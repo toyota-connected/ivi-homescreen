@@ -1,0 +1,87 @@
+name: CMake
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install package
+      run: |
+        sudo add-apt-repository -y ppa:kisak/kisak-mesa
+        sudo apt update -y
+        sudo apt-get -y install libwayland-dev wayland-protocols \
+        mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+        libc++-11-dev libc++abi-11-dev libunwind-dev ninja-build \
+        libxkbcommon-dev
+        clang++ --version
+        
+    - name: Configure CMake
+      run: |
+        mkdir -p ${{github.workspace}}/build/release
+        mkdir -p ${{github.workspace}}/build/debug
+        CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
+          -B ${{github.workspace}}/build/release \
+          -D CMAKE_BUILD_TYPE=Release \
+          -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+          -D BUILD_NUMBER=${GITHUB_RUN_ID}
+        CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
+          -B ${{github.workspace}}/build/debug \
+          -D CMAKE_BUILD_TYPE=Debug \
+          -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+          -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+    - name: Build
+      run: |
+        pushd ${{github.workspace}}/build/debug
+        echo "Create Debian Debug Package"
+        make package -j
+        PACKAGE_FILE=`find -iname ivi-homescreen-*-Debug-*-Linux-*.deb -not -path "./_CPack_Packages/*"`
+        echo $PACKAGE_FILE
+        md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
+        popd
+        pushd ${{github.workspace}}/build/release
+        echo "Create Debian Release Package"
+        make package -j
+        PACKAGE_FILE=`find -iname ivi-homescreen-*-Release-*-Linux-*.deb -not -path "./_CPack_Packages/*"`
+        echo $PACKAGE_FILE
+        md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
+        ls -la
+        echo "Install to Staging"
+        make install -j
+        ls -la shell/homescreen
+        echo "Strip executable"
+        strip shell/homescreen
+        ls -la shell/homescreen
+        echo "List Dependencies"
+        ldd shell/homescreen
+        popd
+        
+        
+
+    - name: Publish Release Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: ivi-homescreen-x86_64-linux.release
+        path: |
+          build/release/ivi-homescreen-*-Linux-*.deb
+          build/release/ivi-homescreen-*-Linux-*.deb-MD5SUMS.txt
+
+    - name: Publish Debug Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: ivi-homescreen-x86_64-linux.debug
+        path: |
+          build/debug/ivi-homescreen-*-Linux-*.deb
+          build/debug/ivi-homescreen-*-Linux-*.deb-MD5SUMS.txt

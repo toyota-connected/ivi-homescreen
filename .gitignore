@@ -1,2 +1,7 @@
 *~
 build/
+.vscode
+needsbuild
+._*
+cmake-build-*
+cmake-aarch64-debug
