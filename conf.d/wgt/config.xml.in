@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" id="@PROJECT_NAME@" version="@PROJECT_VERSION@">
+  <name>@PROJECT_NAME@</name>
+  <icon src="@PROJECT_ICON@"/>
+  <content src="@WIDGET_ENTRY_POINT@" type="@WIDGET_TYPE@"/>
+  <description>@PROJECT_DESCRIPTION@</description>
+  <author>@PROJECT_AUTHOR@ &lt;@PROJECT_AUTHOR_MAIL@&gt;</author>
+  <license>@PROJECT_LICENSE@</license>
+  <feature name="urn:AGL:widget:required-api">
+    <param name="windowmanager" value="ws" />
+    <param name="homescreen" value="ws" />
+  </feature>
+  <feature name="urn:AGL:widget:required-permission">
+    <param name="urn:AGL:permission::public:display" value="required" />
+    <param name="urn:AGL:permission::system:run-by-default" value="required" />
+    <param name="urn:AGL:permission::public:no-htdocs" value="required" />
+  </feature>
+</widget>

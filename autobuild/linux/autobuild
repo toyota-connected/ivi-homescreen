@@ -1,0 +1,67 @@
+#!/usr/bin/make -f
+# Copyright (C) 2015, 2016 "IoT.bzh"
+# Author "Romain Forlot" <romain.forlot@iot.bzh>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#	 http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+THISFILE  := $(lastword $(MAKEFILE_LIST))
+BUILD_DIR := $(abspath $(dir $(THISFILE))/../../build)
+DEST      := ${BUILD_DIR}/target
+
+.PHONY: all clean distclean configure build package help update
+
+all: help
+
+help:
+	@echo "List of targets available:"
+	@echo ""
+	@echo "- all"
+	@echo "- clean"
+	@echo "- distclean"
+	@echo "- configure"
+	@echo "- build: compilation, link and prepare files for package into a widget"
+	@echo "- package: output a widget file '*.wgt'"
+	@echo "- install: install in your ${CMAKE_INSTALL_DIR} directory"
+	@echo ""
+	@echo "Usage: ./conf.d/autobuild/agl/autobuild package DEST=${HOME}/opt"
+	@echo "Don't use your build dir as DEST as wgt file is generated at this location"
+
+update: configure
+	@cmake --build ${BUILD_DIR} --target autobuild
+
+clean:
+	@([ -d ${BUILD_DIR} ] && make -C ${BUILD_DIR} clean) || echo Nothing to clean
+
+distclean:
+	@rm -rf ${BUILD_DIR}
+
+configure: ${BUILD_DIR}/Makefile
+
+build: configure
+	@cmake --build ${BUILD_DIR} ${BUILD_ARGS} --target all
+
+package: build
+	@mkdir -p ${BUILD_DIR}/$@/bin
+	@mkdir -p ${BUILD_DIR}/$@/etc
+	@mkdir -p ${BUILD_DIR}/$@/lib
+	@mkdir -p ${BUILD_DIR}/$@/htdocs
+	@mkdir -p ${BUILD_DIR}/$@/data
+	@cmake --build ${BUILD_DIR} --target widget
+	@mkdir -p ${DEST} && cp ${BUILD_DIR}/*wgt ${DEST}
+
+install: build
+	@cmake --build ${BUILD_DIR} --target install
+
+${BUILD_DIR}/Makefile:
+	@[ -d ${BUILD_DIR} ] || mkdir -p ${BUILD_DIR}
+	@[ -f ${BUILD_DIR}/Makefile ] || (cd ${BUILD_DIR} && cmake ${CONFIGURE_ARGS} ..)

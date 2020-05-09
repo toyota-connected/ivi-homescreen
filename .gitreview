@@ -1,0 +1,5 @@
+[gerrit]
+host=gerrit.automotivelinux.org
+port=29418
+project=apps/agl-cluster-demo-receiver
+defaultbranch=master
