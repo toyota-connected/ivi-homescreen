@@ -9,6 +9,7 @@ on:
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
+  COMPONENT: ivi-homescreen
 
 jobs:
   build:
@@ -47,14 +48,26 @@ jobs:
         pushd ${{github.workspace}}/build/debug
         echo "Create Debian Debug Package"
         make package -j
+        PACKAGE_FILE=`find -iname ivi-homescreen-*-Debug-*-Linux-*.gz -not -path "./_CPack_Packages/*"`
+        echo $PACKAGE_FILE
+        md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
         PACKAGE_FILE=`find -iname ivi-homescreen-*-Debug-*-Linux-*.deb -not -path "./_CPack_Packages/*"`
+        echo $PACKAGE_FILE
+        md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
+        PACKAGE_FILE=`find -iname ivi-homescreen-*-Debug-*-Linux-*.rpm -not -path "./_CPack_Packages/*"`
         echo $PACKAGE_FILE
         md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
         popd
         pushd ${{github.workspace}}/build/release
         echo "Create Debian Release Package"
         make package -j
+        PACKAGE_FILE=`find -iname ivi-homescreen-*-Release-*-Linux-*.gz -not -path "./_CPack_Packages/*"`
+        echo $PACKAGE_FILE
+        md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
         PACKAGE_FILE=`find -iname ivi-homescreen-*-Release-*-Linux-*.deb -not -path "./_CPack_Packages/*"`
+        echo $PACKAGE_FILE
+        md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
+        PACKAGE_FILE=`find -iname ivi-homescreen-*-Release-*-Linux-*.rpm -not -path "./_CPack_Packages/*"`
         echo $PACKAGE_FILE
         md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
         ls -la
@@ -67,21 +80,65 @@ jobs:
         echo "List Dependencies"
         ldd shell/homescreen
         popd
-        
-        
 
-    - name: Publish Release Artifact
+    - name: Publish Release Artifact TGZ
       uses: actions/upload-artifact@v2
       with:
-        name: ivi-homescreen-x86_64-linux.release
+        name: ivi-homescreen-x86_64-linux.debug.tgz
+        path: |
+          build/release/ivi-homescreen-*-Linux-*.tar.gz
+          build/release/ivi-homescreen-*-Linux-*.tar.gz-MD5SUMS.txt
+
+    - name: Publish Debug Artifact TGZ
+      uses: actions/upload-artifact@v2
+      with:
+        name: ivi-homescreen-x86_64-linux.debug.tgz
+        path: |
+          build/debug/ivi-homescreen-*-Linux-*.tar.gz
+          build/debug/ivi-homescreen-*-Linux-*.tar.gz-MD5SUMS.txt
+
+    - name: Publish Release Artifact Debian
+      uses: actions/upload-artifact@v2
+      with:
+        name: ivi-homescreen-x86_64-linux.debug.deb
         path: |
           build/release/ivi-homescreen-*-Linux-*.deb
           build/release/ivi-homescreen-*-Linux-*.deb-MD5SUMS.txt
 
-    - name: Publish Debug Artifact
+    - name: Publish Debug Artifact Debian
       uses: actions/upload-artifact@v2
       with:
-        name: ivi-homescreen-x86_64-linux.debug
+        name: ivi-homescreen-x86_64-linux.debug.deb
         path: |
           build/debug/ivi-homescreen-*-Linux-*.deb
           build/debug/ivi-homescreen-*-Linux-*.deb-MD5SUMS.txt
+
+    - name: Publish Release Artifact RPM
+      uses: actions/upload-artifact@v2
+      with:
+        name: ivi-homescreen-x86_64-linux.debug.rpm
+        path: |
+          build/release/ivi-homescreen-*-Linux-*.rpm
+          build/release/ivi-homescreen-*-Linux-*.rpm-MD5SUMS.txt
+
+    - name: Publish Debug Artifact RPM
+      uses: actions/upload-artifact@v2
+      with:
+        name: ivi-homescreen-x86_64-linux.debug.rpm
+        path: |
+          build/debug/ivi-homescreen-*-Linux-*.rpm
+          build/debug/ivi-homescreen-*-Linux-*.rpm-MD5SUMS.txt
+
+    - name: Publish to Binary Repo
+      if: github.event.pull_request.merged == true
+      run: |
+        echo "Publishing Debian Release Package"
+        DEB_PACKAGE_NAME=`ls build/release/*.deb`
+        curl -u${{ secrets.BINARY_REPO_USER }} \
+        -XPUT "${{ secrets.BINARY_REPO_URL }}/ivi-homescreen-debian/pool/${DEB_PACKAGE_NAME};deb.distribution=ubuntu;deb.component=${COMPONENT};deb.architecture=amd64" \
+        -T $DEB_PACKAGE_NAME
+        echo "Publishing RPM Release Package"
+        RPM_PACKAGE_NAME=`ls build/release/*.rpm`
+        curl -u${{ secrets.BINARY_REPO_USER }} \
+        -XPUT ${{ secrets.BINARY_REPO_URL }}/ivi-homescreen-rpm/ivi-homescreen/1.0.${GITHUB_RUN_ID}/amd64/${RPM_PACKAGE_NAME} \
+        -T $RPM_PACKAGE_NAME
