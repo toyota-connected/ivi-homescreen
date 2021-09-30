@@ -124,13 +124,15 @@ target_link_directories(homescreen PRIVATE
 target_compile_options(homescreen PUBLIC -flto)
 target_link_options(homescreen PUBLIC -flto -v)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(homescreen PRIVATE -stdlib=libc++)
-    target_link_options(homescreen PRIVATE
-            -fuse-ld=lld
-            -nodefaultlibs
-            -stdlib=libc++
-            -lc++ -lc++abi -lunwind -lc -lm)
+if (NOT CMAKE_CROSSCOMPILING)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(homescreen PRIVATE -stdlib=libc++)
+        target_link_options(homescreen PRIVATE
+                -fuse-ld=lld
+                -nodefaultlibs
+                -stdlib=libc++
+                -lc++ -lc++abi -lunwind -lc -lm)
+    endif ()
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)
