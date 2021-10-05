@@ -257,13 +257,7 @@ void Display::seat_handle_capabilities(void* data,
     FML_LOG(INFO) << "Pointer Present";
     d->m_pointer.pointer = wl_seat_get_pointer(seat);
     wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
-    d->m_pointer_pinch = zwp_pointer_gestures_v1_get_pinch_gesture(
-        d->m_gestures, d->m_pointer.pointer);
-    zwp_pointer_gesture_pinch_v1_add_listener(d->m_pointer_pinch,
-                                              &gesture_pinch_listener, d);
   } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
-    zwp_pointer_gesture_pinch_v1_destroy(d->m_pointer_pinch);
-    d->m_pointer_pinch = nullptr;
     wl_pointer_release(d->m_pointer.pointer);
     d->m_pointer.pointer = nullptr;
   }
