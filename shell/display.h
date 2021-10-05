@@ -156,7 +156,6 @@ class Display {
   // struct wl_surface* m_cursor_surface;
 
   struct zwp_pointer_gestures_v1* m_gestures{};
-  struct zwp_pointer_gesture_pinch_v1* m_pointer_pinch{};
   [[maybe_unused]] struct zwp_pointer_gesture_swipe_v1* m_pointer_swipe{};
 
   struct info {
