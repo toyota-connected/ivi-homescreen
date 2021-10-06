@@ -13,6 +13,11 @@ IVI Homescreen for Wayland
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
 
+<a href="https://scan.coverity.com/projects/toyota-connected-ivi-homescreen">
+  <img alt="Coverity Scan Build Status"
+       src="https://scan.coverity.com/projects/23813/badge.svg"/>
+</a>
+
 # x86_64 Desktop development notes
 
 ## Ubuntu 16-18
