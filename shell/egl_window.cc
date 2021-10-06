@@ -341,7 +341,7 @@ void EglWindow::paint_pixels_top(void* image,
                                  int width,
                                  int height,
                                  [[maybe_unused]] uint32_t time) {
-  memset(image, 0xa0, width * height * 4);
+  memset(image, 0xa0, static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
 }
 
 void EglWindow::paint_pixels_bottom(void* image,
@@ -349,7 +349,7 @@ void EglWindow::paint_pixels_bottom(void* image,
                                     int width,
                                     int height,
                                     [[maybe_unused]] uint32_t time) {
-  memset(image, 0x00, width * height * 4);
+  memset(image, 0xa0, static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
 }
 
 void EglWindow::paint_pixels(void* image,
@@ -426,7 +426,7 @@ void EglWindow::redraw(void* data,
       buffer = nullptr;
     else
       /* paint the padding */
-      memset(buffer->shm_data, 0xff, window->m_width * window->m_height * 4);
+      memset(buffer->shm_data, 0xff, static_cast<size_t>(window->m_width) * static_cast<size_t>(window->m_height) * 4);
   }
 
   if (!buffer) {
