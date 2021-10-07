@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include <csignal>
 #include <sstream>
 
@@ -30,14 +29,23 @@ void SignalHandler([[maybe_unused]] int signal) {
 
 int main(int argc, char** argv) {
   bool fullscreen = false;
-  bool show_cursor = true;
+  bool show_cursor = false;
   bool debug_egl = false;
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
-  if (!cl.options().empty()) {
+  if (cl.options().size()) {
     if (cl.HasOption("fullscreen") || cl.HasOption("f")) {
+      FML_DLOG(INFO) << "Fullscreen";
       fullscreen = true;
+    }
+    if (cl.HasOption("cursor") || cl.HasOption("c")) {
+      FML_DLOG(INFO) << "Enable Cursor";
+      show_cursor = true;
+    }
+    if (cl.HasOption("egl") || cl.HasOption("e")) {
+      FML_DLOG(INFO) << "EGL Debug";
+      debug_egl = true;
     }
   }
 
