@@ -126,7 +126,8 @@ target_link_options(homescreen PUBLIC -flto -v)
 
 if (NOT CMAKE_CROSSCOMPILING)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        target_compile_options(homescreen PRIVATE -stdlib=libc++)
+        target_compile_options(homescreen PRIVATE
+                $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
         target_link_options(homescreen PRIVATE
                 -fuse-ld=lld
                 -nodefaultlibs
