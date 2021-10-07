@@ -20,6 +20,19 @@
 #include <iomanip>
 #include <ostream>
 
+class IosFlagSaver {
+ public:
+  explicit IosFlagSaver(std::ostream& _ios) : ios(_ios), f(_ios.flags()) {}
+  ~IosFlagSaver() { ios.flags(f); }
+
+  IosFlagSaver(const IosFlagSaver& rhs) = delete;
+  IosFlagSaver& operator=(const IosFlagSaver& rhs) = delete;
+
+ private:
+  std::ostream& ios;
+  std::ios::fmtflags f;
+};
+
 template <unsigned RowSize, bool ShowAscii>
 struct CustomHexdump {
   CustomHexdump(const uint8_t* data, size_t length)
@@ -31,6 +44,8 @@ struct CustomHexdump {
 template <unsigned RowSize, bool ShowAscii>
 std::ostream& operator<<(std::ostream& out,
                          const CustomHexdump<RowSize, ShowAscii>& dump) {
+  IosFlagSaver ios_fs(out);
+
   out.fill('0');
   for (size_t i = 0; i < dump.mLength; i += RowSize) {
     out << "0x" << std::setw(6) << std::hex << i << ": ";
@@ -57,6 +72,7 @@ std::ostream& operator<<(std::ostream& out,
     }
     out << std::endl;
   }
+
   return out;
 }
 

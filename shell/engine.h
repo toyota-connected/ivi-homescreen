@@ -75,7 +75,7 @@ class Engine {
 
   FlutterEngineResult TextureDispose(int64_t texture_id);
 
-  static std::string GetPersistentCachePath();
+  std::string GetPersistentCachePath();
 
   FlutterEngineResult SendPlatformMessageResponse(
       const FlutterPlatformMessageResponseHandle* handle,
@@ -120,6 +120,7 @@ class Engine {
   std::string m_assets_path;
   std::string m_icu_data_path;
   std::string m_aot_path;
+  std::string m_cache_path;
 
   PlatformChannel* m_platform_channel;
   std::map<int64_t, Texture*> m_texture_registry;

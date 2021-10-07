@@ -7,7 +7,7 @@
 //      http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
+// distributed under the Licfcntlense is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -22,6 +22,7 @@
 #include <cassert>
 #include <cstring>
 #include <utility>
+#include <sys/stat.h>
 
 #include "constants.h"
 #include "display.h"
@@ -148,7 +149,9 @@ static int create_tmpfile_cloexec(char* tmpname) {
   if (fd >= 0)
     unlink(tmpname);
 #else
+  mode_t prev = umask(077);
   fd = mkstemp(tmpname);
+  umask(prev);
   if (fd >= 0) {
     fd = set_cloexec_or_close(fd);
     unlink(tmpname);
@@ -202,7 +205,9 @@ static int os_create_anonymous_file(off_t size) {
      * There is also no need to check for the return value, we
      * couldn't do anything with it anyway.
      */
-    fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK);
+    if(fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK)<0){
+      return -1;
+    }
   } else
 #endif
   {
@@ -415,7 +420,7 @@ void EglWindow::redraw(void* data,
   else
     buffer = nullptr;
 
-  if (!buffer->buffer) {
+  if (buffer && !buffer->buffer) {
     FML_DLOG(INFO)
         << "next_buffer() bubffer->buffer is not set, setting with width "
         << window->m_width << ", height " << window->m_height;
@@ -433,13 +438,11 @@ void EglWindow::redraw(void* data,
     FML_LOG(ERROR) << (!callback
                            ? "Failed to create the first buffer."
                            : "Both buffers busy at redraw(). Server bug?");
-    abort();
+    exit(EXIT_FAILURE);
   }
 
   switch (window->m_type) {
     case WINDOW_NORMAL:
-    default:
-      FML_LOG(ERROR) << "Ooops";
     case WINDOW_BOTTOM:
       paint_pixels_bottom(buffer->shm_data, 0, window->m_width,
                           window->m_height, time);
@@ -452,6 +455,8 @@ void EglWindow::redraw(void* data,
       paint_pixels(buffer->shm_data, 20, window->m_width, window->m_height,
                    time);
       break;
+    default:
+      FML_LOG(ERROR) << "Missing Window Type";
   }
 
   wl_surface_attach(window->m_surface, buffer->buffer, 0, 0);

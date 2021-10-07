@@ -95,7 +95,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         FML_DLOG(INFO) << "SystemChrome.setEnabledSystemUIOverlays";
       } else if (0 ==
                  strcmp(kMethodSetApplicationSwitcherDescription, method)) {
-        unsigned int primaryColor;
+        unsigned int primaryColor = 0;
         auto args = document[kArgs].GetObject();
         if (args.HasMember("primaryColor") && args["primaryColor"].IsNumber()) {
           primaryColor = args["primaryColor"].GetUint();
@@ -162,7 +162,11 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       }
     }
   } else {
-    FML_LOG(ERROR) << "Platform Unhandled: " << method;
+    if (method) {
+      FML_LOG(ERROR) << "Platform Unhandled: " << method;
+    } else {
+      FML_LOG(ERROR) << "Platform Unhandled";
+    }
     PrintMessageAsHexDump(message);
   }
 

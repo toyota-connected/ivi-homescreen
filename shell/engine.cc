@@ -57,6 +57,7 @@ Engine::Engine(App* app, size_t index)
       m_gl_resolver(app->GetGlResolver()),
       m_flutter_engine(nullptr),
       m_platform_channel(PlatformChannel::GetInstance()),
+      m_cache_path(std::move(GetPersistentCachePath())),
       m_args({
         .struct_size = sizeof(FlutterProjectArgs), .assets_path = nullptr,
         .icu_data_path = nullptr, .command_line_argc = 3,
@@ -81,7 +82,7 @@ Engine::Engine(App* app, size_t index)
                 callback(message, userdata);
               }
             },
-        .persistent_cache_path = GetPersistentCachePath().c_str(),
+          .persistent_cache_path = m_cache_path.c_str(),
         .is_persistent_cache_read_only = false,
       }),
       m_renderer_config(
@@ -364,7 +365,13 @@ std::string Engine::GetPersistentCachePath() {
 
   auto path = paths::JoinPaths({homedir, kEnginePersistentCacheDir});
 
-  mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  auto res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  if (res < 0) {
+    if( errno != EEXIST) {
+      FML_LOG(ERROR) << "mkdir failed: " << path;
+      exit(EXIT_FAILURE);
+    }
+  }
   FML_DLOG(INFO) << "PersistentCachePath: " << path;
 
   return path;
