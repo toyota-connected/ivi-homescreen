@@ -29,7 +29,7 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
     if (obj->arguments() && obj->arguments()->IsMap()) {
       const flutter::EncodableMap& args = obj->arguments()->MapValue();
 
-      int32_t device;
+      int32_t device = 0;
       auto it = args.find(flutter::EncodableValue("device"));
       if (it != args.end()) {
         device = it->second.IntValue();
