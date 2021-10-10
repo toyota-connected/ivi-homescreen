@@ -20,7 +20,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Setup JFrog CLI
-        if: github.event.pull_request.merged == true
         uses: jfrog/setup-jfrog-cli@v2
         env:
           JF_ARTIFACTORY_SERVER: ${{ secrets.JF_ARTIFACTORY_SECRET_1 }}
@@ -33,6 +32,8 @@ jobs:
           libc++-11-dev libc++abi-11-dev libunwind-dev libxkbcommon-dev
           clang++ --version
           cmake --version
+          jfrog --version
+          jfrog rt ping
       - name: Configure CMake
         run: |
           mkdir -p ${{github.workspace}}/build/release
@@ -127,7 +128,7 @@ jobs:
             build/debug/ivi-homescreen-*.rpm
             build/debug/ivi-homescreen-*.rpm-MD5SUMS.txt
       - name: Publish to JF Artifactory
-        if: github.event.pull_request.merged == true
+        if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
         run: |
           jfrog rt bce
           jfrog rt bag
