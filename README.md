@@ -1,6 +1,6 @@
 # ivi-homescreen
 
-[![Build Status](https://img.shields.io/github/workflow/status/toyota-connected/ivi-homescreen/CMake/main?logoColor=red&logo=ubuntu)](https://github.com/toyota-connected/ivi-homescreen/actions) [![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) [![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
+[![Build Status](https://img.shields.io/github/workflow/status/toyota-connected/ivi-homescreen/ivi-homescreen-linux/main?logoColor=red&logo=ubuntu)](https://github.com/toyota-connected/ivi-homescreen/actions) [![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) [![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
 
 
 IVI Homescreen for Wayland
@@ -64,7 +64,7 @@ Defaults to Wayland, no need to do anything special
 
 ## CI Example
 
-    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/cmake.yml
+    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/ivi-homescreen-linux.yml
 
 ## Debian Package
 
@@ -123,6 +123,6 @@ Path prefix used to determine required files is determined at build.
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
-# Yocto recipes
+# Yocto recipe
 
-    https://github.com/jwinarske/meta-flutter
+    https://github.com/jwinarske/meta-flutter/blob/dunfell/recipes-graphics/toyota/ivi-homescreen_git.bb
