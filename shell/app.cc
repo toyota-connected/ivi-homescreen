@@ -42,6 +42,8 @@ App::App(const std::string& app_id,
 
   FML_DLOG(INFO) << "+App::App";
 
+  m_display->AglShellDoBackground(m_egl_window[0]->GetNativeSurface());
+
   while (!m_egl_window[0]->SurfaceConfigured()) {
     wl_display_dispatch(m_display->GetDisplay());
   }
