@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <memory>
@@ -44,6 +43,8 @@ class EglWindow : public Egl {
   ~EglWindow();
   EglWindow(const EglWindow&) = delete;
   const EglWindow& operator=(const EglWindow&) = delete;
+
+  [[nodiscard]] wl_surface* GetNativeSurface() const { return m_surface; }
 
   [[maybe_unused]] [[nodiscard]] bool SurfaceConfigured() const {
     return m_configured;
