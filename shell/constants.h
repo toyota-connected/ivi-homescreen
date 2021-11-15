@@ -58,13 +58,14 @@ static constexpr std::array<EGLint, 3> kEglContextAttribs = {
     }
 };
 
-static constexpr std::array<EGLint, 11> kEglConfigAttribs = {{
+static constexpr std::array<EGLint, 13> kEglConfigAttribs = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
     EGL_RED_SIZE, 8,
     EGL_GREEN_SIZE, 8,
     EGL_BLUE_SIZE, 8,
+    EGL_ALPHA_SIZE, 8,
     EGL_NONE // termination sentinel
     // clang-format on
 }};
