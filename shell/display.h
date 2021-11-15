@@ -64,7 +64,7 @@ class Display {
     return m_info.mode.width;
   }
   [[maybe_unused]] [[nodiscard]] int32_t GetModeHeight() const {
-    return m_info.mode.width;
+    return m_info.mode.height;
   }
 
   [[maybe_unused]] void AglShellDoBackground(struct wl_surface*);
