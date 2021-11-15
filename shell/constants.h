@@ -65,6 +65,7 @@ static constexpr std::array<EGLint, 11> kEglConfigAttribs = {{
     EGL_RED_SIZE, 8,
     EGL_GREEN_SIZE, 8,
     EGL_BLUE_SIZE, 8,
+    EGL_ALPHA_SIZE, 8,
     EGL_NONE // termination sentinel
     // clang-format on
 }};
