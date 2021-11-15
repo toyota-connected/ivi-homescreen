@@ -59,31 +59,33 @@ Engine::Engine(App* app, size_t index)
       m_platform_channel(PlatformChannel::GetInstance()),
       m_cache_path(std::move(GetPersistentCachePath())),
       m_args({
-        .struct_size = sizeof(FlutterProjectArgs), .assets_path = nullptr,
-        .icu_data_path = nullptr, .command_line_argc = 3,
-        .command_line_argv = argv,
-        .platform_message_callback =
-            [](const FlutterPlatformMessage* message, void* userdata) {
-              auto engine = reinterpret_cast<Engine*>(userdata);
+          .struct_size = sizeof(FlutterProjectArgs),
+          .assets_path = nullptr,
+          .icu_data_path = nullptr,
+          .command_line_argc = 3,
+          .command_line_argv = argv,
+          .platform_message_callback =
+              [](const FlutterPlatformMessage* message, void* userdata) {
+                auto engine = reinterpret_cast<Engine*>(userdata);
 
-              // FML_DLOG(INFO) << "Channel: " << message->channel;
-              auto handler = engine->m_platform_channel->GetHandler();
+                // FML_DLOG(INFO) << "Channel: " << message->channel;
+                auto handler = engine->m_platform_channel->GetHandler();
 
-              auto callback = handler[std::string(message->channel)];
+                auto callback = handler[std::string(message->channel)];
 
-              if (callback == nullptr) {
-                std::stringstream ss;
-                ss << Hexdump(message->message, message->message_size);
-                FML_DLOG(INFO) << "Channel: \"" << message->channel << "\"\n"
-                               << ss.str();
-                engine->SendPlatformMessageResponse(message->response_handle,
-                                                    nullptr, 0);
-              } else {
-                callback(message, userdata);
-              }
-            },
+                if (callback == nullptr) {
+                  std::stringstream ss;
+                  ss << Hexdump(message->message, message->message_size);
+                  FML_DLOG(INFO) << "Channel: \"" << message->channel << "\"\n"
+                                 << ss.str();
+                  engine->SendPlatformMessageResponse(message->response_handle,
+                                                      nullptr, 0);
+                } else {
+                  callback(message, userdata);
+                }
+              },
           .persistent_cache_path = m_cache_path.c_str(),
-        .is_persistent_cache_read_only = false,
+          .is_persistent_cache_read_only = false,
       }),
       m_renderer_config(
           {.type = kOpenGL,
@@ -221,7 +223,7 @@ FlutterEngineResult Engine::RunTask() {
   return kSuccess;
 }
 
-const FlutterLocale* Engine::HandleLocale(
+[[maybe_unused]] const FlutterLocale* Engine::HandleLocale(
     const FlutterLocale** supported_locales,
     size_t number_of_locales) {
   FML_LOG(INFO) << "number of locale: " << number_of_locales;
@@ -307,7 +309,8 @@ FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
   return kSuccess;
 }
 
-FlutterEngineResult Engine::TextureRegistryRemove(int64_t texture_id) {
+[[maybe_unused]] FlutterEngineResult Engine::TextureRegistryRemove(
+    int64_t texture_id) {
   auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
                    [&texture_id](const std::pair<int64_t, void*>& element) {
@@ -367,7 +370,7 @@ std::string Engine::GetPersistentCachePath() {
 
   auto res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if (res < 0) {
-    if( errno != EEXIST) {
+    if (errno != EEXIST) {
       FML_LOG(ERROR) << "mkdir failed: " << path;
       exit(EXIT_FAILURE);
     }
@@ -405,8 +408,26 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
                                                   data, data_length);
 }
 
-FlutterEngineResult Engine::UpdateLocales(const FlutterLocale** locales,
-                                          size_t locales_count) {
+[[maybe_unused]] bool Engine::SendPlatformMessage(
+    const char* channel,
+    const uint8_t* message,
+    const size_t message_size) const {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  FlutterPlatformMessageResponseHandle* handle;
+  FlutterPlatformMessageCreateResponseHandle(
+      m_flutter_engine, [](const uint8_t* data, size_t size, void* userdata) {},
+      nullptr, &handle);
+  const FlutterPlatformMessage msg{
+      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
+  };
+  return FlutterEngineSendPlatformMessage(m_flutter_engine, &msg);
+}
+
+[[maybe_unused]] FlutterEngineResult Engine::UpdateLocales(
+    const FlutterLocale** locales,
+    size_t locales_count) {
   return FlutterEngineUpdateLocales(m_flutter_engine, locales, locales_count);
 }
 
