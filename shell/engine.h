@@ -62,7 +62,7 @@ class Engine {
   FlutterEngineResult RunTask();
 
   FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture* texture);
-  [[maybe_unused]] FlutterEngineResult TextureRegistryRemove(
+  [[maybe_unused]] [[maybe_unused]] FlutterEngineResult TextureRegistryRemove(
       int64_t texture_id);
 
   FlutterEngineResult TextureEnable(int64_t texture_id);
@@ -75,12 +75,16 @@ class Engine {
 
   FlutterEngineResult TextureDispose(int64_t texture_id);
 
-  std::string GetPersistentCachePath();
+  static std::string GetPersistentCachePath();
 
   FlutterEngineResult SendPlatformMessageResponse(
       const FlutterPlatformMessageResponseHandle* handle,
       const uint8_t* data,
       size_t data_length) const;
+
+  [[maybe_unused]] [[maybe_unused]] bool SendPlatformMessage(const char* channel,
+                                            const uint8_t* message,
+                                            size_t message_size) const;
 
   [[maybe_unused]] FlutterEngineResult UpdateLocales(
       const FlutterLocale** locales,
@@ -130,7 +134,7 @@ class Engine {
   FlutterRendererConfig m_renderer_config{};
   std::string m_clipboard_data;
 
-  [[maybe_unused]]
+  [[maybe_unused]] [[maybe_unused]]
   static const FlutterLocale* HandleLocale(
       const FlutterLocale** supported_locales,
       size_t number_of_locales);
