@@ -257,7 +257,7 @@ void Display::seat_handle_capabilities(void* data,
     FML_LOG(INFO) << "Pointer Present";
     d->m_pointer.pointer = wl_seat_get_pointer(seat);
     wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
-  } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
+  } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.pointer) {
     wl_pointer_release(d->m_pointer.pointer);
     d->m_pointer.pointer = nullptr;
   }
