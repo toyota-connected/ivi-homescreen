@@ -43,8 +43,10 @@ class App {
 
  public:
   explicit App(const std::string& app_id,
+               const std::vector<std::string>& command_line_args,
+               const std::string& application_override_path,
                bool fullscreen,
-               bool show_cursor,
+               bool enable_cursor,
                bool debug_egl);
   App(const App&) = delete;
   const App& operator=(const App&) = delete;

@@ -34,7 +34,7 @@ class Engine;
 
 class Display {
  public:
-  explicit Display(App* app);
+  explicit Display(App* app, bool enable_cursor);
   ~Display();
   Display(const Display&) = delete;
   const Display& operator=(const Display&) = delete;
@@ -90,6 +90,8 @@ class Display {
   struct agl_shell* m_agl_shell;
 
   bool m_has_xrgb;
+
+  bool m_enable_cursor;
 
   struct pointer_event {
     [[maybe_unused]] uint32_t event_mask;
@@ -296,8 +298,8 @@ class Display {
 
   static const struct wl_keyboard_listener keyboard_listener;
 
-  [[maybe_unused]]
-  static struct touch_point* get_touch_point(Display* d, int32_t id);
+  [[maybe_unused]] static struct touch_point* get_touch_point(Display* d,
+                                                              int32_t id);
 
   static void touch_handle_down(void* data,
                                 struct wl_touch* wl_touch,

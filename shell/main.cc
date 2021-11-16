@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <csignal>
 #include <sstream>
 
@@ -28,28 +29,61 @@ void SignalHandler([[maybe_unused]] int signal) {
 }
 
 int main(int argc, char** argv) {
-  bool fullscreen = false;
-  bool show_cursor = false;
+  std::vector<std::string> args;
+#ifndef NDEBUG
+  for (int i = 1; i < argc; ++i) {
+    args.emplace_back(argv[i]);
+  }
+#endif
+
+  std::string application_override_path;
+  bool disable_cursor = false;
   bool debug_egl = false;
+  bool fullscreen = false;
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
-  if (cl.options().size()) {
-    if (cl.HasOption("fullscreen") || cl.HasOption("f")) {
-      FML_DLOG(INFO) << "Fullscreen";
-      fullscreen = true;
+  if (!cl.options().empty()) {
+    if (cl.HasOption("a")) {
+      cl.GetOptionValue("a", &application_override_path);
+      FML_DLOG(INFO) << "Override Assets Path: "
+                     << application_override_path;
+      auto find = "--a=" + application_override_path;
+      auto result = std::find(args.begin(), args.end(), find);
+      if (result != args.end()) {
+        args.erase(result);
+      }
     }
-    if (cl.HasOption("cursor") || cl.HasOption("c")) {
-      FML_DLOG(INFO) << "Enable Cursor";
-      show_cursor = true;
+    if (cl.HasOption("c")) {
+      FML_DLOG(INFO) << "Disable Cursor";
+      disable_cursor = true;
+      auto result = std::find(args.begin(), args.end(), "--c");
+      if (result != args.end()) {
+        args.erase(result);
+      }
     }
-    if (cl.HasOption("egl") || cl.HasOption("e")) {
+#ifndef NDEBUG
+    if (cl.HasOption("e")) {
       FML_DLOG(INFO) << "EGL Debug";
       debug_egl = true;
+      auto result = std::find(args.begin(), args.end(), "--e");
+      if (result != args.end()) {
+        args.erase(result);
+      }
+    }
+#endif
+    if (cl.HasOption("f")) {
+      FML_DLOG(INFO) << "Fullscreen";
+      fullscreen = true;
+      auto idx = std::find(args.begin(), args.end(), "--f");
+      if (idx != args.end()) {
+        args.erase(idx);
+      }
     }
   }
 
-  App app("homescreen", fullscreen, show_cursor, debug_egl);
+  App app("homescreen", args, application_override_path, fullscreen,
+          !disable_cursor, debug_egl);
 
   std::signal(SIGINT, SignalHandler);
 

@@ -25,14 +25,15 @@
 #include "constants.h"
 #include "engine.h"
 
-Display::Display([[maybe_unused]] App* app)
+Display::Display([[maybe_unused]] App* app, bool enable_cursor)
     : m_flutter_engine(nullptr),
       m_display(nullptr),
       m_output(nullptr),
       m_compositor(nullptr),
       m_keyboard(nullptr),
       m_agl_shell(nullptr),
-      m_has_xrgb(false) {
+      m_has_xrgb(false),
+      m_enable_cursor(enable_cursor) {
   FML_DLOG(INFO) << "+ Display()";
 
   m_display = wl_display_connect(nullptr);
@@ -110,14 +111,15 @@ void Display::registry_handle_global(void* data,
   if (strcmp(interface, wl_shell_interface.name) == 0) {
     d->m_shell = static_cast<struct wl_shell*>(
         wl_registry_bind(registry, name, &wl_shell_interface, 1));
-  }
-  else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<struct wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface, 1));
 
-    d->m_cursor_theme = wl_cursor_theme_load(nullptr, 32, d->m_shm);
-    d->m_default_cursor =
-        wl_cursor_theme_get_cursor(d->m_cursor_theme, "left_ptr");
+    if (d->m_enable_cursor) {
+      d->m_cursor_theme = wl_cursor_theme_load(nullptr, 32, d->m_shm);
+      d->m_default_cursor =
+          wl_cursor_theme_get_cursor(d->m_cursor_theme, "left_ptr");
+    }
 
     wl_shm_add_listener(d->m_shm, &shm_listener, d);
   }
@@ -474,8 +476,9 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
     .modifiers = keyboard_handle_modifiers,
 };
 
-[[maybe_unused]]
-struct Display::touch_point* Display::get_touch_point(Display* d, int32_t id) {
+[[maybe_unused]] struct Display::touch_point* Display::get_touch_point(
+    Display* d,
+    int32_t id) {
   struct touch_event* touch = &d->m_touch.event;
 
   for (auto& point : touch->points) {
@@ -575,7 +578,8 @@ const struct wl_touch_listener Display::touch_listener = {
 
 void Display::gesture_pinch_begin(
     [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1* zwp_pointer_gesture_pinch_v1,
+    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
+        zwp_pointer_gesture_pinch_v1,
     [[maybe_unused]] uint32_t serial,
     [[maybe_unused]] uint32_t time,
     [[maybe_unused]] struct wl_surface* surface,
@@ -585,7 +589,8 @@ void Display::gesture_pinch_begin(
 
 void Display::gesture_pinch_update(
     [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1* zwp_pointer_gesture_pinch_v1,
+    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
+        zwp_pointer_gesture_pinch_v1,
     [[maybe_unused]] uint32_t time,
     wl_fixed_t dx,
     wl_fixed_t dy,
@@ -599,7 +604,8 @@ void Display::gesture_pinch_update(
 
 void Display::gesture_pinch_end(
     [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1* zwp_pointer_gesture_pinch_v1,
+    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
+        zwp_pointer_gesture_pinch_v1,
     [[maybe_unused]] uint32_t serial,
     [[maybe_unused]] uint32_t time,
     int32_t cancelled) {

@@ -47,10 +47,10 @@ static bool IsFile(const std::string& path) {
   return S_ISREG(buf.st_mode);
 }
 
-static const char* const argv[] = {"homescreen", "--observatory-port=41795",
-                                   "--disable-service-auth-codes"};
-
-Engine::Engine(App* app, size_t index)
+Engine::Engine(App* app,
+               size_t index,
+               const std::vector<const char*>& command_line_args_c,
+               const std::string& application_override_path)
     : m_index(index),
       m_running(false),
       m_egl_window(app->GetEglWindow(index)),
@@ -62,8 +62,8 @@ Engine::Engine(App* app, size_t index)
           .struct_size = sizeof(FlutterProjectArgs),
           .assets_path = nullptr,
           .icu_data_path = nullptr,
-          .command_line_argc = 3,
-          .command_line_argv = argv,
+          .command_line_argc = static_cast<int>(command_line_args_c.size()),
+          .command_line_argv = command_line_args_c.data(),
           .platform_message_callback =
               [](const FlutterPlatformMessage* message, void* userdata) {
                 auto engine = reinterpret_cast<Engine*>(userdata);
@@ -136,7 +136,12 @@ Engine::Engine(App* app, size_t index)
 
   m_icu_data_path.assign(
       paths::JoinPaths({kPathPrefix, "share/flutter/icudtl.dat"}));
-  m_assets_path.assign(paths::JoinPaths({kPathPrefix, kFlutterAssetPath}));
+
+  if (application_override_path.empty()) {
+    m_assets_path.assign(paths::JoinPaths({kPathPrefix, kFlutterAssetPath}));
+  } else {
+    m_assets_path.assign(application_override_path);
+  }
   std::string kernel_snapshot =
       paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
 
@@ -156,7 +161,7 @@ Engine::Engine(App* app, size_t index)
   }
   FML_DLOG(INFO) << "(" << m_index << ") icu_data_path: " << m_icu_data_path;
 
-  // Configure AOT
+    // Configure AOT
   m_aot_path.assign(paths::JoinPaths({m_assets_path, "libapp.so"}));
   if (FlutterEngineRunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
