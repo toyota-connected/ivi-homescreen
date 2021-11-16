@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "egl_window.h"
 
 #include <fcntl.h>
 #include <flutter/fml/logging.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <cassert>
 #include <cstring>
 #include <utility>
-#include <sys/stat.h>
 
 #include "constants.h"
 #include "display.h"
@@ -60,7 +59,7 @@ EglWindow::EglWindow(size_t index,
 
   wl_shell_surface_add_listener(m_shell_surface, &shell_surface_listener, this);
 
-  m_egl_window[index] = wl_egl_window_create(m_surface, width, height);
+  m_egl_window[index] = wl_egl_window_create(m_surface, m_width, m_height);
 
   m_egl_surface[index] = create_egl_surface(this, m_egl_window[index], nullptr);
 
@@ -70,8 +69,9 @@ EglWindow::EglWindow(size_t index,
   struct wl_callback* callback;
 
   if (m_fullscreen) {
-    wl_shell_surface_set_fullscreen(
-        m_shell_surface, WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE, 0, nullptr);
+    wl_shell_surface_set_fullscreen(m_shell_surface,
+                                    WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE,
+                                    60000, nullptr);
   } else {
     wl_shell_surface_set_toplevel(m_shell_surface);
 
@@ -205,7 +205,7 @@ static int os_create_anonymous_file(off_t size) {
      * There is also no need to check for the return value, we
      * couldn't do anything with it anyway.
      */
-    if(fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK)<0){
+    if (fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) < 0) {
       return -1;
     }
   } else
@@ -346,7 +346,8 @@ void EglWindow::paint_pixels_top(void* image,
                                  int width,
                                  int height,
                                  [[maybe_unused]] uint32_t time) {
-  memset(image, 0xa0, static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+  memset(image, 0xa0,
+         static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
 }
 
 void EglWindow::paint_pixels_bottom(void* image,
@@ -354,7 +355,8 @@ void EglWindow::paint_pixels_bottom(void* image,
                                     int width,
                                     int height,
                                     [[maybe_unused]] uint32_t time) {
-  memset(image, 0xa0, static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+  memset(image, 0xa0,
+         static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
 }
 
 void EglWindow::paint_pixels(void* image,
@@ -431,7 +433,9 @@ void EglWindow::redraw(void* data,
       buffer = nullptr;
     else
       /* paint the padding */
-      memset(buffer->shm_data, 0xff, static_cast<size_t>(window->m_width) * static_cast<size_t>(window->m_height) * 4);
+      memset(buffer->shm_data, 0xff,
+             static_cast<size_t>(window->m_width) *
+                 static_cast<size_t>(window->m_height) * 4);
   }
 
   if (!buffer) {
@@ -481,8 +485,9 @@ void EglWindow::toggle_fullscreen() {
   struct wl_callback* callback;
 
   if (m_fullscreen) {
-    wl_shell_surface_set_fullscreen(
-        m_shell_surface, WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE, 0, nullptr);
+    wl_shell_surface_set_fullscreen(m_shell_surface,
+                                    WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE,
+                                    60000, nullptr);
   } else {
     wl_shell_surface_set_toplevel(m_shell_surface);
     handle_shell_configure(this, m_shell_surface, 0, m_width, m_height);
