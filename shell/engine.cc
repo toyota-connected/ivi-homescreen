@@ -161,7 +161,7 @@ Engine::Engine(App* app,
   }
   FML_DLOG(INFO) << "(" << m_index << ") icu_data_path: " << m_icu_data_path;
 
-    // Configure AOT
+  // Configure AOT
   m_aot_path.assign(paths::JoinPaths({m_assets_path, "libapp.so"}));
   if (FlutterEngineRunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
@@ -170,7 +170,7 @@ Engine::Engine(App* app,
       m_args.aot_data = m_aot_data.get();
     }
   } else {
-    FML_LOG(INFO) << "Engine instance not able to run AOT compiled Dart code";
+    FML_LOG(INFO) << "Runtime=debug";
   }
 
   // Configure task runner interop

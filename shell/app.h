@@ -47,7 +47,9 @@ class App {
                const std::string& application_override_path,
                bool fullscreen,
                bool enable_cursor,
-               bool debug_egl);
+               bool debug_egl,
+               uint32_t width,
+               uint32_t height);
   App(const App&) = delete;
   const App& operator=(const App&) = delete;
 
