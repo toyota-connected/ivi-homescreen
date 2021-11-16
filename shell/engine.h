@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <functional>
@@ -40,7 +39,10 @@ class Texture;
 
 class Engine {
  public:
-  Engine(App* app, size_t index);
+  Engine(App* app,
+         size_t index,
+         const std::vector<const char*>& command_line_args_c,
+         const std::string& application_override_path);
 
   ~Engine() {
     if (m_running) {
@@ -82,16 +84,16 @@ class Engine {
       const uint8_t* data,
       size_t data_length) const;
 
-  [[maybe_unused]] [[maybe_unused]] bool SendPlatformMessage(const char* channel,
-                                            const uint8_t* message,
-                                            size_t message_size) const;
+  [[maybe_unused]] [[maybe_unused]] bool SendPlatformMessage(
+      const char* channel,
+      const uint8_t* message,
+      size_t message_size) const;
 
   [[maybe_unused]] FlutterEngineResult UpdateLocales(
       const FlutterLocale** locales,
       size_t locales_count);
 
-  [[maybe_unused]]
-  std::string GetClipboardData() { return m_clipboard_data; };
+  [[maybe_unused]] std::string GetClipboardData() { return m_clipboard_data; };
 
   void SendMouseEvent(FlutterPointerSignalKind signal,
                       FlutterPointerPhase phase,
@@ -106,13 +108,13 @@ class Engine {
                       double y,
                       int32_t device);
 
-  [[maybe_unused]]
-  Texture* GetTextureObj(int64_t texture_id) {
+  [[maybe_unused]] Texture* GetTextureObj(int64_t texture_id) {
     return m_texture_registry[texture_id];
   }
 
-  [[maybe_unused]]
-  std::shared_ptr<GlResolver> GetGlResolver() { return m_gl_resolver; }
+  [[maybe_unused]] std::shared_ptr<GlResolver> GetGlResolver() {
+    return m_gl_resolver;
+  }
 
  private:
   size_t m_index;
@@ -134,8 +136,7 @@ class Engine {
   FlutterRendererConfig m_renderer_config{};
   std::string m_clipboard_data;
 
-  [[maybe_unused]] [[maybe_unused]]
-  static const FlutterLocale* HandleLocale(
+  [[maybe_unused]] [[maybe_unused]] static const FlutterLocale* HandleLocale(
       const FlutterLocale** supported_locales,
       size_t number_of_locales);
 

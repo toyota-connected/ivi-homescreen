@@ -26,11 +26,13 @@
 #include "gl_resolver.h"
 
 App::App(const std::string& app_id,
+         const std::vector<std::string>& command_line_args,
+         const std::string& application_override_path,
          bool fullscreen,
-         [[maybe_unused]] bool show_cursor,
+         bool enable_cursor,
          bool debug_egl)
     : m_gl_resolver(std::make_shared<GlResolver>()),
-      m_display(std::make_shared<Display>(this)),
+      m_display(std::make_shared<Display>(this, enable_cursor)),
       m_egl_window {
   std::make_shared<EglWindow>(0, m_display, EglWindow::WINDOW_BG, app_id,
                               fullscreen, debug_egl)
@@ -50,8 +52,16 @@ App::App(const std::string& app_id,
 
   FML_DLOG(INFO) << "Surfaces Configured";
 
+  std::vector<const char*> m_command_line_args_c;
+  m_command_line_args_c.reserve(command_line_args.size());
+  m_command_line_args_c.push_back(app_id.c_str());
+  for (const auto& arg : command_line_args) {
+    m_command_line_args_c.push_back(arg.c_str());
+  }
+
   for (size_t i = 0; i < kEngineInstanceCount; i++) {
-    m_engine[i] = std::make_shared<Engine>(this, i);
+    m_engine[i] = std::make_shared<Engine>(this, i, m_command_line_args_c,
+                                           application_override_path);
     m_engine[i]->Run();
 
     if (!m_engine[i]->IsRunning()) {
