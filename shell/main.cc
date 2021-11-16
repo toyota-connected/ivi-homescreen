@@ -40,14 +40,15 @@ int main(int argc, char** argv) {
   bool disable_cursor = false;
   bool debug_egl = false;
   bool fullscreen = false;
+  uint32_t width = 0;
+  uint32_t height = 0;
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
   if (!cl.options().empty()) {
     if (cl.HasOption("a")) {
       cl.GetOptionValue("a", &application_override_path);
-      FML_DLOG(INFO) << "Override Assets Path: "
-                     << application_override_path;
+      FML_DLOG(INFO) << "Override Assets Path: " << application_override_path;
       auto find = "--a=" + application_override_path;
       auto result = std::find(args.begin(), args.end(), find);
       if (result != args.end()) {
@@ -75,15 +76,43 @@ int main(int argc, char** argv) {
     if (cl.HasOption("f")) {
       FML_DLOG(INFO) << "Fullscreen";
       fullscreen = true;
-      auto idx = std::find(args.begin(), args.end(), "--f");
-      if (idx != args.end()) {
-        args.erase(idx);
+      auto result = std::find(args.begin(), args.end(), "--f");
+      if (result != args.end()) {
+        args.erase(result);
+      }
+    }
+    if (cl.HasOption("w")) {
+      std::string width_str;
+      cl.GetOptionValue("w", &width_str);
+      width = static_cast<uint32_t>(std::stoul(width_str));
+      auto find = "--w=" + application_override_path;
+      auto result = std::find(args.begin(), args.end(), find);
+      if (result != args.end()) {
+        args.erase(result);
+      }
+    }
+    if (cl.HasOption("h")) {
+      std::string height_str;
+      cl.GetOptionValue("h", &height_str);
+      height = static_cast<uint32_t>(std::stoul(height_str));
+      auto find = "--h=" + application_override_path;
+      auto result = std::find(args.begin(), args.end(), find);
+      if (result != args.end()) {
+        args.erase(result);
       }
     }
   }
+  if (!width) {
+    width = kScreenWidth;
+  }
+  if (!height) {
+    height = kScreenHeight;
+  }
+  FML_DLOG(INFO) << "Screen Width: " << width;
+  FML_DLOG(INFO) << "Screen Height: " << height;
 
   App app("homescreen", args, application_override_path, fullscreen,
-          !disable_cursor, debug_egl);
+          !disable_cursor, debug_egl, width, height);
 
   std::signal(SIGINT, SignalHandler);
 

@@ -38,8 +38,8 @@ class EglWindow : public Egl {
             std::string app_id,
             bool fullscreen,
             bool debug_egl,
-            int32_t width = kScreenWidth,
-            int32_t height = kScreenHeight);
+            int32_t width,
+            int32_t height);
   ~EglWindow();
   EglWindow(const EglWindow&) = delete;
   const EglWindow& operator=(const EglWindow&) = delete;

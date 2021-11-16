@@ -30,12 +30,14 @@ App::App(const std::string& app_id,
          const std::string& application_override_path,
          bool fullscreen,
          bool enable_cursor,
-         bool debug_egl)
+         bool debug_egl,
+         uint32_t width,
+         uint32_t height)
     : m_gl_resolver(std::make_shared<GlResolver>()),
       m_display(std::make_shared<Display>(this, enable_cursor)),
       m_egl_window {
   std::make_shared<EglWindow>(0, m_display, EglWindow::WINDOW_BG, app_id,
-                              fullscreen, debug_egl)
+                              fullscreen, debug_egl, width, height)
 }
 #ifdef ENABLE_TEXTURE_TEST
 , m_texture_test(std::make_unique<TextureTest>(this))
