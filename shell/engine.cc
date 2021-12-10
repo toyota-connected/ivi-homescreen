@@ -451,17 +451,24 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
   else if (button & BTN_MIDDLE)
     buttons = kFlutterPointerButtonMouseMiddle;
 
-  FlutterPointerEvent msg = {.struct_size = sizeof(FlutterPointerEvent),
-                             .phase = phase,
-                             .timestamp = FlutterEngineGetCurrentTime(),
-                             .x = x,
-                             .y = y,
-                             .device = 0,
-                             .signal_kind = signal,
-                             .scroll_delta_x = scroll_delta_x,
-                             .scroll_delta_y = scroll_delta_y,
-                             .device_kind = kFlutterPointerDeviceKindMouse,
-                             .buttons = buttons};
+  FlutterPointerEvent msg = {
+    .struct_size = sizeof(FlutterPointerEvent),
+    .phase = phase,
+#if defined(ENV64BIT)
+    .timestamp = FlutterEngineGetCurrentTime(),
+#elif defined(ENV32BIT)
+    .timestamp =
+        static_cast<size_t>(FlutterEngineGetCurrentTime() & 0xFFFFFFFFULL),
+#endif
+    .x = x,
+    .y = y,
+    .device = 0,
+    .signal_kind = signal,
+    .scroll_delta_x = scroll_delta_x,
+    .scroll_delta_y = scroll_delta_y,
+    .device_kind = kFlutterPointerDeviceKindMouse,
+    .buttons = buttons
+  };
 
   FlutterEngineSendPointerEvent(m_flutter_engine, &msg, 1);
 }
@@ -470,17 +477,24 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
                             double x,
                             double y,
                             int32_t device) {
-  FlutterPointerEvent msg = {.struct_size = sizeof(FlutterPointerEvent),
-                             .phase = phase,
-                             .timestamp = FlutterEngineGetCurrentTime(),
-                             .x = x,
-                             .y = y,
-                             .device = device,
-                             .signal_kind = kFlutterPointerSignalKindNone,
-                             .scroll_delta_x = 0.0,
-                             .scroll_delta_y = 0.0,
-                             .device_kind = kFlutterPointerDeviceKindTouch,
-                             .buttons = 0};
+  FlutterPointerEvent msg = {
+    .struct_size = sizeof(FlutterPointerEvent),
+    .phase = phase,
+#if defined(ENV64BIT)
+    .timestamp = FlutterEngineGetCurrentTime(),
+#elif defined(ENV32BIT)
+    .timestamp =
+        static_cast<size_t>(FlutterEngineGetCurrentTime() & 0xFFFFFFFFULL),
+#endif
+    .x = x,
+    .y = y,
+    .device = device,
+    .signal_kind = kFlutterPointerSignalKindNone,
+    .scroll_delta_x = 0.0,
+    .scroll_delta_y = 0.0,
+    .device_kind = kFlutterPointerDeviceKindTouch,
+    .buttons = 0
+  };
 
   FlutterEngineSendPointerEvent(m_flutter_engine, &msg, 1);
 }
