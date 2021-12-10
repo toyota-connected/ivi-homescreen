@@ -32,6 +32,11 @@ string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--gc-sections")
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--as-needed")
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    add_compile_definitions(ENV64BIT)
+elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_compile_definitions(ENV32BIT)
+endif()
 
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
