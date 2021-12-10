@@ -22,9 +22,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -fno-integrated-as")
+string(APPEND CMAKE_ASM_FLAGS " -fno-integrated-as")
 
-set(CMAKE_CXX_FLAGS "-fno-rtti")
+string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--no-undefined")
 string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-fvisibility=hidden")
