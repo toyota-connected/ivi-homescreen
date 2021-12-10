@@ -19,7 +19,10 @@
 #include <memory>
 #include <string>
 
-#include <GLES3/gl3.h>
+#include <GLES2/gl2.h>
+#ifndef GL_RGBA8
+#define GL_RGBA8 0x8058
+#endif
 
 #include <flutter_embedder.h>
 
