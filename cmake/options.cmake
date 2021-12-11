@@ -35,5 +35,22 @@ endif ()
 # variables
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
-option(BUILD_IVI "Build IVI variant" ON)
-option(BUILD_IC "Build IC variant" ON)
+# EGL Surface Options
+if (NOT BUILD_EGL_CONTEXT_VERSION_MAJOR)
+    set(BUILD_EGL_CONTEXT_VERSION_MAJOR "3" CACHE STRING "Valid options are: 1, 2, 3." FORCE)
+    message(STATUS "EGL_CONTEXT_VERSION_MAJOR not set, defaulting to 3.")
+endif()
+add_compile_definitions(BUILD_EGL_CONTEXT_VERSION_MAJOR=${BUILD_EGL_CONTEXT_VERSION_MAJOR})
+
+option(BUILD_EGL_OPENGL_ES3 "Build with EGL_OPENGL_ES3_BIT set" ON)
+option(BUILD_EGL_OPENGL_ES2 "Build with EGL_OPENGL_ES2_BIT set" OFF)
+if(BUILD_EGL_OPENGL_ES3)
+    add_compile_definitions(BUILD_EGL_OPENGL_ES3)
+elseif(BUILD_EGL_OPENGL_ES2)
+    add_compile_definitions(BUILD_EGL_OPENGL_ES2)
+endif()
+
+option(BUILD_EGL_TRANSPARENCY "Build with EGL Transparency Enabled" ON)
+if(BUILD_EGL_TRANSPARENCY)
+    add_compile_definitions(BUILD_EGL_ENABLE_TRANSPARENCY)
+endif()
