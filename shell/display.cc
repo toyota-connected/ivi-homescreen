@@ -565,7 +565,7 @@ void Display::touch_handle_cancel(void* data,
 
 void Display::touch_handle_frame([[maybe_unused]] void* data,
                                  [[maybe_unused]] struct wl_touch* wl_touch) {
-  FML_DLOG(INFO) << "touch_handle_frame";
+  //  FML_DLOG(INFO) << "touch_handle_frame";
 }
 
 const struct wl_touch_listener Display::touch_listener = {
@@ -583,8 +583,8 @@ void Display::gesture_pinch_begin(
     [[maybe_unused]] uint32_t serial,
     [[maybe_unused]] uint32_t time,
     [[maybe_unused]] struct wl_surface* surface,
-    uint32_t fingers) {
-  FML_DLOG(INFO) << "gesture_pinch_begin: fingers: " << fingers;
+    [[maybe_unused]] uint32_t fingers) {
+  //  FML_DLOG(INFO) << "gesture_pinch_begin: fingers: " << fingers;
 }
 
 void Display::gesture_pinch_update(
@@ -592,14 +592,16 @@ void Display::gesture_pinch_update(
     [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
         zwp_pointer_gesture_pinch_v1,
     [[maybe_unused]] uint32_t time,
-    wl_fixed_t dx,
-    wl_fixed_t dy,
-    wl_fixed_t scale,
-    wl_fixed_t rotation) {
+    [[maybe_unused]] wl_fixed_t dx,
+    [[maybe_unused]] wl_fixed_t dy,
+    [[maybe_unused]] wl_fixed_t scale,
+    [[maybe_unused]] wl_fixed_t rotation) {
+#if 0
   FML_DLOG(INFO) << "gesture_pinch_update: " << wl_fixed_to_double(dx) << ", "
                  << wl_fixed_to_double(dy)
                  << " scale: " << wl_fixed_to_double(scale)
                  << ", rotation: " << wl_fixed_to_double(rotation);
+#endif
 }
 
 void Display::gesture_pinch_end(
@@ -608,9 +610,9 @@ void Display::gesture_pinch_end(
         zwp_pointer_gesture_pinch_v1,
     [[maybe_unused]] uint32_t serial,
     [[maybe_unused]] uint32_t time,
-    int32_t cancelled) {
-  FML_DLOG(INFO) << "gesture_pinch_end";
-  FML_DLOG(INFO) << "gesture_pinch_begin: cancelled: " << cancelled;
+    [[maybe_unused]] int32_t cancelled) {
+  //  FML_DLOG(INFO) << "gesture_pinch_end";
+  //  FML_DLOG(INFO) << "gesture_pinch_begin: cancelled: " << cancelled;
 }
 
 const struct zwp_pointer_gesture_pinch_v1_listener
