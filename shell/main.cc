@@ -30,11 +30,9 @@ void SignalHandler([[maybe_unused]] int signal) {
 
 int main(int argc, char** argv) {
   std::vector<std::string> args;
-#ifndef NDEBUG
   for (int i = 1; i < argc; ++i) {
     args.emplace_back(argv[i]);
   }
-#endif
 
   std::string application_override_path;
   bool disable_cursor = false;
@@ -63,7 +61,6 @@ int main(int argc, char** argv) {
         args.erase(result);
       }
     }
-#ifndef NDEBUG
     if (cl.HasOption("e")) {
       FML_DLOG(INFO) << "EGL Debug";
       debug_egl = true;
@@ -72,7 +69,6 @@ int main(int argc, char** argv) {
         args.erase(result);
       }
     }
-#endif
     if (cl.HasOption("f")) {
       FML_DLOG(INFO) << "Fullscreen";
       fullscreen = true;
