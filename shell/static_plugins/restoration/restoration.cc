@@ -12,23 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-#include "isolate.h"
+#include "restoration.h"
 
 #include <flutter/fml/logging.h>
-#include "flutter/standard_method_codec.h"
+#include <flutter/standard_method_codec.h>
 
 #include "engine.h"
 
-void Isolate::OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata) {
+void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
+                                 void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
+  auto codec = &flutter::StandardMethodCodec::GetInstance();
+  auto obj = codec->DecodeMethodCall(message->message, message->message_size);
+  auto method = obj->method_name();
 
-  std::string msg;
-  msg.append(reinterpret_cast<const char*>(message->message));
-  msg.resize(message->message_size);
-  FML_DLOG(INFO) << "Root Isolate Service ID: \"" << message->message << "\"";
+  if (method == kMethodGet) {
+    auto res = codec->EncodeSuccessEnvelope();
+    engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+    return;
+  }
 
-  auto res = flutter::StandardMethodCodec::GetInstance().EncodeSuccessEnvelope();
-  engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+  FML_DLOG(INFO) << "[Restoration] Unhandled: " << method;
+  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
 }

@@ -25,29 +25,33 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto codec = &flutter::JsonMethodCodec::GetInstance();
   auto obj = codec->DecodeMethodCall(message->message, message->message_size);
+  auto method = obj->method_name();
+  auto args = obj->arguments();
 
-  if (obj->method_name() == "routeUpdated") {
-    auto args = obj->arguments();
-    std::string previousRouteName;
-    std::string routeName;
-
-    auto itr = args->FindMember("previousRouteName");
-    if (itr != args->MemberEnd()) {
-      if (!itr->value.IsNull()) {
-        previousRouteName = itr->value.GetString();
-      }
+  if (method == kSelectSingleEntryHistory) {
+    if (args->IsNull()) {
+      FML_LOG(INFO) << "Navigation: Select Single Entry History";
+      auto res = codec->EncodeSuccessEnvelope();
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
     }
-    itr = args->FindMember("routeName");
-    if (itr != args->MemberEnd()) {
-      if (!itr->value.IsNull()) {
-        routeName = itr->value.GetString();
-      }
+  }
+  else if (method == kRouteInformationUpdated) {
+    if (args->HasMember("location") && args->HasMember("state") && args->HasMember("replace")) {
+      RouteInformation info{};
+      info.location = (*args)["location"].GetString();
+      info.state = !(*args)["state"].IsNull() ? (*args)["state"].GetString() : "";
+      info.replace = (*args)["replace"].GetBool();
+      FML_LOG(INFO) << "Navigation: Route Information Updated"
+                       "\n\tlocation: " << info.location <<
+                       "\n\tstate: " << info.state <<
+                       "\n\treplace: " << info.replace;
+      auto res = codec->EncodeSuccessEnvelope();
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
     }
-    FML_DLOG(INFO) << "Navigation: routeName=" << routeName
-                   << ", previousRouteName=" << previousRouteName;
-  } else {
-    FML_LOG(ERROR) << "Navigation Channel Unhandled: " << obj->method_name();
   }
 
+  FML_LOG(ERROR) << "[Navigation] Unhandled: " << method;
   engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
 }

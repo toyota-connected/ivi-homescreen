@@ -17,23 +17,14 @@
 #pragma once
 
 #include <flutter_embedder.h>
-#include <string>
 
-constexpr char kChannelNavigation[] = "flutter/navigation";
+constexpr char kChannelRestoration[] = "flutter/restoration";
 
-class Navigation {
+class Restoration {
  public:
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
  private:
-  struct RouteInformation {
-    std::string location;
-    std::string state;
-    bool replace;
-  };
-
-  static constexpr char kSelectSingleEntryHistory[] =
-      "selectSingleEntryHistory";
-  static constexpr char kRouteInformationUpdated[] = "routeInformationUpdated";
+  static constexpr char kMethodGet[] = "get";
 };
