@@ -56,7 +56,7 @@ class Engine {
 
   [[maybe_unused]] [[nodiscard]] size_t GetIndex() const { return m_index; }
 
-  [[maybe_unused]] FlutterEngineResult Run();
+  [[maybe_unused]] FlutterEngineResult Run(pthread_t event_loop_thread_id);
   FlutterEngineResult SetWindowSize(size_t height, size_t width);
 
   [[nodiscard]] bool IsRunning() const;
@@ -135,6 +135,7 @@ class Engine {
   FlutterProjectArgs m_args;
   FlutterRendererConfig m_renderer_config{};
   std::string m_clipboard_data;
+  pthread_t m_event_loop_thread;
 
   [[maybe_unused]] [[maybe_unused]] static const FlutterLocale* HandleLocale(
       const FlutterLocale** supported_locales,
