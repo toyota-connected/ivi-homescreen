@@ -178,7 +178,7 @@ Engine::Engine(App* app,
       .struct_size = sizeof(FlutterTaskRunnerDescription),
       .user_data = this,
       .runs_task_on_current_thread_callback = [](void* context) -> bool {
-        return true;
+        return pthread_equal(pthread_self(), static_cast<Engine*>(context)->m_event_loop_thread) != 0;
       },
       .post_task_callback = [](FlutterTask task, uint64_t target_time,
                                void* context) -> void {
@@ -245,7 +245,7 @@ bool Engine::IsRunning() const {
   return m_running;
 }
 
-FlutterEngineResult Engine::Run() {
+FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Run";
 
   FlutterEngineResult result =
@@ -256,6 +256,8 @@ FlutterEngineResult Engine::Run() {
                     << ") FlutterEngineRun failed or engine is null";
     return result;
   }
+
+  m_event_loop_thread = event_loop_thread_id;
 
   result = FlutterEngineRunInitialized(m_flutter_engine);
   if (result == kSuccess) {

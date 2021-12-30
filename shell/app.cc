@@ -64,7 +64,7 @@ App::App(const std::string& app_id,
   for (size_t i = 0; i < kEngineInstanceCount; i++) {
     m_engine[i] = std::make_shared<Engine>(this, i, m_command_line_args_c,
                                            application_override_path);
-    m_engine[i]->Run();
+    m_engine[i]->Run(pthread_self());
 
     if (!m_engine[i]->IsRunning()) {
       FML_LOG(ERROR) << "Failed to Run Engine";

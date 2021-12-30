@@ -23,6 +23,9 @@
 #ifdef ENABLE_PLUGIN_ISOLATE
 #include "static_plugins/isolate/isolate.h"
 #endif
+#ifdef ENABLE_PLUGIN_RESTORATION
+#include "static_plugins/restoration/restoration.h"
+#endif
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
 #include "static_plugins/mouse_cursor/mouse_cursor.h"
 #endif
@@ -64,6 +67,9 @@ PlatformChannel::PlatformChannel() {
 #endif
 #ifdef ENABLE_PLUGIN_ISOLATE
   RegisterCallback(kChannelIsolate, &Isolate::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_RESTORATION
+  RegisterCallback(kChannelRestoration, &Restoration::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
   RegisterCallback(kChannelMouseCursor, &MouseCursor::OnPlatformMessage);

@@ -40,10 +40,10 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
       if (it != args.end()) {
         kind = it->second.StringValue();
       }
-
+#if 0 //TODO - call into display and set active cursor
       FML_DLOG(INFO) << "activateSystemCursor: device=" << device
                      << ", kind=" << kind;
-
+#endif
       auto val = flutter::EncodableValue(true);
       auto result = codec->EncodeSuccessEnvelope(&val);
       engine->SendPlatformMessageResponse(message->response_handle,
