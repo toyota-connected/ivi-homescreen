@@ -34,7 +34,6 @@ project(ivi-homescreen
         )
 
 include(options)
-include(engine)
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
 message(STATUS "Version ................ ${PROJECT_VERSION}")
