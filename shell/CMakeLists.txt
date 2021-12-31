@@ -109,15 +109,14 @@ target_compile_definitions(homescreen
 
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
-        flutter_engine::flutter_engine
         ${GLIB2_INCLUDE_DIRS}
         ../third_party
+        ../third_party/flutter
         ../third_party/rapidjson/include
 )
 
 target_link_libraries(homescreen PRIVATE
         ${WAYLAND_LIBRARIES}
-        flutter_engine::flutter_engine
         EGL GLESv2
         Threads::Threads
         dl

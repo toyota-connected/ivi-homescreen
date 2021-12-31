@@ -44,12 +44,7 @@ class Engine {
          const std::vector<const char*>& command_line_args_c,
          const std::string& application_override_path);
 
-  ~Engine() {
-    if (m_running) {
-      FlutterEngineShutdown(m_flutter_engine);
-    }
-  }
-
+  ~Engine();
   Engine(const Engine&) = delete;
 
   const Engine& operator=(const Engine&) = delete;
@@ -135,7 +130,9 @@ class Engine {
   FlutterProjectArgs m_args;
   FlutterRendererConfig m_renderer_config{};
   std::string m_clipboard_data;
-  pthread_t m_event_loop_thread;
+  pthread_t m_event_loop_thread{};
+  void* m_engine_so_handle;
+  FlutterEngineProcTable m_proc_table{};
 
   [[maybe_unused]] [[maybe_unused]] static const FlutterLocale* HandleLocale(
       const FlutterLocale** supported_locales,
@@ -156,14 +153,6 @@ class Engine {
                       CompareFlutterTask>
       m_taskrunner;
 
-  // Custom deleter for FlutterEngineAOTData.
-  struct AOTDataDeleter {
-    void operator()(FlutterEngineAOTData aot_data) {
-      FlutterEngineCollectAOTData(aot_data);
-    }
-  };
-  using UniqueAotDataPtr =
-      std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>;
-  UniqueAotDataPtr m_aot_data;
-  static UniqueAotDataPtr LoadAotData(const std::string& aot_data_path);
+  FlutterEngineAOTData m_aot_data;
+  [[nodiscard]] FlutterEngineAOTData LoadAotData(const std::string& aot_data_path) const;
 };
