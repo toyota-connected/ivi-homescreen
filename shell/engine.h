@@ -111,6 +111,8 @@ class Engine {
     return m_gl_resolver;
   }
 
+  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+
  private:
   size_t m_index;
   bool m_running;
@@ -154,5 +156,6 @@ class Engine {
       m_taskrunner;
 
   FlutterEngineAOTData m_aot_data;
-  [[nodiscard]] FlutterEngineAOTData LoadAotData(const std::string& aot_data_path) const;
+  [[nodiscard]] FlutterEngineAOTData LoadAotData(
+      const std::string& aot_data_path) const;
 };

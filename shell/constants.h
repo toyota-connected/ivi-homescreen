@@ -25,6 +25,12 @@ constexpr int32_t kScreenWidth = 1920;
 constexpr int32_t kScreenHeight = 720;
 constexpr int kEglBufferSize = 24;
 
+// Cursor
+constexpr int kCursorSize = 24;
+constexpr char kCursorPointerBasic[] = "left_ptr";
+constexpr char kCursorPointerClick[] = "hand";
+constexpr char kCursorPointerText[] = "left_ptr";
+
 // Touch
 constexpr int kMaxTouchPoints = 10;
 

@@ -32,9 +32,10 @@ App::App(const std::string& app_id,
          bool enable_cursor,
          bool debug_egl,
          uint32_t width,
-         uint32_t height)
+         uint32_t height,
+         const std::string& cursor_theme_name)
     : m_gl_resolver(std::make_shared<GlResolver>()),
-      m_display(std::make_shared<Display>(this, enable_cursor)),
+      m_display(std::make_shared<Display>(this, enable_cursor, cursor_theme_name)),
       m_egl_window {
   std::make_shared<EglWindow>(0, m_display, EglWindow::WINDOW_BG, app_id,
                               fullscreen, debug_egl, width, height)
