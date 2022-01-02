@@ -25,4 +25,6 @@ class MouseCursor {
  public:
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
+ private:
+  static constexpr char kMethodActivateSystemCursor[] = "activateSystemCursor";
 };

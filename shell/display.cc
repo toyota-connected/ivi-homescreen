@@ -25,15 +25,17 @@
 #include "constants.h"
 #include "engine.h"
 
-Display::Display([[maybe_unused]] App* app, bool enable_cursor)
+Display::Display([[maybe_unused]] App* app, bool enable_cursor, std::string  cursor_theme_name)
     : m_flutter_engine(nullptr),
       m_display(nullptr),
       m_output(nullptr),
       m_compositor(nullptr),
+      m_cursor_surface(nullptr),
       m_keyboard(nullptr),
       m_agl_shell(nullptr),
       m_has_xrgb(false),
-      m_enable_cursor(enable_cursor) {
+      m_enable_cursor(enable_cursor),
+      m_cursor_theme_name(std::move(cursor_theme_name)) {
   FML_DLOG(INFO) << "+ Display()";
 
   m_display = wl_display_connect(nullptr);
@@ -87,6 +89,12 @@ Display::~Display() {
   if (m_compositor)
     wl_compositor_destroy(m_compositor);
 
+  if (m_cursor_theme)
+    wl_cursor_theme_destroy(m_cursor_theme);
+
+  if (m_cursor_surface)
+    wl_surface_destroy(m_cursor_surface);
+
   wl_registry_destroy(m_registry);
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
@@ -116,9 +124,9 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_shm_interface, 1));
 
     if (d->m_enable_cursor) {
-      d->m_cursor_theme = wl_cursor_theme_load(nullptr, 32, d->m_shm);
-      d->m_default_cursor =
-          wl_cursor_theme_get_cursor(d->m_cursor_theme, "left_ptr");
+      d->m_cursor_theme =
+          wl_cursor_theme_load(d->m_cursor_theme_name.c_str(), kCursorSize, d->m_shm);
+      d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
 
     wl_shm_add_listener(d->m_shm, &shm_listener, d);
@@ -321,7 +329,7 @@ FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
 
 void Display::pointer_handle_enter(void* data,
                                    [[maybe_unused]] struct wl_pointer* pointer,
-                                   [[maybe_unused]] uint32_t serial,
+                                   uint32_t serial,
                                    [[maybe_unused]] struct wl_surface* surface,
                                    wl_fixed_t sx,
                                    wl_fixed_t sy) {
@@ -329,6 +337,7 @@ void Display::pointer_handle_enter(void* data,
 
   d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
   d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
+  d->m_pointer.serial = serial;
 
   if (d->m_flutter_engine) {
     d->m_flutter_engine->SendMouseEvent(
@@ -341,9 +350,11 @@ void Display::pointer_handle_enter(void* data,
 void Display::pointer_handle_leave(
     void* data,
     [[maybe_unused]] struct wl_pointer* pointer,
-    [[maybe_unused]] uint32_t serial,
+    uint32_t serial,
     [[maybe_unused]] struct wl_surface* surface) {
   auto* d = static_cast<Display*>(data);
+
+  d->m_pointer.serial = serial;
 
   if (d->m_flutter_engine) {
     d->m_flutter_engine->SendMouseEvent(kFlutterPointerSignalKindNone,
@@ -373,7 +384,7 @@ void Display::pointer_handle_motion(void* data,
 void Display::pointer_handle_button(
     void* data,
     [[maybe_unused]] struct wl_pointer* wl_pointer,
-    [[maybe_unused]] uint32_t serial,
+    uint32_t serial,
     [[maybe_unused]] uint32_t time,
     uint32_t button,
     uint32_t state) {
@@ -381,6 +392,7 @@ void Display::pointer_handle_button(
 
   d->m_pointer.event.state = state;
   d->m_pointer.buttons = d->m_pointer.event.button = button;
+  d->m_pointer.serial = serial;
 
   if (d->m_flutter_engine) {
     d->m_flutter_engine->SendMouseEvent(
@@ -615,7 +627,7 @@ void Display::gesture_pinch_end(
   //  FML_DLOG(INFO) << "gesture_pinch_begin: cancelled: " << cancelled;
 }
 
-const struct zwp_pointer_gesture_pinch_v1_listener
+[[maybe_unused]] const struct zwp_pointer_gesture_pinch_v1_listener
     Display::gesture_pinch_listener = {
         .begin = gesture_pinch_begin,
         .update = gesture_pinch_update,
@@ -644,4 +656,49 @@ const struct zwp_pointer_gesture_pinch_v1_listener
 
 void Display::SetEngine(std::shared_ptr<Engine> engine) {
   m_flutter_engine = std::move(engine);
+}
+
+bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
+                                   const std::string& kind) {
+  if (!m_enable_cursor) {
+    FML_DLOG(INFO) << "[cursor_disabled]";
+    return true;
+  }
+
+  if (m_pointer.pointer) {
+    const char* cursor_name;
+    if (kind == "basic") {
+      cursor_name = kCursorPointerBasic;
+    } else if (kind == "click") {
+      cursor_name = kCursorPointerClick;
+    } else if (kind == "text") {
+      cursor_name = kCursorPointerText;
+    } else {
+      FML_DLOG(INFO) << "Cursor Kind = " << kind;
+      return false;
+    }
+
+    auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    if (cursor == nullptr) {
+      FML_DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
+      return false;
+    }
+    auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
+    if (cursor_buffer && m_cursor_surface) {
+      wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
+                            m_cursor_surface,
+                            (int32_t)cursor->images[0]->hotspot_x,
+                            (int32_t)cursor->images[0]->hotspot_y);
+      wl_surface_attach(m_cursor_surface, cursor_buffer, 0, 0);
+      wl_surface_damage(m_cursor_surface, 0, 0,
+                        (int32_t)cursor->images[0]->width,
+                        (int32_t)cursor->images[0]->height);
+      wl_surface_commit(m_cursor_surface);
+    } else {
+      FML_DLOG(INFO) << "Failed to set cursor: Invalid Cursor Buffer";
+      return false;
+    }
+  }
+
+  return true;
 }

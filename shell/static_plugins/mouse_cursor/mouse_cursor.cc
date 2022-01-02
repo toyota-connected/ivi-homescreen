@@ -25,7 +25,7 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto codec = &flutter::StandardMethodCodec::GetInstance();
   auto obj = codec->DecodeMethodCall(message->message, message->message_size);
 
-  if (obj->method_name() == "activateSystemCursor") {
+  if (obj->method_name() == kMethodActivateSystemCursor) {
     if (obj->arguments() && obj->arguments()->IsMap()) {
       const flutter::EncodableMap& args = obj->arguments()->MapValue();
 
@@ -40,11 +40,9 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
       if (it != args.end()) {
         kind = it->second.StringValue();
       }
-#if 0 //TODO - call into display and set active cursor
-      FML_DLOG(INFO) << "activateSystemCursor: device=" << device
-                     << ", kind=" << kind;
-#endif
-      auto val = flutter::EncodableValue(true);
+
+      auto val =
+          flutter::EncodableValue(engine->ActivateSystemCursor(device, kind));
       auto result = codec->EncodeSuccessEnvelope(&val);
       engine->SendPlatformMessageResponse(message->response_handle,
                                           result->data(), result->size());
