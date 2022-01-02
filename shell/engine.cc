@@ -486,7 +486,7 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
   else if (button & BTN_RIGHT)
     buttons |= kFlutterPointerButtonMouseSecondary;
   else if (button & BTN_MIDDLE)
-    buttons = kFlutterPointerButtonMouseMiddle;
+    buttons |= kFlutterPointerButtonMouseMiddle;
 
   FlutterPointerEvent msg = {
     .struct_size = sizeof(FlutterPointerEvent),
@@ -506,6 +506,7 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
     .device_kind = kFlutterPointerDeviceKindMouse,
     .buttons = buttons
   };
+  //FML_DLOG(INFO) << "[SendMouseEvent] phase: " << phase << ", x: " << x << ", y: " << y << ", signal_kind: " << signal << ", " << ", buttons: " << msg.buttons;
 
   m_proc_table.SendPointerEvent(m_flutter_engine, &msg, 1);
 }

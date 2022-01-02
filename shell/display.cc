@@ -299,18 +299,17 @@ const struct wl_seat_listener Display::seat_listener = {
 FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
   FlutterPointerPhase res = p->phase;
 
-  //  FML_DLOG(INFO) << "getPointerPhase: Button: " << p->event.button << ", "
-  //  << "State: " << p->event.state;
-
   if (p->buttons) {
     switch (p->event.state) {
       case WL_POINTER_BUTTON_STATE_PRESSED:
-        if (p->phase == FlutterPointerPhase::kDown)
-          res = FlutterPointerPhase::kMove;
-        else
+        //FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_PRESSED";
+        if ((p->phase == FlutterPointerPhase::kHover) || (p->phase == FlutterPointerPhase::kUp))
           res = FlutterPointerPhase::kDown;
+        else
+          res = FlutterPointerPhase::kMove;
         break;
       case WL_POINTER_BUTTON_STATE_RELEASED:
+        //FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_RELEASED";
         if ((p->phase == FlutterPointerPhase::kDown) ||
             (p->phase == FlutterPointerPhase::kMove))
           res = FlutterPointerPhase::kUp;
