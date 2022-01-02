@@ -667,11 +667,13 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
   if (m_pointer.pointer) {
     const char* cursor_name;
     if (kind == "basic") {
-      cursor_name = kCursorPointerBasic;
+      cursor_name = kCursorKindBasic;
     } else if (kind == "click") {
-      cursor_name = kCursorPointerClick;
+      cursor_name = kCursorKindClick;
     } else if (kind == "text") {
-      cursor_name = kCursorPointerText;
+      cursor_name = kCursorKindText;
+    } else if (kind == "forbidden") {
+      cursor_name = kCursorKindForbidden;
     } else {
       FML_DLOG(INFO) << "Cursor Kind = " << kind;
       return false;

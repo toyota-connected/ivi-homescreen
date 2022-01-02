@@ -16,7 +16,7 @@
 #include "platform_views.h"
 
 #include <flutter/fml/logging.h>
-#include <flutter/json_method_codec.h>
+#include <flutter/shell/platform/common/json_method_codec.h>
 
 #include "engine.h"
 

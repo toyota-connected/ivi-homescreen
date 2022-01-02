@@ -118,11 +118,11 @@ void TextInputModel::AddCodePoint(char32_t c) {
   } else {
     char32_t to_decompose = c - 0x10000;
     AddText(std::u16string({
-                               // High surrogate.
-                               static_cast<char16_t>((to_decompose >> 10) + 0xd800),
-                               // Low surrogate.
-                               static_cast<char16_t>((to_decompose % 0x400) + 0xdc00),
-                           }));
+        // High surrogate.
+        static_cast<char16_t>((to_decompose >> 10) + 0xd800),
+        // Low surrogate.
+        static_cast<char16_t>((to_decompose % 0x400) + 0xdc00),
+    }));
   }
 }
 

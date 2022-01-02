@@ -15,37 +15,38 @@
 #include "mouse_cursor.h"
 
 #include <flutter/fml/logging.h>
-#include <flutter/standard_method_codec.h>
+#include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
 
 #include "engine.h"
+
+#include <iostream>
 
 void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
-  auto codec = &flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec->DecodeMethodCall(message->message, message->message_size);
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  if (obj->method_name() == kMethodActivateSystemCursor) {
-    if (obj->arguments() && obj->arguments()->IsMap()) {
-      const flutter::EncodableMap& args = obj->arguments()->MapValue();
+  auto method = obj->method_name();
+  if (method == kMethodActivateSystemCursor) {
+    if (!obj->arguments()->IsNull()) {
+      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       int32_t device = 0;
-      auto it = args.find(flutter::EncodableValue("device"));
-      if (it != args.end()) {
-        device = it->second.IntValue();
+      auto it = args->find(flutter::EncodableValue("device"));
+      if (it != args->end()) {
+        device = std::get<int32_t>(it->second);
       }
 
       std::string kind;
-      it = args.find(flutter::EncodableValue("kind"));
-      if (it != args.end()) {
-        kind = it->second.StringValue();
+      it = args->find(flutter::EncodableValue("kind"));
+      if (it != args->end()) {
+        kind = std::get<std::string>(it->second);
       }
 
       auto val =
           flutter::EncodableValue(engine->ActivateSystemCursor(device, kind));
-      auto result = codec->EncodeSuccessEnvelope(&val);
-      engine->SendPlatformMessageResponse(message->response_handle,
-                                          result->data(), result->size());
+      auto result = codec.EncodeSuccessEnvelope(&val);
       return;
     }
   } else {

@@ -12,92 +12,215 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "text_input.h"
 
 #include <iostream>
-#include <cstring>
 
-#include <flutter/fml/logging.h>
-#include <flutter/json_method_codec.h>
+//#include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
 
 #include "engine.h"
 
-static constexpr char kSetEditingStateMethod[] = "TextInput.setEditingState";
-static constexpr char kClearClientMethod[] = "TextInput.clearClient";
-static constexpr char kSetClientMethod[] = "TextInput.setClient";
-static constexpr char kShowMethod[] = "TextInput.show";
-static constexpr char kHideMethod[] = "TextInput.hide";
+#define GLFW_RELEASE 0
+#define GLFW_PRESS 1
+#define GLFW_REPEAT 2
 
-static constexpr char kMultilineInputType[] = "TextInputType.multiline";
+#define GLFW_KEY_ENTER 257
+#define GLFW_KEY_BACKSPACE 259
+#define GLFW_KEY_DELETE 261
+#define GLFW_KEY_RIGHT 262
+#define GLFW_KEY_LEFT 263
+#define GLFW_KEY_DOWN 264
+#define GLFW_KEY_UP 265
+#define GLFW_KEY_HOME 268
+#define GLFW_KEY_END 269
 
-static constexpr char kUpdateEditingStateMethod[] =
-    "TextInputClient.updateEditingState";
-static constexpr char kPerformActionMethod[] = "TextInputClient.performAction";
+void TextInput::CharHook(unsigned int code_point) {
+  if (active_model_ == nullptr) {
+    return;
+  }
+  active_model_->AddCodePoint(code_point);
+  SendStateUpdate(*active_model_);
+}
 
-static constexpr char kTextInputAction[] = "inputAction";
-static constexpr char kTextInputType[] = "inputType";
-static constexpr char kTextInputTypeName[] = "name";
-static constexpr char kComposingBaseKey[] = "composingBase";
-static constexpr char kComposingExtentKey[] = "composingExtent";
-static constexpr char kSelectionAffinityKey[] = "selectionAffinity";
-static constexpr char kAffinityDownstream[] = "TextAffinity.downstream";
-static constexpr char kSelectionBaseKey[] = "selectionBase";
-static constexpr char kSelectionExtentKey[] = "selectionExtent";
-static constexpr char kSelectionIsDirectionalKey[] = "selectionIsDirectional";
-static constexpr char kTextKey[] = "text";
+void TextInput::KeyboardHook(int key,
+                             int scancode,
+                             int action,
+                             int mods) {
+  if (active_model_ == nullptr) {
+    return;
+  }
+  if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+    switch (key) {
+      case GLFW_KEY_LEFT:
+        if (active_model_->MoveCursorBack()) {
+          SendStateUpdate(*active_model_);
+        }
+        break;
+      case GLFW_KEY_RIGHT:
+        if (active_model_->MoveCursorForward()) {
+          SendStateUpdate(*active_model_);
+        }
+        break;
+      case GLFW_KEY_END:
+        active_model_->MoveCursorToEnd();
+        SendStateUpdate(*active_model_);
+        break;
+      case GLFW_KEY_HOME:
+        active_model_->MoveCursorToBeginning();
+        SendStateUpdate(*active_model_);
+        break;
+      case GLFW_KEY_BACKSPACE:
+        if (active_model_->Backspace()) {
+          SendStateUpdate(*active_model_);
+        }
+        break;
+      case GLFW_KEY_DELETE:
+        if (active_model_->Delete()) {
+          SendStateUpdate(*active_model_);
+        }
+        break;
+      case GLFW_KEY_ENTER:
+        EnterPressed(active_model_.get());
+        break;
+      default:
+        break;
+    }
+  }
+}
 
-static constexpr char kBadArgumentError[] = "Bad Arguments";
-static constexpr char kInternalConsistencyError[] =
-    "Internal Consistency Error";
+void TextInput::SendStateUpdate(const flutter::TextInputModel& model) {
+  auto args = std::make_unique<rapidjson::Document>(rapidjson::kArrayType);
+  auto& allocator = args->GetAllocator();
+  args->PushBack(client_id_, allocator);
 
-constexpr char kMethod[] = "method";
-constexpr char kArgs[] = "args";
+  flutter::TextRange selection = model.selection();
+  rapidjson::Value editing_state(rapidjson::kObjectType);
+  editing_state.AddMember(kComposingBaseKey, -1, allocator);
+  editing_state.AddMember(kComposingExtentKey, -1, allocator);
+  editing_state.AddMember(kSelectionAffinityKey, kAffinityDownstream,
+                          allocator);
+  editing_state.AddMember(kSelectionBaseKey, selection.base(), allocator);
+  editing_state.AddMember(kSelectionExtentKey, selection.extent(), allocator);
+  editing_state.AddMember(kSelectionIsDirectionalKey, false, allocator);
+  editing_state.AddMember(
+      kTextKey, rapidjson::Value(model.GetText().c_str(), allocator).Move(), allocator);
+  args->PushBack(editing_state, allocator);
+
+//  channel_->InvokeMethod(kUpdateEditingStateMethod, std::move(args));
+}
+
+void TextInput::EnterPressed(flutter::TextInputModel* model) {
+  if (input_type_ == kMultilineInputType) {
+    model->AddCodePoint('\n');
+    SendStateUpdate(*model);
+  }
+  auto args = std::make_unique<rapidjson::Document>(rapidjson::kArrayType);
+  auto& allocator = args->GetAllocator();
+  args->PushBack(client_id_, allocator);
+  args->PushBack(rapidjson::Value(input_action_.c_str(), allocator).Move(), allocator);
+
+//  channel_->InvokeMethod(kPerformActionMethod, std::move(args));
+}
 
 void TextInput::OnPlatformMessage(const FlutterPlatformMessage* message,
                                   void* userdata) {
-  (void)userdata;
   auto engine = reinterpret_cast<Engine*>(userdata);
-  rapidjson::Document document;
-  document.Parse(reinterpret_cast<const char*>(message->message),
-                 message->message_size);
-  if (document.HasParseError() || !document.IsObject()) {
-    return;
-  }
+  auto& codec = flutter::JsonMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  auto method = obj->method_name();
 
-  constexpr char kMethodSetClient[] = "TextInput.setClient";
-  constexpr char kMethodShow[] = "TextInput.show";
-  constexpr char kMethodSetEditableSizeAndTransform[] =
-      "TextInput.setEditableSizeAndTransform";
-  constexpr char kMethodSetStyle[] = "TextInput.setStyle";
-  constexpr char kMethodSetEditingState[] = "TextInput.setEditingState";
+  if (method == kShowMethod || method == kHideMethod) {
+    // These methods are no-ops.
+  } else if (method == kClearClientMethod) {
+    active_model_ = nullptr;
+  } else if (method == kSetClientMethod) {
+    if (obj->arguments()->IsNull()) {
+      auto res = codec.EncodeErrorEnvelope(kBadArgumentError, "Method invoked without args");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    const rapidjson::Document& args = *(obj->arguments());
 
-  if (document.HasMember(kMethod) && document[kMethod].IsString()) {
-    const char* method = document[kMethod].GetString();
-
-    if (document.HasMember(kArgs) && document[kArgs].IsObject()) {
-      auto args = document[kArgs].GetObject();
-
-      if (0 == strcmp(kMethodSetClient, method)) {
-        FML_DLOG(INFO) << "TextInput.setClient";
-
-      } else if (0 == strcmp(kMethodShow, method)) {
-        FML_DLOG(INFO) << "TextInput.show";
-
-      } else if (0 == strcmp(kMethodSetEditableSizeAndTransform, method)) {
-        FML_DLOG(INFO) << "TextInput.setEditableSizeAndTransform";
-
-      } else if (0 == strcmp(kMethodSetStyle, method)) {
-        FML_DLOG(INFO) << "TextInput.setEditableSizeAndTransform";
-
-      } else if (0 == strcmp(kMethodSetEditingState, method)) {
-        FML_DLOG(INFO) << "TextInput.setEditingState";
-
-      } else if (0 == strcmp(kMethodShow, method)) {
-      } else {
-        FML_LOG(ERROR) << "TextInput Unhandled Method: " << method;
+    // TODO(awdavies): There's quite a wealth of arguments supplied with this
+    // method, and they should be inspected/used.
+    const rapidjson::Value& client_id_json = args[0];
+    const rapidjson::Value& client_config = args[1];
+    if (client_id_json.IsNull()) {
+      auto res = codec.EncodeErrorEnvelope(kBadArgumentError, "Could not set client, ID is null.");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    if (client_config.IsNull()) {
+      auto res = codec.EncodeErrorEnvelope(kBadArgumentError,
+                    "Could not set client, missing arguments.");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    client_id_ = client_id_json.GetInt();
+    input_action_ = "";
+    auto input_action_json = client_config.FindMember(kTextInputAction);
+    if (input_action_json != client_config.MemberEnd() &&
+        input_action_json->value.IsString()) {
+      input_action_ = input_action_json->value.GetString();
+    }
+    input_type_ = "";
+    auto input_type_info_json = client_config.FindMember(kTextInputType);
+    if (input_type_info_json != client_config.MemberEnd() &&
+        input_type_info_json->value.IsObject()) {
+      auto input_type_json =
+          input_type_info_json->value.FindMember(kTextInputTypeName);
+      if (input_type_json != input_type_info_json->value.MemberEnd() &&
+          input_type_json->value.IsString()) {
+        input_type_ = input_type_json->value.GetString();
       }
     }
+    active_model_ = std::make_unique<flutter::TextInputModel>();
+  } else if (method == kSetEditingStateMethod) {
+    if (!obj->arguments() || obj->arguments()->IsNull()) {
+      auto res = codec.EncodeErrorEnvelope(kBadArgumentError, "Method invoked without args");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    const rapidjson::Document& args = *(obj->arguments());
+
+    if (active_model_ == nullptr) {
+      auto res = codec.EncodeErrorEnvelope(kInternalConsistencyError,
+                                            "Set editing state has been invoked, but no client is set.");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    auto text = args.FindMember(kTextKey);
+    if (text == args.MemberEnd() || text->value.IsNull()) {
+      auto res = codec.EncodeErrorEnvelope(kBadArgumentError,
+                                            "Set editing state has been invoked, but without text.");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    auto selection_base = args.FindMember(kSelectionBaseKey);
+    auto selection_extent = args.FindMember(kSelectionExtentKey);
+    if (selection_base == args.MemberEnd() || selection_base->value.IsNull() ||
+        selection_extent == args.MemberEnd() ||
+        selection_extent->value.IsNull()) {
+      auto res = codec.EncodeErrorEnvelope(kInternalConsistencyError,
+                                            "Selection base/extent values invalid.");
+      engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
+      return;
+    }
+    // Flutter uses -1/-1 for invalid; translate that to 0/0 for the model.
+    int base = selection_base->value.GetInt();
+    int extent = selection_extent->value.GetInt();
+    if (base == -1 && extent == -1) {
+      base = extent = 0;
+    }
+    active_model_->SetText(text->value.GetString());
+    active_model_->SetSelection(flutter::TextRange(base, extent));
+  } else {
+    engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
   }
-  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+  // All error conditions return early, so if nothing has gone wrong indicate
+  // success.
+  auto res = codec.EncodeSuccessEnvelope();
+  engine->SendPlatformMessageResponse(message->response_handle, res->data(), res->size());
 }
+
+TextInput::TextInput(flutter::BinaryMessenger* messenger) {}

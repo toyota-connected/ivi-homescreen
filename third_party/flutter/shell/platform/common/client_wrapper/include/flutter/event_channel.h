@@ -79,7 +79,7 @@ class EventChannel {
       }
 
       const std::string& method = method_call->method_name();
-      if (method.compare(kOnListenMethod) == 0) {
+      if (method == kOnListenMethod) {
         if (is_listening_) {
           std::unique_ptr<StreamHandlerError<T>> error =
               shared_handler->OnCancel(nullptr);
@@ -103,7 +103,7 @@ class EventChannel {
           result = codec->EncodeSuccessEnvelope();
         }
         reply(result->data(), result->size());
-      } else if (method.compare(kOnCancelMethod) == 0) {
+      } else if (method == kOnCancelMethod) {
         std::unique_ptr<std::vector<uint8_t>> result;
         if (is_listening_) {
           std::unique_ptr<StreamHandlerError<T>> error =
@@ -165,7 +165,7 @@ class EventChannel {
   BinaryMessenger* messenger_;
   const std::string name_;
   const MethodCodec<T>* codec_;
-  bool is_listening_;
+  bool is_listening_ = false;
 };
 
 }  // namespace flutter

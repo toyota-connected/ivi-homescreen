@@ -1,9 +1,8 @@
 // Copyright 2013 The Flutter Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-// FLUTTER_NOLINT
 
-#include "json_message_codec.h"
+#include "flutter/shell/platform/common/json_message_codec.h"
 
 #include <iostream>
 #include <string>
@@ -38,9 +37,7 @@ std::unique_ptr<rapidjson::Document> JsonMessageCodec::DecodeMessageInternal(
   auto json_message = std::make_unique<rapidjson::Document>();
   rapidjson::ParseResult result =
       json_message->Parse(raw_message, message_size);
-  bool parsing_successful =
-      result == rapidjson::ParseErrorCode::kParseErrorNone;
-  if (!parsing_successful) {
+  if (result.IsError()) {
     std::cerr << "Unable to parse JSON message:" << std::endl
               << rapidjson::GetParseError_En(result.Code()) << std::endl;
     return nullptr;

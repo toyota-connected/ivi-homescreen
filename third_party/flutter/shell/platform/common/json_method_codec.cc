@@ -1,11 +1,10 @@
 // Copyright 2013 The Flutter Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-// FLUTTER_NOLINT
 
-#include "json_method_codec.h"
+#include "flutter/shell/platform/common/json_method_codec.h"
 
-#include "json_message_codec.h"
+#include "flutter/shell/platform/common/json_message_codec.h"
 
 namespace flutter {
 
@@ -71,7 +70,6 @@ std::unique_ptr<std::vector<uint8_t>> JsonMethodCodec::EncodeMethodCallInternal(
   // everything when doing encoding (e.g., by having a version that takes
   // owership of the object to encode, so that it can be moved instead).
   rapidjson::Document message(rapidjson::kObjectType);
-
   auto& allocator = message.GetAllocator();
   rapidjson::Value name(method_call.method_name().c_str(), allocator);
   rapidjson::Value arguments;
@@ -106,8 +104,7 @@ JsonMethodCodec::EncodeErrorEnvelopeInternal(
   rapidjson::Document envelope(rapidjson::kArrayType);
   auto& allocator = envelope.GetAllocator();
   envelope.PushBack(rapidjson::Value(error_code.c_str(), allocator), allocator);
-  envelope.PushBack(rapidjson::Value(error_message.c_str(), allocator),
-                    allocator);
+  envelope.PushBack(rapidjson::Value(error_message.c_str(), allocator), allocator);
   rapidjson::Value details_value;
   if (error_details) {
     details_value.CopyFrom(*error_details, allocator);
