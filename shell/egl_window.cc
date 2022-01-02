@@ -496,3 +496,7 @@ void EglWindow::toggle_fullscreen() {
   callback = wl_display_sync(m_display->GetDisplay());
   wl_callback_add_listener(callback, &shell_configure_callback_listener, this);
 }
+
+bool EglWindow::ActivateSystemCursor(int32_t device, const std::string& kind) {
+  return m_display->ActivateSystemCursor(device, kind);
+}

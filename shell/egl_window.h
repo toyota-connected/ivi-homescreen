@@ -53,6 +53,8 @@ class EglWindow : public Egl {
   [[nodiscard]] int32_t GetWidth() const { return m_width; }
   [[nodiscard]] int32_t GetHeight() const { return m_height; }
 
+  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+
  private:
   struct shm_buffer {
     struct wl_buffer* buffer;

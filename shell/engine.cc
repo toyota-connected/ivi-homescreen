@@ -147,7 +147,7 @@ Engine::Engine(App* app,
 
   char* error = dlerror();
   if (error != nullptr) {
-    FML_DLOG(ERROR) << dlerror();
+    FML_DLOG(ERROR) << error;
     exit(-1);
   }
 
@@ -557,4 +557,8 @@ FlutterEngineAOTData Engine::LoadAotData(
     return nullptr;
   }
   return data;
+}
+
+bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
+  return m_egl_window->ActivateSystemCursor(device, kind);
 }

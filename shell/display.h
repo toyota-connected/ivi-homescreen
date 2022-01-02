@@ -34,7 +34,7 @@ class Engine;
 
 class Display {
  public:
-  explicit Display(App* app, bool enable_cursor);
+  explicit Display(App* app, bool enable_cursor, std::string  cursor_theme_name);
   ~Display();
   Display(const Display&) = delete;
   const Display& operator=(const Display&) = delete;
@@ -74,6 +74,8 @@ class Display {
 
   void SetEngine(std::shared_ptr<Engine> engine);
 
+  bool ActivateSystemCursor([[maybe_unused]] int32_t device, const std::string& kind);
+
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
@@ -92,6 +94,8 @@ class Display {
   bool m_has_xrgb;
 
   bool m_enable_cursor;
+  struct wl_surface* m_cursor_surface;
+  std::string m_cursor_theme_name;
 
   struct pointer_event {
     [[maybe_unused]] uint32_t event_mask;
@@ -119,6 +123,7 @@ class Display {
   struct pointer {
     struct wl_pointer* pointer;
     struct pointer_event event;
+    uint32_t serial;
 
     uint32_t buttons;
     uint32_t state;
@@ -152,12 +157,9 @@ class Display {
   } m_touch{};
 
   // for cursor
-  // struct wl_shm *shm;
   struct wl_cursor_theme* m_cursor_theme{};
-  [[maybe_unused]] struct wl_cursor* m_default_cursor{};
-  // struct wl_surface* m_cursor_surface;
 
-  struct zwp_pointer_gestures_v1* m_gestures{};
+  [[maybe_unused]] struct zwp_pointer_gestures_v1* m_gestures{};
   [[maybe_unused]] struct zwp_pointer_gesture_swipe_v1* m_pointer_swipe{};
 
   struct info {
@@ -353,6 +355,6 @@ class Display {
       uint32_t time,
       int32_t cancelled);
 
-  static const struct zwp_pointer_gesture_pinch_v1_listener
+  [[maybe_unused]] static const struct zwp_pointer_gesture_pinch_v1_listener
       gesture_pinch_listener;
 };
