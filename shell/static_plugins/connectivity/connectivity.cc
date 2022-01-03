@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "connectivity.h"
 
 #include <flutter/fml/logging.h>
-#include <flutter/standard_method_codec.h>
+#include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
 
 #include "engine.h"
 
@@ -24,23 +23,24 @@ void Connectivity::OnPlatformMessage(const FlutterPlatformMessage* message,
                                      void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
   std::unique_ptr<std::vector<std::uint8_t>> result;
-  auto codec = &flutter::StandardMethodCodec::GetInstance();
-  auto method_call =
-      codec->DecodeMethodCall(message->message, message->message_size);
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method_name = method_call->method_name();
+  auto method_name = obj->method_name();
 
-  if (method_name == "check") {
-    flutter::EncodableValue val("wifi");
-    result = codec->EncodeSuccessEnvelope(&val);
-    engine->SendPlatformMessageResponse(message->response_handle,
-                                        result->data(), result->size());
-    return;
 #if 0
-    wifi
+  wifi
   mobile
   none
 #endif
+
+  if (method_name == "check") {
+    flutter::EncodableValue val("wifi");
+    result = codec.EncodeSuccessEnvelope(&val);
+    engine->SendPlatformMessageResponse(message->response_handle,
+                                        result->data(), result->size());
+    return;
   } else if (method_name == "wifiName") {
     FML_DLOG(INFO) << "wifiName";
   } else if (method_name == "wifiBSSID") {
@@ -52,7 +52,7 @@ void Connectivity::OnPlatformMessage(const FlutterPlatformMessage* message,
   } else if (method_name == "getLocationServiceAuthorization") {
     FML_DLOG(INFO) << "getLocationServiceAuthorization";
 #if 0
-    notDetermined
+  notDetermined
   restricted
   denied
   authorizedAlways
@@ -66,13 +66,13 @@ void Connectivity::OnPlatformMessageStatus(
     void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
   std::unique_ptr<std::vector<std::uint8_t>> result;
-  auto codec = &flutter::StandardMethodCodec::GetInstance();
-  auto method_call =
-      codec->DecodeMethodCall(message->message, message->message_size);
-  FML_DLOG(INFO) << "ConnectivityStatus: " << method_call->method_name();
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
+  FML_DLOG(INFO) << "ConnectivityStatus: " << obj->method_name();
 
   flutter::EncodableValue val(true);
-  result = codec->EncodeSuccessEnvelope(&val);
+  result = codec.EncodeSuccessEnvelope(&val);
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }

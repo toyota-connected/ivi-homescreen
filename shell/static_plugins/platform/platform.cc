@@ -15,7 +15,7 @@
 #include "platform.h"
 
 #include <flutter/fml/logging.h>
-#include <flutter/json_method_codec.h>
+#include <flutter/shell/platform/common/json_method_codec.h>
 
 #include "engine.h"
 
@@ -68,51 +68,64 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
     return;
   } else if (method == kMethodSetSystemUiOverlayStyle) {
     SystemUiOverlayStyle style{};
-    if (args->HasMember("systemNavigationBarColor") &&
-        !(*args)["systemNavigationBarColor"].IsNull() &&
-        (*args)["systemNavigationBarColor"].IsNumber()) {
+    if (args->HasMember(kSystemNavigationBarColor) &&
+        !(*args)[kSystemNavigationBarColor].IsNull() &&
+        (*args)[kSystemNavigationBarColor].IsNumber()) {
       style.systemNavigationBarColor =
-          (*args)["systemNavigationBarColor"].GetUint();
+          (*args)[kSystemNavigationBarColor].GetUint();
+      FML_DLOG(INFO) << kSystemNavigationBarColor << ": " << style.systemNavigationBarColor;
     }
-    if (args->HasMember("systemNavigationBarDividerColor") &&
-        !(*args)["systemNavigationBarDividerColor"].IsNull() &&
-        (*args)["systemNavigationBarDividerColor"].IsNumber()) {
+    if (args->HasMember(kSystemNavigationBarDividerColor) &&
+        !(*args)[kSystemNavigationBarDividerColor].IsNull() &&
+        (*args)[kSystemNavigationBarDividerColor].IsNumber()) {
       style.systemNavigationBarDividerColor =
-          (*args)["systemNavigationBarDividerColor"].GetUint();
+          (*args)[kSystemNavigationBarDividerColor].GetUint();
+      FML_DLOG(INFO) << kSystemNavigationBarDividerColor << ": " << style.systemNavigationBarDividerColor;
     }
-    if (args->HasMember("statusBarColor") &&
-        !(*args)["statusBarColor"].IsNull() &&
-        (*args)["statusBarColor"].IsNumber()) {
-      style.statusBarColor = (*args)["statusBarColor"].GetUint();
+    if (args->HasMember(kSystemStatusBarContrastEnforced) &&
+        !(*args)[kSystemStatusBarContrastEnforced].IsNull() &&
+        (*args)[kSystemStatusBarContrastEnforced].IsBool()) {
+      style.systemStatusBarContrastEnforced =
+          (*args)[kSystemStatusBarContrastEnforced].GetBool();
+      FML_DLOG(INFO) << kSystemStatusBarContrastEnforced << ": " << style.systemStatusBarContrastEnforced;
     }
-    if (args->HasMember("statusBarBrightness") &&
-        !(*args)["statusBarBrightness"].IsNull() &&
-        (*args)["statusBarBrightness"].IsString()) {
-      style.statusBarBrightness = (*args)["statusBarBrightness"].GetString();
+    if (args->HasMember(kStatusBarColor) &&
+        !(*args)[kStatusBarColor].IsNull() &&
+        (*args)[kStatusBarColor].IsNumber()) {
+      style.statusBarColor = (*args)[kStatusBarColor].GetUint();
+      FML_DLOG(INFO) << kStatusBarColor << ": " << style.statusBarColor;
     }
-    if (args->HasMember("statusBarIconBrightness") &&
-        !(*args)["statusBarIconBrightness"].IsNull() &&
-        (*args)["statusBarIconBrightness"].IsString()) {
+    if (args->HasMember(kStatusBarBrightness) &&
+        !(*args)[kStatusBarBrightness].IsNull() &&
+        (*args)[kStatusBarBrightness].IsString()) {
+      style.statusBarBrightness = (*args)[kStatusBarBrightness].GetString();
+      FML_DLOG(INFO) << kStatusBarBrightness << ": " << style.statusBarBrightness;
+    }
+    if (args->HasMember(kStatusBarIconBrightness) &&
+        !(*args)[kStatusBarIconBrightness].IsNull() &&
+        (*args)[kStatusBarIconBrightness].IsString()) {
       style.statusBarIconBrightness =
-          (*args)["statusBarIconBrightness"].GetString();
+          (*args)[kStatusBarIconBrightness].GetString();
+      FML_DLOG(INFO) << kStatusBarIconBrightness << ": " << style.statusBarIconBrightness;
     }
-    if (args->HasMember("systemNavigationBarIconBrightness") &&
-        !(*args)["systemNavigationBarIconBrightness"].IsNull() &&
-        (*args)["systemNavigationBarIconBrightness"].IsString()) {
+    if (args->HasMember(kSystemNavigationBarIconBrightness) &&
+        !(*args)[kSystemNavigationBarIconBrightness].IsNull() &&
+        (*args)[kSystemNavigationBarIconBrightness].IsString()) {
       style.systemNavigationBarIconBrightness =
-          (*args)["systemNavigationBarIconBrightness"].GetString();
+          (*args)[kSystemNavigationBarIconBrightness].GetString();
+      FML_DLOG(INFO) << kSystemNavigationBarIconBrightness << ": " << style.systemNavigationBarIconBrightness;
     }
-    FML_DLOG(INFO) << "** System UI Overlays Style **"
-                   << "\n\tsystemNavigationBarColor="
-                   << style.systemNavigationBarColor
-                   << "\n\tsystemNavigationBarDividerColor="
-                   << style.systemNavigationBarDividerColor
-                   << "\n\tstatusBarColor=" << style.statusBarColor
-                   << "\n\tstatusBarBrightness=" << style.statusBarBrightness
-                   << "\n\tstatusBarIconBrightness="
-                   << style.statusBarIconBrightness
-                   << "\n\tsystemNavigationBarIconBrightness="
-                   << style.systemNavigationBarIconBrightness;
+    if (args->HasMember(kSystemNavigationBarContrastEnforced) &&
+        !(*args)[kSystemNavigationBarContrastEnforced].IsNull() &&
+        (*args)[kSystemNavigationBarContrastEnforced].IsBool()) {
+      style.systemNavigationBarContrastEnforced =
+          (*args)[kSystemNavigationBarContrastEnforced].GetBool();
+      FML_DLOG(INFO) << kSystemNavigationBarContrastEnforced << ": " << style.systemNavigationBarContrastEnforced;
+    }
+    auto res = codec->EncodeSuccessEnvelope();
+    engine->SendPlatformMessageResponse(message->response_handle, res->data(),
+                                        res->size());
+    return;
   }
 
   FML_DLOG(INFO) << "[Platform] Unhandled: " << method;

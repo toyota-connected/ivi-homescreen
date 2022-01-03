@@ -28,6 +28,10 @@ DEF_SWITCHES_START
 DEF_SWITCH(AotSharedLibraryName,
            "aot-shared-library-name",
            "Name of the *.so containing AOT compiled Dart assets.")
+DEF_SWITCH(AotVMServiceSharedLibraryName,
+           "aot-vmservice-shared-library-name",
+           "Name of the *.so containing AOT compiled Dart assets for "
+           "launching the service isolate.")
 DEF_SWITCH(SnapshotAssetPath,
            "snapshot-asset-path",
            "Path to the directory containing the four files specified by "
@@ -132,9 +136,10 @@ DEF_SWITCH(TraceSkia,
            "Trace Skia calls. This is useful when debugging the GPU threed."
            "By default, Skia tracing is not enabled to reduce the number of "
            "traced events")
-DEF_SWITCH(TraceWhitelist,
-           "trace-whitelist",
-           "(deprecated) Use --trace-allowlist instead.")
+DEF_SWITCH(TraceSkiaAllowlist,
+           "trace-skia-allowlist",
+           "Filters out all Skia trace event categories except those that are "
+           "specified in this comma separated list.")
 DEF_SWITCH(
     TraceAllowlist,
     "trace-allowlist",
@@ -168,6 +173,10 @@ DEF_SWITCH(UseTestFonts,
            "will make font resolution default to the Ahem test font on all "
            "platforms (See https://www.w3.org/Style/CSS/Test/Fonts/Ahem/). "
            "This option is only available on the desktop test shells.")
+DEF_SWITCH(PrefetchedDefaultFontManager,
+           "prefetched-default-font-manager",
+           "Indicates whether the embedding started a prefetch of the "
+           "default font manager before creating the engine.")
 DEF_SWITCH(VerboseLogging,
            "verbose-logging",
            "By default, only errors are logged. This flag enabled logging at "
@@ -199,6 +208,12 @@ DEF_SWITCH(
     "Uses separate threads for the platform, UI, GPU and IO task runners. "
     "By default, a single thread is used for all task runners. Only available "
     "in the flutter_tester.")
+DEF_SWITCH(OldGenHeapSize,
+           "old-gen-heap-size",
+           "The size limit in megabytes for the Dart VM old gen heap space.")
+DEF_SWITCH(EnableSkParagraph,
+           "enable-skparagraph",
+           "Selects the SkParagraph implementation of the text layout engine.")
 
 DEF_SWITCHES_END
 

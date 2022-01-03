@@ -55,22 +55,28 @@ set(SRC_FILES
 
         textures/texture.cc
 
-        ../third_party/flutter/standard_codec.cc
-        ../third_party/flutter/json_message_codec.cc
-        ../third_party/flutter/json_method_codec.cc
+        ../third_party/flutter/shell/platform/common/client_wrapper/core_implementations.cc
+#        ../third_party/flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
+        ../third_party/flutter/shell/platform/common/client_wrapper/standard_codec.cc
+        ../third_party/flutter/shell/platform/common/json_message_codec.cc
+        ../third_party/flutter/shell/platform/common/json_method_codec.cc
+        ../third_party/flutter/shell/platform/common/path_utils.cc
+        ../third_party/flutter/shell/platform/common/text_editing_delta.cc
         ../third_party/flutter/shell/platform/common/text_input_model.cc
 
         ${WAYLAND_PROTOCOL_SOURCES}
 
         ../third_party/flutter/fml/platform/linux/paths_linux.cc
+
         ../third_party/flutter/fml/platform/posix/file_posix.cc
         ../third_party/flutter/fml/platform/posix/paths_posix.cc
         ../third_party/flutter/fml/platform/posix/posix_wrappers_posix.cc
         ../third_party/flutter/fml/platform/posix/shared_mutex_posix.cc
+
         ../third_party/flutter/fml/command_line.cc
         ../third_party/flutter/fml/file.cc
-        ../third_party/flutter/fml/log_settings_state.cc
         ../third_party/flutter/fml/log_settings.cc
+        ../third_party/flutter/fml/log_settings_state.cc
         ../third_party/flutter/fml/logging.cc
         ../third_party/flutter/fml/paths.cc
         ../third_party/flutter/fml/unique_fd.cc
@@ -82,18 +88,18 @@ include(macros)
 
 ENABLE_PLUGIN(isolate)
 ENABLE_PLUGIN(platform)
-ENABLE_PLUGIN(navigation)
 ENABLE_PLUGIN(restoration)
 ENABLE_PLUGIN(mouse_cursor)
 ENABLE_PLUGIN(package_info)
+#ENABLE_PLUGIN(navigation)
+#ENABLE_PLUGIN(accessibility)
+#ENABLE_PLUGIN(url_launcher)
+
 ENABLE_PLUGIN(opengl_texture)
-ENABLE_PLUGIN(accessibility)
 
 #ENABLE_PLUGIN(connectivity)
-#ENABLE_PLUGIN(platform)
 #ENABLE_PLUGIN(platform_views)
 #ENABLE_PLUGIN(text_input)
-#ENABLE_PLUGIN(url_launcher)
 
 # Comment out to disable test texture
 ENABLE_TEXTURE(test)
@@ -110,8 +116,11 @@ target_compile_definitions(homescreen
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
+        ..
         ../third_party
         ../third_party/flutter
+        ../third_party/flutter/shell/platform/common/public
+        ../third_party/flutter/shell/platform/common/client_wrapper
         ../third_party/rapidjson/include
 )
 
