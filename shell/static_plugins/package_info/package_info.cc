@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "package_info.h"
 
 #include <flutter/fml/logging.h>
@@ -23,11 +22,14 @@
 
 void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
+  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
-  auto codec = &flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec->DecodeMethodCall(message->message, message->message_size);
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  if (obj->method_name() == "getAll") {
+  auto method = obj->method_name();
+
+  if (method == "getAll") {
     FML_DLOG(INFO) << "PackageInfo: getAll";
 
     flutter::EncodableValue value(flutter::EncodableMap{
@@ -39,16 +41,12 @@ void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
         {flutter::EncodableValue("buildNumber"),
          flutter::EncodableValue("2")}});
 
-    auto encoded = codec->EncodeSuccessEnvelope(&value);
-    engine->SendPlatformMessageResponse(message->response_handle,
-                                        encoded->data(), encoded->size());
-    return;
+    result = codec.EncodeSuccessEnvelope(&value);
   } else {
-    FML_LOG(ERROR) << "Unhandled PackageInfo Message";
-    std::stringstream ss;
-    ss << Hexdump(message->message, message->message_size);
-    FML_DLOG(INFO) << "Channel: \"" << message->channel << "\"\n" << ss.str();
+    FML_LOG(ERROR) << "PackageInfo: " << method << " is unhandled";
+    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 
-  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }

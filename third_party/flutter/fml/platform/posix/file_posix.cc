@@ -9,6 +9,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <cstring>
+#endif
 
 #include <memory>
 #include <sstream>

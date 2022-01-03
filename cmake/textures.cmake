@@ -14,26 +14,13 @@
 # limitations under the License.
 #
 
-macro(ENABLE_TEXTURE texture)
+include(macros)
 
-    list(APPEND TEXTURES ${texture})
+set(TEXTURES)
 
-    string(TOUPPER ${texture} ucase_texture)
+option(BUILD_TEXTURE_TEST "Includes Test Texture" OFF)
+if (BUILD_TEXTURE_TEST)
+    ENABLE_TEXTURE(test)
+endif ()
 
-    target_compile_definitions(homescreen PRIVATE ENABLE_TEXTURE_${ucase_texture})
-
-    target_sources(homescreen PRIVATE textures/${texture}/texture_${texture}.cc)
-
-endmacro(ENABLE_TEXTURE)
-
-macro(ENABLE_PLUGIN plugin)
-
-    list(APPEND PLUGINS ${plugin})
-
-    string(TOUPPER ${plugin} ucase_plugin)
-
-    target_compile_definitions(homescreen PRIVATE ENABLE_PLUGIN_${ucase_plugin})
-
-    target_sources(homescreen PRIVATE static_plugins/${plugin}/${plugin}.cc)
-
-endmacro(ENABLE_PLUGIN)
+message(STATUS "Texture Config ......... ${TEXTURES}")

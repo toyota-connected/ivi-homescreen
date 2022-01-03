@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelOpenGlTexture[] = "opengl_texture";
-
 class OpenGlTexture {
  public:
+  static constexpr char kChannelName[] = "opengl_texture";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };
