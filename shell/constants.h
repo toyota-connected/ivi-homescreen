@@ -27,9 +27,10 @@ constexpr int kEglBufferSize = 24;
 
 // Cursor
 constexpr int kCursorSize = 24;
-constexpr char kCursorPointerBasic[] = "left_ptr";
-constexpr char kCursorPointerClick[] = "hand";
-constexpr char kCursorPointerText[] = "left_ptr";
+constexpr char kCursorKindBasic[] = "left_ptr";
+constexpr char kCursorKindClick[] = "hand";
+constexpr char kCursorKindText[] = "left_ptr";
+constexpr char kCursorKindForbidden[] = "pirate";
 
 // Touch
 constexpr int kMaxTouchPoints = 10;

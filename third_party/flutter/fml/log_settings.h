@@ -31,13 +31,13 @@ void SetLogSettings(const LogSettings& settings);
 // Sets the active log settings for the current process.
 LogSettings GetLogSettings();
 
-// Gets the minimum log level for the current process. Never returns a value
+// Gets the minimum log level for the current process. Never returs a value
 // higher than LOG_FATAL.
 int GetMinLogLevel();
 
 class ScopedSetLogSettings {
  public:
-  ScopedSetLogSettings(const LogSettings& settings);
+  explicit ScopedSetLogSettings(const LogSettings& settings);
   ~ScopedSetLogSettings();
 
  private:

@@ -15,37 +15,38 @@
 
 #include "opengl_texture.h"
 
-#include <flutter/fml/logging.h>
-#include <flutter/standard_method_codec.h>
+#include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
 
 #include "engine.h"
 
 void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
-  auto codec = &flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec->DecodeMethodCall(message->message, message->message_size);
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  if (obj->method_name() == "create") {
-    if (obj->arguments() && obj->arguments()->IsMap()) {
-      const flutter::EncodableMap& args = obj->arguments()->MapValue();
+  auto method = obj->method_name();
+  if (method == "create") {
+
+    if (!obj->arguments()->IsNull()) {
+      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       int64_t textureId = 0;
-      auto it = args.find(flutter::EncodableValue("textureId"));
-      if (it != args.end()) {
-        textureId = it->second.LongValue();
+      auto it = args->find(flutter::EncodableValue("textureId"));
+      if (it != args->end()) {
+        textureId = std::get<int64_t>(it->second);
       }
 
       double width = 0;
-      it = args.find(flutter::EncodableValue("width"));
-      if (it != args.end()) {
-        width = it->second.DoubleValue();
+      it = args->find(flutter::EncodableValue("width"));
+      if (it != args->end()) {
+        width = std::get<double>(it->second);
       }
 
       double height = 0;
-      it = args.find(flutter::EncodableValue("height"));
-      if (it != args.end()) {
-        height = it->second.DoubleValue();
+      it = args->find(flutter::EncodableValue("height"));
+      if (it != args->end()) {
+        height = std::get<double>(it->second);
       }
 
       // cast size to that what Wayland uses
@@ -53,24 +54,25 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                         static_cast<int32_t>(height));
 
       flutter::EncodableValue value(textureId);
-      auto encoded = codec->EncodeSuccessEnvelope(&value);
+      auto encoded = codec.EncodeSuccessEnvelope(&value);
       engine->SendPlatformMessageResponse(message->response_handle,
                                           encoded->data(), encoded->size());
       return;
     }
-  } else if (obj->method_name() == "dispose") {
-    if (obj->arguments() && obj->arguments()->IsMap()) {
-      const flutter::EncodableMap& args = obj->arguments()->MapValue();
+  } else if (method == "dispose") {
+
+    if (!obj->arguments()->IsNull()) {
+      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       int64_t textureId = 0;
-      auto it = args.find(flutter::EncodableValue("textureId"));
-      if (it != args.end()) {
-        textureId = it->second.IntValue();
+      auto it = args->find(flutter::EncodableValue("textureId"));
+      if (it != args->end()) {
+        textureId = std::get<int64_t>(it->second);
       }
 
       engine->TextureDispose(textureId);
 
-      auto encoded = codec->EncodeSuccessEnvelope();
+      auto encoded = codec.EncodeSuccessEnvelope();
       engine->SendPlatformMessageResponse(message->response_handle,
                                           encoded->data(), encoded->size());
       return;
