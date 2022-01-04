@@ -28,13 +28,14 @@
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
 #include "pointer-gestures-unstable-v1-protocol.h"
+#include "static_plugins/text_input/text_input.h"
 
 class App;
 class Engine;
 
 class Display {
  public:
-  explicit Display(App* app, bool enable_cursor, std::string  cursor_theme_name);
+  explicit Display(App* app, bool enable_cursor, std::string cursor_theme_name);
   ~Display();
   Display(const Display&) = delete;
   const Display& operator=(const Display&) = delete;
@@ -74,7 +75,10 @@ class Display {
 
   void SetEngine(std::shared_ptr<Engine> engine);
 
-  bool ActivateSystemCursor([[maybe_unused]] int32_t device, const std::string& kind);
+  bool ActivateSystemCursor([[maybe_unused]] int32_t device,
+                            const std::string& kind);
+
+  void SetTextInput(std::shared_ptr<TextInput> text_input);
 
  private:
   std::shared_ptr<Engine> m_flutter_engine;
@@ -109,15 +113,6 @@ class Display {
       int32_t discrete;
     } axes[2];
     [[maybe_unused]] uint32_t axis_source;
-  };
-
-  enum touch_event_mask {
-    TOUCH_EVENT_DOWN = 1 << 0,
-    TOUCH_EVENT_UP = 1 << 1,
-    TOUCH_EVENT_MOTION = 1 << 2,
-    TOUCH_EVENT_CANCEL = 1 << 3,
-    TOUCH_EVENT_SHAPE = 1 << 4,
-    TOUCH_EVENT_ORIENTATION = 1 << 5,
   };
 
   struct pointer {
@@ -161,6 +156,12 @@ class Display {
 
   [[maybe_unused]] struct zwp_pointer_gestures_v1* m_gestures{};
   [[maybe_unused]] struct zwp_pointer_gesture_swipe_v1* m_pointer_swipe{};
+
+  struct xkb_context* m_xkb_context;
+  struct xkb_keymap* m_keymap;
+  struct xkb_state* m_xkb_state;
+
+  std::shared_ptr<TextInput> m_text_input{};
 
   struct info {
     struct {

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "url_launcher.h"
 
 #include <sys/wait.h>
@@ -24,28 +23,23 @@
 
 void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
+  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
-  std::unique_ptr<std::vector<std::uint8_t>> result;
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj =
-      codec.DecodeMethodCall(message->message, message->message_size);
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
 
-  if (method == "launch") {
+  if (method == kLaunchMethod) {
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       std::string url;
-      auto it = args->find(flutter::EncodableValue("url"));
+      auto it = args->find(flutter::EncodableValue(kUrlKey));
       if (it != args->end()) {
         url = std::get<std::string>(it->second);
-      }
-      else {
+      } else {
         result = codec.EncodeErrorEnvelope("argument_error", "No URL provided");
-        engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                            result->size());
-        return;
       }
 
       pid_t pid = fork();
@@ -58,38 +52,35 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
       if (status != 0) {
         std::ostringstream error_message;
         error_message << "Failed to open " << url << ": error " << status;
-        result = codec.EncodeErrorEnvelope("open_error", error_message.str());
-        engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                            result->size());
-        return;
+        result = codec.EncodeErrorEnvelope(kLaunchError, error_message.str());
       }
       auto val = flutter::EncodableValue(true);
       result = codec.EncodeSuccessEnvelope(&val);
-      engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                          result->size());
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
-  } else if (method == "canLaunch") {
+  } else if (method == kCanLaunchMethod) {
     std::string url;
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      auto it = args->find(flutter::EncodableValue("url"));
+      auto it = args->find(flutter::EncodableValue(kUrlKey));
       if (it != args->end()) {
         url = std::get<std::string>(it->second);
-      }
-      else {
+        flutter::EncodableValue response(
+            (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||
+            (url.rfind("ftp:", 0) == 0) || (url.rfind("file:", 0) == 0));
+        result = codec.EncodeSuccessEnvelope(&response);
+      } else {
         result = codec.EncodeErrorEnvelope("argument_error", "No URL provided");
-        engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                            result->size());
-        return;
       }
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
-    flutter::EncodableValue response(
-        (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||
-        (url.rfind("ftp:", 0) == 0) || (url.rfind("file:", 0) == 0));
-    result = codec.EncodeSuccessEnvelope(&response);
-    engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                        result->size());
-    return;
+  } else {
+    FML_DLOG(ERROR) << "url_launcher: " << method << " is unhandled";
+    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }

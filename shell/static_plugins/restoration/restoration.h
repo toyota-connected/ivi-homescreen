@@ -18,10 +18,9 @@
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelRestoration[] = "flutter/restoration";
-
 class Restoration {
  public:
+  static constexpr char kChannelName[] = "flutter/restoration";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 

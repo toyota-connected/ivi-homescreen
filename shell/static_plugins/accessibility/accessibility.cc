@@ -12,20 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "accessibility.h"
 
 #include <flutter/fml/logging.h>
 #include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_message_codec.h>
 
 #include "engine.h"
-#include "hexdump.h"
-
-static void PrintMessageAsHexDump(const FlutterPlatformMessage* msg) {
-  std::stringstream ss;
-  ss << Hexdump(msg->message, msg->message_size);
-  FML_DLOG(INFO) << "Channel: \"" << msg->channel << "\"\n" << ss.str();
-}
 
 void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
@@ -36,7 +28,8 @@ void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
   if (!obj->IsNull()) {
     auto map = std::get<flutter::EncodableMap>(*obj);
     auto type = std::get<std::string>(map[flutter::EncodableValue("type")]);
-    auto data = std::get<flutter::EncodableMap>(map[flutter::EncodableValue("data")]);
+    auto data =
+        std::get<flutter::EncodableMap>(map[flutter::EncodableValue("data")]);
     auto msg = std::get<std::string>(data[flutter::EncodableValue("message")]);
 
     FML_DLOG(INFO) << "Accessibility: type: " << type << ", message: " << msg;

@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <iostream>
+#if defined(__linux__)
+#include <cstring>
+#endif
 
 #include "flutter/fml/build_config.h"
 #include "flutter/fml/log_settings.h"

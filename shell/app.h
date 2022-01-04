@@ -25,6 +25,9 @@
 #ifdef ENABLE_TEXTURE_TEST
 #include "textures/test/texture_test.h"
 #endif
+#ifdef ENABLE_PLUGIN_TEXT_INPUT
+#include "static_plugins/text_input/text_input.h"
+#endif
 
 class GlResolver;
 class Display;
@@ -39,6 +42,9 @@ class App {
   std::shared_ptr<Engine> m_engine[kEngineInstanceCount];
 #ifdef ENABLE_TEXTURE_TEST
   std::unique_ptr<TextureTest> m_texture_test;
+#endif
+#ifdef ENABLE_PLUGIN_TEXT_INPUT
+  std::shared_ptr<TextInput> m_text_input;
 #endif
 
  public:

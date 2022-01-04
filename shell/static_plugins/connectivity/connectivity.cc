@@ -21,58 +21,56 @@
 
 void Connectivity::OnPlatformMessage(const FlutterPlatformMessage* message,
                                      void* userdata) {
+  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
-  std::unique_ptr<std::vector<std::uint8_t>> result;
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj =
-      codec.DecodeMethodCall(message->message, message->message_size);
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method_name = obj->method_name();
-
-#if 0
-  wifi
-  mobile
-  none
-#endif
-
-  if (method_name == "check") {
-    flutter::EncodableValue val("wifi");
+  auto method = obj->method_name();
+  if (method == "check") {
+    FML_DLOG(INFO) << "check";
+    // wifi, mobile, none
+    flutter::EncodableValue val("none");
     result = codec.EncodeSuccessEnvelope(&val);
-    engine->SendPlatformMessageResponse(message->response_handle,
-                                        result->data(), result->size());
-    return;
-  } else if (method_name == "wifiName") {
+  } else if (method == "wifiName") {
     FML_DLOG(INFO) << "wifiName";
-  } else if (method_name == "wifiBSSID") {
+    flutter::EncodableValue val("wlan0");
+    result = codec.EncodeSuccessEnvelope(&val);
+  } else if (method == "wifiBSSID") {
     FML_DLOG(INFO) << "wifiBSSID";
-  } else if (method_name == "wifiIPAddress") {
+    flutter::EncodableValue val("SSID");
+    result = codec.EncodeSuccessEnvelope(&val);
+  } else if (method == "wifiIPAddress") {
     FML_DLOG(INFO) << "wifiIPAddress";
-  } else if (method_name == "requestLocationServiceAuthorization") {
+    flutter::EncodableValue val("127.0.0.1");
+    result = codec.EncodeSuccessEnvelope(&val);
+  } else if (method == "requestLocationServiceAuthorization") {
     FML_DLOG(INFO) << "requestLocationServiceAuthorization";
-  } else if (method_name == "getLocationServiceAuthorization") {
+    result = codec.EncodeSuccessEnvelope();
+  } else if (method == "getLocationServiceAuthorization") {
     FML_DLOG(INFO) << "getLocationServiceAuthorization";
-#if 0
-  notDetermined
-  restricted
-  denied
-  authorizedAlways
-  authorizedWhenInUse
-#endif
+    // notDetermined, restricted, denied, authorizedAlways, authorizedWhenInUse
+    flutter::EncodableValue val("denied");
+    result = codec.EncodeSuccessEnvelope(&val);
+  } else {
+    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
+
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }
 
 void Connectivity::OnPlatformMessageStatus(
     const FlutterPlatformMessage* message,
     void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
-  std::unique_ptr<std::vector<std::uint8_t>> result;
+  auto& engine = reinterpret_cast<Engine&>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj =
-      codec.DecodeMethodCall(message->message, message->message_size);
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+
   FML_DLOG(INFO) << "ConnectivityStatus: " << obj->method_name();
 
   flutter::EncodableValue val(true);
-  result = codec.EncodeSuccessEnvelope(&val);
-  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                      result->size());
+  auto result = codec.EncodeSuccessEnvelope(&val);
+  engine.SendPlatformMessageResponse(message->response_handle, result->data(),
+                                     result->size());
 }

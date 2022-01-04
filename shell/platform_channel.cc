@@ -50,53 +50,46 @@
 #ifdef ENABLE_PLUGIN_URL_LAUNCHER
 #include "static_plugins/url_launcher/url_launcher.h"
 #endif
-#ifdef ENABLE_PLUGIN_NAVIGATION_SEARCH
-#include "static_plugins/navigation_search/navigation_search.h"
-#endif
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
 
 PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_ACCESSIBILITY
-  RegisterCallback(kChannelAccessibility, &Accessibility::OnPlatformMessage);
+  RegisterCallback(Accessibility::kChannelName, &Accessibility::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_CONNECTIVITY
-  RegisterCallback(kChannelConnectivity, &Connectivity::OnPlatformMessage);
-  RegisterCallback(kChannelConnectivityStatus,
+  RegisterCallback(Connectivity::kChannelName, &Connectivity::OnPlatformMessage);
+  RegisterCallback(Connectivity::kChannelNameStatus,
                    &Connectivity::OnPlatformMessageStatus);
 #endif
 #ifdef ENABLE_PLUGIN_ISOLATE
-  RegisterCallback(kChannelIsolate, &Isolate::OnPlatformMessage);
+  RegisterCallback(Isolate::kChannelName, &Isolate::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_RESTORATION
-  RegisterCallback(kChannelRestoration, &Restoration::OnPlatformMessage);
+  RegisterCallback(Restoration::kChannelName, &Restoration::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
-  RegisterCallback(kChannelMouseCursor, &MouseCursor::OnPlatformMessage);
+  RegisterCallback(MouseCursor::kChannelName, &MouseCursor::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_NAVIGATION
-  RegisterCallback(kChannelNavigation, &Navigation::OnPlatformMessage);
+  RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
-  RegisterCallback(kChannelOpenGlTexture, OpenGlTexture::OnPlatformMessage);
+  RegisterCallback(OpenGlTexture::kChannelName, OpenGlTexture::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_PACKAGE_INFO
-  RegisterCallback(kChannelPackageInfo, &PackageInfo::OnPlatformMessage);
+  RegisterCallback(PackageInfo::kChannelName, &PackageInfo::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_PLATFORM
-  RegisterCallback(kChannelPlatform, &Platform::OnPlatformMessage);
+  RegisterCallback(Platform::kChannelName, &Platform::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
-  RegisterCallback(kChannelPlatformViews, &PlatformViews::OnPlatformMessage);
+  RegisterCallback(PlatformViews::kChannelName, &PlatformViews::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-  RegisterCallback(kChannelTextInput, &TextInput::OnPlatformMessage);
+  RegisterCallback(TextInput::kChannelName, &TextInput::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_URL_LAUNCHER
-  RegisterCallback(kChannelUrlLauncher, &UrlLauncher::OnPlatformMessage);
-#endif
-#ifdef ENABLE_PLUGIN_NAVIGATION_SEARCH
-  RegisterCallback(kChannelNavigationSearch,
-                   &NavigationSearch::OnPlatformMessage);
+  RegisterCallback(UrlLauncher::kChannelName, &UrlLauncher::OnPlatformMessage);
 #endif
 }
