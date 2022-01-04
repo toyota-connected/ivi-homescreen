@@ -61,7 +61,7 @@ set(SRC_FILES
         ../third_party/flutter/shell/platform/common/json_message_codec.cc
         ../third_party/flutter/shell/platform/common/json_method_codec.cc
         ../third_party/flutter/shell/platform/common/path_utils.cc
-        ../third_party/flutter/shell/platform/common/text_editing_delta.cc
+#        ../third_party/flutter/shell/platform/common/text_editing_delta.cc
         ../third_party/flutter/shell/platform/common/text_input_model.cc
 
         ${WAYLAND_PROTOCOL_SOURCES}
@@ -84,25 +84,8 @@ set(SRC_FILES
 
 add_executable(homescreen ${SRC_FILES})
 
-include(macros)
-
-ENABLE_PLUGIN(isolate)
-ENABLE_PLUGIN(platform)
-ENABLE_PLUGIN(restoration)
-ENABLE_PLUGIN(mouse_cursor)
-ENABLE_PLUGIN(package_info)
-#ENABLE_PLUGIN(navigation)
-#ENABLE_PLUGIN(accessibility)
-#ENABLE_PLUGIN(url_launcher)
-
-ENABLE_PLUGIN(opengl_texture)
-
-#ENABLE_PLUGIN(connectivity)
-#ENABLE_PLUGIN(platform_views)
-#ENABLE_PLUGIN(text_input)
-
-# Comment out to disable test texture
-ENABLE_TEXTURE(test)
+include(plugins)
+include(textures)
 
 target_compile_definitions(homescreen
         PRIVATE

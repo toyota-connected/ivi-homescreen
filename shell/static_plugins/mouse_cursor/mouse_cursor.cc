@@ -23,6 +23,7 @@
 
 void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
+  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
@@ -46,12 +47,15 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       auto val =
           flutter::EncodableValue(engine->ActivateSystemCursor(device, kind));
-      auto result = codec.EncodeSuccessEnvelope(&val);
-      return;
+      result = codec.EncodeSuccessEnvelope(&val);
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(INFO) << "MouseCursor: " << obj->method_name() << " is unhandled";
+    FML_DLOG(INFO) << "MouseCursor: " << method << " is unhandled";
+    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 
-  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }

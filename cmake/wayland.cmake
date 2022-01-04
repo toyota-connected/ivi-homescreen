@@ -15,7 +15,7 @@
 #
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(WAYLAND REQUIRED wayland-client wayland-egl wayland-cursor)
+pkg_check_modules(WAYLAND REQUIRED wayland-client wayland-egl wayland-cursor xkbcommon)
 pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.13)
 pkg_get_variable(WAYLAND_PROTOCOLS_BASE wayland-protocols pkgdatadir)
 

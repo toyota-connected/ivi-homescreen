@@ -458,13 +458,13 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
     return kInternalInconsistency;
   }
   FlutterPlatformMessageResponseHandle* handle;
-  FlutterPlatformMessageCreateResponseHandle(
+  m_proc_table.PlatformMessageCreateResponseHandle(
       m_flutter_engine, [](const uint8_t* data, size_t size, void* userdata) {},
       nullptr, &handle);
   const FlutterPlatformMessage msg{
       sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
   };
-  return m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
 [[maybe_unused]] FlutterEngineResult Engine::UpdateLocales(
@@ -563,3 +563,12 @@ FlutterEngineAOTData Engine::LoadAotData(
 bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
+
+#if ENABLE_PLUGIN_TEXT_INPUT
+[[maybe_unused]] void Engine::SetTextInput(TextInput* text_input) {
+  m_text_input = text_input;
+}
+[[maybe_unused]] TextInput *Engine::GetTextInput() {
+  return m_text_input;
+};
+#endif

@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelPackageInfo[] = "plugins.flutter.io/package_info";
-
 class PackageInfo {
  public:
+  static constexpr char kChannelName[] = "plugins.flutter.io/package_info";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

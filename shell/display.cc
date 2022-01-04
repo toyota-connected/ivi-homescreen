@@ -15,7 +15,9 @@
 #include "display.h"
 
 #include <flutter/fml/logging.h>
+#include <sys/mman.h>
 #include <unistd.h>
+#include <xkbcommon/xkbcommon.h>
 #include <cassert>
 #include <cerrno>
 #include <cstring>
@@ -25,13 +27,18 @@
 #include "constants.h"
 #include "engine.h"
 
-Display::Display([[maybe_unused]] App* app, bool enable_cursor, std::string  cursor_theme_name)
+Display::Display([[maybe_unused]] App* app,
+                 bool enable_cursor,
+                 std::string cursor_theme_name)
     : m_flutter_engine(nullptr),
       m_display(nullptr),
       m_output(nullptr),
       m_compositor(nullptr),
       m_cursor_surface(nullptr),
       m_keyboard(nullptr),
+      m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
+      m_keymap(nullptr),
+      m_xkb_state(nullptr),
       m_agl_shell(nullptr),
       m_has_xrgb(false),
       m_enable_cursor(enable_cursor),
@@ -124,8 +131,8 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_shm_interface, 1));
 
     if (d->m_enable_cursor) {
-      d->m_cursor_theme =
-          wl_cursor_theme_load(d->m_cursor_theme_name.c_str(), kCursorSize, d->m_shm);
+      d->m_cursor_theme = wl_cursor_theme_load(d->m_cursor_theme_name.c_str(),
+                                               kCursorSize, d->m_shm);
       d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
 
@@ -302,14 +309,15 @@ FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
   if (p->buttons) {
     switch (p->event.state) {
       case WL_POINTER_BUTTON_STATE_PRESSED:
-        //FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_PRESSED";
-        if ((p->phase == FlutterPointerPhase::kHover) || (p->phase == FlutterPointerPhase::kUp))
+        // FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_PRESSED";
+        if ((p->phase == FlutterPointerPhase::kHover) ||
+            (p->phase == FlutterPointerPhase::kUp))
           res = FlutterPointerPhase::kDown;
         else
           res = FlutterPointerPhase::kMove;
         break;
       case WL_POINTER_BUTTON_STATE_RELEASED:
-        //FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_RELEASED";
+        // FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_RELEASED";
         if ((p->phase == FlutterPointerPhase::kDown) ||
             (p->phase == FlutterPointerPhase::kMove))
           res = FlutterPointerPhase::kUp;
@@ -428,55 +436,81 @@ const struct wl_pointer_listener Display::pointer_listener = {
     .axis = pointer_handle_axis,
 };
 
-void Display::keyboard_handle_keymap(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct wl_keyboard* keyboard,
-    uint32_t format,
-    int fd,
-    uint32_t size) {
-  FML_DLOG(INFO) << "keyboard keymap format " << format << " fd " << fd
-                 << " size " << size;
-  // Just so we don’t leak the keymap fd
-  close(fd);
-}
-
 void Display::keyboard_handle_enter(
     [[maybe_unused]] void* data,
     [[maybe_unused]] struct wl_keyboard* keyboard,
     [[maybe_unused]] uint32_t serial,
     [[maybe_unused]] struct wl_surface* surface,
-    [[maybe_unused]] struct wl_array* keys) {
-  FML_DLOG(INFO) << "keyboard enter";
-}
+    [[maybe_unused]] struct wl_array* keys) {}
 
 void Display::keyboard_handle_leave(
     [[maybe_unused]] void* data,
     [[maybe_unused]] struct wl_keyboard* keyboard,
     [[maybe_unused]] uint32_t serial,
-    [[maybe_unused]] struct wl_surface* surface) {
-  FML_DLOG(INFO) << "keyboard leave";
+    [[maybe_unused]] struct wl_surface* surface) {}
+
+void Display::keyboard_handle_keymap(
+    void* data,
+    [[maybe_unused]] struct wl_keyboard* keyboard,
+    [[maybe_unused]] uint32_t format,
+    int fd,
+    uint32_t size) {
+  auto* d = static_cast<Display*>(data);
+  char* keymap_string =
+      static_cast<char*>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
+  xkb_keymap_unref(d->m_keymap);
+  d->m_keymap = xkb_keymap_new_from_string(d->m_xkb_context, keymap_string,
+                                           XKB_KEYMAP_FORMAT_TEXT_V1,
+                                           XKB_KEYMAP_COMPILE_NO_FLAGS);
+  munmap(keymap_string, size);
+  close(fd);
+  xkb_state_unref(d->m_xkb_state);
+  d->m_xkb_state = xkb_state_new(d->m_keymap);
 }
 
-void Display::keyboard_handle_key([[maybe_unused]] void* data,
-                                  [[maybe_unused]] struct wl_keyboard* keyboard,
-                                  [[maybe_unused]] uint32_t serial,
-                                  [[maybe_unused]] uint32_t time,
+void Display::keyboard_handle_key(void* data,
+                                  struct wl_keyboard* keyboard,
+                                  uint32_t serial,
+                                  uint32_t time,
                                   uint32_t key,
                                   uint32_t state) {
-  FML_DLOG(INFO) << "keyboard key " << key << " state " << state;
+  auto* d = static_cast<Display*>(data);
+#if ENABLE_PLUGIN_TEXT_INPUT
+  if (d->m_text_input) {
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+      xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
+      d->m_text_input->keyboard_handle_key(d->m_text_input.get(), keyboard,
+                                           serial, time, keysym, state);
+    }
+  }
+#else
+#if !defined(NDEBUG)
+  if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+    xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
+    uint32_t utf32 = xkb_keysym_to_utf32(keysym);
+    if (utf32) {
+      FML_DLOG(INFO) << "[Press] U" << utf32;
+    } else {
+      char name[64];
+      xkb_keysym_get_name(keysym, name, 64);
+      FML_DLOG(INFO) << "[Press] " << name;
+    }
+  }
+#endif
+#endif
 }
 
 void Display::keyboard_handle_modifiers(
-    [[maybe_unused]] void* data,
+    void* data,
     [[maybe_unused]] struct wl_keyboard* keyboard,
     [[maybe_unused]] uint32_t serial,
     uint32_t mods_depressed,
     uint32_t mods_latched,
     uint32_t mods_locked,
     uint32_t group) {
-  FML_DLOG(INFO) << "keyboard modifiers: mods_depressed " << mods_depressed
-                 << " mods_latched " << mods_latched << " mods_locked "
-                 << mods_locked << " group " << group;
+  auto* d = static_cast<Display*>(data);
+  xkb_state_update_mask(d->m_xkb_state, mods_depressed, mods_latched,
+                        mods_locked, 0, 0, group);
 }
 
 const struct wl_keyboard_listener Display::keyboard_listener = {
@@ -702,4 +736,7 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
   }
 
   return true;
+}
+void Display::SetTextInput(std::shared_ptr<TextInput> text_input) {
+  m_text_input = std::move(text_input);
 }

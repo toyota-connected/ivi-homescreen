@@ -31,11 +31,15 @@
 #include "constants.h"
 #include "gl_resolver.h"
 #include "platform_channel.h"
+#include "static_plugins/text_input/text_input.h"
 
 class App;
 class EglWindow;
 class GlResolver;
 class Texture;
+#if ENABLE_PLUGIN_TEXT_INPUT
+class TextInput;
+#endif
 
 class Engine {
  public:
@@ -112,6 +116,12 @@ class Engine {
   }
 
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
+
+#if ENABLE_PLUGIN_TEXT_INPUT
+  TextInput* m_text_input;
+  [[maybe_unused]] void SetTextInput(TextInput *text_input);
+  [[maybe_unused]] TextInput *GetTextInput();
+#endif
 
  private:
   size_t m_index;

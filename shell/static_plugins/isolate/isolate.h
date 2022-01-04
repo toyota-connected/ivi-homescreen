@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelIsolate[] = "flutter/isolate";
-
 class Isolate {
  public:
+  static constexpr char kChannelName[] = "flutter/isolate";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

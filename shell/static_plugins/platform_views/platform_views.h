@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelPlatformViews[] = "flutter/platform_views";
-
 class PlatformViews {
  public:
+  static constexpr char kChannelName[] = "flutter/platform_views";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

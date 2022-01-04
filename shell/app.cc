@@ -35,13 +35,23 @@ App::App(const std::string& app_id,
          uint32_t height,
          const std::string& cursor_theme_name)
     : m_gl_resolver(std::make_shared<GlResolver>()),
-      m_display(std::make_shared<Display>(this, enable_cursor, cursor_theme_name)),
-      m_egl_window {
-  std::make_shared<EglWindow>(0, m_display, EglWindow::WINDOW_BG, app_id,
-                              fullscreen, debug_egl, width, height)
-}
+      m_display(
+          std::make_shared<Display>(this, enable_cursor, cursor_theme_name)),
+      m_egl_window{std::make_shared<EglWindow>(0,
+                                               m_display,
+                                               EglWindow::WINDOW_BG,
+                                               app_id,
+                                               fullscreen,
+                                               debug_egl,
+                                               width,
+                                               height)}
 #ifdef ENABLE_TEXTURE_TEST
-, m_texture_test(std::make_unique<TextureTest>(this))
+      ,
+      m_texture_test(std::make_unique<TextureTest>(this))
+#endif
+#ifdef ENABLE_PLUGIN_TEXT_INPUT
+      ,
+      m_text_input(std::make_shared<TextInput>())
 #endif
 {
 
@@ -87,6 +97,10 @@ App::App(const std::string& app_id,
 
 #ifdef ENABLE_TEXTURE_TEST
   m_texture_test->SetEngine(m_engine[0]);
+#endif
+#ifdef ENABLE_PLUGIN_TEXT_INPUT
+  m_text_input->SetEngine(m_engine[0]);
+  m_display->SetTextInput(m_text_input);
 #endif
 
   m_display->AglShellDoReady();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Toyota Connected North America
+ * Copyright 2020-2022 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,44 +16,43 @@
 
 #pragma once
 
-
 #include <map>
 #include <memory>
 #include <string>
 
-#include "keyboard_hook_handler.h"
-
-#include "flutter/shell/platform/common/client_wrapper/include/flutter/method_channel.h"
+#include "flutter/fml/macros.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/binary_messenger.h"
+#include "flutter/shell/platform/common/client_wrapper/include/flutter/method_channel.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/method_result_functions.h"
-#include "flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h"
+#include "flutter/shell/platform/common/json_method_codec.h"
+#include "flutter/shell/platform/common/text_input_model.h"
 
-#include <flutter/shell/platform/common/text_input_model.h>
-
-#include <flutter/shell/platform/common/json_method_codec.h>
-#include <flutter/shell/platform/common/json_message_codec.h>
 #include <flutter_embedder.h>
+#include <rapidjson/document.h>
+#include <xkbcommon/xkbcommon.h>
 
-#include "rapidjson/document.h"
+class App;
+class Engine;
 
-constexpr char kChannelTextInput[] = "flutter/textinput";
-
-class TextInput : public KeyboardHookHandler {
+class TextInput : public flutter::BinaryMessenger {
  public:
-  explicit TextInput(flutter::BinaryMessenger* messenger);
-  ~TextInput();
+  static constexpr char kChannelName[] = "flutter/textinput";
 
-  // |KeyboardHookHandler|
-  void KeyboardHook(int key,
-                    int scancode,
-                    int action,
-                    int mods) override;
-
-  // |KeyboardHookHandler|
-  void CharHook(unsigned int code_point) override;
+  explicit TextInput();
 
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
+
+  void SetEngine(const std::shared_ptr<Engine>& engine);
+
+  static void keyboard_handle_key(void* data,
+                                  struct wl_keyboard* keyboard,
+                                  uint32_t serial,
+                                  uint32_t time,
+                                  xkb_keysym_t keysym,
+                                  uint32_t state);
+
+  FML_DISALLOW_COPY_AND_ASSIGN(TextInput);
 
  private:
   static constexpr char kSetEditingStateMethod[] = "TextInput.setEditingState";
@@ -81,8 +80,6 @@ class TextInput : public KeyboardHookHandler {
   static constexpr char kSelectionIsDirectionalKey[] = "selectionIsDirectional";
   static constexpr char kTextKey[] = "text";
 
-  static constexpr char kChannelName[] = "flutter/textinput";
-
   static constexpr char kBadArgumentError[] = "Bad Arguments";
   static constexpr char kInternalConsistencyError[] =
       "Internal Consistency Error";
@@ -94,7 +91,7 @@ class TextInput : public KeyboardHookHandler {
   void EnterPressed(flutter::TextInputModel* model);
 
   // The MethodChannel used for communication with the Flutter engine.
-//  static std::unique_ptr<flutter::MethodChannel<rapidjson::Document>> channel_;
+  std::unique_ptr<flutter::MethodChannel<rapidjson::Document>> channel_;
 
   // The active client id.
   int client_id_;
@@ -109,4 +106,18 @@ class TextInput : public KeyboardHookHandler {
   // An action requested by the user on the input client. See available options:
   // https://docs.flutter.io/flutter/services/TextInputAction-class.html
   std::string input_action_;
+
+  std::shared_ptr<Engine> engine_;
+
+  mutable flutter::BinaryReply last_reply_handler_;
+  std::string last_message_handler_channel_;
+  flutter::BinaryMessageHandler last_message_handler_;
+
+  void Send(const std::string& channel,
+            const uint8_t* message,
+            size_t message_size,
+            flutter::BinaryReply reply) const override;
+
+  void SetMessageHandler(const std::string& channel,
+                         flutter::BinaryMessageHandler handler) override;
 };

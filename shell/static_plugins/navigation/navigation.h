@@ -19,10 +19,9 @@
 #include <flutter_embedder.h>
 #include <string>
 
-constexpr char kChannelNavigation[] = "flutter/navigation";
-
 class Navigation {
  public:
+  static constexpr char kChannelName[] = "flutter/navigation";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 

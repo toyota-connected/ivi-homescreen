@@ -14,17 +14,16 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelMouseCursor[] = "flutter/mousecursor";
-
 class MouseCursor {
  public:
+  static constexpr char kChannelName[] = "flutter/mousecursor";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
+
  private:
   static constexpr char kMethodActivateSystemCursor[] = "activateSystemCursor";
 };

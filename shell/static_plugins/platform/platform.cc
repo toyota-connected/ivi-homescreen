@@ -21,51 +21,49 @@
 
 void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
+  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
-  auto codec = &flutter::JsonMethodCodec::GetInstance();
-  auto obj = codec->DecodeMethodCall(message->message, message->message_size);
+  auto& codec = flutter::JsonMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+
   auto method = obj->method_name();
   auto args = obj->arguments();
 
   if (method == kMethodSetApplicationSwitcherDescription) {
-    if (args->HasMember("label") && args->HasMember("primaryColor")) {
+    if (!args->IsNull() && args->HasMember("label") &&
+        args->HasMember("primaryColor")) {
       MethodSetApplicationSwitcherDescription description{};
       description.label = (*args)["label"].GetString();
       description.primaryColor = (*args)["primaryColor"].GetUint();
       FML_DLOG(INFO) << "Platform: ApplicationSwitcherDescription\n\tlabel: \""
                      << description.label
                      << "\"\n\tprimaryColor: " << description.primaryColor;
-      auto res = codec->EncodeSuccessEnvelope();
-      engine->SendPlatformMessageResponse(message->response_handle, res->data(),
-                                          res->size());
-      return;
+      result = codec.EncodeSuccessEnvelope();
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kMethodClipboardHasStrings) {
-    if (args->IsString()) {
+    if (!args->IsNull() && args->IsString()) {
       auto format = args->GetString();
       if (0 == strcmp(format, kTextPlainFormat)) {
-        rapidjson::Document result;
-        result.SetBool(false);
-        auto res = codec->EncodeSuccessEnvelope(&result);
-        engine->SendPlatformMessageResponse(message->response_handle,
-                                            res->data(), res->size());
-        return;
+        rapidjson::Document res;
+        res.SetBool(false);
+        result = codec.EncodeSuccessEnvelope(&res);
       }
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kMethodClipboardSetData) {
-    if (args->HasMember("text") && !((*args)["text"].IsNull())) {
+    if (!args->IsNull() && args->HasMember("text") &&
+        !((*args)["text"].IsNull())) {
       FML_DLOG(INFO) << "Clipboard Data Set: \n" << (*args)["text"].GetString();
+      result = codec.EncodeSuccessEnvelope();
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
-    auto res = codec->EncodeSuccessEnvelope();
-    engine->SendPlatformMessageResponse(message->response_handle, res->data(),
-                                        res->size());
-    return;
   } else if (method == kMethodSetEnabledSystemUIOverlays) {
     FML_DLOG(INFO) << "System UI Overlays Enabled";
-    auto res = codec->EncodeSuccessEnvelope();
-    engine->SendPlatformMessageResponse(message->response_handle, res->data(),
-                                        res->size());
-    return;
+    result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSetSystemUiOverlayStyle) {
     SystemUiOverlayStyle style{};
     if (args->HasMember(kSystemNavigationBarColor) &&
@@ -73,21 +71,24 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemNavigationBarColor].IsNumber()) {
       style.systemNavigationBarColor =
           (*args)[kSystemNavigationBarColor].GetUint();
-      FML_DLOG(INFO) << kSystemNavigationBarColor << ": " << style.systemNavigationBarColor;
+      FML_DLOG(INFO) << kSystemNavigationBarColor << ": "
+                     << style.systemNavigationBarColor;
     }
     if (args->HasMember(kSystemNavigationBarDividerColor) &&
         !(*args)[kSystemNavigationBarDividerColor].IsNull() &&
         (*args)[kSystemNavigationBarDividerColor].IsNumber()) {
       style.systemNavigationBarDividerColor =
           (*args)[kSystemNavigationBarDividerColor].GetUint();
-      FML_DLOG(INFO) << kSystemNavigationBarDividerColor << ": " << style.systemNavigationBarDividerColor;
+      FML_DLOG(INFO) << kSystemNavigationBarDividerColor << ": "
+                     << style.systemNavigationBarDividerColor;
     }
     if (args->HasMember(kSystemStatusBarContrastEnforced) &&
         !(*args)[kSystemStatusBarContrastEnforced].IsNull() &&
         (*args)[kSystemStatusBarContrastEnforced].IsBool()) {
       style.systemStatusBarContrastEnforced =
           (*args)[kSystemStatusBarContrastEnforced].GetBool();
-      FML_DLOG(INFO) << kSystemStatusBarContrastEnforced << ": " << style.systemStatusBarContrastEnforced;
+      FML_DLOG(INFO) << kSystemStatusBarContrastEnforced << ": "
+                     << style.systemStatusBarContrastEnforced;
     }
     if (args->HasMember(kStatusBarColor) &&
         !(*args)[kStatusBarColor].IsNull() &&
@@ -99,35 +100,39 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         !(*args)[kStatusBarBrightness].IsNull() &&
         (*args)[kStatusBarBrightness].IsString()) {
       style.statusBarBrightness = (*args)[kStatusBarBrightness].GetString();
-      FML_DLOG(INFO) << kStatusBarBrightness << ": " << style.statusBarBrightness;
+      FML_DLOG(INFO) << kStatusBarBrightness << ": "
+                     << style.statusBarBrightness;
     }
     if (args->HasMember(kStatusBarIconBrightness) &&
         !(*args)[kStatusBarIconBrightness].IsNull() &&
         (*args)[kStatusBarIconBrightness].IsString()) {
       style.statusBarIconBrightness =
           (*args)[kStatusBarIconBrightness].GetString();
-      FML_DLOG(INFO) << kStatusBarIconBrightness << ": " << style.statusBarIconBrightness;
+      FML_DLOG(INFO) << kStatusBarIconBrightness << ": "
+                     << style.statusBarIconBrightness;
     }
     if (args->HasMember(kSystemNavigationBarIconBrightness) &&
         !(*args)[kSystemNavigationBarIconBrightness].IsNull() &&
         (*args)[kSystemNavigationBarIconBrightness].IsString()) {
       style.systemNavigationBarIconBrightness =
           (*args)[kSystemNavigationBarIconBrightness].GetString();
-      FML_DLOG(INFO) << kSystemNavigationBarIconBrightness << ": " << style.systemNavigationBarIconBrightness;
+      FML_DLOG(INFO) << kSystemNavigationBarIconBrightness << ": "
+                     << style.systemNavigationBarIconBrightness;
     }
     if (args->HasMember(kSystemNavigationBarContrastEnforced) &&
         !(*args)[kSystemNavigationBarContrastEnforced].IsNull() &&
         (*args)[kSystemNavigationBarContrastEnforced].IsBool()) {
       style.systemNavigationBarContrastEnforced =
           (*args)[kSystemNavigationBarContrastEnforced].GetBool();
-      FML_DLOG(INFO) << kSystemNavigationBarContrastEnforced << ": " << style.systemNavigationBarContrastEnforced;
+      FML_DLOG(INFO) << kSystemNavigationBarContrastEnforced << ": "
+                     << style.systemNavigationBarContrastEnforced;
     }
-    auto res = codec->EncodeSuccessEnvelope();
-    engine->SendPlatformMessageResponse(message->response_handle, res->data(),
-                                        res->size());
-    return;
+    result = codec.EncodeSuccessEnvelope();
+  } else {
+    FML_DLOG(ERROR) << "Platform: " << method << " is unhandled";
+    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 
-  FML_DLOG(INFO) << "[Platform] Unhandled: " << method;
-  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }

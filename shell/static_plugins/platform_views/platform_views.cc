@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "platform_views.h"
 
 #include <flutter/fml/logging.h>
@@ -22,42 +21,27 @@
 
 void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  (void)userdata;
-  rapidjson::Document document;
-  document.Parse(reinterpret_cast<const char*>(message->message),
-                 message->message_size);
-  if (document.HasParseError() || !document.IsObject()) {
-    FML_LOG(ERROR) << "Could not parse document";
-    return;
-  }
-  auto root = document.GetObject();
-  auto method = root.FindMember("method");
-  if (method == root.MemberEnd() || !method->value.IsString()) {
-    return;
-  }
+  std::unique_ptr<std::vector<uint8_t>> result;
+  auto engine = reinterpret_cast<Engine*>(userdata);
+  auto& codec = flutter::JsonMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  std::string msg;
-  msg.assign(reinterpret_cast<const char*>(message->message),
-             message->message_size);
-  FML_DLOG(INFO) << "PlatformViews: " << method->value.GetString();
+  auto method = obj->method_name();
 
-  if (method->value == "View.enableWireframe") {
-    auto args_it = root.FindMember("args");
-    if (args_it == root.MemberEnd() || !args_it->value.IsObject()) {
-      FML_DLOG(INFO) << "No arguments found.";
-      return;
+  if (method == "View.enableWireframe") {
+    auto args = obj->arguments();
+    if (!args->IsNull() && args->HasMember("enable")) {
+      bool enable = (*args)["enable"].GetBool();
+      FML_DLOG(INFO) << "View.enableWireframe: " << enable;
+      result = codec.EncodeSuccessEnvelope();
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
-    const auto& args = args_it->value;
-
-    auto enable = args.FindMember("enable");
-    if (!enable->value.IsBool()) {
-      FML_DLOG(INFO) << "Argument 'enable' is not a bool";
-      return;
-    }
-
-    FML_DLOG(INFO) << "wireframe_enabled_callback goes here";
   } else {
-    FML_DLOG(INFO) << "Unknown " << message->channel << " method "
-                   << method->value.GetString();
+    FML_DLOG(ERROR) << "PlatformViews: " << method << " is unhandled";
+    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
+
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }

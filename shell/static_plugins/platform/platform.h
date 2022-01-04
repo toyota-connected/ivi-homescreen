@@ -19,10 +19,9 @@
 #include <flutter_embedder.h>
 #include <string>
 
-constexpr char kChannelPlatform[] = "flutter/platform";
-
 class Platform {
  public:
+  static constexpr char kChannelName[] = "flutter/platform";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
@@ -32,13 +31,13 @@ class Platform {
   };
 
   struct SystemUiOverlayStyle {
-
     /// The color of the system bottom navigation bar.
     ///
     /// Only honored in Android versions O and greater.
     uint32_t systemNavigationBarColor;
 
-    /// The color of the divider between the system's bottom navigation bar and the app's content.
+    /// The color of the divider between the system's bottom navigation bar and
+    /// the app's content.
     ///
     /// Only honored in Android versions P and greater.
     uint32_t systemNavigationBarDividerColor;
@@ -46,9 +45,10 @@ class Platform {
     /// Overrides the contrast enforcement when setting a transparent navigation
     /// bar.
     ///
-    /// When setting a transparent navigation bar in SDK 29+, or Android 10 and up,
-    /// a translucent body scrim may be applied behind the button navigation bar
-    /// to ensure contrast with buttons and the background of the application.
+    /// When setting a transparent navigation bar in SDK 29+, or Android 10 and
+    /// up, a translucent body scrim may be applied behind the button navigation
+    /// bar to ensure contrast with buttons and the background of the
+    /// application.
     ///
     /// SDK 28-, or Android P and lower, will not apply this body scrim.
     ///
@@ -78,16 +78,18 @@ class Platform {
     /// The brightness of the system navigation bar icons.
     ///
     /// Only honored in Android versions O and greater.
-    /// When set to [Brightness.light], the system navigation bar icons are light.
-    /// When set to [Brightness.dark], the system navigation bar icons are dark.
+    /// When set to [Brightness.light], the system navigation bar icons are
+    /// light. When set to [Brightness.dark], the system navigation bar icons
+    /// are dark.
     std::string systemNavigationBarIconBrightness;
 
     /// Overrides the contrast enforcement when setting a transparent navigation
     /// bar.
     ///
-    /// When setting a transparent navigation bar in SDK 29+, or Android 10 and up,
-    /// a translucent body scrim may be applied behind the button navigation bar
-    /// to ensure contrast with buttons and the background of the application.
+    /// When setting a transparent navigation bar in SDK 29+, or Android 10 and
+    /// up, a translucent body scrim may be applied behind the button navigation
+    /// bar to ensure contrast with buttons and the background of the
+    /// application.
     ///
     /// SDK 28-, or Android P and lower, will not apply this body scrim.
     ///
@@ -129,12 +131,17 @@ class Platform {
   static constexpr char kSoundTypeClick[] = "SystemSoundType.click";
 #endif
 
-  static constexpr char kSystemNavigationBarColor[] = "systemNavigationBarColor";
-  static constexpr char kSystemNavigationBarDividerColor[] = "systemNavigationBarDividerColor";
-  static constexpr char kSystemStatusBarContrastEnforced[]= "systemStatusBarContrastEnforced";
+  static constexpr char kSystemNavigationBarColor[] =
+      "systemNavigationBarColor";
+  static constexpr char kSystemNavigationBarDividerColor[] =
+      "systemNavigationBarDividerColor";
+  static constexpr char kSystemStatusBarContrastEnforced[] =
+      "systemStatusBarContrastEnforced";
   static constexpr char kStatusBarColor[] = "statusBarColor";
   static constexpr char kStatusBarBrightness[] = "statusBarBrightness";
   static constexpr char kStatusBarIconBrightness[] = "statusBarIconBrightness";
-  static constexpr char kSystemNavigationBarIconBrightness[] = "systemNavigationBarIconBrightness";
-  static constexpr char kSystemNavigationBarContrastEnforced[] = "systemNavigationBarContrastEnforced";
+  static constexpr char kSystemNavigationBarIconBrightness[] =
+      "systemNavigationBarIconBrightness";
+  static constexpr char kSystemNavigationBarContrastEnforced[] =
+      "systemNavigationBarContrastEnforced";
 };

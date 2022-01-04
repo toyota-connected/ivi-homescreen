@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "opengl_texture.h"
 
 #include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
@@ -21,13 +20,14 @@
 
 void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
+  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
-  if (method == "create") {
 
+  if (method == "create") {
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
@@ -54,13 +54,11 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                         static_cast<int32_t>(height));
 
       flutter::EncodableValue value(textureId);
-      auto encoded = codec.EncodeSuccessEnvelope(&value);
-      engine->SendPlatformMessageResponse(message->response_handle,
-                                          encoded->data(), encoded->size());
-      return;
+      result = codec.EncodeSuccessEnvelope(&value);
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == "dispose") {
-
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
@@ -72,11 +70,11 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       engine->TextureDispose(textureId);
 
-      auto encoded = codec.EncodeSuccessEnvelope();
-      engine->SendPlatformMessageResponse(message->response_handle,
-                                          encoded->data(), encoded->size());
-      return;
+      result = codec.EncodeSuccessEnvelope();
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   }
-  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                      result->size());
 }

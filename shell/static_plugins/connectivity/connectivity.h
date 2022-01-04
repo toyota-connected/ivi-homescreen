@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelConnectivity[] = "plugins.flutter.io/connectivity";
-constexpr char kChannelConnectivityStatus[] =
-    "plugins.flutter.io/connectivity_status";
-
 class Connectivity {
  public:
+  static constexpr char kChannelName[] = "plugins.flutter.io/connectivity";
+  static constexpr char kChannelNameStatus[] =
+      "plugins.flutter.io/connectivity_status";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
   static void OnPlatformMessageStatus(const FlutterPlatformMessage* message,

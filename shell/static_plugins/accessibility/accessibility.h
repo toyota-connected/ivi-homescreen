@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <flutter_embedder.h>
 
-constexpr char kChannelAccessibility[] = "flutter/accessibility";
-
 class Accessibility {
  public:
+  static constexpr char kChannelName[] = "flutter/accessibility";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };
