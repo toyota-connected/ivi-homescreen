@@ -32,11 +32,11 @@ string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--gc-sections")
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--as-needed")
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     add_compile_definitions(ENV64BIT)
-elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+elseif (CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_compile_definitions(ENV32BIT)
-endif()
+endif ()
 
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
@@ -56,12 +56,12 @@ set(SRC_FILES
         textures/texture.cc
 
         ../third_party/flutter/shell/platform/common/client_wrapper/core_implementations.cc
-#        ../third_party/flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
+        #../third_party/flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
         ../third_party/flutter/shell/platform/common/client_wrapper/standard_codec.cc
         ../third_party/flutter/shell/platform/common/json_message_codec.cc
         ../third_party/flutter/shell/platform/common/json_method_codec.cc
         ../third_party/flutter/shell/platform/common/path_utils.cc
-#        ../third_party/flutter/shell/platform/common/text_editing_delta.cc
+        #../third_party/flutter/shell/platform/common/text_editing_delta.cc
         ../third_party/flutter/shell/platform/common/text_input_model.cc
 
         ${WAYLAND_PROTOCOL_SOURCES}
@@ -118,14 +118,20 @@ target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}
         )
 
-target_compile_options(homescreen PUBLIC -flto)
-target_link_options(homescreen PUBLIC -flto -v)
+cmake_policy(SET CMP0069 NEW)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_support_result OUTPUT ipo_support_output)
+if (ipo_support_result)
+    set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+else ()
+    message(WARNING "IPO is not supported: ${ipo_support_output}")
+endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_compile_options(homescreen PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
+            $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
     target_link_options(homescreen PRIVATE
-        -fuse-ld=lld -lc++ -lc -lm)
+            -fuse-ld=lld -lc++ -lc -lm -v)
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)
