@@ -86,6 +86,10 @@ Engine::Engine(App* app,
               },
           .persistent_cache_path = m_cache_path.c_str(),
           .is_persistent_cache_read_only = false,
+          .log_message_callback =
+              [](const char* tag, const char* message, void* user_data) {
+                FML_LOG(INFO) << tag << ": " << message;
+              },
       }),
       m_renderer_config(
           {.type = kOpenGL,
@@ -506,7 +510,9 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
     .device_kind = kFlutterPointerDeviceKindMouse,
     .buttons = buttons
   };
-  //FML_DLOG(INFO) << "[SendMouseEvent] phase: " << phase << ", x: " << x << ", y: " << y << ", signal_kind: " << signal << ", " << ", buttons: " << msg.buttons;
+  // FML_DLOG(INFO) << "[SendMouseEvent] phase: " << phase << ", x: " << x << ",
+  // y: " << y << ", signal_kind: " << signal << ", " << ", buttons: " <<
+  // msg.buttons;
 
   m_proc_table.SendPointerEvent(m_flutter_engine, &msg, 1);
 }
@@ -568,7 +574,7 @@ bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
 [[maybe_unused]] void Engine::SetTextInput(TextInput* text_input) {
   m_text_input = text_input;
 }
-[[maybe_unused]] TextInput *Engine::GetTextInput() {
+[[maybe_unused]] TextInput* Engine::GetTextInput() {
   return m_text_input;
 };
 #endif
