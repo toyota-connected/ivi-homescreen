@@ -88,7 +88,6 @@ Engine::Engine(App* app,
           .is_persistent_cache_read_only = false,
           .log_message_callback =
               [](const char* tag, const char* message, void* user_data) {
-                auto engine = reinterpret_cast<Engine*>(userdata);
                 FML_LOG(INFO) << tag << ": " << message;
               },
       }),
