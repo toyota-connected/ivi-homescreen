@@ -92,6 +92,8 @@ target_compile_definitions(homescreen
         HAVE_STRCHRNUL
         EGL_NO_X11
         MESA_EGL_NO_X11_HEADERS
+        LINUX
+        WL_EGL_PLATFORM
         HAVE_MEMFD_CREATE
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
         )
