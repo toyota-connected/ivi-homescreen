@@ -499,7 +499,7 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
     .timestamp = m_proc_table.GetCurrentTime(),
 #elif defined(ENV32BIT)
     .timestamp =
-        static_cast<size_t>(FlutterEngineGetCurrentTime() & 0xFFFFFFFFULL),
+        static_cast<size_t>(m_proc_table.GetCurrentTime() & 0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -528,7 +528,7 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
     .timestamp = m_proc_table.GetCurrentTime(),
 #elif defined(ENV32BIT)
     .timestamp =
-        static_cast<size_t>(FlutterEngineGetCurrentTime() & 0xFFFFFFFFULL),
+        static_cast<size_t>(m_proc_table.GetCurrentTime() & 0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
