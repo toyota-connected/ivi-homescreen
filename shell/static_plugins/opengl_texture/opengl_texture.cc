@@ -34,7 +34,8 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
       int64_t textureId = 0;
       auto it = args->find(flutter::EncodableValue("textureId"));
       if (it != args->end()) {
-        textureId = std::get<int64_t>(it->second);
+        flutter::EncodableValue encodedValue = it->second;
+        textureId = encodedValue.LongValue();
       }
 
       double width = 0;
@@ -65,7 +66,8 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
       int64_t textureId = 0;
       auto it = args->find(flutter::EncodableValue("textureId"));
       if (it != args->end()) {
-        textureId = std::get<int64_t>(it->second);
+        flutter::EncodableValue encodedValue = it->second;
+        textureId = encodedValue.LongValue();
       }
 
       engine->TextureDispose(textureId);
