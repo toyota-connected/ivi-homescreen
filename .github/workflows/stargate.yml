@@ -1,0 +1,91 @@
+name: stargate-ivi-homescreen-linux
+
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened, closed ]
+  release:
+    types: [ published, created, edited ]
+  workflow_dispatch:
+  schedule:
+    # daily
+    - cron:  '0 0 * * *'
+env:
+  COMPONENT: ivi-homescreen
+
+jobs:
+  build:
+    runs-on: [ self-hosted, elastic ]
+    container:
+      image: arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com/ivi-homescreen-dev:latest
+      credentials:
+        username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+        password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: JFrog CLI
+        run: |
+          jfrog --version
+          jfrog config add \
+            --interactive=false \
+            --artifactory-url=https://artifactory-ha.tmc-stargate.com:443/artifactory/ \
+            --password=${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }} \
+            --user=${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          jfrog c s
+          jfrog rt ping
+
+      - name: Configure CMake
+        working-directory: ${{github.workspace}}
+        run: |
+          export CC=/usr/lib/llvm-12/bin/clang
+          export CXX=/usr/lib/llvm-12/bin/clang++
+          mkdir -p build/release
+          cmake \
+            -B build/release \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+          mkdir -p build/debug
+          cmake \
+            -B build/debug \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Build Debug Packages
+        working-directory: ${{github.workspace}}/build/debug
+        run: |
+          rm -rf _packages || true
+          make package -j
+          ls -la _packages
+
+      - name: Publish Debug Packages
+        working-directory: ${{github.workspace}}/build/debug/_packages
+        run: |
+          jfrog rt u "(*).tar.gz" ${{secrets.ARTIFACTORY_REPO_GENERIC}} --recursive=false
+          jfrog rt u "(*).deb" ${{secrets.ARTIFACTORY_REPO_DEBIAN}}/pool/ --deb=focal/main/amd64 --recursive=false
+          jfrog rt u "(*).rpm" ${{secrets.ARTIFACTORY_REPO_RPM}}/ --recursive=false
+
+      - name: Build Release Packages
+        working-directory: ${{github.workspace}}/build/release       
+        run: |
+          rm -rf _packages || true
+          make package -j
+          ls -la _packages
+
+      - name: Publish Release Packages
+        working-directory: ${{github.workspace}}/build/release/_packages
+        run: |
+          jfrog rt u "(*).tar.gz" ${{secrets.ARTIFACTORY_REPO_GENERIC}} --recursive=false
+          jfrog rt u "(*).deb" ${{secrets.ARTIFACTORY_REPO_DEBIAN}}/pool/ --deb=focal/main/amd64 --recursive=false
+          jfrog rt u "(*).rpm" ${{secrets.ARTIFACTORY_REPO_RPM}}/ --recursive=false
+
+      - name: Release Info
+        working-directory: ${{github.workspace}}/build/release/shell
+        run: |
+          ls -la homescreen
+          echo "Strip executable"
+          strip homescreen
+          ls -la homescreen
+          echo "List Dependencies"
+          ldd homescreen
