@@ -1,0 +1,15 @@
+# filename: .github/elastic-machines.yml
+- provider: aws-auto-scaling-group
+  labels: ["elastic"]
+  ephemeral: false
+  with:
+    autoScalingGroupArn: arn:aws:autoscaling:ap-northeast-1:181163472180:autoScalingGroup:86c6ef0c-ec6c-4e0c-9b87-bbac3cad0651:autoScalingGroupName/stargate-github-runner-autoscaling-group
+    # The ARN of the prod-swp-ie-em-task-role IAM role
+    roleArn: arn:aws:iam::181163472180:role/prod-wit-sg-em-task-role
+  scale:
+    - cronExpression: "* * * * MON-FRI"
+      timezone: UTC
+      minimumIdleMachines: 0
+      maximumIdleMachines: 1
+      minimumMachines: 0
+      maximumMachines: 10 # <- Make sure this matches your AutoScaling Group 
