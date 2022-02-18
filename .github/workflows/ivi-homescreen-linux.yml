@@ -30,7 +30,8 @@ jobs:
           libc++-11-dev libc++abi-11-dev libunwind-dev libxkbcommon-dev
           clang++ --version
           cmake --version
-      - name: Configure CMake
+
+      - name: Configure
         run: |
           mkdir -p ${{github.workspace}}/build/release
           CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
@@ -44,82 +45,66 @@ jobs:
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
-      - name: Build
+
+      - name: Build Debug Packages
+        working-directory: ${{github.workspace}}/build/debug
         run: |
-          pushd ${{github.workspace}}/build/debug
-          echo "Create Debian Debug Package"
+          rm -rf _packages || true
           make package -j
-          PACKAGE_FILE=`find -iname ivi-homescreen-*.tar.gz -not -path "./_CPack_Packages/*"`
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find -iname ivi-homescreen-*.deb -not -path "./_CPack_Packages/*"`
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find -iname ivi-homescreen-*.rpm -not -path "./_CPack_Packages/*"`
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          popd
-          pushd ${{github.workspace}}/build/release
-          echo "Create Debian Release Package"
+          ls -la _packages
+
+      - name: Publish Debug Artifact TGZ
+        uses: actions/upload-artifact@v2
+        with:
+          name: ivi-homescreen-dbg.Linux.tar.gz.zip
+          path: |
+            build/debug/_packages/ivi-homescreen-dbg-*-Linux.tar.gz
+
+      - name: Publish Debug Artifact Debian
+        uses: actions/upload-artifact@v2
+        with:
+          name: ivi-homescreen-dbg.amd64.deb.zip
+          path: |
+            build/debug/_packages/ivi-homescreen-dbg*_amd64.*deb
+
+      - name: Publish Debug Artifact RPM
+        uses: actions/upload-artifact@v2
+        with:
+          name: ivi-homescreen-dgg.x86_64.rpm.zip
+          path: |
+            build/debug/_packages/ivi-homescreen-dbg-*.x86_64.rpm
+
+      - name: Build Release Packages
+        working-directory: ${{github.workspace}}/build/release       
+        run: |
+          rm -rf _packages || true
           make package -j
-          PACKAGE_FILE=`find -iname ivi-homescreen-*.tar.gz -not -path "./_CPack_Packages/*"`
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find -iname ivi-homescreen-*.deb -not -path "./_CPack_Packages/*"`
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find -iname ivi-homescreen-*.rpm -not -path "./_CPack_Packages/*"`
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          ls -la
-          echo "Install to Staging"
-          make install -j
+          ls -la _packages
+          echo "Release Info"
           ls -la shell/homescreen
           echo "Strip executable"
           strip shell/homescreen
           ls -la shell/homescreen
           echo "List Dependencies"
           ldd shell/homescreen
-          popd
+
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v2
         with:
-          name: ivi-homescreen-x86_64-linux.release.tgz
+          name: ivi-homescreen.Linux.tar.gz.zip
           path: |
-            build/release/ivi-homescreen-*.tar.gz
-            build/release/ivi-homescreen-*.tar.gz-MD5SUMS.txt
-      - name: Publish Debug Artifact TGZ
-        uses: actions/upload-artifact@v2
-        with:
-          name: ivi-homescreen-x86_64-linux.debug.tgz
-          path: |
-            build/debug/ivi-homescreen-*.tar.gz
-            build/debug/ivi-homescreen-*.tar.gz-MD5SUMS.txt
+            build/release/_packages/ivi-homescreen-*-Linux.tar.gz
+
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v2
         with:
-          name: ivi-homescreen-x86_64-linux.release.deb
+          name: ivi-homescreen.amd64.deb.zip
           path: |
-            build/release/ivi-homescreen-*.deb
-            build/release/ivi-homescreen-*.deb-MD5SUMS.txt
-      - name: Publish Debug Artifact Debian
-        uses: actions/upload-artifact@v2
-        with:
-          name: ivi-homescreen-x86_64-linux.debug.deb
-          path: |
-            build/debug/ivi-homescreen-*.deb
-            build/debug/ivi-homescreen-*.deb-MD5SUMS.txt
+            build/release/_packages/ivi-homescreen_*_amd64.deb
+
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v2
         with:
-          name: ivi-homescreen-x86_64-linux.release.rpm
+          name: ivi-homescreen.x86_64.rpm.zip
           path: |
-            build/release/ivi-homescreen-*.rpm
-            build/release/ivi-homescreen-*.rpm-MD5SUMS.txt
-      - name: Publish Debug Artifact RPM
-        uses: actions/upload-artifact@v2
-        with:
-          name: ivi-homescreen-x86_64-linux.debug.rpm
-          path: |
-            build/debug/ivi-homescreen-*.rpm
-            build/debug/ivi-homescreen-*.rpm-MD5SUMS.txt
+            build/release/_packages/ivi-homescreen-*.x86_64.rpm
