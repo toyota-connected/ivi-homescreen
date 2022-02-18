@@ -49,32 +49,38 @@ jobs:
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug
         run: |
+          rm -rf _packages || true
           make package -j
-          PACKAGE_FILE=`find _packages -iname ivi-homescreen-*.tar.gz
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find _packages -iname ivi-homescreen-*.deb
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find _packages -iname ivi-homescreen-*.rpm
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
+          ls -la _packages
+
+      - name: Publish Debug Artifact TGZ
+        uses: actions/upload-artifact@v2
+        with:
+          name: ivi-homescreen-dbg.Linux.tar.gz
+          path: |
+            build/debug/_packages/ivi-homescreen-dbg-*-Linux.tar.gz
+
+      - name: Publish Debug Artifact Debian
+        uses: actions/upload-artifact@v2
+        with:
+          name: ivi-homescreen-dbg.amd64.deb
+          path: |
+            build/debug/_packages/ivi-homescreen-dbg*_amd64.*deb
+
+      - name: Publish Debug Artifact RPM
+        uses: actions/upload-artifact@v2
+        with:
+          name: ivi-homescreen-dgg.x86_64.rpm
+          path: |
+            build/debug/_packages/ivi-homescreen-dbg-*.x86_64.rpm
 
       - name: Build Release Packages
         working-directory: ${{github.workspace}}/build/release       
         run: |
+          rm -rf _packages || true
           make package -j
-          PACKAGE_FILE=`find _packages -iname ivi-homescreen-*.tar.gz
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find _packages -iname ivi-homescreen-*.deb
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          PACKAGE_FILE=`find _packages -iname ivi-homescreen-*.rpm
-          echo $PACKAGE_FILE
-          md5sum $PACKAGE_FILE > ${PACKAGE_FILE}-MD5SUMS.txt
-          ls -la
-          echo "Install to Staging"
+          ls -la _packages
+          echo "Release Info"
           ls -la shell/homescreen
           echo "Strip executable"
           strip shell/homescreen
@@ -85,48 +91,20 @@ jobs:
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v2
         with:
-          name: ivi-homescreen-Linux.tar.gz
+          name: ivi-homescreen.Linux.tar.gz
           path: |
-            build/release/_packages/ivi-homescreen-*.tar.gz
-            build/release/ivi-homescreen-*.tar.gz-MD5SUMS.txt
-
-      - name: Publish Debug Artifact TGZ
-        uses: actions/upload-artifact@v2
-        with:
-          name: ivi-homescreen-dbg-Linux.tar.gz
-          path: |
-            build/debug/ivi-homescreen-*.tar.gz
-            build/debug/ivi-homescreen-*.tar.gz-MD5SUMS.txt
+            build/release/_packages/ivi-homescreen-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v2
         with:
-          name: ivi-homescreen_amd64.deb
+          name: ivi-homescreen.amd64.deb
           path: |
-            build/release/_packages/ivi-homescreen-*.deb
-            build/release/ivi-homescreen-*.deb-MD5SUMS.txt
-
-      - name: Publish Debug Artifact Debian
-        uses: actions/upload-artifact@v2
-        with:
-          name: ivi-homescreen-dbg_amd64.deb
-          path: |
-            build/debug/_packages/ivi-homescreen-*.deb
-            build/debug/_packages/ivi-homescreen-*.ddeb
-            build/debug/ivi-homescreen-*.deb-MD5SUMS.txt
+            build/release/_packages/ivi-homescreen_*_amd64.deb
 
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v2
         with:
           name: ivi-homescreen.x86_64.rpm
           path: |
-            build/release/_packages/ivi-homescreen-*.rpm
-            build/release/ivi-homescreen-*.rpm-MD5SUMS.txt
-
-      - name: Publish Debug Artifact RPM
-        uses: actions/upload-artifact@v2
-        with:
-          name: ivi-homescreen-dgb.x86_64.rpm
-          path: |
-            build/debug/_packages/ivi-homescreen-*.rpm
-            build/debug/ivi-homescreen-*.rpm-MD5SUMS.txt
+            build/release/_packages/ivi-homescreen-*.x86_64.rpm
