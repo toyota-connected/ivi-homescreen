@@ -58,21 +58,19 @@ static constexpr std::array<char[kSoMaxLength], kSoCount> kGlSoNames[]{
 // Engine constants
 constexpr int kEngineInstanceCount = 1;
 
-static constexpr std::array<EGLint, 3> kEglContextAttribs = {{
+static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off
-    EGL_CONTEXT_MAJOR_VERSION, BUILD_EGL_CONTEXT_VERSION_MAJOR,
+    EGL_CONTEXT_MAJOR_VERSION, 3,
+    EGL_CONTEXT_MAJOR_VERSION, 2,
     EGL_NONE
     // clang-format on
 }};
 
-static constexpr std::array<EGLint, 13> kEglConfigAttribs = {{
+static constexpr std::array<EGLint, 15> kEglConfigAttribs = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-#if defined(BUILD_EGL_OPENGL_ES3)
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-#elif defined(BUILD_EGL_OPENGL_ES2)
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-#endif
     EGL_RED_SIZE, 8,
     EGL_GREEN_SIZE, 8,
     EGL_BLUE_SIZE, 8,
