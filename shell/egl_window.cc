@@ -59,8 +59,13 @@ EglWindow::EglWindow(size_t index,
 
   wl_shell_surface_add_listener(m_shell_surface, &shell_surface_listener, this);
 
+  m_width  = m_display->GetModeWidth()  > 0 ? m_display->GetModeWidth()  : width;
+  m_height = m_display->GetModeHeight() > 0 ? m_display->GetModeHeight() : height;
+
   m_egl_window[index] = wl_egl_window_create(m_surface, m_width, m_height);
 
+  FML_DLOG(INFO) << "create egl_window: " << m_width << "x" << m_height;
+  
   m_egl_surface[index] = create_egl_surface(this, m_egl_window[index], nullptr);
 
   wl_shell_surface_set_title(m_shell_surface, m_app_id.c_str());
