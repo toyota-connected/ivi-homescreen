@@ -31,6 +31,7 @@ App::App(const std::string& app_id,
          bool fullscreen,
          bool enable_cursor,
          bool debug_egl,
+         bool sprawl,
          uint32_t width,
          uint32_t height,
          const std::string& cursor_theme_name)
@@ -43,6 +44,7 @@ App::App(const std::string& app_id,
                                                app_id,
                                                fullscreen,
                                                debug_egl,
+                                               sprawl,
                                                width,
                                                height)}
 #ifdef ENABLE_TEXTURE_TEST
