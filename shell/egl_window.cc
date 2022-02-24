@@ -32,6 +32,7 @@ EglWindow::EglWindow(size_t index,
                      std::string app_id,
                      bool fullscreen,
                      bool debug_egl,
+                     bool sprawl,
                      int32_t width,
                      int32_t height)
     : Egl(display->GetDisplay(), debug_egl),
@@ -44,6 +45,7 @@ EglWindow::EglWindow(size_t index,
       m_callback(nullptr),
       m_configured(false),
       m_fullscreen(fullscreen),
+      m_sprawl(sprawl),
       m_frame_sync(0) {  // disable vsync
   FML_DLOG(INFO) << "+ EglWindow()";
 
@@ -59,13 +61,17 @@ EglWindow::EglWindow(size_t index,
 
   wl_shell_surface_add_listener(m_shell_surface, &shell_surface_listener, this);
 
-  m_width  = m_display->GetModeWidth()  > 0 ? m_display->GetModeWidth()  : width;
-  m_height = m_display->GetModeHeight() > 0 ? m_display->GetModeHeight() : height;
+  m_width = (m_sprawl && m_display->GetModeWidth() > 0)
+                ? m_display->GetModeWidth()
+                : width;
+  m_height = (m_sprawl && m_display->GetModeHeight() > 0)
+                 ? m_display->GetModeHeight()
+                 : height;
 
   m_egl_window[index] = wl_egl_window_create(m_surface, m_width, m_height);
 
   FML_DLOG(INFO) << "create egl_window: " << m_width << "x" << m_height;
-  
+
   m_egl_surface[index] = create_egl_surface(this, m_egl_window[index], nullptr);
 
   wl_shell_surface_set_title(m_shell_surface, m_app_id.c_str());
