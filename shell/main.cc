@@ -47,6 +47,10 @@ int main(int argc, char** argv) {
   if (!cl.options().empty()) {
     if (cl.HasOption("a")) {
       cl.GetOptionValue("a", &application_override_path);
+      if (application_override_path.empty()) {
+        FML_LOG(ERROR) << "--a option requires an argument (e.g. --a=/usr/share/gallery)";
+        return 1;
+      }
       FML_DLOG(INFO) << "Override Assets Path: " << application_override_path;
       auto find = "--a=" + application_override_path;
       auto result = std::find(args.begin(), args.end(), find);
@@ -81,6 +85,10 @@ int main(int argc, char** argv) {
     if (cl.HasOption("w")) {
       std::string width_str;
       cl.GetOptionValue("w", &width_str);
+      if (width_str.empty()) {
+        FML_LOG(ERROR) << "--w option requires an argument (e.g. --w=720)";
+        return 1;
+      }
       width = static_cast<uint32_t>(std::stoul(width_str));
       auto find = "--w=" + application_override_path;
       auto result = std::find(args.begin(), args.end(), find);
@@ -91,6 +99,10 @@ int main(int argc, char** argv) {
     if (cl.HasOption("h")) {
       std::string height_str;
       cl.GetOptionValue("h", &height_str);
+      if (height_str.empty()) {
+        FML_LOG(ERROR) << "--h option requires an argument (e.g. --w=1280)";
+        return 1;
+      }
       height = static_cast<uint32_t>(std::stoul(height_str));
       auto find = "--h=" + application_override_path;
       auto result = std::find(args.begin(), args.end(), find);
@@ -100,6 +112,10 @@ int main(int argc, char** argv) {
     }
     if (cl.HasOption("t")) {
       cl.GetOptionValue("t", &cursor_theme);
+      if (cursor_theme.empty()) {
+        FML_LOG(ERROR) << "--t option requires an argument (e.g. --t=DMZ-White)";
+        return 1;
+      }
       FML_DLOG(INFO) << "Cursor Theme: " << cursor_theme;
       auto result = std::find(args.begin(), args.end(), "--t");
       if (result != args.end()) {
