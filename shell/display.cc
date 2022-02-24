@@ -254,6 +254,22 @@ const struct wl_output_listener Display::output_listener = {
     display_handle_geometry, display_handle_mode, display_handle_done,
     display_handle_scale};
 
+void Display::wl_output_configure_callback(void* data,
+                                           wl_callback* callback,
+                                           [[maybe_unused]] uint32_t time) {
+  auto* display = static_cast<Display*>(data);
+
+  wl_callback_destroy(callback);
+
+  display->m_is_configured = true;
+
+  FML_DLOG(INFO) << "configuration is done";
+}
+
+const struct wl_callback_listener Display::configure_callback_listener = {
+    .done = wl_output_configure_callback,
+};
+
 void Display::shm_format(void* data,
                          [[maybe_unused]] struct wl_shm* wl_shm,
                          uint32_t format) {
