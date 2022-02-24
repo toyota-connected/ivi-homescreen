@@ -45,6 +45,11 @@ class Display {
     return m_compositor;
   };
 
+  struct wl_subcompositor* GetSubCompositor() {
+    assert(m_subcompositor);
+    return m_subcompositor;
+  };
+
   struct wl_display* GetDisplay() {
     assert(m_display);
     return m_display;
@@ -87,6 +92,7 @@ class Display {
   struct wl_registry* m_registry;
   struct wl_output* m_output;
   struct wl_compositor* m_compositor;
+  struct wl_subcompositor* m_subcompositor;
   struct wl_shell* m_shell{};
   struct wl_shm* m_shm{};
 
