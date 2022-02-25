@@ -156,6 +156,9 @@ void Display::registry_handle_global(void* data,
     d->m_output = static_cast<struct wl_output*>(
         wl_registry_bind(registry, name, &wl_output_interface, 1));
     wl_output_add_listener(d->m_output, &output_listener, d);
+    d->m_is_configured = false;
+    wl_callback* callback = wl_display_sync(d->GetDisplay());
+    wl_callback_add_listener(callback, &configure_callback_listener, d);
   }
 
   else if (strcmp(interface, wl_seat_interface.name) == 0) {
