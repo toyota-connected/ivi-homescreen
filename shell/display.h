@@ -16,8 +16,10 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <flutter_embedder.h>
@@ -79,6 +81,13 @@ class Display {
                             const std::string& kind);
 
   void SetTextInput(std::shared_ptr<TextInput> text_input);
+
+  bool IsConfigured() { return m_is_configured; }
+
+  void WaitForConfig() {
+    while (wl_display_dispatch(GetDisplay()) != -1 && !m_is_configured)
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 
  private:
   std::shared_ptr<Engine> m_flutter_engine;
@@ -221,6 +230,14 @@ class Display {
                                    struct wl_output* wl_output,
                                    int scale);
   static void display_handle_done(void* data, struct wl_output* wl_output);
+
+  bool m_is_configured;
+
+  static const struct wl_callback_listener configure_callback_listener;
+
+  static void wl_output_configure_callback(void* data,
+                                           wl_callback* wl_callback,
+                                           uint32_t time);
 
   static const struct wl_shm_listener shm_listener;
 
