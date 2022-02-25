@@ -65,8 +65,6 @@ EglWindow::EglWindow(size_t index,
   FML_DLOG(INFO) << "EglWindow::m_shell_surface = "
                  << static_cast<void*>(m_shell_surface);
 
-  wl_shell_surface_add_listener(m_shell_surface, &shell_surface_listener, this);
-
   m_display->WaitForConfig();
 
   m_width = (m_sprawl && m_display->GetModeWidth() > 0)
