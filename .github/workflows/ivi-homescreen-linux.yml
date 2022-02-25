@@ -70,7 +70,7 @@ jobs:
       - name: Publish Debug Artifact RPM
         uses: actions/upload-artifact@v2
         with:
-          name: ivi-homescreen-dgg.x86_64.rpm.zip
+          name: ivi-homescreen-dbg.x86_64.rpm.zip
           path: |
             build/debug/_packages/ivi-homescreen-dbg-*.x86_64.rpm
 
