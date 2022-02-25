@@ -53,6 +53,12 @@ EglWindow::EglWindow(size_t index,
   assert(m_surface);
   FML_DLOG(INFO) << "EglWindow::m_surface = " << static_cast<void*>(m_surface);
 
+  m_fps_surface = wl_compositor_create_surface(m_display->GetCompositor());
+  m_subsurface = wl_subcompositor_get_subsurface(m_display->GetSubCompositor(),
+                                                 m_fps_surface, m_surface);
+  wl_subsurface_set_position(m_subsurface, 50, 50);
+  wl_subsurface_set_sync(m_subsurface);
+
   m_shell_surface =
       wl_shell_get_shell_surface(m_display->GetShell(), m_surface);
   assert(m_shell_surface);
@@ -99,6 +105,14 @@ EglWindow::EglWindow(size_t index,
   eglSwapInterval(m_dpy, m_frame_sync);
   ClearCurrent();
 
+  memset(m_fps, 0, sizeof(m_fps));
+  m_fps_idx = 0;
+  m_fps_counter = 0;
+
+  this->m_callback = wl_surface_frame(this->m_surface);
+  wl_callback_add_listener(this->m_callback, &frame_listener, this);
+  wl_surface_commit(this->m_surface);
+
   FML_DLOG(INFO) << "- EglWindow()";
 }
 
@@ -117,6 +131,7 @@ EglWindow::~EglWindow() {
   if (m_shell_surface)
     wl_shell_surface_destroy(m_shell_surface);
 
+  wl_surface_destroy(m_fps_surface);
   wl_surface_destroy(m_surface);
 
   FML_DLOG(INFO) << "- ~EglWindow()";
@@ -423,70 +438,24 @@ void EglWindow::paint_pixels(void* image,
 
 void EglWindow::redraw(void* data,
                        struct wl_callback* callback,
-                       uint32_t time) {
+                       [[maybe_unused]] uint32_t time) {
   auto* window = reinterpret_cast<EglWindow*>(data);
-  struct shm_buffer* buffer;
-  int ret;
-
-  if (!window->m_buffers[0].busy)
-    buffer = &window->m_buffers[0];
-  else if (!window->m_buffers[1].busy)
-    buffer = &window->m_buffers[1];
-  else
-    buffer = nullptr;
-
-  if (buffer && !buffer->buffer) {
-    FML_DLOG(INFO)
-        << "next_buffer() bubffer->buffer is not set, setting with width "
-        << window->m_width << ", height " << window->m_height;
-    ret = create_shm_buffer(window->m_display.get(), buffer, window->m_width,
-                            window->m_height, WL_SHM_FORMAT_XRGB8888);
-
-    if (ret < 0)
-      buffer = nullptr;
-    else
-      /* paint the padding */
-      memset(buffer->shm_data, 0xff,
-             static_cast<size_t>(window->m_width) *
-                 static_cast<size_t>(window->m_height) * 4);
-  }
-
-  if (!buffer) {
-    FML_LOG(ERROR) << (!callback
-                           ? "Failed to create the first buffer."
-                           : "Both buffers busy at redraw(). Server bug?");
-    exit(EXIT_FAILURE);
-  }
-
-  switch (window->m_type) {
-    case WINDOW_NORMAL:
-    case WINDOW_BOTTOM:
-      paint_pixels_bottom(buffer->shm_data, 0, window->m_width,
-                          window->m_height, time);
-      break;
-    case WINDOW_TOP:
-      paint_pixels_top(buffer->shm_data, 0, window->m_width, window->m_height,
-                       time);
-      break;
-    case WINDOW_BG:
-      paint_pixels(buffer->shm_data, 20, window->m_width, window->m_height,
-                   time);
-      break;
-    default:
-      FML_LOG(ERROR) << "Missing Window Type";
-  }
-
-  wl_surface_attach(window->m_surface, buffer->buffer, 0, 0);
-  wl_surface_damage(window->m_surface, 0, 0, window->m_width, window->m_height);
 
   if (callback)
     wl_callback_destroy(callback);
 
   window->m_callback = wl_surface_frame(window->m_surface);
   wl_callback_add_listener(window->m_callback, &frame_listener, window);
-  wl_surface_commit(window->m_surface);
 
-  buffer->busy = 1;
+  window->m_fps_counter++;
+  window->m_fps_counter++;
+}
+
+uint32_t EglWindow::GetFpsCounter() {
+  uint32_t fps_counter = m_fps_counter;
+  m_fps_counter = 0;
+
+  return fps_counter;
 }
 
 const struct wl_callback_listener EglWindow::frame_listener = {redraw};
@@ -495,8 +464,6 @@ const struct wl_callback_listener EglWindow::frame_listener = {redraw};
   return nullptr;
 }
 void EglWindow::toggle_fullscreen() {
-  struct wl_callback* callback;
-
   if (m_fullscreen) {
     wl_shell_surface_set_fullscreen(m_shell_surface,
                                     WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE,
@@ -506,10 +473,57 @@ void EglWindow::toggle_fullscreen() {
     handle_shell_configure(this, m_shell_surface, 0, m_width, m_height);
   }
 
-  callback = wl_display_sync(m_display->GetDisplay());
-  wl_callback_add_listener(callback, &shell_configure_callback_listener, this);
+  wl_callback_add_listener(wl_display_sync(m_display->GetDisplay()),
+                           &shell_configure_callback_listener, this);
 }
 
 bool EglWindow::ActivateSystemCursor(int32_t device, const std::string& kind) {
   return m_display->ActivateSystemCursor(device, kind);
+}
+
+void EglWindow::DrawFps(uint8_t fps) {
+  const int bars = 20;
+  const int bar_w = 10;
+  const int bar_space = 2;
+  const int surface_w = bars * (bar_w + bar_space) - bar_space;
+  const int surface_h = 150;
+  int x, y;
+
+  // update fps array
+  m_fps[m_fps_idx] = fps;
+  m_fps_idx = (m_fps_idx + 1) % bars;
+
+  // create buffer
+  if (!m_fps_buffer.buffer) {
+    create_shm_buffer(m_display.get(), &m_fps_buffer, surface_w, surface_h,
+                      WL_SHM_FORMAT_XRGB8888);
+  }
+  memset(m_fps_buffer.shm_data, 0x00,
+         static_cast<size_t>(surface_w) * static_cast<size_t>(surface_h) * 4);
+
+  // draw bar
+  [[maybe_unused]] auto pixels =
+      reinterpret_cast<uint32_t*>(m_fps_buffer.shm_data);
+
+  for (int i = 0; i < bars; i++) {
+    [[maybe_unused]] auto p =
+        std::clamp(m_fps[(m_fps_idx + i) % bars] / 60.0, 0.0, 1.0);
+    int draw_y = surface_h * (1.0 - p);
+    int draw_x = i * (bar_w + bar_space);
+
+    if (draw_y < 0)
+      draw_y = 0;
+
+    for (y = draw_y; y < surface_h; y++) {
+      for (x = draw_x; x < draw_x + bar_w; x++) {
+        pixels[y * surface_w + x] = 0xFF << 24 | (int)(0xFF * (1.0 - p)) << 16 |
+                                    (int)(0xFF * p) << 8 | 0x00 << 0;
+      }
+    }
+  }
+
+  // commit buffer
+  wl_surface_attach(m_fps_surface, m_fps_buffer.buffer, 0, 0);
+  wl_surface_damage(m_fps_surface, 0, 0, surface_w, surface_h);
+  wl_surface_commit(m_fps_surface);
 }

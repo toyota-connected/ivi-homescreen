@@ -40,6 +40,10 @@ class App {
   std::shared_ptr<Display> m_display;
   std::shared_ptr<EglWindow> m_egl_window[kEngineInstanceCount];
   std::shared_ptr<Engine> m_engine[kEngineInstanceCount];
+  uint8_t m_fps_output;
+  uint32_t m_fps_period;
+  uint32_t m_fps_counter;
+  int32_t m_fps_pretime;
 #ifdef ENABLE_TEXTURE_TEST
   std::unique_ptr<TextureTest> m_texture_test;
 #endif

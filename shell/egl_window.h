@@ -54,7 +54,12 @@ class EglWindow : public Egl {
   [[nodiscard]] int32_t GetWidth() const { return m_width; }
   [[nodiscard]] int32_t GetHeight() const { return m_height; }
 
+  uint32_t GetFpsCounter();
+  void DrawFps(uint8_t fps);
+
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
+
+  uint32_t m_fps_counter;
 
  private:
   struct shm_buffer {
@@ -77,6 +82,12 @@ class EglWindow : public Egl {
   bool m_sprawl;
   enum window_type m_type;
   std::string m_app_id;
+
+  struct wl_surface* m_fps_surface;
+  struct wl_subsurface* m_subsurface;
+  struct shm_buffer m_fps_buffer;
+  uint8_t m_fps_idx;
+  uint8_t m_fps[20];
 
   struct shm_buffer m_buffers[2]{};
   struct wl_callback* m_callback;

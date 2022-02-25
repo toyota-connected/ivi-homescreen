@@ -34,6 +34,7 @@ Display::Display([[maybe_unused]] App* app,
       m_display(nullptr),
       m_output(nullptr),
       m_compositor(nullptr),
+      m_subcompositor(nullptr),
       m_cursor_surface(nullptr),
       m_keyboard(nullptr),
       m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
@@ -57,6 +58,10 @@ Display::Display([[maybe_unused]] App* app,
   wl_display_dispatch(m_display);
 
   if (!m_compositor) {
+    assert(false);
+  }
+
+  if (!m_subcompositor) {
     assert(false);
   }
 
@@ -93,6 +98,9 @@ Display::~Display() {
   if (m_agl_shell)
     agl_shell_destroy(m_agl_shell);
 
+  if (m_subcompositor)
+    wl_subcompositor_destroy(m_subcompositor);
+
   if (m_compositor)
     wl_compositor_destroy(m_compositor);
 
@@ -110,9 +118,9 @@ Display::~Display() {
 }
 
 void Display::registry_handle_global(void* data,
-                                     struct wl_registry* registry,
-                                     uint32_t name,
-                                     const char* interface,
+                                     [[maybe_unused]] struct wl_registry* registry,
+                                     [[maybe_unused]] uint32_t name,
+                                     [[maybe_unused]] const char* interface,
                                      [[maybe_unused]] uint32_t version) {
   auto* d = static_cast<Display*>(data);
 
@@ -121,6 +129,11 @@ void Display::registry_handle_global(void* data,
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
     d->m_compositor = static_cast<struct wl_compositor*>(
         wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+  }
+
+  if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
+    d->m_subcompositor = static_cast<struct wl_subcompositor*>(
+        wl_registry_bind(registry, name, &wl_subcompositor_interface, 1));
   }
 
   if (strcmp(interface, wl_shell_interface.name) == 0) {
@@ -211,8 +224,8 @@ void Display::display_handle_geometry(void* data,
 }
 
 void Display::display_handle_mode(void* data,
-                                  struct wl_output* wl_output,
-                                  uint32_t flags,
+                                  [[maybe_unused]] struct wl_output* wl_output,
+                                  [[maybe_unused]] uint32_t flags,
                                   int width,
                                   int height,
                                   [[maybe_unused]] int refresh) {
@@ -272,7 +285,7 @@ const struct wl_callback_listener Display::configure_callback_listener = {
 
 void Display::shm_format(void* data,
                          [[maybe_unused]] struct wl_shm* wl_shm,
-                         uint32_t format) {
+                         [[maybe_unused]] uint32_t format) {
   auto* display = reinterpret_cast<Display*>(data);
 
   if (format == WL_SHM_FORMAT_XRGB8888)
@@ -283,7 +296,7 @@ const struct wl_shm_listener Display::shm_listener = {shm_format};
 
 void Display::seat_handle_capabilities(void* data,
                                        struct wl_seat* seat,
-                                       uint32_t caps) {
+                                       [[maybe_unused]] uint32_t caps) {
   auto* d = static_cast<Display*>(data);
 
   if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
@@ -320,7 +333,7 @@ const struct wl_seat_listener Display::seat_listener = {
 };
 
 FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
-  FlutterPointerPhase res = p->phase;
+  [[maybe_unused]] FlutterPointerPhase res = p->phase;
 
   if (p->buttons) {
     switch (p->event.state) {
@@ -331,14 +344,11 @@ FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
           res = FlutterPointerPhase::kDown;
         else
           res = FlutterPointerPhase::kMove;
-        break;
       case WL_POINTER_BUTTON_STATE_RELEASED:
         // FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_RELEASED";
         if ((p->phase == FlutterPointerPhase::kDown) ||
             (p->phase == FlutterPointerPhase::kMove))
           res = FlutterPointerPhase::kUp;
-        p->buttons = 0;
-        break;
     }
   } else {
     res = p->event.state == WL_POINTER_BUTTON_STATE_RELEASED
@@ -354,8 +364,8 @@ void Display::pointer_handle_enter(void* data,
                                    [[maybe_unused]] struct wl_pointer* pointer,
                                    uint32_t serial,
                                    [[maybe_unused]] struct wl_surface* surface,
-                                   wl_fixed_t sx,
-                                   wl_fixed_t sy) {
+                                   [[maybe_unused]] wl_fixed_t sx,
+                                   [[maybe_unused]] wl_fixed_t sy) {
   auto* d = static_cast<Display*>(data);
 
   d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
@@ -389,8 +399,8 @@ void Display::pointer_handle_leave(
 void Display::pointer_handle_motion(void* data,
                                     [[maybe_unused]] struct wl_pointer* pointer,
                                     [[maybe_unused]] uint32_t time,
-                                    wl_fixed_t sx,
-                                    wl_fixed_t sy) {
+                                    [[maybe_unused]] wl_fixed_t sx,
+                                    [[maybe_unused]] wl_fixed_t sy) {
   auto* d = static_cast<Display*>(data);
 
   d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
@@ -429,8 +439,8 @@ void Display::pointer_handle_axis(
     void* data,
     [[maybe_unused]] struct wl_pointer* wl_pointer,
     uint32_t time,
-    uint32_t axis,
-    wl_fixed_t value) {
+    [[maybe_unused]] uint32_t axis,
+    [[maybe_unused]] wl_fixed_t value) {
   auto* d = static_cast<Display*>(data);
   d->m_pointer.event.time = time;
   d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
@@ -484,14 +494,14 @@ void Display::keyboard_handle_keymap(
   d->m_xkb_state = xkb_state_new(d->m_keymap);
 }
 
-void Display::keyboard_handle_key(void* data,
-                                  struct wl_keyboard* keyboard,
-                                  uint32_t serial,
-                                  uint32_t time,
-                                  uint32_t key,
-                                  uint32_t state) {
-  auto* d = static_cast<Display*>(data);
+void Display::keyboard_handle_key([[maybe_unused]] void* data,
+                                  [[maybe_unused]] struct wl_keyboard* keyboard,
+                                  [[maybe_unused]] uint32_t serial,
+                                  [[maybe_unused]] uint32_t time,
+                                  [[maybe_unused]] uint32_t key,
+                                  [[maybe_unused]] uint32_t state) {
 #if ENABLE_PLUGIN_TEXT_INPUT
+  auto* d = static_cast<Display*>(data);
   if (d->m_text_input) {
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
       xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
@@ -502,12 +512,12 @@ void Display::keyboard_handle_key(void* data,
 #else
 #if !defined(NDEBUG)
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
+    [[maybe_unused]] xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
     uint32_t utf32 = xkb_keysym_to_utf32(keysym);
     if (utf32) {
       FML_DLOG(INFO) << "[Press] U" << utf32;
     } else {
-      char name[64];
+      [[maybe_unused]] char name[64];
       xkb_keysym_get_name(keysym, name, 64);
       FML_DLOG(INFO) << "[Press] " << name;
     }
@@ -539,8 +549,8 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 
 [[maybe_unused]] struct Display::touch_point* Display::get_touch_point(
     Display* d,
-    int32_t id) {
-  struct touch_event* touch = &d->m_touch.event;
+    [[maybe_unused]] int32_t id) {
+  [[maybe_unused]] auto touch = &d->m_touch.event;
 
   for (auto& point : touch->points) {
     if (point.id == id && point.valid) {
@@ -561,11 +571,11 @@ void Display::touch_handle_down(void* data,
                                 [[maybe_unused]] uint32_t time,
                                 [[maybe_unused]] struct wl_surface* surface,
                                 int32_t id,
-                                wl_fixed_t x_w,
-                                wl_fixed_t y_w) {
+                                [[maybe_unused]] wl_fixed_t x_w,
+                                [[maybe_unused]] wl_fixed_t y_w) {
   auto* d = static_cast<Display*>(data);
 
-  bool first_down = (d->m_touch.down_count[id] == 0);
+  [[maybe_unused]] bool first_down = (d->m_touch.down_count[id] == 0);
   d->m_touch.down_count[id] += 1;
 
   d->m_touch.surface_x = x_w;
@@ -586,9 +596,9 @@ void Display::touch_handle_up(void* data,
   auto* d = static_cast<Display*>(data);
 
   d->m_touch.down_count[id] -= 1;
-  bool last_up = (d->m_touch.down_count[id] == 0);
 
   if (d->m_flutter_engine) {
+    [[maybe_unused]] bool last_up = (d->m_touch.down_count[id] == 0);
     d->m_flutter_engine->SendTouchEvent(
         (last_up ? FlutterPointerPhase::kUp : FlutterPointerPhase::kMove),
         wl_fixed_to_double(d->m_touch.surface_x),
@@ -599,9 +609,9 @@ void Display::touch_handle_up(void* data,
 void Display::touch_handle_motion(void* data,
                                   [[maybe_unused]] struct wl_touch* wl_touch,
                                   [[maybe_unused]] uint32_t time,
-                                  int32_t id,
-                                  wl_fixed_t x_w,
-                                  wl_fixed_t y_w) {
+                                  [[maybe_unused]] int32_t id,
+                                  [[maybe_unused]] wl_fixed_t x_w,
+                                  [[maybe_unused]] wl_fixed_t y_w) {
   auto* d = static_cast<Display*>(data);
 
   d->m_touch.surface_x = x_w;
@@ -690,8 +700,8 @@ void Display::gesture_pinch_end(
   }
 }
 
-[[maybe_unused]] void Display::AglShellDoPanel(struct wl_surface* surface,
-                                               enum agl_shell_edge mode) {
+[[maybe_unused]] void Display::AglShellDoPanel([[maybe_unused]] struct wl_surface* surface,
+                                               [[maybe_unused]] enum agl_shell_edge mode) {
   if (m_agl_shell) {
     agl_shell_set_panel(m_agl_shell, surface, m_output, mode);
   }
@@ -729,12 +739,12 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
       return false;
     }
 
-    auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    [[maybe_unused]] auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
       FML_DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
       return false;
     }
-    auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
+    [[maybe_unused]] auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
     if (cursor_buffer && m_cursor_surface) {
       wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
                             m_cursor_surface,

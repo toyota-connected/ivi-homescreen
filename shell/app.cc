@@ -107,6 +107,49 @@ App::App(const std::string& app_id,
 
   m_display->AglShellDoReady();
 
+  // init the fps output option.
+  m_fps_output = 0;
+  m_fps_period = 1;
+  m_fps_counter = 0;
+
+  const char* envstr_console;
+  if ((envstr_console = getenv("FPS_OUTPUT_CONSOLE")) != nullptr) {
+    int val = atoi(envstr_console);
+
+    if (0 < val) {
+      m_fps_output |= 0x01;
+    }
+  }
+
+  const char* envstr_overlay;
+  if ((envstr_overlay = getenv("FPS_OUTPUT_OVERLAY")) != nullptr) {
+    int val = atoi(envstr_overlay);
+
+    if (0 < val) {
+      m_fps_output |= 0x02;
+    }
+  }
+
+  const char* envstr_freq;
+  if ((envstr_freq = getenv("FPS_OUTPUT_FREQUENCY")) != nullptr) {
+    int val = atoi(envstr_freq);
+
+    if (0 < val) {
+      m_fps_period = val;
+    }
+  }
+
+  if (0 < m_fps_output) {
+    if (0 >= m_fps_period) {
+      m_fps_period = 1;
+    }
+
+    m_fps_period *= (1000 / 16);
+    m_fps_pretime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+  }
+
   FML_DLOG(INFO) << "-App::App";
 }
 
@@ -145,6 +188,29 @@ int App::Loop() {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
   }
 
+  // calc and output the fps.
+  if (0 < m_fps_output) {
+    m_fps_counter++;
+
+    if (m_fps_period <= m_fps_counter) {
+      auto fps_loop = (m_fps_counter * 1000) / (end_time - m_fps_pretime);
+      auto fps_redraw = (m_egl_window[0]->GetFpsCounter() * 1000) /
+                        (end_time - m_fps_pretime);
+
+      m_fps_counter = 0;
+      m_fps_pretime = end_time;
+
+      if (0 < (m_fps_output & 0x01)) {
+        if (0 < (m_fps_output & 0x01)) {
+          FML_LOG(INFO) << "FPS = " << fps_loop << " " << fps_redraw;
+        }
+
+        if (0 < (m_fps_output & 0x02)) {
+          m_egl_window[0]->DrawFps(fps_redraw);
+        }
+      }
+    }
+  }
   return ret;
 }
 
