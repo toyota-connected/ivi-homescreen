@@ -117,6 +117,10 @@ class Engine {
 
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
+  std::shared_ptr<EglWindow> GetEglWindow() { return m_egl_window; }
+
+  std::string GetAssetDirectory() { return m_assets_path; }
+
 #if ENABLE_PLUGIN_TEXT_INPUT
   TextInput* m_text_input;
   [[maybe_unused]] void SetTextInput(TextInput *text_input);

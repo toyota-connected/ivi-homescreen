@@ -101,11 +101,14 @@ target_compile_definitions(homescreen
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
+        ${GST_INCLUDE_DIRS}
+        ${GST_VIDEO_INCLUDE_DIRS}
+        ${AVFORMAT_INCLUDE_DIRS}
         ..
         ../third_party
         ../third_party/flutter
         ../third_party/flutter/shell/platform/common/public
-        ../third_party/flutter/shell/platform/common/client_wrapper
+        ../third_party/flutter/shell/platform/common/client_wrapper/include
         ../third_party/rapidjson/include
 )
 
@@ -114,6 +117,9 @@ target_link_libraries(homescreen PRIVATE
         EGL GLESv2
         Threads::Threads
         dl
+        ${GST_LIBRARIES}
+        ${GST_VIDEO_LIBRARIES}
+        ${AVFORMAT_LIBRARIES}
         )
 
 target_link_directories(homescreen PRIVATE
@@ -133,7 +139,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_compile_options(homescreen PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
     target_link_options(homescreen PRIVATE
-            -fuse-ld=lld -lc++ -lc -lm -v)
+            -fuse-ld=lld -lc++ -lc++abi -lunwind -lc -lm -v)
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)

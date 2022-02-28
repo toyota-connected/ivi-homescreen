@@ -15,7 +15,7 @@
 #include "mouse_cursor.h"
 
 #include <flutter/fml/logging.h>
-#include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
+#include <flutter/standard_method_codec.h>
 
 #include "engine.h"
 

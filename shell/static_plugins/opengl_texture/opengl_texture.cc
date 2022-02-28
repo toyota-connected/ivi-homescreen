@@ -14,7 +14,7 @@
 
 #include "opengl_texture.h"
 
-#include <flutter/shell/platform/common/client_wrapper/include/flutter/standard_method_codec.h>
+#include <flutter/standard_method_codec.h>
 
 #include "engine.h"
 

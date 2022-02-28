@@ -27,7 +27,9 @@ jobs:
           sudo apt update -y
           sudo apt-get -y install libwayland-dev wayland-protocols \
           mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-          libc++-11-dev libc++abi-11-dev libunwind-dev libxkbcommon-dev
+          libc++-11-dev libc++abi-11-dev libunwind-dev libxkbcommon-dev \
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+          gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
           clang++ --version
           cmake --version
 
