@@ -29,6 +29,9 @@
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
 #include "static_plugins/mouse_cursor/mouse_cursor.h"
 #endif
+#ifdef ENABLE_PLUGIN_GSTREAMER
+#include "static_plugins/gstreamer/gstreamer.h"
+#endif
 #ifdef ENABLE_PLUGIN_NAVIGATION
 #include "static_plugins/navigation/navigation.h"
 #endif
@@ -55,10 +58,12 @@ PlatformChannel* PlatformChannel::singleton = nullptr;
 
 PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_ACCESSIBILITY
-  RegisterCallback(Accessibility::kChannelName, &Accessibility::OnPlatformMessage);
+  RegisterCallback(Accessibility::kChannelName,
+                   &Accessibility::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_CONNECTIVITY
-  RegisterCallback(Connectivity::kChannelName, &Connectivity::OnPlatformMessage);
+  RegisterCallback(Connectivity::kChannelName,
+                   &Connectivity::OnPlatformMessage);
   RegisterCallback(Connectivity::kChannelNameStatus,
                    &Connectivity::OnPlatformMessageStatus);
 #endif
@@ -71,11 +76,15 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
   RegisterCallback(MouseCursor::kChannelName, &MouseCursor::OnPlatformMessage);
 #endif
+#ifdef ENABLE_PLUGIN_GSTREAMER
+  RegisterCallback(kChannelGstreamerInitialize, &Gstreamer::OnInitialize);
+#endif
 #ifdef ENABLE_PLUGIN_NAVIGATION
   RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
-  RegisterCallback(OpenGlTexture::kChannelName, OpenGlTexture::OnPlatformMessage);
+  RegisterCallback(OpenGlTexture::kChannelName,
+                   OpenGlTexture::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_PACKAGE_INFO
   RegisterCallback(PackageInfo::kChannelName, &PackageInfo::OnPlatformMessage);
@@ -84,7 +93,8 @@ PlatformChannel::PlatformChannel() {
   RegisterCallback(Platform::kChannelName, &Platform::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
-  RegisterCallback(PlatformViews::kChannelName, &PlatformViews::OnPlatformMessage);
+  RegisterCallback(PlatformViews::kChannelName,
+                   &PlatformViews::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   RegisterCallback(TextInput::kChannelName, &TextInput::OnPlatformMessage);
