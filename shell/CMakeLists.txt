@@ -139,7 +139,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_compile_options(homescreen PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
     target_link_options(homescreen PRIVATE
-            -fuse-ld=lld -lc++ -lc++abi -lunwind -lc -lm -v)
+            -fuse-ld=lld -lc++ -lc++abi -lc -lm -v)
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)
