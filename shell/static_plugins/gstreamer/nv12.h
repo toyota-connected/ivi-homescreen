@@ -1,6 +1,5 @@
 #include "egl_window.h"
 
-#include <GL/gl.h>
 #include <GLES3/gl3.h>
 
 namespace nv12 {

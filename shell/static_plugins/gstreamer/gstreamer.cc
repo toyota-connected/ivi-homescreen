@@ -2,23 +2,17 @@
 #include "gstreamer.h"
 
 #include <flutter/fml/logging.h>
+#include <flutter/fml/paths.h>
+#include <flutter/standard_message_codec.h>
 #include <flutter/standard_method_codec.h>
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include <cassert>
-#include <chrono>
-#include <cstdio>
-#include <future>
-#include <mutex>
-#include <thread>
-
 extern "C" {
 #include <libavformat/avformat.h>
 }
-#include <EGL/egl.h>
-#include <flutter/event_stream_handler_functions.h>
-#include <flutter/fml/paths.h>
-#include <flutter/standard_message_codec.h>
+#include <cassert>
+#include <thread>
+
 #include "engine.h"
 #include "hexdump.h"
 #include "nv12.h"
@@ -289,7 +283,6 @@ static void prepare(CustomData* data) {
 static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
   GError* err;
   gchar* debug_info;
-  std::future<void> handle_fut;
   int64_t textureId =
       data->texture == nullptr ? 0 : data->texture->GetTextureId();
   switch (GST_MESSAGE_TYPE(msg)) {
@@ -304,7 +297,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
       g_free(debug_info);
       g_main_loop_quit(data->main_loop);
       break;
-    case GST_MESSAGE_EOS:
+    case GST_MESSAGE_EOS: {
       FML_DLOG(INFO) << "EOS " << textureId;
       if (data->is_looping) {
         if (!gst_element_seek_simple(
@@ -316,24 +309,21 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
         return TRUE;
       }
       // send completed event
-      try {
-        auto& codec = flutter::StandardMessageCodec::GetInstance();
-        flutter::EncodableValue res(flutter::EncodableMap{
-            {flutter::EncodableValue("event"),
-             flutter::EncodableValue("completed")},
-        });
-        auto result = codec.EncodeMessage(res);
+      auto& codec = flutter::StandardMessageCodec::GetInstance();
+      flutter::EncodableValue res(flutter::EncodableMap{
+          {flutter::EncodableValue("event"),
+           flutter::EncodableValue("completed")},
+      });
+      auto result = codec.EncodeMessage(res);
 
-        std::stringstream ss_event;
-        ss_event << kChannelGstreamerEventPrefix << textureId;
-        auto event_name = ss_event.str();
-        FML_DLOG(INFO) << "send event completed " << event_name;
-        data->engine->SendPlatformMessage(event_name.c_str(), result->data(),
-                                          result->size());
-      } catch (std::future_error& e) {
-        FML_DLOG(ERROR) << e.what();
-      }
+      std::stringstream ss_event;
+      ss_event << kChannelGstreamerEventPrefix << textureId;
+      auto event_name = ss_event.str();
+      FML_DLOG(INFO) << "send event completed " << event_name;
+      data->engine->SendPlatformMessage(event_name.c_str(), result->data(),
+                                        result->size());
       break;
+    }
     case GST_MESSAGE_STATE_CHANGED: {
       GstState old_state, new_state, pending_state;
       gst_message_parse_state_changed(msg, &old_state, &new_state,
