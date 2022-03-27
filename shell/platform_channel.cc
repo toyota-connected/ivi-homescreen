@@ -17,9 +17,6 @@
 #ifdef ENABLE_PLUGIN_ACCESSIBILITY
 #include "static_plugins/accessibility/accessibility.h"
 #endif
-#ifdef ENABLE_PLUGIN_CONNECTIVITY
-#include "static_plugins/connectivity/connectivity.h"
-#endif
 #ifdef ENABLE_PLUGIN_ISOLATE
 #include "static_plugins/isolate/isolate.h"
 #endif
@@ -60,12 +57,6 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_ACCESSIBILITY
   RegisterCallback(Accessibility::kChannelName,
                    &Accessibility::OnPlatformMessage);
-#endif
-#ifdef ENABLE_PLUGIN_CONNECTIVITY
-  RegisterCallback(Connectivity::kChannelName,
-                   &Connectivity::OnPlatformMessage);
-  RegisterCallback(Connectivity::kChannelNameStatus,
-                   &Connectivity::OnPlatformMessageStatus);
 #endif
 #ifdef ENABLE_PLUGIN_ISOLATE
   RegisterCallback(Isolate::kChannelName, &Isolate::OnPlatformMessage);
