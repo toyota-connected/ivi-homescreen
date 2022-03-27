@@ -79,11 +79,6 @@ if (BUILD_PLUGIN_ACCESSIBILITY)
     ENABLE_PLUGIN(accessibility)
 endif ()
 
-option(BUILD_PLUGIN_CONNECTIVITY "Includes Connectivity Plugin" OFF)
-if (BUILD_PLUGIN_CONNECTIVITY)
-    ENABLE_PLUGIN(connectivity)
-endif ()
-
 option(BUILD_PLUGIN_PLATFORM_VIEW "Includes PlatformView Plugin" OFF)
 if (BUILD_PLUGIN_PLATFORM_VIEW)
     ENABLE_PLUGIN(platform_views)
