@@ -125,7 +125,11 @@ bool get_video_info(const char* url,
     return false;
   }
 
+#if defined(AVFORMAT_WITH_CONST)
+  const AVCodec* dec = nullptr;
+#else
   AVCodec* dec;
+#endif
   int ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
   if (ret < 0) {
     FML_DLOG(ERROR) << "Cannot find a video stream in the input file";
@@ -384,7 +388,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
       gst_message_parse_buffering(msg, &percent);
       // FML_DLOG(INFO) << "Buffering: " << percent << "%";
 
-      //TODO - bufferingUpdate
+      // TODO - bufferingUpdate
 
       if (percent == 100) {
         // a 100% message means buffering is done
@@ -1438,7 +1442,7 @@ void Gstreamer::OnSetLooping(const FlutterPlatformMessage* message,
   SendSuccess(engine, message->response_handle);
 }
 
-//TODO - implementation specific
+// TODO - implementation specific
 void Gstreamer::OnSetVolume(const FlutterPlatformMessage* message,
                             void* userdata) {
   PrintMessageAsHex(message);
