@@ -101,9 +101,8 @@ target_compile_definitions(homescreen
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
-        ${GST_INCLUDE_DIRS}
-        ${GST_VIDEO_INCLUDE_DIRS}
-        ${AVFORMAT_INCLUDE_DIRS}
+        ${PLUGIN_GSTREAMER_INCLUDE_DIRS}
+        ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ..
         ../third_party
         ../third_party/flutter
@@ -117,9 +116,8 @@ target_link_libraries(homescreen PRIVATE
         EGL GLESv2
         Threads::Threads
         dl
-        ${GST_LIBRARIES}
-        ${GST_VIDEO_LIBRARIES}
-        ${AVFORMAT_LIBRARIES}
+        ${PLUGIN_GSTREAMER_LINK_LIBRARIES}
+        ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
         )
 
 target_link_directories(homescreen PRIVATE

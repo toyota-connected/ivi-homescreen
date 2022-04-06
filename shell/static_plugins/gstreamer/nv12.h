@@ -29,9 +29,9 @@ class Shader {
  public:
   GLint texY;
   GLint texUV;
-  GLuint innerTexture[2];
+  GLuint innerTexture[2]{};
   GLuint program;
-  GLuint framebuffer;
+  GLuint framebuffer{};
 #if NV12_DEPTH_RENDERBUFFER
   GLuint depth_renderbuffer;
 #endif
