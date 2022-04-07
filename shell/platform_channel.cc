@@ -50,6 +50,9 @@
 #ifdef ENABLE_PLUGIN_URL_LAUNCHER
 #include "static_plugins/url_launcher/url_launcher.h"
 #endif
+#ifdef ENABLE_PLUGIN_SECURE_STORAGE
+#include "static_plugins/secure_storage/secure_storage.h"
+#endif
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
 
@@ -92,5 +95,8 @@ PlatformChannel::PlatformChannel() {
 #endif
 #ifdef ENABLE_PLUGIN_URL_LAUNCHER
   RegisterCallback(UrlLauncher::kChannelName, &UrlLauncher::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_SECURE_STORAGE
+  RegisterCallback(SecureStorage::kChannelName, &SecureStorage::OnPlatformMessage);
 #endif
 }

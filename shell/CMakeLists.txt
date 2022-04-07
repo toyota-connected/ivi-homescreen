@@ -104,6 +104,7 @@ include_directories(
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
+        ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ..
         ../third_party
         ../third_party/flutter
@@ -120,6 +121,7 @@ target_link_libraries(homescreen PRIVATE
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
+        ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
         )
 
 target_link_directories(homescreen PRIVATE
