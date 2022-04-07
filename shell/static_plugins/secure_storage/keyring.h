@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include <libsecret/secret.h>
 #include <flutter/fml/logging.h>
 #include <rapidjson/document.h>
