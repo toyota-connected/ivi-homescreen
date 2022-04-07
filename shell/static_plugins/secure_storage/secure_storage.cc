@@ -18,7 +18,6 @@
 
 #include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
-#include <json/json.h>
 
 #include "engine.h"
 
@@ -26,19 +25,19 @@ static SecureStorage* pInstance_;
 static std::mutex mutex_;
 
 void SecureStorage::deleteIt(const char* key) {
-  SecureStorage::GetInstance("keyring")->keyring_.deleteItem(key);
+  GetInstance("keyring")->keyring_.deleteItem(key);
 }
 
 void SecureStorage::deleteAll() {
-  SecureStorage::GetInstance("keyring")->keyring_.deleteKeyring();
+  GetInstance("keyring")->keyring_.deleteKeyring();
 }
 
 void SecureStorage::write(const char* key, const char* value) {
-  SecureStorage::GetInstance("keyring")->keyring_.addItem(key, value);
+  GetInstance("keyring")->keyring_.addItem(key, value);
 }
 
 flutter::EncodableValue SecureStorage::read(const char* key) {
-  auto str = SecureStorage::GetInstance("keyring")->keyring_.getItem(key);
+  auto str = GetInstance("keyring")->keyring_.getItem(key);
   if (str.empty()) {
     return flutter::EncodableValue();
   }
@@ -47,19 +46,18 @@ flutter::EncodableValue SecureStorage::read(const char* key) {
 
 flutter::EncodableValue SecureStorage::readAll() {
   auto result = flutter::EncodableMap{};
-  Json::Value data =
-      SecureStorage::GetInstance("keyring")->keyring_.readFromKeyring();
-  for (const auto& each : data.getMemberNames()) {
-    result.emplace(flutter::EncodableValue(each.c_str()),
-                   flutter::EncodableValue(data[each].asCString()));
+  auto document = GetInstance("keyring")->keyring_.readFromKeyring();
+  for (rapidjson::Value::ConstMemberIterator itr = document.MemberBegin();
+       itr != document.MemberEnd(); ++itr) {
+    result.emplace(flutter::EncodableValue(itr->name.GetString()),
+                   flutter::EncodableValue(itr->value.GetString()));
   }
   return flutter::EncodableValue(result);
 }
 
 flutter::EncodableValue SecureStorage::containsKey(const char* key) {
-  Json::Value data =
-      SecureStorage::GetInstance("keyring")->keyring_.readFromKeyring();
-  return flutter::EncodableValue(data.isMember(key));
+  auto document = GetInstance("keyring")->keyring_.readFromKeyring();
+  return flutter::EncodableValue(document.HasMember(key));
 }
 
 void SecureStorage::OnPlatformMessage(const FlutterPlatformMessage* message,

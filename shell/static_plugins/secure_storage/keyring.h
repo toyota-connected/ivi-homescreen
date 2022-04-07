@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-#include <json/json.h>
 #include <libsecret/secret.h>
+#include <flutter/fml/logging.h>
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
 #include <memory>
 #include "g_hash_table.h"
 
@@ -36,39 +38,50 @@ class Keyring {
   }
 
   bool addItem(const char* key, const char* value) {
-    Json::Value root = readFromKeyring();
-    root[key] = value;
-    return this->storeToKeyring(root);
+    rapidjson::Document document = readFromKeyring();
+    if (document.HasMember(key) && document[key].IsString()) {
+      document.RemoveMember(key);
+    }
+    rapidjson::Value k(key, document.GetAllocator());
+    rapidjson::Value v(value, document.GetAllocator());
+    document.AddMember(k, v, document.GetAllocator());
+    return this->storeToKeyring(document);
   }
 
   std::string getItem(const char* key) {
-    Json::Value root = readFromKeyring();
-    Json::Value resultJson = root[key];
-    if (resultJson.isString()) {
-      return resultJson.asString();
+    rapidjson::Document root = readFromKeyring();
+    if (root.HasMember(key) && root[key].IsString()) {
+      return root[key].GetString();
     }
     return "";
   }
 
   void deleteItem(const char* key) {
-    Json::Value root = readFromKeyring();
-    root.removeMember(key);
+    rapidjson::Document root = readFromKeyring();
+    if (root.HasMember(key)) {
+      root.RemoveMember(key);
+    }
     this->storeToKeyring(root);
   }
 
-  bool deleteKeyring() { return this->storeToKeyring(Json::Value()); }
+  bool deleteKeyring() {
+    rapidjson::Document d;
+    d.SetObject();
+    return this->storeToKeyring(d);
+  }
 
-  bool storeToKeyring(const Json::Value& value) {
-    Json::StreamWriterBuilder builder;
-    const std::string output = Json::writeString(builder, value);
+  bool storeToKeyring(rapidjson::Document& d) {
     std::unique_ptr<GError> err = nullptr;
     GError* errPtr = err.get();
 
-    builder["indentation"] = "";
+    rapidjson::StringBuffer buffer;
+    buffer.Clear();
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    d.Accept(writer);
 
     bool result = secret_password_storev_sync(
         &m_schema, m_attributes.getGHashTable(), nullptr, m_label.c_str(),
-        output.c_str(), nullptr, &errPtr);
+        buffer.GetString(), nullptr, &errPtr);
 
     if (err) {
       throw std::runtime_error(err->message);
@@ -77,10 +90,8 @@ class Keyring {
     return result;
   }
 
-  Json::Value readFromKeyring() {
-    Json::Value root;
-    Json::CharReaderBuilder charBuilder;
-    std::unique_ptr<Json::CharReader> reader(charBuilder.newCharReader());
+  rapidjson::Document readFromKeyring() {
+    rapidjson::Document d;
     std::unique_ptr<GError> err = nullptr;
     GError* errPtr = err.get();
 
@@ -92,12 +103,12 @@ class Keyring {
     }
 
     if (result != nullptr && strcmp(result, "") != 0 &&
-        reader->parse(result, result + strlen(result), &root, nullptr)) {
-      return root;
+        !d.Parse(result).HasParseError()) {
+      return d;
     }
 
-    this->storeToKeyring(root);
-    return root;
+    this->storeToKeyring(d);
+    return d;
   }
 };
 
