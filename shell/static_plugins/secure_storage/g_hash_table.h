@@ -16,11 +16,31 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <libsecret/secret.h>
 
-class PackageInfo {
+namespace secret {
+
+class FHashTable {
+  GHashTable* m_hashTable;
+
  public:
-  static constexpr char kChannelName[] = "dev.fluttercommunity.plus/package_info";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+  FHashTable() { m_hashTable = g_hash_table_new(g_str_hash, nullptr); }
+
+  GHashTable* getGHashTable() { return m_hashTable; }
+
+  bool insert(const char* key, const char* value) {
+    return g_hash_table_insert(m_hashTable, (void*)key, (void*)value);
+  }
+
+  const char* get(const char* key) {
+    return (const char*)g_hash_table_lookup(m_hashTable, (void*)key);
+  }
+
+  bool contains(const char* key) {
+    return g_hash_table_contains(m_hashTable, (void*)key);
+  }
+
+  ~FHashTable() { g_hash_table_destroy(m_hashTable); }
 };
+
+}  // namespace secret
