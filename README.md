@@ -108,6 +108,21 @@ Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point do
     export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
     homescreen
 
+## FPS
+Three environmental variables impact FPS reporting.
+
+### 1. FPS_OUTPUT_CONSOLE
+
+Setting `FPS_OUTPUT_CONSOLE` to "1" will output FPS count to console.
+
+### 2. FPS_OUTPUT_OVERLAY
+
+If `FPS_OUTPUT_CONSOLE=1` and `FPS_OUTPUT_OVERLAY=1` the screen overlay is enabled.
+
+### 3. FPS_OUTPUT_FREQUENCY
+
+Changing `FPS_OUTPUT_FREQUENCY` controls the update interval.  This parameter is optional.
+
 ## Debug
 
 cd to flutter app folder
