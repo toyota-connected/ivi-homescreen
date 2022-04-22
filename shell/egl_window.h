@@ -25,8 +25,16 @@
 #include "constants.h"
 
 #include "egl.h"
+#include "xdg-shell-client-protocol.h"
+
+// workaround for Wayland macro not compiling in C++
+#define WL_ARRAY_FOR_EACH(pos, array, type)                             \
+  for (pos = (type)(array)->data;                                       \
+       (const char*)pos < ((const char*)(array)->data + (array)->size); \
+       (pos)++)
 
 class Display;
+class Engine;
 
 class EglWindow : public Egl {
  public:
@@ -34,6 +42,7 @@ class EglWindow : public Egl {
 
   EglWindow(size_t index,
             const std::shared_ptr<Display>& display,
+            struct wl_surface* base_surface,
             enum window_type type,
             std::string app_id,
             bool fullscreen,
@@ -44,14 +53,9 @@ class EglWindow : public Egl {
   EglWindow(const EglWindow&) = delete;
   const EglWindow& operator=(const EglWindow&) = delete;
 
-  [[nodiscard]] wl_surface* GetNativeSurface() const { return m_surface; }
+  void SetEngine(const std::shared_ptr<Engine>& engine);
 
-  [[maybe_unused]] [[nodiscard]] bool SurfaceConfigured() const {
-    return m_configured;
-  };
-
-  [[nodiscard]] int32_t GetWidth() const { return m_width; }
-  [[nodiscard]] int32_t GetHeight() const { return m_height; }
+  wl_surface* GetNativeSurface() { return m_base_surface; }
 
   uint32_t GetFpsCounter();
   void DrawFps(uint8_t fps);
@@ -69,18 +73,29 @@ class EglWindow : public Egl {
 
   size_t m_index;
   std::shared_ptr<Display> m_display;
-
-  struct wl_surface* m_surface;
-  struct wl_shell_surface* m_shell_surface;
+  std::shared_ptr<Engine> m_flutter_engine;
+  struct wl_surface* m_base_surface;
   wl_egl_window* m_egl_window[kEngineInstanceCount]{};
 
-  int32_t m_width;
-  int32_t m_height;
+  bool m_fullscreen{};
+  bool m_maximized{};
+  bool m_resize{};
+  bool m_activated{};
+  bool m_running{};
+  struct {
+    int32_t width;
+    int32_t height;
+  } m_geometry;
+  struct {
+    int32_t width;
+    int32_t height;
+  } m_window_size{};
 
-  bool m_fullscreen;
   enum window_type m_type;
   std::string m_app_id;
 
+  struct xdg_surface* m_xdg_surface;
+  struct xdg_toplevel* m_xdg_toplevel;
   struct wl_surface* m_fps_surface;
   struct wl_subsurface* m_subsurface;
   struct shm_buffer m_fps_buffer {};
@@ -89,11 +104,8 @@ class EglWindow : public Egl {
 
   struct shm_buffer m_buffers[2]{};
   struct wl_callback* m_callback;
-  bool m_configured;
 
   int m_frame_sync;
-
-  void toggle_fullscreen();
 
   static void buffer_release(void* data,
                              [[maybe_unused]] struct wl_buffer* buffer);
@@ -106,26 +118,22 @@ class EglWindow : public Egl {
                                int height,
                                uint32_t format);
 
-  static void handle_shell_ping(void* data,
-                                struct wl_shell_surface* shell_surface,
-                                uint32_t serial);
+  static const struct xdg_surface_listener xdg_surface_listener;
 
-  static void handle_shell_configure(void* data,
-                                     struct wl_shell_surface* shell_surface,
-                                     uint32_t edges,
-                                     int32_t width,
-                                     int32_t height);
+  static void handle_xdg_surface_configure(void* data,
+                                           struct xdg_surface* xdg_surface,
+                                           uint32_t serial);
 
-  static void handle_shell_popup_done(void* data,
-                                      struct wl_shell_surface* shell_surface);
+  static const struct xdg_toplevel_listener xdg_toplevel_listener;
 
-  static const struct wl_shell_surface_listener shell_surface_listener;
+  static void handle_toplevel_configure(void* data,
+                                        struct xdg_toplevel* toplevel,
+                                        int32_t width,
+                                        int32_t height,
+                                        struct wl_array* states);
 
-  static void handle_shell_configure_callback(void* data,
-                                              struct wl_callback* callback,
-                                              uint32_t time);
-
-  static const struct wl_callback_listener shell_configure_callback_listener;
+  static void handle_toplevel_close(void* data,
+                                    struct xdg_toplevel* xdg_toplevel);
 
   [[maybe_unused]] static struct shm_buffer* next_buffer(EglWindow* window);
 
