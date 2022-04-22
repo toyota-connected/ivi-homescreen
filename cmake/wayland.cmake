@@ -37,6 +37,3 @@ set(WAYLAND_PROTOCOL_SOURCES)
 wayland_generate(
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/agl/protocol/agl-shell.xml
         ${CMAKE_CURRENT_BINARY_DIR}/agl-shell-client-protocol)
-wayland_generate(
-        ${WAYLAND_PROTOCOLS_BASE}/unstable/pointer-gestures/pointer-gestures-unstable-v1.xml
-        ${CMAKE_CURRENT_BINARY_DIR}/pointer-gestures-unstable-v1-protocol)

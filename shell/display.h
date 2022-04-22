@@ -29,7 +29,6 @@
 
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
-#include "pointer-gestures-unstable-v1-protocol.h"
 #include "static_plugins/text_input/text_input.h"
 
 class App;
@@ -168,9 +167,6 @@ class Display {
 
   // for cursor
   struct wl_cursor_theme* m_cursor_theme{};
-
-  [[maybe_unused]] struct zwp_pointer_gestures_v1* m_gestures{};
-  [[maybe_unused]] struct zwp_pointer_gesture_swipe_v1* m_pointer_swipe{};
 
   struct xkb_context* m_xkb_context;
   struct xkb_keymap* m_keymap;
@@ -354,31 +350,4 @@ class Display {
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
 
   static const struct wl_touch_listener touch_listener;
-
-  static void gesture_pinch_begin(
-      void* data,
-      struct zwp_pointer_gesture_pinch_v1* zwp_pointer_gesture_pinch_v1,
-      uint32_t serial,
-      uint32_t time,
-      struct wl_surface* surface,
-      uint32_t fingers);
-
-  static void gesture_pinch_update(
-      void* data,
-      struct zwp_pointer_gesture_pinch_v1* zwp_pointer_gesture_pinch_v1,
-      uint32_t time,
-      wl_fixed_t dx,
-      wl_fixed_t dy,
-      wl_fixed_t scale,
-      wl_fixed_t rotation);
-
-  static void gesture_pinch_end(
-      void* data,
-      struct zwp_pointer_gesture_pinch_v1* zwp_pointer_gesture_pinch_v1,
-      uint32_t serial,
-      uint32_t time,
-      int32_t cancelled);
-
-  [[maybe_unused]] static const struct zwp_pointer_gesture_pinch_v1_listener
-      gesture_pinch_listener;
 };

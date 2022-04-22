@@ -167,11 +167,6 @@ void Display::registry_handle_global(void* data,
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
   }
 
-  else if (strcmp(interface, zwp_pointer_gestures_v1_interface.name) == 0) {
-    d->m_gestures = static_cast<zwp_pointer_gestures_v1*>(wl_registry_bind(
-        registry, name, &zwp_pointer_gestures_v1_interface, 1));
-  }
-
   else if (strcmp(interface, agl_shell_interface.name) == 0) {
     d->m_agl_shell = static_cast<struct agl_shell*>(
         wl_registry_bind(registry, name, &agl_shell_interface, 1));
@@ -648,52 +643,6 @@ const struct wl_touch_listener Display::touch_listener = {
     .motion = touch_handle_motion,
     .frame = touch_handle_frame,
     .cancel = touch_handle_cancel,
-};
-
-void Display::gesture_pinch_begin(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
-        zwp_pointer_gesture_pinch_v1,
-    [[maybe_unused]] uint32_t serial,
-    [[maybe_unused]] uint32_t time,
-    [[maybe_unused]] struct wl_surface* surface,
-    [[maybe_unused]] uint32_t fingers) {
-  //  FML_DLOG(INFO) << "gesture_pinch_begin: fingers: " << fingers;
-}
-
-void Display::gesture_pinch_update(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
-        zwp_pointer_gesture_pinch_v1,
-    [[maybe_unused]] uint32_t time,
-    [[maybe_unused]] wl_fixed_t dx,
-    [[maybe_unused]] wl_fixed_t dy,
-    [[maybe_unused]] wl_fixed_t scale,
-    [[maybe_unused]] wl_fixed_t rotation) {
-#if 0
-  FML_DLOG(INFO) << "gesture_pinch_update: " << wl_fixed_to_double(dx) << ", "
-                 << wl_fixed_to_double(dy)
-                 << " scale: " << wl_fixed_to_double(scale)
-                 << ", rotation: " << wl_fixed_to_double(rotation);
-#endif
-}
-
-void Display::gesture_pinch_end(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
-        zwp_pointer_gesture_pinch_v1,
-    [[maybe_unused]] uint32_t serial,
-    [[maybe_unused]] uint32_t time,
-    [[maybe_unused]] int32_t cancelled) {
-  //  FML_DLOG(INFO) << "gesture_pinch_end";
-  //  FML_DLOG(INFO) << "gesture_pinch_begin: cancelled: " << cancelled;
-}
-
-[[maybe_unused]] const struct zwp_pointer_gesture_pinch_v1_listener
-    Display::gesture_pinch_listener = {
-        .begin = gesture_pinch_begin,
-        .update = gesture_pinch_update,
-        .end = gesture_pinch_end,
 };
 
 [[maybe_unused]] void Display::AglShellDoBackground(
