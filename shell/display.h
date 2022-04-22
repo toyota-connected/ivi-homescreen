@@ -74,6 +74,8 @@ class Display {
 
   void SetEngine(std::shared_ptr<Engine> engine);
 
+  void SetSurface(wl_surface* surface);
+
   bool ActivateSystemCursor([[maybe_unused]] int32_t device,
                             const std::string& kind);
 
@@ -91,11 +93,11 @@ class Display {
 
   struct wl_display* m_display;
   struct wl_registry* m_registry;
-  struct wl_output* m_output;
   struct wl_compositor* m_compositor;
   struct wl_subcompositor* m_subcompositor;
   struct wl_shell* m_shell{};
   struct wl_shm* m_shm{};
+  struct wl_surface* m_surface{};
 
   struct wl_seat* m_seat{};
   struct wl_keyboard* m_keyboard;
@@ -166,30 +168,24 @@ class Display {
 
   std::shared_ptr<TextInput> m_text_input{};
 
-  struct info {
-    struct {
-      int32_t x;
-      int32_t y;
-      int32_t physical_width;
-      int32_t physical_height;
-      int32_t size;
-      int32_t subpixel;
-      std::string make;
-      std::string model;
-      int32_t transform;
-    } geometry;
+  typedef struct output_info {
+    struct wl_output* output;
+    uint32_t global_id;
+    unsigned width;
+    unsigned height;
+    unsigned physical_width;
+    unsigned physical_height;
+    int refresh_rate;
+    int32_t scale;
+    bool done;
+  } output_info_t;
 
-    struct {
-      int32_t width;
-      int32_t height;
-      double dots_per_in;
-    } mode{};
+  std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
+  output_info_t* m_current_output{};
+  int32_t m_last_buffer_scale;
+  int32_t m_buffer_scale;
 
-    struct {
-      int32_t scale;
-    } scale{};
-
-  } m_info;
+  static void dump_output(output_info_t* output);
 
   static const struct wl_registry_listener registry_listener;
 
@@ -232,6 +228,12 @@ class Display {
   static void wl_output_configure_callback(void* data,
                                            wl_callback* wl_callback,
                                            uint32_t time);
+
+  static const struct wl_surface_listener primary_surface_listener;
+
+  static void handle_primary_surface_enter(void* data,
+                                           struct wl_surface* wl_surface,
+                                           struct wl_output* output);
 
   static const struct wl_shm_listener shm_listener;
 
