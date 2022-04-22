@@ -67,13 +67,6 @@ class Display {
     return m_shm;
   }
 
-  [[maybe_unused]] [[nodiscard]] int32_t GetModeWidth() const {
-    return m_info.mode.width;
-  }
-  [[maybe_unused]] [[nodiscard]] int32_t GetModeHeight() const {
-    return m_info.mode.height;
-  }
-
   [[maybe_unused]] void AglShellDoBackground(struct wl_surface*);
   [[maybe_unused]] void AglShellDoPanel(struct wl_surface*,
                                         enum agl_shell_edge mode);
@@ -109,7 +102,6 @@ class Display {
 
   struct agl_shell* m_agl_shell;
 
-  bool m_has_xrgb;
 
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface;
@@ -233,7 +225,7 @@ class Display {
                                    int scale);
   static void display_handle_done(void* data, struct wl_output* wl_output);
 
-  bool m_is_configured;
+  bool m_is_configured{};
 
   static const struct wl_callback_listener configure_callback_listener;
 

@@ -19,7 +19,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <cassert>
 #include <cstring>
 #include <utility>
 
@@ -48,9 +47,6 @@ EglWindow::EglWindow(size_t index,
   FML_DLOG(INFO) << "+ EglWindow()";
 
   m_surface = wl_compositor_create_surface(m_display->GetCompositor());
-  assert(m_surface);
-  FML_DLOG(INFO) << "EglWindow::m_surface = " << static_cast<void*>(m_surface);
-
   m_fps_surface = wl_compositor_create_surface(m_display->GetCompositor());
   m_subsurface = wl_subcompositor_get_subsurface(m_display->GetSubCompositor(),
                                                  m_fps_surface, m_surface);
@@ -359,72 +355,7 @@ void EglWindow::handle_shell_configure_callback(
 const struct wl_callback_listener EglWindow::shell_configure_callback_listener =
     {.done = handle_shell_configure_callback};
 
-void EglWindow::paint_pixels_top(void* image,
-                                 [[maybe_unused]] int padding,
-                                 int width,
-                                 int height,
-                                 [[maybe_unused]] uint32_t time) {
-  memset(image, 0xa0,
-         static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-}
 
-void EglWindow::paint_pixels_bottom(void* image,
-                                    [[maybe_unused]] int padding,
-                                    int width,
-                                    int height,
-                                    [[maybe_unused]] uint32_t time) {
-  memset(image, 0xa0,
-         static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-}
-
-void EglWindow::paint_pixels(void* image,
-                             int padding,
-                             int width,
-                             int height,
-                             uint32_t time) {
-  const int halfh = padding + (height - padding * 2) / 2;
-  const int halfw = padding + (width - padding * 2) / 2;
-  int ir;
-  int _or;
-  auto* pixel = reinterpret_cast<uint32_t*>(image);
-  int y;
-
-  /* squared radii thresholds */
-  _or = (halfw < halfh ? halfw : halfh) - 8;
-  ir = _or - 32;
-  _or *= _or;
-  ir *= ir;
-
-  pixel += padding * width;
-  for (y = padding; y < height - padding; y++) {
-    int x;
-    int y2 = (y - halfh) * (y - halfh);
-
-    pixel += padding;
-    for (x = padding; x < width - padding; x++) {
-      uint32_t v;
-
-      /* squared distance from center */
-      int r2 = (x - halfw) * (x - halfw) + y2;
-
-      if (r2 < ir)
-        v = (r2 / 32 + time / 64) * 0x0080401;
-      else if (r2 < _or)
-        v = (y + time / 32) * 0x0080401;
-      else
-        v = (x + time / 16) * 0x0080401;
-      v &= 0x00ffffff;
-
-      /* cross if compositor uses X from XRGB as alpha */
-      if (abs(x - y) > 6 && abs(x + y - height) > 6)
-        v |= 0xff000000;
-
-      *pixel++ = v;
-    }
-
-    pixel += padding;
-  }
-}
 
 void EglWindow::redraw(void* data,
                        struct wl_callback* callback,
@@ -449,10 +380,12 @@ uint32_t EglWindow::GetFpsCounter() {
 }
 
 const struct wl_callback_listener EglWindow::frame_listener = {redraw};
+
 [[maybe_unused]] EglWindow::shm_buffer* EglWindow::next_buffer(
     [[maybe_unused]] EglWindow* window) {
   return nullptr;
 }
+
 void EglWindow::toggle_fullscreen() {
   if (m_fullscreen) {
     wl_shell_surface_set_fullscreen(m_shell_surface,
