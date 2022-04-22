@@ -38,7 +38,6 @@ class EglWindow : public Egl {
             std::string app_id,
             bool fullscreen,
             bool debug_egl,
-            bool sprawl,
             int32_t width,
             int32_t height);
   ~EglWindow();
@@ -79,7 +78,6 @@ class EglWindow : public Egl {
   int32_t m_height;
 
   bool m_fullscreen;
-  bool m_sprawl;
   enum window_type m_type;
   std::string m_app_id;
 
