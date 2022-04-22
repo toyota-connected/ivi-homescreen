@@ -107,8 +107,9 @@ App::App(const std::string& app_id,
   m_fps_counter = 0;
 
   const char* envstr_console;
+  char* pEnd;
   if ((envstr_console = getenv("FPS_OUTPUT_CONSOLE")) != nullptr) {
-    int val = atoi(envstr_console);
+    long val = strtol(envstr_console, &pEnd, 10);
 
     if (0 < val) {
       m_fps_output |= 0x01;
@@ -117,7 +118,7 @@ App::App(const std::string& app_id,
 
   const char* envstr_overlay;
   if ((envstr_overlay = getenv("FPS_OUTPUT_OVERLAY")) != nullptr) {
-    int val = atoi(envstr_overlay);
+    long val = strtol(envstr_overlay, &pEnd, 10);
 
     if (0 < val) {
       m_fps_output |= 0x02;
@@ -126,7 +127,7 @@ App::App(const std::string& app_id,
 
   const char* envstr_freq;
   if ((envstr_freq = getenv("FPS_OUTPUT_FREQUENCY")) != nullptr) {
-    int val = atoi(envstr_freq);
+    long val = strtol(envstr_freq, &pEnd, 10);
 
     if (0 < val) {
       m_fps_period = val;

@@ -43,7 +43,7 @@ class App {
   uint8_t m_fps_output;
   uint32_t m_fps_period;
   uint32_t m_fps_counter;
-  int32_t m_fps_pretime;
+  long long m_fps_pretime;
 #ifdef ENABLE_TEXTURE_TEST
   std::unique_ptr<TextureTest> m_texture_test;
 #endif
