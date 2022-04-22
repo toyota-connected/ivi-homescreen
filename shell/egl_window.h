@@ -83,9 +83,9 @@ class EglWindow : public Egl {
 
   struct wl_surface* m_fps_surface;
   struct wl_subsurface* m_subsurface;
-  struct shm_buffer m_fps_buffer;
+  struct shm_buffer m_fps_buffer {};
   uint8_t m_fps_idx;
-  uint8_t m_fps[20];
+  uint8_t m_fps[20]{};
 
   struct shm_buffer m_buffers[2]{};
   struct wl_callback* m_callback;
@@ -128,24 +128,6 @@ class EglWindow : public Egl {
   static const struct wl_callback_listener shell_configure_callback_listener;
 
   [[maybe_unused]] static struct shm_buffer* next_buffer(EglWindow* window);
-
-  static void paint_pixels_top(void* image,
-                               int padding,
-                               int width,
-                               int height,
-                               uint32_t time);
-
-  static void paint_pixels_bottom(void* image,
-                                  int padding,
-                                  int width,
-                                  int height,
-                                  uint32_t time);
-
-  static void paint_pixels(void* image,
-                           int padding,
-                           int width,
-                           int height,
-                           uint32_t time);
 
   static void redraw(void* data, struct wl_callback* callback, uint32_t time);
 

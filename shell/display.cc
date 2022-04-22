@@ -41,7 +41,6 @@ Display::Display([[maybe_unused]] App* app,
       m_keymap(nullptr),
       m_xkb_state(nullptr),
       m_agl_shell(nullptr),
-      m_has_xrgb(false),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   FML_DLOG(INFO) << "+ Display()";
@@ -82,10 +81,6 @@ Display::Display([[maybe_unused]] App* app,
     FML_LOG(INFO) << "No agl_shell extension present";
   }
 
-  if (!m_has_xrgb) {
-    FML_LOG(INFO) << "WL_SHM_FORMAT_XRGB32 not available";
-  }
-
   FML_DLOG(INFO) << "- Display()";
 }
 
@@ -117,11 +112,12 @@ Display::~Display() {
   FML_DLOG(INFO) << "- ~Display()";
 }
 
-void Display::registry_handle_global(void* data,
-                                     [[maybe_unused]] struct wl_registry* registry,
-                                     [[maybe_unused]] uint32_t name,
-                                     [[maybe_unused]] const char* interface,
-                                     [[maybe_unused]] uint32_t version) {
+void Display::registry_handle_global(
+    void* data,
+    [[maybe_unused]] struct wl_registry* registry,
+    [[maybe_unused]] uint32_t name,
+    [[maybe_unused]] const char* interface,
+    [[maybe_unused]] uint32_t version) {
   auto* d = static_cast<Display*>(data);
 
   FML_DLOG(INFO) << "Wayland: " << interface;
@@ -131,7 +127,7 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_compositor_interface, 1));
   }
 
-  if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
+  else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
     d->m_subcompositor = static_cast<struct wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface, 1));
   }
@@ -139,7 +135,9 @@ void Display::registry_handle_global(void* data,
   if (strcmp(interface, wl_shell_interface.name) == 0) {
     d->m_shell = static_cast<struct wl_shell*>(
         wl_registry_bind(registry, name, &wl_shell_interface, 1));
-  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  }
+  
+  else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<struct wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface, 1));
 
@@ -273,8 +271,6 @@ void Display::wl_output_configure_callback(void* data,
   wl_callback_destroy(callback);
 
   display->m_is_configured = true;
-
-  FML_DLOG(INFO) << "configuration is done";
 }
 
 const struct wl_callback_listener Display::configure_callback_listener = {
@@ -284,10 +280,9 @@ const struct wl_callback_listener Display::configure_callback_listener = {
 void Display::shm_format(void* data,
                          [[maybe_unused]] struct wl_shm* wl_shm,
                          [[maybe_unused]] uint32_t format) {
-  auto* display = reinterpret_cast<Display*>(data);
-
-  if (format == WL_SHM_FORMAT_XRGB8888)
-    display->m_has_xrgb = true;
+  (void)data;
+  (void)wl_shm;
+  (void)format;
 }
 
 const struct wl_shm_listener Display::shm_listener = {shm_format};
@@ -510,7 +505,8 @@ void Display::keyboard_handle_key([[maybe_unused]] void* data,
 #else
 #if !defined(NDEBUG)
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    [[maybe_unused]] xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
+    [[maybe_unused]] xkb_keysym_t keysym =
+        xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
     uint32_t utf32 = xkb_keysym_to_utf32(keysym);
     if (utf32) {
       FML_DLOG(INFO) << "[Press] U" << utf32;
@@ -691,12 +687,14 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
       return false;
     }
 
-    [[maybe_unused]] auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    [[maybe_unused]] auto cursor =
+        wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
       FML_DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
       return false;
     }
-    [[maybe_unused]] auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
+    [[maybe_unused]] auto cursor_buffer =
+        wl_cursor_image_get_buffer(cursor->images[0]);
     if (cursor_buffer && m_cursor_surface) {
       wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
                             m_cursor_surface,
@@ -715,6 +713,7 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
 
   return true;
 }
+
 void Display::SetTextInput(std::shared_ptr<TextInput> text_input) {
   m_text_input = std::move(text_input);
 }

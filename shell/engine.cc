@@ -574,7 +574,7 @@ bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
 [[maybe_unused]] void Engine::SetTextInput(TextInput* text_input) {
   m_text_input = text_input;
 }
-[[maybe_unused]] TextInput* Engine::GetTextInput() {
+[[maybe_unused]] TextInput* Engine::GetTextInput() const {
   return m_text_input;
-};
+}
 #endif
