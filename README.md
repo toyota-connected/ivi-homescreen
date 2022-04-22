@@ -125,11 +125,7 @@ Changing `FPS_OUTPUT_FREQUENCY` controls the update interval.  This parameter is
 
 ## Debug
 
-cd to flutter app folder
-
-    flutter config --enable-linux-desktop
-    flutter create .
-    flutter attach --debug-port 41795 --host-vmservice-port 41795
+Setup custom devices to control ivi-homescreen via debugger. 
 
 # CMAKE dependency paths
 
