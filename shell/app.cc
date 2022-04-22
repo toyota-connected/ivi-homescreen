@@ -89,6 +89,9 @@ App::App(const std::string& app_id,
   // Enable pointer events
   m_display->SetEngine(m_flutter_engine[0]);
 
+  // Buffer Scaling
+  m_display->SetSurface(m_egl_window[0]->GetNativeSurface());
+
 #ifdef ENABLE_TEXTURE_TEST
   m_texture_test->SetEngine(m_flutter_engine[0]);
 #endif

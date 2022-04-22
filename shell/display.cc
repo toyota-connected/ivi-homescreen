@@ -14,6 +14,7 @@
 
 #include "display.h"
 
+#include <algorithm>
 #include <flutter/fml/logging.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -32,7 +33,6 @@ Display::Display([[maybe_unused]] App* app,
                  std::string cursor_theme_name)
     : m_flutter_engine(nullptr),
       m_display(nullptr),
-      m_output(nullptr),
       m_compositor(nullptr),
       m_subcompositor(nullptr),
       m_cursor_surface(nullptr),
@@ -40,7 +40,9 @@ Display::Display([[maybe_unused]] App* app,
       m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
       m_keymap(nullptr),
       m_xkb_state(nullptr),
-      m_agl_shell(nullptr),
+      m_buffer_scale(1),
+      m_last_buffer_scale(1),
+	  m_agl_shell(nullptr),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   FML_DLOG(INFO) << "+ Display()";
@@ -70,10 +72,6 @@ Display::Display([[maybe_unused]] App* app,
 
   if (!m_shm) {
     FML_LOG(ERROR) << "No wl_shm global";
-    assert(false);
-  }
-
-  if (!m_output) {
     assert(false);
   }
 
@@ -151,9 +149,15 @@ void Display::registry_handle_global(
   }
 
   else if (strcmp(interface, wl_output_interface.name) == 0) {
-    d->m_output = static_cast<struct wl_output*>(
-        wl_registry_bind(registry, name, &wl_output_interface, 1));
-    wl_output_add_listener(d->m_output, &output_listener, d);
+    auto oi = std::make_shared<output_info_t>();
+    std::fill_n(oi.get(), 1, output_info_t{});
+    oi->global_id = name;
+    oi->output = static_cast<struct wl_output*>(wl_registry_bind(
+        registry, name, &wl_output_interface,
+        std::min(static_cast<uint32_t>(2), version)));
+    wl_output_add_listener(oi->output, &output_listener, oi.get());
+    d->m_all_outputs.push_back(oi);
+
     d->m_is_configured = false;
     wl_callback* callback = wl_display_sync(d->GetDisplay());
     wl_callback_add_listener(callback, &configure_callback_listener, d);
@@ -194,69 +198,55 @@ void Display::display_handle_geometry(void* data,
                                       const char* make,
                                       const char* model,
                                       int transform) {
-  auto* d = static_cast<Display*>(data);
+  (void)data;
+  (void)wl_output;
+  (void)x;
+  (void)y;
+  (void)subpixel;
+  (void)make;
+  (void)model;
+  (void)transform;
 
-  if (wl_output == d->m_output) {
-    d->m_info.geometry.x = x;
-    d->m_info.geometry.y = y;
-    d->m_info.geometry.physical_width = physical_width;
-    d->m_info.geometry.physical_height = physical_height;
-    d->m_info.geometry.subpixel = subpixel;
-    d->m_info.geometry.size = physical_width * physical_height;
-    d->m_info.geometry.make = std::string(make);
-    d->m_info.geometry.model = std::string(model);
-    d->m_info.geometry.transform = transform;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->physical_width = physical_width;
+  oi->physical_height = physical_height;
 
-    FML_DLOG(INFO) << "x: " << d->m_info.geometry.x;
-    FML_DLOG(INFO) << "y: " << d->m_info.geometry.y;
-    FML_DLOG(INFO) << "physical_width: " << d->m_info.geometry.physical_width;
-    FML_DLOG(INFO) << "physical_height: " << d->m_info.geometry.physical_height;
-    FML_DLOG(INFO) << "size: " << d->m_info.geometry.size;
-    FML_DLOG(INFO) << "subpixel: " << d->m_info.geometry.subpixel;
-    FML_DLOG(INFO) << "make: " << d->m_info.geometry.make;
-    FML_DLOG(INFO) << "model: " << d->m_info.geometry.model;
-    FML_DLOG(INFO) << "transform: " << d->m_info.geometry.transform;
-  }
+  FML_DLOG(INFO) << "Physical width: " << physical_width << " mm x "
+                 << physical_height << " mm";
 }
 
 void Display::display_handle_mode(void* data,
-                                  [[maybe_unused]] struct wl_output* wl_output,
-                                  [[maybe_unused]] uint32_t flags,
+                                  struct wl_output* wl_output,
+                                  uint32_t flags,
                                   int width,
                                   int height,
-                                  [[maybe_unused]] int refresh) {
-  auto* d = static_cast<Display*>(data);
+                                  int refresh) {
+  (void)wl_output;
+  (void)flags;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->width = width;
+  oi->height = height;
+  oi->refresh_rate = refresh;
 
-  if (wl_output == d->m_output && (flags & WL_OUTPUT_MODE_CURRENT)) {
-    double dots = width * height;
-    double dots_per_mm = dots / d->m_info.geometry.size;
-    double dots_per_in = dots_per_mm / 0.155;
-
-    d->m_info.mode.width = width;
-    d->m_info.mode.height = height;
-    d->m_info.mode.dots_per_in = dots_per_in;
-
-    FML_DLOG(INFO) << "width: " << d->m_info.mode.width;
-    FML_DLOG(INFO) << "height: " << d->m_info.mode.height;
-    FML_DLOG(INFO) << "dpi: " << d->m_info.mode.dots_per_in;
-  }
+  FML_DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
+                 << (refresh > 1000 ? refresh / 1000.0 : (double)refresh)
+                 << " Hz";
 }
 
 void Display::display_handle_scale(void* data,
                                    struct wl_output* wl_output,
-                                   int scale) {
-  auto* d = static_cast<Display*>(data);
+                                   int32_t factor) {
+  (void)wl_output;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->scale = factor;
 
-  if (wl_output == d->m_output) {
-    d->m_info.scale.scale = scale;
-
-    FML_DLOG(INFO) << "scale: " << d->m_info.scale.scale;
-  }
+  FML_DLOG(INFO) << "Display Scale Factor: " << factor;
 }
 
 void Display::display_handle_done(void* data, struct wl_output* wl_output) {
-  (void)data;
   (void)wl_output;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->done = true;
 }
 
 const struct wl_output_listener Display::output_listener = {
@@ -716,4 +706,50 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
 
 void Display::SetTextInput(std::shared_ptr<TextInput> text_input) {
   m_text_input = std::move(text_input);
+}
+
+void Display::dump_output(output_info_t* output) {
+  FML_DLOG(INFO) << "wl_output: " << output->output;
+  FML_DLOG(INFO) << "global_id: " << output->global_id;
+  FML_DLOG(INFO) << "width: " << output->width;
+  FML_DLOG(INFO) << "height: " << output->height;
+  FML_DLOG(INFO) << "physical_width: " << output->physical_width << " mm";
+  FML_DLOG(INFO) << "physical_height: " << output->physical_height << " mm";
+  FML_DLOG(INFO) << "refresh_rate: "
+                 << (output->refresh_rate > 1000
+                         ? output->refresh_rate / 1000.0
+                         : (double)output->refresh_rate);
+  FML_DLOG(INFO) << "scale: " << output->scale;
+  FML_DLOG(INFO) << "done: " << (output->done ? "true" : "false");
+}
+
+void Display::handle_primary_surface_enter(void* data,
+                                           struct wl_surface* wl_surface,
+                                           struct wl_output* output) {
+  (void)output;
+  (void)wl_surface;
+  auto* d = static_cast<Display*>(data);
+
+  for (auto& out : d->m_all_outputs) {
+    if (out->output == output) {
+      dump_output(out.get());
+
+      FML_DLOG(INFO) << "Entering output #" << out->global_id << ", scale "
+                     << out->scale;
+      d->m_current_output = out.get();
+      d->m_last_buffer_scale = d->m_buffer_scale;
+      d->m_buffer_scale = out->scale;
+      break;
+    }
+  }
+}
+
+const struct wl_surface_listener Display::primary_surface_listener = {
+    handle_primary_surface_enter};
+
+void Display::SetSurface(wl_surface* surface) {
+  m_surface = surface;
+  // TODO: wl_surface_set_buffer_scale requires wl_compositor version >= 3
+  // wl_surface_set_buffer_scale(m_surface, m_buffer_scale);
+  wl_surface_add_listener(m_surface, &primary_surface_listener, this);
 }
