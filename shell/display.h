@@ -30,13 +30,13 @@
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
 #include "static_plugins/text_input/text_input.h"
+#include "xdg-shell-client-protocol.h"
 
-class App;
 class Engine;
 
 class Display {
  public:
-  explicit Display(App* app, bool enable_cursor, std::string cursor_theme_name);
+  explicit Display(bool enable_cursor, std::string cursor_theme_name);
   ~Display();
   Display(const Display&) = delete;
   const Display& operator=(const Display&) = delete;
@@ -56,9 +56,13 @@ class Display {
     return m_display;
   }
 
-  struct wl_shell* GetShell() {
-    return m_shell;
-  };
+  struct xdg_wm_base* GetXdgWmBase() {
+    return m_xdg_wm_base;
+  }
+
+  struct wl_surface* GetBaseSurface() {
+    return m_base_surface;
+  }
 
   [[maybe_unused]] struct agl_shell* GetAglShell() { return m_agl_shell; };
 
@@ -67,46 +71,38 @@ class Display {
     return m_shm;
   }
 
-  [[maybe_unused]] void AglShellDoBackground(struct wl_surface*);
+  [[maybe_unused]] void AglShellDoBackground(struct wl_surface*,
+                                             size_t index);
   [[maybe_unused]] void AglShellDoPanel(struct wl_surface*,
-                                        enum agl_shell_edge mode);
+                                        enum agl_shell_edge mode,
+                                        size_t index);
   [[maybe_unused]] void AglShellDoReady();
 
   void SetEngine(std::shared_ptr<Engine> engine);
-
-  void SetSurface(wl_surface* surface);
 
   bool ActivateSystemCursor([[maybe_unused]] int32_t device,
                             const std::string& kind);
 
   void SetTextInput(std::shared_ptr<TextInput> text_input);
 
-  bool IsConfigured() { return m_is_configured; }
-
-  void WaitForConfig() {
-    while (wl_display_dispatch(GetDisplay()) != -1 && !m_is_configured)
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
-
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
   struct wl_display* m_display;
   struct wl_registry* m_registry;
-  struct wl_compositor* m_compositor;
-  struct wl_subcompositor* m_subcompositor;
-  struct wl_shell* m_shell{};
+  struct wl_compositor* m_compositor{};
+  struct wl_subcompositor* m_subcompositor{};
   struct wl_shm* m_shm{};
-  struct wl_surface* m_surface{};
+  struct wl_surface* m_base_surface{};
 
   struct wl_seat* m_seat{};
-  struct wl_keyboard* m_keyboard;
+  struct wl_keyboard* m_keyboard{};
 
-  struct agl_shell* m_agl_shell;
-
+  struct agl_shell* m_agl_shell{};
+  struct xdg_wm_base* m_xdg_wm_base{};
 
   bool m_enable_cursor;
-  struct wl_surface* m_cursor_surface;
+  struct wl_surface* m_cursor_surface{};
   std::string m_cursor_theme_name;
 
   struct pointer_event {
@@ -163,8 +159,8 @@ class Display {
   struct wl_cursor_theme* m_cursor_theme{};
 
   struct xkb_context* m_xkb_context;
-  struct xkb_keymap* m_keymap;
-  struct xkb_state* m_xkb_state;
+  struct xkb_keymap* m_keymap{};
+  struct xkb_state* m_xkb_state{};
 
   std::shared_ptr<TextInput> m_text_input{};
 
@@ -181,11 +177,9 @@ class Display {
   } output_info_t;
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
-  output_info_t* m_current_output{};
-  int32_t m_last_buffer_scale;
   int32_t m_buffer_scale;
-
-  static void dump_output(output_info_t* output);
+  int32_t m_last_buffer_scale;
+  bool m_buffer_scale_enable{};
 
   static const struct wl_registry_listener registry_listener;
 
@@ -221,19 +215,15 @@ class Display {
                                    int scale);
   static void display_handle_done(void* data, struct wl_output* wl_output);
 
-  bool m_is_configured{};
+  static const struct wl_surface_listener base_surface_listener;
 
-  static const struct wl_callback_listener configure_callback_listener;
-
-  static void wl_output_configure_callback(void* data,
-                                           wl_callback* wl_callback,
-                                           uint32_t time);
-
-  static const struct wl_surface_listener primary_surface_listener;
-
-  static void handle_primary_surface_enter(void* data,
+  static void handle_base_surface_enter(void* data,
                                            struct wl_surface* wl_surface,
                                            struct wl_output* output);
+
+  static void handle_base_surface_leave(void *data,
+                                          struct wl_surface *wl_surface,
+                                          struct wl_output *output);
 
   static const struct wl_shm_listener shm_listener;
 
@@ -244,6 +234,10 @@ class Display {
   static void seat_handle_capabilities(void* data,
                                        struct wl_seat* seat,
                                        uint32_t caps);
+
+  static void seat_handle_name(void* data,
+                               struct wl_seat* seat,
+                               const char *name);
 
   static FlutterPointerPhase getPointerPhase(struct pointer* p);
 
@@ -278,6 +272,23 @@ class Display {
                                   uint32_t axis,
                                   wl_fixed_t value);
 
+  static void pointer_handle_frame(void *data,
+                                   struct wl_pointer *wl_pointer);
+
+  static void pointer_handle_axis_source(void *data,
+                                         struct wl_pointer *wl_pointer,
+                                         uint32_t axis_source);
+
+  static void pointer_handle_axis_stop(void *data,
+                                       struct wl_pointer *wl_pointer,
+                                       uint32_t time,
+                                       uint32_t axis);
+
+  static void pointer_handle_axis_discrete(void *data,
+                                           struct wl_pointer *wl_pointer,
+                                           uint32_t axis,
+                                           int32_t discrete);
+
   static const struct wl_pointer_listener pointer_listener;
 
   static void keyboard_handle_keymap(void* data,
@@ -311,6 +322,11 @@ class Display {
                                         uint32_t mods_latched,
                                         uint32_t mods_locked,
                                         uint32_t group);
+
+  static void keyboard_handle_repeat_info(void *data,
+                                          struct wl_keyboard *wl_keyboard,
+                                          int32_t rate,
+                                          int32_t delay);
 
   static const struct wl_keyboard_listener keyboard_listener;
 
