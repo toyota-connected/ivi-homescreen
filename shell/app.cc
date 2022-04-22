@@ -67,17 +67,17 @@ App::App(const std::string& app_id,
   }
 
   for (size_t i = 0; i < kEngineInstanceCount; i++) {
-    m_engine[i] = std::make_shared<Engine>(this, i, m_command_line_args_c,
+    m_flutter_engine[i] = std::make_shared<Engine>(this, i, m_command_line_args_c,
                                            application_override_path);
-    m_engine[i]->Run(pthread_self());
+    m_flutter_engine[i]->Run(pthread_self());
 
-    if (!m_engine[i]->IsRunning()) {
+    if (!m_flutter_engine[i]->IsRunning()) {
       FML_LOG(ERROR) << "Failed to Run Engine";
       exit(-1);
     }
 
     // Set Flutter Window Size
-    auto result = m_engine[i]->SetWindowSize(m_egl_window[i]->GetHeight(),
+    auto result = m_flutter_engine[i]->SetWindowSize(m_egl_window[i]->GetHeight(),
                                              m_egl_window[i]->GetWidth());
     if (result != kSuccess) {
       FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
@@ -87,13 +87,13 @@ App::App(const std::string& app_id,
   }
 
   // Enable pointer events
-  m_display->SetEngine(m_engine[0]);
+  m_display->SetEngine(m_flutter_engine[0]);
 
 #ifdef ENABLE_TEXTURE_TEST
-  m_texture_test->SetEngine(m_engine[0]);
+  m_texture_test->SetEngine(m_flutter_engine[0]);
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-  m_text_input->SetEngine(m_engine[0]);
+  m_text_input->SetEngine(m_flutter_engine[0]);
   m_display->SetTextInput(m_text_input);
 #endif
 
@@ -151,7 +151,7 @@ int App::Loop() {
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
 
-  for (auto& i : m_engine) {
+  for (auto& i : m_flutter_engine) {
     i->RunTask();
   }
 
