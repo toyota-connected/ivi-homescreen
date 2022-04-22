@@ -37,3 +37,6 @@ set(WAYLAND_PROTOCOL_SOURCES)
 wayland_generate(
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/agl/protocol/agl-shell.xml
         ${CMAKE_CURRENT_BINARY_DIR}/agl-shell-client-protocol)
+wayland_generate(
+        ${WAYLAND_PROTOCOLS_BASE}/stable/xdg-shell/xdg-shell.xml
+        ${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-client-protocol)

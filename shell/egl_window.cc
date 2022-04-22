@@ -24,9 +24,12 @@
 
 #include "constants.h"
 #include "display.h"
+#include "engine.h"
+
 
 EglWindow::EglWindow(size_t index,
                      const std::shared_ptr<Display>& display,
+                     struct wl_surface* base_surface,
                      enum window_type type,
                      std::string app_id,
                      bool fullscreen,
@@ -36,68 +39,51 @@ EglWindow::EglWindow(size_t index,
     : Egl(display->GetDisplay(), debug_egl),
       m_index(index),
       m_display(display),
-      m_width(width),
-      m_height(height),
+      m_base_surface(base_surface),
+      m_flutter_engine(nullptr),
+      m_geometry({width, height}),
       m_type(type),
       m_app_id(std::move(app_id)),
-      m_callback(nullptr),
-      m_configured(false),
       m_fullscreen(fullscreen),
       m_frame_sync(0) {  // disable vsync
   FML_DLOG(INFO) << "+ EglWindow()";
 
-  m_surface = wl_compositor_create_surface(m_display->GetCompositor());
   m_fps_surface = wl_compositor_create_surface(m_display->GetCompositor());
   m_subsurface = wl_subcompositor_get_subsurface(m_display->GetSubCompositor(),
-                                                 m_fps_surface, m_surface);
+                                                 m_fps_surface,
+                                                 m_base_surface);
   wl_subsurface_set_position(m_subsurface, 50, 50);
   wl_subsurface_set_sync(m_subsurface);
 
-  m_shell_surface =
-      wl_shell_get_shell_surface(m_display->GetShell(), m_surface);
-  assert(m_shell_surface);
-  FML_DLOG(INFO) << "EglWindow::m_shell_surface = "
-                 << static_cast<void*>(m_shell_surface);
+  m_xdg_surface =
+      xdg_wm_base_get_xdg_surface(m_display->GetXdgWmBase(),
+                                  m_base_surface);
+  xdg_surface_add_listener(m_xdg_surface, &xdg_surface_listener, this);
+  m_xdg_toplevel = xdg_surface_get_toplevel(m_xdg_surface);
+  xdg_toplevel_add_listener(m_xdg_toplevel, &xdg_toplevel_listener, this);
+  xdg_toplevel_set_app_id(m_xdg_toplevel, m_app_id.c_str());
+  xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
 
-  m_display->WaitForConfig();
+  wl_display_roundtrip(m_display->GetDisplay());
+  wl_surface_commit(m_base_surface);
 
+  m_egl_window[m_index] =
+      wl_egl_window_create(m_base_surface, m_geometry.width, m_geometry.height);
+  FML_DLOG(INFO) << "create egl_window: " << m_geometry.width << "x"
+                 << m_geometry.height;
 
-  m_egl_window[index] = wl_egl_window_create(m_surface, m_width, m_height);
-
-  FML_DLOG(INFO) << "create egl_window: " << m_width << "x" << m_height;
-
-  m_egl_surface[index] = create_egl_surface(this, m_egl_window[index], nullptr);
-
-  wl_shell_surface_set_title(m_shell_surface, m_app_id.c_str());
-
-  toggle_fullscreen();
-  struct wl_callback* callback;
-
-  if (m_fullscreen) {
-    wl_shell_surface_set_fullscreen(m_shell_surface,
-                                    WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE,
-                                    60000, nullptr);
-  } else {
-    wl_shell_surface_set_toplevel(m_shell_surface);
-
-    callback = wl_display_sync(m_display->GetDisplay());
-    wl_callback_add_listener(callback, &shell_configure_callback_listener,
-                             this);
-  }
-  /* Initialise damage to full surface, so the padding gets painted */
-  wl_surface_damage(m_surface, 0, 0, m_width, m_height);
-
-  MakeCurrent(m_index);
-  eglSwapInterval(m_dpy, m_frame_sync);
-  ClearCurrent();
+  m_egl_surface[m_index] =
+      create_egl_surface(this, m_egl_window[m_index], nullptr);
 
   memset(m_fps, 0, sizeof(m_fps));
   m_fps_idx = 0;
   m_fps_counter = 0;
 
-  this->m_callback = wl_surface_frame(this->m_surface);
-  wl_callback_add_listener(this->m_callback, &frame_listener, this);
-  wl_surface_commit(this->m_surface);
+  m_callback = wl_surface_frame(m_base_surface);
+  wl_callback_add_listener(m_callback, &frame_listener, this);
+
+  if (m_fullscreen)
+    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
 
   FML_DLOG(INFO) << "- EglWindow()";
 }
@@ -114,11 +100,14 @@ EglWindow::~EglWindow() {
   if (m_buffers[1].buffer)
     wl_buffer_destroy(m_buffers[1].buffer);
 
-  if (m_shell_surface)
-    wl_shell_surface_destroy(m_shell_surface);
+  if (m_xdg_surface)
+    xdg_surface_destroy(m_xdg_surface);
+
+  if (m_xdg_toplevel)
+    xdg_toplevel_destroy(m_xdg_toplevel);
 
   wl_surface_destroy(m_fps_surface);
-  wl_surface_destroy(m_surface);
+  wl_surface_destroy(m_base_surface);
 
   FML_DLOG(INFO) << "- ~EglWindow()";
 }
@@ -305,57 +294,85 @@ int EglWindow::create_shm_buffer(Display* display,
   return 0;
 }
 
-void EglWindow::handle_shell_ping([[maybe_unused]] void* data,
-                                  struct wl_shell_surface* shell_surface,
-                                  uint32_t serial) {
-  //  FML_DLOG(INFO) << "** handle_shell_ping **";
-  wl_shell_surface_pong(shell_surface, serial);
+void EglWindow::handle_xdg_surface_configure(void* data,
+                                             struct xdg_surface* xdg_surface,
+                                             uint32_t serial) {
+  (void)data;
+  xdg_surface_ack_configure(xdg_surface, serial);
 }
 
-void EglWindow::handle_shell_configure(
-    void* data,
-    [[maybe_unused]] struct wl_shell_surface* shell_surface,
-    [[maybe_unused]] uint32_t edges,
-    int32_t width,
-    int32_t height) {
-  auto* w = reinterpret_cast<EglWindow*>(data);
-  FML_DLOG(INFO) << "** handle_shell_configure ** " << width << " * " << height;
+const struct xdg_surface_listener EglWindow::xdg_surface_listener = {
+    .configure = handle_xdg_surface_configure};
 
-  if (w->m_egl_window[w->m_index]) {
-    wl_egl_window_resize(w->m_egl_window[w->m_index], width, height, 0, 0);
+void EglWindow::handle_toplevel_configure(void* data,
+                                          struct xdg_toplevel* toplevel,
+                                          int32_t width,
+                                          int32_t height,
+                                          struct wl_array* states) {
+  (void)toplevel;
+  auto* w = reinterpret_cast<EglWindow*>(data);
+
+  w->m_fullscreen = false;
+  w->m_maximized = false;
+  w->m_resize = false;
+  w->m_activated = false;
+
+  const uint32_t* state;
+  WL_ARRAY_FOR_EACH(state, states, const uint32_t*) {
+    switch (*state) {
+      case XDG_TOPLEVEL_STATE_FULLSCREEN:
+        w->m_fullscreen = true;
+        break;
+      case XDG_TOPLEVEL_STATE_MAXIMIZED:
+        w->m_maximized = true;
+        break;
+      case XDG_TOPLEVEL_STATE_RESIZING:
+        w->m_resize = true;
+        break;
+      case XDG_TOPLEVEL_STATE_ACTIVATED:
+        w->m_activated = true;
+        break;
+    }
   }
 
-  w->m_width = width;
-  w->m_height = height;
+  if (width > 0 && height > 0) {
+    if (!w->m_fullscreen && !w->m_maximized) {
+      w->m_window_size.width = width;
+      w->m_window_size.height = height;
+    }
+    w->m_geometry.width = width;
+    w->m_geometry.height = height;
+
+  } else if (!w->m_fullscreen && !w->m_maximized) {
+    w->m_geometry.width = w->m_window_size.width;
+    w->m_geometry.height = w->m_window_size.height;
+  }
+
+  if (w->m_egl_window[w->m_index]) {
+    if (w->m_flutter_engine) {
+      auto result = w->m_flutter_engine->SetWindowSize(
+          w->m_geometry.height,
+          w->m_geometry.width);
+      if (result != kSuccess) {
+        FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+      }
+    }
+    wl_egl_window_resize(w->m_egl_window[w->m_index], w->m_geometry.width,
+                         w->m_geometry.height, 0, 0);
+  }
 }
 
-void EglWindow::handle_shell_popup_done(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct wl_shell_surface* shell_surface) {
-  FML_DLOG(INFO) << "** handle_shell_popup_done **";
-}
-
-const struct wl_shell_surface_listener EglWindow::shell_surface_listener = {
-    .ping = handle_shell_ping,
-    .configure = handle_shell_configure,
-    .popup_done = handle_shell_popup_done};
-
-void EglWindow::handle_shell_configure_callback(
-    void* data,
-    struct wl_callback* callback,
-    [[maybe_unused]] uint32_t time) {
+void EglWindow::handle_toplevel_close(void* data,
+                                      struct xdg_toplevel* xdg_toplevel) {
+  (void)xdg_toplevel;
   auto* w = reinterpret_cast<EglWindow*>(data);
-
-  FML_DLOG(INFO) << "** handle_shell_configure_callback **";
-
-  wl_callback_destroy(callback);
-  w->m_configured = true;
+  w->m_running = false;
 }
 
-const struct wl_callback_listener EglWindow::shell_configure_callback_listener =
-    {.done = handle_shell_configure_callback};
-
-
+const struct xdg_toplevel_listener EglWindow::xdg_toplevel_listener = {
+    handle_toplevel_configure,
+    handle_toplevel_close,
+};
 
 void EglWindow::redraw(void* data,
                        struct wl_callback* callback,
@@ -365,7 +382,7 @@ void EglWindow::redraw(void* data,
   if (callback)
     wl_callback_destroy(callback);
 
-  window->m_callback = wl_surface_frame(window->m_surface);
+  window->m_callback = wl_surface_frame(window->m_base_surface);
   wl_callback_add_listener(window->m_callback, &frame_listener, window);
 
   window->m_fps_counter++;
@@ -384,20 +401,6 @@ const struct wl_callback_listener EglWindow::frame_listener = {redraw};
 [[maybe_unused]] EglWindow::shm_buffer* EglWindow::next_buffer(
     [[maybe_unused]] EglWindow* window) {
   return nullptr;
-}
-
-void EglWindow::toggle_fullscreen() {
-  if (m_fullscreen) {
-    wl_shell_surface_set_fullscreen(m_shell_surface,
-                                    WL_SHELL_SURFACE_FULLSCREEN_METHOD_SCALE,
-                                    60000, nullptr);
-  } else {
-    wl_shell_surface_set_toplevel(m_shell_surface);
-    handle_shell_configure(this, m_shell_surface, 0, m_width, m_height);
-  }
-
-  wl_callback_add_listener(wl_display_sync(m_display->GetDisplay()),
-                           &shell_configure_callback_listener, this);
 }
 
 bool EglWindow::ActivateSystemCursor(int32_t device, const std::string& kind) {
@@ -431,7 +434,7 @@ void EglWindow::DrawFps(uint8_t fps) {
   for (int i = 0; i < bars; i++) {
     [[maybe_unused]] auto p =
         std::clamp(m_fps[(m_fps_idx + i) % bars] / 60.0, 0.0, 1.0);
-    int draw_y = surface_h * (1.0 - p);
+    int draw_y = static_cast<int>(surface_h * (1.0 - p));
     int draw_x = i * (bar_w + bar_space);
 
     if (draw_y < 0)
@@ -449,4 +452,16 @@ void EglWindow::DrawFps(uint8_t fps) {
   wl_surface_attach(m_fps_surface, m_fps_buffer.buffer, 0, 0);
   wl_surface_damage(m_fps_surface, 0, 0, surface_w, surface_h);
   wl_surface_commit(m_fps_surface);
+}
+
+void EglWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
+  m_flutter_engine = engine;
+  if (m_flutter_engine) {
+    auto result = m_flutter_engine->SetWindowSize(
+        m_geometry.height,
+        m_geometry.width);
+    if (result != kSuccess) {
+      FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+    }
+  }
 }
