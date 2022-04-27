@@ -122,9 +122,9 @@ class Engine {
   std::string GetAssetDirectory() { return m_assets_path; }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
-  TextInput* m_text_input;
+  TextInput* m_text_input{};
   [[maybe_unused]] void SetTextInput(TextInput *text_input);
-  [[maybe_unused]] TextInput *GetTextInput();
+  [[maybe_unused]] TextInput *GetTextInput() const;
 #endif
 
  private:

@@ -14,34 +14,23 @@
 
 #include "display.h"
 
+#include <algorithm>
 #include <flutter/fml/logging.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon.h>
-#include <cassert>
 #include <cerrno>
 #include <cstring>
 #include <utility>
 
-#include "app.h"
 #include "constants.h"
 #include "engine.h"
 
-Display::Display([[maybe_unused]] App* app,
-                 bool enable_cursor,
+Display::Display(bool enable_cursor,
                  std::string cursor_theme_name)
-    : m_flutter_engine(nullptr),
-      m_display(nullptr),
-      m_output(nullptr),
-      m_compositor(nullptr),
-      m_subcompositor(nullptr),
-      m_cursor_surface(nullptr),
-      m_keyboard(nullptr),
-      m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
-      m_keymap(nullptr),
-      m_xkb_state(nullptr),
-      m_agl_shell(nullptr),
-      m_has_xrgb(false),
+    : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
+      m_buffer_scale(1),
+      m_last_buffer_scale(m_buffer_scale),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   FML_DLOG(INFO) << "+ Display()";
@@ -57,33 +46,8 @@ Display::Display([[maybe_unused]] App* app,
   wl_registry_add_listener(m_registry, &registry_listener, this);
   wl_display_dispatch(m_display);
 
-  if (!m_compositor) {
-    assert(false);
-  }
-
-  if (!m_subcompositor) {
-    assert(false);
-  }
-
-  if (!m_display) {
-    assert(false);
-  }
-
-  if (!m_shm) {
-    FML_LOG(ERROR) << "No wl_shm global";
-    assert(false);
-  }
-
-  if (!m_output) {
-    assert(false);
-  }
-
   if (!m_agl_shell) {
-    FML_LOG(INFO) << "No agl_shell extension present";
-  }
-
-  if (!m_has_xrgb) {
-    FML_LOG(INFO) << "WL_SHM_FORMAT_XRGB32 not available";
+    FML_LOG(INFO) << "agl_shell extension not present";
   }
 
   FML_DLOG(INFO) << "- Display()";
@@ -110,6 +74,9 @@ Display::~Display() {
   if (m_cursor_surface)
     wl_surface_destroy(m_cursor_surface);
 
+  if (m_xdg_wm_base)
+    xdg_wm_base_destroy(m_xdg_wm_base);
+
   wl_registry_destroy(m_registry);
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
@@ -117,64 +84,102 @@ Display::~Display() {
   FML_DLOG(INFO) << "- ~Display()";
 }
 
-void Display::registry_handle_global(void* data,
-                                     [[maybe_unused]] struct wl_registry* registry,
-                                     [[maybe_unused]] uint32_t name,
-                                     [[maybe_unused]] const char* interface,
-                                     [[maybe_unused]] uint32_t version) {
+static void xdg_wm_base_ping([[maybe_unused]] void* data,
+                             struct xdg_wm_base* xdg_wm_base,
+                             uint32_t serial) {
+  xdg_wm_base_pong(xdg_wm_base, serial);
+}
+
+static const struct xdg_wm_base_listener xdg_wm_base_listener = {
+    .ping = xdg_wm_base_ping,
+};
+
+void Display::registry_handle_global(
+    void* data,
+    [[maybe_unused]] struct wl_registry* registry,
+    [[maybe_unused]] uint32_t name,
+    [[maybe_unused]] const char* interface,
+    [[maybe_unused]] uint32_t version) {
   auto* d = static_cast<Display*>(data);
 
-  FML_DLOG(INFO) << "Wayland: " << interface;
+  FML_DLOG(INFO) << "Wayland: " << interface << " version " << version;
 
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
-    d->m_compositor = static_cast<struct wl_compositor*>(
-        wl_registry_bind(registry, name, &wl_compositor_interface, 1));
+    if (version >= 3) {
+      d->m_compositor = static_cast<struct wl_compositor*>(
+          wl_registry_bind(registry, name,
+                           &wl_compositor_interface,
+                           std::min(static_cast<uint32_t>(3), version)));
+      FML_DLOG(INFO) << "\tBuffer Scale Enabled";
+      d->m_buffer_scale_enable = true;
+    }
+    else {
+      d->m_compositor = static_cast<struct wl_compositor*>(
+          wl_registry_bind(registry, name,
+                           &wl_compositor_interface,
+                           std::min(static_cast<uint32_t>(2), version)));
+    }
+    d->m_base_surface = wl_compositor_create_surface(d->m_compositor);
+    wl_surface_add_listener(d->m_base_surface,
+                            &base_surface_listener, d);
   }
 
-  if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
+  else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
     d->m_subcompositor = static_cast<struct wl_subcompositor*>(
-        wl_registry_bind(registry, name, &wl_subcompositor_interface, 1));
+        wl_registry_bind(registry, name,
+                         &wl_subcompositor_interface,
+                         std::min(static_cast<uint32_t>(1), version)));
   }
 
-  if (strcmp(interface, wl_shell_interface.name) == 0) {
-    d->m_shell = static_cast<struct wl_shell*>(
-        wl_registry_bind(registry, name, &wl_shell_interface, 1));
-  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+    d->m_xdg_wm_base = static_cast<struct xdg_wm_base*>(
+        wl_registry_bind(registry, name,
+                         &xdg_wm_base_interface,
+                         std::min(static_cast<uint32_t>(3), version)));
+    xdg_wm_base_add_listener(d->m_xdg_wm_base,
+                             &xdg_wm_base_listener, d);
+  }
+
+  else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<struct wl_shm*>(
-        wl_registry_bind(registry, name, &wl_shm_interface, 1));
+        wl_registry_bind(registry, name,
+                         &wl_shm_interface,
+                         std::min(static_cast<uint32_t>(1), version)));
+    wl_shm_add_listener(d->m_shm, &shm_listener, d);
 
     if (d->m_enable_cursor) {
       d->m_cursor_theme = wl_cursor_theme_load(d->m_cursor_theme_name.c_str(),
                                                kCursorSize, d->m_shm);
       d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
-
-    wl_shm_add_listener(d->m_shm, &shm_listener, d);
   }
 
   else if (strcmp(interface, wl_output_interface.name) == 0) {
-    d->m_output = static_cast<struct wl_output*>(
-        wl_registry_bind(registry, name, &wl_output_interface, 1));
-    wl_output_add_listener(d->m_output, &output_listener, d);
-    d->m_is_configured = false;
-    wl_callback* callback = wl_display_sync(d->GetDisplay());
-    wl_callback_add_listener(callback, &configure_callback_listener, d);
+    auto oi = std::make_shared<output_info_t>();
+    std::fill_n(oi.get(), 1, output_info_t{});
+    oi->global_id = name;
+    oi->output = static_cast<struct wl_output*>(wl_registry_bind(
+        registry, name, &wl_output_interface,
+        std::min(static_cast<uint32_t>(2), version)));
+    wl_output_add_listener(oi->output,
+                           &output_listener,
+                           oi.get());
+    d->m_all_outputs.push_back(oi);
   }
 
   else if (strcmp(interface, wl_seat_interface.name) == 0) {
     d->m_seat = static_cast<wl_seat*>(
-        wl_registry_bind(registry, name, &wl_seat_interface, 1));
+        wl_registry_bind(registry, name,
+                         &wl_seat_interface,
+                         std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
-  }
-
-  else if (strcmp(interface, zwp_pointer_gestures_v1_interface.name) == 0) {
-    d->m_gestures = static_cast<zwp_pointer_gestures_v1*>(wl_registry_bind(
-        registry, name, &zwp_pointer_gestures_v1_interface, 1));
   }
 
   else if (strcmp(interface, agl_shell_interface.name) == 0) {
     d->m_agl_shell = static_cast<struct agl_shell*>(
-        wl_registry_bind(registry, name, &agl_shell_interface, 1));
+        wl_registry_bind(registry, name,
+                         &agl_shell_interface,
+                         std::min(static_cast<uint32_t>(1), version)));
   }
 }
 
@@ -201,105 +206,74 @@ void Display::display_handle_geometry(void* data,
                                       const char* make,
                                       const char* model,
                                       int transform) {
-  auto* d = static_cast<Display*>(data);
+  (void)data;
+  (void)wl_output;
+  (void)x;
+  (void)y;
+  (void)subpixel;
+  (void)make;
+  (void)model;
+  (void)transform;
 
-  if (wl_output == d->m_output) {
-    d->m_info.geometry.x = x;
-    d->m_info.geometry.y = y;
-    d->m_info.geometry.physical_width = physical_width;
-    d->m_info.geometry.physical_height = physical_height;
-    d->m_info.geometry.subpixel = subpixel;
-    d->m_info.geometry.size = physical_width * physical_height;
-    d->m_info.geometry.make = std::string(make);
-    d->m_info.geometry.model = std::string(model);
-    d->m_info.geometry.transform = transform;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->physical_width = physical_width;
+  oi->physical_height = physical_height;
 
-    FML_DLOG(INFO) << "x: " << d->m_info.geometry.x;
-    FML_DLOG(INFO) << "y: " << d->m_info.geometry.y;
-    FML_DLOG(INFO) << "physical_width: " << d->m_info.geometry.physical_width;
-    FML_DLOG(INFO) << "physical_height: " << d->m_info.geometry.physical_height;
-    FML_DLOG(INFO) << "size: " << d->m_info.geometry.size;
-    FML_DLOG(INFO) << "subpixel: " << d->m_info.geometry.subpixel;
-    FML_DLOG(INFO) << "make: " << d->m_info.geometry.make;
-    FML_DLOG(INFO) << "model: " << d->m_info.geometry.model;
-    FML_DLOG(INFO) << "transform: " << d->m_info.geometry.transform;
-  }
+  FML_DLOG(INFO) << "Physical width: " << physical_width << " mm x "
+                 << physical_height << " mm";
 }
 
 void Display::display_handle_mode(void* data,
-                                  [[maybe_unused]] struct wl_output* wl_output,
-                                  [[maybe_unused]] uint32_t flags,
+                                  struct wl_output* wl_output,
+                                  uint32_t flags,
                                   int width,
                                   int height,
-                                  [[maybe_unused]] int refresh) {
-  auto* d = static_cast<Display*>(data);
+                                  int refresh) {
+  (void)wl_output;
+  (void)flags;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->width = width;
+  oi->height = height;
+  oi->refresh_rate = refresh;
 
-  if (wl_output == d->m_output && (flags & WL_OUTPUT_MODE_CURRENT)) {
-    double dots = width * height;
-    double dots_per_mm = dots / d->m_info.geometry.size;
-    double dots_per_in = dots_per_mm / 0.155;
-
-    d->m_info.mode.width = width;
-    d->m_info.mode.height = height;
-    d->m_info.mode.dots_per_in = dots_per_in;
-
-    FML_DLOG(INFO) << "width: " << d->m_info.mode.width;
-    FML_DLOG(INFO) << "height: " << d->m_info.mode.height;
-    FML_DLOG(INFO) << "dpi: " << d->m_info.mode.dots_per_in;
-  }
+  FML_DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
+                 << (refresh > 1000 ? refresh / 1000.0 : (double)refresh)
+                 << " Hz";
 }
 
 void Display::display_handle_scale(void* data,
                                    struct wl_output* wl_output,
-                                   int scale) {
-  auto* d = static_cast<Display*>(data);
+                                   int32_t factor) {
+  (void)wl_output;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->scale = factor;
 
-  if (wl_output == d->m_output) {
-    d->m_info.scale.scale = scale;
-
-    FML_DLOG(INFO) << "scale: " << d->m_info.scale.scale;
-  }
+  FML_DLOG(INFO) << "Display Scale Factor: " << factor;
 }
 
 void Display::display_handle_done(void* data, struct wl_output* wl_output) {
-  (void)data;
   (void)wl_output;
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->done = true;
 }
 
 const struct wl_output_listener Display::output_listener = {
     display_handle_geometry, display_handle_mode, display_handle_done,
     display_handle_scale};
 
-void Display::wl_output_configure_callback(void* data,
-                                           wl_callback* callback,
-                                           [[maybe_unused]] uint32_t time) {
-  auto* display = static_cast<Display*>(data);
-
-  wl_callback_destroy(callback);
-
-  display->m_is_configured = true;
-
-  FML_DLOG(INFO) << "configuration is done";
-}
-
-const struct wl_callback_listener Display::configure_callback_listener = {
-    .done = wl_output_configure_callback,
-};
-
 void Display::shm_format(void* data,
                          [[maybe_unused]] struct wl_shm* wl_shm,
                          [[maybe_unused]] uint32_t format) {
-  auto* display = reinterpret_cast<Display*>(data);
-
-  if (format == WL_SHM_FORMAT_XRGB8888)
-    display->m_has_xrgb = true;
+  (void)data;
+  (void)wl_shm;
+  (void)format;
 }
 
 const struct wl_shm_listener Display::shm_listener = {shm_format};
 
 void Display::seat_handle_capabilities(void* data,
                                        struct wl_seat* seat,
-                                       [[maybe_unused]] uint32_t caps) {
+                                       uint32_t caps) {
   auto* d = static_cast<Display*>(data);
 
   if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
@@ -331,8 +305,17 @@ void Display::seat_handle_capabilities(void* data,
   }
 }
 
+void Display::seat_handle_name(void* data,
+                               struct wl_seat* seat,
+                               const char *name) {
+  (void)data;
+  (void)seat;
+  FML_DLOG(INFO) << "Seat: " << name;
+}
+
 const struct wl_seat_listener Display::seat_listener = {
     .capabilities = seat_handle_capabilities,
+    .name = seat_handle_name,
 };
 
 FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
@@ -400,14 +383,16 @@ void Display::pointer_handle_leave(
 }
 
 void Display::pointer_handle_motion(void* data,
-                                    [[maybe_unused]] struct wl_pointer* pointer,
-                                    [[maybe_unused]] uint32_t time,
-                                    [[maybe_unused]] wl_fixed_t sx,
-                                    [[maybe_unused]] wl_fixed_t sy) {
+                                    struct wl_pointer* pointer,
+                                    uint32_t time,
+                                    wl_fixed_t sx,
+                                    wl_fixed_t sy) {
+  (void)pointer;
+  (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
-  d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
+  d->m_pointer.event.surface_x = wl_fixed_to_double(sx * (wl_fixed_t)d->m_buffer_scale);
+  d->m_pointer.event.surface_y = wl_fixed_to_double(sy * (wl_fixed_t)d->m_buffer_scale);
 
   if (d->m_flutter_engine) {
     d->m_flutter_engine->SendMouseEvent(
@@ -457,12 +442,50 @@ void Display::pointer_handle_axis(
   }
 }
 
+void Display::pointer_handle_frame(void *data,
+                                   struct wl_pointer *wl_pointer) {
+  (void)data;
+  (void)wl_pointer;
+}
+
+void Display::pointer_handle_axis_source(void *data,
+                                         struct wl_pointer *wl_pointer,
+                                         uint32_t axis_source) {
+  (void)data;
+  (void)wl_pointer;
+  (void)axis_source;
+}
+
+void Display::pointer_handle_axis_stop(void *data,
+                                       struct wl_pointer *wl_pointer,
+                                       uint32_t time,
+                                       uint32_t axis) {
+  (void)data;
+  (void)wl_pointer;
+  (void)time;
+  (void)axis;
+}
+
+void Display::pointer_handle_axis_discrete(void *data,
+                                           struct wl_pointer *wl_pointer,
+                                           uint32_t axis,
+                                           int32_t discrete) {
+  (void)data;
+  (void)wl_pointer;
+  (void)axis;
+  (void)discrete;
+}
+
 const struct wl_pointer_listener Display::pointer_listener = {
     .enter = pointer_handle_enter,
     .leave = pointer_handle_leave,
     .motion = pointer_handle_motion,
     .button = pointer_handle_button,
     .axis = pointer_handle_axis,
+    .frame = pointer_handle_frame,
+    .axis_source = pointer_handle_axis_source,
+    .axis_stop = pointer_handle_axis_stop,
+    .axis_discrete = pointer_handle_axis_discrete,
 };
 
 void Display::keyboard_handle_enter(
@@ -515,7 +538,8 @@ void Display::keyboard_handle_key([[maybe_unused]] void* data,
 #else
 #if !defined(NDEBUG)
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    [[maybe_unused]] xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
+    [[maybe_unused]] xkb_keysym_t keysym =
+        xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
     uint32_t utf32 = xkb_keysym_to_utf32(keysym);
     if (utf32) {
       FML_DLOG(INFO) << "[Press] U" << utf32;
@@ -542,12 +566,21 @@ void Display::keyboard_handle_modifiers(
                         mods_locked, 0, 0, group);
 }
 
+void Display::keyboard_handle_repeat_info(void *data,
+                                          struct wl_keyboard *wl_keyboard,
+                                          int32_t rate, int32_t delay) {
+      (void) data;
+      (void) wl_keyboard;
+      FML_DLOG(INFO) << "[keyboard repeat info] rate: " << rate << ", delay: " << delay;
+}
+
 const struct wl_keyboard_listener Display::keyboard_listener = {
     .keymap = keyboard_handle_keymap,
     .enter = keyboard_handle_enter,
     .leave = keyboard_handle_leave,
     .key = keyboard_handle_key,
     .modifiers = keyboard_handle_modifiers,
+    .repeat_info = keyboard_handle_repeat_info,
 };
 
 [[maybe_unused]] struct Display::touch_point* Display::get_touch_point(
@@ -650,63 +683,22 @@ const struct wl_touch_listener Display::touch_listener = {
     .cancel = touch_handle_cancel,
 };
 
-void Display::gesture_pinch_begin(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
-        zwp_pointer_gesture_pinch_v1,
-    [[maybe_unused]] uint32_t serial,
-    [[maybe_unused]] uint32_t time,
-    [[maybe_unused]] struct wl_surface* surface,
-    [[maybe_unused]] uint32_t fingers) {
-  //  FML_DLOG(INFO) << "gesture_pinch_begin: fingers: " << fingers;
-}
-
-void Display::gesture_pinch_update(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
-        zwp_pointer_gesture_pinch_v1,
-    [[maybe_unused]] uint32_t time,
-    [[maybe_unused]] wl_fixed_t dx,
-    [[maybe_unused]] wl_fixed_t dy,
-    [[maybe_unused]] wl_fixed_t scale,
-    [[maybe_unused]] wl_fixed_t rotation) {
-#if 0
-  FML_DLOG(INFO) << "gesture_pinch_update: " << wl_fixed_to_double(dx) << ", "
-                 << wl_fixed_to_double(dy)
-                 << " scale: " << wl_fixed_to_double(scale)
-                 << ", rotation: " << wl_fixed_to_double(rotation);
-#endif
-}
-
-void Display::gesture_pinch_end(
-    [[maybe_unused]] void* data,
-    [[maybe_unused]] struct zwp_pointer_gesture_pinch_v1*
-        zwp_pointer_gesture_pinch_v1,
-    [[maybe_unused]] uint32_t serial,
-    [[maybe_unused]] uint32_t time,
-    [[maybe_unused]] int32_t cancelled) {
-  //  FML_DLOG(INFO) << "gesture_pinch_end";
-  //  FML_DLOG(INFO) << "gesture_pinch_begin: cancelled: " << cancelled;
-}
-
-[[maybe_unused]] const struct zwp_pointer_gesture_pinch_v1_listener
-    Display::gesture_pinch_listener = {
-        .begin = gesture_pinch_begin,
-        .update = gesture_pinch_update,
-        .end = gesture_pinch_end,
-};
-
 [[maybe_unused]] void Display::AglShellDoBackground(
-    struct wl_surface* surface) {
+    struct wl_surface* surface,
+    size_t index) {
   if (m_agl_shell) {
-    agl_shell_set_background(m_agl_shell, surface, m_output);
+    agl_shell_set_background(m_agl_shell, surface,
+                             m_all_outputs[index]->output);
   }
 }
 
-[[maybe_unused]] void Display::AglShellDoPanel([[maybe_unused]] struct wl_surface* surface,
-                                               [[maybe_unused]] enum agl_shell_edge mode) {
+[[maybe_unused]] void Display::AglShellDoPanel(
+    [[maybe_unused]] struct wl_surface* surface,
+    [[maybe_unused]] enum agl_shell_edge mode,
+    size_t index) {
   if (m_agl_shell) {
-    agl_shell_set_panel(m_agl_shell, surface, m_output, mode);
+    agl_shell_set_panel(m_agl_shell, surface,
+                        m_all_outputs[index]->output, mode);
   }
 }
 
@@ -742,12 +734,14 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
       return false;
     }
 
-    [[maybe_unused]] auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    [[maybe_unused]] auto cursor =
+        wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
       FML_DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
       return false;
     }
-    [[maybe_unused]] auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
+    auto cursor_buffer =
+        wl_cursor_image_get_buffer(cursor->images[0]);
     if (cursor_buffer && m_cursor_surface) {
       wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
                             m_cursor_surface,
@@ -766,6 +760,49 @@ bool Display::ActivateSystemCursor([[maybe_unused]] int32_t device,
 
   return true;
 }
+
 void Display::SetTextInput(std::shared_ptr<TextInput> text_input) {
   m_text_input = std::move(text_input);
 }
+
+void Display::handle_base_surface_enter(void* data,
+                                        struct wl_surface* wl_surface,
+                                        struct wl_output* output) {
+  (void)output;
+  (void)wl_surface;
+  auto* d = static_cast<Display*>(data);
+
+  for (auto& out : d->m_all_outputs) {
+    if (out->output == output) {
+      FML_DLOG(INFO) << "Entering output #" << out->global_id << ", scale "
+                     << out->scale;
+      d->m_last_buffer_scale = d->m_buffer_scale;
+      d->m_buffer_scale = out->scale;
+      break;
+    }
+  }
+  if (d->m_buffer_scale_enable) {
+    FML_DLOG(INFO) << "Setting buffer scale: " << d->m_buffer_scale;
+    wl_surface_set_buffer_scale(d->m_base_surface, d->m_buffer_scale);
+    wl_surface_commit(d->m_base_surface);
+  }
+}
+
+void Display::handle_base_surface_leave(void *data,
+                                        struct wl_surface *wl_surface,
+                                        struct wl_output *output) {
+  (void)wl_surface;
+  auto *d = static_cast<Display *>(data);
+
+  for (auto &out: d->m_all_outputs) {
+    if (out->output == output) {
+      FML_DLOG(INFO) << "Leaving output #" << out->global_id << ", scale " << out->scale;
+      break;
+    }
+  }
+}
+
+const struct wl_surface_listener Display::base_surface_listener = {
+    .enter = handle_base_surface_enter,
+    .leave = handle_base_surface_leave,
+};

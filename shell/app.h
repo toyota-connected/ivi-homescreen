@@ -39,11 +39,11 @@ class App {
   std::shared_ptr<GlResolver> m_gl_resolver;
   std::shared_ptr<Display> m_display;
   std::shared_ptr<EglWindow> m_egl_window[kEngineInstanceCount];
-  std::shared_ptr<Engine> m_engine[kEngineInstanceCount];
+  std::shared_ptr<Engine> m_flutter_engine[kEngineInstanceCount];
   uint8_t m_fps_output;
   uint32_t m_fps_period;
   uint32_t m_fps_counter;
-  int32_t m_fps_pretime;
+  long long m_fps_pretime;
 #ifdef ENABLE_TEXTURE_TEST
   std::unique_ptr<TextureTest> m_texture_test;
 #endif
@@ -58,7 +58,6 @@ class App {
                bool fullscreen,
                bool enable_cursor,
                bool debug_egl,
-               bool sprawl,
                uint32_t width,
                uint32_t height,
                const std::string& cursor_theme_name);

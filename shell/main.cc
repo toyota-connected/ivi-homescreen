@@ -39,7 +39,6 @@ int main(int argc, char** argv) {
   bool disable_cursor = false;
   bool debug_egl = false;
   bool fullscreen = false;
-  bool sprawl = false;
   uint32_t width = 0;
   uint32_t height = 0;
 
@@ -125,14 +124,6 @@ int main(int argc, char** argv) {
         args.erase(result);
       }
     }
-    if (cl.HasOption("S")) {
-      FML_DLOG(INFO) << "Sprawl";
-      sprawl = true;
-      auto result = std::find(args.begin(), args.end(), "--S");
-      if (result != args.end()) {
-        args.erase(result);
-      }
-    }
   }
   if (!width) {
     width = kScreenWidth;
@@ -144,7 +135,7 @@ int main(int argc, char** argv) {
   FML_DLOG(INFO) << "Screen Height: " << height;
 
   App app("homescreen", args, application_override_path, fullscreen,
-          !disable_cursor, debug_egl, sprawl, width, height, cursor_theme);
+          !disable_cursor, debug_egl, width, height, cursor_theme);
 
   std::signal(SIGINT, SignalHandler);
 

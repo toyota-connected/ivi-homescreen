@@ -31,20 +31,19 @@ App::App(const std::string& app_id,
          bool fullscreen,
          bool enable_cursor,
          bool debug_egl,
-         bool sprawl,
          uint32_t width,
          uint32_t height,
          const std::string& cursor_theme_name)
     : m_gl_resolver(std::make_shared<GlResolver>()),
       m_display(
-          std::make_shared<Display>(this, enable_cursor, cursor_theme_name)),
+          std::make_shared<Display>(enable_cursor, cursor_theme_name)),
       m_egl_window{std::make_shared<EglWindow>(0,
                                                m_display,
+                                               m_display->GetBaseSurface(),
                                                EglWindow::WINDOW_BG,
                                                app_id,
                                                fullscreen,
                                                debug_egl,
-                                               sprawl,
                                                width,
                                                height)}
 #ifdef ENABLE_TEXTURE_TEST
@@ -59,7 +58,7 @@ App::App(const std::string& app_id,
 
   FML_DLOG(INFO) << "+App::App";
 
-  m_display->AglShellDoBackground(m_egl_window[0]->GetNativeSurface());
+  m_display->AglShellDoBackground(m_egl_window[0]->GetNativeSurface(), 0);
 
   std::vector<const char*> m_command_line_args_c;
   m_command_line_args_c.reserve(command_line_args.size());
@@ -69,33 +68,28 @@ App::App(const std::string& app_id,
   }
 
   for (size_t i = 0; i < kEngineInstanceCount; i++) {
-    m_engine[i] = std::make_shared<Engine>(this, i, m_command_line_args_c,
+    m_flutter_engine[i] = std::make_shared<Engine>(this, i,
+                                                   m_command_line_args_c,
                                            application_override_path);
-    m_engine[i]->Run(pthread_self());
+    m_flutter_engine[i]->Run(pthread_self());
 
-    if (!m_engine[i]->IsRunning()) {
+    if (!m_flutter_engine[i]->IsRunning()) {
       FML_LOG(ERROR) << "Failed to Run Engine";
       exit(-1);
     }
-
-    // Set Flutter Window Size
-    auto result = m_engine[i]->SetWindowSize(m_egl_window[i]->GetHeight(),
-                                             m_egl_window[i]->GetWidth());
-    if (result != kSuccess) {
-      FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
-    }
+    m_egl_window[i]->SetEngine(m_flutter_engine[i]);
 
     FML_DLOG(INFO) << "(" << i << ") Engine running...";
   }
 
   // Enable pointer events
-  m_display->SetEngine(m_engine[0]);
+  m_display->SetEngine(m_flutter_engine[0]);
 
 #ifdef ENABLE_TEXTURE_TEST
-  m_texture_test->SetEngine(m_engine[0]);
+  m_texture_test->SetEngine(m_flutter_engine[0]);
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-  m_text_input->SetEngine(m_engine[0]);
+  m_text_input->SetEngine(m_flutter_engine[0]);
   m_display->SetTextInput(m_text_input);
 #endif
 
@@ -106,27 +100,27 @@ App::App(const std::string& app_id,
   m_fps_period = 1;
   m_fps_counter = 0;
 
-  const char* envstr_console;
-  if ((envstr_console = getenv("FPS_OUTPUT_CONSOLE")) != nullptr) {
-    int val = atoi(envstr_console);
+  const char* env_string_console;
+  if ((env_string_console = getenv("FPS_OUTPUT_CONSOLE")) != nullptr) {
+    long val = strtol(env_string_console, nullptr, 10);
 
     if (0 < val) {
       m_fps_output |= 0x01;
     }
   }
 
-  const char* envstr_overlay;
-  if ((envstr_overlay = getenv("FPS_OUTPUT_OVERLAY")) != nullptr) {
-    int val = atoi(envstr_overlay);
+  const char* env_string_overlay;
+  if ((env_string_overlay = getenv("FPS_OUTPUT_OVERLAY")) != nullptr) {
+    long val = strtol(env_string_overlay, nullptr, 10);
 
     if (0 < val) {
       m_fps_output |= 0x02;
     }
   }
 
-  const char* envstr_freq;
-  if ((envstr_freq = getenv("FPS_OUTPUT_FREQUENCY")) != nullptr) {
-    int val = atoi(envstr_freq);
+  const char* env_string_freq;
+  if ((env_string_freq = getenv("FPS_OUTPUT_FREQUENCY")) != nullptr) {
+    long val = strtol(env_string_freq, nullptr, 10);
 
     if (0 < val) {
       m_fps_period = val;
@@ -152,7 +146,7 @@ int App::Loop() {
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
 
-  for (auto& i : m_engine) {
+  for (auto& i : m_flutter_engine) {
     i->RunTask();
   }
 
