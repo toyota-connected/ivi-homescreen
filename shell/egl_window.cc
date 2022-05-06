@@ -64,9 +64,6 @@ EglWindow::EglWindow(size_t index,
   xdg_toplevel_set_app_id(m_xdg_toplevel, m_app_id.c_str());
   xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
 
-  wl_display_roundtrip(m_display->GetDisplay());
-  wl_surface_commit(m_base_surface);
-
   m_egl_window[m_index] =
       wl_egl_window_create(m_base_surface, m_geometry.width, m_geometry.height);
   FML_DLOG(INFO) << "create egl_window: " << m_geometry.width << "x"
@@ -75,6 +72,9 @@ EglWindow::EglWindow(size_t index,
   m_egl_surface[m_index] =
       create_egl_surface(this, m_egl_window[m_index], nullptr);
 
+  if (m_fullscreen)
+    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
+
   memset(m_fps, 0, sizeof(m_fps));
   m_fps_idx = 0;
   m_fps_counter = 0;
@@ -82,8 +82,7 @@ EglWindow::EglWindow(size_t index,
   m_callback = wl_surface_frame(m_base_surface);
   wl_callback_add_listener(m_callback, &frame_listener, this);
 
-  if (m_fullscreen)
-    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
+  wl_surface_commit(m_base_surface);
 
   FML_DLOG(INFO) << "- EglWindow()";
 }
