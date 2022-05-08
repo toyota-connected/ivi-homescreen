@@ -58,8 +58,6 @@ App::App(const std::string& app_id,
 
   FML_DLOG(INFO) << "+App::App";
 
-  m_display->AglShellDoBackground(m_egl_window[0]->GetNativeSurface(), 0);
-
   std::vector<const char*> m_command_line_args_c;
   m_command_line_args_c.reserve(command_line_args.size());
   m_command_line_args_c.push_back(app_id.c_str());
