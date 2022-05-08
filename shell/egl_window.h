@@ -76,6 +76,7 @@ class EglWindow : public Egl {
   std::shared_ptr<Engine> m_flutter_engine;
   struct wl_surface* m_base_surface;
   wl_egl_window* m_egl_window[kEngineInstanceCount]{};
+  bool m_wait_for_configure{};
 
   bool m_fullscreen{};
   bool m_maximized{};

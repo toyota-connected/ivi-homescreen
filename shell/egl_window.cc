@@ -64,14 +64,6 @@ EglWindow::EglWindow(size_t index,
   xdg_toplevel_set_app_id(m_xdg_toplevel, m_app_id.c_str());
   xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
 
-  m_egl_window[m_index] =
-      wl_egl_window_create(m_base_surface, m_geometry.width, m_geometry.height);
-  FML_DLOG(INFO) << "create egl_window: " << m_geometry.width << "x"
-                 << m_geometry.height;
-
-  m_egl_surface[m_index] =
-      create_egl_surface(this, m_egl_window[m_index], nullptr);
-
   if (m_fullscreen)
     xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
 
@@ -82,7 +74,26 @@ EglWindow::EglWindow(size_t index,
   m_callback = wl_surface_frame(m_base_surface);
   wl_callback_add_listener(m_callback, &frame_listener, this);
 
+  m_wait_for_configure = true;
   wl_surface_commit(m_base_surface);
+
+  // this makes we start-up from the beginning with the correction dimensions
+  // like starting as maximized/fullscreen, rather than starting up as floating
+  // width, height then performing a resize
+  while (m_wait_for_configure) {
+    int ret = wl_display_dispatch(m_display->GetDisplay());
+
+    /* wait until xdg_surface::configure acks the new dimensions */
+    if (m_wait_for_configure)
+      continue;
+
+    m_egl_window[m_index] = wl_egl_window_create(
+        m_base_surface, m_geometry.width, m_geometry.height);
+
+    m_egl_surface[m_index] =
+        create_egl_surface(this, m_egl_window[m_index], nullptr);
+
+  }
 
   FML_DLOG(INFO) << "- EglWindow()";
 }
@@ -296,8 +307,9 @@ int EglWindow::create_shm_buffer(Display* display,
 void EglWindow::handle_xdg_surface_configure(void* data,
                                              struct xdg_surface* xdg_surface,
                                              uint32_t serial) {
-  (void)data;
+  auto* w = reinterpret_cast<EglWindow*>(data);
   xdg_surface_ack_configure(xdg_surface, serial);
+  w->m_wait_for_configure = false;
 }
 
 const struct xdg_surface_listener EglWindow::xdg_surface_listener = {
