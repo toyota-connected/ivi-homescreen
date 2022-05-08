@@ -77,6 +77,26 @@ EglWindow::EglWindow(size_t index,
   m_wait_for_configure = true;
   wl_surface_commit(m_base_surface);
 
+  switch (type) {
+    case WINDOW_BG:
+      m_display->AglShellDoBackground(m_base_surface, 0);
+      break;
+    case WINDOW_PANEL_TOP:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_TOP, 0);
+      break;
+    case WINDOW_PANEL_BOTTOM:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_BOTTOM, 0);
+      break;
+    case WINDOW_PANEL_LEFT:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_LEFT, 0);
+      break;
+    case WINDOW_PANEL_RIGHT:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_RIGHT, 0);
+      break;
+    default:
+      assert(!"Invalid surface role type supplied");
+  }
+
   // this makes we start-up from the beginning with the correction dimensions
   // like starting as maximized/fullscreen, rather than starting up as floating
   // width, height then performing a resize
