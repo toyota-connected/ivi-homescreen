@@ -42,6 +42,7 @@ EglWindow::EglWindow(size_t index,
       m_base_surface(base_surface),
       m_flutter_engine(nullptr),
       m_geometry({width, height}),
+      m_window_size({width, height}),
       m_type(type),
       m_app_id(std::move(app_id)),
       m_fullscreen(fullscreen),
@@ -64,16 +65,8 @@ EglWindow::EglWindow(size_t index,
   xdg_toplevel_set_app_id(m_xdg_toplevel, m_app_id.c_str());
   xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
 
-  wl_display_roundtrip(m_display->GetDisplay());
-  wl_surface_commit(m_base_surface);
-
-  m_egl_window[m_index] =
-      wl_egl_window_create(m_base_surface, m_geometry.width, m_geometry.height);
-  FML_DLOG(INFO) << "create egl_window: " << m_geometry.width << "x"
-                 << m_geometry.height;
-
-  m_egl_surface[m_index] =
-      create_egl_surface(this, m_egl_window[m_index], nullptr);
+  if (m_fullscreen)
+    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
 
   memset(m_fps, 0, sizeof(m_fps));
   m_fps_idx = 0;
@@ -82,8 +75,46 @@ EglWindow::EglWindow(size_t index,
   m_callback = wl_surface_frame(m_base_surface);
   wl_callback_add_listener(m_callback, &frame_listener, this);
 
-  if (m_fullscreen)
-    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
+  m_wait_for_configure = true;
+  wl_surface_commit(m_base_surface);
+
+  switch (type) {
+    case WINDOW_BG:
+      m_display->AglShellDoBackground(m_base_surface, 0);
+      break;
+    case WINDOW_PANEL_TOP:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_TOP, 0);
+      break;
+    case WINDOW_PANEL_BOTTOM:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_BOTTOM, 0);
+      break;
+    case WINDOW_PANEL_LEFT:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_LEFT, 0);
+      break;
+    case WINDOW_PANEL_RIGHT:
+      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_RIGHT, 0);
+      break;
+    default:
+      assert(!"Invalid surface role type supplied");
+  }
+
+  // this makes we start-up from the beginning with the correction dimensions
+  // like starting as maximized/fullscreen, rather than starting up as floating
+  // width, height then performing a resize
+  while (m_wait_for_configure) {
+    int ret = wl_display_dispatch(m_display->GetDisplay());
+
+    /* wait until xdg_surface::configure acks the new dimensions */
+    if (m_wait_for_configure)
+      continue;
+
+    m_egl_window[m_index] = wl_egl_window_create(
+        m_base_surface, m_geometry.width, m_geometry.height);
+
+    m_egl_surface[m_index] =
+        create_egl_surface(this, m_egl_window[m_index], nullptr);
+
+  }
 
   FML_DLOG(INFO) << "- EglWindow()";
 }
@@ -297,8 +328,9 @@ int EglWindow::create_shm_buffer(Display* display,
 void EglWindow::handle_xdg_surface_configure(void* data,
                                              struct xdg_surface* xdg_surface,
                                              uint32_t serial) {
-  (void)data;
+  auto* w = reinterpret_cast<EglWindow*>(data);
   xdg_surface_ack_configure(xdg_surface, serial);
+  w->m_wait_for_configure = false;
 }
 
 const struct xdg_surface_listener EglWindow::xdg_surface_listener = {

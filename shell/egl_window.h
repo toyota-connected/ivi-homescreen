@@ -38,7 +38,18 @@ class Engine;
 
 class EglWindow : public Egl {
  public:
-  enum window_type { WINDOW_NORMAL, WINDOW_BG, WINDOW_TOP, WINDOW_BOTTOM };
+ // a normal surface role is a regular application; a window_bg, window_panel
+ // are part of the client shell UI for AGL; for window_panel only the height
+ // has any meaning, while window_bg will literally be the entire output
+enum window_type {
+    WINDOW_NORMAL,
+    WINDOW_BG,
+    WINDOW_PANEL_TOP,
+    WINDOW_PANEL_BOTTOM,
+    WINDOW_PANEL_LEFT,
+    WINDOW_PANEL_RIGHT
+  };
+
 
   EglWindow(size_t index,
             const std::shared_ptr<Display>& display,
@@ -76,6 +87,7 @@ class EglWindow : public Egl {
   std::shared_ptr<Engine> m_flutter_engine;
   struct wl_surface* m_base_surface;
   wl_egl_window* m_egl_window[kEngineInstanceCount]{};
+  bool m_wait_for_configure{};
 
   bool m_fullscreen{};
   bool m_maximized{};
