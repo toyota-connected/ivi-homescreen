@@ -535,8 +535,8 @@ void Display::keyboard_handle_key([[maybe_unused]] void* data,
                                            serial, time, keysym, state);
     }
   }
-#else
-#if !defined(NDEBUG)
+#elif !defined(NDEBUG)
+  auto* d = static_cast<Display*>(data);
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     [[maybe_unused]] xkb_keysym_t keysym =
         xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
@@ -549,7 +549,6 @@ void Display::keyboard_handle_key([[maybe_unused]] void* data,
       FML_DLOG(INFO) << "[Press] " << name;
     }
   }
-#endif
 #endif
 }
 
