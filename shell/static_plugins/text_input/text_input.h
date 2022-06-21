@@ -20,10 +20,10 @@
 #include <memory>
 #include <string>
 
-#include "flutter/fml/macros.h"
 #include <flutter/binary_messenger.h>
 #include <flutter/method_channel.h>
 #include <flutter/method_result_functions.h>
+#include "flutter/fml/macros.h"
 #include "flutter/shell/platform/common/json_method_codec.h"
 #include "flutter/shell/platform/common/text_input_model.h"
 

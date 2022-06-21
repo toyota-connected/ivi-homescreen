@@ -16,8 +16,8 @@
 
 #pragma once
 
-#include <libsecret/secret.h>
 #include <flutter/fml/logging.h>
+#include <libsecret/secret.h>
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>
 #include <memory>

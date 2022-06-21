@@ -18,9 +18,11 @@ include(macros)
 
 set(TEXTURES)
 
-option(BUILD_TEXTURE_TEST "Includes Test Texture" OFF)
-if (BUILD_TEXTURE_TEST)
-    ENABLE_TEXTURE(test)
+if (BUILD_BACKEND_WAYLAND_EGL)
+    option(BUILD_TEXTURE_TEST_EGL "Includes Test Texture" OFF)
+    if (BUILD_TEXTURE_TEST_EGL)
+        ENABLE_TEXTURE(test_egl)
+    endif ()
 endif ()
 
 message(STATUS "Texture Config ......... ${TEXTURES}")

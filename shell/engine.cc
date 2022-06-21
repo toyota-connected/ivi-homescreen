@@ -28,10 +28,10 @@
 
 #include "app.h"
 #include "constants.h"
-#include "egl_window.h"
 #include "engine.h"
 #include "platform_channel.h"
 #include "textures/texture.h"
+#include "wayland/window.h"
 
 #include "hexdump.h"
 #include "wayland-client.h"
@@ -53,8 +53,8 @@ Engine::Engine(App* app,
                const std::string& application_override_path)
     : m_index(index),
       m_running(false),
+      m_backend(app->GetBackend()),
       m_egl_window(app->GetEglWindow(index)),
-      m_gl_resolver(app->GetGlResolver()),
       m_flutter_engine(nullptr),
       m_platform_channel(PlatformChannel::GetInstance()),
       m_cache_path(std::move(GetPersistentCachePath())),
@@ -90,9 +90,10 @@ Engine::Engine(App* app,
               [](const char* tag, const char* message, void* user_data) {
                 FML_LOG(INFO) << tag << ": " << message;
               },
-      }),
-      m_renderer_config(
-          {.type = kOpenGL,
+      }) {
+#if 0  // TODO
+      m_renderer_config({
+          .type = kOpenGL,
            .open_gl = {
                .struct_size = sizeof(FlutterOpenGLRendererConfig),
                .make_current = [](void* userdata) -> bool {
@@ -135,7 +136,9 @@ Engine::Engine(App* app,
                  }
                  return false;
                },
-           }}) {
+          }}) {
+#endif
+
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
 
   m_engine_so_handle = dlopen("libflutter_engine.so", RTLD_LAZY);
@@ -175,7 +178,7 @@ Engine::Engine(App* app,
   if (!IsFile(kernel_snapshot)) {
     FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
                    << " missing Flutter Kernel";
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
   m_args.assets_path = m_assets_path.c_str();
@@ -235,6 +238,8 @@ Engine::Engine(App* app,
 
   m_args.custom_task_runners = &m_custom_task_runners;
 
+  // m_args.compositor = m_backend->GetCompositorConfig();
+
   FML_DLOG(INFO) << "(" << m_index << ") -Engine::Engine";
 }
 
@@ -287,9 +292,9 @@ bool Engine::IsRunning() const {
 FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Run";
 
-  FlutterEngineResult result =
-      m_proc_table.Initialize(FLUTTER_ENGINE_VERSION, &m_renderer_config,
-                              &m_args, this, &m_flutter_engine);
+  auto config = m_backend->GetRenderConfig();
+  FlutterEngineResult result = m_proc_table.Initialize(
+      FLUTTER_ENGINE_VERSION, &config, &m_args, this, &m_flutter_engine);
   if (result != kSuccess) {
     FML_DLOG(ERROR) << "(" << m_index
                     << ") FlutterEngineRun failed or engine is null";

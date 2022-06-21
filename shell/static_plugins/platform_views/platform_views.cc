@@ -15,7 +15,7 @@
 #include "platform_views.h"
 
 #include <flutter/fml/logging.h>
-#include <flutter/shell/platform/common/json_method_codec.h>
+#include <flutter/standard_method_codec.h>
 
 #include "engine.h"
 
@@ -23,19 +23,17 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
-  auto& codec = flutter::JsonMethodCodec::GetInstance();
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
+  auto args = obj->arguments();
 
-  if (method == "View.enableWireframe") {
-    auto args = obj->arguments();
-    if (!args->IsNull() && args->HasMember("enable")) {
-      bool enable = (*args)["enable"].GetBool();
-      FML_DLOG(INFO) << "View.enableWireframe: " << enable;
-      result = codec.EncodeSuccessEnvelope();
-    } else {
-      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+  if (method == "switchView") {
+    if (args && !args->IsNull()) {
+      FML_DLOG(INFO) << "switchView: " << args->LongValue();
+      auto res = flutter::EncodableValue(args->LongValue());
+      result = codec.EncodeSuccessEnvelope(&res);
     }
   } else {
     FML_DLOG(ERROR) << "PlatformViews: " << method << " is unhandled";

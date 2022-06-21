@@ -28,13 +28,14 @@
 #include <string>
 #include <vector>
 
+#include "backend/backend.h"
 #include "constants.h"
-#include "gl_resolver.h"
 #include "platform_channel.h"
 #include "static_plugins/text_input/text_input.h"
 
 class App;
-class EglWindow;
+class Backend;
+class WaylandWindow;
 class GlResolver;
 class Texture;
 #if ENABLE_PLUGIN_TEXT_INPUT
@@ -117,21 +118,24 @@ class Engine {
 
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
-  std::shared_ptr<EglWindow> GetEglWindow() { return m_egl_window; }
+  std::shared_ptr<WaylandWindow> GetEglWindow() { return m_egl_window; }
 
   std::string GetAssetDirectory() { return m_assets_path; }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
   TextInput* m_text_input{};
-  [[maybe_unused]] void SetTextInput(TextInput *text_input);
-  [[maybe_unused]] TextInput *GetTextInput() const;
+  [[maybe_unused]] void SetTextInput(TextInput* text_input);
+  [[maybe_unused]] TextInput* GetTextInput() const;
 #endif
+
+  Backend* GetBackend() { return m_backend; }
 
  private:
   size_t m_index;
   bool m_running;
 
-  std::shared_ptr<EglWindow> m_egl_window;
+  Backend* m_backend;
+  std::shared_ptr<WaylandWindow> m_egl_window;
   std::shared_ptr<GlResolver> m_gl_resolver;
 
   std::string m_assets_path;
