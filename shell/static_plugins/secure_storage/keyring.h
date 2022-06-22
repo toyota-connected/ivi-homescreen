@@ -40,19 +40,19 @@ class Keyring {
   }
 
   bool addItem(const char* key, const char* value) {
-    rapidjson::Document document = readFromKeyring();
-    if (document.HasMember(key) && document[key].IsString()) {
-      document.RemoveMember(key);
+    rapidjson::Document root = readFromKeyring();
+    if (root.IsObject() && root.HasMember(key) && root[key].IsString()) {
+      root.RemoveMember(key);
     }
-    rapidjson::Value k(key, document.GetAllocator());
-    rapidjson::Value v(value, document.GetAllocator());
-    document.AddMember(k, v, document.GetAllocator());
-    return this->storeToKeyring(document);
+    rapidjson::Value k(key, root.GetAllocator());
+    rapidjson::Value v(value, root.GetAllocator());
+    root.AddMember(k, v, root.GetAllocator());
+    return this->storeToKeyring(root);
   }
 
   std::string getItem(const char* key) {
     rapidjson::Document root = readFromKeyring();
-    if (root.HasMember(key) && root[key].IsString()) {
+    if (root.IsObject() && root.HasMember(key) && root[key].IsString()) {
       return root[key].GetString();
     }
     return "";
@@ -105,7 +105,11 @@ class Keyring {
     }
 
     if (result != nullptr && strcmp(result, "") != 0 &&
-        !d.Parse(result).HasParseError()) {
+      !d.Parse(result).HasParseError()) {
+      if (strcmp(result, "null") == 0) {
+        const char* json = "{}";
+        d.Parse(json);
+      }
       return d;
     }
 
