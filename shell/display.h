@@ -126,7 +126,6 @@ class Display {
 
     uint32_t buttons;
     uint32_t state;
-    FlutterPointerPhase phase;
   } m_pointer{};
 
   struct touch_point {
@@ -239,7 +238,7 @@ class Display {
                                struct wl_seat* seat,
                                const char *name);
 
-  static FlutterPointerPhase getPointerPhase(struct pointer* p);
+  static bool pointerButtonStatePressed(struct pointer* p);
 
   static void pointer_handle_enter(void* data,
                                    struct wl_pointer* pointer,
