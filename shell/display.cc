@@ -318,32 +318,8 @@ const struct wl_seat_listener Display::seat_listener = {
     .name = seat_handle_name,
 };
 
-FlutterPointerPhase Display::getPointerPhase(struct pointer* p) {
-  [[maybe_unused]] FlutterPointerPhase res = p->phase;
-
-  if (p->buttons) {
-    switch (p->event.state) {
-      case WL_POINTER_BUTTON_STATE_PRESSED:
-        // FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_PRESSED";
-        if ((p->phase == FlutterPointerPhase::kHover) ||
-            (p->phase == FlutterPointerPhase::kUp))
-          res = FlutterPointerPhase::kDown;
-        else
-          res = FlutterPointerPhase::kMove;
-      case WL_POINTER_BUTTON_STATE_RELEASED:
-        // FML_DLOG(INFO) << "WL_POINTER_BUTTON_STATE_RELEASED";
-        if ((p->phase == FlutterPointerPhase::kDown) ||
-            (p->phase == FlutterPointerPhase::kMove))
-          res = FlutterPointerPhase::kUp;
-    }
-  } else {
-    res = p->event.state == WL_POINTER_BUTTON_STATE_RELEASED
-              ? FlutterPointerPhase::kHover
-              : FlutterPointerPhase::kUp;
-  }
-
-  p->phase = res;
-  return res;
+bool Display::pointerButtonStatePressed(struct pointer *p) {
+  return (p->buttons) && (p->event.state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
 void Display::pointer_handle_enter(void* data,
@@ -395,8 +371,9 @@ void Display::pointer_handle_motion(void* data,
   d->m_pointer.event.surface_y = wl_fixed_to_double(sy * (wl_fixed_t)d->m_buffer_scale);
 
   if (d->m_flutter_engine) {
+    FlutterPointerPhase phase = pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover; 
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindNone, getPointerPhase(&d->m_pointer),
+        kFlutterPointerSignalKindNone, phase,
         d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
         d->m_pointer.buttons);
   }
@@ -416,11 +393,13 @@ void Display::pointer_handle_button(
   d->m_pointer.serial = serial;
 
   if (d->m_flutter_engine) {
+    FlutterPointerPhase phase = pointerButtonStatePressed(&d->m_pointer) ? kDown : kUp; 
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindNone, getPointerPhase(&d->m_pointer),
+        kFlutterPointerSignalKindNone, phase,
         d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
         d->m_pointer.buttons);
   }
+
 }
 
 void Display::pointer_handle_axis(
@@ -435,7 +414,7 @@ void Display::pointer_handle_axis(
 
   if (d->m_flutter_engine) {
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindScroll, getPointerPhase(&d->m_pointer),
+        kFlutterPointerSignalKindScroll, FlutterPointerPhase::kMove,
         d->m_pointer.event.surface_x, d->m_pointer.event.surface_y,
         d->m_pointer.event.axes[1].value, d->m_pointer.event.axes[0].value,
         d->m_pointer.buttons);
