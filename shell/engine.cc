@@ -189,7 +189,7 @@ Engine::Engine(App* app,
   FML_DLOG(INFO) << "(" << m_index << ") icu_data_path: " << m_icu_data_path;
 
   // Configure AOT
-  m_aot_path.assign(paths::JoinPaths({m_assets_path, "libapp.so"}));
+  m_aot_path.assign(paths::JoinPaths({m_assets_path, "../lib/libapp.so"}));
   if (m_proc_table.RunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
     m_aot_data = LoadAotData(m_aot_path);
