@@ -33,6 +33,7 @@ App::App(const std::string& app_id,
          bool debug_egl,
          uint32_t width,
          uint32_t height,
+         double pixel_ratio,
          const std::string& cursor_theme_name)
     : m_gl_resolver(std::make_shared<GlResolver>()),
       m_display(
@@ -67,6 +68,7 @@ App::App(const std::string& app_id,
 
   for (size_t i = 0; i < kEngineInstanceCount; i++) {
     m_flutter_engine[i] = std::make_shared<Engine>(this, i,
+                                                   pixel_ratio,
                                                    m_command_line_args_c,
                                            application_override_path);
     m_flutter_engine[i]->Run(pthread_self());

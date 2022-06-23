@@ -49,9 +49,11 @@ static bool IsFile(const std::string& path) {
 
 Engine::Engine(App* app,
                size_t index,
+               double pixel_ratio,
                const std::vector<const char*>& command_line_args_c,
                const std::string& application_override_path)
     : m_index(index),
+      m_pixel_ratio(pixel_ratio),
       m_running(false),
       m_egl_window(app->GetEglWindow(index)),
       m_gl_resolver(app->GetGlResolver()),
@@ -333,7 +335,7 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
   FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
                                     .width = width,
                                     .height = height,
-                                    .pixel_ratio = 1.0};
+                                    .pixel_ratio = m_pixel_ratio};
 
   auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {

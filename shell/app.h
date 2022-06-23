@@ -60,6 +60,7 @@ class App {
                bool debug_egl,
                uint32_t width,
                uint32_t height,
+               double pixel_ratio,
                const std::string& cursor_theme_name);
   App(const App&) = delete;
   const App& operator=(const App&) = delete;

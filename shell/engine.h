@@ -45,6 +45,7 @@ class Engine {
  public:
   Engine(App* app,
          size_t index,
+         double pixel_ratio,
          const std::vector<const char*>& command_line_args_c,
          const std::string& application_override_path);
 
@@ -129,6 +130,7 @@ class Engine {
 
  private:
   size_t m_index;
+  double m_pixel_ratio;
   bool m_running;
 
   std::shared_ptr<EglWindow> m_egl_window;

@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
   bool fullscreen = false;
   uint32_t width = 0;
   uint32_t height = 0;
+  double pixel_ratio = 1.0;
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
@@ -111,6 +112,20 @@ int main(int argc, char** argv) {
         args.erase(result);
       }
     }
+    if (cl.HasOption("r")) {
+      std::string pixel_ratio_str;
+      cl.GetOptionValue("r", &pixel_ratio_str);
+      if (pixel_ratio_str.empty()) {
+        FML_LOG(ERROR) << "--r option requires an argument (e.g. --r=2.0)";
+        return 1;
+      }
+      pixel_ratio = static_cast<double>(std::stod(pixel_ratio_str));
+      auto find = "--r=" + pixel_ratio_str;
+      auto result = std::find(args.begin(), args.end(), find);
+      if (result != args.end()) {
+        args.erase(result);
+      }
+    }
     if (cl.HasOption("t")) {
       cl.GetOptionValue("t", &cursor_theme);
       if (cursor_theme.empty()) {
@@ -135,7 +150,8 @@ int main(int argc, char** argv) {
   FML_DLOG(INFO) << "Screen Height: " << height;
 
   App app("homescreen", args, application_override_path, fullscreen,
-          !disable_cursor, debug_egl, width, height, cursor_theme);
+          !disable_cursor, debug_egl, width, height, pixel_ratio,
+          cursor_theme);
 
   std::signal(SIGINT, SignalHandler);
 
