@@ -28,10 +28,10 @@
 
 #include "app.h"
 #include "constants.h"
-#include "egl_window.h"
 #include "engine.h"
 #include "platform_channel.h"
 #include "textures/texture.h"
+#include "wayland/window.h"
 
 #include "hexdump.h"
 #include "wayland-client.h"
@@ -53,8 +53,8 @@ Engine::Engine(App* app,
                const std::string& application_override_path)
     : m_index(index),
       m_running(false),
+      m_backend(app->GetBackend()),
       m_egl_window(app->GetEglWindow(index)),
-      m_gl_resolver(app->GetGlResolver()),
       m_flutter_engine(nullptr),
       m_platform_channel(PlatformChannel::GetInstance()),
       m_cache_path(std::move(GetPersistentCachePath())),
@@ -90,52 +90,7 @@ Engine::Engine(App* app,
               [](const char* tag, const char* message, void* user_data) {
                 FML_LOG(INFO) << tag << ": " << message;
               },
-      }),
-      m_renderer_config(
-          {.type = kOpenGL,
-           .open_gl = {
-               .struct_size = sizeof(FlutterOpenGLRendererConfig),
-               .make_current = [](void* userdata) -> bool {
-                 auto e = reinterpret_cast<Engine*>(userdata);
-                 return e->m_egl_window->MakeCurrent(e->m_index);
-               },
-               .clear_current = [](void* userdata) -> bool {
-                 auto e = reinterpret_cast<Engine*>(userdata);
-                 return e->m_egl_window->ClearCurrent();
-               },
-               .present = [](void* userdata) -> bool {
-                 auto e = reinterpret_cast<Engine*>(userdata);
-                 return e->m_egl_window->SwapBuffers(e->m_index);
-               },
-               .fbo_callback = [](void* userdata) -> uint32_t { return 0; },
-               .make_resource_current = [](void* userdata) -> bool {
-                 auto e = reinterpret_cast<Engine*>(userdata);
-                 return e->m_egl_window->MakeResourceCurrent(e->m_index);
-               },
-               .fbo_reset_after_present = false,
-               .surface_transformation = nullptr,
-               .gl_proc_resolver = [](void* userdata,
-                                      const char* name) -> void* {
-                 auto e = reinterpret_cast<Engine*>(userdata);
-                 return e->m_gl_resolver->gl_process_resolver(name);
-               },
-               .gl_external_texture_frame_callback =
-                   [](void* userdata,
-                      int64_t texture_id,
-                      size_t width,
-                      size_t height,
-                      FlutterOpenGLTexture* texture_out) -> bool {
-                 auto e = reinterpret_cast<Engine*>(userdata);
-                 auto texture = e->m_texture_registry[texture_id];
-                 if (texture) {
-                   texture->GetFlutterOpenGLTexture(texture_out,
-                                                    static_cast<int>(width),
-                                                    static_cast<int>(height));
-                   return true;
-                 }
-                 return false;
-               },
-           }}) {
+      }) {
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
 
   m_engine_so_handle = dlopen("libflutter_engine.so", RTLD_LAZY|RTLD_DEEPBIND);
@@ -175,7 +130,7 @@ Engine::Engine(App* app,
   if (!IsFile(kernel_snapshot)) {
     FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
                    << " missing Flutter Kernel";
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
   m_args.assets_path = m_assets_path.c_str();
@@ -235,6 +190,8 @@ Engine::Engine(App* app,
 
   m_args.custom_task_runners = &m_custom_task_runners;
 
+  // m_args.compositor = m_backend->GetCompositorConfig();
+
   FML_DLOG(INFO) << "(" << m_index << ") -Engine::Engine";
 }
 
@@ -267,7 +224,7 @@ FlutterEngineResult Engine::RunTask() {
   return kSuccess;
 }
 
-[[maybe_unused]] const FlutterLocale* Engine::HandleLocale(
+MAYBE_UNUSED const FlutterLocale* Engine::HandleLocale(
     const FlutterLocale** supported_locales,
     size_t number_of_locales) {
   FML_LOG(INFO) << "number of locale: " << number_of_locales;
@@ -287,9 +244,9 @@ bool Engine::IsRunning() const {
 FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Run";
 
-  FlutterEngineResult result =
-      m_proc_table.Initialize(FLUTTER_ENGINE_VERSION, &m_renderer_config,
-                              &m_args, this, &m_flutter_engine);
+  auto config = m_backend->GetRenderConfig();
+  FlutterEngineResult result = m_proc_table.Initialize(
+      FLUTTER_ENGINE_VERSION, &config, &m_args, this, &m_flutter_engine);
   if (result != kSuccess) {
     FML_DLOG(ERROR) << "(" << m_index
                     << ") FlutterEngineRun failed or engine is null";
@@ -355,7 +312,7 @@ FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
   return kSuccess;
 }
 
-[[maybe_unused]] FlutterEngineResult Engine::TextureRegistryRemove(
+MAYBE_UNUSED FlutterEngineResult Engine::TextureRegistryRemove(
     int64_t texture_id) {
   auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
@@ -454,7 +411,7 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
                                                   data, data_length);
 }
 
-[[maybe_unused]] bool Engine::SendPlatformMessage(
+MAYBE_UNUSED bool Engine::SendPlatformMessage(
     const char* channel,
     const uint8_t* message,
     const size_t message_size) const {
@@ -471,7 +428,7 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
-[[maybe_unused]] FlutterEngineResult Engine::UpdateLocales(
+MAYBE_UNUSED FlutterEngineResult Engine::UpdateLocales(
     const FlutterLocale** locales,
     size_t locales_count) {
   return m_proc_table.UpdateLocales(m_flutter_engine, locales, locales_count);
@@ -571,10 +528,10 @@ bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
 }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
-[[maybe_unused]] void Engine::SetTextInput(TextInput* text_input) {
+MAYBE_UNUSED void Engine::SetTextInput(TextInput* text_input) {
   m_text_input = text_input;
 }
-[[maybe_unused]] TextInput* Engine::GetTextInput() const {
+MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
   return m_text_input;
 }
 #endif

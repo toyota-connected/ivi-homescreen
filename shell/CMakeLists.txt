@@ -16,11 +16,6 @@
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 string(APPEND CMAKE_ASM_FLAGS " -fno-integrated-as")
 
@@ -46,10 +41,9 @@ include(wayland)
 set(SRC_FILES
         main.cc
         app.cc
-        display.cc
-        egl.cc
-        egl_window.cc
-        gl_resolver.cc
+        wayland/display.cc
+        wayland/window.cc
+
         engine.cc
         platform_channel.cc
 
@@ -82,6 +76,12 @@ set(SRC_FILES
         ../third_party/flutter/fml/unique_fd.cc
         )
 
+if (BUILD_BACKEND_WAYLAND_EGL)
+    list(APPEND SRC_FILES backend/wayland_egl.cc backend/egl.cc)
+elseif (BUILD_BACKEND_WAYLAND_VULKAN)
+    list(APPEND SRC_FILES backend/wayland_vulkan.cc)
+endif ()
+
 add_executable(homescreen ${SRC_FILES})
 
 include(plugins)
@@ -93,9 +93,10 @@ target_compile_definitions(homescreen
         EGL_NO_X11
         MESA_EGL_NO_X11_HEADERS
         LINUX
-        WL_EGL_PLATFORM
         HAVE_MEMFD_CREATE
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
+        WL_EGL_PLATFORM
+        FILAMENT_SUPPORTS_WAYLAND
         )
 
 include_directories(
@@ -114,6 +115,7 @@ include_directories(
 )
 
 target_link_libraries(homescreen PRIVATE
+        bluevk
         ${WAYLAND_LIBRARIES}
         EGL GLESv2
         Threads::Threads

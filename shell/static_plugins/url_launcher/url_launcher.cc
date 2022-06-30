@@ -15,6 +15,7 @@
 #include "url_launcher.h"
 
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>

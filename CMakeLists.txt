@@ -40,6 +40,13 @@ message(STATUS "Version ................ ${PROJECT_VERSION}")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+add_subdirectory(third_party)
 add_subdirectory(shell)
 
 if (NOT CMAKE_CROSSCOMPILING)

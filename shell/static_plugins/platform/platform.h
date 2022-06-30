@@ -110,6 +110,7 @@ class Platform {
       "SystemChrome.setSystemUIOverlayStyle";
   static constexpr char kMethodSetEnabledSystemUIOverlays[] =
       "SystemChrome.setEnabledSystemUIOverlays";
+  static constexpr char kHapticFeedbackVibrate[] = "HapticFeedback.vibrate";
 #if 0
   static constexpr char kMethodSystemNavigatorPopMethod[] = "SystemNavigator.pop";
 
