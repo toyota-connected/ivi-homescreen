@@ -20,7 +20,8 @@
 
 class UrlLauncher {
  public:
-  static constexpr char kChannelName[] = "plugins.flutter.io/url_launcher_linux";
+  static constexpr char kChannelName[] =
+      "plugins.flutter.io/url_launcher_linux";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 

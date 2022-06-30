@@ -20,7 +20,8 @@
 
 class PackageInfo {
  public:
-  static constexpr char kChannelName[] = "dev.fluttercommunity.plus/package_info";
+  static constexpr char kChannelName[] =
+      "dev.fluttercommunity.plus/package_info";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

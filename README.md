@@ -16,6 +16,14 @@ IVI Homescreen for Wayland
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
 
+# EGL Backend
+This is the default build configuration.  To manually build EGL Backend use:
+`-DBUILD_BACKEND_WAYLAND_EGL=ON -DBUILD_BACKEND_WAYLAND_VULKAN=OFF`
+
+# Vulkan Backend
+To build Vulkan Backend use:
+`-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON`
+
 # x86_64 Desktop development notes
 
 ## Ubuntu 16-18

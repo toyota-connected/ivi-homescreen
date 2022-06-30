@@ -19,7 +19,6 @@
 #include <flutter/fml/logging.h>
 
 #include "engine.h"
-#include "gl_resolver.h"
 
 Texture::Texture(uint32_t id,
                  uint32_t target,

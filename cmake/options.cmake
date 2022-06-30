@@ -32,10 +32,29 @@ else ()
     set(BUILD_TYPE_LOCAL ON)
 endif ()
 
+#
 # variables
+#
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
-option(BUILD_EGL_TRANSPARENCY "Build with EGL Transparency Enabled" ON)
-if(BUILD_EGL_TRANSPARENCY)
-    add_compile_definitions(BUILD_EGL_ENABLE_TRANSPARENCY)
-endif()
+#
+# backend selection
+#
+option(BUILD_BACKEND_WAYLAND_EGL "Build Backend for EGL" ON)
+if (BUILD_BACKEND_WAYLAND_EGL)
+    add_compile_definitions(BUILD_BACKEND_WAYLAND_EGL)
+    option(BUILD_EGL_TRANSPARENCY "Build with EGL Transparency Enabled" ON)
+    if (BUILD_EGL_TRANSPARENCY)
+        add_compile_definitions(BUILD_EGL_ENABLE_TRANSPARENCY)
+    endif ()
+else ()
+    option(BUILD_BACKEND_WAYLAND_VULKAN "Build Backend for Vulkan" ON)
+    if (BUILD_BACKEND_WAYLAND_VULKAN)
+        add_compile_definitions(BUILD_BACKEND_WAYLAND_VULKAN)
+    endif ()
+endif ()
+
+option(BUILD_BACKEND_WAYLAND_DRM "Build Backend Wayland DRM" OFF)
+if (BUILD_BACKEND_WAYLAND_DRM)
+    add_compile_definitions(BUILD_BACKEND_WAYLAND_DRM)
+endif ()

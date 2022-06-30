@@ -64,6 +64,9 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
   } else if (method == kMethodSetEnabledSystemUIOverlays) {
     FML_DLOG(INFO) << "System UI Overlays Enabled";
     result = codec.EncodeSuccessEnvelope();
+  } else if (method == kHapticFeedbackVibrate) {
+    FML_DLOG(INFO) << "Haptic Feedback - Vibrate";
+    result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSetSystemUiOverlayStyle) {
     SystemUiOverlayStyle style{};
     if (args->HasMember(kSystemNavigationBarColor) &&

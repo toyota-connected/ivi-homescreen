@@ -22,30 +22,41 @@
 #include <memory>
 
 #include "constants.h"
-#ifdef ENABLE_TEXTURE_TEST
-#include "textures/test/texture_test.h"
+#ifdef ENABLE_TEXTURE_TEST_EGL
+#include "textures/test_egl/texture_test_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
+#include "backend/backend.h"
 #include "static_plugins/text_input/text_input.h"
 #endif
 
-class GlResolver;
 class Display;
-class EglWindow;
+class WaylandWindow;
 class Engine;
+#if defined(BUILD_BACKEND_WAYLAND_EGL)
+class WaylandEglBackend;
+#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
+class WaylandVulkanBackend;
+#endif
 
 class App {
  private:
-  std::shared_ptr<GlResolver> m_gl_resolver;
-  std::shared_ptr<Display> m_display;
-  std::shared_ptr<EglWindow> m_egl_window[kEngineInstanceCount];
+  std::shared_ptr<Display> m_wayland_display;
+#if defined(BUILD_BACKEND_WAYLAND_EGL)
+  std::shared_ptr<WaylandEglBackend> m_backend;
+#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
+  std::shared_ptr<WaylandVulkanBackend> m_backend;
+#endif
+  std::shared_ptr<WaylandWindow> m_wayland_window[kEngineInstanceCount];
   std::shared_ptr<Engine> m_flutter_engine[kEngineInstanceCount];
-  uint8_t m_fps_output;
-  uint32_t m_fps_period;
-  uint32_t m_fps_counter;
-  long long m_fps_pretime;
-#ifdef ENABLE_TEXTURE_TEST
-  std::unique_ptr<TextureTest> m_texture_test;
+  struct {
+    uint8_t output;
+    uint32_t period;
+    uint32_t counter;
+    long long pretime;
+  } m_fps{};
+#ifdef ENABLE_TEXTURE_TEST_EGL
+  std::unique_ptr<TextureTestEgl> m_texture_test_egl;
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   std::shared_ptr<TextInput> m_text_input;
@@ -57,18 +68,18 @@ class App {
                const std::string& application_override_path,
                bool fullscreen,
                bool enable_cursor,
-               bool debug_egl,
+               bool debug_backend,
                uint32_t width,
                uint32_t height,
                const std::string& cursor_theme_name);
   App(const App&) = delete;
   const App& operator=(const App&) = delete;
 
-  GlResolver* GetGlResolver();
-
-  std::shared_ptr<EglWindow> GetEglWindow(size_t index) {
-    return m_egl_window[index];
+  std::shared_ptr<WaylandWindow> GetEglWindow(size_t index) {
+    return m_wayland_window[index];
   }
+
+  Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
 
   int Loop();
 };

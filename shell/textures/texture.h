@@ -52,21 +52,21 @@ class Texture {
   int64_t Create(int width, int height);
   void Dispose();
   void Enable(uint32_t name);
-  void Disable();
+  MAYBE_UNUSED void Disable();
   void FrameReady();
-  [[maybe_unused]] [[nodiscard]] int64_t GetTextureId() const { return m_name; }
+  MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
 
  protected:
   std::shared_ptr<Engine> m_flutter_engine;
-  [[maybe_unused]] bool m_enabled;
+  bool m_enabled;
   int64_t m_id;
   int64_t m_name;
   uint32_t m_target;
   uint32_t m_format;
-  [[maybe_unused]] int m_width;
-  [[maybe_unused]] int m_height;
+  MAYBE_UNUSED int m_width;
+  int m_height;
 
-  [[maybe_unused]] EGLSurface m_surface{};
+  MAYBE_UNUSED EGLSurface m_surface{};
 
   bool m_draw_next;
 

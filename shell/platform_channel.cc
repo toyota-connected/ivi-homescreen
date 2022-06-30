@@ -26,8 +26,8 @@
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
 #include "static_plugins/mouse_cursor/mouse_cursor.h"
 #endif
-#ifdef ENABLE_PLUGIN_GSTREAMER
-#include "static_plugins/gstreamer/gstreamer.h"
+#ifdef ENABLE_PLUGIN_GSTREAMER_EGL
+#include "static_plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_NAVIGATION
 #include "static_plugins/navigation/navigation.h"
@@ -70,8 +70,9 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
   RegisterCallback(MouseCursor::kChannelName, &MouseCursor::OnPlatformMessage);
 #endif
-#ifdef ENABLE_PLUGIN_GSTREAMER
-  RegisterCallback(kChannelGstreamerInitialize, &Gstreamer::OnInitialize);
+#ifdef ENABLE_PLUGIN_GSTREAMER_EGL
+  RegisterCallback(GstreamerEgl::kChannelGstreamerInitialize,
+                   &GstreamerEgl::OnInitialize);
 #endif
 #ifdef ENABLE_PLUGIN_NAVIGATION
   RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
@@ -97,6 +98,7 @@ PlatformChannel::PlatformChannel() {
   RegisterCallback(UrlLauncher::kChannelName, &UrlLauncher::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
-  RegisterCallback(SecureStorage::kChannelName, &SecureStorage::OnPlatformMessage);
+  RegisterCallback(SecureStorage::kChannelName,
+                   &SecureStorage::OnPlatformMessage);
 #endif
 }
