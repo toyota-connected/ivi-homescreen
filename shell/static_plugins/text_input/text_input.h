@@ -20,16 +20,18 @@
 #include <memory>
 #include <string>
 
-#include "flutter/fml/macros.h"
 #include <flutter/binary_messenger.h>
 #include <flutter/method_channel.h>
 #include <flutter/method_result_functions.h>
+#include "flutter/fml/macros.h"
 #include "flutter/shell/platform/common/json_method_codec.h"
 #include "flutter/shell/platform/common/text_input_model.h"
 
 #include <flutter_embedder.h>
 #include <rapidjson/document.h>
 #include <xkbcommon/xkbcommon.h>
+
+#include "constants.h"
 
 class App;
 class Engine;
@@ -109,9 +111,9 @@ class TextInput : public flutter::BinaryMessenger {
 
   std::shared_ptr<Engine> engine_;
 
-  mutable flutter::BinaryReply last_reply_handler_;
-  std::string last_message_handler_channel_;
-  flutter::BinaryMessageHandler last_message_handler_;
+  MAYBE_UNUSED mutable flutter::BinaryReply last_reply_handler_;
+  MAYBE_UNUSED std::string last_message_handler_channel_;
+  MAYBE_UNUSED flutter::BinaryMessageHandler last_message_handler_;
 
   void Send(const std::string& channel,
             const uint8_t* message,

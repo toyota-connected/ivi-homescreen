@@ -28,14 +28,14 @@
 #include <string>
 #include <vector>
 
+#include "backend/backend.h"
 #include "constants.h"
-#include "gl_resolver.h"
 #include "platform_channel.h"
 #include "static_plugins/text_input/text_input.h"
 
 class App;
-class EglWindow;
-class GlResolver;
+class Backend;
+class WaylandWindow;
 class Texture;
 #if ENABLE_PLUGIN_TEXT_INPUT
 class TextInput;
@@ -53,17 +53,17 @@ class Engine {
 
   const Engine& operator=(const Engine&) = delete;
 
-  [[maybe_unused]] [[nodiscard]] size_t GetIndex() const { return m_index; }
+  MAYBE_UNUSED NODISCARD size_t GetIndex() const { return m_index; }
 
-  [[maybe_unused]] FlutterEngineResult Run(pthread_t event_loop_thread_id);
+  FlutterEngineResult Run(pthread_t event_loop_thread_id);
   FlutterEngineResult SetWindowSize(size_t height, size_t width);
 
-  [[nodiscard]] bool IsRunning() const;
+  MAYBE_UNUSED NODISCARD bool IsRunning() const;
 
   FlutterEngineResult RunTask();
 
   FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture* texture);
-  [[maybe_unused]] [[maybe_unused]] FlutterEngineResult TextureRegistryRemove(
+  FlutterEngineResult TextureRegistryRemove(
       int64_t texture_id);
 
   FlutterEngineResult TextureEnable(int64_t texture_id);
@@ -83,16 +83,16 @@ class Engine {
       const uint8_t* data,
       size_t data_length) const;
 
-  [[maybe_unused]] [[maybe_unused]] bool SendPlatformMessage(
+  bool SendPlatformMessage(
       const char* channel,
       const uint8_t* message,
       size_t message_size) const;
 
-  [[maybe_unused]] FlutterEngineResult UpdateLocales(
+  MAYBE_UNUSED FlutterEngineResult UpdateLocales(
       const FlutterLocale** locales,
       size_t locales_count);
 
-  [[maybe_unused]] std::string GetClipboardData() { return m_clipboard_data; };
+  MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
 
   void SendMouseEvent(FlutterPointerSignalKind signal,
                       FlutterPointerPhase phase,
@@ -107,32 +107,28 @@ class Engine {
                       double y,
                       int32_t device);
 
-  [[maybe_unused]] Texture* GetTextureObj(int64_t texture_id) {
+  Texture* GetTextureObj(int64_t texture_id) {
     return m_texture_registry[texture_id];
   }
 
-  [[maybe_unused]] std::shared_ptr<GlResolver> GetGlResolver() {
-    return m_gl_resolver;
-  }
-
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
-
-  std::shared_ptr<EglWindow> GetEglWindow() { return m_egl_window; }
 
   std::string GetAssetDirectory() { return m_assets_path; }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
   TextInput* m_text_input{};
-  [[maybe_unused]] void SetTextInput(TextInput *text_input);
-  [[maybe_unused]] TextInput *GetTextInput() const;
+  void SetTextInput(TextInput* text_input);
+  MAYBE_UNUSED NODISCARD TextInput* GetTextInput() const;
 #endif
+
+  Backend* GetBackend() { return m_backend; }
 
  private:
   size_t m_index;
   bool m_running;
 
-  std::shared_ptr<EglWindow> m_egl_window;
-  std::shared_ptr<GlResolver> m_gl_resolver;
+  Backend* m_backend;
+  std::shared_ptr<WaylandWindow> m_egl_window;
 
   std::string m_assets_path;
   std::string m_icu_data_path;
@@ -144,13 +140,12 @@ class Engine {
 
   FlutterEngine m_flutter_engine;
   FlutterProjectArgs m_args;
-  FlutterRendererConfig m_renderer_config{};
   std::string m_clipboard_data;
   pthread_t m_event_loop_thread{};
   void* m_engine_so_handle;
   FlutterEngineProcTable m_proc_table{};
 
-  [[maybe_unused]] [[maybe_unused]] static const FlutterLocale* HandleLocale(
+  MAYBE_UNUSED static const FlutterLocale* HandleLocale(
       const FlutterLocale** supported_locales,
       size_t number_of_locales);
 
@@ -170,6 +165,6 @@ class Engine {
       m_taskrunner;
 
   FlutterEngineAOTData m_aot_data;
-  [[nodiscard]] FlutterEngineAOTData LoadAotData(
+  MAYBE_UNUSED NODISCARD FlutterEngineAOTData LoadAotData(
       const std::string& aot_data_path) const;
 };
