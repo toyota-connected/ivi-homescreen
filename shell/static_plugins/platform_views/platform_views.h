@@ -20,7 +20,7 @@
 
 class PlatformViews {
  public:
-  static constexpr char kChannelName[] = "flutter/platform_views";
+  static constexpr char kChannelName[] = "samples.flutter.io/platform_view";
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

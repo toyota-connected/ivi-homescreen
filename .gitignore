@@ -1,6 +1,7 @@
 *~
+.idea*
 build/
-.vscode
+.vscode*
 needsbuild
 ._*
 cmake-build-*
