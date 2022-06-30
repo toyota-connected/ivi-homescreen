@@ -47,10 +47,12 @@ flutter::EncodableValue SecureStorage::read(const char* key) {
 flutter::EncodableValue SecureStorage::readAll() {
   auto result = flutter::EncodableMap{};
   auto document = GetInstance("keyring")->keyring_.readFromKeyring();
-  for (rapidjson::Value::ConstMemberIterator itr = document.MemberBegin();
-       itr != document.MemberEnd(); ++itr) {
-    result.emplace(flutter::EncodableValue(itr->name.GetString()),
-                   flutter::EncodableValue(itr->value.GetString()));
+  if (document.IsObject()) {
+    for (rapidjson::Value::ConstMemberIterator itr = document.MemberBegin();
+         itr != document.MemberEnd(); ++itr) {
+      result.emplace(flutter::EncodableValue(itr->name.GetString()),
+                     flutter::EncodableValue(itr->value.GetString()));
+    }
   }
   return flutter::EncodableValue(result);
 }

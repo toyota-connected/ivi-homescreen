@@ -141,7 +141,7 @@ Engine::Engine(App* app,
 
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
 
-  m_engine_so_handle = dlopen("libflutter_engine.so", RTLD_LAZY);
+  m_engine_so_handle = dlopen("libflutter_engine.so", RTLD_LAZY|RTLD_DEEPBIND);
   if (!m_engine_so_handle) {
     FML_DLOG(ERROR) << dlerror();
     exit(-1);

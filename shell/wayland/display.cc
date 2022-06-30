@@ -305,7 +305,7 @@ const struct wl_seat_listener Display::seat_listener = {
     .name = seat_handle_name,
 };
 
-bool Display::pointerButtonStatePressed(struct pointer* p) {
+bool Display::pointerButtonStatePressed(struct pointer *p) {
   return (p->buttons) && (p->event.state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
@@ -360,11 +360,11 @@ void Display::pointer_handle_motion(void* data,
       wl_fixed_to_double(sy * (wl_fixed_t)d->m_buffer_scale);
 
   if (d->m_flutter_engine) {
-    FlutterPointerPhase phase =
-        pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover;
+    FlutterPointerPhase phase = pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover; 
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
-        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+        kFlutterPointerSignalKindNone, phase,
+        d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
+        d->m_pointer.buttons);
   }
 }
 
@@ -382,12 +382,13 @@ void Display::pointer_handle_button(
   d->m_pointer.serial = serial;
 
   if (d->m_flutter_engine) {
-    FlutterPointerPhase phase =
-        pointerButtonStatePressed(&d->m_pointer) ? kDown : kUp;
+    FlutterPointerPhase phase = pointerButtonStatePressed(&d->m_pointer) ? kDown : kUp; 
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
-        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+        kFlutterPointerSignalKindNone, phase,
+        d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
+        d->m_pointer.buttons);
   }
+
 }
 
 void Display::pointer_handle_axis(
