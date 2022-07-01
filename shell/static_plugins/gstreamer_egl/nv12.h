@@ -37,10 +37,7 @@ class Shader {
   GLuint textureId;
   GLsizei width, height;
 
-  Shader(GLuint _program,
-         GLuint _textureId,
-         GLsizei _width,
-         GLsizei _height)
+  Shader(GLuint _program, GLuint _textureId, GLsizei _width, GLsizei _height)
       : program(_program),
         textureId(_textureId),
         width(_width),
