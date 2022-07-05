@@ -73,8 +73,8 @@ class Display {
 
   void AglShellDoBackground(struct wl_surface*, size_t index);
   void AglShellDoPanel(struct wl_surface*,
-                                        enum agl_shell_edge mode,
-                                        size_t index);
+                       enum agl_shell_edge mode,
+                       size_t index);
   void AglShellDoReady();
 
   void SetEngine(std::shared_ptr<Engine> engine);

@@ -136,8 +136,7 @@ WaylandWindow::~WaylandWindow() {
   FML_DLOG(INFO) << "- ~WaylandWindow()";
 }
 
-void WaylandWindow::buffer_release(void* data,
-                                   struct wl_buffer* buffer) {
+void WaylandWindow::buffer_release(void* data, struct wl_buffer* buffer) {
   (void)buffer;
   auto* mybuf = reinterpret_cast<struct shm_buffer*>(data);
   mybuf->busy = 0;
@@ -416,8 +415,7 @@ uint32_t WaylandWindow::GetFpsCounter() {
 
 const struct wl_callback_listener WaylandWindow::frame_listener = {redraw};
 
-WaylandWindow::shm_buffer* WaylandWindow::next_buffer(
-    WaylandWindow* window) {
+WaylandWindow::shm_buffer* WaylandWindow::next_buffer(WaylandWindow* window) {
   (void)window;
   return nullptr;
 }
@@ -448,12 +446,10 @@ void WaylandWindow::DrawFps(uint8_t fps) {
          static_cast<size_t>(surface_w) * static_cast<size_t>(surface_h) * 4);
 
   // draw bar
-  auto pixels =
-      reinterpret_cast<uint32_t*>(m_fps_buffer.shm_data);
+  auto pixels = reinterpret_cast<uint32_t*>(m_fps_buffer.shm_data);
 
   for (int i = 0; i < bars; i++) {
-    auto p =
-        std::clamp(m_fps[(m_fps_idx + i) % bars] / 60.0, 0.0, 1.0);
+    auto p = std::clamp(m_fps[(m_fps_idx + i) % bars] / 60.0, 0.0, 1.0);
     int draw_y = static_cast<int>(surface_h * (1.0 - p));
     int draw_x = i * (bar_w + bar_space);
 

@@ -35,13 +35,15 @@ class Egl {
   bool MakeResourceCurrent(size_t index);
   bool MakeTextureCurrent();
 
-  MAYBE_UNUSED EGLSurface GetSurface(size_t index) { return m_egl_surface[index]; }
+  MAYBE_UNUSED EGLSurface GetSurface(size_t index) {
+    return m_egl_surface[index];
+  }
 
   void* gl_process_resolver(const char* name);
 
   static EGLDisplay get_egl_display(EGLenum platform,
-                             void* native_display,
-                             const EGLint* attrib_list);
+                                    void* native_display,
+                                    const EGLint* attrib_list);
 
   EGLSurface create_egl_surface(void* native_window, const EGLint* attrib_list);
 

@@ -57,14 +57,14 @@ class Engine {
 
   FlutterEngineResult Run(pthread_t event_loop_thread_id);
   FlutterEngineResult SetWindowSize(size_t height, size_t width);
+  FlutterEngineResult SetPixelRatio(double pixel_ratio);
 
   MAYBE_UNUSED NODISCARD bool IsRunning() const;
 
   FlutterEngineResult RunTask();
 
   FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture* texture);
-  FlutterEngineResult TextureRegistryRemove(
-      int64_t texture_id);
+  FlutterEngineResult TextureRegistryRemove(int64_t texture_id);
 
   FlutterEngineResult TextureEnable(int64_t texture_id);
   FlutterEngineResult TextureDisable(int64_t texture_id);
@@ -83,14 +83,12 @@ class Engine {
       const uint8_t* data,
       size_t data_length) const;
 
-  bool SendPlatformMessage(
-      const char* channel,
-      const uint8_t* message,
-      size_t message_size) const;
+  bool SendPlatformMessage(const char* channel,
+                           const uint8_t* message,
+                           size_t message_size) const;
 
-  MAYBE_UNUSED FlutterEngineResult UpdateLocales(
-      const FlutterLocale** locales,
-      size_t locales_count);
+  MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale** locales,
+                                                 size_t locales_count);
 
   MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
 
@@ -134,6 +132,9 @@ class Engine {
   std::string m_icu_data_path;
   std::string m_aot_path;
   std::string m_cache_path;
+  size_t m_prev_height;
+  size_t m_prev_width;
+  double m_prev_pixel_ratio;
 
   PlatformChannel* m_platform_channel;
   std::map<int64_t, Texture*> m_texture_registry;
@@ -165,6 +166,6 @@ class Engine {
       m_taskrunner;
 
   FlutterEngineAOTData m_aot_data;
-  MAYBE_UNUSED NODISCARD FlutterEngineAOTData LoadAotData(
-      const std::string& aot_data_path) const;
+  MAYBE_UNUSED NODISCARD FlutterEngineAOTData
+  LoadAotData(const std::string& aot_data_path) const;
 };
