@@ -34,121 +34,125 @@
        (pos)++)
 
 class Display;
+
 class Engine;
 
 class WaylandWindow {
- public:
-  // a normal surface role is a regular application; a window_bg, window_panel
-  // are part of the client shell UI for AGL; for window_panel only the height
-  // has any meaning, while window_bg will literally be the entire output
-  enum window_type {
-    WINDOW_NORMAL,
-    WINDOW_BG,
-    WINDOW_PANEL_TOP,
-    WINDOW_PANEL_BOTTOM,
-    WINDOW_PANEL_LEFT,
-    WINDOW_PANEL_RIGHT
-  };
+public:
+    // a normal surface role is a regular application; a window_bg, window_panel
+    // are part of the client shell UI for AGL; for window_panel only the height
+    // has any meaning, while window_bg will literally be the entire output
+    enum window_type {
+        WINDOW_NORMAL,
+        WINDOW_BG,
+        WINDOW_PANEL_TOP,
+        WINDOW_PANEL_BOTTOM,
+        WINDOW_PANEL_LEFT,
+        WINDOW_PANEL_RIGHT
+    };
 
-  WaylandWindow(size_t index,
-                std::shared_ptr<Display> display,
-                struct wl_surface* base_surface,
-                enum window_type type,
-                std::string app_id,
-                bool fullscreen,
-                int32_t width,
-                int32_t height,
-                Backend* backend);
+    WaylandWindow(size_t index,
+                  std::shared_ptr<Display> display,
+                  struct wl_surface *base_surface,
+                  enum window_type type,
+                  std::string app_id,
+                  bool fullscreen,
+                  int32_t width,
+                  int32_t height,
+                  Backend *backend);
 
-  ~WaylandWindow();
-  WaylandWindow(const WaylandWindow&) = delete;
-  const WaylandWindow& operator=(const WaylandWindow&) = delete;
+    ~WaylandWindow();
 
-  void SetEngine(const std::shared_ptr<Engine>& engine);
+    WaylandWindow(const WaylandWindow &) = delete;
 
-  MAYBE_UNUSED wl_surface* GetNativeSurface() { return m_base_surface; }
+    const WaylandWindow &operator=(const WaylandWindow &) = delete;
 
-  uint32_t GetFpsCounter();
-  void DrawFps(uint8_t fps);
+    void SetEngine(const std::shared_ptr<Engine> &engine);
 
-  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+    MAYBE_UNUSED wl_surface *GetNativeSurface() { return m_base_surface; }
 
-  uint32_t m_fps_counter;
+    uint32_t GetFpsCounter();
 
- private:
-  struct shm_buffer {
-    struct wl_buffer* buffer;
-    void* shm_data;
-    MAYBE_UNUSED int busy;
-  };
+    void DrawFps(uint8_t fps);
 
-  size_t m_index;
-  std::shared_ptr<Display> m_display;
-  std::shared_ptr<Engine> m_flutter_engine;
-  struct wl_surface* m_base_surface;
-  std::shared_ptr<Backend> m_backend;
-  bool m_wait_for_configure{};
+    bool ActivateSystemCursor(int32_t device, const std::string &kind);
 
-  bool m_fullscreen{};
-  bool m_maximized{};
-  MAYBE_UNUSED bool m_resize{};
-  MAYBE_UNUSED bool m_activated{};
-  MAYBE_UNUSED bool m_running{};
-  struct {
-    int32_t width;
-    int32_t height;
-  } m_geometry;
-  struct {
-    int32_t width;
-    int32_t height;
-  } m_window_size{};
+    uint32_t m_fps_counter;
 
-  enum window_type m_type;
-  std::string m_app_id;
+private:
+    struct shm_buffer {
+        struct wl_buffer *buffer;
+        void *shm_data;
+        MAYBE_UNUSED int busy;
+    };
 
-  struct xdg_surface* m_xdg_surface;
-  struct xdg_toplevel* m_xdg_toplevel;
-  struct wl_surface* m_fps_surface;
-  struct wl_subsurface* m_subsurface;
-  struct shm_buffer m_fps_buffer {};
-  uint8_t m_fps_idx;
-  uint8_t m_fps[20]{};
+    size_t m_index;
+    std::shared_ptr<Display> m_display;
+    std::shared_ptr<Engine> m_flutter_engine;
+    struct wl_surface *m_base_surface;
+    std::shared_ptr<Backend> m_backend;
+    bool m_wait_for_configure{};
 
-  struct shm_buffer m_buffers[2]{};
-  struct wl_callback* m_callback;
+    bool m_fullscreen{};
+    bool m_maximized{};
+    MAYBE_UNUSED bool m_resize{};
+    MAYBE_UNUSED bool m_activated{};
+    MAYBE_UNUSED bool m_running{};
+    struct {
+        int32_t width;
+        int32_t height;
+    } m_geometry;
+    struct {
+        int32_t width;
+        int32_t height;
+    } m_window_size{};
 
-  MAYBE_UNUSED int m_frame_sync;
+    enum window_type m_type;
+    std::string m_app_id;
 
-  static void buffer_release(void* data, struct wl_buffer* buffer);
+    struct xdg_surface *m_xdg_surface;
+    struct xdg_toplevel *m_xdg_toplevel;
+    struct wl_surface *m_fps_surface;
+    struct wl_subsurface *m_subsurface;
+    struct shm_buffer m_fps_buffer{};
+    uint8_t m_fps_idx;
+    uint8_t m_fps[20]{};
 
-  static const struct wl_buffer_listener buffer_listener;
+    struct shm_buffer m_buffers[2]{};
+    struct wl_callback *m_callback;
 
-  static int create_shm_buffer(Display* display,
-                               struct shm_buffer* buffer,
-                               int width,
-                               int height,
-                               uint32_t format);
+    MAYBE_UNUSED int m_frame_sync;
 
-  static const struct xdg_surface_listener xdg_surface_listener;
+    static void buffer_release(void *data, struct wl_buffer *buffer);
 
-  static void handle_xdg_surface_configure(void* data,
-                                           struct xdg_surface* xdg_surface,
-                                           uint32_t serial);
+    static const struct wl_buffer_listener buffer_listener;
 
-  static const struct xdg_toplevel_listener xdg_toplevel_listener;
+    static int create_shm_buffer(Display *display,
+                                 struct shm_buffer *buffer,
+                                 int width,
+                                 int height,
+                                 uint32_t format);
 
-  static void handle_toplevel_configure(void* data,
-                                        struct xdg_toplevel* toplevel,
-                                        int32_t width,
-                                        int32_t height,
-                                        struct wl_array* states);
+    static const struct xdg_surface_listener xdg_surface_listener;
 
-  static void handle_toplevel_close(void* data,
-                                    struct xdg_toplevel* xdg_toplevel);
+    static void handle_xdg_surface_configure(void *data,
+                                             struct xdg_surface *xdg_surface,
+                                             uint32_t serial);
 
-  MAYBE_UNUSED static struct shm_buffer* next_buffer(WaylandWindow* window);
+    static const struct xdg_toplevel_listener xdg_toplevel_listener;
 
-  static void redraw(void* data, struct wl_callback* callback, uint32_t time);
+    static void handle_toplevel_configure(void *data,
+                                          struct xdg_toplevel *toplevel,
+                                          int32_t width,
+                                          int32_t height,
+                                          struct wl_array *states);
 
-  static const struct wl_callback_listener frame_listener;
+    static void handle_toplevel_close(void *data,
+                                      struct xdg_toplevel *xdg_toplevel);
+
+    MAYBE_UNUSED static struct shm_buffer *next_buffer(WaylandWindow *window);
+
+    static void redraw(void *data, struct wl_callback *callback, uint32_t time);
+
+    static const struct wl_callback_listener frame_listener;
 };

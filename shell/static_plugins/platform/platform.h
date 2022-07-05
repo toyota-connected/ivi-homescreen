@@ -20,129 +20,130 @@
 #include <string>
 
 class Platform {
- public:
-  static constexpr char kChannelName[] = "flutter/platform";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+public:
+    static constexpr char kChannelName[] = "flutter/platform";
 
-  struct MethodSetApplicationSwitcherDescription {
-    std::string label;
-    uint32_t primaryColor;
-  };
+    static void OnPlatformMessage(const FlutterPlatformMessage *message,
+                                  void *userdata);
 
-  struct SystemUiOverlayStyle {
-    /// The color of the system bottom navigation bar.
-    ///
-    /// Only honored in Android versions O and greater.
-    uint32_t systemNavigationBarColor;
+    struct MethodSetApplicationSwitcherDescription {
+        std::string label;
+        uint32_t primaryColor;
+    };
 
-    /// The color of the divider between the system's bottom navigation bar and
-    /// the app's content.
-    ///
-    /// Only honored in Android versions P and greater.
-    uint32_t systemNavigationBarDividerColor;
+    struct SystemUiOverlayStyle {
+        /// The color of the system bottom navigation bar.
+        ///
+        /// Only honored in Android versions O and greater.
+        uint32_t systemNavigationBarColor;
 
-    /// Overrides the contrast enforcement when setting a transparent navigation
-    /// bar.
-    ///
-    /// When setting a transparent navigation bar in SDK 29+, or Android 10 and
-    /// up, a translucent body scrim may be applied behind the button navigation
-    /// bar to ensure contrast with buttons and the background of the
-    /// application.
-    ///
-    /// SDK 28-, or Android P and lower, will not apply this body scrim.
-    ///
-    /// Setting this to false overrides the default body scrim.
-    ///
-    /// See also:
-    ///
-    ///   * [SystemUiOverlayStyle.systemNavigationBarColor], which is overridden
-    ///   when transparent to enforce this contrast policy.
-    bool systemStatusBarContrastEnforced;
+        /// The color of the divider between the system's bottom navigation bar and
+        /// the app's content.
+        ///
+        /// Only honored in Android versions P and greater.
+        uint32_t systemNavigationBarDividerColor;
 
-    /// The color of top status bar.
-    ///
-    /// Only honored in Android version M and greater.
-    uint32_t statusBarColor;
+        /// Overrides the contrast enforcement when setting a transparent navigation
+        /// bar.
+        ///
+        /// When setting a transparent navigation bar in SDK 29+, or Android 10 and
+        /// up, a translucent body scrim may be applied behind the button navigation
+        /// bar to ensure contrast with buttons and the background of the
+        /// application.
+        ///
+        /// SDK 28-, or Android P and lower, will not apply this body scrim.
+        ///
+        /// Setting this to false overrides the default body scrim.
+        ///
+        /// See also:
+        ///
+        ///   * [SystemUiOverlayStyle.systemNavigationBarColor], which is overridden
+        ///   when transparent to enforce this contrast policy.
+        bool systemStatusBarContrastEnforced;
 
-    /// The brightness of top status bar.
-    ///
-    /// Only honored in iOS.
-    std::string statusBarBrightness;
+        /// The color of top status bar.
+        ///
+        /// Only honored in Android version M and greater.
+        uint32_t statusBarColor;
 
-    /// The brightness of the top status bar icons.
-    ///
-    /// Only honored in Android version M and greater.
-    std::string statusBarIconBrightness;
+        /// The brightness of top status bar.
+        ///
+        /// Only honored in iOS.
+        std::string statusBarBrightness;
 
-    /// The brightness of the system navigation bar icons.
-    ///
-    /// Only honored in Android versions O and greater.
-    /// When set to [Brightness.light], the system navigation bar icons are
-    /// light. When set to [Brightness.dark], the system navigation bar icons
-    /// are dark.
-    std::string systemNavigationBarIconBrightness;
+        /// The brightness of the top status bar icons.
+        ///
+        /// Only honored in Android version M and greater.
+        std::string statusBarIconBrightness;
 
-    /// Overrides the contrast enforcement when setting a transparent navigation
-    /// bar.
-    ///
-    /// When setting a transparent navigation bar in SDK 29+, or Android 10 and
-    /// up, a translucent body scrim may be applied behind the button navigation
-    /// bar to ensure contrast with buttons and the background of the
-    /// application.
-    ///
-    /// SDK 28-, or Android P and lower, will not apply this body scrim.
-    ///
-    /// Setting this to false overrides the default body scrim.
-    ///
-    /// See also:
-    ///
-    ///   * [SystemUiOverlayStyle.systemNavigationBarColor], which is overridden
-    ///   when transparent to enforce this contrast policy.
-    bool systemNavigationBarContrastEnforced;
-  };
+        /// The brightness of the system navigation bar icons.
+        ///
+        /// Only honored in Android versions O and greater.
+        /// When set to [Brightness.light], the system navigation bar icons are
+        /// light. When set to [Brightness.dark], the system navigation bar icons
+        /// are dark.
+        std::string systemNavigationBarIconBrightness;
 
- private:
-  static constexpr char kMethodSetApplicationSwitcherDescription[] =
-      "SystemChrome.setApplicationSwitcherDescription";
+        /// Overrides the contrast enforcement when setting a transparent navigation
+        /// bar.
+        ///
+        /// When setting a transparent navigation bar in SDK 29+, or Android 10 and
+        /// up, a translucent body scrim may be applied behind the button navigation
+        /// bar to ensure contrast with buttons and the background of the
+        /// application.
+        ///
+        /// SDK 28-, or Android P and lower, will not apply this body scrim.
+        ///
+        /// Setting this to false overrides the default body scrim.
+        ///
+        /// See also:
+        ///
+        ///   * [SystemUiOverlayStyle.systemNavigationBarColor], which is overridden
+        ///   when transparent to enforce this contrast policy.
+        bool systemNavigationBarContrastEnforced;
+    };
 
-  static constexpr char kMethodSetSystemUiOverlayStyle[] =
-      "SystemChrome.setSystemUIOverlayStyle";
-  static constexpr char kMethodSetEnabledSystemUIOverlays[] =
-      "SystemChrome.setEnabledSystemUIOverlays";
-  static constexpr char kHapticFeedbackVibrate[] = "HapticFeedback.vibrate";
+private:
+    static constexpr char kMethodSetApplicationSwitcherDescription[] =
+            "SystemChrome.setApplicationSwitcherDescription";
+
+    static constexpr char kMethodSetSystemUiOverlayStyle[] =
+            "SystemChrome.setSystemUIOverlayStyle";
+    static constexpr char kMethodSetEnabledSystemUIOverlays[] =
+            "SystemChrome.setEnabledSystemUIOverlays";
+    static constexpr char kHapticFeedbackVibrate[] = "HapticFeedback.vibrate";
 #if 0
-  static constexpr char kMethodSystemNavigatorPopMethod[] = "SystemNavigator.pop";
+    static constexpr char kMethodSystemNavigatorPopMethod[] = "SystemNavigator.pop";
 
-  static constexpr char kBadArgumentsError[] = "Bad Arguments";
-  static constexpr char kUnknownClipboardFormatError[] = "Unknown Clipboard Format";
-  static constexpr char kFailedError[] = "Failed";
+    static constexpr char kBadArgumentsError[] = "Bad Arguments";
+    static constexpr char kUnknownClipboardFormatError[] = "Unknown Clipboard Format";
+    static constexpr char kFailedError[] = "Failed";
 #endif
-  static constexpr char kMethodClipboardHasStrings[] = "Clipboard.hasStrings";
-  static constexpr char kMethodClipboardSetData[] = "Clipboard.setData";
+    static constexpr char kMethodClipboardHasStrings[] = "Clipboard.hasStrings";
+    static constexpr char kMethodClipboardSetData[] = "Clipboard.setData";
 #if 0
-  static constexpr char kGetClipboardDataMethod[] = "Clipboard.getData";
-  static constexpr char kSystemNavigatorPopMethod[] = "SystemNavigator.pop";
+    static constexpr char kGetClipboardDataMethod[] = "Clipboard.getData";
+    static constexpr char kSystemNavigatorPopMethod[] = "SystemNavigator.pop";
 #endif
-  static constexpr char kTextPlainFormat[] = "text/plain";
+    static constexpr char kTextPlainFormat[] = "text/plain";
 
 #if 0
-  static constexpr char kPlaySoundMethod[] = "SystemSound.play";
-  static constexpr char kSoundTypeAlert[] = "SystemSoundType.alert";
-  static constexpr char kSoundTypeClick[] = "SystemSoundType.click";
+    static constexpr char kPlaySoundMethod[] = "SystemSound.play";
+    static constexpr char kSoundTypeAlert[] = "SystemSoundType.alert";
+    static constexpr char kSoundTypeClick[] = "SystemSoundType.click";
 #endif
 
-  static constexpr char kSystemNavigationBarColor[] =
-      "systemNavigationBarColor";
-  static constexpr char kSystemNavigationBarDividerColor[] =
-      "systemNavigationBarDividerColor";
-  static constexpr char kSystemStatusBarContrastEnforced[] =
-      "systemStatusBarContrastEnforced";
-  static constexpr char kStatusBarColor[] = "statusBarColor";
-  static constexpr char kStatusBarBrightness[] = "statusBarBrightness";
-  static constexpr char kStatusBarIconBrightness[] = "statusBarIconBrightness";
-  static constexpr char kSystemNavigationBarIconBrightness[] =
-      "systemNavigationBarIconBrightness";
-  static constexpr char kSystemNavigationBarContrastEnforced[] =
-      "systemNavigationBarContrastEnforced";
+    static constexpr char kSystemNavigationBarColor[] =
+            "systemNavigationBarColor";
+    static constexpr char kSystemNavigationBarDividerColor[] =
+            "systemNavigationBarDividerColor";
+    static constexpr char kSystemStatusBarContrastEnforced[] =
+            "systemStatusBarContrastEnforced";
+    static constexpr char kStatusBarColor[] = "statusBarColor";
+    static constexpr char kStatusBarBrightness[] = "statusBarBrightness";
+    static constexpr char kStatusBarIconBrightness[] = "statusBarIconBrightness";
+    static constexpr char kSystemNavigationBarIconBrightness[] =
+            "systemNavigationBarIconBrightness";
+    static constexpr char kSystemNavigationBarContrastEnforced[] =
+            "systemNavigationBarContrastEnforced";
 };

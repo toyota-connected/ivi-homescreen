@@ -24,31 +24,32 @@
 #include "egl.h"
 
 class WaylandEglBackend : public Egl, public Backend {
- public:
-  WaylandEglBackend(struct wl_display* display,
-                    struct wl_surface* surface,
-                    bool debug_backend,
-                    int buffer_size = kEglBufferSize);
+public:
+    WaylandEglBackend(struct wl_display *display,
+                      struct wl_surface *surface,
+                      bool debug_backend,
+                      int buffer_size = kEglBufferSize);
 
-  static void Resize(void* user_data,
-                     size_t index,
-                     Engine* engine,
-                     int32_t width,
-                     int32_t height);
+    static void Resize(void *user_data,
+                       size_t index,
+                       Engine *engine,
+                       int32_t width,
+                       int32_t height);
 
-  static void CreateSurface(void* user_data,
-                            size_t index,
-                            wl_surface* surface,
-                            int32_t width,
-                            int32_t height);
+    static void CreateSurface(void *user_data,
+                              size_t index,
+                              wl_surface *surface,
+                              int32_t width,
+                              int32_t height);
 
-  FlutterRendererConfig GetRenderConfig() override;
-  FlutterCompositor GetCompositorConfig() override;
+    FlutterRendererConfig GetRenderConfig() override;
 
- private:
-  MAYBE_UNUSED struct wl_display* wl_display_;
-  MAYBE_UNUSED struct wl_surface* wl_surface_;
-  MAYBE_UNUSED bool resize_pending_;
+    FlutterCompositor GetCompositorConfig() override;
 
-  wl_egl_window* m_egl_window[kEngineInstanceCount]{};
+private:
+    MAYBE_UNUSED struct wl_display *wl_display_;
+    MAYBE_UNUSED struct wl_surface *wl_surface_;
+    MAYBE_UNUSED bool resize_pending_;
+
+    wl_egl_window *m_egl_window[kEngineInstanceCount]{};
 };

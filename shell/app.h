@@ -22,17 +22,23 @@
 #include <memory>
 
 #include "constants.h"
+
 #ifdef ENABLE_TEXTURE_TEST_EGL
 #include "textures/test_egl/texture_test_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
+
 #include "backend/backend.h"
 #include "static_plugins/text_input/text_input.h"
+
 #endif
 
 class Display;
+
 class WaylandWindow;
+
 class Engine;
+
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
 class WaylandEglBackend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
@@ -40,46 +46,49 @@ class WaylandVulkanBackend;
 #endif
 
 class App {
- private:
-  std::shared_ptr<Display> m_wayland_display;
+private:
+    std::shared_ptr<Display> m_wayland_display;
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
-  std::shared_ptr<WaylandEglBackend> m_backend;
+    std::shared_ptr<WaylandEglBackend> m_backend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
-  std::shared_ptr<WaylandVulkanBackend> m_backend;
+    std::shared_ptr<WaylandVulkanBackend> m_backend;
 #endif
-  std::shared_ptr<WaylandWindow> m_wayland_window[kEngineInstanceCount];
-  std::shared_ptr<Engine> m_flutter_engine[kEngineInstanceCount];
-  struct {
-    uint8_t output;
-    uint32_t period;
-    uint32_t counter;
-    long long pretime;
-  } m_fps{};
+    std::shared_ptr<WaylandWindow> m_wayland_window[kEngineInstanceCount];
+    std::shared_ptr<Engine> m_flutter_engine[kEngineInstanceCount];
+    struct {
+        uint8_t output;
+        uint32_t period;
+        uint32_t counter;
+        long long pretime;
+    } m_fps{};
 #ifdef ENABLE_TEXTURE_TEST_EGL
-  std::unique_ptr<TextureTestEgl> m_texture_test_egl;
+    std::unique_ptr<TextureTestEgl> m_texture_test_egl;
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-  std::shared_ptr<TextInput> m_text_input;
+    std::shared_ptr<TextInput> m_text_input;
 #endif
 
- public:
-  explicit App(const std::string& app_id,
-               const std::vector<std::string>& command_line_args,
-               const std::string& application_override_path,
-               bool fullscreen,
-               bool enable_cursor,
-               bool debug_backend,
-               uint32_t width,
-               uint32_t height,
-               const std::string& cursor_theme_name);
-  App(const App&) = delete;
-  const App& operator=(const App&) = delete;
+public:
+    explicit App(const std::string &app_id,
+                 const std::vector<std::string> &command_line_args,
+                 const std::string &application_override_path,
+                 bool fullscreen,
+                 bool enable_cursor,
+                 bool debug_backend,
+                 uint32_t width,
+                 uint32_t height,
+                 const std::string &cursor_theme_name,
+                 int32_t accessibility_features);
 
-  std::shared_ptr<WaylandWindow> GetEglWindow(size_t index) {
-    return m_wayland_window[index];
-  }
+    App(const App &) = delete;
 
-  Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
+    const App &operator=(const App &) = delete;
 
-  int Loop();
+    std::shared_ptr<WaylandWindow> GetEglWindow(size_t index) {
+        return m_wayland_window[index];
+    }
+
+    Backend *GetBackend() { return reinterpret_cast<Backend *>(m_backend.get()); }
+
+    int Loop();
 };

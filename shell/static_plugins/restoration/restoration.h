@@ -19,11 +19,12 @@
 #include <flutter_embedder.h>
 
 class Restoration {
- public:
-  static constexpr char kChannelName[] = "flutter/restoration";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+public:
+    static constexpr char kChannelName[] = "flutter/restoration";
 
- private:
-  static constexpr char kMethodGet[] = "get";
+    static void OnPlatformMessage(const FlutterPlatformMessage *message,
+                                  void *userdata);
+
+private:
+    static constexpr char kMethodGet[] = "get";
 };

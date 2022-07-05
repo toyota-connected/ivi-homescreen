@@ -20,6 +20,7 @@
 #include <string>
 
 #include <GLES2/gl2.h>
+
 #ifndef GL_RGBA8
 #define GL_RGBA8 0x8058
 #endif
@@ -31,22 +32,25 @@
 #include "textures/texture.h"
 
 class App;
+
 class Engine;
 
 class TextureTestEgl : public Texture {
- public:
-  explicit TextureTestEgl(App* app);
-  ~TextureTestEgl();
+public:
+    explicit TextureTestEgl(App *app);
 
-  void Draw(void* userdata);
+    ~TextureTestEgl();
 
-  FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
+    void Draw(void *userdata);
 
- private:
-  bool m_initialized;
+    FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
 
-  WaylandEglBackend* m_egl_backend;
+private:
+    bool m_initialized;
 
-  static void Create(void* userdata);
-  static void Dispose(void* userdata);
+    WaylandEglBackend *m_egl_backend;
+
+    static void Create(void *userdata);
+
+    static void Dispose(void *userdata);
 };

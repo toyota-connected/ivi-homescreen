@@ -34,138 +34,156 @@
 #include "static_plugins/text_input/text_input.h"
 
 class App;
+
 class Backend;
+
 class WaylandWindow;
+
 class Texture;
+
 #if ENABLE_PLUGIN_TEXT_INPUT
+
 class TextInput;
+
 #endif
 
 class Engine {
- public:
-  Engine(App* app,
-         size_t index,
-         const std::vector<const char*>& command_line_args_c,
-         const std::string& application_override_path);
+public:
+    Engine(App *app,
+           size_t index,
+           const std::vector<const char *> &command_line_args_c,
+           const std::string &application_override_path,
+           int32_t accessibility_features);
 
-  ~Engine();
-  Engine(const Engine&) = delete;
+    ~Engine();
 
-  const Engine& operator=(const Engine&) = delete;
+    Engine(const Engine &) = delete;
 
-  MAYBE_UNUSED NODISCARD size_t GetIndex() const { return m_index; }
+    const Engine &operator=(const Engine &) = delete;
 
-  FlutterEngineResult Run(pthread_t event_loop_thread_id);
-  FlutterEngineResult SetWindowSize(size_t height, size_t width);
-  FlutterEngineResult SetPixelRatio(double pixel_ratio);
+    MAYBE_UNUSED NODISCARD size_t GetIndex() const { return m_index; }
 
-  MAYBE_UNUSED NODISCARD bool IsRunning() const;
+    FlutterEngineResult Run(pthread_t event_loop_thread_id);
 
-  FlutterEngineResult RunTask();
+    FlutterEngineResult SetWindowSize(size_t height, size_t width);
 
-  FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture* texture);
-  FlutterEngineResult TextureRegistryRemove(int64_t texture_id);
+    FlutterEngineResult SetPixelRatio(double pixel_ratio);
 
-  FlutterEngineResult TextureEnable(int64_t texture_id);
-  FlutterEngineResult TextureDisable(int64_t texture_id);
-  static FlutterEngineResult MarkExternalTextureFrameAvailable(
-      const std::shared_ptr<Engine>& engine,
-      int64_t texture_id);
+    MAYBE_UNUSED NODISCARD bool IsRunning() const;
 
-  int64_t TextureCreate(int64_t texture_id, int32_t width, int32_t height);
+    FlutterEngineResult RunTask();
 
-  FlutterEngineResult TextureDispose(int64_t texture_id);
+    FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture *texture);
 
-  static std::string GetPersistentCachePath();
+    FlutterEngineResult TextureRegistryRemove(int64_t texture_id);
 
-  FlutterEngineResult SendPlatformMessageResponse(
-      const FlutterPlatformMessageResponseHandle* handle,
-      const uint8_t* data,
-      size_t data_length) const;
+    FlutterEngineResult TextureEnable(int64_t texture_id);
 
-  bool SendPlatformMessage(const char* channel,
-                           const uint8_t* message,
-                           size_t message_size) const;
+    FlutterEngineResult TextureDisable(int64_t texture_id);
 
-  MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale** locales,
-                                                 size_t locales_count);
+    static FlutterEngineResult MarkExternalTextureFrameAvailable(
+            const std::shared_ptr<Engine> &engine,
+            int64_t texture_id);
 
-  MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
+    int64_t TextureCreate(int64_t texture_id, int32_t width, int32_t height);
 
-  void SendMouseEvent(FlutterPointerSignalKind signal,
-                      FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      double scroll_delta_x,
-                      double scroll_delta_y,
-                      uint32_t button);
+    FlutterEngineResult TextureDispose(int64_t texture_id);
 
-  void SendTouchEvent(FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      int32_t device);
+    static std::string GetPersistentCachePath();
 
-  Texture* GetTextureObj(int64_t texture_id) {
-    return m_texture_registry[texture_id];
-  }
+    FlutterEngineResult SendPlatformMessageResponse(
+            const FlutterPlatformMessageResponseHandle *handle,
+            const uint8_t *data,
+            size_t data_length) const;
 
-  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+    bool SendPlatformMessage(const char *channel,
+                             const uint8_t *message,
+                             size_t message_size) const;
 
-  std::string GetAssetDirectory() { return m_assets_path; }
+    MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale **locales,
+                                                   size_t locales_count);
+
+    MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
+
+    void SendMouseEvent(FlutterPointerSignalKind signal,
+                        FlutterPointerPhase phase,
+                        double x,
+                        double y,
+                        double scroll_delta_x,
+                        double scroll_delta_y,
+                        uint32_t button);
+
+    void SendTouchEvent(FlutterPointerPhase phase,
+                        double x,
+                        double y,
+                        int32_t device);
+
+    Texture *GetTextureObj(int64_t texture_id) {
+        return m_texture_registry[texture_id];
+    }
+
+    bool ActivateSystemCursor(int32_t device, const std::string &kind);
+
+    std::string GetAssetDirectory() { return m_assets_path; }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
-  TextInput* m_text_input{};
-  void SetTextInput(TextInput* text_input);
-  MAYBE_UNUSED NODISCARD TextInput* GetTextInput() const;
+    TextInput *m_text_input{};
+
+    void SetTextInput(TextInput *text_input);
+
+    MAYBE_UNUSED NODISCARD TextInput *GetTextInput() const;
+
 #endif
 
-  Backend* GetBackend() { return m_backend; }
+    Backend *GetBackend() { return m_backend; }
 
- private:
-  size_t m_index;
-  bool m_running;
+private:
+    size_t m_index;
+    bool m_running;
 
-  Backend* m_backend;
-  std::shared_ptr<WaylandWindow> m_egl_window;
+    Backend *m_backend;
+    std::shared_ptr<WaylandWindow> m_egl_window;
 
-  std::string m_assets_path;
-  std::string m_icu_data_path;
-  std::string m_aot_path;
-  std::string m_cache_path;
-  size_t m_prev_height;
-  size_t m_prev_width;
-  double m_prev_pixel_ratio;
+    std::string m_assets_path;
+    std::string m_icu_data_path;
+    std::string m_aot_path;
+    std::string m_cache_path;
+    size_t m_prev_height;
+    size_t m_prev_width;
+    double m_prev_pixel_ratio;
+    int32_t m_accessibility_features;
 
-  PlatformChannel* m_platform_channel;
-  std::map<int64_t, Texture*> m_texture_registry;
+    PlatformChannel *m_platform_channel;
+    std::map<int64_t, Texture *> m_texture_registry;
 
-  FlutterEngine m_flutter_engine;
-  FlutterProjectArgs m_args;
-  std::string m_clipboard_data;
-  pthread_t m_event_loop_thread{};
-  void* m_engine_so_handle;
-  FlutterEngineProcTable m_proc_table{};
+    FlutterEngine m_flutter_engine;
+    FlutterProjectArgs m_args;
+    std::string m_clipboard_data;
+    pthread_t m_event_loop_thread{};
+    void *m_engine_so_handle;
+    FlutterEngineProcTable m_proc_table{};
 
-  MAYBE_UNUSED static const FlutterLocale* HandleLocale(
-      const FlutterLocale** supported_locales,
-      size_t number_of_locales);
+    MAYBE_UNUSED static const FlutterLocale *HandleLocale(
+            const FlutterLocale **supported_locales,
+            size_t number_of_locales);
 
-  FlutterTaskRunnerDescription m_platform_task_runner{};
-  FlutterCustomTaskRunners m_custom_task_runners{};
+    FlutterTaskRunnerDescription m_platform_task_runner{};
+    FlutterCustomTaskRunners m_custom_task_runners{};
 
-  class CompareFlutterTask {
-   public:
-    bool operator()(std::pair<uint64_t, FlutterTask> n1,
-                    std::pair<uint64_t, FlutterTask> n2) {
-      return n1.first > n2.first;
-    }
-  };
-  std::priority_queue<std::pair<uint64_t, FlutterTask>,
-                      std::vector<std::pair<uint64_t, FlutterTask>>,
-                      CompareFlutterTask>
-      m_taskrunner;
+    class CompareFlutterTask {
+    public:
+        bool operator()(std::pair<uint64_t, FlutterTask> n1,
+                        std::pair<uint64_t, FlutterTask> n2) {
+            return n1.first > n2.first;
+        }
+    };
 
-  FlutterEngineAOTData m_aot_data;
-  MAYBE_UNUSED NODISCARD FlutterEngineAOTData
-  LoadAotData(const std::string& aot_data_path) const;
+    std::priority_queue<std::pair<uint64_t, FlutterTask>,
+            std::vector<std::pair<uint64_t, FlutterTask>>,
+            CompareFlutterTask>
+            m_taskrunner;
+
+    FlutterEngineAOTData m_aot_data;
+    MAYBE_UNUSED NODISCARD FlutterEngineAOTData
+    LoadAotData(const std::string &aot_data_path) const;
 };

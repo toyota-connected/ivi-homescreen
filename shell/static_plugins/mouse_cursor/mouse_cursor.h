@@ -19,11 +19,12 @@
 #include <flutter_embedder.h>
 
 class MouseCursor {
- public:
-  static constexpr char kChannelName[] = "flutter/mousecursor";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+public:
+    static constexpr char kChannelName[] = "flutter/mousecursor";
 
- private:
-  static constexpr char kMethodActivateSystemCursor[] = "activateSystemCursor";
+    static void OnPlatformMessage(const FlutterPlatformMessage *message,
+                                  void *userdata);
+
+private:
+    static constexpr char kMethodActivateSystemCursor[] = "activateSystemCursor";
 };

@@ -19,8 +19,9 @@
 #include <flutter_embedder.h>
 
 class Isolate {
- public:
-  static constexpr char kChannelName[] = "flutter/isolate";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+public:
+    static constexpr char kChannelName[] = "flutter/isolate";
+
+    static void OnPlatformMessage(const FlutterPlatformMessage *message,
+                                  void *userdata);
 };

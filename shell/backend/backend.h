@@ -23,57 +23,58 @@
 
 class Engine;
 
-typedef void (*ResizeCallback)(void* /* user_data */,
+typedef void (*ResizeCallback)(void * /* user_data */,
                                size_t /* index */,
-                               Engine* /* flutter engine */,
+                               Engine * /* flutter engine */,
                                int32_t /* width */,
                                int32_t /* height */);
 
-typedef void (*CreateSurfaceCallback)(void* /* user_data */,
+typedef void (*CreateSurfaceCallback)(void * /* user_data */,
                                       size_t /* index */,
-                                      struct wl_surface* /* surface */,
+                                      struct wl_surface * /* surface */,
                                       int32_t /* width */,
                                       int32_t /* height */);
 
 class Backend {
- public:
-  Backend(void* user_data,
-          ResizeCallback resize_callback,
-          CreateSurfaceCallback create_surface_callback)
-      : m_user_data(user_data),
-        m_resize_callback(resize_callback),
-        m_create_surface_callback(create_surface_callback) {}
+public:
+    Backend(void *user_data,
+            ResizeCallback resize_callback,
+            CreateSurfaceCallback create_surface_callback)
+            : m_user_data(user_data),
+              m_resize_callback(resize_callback),
+              m_create_surface_callback(create_surface_callback) {}
 
-  virtual ~Backend() = default;
+    virtual ~Backend() = default;
 
-  Backend(const Backend&) = delete;
-  const Backend& operator=(const Backend&) = delete;
+    Backend(const Backend &) = delete;
 
-  void Resize(size_t index,
-              const std::shared_ptr<Engine>& flutter_engine,
-              int32_t width,
-              int32_t height) {
-    if (m_resize_callback) {
-      m_resize_callback(m_user_data, index, flutter_engine.get(), width,
-                        height);
+    const Backend &operator=(const Backend &) = delete;
+
+    void Resize(size_t index,
+                const std::shared_ptr<Engine> &flutter_engine,
+                int32_t width,
+                int32_t height) {
+        if (m_resize_callback) {
+            m_resize_callback(m_user_data, index, flutter_engine.get(), width,
+                              height);
+        }
     }
-  }
 
-  void CreateSurface(size_t index,
-                     struct wl_surface* surface,
-                     int32_t width,
-                     int32_t height) {
-    if (m_create_surface_callback) {
-      m_create_surface_callback(m_user_data, index, surface, width, height);
+    void CreateSurface(size_t index,
+                       struct wl_surface *surface,
+                       int32_t width,
+                       int32_t height) {
+        if (m_create_surface_callback) {
+            m_create_surface_callback(m_user_data, index, surface, width, height);
+        }
     }
-  }
 
-  virtual FlutterRendererConfig GetRenderConfig() { return {}; }
+    virtual FlutterRendererConfig GetRenderConfig() { return {}; }
 
-  MAYBE_UNUSED virtual FlutterCompositor GetCompositorConfig() { return {}; }
+    MAYBE_UNUSED virtual FlutterCompositor GetCompositorConfig() { return {}; }
 
- private:
-  void* m_user_data;
-  ResizeCallback m_resize_callback;
-  CreateSurfaceCallback m_create_surface_callback;
+private:
+    void *m_user_data;
+    ResizeCallback m_resize_callback;
+    CreateSurfaceCallback m_create_surface_callback;
 };

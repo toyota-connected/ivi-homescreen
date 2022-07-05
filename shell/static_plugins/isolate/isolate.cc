@@ -19,18 +19,18 @@
 
 #include "engine.h"
 
-void Isolate::OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
-  auto& codec = flutter::StandardMethodCodec::GetInstance();
+void Isolate::OnPlatformMessage(const FlutterPlatformMessage *message,
+                                void *userdata) {
+    std::unique_ptr<std::vector<uint8_t>> result;
+    auto engine = reinterpret_cast<Engine *>(userdata);
+    auto &codec = flutter::StandardMethodCodec::GetInstance();
 
-  std::string msg;
-  msg.append(reinterpret_cast<const char*>(message->message));
-  msg.resize(message->message_size);
-  FML_DLOG(INFO) << "Root Isolate Service ID: \"" << message->message << "\"";
+    std::string msg;
+    msg.append(reinterpret_cast<const char *>(message->message));
+    msg.resize(message->message_size);
+    FML_DLOG(INFO) << "Root Isolate Service ID: \"" << message->message << "\"";
 
-  result = codec.EncodeSuccessEnvelope();
-  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                      result->size());
+    result = codec.EncodeSuccessEnvelope();
+    engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                        result->size());
 }
