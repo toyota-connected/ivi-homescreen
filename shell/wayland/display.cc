@@ -94,12 +94,11 @@ static const struct xdg_wm_base_listener xdg_wm_base_listener = {
     .ping = xdg_wm_base_ping,
 };
 
-void Display::registry_handle_global(
-    void* data,
-    struct wl_registry* registry,
-    uint32_t name,
-    const char* interface,
-    uint32_t version) {
+void Display::registry_handle_global(void* data,
+                                     struct wl_registry* registry,
+                                     uint32_t name,
+                                     const char* interface,
+                                     uint32_t version) {
   auto* d = static_cast<Display*>(data);
 
   FML_DLOG(INFO) << "Wayland: " << interface << " version " << version;
@@ -249,9 +248,7 @@ const struct wl_output_listener Display::output_listener = {
     display_handle_geometry, display_handle_mode, display_handle_done,
     display_handle_scale};
 
-void Display::shm_format(void* data,
-                         struct wl_shm* wl_shm,
-                         uint32_t format) {
+void Display::shm_format(void* data, struct wl_shm* wl_shm, uint32_t format) {
   (void)data;
   (void)wl_shm;
   (void)format;
@@ -306,7 +303,7 @@ const struct wl_seat_listener Display::seat_listener = {
     .name = seat_handle_name,
 };
 
-bool Display::pointerButtonStatePressed(struct pointer *p) {
+bool Display::pointerButtonStatePressed(struct pointer* p) {
   return (p->buttons) && (p->event.state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
@@ -332,11 +329,10 @@ void Display::pointer_handle_enter(void* data,
   }
 }
 
-void Display::pointer_handle_leave(
-    void* data,
-    struct wl_pointer* pointer,
-    uint32_t serial,
-    struct wl_surface* surface) {
+void Display::pointer_handle_leave(void* data,
+                                   struct wl_pointer* pointer,
+                                   uint32_t serial,
+                                   struct wl_surface* surface) {
   (void)pointer;
   (void)surface;
   auto* d = static_cast<Display*>(data);
@@ -365,21 +361,20 @@ void Display::pointer_handle_motion(void* data,
       wl_fixed_to_double(sy * (wl_fixed_t)d->m_buffer_scale);
 
   if (d->m_flutter_engine) {
-    FlutterPointerPhase phase = pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover; 
+    FlutterPointerPhase phase =
+        pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover;
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindNone, phase,
-        d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
-        d->m_pointer.buttons);
+        kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
+        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
   }
 }
 
-void Display::pointer_handle_button(
-    void* data,
-    struct wl_pointer* wl_pointer,
-    uint32_t serial,
-    uint32_t time,
-    uint32_t button,
-    uint32_t state) {
+void Display::pointer_handle_button(void* data,
+                                    struct wl_pointer* wl_pointer,
+                                    uint32_t serial,
+                                    uint32_t time,
+                                    uint32_t button,
+                                    uint32_t state) {
   (void)wl_pointer;
   (void)time;
   auto* d = static_cast<Display*>(data);
@@ -389,21 +384,19 @@ void Display::pointer_handle_button(
   d->m_pointer.serial = serial;
 
   if (d->m_flutter_engine) {
-    FlutterPointerPhase phase = pointerButtonStatePressed(&d->m_pointer) ? kDown : kUp; 
+    FlutterPointerPhase phase =
+        pointerButtonStatePressed(&d->m_pointer) ? kDown : kUp;
     d->m_flutter_engine->SendMouseEvent(
-        kFlutterPointerSignalKindNone, phase,
-        d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
-        d->m_pointer.buttons);
+        kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
+        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
   }
-
 }
 
-void Display::pointer_handle_axis(
-    void* data,
-    struct wl_pointer* wl_pointer,
-    uint32_t time,
-    uint32_t axis,
-    wl_fixed_t value) {
+void Display::pointer_handle_axis(void* data,
+                                  struct wl_pointer* wl_pointer,
+                                  uint32_t time,
+                                  uint32_t axis,
+                                  wl_fixed_t value) {
   (void)wl_pointer;
   auto* d = static_cast<Display*>(data);
   d->m_pointer.event.time = time;
@@ -463,12 +456,11 @@ const struct wl_pointer_listener Display::pointer_listener = {
     .axis_discrete = pointer_handle_axis_discrete,
 };
 
-void Display::keyboard_handle_enter(
-    void* data,
-    struct wl_keyboard* keyboard,
-    uint32_t serial,
-    struct wl_surface* surface,
-    struct wl_array* keys) {
+void Display::keyboard_handle_enter(void* data,
+                                    struct wl_keyboard* keyboard,
+                                    uint32_t serial,
+                                    struct wl_surface* surface,
+                                    struct wl_array* keys) {
   (void)data;
   (void)keyboard;
   (void)serial;
@@ -476,23 +468,21 @@ void Display::keyboard_handle_enter(
   (void)keys;
 }
 
-void Display::keyboard_handle_leave(
-    void* data,
-    struct wl_keyboard* keyboard,
-    uint32_t serial,
-    struct wl_surface* surface) {
+void Display::keyboard_handle_leave(void* data,
+                                    struct wl_keyboard* keyboard,
+                                    uint32_t serial,
+                                    struct wl_surface* surface) {
   (void)data;
   (void)keyboard;
   (void)serial;
   (void)surface;
 }
 
-void Display::keyboard_handle_keymap(
-    void* data,
-    struct wl_keyboard* keyboard,
-    uint32_t format,
-    int fd,
-    uint32_t size) {
+void Display::keyboard_handle_keymap(void* data,
+                                     struct wl_keyboard* keyboard,
+                                     uint32_t format,
+                                     int fd,
+                                     uint32_t size) {
   (void)keyboard;
   (void)format;
   auto* d = static_cast<Display*>(data);
@@ -526,8 +516,7 @@ void Display::keyboard_handle_key(void* data,
 #elif !defined(NDEBUG)
   auto* d = static_cast<Display*>(data);
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    xkb_keysym_t keysym =
-        xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
+    xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
     uint32_t utf32 = xkb_keysym_to_utf32(keysym);
     if (utf32) {
       FML_DLOG(INFO) << "[Press] U" << utf32;
@@ -540,14 +529,13 @@ void Display::keyboard_handle_key(void* data,
 #endif
 }
 
-void Display::keyboard_handle_modifiers(
-    void* data,
-    struct wl_keyboard* keyboard,
-    uint32_t serial,
-    uint32_t mods_depressed,
-    uint32_t mods_latched,
-    uint32_t mods_locked,
-    uint32_t group) {
+void Display::keyboard_handle_modifiers(void* data,
+                                        struct wl_keyboard* keyboard,
+                                        uint32_t serial,
+                                        uint32_t mods_depressed,
+                                        uint32_t mods_latched,
+                                        uint32_t mods_locked,
+                                        uint32_t group) {
   (void)keyboard;
   (void)serial;
   auto* d = static_cast<Display*>(data);
@@ -642,8 +630,7 @@ void Display::touch_handle_motion(void* data,
   }
 }
 
-void Display::touch_handle_cancel(void* data,
-                                  struct wl_touch* wl_touch) {
+void Display::touch_handle_cancel(void* data, struct wl_touch* wl_touch) {
   (void)wl_touch;
   auto* d = static_cast<Display*>(data);
   if (d->m_flutter_engine) {
@@ -653,8 +640,7 @@ void Display::touch_handle_cancel(void* data,
   }
 }
 
-void Display::touch_handle_frame(void* data,
-                                 struct wl_touch* wl_touch) {
+void Display::touch_handle_frame(void* data, struct wl_touch* wl_touch) {
   (void)data;
   (void)wl_touch;
   //  FML_DLOG(INFO) << "touch_handle_frame";
@@ -668,18 +654,16 @@ const struct wl_touch_listener Display::touch_listener = {
     .cancel = touch_handle_cancel,
 };
 
-void Display::AglShellDoBackground(struct wl_surface* surface,
-                                                    size_t index) {
+void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) {
   if (m_agl_shell) {
     agl_shell_set_background(m_agl_shell, surface,
                              m_all_outputs[index]->output);
   }
 }
 
-void Display::AglShellDoPanel(
-    struct wl_surface* surface,
-    enum agl_shell_edge mode,
-    size_t index) {
+void Display::AglShellDoPanel(struct wl_surface* surface,
+                              enum agl_shell_edge mode,
+                              size_t index) {
   if (m_agl_shell) {
     agl_shell_set_panel(m_agl_shell, surface, m_all_outputs[index]->output,
                         mode);
@@ -696,8 +680,7 @@ void Display::SetEngine(std::shared_ptr<Engine> engine) {
   m_flutter_engine = std::move(engine);
 }
 
-bool Display::ActivateSystemCursor(int32_t device,
-                                   const std::string& kind) {
+bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
   (void)device;
   if (!m_enable_cursor) {
     FML_DLOG(INFO) << "[cursor_disabled]";
@@ -719,8 +702,7 @@ bool Display::ActivateSystemCursor(int32_t device,
       return false;
     }
 
-    auto cursor =
-        wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
       FML_DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
       return false;
@@ -767,8 +749,7 @@ void Display::handle_base_surface_enter(void* data,
   }
   if (d->m_buffer_scale_enable) {
     FML_DLOG(INFO) << "Setting buffer scale: " << d->m_buffer_scale;
-    wl_surface_set_buffer_scale(d->m_base_surface, d->m_buffer_scale);
-    wl_surface_commit(d->m_base_surface);
+    d->m_flutter_engine->SetPixelRatio(d->m_buffer_scale);
   }
 }
 
