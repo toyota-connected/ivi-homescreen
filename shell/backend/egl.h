@@ -25,63 +25,69 @@
 #include "constants.h"
 
 class Egl {
- public:
-  Egl(void* native_display, EGLenum platform, int buffer_size, bool debug);
-  ~Egl();
+public:
+    Egl(void *native_display, EGLenum platform, int buffer_size, bool debug);
 
-  bool ClearCurrent();
-  bool MakeCurrent(size_t index);
-  bool SwapBuffers(size_t index);
-  bool MakeResourceCurrent(size_t index);
-  bool MakeTextureCurrent();
+    ~Egl();
 
-  MAYBE_UNUSED EGLSurface GetSurface(size_t index) {
-    return m_egl_surface[index];
-  }
+    bool ClearCurrent();
 
-  void* gl_process_resolver(const char* name);
+    bool MakeCurrent(size_t index);
 
-  static EGLDisplay get_egl_display(EGLenum platform,
-                                    void* native_display,
-                                    const EGLint* attrib_list);
+    bool SwapBuffers(size_t index);
 
-  EGLSurface create_egl_surface(void* native_window, const EGLint* attrib_list);
+    bool MakeResourceCurrent(size_t index);
 
-  EGLSurface m_egl_surface[kEngineInstanceCount]{};
+    bool MakeTextureCurrent();
 
- private:
-  EGLConfig m_config{};
-  EGLContext m_texture_context;
+    MAYBE_UNUSED EGLSurface GetSurface(size_t index) {
+        return m_egl_surface[index];
+    }
 
-  int m_buffer_size;
+    void *gl_process_resolver(const char *name);
 
-  EGLDisplay m_dpy;
-  EGLContext m_context[kEngineInstanceCount]{};
-  EGLContext m_resource_context[kEngineInstanceCount]{};
+    static EGLDisplay get_egl_display(EGLenum platform,
+                                      void *native_display,
+                                      const EGLint *attrib_list);
 
-  EGLint m_major{};
-  EGLint m_minor{};
+    EGLSurface create_egl_surface(void *native_window, const EGLint *attrib_list);
 
-  std::vector<void*> m_hDL;
-  static int get_handle(std::array<char[kSoMaxLength], kSoCount> arr,
-                        void** out_handle);
+    EGLSurface m_egl_surface[kEngineInstanceCount]{};
 
-  PFNEGLDEBUGMESSAGECONTROLKHRPROC m_pfDebugMessageControl;
-  PFNEGLQUERYDEBUGKHRPROC m_pfQueryDebug;
-  PFNEGLLABELOBJECTKHRPROC m_pfLabelObject;
+private:
+    EGLConfig m_config{};
+    EGLContext m_texture_context;
 
-  void ReportGlesAttributes(EGLConfig* configs, EGLint count);
+    int m_buffer_size;
 
-  static void sDebugCallback(EGLenum error,
-                             const char* command,
-                             EGLint messageType,
-                             EGLLabelKHR threadLabel,
-                             EGLLabelKHR objectLabel,
-                             const char* message);
+    EGLDisplay m_dpy;
+    EGLContext m_context[kEngineInstanceCount]{};
+    EGLContext m_resource_context[kEngineInstanceCount]{};
 
-  static void* get_egl_proc_address(const char* address);
+    EGLint m_major{};
+    EGLint m_minor{};
 
-  void EGL_KHR_debug_init();
+    std::vector<void *> m_hDL;
 
-  static void print_extension_list(const char* ext);
+    static int get_handle(std::array<char[kSoMaxLength], kSoCount> arr,
+                          void **out_handle);
+
+    PFNEGLDEBUGMESSAGECONTROLKHRPROC m_pfDebugMessageControl;
+    PFNEGLQUERYDEBUGKHRPROC m_pfQueryDebug;
+    PFNEGLLABELOBJECTKHRPROC m_pfLabelObject;
+
+    void ReportGlesAttributes(EGLConfig *configs, EGLint count);
+
+    static void sDebugCallback(EGLenum error,
+                               const char *command,
+                               EGLint messageType,
+                               EGLLabelKHR threadLabel,
+                               EGLLabelKHR objectLabel,
+                               const char *message);
+
+    static void *get_egl_proc_address(const char *address);
+
+    void EGL_KHR_debug_init();
+
+    static void print_extension_list(const char *ext);
 };

@@ -20,19 +20,20 @@
 #include <string>
 
 class Navigation {
- public:
-  static constexpr char kChannelName[] = "flutter/navigation";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+public:
+    static constexpr char kChannelName[] = "flutter/navigation";
 
- private:
-  struct RouteInformation {
-    std::string location;
-    std::string state;
-    bool replace;
-  };
+    static void OnPlatformMessage(const FlutterPlatformMessage *message,
+                                  void *userdata);
 
-  static constexpr char kSelectSingleEntryHistory[] =
-      "selectSingleEntryHistory";
-  static constexpr char kRouteInformationUpdated[] = "routeInformationUpdated";
+private:
+    struct RouteInformation {
+        std::string location;
+        std::string state;
+        bool replace;
+    };
+
+    static constexpr char kSelectSingleEntryHistory[] =
+            "selectSingleEntryHistory";
+    static constexpr char kRouteInformationUpdated[] = "routeInformationUpdated";
 };

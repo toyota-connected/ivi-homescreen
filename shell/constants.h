@@ -53,42 +53,42 @@ constexpr char kEnginePersistentCacheDir[] = ".homescreen";
 constexpr size_t kSoCount = 2UL;
 constexpr size_t kSoMaxLength = 15;
 static constexpr std::array<char[kSoMaxLength], kSoCount> kGlSoNames[]{
-    {"libEGL.so.1", "libEGL.so"},
-    {"libGLESv2.so.2", "libGLESv2"},
+        {"libEGL.so.1",    "libEGL.so"},
+        {"libGLESv2.so.2", "libGLESv2"},
 };
 
 // Engine constants
 constexpr int kEngineInstanceCount = 1;
 
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
-    // clang-format off
-    EGL_CONTEXT_MAJOR_VERSION, 3,
-    EGL_CONTEXT_MAJOR_VERSION, 2,
-    EGL_NONE
-    // clang-format on
-}};
+                                                                     // clang-format off
+                                                                     EGL_CONTEXT_MAJOR_VERSION, 3,
+                                                                     EGL_CONTEXT_MAJOR_VERSION, 2,
+                                                                     EGL_NONE
+                                                                     // clang-format on
+                                                             }};
 
 static constexpr std::array<EGLint, 15> kEglConfigAttribs = {{
-    // clang-format off
-    EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-    EGL_RED_SIZE, 8,
-    EGL_GREEN_SIZE, 8,
-    EGL_BLUE_SIZE, 8,
+                                                                     // clang-format off
+                                                                     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+                                                                     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+                                                                     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                                                                     EGL_RED_SIZE, 8,
+                                                                     EGL_GREEN_SIZE, 8,
+                                                                     EGL_BLUE_SIZE, 8,
 #if defined(BUILD_EGL_ENABLE_TRANSPARENCY)
-    EGL_ALPHA_SIZE, 8,
+                                                                     EGL_ALPHA_SIZE, 8,
 #else
-    EGL_ALPHA_SIZE, 0,
+                                                                     EGL_ALPHA_SIZE, 0,
 #endif
-    EGL_NONE // termination sentinel
-    // clang-format on
-}};
+                                                                     EGL_NONE // termination sentinel
+                                                                     // clang-format on
+                                                             }};
 
 // All vkCreate* functions take an optional allocator. For now, we select the
 // default allocator by passing in a null pointer, and we highlight the argument
 // by using the VKALLOC constant.
-constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
+constexpr struct VkAllocationCallbacks *VKALLOC = nullptr;
 
 #if defined(__GNUC__)
 #ifndef MAYBE_UNUSED
