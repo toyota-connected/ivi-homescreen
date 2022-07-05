@@ -20,33 +20,33 @@
 #include "engine.h"
 #include "hexdump.h"
 
-void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
-                                    void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
-  auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage *message,
+                                    void *userdata) {
+    std::unique_ptr<std::vector<uint8_t>> result;
+    auto engine = reinterpret_cast<Engine *>(userdata);
+    auto &codec = flutter::StandardMethodCodec::GetInstance();
+    auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+    auto method = obj->method_name();
 
-  if (method == "getAll") {
-    FML_DLOG(INFO) << "PackageInfo: getAll";
+    if (method == "getAll") {
+        FML_DLOG(INFO) << "PackageInfo: getAll";
 
-    flutter::EncodableValue value(flutter::EncodableMap{
-        {flutter::EncodableValue("appName"),
-         flutter::EncodableValue("Toyota Connected")},
-        {flutter::EncodableValue("packageName"),
-         flutter::EncodableValue("Wayland Embedder")},
-        {flutter::EncodableValue("version"), flutter::EncodableValue("0.1.0")},
-        {flutter::EncodableValue("buildNumber"),
-         flutter::EncodableValue("2")}});
+        flutter::EncodableValue value(flutter::EncodableMap{
+                {flutter::EncodableValue("appName"),
+                                                     flutter::EncodableValue("Toyota Connected")},
+                {flutter::EncodableValue("packageName"),
+                                                     flutter::EncodableValue("Wayland Embedder")},
+                {flutter::EncodableValue("version"), flutter::EncodableValue("0.1.0")},
+                {flutter::EncodableValue("buildNumber"),
+                                                     flutter::EncodableValue("2")}});
 
-    result = codec.EncodeSuccessEnvelope(&value);
-  } else {
-    FML_LOG(ERROR) << "PackageInfo: " << method << " is unhandled";
-    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
-  }
+        result = codec.EncodeSuccessEnvelope(&value);
+    } else {
+        FML_LOG(ERROR) << "PackageInfo: " << method << " is unhandled";
+        result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
+    }
 
-  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                      result->size());
+    engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                        result->size());
 }

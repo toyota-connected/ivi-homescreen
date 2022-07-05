@@ -19,21 +19,21 @@
 
 #include "engine.h"
 
-void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
-                                      void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
-  auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+void Accessibility::OnPlatformMessage(const FlutterPlatformMessage *message,
+                                      void *userdata) {
+    auto engine = reinterpret_cast<Engine *>(userdata);
+    auto &codec = flutter::StandardMessageCodec::GetInstance();
+    auto obj = codec.DecodeMessage(message->message, message->message_size);
 
-  if (!obj->IsNull()) {
-    auto map = std::get<flutter::EncodableMap>(*obj);
-    auto type = std::get<std::string>(map[flutter::EncodableValue("type")]);
-    auto data =
-        std::get<flutter::EncodableMap>(map[flutter::EncodableValue("data")]);
-    auto msg = std::get<std::string>(data[flutter::EncodableValue("message")]);
+    if (!obj->IsNull()) {
+        auto map = std::get<flutter::EncodableMap>(*obj);
+        auto type = std::get<std::string>(map[flutter::EncodableValue("type")]);
+        auto data =
+                std::get<flutter::EncodableMap>(map[flutter::EncodableValue("data")]);
+        auto msg = std::get<std::string>(data[flutter::EncodableValue("message")]);
 
-    FML_DLOG(INFO) << "Accessibility: type: " << type << ", message: " << msg;
-  }
+        FML_DLOG(INFO) << "Accessibility: type: " << type << ", message: " << msg;
+    }
 
-  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+    engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
 }
