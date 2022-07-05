@@ -105,7 +105,7 @@ class Keyring {
     }
 
     if (result != nullptr && strcmp(result, "") != 0 &&
-      !d.Parse(result).HasParseError()) {
+        !d.Parse(result).HasParseError()) {
       if (strcmp(result, "null") == 0) {
         const char* json = "{}";
         d.Parse(json);

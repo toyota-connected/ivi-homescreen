@@ -58,6 +58,7 @@ Engine::Engine(App* app,
       m_flutter_engine(nullptr),
       m_platform_channel(PlatformChannel::GetInstance()),
       m_cache_path(std::move(GetPersistentCachePath())),
+      m_prev_pixel_ratio(1.0),
       m_args({
           .struct_size = sizeof(FlutterProjectArgs),
           .assets_path = nullptr,
@@ -93,7 +94,8 @@ Engine::Engine(App* app,
       }) {
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
 
-  m_engine_so_handle = dlopen("libflutter_engine.so", RTLD_LAZY|RTLD_DEEPBIND);
+  m_engine_so_handle =
+      dlopen("libflutter_engine.so", RTLD_LAZY | RTLD_DEEPBIND);
   if (!m_engine_so_handle) {
     FML_DLOG(ERROR) << dlerror();
     exit(-1);
@@ -286,11 +288,14 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
     return kInternalInconsistency;
   }
 
+  m_prev_height = height;
+  m_prev_width = width;
+
   // Set window size
   FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
                                     .width = width,
                                     .height = height,
-                                    .pixel_ratio = 1.0};
+                                    .pixel_ratio = m_prev_pixel_ratio};
 
   auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
@@ -305,6 +310,36 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
   return kSuccess;
 }
 
+FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+
+  assert(m_prev_width);
+  assert(m_prev_height);
+
+  m_prev_pixel_ratio = pixel_ratio;
+
+  // Set window size
+  FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
+                                    .width = m_prev_width,
+                                    .height = m_prev_height,
+                                    .pixel_ratio = pixel_ratio};
+
+  auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
+  if (result != kSuccess) {
+    FML_DLOG(ERROR) << "(" << m_index
+                    << ") Failed send initial window size to flutter";
+    assert(false);
+  }
+
+  FML_DLOG(INFO) << "(" << m_index << ") SetWindowSize: width=" << m_prev_width
+                 << ", height=" << m_prev_height
+                 << ", pixel_ratio=" << pixel_ratio;
+
+  return kSuccess;
+}
+
 FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
                                                Texture* texture) {
   this->m_texture_registry[texture_id] = texture;
@@ -312,8 +347,8 @@ FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
   return kSuccess;
 }
 
-MAYBE_UNUSED FlutterEngineResult Engine::TextureRegistryRemove(
-    int64_t texture_id) {
+MAYBE_UNUSED FlutterEngineResult
+Engine::TextureRegistryRemove(int64_t texture_id) {
   auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
                    [&texture_id](const std::pair<int64_t, void*>& element) {
@@ -411,10 +446,9 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
                                                   data, data_length);
 }
 
-MAYBE_UNUSED bool Engine::SendPlatformMessage(
-    const char* channel,
-    const uint8_t* message,
-    const size_t message_size) const {
+MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
+                                              const uint8_t* message,
+                                              const size_t message_size) const {
   if (!m_running) {
     return kInternalInconsistency;
   }
@@ -428,9 +462,8 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
-MAYBE_UNUSED FlutterEngineResult Engine::UpdateLocales(
-    const FlutterLocale** locales,
-    size_t locales_count) {
+MAYBE_UNUSED FlutterEngineResult
+Engine::UpdateLocales(const FlutterLocale** locales, size_t locales_count) {
   return m_proc_table.UpdateLocales(m_flutter_engine, locales, locales_count);
 }
 

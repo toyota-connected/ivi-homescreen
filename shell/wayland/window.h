@@ -119,8 +119,7 @@ class WaylandWindow {
 
   MAYBE_UNUSED int m_frame_sync;
 
-  static void buffer_release(void* data,
-                             struct wl_buffer* buffer);
+  static void buffer_release(void* data, struct wl_buffer* buffer);
 
   static const struct wl_buffer_listener buffer_listener;
 

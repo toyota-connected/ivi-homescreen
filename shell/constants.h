@@ -104,6 +104,6 @@ constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
 #define MAYBE_UNUSED [[maybe_unused]]
 #endif
 #ifndef NODISCARD
-#define NODISCARD    [[nodiscard]]
+#define NODISCARD [[nodiscard]]
 #endif
 #endif
