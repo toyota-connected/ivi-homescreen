@@ -19,8 +19,9 @@
 #include <flutter_embedder.h>
 
 class OpenGlTexture {
- public:
-  static constexpr char kChannelName[] = "opengl_texture";
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+public:
+    static constexpr char kChannelName[] = "opengl_texture";
+
+    static void OnPlatformMessage(const FlutterPlatformMessage *message,
+                                  void *userdata);
 };

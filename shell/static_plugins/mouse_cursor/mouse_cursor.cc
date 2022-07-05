@@ -21,41 +21,41 @@
 
 #include <iostream>
 
-void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
-                                    void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
-  auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage *message,
+                                    void *userdata) {
+    std::unique_ptr<std::vector<uint8_t>> result;
+    auto engine = reinterpret_cast<Engine *>(userdata);
+    auto &codec = flutter::StandardMethodCodec::GetInstance();
+    auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
-  if (method == kMethodActivateSystemCursor) {
-    if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+    auto method = obj->method_name();
+    if (method == kMethodActivateSystemCursor) {
+        if (!obj->arguments()->IsNull()) {
+            auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      int32_t device = 0;
-      auto it = args->find(flutter::EncodableValue("device"));
-      if (it != args->end()) {
-        device = std::get<int32_t>(it->second);
-      }
+            int32_t device = 0;
+            auto it = args->find(flutter::EncodableValue("device"));
+            if (it != args->end()) {
+                device = std::get<int32_t>(it->second);
+            }
 
-      std::string kind;
-      it = args->find(flutter::EncodableValue("kind"));
-      if (it != args->end()) {
-        kind = std::get<std::string>(it->second);
-      }
+            std::string kind;
+            it = args->find(flutter::EncodableValue("kind"));
+            if (it != args->end()) {
+                kind = std::get<std::string>(it->second);
+            }
 
-      auto val =
-          flutter::EncodableValue(engine->ActivateSystemCursor(device, kind));
-      result = codec.EncodeSuccessEnvelope(&val);
+            auto val =
+                    flutter::EncodableValue(engine->ActivateSystemCursor(device, kind));
+            result = codec.EncodeSuccessEnvelope(&val);
+        } else {
+            result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+        }
     } else {
-      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+        FML_DLOG(INFO) << "MouseCursor: " << method << " is unhandled";
+        result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
     }
-  } else {
-    FML_DLOG(INFO) << "MouseCursor: " << method << " is unhandled";
-    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
-  }
 
-  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                      result->size());
+    engine->SendPlatformMessageResponse(message->response_handle, result->data(),
+                                        result->size());
 }

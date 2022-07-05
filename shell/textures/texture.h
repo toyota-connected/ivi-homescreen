@@ -28,49 +28,54 @@
 class Engine;
 
 class Texture {
- public:
-  Texture(uint32_t id,
-          uint32_t target,
-          uint32_t format,
-          VoidCallback create_callback,
-          VoidCallback dispose_callback,
-          int width = 0,
-          int height = 0);
+public:
+    Texture(uint32_t id,
+            uint32_t target,
+            uint32_t format,
+            VoidCallback create_callback,
+            VoidCallback dispose_callback,
+            int width = 0,
+            int height = 0);
 
-  ~Texture();
+    ~Texture();
 
-  Texture(const Texture&) = delete;
+    Texture(const Texture &) = delete;
 
-  const Texture& operator=(const Texture&) = delete;
+    const Texture &operator=(const Texture &) = delete;
 
-  void SetEngine(const std::shared_ptr<Engine>& engine);
+    void SetEngine(const std::shared_ptr<Engine> &engine);
 
-  void GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out,
-                               int width,
-                               int height);
+    void GetFlutterOpenGLTexture(FlutterOpenGLTexture *texture_out,
+                                 int width,
+                                 int height);
 
-  int64_t Create(int width, int height);
-  void Dispose();
-  void Enable(uint32_t name);
-  MAYBE_UNUSED void Disable();
-  void FrameReady();
-  MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
+    int64_t Create(int width, int height);
 
- protected:
-  std::shared_ptr<Engine> m_flutter_engine;
-  bool m_enabled;
-  int64_t m_id;
-  int64_t m_name;
-  uint32_t m_target;
-  uint32_t m_format;
-  MAYBE_UNUSED int m_width;
-  int m_height;
+    void Dispose();
 
-  MAYBE_UNUSED EGLSurface m_surface{};
+    void Enable(uint32_t name);
 
-  bool m_draw_next;
+    MAYBE_UNUSED void Disable();
 
- private:
-  const VoidCallback m_create_callback;
-  const VoidCallback m_dispose_callback;
+    void FrameReady();
+
+    MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
+
+protected:
+    std::shared_ptr<Engine> m_flutter_engine;
+    bool m_enabled;
+    int64_t m_id;
+    int64_t m_name;
+    uint32_t m_target;
+    uint32_t m_format;
+    MAYBE_UNUSED int m_width;
+    int m_height;
+
+    MAYBE_UNUSED EGLSurface m_surface{};
+
+    bool m_draw_next;
+
+private:
+    const VoidCallback m_create_callback;
+    const VoidCallback m_dispose_callback;
 };

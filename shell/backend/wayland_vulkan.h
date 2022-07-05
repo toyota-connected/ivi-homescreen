@@ -24,119 +24,136 @@
 #include "third_party/flutter/flutter_embedder.h"
 
 class WaylandVulkanBackend : public Backend {
- public:
-  WaylandVulkanBackend(struct wl_display* display,
-                       struct wl_surface* surface,
-                       uint32_t width,
-                       uint32_t height,
-                       bool enable_validation_layers);
-  ~WaylandVulkanBackend();
-  static void Resize(void* user_data,
-                     size_t index,
-                     Engine* engine,
-                     int32_t width,
-                     int32_t height);
-  static void CreateSurface(void* user_data,
-                            size_t index,
-                            wl_surface* surface,
-                            int32_t width,
-                            int32_t height);
+public:
+    WaylandVulkanBackend(struct wl_display *display,
+                         struct wl_surface *surface,
+                         uint32_t width,
+                         uint32_t height,
+                         bool enable_validation_layers);
 
-  FlutterRendererConfig GetRenderConfig() override;
-  FlutterCompositor GetCompositorConfig() override;
+    ~WaylandVulkanBackend();
 
- private:
-  static constexpr VkPresentModeKHR kPreferredPresentMode =
-      VK_PRESENT_MODE_FIFO_KHR;
+    static void Resize(void *user_data,
+                       size_t index,
+                       Engine *engine,
+                       int32_t width,
+                       int32_t height);
 
-  struct {
-    std::vector<const char*> enabled_instance_extensions;
-    std::vector<const char*> enabled_device_extensions;
-    std::vector<const char*> enabled_layer_extensions;
-    VkInstance instance{};
-    VkSurfaceKHR surface{VK_NULL_HANDLE};
+    static void CreateSurface(void *user_data,
+                              size_t index,
+                              wl_surface *surface,
+                              int32_t width,
+                              int32_t height);
 
-    VkPhysicalDevice physical_device{};
-    VkPhysicalDeviceFeatures physical_device_features{};
-    VkPhysicalDeviceMemoryProperties physical_device_memory_properties{};
-    VkDevice device{};
-    uint32_t queue_family_index{};
-    VkQueue queue{};
+    FlutterRendererConfig GetRenderConfig() override;
 
-    bool validationFeaturesSupported = false;
-    bool debugUtilsSupported = false;
-    bool debugReportExtensionSupported = false;
-    bool debugMarkersSupported{false};
-    bool portabilitySubsetSupported{false};
-    bool maintenanceSupported[3]{false};
+    FlutterCompositor GetCompositorConfig() override;
 
-    VkCommandPool swapchain_command_pool{};
-    std::vector<VkCommandBuffer> present_transition_buffers;
+private:
+    static constexpr VkPresentModeKHR kPreferredPresentMode =
+            VK_PRESENT_MODE_FIFO_KHR;
 
-    VkFence image_ready_fence{};
-    VkSemaphore present_transition_semaphore{};
+    struct {
+        std::vector<const char *> enabled_instance_extensions;
+        std::vector<const char *> enabled_device_extensions;
+        std::vector<const char *> enabled_layer_extensions;
+        VkInstance instance{};
+        VkSurfaceKHR surface{VK_NULL_HANDLE};
 
-    VkSurfaceFormatKHR surface_format{};
-    VkSwapchainKHR swapchain{};
-    std::vector<VkImage> swapchain_images;
-    uint32_t last_image_index{};
+        VkPhysicalDevice physical_device{};
+        VkPhysicalDeviceFeatures physical_device_features{};
+        VkPhysicalDeviceMemoryProperties physical_device_memory_properties{};
+        VkDevice device{};
+        uint32_t queue_family_index{};
+        VkQueue queue{};
 
-    bool resize_pending = false;
-  } state_;
+        bool validationFeaturesSupported = false;
+        bool debugUtilsSupported = false;
+        bool debugReportExtensionSupported = false;
+        bool debugMarkersSupported{false};
+        bool portabilitySubsetSupported{false};
+        bool maintenanceSupported[3]{false};
 
-  struct wl_display* wl_display_;
-  struct wl_surface* wl_surface_;
-  uint32_t width_;
-  uint32_t height_;
-  bool enable_validation_layers_;
-  bool resize_pending_;
+        VkCommandPool swapchain_command_pool{};
+        std::vector<VkCommandBuffer> present_transition_buffers;
 
-  void createInstance();
-  void setupDebugMessenger();
+        VkFence image_ready_fence{};
+        VkSemaphore present_transition_semaphore{};
 
-  void createSurface(struct wl_display* display, struct wl_surface* surface);
-  void findPhysicalDevice();
-  void createLogicalDevice();
-  bool InitializeSwapchain();
+        VkSurfaceFormatKHR surface_format{};
+        VkSwapchainKHR swapchain{};
+        std::vector<VkImage> swapchain_images;
+        uint32_t last_image_index{};
 
-  static std::vector<VkLayerProperties> enumerateInstanceLayerProperties();
-  static std::vector<VkExtensionProperties>
-  enumerateInstanceExtensionProperties();
+        bool resize_pending = false;
+    } state_;
 
-  static FlutterVulkanImage GetNextImageCallback(
-      void* user_data,
-      const FlutterFrameInfo* frame_info);
-  static bool PresentCallback(void* user_data, const FlutterVulkanImage* image);
-  static void* GetInstanceProcAddressCallback(
-      void* user_data,
-      FlutterVulkanInstanceHandle instance,
-      const char* procname);
+    struct wl_display *wl_display_;
+    struct wl_surface *wl_surface_;
+    uint32_t width_;
+    uint32_t height_;
+    bool enable_validation_layers_;
+    bool resize_pending_;
 
-  VkDebugReportCallbackEXT mDebugCallback = VK_NULL_HANDLE;
-  VkDebugUtilsMessengerEXT mDebugMessenger = VK_NULL_HANDLE;
+    void createInstance();
 
-  static VKAPI_ATTR VkBool32 VKAPI_CALL
-  debugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-                     VkDebugUtilsMessageTypeFlagsEXT types,
-                     const VkDebugUtilsMessengerCallbackDataEXT* cbdata,
-                     void* pUserData);
+    void setupDebugMessenger();
 
-  static VKAPI_ATTR VkBool32 VKAPI_CALL
-  debugReportCallback(VkDebugReportFlagsEXT flags,
-                      VkDebugReportObjectTypeEXT objectType,
-                      uint64_t object,
-                      size_t location,
-                      int32_t messageCode,
-                      const char* pLayerPrefix,
-                      const char* pMessage,
-                      void* pUserData);
+    void createSurface(struct wl_display *display, struct wl_surface *surface);
 
-  static bool CollectBackingStore(const FlutterBackingStore* renderer,
-                                  void* user_data);
-  static bool CreateBackingStore(const FlutterBackingStoreConfig* config,
-                                 FlutterBackingStore* backing_store_out,
-                                 void* user_data);
-  static bool PresentLayers(const FlutterLayer** layers,
-                            size_t layers_count,
-                            void* user_data);
+    void findPhysicalDevice();
+
+    void createLogicalDevice();
+
+    bool InitializeSwapchain();
+
+    static std::vector<VkLayerProperties> enumerateInstanceLayerProperties();
+
+    static std::vector<VkExtensionProperties>
+    enumerateInstanceExtensionProperties();
+
+    static FlutterVulkanImage GetNextImageCallback(
+            void *user_data,
+            const FlutterFrameInfo *frame_info);
+
+    static bool PresentCallback(void *user_data, const FlutterVulkanImage *image);
+
+    static void *GetInstanceProcAddressCallback(
+            void *user_data,
+            FlutterVulkanInstanceHandle instance,
+            const char *procname);
+
+    VkDebugReportCallbackEXT mDebugCallback = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT mDebugMessenger = VK_NULL_HANDLE;
+
+    static VKAPI_ATTR VkBool32
+
+    VKAPI_CALL
+    debugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                       VkDebugUtilsMessageTypeFlagsEXT types,
+                       const VkDebugUtilsMessengerCallbackDataEXT *cbdata,
+                       void *pUserData);
+
+    static VKAPI_ATTR VkBool32
+
+    VKAPI_CALL
+    debugReportCallback(VkDebugReportFlagsEXT flags,
+                        VkDebugReportObjectTypeEXT objectType,
+                        uint64_t object,
+                        size_t location,
+                        int32_t messageCode,
+                        const char *pLayerPrefix,
+                        const char *pMessage,
+                        void *pUserData);
+
+    static bool CollectBackingStore(const FlutterBackingStore *renderer,
+                                    void *user_data);
+
+    static bool CreateBackingStore(const FlutterBackingStoreConfig *config,
+                                   FlutterBackingStore *backing_store_out,
+                                   void *user_data);
+
+    static bool PresentLayers(const FlutterLayer **layers,
+                              size_t layers_count,
+                              void *user_data);
 };
