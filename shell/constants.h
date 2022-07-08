@@ -42,7 +42,16 @@ constexpr char kDefaultLocaleScriptCode[] = "";
 
 // Path prefix comes from build
 constexpr char kPathPrefix[] = PATH_PREFIX;
-constexpr char kFlutterAssetPath[] = "share/homescreen/bundle/flutter_assets";
+
+// Bundle folder paths
+constexpr char kBundleFlutterAssets[] = "data/flutter_assets";
+constexpr char kBundleAot[] = "lib/libapp.so";
+// Bundle folder override paths
+constexpr char kBundleIcudtl[] = "data/icudtl.dat";
+constexpr char kBundleEngine[] = "lib/libflutter_engine.so";
+// System paths
+constexpr char kSystemEngine[] = "libflutter_engine.so";
+constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
 constexpr char kApplicationName[] = "homescreen";
 
