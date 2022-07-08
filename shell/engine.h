@@ -52,7 +52,7 @@ public:
     Engine(App *app,
            size_t index,
            const std::vector<const char *> &command_line_args_c,
-           const std::string &application_override_path,
+           const std::string &bundle_path,
            int32_t accessibility_features);
 
     ~Engine();

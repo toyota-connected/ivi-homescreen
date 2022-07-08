@@ -32,7 +32,7 @@
 
 App::App(const std::string &app_id,
          const std::vector<std::string> &command_line_args,
-         const std::string &application_override_path,
+         const std::string &bundle_path,
          bool fullscreen,
          bool enable_cursor,
          bool debug_backend,
@@ -86,7 +86,7 @@ App::App(const std::string &app_id,
 
     for (size_t i = 0; i < kEngineInstanceCount; i++) {
         m_flutter_engine[i] = std::make_shared<Engine>(
-                this, i, m_command_line_args_c, application_override_path, accessibility_features);
+                this, i, m_command_line_args_c, bundle_path, accessibility_features);
         m_flutter_engine[i]->Run(pthread_self());
 
         if (!m_flutter_engine[i]->IsRunning()) {

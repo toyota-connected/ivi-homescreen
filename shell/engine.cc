@@ -50,7 +50,7 @@ static bool IsFile(const std::string &path) {
 Engine::Engine(App *app,
                size_t index,
                const std::vector<const char *> &command_line_args_c,
-               const std::string &application_override_path,
+               const std::string &bundle_path,
                int32_t accessibility_features)
         : m_index(index),
           m_running(false),
@@ -96,8 +96,26 @@ Engine::Engine(App *app,
                  }) {
     FML_DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
 
-    m_engine_so_handle =
-            dlopen("libflutter_engine.so", RTLD_LAZY | RTLD_DEEPBIND);
+    ///
+    /// libflutter_engine.so loading
+    ///
+    std::string engine_file_path;
+    if (bundle_path.empty()) {
+        FML_LOG(ERROR) << "Specify bundle folder using --b= option";
+        exit(EXIT_FAILURE);
+    }
+    else {
+        // override path
+        engine_file_path.assign(paths::JoinPaths({bundle_path, kBundleEngine}));
+        if (IsFile(engine_file_path)) {
+          FML_DLOG(INFO) << "(" << m_index
+                         << ") libflutter_engine.so: " << engine_file_path;
+        }
+        else {
+            engine_file_path.assign(kSystemEngine);
+        }
+    }
+    m_engine_so_handle = dlopen(engine_file_path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
     if (!m_engine_so_handle) {
         FML_DLOG(ERROR) << dlerror();
         exit(-1);
@@ -120,38 +138,43 @@ Engine::Engine(App *app,
         exit(-1);
     }
 
-    m_icu_data_path.assign(
-            paths::JoinPaths({kPathPrefix, "share/flutter/icudtl.dat"}));
+    ///
+    /// flutter_assets folder
+    ///
+    m_assets_path.assign(paths::JoinPaths({bundle_path, kBundleFlutterAssets}));
+    FML_DLOG(INFO) << "(" << m_index << ") flutter_assets: " << m_assets_path;
+    m_args.assets_path = m_assets_path.c_str();
 
-    if (application_override_path.empty()) {
-        m_assets_path.assign(paths::JoinPaths({kPathPrefix, kFlutterAssetPath}));
-    } else {
-        m_assets_path.assign(application_override_path);
-    }
-    std::string kernel_snapshot =
-            paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
-
+    ///
+    /// kernel_blob.bin file
+    ///
+    std::string kernel_snapshot = paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
     if (!IsFile(kernel_snapshot)) {
         FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
                        << " missing Flutter Kernel";
         exit(EXIT_FAILURE);
     }
 
-    m_args.assets_path = m_assets_path.c_str();
-    FML_DLOG(INFO) << "(" << m_index << ") assets_path: " << m_args.assets_path;
-
-    m_args.icu_data_path = m_icu_data_path.c_str();
-    if (!IsFile(m_args.icu_data_path)) {
-        FML_LOG(ERROR) << "(" << m_index << ") " << m_icu_data_path << " missing";
+    ///
+    /// icudtl.dat file
+    ///
+    m_icu_data_path.assign(paths::JoinPaths({bundle_path, kBundleIcudtl}));
+    if (!IsFile(m_icu_data_path)) {
+        m_icu_data_path.assign(paths::JoinPaths({kPathPrefix, kSystemIcudtl}));
+    }
+    if (!IsFile(m_icu_data_path)) {
+        FML_LOG(ERROR) << "(" << m_index << ") " << m_icu_data_path << " is not present.";
         assert(false);
     }
-    FML_DLOG(INFO) << "(" << m_index << ") icu_data_path: " << m_icu_data_path;
+    FML_DLOG(INFO) << "(" << m_index << ") icudtl.dat: " << m_icu_data_path;
+    m_args.icu_data_path = m_icu_data_path.c_str();
 
-    // Configure AOT
-    m_aot_path.assign(paths::JoinPaths({m_assets_path, "libapp.so"}));
+    ///
+    /// AOT loading
+    ///
     if (m_proc_table.RunsAOTCompiledDartCode()) {
         m_args.aot_data = nullptr;
-        m_aot_data = LoadAotData(m_aot_path);
+        m_aot_data = LoadAotData(paths::JoinPaths({bundle_path, kBundleAot}));
         if (m_aot_data) {
             m_args.aot_data = m_aot_data;
         }

@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
         args.emplace_back(argv[i]);
     }
 
-    std::string application_override_path;
+    std::string bundle_path;
     std::string cursor_theme;
     bool disable_cursor = false;
     bool debug_backend = false;
@@ -63,14 +63,14 @@ int main(int argc, char **argv) {
             }
         }
         if (cl.HasOption("b")) {
-            cl.GetOptionValue("b", &application_override_path);
-            if (application_override_path.empty()) {
+            cl.GetOptionValue("b", &bundle_path);
+            if (bundle_path.empty()) {
                 FML_LOG(ERROR)
                 << "--b (Bundle Path) option requires an argument (e.g. --b=/usr/share/gallery)";
                 return 1;
             }
-            FML_DLOG(INFO) << "Bundle Path: " << application_override_path;
-            auto find = "--b=" + application_override_path;
+            FML_DLOG(INFO) << "Bundle Path: " << bundle_path;
+            auto find = "--b=" + bundle_path;
             auto result = std::find(args.begin(), args.end(), find);
             if (result != args.end()) {
                 args.erase(result);
@@ -108,7 +108,7 @@ int main(int argc, char **argv) {
                 return 1;
             }
             width = static_cast<uint32_t>(std::stoul(width_str));
-            auto find = "--w=" + application_override_path;
+            auto find = "--w=" + width_str;
             auto result = std::find(args.begin(), args.end(), find);
             if (result != args.end()) {
                 args.erase(result);
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
                 return 1;
             }
             height = static_cast<uint32_t>(std::stoul(height_str));
-            auto find = "--h=" + application_override_path;
+            auto find = "--h=" + height_str;
             auto result = std::find(args.begin(), args.end(), find);
             if (result != args.end()) {
                 args.erase(result);
@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
     FML_DLOG(INFO) << "Screen Width: " << width;
     FML_DLOG(INFO) << "Screen Height: " << height;
 
-    App app("homescreen", args, application_override_path, fullscreen,
+    App app(kApplicationName, args, bundle_path, fullscreen,
             !disable_cursor, debug_backend, width, height, cursor_theme, accessibility_features);
 
     std::signal(SIGINT, SignalHandler);

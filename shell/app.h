@@ -71,7 +71,7 @@ private:
 public:
     explicit App(const std::string &app_id,
                  const std::vector<std::string> &command_line_args,
-                 const std::string &application_override_path,
+                 const std::string &bundle_path,
                  bool fullscreen,
                  bool enable_cursor,
                  bool debug_backend,
