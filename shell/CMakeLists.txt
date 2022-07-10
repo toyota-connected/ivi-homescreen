@@ -44,6 +44,8 @@ set(SRC_FILES
         wayland/display.cc
         wayland/window.cc
 
+        configuration/configuration.cc
+
         engine.cc
         platform_channel.cc
 
