@@ -30,6 +30,7 @@
 
 #include "backend/backend.h"
 #include "static_plugins/text_input/text_input.h"
+#include "configuration/configuration.h"
 
 #endif
 
@@ -69,16 +70,7 @@ private:
 #endif
 
 public:
-    explicit App(const std::string &app_id,
-                 const std::vector<std::string> &command_line_args,
-                 const std::string &bundle_path,
-                 bool fullscreen,
-                 bool enable_cursor,
-                 bool debug_backend,
-                 uint32_t width,
-                 uint32_t height,
-                 const std::string &cursor_theme_name,
-                 int32_t accessibility_features);
+    explicit App(const std::vector<Configuration::Config>& configs);
 
     App(const App &) = delete;
 

@@ -1170,10 +1170,10 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage *message,
             std::string asset_path = std::get<std::string>(it->second);
             FML_DLOG(INFO) << "asset_path: " << asset_path;
             if (asset_path[0] == '/') {
-                data->uri.assign(paths::JoinPaths({kUriPrefixFile, asset_path}));
+                data->uri = paths::JoinPaths({kUriPrefixFile, asset_path});
             } else {
-                data->uri.assign(paths::JoinPaths(
-                        {kUriPrefixFile, engine->GetAssetDirectory(), asset_path}));
+                data->uri = paths::JoinPaths(
+                        {kUriPrefixFile, engine->GetAssetDirectory(), asset_path});
             }
             FML_DLOG(INFO) << "asset uri: " << data->uri;
         }

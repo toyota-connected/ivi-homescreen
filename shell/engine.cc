@@ -49,7 +49,7 @@ static bool IsFile(const std::string &path) {
 
 Engine::Engine(App *app,
                size_t index,
-               const std::vector<const char *> &command_line_args_c,
+               const std::vector<const char *> & vm_args_c,
                const std::string &bundle_path,
                int32_t accessibility_features)
         : m_index(index),
@@ -65,8 +65,8 @@ Engine::Engine(App *app,
                          .struct_size = sizeof(FlutterProjectArgs),
                          .assets_path = nullptr,
                          .icu_data_path = nullptr,
-                         .command_line_argc = static_cast<int>(command_line_args_c.size()),
-                         .command_line_argv = command_line_args_c.data(),
+                         .command_line_argc = static_cast<int>(vm_args_c.size()),
+                         .command_line_argv = vm_args_c.data(),
                          .platform_message_callback =
                          [](const FlutterPlatformMessage *message, void *userdata) {
                              auto engine = reinterpret_cast<Engine *>(userdata);
@@ -106,13 +106,13 @@ Engine::Engine(App *app,
     }
     else {
         // override path
-        engine_file_path.assign(paths::JoinPaths({bundle_path, kBundleEngine}));
+        engine_file_path = paths::JoinPaths({bundle_path, kBundleEngine});
         if (IsFile(engine_file_path)) {
           FML_DLOG(INFO) << "(" << m_index
                          << ") libflutter_engine.so: " << engine_file_path;
         }
         else {
-            engine_file_path.assign(kSystemEngine);
+            engine_file_path = kSystemEngine;
         }
     }
     m_engine_so_handle = dlopen(engine_file_path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
@@ -141,7 +141,7 @@ Engine::Engine(App *app,
     ///
     /// flutter_assets folder
     ///
-    m_assets_path.assign(paths::JoinPaths({bundle_path, kBundleFlutterAssets}));
+    m_assets_path = paths::JoinPaths({bundle_path, kBundleFlutterAssets});
     FML_DLOG(INFO) << "(" << m_index << ") flutter_assets: " << m_assets_path;
     m_args.assets_path = m_assets_path.c_str();
 
@@ -158,9 +158,9 @@ Engine::Engine(App *app,
     ///
     /// icudtl.dat file
     ///
-    m_icu_data_path.assign(paths::JoinPaths({bundle_path, kBundleIcudtl}));
+    m_icu_data_path = paths::JoinPaths({bundle_path, kBundleIcudtl});
     if (!IsFile(m_icu_data_path)) {
-        m_icu_data_path.assign(paths::JoinPaths({kPathPrefix, kSystemIcudtl}));
+        m_icu_data_path = paths::JoinPaths({kPathPrefix, kSystemIcudtl});
     }
     if (!IsFile(m_icu_data_path)) {
         FML_LOG(ERROR) << "(" << m_index << ") " << m_icu_data_path << " is not present.";
