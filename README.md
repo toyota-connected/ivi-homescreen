@@ -19,12 +19,16 @@ IVI Homescreen for Wayland
 # Backend Support
 
 ### EGL Backend
-This is the default build configuration.  To manually build EGL Backend use:
-`-DBUILD_BACKEND_WAYLAND_EGL=ON -DBUILD_BACKEND_WAYLAND_VULKAN=OFF`
+This is the default build configuration.  To manually build EGL Backend use
+```
+-DBUILD_BACKEND_WAYLAND_EGL=ON -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
+```
 
 ### Vulkan Backend
-To build Vulkan Backend use:
-`-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON`
+To build Vulkan Backend use
+```
+-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON
+```
 
 # Bundle File Override Logic
 
@@ -78,7 +82,7 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 * Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
 
-###JSON Configuration keys
+### JSON Configuration keys
 
 #### Global
 
@@ -119,7 +123,8 @@ If you used this minimum definition, invocation would look something like this
 homescreen --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
 ``` 
 
-###JSON Configuration Example 1
+### JSON Configuration Example 1
+
 Loads Two Views
 1. Gallery app to a 1920x1280 Background window, passing two arguments to the Dart VM
 2. Video player to Left Panel sized 320x240 with all accessibility features enabled.
@@ -147,7 +152,9 @@ Loads Two Views
 
 homescreen --j=/tmp/bg_left_rel.json
 ```
-###JSON Configuration Example 2
+
+### JSON Configuration Example 2
+
 Loads Single View
 1. Fullscreen Gallery app, cursor disabled, backend debug enabled, passing `vm_args` values to the Dart VM
 ```
@@ -297,6 +304,13 @@ Path prefix used to determine required files is determined at build.
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
-# Yocto recipe
 
-    https://github.com/jwinarske/meta-flutter/blob/dunfell/recipes-graphics/toyota/ivi-homescreen_git.bb
+# Yocto recipes
+
+## Kirkstone
+
+    https://github.com/meta-flutter/meta-flutter/tree/kirkstone/recipes-graphics/toyota
+
+## Dunfell
+
+    https://github.com/meta-flutter/meta-flutter/tree/dunfell/recipes-graphics/toyota
