@@ -69,9 +69,9 @@ App::App(const std::vector<Configuration::Config>& configs)
   FML_DLOG(INFO) << "+App::App";
 
   std::vector<const char*> m_command_line_args_c;
-  m_command_line_args_c.reserve(configs[0].view.command_line_args.size());
+  m_command_line_args_c.reserve(configs[0].view.vm_args.size());
   m_command_line_args_c.push_back(configs[0].app_id.c_str());
-  for (const auto& arg : configs[0].view.command_line_args) {
+  for (const auto& arg : configs[0].view.vm_args) {
     m_command_line_args_c.push_back(arg.c_str());
   }
 

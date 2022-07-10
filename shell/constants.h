@@ -21,8 +21,8 @@
 #include <array>
 
 // Screen Size
-constexpr int32_t kScreenWidth = 1920;
-constexpr int32_t kScreenHeight = 720;
+constexpr int32_t kDefaultViewWidth = 1920;
+constexpr int32_t kDefaultViewHeight = 720;
 constexpr int kEglBufferSize = 24;
 
 // Cursor

@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Toyota Connected North America
+// Copyright 2022 Toyota Connected North America
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,9 @@
 #include "rapidjson/document.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
+
   if (!doc.HasMember(kViewKey)) {
-    FML_LOG(ERROR) << "JSON Configuration must have a \"view\" object defined";
+    FML_LOG(ERROR) << "JSON Configuration requires a \"view\" object";
     exit(EXIT_FAILURE);
   }
 
@@ -38,10 +39,10 @@ void Configuration::getViewParameters(
     const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
     Config& instance) {
   if (obj.HasMember(kBundlePathKey) && obj[kBundlePathKey].IsString()) {
-    instance.view.bundle_path.assign(obj[kBundlePathKey].GetString());
+    instance.view.bundle_path = obj[kBundlePathKey].GetString();
   }
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
-    instance.view.window_type.assign(obj[kWindowTypeKey].GetString());
+    instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
     instance.view.width = obj[kWidthKey].GetInt();
@@ -54,16 +55,25 @@ void Configuration::getViewParameters(
     instance.view.accessibility_features =
         obj[kAccessibilityFeaturesKey].GetInt();
   }
+  if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
+    auto args = obj[kVmArgsKey].GetArray();
+    for (auto const& arg : args) {
+      instance.view.vm_args.emplace_back(arg.GetString());
+    }
+  }
+  if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
+    instance.view.fullscreen = obj[kFullscreenKey].GetBool();
+  }
 }
 
 void Configuration::getGlobalParameters(
     const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
     Config& instance) {
   if (obj.HasMember(kAppIdKey) && obj[kAppIdKey].IsString()) {
-    instance.app_id.assign(obj[kAppIdKey].GetString());
+    instance.app_id = obj[kAppIdKey].GetString();
   }
   if (obj.HasMember(kCursorThemeKey) && obj[kCursorThemeKey].IsString()) {
-    instance.cursor_theme.assign(obj[kCursorThemeKey].GetString());
+    instance.cursor_theme = obj[kCursorThemeKey].GetString();
   }
   if (obj.HasMember(kDisableCursorKey) && obj[kDisableCursorKey].IsBool()) {
     instance.disable_cursor = obj[kDisableCursorKey].GetBool();
@@ -71,26 +81,17 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
   }
-
-  if (obj.HasMember(kCommandLineArgsKey)) {
-    if (obj[kCommandLineArgsKey].IsArray()) {
-      auto args = obj[kCommandLineArgsKey].GetArray();
-      instance.view.command_line_args.reserve(args.Capacity());
-      for (auto const& arg : args) {
-        instance.view.command_line_args.emplace_back(arg.GetString());
-      }
-    } else {
-      FML_LOG(ERROR)
-          << "Command Line args in JSON config has to be an array of strings";
-      exit(EXIT_FAILURE);
+  if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
+    auto args = obj[kVmArgsKey].GetArray();
+    for (auto const& arg : args) {
+      instance.view.vm_args.emplace_back(arg.GetString());
     }
   }
-
   if (obj.HasMember(kBundlePathKey) && obj[kBundlePathKey].IsString()) {
-    instance.view.bundle_path.assign(obj[kBundlePathKey].GetString());
+    instance.view.bundle_path = obj[kBundlePathKey].GetString();
   }
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
-    instance.view.window_type.assign(obj[kWindowTypeKey].GetString());
+    instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
@@ -124,17 +125,16 @@ void Configuration::getView(rapidjson::Document& doc,
   }
 }
 
-void Configuration::getCliOverrides(rapidjson::Document& doc,
-                                    Config& instance,
+void Configuration::getCliOverrides(Config& instance,
                                     Config& cli) {
   if (!cli.app_id.empty()) {
-    instance.app_id.assign(cli.app_id);
+    instance.app_id = cli.app_id;
   }
   if (!cli.json_configuration_path.empty()) {
-    instance.json_configuration_path.assign(cli.json_configuration_path);
+    instance.json_configuration_path = cli.json_configuration_path;
   }
   if (!cli.cursor_theme.empty()) {
-    instance.cursor_theme.assign(cli.cursor_theme);
+    instance.cursor_theme = cli.cursor_theme;
   }
   if (cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
@@ -142,21 +142,16 @@ void Configuration::getCliOverrides(rapidjson::Document& doc,
   if (cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
   }
-
-  if (!cli.view.command_line_args.empty()) {
-    instance.view.command_line_args.clear();
-    instance.view.command_line_args.reserve(
-        cli.view.command_line_args.capacity());
-    for (auto const& arg : instance.view.command_line_args) {
-      instance.view.command_line_args.emplace_back(arg);
+  if (!cli.view.vm_args.empty()) {
+    for (auto const& arg : cli.view.vm_args) {
+      instance.view.vm_args.emplace_back(arg);
     }
   }
-
   if (!cli.view.bundle_path.empty()) {
-    instance.view.bundle_path.assign(cli.view.bundle_path);
+    instance.view.bundle_path = cli.view.bundle_path;
   }
   if (!cli.view.window_type.empty()) {
-    instance.view.window_type.assign(cli.view.window_type);
+    instance.view.window_type = cli.view.window_type;
   }
   if (cli.view.accessibility_features > 0) {
     instance.view.accessibility_features = cli.view.accessibility_features;
@@ -175,34 +170,39 @@ void Configuration::getCliOverrides(rapidjson::Document& doc,
 std::vector<struct Configuration::Config> Configuration::ParseConfig(
     Configuration::Config& config) {
   rapidjson::Document doc;
+  rapidjson::SizeType view_count = 1;
   if (!config.json_configuration_path.empty()) {
     doc = getJsonDocument(config.json_configuration_path);
-    Validate(doc);
+    if (!doc.IsObject()) {
+      FML_LOG(ERROR) << "Invalid JSON Configuration file";
+      exit(EXIT_FAILURE);
+    }
+
+    view_count = getViewCount(doc);
   }
 
-  auto view_count = getViewCount(doc);
   FML_DLOG(INFO) << "View Count: " << view_count;
   std::vector<struct Config> res;
   res.reserve(view_count);
   for (int i = 0; i < view_count; i++) {
     Config cfg{};
-    getView(doc, i, cfg);
-    getCliOverrides(doc, cfg, config);
+    if (doc.IsObject()) {
+      getView(doc, i, cfg);
+    }
+    getCliOverrides(cfg, config);
 
     if (cfg.view.window_type.empty())
-      cfg.view.window_type.assign("NORMAL");
+      cfg.view.window_type = "NORMAL";
 
     if (cfg.view.bundle_path.empty()) {
       FML_LOG(ERROR) << "A bundle path must be specified";
       exit(EXIT_FAILURE);
     }
     if (cfg.view.width == 0) {
-      FML_LOG(ERROR) << "A view width must be specified";
-      exit(EXIT_FAILURE);
+      cfg.view.width = kDefaultViewWidth;
     }
     if (cfg.view.height == 0) {
-      FML_LOG(ERROR) << "A view height must be specified";
-      exit(EXIT_FAILURE);
+      cfg.view.height = kDefaultViewHeight;
     }
 
     res.emplace_back(cfg);
@@ -210,17 +210,6 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
   assert(res.capacity() == view_count);
 
   return res;
-}
-
-void Configuration::Validate(rapidjson::Document& doc) {
-  std::string missingParams;
-  if (!doc.HasMember(kViewKey))
-    missingParams += "view ";
-
-  if (!missingParams.empty()) {
-    FML_LOG(ERROR) << "Missing parameter(s) in JSON: " << missingParams;
-    exit(EXIT_FAILURE);
-  }
 }
 
 rapidjson::Document Configuration::getJsonDocument(
@@ -244,8 +233,9 @@ void Configuration::PrintConfig(const Config& config) {
   FML_LOG(INFO) << "* Global *";
   FML_LOG(INFO) << "**********";
   FML_LOG(INFO) << "Application Id: .......... " << config.app_id;
-  FML_LOG(INFO) << "JSON Configuration: ...... "
-                << config.json_configuration_path;
+  if (!config.json_configuration_path.empty())
+    FML_LOG(INFO) << "JSON Configuration: ...... "
+                  << config.json_configuration_path;
   FML_LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
   FML_LOG(INFO) << "Disable Cursor: .......... "
                 << (config.disable_cursor ? "true" : "false");
@@ -254,16 +244,18 @@ void Configuration::PrintConfig(const Config& config) {
   FML_LOG(INFO) << "********";
   FML_LOG(INFO) << "* View *";
   FML_LOG(INFO) << "********";
-  FML_LOG(INFO) << "Command Line Args:";
-  for (auto const& arg : config.view.command_line_args) {
-    FML_LOG(INFO) << arg;
+  if (config.view.vm_args.size()) {
+    FML_LOG(INFO) << "VM Args:";
+    for (auto const& arg : config.view.vm_args) {
+      FML_LOG(INFO) << arg;
+    }
   }
   FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
   FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
-  FML_LOG(INFO) << "Accessibility Features: ... "
-                << config.view.accessibility_features;
-  FML_LOG(INFO) << "Width: .................... " << config.view.width;
-  FML_LOG(INFO) << "Height: ................... " << config.view.height;
+  FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
+                << config.view.height;
   FML_LOG(INFO) << "Fullscreen: ............... "
                 << (config.view.fullscreen ? "true" : "false");
+  FML_LOG(INFO) << "Accessibility Features: ... "
+                << config.view.accessibility_features;
 }

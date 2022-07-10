@@ -16,13 +16,168 @@ IVI Homescreen for Wayland
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
 
-# EGL Backend
+# Backend Support
+
+### EGL Backend
 This is the default build configuration.  To manually build EGL Backend use:
 `-DBUILD_BACKEND_WAYLAND_EGL=ON -DBUILD_BACKEND_WAYLAND_VULKAN=OFF`
 
-# Vulkan Backend
+### Vulkan Backend
 To build Vulkan Backend use:
 `-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON`
+
+# Bundle File Override Logic
+
+If an override file is not present, it gets loaded from default location.
+
+## Optional override files
+
+### icudtl.dat
+
+Bundle Override - `{bundle path}/data/icudtl.dat`
+
+Yocto Default - `/usr/share/flutter/icudtl.dat`
+
+Desktop Default - `/usr/local/share/flutter/icudtl.dat`
+
+The CMake variable CMAKE_SYSROOT controls the sysroot prefix.
+On Yocto this defaults to `/usr`, on desktop builds it defaults to `/usr/local`.
+
+### libflutter_engine.so
+
+Bundle Override - `{bundle path}/lib/libflutter_engine.so`
+
+Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
+
+# Command Line Options
+
+`--a={int value}` - Sets the Engine's initial state of Accessibility Feature support.  Requires an integer value.
+
+`--c` - Disables the cursor.
+
+`--d` - Outputs backend debug information.  If Vulkan and Validation Layer is available, it will be loaded.
+
+`--f` - Sets window to fullscreen.
+
+`--w={int value}` - Sets View width.  Requires an integer value.
+
+`--h={int value}` - Sets View height.  Requires an integer value.
+
+`--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
+
+`--b={path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
+
+```
+  Flutter Application (bundle folder)
+    data/flutter_assets
+    data/icudtl.dat (optional - overrides system path)
+    lib/libapp.so
+    lib/libflutter_engine.so (optional - overrides system path)
+```
+* `--j=` - Sets the JSON configuration file.
+
+* Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
+
+###JSON Configuration keys
+
+#### Global
+
+`app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
+
+`cursor_theme` - Sets cursor theme to use.
+
+`disable_cursor` - Disables the cursor.
+
+`debug_backend` - Enables Backend Debug logic.
+
+#### View Specific
+
+`view` - Minimum required.  Can be single object or array.
+
+`bundle_path` - sets the Bundle Path.
+
+`window_type` - Currently used for AGL Compositor Window Types.  If not running on AGL compositor,
+it will create borderless windows in no particular position.
+
+`width` - sets View width.  Requires an integer value.
+
+`height` - sets View height.  Requires an integer value.
+
+`accessibility_features` - Bitmask of Engine Accessibility Features.  Requires an integer.  See flutter_embedder.h for valid values.
+
+`vm_args` - Array of strings which get passed to the VM instance as command line arguments.
+
+`fullscreen` - Sets window to fullscreen.
+
+Minimum definition when using `--j=`
+```
+{"view":{}}
+```
+
+If you used this minimum definition, invocation would look something like this
+```
+homescreen --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
+``` 
+
+###JSON Configuration Example 1
+Loads Two Views
+1. Gallery app to a 1920x1280 Background window, passing two arguments to the Dart VM
+2. Video player to Left Panel sized 320x240 with all accessibility features enabled.
+```
+/tmp/bg_left_rel.json
+
+{
+   "view":[
+      {
+         "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
+         "vm_args":["--enable-asserts", "--pause-isolates-on-start"],
+         "window_type":"BG",
+         "width":1920,
+         "height":1280
+      },
+      {
+         "bundle_path":"/home/joel/development/plugins/packages/video_player/video_player/example/.homescreen/x86/release",
+         "window_type":"PANEL_LEFT",
+         "width":320,
+         "height":240,
+         "accessibility_features":31
+      }
+   ]
+}
+
+homescreen --j=/tmp/bg_left_rel.json
+```
+###JSON Configuration Example 2
+Loads Single View
+1. Fullscreen Gallery app, cursor disabled, backend debug enabled, passing `vm_args` values to the Dart VM
+```
+/tmp/bg_dbg.json
+
+{
+   "disable_cursor":true,
+   "backend_debug":true,
+   "accessibility_features":31,
+   "view":{
+      "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
+      "vm_args":["--no-serve-devtools"],
+      "width":1920,
+      "height":1280,
+      "fullscreen":true
+   }
+}
+
+homescreen --j=/tmp/bg_dbg.json
+```
+
+### Parameter loading order
+Only VM Command Line arguments are additive.  Meaning all instances of VM command line references will get added
+together; JSON view + JSON global + CLI args.
+
+All other parameters get assigned using the following ordering:
+
+1. JSON Configuration View object parameters
+2. JSON Configuration Global (non-view) parameters
+3. Command Line parameters (Overrides View and Global parameters)
 
 # x86_64 Desktop development notes
 

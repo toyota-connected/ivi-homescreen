@@ -35,20 +35,27 @@ bool isNumber(const std::string& s) {
                      [](char c) { return isdigit(c) != 0; });
 }
 
-int main(int argc, char** argv) {
-  std::vector<std::string> args;
-  for (int i = 1; i < argc; ++i) {
-    args.emplace_back(argv[i]);
+void removeArgument(std::vector<std::string> &args, const std::string& arg) {
+  auto result = std::find(args.begin(), args.end(), arg);
+  if (result != args.end()) {
+    args.erase(result);
   }
+}
+
+int main(int argc, char** argv) {
 
   struct Configuration::Config config {
-    .app_id = kApplicationName, .json_configuration_path = "",
-    .cursor_theme = "", .disable_cursor = false, .debug_backend = false, .view {
-      .command_line_args{}, .bundle_path = "",
-                            .window_type = "", .accessibility_features = 0,
-                            .width = 0, .height = 0, .fullscreen = false
-    }
+    .app_id = kApplicationName,
+    .json_configuration_path{},
+    .cursor_theme{},
+    .disable_cursor{},
+    .debug_backend{},
+    .view {}
   };
+
+  for (int i = 1; i < argc; ++i) {
+    config.view.vm_args.emplace_back(argv[i]);
+  }
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
@@ -62,11 +69,7 @@ int main(int argc, char** argv) {
       }
       FML_DLOG(INFO) << "Json Configuration: "
                      << config.json_configuration_path;
-      auto find = "--j=" + config.json_configuration_path;
-      auto result = std::find(args.begin(), args.end(), find);
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--j=" + config.json_configuration_path);
     }
     if (cl.HasOption("a")) {
       std::string accessibility_feature_flag_str;
@@ -82,11 +85,7 @@ int main(int argc, char** argv) {
       }
       config.view.accessibility_features =
           static_cast<int32_t>(std::stol(accessibility_feature_flag_str));
-      auto find = "--a=" + accessibility_feature_flag_str;
-      auto result = std::find(args.begin(), args.end(), find);
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--a=" + accessibility_feature_flag_str);
     }
     if (cl.HasOption("b")) {
       cl.GetOptionValue("b", &config.view.bundle_path);
@@ -96,35 +95,22 @@ int main(int argc, char** argv) {
         return 1;
       }
       FML_DLOG(INFO) << "Bundle Path: " << config.view.bundle_path;
-      auto find = "--b=" + config.view.bundle_path;
-      auto result = std::find(args.begin(), args.end(), find);
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--b=" + config.view.bundle_path);
     }
     if (cl.HasOption("c")) {
       FML_DLOG(INFO) << "Disable Cursor";
       config.disable_cursor = true;
-      auto result = std::find(args.begin(), args.end(), "--c");
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--c");
     }
     if (cl.HasOption("d")) {
       FML_DLOG(INFO) << "Backend Debug";
       config.debug_backend = true;
-      auto result = std::find(args.begin(), args.end(), "--d");
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--d");
     }
     if (cl.HasOption("f")) {
       FML_DLOG(INFO) << "Fullscreen";
       config.view.fullscreen = true;
-      auto result = std::find(args.begin(), args.end(), "--f");
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--f");
     }
     if (cl.HasOption("w")) {
       std::string width_str;
@@ -138,11 +124,7 @@ int main(int argc, char** argv) {
         return 1;
       }
       config.view.width = static_cast<uint32_t>(std::stoul(width_str));
-      auto find = "--w=" + width_str;
-      auto result = std::find(args.begin(), args.end(), find);
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--w=" + width_str);
     }
     if (cl.HasOption("h")) {
       std::string height_str;
@@ -156,11 +138,7 @@ int main(int argc, char** argv) {
         return 1;
       }
       config.view.height = static_cast<uint32_t>(std::stoul(height_str));
-      auto find = "--h=" + height_str;
-      auto result = std::find(args.begin(), args.end(), find);
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--h=" + height_str);
     }
     if (cl.HasOption("t")) {
       cl.GetOptionValue("t", &config.cursor_theme);
@@ -170,10 +148,15 @@ int main(int argc, char** argv) {
         return 1;
       }
       FML_DLOG(INFO) << "Cursor Theme: " << config.cursor_theme;
-      auto result = std::find(args.begin(), args.end(), "--t");
-      if (result != args.end()) {
-        args.erase(result);
-      }
+      removeArgument(config.view.vm_args, "--t=" + config.cursor_theme);
+    }
+  }
+
+  auto vm_arg_count = config.view.vm_args.size();
+  if(vm_arg_count) {
+    FML_DLOG(INFO) << "VM Arg Count: " << vm_arg_count;
+    for (auto const& arg : config.view.vm_args) {
+      FML_DLOG(INFO) << arg;
     }
   }
 
@@ -181,7 +164,7 @@ int main(int argc, char** argv) {
   for(auto const &c : configs) {
     Configuration::PrintConfig(c);
   }
-  assert(configs.capacity() > 0);
+  assert(!configs.empty());
 
   App app(configs);
 
