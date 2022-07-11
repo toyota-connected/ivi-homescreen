@@ -100,6 +100,10 @@ public:
                              const uint8_t *message,
                              size_t message_size) const;
 
+    MAYBE_UNUSED int32_t GetAccessibilityFeatures() { return m_accessibility_features; }
+
+    MAYBE_UNUSED FlutterEngineResult UpdateAccessibilityFeatures(int32_t value);
+
     MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale **locales,
                                                    size_t locales_count);
 

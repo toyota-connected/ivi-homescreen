@@ -496,6 +496,13 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char *channel,
 }
 
 MAYBE_UNUSED FlutterEngineResult
+Engine::UpdateAccessibilityFeatures(int32_t value) {
+    m_accessibility_features = value;
+    return m_proc_table.UpdateAccessibilityFeatures(
+            m_flutter_engine, static_cast<FlutterAccessibilityFeature>(value));
+}
+
+MAYBE_UNUSED FlutterEngineResult
 Engine::UpdateLocales(const FlutterLocale **locales, size_t locales_count) {
     return m_proc_table.UpdateLocales(m_flutter_engine, locales, locales_count);
 }
