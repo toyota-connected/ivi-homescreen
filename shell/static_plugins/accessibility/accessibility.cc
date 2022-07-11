@@ -1,4 +1,4 @@
-// Copyright 2020 Toyota Connected North America
+// Copyright 2020-2022 Toyota Connected North America
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,19 @@ void Accessibility::OnPlatformMessage(const FlutterPlatformMessage *message,
         auto msg = std::get<std::string>(data[flutter::EncodableValue("message")]);
 
         FML_DLOG(INFO) << "Accessibility: type: " << type << ", message: " << msg;
+
+        if (type == "disableAnimations") {
+            auto value = engine->GetAccessibilityFeatures();
+            auto enabled = std::get<bool>(data[flutter::EncodableValue("enabled")]);
+            if (enabled) {
+                value |= FlutterAccessibilityFeature::kFlutterAccessibilityFeatureDisableAnimations;
+            }
+            else {
+                value &= ~FlutterAccessibilityFeature::kFlutterAccessibilityFeatureDisableAnimations;
+            }
+            engine->UpdateAccessibilityFeatures(value);
+            FML_DLOG(INFO) << "Accessibility: type: " << type << ", enabled: " << (enabled ? "true" : "false");
+        }
     }
 
     engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
