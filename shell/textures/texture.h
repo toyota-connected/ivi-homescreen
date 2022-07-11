@@ -22,63 +22,64 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include <flutter/encodable_value.h>
 #include <flutter_embedder.h>
 #include "constants.h"
-#include <flutter/encodable_value.h>
 
 class Engine;
 
-typedef flutter::EncodableValue (*EncodableValueCallback)(void* /* user data */);
+typedef flutter::EncodableValue (*EncodableValueCallback)(
+    void* /* user data */);
 
 class Texture {
-public:
-    Texture(uint32_t id,
-            uint32_t target,
-            uint32_t format,
-            EncodableValueCallback create_callback,
-            VoidCallback dispose_callback,
-            int width = 0,
-            int height = 0);
+ public:
+  Texture(uint32_t id,
+          uint32_t target,
+          uint32_t format,
+          EncodableValueCallback create_callback,
+          VoidCallback dispose_callback,
+          int width = 0,
+          int height = 0);
 
-    ~Texture();
+  ~Texture();
 
-    Texture(const Texture &) = delete;
+  Texture(const Texture&) = delete;
 
-    const Texture &operator=(const Texture &) = delete;
+  const Texture& operator=(const Texture&) = delete;
 
-    void SetEngine(const std::shared_ptr<Engine> &engine);
+  void SetEngine(const std::shared_ptr<Engine>& engine);
 
-    void GetFlutterOpenGLTexture(FlutterOpenGLTexture *texture_out,
-                                 int width,
-                                 int height);
+  void GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out,
+                               int width,
+                               int height);
 
-    flutter::EncodableValue Create(int width, int height);
+  flutter::EncodableValue Create(int width, int height);
 
-    void Dispose();
+  void Dispose();
 
-    void Enable(uint32_t name);
+  void Enable(uint32_t name);
 
-    MAYBE_UNUSED void Disable();
+  MAYBE_UNUSED void Disable();
 
-    void FrameReady();
+  void FrameReady();
 
-    MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
+  MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
 
-protected:
-    std::shared_ptr<Engine> m_flutter_engine;
-    bool m_enabled;
-    int64_t m_id;
-    int64_t m_name;
-    uint32_t m_target;
-    uint32_t m_format;
-    MAYBE_UNUSED int m_width;
-    int m_height;
+ protected:
+  std::shared_ptr<Engine> m_flutter_engine;
+  bool m_enabled;
+  int64_t m_id;
+  int64_t m_name;
+  uint32_t m_target;
+  uint32_t m_format;
+  MAYBE_UNUSED int m_width;
+  int m_height;
 
-    MAYBE_UNUSED EGLSurface m_surface{};
+  MAYBE_UNUSED EGLSurface m_surface{};
 
-    bool m_draw_next;
+  bool m_draw_next;
 
-private:
-    const EncodableValueCallback m_create_callback;
-    const VoidCallback m_dispose_callback;
+ private:
+  const EncodableValueCallback m_create_callback;
+  const VoidCallback m_dispose_callback;
 };

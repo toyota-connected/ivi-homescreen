@@ -4,7 +4,7 @@
 
 namespace nv12 {
 
-    const GLchar *fragmentSource = R"glsl(
+const GLchar* fragmentSource = R"glsl(
   #version 320 es
   precision highp float;
   in vec2 Texcoord;
@@ -24,122 +24,122 @@ namespace nv12 {
   }
 )glsl";
 
-    class Shader {
-    public:
-        GLint texY;
-        GLint texUV;
-        GLuint innerTexture[2]{};
-        GLuint program;
-        GLuint framebuffer{};
+class Shader {
+ public:
+  GLint texY;
+  GLint texUV;
+  GLuint innerTexture[2]{};
+  GLuint program;
+  GLuint framebuffer{};
 #if NV12_DEPTH_RENDERBUFFER
-        GLuint depth_renderbuffer;
+  GLuint depth_renderbuffer;
 #endif
-        GLuint textureId;
-        GLsizei width, height;
+  GLuint textureId;
+  GLsizei width, height;
 
-        Shader(GLuint _program, GLuint _textureId, GLsizei _width, GLsizei _height)
-                : program(_program),
-                  textureId(_textureId),
-                  width(_width),
-                  height(_height) {
-            texY = glGetUniformLocation(program, "textureY");
-            texUV = glGetUniformLocation(program, "textureUV");
-            glUseProgram(program);
+  Shader(GLuint _program, GLuint _textureId, GLsizei _width, GLsizei _height)
+      : program(_program),
+        textureId(_textureId),
+        width(_width),
+        height(_height) {
+    texY = glGetUniformLocation(program, "textureY");
+    texUV = glGetUniformLocation(program, "textureUV");
+    glUseProgram(program);
 
-            glGenTextures(2, &innerTexture[0]);
+    glGenTextures(2, &innerTexture[0]);
 
-            glBindTexture(GL_TEXTURE_2D, textureId);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                            GL_LINEAR_MIPMAP_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_HINT, GL_TRUE);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB,
-                         GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, textureId);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                    GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_HINT, GL_TRUE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB,
+                 GL_UNSIGNED_BYTE, nullptr);
 #if NV12_DEPTH_RENDERBUFFER
-            glGenRenderbuffers(1, &depth_renderbuffer);
-            glBindRenderbuffer(GL_RENDERBUFFER, depth_renderbuffer);
-            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
-            glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glGenRenderbuffers(1, &depth_renderbuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, depth_renderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
 #endif
 
-            glGenFramebuffers(1, &framebuffer);
-            glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                   textureId, 0);
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           textureId, 0);
 #if NV12_DEPTH_RENDERBUFFER
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                                      GL_RENDERBUFFER, depth_renderbuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, depth_renderbuffer);
 #endif
-            GLenum DrawBuffers[] = {GL_COLOR_ATTACHMENT0};
-            glDrawBuffers(1, DrawBuffers);
+    GLenum DrawBuffers[] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(1, DrawBuffers);
 
-            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-                switch (glCheckFramebufferStatus(GL_FRAMEBUFFER)) {
-                    case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-                        FML_LOG(ERROR)
-                        << "failed to draw to framebuffer: "
-                           "the framebuffer attachment points are framebuffer incomplete";
-                        break;
-                    case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-                        FML_LOG(ERROR) << "failed to draw to framebuffer: "
-                                          "the framebuffer does not have at least one image "
-                                          "attached to it";
-                        break;
-                    case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS:
-                        FML_LOG(ERROR) << "failed to draw to framebuffer: "
-                                          "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS";
-                        break;
-                    case GL_FRAMEBUFFER_UNSUPPORTED:
-                    default:
-                        FML_LOG(ERROR)
-                        << "failed to draw to framebuffer: target is the default "
-                           "framebuffer, but the default framebuffer does not exist";
-                        break;
-                }
-                return;
-            }
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        }
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+      switch (glCheckFramebufferStatus(GL_FRAMEBUFFER)) {
+        case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
+          FML_LOG(ERROR)
+              << "failed to draw to framebuffer: "
+                 "the framebuffer attachment points are framebuffer incomplete";
+          break;
+        case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
+          FML_LOG(ERROR) << "failed to draw to framebuffer: "
+                            "the framebuffer does not have at least one image "
+                            "attached to it";
+          break;
+        case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS:
+          FML_LOG(ERROR) << "failed to draw to framebuffer: "
+                            "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS";
+          break;
+        case GL_FRAMEBUFFER_UNSUPPORTED:
+        default:
+          FML_LOG(ERROR)
+              << "failed to draw to framebuffer: target is the default "
+                 "framebuffer, but the default framebuffer does not exist";
+          break;
+      }
+      return;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
 
-        void loadPixels(unsigned char *y_buf,
-                        unsigned char *uv_buf,
-                        GLsizei y_p_s,
-                        GLsizei y_s,
-                        GLsizei uv_p_s,
-                        GLsizei uv_s) {
-            (void) y_p_s;
-            (void) uv_p_s;
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, innerTexture[0]);
-            glUniform1i(texY, 0);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  void loadPixels(unsigned char* y_buf,
+                  unsigned char* uv_buf,
+                  GLsizei y_p_s,
+                  GLsizei y_s,
+                  GLsizei uv_p_s,
+                  GLsizei uv_s) {
+    (void)y_p_s;
+    (void)uv_p_s;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, innerTexture[0]);
+    glUniform1i(texY, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                            GL_LINEAR_MIPMAP_LINEAR);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, y_s, height, 0, GL_RED,
-                         GL_UNSIGNED_BYTE, y_buf);
-            glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                    GL_LINEAR_MIPMAP_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, y_s, height, 0, GL_RED,
+                 GL_UNSIGNED_BYTE, y_buf);
+    glGenerateMipmap(GL_TEXTURE_2D);
 
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, innerTexture[1]);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            glUniform1i(texUV, 1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, innerTexture[1]);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glUniform1i(texUV, 1);
 
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                            GL_LINEAR_MIPMAP_LINEAR);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, uv_s / 2, height / 2, 0, GL_RG,
-                         GL_UNSIGNED_BYTE, uv_buf);
-            glGenerateMipmap(GL_TEXTURE_2D);
-        }
-    };
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                    GL_LINEAR_MIPMAP_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, uv_s / 2, height / 2, 0, GL_RG,
+                 GL_UNSIGNED_BYTE, uv_buf);
+    glGenerateMipmap(GL_TEXTURE_2D);
+  }
+};
 
 };  // namespace nv12
