@@ -50,12 +50,18 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage *message,
                 height = std::get<double>(it->second);
             }
 
-            // cast size to that what Wayland uses
-            textureId = engine->TextureCreate(textureId, static_cast<int32_t>(width),
-                                              static_cast<int32_t>(height));
+            if (0 == textureId || 0 == width || 0 == height) {
+              result = codec.EncodeErrorEnvelope(
+                  "argument_error",
+                  "textureId, width and height must be non-zero");
+            } else {
+              // cast size to that what Wayland uses
+              auto value =
+                  engine->TextureCreate(textureId, static_cast<int32_t>(width),
+                                        static_cast<int32_t>(height));
 
-            flutter::EncodableValue value(textureId);
-            result = codec.EncodeSuccessEnvelope(&value);
+              result = codec.EncodeSuccessEnvelope(&value);
+            }
         } else {
             result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
         }
