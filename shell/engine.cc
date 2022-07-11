@@ -414,7 +414,7 @@ FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
             engine->m_flutter_engine, texture_id);
 }
 
-int64_t Engine::TextureCreate(int64_t texture_id,
+flutter::EncodableValue Engine::TextureCreate(int64_t texture_id,
                               int32_t width,
                               int32_t height) {
     FML_DLOG(INFO) << "Engine::TextureCreate: <" << texture_id << ">";
@@ -422,10 +422,13 @@ int64_t Engine::TextureCreate(int64_t texture_id,
     auto texture = this->m_texture_registry[texture_id];
 
     if (texture != nullptr) {
-        int64_t id = texture->Create(width, height);
-        return id;
+        return texture->Create(width, height);
     }
-    return -1;
+
+    return flutter::EncodableValue (flutter::EncodableMap{
+        {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
+        {flutter::EncodableValue("error"), flutter::EncodableValue("Not found in registry")}
+    });
 }
 
 std::string Engine::GetPersistentCachePath() {

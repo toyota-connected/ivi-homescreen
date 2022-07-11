@@ -23,7 +23,7 @@
 Texture::Texture(uint32_t id,
                  uint32_t target,
                  uint32_t format,
-                 VoidCallback create_callback,
+                 EncodableValueCallback create_callback,
                  VoidCallback dispose_callback,
                  int width,
                  int height)
@@ -55,13 +55,17 @@ void Texture::GetFlutterOpenGLTexture(FlutterOpenGLTexture *texture_out,
     m_draw_next = true;
 }
 
-int64_t Texture::Create(int32_t width, int32_t height) {
+flutter::EncodableValue Texture::Create(int32_t width, int32_t height) {
     m_width = width;
     m_height = height;
     if (m_create_callback) {
-        m_create_callback(this);
+        return m_create_callback(this);
     }
-    return m_name;
+
+    return flutter::EncodableValue (flutter::EncodableMap{
+        {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
+        {flutter::EncodableValue("error"),
+         flutter::EncodableValue("Create callback not set")}});
 }
 
 void Texture::Dispose() {

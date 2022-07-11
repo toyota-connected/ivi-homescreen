@@ -85,7 +85,7 @@ public:
             const std::shared_ptr<Engine> &engine,
             int64_t texture_id);
 
-    int64_t TextureCreate(int64_t texture_id, int32_t width, int32_t height);
+    flutter::EncodableValue TextureCreate(int64_t texture_id, int32_t width, int32_t height);
 
     FlutterEngineResult TextureDispose(int64_t texture_id);
 

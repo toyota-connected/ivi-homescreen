@@ -50,7 +50,7 @@ private:
 
     WaylandEglBackend *m_egl_backend;
 
-    static void Create(void *userdata);
+    static flutter::EncodableValue Create(void *userdata);
 
     static void Dispose(void *userdata);
 };

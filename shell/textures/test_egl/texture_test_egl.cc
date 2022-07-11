@@ -30,7 +30,7 @@ TextureTestEgl::TextureTestEgl(App *app)
 
 TextureTestEgl::~TextureTestEgl() = default;
 
-void TextureTestEgl::Create(void *userdata) {
+flutter::EncodableValue TextureTestEgl::Create(void *userdata) {
     auto *obj = reinterpret_cast<TextureTestEgl *>(userdata);
 
     obj->m_egl_backend->MakeTextureCurrent();
@@ -53,6 +53,22 @@ void TextureTestEgl::Create(void *userdata) {
 
     obj->m_initialized = true;
     obj->Enable(textureId);
+
+    return flutter::EncodableValue(flutter::EncodableMap{
+        {flutter::EncodableValue("result"),
+         flutter::EncodableValue(0)},
+        {flutter::EncodableValue("textureId"),
+         flutter::EncodableValue(obj->m_name)},
+        {flutter::EncodableValue("width"),
+         flutter::EncodableValue(obj->m_width)},
+        {flutter::EncodableValue("height"),
+         flutter::EncodableValue(obj->m_height)},
+        {flutter::EncodableValue("GL_target"),
+         flutter::EncodableValue(obj->m_target)},
+        {flutter::EncodableValue("GL_format"),
+         flutter::EncodableValue(obj->m_format)},
+        {flutter::EncodableValue("GL_textureId"),
+         flutter::EncodableValue(textureId)}});
 }
 
 void TextureTestEgl::Dispose(void *userdata) {

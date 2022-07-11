@@ -24,15 +24,18 @@
 
 #include <flutter_embedder.h>
 #include "constants.h"
+#include <flutter/encodable_value.h>
 
 class Engine;
+
+typedef flutter::EncodableValue (*EncodableValueCallback)(void* /* user data */);
 
 class Texture {
 public:
     Texture(uint32_t id,
             uint32_t target,
             uint32_t format,
-            VoidCallback create_callback,
+            EncodableValueCallback create_callback,
             VoidCallback dispose_callback,
             int width = 0,
             int height = 0);
@@ -49,7 +52,7 @@ public:
                                  int width,
                                  int height);
 
-    int64_t Create(int width, int height);
+    flutter::EncodableValue Create(int width, int height);
 
     void Dispose();
 
@@ -76,6 +79,6 @@ protected:
     bool m_draw_next;
 
 private:
-    const VoidCallback m_create_callback;
+    const EncodableValueCallback m_create_callback;
     const VoidCallback m_dispose_callback;
 };
