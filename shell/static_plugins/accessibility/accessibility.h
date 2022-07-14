@@ -19,9 +19,9 @@
 #include <flutter_embedder.h>
 
 class Accessibility {
-public:
-    static constexpr char kChannelName[] = "flutter/accessibility";
+ public:
+  static constexpr char kChannelName[] = "flutter/accessibility";
 
-    static void OnPlatformMessage(const FlutterPlatformMessage *message,
-                                  void *userdata);
+  static void OnPlatformMessage(const FlutterPlatformMessage* message,
+                                void* userdata);
 };

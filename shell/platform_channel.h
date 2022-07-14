@@ -41,7 +41,7 @@ class PlatformChannel {
   }
 
   std::map<std::string, FlutterPlatformMessageCallback> GetHandler() {
-    return this->m_platform_message_handlers;
+    return m_platform_message_handlers;
   }
 
   void RegisterCallback(const char* channel,
