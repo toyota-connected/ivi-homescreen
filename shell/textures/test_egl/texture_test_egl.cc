@@ -16,73 +16,70 @@
 
 #include <chrono>
 
-#include "app.h"
-#include "engine.h"
+#include "backend/wayland_egl.h"
 #include "textures/texture.h"
-#include "wayland/window.h"
+#include "view/flutter_view.h"
 
 constexpr int64_t kTestTextureObjectId = 5150;
 
-TextureTestEgl::TextureTestEgl(App *app)
-        : Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8, Create, Dispose),
-          m_egl_backend(reinterpret_cast<WaylandEglBackend *>(app->GetBackend())),
-          m_initialized(false) {}
+TextureTestEgl::TextureTestEgl(FlutterView* view)
+    : Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8, Create, Dispose),
+      m_egl_backend(reinterpret_cast<WaylandEglBackend*>(view->GetBackend())),
+      m_initialized(false) {}
 
 TextureTestEgl::~TextureTestEgl() = default;
 
-flutter::EncodableValue TextureTestEgl::Create(void *userdata) {
-    auto *obj = reinterpret_cast<TextureTestEgl *>(userdata);
+flutter::EncodableValue TextureTestEgl::Create(void* userdata) {
+  auto* obj = reinterpret_cast<TextureTestEgl*>(userdata);
 
-    obj->m_egl_backend->MakeTextureCurrent();
+  obj->m_egl_backend->MakeTextureCurrent();
 
-    GLubyte pixels[4 * 3] = {
-            255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0,
-    };
+  GLubyte pixels[4 * 3] = {
+      255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0,
+  };
 
-    GLuint textureId;
-    glGenTextures(1, &textureId);
-    glBindTexture(GL_TEXTURE_2D, textureId);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE,
-                 pixels);
+  GLuint textureId;
+  glGenTextures(1, &textureId);
+  glBindTexture(GL_TEXTURE_2D, textureId);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE,
+               pixels);
 
-    glFinish();
-    obj->m_egl_backend->ClearCurrent();
+  glFinish();
+  obj->m_egl_backend->ClearCurrent();
 
-    obj->m_initialized = true;
-    obj->Enable(textureId);
+  obj->m_initialized = true;
+  obj->Enable(textureId);
 
-    return flutter::EncodableValue(flutter::EncodableMap{
-        {flutter::EncodableValue("result"),
-         flutter::EncodableValue(0)},
-        {flutter::EncodableValue("textureId"),
-         flutter::EncodableValue(obj->m_name)},
-        {flutter::EncodableValue("width"),
-         flutter::EncodableValue(obj->m_width)},
-        {flutter::EncodableValue("height"),
-         flutter::EncodableValue(obj->m_height)},
-        {flutter::EncodableValue("GL_target"),
-         flutter::EncodableValue(obj->m_target)},
-        {flutter::EncodableValue("GL_format"),
-         flutter::EncodableValue(obj->m_format)},
-        {flutter::EncodableValue("GL_textureId"),
-         flutter::EncodableValue(textureId)}});
+  return flutter::EncodableValue(flutter::EncodableMap{
+      {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("textureId"),
+       flutter::EncodableValue(obj->m_name)},
+      {flutter::EncodableValue("width"), flutter::EncodableValue(obj->m_width)},
+      {flutter::EncodableValue("height"),
+       flutter::EncodableValue(obj->m_height)},
+      {flutter::EncodableValue("GL_target"),
+       flutter::EncodableValue(obj->m_target)},
+      {flutter::EncodableValue("GL_format"),
+       flutter::EncodableValue(obj->m_format)},
+      {flutter::EncodableValue("GL_textureId"),
+       flutter::EncodableValue(textureId)}});
 }
 
-void TextureTestEgl::Dispose(void *userdata) {
-    auto *obj = (TextureTestEgl *) userdata;
-    obj->Disable();
+void TextureTestEgl::Dispose(void* userdata) {
+  auto* obj = (TextureTestEgl*)userdata;
+  obj->Disable();
 }
 
-void TextureTestEgl::Draw(void *userdata) {
-    auto *obj = (TextureTestEgl *) userdata;
+void TextureTestEgl::Draw(void* userdata) {
+  auto* obj = (TextureTestEgl*)userdata;
 
-    if (!m_draw_next)
-        return;
+  if (!m_draw_next)
+    return;
 
-    m_draw_next = false;
+  m_draw_next = false;
 
-    obj->FrameReady();
+  obj->FrameReady();
 }

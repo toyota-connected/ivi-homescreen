@@ -22,7 +22,6 @@
 #include "rapidjson/document.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
-
   if (!doc.HasMember(kViewKey)) {
     FML_LOG(ERROR) << "JSON Configuration requires a \"view\" object";
     exit(EXIT_FAILURE);
@@ -63,6 +62,15 @@ void Configuration::getViewParameters(
   }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
+  }
+  if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
+    instance.view.fps_output_console = obj[kFpsOutputConsole].IsInt();
+  }
+  if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].IsInt();
+  }
+  if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].IsInt();
   }
 }
 
@@ -107,6 +115,15 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
+  if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
+    instance.view.fps_output_console = obj[kFpsOutputConsole].IsInt();
+  }
+  if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].IsInt();
+  }
+  if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].IsInt();
+  }
 }
 
 void Configuration::getView(rapidjson::Document& doc,
@@ -125,8 +142,7 @@ void Configuration::getView(rapidjson::Document& doc,
   }
 }
 
-void Configuration::getCliOverrides(Config& instance,
-                                    Config& cli) {
+void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (!cli.app_id.empty()) {
     instance.app_id = cli.app_id;
   }
@@ -244,7 +260,7 @@ void Configuration::PrintConfig(const Config& config) {
   FML_LOG(INFO) << "********";
   FML_LOG(INFO) << "* View *";
   FML_LOG(INFO) << "********";
-  if (config.view.vm_args.size()) {
+  if (!config.view.vm_args.empty()) {
     FML_LOG(INFO) << "VM Args:";
     for (auto const& arg : config.view.vm_args) {
       FML_LOG(INFO) << arg;

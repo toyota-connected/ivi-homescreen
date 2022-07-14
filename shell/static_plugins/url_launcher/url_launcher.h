@@ -19,17 +19,17 @@
 #include <flutter_embedder.h>
 
 class UrlLauncher {
-public:
-    static constexpr char kChannelName[] =
-            "plugins.flutter.io/url_launcher_linux";
+ public:
+  static constexpr char kChannelName[] =
+      "plugins.flutter.io/url_launcher_linux";
 
-    static void OnPlatformMessage(const FlutterPlatformMessage *message,
-                                  void *userdata);
+  static void OnPlatformMessage(const FlutterPlatformMessage* message,
+                                void* userdata);
 
-private:
-    static constexpr char kBadArgumentsError[] = "Bad Arguments";
-    static constexpr char kLaunchError[] = "Launch Error";
-    static constexpr char kCanLaunchMethod[] = "canLaunch";
-    static constexpr char kLaunchMethod[] = "launch";
-    static constexpr char kUrlKey[] = "url";
+ private:
+  static constexpr char kBadArgumentsError[] = "Bad Arguments";
+  static constexpr char kLaunchError[] = "Launch Error";
+  static constexpr char kCanLaunchMethod[] = "canLaunch";
+  static constexpr char kLaunchMethod[] = "launch";
+  static constexpr char kUrlKey[] = "url";
 };

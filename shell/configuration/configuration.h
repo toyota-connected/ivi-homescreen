@@ -17,9 +17,8 @@
 #include <string>
 #include <vector>
 
-#include "rapidjson/document.h"
 #include "flutter/fml/macros.h"
-
+#include "rapidjson/document.h"
 
 class Configuration {
  public:
@@ -38,6 +37,9 @@ class Configuration {
       uint32_t width;
       uint32_t height;
       bool fullscreen;
+      uint32_t fps_output_console;
+      uint32_t fps_output_overlay;
+      uint32_t fps_output_frequency;
     } view;
   };
 
@@ -61,6 +63,9 @@ class Configuration {
   static constexpr char kCursorThemeKey[] = "cursor_theme";
   static constexpr char kDisableCursorKey[] = "disable_cursor";
   static constexpr char kDebugBackendKey[] = "debug_backend";
+  static constexpr char kFpsOutputConsole[] = "fps_output_console";
+  static constexpr char kFpsOutputOverlay[] = "fps_output_overlay";
+  static constexpr char kFpsOutputFrequency[] = "fps_output_frequency";
 
   static rapidjson::Document getJsonDocument(const std::string& filename);
 
@@ -76,6 +81,5 @@ class Configuration {
 
   static void getView(rapidjson::Document& doc, int index, Config& instance);
 
-  static void getCliOverrides(Config& instance,
-                              Config& cli);
+  static void getCliOverrides(Config& instance, Config& cli);
 };

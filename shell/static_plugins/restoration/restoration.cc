@@ -19,19 +19,20 @@
 
 #include "engine.h"
 
-void Restoration::OnPlatformMessage(const FlutterPlatformMessage *message,
-                                    void *userdata) {
-    auto engine = reinterpret_cast<Engine *>(userdata);
-    auto &codec = flutter::StandardMethodCodec::GetInstance();
-    auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
+                                    void* userdata) {
+  auto engine = reinterpret_cast<Engine*>(userdata);
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-    auto method = obj->method_name();
+  auto method = obj->method_name();
 
-    if (method == kMethodGet) {
-        FML_DLOG(INFO) << "Restoration: Get";
-    } else {
-        FML_DLOG(ERROR) << "Restoration: " << method << " is unhandled";
-    }
+  if (method == kMethodGet) {
+    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Restoration: Get";
+  } else {
+    FML_DLOG(ERROR) << "(" << engine->GetIndex() << ") Restoration: " << method
+                    << " is unhandled";
+  }
 
-    engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
+  engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
 }

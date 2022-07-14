@@ -27,91 +27,91 @@ Texture::Texture(uint32_t id,
                  VoidCallback dispose_callback,
                  int width,
                  int height)
-        : m_flutter_engine(nullptr),
-          m_create_callback(create_callback),
-          m_dispose_callback(dispose_callback),
-          m_enabled(false),
-          m_draw_next(false),
-          m_target(target),
-          m_id(id),
-          m_name(0),
-          m_format(format),
-          m_height(height),
-          m_width(width) {}
+    : m_flutter_engine(nullptr),
+      m_create_callback(create_callback),
+      m_dispose_callback(dispose_callback),
+      m_enabled(false),
+      m_draw_next(false),
+      m_target(target),
+      m_id(id),
+      m_name(0),
+      m_format(format),
+      m_height(height),
+      m_width(width) {}
 
 Texture::~Texture() {
-    FML_DLOG(INFO) << "Texture Destructor";
+  FML_DLOG(INFO) << "Texture Destructor";
 }
 
-void Texture::GetFlutterOpenGLTexture(FlutterOpenGLTexture *texture_out,
+void Texture::GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out,
                                       int width,
                                       int height) {
-    texture_out->width = width;
-    texture_out->height = height;
-    texture_out->target = m_target;
-    texture_out->name = m_name;
-    texture_out->format = m_format;
+  texture_out->width = width;
+  texture_out->height = height;
+  texture_out->target = m_target;
+  texture_out->name = m_name;
+  texture_out->format = m_format;
 
-    m_draw_next = true;
+  m_draw_next = true;
 }
 
 flutter::EncodableValue Texture::Create(int32_t width, int32_t height) {
-    m_width = width;
-    m_height = height;
-    if (m_create_callback) {
-        return m_create_callback(this);
-    }
+  m_width = width;
+  m_height = height;
+  if (m_create_callback) {
+    return m_create_callback(this);
+  }
 
-    return flutter::EncodableValue (flutter::EncodableMap{
-        {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
-        {flutter::EncodableValue("error"),
-         flutter::EncodableValue("Create callback not set")}});
+  return flutter::EncodableValue(flutter::EncodableMap{
+      {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
+      {flutter::EncodableValue("error"),
+       flutter::EncodableValue("Create callback not set")}});
 }
 
 void Texture::Dispose() {
-    if (m_dispose_callback) {
-        m_dispose_callback(this);
-    }
+  if (m_dispose_callback) {
+    m_dispose_callback(this);
+  }
 }
 
 void Texture::Enable(GLuint name) {
-    m_name = name;
+  m_name = name;
 
-    if (m_flutter_engine) {
-        // Add again for assigned EGL texture id
-        // EGL assigns Textures starting in low digits
-        // Keep values passed to open_gl texture high to prevent collision
-        // no plan to enforce overwriting
-        m_flutter_engine->TextureRegistryAdd(m_name, this);
+  if (m_flutter_engine) {
+    // Add again for assigned EGL texture id
+    // EGL assigns Textures starting in low digits
+    // Keep values passed to open_gl texture high to prevent collision
+    // no plan to enforce overwriting
+    m_flutter_engine->TextureRegistryAdd(m_name, this);
 
-        if (kSuccess != m_flutter_engine->TextureEnable(m_name)) {
-            assert(false);
-        }
-
-        if (kSuccess != m_flutter_engine->MarkExternalTextureFrameAvailable(
-                m_flutter_engine, m_name)) {
-            assert(false);
-        }
-        m_enabled = true;
+    if (kSuccess != m_flutter_engine->TextureEnable(m_name)) {
+      assert(false);
     }
+
+    if (kSuccess != m_flutter_engine->MarkExternalTextureFrameAvailable(
+                        m_flutter_engine, m_name)) {
+      assert(false);
+    }
+    m_enabled = true;
+  }
 }
 
 void Texture::Disable() {
-    if (m_flutter_engine)
-        assert(m_name);
-    m_flutter_engine->TextureDisable(m_name);
-    m_enabled = false;
+  if (m_flutter_engine)
+    assert(m_name);
+  m_flutter_engine->TextureDisable(m_name);
+  m_enabled = false;
 }
 
-void Texture::SetEngine(const std::shared_ptr<Engine> &engine) {
-    if (engine) {
-        m_flutter_engine = engine;
-        engine->TextureRegistryAdd(m_id, this);
-    }
+void Texture::SetEngine(const std::shared_ptr<Engine>& engine) {
+  if (engine) {
+    m_flutter_engine = engine;
+    engine->TextureRegistryAdd(m_id, this);
+  }
 }
 
 void Texture::FrameReady() {
-    if (m_flutter_engine)
-        m_flutter_engine->MarkExternalTextureFrameAvailable(m_flutter_engine,
-                                                            m_name);
+  if (m_flutter_engine)
+    m_flutter_engine->MarkExternalTextureFrameAvailable(m_flutter_engine,
+                                                        m_name);
 }

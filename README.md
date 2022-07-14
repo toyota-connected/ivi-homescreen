@@ -30,6 +30,8 @@ To build Vulkan Backend use
 -DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON
 ```
 
+Running Vulkan requires an engine version that supports Vulkan.  Stable does not yet support Vulkan.
+
 # Bundle File Override Logic
 
 If an override file is not present, it gets loaded from default location.
@@ -38,18 +40,23 @@ If an override file is not present, it gets loaded from default location.
 
 ### icudtl.dat
 
-Bundle Override - `{bundle path}/data/icudtl.dat`
+Bundle Override
 
-Yocto Default - `/usr/share/flutter/icudtl.dat`
+    {bundle path}/data/icudtl.dat
 
-Desktop Default - `/usr/local/share/flutter/icudtl.dat`
+Yocto Default
 
-The CMake variable CMAKE_SYSROOT controls the sysroot prefix.
-On Yocto this defaults to `/usr`, on desktop builds it defaults to `/usr/local`.
+    /usr/share/flutter/icudtl.dat
+
+Desktop Default
+
+    /usr/local/share/flutter/icudtl.dat
 
 ### libflutter_engine.so
 
-Bundle Override - `{bundle path}/lib/libflutter_engine.so`
+Bundle Override
+
+    {bundle path}/lib/libflutter_engine.so
 
 Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
 
@@ -112,6 +119,12 @@ it will create borderless windows in no particular position.
 `vm_args` - Array of strings which get passed to the VM instance as command line arguments.
 
 `fullscreen` - Sets window to fullscreen.
+
+`fps_output_console` - Setting to `1` FPS count is output to stdout.
+
+`fps_output_overlay` - If `"fps_output_console"=1` and `"fps_output_overlay"=1` the screen overlay is enabled.
+
+`fps_output_frequency` - Optional for FPS.  Changing value controls the update interval.
 
 Minimum definition when using `--j=`
 ```
@@ -277,21 +290,6 @@ Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point do
     cd <homescreen build>
     export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
     homescreen
-
-## FPS
-Three environmental variables impact FPS reporting.
-
-### 1. FPS_OUTPUT_CONSOLE
-
-Setting `FPS_OUTPUT_CONSOLE` to "1" will output FPS count to console.
-
-### 2. FPS_OUTPUT_OVERLAY
-
-If `FPS_OUTPUT_CONSOLE=1` and `FPS_OUTPUT_OVERLAY=1` the screen overlay is enabled.
-
-### 3. FPS_OUTPUT_FREQUENCY
-
-Changing `FPS_OUTPUT_FREQUENCY` controls the update interval.  This parameter is optional.
 
 ## Debug
 

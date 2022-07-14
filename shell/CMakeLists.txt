@@ -44,6 +44,7 @@ set(SRC_FILES
         wayland/display.cc
         wayland/window.cc
 
+        view/flutter_view.cc
         configuration/configuration.cc
 
         engine.cc
@@ -79,7 +80,10 @@ set(SRC_FILES
         )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    list(APPEND SRC_FILES backend/wayland_egl.cc backend/egl.cc)
+    list(APPEND SRC_FILES
+            backend/wayland_egl.cc
+            backend/egl.cc
+            backend/gl_process_resolver.cc)
 elseif (BUILD_BACKEND_WAYLAND_VULKAN)
     list(APPEND SRC_FILES backend/wayland_vulkan.cc)
 endif ()
