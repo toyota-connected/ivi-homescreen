@@ -20,131 +20,24 @@
 #include <flutter/fml/logging.h>
 
 #include "constants.h"
-#include "engine.h"
+#include "view/flutter_view.h"
 #include "wayland/display.h"
-#include "wayland/window.h"
-
-#if defined(BUILD_BACKEND_WAYLAND_EGL)
-#include "backend/wayland_egl.h"
-#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
-#include "backend/wayland_vulkan.h"
-#endif
 
 App::App(const std::vector<Configuration::Config>& configs)
     : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
-                                                  configs[0].cursor_theme)),
-#if defined(BUILD_BACKEND_WAYLAND_EGL)
-      m_backend(std::make_shared<WaylandEglBackend>(
-          m_wayland_display->GetDisplay(),
-          m_wayland_display->GetBaseSurface(),
-          configs[0].debug_backend)),
-#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
-      m_backend(std::make_shared<WaylandVulkanBackend>(
-          m_wayland_display->GetDisplay(),
-          m_wayland_display->GetBaseSurface(),
-          configs[0].view.width,
-          configs[0].view.height,
-          configs[0].debug_backend)),
-#endif
-      m_wayland_window{
-          std::make_shared<WaylandWindow>(0,
-                                          m_wayland_display,
-                                          m_wayland_display->GetBaseSurface(),
-                                          WaylandWindow::WINDOW_BG,
-                                          configs[0].app_id,
-                                          configs[0].view.fullscreen,
-                                          configs[0].view.width,
-                                          configs[0].view.height,
-                                          m_backend.get())}
-#ifdef ENABLE_TEXTURE_TEST_EGL
-      ,
-      m_texture_test_egl(std::make_unique<TextureTestEgl>(this))
-#endif
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-      ,
-      m_text_input(std::make_shared<TextInput>())
-#endif
-{
-
+                                                  configs[0].cursor_theme)) {
   FML_DLOG(INFO) << "+App::App";
 
-  std::vector<const char*> m_command_line_args_c;
-  m_command_line_args_c.reserve(configs[0].view.vm_args.size());
-  m_command_line_args_c.push_back(configs[0].app_id.c_str());
-  for (const auto& arg : configs[0].view.vm_args) {
-    m_command_line_args_c.push_back(arg.c_str());
+  size_t index = 0;
+  m_views.reserve(configs.size());
+  for (auto const& cfg : configs) {
+    auto view = std::make_unique<FlutterView>(cfg, index, m_wayland_display);
+    view->Initialize();
+    m_views.emplace_back(std::move(view));
+    index++;
   }
-
-  for (size_t i = 0; i < kEngineInstanceCount; i++) {
-    m_flutter_engine[i] = std::make_shared<Engine>(
-        this, i, m_command_line_args_c, configs[0].view.bundle_path,
-        configs[0].view.accessibility_features);
-    m_flutter_engine[i]->Run(pthread_self());
-
-    if (!m_flutter_engine[i]->IsRunning()) {
-      FML_LOG(ERROR) << "Failed to Run Engine";
-      exit(-1);
-    }
-    m_wayland_window[i]->SetEngine(m_flutter_engine[i]);
-
-    FML_DLOG(INFO) << "(" << i << ") Engine running...";
-  }
-
-  // Enable pointer events
-  m_wayland_display->SetEngine(m_flutter_engine[0]);
-
-#ifdef ENABLE_TEXTURE_TEST_EGL
-  m_texture_test_egl->SetEngine(m_flutter_engine[0]);
-#endif
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-  m_text_input->SetEngine(m_flutter_engine[0]);
-  m_wayland_display->SetTextInput(m_text_input);
-#endif
 
   m_wayland_display->AglShellDoReady();
-
-  // init the fps output option.
-  m_fps.output = 0;
-  m_fps.period = 1;
-  m_fps.counter = 0;
-
-  const char* env_string_console;
-  if ((env_string_console = getenv("FPS_OUTPUT_CONSOLE")) != nullptr) {
-    long val = strtol(env_string_console, nullptr, 10);
-
-    if (0 < val) {
-      m_fps.output |= 0x01;
-    }
-  }
-
-  const char* env_string_overlay;
-  if ((env_string_overlay = getenv("FPS_OUTPUT_OVERLAY")) != nullptr) {
-    long val = strtol(env_string_overlay, nullptr, 10);
-
-    if (0 < val) {
-      m_fps.output |= 0x02;
-    }
-  }
-
-  const char* env_string_freq;
-  if ((env_string_freq = getenv("FPS_OUTPUT_FREQUENCY")) != nullptr) {
-    long val = strtol(env_string_freq, nullptr, 10);
-
-    if (0 < val) {
-      m_fps.period = val;
-    }
-  }
-
-  if (0 < m_fps.output) {
-    if (0 >= m_fps.period) {
-      m_fps.period = 1;
-    }
-
-    m_fps.period *= (1000 / 16);
-    m_fps.pretime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-  }
 
   FML_DLOG(INFO) << "-App::App";
 }
@@ -154,24 +47,11 @@ int App::Loop() {
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
 
-  for (auto& i : m_flutter_engine) {
-    i->RunTask();
-  }
+  auto ret = m_wayland_display->PollEvents();
 
-#ifdef ENABLE_TEXTURE_TEST_EGL
-  if (m_texture_test_egl) {
-    m_texture_test_egl->Draw(m_texture_test_egl.get());
+  for (auto const& view : m_views) {
+    view->RunTasks();
   }
-#endif
-
-  auto display = m_wayland_display->GetDisplay();
-  while (wl_display_prepare_read(display) != 0) {
-    wl_display_dispatch_pending(display);
-  }
-  wl_display_flush(display);
-
-  wl_display_read_events(display);
-  auto ret = wl_display_dispatch_pending(display);
 
   auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now().time_since_epoch())
@@ -185,28 +65,9 @@ int App::Loop() {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
   }
 
-  // calc and output the fps.
-  if (0 < m_fps.output) {
-    m_fps.counter++;
-
-    if (m_fps.period <= m_fps.counter) {
-      auto fps_loop = (m_fps.counter * 1000) / (end_time - m_fps.pretime);
-      auto fps_redraw = (m_wayland_window[0]->GetFpsCounter() * 1000) /
-                        (end_time - m_fps.pretime);
-
-      m_fps.counter = 0;
-      m_fps.pretime = end_time;
-
-      if (0 < (m_fps.output & 0x01)) {
-        if (0 < (m_fps.output & 0x01)) {
-          FML_LOG(INFO) << "FPS = " << fps_loop << " " << fps_redraw;
-        }
-
-        if (0 < (m_fps.output & 0x02)) {
-          m_wayland_window[0]->DrawFps(fps_redraw);
-        }
-      }
-    }
+  for (auto const& i : m_views) {
+    i->DrawFps(end_time);
   }
+
   return ret;
 }

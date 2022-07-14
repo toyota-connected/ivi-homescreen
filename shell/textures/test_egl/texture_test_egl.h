@@ -27,30 +27,35 @@
 
 #include <flutter_embedder.h>
 
-#include "backend/wayland_egl.h"
 #include "flutter/fml/macros.h"
 #include "textures/texture.h"
 
 class App;
 
+class Backend;
+
 class Engine;
 
+class FlutterView;
+
+class WaylandEglBackend;
+
 class TextureTestEgl : public Texture {
-public:
-    explicit TextureTestEgl(App *app);
+ public:
+  explicit TextureTestEgl(FlutterView* view);
 
-    ~TextureTestEgl();
+  ~TextureTestEgl();
 
-    void Draw(void *userdata);
+  void Draw(void* userdata);
 
-    FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
+  FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
 
-private:
-    bool m_initialized;
+ private:
+  bool m_initialized;
 
-    WaylandEglBackend *m_egl_backend;
+  WaylandEglBackend* m_egl_backend;
 
-    static flutter::EncodableValue Create(void *userdata);
+  static flutter::EncodableValue Create(void* userdata);
 
-    static void Dispose(void *userdata);
+  static void Dispose(void* userdata);
 };
