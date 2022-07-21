@@ -133,7 +133,7 @@ Minimum definition when using `--j=`
 
 If you used this minimum definition, invocation would look something like this
 ```
-homescreen --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
+flutter-ed --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
 ``` 
 
 ### JSON Configuration Example 1
@@ -163,7 +163,7 @@ Loads Two Views
    ]
 }
 
-homescreen --j=/tmp/bg_left_rel.json
+flutter-ed --j=/tmp/bg_left_rel.json
 ```
 
 ### JSON Configuration Example 2
@@ -186,7 +186,7 @@ Loads Single View
    }
 }
 
-homescreen --j=/tmp/bg_dbg.json
+flutter-ed --j=/tmp/bg_dbg.json
 ```
 
 ### Parameter loading order
@@ -268,28 +268,28 @@ Confirm flutter/bin is in the path using: `flutter doctor -v`
 
 ## Install
 
-loading path for application is: `/usr/local/share/homescreen/bundle`
+loading path for application is: `/usr/local/share/flutter-ed/bundle`
 
 This is used to leverage symlinks.  Such as:
 
-    cd /usr/local/share/homescreen
+    cd /usr/local/share/flutter-ed
     sudo rm -rf bundle
     sudo ln -sf ~/development/my_flutter_app/build/ bundle
 
 Or
 
-    sudo mkdir -p /usr/local/share/homescreen/my_flutter_app/
-    sudo cp -r build/* /usr/local/share/homescreen/my_flutter_app/
-    sudo ln -sf /usr/local/share/homescreen/my_flutter_app/ bundle
+    sudo mkdir -p /usr/local/share/flutter-ed/my_flutter_app/
+    sudo cp -r build/* /usr/local/share/flutter-ed/my_flutter_app/
+    sudo ln -sf /usr/local/share/flutter-ed/my_flutter_app/ bundle
 
 ## Running on desktop
 
 Copy a current icudtl.dat to /usr/local/share/flutter
 Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point downloaded engine for build:
 
-    cd <homescreen build>
+    cd <flutter-ed build>
     export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
-    homescreen
+    flutter-ed
 
 ## Debug
 

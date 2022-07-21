@@ -88,12 +88,12 @@ elseif (BUILD_BACKEND_WAYLAND_VULKAN)
     list(APPEND SRC_FILES backend/wayland_vulkan.cc)
 endif ()
 
-add_executable(homescreen ${SRC_FILES})
+add_executable(flutter-ed ${SRC_FILES})
 
 include(plugins)
 include(textures)
 
-target_compile_definitions(homescreen
+target_compile_definitions(flutter-ed
         PRIVATE
         HAVE_STRCHRNUL
         EGL_NO_X11
@@ -120,7 +120,7 @@ include_directories(
         ../third_party/rapidjson/include
 )
 
-target_link_libraries(homescreen PRIVATE
+target_link_libraries(flutter-ed PRIVATE
         bluevk
         ${WAYLAND_LIBRARIES}
         EGL GLESv2
@@ -132,7 +132,7 @@ target_link_libraries(homescreen PRIVATE
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
         )
 
-target_link_directories(homescreen PRIVATE
+target_link_directories(flutter-ed PRIVATE
         ${CMAKE_BINARY_DIR}
         )
 
@@ -140,16 +140,16 @@ cmake_policy(SET CMP0069 NEW)
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ipo_support_result OUTPUT ipo_support_output)
 if (ipo_support_result)
-    set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET flutter-ed PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 else ()
     message(WARNING "IPO is not supported: ${ipo_support_output}")
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(homescreen PRIVATE
+    target_compile_options(flutter-ed PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
-    target_link_options(homescreen PRIVATE
+    target_link_options(flutter-ed PRIVATE
             -fuse-ld=lld -lc++ -lc++abi -lc -lm -v)
 endif ()
 
-install(TARGETS homescreen DESTINATION bin)
+install(TARGETS flutter-ed DESTINATION bin)
