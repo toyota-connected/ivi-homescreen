@@ -25,7 +25,8 @@
 
 App::App(const std::vector<Configuration::Config>& configs)
     : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
-                                                  configs[0].cursor_theme)) {
+                                                  configs[0].cursor_theme,
+                                                  configs)) {
   FML_DLOG(INFO) << "+App::App";
   bool found_view_with_bg = false;
 
