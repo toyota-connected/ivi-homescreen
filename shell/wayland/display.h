@@ -32,11 +32,15 @@
 #include "static_plugins/text_input/text_input.h"
 #include "xdg-shell-client-protocol.h"
 
+#include "configuration/configuration.h"
+
 class Engine;
 
 class Display {
  public:
-  explicit Display(bool enable_cursor, std::string cursor_theme_name);
+  explicit Display(bool enable_cursor,
+                   std::string cursor_theme_name,
+                   const std::vector<Configuration::Config>& configs);
 
   ~Display();
 
@@ -95,6 +99,8 @@ class Display {
   struct wl_subcompositor* m_subcompositor{};
   struct wl_shm* m_shm{};
   struct wl_surface* m_base_surface{};
+
+  bool m_bind_to_agl_shell = false;
 
   std::map<wl_surface*, Engine*> m_surface_engine_map;
   wl_surface* m_active_surface{};

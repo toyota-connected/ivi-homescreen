@@ -25,8 +25,10 @@
 
 App::App(const std::vector<Configuration::Config>& configs)
     : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
-                                                  configs[0].cursor_theme)) {
+                                                  configs[0].cursor_theme,
+                                                  configs)) {
   FML_DLOG(INFO) << "+App::App";
+  bool found_view_with_bg = false;
 
   size_t index = 0;
   m_views.reserve(configs.size());
@@ -35,9 +37,16 @@ App::App(const std::vector<Configuration::Config>& configs)
     view->Initialize();
     m_views.emplace_back(std::move(view));
     index++;
+
+    if (WaylandWindow::get_window_type(cfg.view.window_type) ==
+        WaylandWindow::WINDOW_BG)
+      found_view_with_bg = true;
   }
 
-  m_wayland_display->AglShellDoReady();
+  // check that if we had a BG type and issue a ready() request for it,
+  // otherwise we're going to assume that this is a NORMAL/REGULAR application.
+  if (found_view_with_bg)
+    m_wayland_display->AglShellDoReady();
 
   FML_DLOG(INFO) << "-App::App";
 }
