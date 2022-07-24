@@ -79,6 +79,7 @@ class WaylandWindow {
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
   uint32_t m_fps_counter;
+  static window_type get_window_type(const std::string& type);
 
  private:
   struct shm_buffer {
@@ -157,5 +158,4 @@ class WaylandWindow {
 
   static const struct wl_callback_listener frame_listener;
 
-  static window_type get_window_type(const std::string& type);
 };
