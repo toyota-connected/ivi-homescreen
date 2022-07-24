@@ -27,13 +27,24 @@
 #include "constants.h"
 #include "engine.h"
 
-Display::Display(bool enable_cursor, std::string cursor_theme_name)
+Display::Display(bool enable_cursor,
+                 std::string cursor_theme_name,
+                 const std::vector<Configuration::Config>& configs)
     : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
       m_buffer_scale(1),
       m_last_buffer_scale(m_buffer_scale),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   FML_DLOG(INFO) << "+ Display()";
+
+  for (auto const& cfg : configs) {
+    // check if we actually need to bind to agl-shell
+    auto window_type = WaylandWindow::get_window_type(cfg.view.window_type);
+    if (window_type != WaylandWindow::WINDOW_NORMAL) {
+      m_bind_to_agl_shell = true;
+      break;
+    }
+  }
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
@@ -46,7 +57,7 @@ Display::Display(bool enable_cursor, std::string cursor_theme_name)
   wl_registry_add_listener(m_registry, &registry_listener, this);
   wl_display_dispatch(m_display);
 
-  if (!m_agl_shell) {
+  if (!m_agl_shell && m_bind_to_agl_shell) {
     FML_LOG(INFO) << "agl_shell extension not present";
   }
 
@@ -152,7 +163,8 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_seat_interface,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
-  } else if (strcmp(interface, agl_shell_interface.name) == 0) {
+  } else if (strcmp(interface, agl_shell_interface.name) == 0 &&
+             d->m_bind_to_agl_shell) {
     d->m_agl_shell = static_cast<struct agl_shell*>(
         wl_registry_bind(registry, name, &agl_shell_interface,
                          std::min(static_cast<uint32_t>(1), version)));
