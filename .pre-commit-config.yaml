@@ -1,0 +1,25 @@
+---
+default_stages: [commit, manual]
+fail_fast: false
+
+repos:
+  - repo: https://github.tmc-stargate.com/arene-os-services-cockpit-wa/pre-commit-hooks
+    rev: v4.1.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ["--fix=auto"]
+      - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+
+  - repo: https://github.tmc-stargate.com/arene-os-services-cockpit-wa/arene-cockpit-misc-pre-commit
+    rev: v0.1.0
+    hooks:
+      - id: infra-cpplint-local
+        stages: [commit]
+
+  - repo: https://github.tmc-stargate.com/arene-os-services-cockpit-wa/arene-cockpit-misc-pre-commit
+    rev: v0.1.0
+    hooks:
+      - id: infra-cpplint-ci
+        stages: [manual]
