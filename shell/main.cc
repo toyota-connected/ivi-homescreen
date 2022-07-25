@@ -44,7 +44,7 @@ void RemoveArgument(std::vector<std::string>& args, const std::string& arg) {
 
 int main(int argc, char** argv) {
   struct Configuration::Config config {
-    .app_id = kApplicationName, .json_configuration_path{}, .cursor_theme{},
+    .app_id = {}, .json_configuration_path{}, .cursor_theme{},
     .disable_cursor{}, .debug_backend{}, .view {}
   };
 

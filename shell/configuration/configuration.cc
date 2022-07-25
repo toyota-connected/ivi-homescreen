@@ -220,6 +220,8 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
     if (cfg.view.height == 0) {
       cfg.view.height = kDefaultViewHeight;
     }
+    if (cfg.app_id.empty())
+      cfg.app_id = kApplicationName;
 
     res.emplace_back(cfg);
   }
