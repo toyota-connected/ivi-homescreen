@@ -152,10 +152,12 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (!cli.cursor_theme.empty()) {
     instance.cursor_theme = cli.cursor_theme;
   }
-  if (cli.disable_cursor != instance.disable_cursor) {
+  if (cli.disable_cursor == true &&
+      cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
   }
-  if (cli.debug_backend != instance.debug_backend) {
+  if (cli.debug_backend == true &&
+      cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
   }
   if (!cli.view.vm_args.empty()) {
