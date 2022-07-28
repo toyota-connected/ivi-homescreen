@@ -208,7 +208,7 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
     getCliOverrides(cfg, config);
 
     if (cfg.view.window_type.empty())
-      cfg.view.window_type = "NORMAL";
+      cfg.view.window_type = "BG";
 
     if (cfg.view.bundle_path.empty()) {
       FML_LOG(ERROR) << "A bundle path must be specified";
