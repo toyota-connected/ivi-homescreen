@@ -175,7 +175,7 @@ Loads Single View
 
 {
    "disable_cursor":true,
-   "backend_debug":true,
+   "debug_backend":true,
    "accessibility_features":31,
    "view":{
       "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
