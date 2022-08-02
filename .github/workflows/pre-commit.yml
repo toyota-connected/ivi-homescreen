@@ -1,0 +1,52 @@
+---
+name: pre-commit
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  pre-commit:
+    runs-on: [self-hosted, infra-pre-commit]
+    container:
+      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/cockpit-generic:latest
+      options: --user cockpit-user
+      credentials:
+        username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+        password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+      volumes:
+        - ${{ github.workspace }}/workdir:/workdir
+
+    steps:
+      - name: Initialize_setup
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -e
+          # change the owner to be cockpit-user
+          sudo chown cockpit-user:cockpit-user /workdir
+          sudo chown cockpit-user:cockpit-user -R /github/home
+          # workspace reflesh
+          if [ -d /workdir ] ; then
+            echo "Delete /workdir/*"
+            rm -rf /workdir/*
+          fi
+
+      - name: Git_clone_pre-commit_target
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+          path: workdir/pre-commit_target
+          set-safe-directory: false
+
+      - name: Run pre-commit
+        working-directory: ${{ github.workspace }}/workdir
+        env:
+          TARGET_DIR: pre-commit_target
+        shell: bash
+        run: |
+          cd ${TARGET_DIR}
+          pre-commit clean
+          pre-commit install
+          pre-commit run -a --hook-stage manual
