@@ -151,6 +151,16 @@ int main(int argc, char** argv) {
       FML_DLOG(INFO) << "Cursor Theme: " << config.cursor_theme;
       RemoveArgument(config.view.vm_args, "--t=" + config.cursor_theme);
     }
+    if (cl.HasOption("window-type")) {
+      cl.GetOptionValue("window-type", &config.view.window_type);
+      if (config.view.window_type.empty()) {
+        FML_LOG(ERROR)
+            << "--window-type option requires an argument (e.g. --window-type=BG)";
+        return EXIT_FAILURE;
+      }
+      FML_DLOG(INFO) << "Window Type: " << config.view.window_type;
+      RemoveArgument(config.view.vm_args, "--window-type=" + config.view.window_type);
+    }
   }
 
   auto vm_arg_count = config.view.vm_args.size();
