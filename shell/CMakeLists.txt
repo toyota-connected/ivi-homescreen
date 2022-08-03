@@ -94,12 +94,12 @@ if (BUILD_PLUGIN_COMP_SURF)
     list(APPEND SRC_FILES view/compositor_surface.cc)
 endif ()
 
-add_executable(homescreen ${SRC_FILES})
+add_executable(flutter-auto ${SRC_FILES})
 
 include(plugins)
 include(textures)
 
-target_compile_definitions(homescreen
+target_compile_definitions(flutter-auto
         PRIVATE
         HAVE_STRCHRNUL
         EGL_NO_X11
@@ -127,16 +127,16 @@ include_directories(
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_link_libraries(homescreen PRIVATE EGL GLESv2)
+    target_link_libraries(flutter-auto PRIVATE EGL GLESv2)
 endif ()
 if (BUILD_PLUGIN_COMP_SURF)
-    target_link_libraries(homescreen PRIVATE EGL)
+    target_link_libraries(flutter-auto PRIVATE EGL)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_link_libraries(homescreen PRIVATE bluevk)
+    target_link_libraries(flutter-auto PRIVATE bluevk)
 endif ()
 
-target_link_libraries(homescreen PRIVATE
+target_link_libraries(flutter-auto PRIVATE
         ${WAYLAND_LIBRARIES}
         Threads::Threads
         dl
@@ -146,16 +146,16 @@ target_link_libraries(homescreen PRIVATE
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
         )
 
-target_link_directories(homescreen PRIVATE
+target_link_directories(flutter-auto PRIVATE
         ${CMAKE_BINARY_DIR}
         )
 
 if (IPO_SUPPORT_RESULT)
-    set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET flutter-auto PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
+    target_link_options(flutter-auto PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
-install(TARGETS homescreen DESTINATION bin)
+install(TARGETS flutter-auto DESTINATION bin)

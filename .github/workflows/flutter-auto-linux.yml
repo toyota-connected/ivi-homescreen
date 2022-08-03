@@ -1,4 +1,4 @@
-name: ivi-homescreen-linux
+name: flutter-auto-linux
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
     - cron:  '0 0 * * *'
 
 env:
-  COMPONENT: ivi-homescreen
+  COMPONENT: flutter-auto
 
 jobs:
   build:
@@ -66,23 +66,23 @@ jobs:
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v3
         with:
-          name: ivi-homescreen-dbg.Linux.tar.gz.zip
+          name: flutter-auto-dbg.Linux.tar.gz.zip
           path: |
-            build/debug/_packages/ivi-homescreen-dbg-*-Linux.tar.gz
+            build/debug/_packages/flutter-auto-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
         uses: actions/upload-artifact@v3
         with:
-          name: ivi-homescreen-dbg.amd64.deb.zip
+          name: flutter-auto-dbg.amd64.deb.zip
           path: |
-            build/debug/_packages/ivi-homescreen-dbg*_amd64.*deb
+            build/debug/_packages/flutter-auto-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
         uses: actions/upload-artifact@v3
         with:
-          name: ivi-homescreen-dbg.x86_64.rpm.zip
+          name: flutter-auto-dbg.x86_64.rpm.zip
           path: |
-            build/debug/_packages/ivi-homescreen-dbg-*.x86_64.rpm
+            build/debug/_packages/flutter-auto-dbg-*.x86_64.rpm
 
       - name: Build Release Packages
         working-directory: ${{github.workspace}}/build/release       
@@ -91,30 +91,30 @@ jobs:
           make package -j
           ls -la _packages
           echo "Release Info"
-          ls -la shell/homescreen
+          ls -la shell/flutter-auto
           echo "Strip executable"
-          strip shell/homescreen
-          ls -la shell/homescreen
+          strip shell/flutter-auto
+          ls -la shell/flutter-auto
           echo "List Dependencies"
-          ldd shell/homescreen
+          ldd shell/flutter-auto
 
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v3
         with:
-          name: ivi-homescreen.Linux.tar.gz.zip
+          name: flutter-auto.Linux.tar.gz.zip
           path: |
-            build/release/_packages/ivi-homescreen-*-Linux.tar.gz
+            build/release/_packages/flutter-auto-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v3
         with:
-          name: ivi-homescreen.amd64.deb.zip
+          name: flutter-auto.amd64.deb.zip
           path: |
-            build/release/_packages/ivi-homescreen_*_amd64.deb
+            build/release/_packages/flutter-auto_*_amd64.deb
 
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v3
         with:
-          name: ivi-homescreen.x86_64.rpm.zip
+          name: flutter-auto.x86_64.rpm.zip
           path: |
-            build/release/_packages/ivi-homescreen-*.x86_64.rpm
+            build/release/_packages/flutter-auto-*.x86_64.rpm

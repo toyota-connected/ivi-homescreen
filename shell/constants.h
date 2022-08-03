@@ -58,8 +58,8 @@ constexpr char kSystemEngine[] = "libflutter_engine.so";
 constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
 // Install path constants
-static constexpr char kApplicationName[] = "homescreen";
-static constexpr char kXdgApplicationDir[] = ".homescreen";
+static constexpr char kApplicationName[] = "flutter-auto";
+static constexpr char kXdgApplicationDir[] = ".flutter-auto";
 static constexpr char kXdgConfigDir[] = ".config";
 
 // Compositor Surface
