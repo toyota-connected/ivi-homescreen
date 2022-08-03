@@ -1,9 +1,6 @@
-# ivi-homescreen
+# flutter-auto
 
-[![Build Status](https://img.shields.io/github/workflow/status/toyota-connected/ivi-homescreen/ivi-homescreen-linux/main?logoColor=red&logo=ubuntu)](https://github.com/toyota-connected/ivi-homescreen/actions) [![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) [![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
-
-
-IVI Homescreen for Wayland
+Flutter Auto
 
 * Strongly Typed (C++)
 * Lightweight
@@ -15,6 +12,15 @@ IVI Homescreen for Wayland
   * Yocto Dunfell+
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
+
+[![flutter-auto-linux](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/ivi-homescreen-linux.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml)
+
+[![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) 
+
+[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) 
+
+[![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
+
 
 # Backend Support
 
@@ -133,7 +139,7 @@ Minimum definition when using `--j=`
 
 If you used this minimum definition, invocation would look something like this
 ```
-homescreen --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
+flutter-auto --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
 ``` 
 
 ### JSON Configuration Example 1
@@ -147,14 +153,14 @@ Loads Two Views
 {
    "view":[
       {
-         "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
+         "bundle_path":"/home/joel/development/gallery/.flutter-auto/x86/release",
          "vm_args":["--enable-asserts", "--pause-isolates-on-start"],
          "window_type":"BG",
          "width":1920,
          "height":1280
       },
       {
-         "bundle_path":"/home/joel/development/plugins/packages/video_player/video_player/example/.homescreen/x86/release",
+         "bundle_path":"/home/joel/development/plugins/packages/video_player/video_player/example/.flutter-auto/x86/release",
          "window_type":"PANEL_LEFT",
          "width":320,
          "height":240,
@@ -163,7 +169,7 @@ Loads Two Views
    ]
 }
 
-homescreen --j=/tmp/bg_left_rel.json
+flutter-auto --j=/tmp/bg_left_rel.json
 ```
 
 ### JSON Configuration Example 2
@@ -178,7 +184,7 @@ Loads Single View
    "debug_backend":true,
    "accessibility_features":31,
    "view":{
-      "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
+      "bundle_path":"/home/joel/development/gallery/.flutter-auto/x86/release",
       "vm_args":["--no-serve-devtools"],
       "width":1920,
       "height":1280,
@@ -186,7 +192,7 @@ Loads Single View
    }
 }
 
-homescreen --j=/tmp/bg_dbg.json
+flutter-auto --j=/tmp/bg_dbg.json
 ```
 
 ### Parameter loading order

@@ -53,10 +53,10 @@ constexpr char kBundleEngine[] = "lib/libflutter_engine.so";
 constexpr char kSystemEngine[] = "libflutter_engine.so";
 constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
-constexpr char kApplicationName[] = "homescreen";
+constexpr char kApplicationName[] = "flutter-auto";
 
 // Install path constants
-constexpr char kEnginePersistentCacheDir[] = ".homescreen";
+constexpr char kEnginePersistentCacheDir[] = ".flutter-auto";
 
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off
