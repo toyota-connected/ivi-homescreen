@@ -124,7 +124,7 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 
-target_link_directories(homescreen PRIVATE
+target_link_directories(flutter-auto PRIVATE
         ${CMAKE_BINARY_DIR}
 )
 
@@ -139,4 +139,4 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
-install(TARGETS homescreen DESTINATION bin)
+install(TARGETS flutter-auto DESTINATION bin)

@@ -28,9 +28,9 @@ if (NOT BUILD_NUMBER)
     set(BUILD_NUMBER 0)
 endif ()
 
-project(ivi-homescreen
-        VERSION "1.0.${BUILD_NUMBER}"
-        DESCRIPTION "IVI Flutter Shell"
+project(flutter-auto
+        VERSION "2.0.${BUILD_NUMBER}"
+        DESCRIPTION "Flutter Auto Shell"
         LANGUAGES CXX C
         )
 
