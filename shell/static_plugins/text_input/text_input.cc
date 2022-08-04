@@ -173,14 +173,8 @@ done:
 }
 
 void TextInput::keyboard_handle_key(void* data,
-                                    struct wl_keyboard* keyboard,
-                                    uint32_t serial,
-                                    uint32_t time,
                                     xkb_keysym_t keysym,
                                     uint32_t state) {
-  (void)keyboard;
-  (void)serial;
-  (void)time;
   auto* text_input = static_cast<TextInput*>(data);
 
   if (text_input->active_model_ == nullptr) {

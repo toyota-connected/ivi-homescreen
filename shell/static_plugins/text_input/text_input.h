@@ -75,9 +75,6 @@ class TextInput : public flutter::BinaryMessenger {
   * flutter
   */
   static void keyboard_handle_key(void* data,
-                                  struct wl_keyboard* keyboard,
-                                  uint32_t serial,
-                                  uint32_t time,
                                   xkb_keysym_t keysym,
                                   uint32_t state);
 

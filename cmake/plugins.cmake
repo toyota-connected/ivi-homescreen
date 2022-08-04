@@ -64,6 +64,11 @@ if (BUILD_PLUGIN_TEXT_INPUT)
     ENABLE_PLUGIN(text_input)
 endif ()
 
+option(BUILD_PLUGIN_KEY_EVENT "Includes Key Event Plugin" ON)
+if (BUILD_PLUGIN_KEY_EVENT)
+    ENABLE_PLUGIN(key_event)
+endif ()
+
 option(BUILD_PLUGIN_URL_LAUNCHER "Includes URL Launcher Plugin" ON)
 if (BUILD_PLUGIN_URL_LAUNCHER)
     ENABLE_PLUGIN(url_launcher)
