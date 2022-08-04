@@ -50,6 +50,7 @@ set(SRC_FILES
 
         engine.cc
         platform_channel.cc
+        timer.cc
 
         textures/texture.cc
 

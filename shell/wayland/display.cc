@@ -26,6 +26,7 @@
 
 #include "constants.h"
 #include "engine.h"
+#include "timer.h"
 
 Display::Display(bool enable_cursor,
                  std::string cursor_theme_name,
@@ -188,6 +189,10 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_seat_interface,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
+
+    d->m_repeat_timer = std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
+    d->m_repeat_timer->set_timerspec(40, 400);
+
   } else if (strcmp(interface, agl_shell_interface.name) == 0 &&
              d->m_agl.bind_to_agl_shell) {
     if (version >= 2) {
@@ -521,10 +526,13 @@ void Display::keyboard_handle_leave(void* data,
                                     struct wl_keyboard* keyboard,
                                     uint32_t serial,
                                     struct wl_surface* surface) {
-  (void)data;
   (void)keyboard;
   (void)serial;
   (void)surface;
+
+  auto* d = static_cast<Display*>(data);
+
+  d->m_repeat_timer->disarm();
 }
 
 void Display::keyboard_handle_keymap(void* data,
@@ -553,20 +561,45 @@ void Display::keyboard_handle_key(void* data,
                                   uint32_t time,
                                   uint32_t key,
                                   uint32_t state) {
-#if ENABLE_PLUGIN_TEXT_INPUT
   auto* d = static_cast<Display*>(data);
-  auto text_input = d->m_text_input[d->m_active_surface];
-  if (text_input) {
-    if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-      xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
-      TextInput::keyboard_handle_key(text_input, keyboard, serial, time, keysym,
-                                     state);
+
+  if (!d->m_xkb_state)
+    return;
+
+  uint32_t code = key + 8;
+
+  xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, code);
+
+  if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+    d->m_keysym_pressed = keysym;
+
+#if ENABLE_PLUGIN_TEXT_INPUT
+    auto text_input = d->m_text_input[d->m_active_surface];
+    if (text_input) {
+      TextInput::keyboard_handle_key(text_input, keysym, state);
+    }
+#endif
+
+    if (xkb_keymap_key_repeats(d->m_keymap, code)) {
+      d->m_repeat_code = code;
+      d->m_repeat_timer->arm();
+    }
+  } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+#if ENABLE_PLUGIN_KEY_EVENT
+    auto key_event = d->m_key_event[d->m_active_surface];
+    if (key_event) {
+      KeyEvent::keyboard_handle_key(key_event,
+                                    kFlutterKeyEventTypeUp,
+                                    code,
+                                    d->m_keysym_pressed);
+    }
+#endif
+    if (d->m_repeat_code == code) {
+      d->m_repeat_timer->disarm();
     }
   }
-#elif !defined(NDEBUG)
-  auto* d = static_cast<Display*>(data);
+#if !defined(NDEBUG)
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, key + 8);
     uint32_t utf32 = xkb_keysym_to_utf32(keysym);
     if (utf32) {
       FML_DLOG(INFO) << "[Press] U" << utf32;
@@ -574,6 +607,15 @@ void Display::keyboard_handle_key(void* data,
       char name[64];
       xkb_keysym_get_name(keysym, name, 64);
       FML_DLOG(INFO) << "[Press] " << name;
+    }
+  } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+    uint32_t utf32 = xkb_keysym_to_utf32(d->m_keysym_pressed);
+    if (utf32) {
+      FML_DLOG(INFO) << "[Released] U" << utf32;
+    } else {
+      char name[64];
+      xkb_keysym_get_name(d->m_keysym_pressed, name, 64);
+      FML_DLOG(INFO) << "[Released] " << name;
     }
   }
 #endif
@@ -597,8 +639,12 @@ void Display::keyboard_handle_repeat_info(void* data,
                                           struct wl_keyboard* wl_keyboard,
                                           int32_t rate,
                                           int32_t delay) {
-  (void)data;
   (void)wl_keyboard;
+
+  auto d = reinterpret_cast<Display*>(data);
+
+  d->m_repeat_timer->set_timerspec(rate, delay);
+
   FML_DLOG(INFO) << "[keyboard repeat info] rate: " << rate
                  << ", delay: " << delay;
 }
@@ -611,6 +657,29 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
     .modifiers = keyboard_handle_modifiers,
     .repeat_info = keyboard_handle_repeat_info,
 };
+
+void Display::keyboard_repeat_func(void* data) {
+  auto d = reinterpret_cast<Display*>(data);
+#if ENABLE_PLUGIN_TEXT_INPUT
+  auto text_input = d->m_text_input[d->m_active_surface];
+  if (text_input) {
+    TextInput::keyboard_handle_key(text_input,
+                                   d->m_keysym_pressed,
+                                   WL_KEYBOARD_KEY_STATE_PRESSED);
+  }
+#endif
+
+#if !defined(NDEBUG)
+  uint32_t utf32 = xkb_keysym_to_utf32(d->m_keysym_pressed);
+  if (utf32) {
+    FML_DLOG(INFO) << "[Repeat] U" << utf32;
+  } else {
+    char name[64];
+    xkb_keysym_get_name(d->m_keysym_pressed, name, 64);
+    FML_DLOG(INFO) << "[Repeat] " << name;
+  }
+#endif
+}
 
 void Display::touch_handle_down(void* data,
                                 struct wl_touch* wl_touch,
