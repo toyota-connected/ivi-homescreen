@@ -6,10 +6,10 @@ name: arene-ivi-homescreen_ivi-homescreen
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [ master ]
+    branches: [ main ]
     paths-ignore: ".github/workflows/**"
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
     paths-ignore: ".github/workflows/**"
 
   # Allows you to run this workflow manually from the Actions tab
@@ -36,7 +36,7 @@ jobs:
       GITHUB_URL: "https://github.tmc-stargate.com/arene-os-services-cockpit-tmc-wa/"
       TARGET_REPOSITORY: "ivi-homescreen"
       EVENT_TYPE: "github-actions-hook-build"
-      CODEQL_DISPATCH_TYPES: "ivi-homescreen"
+      CODEQL_DISPATCH_TYPES: "none"
       ENABLE_HOOK_BUILD: "true"
       ADD_UNIT_LABEL: "true"
 
