@@ -61,6 +61,9 @@ int App::Loop() {
     view->RunTasks();
   }
 
+  if (m_wayland_display->m_repeat_timer)
+    m_wayland_display->m_repeat_timer->wait_event();
+
   auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now().time_since_epoch())
                       .count();

@@ -32,6 +32,7 @@
 #include "constants.h"
 #include "static_plugins/text_input/text_input.h"
 #include "xdg-shell-client-protocol.h"
+#include "timer.h"
 
 #include "configuration/configuration.h"
 
@@ -48,6 +49,8 @@ class Display {
   Display(const Display&) = delete;
 
   const Display& operator=(const Display&) = delete;
+
+  std::shared_ptr<EventTimer> m_repeat_timer{};
 
   /**
   * @brief Get compositor
@@ -276,7 +279,11 @@ class Display {
   struct xkb_keymap* m_keymap{};
   struct xkb_state* m_xkb_state{};
 
+  xkb_keysym_t m_keysym_pressed{};
+
   std::map<wl_surface*, TextInput*> m_text_input;
+
+  uint32_t m_repeat_code;
 
   typedef struct output_info {
     struct wl_output* output;
@@ -731,6 +738,15 @@ class Display {
                                           int32_t delay);
 
   static const struct wl_keyboard_listener keyboard_listener;
+
+  /**
+  * @brief a callback for key repeat behavior
+  * @param[in] data Data of type Display
+  * @return void
+  * @relation
+  * wayland
+  */
+  static void keyboard_repeat_func(void* data);
 
   /**
   * @brief Touch event down
