@@ -111,6 +111,12 @@ target_compile_definitions(homescreen
         FILAMENT_SUPPORTS_WAYLAND
         )
 
+if (BUILD_UNORDERED_MAP)
+    target_compile_features(homescreen
+        PRIVATE
+        cxx_std_17)
+endif ()
+
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}

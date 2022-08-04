@@ -26,6 +26,9 @@
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
 #include "static_plugins/text_input/text_input.h"
 #endif
+#ifdef ENABLE_PLUGIN_KEY_EVENT
+#include "static_plugins/key_event/key_event.h"
+#endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
 #include "textures/navi_render_egl/texture_navi_render_egl.h"
 #endif
@@ -140,6 +143,9 @@ class FlutterView {
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   std::shared_ptr<TextInput> m_text_input;
+#endif
+#ifdef ENABLE_PLUGIN_KEY_EVENT
+  std::shared_ptr<KeyEvent> m_key_event;
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
   std::unique_ptr<TextureNaviRender> m_texture_navi;

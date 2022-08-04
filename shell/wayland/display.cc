@@ -573,6 +573,16 @@ void Display::keyboard_handle_key(void* data,
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     d->m_keysym_pressed = keysym;
 
+#if ENABLE_PLUGIN_KEY_EVENT
+    auto key_event = d->m_key_event[d->m_active_surface];
+    if (key_event) {
+      KeyEvent::keyboard_handle_key(key_event,
+                                    kFlutterKeyEventTypeDown,
+                                    code,
+                                    d->m_keysym_pressed);
+    }
+#endif
+
 #if ENABLE_PLUGIN_TEXT_INPUT
     auto text_input = d->m_text_input[d->m_active_surface];
     if (text_input) {
@@ -660,6 +670,15 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 
 void Display::keyboard_repeat_func(void* data) {
   auto d = reinterpret_cast<Display*>(data);
+#if ENABLE_PLUGIN_KEY_EVENT
+  auto key_event = d->m_key_event[d->m_active_surface];
+  if (key_event) {
+    KeyEvent::keyboard_handle_key(key_event,
+                                  kFlutterKeyEventTypeRepeat,
+                                  d->m_repeat_code,
+                                  d->m_keysym_pressed);
+  }
+#endif
 #if ENABLE_PLUGIN_TEXT_INPUT
   auto text_input = d->m_text_input[d->m_active_surface];
   if (text_input) {
@@ -862,6 +881,11 @@ bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
 void Display::SetTextInput(wl_surface* surface, TextInput* text_input) {
   m_text_input[surface] = text_input;
 }
+
+void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
+  m_key_event[surface] = key_event;
+}
+
 
 void Display::handle_base_surface_enter(void* data,
                                         struct wl_surface* surface,

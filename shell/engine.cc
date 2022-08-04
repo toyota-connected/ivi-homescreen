@@ -605,3 +605,12 @@ MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
 }
 
 #endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+[[maybe_unused]] void Engine::SetKeyEvent(KeyEvent* key_event) {
+  m_key_event = key_event;
+}
+[[maybe_unused]] KeyEvent* Engine::GetKeyEvent() const {
+  return m_key_event;
+}
+#endif

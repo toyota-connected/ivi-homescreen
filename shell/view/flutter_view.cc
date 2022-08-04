@@ -43,6 +43,10 @@ FlutterView::FlutterView(Configuration::Config config,
       ,
       m_text_input(std::make_shared<TextInput>())
 #endif
+#ifdef ENABLE_PLUGIN_KEY_EVENT
+      ,
+      m_key_event(std::make_shared<KeyEvent>())
+#endif
 {
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
@@ -100,6 +104,11 @@ void FlutterView::Initialize() {
   m_text_input->SetEngine(m_flutter_engine);
   m_wayland_display->SetTextInput(m_wayland_window->GetBaseSurface(),
                                   m_text_input.get());
+#endif
+#ifdef ENABLE_PLUGIN_KEY_EVENT
+  m_key_event->SetEngine(m_flutter_engine);
+  m_wayland_display->SetKeyEvent(m_wayland_window->GetBaseSurface(),
+                                 m_key_event.get());
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
   m_texture_navi->SetEngine(m_flutter_engine);
