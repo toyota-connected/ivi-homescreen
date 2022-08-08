@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <string>
 
@@ -27,7 +26,9 @@
  *   the following comment out entries are not supported.
  */
 #if defined(BUILD_UNORDERED_MAP)
+#include <unordered_map>
 static const std::unordered_map<uint32_t, uint32_t> map_xkb_key_to_fl_snancode = {
+#include <map>
 #else
 static const std::map<uint32_t, uint32_t> map_xkb_key_to_fl_snancode = {
 #endif
