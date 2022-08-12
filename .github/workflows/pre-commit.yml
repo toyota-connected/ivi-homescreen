@@ -31,35 +31,22 @@ jobs:
             echo "Delete /workdir/*"
             rm -rf /workdir/*
           fi
+          # setup netrc
+          echo "machine github.tmc-stargate.com login ${{ secrets.TMCSTARGATE_GITHUB_USER }} password ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}" >> ~/.netrc
+          chmod go-rw ~/.netrc
 
-      - name: Git_clone_arene-cockpit-misc-actions
-        uses: actions/checkout@v2
-        with:
-          repository: arene-os-services-cockpit-wa/arene-cockpit-misc-actions
-          path: workdir/arene-cockpit-misc-actions
-          token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
-          set-safe-directory: false
-
-      - name: setup netrc
-        uses: ./workdir/arene-cockpit-misc-actions/actions/setup_netrc
-        with:
-          stargate_github_user: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
-          stargate_github_token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
-          stargate_artifactory_username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
-          stargate_artifactory_password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
-
-      - name: Git_clone_pre-commit_target
+      - name: git clone pre-commit target
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref }}
-          path: workdir/pre-commit_target
+          path: workdir/pre-commit-target
           set-safe-directory: false
 
       - name: Run pre-commit
         working-directory: ${{ github.workspace }}/workdir
         env:
-          TARGET_DIR: pre-commit_target
+          TARGET_DIR: pre-commit-target
         shell: bash
         run: |
           cd ${TARGET_DIR}
