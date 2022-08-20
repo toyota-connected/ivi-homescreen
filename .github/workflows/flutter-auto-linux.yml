@@ -14,7 +14,7 @@ env:
   COMPONENT: flutter-auto
 
 jobs:
-  build:
+  x86_64_egl:
     if: ${{ github.server_url == 'https://github.com' &&  always() }}
     runs-on: ubuntu-latest
     steps:
@@ -26,30 +26,31 @@ jobs:
           sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt update -y
           sudo apt-get -y install libwayland-dev wayland-protocols \
-          mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-          libc++-11-dev libc++abi-11-dev libunwind-dev libxkbcommon-dev \
-          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-          gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
-          clang++ --version
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+            clang-12 lldb-12 lld-12 libc++-12-dev libc++abi-12-dev libunwind-dev \
+            libxkbcommon-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
+          /usr/lib/llvm-12/bin/clang++ --version
           cmake --version
 
       - name: Configure
         run: |
-          mkdir -p ${{github.workspace}}/build/release
-          CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
-            -B ${{github.workspace}}/build/release \
+          mkdir -p ${{github.workspace}}/build/release-egl
+          CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
+            -B ${{github.workspace}}/build/release-egl \
             -D CMAKE_BUILD_TYPE=Release \
-            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
-          mkdir -p ${{github.workspace}}/build/debug
-          CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
-            -B ${{github.workspace}}/build/debug \
+          mkdir -p ${{github.workspace}}/build/debug-egl
+          CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
+            -B ${{github.workspace}}/build/debug-egl \
             -D CMAKE_BUILD_TYPE=Debug \
-            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
       - name: Build Debug Packages
-        working-directory: ${{github.workspace}}/build/debug
+        working-directory: ${{github.workspace}}/build/debug-egl
         run: |
           rm -rf _packages || true
           make package -j
@@ -58,26 +59,26 @@ jobs:
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v2
         with:
-          name: flutter-auto-dbg.Linux.tar.gz.zip
+          name: flutter-auto-egl-dbg.Linux.tar.gz.zip
           path: |
-            build/debug/_packages/flutter-auto-dbg-*-Linux.tar.gz
+            build/debug-egl/_packages/flutter-auto-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
         uses: actions/upload-artifact@v2
         with:
-          name: flutter-auto-dbg.amd64.deb.zip
+          name: flutter-auto-egl-dbg.amd64.deb.zip
           path: |
-            build/debug/_packages/flutter-auto-dbg*_amd64.*deb
+            build/debug-egl/_packages/flutter-auto-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
         uses: actions/upload-artifact@v2
         with:
-          name: flutter-auto-dbg.x86_64.rpm.zip
+          name: flutter-auto-egl-dbg.x86_64.rpm.zip
           path: |
-            build/debug/_packages/flutter-auto-dbg-*.x86_64.rpm
+            build/debug-egl/_packages/flutter-auto-dbg-*.x86_64.rpm
 
       - name: Build Release Packages
-        working-directory: ${{github.workspace}}/build/release       
+        working-directory: ${{github.workspace}}/build/release-egl
         run: |
           rm -rf _packages || true
           make package -j
@@ -93,20 +94,120 @@ jobs:
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v2
         with:
-          name: flutter-auto.Linux.tar.gz.zip
+          name: flutter-auto-egl.Linux.tar.gz.zip
           path: |
-            build/release/_packages/flutter-auto-*-Linux.tar.gz
+            build/release-egl/_packages/flutter-auto-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v2
         with:
-          name: flutter-auto.amd64.deb.zip
+          name: flutter-auto-egl.amd64.deb.zip
           path: |
-            build/release/_packages/flutter-auto_*_amd64.deb
+            build/release-egl/_packages/flutter-auto_*_amd64.deb
 
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v2
         with:
-          name: flutter-auto.x86_64.rpm.zip
+          name: flutter-auto-egl.x86_64.rpm.zip
           path: |
-            build/release/_packages/flutter-auto-*.x86_64.rpm
+            build/release-egl/_packages/flutter-auto-*.x86_64.rpm
+
+  x86_64_vulkan:
+    if: ${{ github.server_url == 'https://github.com' &&  always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install packages
+        run: |
+          echo ${{ github.server_url }}
+          sudo add-apt-repository -y ppa:kisak/kisak-mesa
+          sudo apt update -y
+          sudo apt-get -y install libwayland-dev wayland-protocols \
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+            clang-12 lldb-12 lld-12 libc++-12-dev libc++abi-12-dev libunwind-dev \
+            libxkbcommon-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
+          /usr/lib/llvm-12/bin/clang++ --version
+          cmake --version
+
+      - name: Configure
+        run: |
+          mkdir -p ${{github.workspace}}/build/release-vulkan
+          CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
+            -B ${{github.workspace}}/build/release-vulkan \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-release/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_BACKEND_WAYLAND_EGL=OFF
+          mkdir -p ${{github.workspace}}/build/debug
+          CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
+            -B ${{github.workspace}}/build/debug-vulkan \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-debug/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_BACKEND_WAYLAND_EGL=OFF
+
+      - name: Build Debug Packages
+        working-directory: ${{github.workspace}}/build/debug-vulkan
+        run: |
+          rm -rf _packages || true
+          make package -j
+          ls -la _packages
+
+      - name: Publish Debug Artifact TGZ
+        uses: actions/upload-artifact@v2
+        with:
+          name: flutter-auto-vulkan-dbg.Linux.tar.gz.zip
+          path: |
+            build/debug-vulkan/_packages/flutter-auto-dbg-*-Linux.tar.gz
+
+      - name: Publish Debug Artifact Debian
+        uses: actions/upload-artifact@v2
+        with:
+          name: flutter-auto-vulkan-dbg.amd64.deb.zip
+          path: |
+            build/debug-vulkan/_packages/flutter-auto-dbg*_amd64.*deb
+
+      - name: Publish Debug Artifact RPM
+        uses: actions/upload-artifact@v2
+        with:
+          name: flutter-auto-vulkan-dbg.x86_64.rpm.zip
+          path: |
+            build/debug-vulkan/_packages/flutter-auto-dbg-*.x86_64.rpm
+
+      - name: Build Release Packages
+        working-directory: ${{github.workspace}}/build/release-vulkan
+        run: |
+          rm -rf _packages || true
+          make package -j
+          ls -la _packages
+          echo "Release Info"
+          ls -la shell/flutter-auto
+          echo "Strip executable"
+          strip shell/flutter-auto
+          ls -la shell/flutter-auto
+          echo "List Dependencies"
+          ldd shell/flutter-auto
+
+      - name: Publish Release Artifact TGZ
+        uses: actions/upload-artifact@v2
+        with:
+          name: flutter-auto-vulkan.Linux.tar.gz.zip
+          path: |
+            build/release-vulkan/_packages/flutter-auto-*-Linux.tar.gz
+
+      - name: Publish Release Artifact Debian
+        uses: actions/upload-artifact@v2
+        with:
+          name: flutter-auto-vulkan.amd64.deb.zip
+          path: |
+            build/release-vulkan/_packages/flutter-auto_*_amd64.deb
+
+      - name: Publish Release Artifact RPM
+        uses: actions/upload-artifact@v2
+        with:
+          name: flutter-auto-vulkan.x86_64.rpm.zip
+          path: |
+            build/release-vulkan/_packages/flutter-auto-*.x86_64.rpm
