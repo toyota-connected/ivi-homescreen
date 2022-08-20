@@ -19,6 +19,8 @@
 
 #include "engine.h"
 
+std::string g_clipboard;
+
 void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
@@ -49,7 +51,18 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       auto format = args->GetString();
       if (0 == strcmp(format, kTextPlainFormat)) {
         rapidjson::Document res;
-        res.SetBool(false);
+        res.SetObject();
+        auto& allocator = res.GetAllocator();
+
+        FML_DLOG(INFO)
+            << "(" << engine->GetIndex()
+            << ") Platform: Clipboard.hasStrings\n\ttext: \""
+            << g_clipboard
+            << "\"\n";
+
+        rapidjson::Value s;
+        s = rapidjson::StringRef(g_clipboard.c_str());
+        res.AddMember("text", s, allocator);
         result = codec.EncodeSuccessEnvelope(&res);
       }
     } else {
@@ -60,6 +73,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         !((*args)["text"].IsNull())) {
       FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Clipboard Data Set: \n"
                      << (*args)["text"].GetString();
+      g_clipboard.assign((*args)["text"].GetString());
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
