@@ -4,7 +4,6 @@ name: pre-commit
 on:
   pull_request:
     branches: "master"
-    branches-ignore: "sync/**"
 
 jobs:
   pre-commit:
