@@ -3,7 +3,8 @@ name: pre-commit
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: "master"
+    branches-ignore: "sync/**"
 
 jobs:
   pre-commit:
@@ -32,7 +33,9 @@ jobs:
             rm -rf /workdir/*
           fi
           # setup netrc
-          echo "machine github.tmc-stargate.com login ${{ secrets.TMCSTARGATE_GITHUB_USER }} password ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}" >> ~/.netrc
+          echo "machine github.tmc-stargate.com" > ~/.netrc
+          echo "login ${{ secrets.TMCSTARGATE_GITHUB_USER }}" >> ~/.netrc
+          echo "password ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}" >> ~/.netrc
           chmod go-rw ~/.netrc
 
       - name: git clone pre-commit target
