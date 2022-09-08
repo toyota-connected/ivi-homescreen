@@ -23,8 +23,8 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [ self-hosted, elastic-t2large ]
     container:
-      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/poky-tekton:latest
-      options: --user tekton
+      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/cockpit-poky:latest
+      options: --user cockpit-user
       credentials:
         username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
         password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
@@ -52,9 +52,9 @@ jobs:
         shell: bash
         run: |
           set -e
-          # change the owner to be tekton
-          sudo chown tekton:tekton /workdir
-          sudo chown tekton:tekton -R /github/home
+          # change the owner to be cockpit-user
+          sudo chown cockpit-user:cockpit-user /workdir
+          sudo chown cockpit-user:cockpit-user -R /github/home
           # workspace reflesh
           if [ -d /workdir ] ; then
             echo "Delete /workdir/*"
@@ -129,7 +129,7 @@ jobs:
             # Fix configration to TMCSG Artifactory
             echo 'CONFIG_CICD_P21AGL_DL_MIRROR="https://artifactory-ha.tmc-stargate.com:443/artifactory/arene-os-services-cockpit-generic/yocto/downloads/"' >> ./arene-ivi-misc-integ-integrator/config.txt
             echo 'CONFIG_CICD_P21AGL_SS_MIRROR="https://artifactory-ha.tmc-stargate.com:443/artifactory/arene-os-services-cockpit-generic/yocto/sstate-cache/ivi/x86_64/"' >> ./arene-ivi-misc-integ-integrator/config.txt
-            export PATH=${PATH}:/home/tekton/bin
+            export PATH=${PATH}:/home/cockpit-user/bin
             if [[ ${EVENT_NAME} == "pull_request" ]];then
               TARGET_BRANCH=${BRANCH_PULLREQ_HEAD}
             else
