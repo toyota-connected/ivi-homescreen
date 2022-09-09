@@ -161,6 +161,17 @@ int main(int argc, char** argv) {
       FML_DLOG(INFO) << "Window Type: " << config.view.window_type;
       RemoveArgument(config.view.vm_args, "--window-type=" + config.view.window_type);
     }
+    if (cl.HasOption("xdg-shell-app-id")) {
+      cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
+      if (config.app_id.empty()) {
+        FML_LOG(ERROR) << "--xdg-shell-app-id option requires an argument "
+                          "(e.g. --xdg-shell-app-id=gallery)";
+        return EXIT_FAILURE;
+      }
+      FML_DLOG(INFO) << "Application ID: " << config.app_id;
+      RemoveArgument(config.view.vm_args,
+                     "--xdg-shell-app-id=" + config.app_id);
+    }
   }
 
   auto vm_arg_count = config.view.vm_args.size();
