@@ -22,7 +22,6 @@
 #include <cerrno>
 #include <cstring>
 #include <utility>
-#include "third_party/flutter/fml/logging.h"
 
 #include "constants.h"
 #include "engine.h"
@@ -41,7 +40,7 @@ Display::Display(bool enable_cursor,
     // check if we actually need to bind to agl-shell
     auto window_type = WaylandWindow::get_window_type(cfg.view.window_type);
     if (window_type != WaylandWindow::WINDOW_NORMAL) {
-      m_bind_to_agl_shell = true;
+      m_agl.bind_to_agl_shell = true;
       break;
     }
   }
@@ -55,9 +54,24 @@ Display::Display(bool enable_cursor,
 
   m_registry = wl_display_get_registry(m_display);
   wl_registry_add_listener(m_registry, &registry_listener, this);
-  wl_display_dispatch(m_display);
 
-  if (!m_agl_shell && m_bind_to_agl_shell) {
+  if (m_agl.shell && m_agl.bind_to_agl_shell && m_agl.version >= 2) {
+    int ret = 0;
+    while (ret != -1 && m_agl.wait_for_bound) {
+      ret = wl_display_dispatch(m_display);
+      if (m_agl.wait_for_bound)
+        continue;
+    }
+    if (!m_agl.bound_ok) {
+      FML_LOG(ERROR)
+          << "agl_shell extension already in use by other shell client.";
+      exit(EXIT_FAILURE);
+    }
+  } else {
+    wl_display_dispatch(m_display);
+  }
+
+  if (!m_agl.shell && m_agl.bind_to_agl_shell) {
     FML_LOG(INFO) << "agl_shell extension not present";
   }
 
@@ -70,8 +84,8 @@ Display::~Display() {
   if (m_shm)
     wl_shm_destroy(m_shm);
 
-  if (m_agl_shell)
-    agl_shell_destroy(m_agl_shell);
+  if (m_agl.shell)
+    agl_shell_destroy(m_agl.shell);
 
   if (m_subcompositor)
     wl_subcompositor_destroy(m_subcompositor);
@@ -164,10 +178,19 @@ void Display::registry_handle_global(void* data,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
   } else if (strcmp(interface, agl_shell_interface.name) == 0 &&
-             d->m_bind_to_agl_shell) {
-    d->m_agl_shell = static_cast<struct agl_shell*>(
-        wl_registry_bind(registry, name, &agl_shell_interface,
-                         std::min(static_cast<uint32_t>(1), version)));
+             d->m_agl.bind_to_agl_shell) {
+    if (version >= 2) {
+      d->m_agl.shell = static_cast<struct agl_shell*>(
+          wl_registry_bind(registry, name, &agl_shell_interface,
+                           std::min(static_cast<uint32_t>(2), version)));
+      agl_shell_add_listener(d->m_agl.shell, &agl_shell_listener, data);
+    } else {
+      d->m_agl.shell = static_cast<struct agl_shell*>(
+          wl_registry_bind(registry, name, &agl_shell_interface,
+                           std::min(static_cast<uint32_t>(1), version)));
+    }
+    d->m_agl.version = version;
+    FML_LOG(INFO) << "agl_shell version: " << version;
   }
 }
 
@@ -682,8 +705,8 @@ int Display::PollEvents() {
 }
 
 void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) {
-  if (m_agl_shell) {
-    agl_shell_set_background(m_agl_shell, surface,
+  if (m_agl.shell) {
+    agl_shell_set_background(m_agl.shell, surface,
                              m_all_outputs[index]->output);
   }
 }
@@ -691,15 +714,15 @@ void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) {
 void Display::AglShellDoPanel(struct wl_surface* surface,
                               enum agl_shell_edge mode,
                               size_t index) {
-  if (m_agl_shell) {
-    agl_shell_set_panel(m_agl_shell, surface, m_all_outputs[index]->output,
+  if (m_agl.shell) {
+    agl_shell_set_panel(m_agl.shell, surface, m_all_outputs[index]->output,
                         mode);
   }
 }
 
-void Display::AglShellDoReady() {
-  if (m_agl_shell) {
-    agl_shell_ready(m_agl_shell);
+void Display::AglShellDoReady() const {
+  if (m_agl.shell) {
+    agl_shell_ready(m_agl.shell);
   }
 }
 
@@ -802,4 +825,23 @@ void Display::handle_base_surface_leave(void* data,
 const struct wl_surface_listener Display::base_surface_listener = {
     .enter = handle_base_surface_enter,
     .leave = handle_base_surface_leave,
+};
+
+void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
+  (void)shell;
+  auto* d = static_cast<Display*>(data);
+  d->m_agl.wait_for_bound = false;
+  d->m_agl.bound_ok = true;
+}
+
+void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
+  (void)shell;
+  auto* d = static_cast<Display*>(data);
+  d->m_agl.wait_for_bound = false;
+  d->m_agl.bound_ok = false;
+}
+
+const struct agl_shell_listener Display::agl_shell_listener = {
+    .bound_ok = agl_shell_bound_ok,
+    .bound_fail = agl_shell_bound_fail,
 };
