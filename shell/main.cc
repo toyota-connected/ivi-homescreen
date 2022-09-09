@@ -305,6 +305,17 @@ int main(int argc, char** argv) {
           strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
       RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
     }
+    if (cl.HasOption("xdg-shell-app-id")) {
+      cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
+      if (config.app_id.empty()) {
+        FML_LOG(ERROR) << "--xdg-shell-app-id option requires an argument "
+                          "(e.g. --xdg-shell-app-id=gallery)";
+        return EXIT_FAILURE;
+      }
+      FML_DLOG(INFO) << "Application ID: " << config.app_id;
+      RemoveArgument(config.view.vm_args,
+                     "--xdg-shell-app-id=" + config.app_id);
+    }
   }
 
   auto vm_arg_count = config.view.vm_args.size();
