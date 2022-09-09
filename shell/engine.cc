@@ -146,17 +146,6 @@ Engine::Engine(FlutterView* view,
   m_args.assets_path = m_assets_path.c_str();
 
   ///
-  /// kernel_blob.bin file
-  ///
-  std::string kernel_snapshot =
-      paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
-  if (!IsFile(kernel_snapshot)) {
-    FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
-                   << " missing Flutter Kernel";
-    exit(EXIT_FAILURE);
-  }
-
-  ///
   /// icudtl.dat file
   ///
   m_icu_data_path = paths::JoinPaths({bundle_path, kBundleIcudtl});
@@ -182,6 +171,13 @@ Engine::Engine(FlutterView* view,
     }
   } else {
     FML_LOG(INFO) << "(" << m_index << ") Runtime=debug";
+    std::string kernel_snapshot =
+        paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
+    if (!IsFile(kernel_snapshot)) {
+      FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
+                     << " missing Flutter Kernel";
+      exit(EXIT_FAILURE);
+    }
   }
 
   // Configure task runner interop
