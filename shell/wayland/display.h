@@ -63,11 +63,7 @@ class Display {
     return m_display;
   }
 
-  struct xdg_wm_base* GetXdgWmBase() {
-    return m_xdg_wm_base;
-  }
-
-  MAYBE_UNUSED struct agl_shell* GetAglShell() { return m_agl_shell; };
+  struct xdg_wm_base* GetXdgWmBase() { return m_xdg_wm_base; }
 
   struct wl_shm* GetShm() {
     assert(m_shm);
@@ -82,7 +78,7 @@ class Display {
                        enum agl_shell_edge mode,
                        size_t index);
 
-  void AglShellDoReady();
+  void AglShellDoReady() const;
 
   void SetEngine(wl_surface* surface, Engine* engine);
 
@@ -100,8 +96,6 @@ class Display {
   struct wl_shm* m_shm{};
   struct wl_surface* m_base_surface{};
 
-  bool m_bind_to_agl_shell = false;
-
   std::map<wl_surface*, Engine*> m_surface_engine_map;
   wl_surface* m_active_surface{};
   Engine* m_active_engine{};
@@ -110,8 +104,16 @@ class Display {
   struct wl_seat* m_seat{};
   struct wl_keyboard* m_keyboard{};
 
-  struct agl_shell* m_agl_shell{};
   struct xdg_wm_base* m_xdg_wm_base{};
+
+  struct agl {
+    bool bind_to_agl_shell = false;
+    struct agl_shell* shell{};
+
+    bool wait_for_bound;
+    bool bound_ok;
+    uint32_t version = 0;
+  } m_agl;
 
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};
@@ -373,4 +375,10 @@ class Display {
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
 
   static const struct wl_touch_listener touch_listener;
+
+  static void agl_shell_bound_ok(void* data, struct agl_shell* shell);
+
+  static void agl_shell_bound_fail(void* data, struct agl_shell* shell);
+
+  static const struct agl_shell_listener agl_shell_listener;
 };
