@@ -67,6 +67,26 @@ void KeyEvent::SendKeyEvent(bool pressed,
     scancode = utf32_code;
   }
 
+  // FIXME: This is a workaround.
+  //        Maybe, the mutual exclusion between text_input and
+  //        key_event are required.
+  //        This may be accomplished by receiving the handled event from apps.
+  //        But, I'm not sure how to get handled event from apps.
+  // To avoid weird behavior in TextField, ignore some keys
+  switch(scancode) {
+    case KEY_UP:
+    case KEY_DOWN:
+    case KEY_LEFT:
+    case KEY_RIGHT:
+    case KEY_END:
+    case KEY_HOME:
+      return;
+      break;
+    default:
+      // ok
+      break;
+  }
+
   event.AddMember(kKeyCodeKey, scancode, allocator);
   event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
   event.AddMember(kToolkitKey, kGLFWKey, allocator);
