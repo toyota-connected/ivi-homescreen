@@ -61,7 +61,17 @@ endif ()
 
 option(BUILD_LIBDECOR "Build libdecor" OFF)
 if (BUILD_LIBDECOR)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(DECOR REQUIRED libdecoration)
+    include(ExternalProject)
+    ExternalProject_Add(libdecor
+        GIT_REPOSITORY https://gitlab.gnome.org/jadahl/libdecor.git
+        GIT_TAG 8b42120d2b144bb9b5b62212d74d93ee23c82395
+        GIT_SHALLOW true
+        SOURCE_DIR ${CMAKE_BINARY_DIR}/libdecor
+        CONFIGURE_COMMAND "cd ${CMAKE_BINARY_DIR}/libdecor && meson build --buildtype release -Ddemo=false"
+        COMPILE_COMMAND "cd ${CMAKE_BINARY_DIR}/libdecor && meson compile -C build"
+        INSTALL_COMMAND ""
+    )
+    include_directories(${CMAKE_BINARY_DIR}/libdecor/src)
+    link_directories(${CMAKE_BINARY_DIR}/libdecor/build/src)
     add_compile_definitions(BUILD_LIBDECOR)
 endif ()

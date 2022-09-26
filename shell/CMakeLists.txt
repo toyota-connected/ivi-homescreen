@@ -89,6 +89,9 @@ elseif (BUILD_BACKEND_WAYLAND_VULKAN)
 endif ()
 
 add_executable(flutter-auto ${SRC_FILES})
+if (BUILD_LIBDECOR)
+    add_dependencies(flutter-auto libdecor)
+endif()
 
 include(plugins)
 include(textures)

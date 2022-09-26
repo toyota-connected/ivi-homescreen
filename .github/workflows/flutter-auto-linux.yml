@@ -31,7 +31,8 @@ jobs:
             libxkbcommon-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev \
-            libdecoration0-dev
+            libpango1.0-dev libdbus-1-dev
+          pip3 install meson
           /usr/lib/llvm-12/bin/clang++ --version
           cmake --version
 
