@@ -30,7 +30,8 @@ jobs:
             clang-12 lldb-12 lld-12 libc++-12-dev libc++abi-12-dev libunwind-dev \
             libxkbcommon-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
+            gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev \
+            libdecoration0-dev
           /usr/lib/llvm-12/bin/clang++ --version
           cmake --version
 
@@ -42,14 +43,16 @@ jobs:
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            -D BUILD_PLUGIN_SECURE_STORAGE=ON
+            -D BUILD_PLUGIN_SECURE_STORAGE=ON \
+            -D BUILD_LIBDECOR=ON
           mkdir -p ${{github.workspace}}/build/debug-egl
           CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
             -B ${{github.workspace}}/build/debug-egl \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            -D BUILD_PLUGIN_SECURE_STORAGE=ON
+            -D BUILD_PLUGIN_SECURE_STORAGE=ON \
+            -D BUILD_LIBDECOR=ON
 
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug-egl

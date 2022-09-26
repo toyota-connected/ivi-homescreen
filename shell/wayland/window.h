@@ -21,6 +21,10 @@
 
 #include <cassert>
 
+#if defined(BUILD_LIBDECOR)
+#include <libdecor.h>
+#endif
+
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
 
@@ -125,6 +129,13 @@ class WaylandWindow {
 
   MAYBE_UNUSED int m_frame_sync;
 
+#if defined(BUILD_LIBDECOR)
+  static const size_t decor_chk = 16;
+  struct libdecor_frame *decor_frame;
+  enum libdecor_window_state decor_window_state;
+  struct libdecor *decor_context;
+#endif
+
   static void buffer_release(void* data, struct wl_buffer* buffer);
 
   static const struct wl_buffer_listener buffer_listener;
@@ -158,4 +169,13 @@ class WaylandWindow {
 
   static const struct wl_callback_listener frame_listener;
 
+#if defined(BUILD_LIBDECOR)
+  static void handle_error(struct libdecor *context, enum libdecor_error error, const char *message);
+  static struct libdecor_interface libdecor_iface;
+  static struct libdecor_frame_interface libdecor_frame_iface;
+  static void
+  static handle_close(struct libdecor_frame *frame, void *user_data);
+  static void handle_commit(struct libdecor_frame *frame, void *user_data);
+  static void handle_dismiss_popup(struct libdecor_frame *frame, const char *seat_name, void *user_data);
+#endif
 };

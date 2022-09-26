@@ -61,6 +61,15 @@ WaylandWindow::WaylandWindow(size_t index,
   xdg_toplevel_set_app_id(m_xdg_toplevel, m_app_id.c_str());
   xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
 
+#if defined(BUILD_LIBDECOR)
+	decor_context = libdecor_new(  m_display->GetDisplay(), &libdecor_iface);
+	decor_frame = libdecor_decorate(decor_context, m_xdg_surface, &libdecor_frame_iface, this);
+	libdecor_frame_set_app_id(decor_frame, m_app_id.c_str());
+	libdecor_frame_set_title(decor_frame, m_app_id.c_str());
+	libdecor_frame_map(decor_frame);
+	libdecor_frame_set_min_content_size(decor_frame, 15 * decor_chk, 10 * decor_chk);
+#endif()
+
   if (m_fullscreen)
     xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
 
@@ -500,3 +509,45 @@ WaylandWindow::window_type WaylandWindow::get_window_type(
   }
   return WINDOW_NORMAL;
 }
+
+#if defined(BUILD_LIBDECOR)
+void handle_error(struct libdecor *context, enum libdecor_error error, const char *message)
+{
+  (void)context;
+	FML_LOG(INFO) << "Caught error (" << error << "): " << message;
+	exit(EXIT_FAILURE);
+}
+
+struct libdecor_interface libdecor_iface = {
+	.error = handle_error,
+};
+
+void handle_close(struct libdecor_frame *frame, void *user_data)
+{
+  (void)frame;
+  (void)user_data;
+  FML_DLOG(INFO) << "handle_close";
+}
+
+void handle_commit(struct libdecor_frame *frame, void *user_data)
+{
+  (void)frame;
+  (void)user_data;
+  FML_DLOG(INFO) << "handle_commit";
+}
+
+void handle_dismiss_popup(struct libdecor_frame *frame, const char *seat_name, void *user_data)
+{
+  (void)frame;
+  (void)seat_name;
+  (void)user_data;
+  FML_DLOG(INFO) << "handle_dismiss_popup";
+}
+
+struct libdecor_frame_interface libdecor_frame_iface = {
+	handle_configure,
+	handle_close,
+	handle_commit,
+	handle_dismiss_popup,
+};
+#endif
