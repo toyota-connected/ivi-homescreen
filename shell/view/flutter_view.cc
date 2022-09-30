@@ -45,6 +45,9 @@ FlutterView::FlutterView(Configuration::Config config,
 #ifdef ENABLE_TEXTURE_TEST_EGL
   m_texture_test_egl = std::make_unique<TextureTestEgl>(this);
 #endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+  m_texture_navi = std::make_unique<TextureNaviRender>(this);
+#endif
 }
 
 FlutterView::~FlutterView() = default;
@@ -82,6 +85,9 @@ void FlutterView::Initialize() {
   m_wayland_display->SetTextInput(m_wayland_window->GetBaseSurface(),
                                   m_text_input.get());
 #endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+  m_texture_navi->SetEngine(m_flutter_engine);
+#endif
 
   // init the fps output option.
   m_fps.output = 0;
@@ -116,6 +122,11 @@ void FlutterView::RunTasks() {
 #ifdef ENABLE_TEXTURE_TEST_EGL
   if (m_texture_test_egl) {
     m_texture_test_egl->Draw(m_texture_test_egl.get());
+  }
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+  if (m_texture_navi) {
+    m_texture_navi->Draw(m_texture_navi.get());
   }
 #endif
 }
