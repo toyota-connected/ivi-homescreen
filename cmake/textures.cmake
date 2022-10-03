@@ -25,4 +25,13 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     endif ()
 endif ()
 
+option(BUILD_TEXTURE_NAVI_RENDER_EGL "Includes Navi Texture" ON)
+if (BUILD_TEXTURE_NAVI_RENDER_EGL)
+    ENABLE_TEXTURE(navi_render_egl)
+    option(BUILD_TEXTURE_NAVI_EGL_ROUTING "Includes Navi Routing" OFF)
+    if (BUILD_TEXTURE_NAVI_EGL_ROUTING)
+        add_compile_definitions(BUILD_TEXTURE_NAVI_EGL_ROUTING)
+    endif ()
+endif ()
+
 message(STATUS "Texture Config ......... ${TEXTURES}")
