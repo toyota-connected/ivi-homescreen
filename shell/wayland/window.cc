@@ -29,6 +29,7 @@
 WaylandWindow::WaylandWindow(size_t index,
                              std::shared_ptr<Display> display,
                              const std::string& type,
+                             wl_output *output,
                              std::string app_id,
                              bool fullscreen,
                              int32_t width,
@@ -36,6 +37,7 @@ WaylandWindow::WaylandWindow(size_t index,
                              Backend* backend)
     : m_index(index),
       m_display(std::move(display)),
+      m_wl_output(output),
       m_backend(backend),
       m_flutter_engine(nullptr),
       m_geometry({width, height}),
@@ -62,7 +64,7 @@ WaylandWindow::WaylandWindow(size_t index,
   xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
 
   if (m_fullscreen)
-    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
+    xdg_toplevel_set_fullscreen(m_xdg_toplevel, m_wl_output);
 
   memset(m_fps, 0, sizeof(m_fps));
   m_fps_idx = 0;
