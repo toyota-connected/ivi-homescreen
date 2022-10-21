@@ -147,7 +147,7 @@ void Display::registry_handle_global(void* data,
     d->m_subcompositor = static_cast<struct wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
-  } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+    } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
     d->m_xdg_wm_base = static_cast<struct xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface,
                          std::min(static_cast<uint32_t>(3), version)));
@@ -171,6 +171,7 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_output_interface,
                          std::min(static_cast<uint32_t>(2), version)));
     wl_output_add_listener(oi->output, &output_listener, oi.get());
+    FML_DLOG(INFO) << "Wayland: Output [" << d->m_all_outputs.size() << "]";
     d->m_all_outputs.push_back(oi);
   } else if (strcmp(interface, wl_seat_interface.name) == 0) {
     d->m_seat = static_cast<wl_seat*>(

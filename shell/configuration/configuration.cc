@@ -43,6 +43,9 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
+  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
+    instance.view.wl_output_index = obj[kOutputIndex].GetInt();
+  }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
     instance.view.width = obj[kWidthKey].GetInt();
   }
@@ -100,6 +103,9 @@ void Configuration::getGlobalParameters(
   }
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
     instance.view.window_type = obj[kWindowTypeKey].GetString();
+  }
+  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
+    instance.view.wl_output_index = obj[kOutputIndex].IsInt();
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
@@ -168,6 +174,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   }
   if (!cli.view.window_type.empty()) {
     instance.view.window_type = cli.view.window_type;
+  }
+  if (cli.view.wl_output_index > 0) {
+    instance.view.wl_output_index = cli.view.wl_output_index;
   }
   if (cli.view.accessibility_features > 0) {
     instance.view.accessibility_features = cli.view.accessibility_features;
@@ -268,6 +277,7 @@ void Configuration::PrintConfig(const Config& config) {
   }
   FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
   FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
+  FML_LOG(INFO) << "Output Index: ............. " << config.view.wl_output_index;
   FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
                 << config.view.height;
   FML_LOG(INFO) << "Fullscreen: ............... "

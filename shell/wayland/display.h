@@ -86,6 +86,13 @@ class Display {
 
   void SetTextInput(wl_surface* surface, TextInput* text_input);
 
+  wl_output* GetWlOutput(uint32_t index) {
+    if (index <= m_all_outputs.size()) {
+      return m_all_outputs[index]->output;
+    }
+    return nullptr;
+  }
+
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
@@ -185,10 +192,10 @@ class Display {
     unsigned width;
     unsigned height;
     MAYBE_UNUSED unsigned physical_width;
-    unsigned physical_height;
+    MAYBE_UNUSED unsigned physical_height;
     MAYBE_UNUSED int refresh_rate;
     int32_t scale;
-    bool done;
+    MAYBE_UNUSED bool done;
   } output_info_t;
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;

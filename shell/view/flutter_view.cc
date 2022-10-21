@@ -38,9 +38,10 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.height, m_config.debug_backend);
 #endif
   m_wayland_window = std::make_shared<WaylandWindow>(
-      m_index, display, m_config.view.window_type, m_config.app_id,
-      m_config.view.fullscreen, m_config.view.width, m_config.view.height,
-      m_backend.get());
+      m_index, display, m_config.view.window_type,
+      m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
+      m_config.app_id, m_config.view.fullscreen, m_config.view.width,
+      m_config.view.height, m_backend.get());
 
 #ifdef ENABLE_TEXTURE_TEST_EGL
   m_texture_test_egl = std::make_unique<TextureTestEgl>(this);

@@ -56,6 +56,7 @@ class WaylandWindow {
   WaylandWindow(size_t index,
                 std::shared_ptr<Display> display,
                 const std::string& type,
+                wl_output *output,
                 std::string app_id,
                 bool fullscreen,
                 int32_t width,
@@ -90,6 +91,7 @@ class WaylandWindow {
 
   size_t m_index;
   std::shared_ptr<Display> m_display;
+  wl_output *m_wl_output;
   std::shared_ptr<Engine> m_flutter_engine;
   struct wl_surface* m_base_surface;
   std::shared_ptr<Backend> m_backend;
