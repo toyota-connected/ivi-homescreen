@@ -161,6 +161,21 @@ int main(int argc, char** argv) {
       FML_DLOG(INFO) << "Window Type: " << config.view.window_type;
       RemoveArgument(config.view.vm_args, "--window-type=" + config.view.window_type);
     }
+    if (cl.HasOption("output-index")) {
+      std::string output_index_str;
+      cl.GetOptionValue("output-index", &output_index_str);
+      if (!IsNumber(output_index_str)) {
+        FML_LOG(ERROR) << "--output-index option (Wayland Output Index) requires an integer value";
+        return EXIT_FAILURE;
+      }
+      if (output_index_str.empty()) {
+        FML_LOG(ERROR)
+            << "--output-index option (Wayland Output Index) requires an argument (e.g. --output-index=1)";
+        return EXIT_FAILURE;
+      }
+      config.view.wl_output_index = static_cast<uint32_t>(std::stoul(output_index_str));
+      RemoveArgument(config.view.vm_args, "--output-index=" + output_index_str);
+    }
     if (cl.HasOption("xdg-shell-app-id")) {
       cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
       if (config.app_id.empty()) {
