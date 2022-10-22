@@ -14,6 +14,9 @@
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "static_plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+#include "compositor_surface.h"
+#endif
 #include "wayland/display.h"
 #include "wayland/window.h"
 
@@ -30,12 +33,11 @@ FlutterView::FlutterView(Configuration::Config config,
 {
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
-      display->GetDisplay(), m_config.debug_backend,
-      kEglBufferSize);
+      display->GetDisplay(), m_config.debug_backend, kEglBufferSize);
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
   m_backend = std::make_shared<WaylandVulkanBackend>(
-      display->GetDisplay(), m_config.view.width,
-      m_config.view.height, m_config.debug_backend);
+      display->GetDisplay(), m_config.view.width, m_config.view.height,
+      m_config.debug_backend);
 #endif
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
@@ -130,6 +132,11 @@ void FlutterView::RunTasks() {
     m_texture_navi->Draw(m_texture_navi.get());
   }
 #endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+  for(auto const& surface: m_comp_surf) {
+    surface->Draw();
+  }
+#endif
 }
 
 // calc and output the FPS
@@ -158,3 +165,21 @@ void FlutterView::DrawFps(long long end_time) {
     }
   }
 }
+
+#ifdef ENABLE_PLUGIN_COMP_SURF
+void* FlutterView::CreateSurface(void* h_module,
+                                 const std::string& assets_path,
+                                 CompositorSurface::PARAM_SURFACE_T type,
+                                 CompositorSurface::PARAM_Z_ORDER_T z_order,
+                                 CompositorSurface::PARAM_SYNC_T sync,
+                                 int width,
+                                 int height,
+                                 int32_t x,
+                                 int32_t y) {
+  m_comp_surf.push_back(std::make_unique<CompositorSurface>(
+      m_wayland_display, m_wayland_window, h_module, assets_path, type, z_order,
+      sync, width, height, x, y));
+
+  return m_comp_surf[m_comp_surf.size()-1]->GetContext();
+}
+#endif

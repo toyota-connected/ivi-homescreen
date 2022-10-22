@@ -150,12 +150,17 @@ class Engine {
     return m_backend;
   }
 
+  FlutterView* GetView() {
+    return m_view;
+  }
+
  private:
   size_t m_index;
   bool m_running;
 
   Backend* m_backend;
   std::shared_ptr<WaylandWindow> m_egl_window;
+  FlutterView* m_view;
 
   std::string m_assets_path;
   std::string m_icu_data_path;
