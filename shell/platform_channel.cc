@@ -32,6 +32,9 @@
 #ifdef ENABLE_PLUGIN_NAVIGATION
 #include "static_plugins/navigation/navigation.h"
 #endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+#include "static_plugins/comp_surf/comp_surf.h"
+#endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
 #include "static_plugins/opengl_texture/opengl_texture.h"
 #endif
@@ -76,6 +79,10 @@ PlatformChannel::PlatformChannel() {
 #endif
 #ifdef ENABLE_PLUGIN_NAVIGATION
   RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+  RegisterCallback(CompositorSurfacePlugin::kChannelName,
+                   &CompositorSurfacePlugin::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
   RegisterCallback(OpenGlTexture::kChannelName,

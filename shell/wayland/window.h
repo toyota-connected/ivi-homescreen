@@ -79,6 +79,8 @@ class WaylandWindow {
 
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
+  wl_surface* GetFlutterSurface() { return m_flutter_surface; }
+
   uint32_t m_fps_counter;
   static window_type get_window_type(const std::string& type);
 
@@ -93,7 +95,9 @@ class WaylandWindow {
   std::shared_ptr<Display> m_display;
   wl_output *m_wl_output;
   std::shared_ptr<Engine> m_flutter_engine;
-  struct wl_surface* m_base_surface;
+  struct wl_surface* m_base_surface{};
+  struct wl_surface* m_flutter_surface{};
+  struct wl_subsurface* m_flutter_subsurface{};
   std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
 

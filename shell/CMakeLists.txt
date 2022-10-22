@@ -88,6 +88,10 @@ elseif (BUILD_BACKEND_WAYLAND_VULKAN)
     list(APPEND SRC_FILES backend/wayland_vulkan.cc)
 endif ()
 
+if (BUILD_PLUGIN_COMP_SURF)
+    list(APPEND SRC_FILES view/compositor_surface.cc)
+endif ()
+
 add_executable(homescreen ${SRC_FILES})
 
 include(plugins)
