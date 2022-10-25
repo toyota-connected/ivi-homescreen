@@ -51,6 +51,7 @@ Engine::Engine(FlutterView* view,
                int32_t accessibility_features)
     : m_index(index),
       m_running(false),
+      m_view(view),
       m_backend(view->GetBackend()),
       m_egl_window(view->GetEglWindow()),
       m_flutter_engine(nullptr),

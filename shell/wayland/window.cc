@@ -49,9 +49,14 @@ WaylandWindow::WaylandWindow(size_t index,
   FML_DLOG(INFO) << "(" << m_index << ") + WaylandWindow()";
 
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
+
+  m_flutter_surface = wl_compositor_create_surface(m_display->GetCompositor());
+  m_flutter_subsurface = wl_subcompositor_get_subsurface(m_display->GetSubCompositor(),
+                                                         m_flutter_surface, m_base_surface);
+
   m_fps_surface = wl_compositor_create_surface(m_display->GetCompositor());
   m_subsurface = wl_subcompositor_get_subsurface(m_display->GetSubCompositor(),
-                                                 m_fps_surface, m_base_surface);
+                                                 m_fps_surface, m_flutter_surface);
   wl_subsurface_set_position(m_subsurface, 50, 50);
   wl_subsurface_set_sync(m_subsurface);
 

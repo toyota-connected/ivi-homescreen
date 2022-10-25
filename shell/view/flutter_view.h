@@ -15,6 +15,9 @@
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
 #include "textures/navi_render_egl/texture_navi_render_egl.h"
 #endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+#include "compositor_surface.h"
+#endif
 
 class Display;
 class Engine;
@@ -25,6 +28,9 @@ class WaylandWindow;
 class WaylandEglBackend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
 class WaylandVulkanBackend;
+#endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+class CompositorSurface;
 #endif
 
 class FlutterView {
@@ -40,7 +46,23 @@ class FlutterView {
 
   Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
 
+  [[nodiscard]] uint64_t GetIndex() const { return m_index; }
+
   void DrawFps(long long end_time);
+
+#ifdef ENABLE_PLUGIN_COMP_SURF
+  void* CreateSurface(void* h_module,
+                      const std::string& assets_path,
+                      CompositorSurface::PARAM_SURFACE_T type,
+                      CompositorSurface::PARAM_Z_ORDER_T z_order,
+                      CompositorSurface::PARAM_SYNC_T sync,
+                      int width,
+                      int height,
+                      int32_t x,
+                      int32_t y);
+
+  std::vector<std::unique_ptr<CompositorSurface>> m_comp_surf;
+#endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
