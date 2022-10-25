@@ -1,0 +1,12 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_PREFIX@/lib64
+includedir=@CMAKE_INSTALL_PREFIX@/include
+assetdir=@CMAKE_INSTALL_PREFIX@/share/@PROJECT_NAME@/assets
+
+Name: @PROJECT_NAME@
+Description: @PROJECT_DESCRIPTION@
+Version: @PROJECT_VERSION@
+
+Libs: -L${libdir} -l@PROJECT_NAME@
+Libs.private: -ldl
+Cflags: -I@CMAKE_INSTALL_PREFIX@/include/@PROJECT_NAME@

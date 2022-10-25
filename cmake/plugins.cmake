@@ -73,6 +73,11 @@ if (BUILD_PLUGIN_PACKAGE_INFO)
     ENABLE_PLUGIN(package_info)
 endif ()
 
+option(BUILD_PLUGIN_COMP_SURF "Include Compositor Surface Plugin" ON)
+if (BUILD_PLUGIN_COMP_SURF)
+    ENABLE_PLUGIN(comp_surf)
+endif ()
+
 if (BUILD_BACKEND_WAYLAND_EGL)
     option(BUILD_PLUGIN_OPENGL_TEXTURE "Includes OpenGL Texture Plugin" ON)
     if (BUILD_PLUGIN_OPENGL_TEXTURE)
