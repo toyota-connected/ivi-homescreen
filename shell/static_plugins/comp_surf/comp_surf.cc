@@ -60,7 +60,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         return;
       }
 
-      std::string assets_path = "/usr/share/comp_surf_vulkan/assets/";
+      std::string assets_path;
       it = args->find(flutter::EncodableValue(kArgAssetsPath));
       if (it != args->end()) {
         assets_path = std::get<std::string>(it->second);
