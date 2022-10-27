@@ -1,4 +1,4 @@
-# Test - Compositor Surface Vulkan
+# Test - Compositor Surface EGL
 
 ### C++
 ```
@@ -17,5 +17,5 @@ Ensure ivi-homescreen is built with `-DBUILD_PLUGIN_COMP_SURF=ON`
 ```
 flutter run -d flutter-auto
 q
-homescreen --b=/tmp/test_comp_surf
+homescreen --b=/tmp/test_comp_surf_egl
 ```

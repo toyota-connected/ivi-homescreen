@@ -17,8 +17,6 @@
 #include <sstream>
 #include <thread>
 
-#include <flutter/fml/logging.h>
-
 #include "constants.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"

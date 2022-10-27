@@ -48,15 +48,15 @@ class _MyAppState extends State<MyApp> {
               'create',
               {
                 'view': 0,
-                'type': 'vulkan',
+                'type': 'egl',
                 'z_order': 'above',
                 'sync': 'sync',
-                'x': 0,
-                'y': 0,
+                'x': 10,
+                'y': 10,
                 'width': 800,
                 'height': 600,
-                'module': 'libcomp_surf_vulkan.so',
-                'assets_path': '/usr/local/share/comp_surf_vulkan/assets',
+                'module': 'libcomp_surf_egl.so',
+                'assets_path': '/usr/local/shared/test_comp_surf_egl/assets',
               },
             ).then((response) {
               setState(() => surfaceContext = response!['context'] as int);
