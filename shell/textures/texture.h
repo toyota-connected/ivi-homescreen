@@ -47,22 +47,80 @@ class Texture {
 
   const Texture& operator=(const Texture&) = delete;
 
+  /**
+  * @brief Set Engine
+  * @param[in] engine Engine
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void SetEngine(const std::shared_ptr<Engine>& engine);
 
+  /**
+  * @brief Get flutter OpenGL texture
+  * @param[in,out] texture_out Pointer to FlutterOpenGLTexture
+  * @param[in] width Texture width
+  * @param[in] height Texture height
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out,
                                int width,
                                int height);
 
+  /**
+  * @brief Get flutter OpenGL texture
+  * @param[in] width Width
+  * @param[in] height Height
+  * @return flutter::EncodableValue
+  * @retval Callback to m_create_callback
+  * @retval Error callback is not set
+  * @relation
+  * wayland, flutter
+  */
   flutter::EncodableValue Create(int width, int height);
 
+  /**
+  * @brief Dispose
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void Dispose();
 
+  /**
+  * @brief Add again for assigned EGL texture id
+  * @param[in] name Texture id
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void Enable(uint32_t name);
 
+  /**
+  * @brief Disable assigned EGL texture id
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   MAYBE_UNUSED void Disable();
 
+  /**
+  * @brief Ready that a new texture frame is available for a given texture id
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void FrameReady();
 
+  /**
+  * @brief Get texture id
+  * @return int64_t
+  * @retval Texture id
+  * @relation
+  * wayland, flutter
+  */
   MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
 
  protected:

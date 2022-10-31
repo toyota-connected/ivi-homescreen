@@ -23,17 +23,41 @@
 
 volatile bool running = true;
 
+/**
+* @brief Signal handler
+* @param[in] signal No use
+* @return void
+* @relation
+* internal
+*/
 void SignalHandler(int signal) {
   (void)signal;
   FML_DLOG(INFO) << "Ctl+C";
   running = false;
 }
 
+/**
+* @brief Check if input is a number
+* @param[in] s String to check if it is a number
+* @return bool
+* @retval true If s is a number
+* @retval false If s is not a number
+* @relation
+* internal
+*/
 bool IsNumber(const std::string& s) {
   return std::all_of(s.begin(), s.end(),
                      [](char c) { return isdigit(c) != 0; });
 }
 
+/**
+* @brief Remove argument from vector
+* @param[in] args Vector of element that matches the argument to be removed
+* @param[in] arg Arguments to be removed
+* @return void
+* @relation
+* internal
+*/
 void RemoveArgument(std::vector<std::string>& args, const std::string& arg) {
   auto result = std::find(args.begin(), args.end(), arg);
   if (result != args.end()) {
@@ -41,6 +65,16 @@ void RemoveArgument(std::vector<std::string>& args, const std::string& arg) {
   }
 }
 
+/**
+* @brief Main function
+* @param[in] argc Number of arguments
+* @param[in] argv Arguments passed to the program
+* @return int
+* @retval 0 Normal end
+* @retval Non-zero Abnormal end
+* @relation
+* wayland, flutter
+*/
 int main(int argc, char** argv) {
   struct Configuration::Config config {
     .app_id = kApplicationName, .json_configuration_path{}, .cursor_theme{},

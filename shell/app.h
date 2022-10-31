@@ -36,6 +36,13 @@ class App {
 
   const App& operator=(const App&) = delete;
 
+  /**
+  * @brief One frame in the loop
+  * @return int
+  * @retval Number of dispatched events
+  * @relation
+  * wayland, flutter
+  */
   int Loop();
 
  private:

@@ -224,6 +224,11 @@ Defaults to Wayland, no need to do anything special
     mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
     libxkbcommon-dev
 
+## Optional Packages
+
+    # To build doxygen documentation
+    sudo apt-get -y install doxygen
+
 ## GCC/libstdc++ Build
 
     git clone https://github.com/toyota-connected-na/ivi-homescreen.git

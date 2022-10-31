@@ -22,6 +22,14 @@ class MouseCursor {
  public:
   static constexpr char kChannelName[] = "flutter/mousecursor";
 
+  /**
+  * @brief Callback function for platform messages about mouse cursor
+  * @param[in] message Recieve message
+  * @param[in] userdata Pointer to User data
+  * @return void
+  * @relation
+  * flutter
+  */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
