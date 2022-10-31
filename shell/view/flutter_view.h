@@ -40,15 +40,50 @@ class FlutterView {
               size_t index,
               const std::shared_ptr<Display>& display);
   ~FlutterView();
+
+  /**
+  * @brief Run Tasks
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void RunTasks();
+
+  /**
+  * @brief Initialize
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void Initialize();
 
+  /**
+  * @brief Get Egl Window
+  * @return shared_ptr<WaylandWindow>
+  * @retval Egl Window
+  * @relation
+  * wayland, flutter
+  */
   std::shared_ptr<WaylandWindow> GetEglWindow() { return m_wayland_window; }
 
+  /**
+  * @brief Get Backend
+  * @return Backend*
+  * @retval Backend pointer
+  * @relation
+  * wayland, flutter
+  */
   Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
 
   [[nodiscard]] uint64_t GetIndex() const { return m_index; }
 
+  /**
+  * @brief Draw FPS to calc and output
+  * @param[in] end_time End time
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void DrawFps(long long end_time);
 
 #ifdef ENABLE_PLUGIN_COMP_SURF

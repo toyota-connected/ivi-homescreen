@@ -69,15 +69,50 @@ class WaylandWindow {
 
   const WaylandWindow& operator=(const WaylandWindow&) = delete;
 
+  /**
+  * @brief Set Engine
+  * @param[in] engine Engine
+  * @return void
+  * @relation
+  * wayland
+  */
   void SetEngine(const std::shared_ptr<Engine>& engine);
 
+  /**
+  * @brief Get Fps Counter
+  * @return uint32_t
+  * @retval Frames Per Second counter.
+  * @relation
+  * wayland
+  */
   uint32_t GetFpsCounter();
 
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
+  /**
+  * @brief Get Base Surface
+  * @return wl_surface*
+  * @retval Base surface
+  * @relation
+  * wayland
+  */
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
   uint32_t m_fps_counter;
+
+  /**
+  * @brief Get window_type
+  * @param[in] type Window type
+  * @return window_type
+  * @retval WINDOW_NORMAL
+  * @retval WINDOW_BG
+  * @retval WINDOW_PANEL_TOP
+  * @retval WINDOW_PANEL_BOTTOM
+  * @retval WINDOW_PANEL_LEFT
+  * @retval WINDOW_PANEL_RIGHT
+  * @relation
+  * wayland, agl-shell
+  */
   static window_type get_window_type(const std::string& type);
 
  private:
@@ -113,18 +148,46 @@ class WaylandWindow {
 
   static const struct xdg_surface_listener xdg_surface_listener;
 
+  /**
+  * @brief Response to configure event
+  * @param[in] data Pointer to WaylandWindow type
+  * @param[in] xdg_surface Surfaces in the domain of xdg-shell
+  * @param[in] serial Serial of the configure event
+  * @return void
+  * @relation
+  * wayland
+  */
   static void handle_xdg_surface_configure(void* data,
                                            struct xdg_surface* xdg_surface,
                                            uint32_t serial);
 
   static const struct xdg_toplevel_listener xdg_toplevel_listener;
 
+  /**
+  * @brief Response to configure event
+  * @param[in] data Pointer to WaylandWindow type
+  * @param[in] toplevel No use
+  * @param[in] width Width
+  * @param[in] height Height
+  * @param[in] states Dynamic array for checking xdg_toplevel_state
+  * @return void
+  * @relation
+  * wayland
+  */
   static void handle_toplevel_configure(void* data,
                                         struct xdg_toplevel* toplevel,
                                         int32_t width,
                                         int32_t height,
                                         struct wl_array* states);
 
+  /**
+  * @brief Close event
+  * @param[in] data Pointer to WaylandWindow type
+  * @param[in] xdg_toplevel No use
+  * @return void
+  * @relation
+  * wayland
+  */
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
 

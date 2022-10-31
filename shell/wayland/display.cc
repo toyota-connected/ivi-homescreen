@@ -109,6 +109,15 @@ Display::~Display() {
   FML_DLOG(INFO) << "- ~Display()";
 }
 
+/**
+* @brief Respond to a ping event with a pong request
+* @param[in] data No use
+* @param[in] xdg_wm_base Pointer to xdg_shell interface
+* @param[in] serial Serial of pointer
+* @return void
+* @relation
+* wayland
+*/
 static void xdg_wm_base_ping(void* data,
                              struct xdg_wm_base* xdg_wm_base,
                              uint32_t serial) {
