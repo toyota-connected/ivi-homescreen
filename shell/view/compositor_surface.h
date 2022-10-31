@@ -6,6 +6,7 @@
 #include "configuration/configuration.h"
 #include "flutter/fml/macros.h"
 
+#include <EGL/egl.h>
 #include <wayland-client.h>
 
 #include "compositor_surface_api.h"
@@ -34,7 +35,7 @@ class CompositorSurface {
   CompositorSurface(const std::shared_ptr<Display>& wayland_display,
                     const std::shared_ptr<WaylandWindow>& wayland_window,
                     void* h_module,
-                    std::string  assets_path,
+                    std::string assets_path,
                     CompositorSurface::PARAM_SURFACE_T type,
                     CompositorSurface::PARAM_Z_ORDER_T z_order,
                     CompositorSurface::PARAM_SYNC_T sync,
@@ -45,19 +46,26 @@ class CompositorSurface {
 
   ~CompositorSurface();
 
-  void* GetContext() { return api_.ctx; }
+  [[nodiscard]] void* GetContext() const { return api_.ctx; }
 
-  void Draw() { api_.render(api_.ctx, 0); }
+  void RunTask() const { api_.run_task(api_.ctx); }
+
+  static void Commit(void *userdata);
 
  private:
   typedef struct {
     struct wl_display* display;
     struct wl_surface* surface;
+    EGLDisplay egl_display;
+    struct wl_egl_window* egl_window;
   } wl;
 
   void InitApi();
 
   std::unique_ptr<wl> wl_;
+  wl_surface* surface_flutter_;
+  wl_surface* surface_base_;
+
   wl_subsurface* subsurface_;
   void* h_module_;
   std::string assets_path_;
@@ -76,7 +84,7 @@ class CompositorSurface {
     COMP_SURF_API_LOAD_FUNCTIONS* loader{};
     COMP_SURF_API_INITIALIZE_T* initialize{};
     COMP_SURF_API_DE_INITIALIZE_T* de_initialize{};
-    COMP_SURF_API_RENDER_T* render{};
+    COMP_SURF_API_RUN_TASK_T* run_task{};
     COMP_SURF_API_RESIZE_T* resize{};
 
   } api_;

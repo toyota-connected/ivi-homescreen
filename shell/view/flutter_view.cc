@@ -133,8 +133,8 @@ void FlutterView::RunTasks() {
   }
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
-  for(auto const& surface: m_comp_surf) {
-    surface->Draw();
+  for (auto const& surface : m_comp_surf) {
+    surface->RunTask();
   }
 #endif
 }
@@ -180,6 +180,6 @@ void* FlutterView::CreateSurface(void* h_module,
       m_wayland_display, m_wayland_window, h_module, assets_path, type, z_order,
       sync, width, height, x, y));
 
-  return m_comp_surf[m_comp_surf.size()-1]->GetContext();
+  return m_comp_surf[m_comp_surf.size() - 1]->GetContext();
 }
 #endif

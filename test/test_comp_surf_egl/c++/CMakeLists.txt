@@ -27,10 +27,10 @@ if (NOT BUILD_NUMBER)
     set(BUILD_NUMBER 0)
 endif ()
 
-project(comp_surf_vulkan
+project(comp_surf_egl
         VERSION "1.0.${BUILD_NUMBER}"
-        DESCRIPTION "Compositor Surface Vulkan Test"
-        LANGUAGES CXX C ASM
+        DESCRIPTION "Compositor Surface EGL Test"
+        LANGUAGES CXX C
         )
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
@@ -39,7 +39,7 @@ message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -56,7 +56,8 @@ add_subdirectory(third_party)
 #
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(WAYLAND REQUIRED wayland-client)
+pkg_check_modules(GLES glesv2 egl REQUIRED)
+pkg_check_modules(WAYLAND REQUIRED wayland-egl)
 
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
@@ -73,9 +74,11 @@ add_library(${PROJECT_NAME} SHARED
         src/main.cpp
         src/context.h
         src/context.cpp
-        src/VkBootstrap.cpp
-        src/VkBootstrap.h
-        src/VkBootstrapDispatch.h
+        )
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+        EGL_NO_X11
+        MESA_EGL_NO_X11_HEADERS
         )
 
 target_include_directories(${PROJECT_NAME}
@@ -87,7 +90,9 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_BINARY_DIR})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+        ${GLES_LINK_LIBRARIES}
         ${WAYLAND_LINK_LIBRARIES}
+        Threads::Threads
         ${CMAKE_DL_LIBS}
         )
 
