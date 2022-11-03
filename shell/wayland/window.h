@@ -84,6 +84,8 @@ class WaylandWindow {
   uint32_t m_fps_counter;
   static window_type get_window_type(const std::string& type);
 
+  void CommitSurfaces();
+
  private:
   struct shm_buffer {
     struct wl_buffer* buffer;

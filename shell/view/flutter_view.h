@@ -51,17 +51,24 @@ class FlutterView {
   void DrawFps(long long end_time);
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
-  void* CreateSurface(void* h_module,
-                      const std::string& assets_path,
-                      CompositorSurface::PARAM_SURFACE_T type,
-                      CompositorSurface::PARAM_Z_ORDER_T z_order,
-                      CompositorSurface::PARAM_SYNC_T sync,
-                      int width,
-                      int height,
-                      int32_t x,
-                      int32_t y);
+  size_t CreateSurface(void* h_module,
+                       const std::string& assets_path,
+                       const std::string& cache_path,
+                       CompositorSurface::PARAM_SURFACE_T type,
+                       CompositorSurface::PARAM_Z_ORDER_T z_order,
+                       CompositorSurface::PARAM_SYNC_T sync,
+                       int width,
+                       int height,
+                       int32_t x,
+                       int32_t y);
+
+  void DisposeSurface(size_t index);
 
   std::vector<std::unique_ptr<CompositorSurface>> m_comp_surf;
+
+  void* GetSurfaceContext(size_t index);
+
+  static void CommitView(const FlutterView *obj, size_t index);
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);

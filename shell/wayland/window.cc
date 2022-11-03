@@ -20,7 +20,6 @@
 #include <unistd.h>
 #include <cstring>
 #include <utility>
-#include "third_party/flutter/fml/logging.h"
 
 #include "constants.h"
 #include "display.h"
@@ -424,11 +423,6 @@ uint32_t WaylandWindow::GetFpsCounter() {
 
 const struct wl_callback_listener WaylandWindow::frame_listener = {redraw};
 
-WaylandWindow::shm_buffer* WaylandWindow::next_buffer(WaylandWindow* window) {
-  (void)window;
-  return nullptr;
-}
-
 bool WaylandWindow::ActivateSystemCursor(int32_t device,
                                          const std::string& kind) {
   return m_display->ActivateSystemCursor(device, kind);
@@ -506,4 +500,9 @@ WaylandWindow::window_type WaylandWindow::get_window_type(
     return WINDOW_PANEL_RIGHT;
   }
   return WINDOW_NORMAL;
+}
+
+void WaylandWindow::CommitSurfaces() {
+  wl_surface_commit(m_flutter_surface);
+  wl_surface_commit(m_base_surface);
 }

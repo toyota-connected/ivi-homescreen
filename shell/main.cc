@@ -20,7 +20,6 @@
 #include "configuration/configuration.h"
 
 #include <flutter/fml/command_line.h>
-#include <flutter/fml/logging.h>
 
 volatile bool running = true;
 

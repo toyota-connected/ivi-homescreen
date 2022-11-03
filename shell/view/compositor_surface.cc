@@ -2,34 +2,120 @@
 #include "compositor_surface.h"
 
 #include <flutter/fml/logging.h>
+#include <flutter/fml/paths.h>
 
 #include <dlfcn.h>
+#include <pwd.h>
 
 #include <EGL/eglext.h>
+#include <sys/stat.h>
 #include <wayland-egl.h>
 #include <utility>
 
+#include "../view/flutter_view.h"
 #include "../wayland/display.h"
-#include "../wayland/window.h"
 
-CompositorSurface::~CompositorSurface() {
-  if (type_ == CompositorSurface::egl) {
-    wl_egl_window_destroy(wl_->egl_window);
+CompositorSurface::CompositorSurface(
+    size_t surface_index,
+    const std::shared_ptr<Display>& display,
+    const std::shared_ptr<WaylandWindow>& window,
+    void* h_module,
+    std::string assets_path,
+    const std::string& cache_folder,
+    CompositorSurface::PARAM_SURFACE_T type,
+    CompositorSurface::PARAM_Z_ORDER_T z_order,
+    CompositorSurface::PARAM_SYNC_T sync,
+    int width,
+    int height,
+    int32_t x,
+    int32_t y,
+    const FlutterView* view)
+    : m_surface_index(surface_index),
+      m_h_module(h_module),
+      m_assets_path(std::move(assets_path)),
+      m_cache_path(GetCachePath(cache_folder.c_str())),
+      m_type(type),
+      m_z_order(z_order),
+      m_sync(sync),
+      width_(width),
+      height_(height),
+      m_origin_x(x),
+      m_origin_y(y),
+      m_view(view),
+      m_callback(nullptr) {
+  // API
+  init_api(this);
+
+  // Surface
+  m_wl.display = display->GetDisplay();
+  m_wl.surface = wl_compositor_create_surface(display->GetCompositor());
+  m_wl.egl_display = nullptr;
+  m_wl.egl_window = nullptr;
+
+  if (type == CompositorSurface::egl) {
+    m_wl.egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR,
+                                             display->GetDisplay(), nullptr);
+    m_wl.egl_window = wl_egl_window_create(m_wl.surface, width, height);
+    assert(m_wl.egl_display);
+    assert(m_wl.egl_window);
   }
-  wl_subsurface_destroy(subsurface_);
-  wl_surface_destroy(wl_->surface);
 
-  if (h_module_) {
-    api_.de_initialize(api_.ctx);
-    dlclose(h_module_);
+  // Sub-surface
+  m_subsurface = wl_subcompositor_get_subsurface(
+      display->GetSubCompositor(), m_wl.surface, window->GetFlutterSurface());
+
+  // Position
+  wl_subsurface_set_position(m_subsurface, m_origin_x, m_origin_y);
+
+  // Z-Order
+  if (m_z_order == CompositorSurface::PARAM_Z_ORDER_T::above) {
+    wl_subsurface_place_above(m_subsurface, window->GetFlutterSurface());
+  } else if (m_z_order == CompositorSurface::PARAM_Z_ORDER_T::below) {
+    wl_subsurface_place_below(m_subsurface, window->GetFlutterSurface());
+  }
+
+  // Sync
+  if (m_sync == CompositorSurface::PARAM_SYNC_T::sync) {
+    wl_subsurface_set_sync(m_subsurface);
+  } else if (m_sync == CompositorSurface::PARAM_SYNC_T::de_sync) {
+    wl_subsurface_set_desync(m_subsurface);
   }
 }
 
-void CompositorSurface::InitApi() {
-  api_.version = reinterpret_cast<COMP_SURF_API_VERSION_T*>(
-      dlsym(h_module_, "comp_surf_version"));
-  if (api_.version) {
-    auto version = api_.version();
+void CompositorSurface::Dispose(void* userdata) {
+  auto* obj = (CompositorSurface*)userdata;
+
+  obj->m_api.de_initialize(obj->m_api.ctx);
+  obj->m_api.ctx = nullptr;
+
+  if (obj->m_subsurface) {
+    wl_subsurface_destroy(obj->m_subsurface);
+    obj->m_subsurface = nullptr;
+  }
+
+  if (obj->m_wl.egl_window) {
+    wl_egl_window_destroy(obj->m_wl.egl_window);
+    obj->m_wl.egl_window = nullptr;
+  }
+
+  if (obj->m_wl.surface) {
+    wl_surface_destroy(obj->m_wl.surface);
+    obj->m_wl.surface = nullptr;
+  }
+
+  if (obj->m_h_module) {
+#if 0  // TODO causes segfault
+      dlclose(obj->m_h_module);
+      obj->m_h_module = nullptr;
+#endif
+  }
+}
+
+void CompositorSurface::init_api(CompositorSurface *obj) {
+  obj->m_api.version = reinterpret_cast<COMP_SURF_API_VERSION_T*>(
+      dlsym(obj->m_h_module, "comp_surf_version"));
+  if (obj->m_api.version) {
+    auto version = obj->m_api.version();
     if (version != kCompSurfExpectedInterfaceVersion) {
       FML_LOG(ERROR) << "Unexpected interface version: " << version;
       exit(1);
@@ -38,29 +124,34 @@ void CompositorSurface::InitApi() {
     goto invalid;
   }
 
-  api_.loader = reinterpret_cast<COMP_SURF_API_LOAD_FUNCTIONS*>(
-      dlsym(h_module_, "comp_surf_load_functions"));
-  if (!api_.loader) {
+  obj->m_api.loader = reinterpret_cast<COMP_SURF_API_LOAD_FUNCTIONS*>(
+      dlsym(obj->m_h_module, "comp_surf_load_functions"));
+  if (!obj->m_api.loader) {
     goto invalid;
   }
-  api_.initialize = reinterpret_cast<COMP_SURF_API_INITIALIZE_T*>(
-      dlsym(h_module_, "comp_surf_initialize"));
-  if (!api_.initialize) {
+  obj->m_api.initialize = reinterpret_cast<COMP_SURF_API_INITIALIZE_T*>(
+      dlsym(obj->m_h_module, "comp_surf_initialize"));
+  if (!obj->m_api.initialize) {
     goto invalid;
   }
-  api_.de_initialize = reinterpret_cast<COMP_SURF_API_DE_INITIALIZE_T*>(
-      dlsym(h_module_, "comp_surf_de_initialize"));
-  if (!api_.de_initialize) {
+  obj->m_api.de_initialize = reinterpret_cast<COMP_SURF_API_DE_INITIALIZE_T*>(
+      dlsym(obj->m_h_module, "comp_surf_de_initialize"));
+  if (!obj->m_api.de_initialize) {
     goto invalid;
   }
-  api_.run_task = reinterpret_cast<COMP_SURF_API_RUN_TASK_T*>(
-      dlsym(h_module_, "comp_surf_run_task"));
-  if (!api_.run_task) {
+  obj->m_api.run_task = reinterpret_cast<COMP_SURF_API_RUN_TASK_T*>(
+      dlsym(obj->m_h_module, "comp_surf_run_task"));
+  if (!obj->m_api.run_task) {
     goto invalid;
   }
-  api_.resize = reinterpret_cast<COMP_SURF_API_RESIZE_T*>(
-      dlsym(h_module_, "comp_surf_resize"));
-  if (!api_.resize) {
+  obj->m_api.draw_frame = reinterpret_cast<COMP_SURF_API_DRAW_FRAME_T*>(
+      dlsym(obj->m_h_module, "comp_surf_draw_frame"));
+  if (!obj->m_api.draw_frame) {
+    goto invalid;
+  }
+  obj->m_api.resize = reinterpret_cast<COMP_SURF_API_RESIZE_T*>(
+      dlsym(obj->m_h_module, "comp_surf_resize"));
+  if (!obj->m_api.resize) {
     goto invalid;
   }
   return;
@@ -70,83 +161,57 @@ invalid:
   exit(1);
 }
 
-CompositorSurface::CompositorSurface(
-    const std::shared_ptr<Display>& display,
-    const std::shared_ptr<WaylandWindow>& window,
-    void* h_module,
-    std::string assets_path,
-    CompositorSurface::PARAM_SURFACE_T type,
-    CompositorSurface::PARAM_Z_ORDER_T z_order,
-    CompositorSurface::PARAM_SYNC_T sync,
-    int width,
-    int height,
-    int32_t x,
-    int32_t y)
-    : h_module_(h_module),
-      assets_path_(std::move(assets_path)),
-      type_(type),
-      z_order_(z_order),
-      sync_(sync),
-      width_(width),
-      height_(height),
-      x_(x),
-      y_(y) {
-  InitApi();
-
-  // Surface
-
-  wl_ = std::make_unique<wl>();
-
-  wl_->display = display->GetDisplay();
-  wl_->surface = wl_compositor_create_surface(display->GetCompositor());
-  surface_flutter_ = window->GetFlutterSurface();
-  surface_base_ = window->GetBaseSurface();
-  wl_->egl_display = nullptr;
-  wl_->egl_window = nullptr;
-
-  if (type == CompositorSurface::egl) {
-    wl_->egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR,
-                                             display->GetDisplay(), nullptr);
-    wl_->egl_window = wl_egl_window_create(wl_->surface, width, height);
-    assert(wl_->egl_display);
-    assert(wl_->egl_window);
+std::string CompositorSurface::GetCachePath(const char* folder) {
+  const char* homedir;
+  if ((homedir = getenv("HOME")) == nullptr) {
+    homedir = getpwuid(getuid())->pw_dir;
   }
 
-  // Sub-surface
-  subsurface_ = wl_subcompositor_get_subsurface(display->GetSubCompositor(),
-                                                wl_->surface,
-                                                window->GetFlutterSurface());
+  auto path = fml::paths::JoinPaths({homedir, folder});
 
-  // Position
-  wl_subsurface_set_position(subsurface_, x_, y_);
+  mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
-  // Z-Order
-  if (z_order_ == CompositorSurface::PARAM_Z_ORDER_T::above) {
-    wl_subsurface_place_above(subsurface_, window->GetFlutterSurface());
-  } else if (z_order_ == CompositorSurface::PARAM_Z_ORDER_T::below) {
-    wl_subsurface_place_below(subsurface_, window->GetFlutterSurface());
-  }
-
-  // Sync
-  if (sync_ == CompositorSurface::PARAM_SYNC_T::sync) {
-    wl_subsurface_set_sync(subsurface_);
-  } else if (sync_ == CompositorSurface::PARAM_SYNC_T::de_sync) {
-    wl_subsurface_set_desync(subsurface_);
-  }
-
-  // Initialize Plugin
-  api_.ctx =
-      api_.initialize("", width_, height_, wl_.get(), assets_path_.c_str(),
-                      &CompositorSurface::Commit, this);
+  return path;
 }
 
-/*
- * Commit Surface stack
- * required for framecallback
- */
-extern "C" void CompositorSurface::Commit(void *userdata) {
-    auto obj = reinterpret_cast<CompositorSurface*>(userdata);
-    wl_surface_commit(obj->wl_->surface);
-    wl_surface_commit(obj->surface_flutter_);
-    wl_surface_commit(obj->surface_base_);
+void CompositorSurface::InitializePlugin() {
+  m_api.ctx = m_api.initialize(
+      "", width_, height_, &m_wl, m_assets_path.c_str(), m_cache_path.c_str());
+
+  StartFrames();
 }
+
+void CompositorSurface::StartFrames() {
+  if(m_callback)
+    wl_callback_destroy(m_callback);
+  m_callback = nullptr;
+  on_frame(this, m_callback, 0);
+}
+
+void CompositorSurface::StopFrames() {
+  if(m_callback)
+    wl_callback_destroy(m_callback);
+  m_callback = nullptr;
+}
+
+void CompositorSurface::on_frame(void* data, struct wl_callback* callback, uint32_t time) {
+
+  auto obj = reinterpret_cast<CompositorSurface*>(data);
+
+  assert(obj->m_callback == callback);
+  obj->m_callback = nullptr;
+
+  if (callback)
+    wl_callback_destroy(callback);
+
+  obj->m_api.draw_frame(obj->m_api.ctx, time);
+
+  obj->m_callback = wl_surface_frame(obj->m_wl.surface);
+  wl_callback_add_listener(obj->m_callback, &CompositorSurface::frame_listener,
+                           data);
+
+  FlutterView::CommitView(obj->m_view, obj->m_surface_index);
+}
+
+const struct wl_callback_listener CompositorSurface::frame_listener = {
+    .done = on_frame};
