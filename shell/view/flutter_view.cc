@@ -167,19 +167,48 @@ void FlutterView::DrawFps(long long end_time) {
 }
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
-void* FlutterView::CreateSurface(void* h_module,
-                                 const std::string& assets_path,
-                                 CompositorSurface::PARAM_SURFACE_T type,
-                                 CompositorSurface::PARAM_Z_ORDER_T z_order,
-                                 CompositorSurface::PARAM_SYNC_T sync,
-                                 int width,
-                                 int height,
-                                 int32_t x,
-                                 int32_t y) {
+size_t FlutterView::CreateSurface(void* h_module,
+                                  const std::string& assets_path,
+                                  const std::string& cache_folder,
+                                  CompositorSurface::PARAM_SURFACE_T type,
+                                  CompositorSurface::PARAM_Z_ORDER_T z_order,
+                                  CompositorSurface::PARAM_SYNC_T sync,
+                                  int width,
+                                  int height,
+                                  int32_t x,
+                                  int32_t y) {
+  auto index = m_comp_surf.size();
   m_comp_surf.push_back(std::make_unique<CompositorSurface>(
-      m_wayland_display, m_wayland_window, h_module, assets_path, type, z_order,
-      sync, width, height, x, y));
+      index, m_wayland_display, m_wayland_window, h_module, assets_path, cache_folder,
+      type, z_order, sync, width, height, x, y, this));
 
-  return m_comp_surf[m_comp_surf.size() - 1]->GetContext();
+  // surface must be in vector before initializing it.
+  m_comp_surf[index]->InitializePlugin();
+
+  return index;
+}
+
+void FlutterView::DisposeSurface(size_t index) {
+  m_comp_surf[index]->StopFrames();
+  m_comp_surf[index]->Dispose(m_comp_surf[index].get());
+  m_comp_surf[index].reset();
+
+  m_comp_surf.erase(m_comp_surf.begin() + static_cast<long>(index));
+}
+
+void FlutterView::CommitView(const FlutterView *obj, size_t index) {
+  for (unsigned i = index + 1; i-- != 0; ) {
+//  for (unsigned i = obj->m_comp_surf.size(); i-- != 0; ) {
+    wl_surface_commit(obj->m_comp_surf[i]->GetSurface());
+  }
+  obj->m_wayland_window->CommitSurfaces();
+}
+
+void* FlutterView::GetSurfaceContext(size_t index) {
+  void* res = nullptr;
+  if (index <= m_comp_surf.size()) {
+    res = m_comp_surf[index]->GetContext();
+  }
+  return res;
 }
 #endif

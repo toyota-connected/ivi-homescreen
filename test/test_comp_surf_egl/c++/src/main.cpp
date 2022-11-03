@@ -30,66 +30,69 @@
 // #############################################################################
 
 extern "C" struct comp_surf_Context {
-  std::unique_ptr<CompSurfContext> context;
+    std::unique_ptr<CompSurfContext> context;
 };
 
 namespace {
-inline void checkContext(comp_surf_Context* ctx) {
-  if (!ctx) {
-    std::cerr << "Context not initialized" << std::endl;
-    std::abort();
-  }
+    inline void checkContext(comp_surf_Context *ctx) {
+        if (!ctx) {
+            std::cerr << "Context not initialized" << std::endl;
+            std::abort();
+        }
 
-  assert(ctx->context != nullptr);
-}
+        assert(ctx->context != nullptr);
+    }
 
-inline CompSurfContext& getContext(comp_surf_Context* ctx) {
-  checkContext(ctx);
-  return *ctx->context;
-}
+    inline CompSurfContext &getContext(comp_surf_Context *ctx) {
+        checkContext(ctx);
+        return *ctx->context;
+    }
 }  // namespace
 
 API_EXPORT
 uint32_t comp_surf_version() {
-  return CompSurfContext::version();
+    return CompSurfContext::version();
 }
 
 API_EXPORT
-void comp_surf_load_functions(void* userdata,
+void comp_surf_load_functions(void *userdata,
                               comp_surf_LoaderFunction loaderFunction) {
-  (void)userdata;
-  (void)loaderFunction;
+    (void) userdata;
+    (void) loaderFunction;
 }
 
 API_EXPORT
-comp_surf_Context* comp_surf_initialize(
-    const char* accessToken,
-    int width,
-    int height,
-    void* nativeWindow,
-    const char* assetsPath,
-    comp_surf_CommitFrameFunction commit_frame,
-    void* commit_frame_user_data) {
-  auto* ctx = new comp_surf_Context;
-  ctx->context = std::make_unique<CompSurfContext>(
-      accessToken, width, height, nativeWindow, assetsPath, commit_frame,
-      commit_frame_user_data);
-  return ctx;
+comp_surf_Context *comp_surf_initialize(
+        const char *accessToken,
+        int width,
+        int height,
+        void *nativeWindow,
+        const char *assetsPath,
+        const char *cachePath) {
+    auto *ctx = new comp_surf_Context;
+    ctx->context = std::make_unique<CompSurfContext>(
+            accessToken, width, height, nativeWindow, assetsPath, cachePath);
+    return ctx;
 }
 
 API_EXPORT
-void comp_surf_de_initialize(comp_surf_Context* ctx) {
-  checkContext(ctx);
-  ctx->context.release();
-  delete ctx;
+void comp_surf_de_initialize(comp_surf_Context *ctx) {
+    getContext(ctx).de_initialize();
+    ctx->context.release();
+    delete ctx;
 }
 
 API_EXPORT
-void comp_surf_run_task(comp_surf_Context* ctx) {
-  getContext(ctx).run_task();
+void comp_surf_run_task(comp_surf_Context *ctx) {
+    getContext(ctx).run_task();
 }
 
 API_EXPORT
-void comp_surf_resize(comp_surf_Context* ctx, int width, int height) {
-  getContext(ctx).resize(width, height);
+void comp_surf_draw_frame(comp_surf_Context *ctx, uint32_t time) {
+    getContext(ctx).draw_frame(time);
+}
+
+API_EXPORT
+void comp_surf_resize(comp_surf_Context *ctx, int width, int height) {
+    getContext(ctx).resize(width, height);
 }

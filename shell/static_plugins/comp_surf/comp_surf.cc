@@ -35,7 +35,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      auto viewId = 0;
+      int64_t viewId = 0;
       auto it = args->find(flutter::EncodableValue(kArgView));
       if (it != args->end()) {
         flutter::EncodableValue encodedValue = it->second;
@@ -66,12 +66,18 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         assets_path = std::get<std::string>(it->second);
       }
 
+      std::string cache_folder;
+      it = args->find(flutter::EncodableValue(kCacheFolder));
+      if (it != args->end()) {
+        cache_folder = std::get<std::string>(it->second);
+      }
+
       std::string type_str;
       it = args->find(flutter::EncodableValue(kArgType));
       if (it != args->end()) {
         type_str = std::get<std::string>(it->second);
       }
-      auto type = CompositorSurface::PARAM_SURFACE_T::egl;
+      CompositorSurface::PARAM_SURFACE_T type;
       if (type_str == kParamTypeEgl) {
         type = CompositorSurface::PARAM_SURFACE_T::egl;
       } else if (type_str == kParamTypeVulkan) {
@@ -89,7 +95,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
       if (it != args->end()) {
         z_order_str = std::get<std::string>(it->second);
       }
-      auto z_order = CompositorSurface::PARAM_Z_ORDER_T::above;
+      CompositorSurface::PARAM_Z_ORDER_T z_order;
       if (z_order_str == kParamZOrderAbove) {
         z_order = CompositorSurface::PARAM_Z_ORDER_T::above;
       } else if (z_order_str == kParamZOrderBelow) {
@@ -106,7 +112,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
       if (it != args->end()) {
         sync_str = std::get<std::string>(it->second);
       }
-      auto sync = CompositorSurface::PARAM_SYNC_T::sync;
+      CompositorSurface::PARAM_SYNC_T sync;
       if (sync_str == kParamSyncSync) {
         sync = CompositorSurface::PARAM_SYNC_T::sync;
       } else if (sync_str == kParamSyncDeSync) {
@@ -143,13 +149,17 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         y = std::get<int32_t>(it->second);
       }
 
-      auto context = view->CreateSurface(h_module, assets_path, type, z_order,
-                                         sync, width, height, x, y);
+      auto index = view->CreateSurface(h_module, assets_path, cache_folder,
+                                       type, z_order, sync, width, height, x, y);
+
+      auto context = view->GetSurfaceContext(index);
 
       auto value = flutter::EncodableValue(flutter::EncodableMap{
           {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
           {flutter::EncodableValue("context"),
            flutter::EncodableValue(reinterpret_cast<int64_t>(context))},
+          {flutter::EncodableValue("index"),
+           flutter::EncodableValue(static_cast<int>(index))},
       });
 
       result = codec.EncodeSuccessEnvelope(&value);
@@ -161,14 +171,25 @@ void CompositorSurfacePlugin::OnPlatformMessage(
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      int64_t textureId = 0;
-      auto it = args->find(flutter::EncodableValue("surfaceId"));
+      int64_t viewId = 0;
+      auto it = args->find(flutter::EncodableValue(kArgView));
       if (it != args->end()) {
         flutter::EncodableValue encodedValue = it->second;
-        textureId = encodedValue.LongValue();
+        viewId = encodedValue.LongValue();
       }
 
-      engine->TextureDispose(textureId);
+      auto view = engine->GetView();
+      if (viewId != view->GetIndex()) {
+        assert(false);
+      }
+
+      auto index = 0;
+      it = args->find(flutter::EncodableValue(kSurfaceIndex));
+      if (it != args->end()) {
+        index = std::get<int>(it->second);
+      }
+
+      view->DisposeSurface(index);
 
       result = codec.EncodeSuccessEnvelope();
     } else {
