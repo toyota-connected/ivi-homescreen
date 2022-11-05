@@ -59,7 +59,6 @@ constexpr char kApplicationName[] = "homescreen";
 constexpr char kEnginePersistentCacheDir[] = ".homescreen";
 
 // Compositor Surface
-constexpr int kMaxSurfacesPerView = 2;
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{

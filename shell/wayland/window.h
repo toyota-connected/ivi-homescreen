@@ -56,7 +56,7 @@ class WaylandWindow {
   WaylandWindow(size_t index,
                 std::shared_ptr<Display> display,
                 const std::string& type,
-                wl_output *output,
+                wl_output* output,
                 std::string app_id,
                 bool fullscreen,
                 int32_t width,
@@ -73,8 +73,6 @@ class WaylandWindow {
 
   uint32_t GetFpsCounter();
 
-  void DrawFps(uint8_t fps);
-
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
   wl_surface* GetBaseSurface() { return m_base_surface; }
@@ -84,16 +82,12 @@ class WaylandWindow {
   uint32_t m_fps_counter;
   static window_type get_window_type(const std::string& type);
 
- private:
-  struct shm_buffer {
-    struct wl_buffer* buffer;
-    void* shm_data;
-    MAYBE_UNUSED int busy;
-  };
+  void CommitSurfaces();
 
+ private:
   size_t m_index;
   std::shared_ptr<Display> m_display;
-  wl_output *m_wl_output;
+  wl_output* m_wl_output;
   std::shared_ptr<Engine> m_flutter_engine;
   struct wl_surface* m_base_surface{};
   struct wl_surface* m_flutter_surface{};
@@ -120,26 +114,9 @@ class WaylandWindow {
 
   struct xdg_surface* m_xdg_surface;
   struct xdg_toplevel* m_xdg_toplevel;
-  struct wl_surface* m_fps_surface;
-  struct wl_subsurface* m_subsurface;
-  struct shm_buffer m_fps_buffer {};
-  uint8_t m_fps_idx;
-  uint8_t m_fps[20]{};
 
-  struct shm_buffer m_buffers[2]{};
-  struct wl_callback* m_callback;
-
-  MAYBE_UNUSED int m_frame_sync;
-
-  static void buffer_release(void* data, struct wl_buffer* buffer);
-
-  static const struct wl_buffer_listener buffer_listener;
-
-  static int create_shm_buffer(Display* display,
-                               struct shm_buffer* buffer,
-                               int width,
-                               int height,
-                               uint32_t format);
+  struct wl_callback* m_base_frame_callback;
+  struct wl_callback* m_flutter_frame_callback;
 
   static const struct xdg_surface_listener xdg_surface_listener;
 
@@ -158,10 +135,15 @@ class WaylandWindow {
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
 
-  MAYBE_UNUSED static struct shm_buffer* next_buffer(WaylandWindow* window);
+  static void on_frame_base_surface(void* data,
+                                    struct wl_callback* callback,
+                                    uint32_t time);
 
-  static void redraw(void* data, struct wl_callback* callback, uint32_t time);
+  static const struct wl_callback_listener frame_listener_base_surface;
 
-  static const struct wl_callback_listener frame_listener;
+  static void on_frame_flutter_surface(void* data,
+                                       struct wl_callback* callback,
+                                       uint32_t time);
 
+  static const struct wl_callback_listener frame_listener_flutter_surface;
 };

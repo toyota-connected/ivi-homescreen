@@ -32,16 +32,15 @@ CompSurfContext::CompSurfContext(const char* accessToken,
                                  int height,
                                  void* nativeWindow,
                                  const char* assetsPath,
-                                 comp_surf_CommitFrameFunction commit_frame,
-                                 void* commit_frame_user_data)
+                                 const char* cachePath)
     : accessToken_(accessToken),
-      width_(width),
-      height_(height),
       assetsPath_(assetsPath),
-      commit_frame_(commit_frame),
-      commit_frame_user_data_(commit_frame_user_data) {
+      cachePath_(cachePath) {
+  (void)width;
+  (void)height;
   std::cout << "[comp_surf_vulkan]" << std::endl;
   std::cout << "assetsPath: " << assetsPath_ << std::endl;
+  std::cout << "cachePath: " << cachePath_ << std::endl;
 
   typedef struct {
     struct wl_display* wl_display;
@@ -50,9 +49,6 @@ CompSurfContext::CompSurfContext(const char* accessToken,
 
   auto p = reinterpret_cast<wl*>(nativeWindow);
   assert(p);
-
-  surface_ = p->wl_surface;
-  callback_ = nullptr;
 
   init_.window = nativeWindow;
 
@@ -74,8 +70,6 @@ CompSurfContext::CompSurfContext(const char* accessToken,
     return;
   if (0 != create_sync_objects(init_, render_data_))
     return;
-
-  redraw(this, nullptr, 0);
 }
 
 CompSurfContext::~CompSurfContext() {
@@ -85,34 +79,17 @@ CompSurfContext::~CompSurfContext() {
 
 void CompSurfContext::run_task() {}
 
-const struct wl_callback_listener CompSurfContext::frame_listener = {
-    .done = redraw};
-
-void CompSurfContext::redraw(void* data,
-                             struct wl_callback* callback,
-                             uint32_t time) {
-  auto ctx = reinterpret_cast<CompSurfContext*>(data);
-
-  assert(ctx->callback_ == callback);
-  ctx->callback_ = nullptr;
-
-  if (callback)
-    wl_callback_destroy(callback);
-
-  int res = draw_frame(ctx->init_, ctx->render_data_);
+void CompSurfContext::draw_frame(uint32_t time) {
+  (void)time;
+  int res = draw_frame(init_, render_data_);
   if (res != 0) {
     std::cout << "failed to draw frame \n";
   }
-
-  ctx->callback_ = wl_surface_frame(ctx->surface_);
-  wl_callback_add_listener(ctx->callback_, &CompSurfContext::frame_listener,
-                           data);
-  ctx->commit_frame_(ctx->commit_frame_user_data_);
 }
 
 void CompSurfContext::resize(int width, int height) {
-  width_ = width;
-  height_ = height;
+  (void)width;
+  (void)height;
 }
 
 VkSurfaceKHR CompSurfContext::createVkSurfaceKHR(Init& init) {

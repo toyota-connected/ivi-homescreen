@@ -277,7 +277,8 @@ void Configuration::PrintConfig(const Config& config) {
   }
   FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
   FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
-  FML_LOG(INFO) << "Output Index: ............. " << config.view.wl_output_index;
+  FML_LOG(INFO) << "Output Index: ............. "
+                << config.view.wl_output_index;
   FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
                 << config.view.height;
   FML_LOG(INFO) << "Fullscreen: ............... "

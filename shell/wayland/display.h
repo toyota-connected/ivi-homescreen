@@ -117,8 +117,8 @@ class Display {
     bool bind_to_agl_shell = false;
     struct agl_shell* shell{};
 
-    bool wait_for_bound;
-    bool bound_ok;
+    bool wait_for_bound{};
+    bool bound_ok{};
     uint32_t version = 0;
   } m_agl;
 

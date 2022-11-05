@@ -34,8 +34,7 @@ struct CompSurfContext {
                   int height,
                   void* nativeWindow,
                   const char* assetsPath,
-                  comp_surf_CommitFrameFunction commit_frame,
-                  void* commit_frame_user_data);
+                  const char* cachePath);
 
   ~CompSurfContext();
 
@@ -47,7 +46,9 @@ struct CompSurfContext {
 
   void run_task();
 
-  void resize(int width, int height);
+  void draw_frame(uint32_t time);
+
+  static void resize(int width, int height);
 
  private:
   static constexpr int kMaxFramesInFlight = 2;
@@ -67,7 +68,7 @@ struct CompSurfContext {
 
     void close() {
       dlclose(library);
-      library = 0;
+      library = nullptr;
     }
 
     void init(VkInstance instance) {
@@ -208,14 +209,8 @@ struct CompSurfContext {
   } render_data_;
 
   std::string accessToken_;
-  int width_;
-  int height_;
   std::string assetsPath_;
-  comp_surf_CommitFrameFunction commit_frame_;
-  void* commit_frame_user_data_;
-
-  struct wl_surface* surface_;
-  struct wl_callback* callback_;
+  std::string cachePath_;
 
   struct Init {
     void* window{};
@@ -263,6 +258,4 @@ struct CompSurfContext {
   static void cleanup(Init& init, RenderData& data);
 
   static const struct wl_callback_listener frame_listener;
-
-  static void redraw(void* data, struct wl_callback* callback, uint32_t time);
 };

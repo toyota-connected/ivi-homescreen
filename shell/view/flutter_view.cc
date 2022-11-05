@@ -134,7 +134,7 @@ void FlutterView::RunTasks() {
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
   for (auto const& surface : m_comp_surf) {
-    surface->RunTask();
+    surface.second->RunTask();
   }
 #endif
 }
@@ -157,29 +157,44 @@ void FlutterView::DrawFps(long long end_time) {
           FML_LOG(INFO) << "(" << m_index << ") FPS = " << fps_loop << " "
                         << fps_redraw;
         }
-
-        if (0 < (m_fps.output & 0x02)) {
-          m_wayland_window->DrawFps(fps_redraw);
-        }
       }
     }
   }
 }
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
-void* FlutterView::CreateSurface(void* h_module,
-                                 const std::string& assets_path,
-                                 CompositorSurface::PARAM_SURFACE_T type,
-                                 CompositorSurface::PARAM_Z_ORDER_T z_order,
-                                 CompositorSurface::PARAM_SYNC_T sync,
-                                 int width,
-                                 int height,
-                                 int32_t x,
-                                 int32_t y) {
-  m_comp_surf.push_back(std::make_unique<CompositorSurface>(
-      m_wayland_display, m_wayland_window, h_module, assets_path, type, z_order,
-      sync, width, height, x, y));
+size_t FlutterView::CreateSurface(void* h_module,
+                                  const std::string& assets_path,
+                                  const std::string& cache_folder,
+                                  CompositorSurface::PARAM_SURFACE_T type,
+                                  CompositorSurface::PARAM_Z_ORDER_T z_order,
+                                  CompositorSurface::PARAM_SYNC_T sync,
+                                  int width,
+                                  int height,
+                                  int32_t x,
+                                  int32_t y) {
+  auto index = static_cast<int64_t>(m_comp_surf.size());
+  m_comp_surf[index] = std::make_unique<CompositorSurface>(
+      index, m_wayland_display, m_wayland_window, h_module, assets_path,
+      cache_folder, type, z_order, sync, width, height, x, y, this);
 
-  return m_comp_surf[m_comp_surf.size() - 1]->GetContext();
+  m_comp_surf[index]->InitializePlugin();
+  return index;
+}
+
+void FlutterView::DisposeSurface(int64_t key) {
+  m_comp_surf[key]->StopFrames();
+  m_comp_surf[key]->Dispose(m_comp_surf[key].get());
+  m_comp_surf[key].reset();
+
+  m_comp_surf.erase(key);
+}
+
+void* FlutterView::GetSurfaceContext(int64_t index) {
+  void* res = nullptr;
+  if (m_comp_surf.find(index) != m_comp_surf.end()) {
+    res = m_comp_surf[index]->GetContext();
+  }
+  return res;
 }
 #endif

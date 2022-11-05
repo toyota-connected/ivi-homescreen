@@ -28,6 +28,7 @@ class CompositorSurfacePlugin {
   static constexpr char kArgView[] = "view";
   static constexpr char kArgModule[] = "module";
   static constexpr char kArgAssetsPath[] = "assets_path";
+  static constexpr char kCacheFolder[] = "cache_folder";
   static constexpr char kArgType[] = "type";
   static constexpr char kArgZOrder[] = "z_order";
   static constexpr char kArgSync[] = "sync";
@@ -35,6 +36,7 @@ class CompositorSurfacePlugin {
   static constexpr char kArgHeight[] = "height";
   static constexpr char kArgX[] = "x";
   static constexpr char kArgY[] = "y";
+  static constexpr char kSurfaceIndex[] = "index";
 
   static constexpr char kParamTypeEgl[] = "egl";
   static constexpr char kParamTypeVulkan[] = "vulkan";

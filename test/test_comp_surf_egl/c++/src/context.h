@@ -53,7 +53,6 @@ struct CompSurfContext {
     struct wl_egl_window* native;
     struct wl_surface* surface;
     EGLSurface egl_surface;
-    struct wl_callback* callback;
   };
 
   static uint32_t version();
@@ -63,10 +62,9 @@ struct CompSurfContext {
                   int height,
                   void* nativeWindow,
                   const char* assetsPath,
-                  comp_surf_CommitFrameFunction commit_frame,
-                  void* commit_frame_user_data);
+                  const char* cachePath);
 
-  ~CompSurfContext();
+  ~CompSurfContext() = default;
 
   CompSurfContext(const CompSurfContext&) = delete;
 
@@ -74,26 +72,19 @@ struct CompSurfContext {
 
   CompSurfContext& operator=(const CompSurfContext&) = delete;
 
+  void de_initialize() const;
+
   void run_task();
+
+  void draw_frame(CompSurfContext* ctx, uint32_t time) const;
 
   void resize(int width, int height);
 
-  window* GetWindow() { return &window_; }
-
  private:
-  static constexpr int kEglBufferSize = 16;
-  std::string accessToken_;
-  int width_;
-  int height_;
-  std::string assetsPath_;
-  comp_surf_CommitFrameFunction commit_frame_;
-  void* commit_frame_user_data_;
-
-  struct {
-    EGLDisplay dpy;
-    EGLContext ctx;
-    EGLConfig conf;
-  } egl;
+  static constexpr int kEglBufferSize = 24;
+  std::string mAccessToken;
+  std::string mAssetsPath;
+  std::string mCachePath;
 
   static constexpr char kVertShaderText[] =
       "uniform mat4 rotation;\n"
@@ -112,30 +103,15 @@ struct CompSurfContext {
       "  gl_FragColor = v_color;\n"
       "}\n";
 
-  struct display display_;
-  struct window window_;
-
-  static void* get_egl_proc_address(const char* address);
-
-  static EGLSurface create_egl_surface(EGLDisplay& eglDisplay,
-                                       EGLConfig& eglConfig,
-                                       void* native_window,
-                                       const EGLint* attrib_list);
+  struct display mDisplay;
+  struct window mWindow;
 
   static void init_egl(void* nativeWindow,
                        EGLDisplay& eglDisplay,
                        EGLSurface& eglSurface,
                        EGLContext& eglContext);
 
-  static void fini_egl(struct display* display);
-
   static GLuint create_shader(const char* source, GLenum shader_type);
 
   static void init_gl(struct window* window);
-
-  static void destroy_surface(struct window* window);
-
-  static const struct wl_callback_listener frame_listener;
-
-  static void redraw(void* data, struct wl_callback* callback, uint32_t time);
 };

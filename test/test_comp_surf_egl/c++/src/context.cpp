@@ -1,20 +1,6 @@
 /*
- * Copyright 2022 Toyota Connected North America
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-/*
  * Copyright © 2011 Benjamin Franzke
+ * Copyright 2022 Toyota Connected North America
  *
  * Permission to use, copy, modify, distribute, and sell this software and its
  * documentation for any purpose is hereby granted without fee, provided that
@@ -39,7 +25,7 @@
 
 #include <EGL/eglext.h>
 #include <wayland-client.h>
-#include <wayland-egl.h>
+
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -53,25 +39,22 @@ CompSurfContext::CompSurfContext(const char* accessToken,
                                  int height,
                                  void* nativeWindow,
                                  const char* assetsPath,
-                                 comp_surf_CommitFrameFunction commit_frame,
-                                 void* commit_frame_user_data)
-    : accessToken_(accessToken),
-      width_(width),
-      height_(height),
-      assetsPath_(assetsPath),
-      commit_frame_(commit_frame),
-      commit_frame_user_data_(commit_frame_user_data),
-      window_{nullptr},
-      display_{nullptr} {
+                                 const char* cachePath)
+    : mAccessToken(accessToken),
+      mAssetsPath(assetsPath),
+      mCachePath(cachePath),
+      mWindow{nullptr},
+      mDisplay{nullptr} {
   std::cout << "[comp_surf_egl]" << std::endl;
-  std::cout << "assetsPath: " << assetsPath_ << std::endl;
+  std::cout << "assetsPath: " << mAssetsPath << std::endl;
+  std::cout << "cachePath: " << mCachePath << std::endl;
 
-  window_.display = &display_;
-  display_.window = &window_;
-  window_.window_size.width = width;
-  window_.window_size.height = height;
-  window_.geometry.width = width;
-  window_.geometry.height = height;
+  mDisplay.window = &mWindow;
+  mWindow.display = &mDisplay;
+  mWindow.window_size.width = width;
+  mWindow.window_size.height = height;
+  mWindow.geometry.width = width;
+  mWindow.geometry.height = height;
 
   typedef struct {
     struct wl_display* wl_display;
@@ -83,83 +66,52 @@ CompSurfContext::CompSurfContext(const char* accessToken,
   auto p = reinterpret_cast<wl*>(nativeWindow);
   assert(p);
 
-  window_.surface = p->wl_surface;
-  display_.egl.dpy = p->egl_display;
-  window_.native = p->egl_window;
+  mWindow.surface = p->wl_surface;
+  mDisplay.egl.dpy = p->egl_display;
+  mWindow.native = p->egl_window;
 
-  assert(window_.surface);
-  assert(display_.egl.dpy);
-  assert(window_.native);
+  assert(mWindow.surface);
+  assert(mDisplay.egl.dpy);
+  assert(mWindow.native);
 
-  init_egl(p->egl_window, p->egl_display, window_.egl_surface,
-           display_.egl.ctx);
+  init_egl(p->egl_window, p->egl_display, mWindow.egl_surface,
+           mDisplay.egl.ctx);
 
-  eglMakeCurrent(display_.egl.dpy, window_.egl_surface, window_.egl_surface,
-                 display_.egl.ctx);
+  eglMakeCurrent(mDisplay.egl.dpy, mWindow.egl_surface, mWindow.egl_surface,
+                 mDisplay.egl.ctx);
 
-  init_gl(&window_);
+  init_gl(&mWindow);
 
-  eglSwapInterval(display_.egl.dpy, 0);
+  eglSwapInterval(mDisplay.egl.dpy, 0);
 
-  redraw(this, nullptr, 0);
+  eglMakeCurrent(mDisplay.egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                 EGL_NO_CONTEXT);
 }
 
-CompSurfContext::~CompSurfContext() {
-  destroy_surface(&window_);
-  fini_egl(&display_);
+void CompSurfContext::de_initialize() const {
+  // prevent segfault
+  eglMakeCurrent(mDisplay.egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                 EGL_NO_CONTEXT);
+  eglTerminate(mDisplay.egl.dpy);
+  eglReleaseThread();
 }
 
 void CompSurfContext::run_task() {}
 
 void CompSurfContext::resize(int width, int height) {
-  window_.geometry.width = width;
-  window_.geometry.height = height;
+  mWindow.geometry.width = width;
+  mWindow.geometry.height = height;
 
-  window_.window_size = window_.geometry;
-}
-
-void* CompSurfContext::get_egl_proc_address(const char* address) {
-  const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-
-  if (extensions && (strstr(extensions, "EGL_EXT_platform_wayland") ||
-                     strstr(extensions, "EGL_KHR_platform_wayland"))) {
-    return (void*)eglGetProcAddress(address);
-  }
-
-  return nullptr;
-}
-
-EGLSurface CompSurfContext::create_egl_surface(EGLDisplay& eglDisplay,
-                                               EGLConfig& eglConfig,
-                                               void* native_window,
-                                               const EGLint* attrib_list) {
-  static PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC create_platform_window =
-      nullptr;
-
-  if (!create_platform_window) {
-    create_platform_window =
-        (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)get_egl_proc_address(
-            "eglCreatePlatformWindowSurfaceEXT");
-  }
-
-  if (create_platform_window)
-    return create_platform_window(eglDisplay, eglConfig, native_window,
-                                  attrib_list);
-
-  return eglCreateWindowSurface(
-      eglDisplay, eglConfig, (EGLNativeWindowType)native_window, attrib_list);
+  mWindow.window_size = mWindow.geometry;
 }
 
 void CompSurfContext::init_egl(void* nativeWindow,
                                EGLDisplay& eglDisplay,
                                EGLSurface& eglSurface,
                                EGLContext& eglContext) {
-  constexpr int kEglBufferSize = 24;
-
   EGLint config_attribs[] = {
       // clang-format off
             EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
             EGL_RED_SIZE, 1,
             EGL_GREEN_SIZE, 1,
@@ -171,7 +123,6 @@ void CompSurfContext::init_egl(void* nativeWindow,
 
   static const EGLint context_attribs[] = {
       // clang-format off
-            EGL_CONTEXT_MAJOR_VERSION, 3,
             EGL_CONTEXT_MAJOR_VERSION, 2,
             EGL_NONE
       // clang-format on
@@ -213,18 +164,10 @@ void CompSurfContext::init_egl(void* nativeWindow,
 
   eglContext =
       eglCreateContext(eglDisplay, egl_conf, EGL_NO_CONTEXT, context_attribs);
-  eglSurface = create_egl_surface(eglDisplay, egl_conf, nativeWindow, nullptr);
+
+  eglSurface = eglCreateWindowSurface(
+      eglDisplay, egl_conf, (EGLNativeWindowType)nativeWindow, nullptr);
   assert(eglSurface != EGL_NO_SURFACE);
-}
-
-void CompSurfContext::fini_egl(CompSurfContext::display* display) {
-  /* Required, otherwise segfault in egl_dri2.c: dri2_make_current()
-   * on eglReleaseThread(). */
-  eglMakeCurrent(display->egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
-                 EGL_NO_CONTEXT);
-
-  eglTerminate(display->egl.dpy);
-  eglReleaseThread();
 }
 
 GLuint CompSurfContext::create_shader(const char* source, GLenum shader_type) {
@@ -284,43 +227,14 @@ void CompSurfContext::init_gl(CompSurfContext::window* window) {
   window->gl.rotation_uniform = glGetUniformLocation(program, "rotation");
 }
 
-void CompSurfContext::destroy_surface(CompSurfContext::window* window) {
-  /* Require, otherwise segfault in egl_dri2.c: dri2_make_current()
-   * on eglReleaseThread(). */
-  eglMakeCurrent(window->display->egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
-                 EGL_NO_CONTEXT);
-
-  wl_egl_window_destroy(window->native);
-
-  wl_surface_destroy(window->surface);
-
-  if (window->callback)
-    wl_callback_destroy(window->callback);
-}
-
-const struct wl_callback_listener CompSurfContext::frame_listener = {
-    .done = redraw};
-
-void CompSurfContext::redraw(void* data,
-                             struct wl_callback* callback,
-                             uint32_t time) {
-  auto ctx = reinterpret_cast<CompSurfContext*>(data);
-  auto window = &ctx->window_;
-
+void CompSurfContext::draw_frame(CompSurfContext* ctx, uint32_t time) const {
   static const GLfloat verts[3][2] = {{-0.5, -0.5}, {0.5, -0.5}, {0, 0.5}};
   static const GLfloat colors[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
   GLfloat angle;
   GLfloat rotation[4][4] = {
       {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
-  static const int32_t speed_div = 5;
+  static const uint32_t speed_div = 5;
   static uint32_t start_time = 0;
-  struct wl_region* region;
-
-  assert(window->callback == callback);
-  window->callback = nullptr;
-
-  if (callback)
-    wl_callback_destroy(callback);
 
   if (start_time == 0)
     start_time = time;
@@ -331,28 +245,29 @@ void CompSurfContext::redraw(void* data,
   rotation[2][0] = -sin(angle);
   rotation[2][2] = cos(angle);
 
-  glViewport(0, 0, window->geometry.width, window->geometry.height);
+  eglMakeCurrent(mDisplay.egl.dpy, mWindow.egl_surface, mWindow.egl_surface,
+                 mDisplay.egl.ctx);
 
-  glUniformMatrix4fv(window->gl.rotation_uniform, 1, GL_FALSE,
+  glViewport(0, 0, mWindow.geometry.width, mWindow.geometry.height);
+
+  glUniformMatrix4fv(mWindow.gl.rotation_uniform, 1, GL_FALSE,
                      (GLfloat*)rotation);
 
   glClearColor(0.0, 0.0, 0.0, 0.5);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  glVertexAttribPointer(window->gl.pos, 2, GL_FLOAT, GL_FALSE, 0, verts);
-  glVertexAttribPointer(window->gl.col, 3, GL_FLOAT, GL_FALSE, 0, colors);
-  glEnableVertexAttribArray(window->gl.pos);
-  glEnableVertexAttribArray(window->gl.col);
+  glVertexAttribPointer(mWindow.gl.pos, 2, GL_FLOAT, GL_FALSE, 0, verts);
+  glVertexAttribPointer(mWindow.gl.col, 3, GL_FLOAT, GL_FALSE, 0, colors);
+  glEnableVertexAttribArray(mWindow.gl.pos);
+  glEnableVertexAttribArray(mWindow.gl.col);
 
   glDrawArrays(GL_TRIANGLES, 0, 3);
 
-  glDisableVertexAttribArray(window->gl.pos);
-  glDisableVertexAttribArray(window->gl.col);
+  glDisableVertexAttribArray(mWindow.gl.pos);
+  glDisableVertexAttribArray(mWindow.gl.col);
 
-  eglSwapBuffers(window->display->egl.dpy, window->egl_surface);
+  eglSwapBuffers(mWindow.display->egl.dpy, mWindow.egl_surface);
 
-  window->callback = wl_surface_frame(window->surface);
-  wl_callback_add_listener(window->callback, &CompSurfContext::frame_listener,
-                           data);
-  ctx->commit_frame_(ctx->commit_frame_user_data_);
+  eglMakeCurrent(mDisplay.egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                 EGL_NO_CONTEXT);
 }

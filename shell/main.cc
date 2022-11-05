@@ -20,7 +20,6 @@
 #include "configuration/configuration.h"
 
 #include <flutter/fml/command_line.h>
-#include <flutter/fml/logging.h>
 
 volatile bool running = true;
 
@@ -154,26 +153,29 @@ int main(int argc, char** argv) {
     if (cl.HasOption("window-type")) {
       cl.GetOptionValue("window-type", &config.view.window_type);
       if (config.view.window_type.empty()) {
-        FML_LOG(ERROR)
-            << "--window-type option requires an argument (e.g. --window-type=BG)";
+        FML_LOG(ERROR) << "--window-type option requires an argument (e.g. "
+                          "--window-type=BG)";
         return EXIT_FAILURE;
       }
       FML_DLOG(INFO) << "Window Type: " << config.view.window_type;
-      RemoveArgument(config.view.vm_args, "--window-type=" + config.view.window_type);
+      RemoveArgument(config.view.vm_args,
+                     "--window-type=" + config.view.window_type);
     }
     if (cl.HasOption("output-index")) {
       std::string output_index_str;
       cl.GetOptionValue("output-index", &output_index_str);
       if (!IsNumber(output_index_str)) {
-        FML_LOG(ERROR) << "--output-index option (Wayland Output Index) requires an integer value";
+        FML_LOG(ERROR) << "--output-index option (Wayland Output Index) "
+                          "requires an integer value";
         return EXIT_FAILURE;
       }
       if (output_index_str.empty()) {
-        FML_LOG(ERROR)
-            << "--output-index option (Wayland Output Index) requires an argument (e.g. --output-index=1)";
+        FML_LOG(ERROR) << "--output-index option (Wayland Output Index) "
+                          "requires an argument (e.g. --output-index=1)";
         return EXIT_FAILURE;
       }
-      config.view.wl_output_index = static_cast<uint32_t>(std::stoul(output_index_str));
+      config.view.wl_output_index =
+          static_cast<uint32_t>(std::stoul(output_index_str));
       RemoveArgument(config.view.vm_args, "--output-index=" + output_index_str);
     }
     if (cl.HasOption("xdg-shell-app-id")) {
