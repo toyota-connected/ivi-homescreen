@@ -36,26 +36,25 @@ typedef struct comp_surf_Context comp_surf_Context;
 
 uint32_t comp_surf_version();
 
-typedef const void *(*comp_surf_LoaderFunction)(void *userdata,
-                                                char const *procname);
-void comp_surf_load_functions(void *userdata,
+typedef const void* (*comp_surf_LoaderFunction)(void* userdata,
+                                                char const* procname);
+void comp_surf_load_functions(void* userdata,
                               comp_surf_LoaderFunction loaderFunction);
 
-comp_surf_Context *comp_surf_initialize(
-        const char *accessToken,
-        int width,
-        int height,
-        void *nativeWindow,
-        const char *assetsPath,
-        const char *cachePath);
+comp_surf_Context* comp_surf_initialize(const char* accessToken,
+                                        int width,
+                                        int height,
+                                        void* nativeWindow,
+                                        const char* assetsPath,
+                                        const char* cachePath);
 
-void comp_surf_de_initialize(comp_surf_Context *ctx);
+void comp_surf_de_initialize(comp_surf_Context* ctx);
 
-void comp_surf_run_task(comp_surf_Context *ctx);
+void comp_surf_run_task(comp_surf_Context* ctx);
 
-void comp_surf_draw_frame(comp_surf_Context *ctx, uint32_t time);
+void comp_surf_draw_frame(comp_surf_Context* ctx, uint32_t time);
 
-void comp_surf_resize(comp_surf_Context *ctx, int width, int height);
+void comp_surf_resize(comp_surf_Context* ctx, int width, int height);
 
 // #############################################################################
 //  services API

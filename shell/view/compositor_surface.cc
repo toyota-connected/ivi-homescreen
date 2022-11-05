@@ -16,7 +16,7 @@
 #include "../wayland/display.h"
 
 CompositorSurface::CompositorSurface(
-    size_t surface_index,
+    int64_t key,
     const std::shared_ptr<Display>& display,
     const std::shared_ptr<WaylandWindow>& window,
     void* h_module,
@@ -30,10 +30,11 @@ CompositorSurface::CompositorSurface(
     int32_t x,
     int32_t y,
     const FlutterView* view)
-    : m_surface_index(surface_index),
+    : m_key(key),
       m_h_module(h_module),
       m_assets_path(std::move(assets_path)),
       m_cache_path(GetCachePath(cache_folder.c_str())),
+      m_context(nullptr),
       m_type(type),
       m_z_order(z_order),
       m_sync(sync),
@@ -85,8 +86,8 @@ CompositorSurface::CompositorSurface(
 void CompositorSurface::Dispose(void* userdata) {
   auto* obj = (CompositorSurface*)userdata;
 
-  obj->m_api.de_initialize(obj->m_api.ctx);
-  obj->m_api.ctx = nullptr;
+  obj->m_api.de_initialize(obj->m_context);
+  obj->m_context = nullptr;
 
   if (obj->m_subsurface) {
     wl_subsurface_destroy(obj->m_subsurface);
@@ -104,14 +105,12 @@ void CompositorSurface::Dispose(void* userdata) {
   }
 
   if (obj->m_h_module) {
-#if 0  // TODO causes segfault
-      dlclose(obj->m_h_module);
-      obj->m_h_module = nullptr;
-#endif
+    dlclose(obj->m_h_module);
+    obj->m_h_module = nullptr;
   }
 }
 
-void CompositorSurface::init_api(CompositorSurface *obj) {
+void CompositorSurface::init_api(CompositorSurface* obj) {
   obj->m_api.version = reinterpret_cast<COMP_SURF_API_VERSION_T*>(
       dlsym(obj->m_h_module, "comp_surf_version"));
   if (obj->m_api.version) {
@@ -175,42 +174,42 @@ std::string CompositorSurface::GetCachePath(const char* folder) {
 }
 
 void CompositorSurface::InitializePlugin() {
-  m_api.ctx = m_api.initialize(
-      "", width_, height_, &m_wl, m_assets_path.c_str(), m_cache_path.c_str());
+  m_context = m_api.initialize("", width_, height_, &m_wl,
+                               m_assets_path.c_str(), m_cache_path.c_str());
 
   StartFrames();
 }
 
 void CompositorSurface::StartFrames() {
-  if(m_callback)
+  if (m_callback)
     wl_callback_destroy(m_callback);
   m_callback = nullptr;
   on_frame(this, m_callback, 0);
 }
 
 void CompositorSurface::StopFrames() {
-  if(m_callback)
+  if (m_callback)
     wl_callback_destroy(m_callback);
   m_callback = nullptr;
 }
 
-void CompositorSurface::on_frame(void* data, struct wl_callback* callback, uint32_t time) {
-
+void CompositorSurface::on_frame(void* data,
+                                 struct wl_callback* callback,
+                                 uint32_t time) {
   auto obj = reinterpret_cast<CompositorSurface*>(data);
 
-  assert(obj->m_callback == callback);
   obj->m_callback = nullptr;
 
   if (callback)
     wl_callback_destroy(callback);
 
-  obj->m_api.draw_frame(obj->m_api.ctx, time);
+  obj->m_api.draw_frame(obj->m_context, time);
 
   obj->m_callback = wl_surface_frame(obj->m_wl.surface);
   wl_callback_add_listener(obj->m_callback, &CompositorSurface::frame_listener,
                            data);
 
-  FlutterView::CommitView(obj->m_view, obj->m_surface_index);
+  wl_surface_commit(obj->m_wl.surface);
 }
 
 const struct wl_callback_listener CompositorSurface::frame_listener = {

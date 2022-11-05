@@ -146,13 +146,9 @@ class Engine {
 
 #endif
 
-  Backend* GetBackend() {
-    return m_backend;
-  }
+  Backend* GetBackend() { return m_backend; }
 
-  FlutterView* GetView() {
-    return m_view;
-  }
+  FlutterView* GetView() { return m_view; }
 
  private:
   size_t m_index;

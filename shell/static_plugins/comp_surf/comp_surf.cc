@@ -149,8 +149,9 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         y = std::get<int32_t>(it->second);
       }
 
-      auto index = view->CreateSurface(h_module, assets_path, cache_folder,
-                                       type, z_order, sync, width, height, x, y);
+      auto index =
+          view->CreateSurface(h_module, assets_path, cache_folder, type,
+                              z_order, sync, width, height, x, y);
 
       auto context = view->GetSurfaceContext(index);
 

@@ -21,7 +21,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <shared_mutex>
 
 #include <wayland-client.h>
 #include <wayland-cursor.h>
@@ -122,8 +121,6 @@ class Display {
     bool bound_ok{};
     uint32_t version = 0;
   } m_agl;
-
-  std::shared_mutex m_wayland_events_mutex;
 
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};

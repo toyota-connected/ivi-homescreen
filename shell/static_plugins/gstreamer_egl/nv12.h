@@ -142,4 +142,4 @@ class Shader {
   }
 };
 
-};  // namespace nv12
+}  // namespace nv12

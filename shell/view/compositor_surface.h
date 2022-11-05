@@ -34,7 +34,7 @@ class CompositorSurface {
     de_sync,
   };
 
-  CompositorSurface(size_t surface_index,
+  CompositorSurface(int64_t key,
                     const std::shared_ptr<Display>& wayland_display,
                     const std::shared_ptr<WaylandWindow>& wayland_window,
                     void* h_module,
@@ -53,16 +53,14 @@ class CompositorSurface {
 
   void InitializePlugin();
 
-  [[nodiscard]] void* GetContext() const { return m_api.ctx; }
+  [[nodiscard]] void* GetContext() const { return m_context; }
 
-  void RunTask() const { m_api.run_task(m_api.ctx); }
+  void RunTask() const { m_api.run_task(m_context); }
 
   static void Dispose(void* userdata);
 
   void StartFrames();
   void StopFrames();
-
-  [[nodiscard]] wl_surface* GetSurface() const { return m_wl.surface; }
 
   static std::string GetCachePath(const char* folder);
 
@@ -79,7 +77,6 @@ class CompositorSurface {
   struct wl_callback* m_callback;
   const FlutterView* m_view;
 
-  size_t m_surface_index;
   wl_subsurface* m_subsurface;
   void* m_h_module;
   std::string m_assets_path;
@@ -91,10 +88,10 @@ class CompositorSurface {
   int height_;
   int32_t m_origin_x;
   int32_t m_origin_y;
+  int64_t m_key;
 
   struct {
     COMP_SURF_API_VERSION_T* version{};
-    COMP_SURF_API_CONTEXT_T* ctx{};
     COMP_SURF_API_LOAD_FUNCTIONS* loader{};
     COMP_SURF_API_INITIALIZE_T* initialize{};
     COMP_SURF_API_DE_INITIALIZE_T* de_initialize{};
@@ -103,7 +100,9 @@ class CompositorSurface {
     COMP_SURF_API_RESIZE_T* resize{};
   } m_api;
 
-  static void init_api(CompositorSurface *obj);
+  COMP_SURF_API_CONTEXT_T* m_context{};
+
+  static void init_api(CompositorSurface* obj);
   static void on_frame(void* data, struct wl_callback* callback, uint32_t time);
   static const struct wl_callback_listener frame_listener;
 };
