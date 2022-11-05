@@ -504,7 +504,6 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
                             double scroll_delta_x,
                             double scroll_delta_y,
                             int64_t buttons) {
-
   FlutterPointerEvent msg = {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,

@@ -107,11 +107,11 @@ class VulkanFunctions {
 #elif defined(_WIN32)
       FreeLibrary(library);
 #endif
-      library = 0;
+      library = nullptr;
     }
   };
 
-  VulkanLibrary& get_vulkan_library() {
+  static VulkanLibrary& get_vulkan_library() {
     static VulkanLibrary lib;
     return lib;
   }
@@ -278,7 +278,7 @@ auto get_vector(std::vector<T>& out, F&& f, Ts&&... ts) -> VkResult {
     err = f(ts..., &count, nullptr);
     if (err != VK_SUCCESS) {
       return err;
-    };
+    }
     out.resize(count);
     err = f(ts..., &count, out.data());
     out.resize(count);

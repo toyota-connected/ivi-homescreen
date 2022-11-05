@@ -17,7 +17,6 @@
 #ifndef COMP_SURF_EGL_H
 #define COMP_SURF_EGL_H
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -42,20 +41,18 @@ typedef const void* (*comp_surf_LoaderFunction)(void* userdata,
 void comp_surf_load_functions(void* userdata,
                               comp_surf_LoaderFunction loaderFunction);
 
-typedef void (*comp_surf_CommitFrameFunction)(void* userdata);
-
-comp_surf_Context* comp_surf_initialize(
-    const char* accessToken,
-    int width,
-    int height,
-    void* nativeWindow,
-    const char* assetsPath,
-    comp_surf_CommitFrameFunction commitFrameFunction,
-    void* commitFrameFunctionUserdata);
+comp_surf_Context* comp_surf_initialize(const char* accessToken,
+                                        int width,
+                                        int height,
+                                        void* nativeWindow,
+                                        const char* assetsPath,
+                                        const char* cachePath);
 
 void comp_surf_de_initialize(comp_surf_Context* ctx);
 
 void comp_surf_run_task(comp_surf_Context* ctx);
+
+void comp_surf_draw_frame(comp_surf_Context* ctx, uint32_t time);
 
 void comp_surf_resize(comp_surf_Context* ctx, int width, int height);
 

@@ -245,7 +245,7 @@ struct GenericFeaturesPNextNode {
 
   VkStructureType sType = static_cast<VkStructureType>(0);
   void* pNext = nullptr;
-  VkBool32 fields[field_capacity];
+  VkBool32 fields[field_capacity]{};
 };
 
 }  // namespace detail
@@ -999,10 +999,10 @@ struct Swapchain {
   uint32_t image_count = 0;
   VkFormat image_format =
       VK_FORMAT_UNDEFINED;  // The image format actually used when creating the
-                            // swapchain.
+  // swapchain.
   VkColorSpaceKHR color_space =
       VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;  // The color space actually used when
-                                          // creating the swapchain.
+  // creating the swapchain.
   VkImageUsageFlags image_usage_flags = 0;
   VkExtent2D extent = {0, 0};
   // The value of minImageCount actually used when creating the swapchain; note
@@ -1011,7 +1011,7 @@ struct Swapchain {
   uint32_t requested_min_image_count = 0;
   VkPresentModeKHR present_mode =
       VK_PRESENT_MODE_IMMEDIATE_KHR;  // The present mode actually used when
-                                      // creating the swapchain.
+  // creating the swapchain.
   uint32_t instance_version = VKB_VK_API_VERSION_1_0;
   VkAllocationCallbacks* allocation_callbacks = VK_NULL_HANDLE;
 

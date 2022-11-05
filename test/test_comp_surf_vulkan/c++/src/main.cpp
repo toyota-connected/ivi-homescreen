@@ -62,31 +62,34 @@ void comp_surf_load_functions(void* userdata,
 }
 
 API_EXPORT
-comp_surf_Context* comp_surf_initialize(
-    const char* accessToken,
-    int width,
-    int height,
-    void* nativeWindow,
-    const char* assetsPath,
-    comp_surf_CommitFrameFunction commit_frame,
-    void* commit_frame_user_data) {
+comp_surf_Context* comp_surf_initialize(const char* accessToken,
+                                        int width,
+                                        int height,
+                                        void* nativeWindow,
+                                        const char* assetsPath,
+                                        const char* cachePath) {
   auto* ctx = new comp_surf_Context;
   ctx->context = std::make_unique<CompSurfContext>(
-      accessToken, width, height, nativeWindow, assetsPath, commit_frame,
-      commit_frame_user_data);
+      accessToken, width, height, nativeWindow, assetsPath, cachePath);
   return ctx;
 }
 
 API_EXPORT
 void comp_surf_de_initialize(comp_surf_Context* ctx) {
   checkContext(ctx);
-  ctx->context.release();
+  auto res = ctx->context.release();
+  assert(res != nullptr);
   delete ctx;
 }
 
 API_EXPORT
 void comp_surf_run_task(comp_surf_Context* ctx) {
   getContext(ctx).run_task();
+}
+
+API_EXPORT
+void comp_surf_draw_frame(comp_surf_Context* ctx, uint32_t time) {
+  getContext(ctx).draw_frame(time);
 }
 
 API_EXPORT

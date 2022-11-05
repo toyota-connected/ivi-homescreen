@@ -147,7 +147,7 @@ void Display::registry_handle_global(void* data,
     d->m_subcompositor = static_cast<struct wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
-    } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+  } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
     d->m_xdg_wm_base = static_cast<struct xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface,
                          std::min(static_cast<uint32_t>(3), version)));
