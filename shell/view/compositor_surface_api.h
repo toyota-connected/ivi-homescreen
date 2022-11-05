@@ -25,7 +25,8 @@ typedef COMP_SURF_API_CONTEXT_T* COMP_SURF_API_INITIALIZE_T(
 
 typedef void COMP_SURF_API_DE_INITIALIZE_T(COMP_SURF_API_CONTEXT_T* ctx);
 
-typedef void COMP_SURF_API_DRAW_FRAME_T(COMP_SURF_API_CONTEXT_T* ctx, uint32_t time);
+typedef void COMP_SURF_API_DRAW_FRAME_T(COMP_SURF_API_CONTEXT_T* ctx,
+                                        uint32_t time);
 
 typedef void COMP_SURF_API_RUN_TASK_T(COMP_SURF_API_CONTEXT_T* ctx);
 

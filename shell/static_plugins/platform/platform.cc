@@ -54,11 +54,9 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         res.SetObject();
         auto& allocator = res.GetAllocator();
 
-        FML_DLOG(INFO)
-            << "(" << engine->GetIndex()
-            << ") Platform: Clipboard.hasStrings\n\ttext: \""
-            << g_clipboard
-            << "\"\n";
+        FML_DLOG(INFO) << "(" << engine->GetIndex()
+                       << ") Platform: Clipboard.hasStrings\n\ttext: \""
+                       << g_clipboard << "\"\n";
 
         rapidjson::Value s;
         s = rapidjson::StringRef(g_clipboard.c_str());

@@ -230,7 +230,7 @@ void WaylandVulkanBackend::setupDebugMessenger() {
     if (bluevk::vkCreateDebugReportCallbackEXT(
             state_.instance, &cbinfo, VKALLOC, &mDebugCallback) != VK_SUCCESS) {
       FML_LOG(ERROR) << "Unable to create Vulkan debug callback";
-    };
+    }
   }
 }
 
@@ -743,7 +743,7 @@ VKAPI_ATTR VkBool32
     FML_LOG(WARNING) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
                      << cbdata->pMessage;
   }
-  return VK_FALSE;
+  return VK_TRUE;
 }
 
 FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(

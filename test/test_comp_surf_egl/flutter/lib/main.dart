@@ -77,18 +77,18 @@ class _MyAppState extends State<MyApp> {
                 children: [
                   Expanded(
                       child: SurfaceInstance(
-                          name: 'Texture(0)',
+                          name: 'Surface(0)',
                           view: 0,
                           type: 'egl',
                           z_order: 'above',
                           sync: 'sync',
                           x: 10,
                           y: 10,
-                          width: 640,
-                          height: 480,
-                          module: 'libnav_render.so',
-                          asset_path: '/home/joel.winarske@toyotaconnected.com/development/nav_render_mapbox/assets',
-                          cache_folder: '.config/navigation/instance0'
+                          width: 800,
+                          height: 600,
+                          module: 'libcomp_surf_egl.so',
+                          asset_path: '/usr/local/share/comp_surf_egl/assets',
+                          cache_folder: '.config/comp_surf_egl/instance0'
                       ),
                   ),
                 ],
@@ -100,18 +100,18 @@ class _MyAppState extends State<MyApp> {
                 children: [
                   Expanded(
                       child: SurfaceInstance(
-                          name: 'Navigation(0)',
+                          name: 'Surface(0)',
                           view: 0,
                           type: 'egl',
                           z_order: 'above',
                           sync: 'sync',
-                          x: 10,
-                          y: 620,
+                          x: 820,
+                          y: 10,
                           width: 800,
                           height: 600,
-                          module: 'libnav_render.so',
-                          asset_path: '/home/joel.winarske@toyotaconnected.com/development/nav_render_mapbox/assets',
-                          cache_folder: '.config/navigation/instance1'
+                          module: 'libcomp_surf_egl.so',
+                          asset_path: '/usr/local/share/comp_surf_egl/assets',
+                          cache_folder: '.config/comp_surf_egl/instance1'
                       ),
                   ),
                 ],

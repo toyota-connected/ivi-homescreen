@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 
 #include "configuration/configuration.h"
@@ -62,13 +63,12 @@ class FlutterView {
                        int32_t x,
                        int32_t y);
 
-  void DisposeSurface(size_t index);
+  void DisposeSurface(int64_t index);
 
-  std::vector<std::unique_ptr<CompositorSurface>> m_comp_surf;
+  typedef std::map<int64_t, std::unique_ptr<CompositorSurface>> surface_array_t;
+  surface_array_t m_comp_surf;
 
-  void* GetSurfaceContext(size_t index);
-
-  static void CommitView(const FlutterView *obj, size_t index);
+  void* GetSurfaceContext(int64_t index);
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);

@@ -26,234 +26,236 @@
 #include <vulkan/vulkan_wayland.h>
 
 struct CompSurfContext {
-public:
-    static uint32_t version();
+ public:
+  static uint32_t version();
 
-    CompSurfContext(const char *accessToken,
-                    int width,
-                    int height,
-                    void *nativeWindow,
-                    const char *assetsPath);
+  CompSurfContext(const char* accessToken,
+                  int width,
+                  int height,
+                  void* nativeWindow,
+                  const char* assetsPath,
+                  const char* cachePath);
 
-    ~CompSurfContext();
+  ~CompSurfContext();
 
-    CompSurfContext(const CompSurfContext &) = delete;
+  CompSurfContext(const CompSurfContext&) = delete;
 
-    CompSurfContext(CompSurfContext &&) = delete;
+  CompSurfContext(CompSurfContext&&) = delete;
 
-    CompSurfContext &operator=(const CompSurfContext &) = delete;
+  CompSurfContext& operator=(const CompSurfContext&) = delete;
 
-    void run_task();
+  void run_task();
 
-    void draw_frame(uint32_t time);
+  void draw_frame(uint32_t time);
 
-    static void resize(int width, int height);
+  static void resize(int width, int height);
 
-private:
-    static constexpr int kMaxFramesInFlight = 2;
+ private:
+  static constexpr int kMaxFramesInFlight = 2;
 
-    struct VulkanLibrary {
-        void *library;
+  struct VulkanLibrary {
+    void* library;
 
-        VulkanLibrary() {
-            library = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
-            if (!library)
-                library = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
-            if (!library)
-                return;
-            vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-                    dlsym(library, "vkGetInstanceProcAddr"));
-        }
+    VulkanLibrary() {
+      library = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+      if (!library)
+        library = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
+      if (!library)
+        return;
+      vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+          dlsym(library, "vkGetInstanceProcAddr"));
+    }
 
-        void close() {
-            dlclose(library);
-            library = nullptr;
-        }
+    void close() {
+      dlclose(library);
+      library = nullptr;
+    }
 
-        void init(VkInstance instance) {
-            vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr) vkGetInstanceProcAddr(
-                    instance, "vkGetDeviceProcAddr");
-            vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR) vkGetInstanceProcAddr(
-                    instance, "vkDestroySurfaceKHR");
-            vkCreateWaylandSurfaceKHR =
-                    (PFN_vkCreateWaylandSurfaceKHR) vkGetInstanceProcAddr(
-                            instance, "vkCreateWaylandSurfaceKHR");
-        }
+    void init(VkInstance instance) {
+      vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(
+          instance, "vkGetDeviceProcAddr");
+      vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)vkGetInstanceProcAddr(
+          instance, "vkDestroySurfaceKHR");
+      vkCreateWaylandSurfaceKHR =
+          (PFN_vkCreateWaylandSurfaceKHR)vkGetInstanceProcAddr(
+              instance, "vkCreateWaylandSurfaceKHR");
+    }
 
-        void init(VkDevice device) {
-            vkCreateRenderPass = (PFN_vkCreateRenderPass) vkGetDeviceProcAddr(
-                    device, "vkCreateRenderPass");
-            vkCreateShaderModule = (PFN_vkCreateShaderModule) vkGetDeviceProcAddr(
-                    device, "vkCreateShaderModule");
-            vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout) vkGetDeviceProcAddr(
-                    device, "vkCreatePipelineLayout");
-            vkCreateGraphicsPipelines =
-                    (PFN_vkCreateGraphicsPipelines) vkGetDeviceProcAddr(
-                            device, "vkCreateGraphicsPipelines");
-            vkDestroyShaderModule = (PFN_vkDestroyShaderModule) vkGetDeviceProcAddr(
-                    device, "vkDestroyShaderModule");
-            vkCreateFramebuffer = (PFN_vkCreateFramebuffer) vkGetDeviceProcAddr(
-                    device, "vkCreateFramebuffer");
-            vkCreateCommandPool = (PFN_vkCreateCommandPool) vkGetDeviceProcAddr(
-                    device, "vkCreateCommandPool");
-            vkAllocateCommandBuffers =
-                    (PFN_vkAllocateCommandBuffers) vkGetDeviceProcAddr(
-                            device, "vkAllocateCommandBuffers");
-            vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer) vkGetDeviceProcAddr(
-                    device, "vkBeginCommandBuffer");
-            vkEndCommandBuffer = (PFN_vkEndCommandBuffer) vkGetDeviceProcAddr(
-                    device, "vkEndCommandBuffer");
-            vkCmdSetViewport =
-                    (PFN_vkCmdSetViewport) vkGetDeviceProcAddr(device, "vkCmdSetViewport");
-            vkCmdSetScissor =
-                    (PFN_vkCmdSetScissor) vkGetDeviceProcAddr(device, "vkCmdSetScissor");
-            vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass) vkGetDeviceProcAddr(
-                    device, "vkCmdBeginRenderPass");
-            vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass) vkGetDeviceProcAddr(
-                    device, "vkCmdEndRenderPass");
-            vkCmdBindPipeline = (PFN_vkCmdBindPipeline) vkGetDeviceProcAddr(
-                    device, "vkCmdBindPipeline");
-            vkCmdDraw = (PFN_vkCmdDraw) vkGetDeviceProcAddr(device, "vkCmdDraw");
-            vkCreateSemaphore = (PFN_vkCreateSemaphore) vkGetDeviceProcAddr(
-                    device, "vkCreateSemaphore");
-            vkCreateFence =
-                    (PFN_vkCreateFence) vkGetDeviceProcAddr(device, "vkCreateFence");
-            vkDeviceWaitIdle =
-                    (PFN_vkDeviceWaitIdle) vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
-            vkDestroyCommandPool = (PFN_vkDestroyCommandPool) vkGetDeviceProcAddr(
-                    device, "vkDestroyCommandPool");
-            vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer) vkGetDeviceProcAddr(
-                    device, "vkDestroyFramebuffer");
-            vkWaitForFences =
-                    (PFN_vkWaitForFences) vkGetDeviceProcAddr(device, "vkWaitForFences");
-            vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR) vkGetDeviceProcAddr(
-                    device, "vkAcquireNextImageKHR");
-            vkResetFences =
-                    (PFN_vkResetFences) vkGetDeviceProcAddr(device, "vkResetFences");
-            vkQueueSubmit =
-                    (PFN_vkQueueSubmit) vkGetDeviceProcAddr(device, "vkQueueSubmit");
-            vkQueuePresentKHR = (PFN_vkQueuePresentKHR) vkGetDeviceProcAddr(
-                    device, "vkQueuePresentKHR");
-            vkDestroySemaphore = (PFN_vkDestroySemaphore) vkGetDeviceProcAddr(
-                    device, "vkDestroySemaphore");
-            vkDestroyFence =
-                    (PFN_vkDestroyFence) vkGetDeviceProcAddr(device, "vkDestroyFence");
-            vkDestroyPipeline = (PFN_vkDestroyPipeline) vkGetDeviceProcAddr(
-                    device, "vkDestroyPipeline");
-            vkDestroyPipelineLayout =
-                    (PFN_vkDestroyPipelineLayout) vkGetDeviceProcAddr(
-                            device, "vkDestroyPipelineLayout");
-            vkDestroyRenderPass = (PFN_vkDestroyRenderPass) vkGetDeviceProcAddr(
-                    device, "vkDestroyRenderPass");
-        }
+    void init(VkDevice device) {
+      vkCreateRenderPass = (PFN_vkCreateRenderPass)vkGetDeviceProcAddr(
+          device, "vkCreateRenderPass");
+      vkCreateShaderModule = (PFN_vkCreateShaderModule)vkGetDeviceProcAddr(
+          device, "vkCreateShaderModule");
+      vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)vkGetDeviceProcAddr(
+          device, "vkCreatePipelineLayout");
+      vkCreateGraphicsPipelines =
+          (PFN_vkCreateGraphicsPipelines)vkGetDeviceProcAddr(
+              device, "vkCreateGraphicsPipelines");
+      vkDestroyShaderModule = (PFN_vkDestroyShaderModule)vkGetDeviceProcAddr(
+          device, "vkDestroyShaderModule");
+      vkCreateFramebuffer = (PFN_vkCreateFramebuffer)vkGetDeviceProcAddr(
+          device, "vkCreateFramebuffer");
+      vkCreateCommandPool = (PFN_vkCreateCommandPool)vkGetDeviceProcAddr(
+          device, "vkCreateCommandPool");
+      vkAllocateCommandBuffers =
+          (PFN_vkAllocateCommandBuffers)vkGetDeviceProcAddr(
+              device, "vkAllocateCommandBuffers");
+      vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetDeviceProcAddr(
+          device, "vkBeginCommandBuffer");
+      vkEndCommandBuffer = (PFN_vkEndCommandBuffer)vkGetDeviceProcAddr(
+          device, "vkEndCommandBuffer");
+      vkCmdSetViewport =
+          (PFN_vkCmdSetViewport)vkGetDeviceProcAddr(device, "vkCmdSetViewport");
+      vkCmdSetScissor =
+          (PFN_vkCmdSetScissor)vkGetDeviceProcAddr(device, "vkCmdSetScissor");
+      vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)vkGetDeviceProcAddr(
+          device, "vkCmdBeginRenderPass");
+      vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)vkGetDeviceProcAddr(
+          device, "vkCmdEndRenderPass");
+      vkCmdBindPipeline = (PFN_vkCmdBindPipeline)vkGetDeviceProcAddr(
+          device, "vkCmdBindPipeline");
+      vkCmdDraw = (PFN_vkCmdDraw)vkGetDeviceProcAddr(device, "vkCmdDraw");
+      vkCreateSemaphore = (PFN_vkCreateSemaphore)vkGetDeviceProcAddr(
+          device, "vkCreateSemaphore");
+      vkCreateFence =
+          (PFN_vkCreateFence)vkGetDeviceProcAddr(device, "vkCreateFence");
+      vkDeviceWaitIdle =
+          (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
+      vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetDeviceProcAddr(
+          device, "vkDestroyCommandPool");
+      vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)vkGetDeviceProcAddr(
+          device, "vkDestroyFramebuffer");
+      vkWaitForFences =
+          (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
+      vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(
+          device, "vkAcquireNextImageKHR");
+      vkResetFences =
+          (PFN_vkResetFences)vkGetDeviceProcAddr(device, "vkResetFences");
+      vkQueueSubmit =
+          (PFN_vkQueueSubmit)vkGetDeviceProcAddr(device, "vkQueueSubmit");
+      vkQueuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(
+          device, "vkQueuePresentKHR");
+      vkDestroySemaphore = (PFN_vkDestroySemaphore)vkGetDeviceProcAddr(
+          device, "vkDestroySemaphore");
+      vkDestroyFence =
+          (PFN_vkDestroyFence)vkGetDeviceProcAddr(device, "vkDestroyFence");
+      vkDestroyPipeline = (PFN_vkDestroyPipeline)vkGetDeviceProcAddr(
+          device, "vkDestroyPipeline");
+      vkDestroyPipelineLayout =
+          (PFN_vkDestroyPipelineLayout)vkGetDeviceProcAddr(
+              device, "vkDestroyPipelineLayout");
+      vkDestroyRenderPass = (PFN_vkDestroyRenderPass)vkGetDeviceProcAddr(
+          device, "vkDestroyRenderPass");
+    }
 
-        PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = VK_NULL_HANDLE;
-        PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = VK_NULL_HANDLE;
+    PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = VK_NULL_HANDLE;
+    PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = VK_NULL_HANDLE;
 
-        PFN_vkCreateRenderPass vkCreateRenderPass = VK_NULL_HANDLE;
-        PFN_vkCreateShaderModule vkCreateShaderModule = VK_NULL_HANDLE;
-        PFN_vkCreatePipelineLayout vkCreatePipelineLayout = VK_NULL_HANDLE;
-        PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines = VK_NULL_HANDLE;
-        PFN_vkDestroyShaderModule vkDestroyShaderModule = VK_NULL_HANDLE;
-        PFN_vkCreateFramebuffer vkCreateFramebuffer = VK_NULL_HANDLE;
-        PFN_vkCreateCommandPool vkCreateCommandPool = VK_NULL_HANDLE;
-        PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers = VK_NULL_HANDLE;
-        PFN_vkBeginCommandBuffer vkBeginCommandBuffer = VK_NULL_HANDLE;
-        PFN_vkEndCommandBuffer vkEndCommandBuffer = VK_NULL_HANDLE;
-        PFN_vkCmdSetViewport vkCmdSetViewport = VK_NULL_HANDLE;
-        PFN_vkCmdSetScissor vkCmdSetScissor = VK_NULL_HANDLE;
-        PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass = VK_NULL_HANDLE;
-        PFN_vkCmdEndRenderPass vkCmdEndRenderPass = VK_NULL_HANDLE;
-        PFN_vkCmdBindPipeline vkCmdBindPipeline = VK_NULL_HANDLE;
-        PFN_vkCmdDraw vkCmdDraw = VK_NULL_HANDLE;
-        PFN_vkCreateSemaphore vkCreateSemaphore = VK_NULL_HANDLE;
-        PFN_vkCreateFence vkCreateFence = VK_NULL_HANDLE;
-        PFN_vkDeviceWaitIdle vkDeviceWaitIdle = VK_NULL_HANDLE;
-        PFN_vkDestroyCommandPool vkDestroyCommandPool = VK_NULL_HANDLE;
-        PFN_vkDestroyFramebuffer vkDestroyFramebuffer = VK_NULL_HANDLE;
-        PFN_vkWaitForFences vkWaitForFences = VK_NULL_HANDLE;
-        PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR = VK_NULL_HANDLE;
-        PFN_vkResetFences vkResetFences = VK_NULL_HANDLE;
-        PFN_vkQueueSubmit vkQueueSubmit = VK_NULL_HANDLE;
-        PFN_vkQueuePresentKHR vkQueuePresentKHR = VK_NULL_HANDLE;
-        PFN_vkDestroySemaphore vkDestroySemaphore = VK_NULL_HANDLE;
-        PFN_vkDestroyFence vkDestroyFence = VK_NULL_HANDLE;
-        PFN_vkDestroyPipeline vkDestroyPipeline = VK_NULL_HANDLE;
-        PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout = VK_NULL_HANDLE;
-        PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = VK_NULL_HANDLE;
-        PFN_vkDestroyRenderPass vkDestroyRenderPass = VK_NULL_HANDLE;
-        PFN_vkCreateWaylandSurfaceKHR vkCreateWaylandSurfaceKHR = VK_NULL_HANDLE;
-    };
+    PFN_vkCreateRenderPass vkCreateRenderPass = VK_NULL_HANDLE;
+    PFN_vkCreateShaderModule vkCreateShaderModule = VK_NULL_HANDLE;
+    PFN_vkCreatePipelineLayout vkCreatePipelineLayout = VK_NULL_HANDLE;
+    PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines = VK_NULL_HANDLE;
+    PFN_vkDestroyShaderModule vkDestroyShaderModule = VK_NULL_HANDLE;
+    PFN_vkCreateFramebuffer vkCreateFramebuffer = VK_NULL_HANDLE;
+    PFN_vkCreateCommandPool vkCreateCommandPool = VK_NULL_HANDLE;
+    PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers = VK_NULL_HANDLE;
+    PFN_vkBeginCommandBuffer vkBeginCommandBuffer = VK_NULL_HANDLE;
+    PFN_vkEndCommandBuffer vkEndCommandBuffer = VK_NULL_HANDLE;
+    PFN_vkCmdSetViewport vkCmdSetViewport = VK_NULL_HANDLE;
+    PFN_vkCmdSetScissor vkCmdSetScissor = VK_NULL_HANDLE;
+    PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass = VK_NULL_HANDLE;
+    PFN_vkCmdEndRenderPass vkCmdEndRenderPass = VK_NULL_HANDLE;
+    PFN_vkCmdBindPipeline vkCmdBindPipeline = VK_NULL_HANDLE;
+    PFN_vkCmdDraw vkCmdDraw = VK_NULL_HANDLE;
+    PFN_vkCreateSemaphore vkCreateSemaphore = VK_NULL_HANDLE;
+    PFN_vkCreateFence vkCreateFence = VK_NULL_HANDLE;
+    PFN_vkDeviceWaitIdle vkDeviceWaitIdle = VK_NULL_HANDLE;
+    PFN_vkDestroyCommandPool vkDestroyCommandPool = VK_NULL_HANDLE;
+    PFN_vkDestroyFramebuffer vkDestroyFramebuffer = VK_NULL_HANDLE;
+    PFN_vkWaitForFences vkWaitForFences = VK_NULL_HANDLE;
+    PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR = VK_NULL_HANDLE;
+    PFN_vkResetFences vkResetFences = VK_NULL_HANDLE;
+    PFN_vkQueueSubmit vkQueueSubmit = VK_NULL_HANDLE;
+    PFN_vkQueuePresentKHR vkQueuePresentKHR = VK_NULL_HANDLE;
+    PFN_vkDestroySemaphore vkDestroySemaphore = VK_NULL_HANDLE;
+    PFN_vkDestroyFence vkDestroyFence = VK_NULL_HANDLE;
+    PFN_vkDestroyPipeline vkDestroyPipeline = VK_NULL_HANDLE;
+    PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout = VK_NULL_HANDLE;
+    PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = VK_NULL_HANDLE;
+    PFN_vkDestroyRenderPass vkDestroyRenderPass = VK_NULL_HANDLE;
+    PFN_vkCreateWaylandSurfaceKHR vkCreateWaylandSurfaceKHR = VK_NULL_HANDLE;
+  };
 
-    struct RenderData {
-        VkQueue graphics_queue;
-        VkQueue present_queue;
+  struct RenderData {
+    VkQueue graphics_queue;
+    VkQueue present_queue;
 
-        std::vector<VkImage> swapchain_images;
-        std::vector<VkImageView> swapchain_image_views;
-        std::vector<VkFramebuffer> framebuffers;
+    std::vector<VkImage> swapchain_images;
+    std::vector<VkImageView> swapchain_image_views;
+    std::vector<VkFramebuffer> framebuffers;
 
-        VkRenderPass render_pass;
-        VkPipelineLayout pipeline_layout;
-        VkPipeline graphics_pipeline;
+    VkRenderPass render_pass;
+    VkPipelineLayout pipeline_layout;
+    VkPipeline graphics_pipeline;
 
-        VkCommandPool command_pool;
-        std::vector<VkCommandBuffer> command_buffers;
+    VkCommandPool command_pool;
+    std::vector<VkCommandBuffer> command_buffers;
 
-        std::vector<VkSemaphore> available_semaphores;
-        std::vector<VkSemaphore> finished_semaphore;
-        std::vector<VkFence> in_flight_fences;
-        std::vector<VkFence> image_in_flight;
-        size_t current_frame = 0;
-    } render_data_;
+    std::vector<VkSemaphore> available_semaphores;
+    std::vector<VkSemaphore> finished_semaphore;
+    std::vector<VkFence> in_flight_fences;
+    std::vector<VkFence> image_in_flight;
+    size_t current_frame = 0;
+  } render_data_;
 
-    std::string accessToken_;
-    std::string assetsPath_;
+  std::string accessToken_;
+  std::string assetsPath_;
+  std::string cachePath_;
 
-    struct Init {
-        void *window{};
-        VulkanLibrary vk_lib;
-        vkb::Instance instance;
-        VkSurfaceKHR surface{};
-        vkb::Device device;
-        vkb::Swapchain swapchain;
+  struct Init {
+    void* window{};
+    VulkanLibrary vk_lib;
+    vkb::Instance instance;
+    VkSurfaceKHR surface{};
+    vkb::Device device;
+    vkb::Swapchain swapchain;
 
-        // convenience
-        VulkanLibrary *operator->() { return &vk_lib; }
-    } init_;
+    // convenience
+    VulkanLibrary* operator->() { return &vk_lib; }
+  } init_;
 
-    static VkSurfaceKHR createVkSurfaceKHR(Init &init);
+  static VkSurfaceKHR createVkSurfaceKHR(Init& init);
 
-    static int device_initialization(Init &init);
+  static int device_initialization(Init& init);
 
-    static int create_swapchain(Init &init);
+  static int create_swapchain(Init& init);
 
-    static int get_queues(Init &init, RenderData &data);
+  static int get_queues(Init& init, RenderData& data);
 
-    static int create_render_pass(Init &init, RenderData &data);
+  static int create_render_pass(Init& init, RenderData& data);
 
-    static std::vector<char> readFile(const std::string &filename);
+  static std::vector<char> readFile(const std::string& filename);
 
-    static VkShaderModule createShaderModule(Init &init,
-                                             const std::vector<char> &code);
+  static VkShaderModule createShaderModule(Init& init,
+                                           const std::vector<char>& code);
 
-    static int create_graphics_pipeline(Init &init,
-                                        RenderData &data,
-                                        std::string &assetsPath);
+  static int create_graphics_pipeline(Init& init,
+                                      RenderData& data,
+                                      std::string& assetsPath);
 
-    static int create_framebuffers(Init &init, RenderData &data);
+  static int create_framebuffers(Init& init, RenderData& data);
 
-    static int create_command_pool(Init &init, RenderData &data);
+  static int create_command_pool(Init& init, RenderData& data);
 
-    static int create_command_buffers(Init &init, RenderData &data);
+  static int create_command_buffers(Init& init, RenderData& data);
 
-    static int create_sync_objects(Init &init, RenderData &data);
+  static int create_sync_objects(Init& init, RenderData& data);
 
-    static int recreate_swapchain(Init &init, RenderData &data);
+  static int recreate_swapchain(Init& init, RenderData& data);
 
-    static int draw_frame(Init &init, RenderData &data);
+  static int draw_frame(Init& init, RenderData& data);
 
-    static void cleanup(Init &init, RenderData &data);
+  static void cleanup(Init& init, RenderData& data);
 
-    static const struct wl_callback_listener frame_listener;
+  static const struct wl_callback_listener frame_listener;
 };
