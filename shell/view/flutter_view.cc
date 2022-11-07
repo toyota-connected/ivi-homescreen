@@ -166,6 +166,7 @@ void FlutterView::DrawFps(long long end_time) {
 size_t FlutterView::CreateSurface(void* h_module,
                                   const std::string& assets_path,
                                   const std::string& cache_folder,
+                                  const std::string& misc_folder,
                                   CompositorSurface::PARAM_SURFACE_T type,
                                   CompositorSurface::PARAM_Z_ORDER_T z_order,
                                   CompositorSurface::PARAM_SYNC_T sync,
@@ -176,7 +177,7 @@ size_t FlutterView::CreateSurface(void* h_module,
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
       index, m_wayland_display, m_wayland_window, h_module, assets_path,
-      cache_folder, type, z_order, sync, width, height, x, y, this);
+      cache_folder, misc_folder, type, z_order, sync, width, height, x, y, this);
 
   m_comp_surf[index]->InitializePlugin();
   return index;

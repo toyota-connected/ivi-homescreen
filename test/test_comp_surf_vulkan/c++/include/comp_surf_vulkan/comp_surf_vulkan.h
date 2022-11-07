@@ -46,7 +46,8 @@ comp_surf_Context* comp_surf_initialize(const char* accessToken,
                                         int height,
                                         void* nativeWindow,
                                         const char* assetsPath,
-                                        const char* cachePath);
+                                        const char* cachePath,
+                                        const char* miscPath);
 
 void comp_surf_de_initialize(comp_surf_Context* ctx);
 
