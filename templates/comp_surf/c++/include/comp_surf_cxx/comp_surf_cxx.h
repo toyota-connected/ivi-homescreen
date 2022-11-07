@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef COMP_SURF_EGL_H
-#define COMP_SURF_EGL_H
+#ifndef COMP_SURF_CXX_H
+#define COMP_SURF_CXX_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -37,7 +37,7 @@ typedef struct comp_surf_Context comp_surf_Context;
 uint32_t comp_surf_version();
 
 typedef const void* (*comp_surf_LoaderFunction)(void* userdata,
-                                                char const* symbol_name);
+                                                char const* procname);
 void comp_surf_load_functions(void* userdata,
                               comp_surf_LoaderFunction loaderFunction);
 
@@ -64,4 +64,4 @@ void comp_surf_resize(comp_surf_Context* ctx, int width, int height);
 }
 #endif
 
-#endif  // COMP_SURF_EGL_H
+#endif  // COMP_SURF_CXX_H
