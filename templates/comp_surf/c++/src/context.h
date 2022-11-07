@@ -30,7 +30,8 @@ struct CompSurfContext {
                   int height,
                   void* nativeWindow,
                   const char* assetsPath,
-                  const char* cachePath);
+                  const char* cachePath,
+                  const char* miscPath);
 
   ~CompSurfContext() = default;
 
@@ -52,4 +53,5 @@ struct CompSurfContext {
   std::string mAccessToken;
   std::string mAssetsPath;
   std::string mCachePath;
+  std::string mMiscPath;
 };

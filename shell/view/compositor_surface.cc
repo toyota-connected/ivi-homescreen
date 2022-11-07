@@ -22,6 +22,7 @@ CompositorSurface::CompositorSurface(
     void* h_module,
     std::string assets_path,
     const std::string& cache_folder,
+    const std::string& misc_folder,
     CompositorSurface::PARAM_SURFACE_T type,
     CompositorSurface::PARAM_Z_ORDER_T z_order,
     CompositorSurface::PARAM_SYNC_T sync,
@@ -34,6 +35,7 @@ CompositorSurface::CompositorSurface(
       m_h_module(h_module),
       m_assets_path(std::move(assets_path)),
       m_cache_path(GetCachePath(cache_folder.c_str())),
+      m_misc_path(GetCachePath(misc_folder.c_str())),
       m_context(nullptr),
       m_type(type),
       m_z_order(z_order),
@@ -175,7 +177,8 @@ std::string CompositorSurface::GetCachePath(const char* folder) {
 
 void CompositorSurface::InitializePlugin() {
   m_context = m_api.initialize("", width_, height_, &m_wl,
-                               m_assets_path.c_str(), m_cache_path.c_str());
+                               m_assets_path.c_str(), m_cache_path.c_str(),
+                               m_misc_path.c_str());
 
   StartFrames();
 }

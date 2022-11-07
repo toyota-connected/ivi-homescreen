@@ -34,7 +34,8 @@ struct CompSurfContext {
                   int height,
                   void* nativeWindow,
                   const char* assetsPath,
-                  const char* cachePath);
+                  const char* cachePath,
+                  const char* miscPath);
 
   ~CompSurfContext();
 
@@ -211,6 +212,7 @@ struct CompSurfContext {
   std::string accessToken_;
   std::string assetsPath_;
   std::string cachePath_;
+  std::string miscPath_;
 
   struct Init {
     void* window{};
@@ -219,6 +221,8 @@ struct CompSurfContext {
     VkSurfaceKHR surface{};
     vkb::Device device;
     vkb::Swapchain swapchain;
+    uint32_t width;
+    uint32_t height;
 
     // convenience
     VulkanLibrary* operator->() { return &vk_lib; }

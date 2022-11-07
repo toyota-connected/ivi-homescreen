@@ -52,11 +52,13 @@ pub extern "C" fn comp_surf_initialize(
         native_window: *mut c_void,
         assets_path: *const c_char,
         cache_path: *const c_char,
+        misc_path: *const c_char,
     ) -> *mut CompSurfContext {
 
-    let access_token_cstr = unsafe { CStr::from_ptr(access_token )};
-    let assets_path_cstr = unsafe { CStr::from_ptr(assets_path )};
-    let cache_path_cstr = unsafe { CStr::from_ptr(cache_path )};
+    let access_token_cstr = unsafe { CStr::from_ptr(access_token)};
+    let assets_path_cstr = unsafe { CStr::from_ptr(assets_path)};
+    let cache_path_cstr = unsafe { CStr::from_ptr(cache_path)};
+    let misc_path_cstr = unsafe { CStr::from_ptr(misc_path)};
 
     let context = CompSurfContext::new(
         native_window,
@@ -64,7 +66,8 @@ pub extern "C" fn comp_surf_initialize(
         height,
         String::from_utf8_lossy(access_token_cstr.to_bytes()).to_string(),
         String::from_utf8_lossy(assets_path_cstr.to_bytes()).to_string(),
-        String::from_utf8_lossy(cache_path_cstr.to_bytes()).to_string()
+        String::from_utf8_lossy(cache_path_cstr.to_bytes()).to_string(),
+        String::from_utf8_lossy(misc_path_cstr.to_bytes()).to_string()
     );
 
     context.dump();

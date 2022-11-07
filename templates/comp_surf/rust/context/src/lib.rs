@@ -33,6 +33,7 @@ pub struct CompSurfContext {
     height: i32,
     assets_path: String,
     cache_path: String,
+    misc_path: String,
     native_window: *mut NativeWindow,
 }
 
@@ -42,7 +43,8 @@ impl CompSurfContext {
            height: i32,
            access_token: String,
            assets_path: String,
-           cache_path: String) -> CompSurfContext {
+           cache_path: String,
+           misc_path: String) -> CompSurfContext {
 
         println!("[comp_surf_rs]");
 
@@ -54,6 +56,7 @@ impl CompSurfContext {
             access_token,
             assets_path,
             cache_path,
+            misc_path,
             native_window,
         }
     }
@@ -67,6 +70,7 @@ impl CompSurfContext {
         println!("Height: {}", self.height);
         println!("AssetsPath: [{}]", self.assets_path);
         println!("CachePath: [{}]", self.cache_path);
+        println!("MiscPath: [{}]", self.misc_path);
         println!("AccessToken: [{}]", self.access_token);
         println!("Native Display: {:#04X?}", unsafe { (*self.native_window).display as usize });
         println!("Native Surface: {:#04X?}", unsafe { (*self.native_window).surface as usize });

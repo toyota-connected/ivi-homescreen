@@ -32,15 +32,18 @@ CompSurfContext::CompSurfContext(const char* accessToken,
                                  int height,
                                  void* nativeWindow,
                                  const char* assetsPath,
-                                 const char* cachePath)
+                                 const char* cachePath,
+                                 const char* miscPath)
     : accessToken_(accessToken),
       assetsPath_(assetsPath),
-      cachePath_(cachePath) {
+      cachePath_(cachePath),
+      miscPath_(miscPath) {
   (void)width;
   (void)height;
   std::cout << "[comp_surf_vulkan]" << std::endl;
   std::cout << "assetsPath: " << assetsPath_ << std::endl;
   std::cout << "cachePath: " << cachePath_ << std::endl;
+  std::cout << "miscPath: " << cachePath_ << std::endl;
 
   typedef struct {
     struct wl_display* wl_display;
@@ -51,6 +54,8 @@ CompSurfContext::CompSurfContext(const char* accessToken,
   assert(p);
 
   init_.window = nativeWindow;
+  init_.width = width;
+  init_.height = height;
 
   if (0 != device_initialization(init_))
     return;
@@ -159,6 +164,7 @@ int CompSurfContext::device_initialization(Init& init) {
 
 int CompSurfContext::create_swapchain(Init& init) {
   vkb::SwapchainBuilder swapchain_builder{init.device, init.surface};
+  swapchain_builder.set_desired_extent(init.width, init.height);
   auto swap_ret = swapchain_builder.set_old_swapchain(init.swapchain).build();
   if (!swap_ret) {
     std::cout << swap_ret.error().message() << " " << swap_ret.vk_result()

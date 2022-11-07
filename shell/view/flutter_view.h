@@ -55,6 +55,7 @@ class FlutterView {
   size_t CreateSurface(void* h_module,
                        const std::string& assets_path,
                        const std::string& cache_path,
+                       const std::string& misc_path,
                        CompositorSurface::PARAM_SURFACE_T type,
                        CompositorSurface::PARAM_Z_ORDER_T z_order,
                        CompositorSurface::PARAM_SYNC_T sync,

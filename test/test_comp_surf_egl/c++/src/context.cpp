@@ -39,15 +39,18 @@ CompSurfContext::CompSurfContext(const char* accessToken,
                                  int height,
                                  void* nativeWindow,
                                  const char* assetsPath,
-                                 const char* cachePath)
+                                 const char* cachePath,
+                                 const char* miscPath)
     : mAccessToken(accessToken),
       mAssetsPath(assetsPath),
       mCachePath(cachePath),
+      mMiscPath(miscPath),
       mWindow{nullptr},
       mDisplay{nullptr} {
   std::cout << "[comp_surf_egl]" << std::endl;
   std::cout << "assetsPath: " << mAssetsPath << std::endl;
   std::cout << "cachePath: " << mCachePath << std::endl;
+  std::cout << "miscPath: " << mMiscPath << std::endl;
 
   mDisplay.window = &mWindow;
   mWindow.display = &mDisplay;
