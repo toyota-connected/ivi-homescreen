@@ -1,0 +1,11 @@
+[package]
+name = "comp_surf_types"
+version = "0.1.0"
+edition = "2021"
+authors = ["Joel Winarske"]
+repository = "https://github.com/toyota-connected/ivi-homescreen"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]

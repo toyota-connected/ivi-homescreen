@@ -1,0 +1,14 @@
+[workspace]
+
+exclude = [
+]
+
+members = [
+    "context",
+    "plugin",
+    "types"
+]
+
+[profile.release]
+strip = true
+lto = "fat"
