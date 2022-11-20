@@ -101,7 +101,7 @@ class _MyAppState extends State<MyApp> {
                 children: [
                   Expanded(
                       child: SurfaceInstance(
-                          name: 'Surface(0)',
+                          name: 'Surface(1)',
                           view: 0,
                           type: 'vulkan',
                           z_order: 'above',
@@ -111,9 +111,9 @@ class _MyAppState extends State<MyApp> {
                           width: 800,
                           height: 600,
                           module: 'libcomp_surf_vulkan.so',
-                          asset_path: '/home/joel.winarske@toyotaconnected.com/development/stargate/ivi-homescreen/test/test_comp_surf_vulkan/c++/assets',
-                          cache_folder: '.config/comp_surf_egl/instance1',
-                          misc_folder: '.config/comp_surf_egl/common'
+                          asset_path: '/usr/local/share/comp_surf_vulkan/assets',
+                          cache_folder: '.config/comp_surf_vulkan/instance0',
+                          misc_folder: '.config/comp_surf_vulkan/common'
                       ),
                   ),
                 ],

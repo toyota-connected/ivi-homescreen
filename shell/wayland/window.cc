@@ -48,13 +48,6 @@ WaylandWindow::WaylandWindow(size_t index,
   wl_callback_add_listener(m_base_frame_callback, &frame_listener_base_surface,
                            this);
 
-  m_flutter_surface = wl_compositor_create_surface(m_display->GetCompositor());
-  m_flutter_subsurface = wl_subcompositor_get_subsurface(
-      m_display->GetSubCompositor(), m_flutter_surface, m_base_surface);
-  m_flutter_frame_callback = wl_surface_frame(m_flutter_surface);
-  wl_callback_add_listener(m_flutter_frame_callback,
-                           &frame_listener_flutter_surface, this);
-
   m_xdg_surface =
       xdg_wm_base_get_xdg_surface(m_display->GetXdgWmBase(), m_base_surface);
 
@@ -71,7 +64,6 @@ WaylandWindow::WaylandWindow(size_t index,
 
   m_wait_for_configure = true;
   wl_surface_commit(m_base_surface);
-  wl_surface_commit(m_flutter_surface);
 
   switch (m_type) {
     case WINDOW_NORMAL:
@@ -104,10 +96,10 @@ WaylandWindow::WaylandWindow(size_t index,
     /* wait until xdg_surface::configure acks the new dimensions */
     if (m_wait_for_configure)
       continue;
-
-    m_backend->CreateSurface(m_index, m_base_surface, m_geometry.width,
-                             m_geometry.height);
   }
+
+  m_backend->CreateSurface(m_index, m_base_surface, m_geometry.width,
+                           m_geometry.height);
 
   FML_DLOG(INFO) << "(" << m_index << ") - WaylandWindow()";
 }
@@ -223,26 +215,6 @@ void WaylandWindow::on_frame_base_surface(void* data,
   wl_surface_commit(window->m_base_surface);
 }
 
-const struct wl_callback_listener
-    WaylandWindow::frame_listener_flutter_surface = {on_frame_flutter_surface};
-
-void WaylandWindow::on_frame_flutter_surface(void* data,
-                                             struct wl_callback* callback,
-                                             uint32_t time) {
-  (void)time;
-  auto* window = reinterpret_cast<WaylandWindow*>(data);
-
-  if (callback)
-    wl_callback_destroy(callback);
-
-  window->m_flutter_frame_callback =
-      wl_surface_frame(window->m_flutter_surface);
-  wl_callback_add_listener(window->m_flutter_frame_callback,
-                           &frame_listener_flutter_surface, window);
-
-  wl_surface_commit(window->m_flutter_surface);
-}
-
 uint32_t WaylandWindow::GetFpsCounter() {
   uint32_t fps_counter = m_fps_counter;
   m_fps_counter = 0;
@@ -282,9 +254,4 @@ WaylandWindow::window_type WaylandWindow::get_window_type(
     return WINDOW_PANEL_RIGHT;
   }
   return WINDOW_NORMAL;
-}
-
-void WaylandWindow::CommitSurfaces() {
-  wl_surface_commit(m_flutter_surface);
-  wl_surface_commit(m_base_surface);
 }

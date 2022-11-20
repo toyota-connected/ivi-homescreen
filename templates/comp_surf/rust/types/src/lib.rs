@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-use std::ffi::{c_void, c_char};
+use std::ffi::{c_void};
+use std::os::raw::c_char;
 
 pub type LoaderFunction = Option<
     unsafe extern "C" fn(

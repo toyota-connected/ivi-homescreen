@@ -15,6 +15,7 @@
  */
 
 use std::ffi::c_void;
+use std::ptr::{null_mut};
 
 use comp_surf_types::LoaderFunction;
 
@@ -72,19 +73,28 @@ impl CompSurfContext {
         println!("CachePath: [{}]", self.cache_path);
         println!("MiscPath: [{}]", self.misc_path);
         println!("AccessToken: [{}]", self.access_token);
-        println!("Native Display: {:#04X?}", unsafe { (*self.native_window).display as usize });
-        println!("Native Surface: {:#04X?}", unsafe { (*self.native_window).surface as usize });
-        println!("Native EGL Display: {:#04X?}", unsafe { (*self.native_window).egl_display as usize });
-        println!("Native EGL Window: {:#04X?}", unsafe { (*self.native_window).egl_window as usize });
+        if self.native_window != null_mut() {
+            println!("Native Display: {:#04X?}", unsafe { (*self.native_window).display as usize });
+        }
+        if self.native_window != null_mut() {
+            println!("Native Surface: {:#04X?}", unsafe { (*self.native_window).surface as usize });
+        }
+        if self.native_window != null_mut() {
+            println!("Native EGL Display: {:#04X?}", unsafe { (*self.native_window).egl_display as usize });
+        }
+        if self.native_window != null_mut() {
+            println!("Native EGL Window: {:#04X?}", unsafe { (*self.native_window).egl_window as usize });
+        }
     }
 
-    pub fn load_functions(&self, loader: LoaderFunction) {
+    pub fn load_functions(&self, _loader: LoaderFunction) {
+        println!("load_functions");
     }
 
     pub fn run_task(&self) {
     }
 
-    pub fn draw_frame(&self, time: f64) {
+    pub fn draw_frame(&self, _time: f64) {
     }
 
     pub fn resize(&mut self, width: i32, height: i32) {
