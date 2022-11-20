@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-use std::ffi::{CStr, c_void, c_int, c_char};
+use std::ffi::{CStr, c_void};
+use std::os::raw::{c_char, c_int};
 
 use comp_surf_context::CompSurfContext;
 
@@ -77,10 +78,10 @@ pub extern "C" fn comp_surf_initialize(
 
 #[no_mangle]
 pub extern "C" fn comp_surf_de_initialize(ctx: *mut CompSurfContext) {
+    print!("comp_surf_de_initialize: {:?}", ctx);
     if ctx.is_null() {
         return;
     }
-    print!("comp_surf_de_initialize: {:?}", ctx);
     let _ = unsafe { Box::from_raw(ctx) };
 }
 
