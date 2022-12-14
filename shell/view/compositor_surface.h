@@ -40,6 +40,7 @@ class CompositorSurface {
                     void* h_module,
                     std::string assets_path,
                     const std::string& cache_folder,
+                    const std::string& misc_folder,
                     CompositorSurface::PARAM_SURFACE_T type,
                     CompositorSurface::PARAM_Z_ORDER_T z_order,
                     CompositorSurface::PARAM_SYNC_T sync,
@@ -81,6 +82,7 @@ class CompositorSurface {
   void* m_h_module;
   std::string m_assets_path;
   std::string m_cache_path;
+  std::string m_misc_path;
   [[maybe_unused]] PARAM_SURFACE_T m_type;
   PARAM_Z_ORDER_T m_z_order;
   PARAM_SYNC_T m_sync;

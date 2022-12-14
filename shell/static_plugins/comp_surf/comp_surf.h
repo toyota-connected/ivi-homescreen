@@ -29,6 +29,7 @@ class CompositorSurfacePlugin {
   static constexpr char kArgModule[] = "module";
   static constexpr char kArgAssetsPath[] = "assets_path";
   static constexpr char kCacheFolder[] = "cache_folder";
+  static constexpr char kMiscFolder[] = "misc_folder";
   static constexpr char kArgType[] = "type";
   static constexpr char kArgZOrder[] = "z_order";
   static constexpr char kArgSync[] = "sync";

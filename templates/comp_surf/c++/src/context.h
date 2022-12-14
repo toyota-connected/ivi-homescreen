@@ -16,45 +16,13 @@
 
 #pragma once
 
-#include "../include/comp_surf_egl/comp_surf_egl.h"
+#include "../include/comp_surf_cxx/comp_surf_cxx.h"
 
 #include <memory>
 #include <string>
 
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
-
 struct CompSurfContext {
  public:
-  struct window;
-
-  struct display {
-    struct {
-      EGLDisplay dpy;
-      EGLContext ctx;
-      EGLConfig conf;
-    } egl;
-    struct window* window;
-  };
-
-  struct geometry {
-    int width, height;
-  };
-
-  struct window {
-    struct display* display;
-    struct geometry geometry, window_size;
-    struct {
-      GLuint rotation_uniform;
-      GLuint pos;
-      GLuint col;
-    } gl;
-
-    struct wl_egl_window* native;
-    struct wl_surface* surface;
-    EGLSurface egl_surface;
-  };
-
   static uint32_t version();
 
   CompSurfContext(const char* accessToken,
@@ -82,38 +50,8 @@ struct CompSurfContext {
   void resize(int width, int height);
 
  private:
-  static constexpr int kEglBufferSize = 24;
   std::string mAccessToken;
   std::string mAssetsPath;
   std::string mCachePath;
   std::string mMiscPath;
-
-  static constexpr char kVertShaderText[] =
-      "uniform mat4 rotation;\n"
-      "attribute vec4 pos;\n"
-      "attribute vec4 color;\n"
-      "varying vec4 v_color;\n"
-      "void main() {\n"
-      "  gl_Position = rotation * pos;\n"
-      "  v_color = color;\n"
-      "}\n";
-
-  static constexpr char kFragShaderText[] =
-      "precision mediump float;\n"
-      "varying vec4 v_color;\n"
-      "void main() {\n"
-      "  gl_FragColor = v_color;\n"
-      "}\n";
-
-  struct display mDisplay;
-  struct window mWindow;
-
-  static void init_egl(void* nativeWindow,
-                       EGLDisplay& eglDisplay,
-                       EGLSurface& eglSurface,
-                       EGLContext& eglContext);
-
-  static GLuint create_shader(const char* source, GLenum shader_type);
-
-  static void init_gl(struct window* window);
 };

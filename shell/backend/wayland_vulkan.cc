@@ -113,7 +113,7 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
 void WaylandVulkanBackend::createInstance() {
   auto instance_extensions = enumerateInstanceExtensionProperties();
   for (const auto& l : instance_extensions) {
-    FML_DLOG(INFO) << l.extensionName << ", ver: " << l.specVersion;
+    // FML_DLOG(INFO) << l.extensionName << ", ver: " << l.specVersion;
     if (enable_validation_layers_) {
       if (strcmp(l.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) ==
           0) {
@@ -300,8 +300,8 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     bool supports_swapchain = false;
     for (const auto& available_extension : available_extensions) {
-      FML_DLOG(INFO) << available_extension.extensionName
-                     << ", ver: " << available_extension.specVersion;
+      // FML_DLOG(INFO) << available_extension.extensionName
+      //<< ", ver: " << available_extension.specVersion;
       if (strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                  available_extension.extensionName) == 0) {
         supports_swapchain = true;

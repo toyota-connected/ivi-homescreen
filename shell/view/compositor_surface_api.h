@@ -21,7 +21,8 @@ typedef COMP_SURF_API_CONTEXT_T* COMP_SURF_API_INITIALIZE_T(
     int height,
     void* nativeWindow,
     const char* assetsPath,
-    const char* cachePath);
+    const char* cachePath,
+    const char* miscPath);
 
 typedef void COMP_SURF_API_DE_INITIALIZE_T(COMP_SURF_API_CONTEXT_T* ctx);
 
