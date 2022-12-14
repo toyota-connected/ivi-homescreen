@@ -77,12 +77,8 @@ class WaylandWindow {
 
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
-  wl_surface* GetFlutterSurface() { return m_flutter_surface; }
-
   uint32_t m_fps_counter;
   static window_type get_window_type(const std::string& type);
-
-  void CommitSurfaces();
 
  private:
   size_t m_index;
@@ -90,8 +86,6 @@ class WaylandWindow {
   wl_output* m_wl_output;
   std::shared_ptr<Engine> m_flutter_engine;
   struct wl_surface* m_base_surface{};
-  struct wl_surface* m_flutter_surface{};
-  struct wl_subsurface* m_flutter_subsurface{};
   std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
 
@@ -116,7 +110,6 @@ class WaylandWindow {
   struct xdg_toplevel* m_xdg_toplevel;
 
   struct wl_callback* m_base_frame_callback;
-  struct wl_callback* m_flutter_frame_callback;
 
   static const struct xdg_surface_listener xdg_surface_listener;
 
@@ -140,10 +133,4 @@ class WaylandWindow {
                                     uint32_t time);
 
   static const struct wl_callback_listener frame_listener_base_surface;
-
-  static void on_frame_flutter_surface(void* data,
-                                       struct wl_callback* callback,
-                                       uint32_t time);
-
-  static const struct wl_callback_listener frame_listener_flutter_surface;
 };

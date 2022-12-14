@@ -72,6 +72,12 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         cache_folder = std::get<std::string>(it->second);
       }
 
+      std::string misc_folder;
+      it = args->find(flutter::EncodableValue(kMiscFolder));
+      if (it != args->end()) {
+        misc_folder = std::get<std::string>(it->second);
+      }
+
       std::string type_str;
       it = args->find(flutter::EncodableValue(kArgType));
       if (it != args->end()) {
@@ -150,8 +156,8 @@ void CompositorSurfacePlugin::OnPlatformMessage(
       }
 
       auto index =
-          view->CreateSurface(h_module, assets_path, cache_folder, type,
-                              z_order, sync, width, height, x, y);
+          view->CreateSurface(h_module, assets_path, cache_folder, misc_folder,
+                              type, z_order, sync, width, height, x, y);
 
       auto context = view->GetSurfaceContext(index);
 

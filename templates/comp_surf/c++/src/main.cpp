@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "../include/comp_surf_egl/comp_surf_egl.h"
+#include "../include/comp_surf_cxx/comp_surf_cxx.h"
 #include "context.h"
 
 #include <cassert>

@@ -22,6 +22,7 @@ CompositorSurface::CompositorSurface(
     void* h_module,
     std::string assets_path,
     const std::string& cache_folder,
+    const std::string& misc_folder,
     CompositorSurface::PARAM_SURFACE_T type,
     CompositorSurface::PARAM_Z_ORDER_T z_order,
     CompositorSurface::PARAM_SYNC_T sync,
@@ -34,6 +35,7 @@ CompositorSurface::CompositorSurface(
       m_h_module(h_module),
       m_assets_path(std::move(assets_path)),
       m_cache_path(GetCachePath(cache_folder.c_str())),
+      m_misc_path(GetCachePath(misc_folder.c_str())),
       m_context(nullptr),
       m_type(type),
       m_z_order(z_order),
@@ -53,6 +55,8 @@ CompositorSurface::CompositorSurface(
   m_wl.egl_display = nullptr;
   m_wl.egl_window = nullptr;
 
+  auto parent_surface = window->GetBaseSurface();
+
   if (type == CompositorSurface::egl) {
     m_wl.egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR,
                                              display->GetDisplay(), nullptr);
@@ -62,17 +66,18 @@ CompositorSurface::CompositorSurface(
   }
 
   // Sub-surface
-  m_subsurface = wl_subcompositor_get_subsurface(
-      display->GetSubCompositor(), m_wl.surface, window->GetFlutterSurface());
+  m_subsurface = wl_subcompositor_get_subsurface(display->GetSubCompositor(),
+                                                 m_wl.surface, parent_surface);
+  assert(m_subsurface);
 
   // Position
   wl_subsurface_set_position(m_subsurface, m_origin_x, m_origin_y);
 
   // Z-Order
   if (m_z_order == CompositorSurface::PARAM_Z_ORDER_T::above) {
-    wl_subsurface_place_above(m_subsurface, window->GetFlutterSurface());
+    wl_subsurface_place_above(m_subsurface, parent_surface);
   } else if (m_z_order == CompositorSurface::PARAM_Z_ORDER_T::below) {
-    wl_subsurface_place_below(m_subsurface, window->GetFlutterSurface());
+    wl_subsurface_place_below(m_subsurface, parent_surface);
   }
 
   // Sync
@@ -174,9 +179,9 @@ std::string CompositorSurface::GetCachePath(const char* folder) {
 }
 
 void CompositorSurface::InitializePlugin() {
-  m_context = m_api.initialize("", width_, height_, &m_wl,
-                               m_assets_path.c_str(), m_cache_path.c_str());
-
+  m_context =
+      m_api.initialize("", width_, height_, &m_wl, m_assets_path.c_str(),
+                       m_cache_path.c_str(), m_misc_path.c_str());
   StartFrames();
 }
 
@@ -208,6 +213,9 @@ void CompositorSurface::on_frame(void* data,
   obj->m_callback = wl_surface_frame(obj->m_wl.surface);
   wl_callback_add_listener(obj->m_callback, &CompositorSurface::frame_listener,
                            data);
+
+  wl_subsurface_set_position(obj->m_subsurface, obj->m_origin_x,
+                             obj->m_origin_y);
 
   wl_surface_commit(obj->m_wl.surface);
 }

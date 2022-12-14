@@ -88,7 +88,8 @@ class _MyAppState extends State<MyApp> {
                           height: 600,
                           module: 'libcomp_surf_egl.so',
                           asset_path: '/usr/local/share/comp_surf_egl/assets',
-                          cache_folder: '.config/comp_surf_egl/instance0'
+                          cache_folder: '.config/comp_surf_egl/instance0',
+                          misc_folder: '.config/comp_surf_egl/common'
                       ),
                   ),
                 ],
@@ -100,18 +101,19 @@ class _MyAppState extends State<MyApp> {
                 children: [
                   Expanded(
                       child: SurfaceInstance(
-                          name: 'Surface(0)',
+                          name: 'Surface(1)',
                           view: 0,
-                          type: 'egl',
+                          type: 'vulkan',
                           z_order: 'above',
                           sync: 'sync',
                           x: 820,
                           y: 10,
                           width: 800,
                           height: 600,
-                          module: 'libcomp_surf_egl.so',
-                          asset_path: '/usr/local/share/comp_surf_egl/assets',
-                          cache_folder: '.config/comp_surf_egl/instance1'
+                          module: 'libcomp_surf_vulkan.so',
+                          asset_path: '/usr/local/share/comp_surf_vulkan/assets',
+                          cache_folder: '.config/comp_surf_vulkan/instance0',
+                          misc_folder: '.config/comp_surf_vulkan/common'
                       ),
                   ),
                 ],
@@ -139,6 +141,7 @@ class SurfaceInstance extends StatefulWidget {
       required this.module,
       required this.asset_path,
       required this.cache_folder,
+      required this.misc_folder,
       });
 
   final String name;
@@ -151,6 +154,7 @@ class SurfaceInstance extends StatefulWidget {
   final String module;
   final String asset_path;
   final String cache_folder;
+  final String misc_folder;
 
   @override
   State<SurfaceInstance> createState() => _SurfaceInstanceState();
@@ -190,6 +194,7 @@ class _SurfaceInstanceState extends State<SurfaceInstance> {
                         'module': widget.module,
                         'assets_path': widget.asset_path,
                         'cache_folder': widget.cache_folder,
+                        'misc_folder': widget.misc_folder,
                       };
                       print('Create request: $req');
                       channel.invokeMethod('create', req).then((resp) {
