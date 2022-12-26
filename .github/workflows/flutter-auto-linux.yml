@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install packages
         run: |
           echo ${{ github.server_url }}
@@ -159,21 +159,21 @@ jobs:
           ls -la _packages
 
       - name: Publish Debug Artifact TGZ
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan-dbg.Linux.tar.gz.zip
           path: |
             build/debug-vulkan/_packages/flutter-auto-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan-dbg.amd64.deb.zip
           path: |
             build/debug-vulkan/_packages/flutter-auto-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan-dbg.x86_64.rpm.zip
           path: |
@@ -194,21 +194,21 @@ jobs:
           ldd shell/flutter-auto
 
       - name: Publish Release Artifact TGZ
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan.Linux.tar.gz.zip
           path: |
             build/release-vulkan/_packages/flutter-auto-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan.amd64.deb.zip
           path: |
             build/release-vulkan/_packages/flutter-auto_*_amd64.deb
 
       - name: Publish Release Artifact RPM
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan.x86_64.rpm.zip
           path: |
