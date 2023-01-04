@@ -36,6 +36,13 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
+  } else if (method == kSelectMultiEntryHistory) {
+      FML_LOG(INFO) << "(" << engine->GetIndex()
+                    << ") Navigation: Select Multi Entry History";
+      result = codec.EncodeSuccessEnvelope();
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+    }
   } else if (method == kRouteInformationUpdated) {
     auto args = obj->arguments();
     if (!args->IsNull() && args->HasMember("location") &&
