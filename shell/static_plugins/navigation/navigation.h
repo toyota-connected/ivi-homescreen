@@ -35,5 +35,6 @@ class Navigation {
 
   static constexpr char kSelectSingleEntryHistory[] =
       "selectSingleEntryHistory";
+  static constexpr char kSelectMultiEntryHistory[] = "selectMultiEntryHistory";
   static constexpr char kRouteInformationUpdated[] = "routeInformationUpdated";
 };
