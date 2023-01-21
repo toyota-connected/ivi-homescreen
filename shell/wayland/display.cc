@@ -166,7 +166,7 @@ void Display::registry_handle_global(void* data,
                          std::min(static_cast<uint32_t>(1), version)));
     wl_shm_add_listener(d->m_shm, &shm_listener, d);
 
-    if (d->m_enable_cursor) {
+    if (d->m_enable_cursor && d->m_compositor) {
       d->m_cursor_theme = wl_cursor_theme_load(d->m_cursor_theme_name.c_str(),
                                                kCursorSize, d->m_shm);
     }

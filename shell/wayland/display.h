@@ -816,7 +816,6 @@ class Display {
 
   static const struct wl_touch_listener touch_listener;
 
-<<<<<<< HEAD
   /**
    * @brief AGL bound ok
    * @param[in,out] data Data of type Display
@@ -837,10 +836,6 @@ class Display {
    * wayland, agl-shell
    * @note Do nothing
    */
-=======
-  static void agl_shell_bound_ok(void* data, struct agl_shell* shell);
-
->>>>>>> a28d8fa (agl shell protocol v2 (#83))
   static void agl_shell_bound_fail(void* data, struct agl_shell* shell);
 
   static const struct agl_shell_listener agl_shell_listener;
