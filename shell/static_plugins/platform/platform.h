@@ -23,6 +23,14 @@ class Platform {
  public:
   static constexpr char kChannelName[] = "flutter/platform";
 
+  /**
+  * @brief Callback function for platform messages about platform
+  * @param[in] message Recieve message
+  * @param[in] userdata Pointer to User data
+  * @return void
+  * @relation
+  * flutter
+  */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
