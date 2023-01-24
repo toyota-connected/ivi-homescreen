@@ -33,6 +33,7 @@ project(ivi-homescreen
         LANGUAGES CXX C
         )
 
+include(context)
 include(options)
 
 message(STATUS "Project ................ ${PROJECT_NAME}")

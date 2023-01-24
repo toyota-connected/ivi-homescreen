@@ -124,10 +124,18 @@ include_directories(
         ../third_party/rapidjson/include
 )
 
+if (BUILD_BACKEND_WAYLAND_EGL)
+    target_link_libraries(homescreen PRIVATE EGL GLESv2)
+endif ()
+if (BUILD_PLUGIN_COMP_SURF)
+    target_link_libraries(homescreen PRIVATE EGL)
+endif ()
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    target_link_libraries(homescreen PRIVATE bluevk)
+endif ()
+
 target_link_libraries(homescreen PRIVATE
-        bluevk
         ${WAYLAND_LIBRARIES}
-        EGL GLESv2
         Threads::Threads
         dl
         ${GST_LIBRARIES}
@@ -140,20 +148,12 @@ target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}
         )
 
-cmake_policy(SET CMP0069 NEW)
-include(CheckIPOSupported)
-check_ipo_supported(RESULT ipo_support_result OUTPUT ipo_support_output)
-if (ipo_support_result)
+if (IPO_SUPPORT_RESULT)
     set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-else ()
-    message(WARNING "IPO is not supported: ${ipo_support_output}")
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(homescreen PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
-    target_link_options(homescreen PRIVATE
-            -fuse-ld=lld -lc++ -lc++abi -lc -lm -v)
+    target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)
