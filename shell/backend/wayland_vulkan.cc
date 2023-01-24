@@ -65,7 +65,8 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
           .get_instance_proc_address_callback = GetInstanceProcAddressCallback,
           .get_next_image_callback = GetNextImageCallback,
           .present_image_callback = PresentCallback,
-      }};
+      }
+  };
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
