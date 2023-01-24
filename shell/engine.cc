@@ -35,6 +35,15 @@
 
 using namespace fml;
 
+/**
+* @brief Check if the input path is a file
+* @param[in] path Path string
+* @return bool
+* @retval true If the file exists in that path
+* @retval false If the file does not exists in that path
+* @relation
+* internal
+*/
 static bool IsFile(const std::string& path) {
   struct stat buf {};
   if (stat(path.c_str(), &buf) != 0) {

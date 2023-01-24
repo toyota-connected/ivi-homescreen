@@ -34,6 +34,13 @@ class TextureNaviRender : public Texture {
 
   const TextureNaviRender& operator=(const TextureNaviRender&) = delete;
 
+  /**
+  * @brief Draw a new texture
+  * @param[in,out] userdata Pointer to TextureNaviRender
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void Draw(void* userdata);
 
  private:
@@ -46,8 +53,24 @@ class TextureNaviRender : public Texture {
 
   static std::map<std::string, std::string> m_styles;
 
+  /**
+  * @brief Create Navigation  texture
+  * @param[in,out] userdata Pointer to TextureNaviRender
+  * @return flutter::EncodableValue
+  * @retval EncodableValue This contain result:OK, textureId, width, height and render_ctx
+  * @retval Error
+  * @relation
+  * wayland, flutter
+  */
   static flutter::EncodableValue Create(void* userdata);
 
+  /**
+  * @brief Dispose assigned EGL texture id
+  * @param[in,out] userdata Pointer to TextureNaviRender
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   static void Dispose(void* userdata);
 
   NAV_RENDER_API_CONTEXT_T* m_render_context{};
@@ -78,11 +101,29 @@ class TextureNaviRender : public Texture {
 
   void* m_h_module[2]{};
 
+  /**
+  * @brief Initialize RenderApi
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void InitRenderApi();
 
 #if defined(BUILD_TEXTURE_NAVI_EGL_ROUTING)
+  /**
+  * @brief Initialize RoutingApi
+  * @return void
+  * @relation
+  * wayland, flutter
+  */
   void InitRoutingApi();
 #endif
 
+  /**
+  * @brief Create cache directory and get the path
+  * @return std::string
+  * @relation
+  * wayland, flutter
+  */
   static std::string GetCachePath();
 };
