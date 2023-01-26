@@ -81,6 +81,8 @@ int main(int argc, char** argv) {
     .disable_cursor{}, .debug_backend{}, .view {}
   };
 
+  FML_LOG(INFO) << GIT_BRANCH " @ " GIT_HASH;
+
   config.view.vm_args.reserve(argc - 1);
   for (int i = 1; i < argc; ++i) {
     config.view.vm_args.emplace_back(argv[i]);

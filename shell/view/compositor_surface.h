@@ -71,6 +71,8 @@ class CompositorSurface {
     struct wl_surface* surface;
     EGLDisplay egl_display;
     struct wl_egl_window* egl_window;
+    uint32_t width;
+    uint32_t height;
   } wl;
 
   wl m_wl{};
