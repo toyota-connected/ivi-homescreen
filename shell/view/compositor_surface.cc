@@ -54,6 +54,8 @@ CompositorSurface::CompositorSurface(
   m_wl.surface = wl_compositor_create_surface(display->GetCompositor());
   m_wl.egl_display = nullptr;
   m_wl.egl_window = nullptr;
+  m_wl.width = width;
+  m_wl.height = height;
 
   auto parent_surface = window->GetBaseSurface();
 
