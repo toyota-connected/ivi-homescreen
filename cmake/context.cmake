@@ -1,7 +1,7 @@
 #
 # Branch
 #
-execute_process (
+execute_process(
         COMMAND git rev-parse --abbrev-ref HEAD
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         OUTPUT_VARIABLE GIT_BRANCH
@@ -12,13 +12,13 @@ if (GIT_BRANCH)
     message(STATUS "GIT Branch ............. ${GIT_BRANCH}")
     add_definitions("-DGIT_BRANCH=\"${GIT_BRANCH}\"")
 else ()
-    add_definitions ("-DGIT_BRANCH=\"unkown\"")
-endif()
+    add_definitions("-DGIT_BRANCH=\"unkown\"")
+endif ()
 
 #
 # Commit Hash
 #
-execute_process (
+execute_process(
         COMMAND git rev-parse --short HEAD
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         OUTPUT_VARIABLE GIT_COMMIT_HASH
@@ -29,8 +29,8 @@ if (GIT_COMMIT_HASH)
     message(STATUS "GIT Hash ............... ${GIT_COMMIT_HASH}")
     add_definitions("-DGIT_HASH=\"${GIT_COMMIT_HASH}\"")
 else ()
-    add_definitions ("-DGIT_HASH=\"unknown\"")
-endif()
+    add_definitions("-DGIT_HASH=\"unknown\"")
+endif ()
 
 #
 # Clang Variables
@@ -43,20 +43,27 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     )
     if (LLVM_VERSION)
         message(STATUS "LLVM Version ........... ${LLVM_VERSION}")
-    endif()
+    endif ()
 
-    execute_process(
-            COMMAND llvm-config --prefix
-            OUTPUT_VARIABLE LLVM_ROOT
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
+    if (NOT LLVM_ROOT)
+        execute_process(
+                COMMAND llvm-config --prefix
+                OUTPUT_VARIABLE LLVM_ROOT
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+    endif ()
+
     if (LLVM_ROOT)
         message(STATUS "LLVM Root .............. ${LLVM_ROOT}")
         message(STATUS "C++ header path ........ ${LLVM_ROOT}/include/c++/v1/")
 
         add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
         add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-isystem${LLVM_ROOT}/include/c++/v1/>)
-    endif()
+    endif ()
+
+    if (NOT LLVM_ROOT)
+        message(FATAL_ERROR "If llvm-config is not installed manually set LLVM_ROOT")
+    endif ()
 
     execute_process(
             COMMAND llvm-config --cmakedir
@@ -66,9 +73,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if (LLVM_CMAKE_DIR)
         message(STATUS "Clang CMake Path ....... ${LLVM_CMAKE_DIR}")
         list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
-    endif()
+    endif ()
 
-endif()
+endif ()
 
 #
 # Toolchain IPO/LTO support
