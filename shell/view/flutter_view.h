@@ -1,3 +1,16 @@
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #pragma once
 
@@ -12,6 +25,9 @@
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
 #include "static_plugins/text_input/text_input.h"
+#endif
+#ifdef ENABLE_PLUGIN_KEY_EVENT
+#include "static_plugins/key_event/key_event.h"
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
 #include "textures/navi_render_egl/texture_navi_render_egl.h"
@@ -127,6 +143,9 @@ class FlutterView {
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   std::shared_ptr<TextInput> m_text_input;
+#endif
+#ifdef ENABLE_PLUGIN_KEY_EVENT
+  std::shared_ptr<KeyEvent> m_key_event;
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
   std::unique_ptr<TextureNaviRender> m_texture_navi;

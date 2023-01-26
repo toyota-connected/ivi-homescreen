@@ -1,5 +1,6 @@
 #
 # Copyright 2020-2022 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -61,6 +62,11 @@ endif ()
 option(BUILD_PLUGIN_TEXT_INPUT "Includes Text Input Plugin" ON)
 if (BUILD_PLUGIN_TEXT_INPUT)
     ENABLE_PLUGIN(text_input)
+endif ()
+
+option(BUILD_PLUGIN_KEY_EVENT "Includes Key Event Plugin" ON)
+if (BUILD_PLUGIN_KEY_EVENT)
+    ENABLE_PLUGIN(key_event)
 endif ()
 
 option(BUILD_PLUGIN_URL_LAUNCHER "Includes URL Launcher Plugin" ON)

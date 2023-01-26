@@ -1,4 +1,5 @@
 // Copyright 2020 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -172,14 +173,8 @@ done:
 }
 
 void TextInput::keyboard_handle_key(void* data,
-                                    struct wl_keyboard* keyboard,
-                                    uint32_t serial,
-                                    uint32_t time,
                                     xkb_keysym_t keysym,
                                     uint32_t state) {
-  (void)keyboard;
-  (void)serial;
-  (void)time;
   auto* text_input = static_cast<TextInput*>(data);
 
   if (text_input->active_model_ == nullptr) {
@@ -189,20 +184,24 @@ void TextInput::keyboard_handle_key(void* data,
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     switch (keysym) {
       case XKB_KEY_Left:
+      case XKB_KEY_KP_Left:
         if (text_input->active_model_->MoveCursorBack()) {
           text_input->SendStateUpdate(*text_input->active_model_);
         }
         break;
       case XKB_KEY_Right:
+      case XKB_KEY_KP_Right:
         if (text_input->active_model_->MoveCursorForward()) {
           text_input->SendStateUpdate(*text_input->active_model_);
         }
         break;
       case XKB_KEY_End:
+      case XKB_KEY_KP_End:
         text_input->active_model_->MoveCursorToEnd();
         text_input->SendStateUpdate(*text_input->active_model_);
         break;
       case XKB_KEY_Home:
+      case XKB_KEY_KP_Home:
         text_input->active_model_->MoveCursorToBeginning();
         text_input->SendStateUpdate(*text_input->active_model_);
         break;
@@ -212,6 +211,7 @@ void TextInput::keyboard_handle_key(void* data,
         }
         break;
       case XKB_KEY_Delete:
+      case XKB_KEY_KP_Delete:
         if (text_input->active_model_->Delete()) {
           text_input->SendStateUpdate(*text_input->active_model_);
         }
@@ -242,6 +242,46 @@ void TextInput::keyboard_handle_key(void* data,
       case XKB_KEY_Scroll_Lock:
       case XKB_KEY_Sys_Req:
       case XKB_KEY_Escape:
+      case XKB_KEY_Up:
+      case XKB_KEY_Down:
+      case XKB_KEY_Page_Up:
+      case XKB_KEY_Page_Down:
+      case XKB_KEY_Begin:
+      case XKB_KEY_Print:
+      case XKB_KEY_Insert:
+      case XKB_KEY_Menu:
+      case XKB_KEY_Num_Lock:
+      case XKB_KEY_KP_Up:
+      case XKB_KEY_KP_Down:
+      case XKB_KEY_KP_Page_Up:
+      case XKB_KEY_KP_Page_Down:
+      case XKB_KEY_KP_Begin:
+      case XKB_KEY_KP_Insert:
+      case XKB_KEY_KP_Tab:
+      case XKB_KEY_F1:
+      case XKB_KEY_F2:
+      case XKB_KEY_F3:
+      case XKB_KEY_F4:
+      case XKB_KEY_F5:
+      case XKB_KEY_F6:
+      case XKB_KEY_F7:
+      case XKB_KEY_F8:
+      case XKB_KEY_F9:
+      case XKB_KEY_F10:
+      case XKB_KEY_F11:
+      case XKB_KEY_F12:
+      case XKB_KEY_F13:
+      case XKB_KEY_F14:
+      case XKB_KEY_F15:
+      case XKB_KEY_F16:
+      case XKB_KEY_F17:
+      case XKB_KEY_F18:
+      case XKB_KEY_F19:
+      case XKB_KEY_F20:
+      case XKB_KEY_F21:
+      case XKB_KEY_F22:
+      case XKB_KEY_F23:
+      case XKB_KEY_F24:
         break;
       default:
         text_input->active_model_->AddCodePoint(keysym);

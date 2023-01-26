@@ -1,5 +1,6 @@
 /*
  * Copyright 2020 Toyota Connected North America
+ * @copyright Copyright (c) 2022 Woven Alpha, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@
 #include "constants.h"
 #include "platform_channel.h"
 #include "static_plugins/text_input/text_input.h"
+#include "static_plugins/key_event/key_event.h"
 #include "view/flutter_view.h"
 
 class App;
@@ -47,6 +49,12 @@ class Texture;
 #if ENABLE_PLUGIN_TEXT_INPUT
 
 class TextInput;
+
+#endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+
+class KeyEvent;
 
 #endif
 
@@ -378,6 +386,28 @@ class Engine {
   */
   MAYBE_UNUSED NODISCARD TextInput* GetTextInput() const;
 
+#endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+  KeyEvent* m_key_event{};
+
+  /**
+  * @brief Set key event
+  * @param[in] key_event KeyEvent
+  * @return void
+  * @relation
+  * flutter
+  */
+  void SetKeyEvent(KeyEvent* key_event);
+
+  /**
+  * @brief Get key event
+  * @return KeyEvent*
+  * @retval KeyEvent
+  * @relation
+  * flutter
+  */
+  MAYBE_UNUSED NODISCARD KeyEvent *GetKeyEvent() const;
 #endif
 
   /**

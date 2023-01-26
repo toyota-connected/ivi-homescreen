@@ -1,4 +1,5 @@
 // Copyright 2020 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,6 +60,9 @@ int App::Loop() {
   for (auto const& view : m_views) {
     view->RunTasks();
   }
+
+  if (m_wayland_display->m_repeat_timer)
+    m_wayland_display->m_repeat_timer->wait_event();
 
   auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now().time_since_epoch())
