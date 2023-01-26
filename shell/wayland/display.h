@@ -1,5 +1,6 @@
 /*
  * Copyright 2020 Toyota Connected North America
+ * @copyright Copyright (c) 2022 Woven Alpha, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +31,9 @@
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
 #include "static_plugins/text_input/text_input.h"
+#include "static_plugins/key_event/key_event.h"
 #include "xdg-shell-client-protocol.h"
+#include "timer.h"
 
 #include "configuration/configuration.h"
 
@@ -47,6 +50,8 @@ class Display {
   Display(const Display&) = delete;
 
   const Display& operator=(const Display&) = delete;
+
+  std::shared_ptr<EventTimer> m_repeat_timer{};
 
   /**
   * @brief Get compositor
@@ -177,6 +182,16 @@ class Display {
   */
   void SetTextInput(wl_surface* surface, TextInput* text_input);
 
+  /**
+  * @brief Set key event
+  * @param[in] surface Image
+  * @param[in] text_input Pointer of KeyEvent to set
+  * @return void
+  * @relation
+  * wayland
+  */
+  void SetKeyEvent(wl_surface* surface, KeyEvent* keyevent);
+
   wl_output* GetWlOutput(uint32_t index) {
     if (index <= m_all_outputs.size()) {
       return m_all_outputs[index]->output;
@@ -275,7 +290,12 @@ class Display {
   struct xkb_keymap* m_keymap{};
   struct xkb_state* m_xkb_state{};
 
+  xkb_keysym_t m_keysym_pressed{};
+
   std::map<wl_surface*, TextInput*> m_text_input;
+  std::map<wl_surface*, KeyEvent*> m_key_event;
+
+  uint32_t m_repeat_code;
 
   typedef struct output_info {
     struct wl_output* output;
@@ -730,6 +750,15 @@ class Display {
                                           int32_t delay);
 
   static const struct wl_keyboard_listener keyboard_listener;
+
+  /**
+  * @brief a callback for key repeat behavior
+  * @param[in] data Data of type Display
+  * @return void
+  * @relation
+  * wayland
+  */
+  static void keyboard_repeat_func(void* data);
 
   /**
   * @brief Touch event down

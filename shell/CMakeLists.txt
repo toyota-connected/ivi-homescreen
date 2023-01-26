@@ -1,5 +1,6 @@
 #
 # Copyright 2020 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,6 +50,7 @@ set(SRC_FILES
 
         engine.cc
         platform_channel.cc
+        timer.cc
 
         textures/texture.cc
 
@@ -108,6 +110,12 @@ target_compile_definitions(homescreen
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
         )
+
+if (BUILD_UNORDERED_MAP)
+    target_compile_features(homescreen
+        PRIVATE
+        cxx_std_17)
+endif ()
 
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}

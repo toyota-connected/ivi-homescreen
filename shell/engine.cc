@@ -1,4 +1,5 @@
 // Copyright 2020 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -603,4 +604,13 @@ MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
   return m_text_input;
 }
 
+#endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+[[maybe_unused]] void Engine::SetKeyEvent(KeyEvent* key_event) {
+  m_key_event = key_event;
+}
+[[maybe_unused]] KeyEvent* Engine::GetKeyEvent() const {
+  return m_key_event;
+}
 #endif

@@ -1,5 +1,6 @@
 /*
  * Copyright 2020-2022 Toyota Connected North America
+ * @copyright Copyright (c) 2022 Woven Alpha, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,9 +75,6 @@ class TextInput : public flutter::BinaryMessenger {
   * flutter
   */
   static void keyboard_handle_key(void* data,
-                                  struct wl_keyboard* keyboard,
-                                  uint32_t serial,
-                                  uint32_t time,
                                   xkb_keysym_t keysym,
                                   uint32_t state);
 
