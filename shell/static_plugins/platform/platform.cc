@@ -55,10 +55,23 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         res.SetObject();
         auto& allocator = res.GetAllocator();
 
-        FML_DLOG(INFO) << "(" << engine->GetIndex()
-                       << ") Platform: Clipboard.hasStrings\n\ttext: \""
-                       << g_clipboard << "\"\n";
-
+        if (g_clipboard.empty()) {
+          res.AddMember("value", false, allocator);
+        } else {
+          res.AddMember("value", true, allocator);
+        }
+        result = codec.EncodeSuccessEnvelope(&res);
+      }
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+    }
+  } else if (method == kMethodClipboardGetData) {
+    if (!args->IsNull() && args->IsString()) {
+      auto format = args->GetString();
+      if (0 == strcmp(format, kTextPlainFormat)) {
+        rapidjson::Document res;
+        res.SetObject();
+        auto& allocator = res.GetAllocator();
         rapidjson::Value s;
         s = rapidjson::StringRef(g_clipboard.c_str());
         res.AddMember("text", s, allocator);
