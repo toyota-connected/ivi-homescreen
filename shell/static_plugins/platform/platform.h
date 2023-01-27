@@ -128,6 +128,7 @@ class Platform {
     static constexpr char kFailedError[] = "Failed";
 #endif
   static constexpr char kMethodClipboardHasStrings[] = "Clipboard.hasStrings";
+  static constexpr char kMethodClipboardGetData[] = "Clipboard.getData";
   static constexpr char kMethodClipboardSetData[] = "Clipboard.setData";
 #if 0
     static constexpr char kGetClipboardDataMethod[] = "Clipboard.getData";
