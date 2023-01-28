@@ -1,5 +1,6 @@
 #
 # Copyright 2020 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +37,14 @@ endif ()
 # variables
 #
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
+#
+# for c++ compatibility
+#
+# std::unordered_map is faster than std::map, but it is supported after c++11.
+option(BUILD_UNORDERED_MAP "Build std::unordered_map instead of std::map" ON)
+if (BUILD_UNORDERED_MAP)
+    add_compile_definitions(BUILD_UNORDERED_MAP)
+endif ()
 
 #
 # backend selection

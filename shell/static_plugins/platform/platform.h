@@ -23,6 +23,14 @@ class Platform {
  public:
   static constexpr char kChannelName[] = "flutter/platform";
 
+  /**
+  * @brief Callback function for platform messages about platform
+  * @param[in] message Recieve message
+  * @param[in] userdata Pointer to User data
+  * @return void
+  * @relation
+  * flutter
+  */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
@@ -120,6 +128,7 @@ class Platform {
     static constexpr char kFailedError[] = "Failed";
 #endif
   static constexpr char kMethodClipboardHasStrings[] = "Clipboard.hasStrings";
+  static constexpr char kMethodClipboardGetData[] = "Clipboard.getData";
   static constexpr char kMethodClipboardSetData[] = "Clipboard.setData";
 #if 0
     static constexpr char kGetClipboardDataMethod[] = "Clipboard.getData";

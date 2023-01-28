@@ -65,7 +65,8 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
           .get_instance_proc_address_callback = GetInstanceProcAddressCallback,
           .get_next_image_callback = GetNextImageCallback,
           .present_image_callback = PresentCallback,
-      }};
+      }
+  };
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
@@ -113,7 +114,7 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
 void WaylandVulkanBackend::createInstance() {
   auto instance_extensions = enumerateInstanceExtensionProperties();
   for (const auto& l : instance_extensions) {
-    FML_DLOG(INFO) << l.extensionName << ", ver: " << l.specVersion;
+    // FML_DLOG(INFO) << l.extensionName << ", ver: " << l.specVersion;
     if (enable_validation_layers_) {
       if (strcmp(l.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) ==
           0) {
@@ -230,7 +231,7 @@ void WaylandVulkanBackend::setupDebugMessenger() {
     if (bluevk::vkCreateDebugReportCallbackEXT(
             state_.instance, &cbinfo, VKALLOC, &mDebugCallback) != VK_SUCCESS) {
       FML_LOG(ERROR) << "Unable to create Vulkan debug callback";
-    };
+    }
   }
 }
 
@@ -300,8 +301,8 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     bool supports_swapchain = false;
     for (const auto& available_extension : available_extensions) {
-      FML_DLOG(INFO) << available_extension.extensionName
-                     << ", ver: " << available_extension.specVersion;
+      // FML_DLOG(INFO) << available_extension.extensionName
+      //<< ", ver: " << available_extension.specVersion;
       if (strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                  available_extension.extensionName) == 0) {
         supports_swapchain = true;
@@ -743,7 +744,7 @@ VKAPI_ATTR VkBool32
     FML_LOG(WARNING) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
                      << cbdata->pMessage;
   }
-  return VK_FALSE;
+  return VK_TRUE;
 }
 
 FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(

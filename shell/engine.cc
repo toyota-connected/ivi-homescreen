@@ -1,4 +1,5 @@
 // Copyright 2020 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +36,15 @@
 
 using namespace fml;
 
+/**
+* @brief Check if the input path is a file
+* @param[in] path Path string
+* @return bool
+* @retval true If the file exists in that path
+* @retval false If the file does not exists in that path
+* @relation
+* internal
+*/
 static bool IsFile(const std::string& path) {
   struct stat buf {};
   if (stat(path.c_str(), &buf) != 0) {
@@ -51,6 +61,7 @@ Engine::Engine(FlutterView* view,
                int32_t accessibility_features)
     : m_index(index),
       m_running(false),
+      m_view(view),
       m_backend(view->GetBackend()),
       m_egl_window(view->GetEglWindow()),
       m_flutter_engine(nullptr),
@@ -503,7 +514,6 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
                             double scroll_delta_x,
                             double scroll_delta_y,
                             int64_t buttons) {
-
   FlutterPointerEvent msg = {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
@@ -594,4 +604,13 @@ MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
   return m_text_input;
 }
 
+#endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+[[maybe_unused]] void Engine::SetKeyEvent(KeyEvent* key_event) {
+  m_key_event = key_event;
+}
+[[maybe_unused]] KeyEvent* Engine::GetKeyEvent() const {
+  return m_key_event;
+}
 #endif
