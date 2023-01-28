@@ -83,8 +83,6 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
   // FML_DLOG(INFO) << "m_texture_context = " << m_texture_context;
 
-  eglSwapInterval(m_dpy, 0);
-
   ClearCurrent();
 }
 
