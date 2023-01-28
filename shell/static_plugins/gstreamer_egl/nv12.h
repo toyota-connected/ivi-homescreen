@@ -104,6 +104,18 @@ class Shader {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
+  /**
+  * @brief Load pixels
+  * @param[in] y_buf Pointer to image data for luminance signal
+  * @param[in] uv_buf Pointer to image data for color difference signal
+  * @param[in] y_p_s No use
+  * @param[in] y_s Texture image width for luminance signal
+  * @param[in] uv_p_s No use
+  * @param[in] uv_s Texture image width for color difference signal
+  * @return void
+  * @relation
+  * flutter
+  */
   void loadPixels(unsigned char* y_buf,
                   unsigned char* uv_buf,
                   GLsizei y_p_s,
@@ -142,4 +154,4 @@ class Shader {
   }
 };
 
-};  // namespace nv12
+}  // namespace nv12

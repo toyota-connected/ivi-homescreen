@@ -58,6 +58,9 @@ constexpr char kApplicationName[] = "homescreen";
 // Install path constants
 constexpr char kEnginePersistentCacheDir[] = ".homescreen";
 
+// Compositor Surface
+constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
+
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off
     EGL_CONTEXT_MAJOR_VERSION, 3,

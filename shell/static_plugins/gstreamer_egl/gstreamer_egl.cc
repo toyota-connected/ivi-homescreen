@@ -99,6 +99,14 @@ static std::map<int64_t, std::shared_ptr<CustomData>> global_map;
 #define PrintMessageAsHex(a, b)
 #endif
 
+/**
+* @brief Send a response message
+* @param[in] engine Pointer to flutter engine
+* @param[in] response_handle Pointer to response handle
+* @return void
+* @relation
+* flutter
+*/
 void SendSuccess(Engine* engine,
                  const FlutterPlatformMessageResponseHandle* response_handle) {
   auto& codec = flutter::StandardMessageCodec::GetInstance();
@@ -112,6 +120,19 @@ void SendSuccess(Engine* engine,
                                       encoded->size());
 }
 
+/**
+* @brief Get video info
+* @param[in] url URL of the stream
+* @param[out] width Buffer to store width info
+* @param[out] height Buffer to store height info
+* @param[out] duration Buffer to store duration info
+* @param[out] codec_id Buffer to store codec info
+* @return bool
+* @retval true Normal end
+* @retval false Abnormal end
+* @relation
+* flutter
+*/
 bool get_video_info(const char* url,
                     int& width,
                     int& height,
@@ -159,6 +180,16 @@ bool get_video_info(const char* url,
   return true;
 }
 
+/**
+* @brief Load RGB pixels
+* @param[in] textureId Texture image id
+* @param[in] data Pointer to image data
+* @param[in] width Texture image width
+* @param[in] height Texture image height
+* @return void
+* @relation
+* flutter
+*/
 void loadRGBPixels(GLuint textureId,
                    unsigned char* data,
                    int width,
@@ -177,6 +208,13 @@ void loadRGBPixels(GLuint textureId,
   glGenerateMipmap(GL_TEXTURE_2D);
 }
 
+/**
+* @brief Draw core
+* @param[in] shader Pointer to shader
+* @return void
+* @relation
+* flutter
+*/
 void draw_core(nv12::Shader* shader) {
   glViewport(-shader->width / 2, -shader->height / 2, shader->width * 2,
              shader->height * 2);
@@ -200,6 +238,16 @@ void draw_core(nv12::Shader* shader) {
   glFinish();
 }
 
+/**
+* @brief Callback called when fakesink receives new frame data
+* @param[in] fakesink No use
+* @param[in] buffer Pointer to New frame data
+* @param[in] pad No use
+* @param[in,out] _data Pointer to User data
+* @return void
+* @relation
+* flutter
+*/
 void handoff_handler(GstElement* fakesink,
                      GstBuffer* buffer,
                      GstPad* pad,
@@ -262,6 +310,13 @@ void handoff_handler(GstElement* fakesink,
   }
 }
 
+/**
+* @brief Prepare
+* @param[in,out] data Pointer to User data
+* @return void
+* @relation
+* flutter
+*/
 static void prepare(CustomData* data) {
   GstElement* playbin = data->playbin;
   g_object_get(playbin, "n-video", &(data->n_video), nullptr);
@@ -292,6 +347,17 @@ static void prepare(CustomData* data) {
   data->initialized = true;
 }
 
+/**
+* @brief Analyze Gst message and process the message
+* @param[in] bus Gst bus
+* @param[in] msg Gst message
+* @param[in] data Pointer to User data
+* @return gboolean
+* @retval true Normal end
+* @retval false Abnormal end
+* @relation
+* flutter
+*/
 static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
   GError* err;
   gchar* debug_info;
@@ -525,6 +591,16 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
   return TRUE;
 }
 
+/**
+* @brief Load shaders
+* @param[in] vsource Source code to load into vertexShader
+* @param[in] fsource Source code to load into fragmentShader
+* @return GLuint
+* @retval Non-zero Normal end
+* @retval 0 Abnormal end
+* @relation
+* flutter
+*/
 GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
   GLuint shaderProgram;
   GLint result;
@@ -570,6 +646,14 @@ GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
   return shaderProgram;
 }
 
+/**
+* @brief Return GStreamer plugin for codec ID
+* @param[in] codec_id Codec ID
+* @return char*
+* @retval GStreamer plugin
+* @relation
+* flutter
+*/
 const char* map_ffmpeg_plugin(AVCodecID codec_id) {
   switch (codec_id) {
     case AV_CODEC_ID_4XM:
@@ -978,6 +1062,13 @@ const char* map_ffmpeg_plugin(AVCodecID codec_id) {
   }
 }
 
+/**
+* @brief Main Loop
+* @param[in,out] data Pointer to User data
+* @return void
+* @relation
+* flutter
+*/
 void main_loop(CustomData* data) {
   FML_DLOG(INFO) << "(" << data->engine->GetIndex()
                  << ") [main_loop] start data thread "
@@ -1104,6 +1195,14 @@ void GstreamerEgl::OnInitialize(const FlutterPlatformMessage* message,
   SendSuccess(engine, message->response_handle);
 }
 
+/**
+* @brief OnEvent method
+* @param[in] message Recieve message
+* @param[in] userdata Pointer to User data
+* @return void
+* @relation
+* flutter
+*/
 void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
@@ -1333,6 +1432,14 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
                                       encoded->size());
 }
 
+/**
+* @brief Encode error messages for OnDispose method
+* @param[in] error_msg Error message
+* @return flutter::EncodableValue
+* @retval Value after encoding
+* @relation
+* flutter
+*/
 flutter::EncodableValue dispose_error(const char* error_msg) {
   FML_DLOG(ERROR) << "[dispose error] " << error_msg;
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -1403,6 +1510,14 @@ void GstreamerEgl::OnDispose(const FlutterPlatformMessage* message,
   SendSuccess(engine, message->response_handle);
 }
 
+/**
+* @brief Encode error messages for OnSetLooping method
+* @param[in] error_msg Error message
+* @return flutter::EncodableValue
+* @retval Value after encoding
+* @relation
+* flutter
+*/
 flutter::EncodableValue setLooping_error(const char* error_msg) {
   FML_DLOG(ERROR) << "[setLooping error] " << error_msg;
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -1573,6 +1688,14 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
   SendSuccess(engine, message->response_handle);
 }
 
+/**
+* @brief Encode error messages for OnPlay method
+* @param[in] error_msg Error message
+* @return flutter::EncodableValue
+* @retval Value after encoding
+* @relation
+* flutter
+*/
 flutter::EncodableValue play_error(const char* error_msg) {
   FML_DLOG(ERROR) << "[play error] " << error_msg;
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -1630,6 +1753,14 @@ void GstreamerEgl::OnPlay(const FlutterPlatformMessage* message,
   SendSuccess(engine, message->response_handle);
 }
 
+/**
+* @brief Encode error messages for OnPosition method
+* @param[in] error_msg Error message
+* @return flutter::EncodableValue
+* @retval Value after encoding
+* @relation
+* flutter
+*/
 flutter::EncodableValue position_error(const char* error_msg) {
   FML_DLOG(ERROR) << "[position error] " << error_msg;
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -1701,6 +1832,14 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
                                       encoded->size());
 }
 
+/**
+* @brief Encode error messages for OnSeekTo method
+* @param[in] error_msg Error message
+* @return flutter::EncodableValue
+* @retval Value after encoding
+* @relation
+* flutter
+*/
 flutter::EncodableValue seekTo_error(const char* error_msg) {
   FML_DLOG(ERROR) << "[seekTo error] " << error_msg;
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -1772,6 +1911,14 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
   SendSuccess(engine, message->response_handle);
 }
 
+/**
+* @brief Encode error messages for OnPause method
+* @param[in] error_msg Error message
+* @return flutter::EncodableValue
+* @retval Value after encoding
+* @relation
+* flutter
+*/
 flutter::EncodableValue pause_error(const char* error_msg) {
   FML_DLOG(ERROR) << "[pause error] " << error_msg;
   return flutter::EncodableValue(flutter::EncodableMap{

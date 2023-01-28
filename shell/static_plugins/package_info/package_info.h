@@ -23,6 +23,14 @@ class PackageInfo {
   static constexpr char kChannelName[] =
       "dev.fluttercommunity.plus/package_info";
 
+  /**
+  * @brief Callback function for platform messages about package info
+  * @param[in] message Recieve message
+  * @param[in] userdata Pointer to User data
+  * @return void
+  * @relation
+  * flutter
+  */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

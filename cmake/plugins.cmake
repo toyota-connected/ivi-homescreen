@@ -1,5 +1,6 @@
 #
 # Copyright 2020-2022 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -63,6 +64,11 @@ if (BUILD_PLUGIN_TEXT_INPUT)
     ENABLE_PLUGIN(text_input)
 endif ()
 
+option(BUILD_PLUGIN_KEY_EVENT "Includes Key Event Plugin" ON)
+if (BUILD_PLUGIN_KEY_EVENT)
+    ENABLE_PLUGIN(key_event)
+endif ()
+
 option(BUILD_PLUGIN_URL_LAUNCHER "Includes URL Launcher Plugin" ON)
 if (BUILD_PLUGIN_URL_LAUNCHER)
     ENABLE_PLUGIN(url_launcher)
@@ -71,6 +77,11 @@ endif ()
 option(BUILD_PLUGIN_PACKAGE_INFO "Include PackageInfo Plugin" ON)
 if (BUILD_PLUGIN_PACKAGE_INFO)
     ENABLE_PLUGIN(package_info)
+endif ()
+
+option(BUILD_PLUGIN_COMP_SURF "Include Compositor Surface Plugin" ON)
+if (BUILD_PLUGIN_COMP_SURF)
+    ENABLE_PLUGIN(comp_surf)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
