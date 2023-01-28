@@ -201,6 +201,14 @@ All other parameters get assigned using the following ordering:
 
 # x86_64 Desktop development notes
 
+## NVidia GL errors
+
+Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
+This should resolve it:
+```
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+```
+
 ## Ubuntu 16-18
 
 ### Logging in
