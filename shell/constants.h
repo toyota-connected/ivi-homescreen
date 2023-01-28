@@ -56,7 +56,7 @@ constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 constexpr char kApplicationName[] = "homescreen";
 
 // Install path constants
-constexpr char kEnginePersistentCacheDir[] = ".homescreen";
+constexpr char kEnginePersistentCacheDir[] = ".config/homescreen";
 
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
