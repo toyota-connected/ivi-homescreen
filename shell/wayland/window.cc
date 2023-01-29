@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <utility>
+#include <flutter/fml/paths.h>
 #include "third_party/flutter/fml/logging.h"
 
 #include "constants.h"
@@ -170,20 +171,20 @@ static int set_cloexec_or_close(int fd) {
   return fd;
 }
 
-static int create_tmpfile_cloexec(char* tmpname) {
+static int create_tmpfile_cloexec(std::string tmpname) {
   int fd;
 
 #ifdef HAVE_MKOSTEMP
   fd = mkostemp(tmpname, O_CLOEXEC);
   if (fd >= 0)
-    unlink(tmpname);
+    unlink(tmpname.c_str());
 #else
   mode_t prev = umask(077);
-  fd = mkstemp(tmpname);
+  fd = mkstemp(tmpname.data());
   umask(prev);
   if (fd >= 0) {
     fd = set_cloexec_or_close(fd);
-    unlink(tmpname);
+    unlink(tmpname.c_str());
   }
 #endif
 
@@ -219,9 +220,6 @@ static int create_tmpfile_cloexec(char* tmpname) {
  * XDG_RUNTIME_DIR.
  */
 static int os_create_anonymous_file(off_t size) {
-  static const char weston_template[] = "/weston-shared-XXXXXX";
-  const char* path;
-  char* name;
   int fd;
   int ret;
 
@@ -240,22 +238,20 @@ static int os_create_anonymous_file(off_t size) {
   } else
 #endif
   {
-    path = getenv("XDG_RUNTIME_DIR");
-    if (!path) {
+    std::string path = getenv("XDG_RUNTIME_DIR");
+    if (path.empty()) {
       errno = ENOENT;
       return -1;
     }
 
-    name = static_cast<char*>(malloc(strlen(path) + sizeof(weston_template)));
-    if (!name)
+    std::string name = fml::paths::JoinPaths({path, "/weston-shared-XXXXXX"});
+    if (name.empty())
       return -1;
 
-    strcpy(name, path);
-    strcat(name, weston_template);
+    if (name.length() > PATH_MAX)
+      return -1;
 
     fd = create_tmpfile_cloexec(name);
-
-    free(name);
 
     if (fd < 0)
       return -1;
