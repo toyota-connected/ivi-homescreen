@@ -16,37 +16,41 @@ env:
 jobs:
   build:
     if: ${{ github.server_url == 'https://github.com' &&  always() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install packages
         run: |
           echo ${{ github.server_url }}
           sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt update -y
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 14
+          sudo apt update -y
           sudo apt-get -y install libwayland-dev wayland-protocols \
           mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-          libc++-11-dev libc++abi-11-dev libunwind-dev libxkbcommon-dev \
-          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-          gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
+          libc++-14-dev libc++abi-14-dev libunwind-14-dev libxkbcommon-dev
           clang++ --version
           cmake --version
 
       - name: Configure
         run: |
           mkdir -p ${{github.workspace}}/build/release
-          CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
+          CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
             -B ${{github.workspace}}/build/release \
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
-            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_PLUGIN_GSTREAMER_EGL=OFF
           mkdir -p ${{github.workspace}}/build/debug
-          CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake \
+          CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
             -B ${{github.workspace}}/build/debug \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
-            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_PLUGIN_GSTREAMER_EGL=OFF
 
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug
@@ -56,21 +60,21 @@ jobs:
           ls -la _packages
 
       - name: Publish Debug Artifact TGZ
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ivi-homescreen-dbg.Linux.tar.gz.zip
           path: |
             build/debug/_packages/ivi-homescreen-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ivi-homescreen-dbg.amd64.deb.zip
           path: |
             build/debug/_packages/ivi-homescreen-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ivi-homescreen-dbg.x86_64.rpm.zip
           path: |
@@ -91,21 +95,21 @@ jobs:
           ldd shell/homescreen
 
       - name: Publish Release Artifact TGZ
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ivi-homescreen.Linux.tar.gz.zip
           path: |
             build/release/_packages/ivi-homescreen-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ivi-homescreen.amd64.deb.zip
           path: |
             build/release/_packages/ivi-homescreen_*_amd64.deb
 
       - name: Publish Release Artifact RPM
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ivi-homescreen.x86_64.rpm.zip
           path: |
