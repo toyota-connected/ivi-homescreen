@@ -1,4 +1,4 @@
-dname: "CodeQL"
+name: "CodeQL"
 
 on:
   push:
@@ -11,8 +11,8 @@ on:
 
 jobs:
   analyze:
-    name: Analyze
     if: ${{ github.server_url == 'https://github.com' &&  always() }}
+    name: Analyze
     runs-on: ubuntu-22.04
     permissions:
       actions: read
