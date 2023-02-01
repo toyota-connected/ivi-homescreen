@@ -25,13 +25,15 @@ jobs:
           echo ${{ github.server_url }}
           sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt update -y
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 12
           sudo apt-get -y install libwayland-dev wayland-protocols \
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-            clang-12 lldb-12 lld-12 libc++-12-dev libc++abi-12-dev libunwind-dev \
-            libxkbcommon-dev \
+            libc++-12-dev libc++abi-12-dev libunwind-12-dev libxkbcommon-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
-          /usr/lib/llvm-12/bin/clang++ --version
+          clang++ --version
           cmake --version
 
       - name: Configure
