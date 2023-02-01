@@ -23,13 +23,13 @@ class OpenGlTexture {
   static constexpr char kChannelName[] = "opengl_texture";
 
   /**
-  * @brief Callback function for platform messages about opengl texture
-  * @param[in] message Recieve message
-  * @param[in] userdata Pointer to User data
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Callback function for platform messages about opengl texture
+   * @param[in] message Recieve message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

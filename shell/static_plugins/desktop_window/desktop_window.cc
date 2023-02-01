@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "opengl_texture.h"
+#include "desktop_window.h"
 
+#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
 
-void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
+void DesktopWindow::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
@@ -27,61 +28,45 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   auto method = obj->method_name();
 
-  if (method == "create") {
+  if (method == "desktop_window") {
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      int64_t textureId = 0;
-      auto it = args->find(flutter::EncodableValue("textureId"));
-      if (it != args->end()) {
-        flutter::EncodableValue encodedValue = it->second;
-        textureId = encodedValue.LongValue();
+      FML_DLOG(INFO) << "desktop_window";
+
+      for (auto it : *args) {
+        auto key = std::get<std::string>(it.first);
+        FML_DLOG(INFO) << key;
       }
 
-      double width = 0;
+      int64_t setMinWindowSize = 0;
+      auto it = args->find(flutter::EncodableValue("setMinWindowSize"));
+      if (it != args->end()) {
+        flutter::EncodableValue encodedValue = it->second;
+        setMinWindowSize = encodedValue.LongValue();
+      }
+
+      int64_t width = 0;
       it = args->find(flutter::EncodableValue("width"));
       if (it != args->end()) {
-        width = std::get<double>(it->second);
+        flutter::EncodableValue encodedValue = it->second;
+        width = encodedValue.LongValue();
       }
 
-      double height = 0;
+      int64_t height = 0;
       it = args->find(flutter::EncodableValue("height"));
       if (it != args->end()) {
-        height = std::get<double>(it->second);
-      }
-
-      if (0 == textureId || 0 == width || 0 == height) {
-        result = codec.EncodeErrorEnvelope(
-            "argument_error", "textureId, width and height must be non-zero");
-      } else {
-        // cast size to that what Wayland uses
-        auto value =
-            engine->TextureCreate(textureId, static_cast<int32_t>(width),
-                                  static_cast<int32_t>(height), args);
-
-        result = codec.EncodeSuccessEnvelope(&value);
-      }
-    } else {
-      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
-    }
-  } else if (method == "dispose") {
-    if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
-
-      int64_t textureId = 0;
-      auto it = args->find(flutter::EncodableValue("textureId"));
-      if (it != args->end()) {
         flutter::EncodableValue encodedValue = it->second;
-        textureId = encodedValue.LongValue();
+        height = encodedValue.LongValue();
       }
 
-      engine->TextureDispose(textureId);
-
-      result = codec.EncodeSuccessEnvelope();
-    } else {
-      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+      FML_DLOG(INFO) << "setMinWindowSize: " << setMinWindowSize;
+      FML_DLOG(INFO) << "width: " << width;
+      FML_DLOG(INFO) << "height: " << height;
     }
   }
+
+  result = codec.EncodeSuccessEnvelope();
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }

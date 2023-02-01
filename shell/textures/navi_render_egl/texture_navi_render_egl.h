@@ -35,15 +35,17 @@ class TextureNaviRender : public Texture {
   const TextureNaviRender& operator=(const TextureNaviRender&) = delete;
 
   /**
-  * @brief Draw a new texture
-  * @param[in,out] userdata Pointer to TextureNaviRender
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Draw a new texture
+   * @param[in,out] userdata Pointer to TextureNaviRender
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void Draw(void* userdata);
 
  private:
+  static constexpr int EXPECTED_RENDER_API_VERSION = 0x00010001;
+
   WaylandEglBackend* m_egl_backend;
   std::string m_map_base_path;
   bool m_initialized{};
@@ -54,31 +56,35 @@ class TextureNaviRender : public Texture {
   static std::map<std::string, std::string> m_styles;
 
   /**
-  * @brief Create Navigation  texture
-  * @param[in,out] userdata Pointer to TextureNaviRender
-  * @return flutter::EncodableValue
-  * @retval EncodableValue This contain result:OK, textureId, width, height and render_ctx
-  * @retval Error
-  * @relation
-  * wayland, flutter
-  */
-  static flutter::EncodableValue Create(void* userdata);
+   * @brief Create Navigation Instance
+   * @param[in,out] userdata Pointer to TextureNaviRender
+   * @param[in] args from Dart
+   * @return flutter::EncodableValue
+   * @retval EncodableValue This contain result:OK, textureId, width, height and
+   * render_ctx
+   * @retval Error
+   * @relation
+   * wayland, flutter
+   */
+  static flutter::EncodableValue Create(
+      void* userdata,
+      const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
 
   /**
-  * @brief Dispose assigned EGL texture id
-  * @param[in,out] userdata Pointer to TextureNaviRender
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
-  static void Dispose(void* userdata);
+   * @brief Dispose Navigation Instance
+   * @param[in,out] userdata Pointer to TextureNaviRender
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void Dispose(void* userdata, GLuint name);
 
   NAV_RENDER_API_CONTEXT_T* m_render_context{};
 
   struct {
     NAV_RENDER_API_VERSION_T* version{};
 
-    NAV_RENDER_API_CONTEXT_T* ctx{};
+    std::vector<NAV_RENDER_API_CONTEXT_T*> ctx{};
     NAV_RENDER_API_LOAD_GL_FUNCTIONS* gl_loader{};
     NAV_RENDER_API_INITIALIZE_T* initialize{};
     NAV_RENDER_API_DE_INITIALIZE_T* de_initialize{};
@@ -99,31 +105,31 @@ class TextureNaviRender : public Texture {
   } m_routing_api;
 #endif
 
-  void* m_h_module[2]{};
+  void* m_h_module{};
 
   /**
-  * @brief Initialize RenderApi
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Initialize RenderApi
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void InitRenderApi();
 
 #if defined(BUILD_TEXTURE_NAVI_EGL_ROUTING)
   /**
-  * @brief Initialize RoutingApi
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Initialize RoutingApi
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void InitRoutingApi();
 #endif
 
   /**
-  * @brief Create cache directory and get the path
-  * @return std::string
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Create cache directory and get the path
+   * @return std::string
+   * @relation
+   * wayland, flutter
+   */
   static std::string GetCachePath();
 };

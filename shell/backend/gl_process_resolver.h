@@ -26,41 +26,41 @@ class EglProcessResolver {
   static constexpr size_t kSoCount = 2UL;
   static constexpr size_t kSoMaxLength = 15;
   static constexpr std::array<char[kSoMaxLength], kSoCount> kGlSoNames[]{
-      {"libEGL.so.1", "libEGL.so"},
-      {"libGLESv2.so.2", "libGLESv2"},
+      {"libEGL.so"},
+      {"libGLESv2"},
   };
 
   ~EglProcessResolver();
 
   /**
-  * @brief Initialize
-  * @return void
-  * @relation
-  * internal
-  */
+   * @brief Initialize
+   * @return void
+   * @relation
+   * internal
+   */
   void Initialize();
 
   /**
-  * @brief Get DLL handle
-  * @param[in] arr Array of .so file names
-  * @param[out] out_handle DLL handle
-  * @return int
-  * @retval 1 Normal end
-  * @retval -1 Abnormal end
-  * @relation
-  * internal
-  */
+   * @brief Get DLL handle
+   * @param[in] arr Array of .so file names
+   * @param[out] out_handle DLL handle
+   * @return int
+   * @retval 1 Normal end
+   * @retval -1 Abnormal end
+   * @relation
+   * internal
+   */
   static int GetHandle(std::array<char[kSoMaxLength], kSoCount> arr,
                        void** out_handle);
 
   /**
-  * @brief Resolve the process
-  * @param[in] name Process name
-  * @return void*
-  * @retval Process address
-  * @relation
-  * wayland
-  */
+   * @brief Resolve the process
+   * @param[in] name Process name
+   * @return void*
+   * @retval Process address
+   * @relation
+   * wayland
+   */
   void* process_resolver(const char* name);
 
  private:
@@ -74,12 +74,12 @@ class GlProcessResolver {
   void operator=(const GlProcessResolver&) = delete;
 
   /**
-  * @brief Get instance of EglProcessResolver class
-  * @return EglProcessResolver&
-  * @retval Instance of the EglProcessResolver class
-  * @relation
-  * internal
-  */
+   * @brief Get instance of EglProcessResolver class
+   * @return EglProcessResolver&
+   * @retval Instance of the EglProcessResolver class
+   * @relation
+   * internal
+   */
   static EglProcessResolver& GetInstance() {
     if (!sInstance) {
       sInstance = std::make_shared<EglProcessResolver>();

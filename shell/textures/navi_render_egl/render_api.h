@@ -17,7 +17,10 @@ typedef NAV_RENDER_API_CONTEXT_T* NAV_RENDER_API_INITIALIZE_T(
     const char* accessToken,
     int width,
     int height,
-    const char* assetsPath);
+    const char* assetsPath,
+    const char* cachePath,
+    const char* miscPath,
+    unsigned int* name);
 
 typedef void NAV_RENDER_API_DE_INITIALIZE_T(NAV_RENDER_API_CONTEXT_T* ctx);
 

@@ -21,12 +21,10 @@
 #include <wayland-egl.h>
 
 #include "constants.h"
-#include "third_party/flutter/fml/logging.h"
 
 #include "egl.h"
 #include "engine.h"
 #include "gl_process_resolver.h"
-#include "textures/texture.h"
 
 WaylandEglBackend::WaylandEglBackend(struct wl_display* display,
                                      bool debug_backend,
@@ -71,9 +69,12 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             auto e = reinterpret_cast<Engine*>(userdata);
             auto texture = e->GetTextureObj(texture_id);
             if (texture) {
-              texture->GetFlutterOpenGLTexture(texture_out,
-                                               static_cast<int>(width),
-                                               static_cast<int>(height));
+              texture_out->name = texture_id;
+              texture_out->width = width;
+              texture_out->height = height;
+#if defined(BUILD_PLUGIN_OPENGL_TEXTURE)
+              texture->GetFlutterOpenGLTexture(texture_out);
+#endif
               return true;
             }
             return false;

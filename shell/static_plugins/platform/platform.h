@@ -24,13 +24,13 @@ class Platform {
   static constexpr char kChannelName[] = "flutter/platform";
 
   /**
-  * @brief Callback function for platform messages about platform
-  * @param[in] message Recieve message
-  * @param[in] userdata Pointer to User data
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Callback function for platform messages about platform
+   * @param[in] message Recieve message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
@@ -155,4 +155,6 @@ class Platform {
       "systemNavigationBarIconBrightness";
   static constexpr char kSystemNavigationBarContrastEnforced[] =
       "systemNavigationBarContrastEnforced";
+  static constexpr char kSystemChrome_setPreferredOrientations[] =
+      "SystemChrome.setPreferredOrientations";
 };
