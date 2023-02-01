@@ -37,14 +37,14 @@
 using namespace fml;
 
 /**
-* @brief Check if the input path is a file
-* @param[in] path Path string
-* @return bool
-* @retval true If the file exists in that path
-* @retval false If the file does not exists in that path
-* @relation
-* internal
-*/
+ * @brief Check if the input path is a file
+ * @param[in] path Path string
+ * @return bool
+ * @retval true If the file exists in that path
+ * @retval false If the file does not exists in that path
+ * @relation
+ * internal
+ */
 static bool IsFile(const std::string& path) {
   struct stat buf {};
   if (stat(path.c_str(), &buf) != 0) {
@@ -204,7 +204,7 @@ Engine::Engine(FlutterView* view,
                                void* context) -> void {
         auto* e = static_cast<Engine*>(context);
         // FML_DLOG(INFO) << "(" << e->GetIndex() << ") Post Task";
-        e->m_taskrunner.push(std::make_pair(target_time, task));
+        e->m_taskrunner.emplace(target_time, task);
         if (!e->m_running) {
           uint64_t current = e->m_proc_table.GetCurrentTime();
           if (current >= e->m_taskrunner.top().first) {
@@ -411,6 +411,7 @@ FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
       engine->m_flutter_engine, texture_id);
 }
 
+#if 0
 flutter::EncodableValue Engine::TextureCreate(int64_t texture_id,
                                               int32_t width,
                                               int32_t height) {
@@ -421,6 +422,29 @@ flutter::EncodableValue Engine::TextureCreate(int64_t texture_id,
 
   if (texture != nullptr) {
     return texture->Create(width, height);
+  }
+
+  return flutter::EncodableValue(flutter::EncodableMap{
+      {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
+      {flutter::EncodableValue("error"),
+       flutter::EncodableValue("Not found in registry")}});
+}
+
+#include <flutter/standard_method_codec.h>
+#endif
+
+flutter::EncodableValue Engine::TextureCreate(
+    int64_t texture_id,
+    int32_t width,
+    int32_t height,
+    const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
+  FML_DLOG(INFO) << "(" << m_index << ") Engine::TextureCreate: <" << texture_id
+                 << ">";
+
+  auto texture = this->m_texture_registry[texture_id];
+
+  if (texture != nullptr) {
+    return texture->Create(width, height, args);
   }
 
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -459,7 +483,7 @@ FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
                      return element.first == texture_id;
                    });
   if (search != m_texture_registry.end()) {
-    ((Texture*)search->second)->Dispose();
+    ((Texture*)search->second)->Dispose(texture_id);
     FML_DLOG(INFO) << "(" << m_index << ") Texture Disposed (" << texture_id
                    << ")";
     return kSuccess;

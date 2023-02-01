@@ -98,6 +98,15 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
     FML_DLOG(INFO) << "(" << engine->GetIndex()
                    << ") Haptic Feedback - Vibrate";
     result = codec.EncodeSuccessEnvelope();
+  } else if (method == kSystemChrome_setPreferredOrientations) {
+    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") setPreferredOrientations";
+    if (!args->IsNull()) {
+      for (const auto& field : args->GetArray()) {
+        FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+                       << field.GetString();
+      }
+    }
+    result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSetSystemUiOverlayStyle) {
     SystemUiOverlayStyle style{};
     if (args->HasMember(kSystemNavigationBarColor) &&

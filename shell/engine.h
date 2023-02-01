@@ -21,6 +21,7 @@
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <flutter/encodable_value.h>
 #include <flutter_embedder.h>
 #include <map>
 #include <memory>
@@ -32,8 +33,8 @@
 #include "backend/backend.h"
 #include "constants.h"
 #include "platform_channel.h"
-#include "static_plugins/text_input/text_input.h"
 #include "static_plugins/key_event/key_event.h"
+#include "static_plugins/text_input/text_input.h"
 #include "view/flutter_view.h"
 
 class App;
@@ -61,17 +62,17 @@ class KeyEvent;
 class Engine {
  public:
   /**
-  * @brief Constructor of engine
-  * @param[in] view Pointer to Flutter view
-  * @param[in] index an index of Flutter view
-  * @param[in] vm_args_c Command line arguments
-  * @param[in] bundle_path Path to bundle
-  * @param[in] accessibility_features Accessibility Features
-  * @return Engine
-  * @retval Constructed engine class
-  * @relation
-  * internal
-  */
+   * @brief Constructor of engine
+   * @param[in] view Pointer to Flutter view
+   * @param[in] index an index of Flutter view
+   * @param[in] vm_args_c Command line arguments
+   * @param[in] bundle_path Path to bundle
+   * @param[in] accessibility_features Accessibility Features
+   * @return Engine
+   * @retval Constructed engine class
+   * @relation
+   * internal
+   */
   Engine(FlutterView* view,
          size_t index,
          const std::vector<const char*>& vm_args_c,
@@ -87,228 +88,228 @@ class Engine {
   MAYBE_UNUSED NODISCARD size_t GetIndex() const { return m_index; }
 
   /**
-  * @brief Run flutter engine
-  * @param[in] event_loop_thread_id ID of the pthread to run
-  * @return FlutterEngineResult
-  * @retval The result of the run Flutter engine
-  * @relation
-  * flutter
-  */
+   * @brief Run flutter engine
+   * @param[in] event_loop_thread_id ID of the pthread to run
+   * @return FlutterEngineResult
+   * @retval The result of the run Flutter engine
+   * @relation
+   * flutter
+   */
   FlutterEngineResult Run(pthread_t event_loop_thread_id);
 
   /**
-  * @brief Set window size of flutter
-  * @param[in] height Height of flutter window
-  * @param[in] width Width of flutter window
-  * @return FlutterEngineResult
-  * @retval The result of the set window size
-  * @relation
-  * flutter
-  */
+   * @brief Set window size of flutter
+   * @param[in] height Height of flutter window
+   * @param[in] width Width of flutter window
+   * @return FlutterEngineResult
+   * @retval The result of the set window size
+   * @relation
+   * flutter
+   */
   FlutterEngineResult SetWindowSize(size_t height, size_t width);
 
   /**
-  * @brief Set pixel ratio of flutter
-  * @param[in] pixel_ratio Pixel ratio of flutter window
-  * @return FlutterEngineResult
-  * @retval The result of the set pixel ratio
-  * @relation
-  * flutter
-  */
+   * @brief Set pixel ratio of flutter
+   * @param[in] pixel_ratio Pixel ratio of flutter window
+   * @return FlutterEngineResult
+   * @retval The result of the set pixel ratio
+   * @relation
+   * flutter
+   */
   FlutterEngineResult SetPixelRatio(double pixel_ratio);
 
   /**
-  * @brief Check if engine is running
-  * @return bool
-  * @retval true If running
-  * @retval false If not running
-  * @relation
-  * internal
-  */
+   * @brief Check if engine is running
+   * @return bool
+   * @retval true If running
+   * @retval false If not running
+   * @relation
+   * internal
+   */
   MAYBE_UNUSED NODISCARD bool IsRunning() const;
 
   /**
-  * @brief Run flutter tasks
-  * @return FlutterEngineResult
-  * @retval The result of the run flutter tasks
-  * @relation
-  * flutter
-  */
+   * @brief Run flutter tasks
+   * @return FlutterEngineResult
+   * @retval The result of the run flutter tasks
+   * @relation
+   * flutter
+   */
   FlutterEngineResult RunTask();
 
   /**
-  * @brief Add texture to registry
-  * @param[in] texture_id ID of the texture to add
-  * @param[in] texture Texture to add
-  * @return FlutterEngineResult
-  * @retval The result of adding texture
-  * @relation
-  * flutter
-  */
+   * @brief Add texture to registry
+   * @param[in] texture_id ID of the texture to add
+   * @param[in] texture Texture to add
+   * @return FlutterEngineResult
+   * @retval The result of adding texture
+   * @relation
+   * flutter
+   */
   FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture* texture);
 
   /**
-  * @brief Remove texture to registry
-  * @param[in] texture_id ID of the texture to remove
-  * @return FlutterEngineResult
-  * @retval The result of removing texture
-  * @relation
-  * flutter
-  */
+   * @brief Remove texture to registry
+   * @param[in] texture_id ID of the texture to remove
+   * @return FlutterEngineResult
+   * @retval The result of removing texture
+   * @relation
+   * flutter
+   */
   FlutterEngineResult TextureRegistryRemove(int64_t texture_id);
 
   /**
-  * @brief Enable texture
-  * @param[in] texture_id ID of the texture to enable
-  * @return FlutterEngineResult
-  * @retval The result of enabling texture
-  * @relation
-  * flutter
-  */
+   * @brief Enable texture
+   * @param[in] texture_id ID of the texture to enable
+   * @return FlutterEngineResult
+   * @retval The result of enabling texture
+   * @relation
+   * flutter
+   */
   FlutterEngineResult TextureEnable(int64_t texture_id);
 
   /**
-  * @brief Disable texture
-  * @param[in] texture_id ID of the texture to disable
-  * @return FlutterEngineResult
-  * @retval The result of disabling texture
-  * @relation
-  * flutter
-  */
+   * @brief Disable texture
+   * @param[in] texture_id ID of the texture to disable
+   * @return FlutterEngineResult
+   * @retval The result of disabling texture
+   * @relation
+   * flutter
+   */
   FlutterEngineResult TextureDisable(int64_t texture_id);
 
   /**
-  * @brief Mark that a new texture frame is available
-  * @param[in] engine Running engine instance
-  * @param[in] texture_id ID of the new texture
-  * @return FlutterEngineResult
-  * @retval The result of marking texture
-  * @relation
-  * flutter
-  */
+   * @brief Mark that a new texture frame is available
+   * @param[in] engine Running engine instance
+   * @param[in] texture_id ID of the new texture
+   * @return FlutterEngineResult
+   * @retval The result of marking texture
+   * @relation
+   * flutter
+   */
   static FlutterEngineResult MarkExternalTextureFrameAvailable(
       const std::shared_ptr<Engine>& engine,
       int64_t texture_id);
+  
+  /**
+   * @brief Create texture
+   * @param[in] args passed from Flutter
+   * @return flutter::EncodableValue
+   * @retval The result of create texture
+   * @relation
+   * flutter
+   */
+  flutter::EncodableValue TextureCreate(
+      int64_t texture_id,
+      int32_t width,
+      int32_t height,
+      const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
 
   /**
-  * @brief Create texture
-  * @param[in] texture_id ID of the new texture
-  * @param[in] width Width of texture
-  * @param[in] height Height of the texture
-  * @return flutter::EncodableValue
-  * @retval The result of create texture
-  * @relation
-  * flutter
-  */
-  flutter::EncodableValue TextureCreate(int64_t texture_id,
-                                        int32_t width,
-                                        int32_t height);
-
-  /**
-  * @brief Dispose texture
-  * @param[in] texture_id ID of the texture to dispose
-  * @return FlutterEngineResult
-  * @retval The result of dispose texture
-  * @relation
-  * flutter
-  */
+   * @brief Dispose texture
+   * @param[in] texture_id ID of the texture to dispose
+   * @return FlutterEngineResult
+   * @retval The result of dispose texture
+   * @relation
+   * flutter
+   */
   FlutterEngineResult TextureDispose(int64_t texture_id);
 
   /**
-  * @brief Get persistent cache path
-  * @param[in] index Index of path (for log)
-  * @return std::string
-  * @retval The cache path
-  * @relation
-  * flutter
-  */
+   * @brief Get persistent cache path
+   * @param[in] index Index of path (for log)
+   * @return std::string
+   * @retval The cache path
+   * @relation
+   * flutter
+   */
   static std::string GetPersistentCachePath(size_t index);
 
   /**
-  * @brief Send platform message response
-  * @param[in] handle The platform message response handle
-  * @param[in] data The data to associate with the platform message response
-  * @param[in] data_length The length of the platform message response data
-  * @return FlutterEngineResult
-  * @retval The result of send platform message resoponse
-  * @relation
-  * flutter
-  */
+   * @brief Send platform message response
+   * @param[in] handle The platform message response handle
+   * @param[in] data The data to associate with the platform message response
+   * @param[in] data_length The length of the platform message response data
+   * @return FlutterEngineResult
+   * @retval The result of send platform message resoponse
+   * @relation
+   * flutter
+   */
   FlutterEngineResult SendPlatformMessageResponse(
       const FlutterPlatformMessageResponseHandle* handle,
       const uint8_t* data,
       size_t data_length) const;
 
   /**
-  * @brief Send platform message
-  * @param[in] channel Destination channel
-  * @param[in] message Message to send
-  * @param[in] message_size Size of message
-  * @return bool
-  * @retval true If successed to send message
-  * @retval false If failed to send message
-  * @relation
-  * flutter
-  */
+   * @brief Send platform message
+   * @param[in] channel Destination channel
+   * @param[in] message Message to send
+   * @param[in] message_size Size of message
+   * @return bool
+   * @retval true If successed to send message
+   * @retval false If failed to send message
+   * @relation
+   * flutter
+   */
   bool SendPlatformMessage(const char* channel,
                            const uint8_t* message,
                            size_t message_size) const;
 
   /**
-  * @brief Get accessibility features
-  * @return int32_t
-  * @retval Accessibility features
-  * @relation
-  * flutter
-  */
+   * @brief Get accessibility features
+   * @return int32_t
+   * @retval Accessibility features
+   * @relation
+   * flutter
+   */
   MAYBE_UNUSED int32_t GetAccessibilityFeatures() const {
     return m_accessibility_features;
   }
 
   /**
-  * @brief Update accessibility features
-  * @param[in] value a value representing accessibility features
-  * @return FlutterEngineResult
-  * @retval The result of the updating accessibility features
-  * @relation
-  * flutter
-  */
+   * @brief Update accessibility features
+   * @param[in] value a value representing accessibility features
+   * @return FlutterEngineResult
+   * @retval The result of the updating accessibility features
+   * @relation
+   * flutter
+   */
   MAYBE_UNUSED FlutterEngineResult UpdateAccessibilityFeatures(int32_t value);
 
   /**
-  * @brief Update locales
-  * @param[in] locales Updated locales in the order of preference
-  * @param[in] locales_count Count of locales
-  * @return FlutterEngineResult
-  * @retval The result of the updating locales
-  * @relation
-  * flutter
-  */
+   * @brief Update locales
+   * @param[in] locales Updated locales in the order of preference
+   * @param[in] locales_count Count of locales
+   * @return FlutterEngineResult
+   * @retval The result of the updating locales
+   * @relation
+   * flutter
+   */
   MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale** locales,
                                                  size_t locales_count);
 
   /**
-  * @brief Get clipboard data
-  * @return std::string
-  * @retval Clipboard data
-  * @relation
-  * flutter
-  */
+   * @brief Get clipboard data
+   * @return std::string
+   * @retval Clipboard data
+   * @relation
+   * flutter
+   */
   MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
 
   /**
-  * @brief Send mouse event
-  * @param[in] signal Kind of the signal
-  * @param[in] phase Phase of the event
-  * @param[in] x X coordinate of the event
-  * @param[in] y Y coordinate of the event
-  * @param[in] scroll_delta_x X offset of the scroll
-  * @param[in] scroll_delta_y Y offset of the scroll
-  * @param[in] buttons Buttons currently pressed, if any
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Send mouse event
+   * @param[in] signal Kind of the signal
+   * @param[in] phase Phase of the event
+   * @param[in] x X coordinate of the event
+   * @param[in] y Y coordinate of the event
+   * @param[in] scroll_delta_x X offset of the scroll
+   * @param[in] scroll_delta_y Y offset of the scroll
+   * @param[in] buttons Buttons currently pressed, if any
+   * @return void
+   * @relation
+   * flutter
+   */
   void SendMouseEvent(FlutterPointerSignalKind signal,
                       FlutterPointerPhase phase,
                       double x,
@@ -318,72 +319,72 @@ class Engine {
                       int64_t buttons);
 
   /**
-  * @brief Send touch event
-  * @param[in] phase Phase of the pointer event
-  * @param[in] x X coordinate of the pointer event
-  * @param[in] y Y coordinate of the pointer event
-  * @param[in] device Device identifier
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Send touch event
+   * @param[in] phase Phase of the pointer event
+   * @param[in] x X coordinate of the pointer event
+   * @param[in] y Y coordinate of the pointer event
+   * @param[in] device Device identifier
+   * @return void
+   * @relation
+   * flutter
+   */
   void SendTouchEvent(FlutterPointerPhase phase,
                       double x,
                       double y,
                       int32_t device);
 
   /**
-  * @brief get texture object
-  * @param[in] texture_id ID of texture
-  * @return Texture*
-  * @retval Pointer to texture object
-  * @relation
-  * flutter
-  */
+   * @brief get texture object
+   * @param[in] texture_id ID of texture
+   * @return Texture*
+   * @retval Pointer to texture object
+   * @relation
+   * flutter
+   */
   Texture* GetTextureObj(int64_t texture_id) {
     return m_texture_registry[texture_id];
   }
 
   /**
-  * @brief Activate system cursor
-  * @param[in] device No use
-  * @param[in] kind Cursor kind
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Activate system cursor
+   * @param[in] device No use
+   * @param[in] kind Cursor kind
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
   /**
-  * @brief Get asset directory path
-  * @return std::string
-  * @retval Path of the asset directory
-  * @relation
-  * flutter
-  */
+   * @brief Get asset directory path
+   * @return std::string
+   * @retval Path of the asset directory
+   * @relation
+   * flutter
+   */
   std::string GetAssetDirectory() { return m_assets_path; }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
   TextInput* m_text_input{};
 
   /**
-  * @brief Set text input
-  * @param[in] text_input Text input
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Set text input
+   * @param[in] text_input Text input
+   * @return void
+   * @relation
+   * flutter
+   */
   void SetTextInput(TextInput* text_input);
 
   /**
-  * @brief Get text input
-  * @return TextInput*
-  * @retval Text input
-  * @relation
-  * flutter
-  */
+   * @brief Get text input
+   * @return TextInput*
+   * @retval Text input
+   * @relation
+   * flutter
+   */
   MAYBE_UNUSED NODISCARD TextInput* GetTextInput() const;
 
 #endif
@@ -392,31 +393,31 @@ class Engine {
   KeyEvent* m_key_event{};
 
   /**
-  * @brief Set key event
-  * @param[in] key_event KeyEvent
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Set key event
+   * @param[in] key_event KeyEvent
+   * @return void
+   * @relation
+   * flutter
+   */
   void SetKeyEvent(KeyEvent* key_event);
 
   /**
-  * @brief Get key event
-  * @return KeyEvent*
-  * @retval KeyEvent
-  * @relation
-  * flutter
-  */
-  MAYBE_UNUSED NODISCARD KeyEvent *GetKeyEvent() const;
+   * @brief Get key event
+   * @return KeyEvent*
+   * @retval KeyEvent
+   * @relation
+   * flutter
+   */
+  MAYBE_UNUSED NODISCARD KeyEvent* GetKeyEvent() const;
 #endif
 
   /**
-  * @brief Get backend of view
-  * @return Backend*
-  * @retval Backend pointer
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Get backend of view
+   * @return Backend*
+   * @retval Backend pointer
+   * @relation
+   * wayland, flutter
+   */
   Backend* GetBackend() { return m_backend; }
 
   FlutterView* GetView() { return m_view; }
@@ -466,13 +467,13 @@ class Engine {
   FlutterEngineAOTData m_aot_data;
 
   /**
-  * @brief Load AOT data
-  * @param[in] aot_data_path Path to AOT data
-  * @return FlutterEngineAOTData
-  * @retval Loaded AOT data
-  * @relation
-  * flutter
-  */
+   * @brief Load AOT data
+   * @param[in] aot_data_path Path to AOT data
+   * @return FlutterEngineAOTData
+   * @retval Loaded AOT data
+   * @relation
+   * flutter
+   */
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
   LoadAotData(const std::string& aot_data_path) const;
 };

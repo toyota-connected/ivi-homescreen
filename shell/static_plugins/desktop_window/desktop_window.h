@@ -17,14 +17,13 @@
 #pragma once
 
 #include <flutter_embedder.h>
-#include <string>
 
-class Navigation {
+class DesktopWindow {
  public:
-  static constexpr char kChannelName[] = "flutter/navigation";
+  static constexpr char kChannelName[] = "desktop_window";
 
   /**
-   * @brief Callback function for platform messages about navigation
+   * @brief Callback function for platform messages about desktop_window
    * @param[in] message Recieve message
    * @param[in] userdata Pointer to User data
    * @return void
@@ -33,16 +32,4 @@ class Navigation {
    */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
-
- private:
-  struct RouteInformation {
-    std::string location;
-    std::string state;
-    bool replace;
-  };
-
-  static constexpr char kSelectSingleEntryHistory[] =
-      "selectSingleEntryHistory";
-  static constexpr char kSelectMultiEntryHistory[] = "selectMultiEntryHistory";
-  static constexpr char kRouteInformationUpdated[] = "routeInformationUpdated";
 };

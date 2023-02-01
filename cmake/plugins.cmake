@@ -106,10 +106,16 @@ if (BUILD_PLUGIN_PLATFORM_VIEW)
     ENABLE_PLUGIN(platform_views)
 endif ()
 
+option(BUILD_PLUGIN_DESKTOP_WINDOW "Includes Desktop Window Plugin" ON)
+if (BUILD_PLUGIN_DESKTOP_WINDOW)
+    ENABLE_PLUGIN(desktop_window)
+endif ()
+
 option(BUILD_PLUGIN_SECURE_STORAGE "Includes Flutter Secure Storage" OFF)
 if (BUILD_PLUGIN_SECURE_STORAGE)
     ENABLE_PLUGIN(secure_storage)
     pkg_check_modules(PLUGIN_SECURE_STORAGE REQUIRED libsecret-1)
 endif ()
+
 
 message(STATUS "Plugin Config .......... ${PLUGINS}")
