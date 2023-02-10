@@ -7,4 +7,4 @@ include_directories(.)
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     add_subdirectory(filament/libs/bluevk)
-endif  ()
+endif ()

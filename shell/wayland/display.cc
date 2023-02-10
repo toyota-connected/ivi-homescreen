@@ -112,14 +112,14 @@ Display::~Display() {
 }
 
 /**
-* @brief Respond to a ping event with a pong request
-* @param[in] data No use
-* @param[in] xdg_wm_base Pointer to xdg_shell interface
-* @param[in] serial Serial of pointer
-* @return void
-* @relation
-* wayland
-*/
+ * @brief Respond to a ping event with a pong request
+ * @param[in] data No use
+ * @param[in] xdg_wm_base Pointer to xdg_shell interface
+ * @param[in] serial Serial of pointer
+ * @return void
+ * @relation
+ * wayland
+ */
 static void xdg_wm_base_ping(void* data,
                              struct xdg_wm_base* xdg_wm_base,
                              uint32_t serial) {
@@ -190,7 +190,8 @@ void Display::registry_handle_global(void* data,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
 
-    d->m_repeat_timer = std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
+    d->m_repeat_timer =
+        std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
     d->m_repeat_timer->set_timerspec(40, 400);
 
   } else if (strcmp(interface, agl_shell_interface.name) == 0 &&
@@ -566,20 +567,51 @@ void Display::keyboard_handle_key(void* data,
   if (!d->m_xkb_state)
     return;
 
-  uint32_t code = key + 8;
-
-  xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, code);
-
-  if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    d->m_keysym_pressed = keysym;
+  //
+  // Important: the scancode from this event is the Linux evdev scancode.
+  // To translate this to an XKB scancode, you must add 8 to the evdev scancode.
+  //
+  uint32_t xkb_scancode = key + 8;
+  //
+  // Gets the single keysym obtained from pressing a particular key in a given
+  // keyboard state. If the key does not have exactly one keysym, returns
+  // XKB_KEY_NoSymbol
+  //
+  xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, xkb_scancode);
+  if (keysym == XKB_KEY_NoSymbol) {
+    const xkb_keysym_t* keysyms;
+    int res = xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &keysyms);
+    if (res == 0) {
+      FML_LOG(INFO) << "xkb_scancode has no keysyms: "
+                    << "0x" << std::hex << xkb_scancode;
+      keysym = XKB_KEY_NoSymbol;
+    } else {
+      // only use the first symbol until the use case for two is clarified
+      keysym = keysyms[0];
+      for (int i = 0; i < res; i++) {
+        FML_LOG(INFO) << "xkb keysym: " << std::hex << "0x" << keysyms;
+      }
+    }
+  }
 
 #if ENABLE_PLUGIN_KEY_EVENT
-    auto key_event = d->m_key_event[d->m_active_surface];
+  auto key_event = d->m_key_event[d->m_active_surface];
+#endif
+
+  if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+    if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
+      d->m_keysym_pressed = keysym;
+      d->m_repeat_code = xkb_scancode;
+      d->m_repeat_timer->arm();
+    } else {
+      FML_DLOG(INFO) << "key does not repeat: " << std::hex << "0x"
+                     << xkb_scancode;
+    }
+
+#if ENABLE_PLUGIN_KEY_EVENT
     if (key_event) {
-      KeyEvent::keyboard_handle_key(key_event,
-                                    kFlutterKeyEventTypeDown,
-                                    code,
-                                    d->m_keysym_pressed);
+      KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeDown,
+                                    xkb_scancode, keysym);
     }
 #endif
 
@@ -590,45 +622,18 @@ void Display::keyboard_handle_key(void* data,
     }
 #endif
 
-    if (xkb_keymap_key_repeats(d->m_keymap, code)) {
-      d->m_repeat_code = code;
-      d->m_repeat_timer->arm();
-    }
   } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
 #if ENABLE_PLUGIN_KEY_EVENT
-    auto key_event = d->m_key_event[d->m_active_surface];
     if (key_event) {
-      KeyEvent::keyboard_handle_key(key_event,
-                                    kFlutterKeyEventTypeUp,
-                                    code,
-                                    d->m_keysym_pressed);
+      KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
+                                    xkb_scancode, keysym);
     }
 #endif
-    if (d->m_repeat_code == code) {
+    if (d->m_repeat_code == xkb_scancode) {
       d->m_repeat_timer->disarm();
+      d->m_repeat_code = XKB_KEY_NoSymbol;
     }
   }
-#if !defined(NDEBUG)
-  if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    uint32_t utf32 = xkb_keysym_to_utf32(keysym);
-    if (utf32) {
-      FML_DLOG(INFO) << "[Press] U" << utf32;
-    } else {
-      char name[64];
-      xkb_keysym_get_name(keysym, name, 64);
-      FML_DLOG(INFO) << "[Press] " << name;
-    }
-  } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
-    uint32_t utf32 = xkb_keysym_to_utf32(d->m_keysym_pressed);
-    if (utf32) {
-      FML_DLOG(INFO) << "[Released] U" << utf32;
-    } else {
-      char name[64];
-      xkb_keysym_get_name(d->m_keysym_pressed, name, 64);
-      FML_DLOG(INFO) << "[Released] " << name;
-    }
-  }
-#endif
 }
 
 void Display::keyboard_handle_modifiers(void* data,
@@ -672,30 +677,16 @@ void Display::keyboard_repeat_func(void* data) {
   auto d = reinterpret_cast<Display*>(data);
 #if ENABLE_PLUGIN_KEY_EVENT
   auto key_event = d->m_key_event[d->m_active_surface];
-  if (key_event) {
-    KeyEvent::keyboard_handle_key(key_event,
-                                  kFlutterKeyEventTypeRepeat,
-                                  d->m_repeat_code,
-                                  d->m_keysym_pressed);
+  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
+    KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeRepeat,
+                                  d->m_repeat_code, d->m_keysym_pressed);
   }
 #endif
 #if ENABLE_PLUGIN_TEXT_INPUT
   auto text_input = d->m_text_input[d->m_active_surface];
-  if (text_input) {
-    TextInput::keyboard_handle_key(text_input,
-                                   d->m_keysym_pressed,
+  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
+    TextInput::keyboard_handle_key(text_input, d->m_keysym_pressed,
                                    WL_KEYBOARD_KEY_STATE_PRESSED);
-  }
-#endif
-
-#if !defined(NDEBUG)
-  uint32_t utf32 = xkb_keysym_to_utf32(d->m_keysym_pressed);
-  if (utf32) {
-    FML_DLOG(INFO) << "[Repeat] U" << utf32;
-  } else {
-    char name[64];
-    xkb_keysym_get_name(d->m_keysym_pressed, name, 64);
-    FML_DLOG(INFO) << "[Repeat] " << name;
   }
 #endif
 }
@@ -885,7 +876,6 @@ void Display::SetTextInput(wl_surface* surface, TextInput* text_input) {
 void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
   m_key_event[surface] = key_event;
 }
-
 
 void Display::handle_base_surface_enter(void* data,
                                         struct wl_surface* surface,

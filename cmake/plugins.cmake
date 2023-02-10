@@ -43,7 +43,7 @@ if (BUILD_PLUGIN_MOUSE_CURSOR)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    option(BUILD_PLUGIN_GSTREAMER_EGL "Include GStreamer Plugin" ON)
+    option(BUILD_PLUGIN_GSTREAMER_EGL "Include GStreamer Plugin" OFF)
     if (BUILD_PLUGIN_GSTREAMER_EGL)
         ENABLE_PLUGIN(gstreamer_egl)
         pkg_check_modules(GST REQUIRED gstreamer-1.0>=1.4)
