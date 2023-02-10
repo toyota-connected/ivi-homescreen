@@ -53,10 +53,9 @@ constexpr char kBundleEngine[] = "lib/libflutter_engine.so";
 constexpr char kSystemEngine[] = "libflutter_engine.so";
 constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
-constexpr char kApplicationName[] = "homescreen";
-
 // Install path constants
-constexpr char kEnginePersistentCacheDir[] = ".config/homescreen";
+constexpr char kXdgConfigHome[] = ".config";
+constexpr char kApplicationName[] = "homescreen";
 
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
