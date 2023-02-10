@@ -459,9 +459,18 @@ std::string Engine::GetPersistentCachePath(size_t index) {
     homedir = getpwuid(getuid())->pw_dir;
   }
 
-  auto path = paths::JoinPaths({homedir, kEnginePersistentCacheDir});
+  auto path = paths::JoinPaths({homedir, kXdgConfigHome});
 
   auto res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  if (res < 0) {
+    if (errno != EEXIST) {
+      FML_LOG(ERROR) << "(" << index << ") mkdir failed: " << path;
+      exit(EXIT_FAILURE);
+    }
+  }
+  path = paths::JoinPaths({homedir, kXdgConfigHome, kApplicationName});
+
+  res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if (res < 0) {
     if (errno != EEXIST) {
       FML_LOG(ERROR) << "(" << index << ") mkdir failed: " << path;
