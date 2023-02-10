@@ -288,17 +288,6 @@ void TextInput::keyboard_handle_key(void* data,
         text_input->SendStateUpdate(*(text_input->active_model_));
         break;
     }
-
-#if !defined(NDEBUG)
-    uint32_t utf32 = xkb_keysym_to_utf32(keysym);
-    if (utf32) {
-      FML_DLOG(INFO) << "[Press] U" << utf32;
-    } else {
-      char name[64];
-      xkb_keysym_get_name(keysym, name, 64);
-      FML_DLOG(INFO) << "[Press] " << name;
-    }
-#endif
   }
 }
 

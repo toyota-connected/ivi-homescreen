@@ -2,7 +2,7 @@ option(BUILD_DOC "Build documentation" ON)
 
 find_package(Doxygen)
 if (DOXYGEN_FOUND)
-    set(DOXYGEN_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../doc/Doxyfile)
+    set(DOXYGEN_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../docs/Doxyfile)
 
     message("Doxygen build started")
 

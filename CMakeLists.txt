@@ -49,7 +49,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(third_party)
 add_subdirectory(shell)
-add_subdirectory(doc)
+add_subdirectory(docs)
 
 if (NOT CMAKE_CROSSCOMPILING)
     include(packaging)
