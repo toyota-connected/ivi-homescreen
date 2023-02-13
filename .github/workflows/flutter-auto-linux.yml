@@ -27,12 +27,10 @@ jobs:
           sudo apt update -y
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 12
+          sudo ./llvm.sh 14
           sudo apt-get -y install libwayland-dev wayland-protocols \
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-            libc++-12-dev libc++abi-12-dev libunwind-12-dev libxkbcommon-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
+            libc++-14-dev libc++abi-14-dev libunwind-14-dev libxkbcommon-dev
           clang++ --version
           cmake --version
 
@@ -44,6 +42,7 @@ jobs:
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
           mkdir -p ${{github.workspace}}/build/debug-egl
           CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
@@ -51,6 +50,7 @@ jobs:
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
 
       - name: Build Debug Packages
@@ -129,12 +129,10 @@ jobs:
           sudo apt update -y
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 12
+          sudo ./llvm.sh 14
           sudo apt-get -y install libwayland-dev wayland-protocols \
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-            libc++-12-dev libc++abi-12-dev libunwind-12-dev libxkbcommon-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-base gstreamer1.0-gl libavformat-dev
+            libc++-14-dev libc++abi-14-dev libunwind-14-dev libxkbcommon-dev
           clang++ --version
           cmake --version
 
@@ -147,6 +145,7 @@ jobs:
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-release/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
+            -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
           mkdir -p ${{github.workspace}}/build/debug
           CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake \
@@ -155,6 +154,7 @@ jobs:
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-debug/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
+            -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
 
       - name: Build Debug Packages
