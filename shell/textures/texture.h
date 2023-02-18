@@ -59,7 +59,7 @@ class Texture {
    * @relation
    * wayland, flutter
    */
-  void SetEngine(const std::shared_ptr<Engine>& engine);
+  void SetEngine(Engine* engine);
 
   /**
    * @brief Get flutter OpenGL texture
@@ -121,8 +121,10 @@ class Texture {
    */
   void FrameReady();
 
+  int64_t GetId() { return m_id; }
+
  protected:
-  std::shared_ptr<Engine> m_flutter_engine;
+  Engine* m_flutter_engine;
   bool m_enabled;
   int64_t m_id;
   std::vector<int64_t> m_name;

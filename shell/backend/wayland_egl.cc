@@ -72,7 +72,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
               texture_out->name = texture_id;
               texture_out->width = width;
               texture_out->height = height;
-#if defined(BUILD_PLUGIN_OPENGL_TEXTURE)
+#if defined(ENABLE_PLUGIN_OPENGL_TEXTURE)
               texture->GetFlutterOpenGLTexture(texture_out);
 #endif
               return true;

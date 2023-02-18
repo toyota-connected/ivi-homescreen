@@ -405,33 +405,11 @@ FlutterEngineResult Engine::TextureDisable(int64_t texture_id) {
 }
 
 FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
-    const std::shared_ptr<Engine>& engine,
+    const Engine* engine,
     int64_t texture_id) {
   return engine->m_proc_table.MarkExternalTextureFrameAvailable(
       engine->m_flutter_engine, texture_id);
 }
-
-#if 0
-flutter::EncodableValue Engine::TextureCreate(int64_t texture_id,
-                                              int32_t width,
-                                              int32_t height) {
-  FML_DLOG(INFO) << "(" << m_index << ") Engine::TextureCreate: <" << texture_id
-                 << ">";
-
-  auto texture = this->m_texture_registry[texture_id];
-
-  if (texture != nullptr) {
-    return texture->Create(width, height);
-  }
-
-  return flutter::EncodableValue(flutter::EncodableMap{
-      {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
-      {flutter::EncodableValue("error"),
-       flutter::EncodableValue("Not found in registry")}});
-}
-
-#include <flutter/standard_method_codec.h>
-#endif
 
 flutter::EncodableValue Engine::TextureCreate(
     int64_t texture_id,

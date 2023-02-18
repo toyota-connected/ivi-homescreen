@@ -51,23 +51,20 @@ FlutterView::FlutterView(Configuration::Config config,
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.debug_backend, kEglBufferSize);
+#if defined(ENABLE_TEXTURE_EGL)
+  TextureEgl::GetInstance().SetView(this);
+#endif
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
   m_backend = std::make_shared<WaylandVulkanBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
       m_config.debug_backend);
 #endif
+
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
       m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
       m_config.app_id, m_config.view.fullscreen, m_config.view.width,
       m_config.view.height, m_backend.get());
-
-#ifdef ENABLE_TEXTURE_TEST_EGL
-  m_texture_test_egl = std::make_unique<TextureTestEgl>(this);
-#endif
-#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
-  m_texture_navi = std::make_unique<TextureNaviRender>(this);
-#endif
 }
 
 FlutterView::~FlutterView() = default;
@@ -97,9 +94,6 @@ void FlutterView::Initialize() {
 
   FML_DLOG(INFO) << "(" << m_index << ") Engine running...";
 
-#ifdef ENABLE_TEXTURE_TEST_EGL
-  m_texture_test_egl->SetEngine(m_flutter_engine);
-#endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   m_text_input->SetEngine(m_flutter_engine);
   m_wayland_display->SetTextInput(m_wayland_window->GetBaseSurface(),
@@ -109,9 +103,6 @@ void FlutterView::Initialize() {
   m_key_event->SetEngine(m_flutter_engine);
   m_wayland_display->SetKeyEvent(m_wayland_window->GetBaseSurface(),
                                  m_key_event.get());
-#endif
-#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
-  m_texture_navi->SetEngine(m_flutter_engine);
 #endif
 
   // init the fps output option.
@@ -144,16 +135,11 @@ void FlutterView::Initialize() {
 void FlutterView::RunTasks() {
   m_flutter_engine->RunTask();
 
-#ifdef ENABLE_TEXTURE_TEST_EGL
-  if (m_texture_test_egl) {
-    m_texture_test_egl->Draw(m_texture_test_egl.get());
-  }
+#ifdef ENABLE_TEXTURE_EGL
+  TextureEgl::GetInstance().Draw();
+  TextureEgl::GetInstance().RunTask();
 #endif
-#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
-  if (m_texture_navi) {
-    m_texture_navi->Draw(m_texture_navi.get());
-  }
-#endif
+
 #ifdef ENABLE_PLUGIN_COMP_SURF
   for (auto const& surface : m_comp_surf) {
     surface.second->RunTask();
@@ -201,7 +187,8 @@ size_t FlutterView::CreateSurface(void* h_module,
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
       index, m_wayland_display, m_wayland_window, h_module, assets_path,
-      cache_folder, misc_folder, type, z_order, sync, width, height, x, y, this);
+      cache_folder, misc_folder, type, z_order, sync, width, height, x, y,
+      this);
 
   m_comp_surf[index]->InitializePlugin();
 

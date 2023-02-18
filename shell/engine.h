@@ -188,7 +188,7 @@ class Engine {
    * flutter
    */
   static FlutterEngineResult MarkExternalTextureFrameAvailable(
-      const std::shared_ptr<Engine>& engine,
+      const Engine* engine,
       int64_t texture_id);
   
   /**
