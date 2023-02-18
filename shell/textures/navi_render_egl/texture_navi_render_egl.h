@@ -41,17 +41,35 @@ class TextureNaviRender : public Texture {
    * @relation
    * wayland, flutter
    */
-  void Draw(void* userdata);
+  static void Draw(void* userdata);
+
+  /**
+   * @brief Run Task
+   * @param[in,out] userdata Pointer to TextureNaviRender
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void RunTask(void* userdata);
+
+  /**
+   * @brief Dispose Navigation Instance
+   * @param[in,out] userdata Pointer to TextureNaviRender
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void Dispose(void* userdata, GLuint name);
 
  private:
-  static constexpr int EXPECTED_RENDER_API_VERSION = 0x00010001;
+  static constexpr int EXPECTED_RENDER_API_VERSION = 0x00010002;
 
   WaylandEglBackend* m_egl_backend;
   std::string m_map_base_path;
   bool m_initialized{};
 
   GLuint m_fbo{};
-  GLuint m_rendered_texture{};
+  GLuint m_texture_id{};
 
   static std::map<std::string, std::string> m_styles;
 
@@ -70,17 +88,6 @@ class TextureNaviRender : public Texture {
       void* userdata,
       const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
 
-  /**
-   * @brief Dispose Navigation Instance
-   * @param[in,out] userdata Pointer to TextureNaviRender
-   * @return void
-   * @relation
-   * wayland, flutter
-   */
-  static void Dispose(void* userdata, GLuint name);
-
-  NAV_RENDER_API_CONTEXT_T* m_render_context{};
-
   struct {
     NAV_RENDER_API_VERSION_T* version{};
 
@@ -88,6 +95,7 @@ class TextureNaviRender : public Texture {
     NAV_RENDER_API_LOAD_GL_FUNCTIONS* gl_loader{};
     NAV_RENDER_API_INITIALIZE_T* initialize{};
     NAV_RENDER_API_DE_INITIALIZE_T* de_initialize{};
+    NAV_RENDER_API_RUN_TASK_T* run_task{};
     NAV_RENDER_API_RENDER_T* render{};
     NAV_RENDER_API_RESIZE_T* resize{};
 
@@ -125,11 +133,4 @@ class TextureNaviRender : public Texture {
   void InitRoutingApi();
 #endif
 
-  /**
-   * @brief Create cache directory and get the path
-   * @return std::string
-   * @relation
-   * wayland, flutter
-   */
-  static std::string GetCachePath();
 };

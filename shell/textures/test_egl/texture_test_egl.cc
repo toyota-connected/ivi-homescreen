@@ -78,10 +78,10 @@ void TextureTestEgl::Dispose(void* userdata, GLuint name) {
 void TextureTestEgl::Draw(void* userdata) {
   auto* obj = (TextureTestEgl*)userdata;
 
-  if (!m_draw_next)
+  if (!obj->m_draw_next)
     return;
 
-  m_draw_next = false;
+  obj->m_draw_next = false;
 
   obj->FrameReady();
 }

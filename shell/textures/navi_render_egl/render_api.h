@@ -32,8 +32,10 @@ typedef void NAV_RENDER_API_DE_INITIALIZE_T(NAV_RENDER_API_CONTEXT_T* ctx);
 // Main
 //
 
+typedef void NAV_RENDER_API_RUN_TASK_T(NAV_RENDER_API_CONTEXT_T* ctx);
+
 typedef void NAV_RENDER_API_RENDER_T(NAV_RENDER_API_CONTEXT_T* ctx,
-                                     double time);
+                                     uint32_t framebufferId);
 
 typedef void NAV_RENDER_API_RESIZE_T(NAV_RENDER_API_CONTEXT_T* ctx,
                                      int width,

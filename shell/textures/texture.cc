@@ -106,7 +106,7 @@ void Texture::Disable(GLuint name) {
   }
 }
 
-void Texture::SetEngine(const std::shared_ptr<Engine>& engine) {
+void Texture::SetEngine(Engine* engine) {
   if (engine) {
     m_flutter_engine = engine;
     engine->TextureRegistryAdd(m_id, this);

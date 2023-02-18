@@ -20,8 +20,8 @@
 #include "configuration/configuration.h"
 #include "flutter/fml/macros.h"
 #include "wayland/window.h"
-#ifdef ENABLE_TEXTURE_TEST_EGL
-#include "textures/test_egl/texture_test_egl.h"
+#ifdef ENABLE_TEXTURE_EGL
+#include "textures/egl/texture_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
 #include "static_plugins/text_input/text_input.h"
@@ -48,6 +48,9 @@ class WaylandVulkanBackend;
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
+#endif
+#ifdef ENABLE_TEXTURE_EGL
+class TextureEgl;
 #endif
 
 class FlutterView {
@@ -138,17 +141,14 @@ class FlutterView {
   std::shared_ptr<PlatformChannel> m_platform_channel;
   size_t m_index;
 
-#ifdef ENABLE_TEXTURE_TEST_EGL
-  std::unique_ptr<TextureTestEgl> m_texture_test_egl;
+#ifdef ENABLE_TEXTURE_EGL
+  std::unique_ptr<TextureEgl> m_texture_egl;
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   std::shared_ptr<TextInput> m_text_input;
 #endif
 #ifdef ENABLE_PLUGIN_KEY_EVENT
   std::shared_ptr<KeyEvent> m_key_event;
-#endif
-#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
-  std::unique_ptr<TextureNaviRender> m_texture_navi;
 #endif
 
   struct {

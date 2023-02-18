@@ -47,22 +47,6 @@ class TextureTestEgl : public Texture {
   ~TextureTestEgl();
 
   /**
-   * @brief Draw a new texture
-   * @param[in,out] userdata Pointer to TextureTestEgl
-   * @return void
-   * @relation
-   * wayland, flutter
-   */
-  void Draw(void* userdata);
-
-  FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
-
- private:
-  bool m_initialized;
-
-  WaylandEglBackend* m_egl_backend;
-
-  /**
    * @brief Create test texture
    * @param[in,out] userdata Pointer to TextureTestEgl
    * @param[in] args from Dart
@@ -85,4 +69,20 @@ class TextureTestEgl : public Texture {
    * wayland, flutter
    */
   static void Dispose(void* userdata, GLuint name);
+
+  /**
+   * @brief Draw a new texture
+   * @param[in,out] userdata Pointer to TextureTestEgl
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void Draw(void* userdata);
+
+  FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
+
+ private:
+  bool m_initialized;
+
+  WaylandEglBackend* m_egl_backend;
 };
