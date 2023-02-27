@@ -1,19 +1,21 @@
 
 #include "compositor_surface.h"
 
+#include <filesystem>
+
 #include <flutter/fml/logging.h>
 #include <flutter/fml/paths.h>
 
 #include <dlfcn.h>
-#include <pwd.h>
 
 #include <EGL/eglext.h>
-#include <sys/stat.h>
 #include <wayland-egl.h>
 #include <utility>
 
+#include "../utils.h"
 #include "../view/flutter_view.h"
 #include "../wayland/display.h"
+
 
 CompositorSurface::CompositorSurface(
     int64_t key,
@@ -34,8 +36,8 @@ CompositorSurface::CompositorSurface(
     : m_key(key),
       m_h_module(h_module),
       m_assets_path(std::move(assets_path)),
-      m_cache_path(GetCachePath(cache_folder.c_str())),
-      m_misc_path(GetCachePath(misc_folder.c_str())),
+      m_cache_path(GetFilePath(cache_folder.c_str())),
+      m_misc_path(GetFilePath(misc_folder.c_str())),
       m_context(nullptr),
       m_type(type),
       m_z_order(z_order),
@@ -167,15 +169,17 @@ invalid:
   exit(1);
 }
 
-std::string CompositorSurface::GetCachePath(const char* folder) {
-  const char* homedir;
-  if ((homedir = getenv("HOME")) == nullptr) {
-    homedir = getpwuid(getuid())->pw_dir;
+std::string CompositorSurface::GetFilePath(const char* folder) {
+
+  auto path =
+      fml::paths::JoinPaths({Utils::GetConfigHomePath(), folder});
+
+  if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
+    if (!std::filesystem::create_directories(path)) {
+      FML_LOG(ERROR) << "GetCachePath create_directories failed: " << path;
+      exit(EXIT_FAILURE);
+    }
   }
-
-  auto path = fml::paths::JoinPaths({homedir, folder});
-
-  mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
   return path;
 }

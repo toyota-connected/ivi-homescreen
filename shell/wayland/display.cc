@@ -32,8 +32,6 @@ Display::Display(bool enable_cursor,
                  std::string cursor_theme_name,
                  const std::vector<Configuration::Config>& configs)
     : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
-      m_buffer_scale(1),
-      m_last_buffer_scale(m_buffer_scale),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   FML_DLOG(INFO) << "+ Display()";
@@ -153,7 +151,6 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(2), version)));
     }
     d->m_base_surface = wl_compositor_create_surface(d->m_compositor);
-    wl_surface_add_listener(d->m_base_surface, &base_surface_listener, d);
   } else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
     d->m_subcompositor = static_cast<struct wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
@@ -357,7 +354,8 @@ void Display::pointer_handle_enter(void* data,
   (void)pointer;
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
-  d->m_active_engine = d->m_surface_engine_map[surface];
+  d->m_active_engine = d->m_surface_engine_map[surface].first;
+  d->m_active_pixel_ratio = d->m_surface_engine_map[surface].second;
 
   d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
   d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
@@ -397,10 +395,10 @@ void Display::pointer_handle_motion(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_pointer.event.surface_x =
-      wl_fixed_to_double(sx * (wl_fixed_t)d->m_buffer_scale);
-  d->m_pointer.event.surface_y =
-      wl_fixed_to_double(sy * (wl_fixed_t)d->m_buffer_scale);
+  d->m_pointer.event.surface_x = wl_fixed_to_double(
+      sx * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio));
+  d->m_pointer.event.surface_y = wl_fixed_to_double(
+      sy * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio));
 
   if (d->m_active_engine) {
     FlutterPointerPhase phase =
@@ -520,7 +518,8 @@ void Display::keyboard_handle_enter(void* data,
   (void)keys;
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
-  d->m_active_engine = d->m_surface_engine_map[surface];
+  d->m_active_engine = d->m_surface_engine_map[surface].first;
+  d->m_active_pixel_ratio = d->m_surface_engine_map[surface].second;
 }
 
 void Display::keyboard_handle_leave(void* data,
@@ -711,7 +710,8 @@ void Display::touch_handle_down(void* data,
   d->m_touch.surface_y = y_w;
 
   d->m_active_surface = surface;
-  d->m_touch_engine = d->m_surface_engine_map[surface];
+  d->m_touch_engine = d->m_surface_engine_map[surface].first;
+  d->m_active_pixel_ratio = d->m_surface_engine_map[surface].second;
   if (d->m_touch_engine) {
     d->m_touch_engine->SendTouchEvent(
         (first_down ? FlutterPointerPhase::kDown : FlutterPointerPhase::kMove),
@@ -751,8 +751,10 @@ void Display::touch_handle_motion(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.surface_x = x_w;
-  d->m_touch.surface_y = y_w;
+  d->m_touch.surface_x =
+      x_w * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio);
+  d->m_touch.surface_y =
+      x_w * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio);
 
   if (d->m_touch_engine) {
     d->m_touch_engine->SendTouchEvent(FlutterPointerPhase::kMove,
@@ -816,10 +818,13 @@ void Display::AglShellDoReady() const {
   }
 }
 
-void Display::SetEngine(wl_surface* surface, Engine* engine) {
+void Display::SetEngine(wl_surface* surface,
+                        Engine* engine,
+                        double pixel_ratio) {
   m_active_engine = engine;
+  m_active_pixel_ratio = pixel_ratio;
   m_active_surface = surface;
-  m_surface_engine_map[surface] = engine;
+  m_surface_engine_map[surface] = std::pair(engine, pixel_ratio);
 }
 
 bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
@@ -877,49 +882,17 @@ void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
   m_key_event[surface] = key_event;
 }
 
-void Display::handle_base_surface_enter(void* data,
-                                        struct wl_surface* surface,
-                                        struct wl_output* output) {
-  (void)output;
-  (void)surface;
-  auto* d = static_cast<Display*>(data);
-
-  for (auto& out : d->m_all_outputs) {
-    if (out->output == output) {
-      FML_DLOG(INFO) << "Entering output #" << out->global_id << ", scale "
-                     << out->scale;
-      d->m_last_buffer_scale = d->m_buffer_scale;
-      d->m_buffer_scale = out->scale;
-      break;
+int32_t Display::GetBufferScale(uint32_t index) {
+  if (index < m_all_outputs.size()) {
+    if (m_buffer_scale_enable) {
+      return m_all_outputs[index]->scale;
+    } else {
+      return kDefaultPixelRatio;
     }
   }
-  if (d->m_buffer_scale_enable) {
-    FML_DLOG(INFO) << "Setting buffer scale: " << d->m_buffer_scale;
-    if (d->m_active_engine) {
-      d->m_active_engine->SetPixelRatio(d->m_buffer_scale);
-    }
-  }
+  FML_DLOG(ERROR) << "Invalid output index: " << index;
+  return kDefaultPixelRatio;
 }
-
-void Display::handle_base_surface_leave(void* data,
-                                        struct wl_surface* surface,
-                                        struct wl_output* output) {
-  (void)surface;
-  auto* d = static_cast<Display*>(data);
-
-  for (auto& out : d->m_all_outputs) {
-    if (out->output == output) {
-      FML_DLOG(INFO) << "Leaving output #" << out->global_id << ", scale "
-                     << out->scale;
-      break;
-    }
-  }
-}
-
-const struct wl_surface_listener Display::base_surface_listener = {
-    .enter = handle_base_surface_enter,
-    .leave = handle_base_surface_leave,
-};
 
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
   (void)shell;

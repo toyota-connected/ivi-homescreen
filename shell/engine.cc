@@ -17,14 +17,12 @@
 #include <vector>
 
 #include <dlfcn.h>
-#include <pwd.h>
-#include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #include <cassert>
 
-#include <flutter/fml/logging.h>
+#include <flutter/fml/file.h>
 #include <flutter/fml/paths.h>
+#include <filesystem>
 
 #include "constants.h"
 #include "engine.h"
@@ -32,27 +30,8 @@
 #include "textures/texture.h"
 
 #include "hexdump.h"
+#include "utils.h"
 #include "wayland-client.h"
-
-using namespace fml;
-
-/**
- * @brief Check if the input path is a file
- * @param[in] path Path string
- * @return bool
- * @retval true If the file exists in that path
- * @retval false If the file does not exists in that path
- * @relation
- * internal
- */
-static bool IsFile(const std::string& path) {
-  struct stat buf {};
-  if (stat(path.c_str(), &buf) != 0) {
-    return false;
-  }
-
-  return S_ISREG(buf.st_mode);
-}
 
 Engine::Engine(FlutterView* view,
                size_t index,
@@ -63,9 +42,9 @@ Engine::Engine(FlutterView* view,
       m_running(false),
       m_view(view),
       m_backend(view->GetBackend()),
-      m_egl_window(view->GetEglWindow()),
+      m_egl_window(view->GetWindow()),
       m_flutter_engine(nullptr),
-      m_cache_path(std::move(GetPersistentCachePath(index))),
+      m_cache_path(std::move(GetFilePath(index))),
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
       m_prev_width(0),
@@ -117,8 +96,8 @@ Engine::Engine(FlutterView* view,
     exit(EXIT_FAILURE);
   } else {
     // override path
-    engine_file_path = paths::JoinPaths({bundle_path, kBundleEngine});
-    if (IsFile(engine_file_path)) {
+    engine_file_path = fml::paths::JoinPaths({bundle_path, kBundleEngine});
+    if (fml::IsFile(engine_file_path)) {
       FML_DLOG(INFO) << "(" << m_index
                      << ") libflutter_engine.so: " << engine_file_path;
     } else {
@@ -152,18 +131,18 @@ Engine::Engine(FlutterView* view,
   ///
   /// flutter_assets folder
   ///
-  m_assets_path = paths::JoinPaths({bundle_path, kBundleFlutterAssets});
+  m_assets_path = fml::paths::JoinPaths({bundle_path, kBundleFlutterAssets});
   FML_DLOG(INFO) << "(" << m_index << ") flutter_assets: " << m_assets_path;
   m_args.assets_path = m_assets_path.c_str();
 
   ///
   /// icudtl.dat file
   ///
-  m_icu_data_path = paths::JoinPaths({bundle_path, kBundleIcudtl});
-  if (!IsFile(m_icu_data_path)) {
-    m_icu_data_path = paths::JoinPaths({kPathPrefix, kSystemIcudtl});
+  m_icu_data_path = fml::paths::JoinPaths({bundle_path, kBundleIcudtl});
+  if (!fml::IsFile(m_icu_data_path)) {
+    m_icu_data_path = fml::paths::JoinPaths({kPathPrefix, kSystemIcudtl});
   }
-  if (!IsFile(m_icu_data_path)) {
+  if (!fml::IsFile(m_icu_data_path)) {
     FML_LOG(ERROR) << "(" << m_index << ") " << m_icu_data_path
                    << " is not present.";
     assert(false);
@@ -176,15 +155,15 @@ Engine::Engine(FlutterView* view,
   ///
   if (m_proc_table.RunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
-    m_aot_data = LoadAotData(paths::JoinPaths({bundle_path, kBundleAot}));
+    m_aot_data = LoadAotData(fml::paths::JoinPaths({bundle_path, kBundleAot}));
     if (m_aot_data) {
       m_args.aot_data = m_aot_data;
     }
   } else {
     FML_LOG(INFO) << "(" << m_index << ") Runtime=debug";
     std::string kernel_snapshot =
-        paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
-    if (!IsFile(kernel_snapshot)) {
+        fml::paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
+    if (!fml::IsFile(kernel_snapshot)) {
       FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
                      << " missing Flutter Kernel";
       exit(EXIT_FAILURE);
@@ -431,30 +410,16 @@ flutter::EncodableValue Engine::TextureCreate(
        flutter::EncodableValue("Not found in registry")}});
 }
 
-std::string Engine::GetPersistentCachePath(size_t index) {
-  const char* homedir;
-  if ((homedir = getenv("HOME")) == nullptr) {
-    homedir = getpwuid(getuid())->pw_dir;
-  }
+std::string Engine::GetFilePath(size_t index) {
+  auto path = Utils::GetConfigHomePath();
 
-  auto path = paths::JoinPaths({homedir, kXdgConfigHome});
-
-  auto res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-  if (res < 0) {
-    if (errno != EEXIST) {
-      FML_LOG(ERROR) << "(" << index << ") mkdir failed: " << path;
+  if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
+    if (!std::filesystem::create_directories(path)) {
+      FML_LOG(ERROR) << "(" << index << ") create_directories failed: " << path;
       exit(EXIT_FAILURE);
     }
   }
-  path = paths::JoinPaths({homedir, kXdgConfigHome, kApplicationName});
 
-  res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-  if (res < 0) {
-    if (errno != EEXIST) {
-      FML_LOG(ERROR) << "(" << index << ") mkdir failed: " << path;
-      exit(EXIT_FAILURE);
-    }
-  }
   FML_DLOG(INFO) << "(" << index << ") PersistentCachePath: " << path;
 
   return path;
@@ -531,8 +496,8 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
 #if defined(ENV64BIT)
     .timestamp = m_proc_table.GetCurrentTime() / 1000,
 #elif defined(ENV32BIT)
-    .timestamp =
-        static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 & 0xFFFFFFFFULL),
+    .timestamp = static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 &
+                                     0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -562,8 +527,8 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
 #if defined(ENV64BIT)
     .timestamp = m_proc_table.GetCurrentTime() / 1000,
 #elif defined(ENV32BIT)
-    .timestamp =
-        static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 & 0xFFFFFFFFULL),
+    .timestamp = static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 &
+                                     0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -580,7 +545,7 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
 
 FlutterEngineAOTData Engine::LoadAotData(
     const std::string& aot_data_path) const {
-  if (!IsFile(aot_data_path)) {
+  if (!fml::IsFile(aot_data_path)) {
     FML_DLOG(INFO) << "(" << m_index << ") AOT file not present";
     return nullptr;
   }

@@ -63,8 +63,9 @@ FlutterView::FlutterView(Configuration::Config config,
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
       m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
-      m_config.app_id, m_config.view.fullscreen, m_config.view.width,
-      m_config.view.height, m_backend.get());
+      m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
+      m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
+      m_backend.get());
 }
 
 FlutterView::~FlutterView() = default;
@@ -80,6 +81,7 @@ void FlutterView::Initialize() {
   m_flutter_engine = std::make_shared<Engine>(
       this, m_index, m_command_line_args_c, m_config.view.bundle_path,
       m_config.view.accessibility_features);
+
   m_flutter_engine->Run(pthread_self());
 
   if (!m_flutter_engine->IsRunning()) {
@@ -89,7 +91,8 @@ void FlutterView::Initialize() {
 
   // Engine events are decoded by surface pointer
   m_wayland_display->SetEngine(m_wayland_window->GetBaseSurface(),
-                               m_flutter_engine.get());
+                               m_flutter_engine.get(),
+                               m_config.view.pixel_ratio);
   m_wayland_window->SetEngine(m_flutter_engine);
 
   FML_DLOG(INFO) << "(" << m_index << ") Engine running...";
@@ -213,5 +216,38 @@ void* FlutterView::GetSurfaceContext(int64_t index) {
     res = m_comp_surf[index]->GetContext();
   }
   return res;
+}
+#endif
+
+#ifdef ENABLE_PLUGIN_COMP_REGION
+void FlutterView::ClearRegion(std::string& type) {
+  if (type == "input") {
+    wl_surface_set_input_region(m_wayland_window->GetBaseSurface(), nullptr);
+  } else if (type == "opaque") {
+    wl_surface_set_opaque_region(m_wayland_window->GetBaseSurface(), nullptr);
+  }
+}
+
+void FlutterView::SetRegion(
+    std::string& type,
+    std::vector<CompositorRegionPlugin::REGION_T>& regions) {
+  auto compositor = m_wayland_display->GetCompositor();
+  auto base_region = wl_compositor_create_region(compositor);
+
+  for (auto const& region : regions) {
+    FML_DLOG(INFO) << "Set Region: type: " << type << ", x: " << region.x
+                   << ", y: " << region.y << ", width: " << region.width
+                   << ", height: " << region.height;
+
+    wl_region_add(base_region, region.x, region.y, region.width, region.height);
+  }
+
+  if (type == "input") {
+    wl_surface_set_input_region(m_wayland_window->GetBaseSurface(),
+                                base_region);
+  } else if (type == "opaque") {
+    wl_surface_set_opaque_region(m_wayland_window->GetBaseSurface(),
+                                 base_region);
+  }
 }
 #endif

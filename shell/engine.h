@@ -190,7 +190,7 @@ class Engine {
   static FlutterEngineResult MarkExternalTextureFrameAvailable(
       const Engine* engine,
       int64_t texture_id);
-  
+
   /**
    * @brief Create texture
    * @param[in] args passed from Flutter
@@ -223,7 +223,7 @@ class Engine {
    * @relation
    * flutter
    */
-  static std::string GetPersistentCachePath(size_t index);
+  static std::string GetFilePath(size_t index);
 
   /**
    * @brief Send platform message response

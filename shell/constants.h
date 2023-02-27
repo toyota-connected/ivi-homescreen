@@ -23,6 +23,7 @@
 // Screen Size
 constexpr int32_t kDefaultViewWidth = 1920;
 constexpr int32_t kDefaultViewHeight = 720;
+constexpr double kDefaultPixelRatio = 1.0;
 constexpr int kEglBufferSize = 24;
 
 // Cursor
@@ -54,8 +55,9 @@ constexpr char kSystemEngine[] = "libflutter_engine.so";
 constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
 // Install path constants
-constexpr char kXdgConfigHome[] = ".config";
-constexpr char kApplicationName[] = "homescreen";
+static constexpr char kApplicationName[] = "homescreen";
+static constexpr char kXdgApplicationDir[] = ".homescreen";
+static constexpr char kXdgConfigDir[] = ".config";
 
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
