@@ -63,7 +63,7 @@ class CompositorSurface {
   void StartFrames();
   void StopFrames();
 
-  static std::string GetCachePath(const char* folder);
+  static std::string GetFilePath(const char* folder);
 
  private:
   typedef struct {

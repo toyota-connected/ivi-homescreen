@@ -84,6 +84,11 @@ if (BUILD_PLUGIN_COMP_SURF)
     ENABLE_PLUGIN(comp_surf)
 endif ()
 
+option(BUILD_PLUGIN_COMP_REGION "Include Compositor Region Plugin" ON)
+if (BUILD_PLUGIN_COMP_REGION)
+    ENABLE_PLUGIN(comp_region)
+endif ()
+
 if (BUILD_BACKEND_WAYLAND_EGL)
     option(BUILD_PLUGIN_OPENGL_TEXTURE "Includes OpenGL Texture Plugin" ON)
     if (BUILD_PLUGIN_OPENGL_TEXTURE)

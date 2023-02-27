@@ -25,18 +25,22 @@ WaylandWindow::WaylandWindow(size_t index,
                              std::shared_ptr<Display> display,
                              const std::string& type,
                              wl_output* output,
+                             uint32_t output_index,
                              std::string app_id,
                              bool fullscreen,
                              int32_t width,
                              int32_t height,
+                             double pixel_ratio,
                              Backend* backend)
     : m_index(index),
       m_display(std::move(display)),
       m_wl_output(output),
+      m_output_index(output_index),
       m_backend(backend),
       m_flutter_engine(nullptr),
       m_geometry({width, height}),
       m_window_size({width, height}),
+      m_pixel_ratio(pixel_ratio),
       m_type(get_window_type(type)),
       m_app_id(std::move(app_id)),
       m_fullscreen(fullscreen) {  // disable vsync
@@ -44,9 +48,11 @@ WaylandWindow::WaylandWindow(size_t index,
 
   m_fps_counter = 0;
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
+  wl_surface_add_listener(m_base_surface, &m_base_surface_listener, this);
+
   m_base_frame_callback = wl_surface_frame(m_base_surface);
-  wl_callback_add_listener(m_base_frame_callback, &frame_listener_base_surface,
-                           this);
+  wl_callback_add_listener(m_base_frame_callback,
+                           &m_base_surface_frame_listener, this);
 
   m_xdg_surface =
       xdg_wm_base_get_xdg_surface(m_display->GetXdgWmBase(), m_base_surface);
@@ -121,6 +127,36 @@ WaylandWindow::~WaylandWindow() {
   FML_DLOG(INFO) << "(" << m_index << ") - ~WaylandWindow()";
 }
 
+void WaylandWindow::handle_base_surface_enter(void* data,
+                                              struct wl_surface* surface,
+                                              struct wl_output* output) {
+  auto* d = static_cast<WaylandWindow*>(data);
+  (void)surface;
+  (void)output;
+
+  auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
+
+  auto result =
+      d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
+  if (result != kSuccess) {
+    FML_LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
+  }
+}
+
+void WaylandWindow::handle_base_surface_leave(void* data,
+                                              struct wl_surface* surface,
+                                              struct wl_output* output) {
+  (void)data;
+  (void)surface;
+  (void)output;
+  FML_DLOG(INFO) << "Leaving output";
+}
+
+const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
+    .enter = handle_base_surface_enter,
+    .leave = handle_base_surface_leave,
+};
+
 void WaylandWindow::handle_xdg_surface_configure(
     void* data,
     struct xdg_surface* xdg_surface,
@@ -193,8 +229,8 @@ const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
     handle_toplevel_close,
 };
 
-const struct wl_callback_listener WaylandWindow::frame_listener_base_surface = {
-    on_frame_base_surface};
+const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
+    {on_frame_base_surface};
 
 void WaylandWindow::on_frame_base_surface(void* data,
                                           struct wl_callback* callback,
@@ -207,7 +243,7 @@ void WaylandWindow::on_frame_base_surface(void* data,
 
   window->m_base_frame_callback = wl_surface_frame(window->m_base_surface);
   wl_callback_add_listener(window->m_base_frame_callback,
-                           &frame_listener_base_surface, window);
+                           &m_base_surface_frame_listener, window);
 
   window->m_fps_counter++;
   window->m_fps_counter++;
@@ -234,6 +270,13 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
         m_flutter_engine->SetWindowSize(m_geometry.height, m_geometry.width);
     if (result != kSuccess) {
       FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+    }
+
+    auto buffer_scale = m_display->GetBufferScale(m_output_index);
+
+    result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
+    if (result != kSuccess) {
+      FML_LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
     }
   }
 }

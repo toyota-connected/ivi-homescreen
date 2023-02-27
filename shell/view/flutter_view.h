@@ -35,6 +35,9 @@
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
 #endif
+#ifdef ENABLE_PLUGIN_COMP_REGION
+#include "static_plugins/comp_region/comp_region.h"
+#endif
 
 class Display;
 class Engine;
@@ -61,48 +64,48 @@ class FlutterView {
   ~FlutterView();
 
   /**
-  * @brief Run Tasks
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Run Tasks
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void RunTasks();
 
   /**
-  * @brief Initialize
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Initialize
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void Initialize();
 
   /**
-  * @brief Get Egl Window
-  * @return shared_ptr<WaylandWindow>
-  * @retval Egl Window
-  * @relation
-  * wayland, flutter
-  */
-  std::shared_ptr<WaylandWindow> GetEglWindow() { return m_wayland_window; }
+   * @brief Get Egl Window
+   * @return shared_ptr<WaylandWindow>
+   * @retval Egl Window
+   * @relation
+   * wayland, flutter
+   */
+  std::shared_ptr<WaylandWindow> GetWindow() { return m_wayland_window; }
 
   /**
-  * @brief Get Backend
-  * @return Backend*
-  * @retval Backend pointer
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Get Backend
+   * @return Backend*
+   * @retval Backend pointer
+   * @relation
+   * wayland, flutter
+   */
   Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
 
   [[nodiscard]] uint64_t GetIndex() const { return m_index; }
 
   /**
-  * @brief Draw FPS to calc and output
-  * @param[in] end_time End time
-  * @return void
-  * @relation
-  * wayland, flutter
-  */
+   * @brief Draw FPS to calc and output
+   * @param[in] end_time End time
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void DrawFps(long long end_time);
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
@@ -124,6 +127,13 @@ class FlutterView {
   surface_array_t m_comp_surf;
 
   void* GetSurfaceContext(int64_t index);
+#endif
+
+#ifdef ENABLE_PLUGIN_COMP_REGION
+  void ClearRegion(std::string& type);
+
+  void SetRegion(std::string& type,
+                 std::vector<CompositorRegionPlugin::REGION_T>& regions);
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);

@@ -74,6 +74,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `--h={int value}` - Sets View height.  Requires an integer value.
 
+`--p={int value}` - Sets Pixel Ratio.  Requires a double value.
+
 `--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
 
 `--b={path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
