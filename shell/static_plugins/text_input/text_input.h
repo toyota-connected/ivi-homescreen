@@ -34,6 +34,10 @@
 
 #include "constants.h"
 
+#if ENABLE_PLUGIN_KEY_EVENT
+#include "static_plugins/key_event/key_event.h"
+#endif
+
 class Engine;
 
 class TextInput : public flutter::BinaryMessenger {
@@ -77,6 +81,17 @@ class TextInput : public flutter::BinaryMessenger {
   static void keyboard_handle_key(void* data,
                                   xkb_keysym_t keysym,
                                   uint32_t state);
+
+#if ENABLE_PLUGIN_KEY_EVENT
+  static std::shared_ptr<DelegateHandleKey> GetDelegate(
+      void* data,
+      FlutterKeyEventType type,
+      uint32_t xkb_scancode,
+      xkb_keysym_t keysym);
+
+  static void handle_key_hook(void *data, FlutterKeyEventType type,
+      uint32_t xkb_scancode, xkb_keysym_t keysym);
+#endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(TextInput);
 

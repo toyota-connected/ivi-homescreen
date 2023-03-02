@@ -34,6 +34,31 @@
 
 class Engine;
 
+class DelegateHandleKey {
+ public:
+
+  typedef void (*HandleKeyHook)(void *data, FlutterKeyEventType type,
+                  uint32_t xkb_scancode, xkb_keysym_t keysym);
+
+  explicit DelegateHandleKey(void *data, HandleKeyHook hook,
+      FlutterKeyEventType, uint32_t xkb_scancode, xkb_keysym_t keysym);
+
+  /**
+   * @brief Run the registered callback
+   * @return void
+   * @relation
+   * internal
+   */
+  void TriggerHook();
+
+ private:
+  void* m_data;
+  HandleKeyHook m_hook;
+  FlutterKeyEventType m_type;
+  uint32_t m_xkb_scancode;
+  xkb_keysym_t m_keysym;
+};
+
 class KeyEvent : public flutter::BinaryMessenger {
  public:
   static constexpr char kChannelName[] = "flutter/keyevent";
@@ -71,6 +96,9 @@ class KeyEvent : public flutter::BinaryMessenger {
    * @param[in] type the type of Flutter KeyEvent
    * @param[in] code key code
    * @param[in] sym key symbol
+   * @param[in] hook_data Pointer to Hook data
+   * @paran[in] hook another callback when a key is handled.
+   *            This will be called only when a key event is not handled in flutter app.
    * @return void
    * @relation
    * flutter
@@ -83,7 +111,8 @@ class KeyEvent : public flutter::BinaryMessenger {
   static void keyboard_handle_key(void* data,
                                   FlutterKeyEventType eventType,
                                   uint32_t xkb_scancode,
-                                  xkb_keysym_t keysym);
+                                  xkb_keysym_t keysym,
+                                  std::shared_ptr<DelegateHandleKey> delegate);
 
   FML_DISALLOW_COPY_AND_ASSIGN(KeyEvent);
 
@@ -99,6 +128,7 @@ class KeyEvent : public flutter::BinaryMessenger {
   static constexpr char kKeyUp[] = "keyup";
   static constexpr char kKeyDown[] = "keydown";
   static constexpr char kValueToolkitGtk[] = "gtk";
+  static constexpr char kHandled[] = "handled";
 
   std::shared_ptr<Engine> engine_;
 
@@ -117,7 +147,50 @@ class KeyEvent : public flutter::BinaryMessenger {
   void SendKeyEvent(bool released,
                     xkb_keysym_t keysym,
                     uint32_t xkb_scancode,
-                    uint32_t modifiers);
+                    uint32_t modifiers,
+                    std::shared_ptr<DelegateHandleKey> delegate);
+
+  mutable flutter::BinaryReply last_binary_reply_;
+  std::string last_message_handler_channel_;
+  flutter::BinaryMessageHandler last_message_handler_;
+
+  /**
+   * @brief The reply callback impl for SendPlatformMessage
+   * @param[in] the reply data
+   * @param[in] the reply size
+   * @param[in] user data
+   * @return void
+   * @relation
+   * flutter
+   */
+  static void ReplyHandler(const uint8_t *data, size_t data_size,
+                           void* userdata) {
+    auto d = reinterpret_cast<KeyEvent*>(userdata);
+    if (d->last_binary_reply_) {
+      d->last_binary_reply_(data, data_size);
+    }
+  }
+
+  typedef enum {
+    FL_KEY_EV_RET_IGNORED = 0,
+    FL_KEY_EV_RET_HANDLED,
+    FL_KEY_EV_RET_FAILED,
+  } FL_KEY_EV_RET_T;
+
+  /**
+   * @brief parse a reply from a flutter app
+   * @param[in] the reply data
+   * @param[in] the reply size
+   * @return FL_KEY_EV_RET_T
+   *         If it is failed to parse a reply, return FL_KEY_EV_RET_FAILED.
+   *         If it is complete to parse a reply, return FL_KEY_EV_RET_HANDLED or FL_KEY_EV_RET_IGNORED.
+   *         FL_KEY_EV_RET_IGNORED is corresponding to KeyEventResult.ignored.
+   *         FL_KEY_EV_RET_HANDLED is corresponding to KeyEventResult.handled.
+   * @relation
+   * flutter
+   */
+  static FL_KEY_EV_RET_T ParseReply(const uint8_t* reply, size_t reply_size);
+
 
   /**
    * @brief Send a message to the Flutter engine on this channel

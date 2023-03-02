@@ -354,8 +354,7 @@ void Display::pointer_handle_enter(void* data,
   (void)pointer;
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
-  d->m_active_engine = d->m_surface_engine_map[surface].first;
-  d->m_active_pixel_ratio = d->m_surface_engine_map[surface].second;
+  d->m_active_engine = d->m_surface_engine_map[surface];
 
   d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
   d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
@@ -395,10 +394,8 @@ void Display::pointer_handle_motion(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_pointer.event.surface_x = wl_fixed_to_double(
-      sx * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio));
-  d->m_pointer.event.surface_y = wl_fixed_to_double(
-      sy * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio));
+  d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
+  d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
 
   if (d->m_active_engine) {
     FlutterPointerPhase phase =
@@ -518,8 +515,7 @@ void Display::keyboard_handle_enter(void* data,
   (void)keys;
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
-  d->m_active_engine = d->m_surface_engine_map[surface].first;
-  d->m_active_pixel_ratio = d->m_surface_engine_map[surface].second;
+  d->m_active_engine = d->m_surface_engine_map[surface];
 }
 
 void Display::keyboard_handle_leave(void* data,
@@ -593,9 +589,14 @@ void Display::keyboard_handle_key(void* data,
     }
   }
 
+#if ENABLE_PLUGIN_TEXT_INPUT
+  auto text_input = d->m_text_input[d->m_active_surface];
+#endif
 #if ENABLE_PLUGIN_KEY_EVENT
   auto key_event = d->m_key_event[d->m_active_surface];
+  std::shared_ptr<DelegateHandleKey> delegate = nullptr;
 #endif
+
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
@@ -607,25 +608,33 @@ void Display::keyboard_handle_key(void* data,
                      << xkb_scancode;
     }
 
+#if ENABLE_PLUGIN_TEXT_INPUT
+    if (text_input) {
+#endif
+#if ENABLE_PLUGIN_KEY_EVENT && ENABLE_PLUGIN_TEXT_INPUT
+      // The both of TextInput and KeyEvent is enabled.
+      delegate = std::move(TextInput::GetDelegate(text_input,
+          kFlutterKeyEventTypeRepeat,
+          d->m_repeat_code, d->m_keysym_pressed));
+#elif !(ENABLE_PLUGIN_KEY_EVENT) && ENABLE_PLUGIN_TEXT_INPUT
+      // Only TextInput is enabled.
+      TextInput::keyboard_handle_key(text_input, keysym, state);
+#endif
+#if ENABLE_PLUGIN_TEXT_INPUT
+    }
+#endif
+
 #if ENABLE_PLUGIN_KEY_EVENT
     if (key_event) {
       KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeDown,
-                                    xkb_scancode, keysym);
+          xkb_scancode, keysym, std::move(delegate));
     }
 #endif
-
-#if ENABLE_PLUGIN_TEXT_INPUT
-    auto text_input = d->m_text_input[d->m_active_surface];
-    if (text_input) {
-      TextInput::keyboard_handle_key(text_input, keysym, state);
-    }
-#endif
-
   } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
 #if ENABLE_PLUGIN_KEY_EVENT
     if (key_event) {
       KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
-                                    xkb_scancode, keysym);
+          xkb_scancode, keysym, nullptr);
     }
 #endif
     if (d->m_repeat_code == xkb_scancode) {
@@ -674,18 +683,36 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 
 void Display::keyboard_repeat_func(void* data) {
   auto d = reinterpret_cast<Display*>(data);
-#if ENABLE_PLUGIN_KEY_EVENT
-  auto key_event = d->m_key_event[d->m_active_surface];
-  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
-    KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeRepeat,
-                                  d->m_repeat_code, d->m_keysym_pressed);
-  }
-#endif
+
 #if ENABLE_PLUGIN_TEXT_INPUT
   auto text_input = d->m_text_input[d->m_active_surface];
-  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
+#endif
+#if ENABLE_PLUGIN_KEY_EVENT
+  auto key_event = d->m_key_event[d->m_active_surface];
+  std::shared_ptr<DelegateHandleKey> delegate = nullptr;
+#endif
+
+#if ENABLE_PLUGIN_TEXT_INPUT
+  if (text_input && d->m_repeat_code != XKB_KEY_NoSymbol) {
+#endif
+#if ENABLE_PLUGIN_KEY_EVENT && ENABLE_PLUGIN_TEXT_INPUT
+    // The both of TextInput and KeyEvent is enabled.
+    delegate = std::move(TextInput::GetDelegate(text_input,
+      kFlutterKeyEventTypeRepeat,
+      d->m_repeat_code, d->m_keysym_pressed));
+#elif !(ENABLE_PLUGIN_KEY_EVENT) && ENABLE_PLUGIN_TEXT_INPUT
+    // Only TextInput is enabled.
     TextInput::keyboard_handle_key(text_input, d->m_keysym_pressed,
                                    WL_KEYBOARD_KEY_STATE_PRESSED);
+#endif
+#if ENABLE_PLUGIN_TEXT_INPUT
+  }
+#endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
+    KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeRepeat,
+        d->m_repeat_code, d->m_keysym_pressed, std::move(delegate));
   }
 #endif
 }
@@ -710,8 +737,7 @@ void Display::touch_handle_down(void* data,
   d->m_touch.surface_y = y_w;
 
   d->m_active_surface = surface;
-  d->m_touch_engine = d->m_surface_engine_map[surface].first;
-  d->m_active_pixel_ratio = d->m_surface_engine_map[surface].second;
+  d->m_touch_engine = d->m_surface_engine_map[surface];
   if (d->m_touch_engine) {
     d->m_touch_engine->SendTouchEvent(
         (first_down ? FlutterPointerPhase::kDown : FlutterPointerPhase::kMove),
@@ -751,10 +777,8 @@ void Display::touch_handle_motion(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.surface_x =
-      x_w * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio);
-  d->m_touch.surface_y =
-      x_w * (wl_fixed_t)(d->m_buffer_scale * d->m_active_pixel_ratio);
+  d->m_touch.surface_x = x_w;
+  d->m_touch.surface_y = y_w;
 
   if (d->m_touch_engine) {
     d->m_touch_engine->SendTouchEvent(FlutterPointerPhase::kMove,
@@ -819,12 +843,10 @@ void Display::AglShellDoReady() const {
 }
 
 void Display::SetEngine(wl_surface* surface,
-                        Engine* engine,
-                        double pixel_ratio) {
+                        Engine* engine) {
   m_active_engine = engine;
-  m_active_pixel_ratio = pixel_ratio;
   m_active_surface = surface;
-  m_surface_engine_map[surface] = std::pair(engine, pixel_ratio);
+  m_surface_engine_map[surface] = engine;
 }
 
 bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
@@ -887,11 +909,11 @@ int32_t Display::GetBufferScale(uint32_t index) {
     if (m_buffer_scale_enable) {
       return m_all_outputs[index]->scale;
     } else {
-      return kDefaultPixelRatio;
+      return kDefaultBufferScale;
     }
   }
   FML_DLOG(ERROR) << "Invalid output index: " << index;
-  return kDefaultPixelRatio;
+  return kDefaultBufferScale;
 }
 
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {

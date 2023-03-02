@@ -32,6 +32,7 @@ flutter::EncodableValue TextureEgl::Create(
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
 
   switch(texture_id) {
+#ifdef ENABLE_TEXTURE_TEST_EGL
     case kTextureEgl_ObjectId_Test: {
       m_textures->push_back(
           std::make_unique<TextureTestEgl>(m_flutter_view)
@@ -40,6 +41,8 @@ flutter::EncodableValue TextureEgl::Create(
       return m_textures->back()->Create(
           width, height, args);
     }
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
     case kTextureEgl_ObjectId_Navigation: {
       m_textures->push_back(
           std::make_unique<TextureNaviRender>(m_flutter_view)
@@ -48,6 +51,7 @@ flutter::EncodableValue TextureEgl::Create(
       return m_textures->back()->Create(
           width, height, args);
     }
+#endif
     default: {
       return flutter::EncodableValue(flutter::EncodableMap{
           {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
@@ -59,30 +63,53 @@ flutter::EncodableValue TextureEgl::Create(
 
 void TextureEgl::Dispose() {
   for(auto &item : *m_textures) {
-    if (item->GetId() == kTextureEgl_ObjectId_Test) {
-      TextureTestEgl::Dispose(item.get(), item->GetId());
-    }
-    else if (item->GetId() == kTextureEgl_ObjectId_Navigation) {
-      TextureNaviRender::Dispose(item.get(), item->GetId());
+    switch(item->GetId()) {
+#ifdef ENABLE_TEXTURE_TEST_EGL
+      case kTextureEgl_ObjectId_Test: {
+        TextureTestEgl::Dispose(item.get(), item->GetId());
+        break;
+      }
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+      case kTextureEgl_ObjectId_Navigation: {
+        TextureNaviRender::Dispose(item.get(), item->GetId());
+        break;
+      }
+#endif
+      default:
+        break;
     }
   }
 }
 
 void TextureEgl::Draw() {
-   for(auto &item : *m_textures) {
-    if (item->GetId() == kTextureEgl_ObjectId_Test) {
-      TextureTestEgl::Draw(item.get());
+  for(auto &item : *m_textures) {
+    switch (item->GetId()) {
+#ifdef ENABLE_TEXTURE_TEST_EGL
+      case kTextureEgl_ObjectId_Test: {
+        TextureTestEgl::Draw(item.get());
+        break;
+      }
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+      case kTextureEgl_ObjectId_Navigation: {
+        TextureNaviRender::Draw(item.get());
+        break;
+      }
+#endif
+      default: {
+        break;
+      }
     }
-    else if (item->GetId() == kTextureEgl_ObjectId_Navigation) {
-      TextureNaviRender::Draw(item.get());
-    }
-   }
+  }
 }
 
 void TextureEgl::RunTask() {
-   for(auto &item : *m_textures) {
+  for(auto &item : *m_textures) {
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
     if (item->GetId() == kTextureEgl_ObjectId_Navigation) {
       TextureNaviRender::RunTask(item.get());
     }
-   }
+#endif
+  }
 }
