@@ -23,8 +23,11 @@
 // Screen Size
 constexpr int32_t kDefaultViewWidth = 1920;
 constexpr int32_t kDefaultViewHeight = 720;
-constexpr double kDefaultPixelRatio = 1.0;
 constexpr int kEglBufferSize = 24;
+
+// Scale Factor
+constexpr double kDefaultBufferScale = 1.0;
+constexpr double kDefaultPixelRatio = 1.0;
 
 // Cursor
 constexpr int kCursorSize = 24;

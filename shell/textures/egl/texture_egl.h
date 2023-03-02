@@ -88,9 +88,12 @@ class TextureEgl {
   }
 
  private:
-
+#ifdef ENABLE_TEXTURE_TEST_EGL
   static constexpr int64_t kTextureEgl_ObjectId_Test = 5150;
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
   static constexpr uint32_t kTextureEgl_ObjectId_Navigation = 98765;
+#endif
 
   std::unique_ptr<std::vector<std::unique_ptr<Texture>>> m_textures;
 

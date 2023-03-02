@@ -256,6 +256,38 @@ class Engine {
                            size_t message_size) const;
 
   /**
+   * @brief PlatformMessage Reply callback
+   * @param[in] data payload
+   * @param[in] data_size payload size
+   * @param[in] userdata user data
+   * @return void
+   * @relation
+   * flutter
+   */
+  typedef void (*FlutterBinaryReplyUserdata)(const uint8_t *data,
+                                             size_t data_size,
+                                             void* userdata);
+
+  /**
+   * @brief Send platform message
+   * @param[in] channel Destination channel
+   * @param[in] message Message to send
+   * @param[in] message_size Size of message
+   * @param[in] reply a callback invoked by the engine when the Flutter app send a response on the handle.
+   * @param[in] userdata The user data associated with the data callback.
+   * @return bool
+   * @retval true If successed to send message
+   * @retval false If failed to send message
+   * @relation
+   * flutter
+   */
+  bool SendPlatformMessage(const char* channel,
+                           const uint8_t* message,
+                           size_t message_size,
+                           const FlutterBinaryReplyUserdata reply,
+                           void* userdata) const;
+
+  /**
    * @brief Get accessibility features
    * @return int32_t
    * @retval Accessibility features

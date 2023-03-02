@@ -471,6 +471,29 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
+MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
+                                              const uint8_t *message,
+                                              const size_t message_size,
+                                              const FlutterBinaryReplyUserdata reply,
+                                              void* userdata) const {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  FlutterPlatformMessageResponseHandle* handle;
+  m_proc_table.PlatformMessageCreateResponseHandle(
+      m_flutter_engine, reply, userdata, &handle);
+  const FlutterPlatformMessage msg{
+      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
+  };
+
+  FlutterEngineResult message_ret = m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  if (handle != nullptr) {
+    m_proc_table.PlatformMessageReleaseResponseHandle(m_flutter_engine, handle);
+  }
+
+  return message_ret == kSuccess;
+}
+
 MAYBE_UNUSED FlutterEngineResult
 Engine::UpdateAccessibilityFeatures(int32_t value) {
   m_accessibility_features = value;

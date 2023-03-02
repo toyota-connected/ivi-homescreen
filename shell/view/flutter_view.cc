@@ -91,8 +91,7 @@ void FlutterView::Initialize() {
 
   // Engine events are decoded by surface pointer
   m_wayland_display->SetEngine(m_wayland_window->GetBaseSurface(),
-                               m_flutter_engine.get(),
-                               m_config.view.pixel_ratio);
+                               m_flutter_engine.get());
   m_wayland_window->SetEngine(m_flutter_engine);
 
   FML_DLOG(INFO) << "(" << m_index << ") Engine running...";
@@ -221,6 +220,7 @@ void* FlutterView::GetSurfaceContext(int64_t index) {
 
 #ifdef ENABLE_PLUGIN_COMP_REGION
 void FlutterView::ClearRegion(std::string& type) {
+  // A NULL wl_region causes the pending input/opaque region to be set to empty.
   if (type == "input") {
     wl_surface_set_input_region(m_wayland_window->GetBaseSurface(), nullptr);
   } else if (type == "opaque") {
@@ -249,5 +249,8 @@ void FlutterView::SetRegion(
     wl_surface_set_opaque_region(m_wayland_window->GetBaseSurface(),
                                  base_region);
   }
+  // Setting the pending input/opaque region has copy semantics,
+  // and the wl_region object can be destroyed immediately.
+  wl_region_destroy(base_region);
 }
 #endif

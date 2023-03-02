@@ -154,12 +154,11 @@ class Display {
    * @brief Set Engine
    * @param[in] surface Image
    * @param[in] engine Engine
-   * @param[in] pixel_ratio Pixel Ratio
    * @return void
    * @relation
    * wayland
    */
-  void SetEngine(wl_surface* surface, Engine* engine, double pixel_ratio);
+  void SetEngine(wl_surface* surface, Engine* engine);
 
   /**
    * @brief Activate system cursor
@@ -212,10 +211,9 @@ class Display {
   struct wl_shm* m_shm{};
   struct wl_surface* m_base_surface{};
 
-  std::map<wl_surface*, std::pair<Engine*, double>> m_surface_engine_map;
+  std::map<wl_surface*, Engine*> m_surface_engine_map;
   wl_surface* m_active_surface{};
   Engine* m_active_engine{};
-  double m_active_pixel_ratio{};
   Engine* m_touch_engine{};
 
   struct wl_seat* m_seat{};

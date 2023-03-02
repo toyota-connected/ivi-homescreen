@@ -291,6 +291,36 @@ void TextInput::keyboard_handle_key(void* data,
   }
 }
 
+#if ENABLE_PLUGIN_KEY_EVENT
+std::shared_ptr<DelegateHandleKey> TextInput::GetDelegate(
+    void *data,
+    FlutterKeyEventType type,
+    uint32_t xkb_scancode,
+    xkb_keysym_t keysym) {
+  if (type == kFlutterKeyEventTypeUp) {
+    // ignore
+    return nullptr;
+  }
+  if (data == nullptr) {
+    // ignore
+    return nullptr;
+  }
+
+  return std::make_shared<DelegateHandleKey>(data, TextInput::handle_key_hook,
+      type, xkb_scancode, keysym);
+}
+
+void TextInput::handle_key_hook(void *data, FlutterKeyEventType type,
+                                       uint32_t xkb_scancode, xkb_keysym_t keysym) {
+  auto* text_input = static_cast<TextInput*>(data);
+
+  if ((type == kFlutterKeyEventTypeRepeat && xkb_scancode != XKB_KEY_NoSymbol) ||
+      (type == kFlutterKeyEventTypeDown)) {
+    text_input->keyboard_handle_key(text_input, keysym, WL_KEYBOARD_KEY_STATE_PRESSED);
+  }
+}
+#endif
+
 void TextInput::Send(const std::string& channel,
                      const uint8_t* message,
                      size_t message_size,
