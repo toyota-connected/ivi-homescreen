@@ -71,13 +71,13 @@ void Configuration::getViewParameters(
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].IsInt();
+    instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
   }
   if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].IsInt();
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetInt();
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].IsInt();
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetInt();
   }
 }
 
@@ -129,13 +129,13 @@ void Configuration::getGlobalParameters(
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].IsInt();
+    instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
   }
   if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].IsInt();
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetInt();
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].IsInt();
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetInt();
   }
 }
 
@@ -241,6 +241,9 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
     }
     if (cfg.view.pixel_ratio == 0) {
       cfg.view.pixel_ratio = kDefaultPixelRatio;
+    }
+    if (cfg.app_id.empty()) {
+      cfg.app_id = kApplicationName;
     }
 
     res.emplace_back(cfg);
