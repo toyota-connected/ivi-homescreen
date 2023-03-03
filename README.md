@@ -74,6 +74,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `--h={int value}` - Sets View height.  Requires an integer value.
 
+`--p={int value}` - Sets Pixel Ratio.  Requires a double value.
+
 `--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
 
 `--b={path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
@@ -201,6 +203,14 @@ All other parameters get assigned using the following ordering:
 
 # x86_64 Desktop development notes
 
+## NVidia GL errors
+
+Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
+This should resolve it:
+```
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+```
+
 ## Ubuntu 16-18
 
 ### Logging in
@@ -223,6 +233,11 @@ Defaults to Wayland, no need to do anything special
     sudo apt-get -y install libwayland-dev wayland-protocols \
     mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
     libxkbcommon-dev
+
+## Optional Packages
+
+    # To build doxygen documentation
+    sudo apt-get -y install doxygen
 
 ## GCC/libstdc++ Build
 

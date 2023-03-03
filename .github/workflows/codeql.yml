@@ -65,14 +65,19 @@ jobs:
           -D CMAKE_BUILD_TYPE=Release \
           -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
           -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-          -D BUILD_PLUGIN_GSTREAMER_EGL=OFF
+          -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
+          -D BUILD_PLUGIN_COMP_SURF=ON \
+          -D LLVM_ROOT=/usr/lib/llvm-14
         mkdir -p ${{github.workspace}}/build/debug
         CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
           -B ${{github.workspace}}/build/debug \
           -D CMAKE_BUILD_TYPE=Debug \
           -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
           -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-          -D BUILD_PLUGIN_GSTREAMER_EGL=OFF
+          -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
+          -D BUILD_PLUGIN_COMP_SURF=ON \
+          -D LLVM_ROOT=/usr/lib/llvm-14
+
 
     - name: Build Debug Packages
       working-directory: ${{github.workspace}}/build/debug

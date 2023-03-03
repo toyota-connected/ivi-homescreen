@@ -1,5 +1,6 @@
 #
 # Copyright 2020-2022 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,7 +43,7 @@ if (BUILD_PLUGIN_MOUSE_CURSOR)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    option(BUILD_PLUGIN_GSTREAMER_EGL "Include GStreamer Plugin" ON)
+    option(BUILD_PLUGIN_GSTREAMER_EGL "Include GStreamer Plugin" OFF)
     if (BUILD_PLUGIN_GSTREAMER_EGL)
         ENABLE_PLUGIN(gstreamer_egl)
         pkg_check_modules(GST REQUIRED gstreamer-1.0>=1.4)
@@ -63,6 +64,11 @@ if (BUILD_PLUGIN_TEXT_INPUT)
     ENABLE_PLUGIN(text_input)
 endif ()
 
+option(BUILD_PLUGIN_KEY_EVENT "Includes Key Event Plugin" ON)
+if (BUILD_PLUGIN_KEY_EVENT)
+    ENABLE_PLUGIN(key_event)
+endif ()
+
 option(BUILD_PLUGIN_URL_LAUNCHER "Includes URL Launcher Plugin" ON)
 if (BUILD_PLUGIN_URL_LAUNCHER)
     ENABLE_PLUGIN(url_launcher)
@@ -71,6 +77,16 @@ endif ()
 option(BUILD_PLUGIN_PACKAGE_INFO "Include PackageInfo Plugin" ON)
 if (BUILD_PLUGIN_PACKAGE_INFO)
     ENABLE_PLUGIN(package_info)
+endif ()
+
+option(BUILD_PLUGIN_COMP_SURF "Include Compositor Surface Plugin" ON)
+if (BUILD_PLUGIN_COMP_SURF)
+    ENABLE_PLUGIN(comp_surf)
+endif ()
+
+option(BUILD_PLUGIN_COMP_REGION "Include Compositor Region Plugin" ON)
+if (BUILD_PLUGIN_COMP_REGION)
+    ENABLE_PLUGIN(comp_region)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
@@ -95,10 +111,16 @@ if (BUILD_PLUGIN_PLATFORM_VIEW)
     ENABLE_PLUGIN(platform_views)
 endif ()
 
+option(BUILD_PLUGIN_DESKTOP_WINDOW "Includes Desktop Window Plugin" ON)
+if (BUILD_PLUGIN_DESKTOP_WINDOW)
+    ENABLE_PLUGIN(desktop_window)
+endif ()
+
 option(BUILD_PLUGIN_SECURE_STORAGE "Includes Flutter Secure Storage" OFF)
 if (BUILD_PLUGIN_SECURE_STORAGE)
     ENABLE_PLUGIN(secure_storage)
     pkg_check_modules(PLUGIN_SECURE_STORAGE REQUIRED libsecret-1)
 endif ()
+
 
 message(STATUS "Plugin Config .......... ${PLUGINS}")

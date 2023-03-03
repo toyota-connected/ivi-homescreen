@@ -1,5 +1,6 @@
 /*
  * Copyright 2020 Toyota Connected North America
+ * @copyright Copyright (c) 2022 Woven Alpha, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,16 +35,38 @@ class PlatformChannel {
   PlatformChannel(const PlatformChannel&) = delete;
   const PlatformChannel& operator=(const PlatformChannel&) = delete;
 
+  /**
+  * @brief Get instance of PlatformChannel
+  * @return PlatformChannel*
+  * @retval Pointer to PlatformChannel that is a singleton.
+  * @relation
+  * flutter
+  */
   static PlatformChannel* GetInstance() {
     if (singleton == nullptr)
       singleton = new PlatformChannel;
     return singleton;
   }
 
+  /**
+  * @brief Get platform message handler
+  * @return std::map<std::string, FlutterPlatformMessageCallback>
+  * @retval Handler from channel name to Flutter platform message callback
+  * @relation
+  * flutter
+  */
   std::map<std::string, FlutterPlatformMessageCallback> GetHandler() {
     return m_platform_message_handlers;
   }
 
+  /**
+  * @brief Register flutter platform message callback
+  * @param[in] channel String of channel name
+  * @param[in] callback Flutter platform message callback
+  * @return void
+  * @relation
+  * flutter
+  */
   void RegisterCallback(const char* channel,
                         FlutterPlatformMessageCallback callback) {
     m_platform_message_handlers.emplace(std::string(channel), callback);
