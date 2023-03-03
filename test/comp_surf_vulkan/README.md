@@ -10,9 +10,14 @@ sudo make install
 
 ### ivi-homescreen
 
-Ensure ivi-homescreen is built with `-DBUILD_PLUGIN_COMP_SURF=ON`
+Ensure `ivi-homescreen` is built with the following flag:
+
+    -DBUILD_PLUGIN_COMP_SURF=ON
+
 
 ### flutter
+
+The following expects the use of Flutter Workspace Automation:
 
 ```
 flutter run -d flutter-auto

@@ -169,8 +169,8 @@ void Display::registry_handle_global(void* data,
     if (d->m_enable_cursor) {
       d->m_cursor_theme = wl_cursor_theme_load(d->m_cursor_theme_name.c_str(),
                                                kCursorSize, d->m_shm);
-      d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
+    d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
   } else if (strcmp(interface, wl_output_interface.name) == 0) {
     auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
@@ -852,7 +852,10 @@ void Display::SetEngine(wl_surface* surface,
 bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
   (void)device;
   if (!m_enable_cursor) {
-    FML_DLOG(INFO) << "[cursor_disabled]";
+    wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
+                          m_cursor_surface, 0,0);
+    wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
+    wl_surface_commit(m_cursor_surface);
     return true;
   }
 
