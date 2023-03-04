@@ -29,7 +29,9 @@ TextureTestEgl::TextureTestEgl(FlutterView* view)
 
 TextureTestEgl::~TextureTestEgl() = default;
 
-flutter::EncodableValue TextureTestEgl::Create(void* userdata) {
+flutter::EncodableValue TextureTestEgl::Create(
+    void* userdata,
+    const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
   auto* obj = reinterpret_cast<TextureTestEgl*>(userdata);
 
   obj->m_egl_backend->MakeTextureCurrent();
@@ -56,7 +58,7 @@ flutter::EncodableValue TextureTestEgl::Create(void* userdata) {
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("textureId"),
-       flutter::EncodableValue(obj->m_name)},
+       flutter::EncodableValue(textureId)},
       {flutter::EncodableValue("width"), flutter::EncodableValue(obj->m_width)},
       {flutter::EncodableValue("height"),
        flutter::EncodableValue(obj->m_height)},
@@ -68,18 +70,18 @@ flutter::EncodableValue TextureTestEgl::Create(void* userdata) {
        flutter::EncodableValue(textureId)}});
 }
 
-void TextureTestEgl::Dispose(void* userdata) {
+void TextureTestEgl::Dispose(void* userdata, GLuint name) {
   auto* obj = (TextureTestEgl*)userdata;
-  obj->Disable();
+  obj->Disable(name);
 }
 
 void TextureTestEgl::Draw(void* userdata) {
   auto* obj = (TextureTestEgl*)userdata;
 
-  if (!m_draw_next)
+  if (!obj->m_draw_next)
     return;
 
-  m_draw_next = false;
+  obj->m_draw_next = false;
 
   obj->FrameReady();
 }

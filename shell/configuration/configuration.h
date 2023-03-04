@@ -33,19 +33,36 @@ class Configuration {
       std::vector<std::string> vm_args;
       std::string bundle_path;
       std::string window_type;
+      uint32_t wl_output_index;
       int32_t accessibility_features;
       uint32_t width;
       uint32_t height;
       bool fullscreen;
+      double pixel_ratio;
       uint32_t fps_output_console;
       uint32_t fps_output_overlay;
       uint32_t fps_output_frequency;
     } view;
   };
 
+  /**
+   * @brief Parse config file and generate View config
+   * @param[in] config Config file
+   * @return std::vector<Configuration::Config>
+   * @retval View config
+   * @relation
+   * internal
+   */
   static std::vector<struct Configuration::Config> ParseConfig(
       struct Configuration::Config& config);
 
+  /**
+   * @brief Print the contents of the configuration to the log
+   * @param[in] config Pointer to config object to print
+   * @return void
+   * @relation
+   * internal
+   */
   static void PrintConfig(const Config&);
 
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
@@ -54,8 +71,10 @@ class Configuration {
   static constexpr char kViewKey[] = "view";
   static constexpr char kBundlePathKey[] = "bundle_path";
   static constexpr char kWindowTypeKey[] = "window_type";
+  static constexpr char kOutputIndex[] = "output_index";
   static constexpr char kWidthKey[] = "width";
   static constexpr char kHeightKey[] = "height";
+  static constexpr char kPixelRatioKey[] = "pixel_ratio";
   static constexpr char kAccessibilityFeaturesKey[] = "accessibility_features";
   static constexpr char kVmArgsKey[] = "vm_args";
   static constexpr char kFullscreenKey[] = "fullscreen";
@@ -67,19 +86,68 @@ class Configuration {
   static constexpr char kFpsOutputOverlay[] = "fps_output_overlay";
   static constexpr char kFpsOutputFrequency[] = "fps_output_frequency";
 
+  /**
+   * @brief Parse a Json Document string into DOM
+   * @param[in] filename Json Document path
+   * @return rapidjson::Document
+   * @retval Document Object
+   * @relation
+   * internal
+   */
   static rapidjson::Document getJsonDocument(const std::string& filename);
 
+  /**
+   * @brief Get View counts
+   * @param[in] doc Document Object
+   * @return rapidjson::SizeType
+   * @retval Number of element counts
+   * @relation
+   * internal
+   */
   static rapidjson::SizeType getViewCount(rapidjson::Document& doc);
 
+  /**
+   * @brief Get View parameters set to View config
+   * @param[in] obj Conifg parameters
+   * @param[in,out] instance View config
+   * @return void
+   * @relation
+   * internal
+   */
   static void getViewParameters(
       const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
       Config& instance);
 
+  /**
+   * @brief Get Global parameters set to View config
+   * @param[in] obj Conifg parameters
+   * @param[in,out] instance View confige
+   * @return void
+   * @relation
+   * internal
+   */
   static void getGlobalParameters(
       const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
       Config& instance);
 
+  /**
+   * @brief Get Doc parameters set to View config
+   * @param[in] doc Document Object
+   * @param[in] index 0 ~ View counts-1
+   * @param[in,out] instance View config
+   * @return void
+   * @relation
+   * internal
+   */
   static void getView(rapidjson::Document& doc, int index, Config& instance);
 
+  /**
+   * @brief Get Cli config overrides to View config
+   * @param[in,out] instance View config
+   * @param[in] cli Cli config
+   * @return void
+   * @relation
+   * internal
+   */
   static void getCliOverrides(Config& instance, Config& cli);
 };

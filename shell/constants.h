@@ -25,6 +25,10 @@ constexpr int32_t kDefaultViewWidth = 1920;
 constexpr int32_t kDefaultViewHeight = 720;
 constexpr int kEglBufferSize = 24;
 
+// Scale Factor
+constexpr double kDefaultBufferScale = 1.0;
+constexpr double kDefaultPixelRatio = 1.0;
+
 // Cursor
 constexpr int kCursorSize = 24;
 constexpr char kCursorKindBasic[] = "left_ptr";
@@ -53,10 +57,13 @@ constexpr char kBundleEngine[] = "lib/libflutter_engine.so";
 constexpr char kSystemEngine[] = "libflutter_engine.so";
 constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
-constexpr char kApplicationName[] = "homescreen";
-
 // Install path constants
-constexpr char kEnginePersistentCacheDir[] = ".homescreen";
+static constexpr char kApplicationName[] = "homescreen";
+static constexpr char kXdgApplicationDir[] = ".homescreen";
+static constexpr char kXdgConfigDir[] = ".config";
+
+// Compositor Surface
+constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off

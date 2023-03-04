@@ -1,4 +1,5 @@
 // Copyright 2020 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +19,8 @@
 #include <flutter/shell/platform/common/json_method_codec.h>
 
 #include "engine.h"
+
+std::string g_clipboard;
 
 void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
@@ -49,7 +52,29 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       auto format = args->GetString();
       if (0 == strcmp(format, kTextPlainFormat)) {
         rapidjson::Document res;
-        res.SetBool(false);
+        res.SetObject();
+        auto& allocator = res.GetAllocator();
+
+        if (g_clipboard.empty()) {
+          res.AddMember("value", false, allocator);
+        } else {
+          res.AddMember("value", true, allocator);
+        }
+        result = codec.EncodeSuccessEnvelope(&res);
+      }
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+    }
+  } else if (method == kMethodClipboardGetData) {
+    if (!args->IsNull() && args->IsString()) {
+      auto format = args->GetString();
+      if (0 == strcmp(format, kTextPlainFormat)) {
+        rapidjson::Document res;
+        res.SetObject();
+        auto& allocator = res.GetAllocator();
+        rapidjson::Value s;
+        s = rapidjson::StringRef(g_clipboard.c_str());
+        res.AddMember("text", s, allocator);
         result = codec.EncodeSuccessEnvelope(&res);
       }
     } else {
@@ -60,6 +85,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         !((*args)["text"].IsNull())) {
       FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Clipboard Data Set: \n"
                      << (*args)["text"].GetString();
+      g_clipboard.assign((*args)["text"].GetString());
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
@@ -71,6 +97,15 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
   } else if (method == kHapticFeedbackVibrate) {
     FML_DLOG(INFO) << "(" << engine->GetIndex()
                    << ") Haptic Feedback - Vibrate";
+    result = codec.EncodeSuccessEnvelope();
+  } else if (method == kSystemChrome_setPreferredOrientations) {
+    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") setPreferredOrientations";
+    if (!args->IsNull()) {
+      for (const auto& field : args->GetArray()) {
+        FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+                       << field.GetString();
+      }
+    }
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSetSystemUiOverlayStyle) {
     SystemUiOverlayStyle style{};

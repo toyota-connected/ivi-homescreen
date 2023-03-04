@@ -23,6 +23,14 @@ class Navigation {
  public:
   static constexpr char kChannelName[] = "flutter/navigation";
 
+  /**
+   * @brief Callback function for platform messages about navigation
+   * @param[in] message Recieve message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
@@ -35,5 +43,6 @@ class Navigation {
 
   static constexpr char kSelectSingleEntryHistory[] =
       "selectSingleEntryHistory";
+  static constexpr char kSelectMultiEntryHistory[] = "selectMultiEntryHistory";
   static constexpr char kRouteInformationUpdated[] = "routeInformationUpdated";
 };
