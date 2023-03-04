@@ -46,7 +46,38 @@ class TextureTestEgl : public Texture {
 
   ~TextureTestEgl();
 
-  void Draw(void* userdata);
+  /**
+   * @brief Create test texture
+   * @param[in,out] userdata Pointer to TextureTestEgl
+   * @param[in] args from Dart
+   * @return flutter::EncodableValue
+   * @retval EncodableValue This contain result:OK, textureId, width, height,
+   * GL_target, GL_format, GL_textureId
+   * @retval Error
+   * @relation
+   * wayland, flutter
+   */
+  static flutter::EncodableValue Create(
+      void* userdata,
+      const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
+
+  /**
+   * @brief Dispose assigned EGL texture id
+   * @param[in,out] userdata Pointer to TextureTestEgl
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void Dispose(void* userdata, GLuint name);
+
+  /**
+   * @brief Draw a new texture
+   * @param[in,out] userdata Pointer to TextureTestEgl
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void Draw(void* userdata);
 
   FML_DISALLOW_COPY_AND_ASSIGN(TextureTestEgl);
 
@@ -54,8 +85,4 @@ class TextureTestEgl : public Texture {
   bool m_initialized;
 
   WaylandEglBackend* m_egl_backend;
-
-  static flutter::EncodableValue Create(void* userdata);
-
-  static void Dispose(void* userdata);
 };

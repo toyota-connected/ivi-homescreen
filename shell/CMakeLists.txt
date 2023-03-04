@@ -1,5 +1,6 @@
 #
 # Copyright 2020 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,6 +50,7 @@ set(SRC_FILES
 
         engine.cc
         platform_channel.cc
+        timer.cc
 
         textures/texture.cc
 
@@ -88,6 +90,10 @@ elseif (BUILD_BACKEND_WAYLAND_VULKAN)
     list(APPEND SRC_FILES backend/wayland_vulkan.cc)
 endif ()
 
+if (BUILD_PLUGIN_COMP_SURF)
+    list(APPEND SRC_FILES view/compositor_surface.cc)
+endif ()
+
 add_executable(flutter-auto ${SRC_FILES})
 
 include(plugins)
@@ -120,10 +126,18 @@ include_directories(
         ../third_party/rapidjson/include
 )
 
+if (BUILD_BACKEND_WAYLAND_EGL)
+    target_link_libraries(flutter-auto PRIVATE EGL GLESv2)
+endif ()
+if (BUILD_PLUGIN_COMP_SURF)
+    target_link_libraries(flutter-auto PRIVATE EGL)
+endif ()
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    target_link_libraries(flutter-auto PRIVATE bluevk)
+endif ()
+
 target_link_libraries(flutter-auto PRIVATE
-        bluevk
         ${WAYLAND_LIBRARIES}
-        EGL GLESv2
         Threads::Threads
         dl
         ${GST_LIBRARIES}
@@ -136,20 +150,12 @@ target_link_directories(flutter-auto PRIVATE
         ${CMAKE_BINARY_DIR}
         )
 
-cmake_policy(SET CMP0069 NEW)
-include(CheckIPOSupported)
-check_ipo_supported(RESULT ipo_support_result OUTPUT ipo_support_output)
-if (ipo_support_result)
+if (IPO_SUPPORT_RESULT)
     set_property(TARGET flutter-auto PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-else ()
-    message(WARNING "IPO is not supported: ${ipo_support_output}")
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(flutter-auto PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -I${CMAKE_SYSROOT}/include/c++/v1>)
-    target_link_options(flutter-auto PRIVATE
-            -fuse-ld=lld -lc++ -lc++abi -lc -lm -v)
+    target_link_options(flutter-auto PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
 install(TARGETS flutter-auto DESTINATION bin)

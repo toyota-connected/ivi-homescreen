@@ -1,4 +1,4 @@
-# test_egl
+# test_comp_surf_vulkan
 
 A new Flutter project.
 

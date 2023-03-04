@@ -1,4 +1,5 @@
 // Copyright 2020 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +17,12 @@
 #include <vector>
 
 #include <dlfcn.h>
-#include <pwd.h>
-#include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #include <cassert>
 
-#include <flutter/fml/logging.h>
+#include <flutter/fml/file.h>
 #include <flutter/fml/paths.h>
+#include <filesystem>
 
 #include "constants.h"
 #include "engine.h"
@@ -31,18 +30,8 @@
 #include "textures/texture.h"
 
 #include "hexdump.h"
+#include "utils.h"
 #include "wayland-client.h"
-
-using namespace fml;
-
-static bool IsFile(const std::string& path) {
-  struct stat buf {};
-  if (stat(path.c_str(), &buf) != 0) {
-    return false;
-  }
-
-  return S_ISREG(buf.st_mode);
-}
 
 Engine::Engine(FlutterView* view,
                size_t index,
@@ -51,10 +40,11 @@ Engine::Engine(FlutterView* view,
                int32_t accessibility_features)
     : m_index(index),
       m_running(false),
+      m_view(view),
       m_backend(view->GetBackend()),
-      m_egl_window(view->GetEglWindow()),
+      m_egl_window(view->GetWindow()),
       m_flutter_engine(nullptr),
-      m_cache_path(std::move(GetPersistentCachePath(index))),
+      m_cache_path(std::move(GetFilePath(index))),
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
       m_prev_width(0),
@@ -106,8 +96,8 @@ Engine::Engine(FlutterView* view,
     exit(EXIT_FAILURE);
   } else {
     // override path
-    engine_file_path = paths::JoinPaths({bundle_path, kBundleEngine});
-    if (IsFile(engine_file_path)) {
+    engine_file_path = fml::paths::JoinPaths({bundle_path, kBundleEngine});
+    if (fml::IsFile(engine_file_path)) {
       FML_DLOG(INFO) << "(" << m_index
                      << ") libflutter_engine.so: " << engine_file_path;
     } else {
@@ -141,18 +131,18 @@ Engine::Engine(FlutterView* view,
   ///
   /// flutter_assets folder
   ///
-  m_assets_path = paths::JoinPaths({bundle_path, kBundleFlutterAssets});
+  m_assets_path = fml::paths::JoinPaths({bundle_path, kBundleFlutterAssets});
   FML_DLOG(INFO) << "(" << m_index << ") flutter_assets: " << m_assets_path;
   m_args.assets_path = m_assets_path.c_str();
 
   ///
   /// icudtl.dat file
   ///
-  m_icu_data_path = paths::JoinPaths({bundle_path, kBundleIcudtl});
-  if (!IsFile(m_icu_data_path)) {
-    m_icu_data_path = paths::JoinPaths({kPathPrefix, kSystemIcudtl});
+  m_icu_data_path = fml::paths::JoinPaths({bundle_path, kBundleIcudtl});
+  if (!fml::IsFile(m_icu_data_path)) {
+    m_icu_data_path = fml::paths::JoinPaths({kPathPrefix, kSystemIcudtl});
   }
-  if (!IsFile(m_icu_data_path)) {
+  if (!fml::IsFile(m_icu_data_path)) {
     FML_LOG(ERROR) << "(" << m_index << ") " << m_icu_data_path
                    << " is not present.";
     assert(false);
@@ -165,15 +155,15 @@ Engine::Engine(FlutterView* view,
   ///
   if (m_proc_table.RunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
-    m_aot_data = LoadAotData(paths::JoinPaths({bundle_path, kBundleAot}));
+    m_aot_data = LoadAotData(fml::paths::JoinPaths({bundle_path, kBundleAot}));
     if (m_aot_data) {
       m_args.aot_data = m_aot_data;
     }
   } else {
     FML_LOG(INFO) << "(" << m_index << ") Runtime=debug";
     std::string kernel_snapshot =
-        paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
-    if (!IsFile(kernel_snapshot)) {
+        fml::paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
+    if (!fml::IsFile(kernel_snapshot)) {
       FML_LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
                      << " missing Flutter Kernel";
       exit(EXIT_FAILURE);
@@ -193,7 +183,7 @@ Engine::Engine(FlutterView* view,
                                void* context) -> void {
         auto* e = static_cast<Engine*>(context);
         // FML_DLOG(INFO) << "(" << e->GetIndex() << ") Post Task";
-        e->m_taskrunner.push(std::make_pair(target_time, task));
+        e->m_taskrunner.emplace(target_time, task);
         if (!e->m_running) {
           uint64_t current = e->m_proc_table.GetCurrentTime();
           if (current >= e->m_taskrunner.top().first) {
@@ -394,22 +384,24 @@ FlutterEngineResult Engine::TextureDisable(int64_t texture_id) {
 }
 
 FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
-    const std::shared_ptr<Engine>& engine,
+    const Engine* engine,
     int64_t texture_id) {
   return engine->m_proc_table.MarkExternalTextureFrameAvailable(
       engine->m_flutter_engine, texture_id);
 }
 
-flutter::EncodableValue Engine::TextureCreate(int64_t texture_id,
-                                              int32_t width,
-                                              int32_t height) {
+flutter::EncodableValue Engine::TextureCreate(
+    int64_t texture_id,
+    int32_t width,
+    int32_t height,
+    const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
   FML_DLOG(INFO) << "(" << m_index << ") Engine::TextureCreate: <" << texture_id
                  << ">";
 
   auto texture = this->m_texture_registry[texture_id];
 
   if (texture != nullptr) {
-    return texture->Create(width, height);
+    return texture->Create(width, height, args);
   }
 
   return flutter::EncodableValue(flutter::EncodableMap{
@@ -418,21 +410,16 @@ flutter::EncodableValue Engine::TextureCreate(int64_t texture_id,
        flutter::EncodableValue("Not found in registry")}});
 }
 
-std::string Engine::GetPersistentCachePath(size_t index) {
-  const char* homedir;
-  if ((homedir = getenv("HOME")) == nullptr) {
-    homedir = getpwuid(getuid())->pw_dir;
-  }
+std::string Engine::GetFilePath(size_t index) {
+  auto path = Utils::GetConfigHomePath();
 
-  auto path = paths::JoinPaths({homedir, kEnginePersistentCacheDir});
-
-  auto res = mkdir(path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-  if (res < 0) {
-    if (errno != EEXIST) {
-      FML_LOG(ERROR) << "(" << index << ") mkdir failed: " << path;
+  if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
+    if (!std::filesystem::create_directories(path)) {
+      FML_LOG(ERROR) << "(" << index << ") create_directories failed: " << path;
       exit(EXIT_FAILURE);
     }
   }
+
   FML_DLOG(INFO) << "(" << index << ") PersistentCachePath: " << path;
 
   return path;
@@ -448,7 +435,7 @@ FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
                      return element.first == texture_id;
                    });
   if (search != m_texture_registry.end()) {
-    ((Texture*)search->second)->Dispose();
+    ((Texture*)search->second)->Dispose(texture_id);
     FML_DLOG(INFO) << "(" << m_index << ") Texture Disposed (" << texture_id
                    << ")";
     return kSuccess;
@@ -484,6 +471,29 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
+MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
+                                              const uint8_t *message,
+                                              const size_t message_size,
+                                              const FlutterBinaryReplyUserdata reply,
+                                              void* userdata) const {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  FlutterPlatformMessageResponseHandle* handle;
+  m_proc_table.PlatformMessageCreateResponseHandle(
+      m_flutter_engine, reply, userdata, &handle);
+  const FlutterPlatformMessage msg{
+      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
+  };
+
+  FlutterEngineResult message_ret = m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  if (handle != nullptr) {
+    m_proc_table.PlatformMessageReleaseResponseHandle(m_flutter_engine, handle);
+  }
+
+  return message_ret == kSuccess;
+}
+
 MAYBE_UNUSED FlutterEngineResult
 Engine::UpdateAccessibilityFeatures(int32_t value) {
   m_accessibility_features = value;
@@ -503,15 +513,14 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
                             double scroll_delta_x,
                             double scroll_delta_y,
                             int64_t buttons) {
-
   FlutterPointerEvent msg = {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = m_proc_table.GetCurrentTime(),
+    .timestamp = m_proc_table.GetCurrentTime() / 1000,
 #elif defined(ENV32BIT)
-    .timestamp =
-        static_cast<size_t>(m_proc_table.GetCurrentTime() & 0xFFFFFFFFULL),
+    .timestamp = static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 &
+                                     0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -539,10 +548,10 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = m_proc_table.GetCurrentTime(),
+    .timestamp = m_proc_table.GetCurrentTime() / 1000,
 #elif defined(ENV32BIT)
-    .timestamp =
-        static_cast<size_t>(m_proc_table.GetCurrentTime() & 0xFFFFFFFFULL),
+    .timestamp = static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 &
+                                     0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -559,7 +568,7 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
 
 FlutterEngineAOTData Engine::LoadAotData(
     const std::string& aot_data_path) const {
-  if (!IsFile(aot_data_path)) {
+  if (!fml::IsFile(aot_data_path)) {
     FML_DLOG(INFO) << "(" << m_index << ") AOT file not present";
     return nullptr;
   }
@@ -594,4 +603,13 @@ MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
   return m_text_input;
 }
 
+#endif
+
+#if ENABLE_PLUGIN_KEY_EVENT
+[[maybe_unused]] void Engine::SetKeyEvent(KeyEvent* key_event) {
+  m_key_event = key_event;
+}
+[[maybe_unused]] KeyEvent* Engine::GetKeyEvent() const {
+  return m_key_event;
+}
 #endif

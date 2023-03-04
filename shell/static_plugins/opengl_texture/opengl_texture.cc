@@ -18,6 +18,8 @@
 
 #include "engine.h"
 
+#include "textures/egl/texture_egl.h"
+
 void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
@@ -55,9 +57,9 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
             "argument_error", "textureId, width and height must be non-zero");
       } else {
         // cast size to that what Wayland uses
-        auto value =
-            engine->TextureCreate(textureId, static_cast<int32_t>(width),
-                                  static_cast<int32_t>(height));
+        auto value = TextureEgl::GetInstance().Create(
+            engine, textureId, static_cast<int32_t>(width),
+            static_cast<int32_t>(height), args);
 
         result = codec.EncodeSuccessEnvelope(&value);
       }

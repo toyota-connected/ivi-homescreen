@@ -32,6 +32,12 @@
 #ifdef ENABLE_PLUGIN_NAVIGATION
 #include "static_plugins/navigation/navigation.h"
 #endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+#include "static_plugins/comp_surf/comp_surf.h"
+#endif
+#ifdef ENABLE_PLUGIN_COMP_REGION
+#include "static_plugins/comp_region/comp_region.h"
+#endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
 #include "static_plugins/opengl_texture/opengl_texture.h"
 #endif
@@ -43,6 +49,9 @@
 #endif
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
 #include "static_plugins/platform_views/platform_views.h"
+#endif
+#ifdef ENABLE_PLUGIN_DESKTOP_WINDOW
+#include "static_plugins/desktop_window/desktop_window.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
 #include "static_plugins/text_input/text_input.h"
@@ -77,6 +86,14 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_NAVIGATION
   RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
 #endif
+#ifdef ENABLE_PLUGIN_COMP_SURF
+  RegisterCallback(CompositorSurfacePlugin::kChannelName,
+                   &CompositorSurfacePlugin::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_COMP_REGION
+  RegisterCallback(CompositorRegionPlugin::kChannelName,
+                   &CompositorRegionPlugin::OnPlatformMessage);
+#endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
   RegisterCallback(OpenGlTexture::kChannelName,
                    OpenGlTexture::OnPlatformMessage);
@@ -90,6 +107,10 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
   RegisterCallback(PlatformViews::kChannelName,
                    &PlatformViews::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_DESKTOP_WINDOW
+  RegisterCallback(DesktopWindow::kChannelName,
+                   &DesktopWindow::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   RegisterCallback(TextInput::kChannelName, &TextInput::OnPlatformMessage);
