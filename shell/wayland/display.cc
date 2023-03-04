@@ -937,22 +937,3 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
 };
-
-void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
-  (void)shell;
-  auto* d = static_cast<Display*>(data);
-  d->m_agl.wait_for_bound = false;
-  d->m_agl.bound_ok = true;
-}
-
-void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
-  (void)shell;
-  auto* d = static_cast<Display*>(data);
-  d->m_agl.wait_for_bound = false;
-  d->m_agl.bound_ok = false;
-}
-
-const struct agl_shell_listener Display::agl_shell_listener = {
-    .bound_ok = agl_shell_bound_ok,
-    .bound_fail = agl_shell_bound_fail,
-};
