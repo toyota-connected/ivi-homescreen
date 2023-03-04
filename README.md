@@ -13,15 +13,6 @@ Flutter Auto
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
 
-[![flutter-auto-linux](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/ivi-homescreen-linux.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml)
-
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) 
-
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) 
-
-[![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
-
-
 # Backend Support
 
 ### EGL Backend
@@ -79,6 +70,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 `--w={int value}` - Sets View width.  Requires an integer value.
 
 `--h={int value}` - Sets View height.  Requires an integer value.
+
+`--p={int value}` - Sets Pixel Ratio.  Requires a double value.
 
 `--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
 
@@ -207,6 +200,14 @@ All other parameters get assigned using the following ordering:
 
 # x86_64 Desktop development notes
 
+## NVidia GL errors
+
+Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
+This should resolve it:
+```
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+```
+
 ## Ubuntu 16-18
 
 ### Logging in
@@ -229,6 +230,11 @@ Defaults to Wayland, no need to do anything special
     sudo apt-get -y install libwayland-dev wayland-protocols \
     mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
     libxkbcommon-dev
+
+## Optional Packages
+
+    # To build doxygen documentation
+    sudo apt-get -y install doxygen
 
 ## GCC/libstdc++ Build
 
@@ -274,28 +280,28 @@ Confirm flutter/bin is in the path using: `flutter doctor -v`
 
 ## Install
 
-loading path for application is: `/usr/local/share/homescreen/bundle`
+loading path for application is: `/usr/local/share/flutter-auto/bundle`
 
 This is used to leverage symlinks.  Such as:
 
-    cd /usr/local/share/homescreen
+    cd /usr/local/share/flutter-auto
     sudo rm -rf bundle
     sudo ln -sf ~/development/my_flutter_app/build/ bundle
 
 Or
 
-    sudo mkdir -p /usr/local/share/homescreen/my_flutter_app/
-    sudo cp -r build/* /usr/local/share/homescreen/my_flutter_app/
-    sudo ln -sf /usr/local/share/homescreen/my_flutter_app/ bundle
+    sudo mkdir -p /usr/local/share/flutter-auto/my_flutter_app/
+    sudo cp -r build/* /usr/local/share/flutter-auto/my_flutter_app/
+    sudo ln -sf /usr/local/share/flutter-auto/my_flutter_app/ bundle
 
 ## Running on desktop
 
 Copy a current icudtl.dat to /usr/local/share/flutter
 Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point downloaded engine for build:
 
-    cd <homescreen build>
+    cd <flutter-auto build>
     export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
-    homescreen
+    flutter-auto
 
 ## Debug
 

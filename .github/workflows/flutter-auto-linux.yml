@@ -43,6 +43,7 @@ jobs:
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
+	    -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
           mkdir -p ${{github.workspace}}/build/debug-egl
           CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
@@ -51,6 +52,7 @@ jobs:
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
+	    -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
 
       - name: Build Debug Packages
@@ -146,6 +148,7 @@ jobs:
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
+	    -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
           mkdir -p ${{github.workspace}}/build/debug
           CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
@@ -155,6 +158,7 @@ jobs:
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_PLUGIN_GSTREAMER_EGL=OFF \
+	    -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
 
       - name: Build Debug Packages

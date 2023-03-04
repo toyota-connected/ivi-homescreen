@@ -5,4 +5,6 @@ add_compile_definitions(FILAMENT_SUPPORTS_WAYLAND)
 
 include_directories(.)
 
-add_subdirectory(filament/libs/bluevk)
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    add_subdirectory(filament/libs/bluevk)
+endif ()
