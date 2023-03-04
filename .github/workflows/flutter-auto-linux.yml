@@ -45,6 +45,7 @@ jobs:
             -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D LLVM_ROOT=/usr/lib/llvm-14
+
           mkdir -p ${{github.workspace}}/build/debug-egl
           CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
             -B ${{github.workspace}}/build/debug-egl \
@@ -150,6 +151,7 @@ jobs:
             -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D LLVM_ROOT=/usr/lib/llvm-14
+
           mkdir -p ${{github.workspace}}/build/debug
           CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
             -B ${{github.workspace}}/build/debug-vulkan \
