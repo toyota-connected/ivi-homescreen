@@ -139,10 +139,6 @@ class CompositorSurface {
   int height_;
   int32_t m_origin_x;
   int32_t m_origin_y;
-
-  struct {
-    COMP_SURF_API_VERSION_T* version{};
-    COMP_SURF_API_LOAD_FUNCTIONS* loader{};
     COMP_SURF_API_INITIALIZE_T* initialize{};
     COMP_SURF_API_DE_INITIALIZE_T* de_initialize{};
     COMP_SURF_API_RUN_TASK_T* run_task{};

@@ -316,6 +316,19 @@ int main(int argc, char** argv) {
       RemoveArgument(config.view.vm_args,
                      "--xdg-shell-app-id=" + config.app_id);
     }
+    if (cl.HasOption("p")) {
+      std::string pixel_ratio_str;
+      cl.GetOptionValue("p", &pixel_ratio_str);
+      if (pixel_ratio_str.empty()) {
+        FML_LOG(ERROR) << "--p option (Pixel Ratio) requires an argument "
+                          "(e.g. --p=1.1234)";
+        return EXIT_FAILURE;
+      }
+
+      char* ptr;
+      config.view.pixel_ratio = strtod(pixel_ratio_str.c_str(), &ptr);
+      RemoveArgument(config.view.vm_args, "--p=" + pixel_ratio_str);
+    }
   }
 
   auto vm_arg_count = config.view.vm_args.size();

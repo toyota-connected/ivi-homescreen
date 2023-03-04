@@ -170,9 +170,9 @@ class FlutterView {
 #endif
 
 #ifdef ENABLE_PLUGIN_COMP_REGION
+<<<<<<< HEAD
   /**
    * @brief Clear a region of a subsurface
-   * @param[in] type Type of a region
    * @return void
    * @relation
    * wayland
@@ -187,9 +187,9 @@ class FlutterView {
    * @relation
    * wayland
    */
-  void SetRegion(std::string& type,
-                 std::vector<CompositorRegionPlugin::REGION_T>& regions);
-#endif
+=======
+  void ClearRegion(std::string& type);
+
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
@@ -222,6 +222,9 @@ class FlutterView {
     uint32_t counter;
     long long pre_time;
   } m_fps{};
+<<<<<<< HEAD
 
   uint64_t m_pointer_events{};
+=======
+>>>>>>> a6e4129 (OSS 0223 (#101))
 };

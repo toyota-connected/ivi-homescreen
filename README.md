@@ -63,15 +63,6 @@ You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_T
 
 If sanitizers are supported by your compiler, the specified targets will be build with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
 
-[![flutter-auto-linux](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/ivi-homescreen-linux.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml)
-
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) 
-
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) 
-
-[![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
-
-
 # Backend Support
 
 ### EGL Backend
@@ -408,28 +399,28 @@ Confirm flutter/bin is in the path using: `flutter doctor -v`
 
 ## Install
 
-loading path for application is: `/usr/local/share/homescreen/bundle`
+loading path for application is: `/usr/local/share/flutter-auto/bundle`
 
 This is used to leverage symlinks.  Such as:
 
-    cd /usr/local/share/homescreen
+    cd /usr/local/share/flutter-auto
     sudo rm -rf bundle
     sudo ln -sf ~/development/my_flutter_app/build/ bundle
 
 Or
 
-    sudo mkdir -p /usr/local/share/homescreen/my_flutter_app/
-    sudo cp -r build/* /usr/local/share/homescreen/my_flutter_app/
-    sudo ln -sf /usr/local/share/homescreen/my_flutter_app/ bundle
+    sudo mkdir -p /usr/local/share/flutter-auto/my_flutter_app/
+    sudo cp -r build/* /usr/local/share/flutter-auto/my_flutter_app/
+    sudo ln -sf /usr/local/share/flutter-auto/my_flutter_app/ bundle
 
 ## Running on desktop
 
 Copy a current icudtl.dat to /usr/local/share/flutter
 Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point downloaded engine for build:
 
-    cd <homescreen build>
+    cd <flutter-auto build>
     export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
-    homescreen
+    flutter-auto
 
 ## Debug
 

@@ -64,6 +64,9 @@ void Configuration::getViewParameters(
     instance.view.ivi_surface_id =
         static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
   }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
+    instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+  }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
@@ -149,6 +152,9 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
     instance.view.ivi_surface_id =
         static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
+  }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
+    instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();

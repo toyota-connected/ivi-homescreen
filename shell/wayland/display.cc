@@ -181,13 +181,14 @@ void Display::registry_handle_global(void* data,
                          std::min(static_cast<uint32_t>(1), version)));
     wl_shm_add_listener(d->m_shm, &shm_listener, d);
 
-    if (d->m_enable_cursor && d->m_compositor) {
+    if (d->m_enable_cursor) {
       d->m_cursor_theme = wl_cursor_theme_load(d->m_cursor_theme_name.c_str(),
                                                kCursorSize, d->m_shm);
     }
     if (d->m_compositor) {
       d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
+    d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
   } else if (strcmp(interface, wl_output_interface.name) == 0) {
     auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
@@ -809,7 +810,8 @@ void Display::AglShellDoReady() const {
   }
 }
 
-void Display::SetEngine(wl_surface* surface, Engine* engine) {
+void Display::SetEngine(wl_surface* surface,
+                        Engine* engine) {
   m_active_engine = engine;
   m_active_surface = surface;
   m_surface_engine_map[surface] = engine;

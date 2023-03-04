@@ -214,7 +214,6 @@ class WaylandVulkanBackend : public Backend {
    * wayland
    */
   static bool PresentCallback(void* user_data, const FlutterVulkanImage* image);
-
   /**
    * @brief Callback to Get instance Process Address
    * @param[in] user_data Pointer to User data
@@ -222,25 +221,6 @@ class WaylandVulkanBackend : public Backend {
    * @param[in] procname Process name
    * @return void*
    * @retval Instance Process Address
-   * @relation
-   * wayland
-   */
-  static void* GetInstanceProcAddressCallback(
-      void* user_data,
-      FlutterVulkanInstanceHandle instance,
-      const char* procname);
-
-  VkDebugReportCallbackEXT mDebugCallback = VK_NULL_HANDLE;
-  VkDebugUtilsMessengerEXT mDebugMessenger = VK_NULL_HANDLE;
-
-  /**
-   * @brief Callback to VK_EXT_debug_utils
-   * @param[in] severity Bitmask of VkDebugUtilsMessageSeverityFlagBitsEXT
-   * @param[in] types No use
-   * @param[in] cbdata Structure specifying parameters returned to the callback
-   * @param[in] pUserData No use
-   * @return VkBool32
-   * @retval VK_FALSE Abnormal end
    * @relation
    * wayland
    */

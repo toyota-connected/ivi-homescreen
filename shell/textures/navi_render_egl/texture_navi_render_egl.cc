@@ -227,10 +227,6 @@ flutter::EncodableValue TextureNaviRender::Create(
        flutter::EncodableValue(obj->m_height)},
       {flutter::EncodableValue("render_ctx"),
        flutter::EncodableValue(reinterpret_cast<int64_t>(context))}});
-}
-
-void TextureNaviRender::Dispose(void* userdata, GLuint name) {
-  auto* obj = (TextureNaviRender*)userdata;
   auto context = obj->m_render_api.ctx[obj->m_texture_id];
   obj->m_run_enable = false;
   obj->m_render_api.de_initialize(context);
