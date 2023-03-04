@@ -56,10 +56,13 @@ class WaylandWindow {
   WaylandWindow(size_t index,
                 std::shared_ptr<Display> display,
                 const std::string& type,
+                wl_output* output,
+                uint32_t output_index,
                 std::string app_id,
                 bool fullscreen,
                 int32_t width,
                 int32_t height,
+                double pixel_ratio,
                 Backend* backend);
 
   ~WaylandWindow();
@@ -68,30 +71,70 @@ class WaylandWindow {
 
   const WaylandWindow& operator=(const WaylandWindow&) = delete;
 
+  /**
+   * @brief Set Engine
+   * @param[in] engine Engine
+   * @return void
+   * @relation
+   * wayland
+   */
   void SetEngine(const std::shared_ptr<Engine>& engine);
 
+  /**
+   * @brief Get Fps Counter
+   * @return uint32_t
+   * @retval Frames Per Second counter.
+   * @relation
+   * wayland
+   */
   uint32_t GetFpsCounter();
-
-  void DrawFps(uint8_t fps);
 
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
+  /**
+   * @brief Get Base Surface
+   * @return wl_surface*
+   * @retval Base surface
+   * @relation
+   * wayland
+   */
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
   uint32_t m_fps_counter;
+
+  /**
+   * @brief Get window_type
+   * @param[in] type Window type
+   * @return window_type
+   * @retval WINDOW_NORMAL
+   * @retval WINDOW_BG
+   * @retval WINDOW_PANEL_TOP
+   * @retval WINDOW_PANEL_BOTTOM
+   * @retval WINDOW_PANEL_LEFT
+   * @retval WINDOW_PANEL_RIGHT
+   * @relation
+   * wayland, agl-shell
+   */
   static window_type get_window_type(const std::string& type);
 
- private:
-  struct shm_buffer {
-    struct wl_buffer* buffer;
-    void* shm_data;
-    MAYBE_UNUSED int busy;
-  };
+  /**
+   * @brief GetSize
+   * @retval std::pair<int32_t, int32_t> width, height
+   * @relation
+   * wayland
+   */
+  std::pair<int32_t, int32_t> GetSize() {
+    return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
+  }
 
+ private:
   size_t m_index;
   std::shared_ptr<Display> m_display;
+  wl_output* m_wl_output;
+  uint32_t m_output_index;
   std::shared_ptr<Engine> m_flutter_engine;
-  struct wl_surface* m_base_surface;
+  double m_pixel_ratio;
+  struct wl_surface* m_base_surface{};
   std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
 
@@ -114,48 +157,85 @@ class WaylandWindow {
 
   struct xdg_surface* m_xdg_surface;
   struct xdg_toplevel* m_xdg_toplevel;
-  struct wl_surface* m_fps_surface;
-  struct wl_subsurface* m_subsurface;
-  struct shm_buffer m_fps_buffer {};
-  uint8_t m_fps_idx;
-  uint8_t m_fps[20]{};
 
-  struct shm_buffer m_buffers[2]{};
-  struct wl_callback* m_callback;
-
-  MAYBE_UNUSED int m_frame_sync;
-
-  static void buffer_release(void* data, struct wl_buffer* buffer);
-
-  static const struct wl_buffer_listener buffer_listener;
-
-  static int create_shm_buffer(Display* display,
-                               struct shm_buffer* buffer,
-                               int width,
-                               int height,
-                               uint32_t format);
+  struct wl_callback* m_base_frame_callback;
 
   static const struct xdg_surface_listener xdg_surface_listener;
 
+  static const struct wl_surface_listener m_base_surface_listener;
+
+  /**
+   * @brief Handle enter base surface event
+   * @param[in,out] data Data of type Display
+   * @param[in] surface No use
+   * @param[in] output Output
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void handle_base_surface_enter(void* data,
+                                        struct wl_surface* surface,
+                                        struct wl_output* output);
+
+  /**
+   * @brief Handle leave base surface event
+   * @param[in,out] data Data of type Display
+   * @param[in] surface No use
+   * @param[in] output Output
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void handle_base_surface_leave(void* data,
+                                        struct wl_surface* surface,
+                                        struct wl_output* output);
+
+  /**
+   * @brief Response to configure event
+   * @param[in] data Pointer to WaylandWindow type
+   * @param[in] xdg_surface Surfaces in the domain of xdg-shell
+   * @param[in] serial Serial of the configure event
+   * @return void
+   * @relation
+   * wayland
+   */
   static void handle_xdg_surface_configure(void* data,
                                            struct xdg_surface* xdg_surface,
                                            uint32_t serial);
 
   static const struct xdg_toplevel_listener xdg_toplevel_listener;
 
+  /**
+   * @brief Response to configure event
+   * @param[in] data Pointer to WaylandWindow type
+   * @param[in] toplevel No use
+   * @param[in] width Width
+   * @param[in] height Height
+   * @param[in] states Dynamic array for checking xdg_toplevel_state
+   * @return void
+   * @relation
+   * wayland
+   */
   static void handle_toplevel_configure(void* data,
                                         struct xdg_toplevel* toplevel,
                                         int32_t width,
                                         int32_t height,
                                         struct wl_array* states);
 
+  /**
+   * @brief Close event
+   * @param[in] data Pointer to WaylandWindow type
+   * @param[in] xdg_toplevel No use
+   * @return void
+   * @relation
+   * wayland
+   */
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
 
-  MAYBE_UNUSED static struct shm_buffer* next_buffer(WaylandWindow* window);
+  static void on_frame_base_surface(void* data,
+                                    struct wl_callback* callback,
+                                    uint32_t time);
 
-  static void redraw(void* data, struct wl_callback* callback, uint32_t time);
-
-  static const struct wl_callback_listener frame_listener;
-
+  static const struct wl_callback_listener m_base_surface_frame_listener;
 };

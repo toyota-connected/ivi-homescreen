@@ -1,0 +1,17 @@
+[package]
+name = "compositor_surface_plugin"
+version = "0.1.0"
+edition = "2021"
+authors = ["Joel Winarske"]
+repository = "https://github.com/toyota-connected/ivi-homescreen"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "comp_surf_rs"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+comp_surf_context = {path="../context"}
+comp_surf_types = {path="../types"}

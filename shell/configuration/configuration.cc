@@ -1,4 +1,5 @@
 // Copyright 2022 Toyota Connected North America
+// @copyright Copyright (c) 2022 Woven Alpha, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,11 +44,17 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
+  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
+    instance.view.wl_output_index = obj[kOutputIndex].GetInt();
+  }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
     instance.view.width = obj[kWidthKey].GetInt();
   }
   if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsInt()) {
     instance.view.height = obj[kHeightKey].GetInt();
+  }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
+    instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
@@ -64,13 +71,13 @@ void Configuration::getViewParameters(
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].IsInt();
+    instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
   }
   if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].IsInt();
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetInt();
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].IsInt();
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetInt();
   }
 }
 
@@ -101,6 +108,9 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
+  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
+    instance.view.wl_output_index = obj[kOutputIndex].IsInt();
+  }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
@@ -112,17 +122,20 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsInt()) {
     instance.view.height = obj[kHeightKey].GetInt();
   }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
+    instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+  }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].IsInt();
+    instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
   }
   if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].IsInt();
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetInt();
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].IsInt();
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetInt();
   }
 }
 
@@ -169,6 +182,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (!cli.view.window_type.empty()) {
     instance.view.window_type = cli.view.window_type;
   }
+  if (cli.view.wl_output_index > 0) {
+    instance.view.wl_output_index = cli.view.wl_output_index;
+  }
   if (cli.view.accessibility_features > 0) {
     instance.view.accessibility_features = cli.view.accessibility_features;
   }
@@ -177,6 +193,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   }
   if (cli.view.height > 0) {
     instance.view.height = cli.view.height;
+  }
+  if (cli.view.pixel_ratio > 0) {
+    instance.view.pixel_ratio = cli.view.pixel_ratio;
   }
   if (cli.view.fullscreen != instance.view.fullscreen) {
     instance.view.fullscreen = cli.view.fullscreen;
@@ -219,6 +238,12 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
     }
     if (cfg.view.height == 0) {
       cfg.view.height = kDefaultViewHeight;
+    }
+    if (cfg.view.pixel_ratio == 0) {
+      cfg.view.pixel_ratio = kDefaultPixelRatio;
+    }
+    if (cfg.app_id.empty()) {
+      cfg.app_id = kApplicationName;
     }
 
     res.emplace_back(cfg);
@@ -268,8 +293,13 @@ void Configuration::PrintConfig(const Config& config) {
   }
   FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
   FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
+  FML_LOG(INFO) << "Output Index: ............. "
+                << config.view.wl_output_index;
   FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
                 << config.view.height;
+  if (config.view.pixel_ratio != kDefaultPixelRatio) {
+    FML_LOG(INFO) << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+  }
   FML_LOG(INFO) << "Fullscreen: ............... "
                 << (config.view.fullscreen ? "true" : "false");
   FML_LOG(INFO) << "Accessibility Features: ... "

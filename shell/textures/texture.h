@@ -22,6 +22,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
 #include <flutter_embedder.h>
 #include "constants.h"
@@ -29,7 +30,11 @@
 class Engine;
 
 typedef flutter::EncodableValue (*EncodableValueCallback)(
-    void* /* user data */);
+    void* /* user data */,
+    const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
+
+typedef void (*TextureCallback)(void* /* user data */,
+                                GLuint /* texture name */);
 
 class Texture {
  public:
@@ -37,7 +42,7 @@ class Texture {
           uint32_t target,
           uint32_t format,
           EncodableValueCallback create_callback,
-          VoidCallback dispose_callback,
+          TextureCallback dispose_callback,
           int width = 0,
           int height = 0);
 
@@ -47,29 +52,82 @@ class Texture {
 
   const Texture& operator=(const Texture&) = delete;
 
-  void SetEngine(const std::shared_ptr<Engine>& engine);
+  /**
+   * @brief Set Engine
+   * @param[in] engine Engine
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  void SetEngine(Engine* engine);
 
-  void GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out,
-                               int width,
-                               int height);
+  /**
+   * @brief Get flutter OpenGL texture
+   * @param[in,out] texture_out Pointer to FlutterOpenGLTexture
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  void GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out);
 
-  flutter::EncodableValue Create(int width, int height);
+  /**
+   * @brief Get flutter OpenGL texture
+   * @param[in] width Width
+   * @param[in] height Height
+   * @param[in] args from Dart
+   * @return flutter::EncodableValue
+   * @retval Callback to m_create_callback
+   * @retval Error callback is not set
+   * @relation
+   * wayland, flutter
+   */
+  flutter::EncodableValue Create(
+      int width,
+      int height,
+      const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
 
-  void Dispose();
+  /**
+   * @brief Dispose
+   * @param[in] name Texture id
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  void Dispose(uint32_t name);
 
+  /**
+   * @brief Add again for assigned EGL texture id
+   * @param[in] name Texture id
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void Enable(uint32_t name);
 
-  MAYBE_UNUSED void Disable();
+  /**
+   * @brief Disable assigned EGL texture id
+   * @param[in] name Texture id
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  MAYBE_UNUSED void Disable(GLuint name);
 
+  /**
+   * @brief Ready that a new texture frame is available for a given texture id
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
   void FrameReady();
 
-  MAYBE_UNUSED NODISCARD int64_t GetTextureId() const { return m_name; }
+  int64_t GetId() { return m_id; }
 
  protected:
-  std::shared_ptr<Engine> m_flutter_engine;
+  Engine* m_flutter_engine;
   bool m_enabled;
   int64_t m_id;
-  int64_t m_name;
+  std::vector<int64_t> m_name;
   uint32_t m_target;
   uint32_t m_format;
   MAYBE_UNUSED int m_width;
@@ -81,5 +139,5 @@ class Texture {
 
  private:
   const EncodableValueCallback m_create_callback;
-  const VoidCallback m_dispose_callback;
+  const TextureCallback m_dispose_callback;
 };
