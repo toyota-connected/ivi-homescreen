@@ -97,9 +97,9 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
 
-`cursor_theme` - Sets cursor theme to use.
+`cursor_theme` - Sets cursor theme to use.  This only applies to command line, and global parameter options.
 
-`disable_cursor` - Disables the cursor.
+`disable_cursor` - Disables the cursor.  This only applies to command line, and global parameter options.
 
 `debug_backend` - Enables Backend Debug logic.
 

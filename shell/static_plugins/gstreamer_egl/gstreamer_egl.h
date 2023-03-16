@@ -1,6 +1,6 @@
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class GstreamerEgl {
  public:

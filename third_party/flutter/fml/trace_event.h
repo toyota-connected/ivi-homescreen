@@ -47,7 +47,7 @@
 #include "flutter/fml/time/time_point.h"
 #include "third_party/dart/runtime/include/dart_tools_api.h"
 
-#if (FLUTTER_RELEASE && !defined(OS_FUCHSIA) && !defined(OS_ANDROID))
+#if (FLUTTER_RELEASE && !defined(OS_FUCHSIA) && !defined(FML_OS_ANDROID))
 #define FLUTTER_TIMELINE_ENABLED 0
 #else
 #define FLUTTER_TIMELINE_ENABLED 1
@@ -147,15 +147,23 @@ using TraceIDArg = int64_t;
 
 void TraceSetAllowlist(const std::vector<std::string>& allowlist);
 
-using TimelineEventHandler = std::function<void(const char*,
-                                                int64_t,
-                                                int64_t,
-                                                Dart_Timeline_Event_Type,
-                                                intptr_t,
-                                                const char**,
-                                                const char**)>;
+typedef void (*TimelineEventHandler)(const char*,
+                                     int64_t,
+                                     int64_t,
+                                     Dart_Timeline_Event_Type,
+                                     intptr_t,
+                                     const char**,
+                                     const char**);
+
+using TimelineMicrosSource = int64_t (*)();
 
 void TraceSetTimelineEventHandler(TimelineEventHandler handler);
+
+bool TraceHasTimelineEventHandler();
+
+void TraceSetTimelineMicrosSource(TimelineMicrosSource source);
+
+int64_t TraceGetTimelineMicros();
 
 void TraceTimelineEvent(TraceArg category_group,
                         TraceArg name,

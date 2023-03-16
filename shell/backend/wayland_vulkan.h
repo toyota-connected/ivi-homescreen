@@ -21,7 +21,7 @@
 
 #include "backend/backend.h"
 #include "bluevk/BlueVK.h"
-#include "third_party/flutter/flutter_embedder.h"
+#include <shell/platform/embedder/embedder.h>
 
 class WaylandVulkanBackend : public Backend {
  public:

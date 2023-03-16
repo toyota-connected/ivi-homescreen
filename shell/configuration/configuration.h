@@ -27,7 +27,9 @@ class Configuration {
     std::string json_configuration_path;
     std::string cursor_theme;
     bool disable_cursor;
+    bool disable_cursor_set;
     bool debug_backend;
+    bool debug_backend_set;
 
     struct {
       std::vector<std::string> vm_args;
@@ -38,6 +40,7 @@ class Configuration {
       uint32_t width;
       uint32_t height;
       bool fullscreen;
+      bool fullscreen_set;
       double pixel_ratio;
       uint32_t fps_output_console;
       uint32_t fps_output_overlay;

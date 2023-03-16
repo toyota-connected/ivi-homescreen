@@ -82,7 +82,7 @@ class FileMapping final : public Mapping {
   uint8_t* mapping_ = nullptr;
   uint8_t* mutable_mapping_ = nullptr;
 
-#if OS_WIN
+#if FML_OS_WIN
   fml::UniqueFD mapping_handle_;
 #endif
 
@@ -160,7 +160,7 @@ class MallocMapping final : public Mapping {
   /// for `uint8_t` and `char`.
   template <typename T>
   static MallocMapping Copy(const T* begin, const T* end) {
-    FML_DCHECK(end > begin);
+    FML_DCHECK(end >= begin);
     size_t length = end - begin;
     return Copy(begin, length);
   }

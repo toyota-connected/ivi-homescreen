@@ -70,6 +70,9 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
+  if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
+    instance.debug_backend = obj[kDebugBackendKey].GetBool();
+  }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
     instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
   }
@@ -165,10 +168,10 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (!cli.cursor_theme.empty()) {
     instance.cursor_theme = cli.cursor_theme;
   }
-  if (cli.disable_cursor != instance.disable_cursor) {
+  if (cli.disable_cursor_set && cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
   }
-  if (cli.debug_backend != instance.debug_backend) {
+  if (cli.debug_backend_set && cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
   }
   if (!cli.view.vm_args.empty()) {
@@ -197,7 +200,7 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (cli.view.pixel_ratio > 0) {
     instance.view.pixel_ratio = cli.view.pixel_ratio;
   }
-  if (cli.view.fullscreen != instance.view.fullscreen) {
+  if (cli.view.fullscreen_set && cli.view.fullscreen != instance.view.fullscreen) {
     instance.view.fullscreen = cli.view.fullscreen;
   }
 }

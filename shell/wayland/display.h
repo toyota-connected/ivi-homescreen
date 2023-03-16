@@ -26,7 +26,7 @@
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 #include <cassert>
-#include "third_party/flutter/flutter_embedder.h"
+#include <shell/platform/embedder/embedder.h>
 
 #include "agl-shell-client-protocol.h"
 #include "constants.h"

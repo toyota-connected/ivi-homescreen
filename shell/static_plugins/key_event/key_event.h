@@ -26,7 +26,7 @@
 #include <flutter/shell/platform/common/json_message_codec.h>
 #include "flutter/fml/macros.h"
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 #include <rapidjson/document.h>
 #include <xkbcommon/xkbcommon.h>
 

@@ -25,7 +25,7 @@
 #define GL_RGBA8 0x8058
 #endif
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "flutter/fml/macros.h"
 #include "textures/texture.h"

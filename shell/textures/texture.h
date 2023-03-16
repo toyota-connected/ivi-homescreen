@@ -24,7 +24,7 @@
 
 #include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 #include "constants.h"
 
 class Engine;

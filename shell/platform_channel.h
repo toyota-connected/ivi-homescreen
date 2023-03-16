@@ -20,7 +20,7 @@
 #include <map>
 #include <string>
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class PlatformChannel {
  protected:

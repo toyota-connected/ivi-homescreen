@@ -42,10 +42,40 @@ class PixelBufferTexture {
   const CopyBufferCallback copy_buffer_callback_;
 };
 
+// A GPU surface-based texture.
+class GpuSurfaceTexture {
+ public:
+  // A callback used for retrieving surface descriptors.
+  typedef std::function<
+      const FlutterDesktopGpuSurfaceDescriptor*(size_t width, size_t height)>
+      ObtainDescriptorCallback;
+
+  GpuSurfaceTexture(FlutterDesktopGpuSurfaceType surface_type,
+                    ObtainDescriptorCallback obtain_descriptor_callback)
+      : surface_type_(surface_type),
+        obtain_descriptor_callback_(obtain_descriptor_callback) {}
+
+  // Returns the callback-provided FlutterDesktopGpuSurfaceDescriptor that
+  // contains the surface handle. The intended surface size is specified by
+  // |width| and |height|.
+  const FlutterDesktopGpuSurfaceDescriptor* ObtainDescriptor(
+      size_t width,
+      size_t height) const {
+    return obtain_descriptor_callback_(width, height);
+  }
+
+  // Gets the surface type.
+  FlutterDesktopGpuSurfaceType surface_type() const { return surface_type_; }
+
+ private:
+  const FlutterDesktopGpuSurfaceType surface_type_;
+  const ObtainDescriptorCallback obtain_descriptor_callback_;
+};
+
 // The available texture variants.
 // Only PixelBufferTexture is currently implemented.
 // Other variants are expected to be added in the future.
-typedef std::variant<PixelBufferTexture> TextureVariant;
+typedef std::variant<PixelBufferTexture, GpuSurfaceTexture> TextureVariant;
 
 // An object keeping track of external textures.
 //
@@ -65,8 +95,13 @@ class TextureRegistrar {
   // the callback that was provided upon creating the texture.
   virtual bool MarkTextureFrameAvailable(int64_t texture_id) = 0;
 
-  // Unregisters an existing Texture object.
-  // Textures must not be unregistered while they're in use.
+  // Asynchronously unregisters an existing texture object.
+  // Upon completion, the optional |callback| gets invoked.
+  virtual void UnregisterTexture(int64_t texture_id,
+                                 std::function<void()> callback) = 0;
+
+  // Unregisters an existing texture object.
+  // DEPRECATED: Use UnregisterTexture(texture_id, optional_callback) instead.
   virtual bool UnregisterTexture(int64_t texture_id) = 0;
 };
 

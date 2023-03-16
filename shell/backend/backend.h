@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
 #include "engine.h"
