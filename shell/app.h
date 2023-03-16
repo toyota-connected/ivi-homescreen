@@ -17,7 +17,7 @@
 #pragma once
 
 #include <EGL/egl.h>
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <memory>
 

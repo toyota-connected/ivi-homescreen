@@ -8,7 +8,7 @@
 
 #include <EGL/egl.h>
 #include <GLES3/gl32.h>
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "../texture.h"
 #include "render_api.h"
