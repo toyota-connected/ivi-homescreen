@@ -55,15 +55,13 @@ set(SRC_FILES
         textures/texture.cc
 
         ../third_party/flutter/shell/platform/common/client_wrapper/core_implementations.cc
-        #../third_party/flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
+        ../third_party/flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
         ../third_party/flutter/shell/platform/common/client_wrapper/standard_codec.cc
         ../third_party/flutter/shell/platform/common/json_message_codec.cc
         ../third_party/flutter/shell/platform/common/json_method_codec.cc
         ../third_party/flutter/shell/platform/common/path_utils.cc
-        #../third_party/flutter/shell/platform/common/text_editing_delta.cc
+        ../third_party/flutter/shell/platform/common/text_editing_delta.cc
         ../third_party/flutter/shell/platform/common/text_input_model.cc
-
-        ${WAYLAND_PROTOCOL_SOURCES}
 
         ../third_party/flutter/fml/platform/linux/paths_linux.cc
 
@@ -78,7 +76,10 @@ set(SRC_FILES
         ../third_party/flutter/fml/log_settings_state.cc
         ../third_party/flutter/fml/logging.cc
         ../third_party/flutter/fml/paths.cc
+        ../third_party/flutter/fml/string_conversion.cc
         ../third_party/flutter/fml/unique_fd.cc
+
+        ${WAYLAND_PROTOCOL_SOURCES}
         )
 
 if (BUILD_BACKEND_WAYLAND_EGL)

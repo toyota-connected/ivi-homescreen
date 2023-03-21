@@ -92,10 +92,8 @@ CompSurfContext::CompSurfContext(const char* accessToken,
 }
 
 void CompSurfContext::de_initialize() const {
-  // prevent segfault
   eglMakeCurrent(mDisplay.egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
                  EGL_NO_CONTEXT);
-  eglTerminate(mDisplay.egl.dpy);
   eglReleaseThread();
 }
 

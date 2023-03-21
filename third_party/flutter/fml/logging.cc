@@ -3,18 +3,16 @@
 // found in the LICENSE file.
 
 #include <algorithm>
-#include <iostream>
-#if defined(__linux__)
 #include <cstring>
-#endif
+#include <iostream>
 
 #include "flutter/fml/build_config.h"
 #include "flutter/fml/log_settings.h"
 #include "flutter/fml/logging.h"
 
-#if defined(OS_ANDROID)
+#if defined(FML_OS_ANDROID)
 #include <android/log.h>
-#elif defined(OS_IOS)
+#elif defined(FML_OS_IOS)
 #include <syslog.h>
 #elif defined(OS_FUCHSIA)
 #include <lib/syslog/global.h>
@@ -79,7 +77,7 @@ LogMessage::~LogMessage() {
   stream_ << std::endl;
 #endif
 
-#if defined(OS_ANDROID)
+#if defined(FML_OS_ANDROID)
   android_LogPriority priority =
       (severity_ < 0) ? ANDROID_LOG_VERBOSE : ANDROID_LOG_UNKNOWN;
   switch (severity_) {
@@ -97,7 +95,7 @@ LogMessage::~LogMessage() {
       break;
   }
   __android_log_write(priority, "flutter", stream_.str().c_str());
-#elif defined(OS_IOS)
+#elif defined(FML_OS_IOS)
   syslog(LOG_ALERT, "%s", stream_.str().c_str());
 #elif defined(OS_FUCHSIA)
   fx_log_severity_t fx_severity;

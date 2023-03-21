@@ -56,7 +56,7 @@ class _MyAppState extends State<MyApp> {
                 'width': 800,
                 'height': 600,
                 'module': 'libcomp_surf_vulkan.so',
-                'assets_path': 'assets',
+                'assets_path': '/usr/local/share/comp_surf_vulkan/assets',
               },
             ).then((response) {
               setState(() => surfaceContext = response!['context'] as int);

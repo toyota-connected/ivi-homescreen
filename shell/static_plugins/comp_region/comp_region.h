@@ -17,7 +17,7 @@
 #pragma once
 
 #include <flutter/standard_method_codec.h>
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class FlutterView;
 
