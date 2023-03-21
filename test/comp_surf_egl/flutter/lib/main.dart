@@ -86,10 +86,10 @@ class _MyAppState extends State<MyApp> {
                           y: 10,
                           width: 800,
                           height: 600,
-                          module: 'libnav_render.so',
-                          asset_path: 'assets',
-                          cache_folder: 'cache',
-                          misc_folder: 'misc'
+                          module: 'libcomp_surf_egl.so',
+                          asset_path: '/usr/share/flutter/comp_surf_egl/assets',
+                          cache_folder: '.config/navigation/instance0',
+                          misc_folder: '.config/navigation/instance0/common'
                       ),
                   ),
                 ],
@@ -110,10 +110,10 @@ class _MyAppState extends State<MyApp> {
                           y: 10,
                           width: 800,
                           height: 600,
-                          module: 'libnav_render.so',
-                          asset_path: 'assets',
-                          cache_folder: 'cache',
-                          misc_folder: 'misc'
+                          module: 'libcomp_surf_egl.so',
+                          asset_path: '/usr/share/flutter/comp_surf_egl/assets',
+                          cache_folder: '.config/comp_surf_egl/instance1',
+                          misc_folder: '.config/comp_surf_egl/common'
                       ),
                   ),
                 ],
