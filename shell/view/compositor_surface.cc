@@ -29,14 +29,11 @@ CompositorSurface::CompositorSurface(
     int width,
     int height,
     int32_t x,
-    int32_t y,
-    const FlutterView* view)
-    : m_key(key),
-      m_h_module(h_module),
+    int32_t y)
+    : m_h_module(h_module),
       m_assets_path(std::move(assets_path)),
       m_cache_path(GetFilePath(cache_folder.c_str())),
       m_misc_path(GetFilePath(misc_folder.c_str())),
-      m_context(nullptr),
       m_type(type),
       m_z_order(z_order),
       m_sync(sync),
@@ -44,8 +41,9 @@ CompositorSurface::CompositorSurface(
       height_(height),
       m_origin_x(x),
       m_origin_y(y),
-      m_view(view),
+      m_context(nullptr),
       m_callback(nullptr) {
+  (void)key;
   // API
   init_api(this);
 
@@ -54,8 +52,8 @@ CompositorSurface::CompositorSurface(
   m_wl.surface = wl_compositor_create_surface(display->GetCompositor());
   m_wl.egl_display = nullptr;
   m_wl.egl_window = nullptr;
-  m_wl.width = width;
-  m_wl.height = height;
+  m_wl.width = static_cast<uint32_t>(width);
+  m_wl.height = static_cast<uint32_t>(height);
 
   auto parent_surface = window->GetBaseSurface();
 

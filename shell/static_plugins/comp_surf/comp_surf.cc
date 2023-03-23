@@ -157,7 +157,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
           view->CreateSurface(h_module, assets_path, cache_folder, misc_folder,
                               type, z_order, sync, width, height, x, y);
 
-      auto context = view->GetSurfaceContext(index);
+      auto context = view->GetSurfaceContext(static_cast<int64_t>(index));
 
       auto value = flutter::EncodableValue(flutter::EncodableMap{
           {flutter::EncodableValue("result"), flutter::EncodableValue(0)},

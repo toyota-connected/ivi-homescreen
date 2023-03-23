@@ -52,7 +52,10 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             auto* b = (WaylandEglBackend*)(e->GetBackend());
             return b->SwapBuffers();
           },
-          .fbo_callback = [](void* userdata) -> uint32_t { return 0; },
+          .fbo_callback = [](void* userdata) -> uint32_t {
+            (void)userdata;
+            return 0;
+          },
           .make_resource_current = [](void* userdata) -> bool {
             auto e = reinterpret_cast<Engine*>(userdata);
             auto* b = (WaylandEglBackend*)(e->GetBackend());
@@ -61,6 +64,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
           .fbo_reset_after_present = false,
           .surface_transformation = nullptr,
           .gl_proc_resolver = [](void* userdata, const char* name) -> void* {
+            (void)userdata;
             return GlProcessResolver::GetInstance().process_resolver(name);
           },
           .gl_external_texture_frame_callback =
@@ -69,7 +73,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             auto e = reinterpret_cast<Engine*>(userdata);
             auto texture = e->GetTextureObj(texture_id);
             if (texture) {
-              texture_out->name = texture_id;
+              texture_out->name = static_cast<uint32_t>(texture_id);
               texture_out->width = width;
               texture_out->height = height;
 #if defined(ENABLE_PLUGIN_OPENGL_TEXTURE)
@@ -100,7 +104,8 @@ void WaylandEglBackend::Resize(void* user_data,
   auto b = reinterpret_cast<WaylandEglBackend*>(user_data);
   if (b->m_egl_window) {
     if (engine) {
-      auto result = engine->SetWindowSize(height, width);
+      auto result = engine->SetWindowSize(static_cast<size_t>(height),
+                                          static_cast<size_t>(width));
       if (result != kSuccess) {
         FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
       }

@@ -189,8 +189,7 @@ size_t FlutterView::CreateSurface(void* h_module,
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
       index, m_wayland_display, m_wayland_window, h_module, assets_path,
-      cache_folder, misc_folder, type, z_order, sync, width, height, x, y,
-      this);
+      cache_folder, misc_folder, type, z_order, sync, width, height, x, y);
 
   m_comp_surf[index]->InitializePlugin();
 
@@ -198,7 +197,7 @@ size_t FlutterView::CreateSurface(void* h_module,
   auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
   FML_LOG(INFO) << "comp surf init: " << (float)tDiff;
 
-  return index;
+  return static_cast<size_t>(index);
 }
 
 void FlutterView::DisposeSurface(int64_t key) {

@@ -47,8 +47,7 @@ class CompositorSurface {
                     int width,
                     int height,
                     int32_t x,
-                    int32_t y,
-                    const FlutterView* view);
+                    int32_t y);
 
   ~CompositorSurface() = default;
 
@@ -77,9 +76,6 @@ class CompositorSurface {
 
   wl m_wl{};
 
-  struct wl_callback* m_callback;
-  const FlutterView* m_view;
-
   wl_subsurface* m_subsurface;
   void* m_h_module;
   std::string m_assets_path;
@@ -92,7 +88,6 @@ class CompositorSurface {
   int height_;
   int32_t m_origin_x;
   int32_t m_origin_y;
-  int64_t m_key;
 
   struct {
     COMP_SURF_API_VERSION_T* version{};
@@ -105,6 +100,8 @@ class CompositorSurface {
   } m_api;
 
   COMP_SURF_API_CONTEXT_T* m_context{};
+
+  struct wl_callback* m_callback;
 
   static void init_api(CompositorSurface* obj);
   static void on_frame(void* data, struct wl_callback* callback, uint32_t time);

@@ -158,7 +158,8 @@ void TextInput::OnPlatformMessage(const FlutterPlatformMessage* message,
       base = extent = 0;
     }
     text_input->active_model_->SetText(text->value.GetString());
-    text_input->active_model_->SetSelection(flutter::TextRange(base, extent));
+    text_input->active_model_->SetSelection(flutter::TextRange(
+        static_cast<size_t>(base), static_cast<size_t>(extent)));
   } else {
     engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);
     return;

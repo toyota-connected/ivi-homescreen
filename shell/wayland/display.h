@@ -312,8 +312,6 @@ class Display {
   uint32_t m_repeat_code{};
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
-  double m_buffer_scale = 1.0;
-  MAYBE_UNUSED double m_last_buffer_scale{};
   bool m_buffer_scale_enable{};
 
   static const struct wl_registry_listener registry_listener;

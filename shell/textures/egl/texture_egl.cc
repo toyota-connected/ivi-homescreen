@@ -60,13 +60,13 @@ void TextureEgl::Dispose() {
     switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
       case kTextureEgl_ObjectId_Test: {
-        TextureTestEgl::Dispose(item.get(), item->GetId());
+        TextureTestEgl::Dispose(item.get(), static_cast<GLuint>(item->GetId()));
         break;
       }
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
       case kTextureEgl_ObjectId_Navigation: {
-        TextureNaviRender::Dispose(item.get(), item->GetId());
+        TextureNaviRender::Dispose(item.get(), static_cast<GLuint>(item->GetId()));
         break;
       }
 #endif

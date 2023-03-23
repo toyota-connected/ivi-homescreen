@@ -32,6 +32,7 @@ TextureTestEgl::~TextureTestEgl() = default;
 flutter::EncodableValue TextureTestEgl::Create(
     void* userdata,
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
+  (void)args;
   auto* obj = reinterpret_cast<TextureTestEgl*>(userdata);
 
   obj->m_egl_backend->MakeTextureCurrent();

@@ -14,15 +14,15 @@ namespace flutter {
 
 /// A change in the state of an input field.
 struct TextEditingDelta {
-  TextEditingDelta(const std::u16string& text_before_change,
+  TextEditingDelta(std::u16string  text_before_change,
                    const TextRange& range,
-                   const std::u16string& text);
+                   std::u16string  text);
 
   TextEditingDelta(const std::string& text_before_change,
                    const TextRange& range,
                    const std::string& text);
 
-  explicit TextEditingDelta(const std::u16string& text);
+  explicit TextEditingDelta(std::u16string  text);
 
   explicit TextEditingDelta(const std::string& text);
 
