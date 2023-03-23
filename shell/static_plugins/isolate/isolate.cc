@@ -14,7 +14,6 @@
 
 #include "isolate.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
@@ -24,12 +23,6 @@ void Isolate::OnPlatformMessage(const FlutterPlatformMessage* message,
   std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-
-  std::string msg;
-  msg.append(reinterpret_cast<const char*>(message->message));
-  msg.resize(message->message_size);
-  FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Root Isolate Service ID: \""
-                 << message->message << "\"";
 
   result = codec.EncodeSuccessEnvelope();
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),

@@ -132,5 +132,4 @@ class TextureNaviRender : public Texture {
    */
   void InitRoutingApi();
 #endif
-
 };

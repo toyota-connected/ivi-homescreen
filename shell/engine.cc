@@ -59,7 +59,6 @@ Engine::Engine(FlutterView* view,
               [](const FlutterPlatformMessage* message, void* userdata) {
                 auto engine = reinterpret_cast<Engine*>(userdata);
 
-                // FML_DLOG(INFO) << "Channel: " << message->channel;
                 auto platform_channel = PlatformChannel::GetInstance();
                 auto callback =
                     platform_channel
@@ -104,8 +103,7 @@ Engine::Engine(FlutterView* view,
       engine_file_path = kSystemEngine;
     }
   }
-  m_engine_so_handle =
-      dlopen(engine_file_path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
+  m_engine_so_handle = dlopen(engine_file_path.c_str(), RTLD_LAZY);
   if (!m_engine_so_handle) {
     FML_DLOG(ERROR) << dlerror();
     exit(-1);
@@ -182,7 +180,6 @@ Engine::Engine(FlutterView* view,
       .post_task_callback = [](FlutterTask task, uint64_t target_time,
                                void* context) -> void {
         auto* e = static_cast<Engine*>(context);
-        // FML_DLOG(INFO) << "(" << e->GetIndex() << ") Post Task";
         e->m_taskrunner.emplace(target_time, task);
         if (!e->m_running) {
           uint64_t current = e->m_proc_table.GetCurrentTime();
@@ -204,8 +201,6 @@ Engine::Engine(FlutterView* view,
   };
 
   m_args.custom_task_runners = &m_custom_task_runners;
-
-  // m_args.compositor = m_backend->GetCompositorConfig();
 
   FML_DLOG(INFO) << "(" << m_index << ") -Engine::Engine";
 }
@@ -471,22 +466,24 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
-MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
-                                              const uint8_t *message,
-                                              const size_t message_size,
-                                              const FlutterBinaryReplyUserdata reply,
-                                              void* userdata) const {
+MAYBE_UNUSED bool Engine::SendPlatformMessage(
+    const char* channel,
+    const uint8_t* message,
+    const size_t message_size,
+    const FlutterBinaryReplyUserdata reply,
+    void* userdata) const {
   if (!m_running) {
     return kInternalInconsistency;
   }
   FlutterPlatformMessageResponseHandle* handle;
-  m_proc_table.PlatformMessageCreateResponseHandle(
-      m_flutter_engine, reply, userdata, &handle);
+  m_proc_table.PlatformMessageCreateResponseHandle(m_flutter_engine, reply,
+                                                   userdata, &handle);
   const FlutterPlatformMessage msg{
       sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
   };
 
-  FlutterEngineResult message_ret = m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  FlutterEngineResult message_ret =
+      m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
   if (handle != nullptr) {
     m_proc_table.PlatformMessageReleaseResponseHandle(m_flutter_engine, handle);
   }

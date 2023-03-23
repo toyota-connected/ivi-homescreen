@@ -46,6 +46,17 @@ class CompositorSurfacePlugin {
   static constexpr char kParamSyncSync[] = "sync";
   static constexpr char kParamSyncDeSync[] = "de-sync";
 
+  /**
+   * @brief Callback function for platform messages about Compositor Sub-Surface
+   * @param[in] message Received message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   *
+   * Used for handling method calls from Dart related to
+   * compositor sub-surfaces
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

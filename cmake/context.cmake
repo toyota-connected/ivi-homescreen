@@ -33,9 +33,9 @@ else ()
 endif ()
 
 #
-# Clang Variables
+# libc++
 #
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     execute_process(
             COMMAND llvm-config --version
             OUTPUT_VARIABLE LLVM_VERSION
@@ -53,17 +53,15 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         )
     endif ()
 
-    if (LLVM_ROOT)
-        message(STATUS "LLVM Root .............. ${LLVM_ROOT}")
-        message(STATUS "C++ header path ........ ${LLVM_ROOT}/include/c++/v1/")
-
-        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
-        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-isystem${LLVM_ROOT}/include/c++/v1/>)
-    endif ()
-
     if (NOT LLVM_ROOT)
-        message(FATAL_ERROR "If llvm-config is not installed manually set LLVM_ROOT")
+        message(WARNING "LLVM_ROOT not detected, using default")
+        set(LLVM_ROOT "/usr")
     endif ()
+
+    message(STATUS "LLVM Root .............. ${LLVM_ROOT}")
+    message(STATUS "C++ header path ........ ${LLVM_ROOT}/include/c++/v1/")
+
+    set(CONTEXT_COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++> $<$<COMPILE_LANGUAGE:CXX>:-isystem${LLVM_ROOT}/include/c++/v1/>)
 
     execute_process(
             COMMAND llvm-config --cmakedir

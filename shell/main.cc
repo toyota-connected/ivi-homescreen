@@ -78,8 +78,8 @@ void RemoveArgument(std::vector<std::string>& args, const std::string& arg) {
  */
 int main(int argc, char** argv) {
   struct Configuration::Config config {
-    .app_id{}, .json_configuration_path{}, .cursor_theme{},
-    .disable_cursor{}, .disable_cursor_set{}, .debug_backend{}, .debug_backend_set{}, .view{},
+    .app_id{}, .json_configuration_path{}, .cursor_theme{}, .disable_cursor{},
+        .disable_cursor_set{}, .debug_backend{}, .debug_backend_set{}, .view{},
   };
 
   FML_LOG(INFO) << GIT_BRANCH " @ " GIT_HASH;

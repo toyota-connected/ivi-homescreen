@@ -31,78 +31,80 @@ class Egl {
   ~Egl();
 
   /**
-  * @brief Clear an EGL rendering context
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Clear an EGL rendering context
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool ClearCurrent();
 
   /**
-  * @brief Attach an EGL rendering context to EGL surface
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Attach an EGL rendering context to EGL surface
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool MakeCurrent();
 
   /**
-  * @brief Post EGL surface color buffer to a native window
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Post EGL surface color buffer to a native window
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool SwapBuffers();
 
   /**
-  * @brief Attach an EGL rendering context to EGL surface by specifying Resource content
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Attach an EGL rendering context to EGL surface by specifying
+   * Resource content
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool MakeResourceCurrent();
 
   /**
-  * @brief Attach an EGL rendering context to EGL surface by specifying Texture content
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Attach an EGL rendering context to EGL surface by specifying Texture
+   * content
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool MakeTextureCurrent();
 
   /**
-  * @brief Get an EGL display connection
-  * @param[in] platform Platform
-  * @param[in] native_display The native display
-  * @param[in] attrib_list Display attributes
-  * @return EGLDisplay
-  * @retval An EGL display connection
-  * @relation
-  * wayland
-  */
+   * @brief Get an EGL display connection
+   * @param[in] platform Platform
+   * @param[in] native_display The native display
+   * @param[in] attrib_list Display attributes
+   * @return EGLDisplay
+   * @retval An EGL display connection
+   * @relation
+   * wayland
+   */
   static EGLDisplay get_egl_display(EGLenum platform,
                                     void* native_display,
                                     const EGLint* attrib_list);
 
   /**
-  * @brief Create a new EGL window surface
-  * @param[in] native_window The native window
-  * @param[in] attrib_list Window surface attributes
-  * @return EGLSurface
-  * @retval An EGL window surface
-  * @relation
-  * wayland
-  */
+   * @brief Create a new EGL window surface
+   * @param[in] native_window The native window
+   * @param[in] attrib_list Window surface attributes
+   * @return EGLSurface
+   * @retval An EGL window surface
+   * @relation
+   * wayland
+   */
   EGLSurface create_egl_surface(void* native_window, const EGLint* attrib_list);
 
   EGLSurface m_egl_surface{};
@@ -124,28 +126,29 @@ class Egl {
   PFNEGLQUERYDEBUGKHRPROC m_pfQueryDebug{};
   PFNEGLLABELOBJECTKHRPROC m_pfLabelObject{};
 
- /**
-  * @brief Report the contents of EGL attributes and frame buffer configurations
-  * @param[in] configs EGL Config
-  * @param[in] count Count of configs
-  * @return void
-  * @relation
-  * wayland
-  */
+  /**
+   * @brief Report the contents of EGL attributes and frame buffer
+   * configurations
+   * @param[in] configs EGL Config
+   * @param[in] count Count of configs
+   * @return void
+   * @relation
+   * wayland
+   */
   void ReportGlesAttributes(EGLConfig* configs, EGLint count);
 
- /**
-  * @brief Debug callback function to output error details
-  * @param[in] error Error code
-  * @param[in] command Commands in case of error
-  * @param[in] messageType Type of message when an error occurs
-  * @param[in] threadLabel Thread label when error occurs
-  * @param[in] objectLabel Object label when an error occurs
-  * @param[in] message Error message
-  * @return void
-  * @relation
-  * internal
-  */
+  /**
+   * @brief Debug callback function to output error details
+   * @param[in] error Error code
+   * @param[in] command Commands in case of error
+   * @param[in] messageType Type of message when an error occurs
+   * @param[in] threadLabel Thread label when error occurs
+   * @param[in] objectLabel Object label when an error occurs
+   * @param[in] message Error message
+   * @return void
+   * @relation
+   * internal
+   */
   static void sDebugCallback(EGLenum error,
                              const char* command,
                              EGLint messageType,
@@ -154,29 +157,29 @@ class Egl {
                              const char* message);
 
   /**
-  * @brief Get address of EGL function
-  * @param[in] address Function name
-  * @return void*
-  * @retval Function address
-  * @relation
-  * wayland
-  */
+   * @brief Get address of EGL function
+   * @param[in] address Function name
+   * @return void*
+   * @retval Function address
+   * @relation
+   * wayland
+   */
   static void* get_egl_proc_address(const char* address);
 
   /**
-  * @brief Initialize of EGL KHR_debug
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Initialize of EGL KHR_debug
+   * @return void
+   * @relation
+   * wayland
+   */
   void EGL_KHR_debug_init();
 
   /**
-  * @brief Print a list of extensions, with word-wrapping
-  * @param[in] ext List of extensions
-  * @return void
-  * @relation
-  * internal
-  */
+   * @brief Print a list of extensions, with word-wrapping
+   * @param[in] ext List of extensions
+   * @return void
+   * @relation
+   * internal
+   */
   static void print_extension_list(const char* ext);
 };

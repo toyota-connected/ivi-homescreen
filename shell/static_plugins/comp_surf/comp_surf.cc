@@ -15,10 +15,8 @@
 #include "comp_surf.h"
 
 #include <dlfcn.h>
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
-#include "../../view/flutter_view.h"
 #include "engine.h"
 
 void CompositorSurfacePlugin::OnPlatformMessage(

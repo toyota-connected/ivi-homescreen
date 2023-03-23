@@ -14,10 +14,10 @@
 
 #include "restoration.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
+#include "logging.h"
 
 void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {

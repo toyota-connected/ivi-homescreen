@@ -30,16 +30,16 @@ class WaylandEglBackend : public Egl, public Backend {
                     int buffer_size = kEglBufferSize);
 
   /**
-  * @brief Resize Flutter engine Window size
-  * @param[in] user_data Pointer to User data
-  * @param[in] index No use
-  * @param[in] engine Pointer to Flutter engine
-  * @param[in] width Set window width
-  * @param[in] height Set window height
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Resize Flutter engine Window size
+   * @param[in] user_data Pointer to User data
+   * @param[in] index No use
+   * @param[in] engine Pointer to Flutter engine
+   * @param[in] width Set window width
+   * @param[in] height Set window height
+   * @return void
+   * @relation
+   * wayland
+   */
   static void Resize(void* user_data,
                      size_t index,
                      Engine* engine,
@@ -47,16 +47,16 @@ class WaylandEglBackend : public Egl, public Backend {
                      int32_t height);
 
   /**
-  * @brief Create EGL surface
-  * @param[in] user_data Pointer to User data
-  * @param[in] index No use
-  * @param[in] surface Pointer to surface
-  * @param[in] width Set surface width
-  * @param[in] height Set surface height
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Create EGL surface
+   * @param[in] user_data Pointer to User data
+   * @param[in] index No use
+   * @param[in] surface Pointer to surface
+   * @param[in] width Set surface width
+   * @param[in] height Set surface height
+   * @return void
+   * @relation
+   * wayland
+   */
   static void CreateSurface(void* user_data,
                             size_t index,
                             wl_surface* surface,
@@ -64,21 +64,21 @@ class WaylandEglBackend : public Egl, public Backend {
                             int32_t height);
 
   /**
-  * @brief Get FlutterRendererConfig
-  * @return FlutterRendererConfig
-  * @retval Pointer to FlutterRendererConfig
-  * @relation
-  * wayland
-  */
+   * @brief Get FlutterRendererConfig
+   * @return FlutterRendererConfig
+   * @retval Pointer to FlutterRendererConfig
+   * @relation
+   * wayland
+   */
   FlutterRendererConfig GetRenderConfig() override;
 
   /**
-  * @brief Get FlutterCompositor
-  * @return FlutterCompositor
-  * @retval Pointer to FlutterCompositor
-  * @relation
-  * wayland
-  */
+   * @brief Get FlutterCompositor
+   * @return FlutterCompositor
+   * @retval Pointer to FlutterCompositor
+   * @relation
+   * wayland
+   */
   FlutterCompositor GetCompositorConfig() override;
 
  private:

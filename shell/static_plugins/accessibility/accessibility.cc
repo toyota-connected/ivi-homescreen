@@ -14,10 +14,10 @@
 
 #include "accessibility.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_message_codec.h>
 
 #include "engine.h"
+#include "logging.h"
 
 void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {

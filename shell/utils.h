@@ -15,11 +15,11 @@
 class Utils {
  public:
   /**
-  * @brief trim from end of string (right)
-  * @return std::string&
-  * @retval String that has specified characters trimmed from right.
-  * @relation
-  * flutter
+   * @brief trim from end of string (right)
+   * @return std::string&
+   * @retval String that has specified characters trimmed from right.
+   * @relation
+   * flutter
    */
   inline static std::string& rtrim(std::string& s, const char* t) {
     s.erase(s.find_last_not_of(t) + 1);
@@ -27,11 +27,11 @@ class Utils {
   }
 
   /**
-  * @brief trim from beginning of string (left)
-  * @return std::string&
-  * @retval String that has specified characters trimmed from left.
-  * @relation
-  * flutter
+   * @brief trim from beginning of string (left)
+   * @return std::string&
+   * @retval String that has specified characters trimmed from left.
+   * @relation
+   * flutter
    */
   inline static std::string& ltrim(std::string& s, const char* t) {
     s.erase(0, s.find_first_not_of(t));
@@ -39,22 +39,22 @@ class Utils {
   }
 
   /**
-  * @brief trim from both ends of string (right then left)
-  * @return std::string&
-  * @retval String that has specified characters trimmed from right and left.
-  * @relation
-  * flutter
+   * @brief trim from both ends of string (right then left)
+   * @return std::string&
+   * @retval String that has specified characters trimmed from right and left.
+   * @relation
+   * flutter
    */
   inline static std::string& trim(std::string& s, const char* t) {
     return ltrim(rtrim(s, t), t);
   }
 
   /**
-  * @brief Gets Home Path
-  * @return const char*
-  * @retval Home path string
-  * @relation
-  * flutter
+   * @brief Gets Home Path
+   * @return const char*
+   * @retval Home path string
+   * @relation
+   * flutter
    */
   static const char* GetHomePath() {
     static char* home_dir = nullptr;
@@ -85,11 +85,11 @@ class Utils {
   }
 
   /**
-  * @brief Gets Config Home Path
-  * @return const char*
-  * @retval Home path string
-  * @relation
-  * flutter
+   * @brief Gets Config Home Path
+   * @return const char*
+   * @retval Home path string
+   * @relation
+   * flutter
    */
   static const char* GetConfigHomePath() {
     static const char* config_home_dir = nullptr;

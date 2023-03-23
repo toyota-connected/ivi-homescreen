@@ -32,6 +32,7 @@
 
 #include "backend/backend.h"
 #include "constants.h"
+#include "logging.h"
 #include "platform_channel.h"
 #include "static_plugins/key_event/key_event.h"
 #include "static_plugins/text_input/text_input.h"
@@ -264,7 +265,7 @@ class Engine {
    * @relation
    * flutter
    */
-  typedef void (*FlutterBinaryReplyUserdata)(const uint8_t *data,
+  typedef void (*FlutterBinaryReplyUserdata)(const uint8_t* data,
                                              size_t data_size,
                                              void* userdata);
 
@@ -273,7 +274,8 @@ class Engine {
    * @param[in] channel Destination channel
    * @param[in] message Message to send
    * @param[in] message_size Size of message
-   * @param[in] reply a callback invoked by the engine when the Flutter app send a response on the handle.
+   * @param[in] reply a callback invoked by the engine when the Flutter app send
+   * a response on the handle.
    * @param[in] userdata The user data associated with the data callback.
    * @return bool
    * @retval true If successed to send message

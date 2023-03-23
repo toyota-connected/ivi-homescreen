@@ -17,7 +17,8 @@
 #include "../../view/flutter_view.h"
 #include "engine.h"
 
-void CompositorRegionPlugin::ClearGroups(flutter::EncodableList& types, FlutterView* view) {
+void CompositorRegionPlugin::ClearGroups(flutter::EncodableList& types,
+                                         FlutterView* view) {
   for (auto const& encoded_types : types) {
     std::string type = std::get<std::string>(encoded_types);
     view->ClearRegion(type);

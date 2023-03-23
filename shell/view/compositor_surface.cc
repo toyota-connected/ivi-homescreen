@@ -3,7 +3,6 @@
 
 #include <filesystem>
 
-#include <flutter/fml/logging.h>
 #include <flutter/fml/paths.h>
 
 #include <dlfcn.h>
@@ -15,7 +14,6 @@
 #include "../utils.h"
 #include "../view/flutter_view.h"
 #include "../wayland/display.h"
-
 
 CompositorSurface::CompositorSurface(
     int64_t key,
@@ -170,9 +168,7 @@ invalid:
 }
 
 std::string CompositorSurface::GetFilePath(const char* folder) {
-
-  auto path =
-      fml::paths::JoinPaths({Utils::GetConfigHomePath(), folder});
+  auto path = fml::paths::JoinPaths({Utils::GetConfigHomePath(), folder});
 
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {

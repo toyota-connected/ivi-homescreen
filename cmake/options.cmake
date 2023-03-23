@@ -59,3 +59,8 @@ option(BUILD_BACKEND_WAYLAND_DRM "Build Backend Wayland DRM" OFF)
 if (BUILD_BACKEND_WAYLAND_DRM)
     add_compile_definitions(BUILD_BACKEND_WAYLAND_DRM)
 endif ()
+
+#
+# Sanitizers
+#
+find_package(Sanitizers)

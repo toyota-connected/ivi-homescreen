@@ -2,15 +2,14 @@
 #include "texture_navi_render_egl.h"
 
 #include <dlfcn.h>
-#include <chrono>
 #include <mutex>
 
-#include <flutter/fml/logging.h>
 #include <sys/stat.h>
 #include <cmath>
 #include <memory>
 
 #include "backend/wayland_egl.h"
+#include "logging.h"
 #include "view/flutter_view.h"
 
 constexpr uint32_t kMapProviderTextureId = 98765;

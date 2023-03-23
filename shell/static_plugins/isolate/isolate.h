@@ -23,13 +23,13 @@ class Isolate {
   static constexpr char kChannelName[] = "flutter/isolate";
 
   /**
-  * @brief Callback function for platform messages about isolate
-  * @param[in] message Recieve message
-  * @param[in] userdata Pointer to User data
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Callback function for platform messages about isolate
+   * @param[in] message Receive message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

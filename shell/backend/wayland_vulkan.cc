@@ -18,10 +18,8 @@
 
 #include <cassert>
 #include <cstdlib>
-#include <map>
+#include <optional>
 #include <queue>
-
-#include "third_party/flutter/fml/logging.h"
 
 #include "constants.h"
 #include "engine.h"
@@ -65,8 +63,7 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
           .get_instance_proc_address_callback = GetInstanceProcAddressCallback,
           .get_next_image_callback = GetNextImageCallback,
           .present_image_callback = PresentCallback,
-      }
-  };
+      }};
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
@@ -114,7 +111,6 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
 void WaylandVulkanBackend::createInstance() {
   auto instance_extensions = enumerateInstanceExtensionProperties();
   for (const auto& l : instance_extensions) {
-    // FML_DLOG(INFO) << l.extensionName << ", ver: " << l.specVersion;
     if (enable_validation_layers_) {
       if (strcmp(l.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) ==
           0) {
@@ -180,7 +176,6 @@ void WaylandVulkanBackend::createInstance() {
 
   auto available_layers = enumerateInstanceLayerProperties();
   for (const auto& l : available_layers) {
-    // FML_DLOG(INFO) << l.layerName << ", ver: " << l.specVersion;
     if (enable_validation_layers_ &&
         strcmp(l.layerName, VK_LAYER_KHRONOS_VALIDATION_NAME) == 0) {
       state_.enabled_layer_extensions.push_back(
@@ -301,8 +296,6 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     bool supports_swapchain = false;
     for (const auto& available_extension : available_extensions) {
-      // FML_DLOG(INFO) << available_extension.extensionName
-      //<< ", ver: " << available_extension.specVersion;
       if (strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                  available_extension.extensionName) == 0) {
         supports_swapchain = true;

@@ -17,10 +17,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
+#include "logging.h"
 
 void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
