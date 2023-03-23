@@ -23,10 +23,10 @@
 #include <thread>
 #include <vector>
 
+#include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 #include <cassert>
-#include <shell/platform/embedder/embedder.h>
 
 #include "agl-shell-client-protocol.h"
 #include "constants.h"

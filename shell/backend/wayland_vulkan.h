@@ -19,9 +19,9 @@
 #include <cstdint>
 #include <vector>
 
+#include <shell/platform/embedder/embedder.h>
 #include "backend/backend.h"
 #include "bluevk/BlueVK.h"
-#include <shell/platform/embedder/embedder.h>
 
 class WaylandVulkanBackend : public Backend {
  public:
@@ -33,16 +33,16 @@ class WaylandVulkanBackend : public Backend {
   ~WaylandVulkanBackend() override;
 
   /**
-  * @brief Resize Flutter engine Window size
-  * @param[in] user_data Pointer to User data
-  * @param[in] index No use
-  * @param[in] engine Pointer to Flutter engine
-  * @param[in] width Set window width
-  * @param[in] height Set window height
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Resize Flutter engine Window size
+   * @param[in] user_data Pointer to User data
+   * @param[in] index No use
+   * @param[in] engine Pointer to Flutter engine
+   * @param[in] width Set window width
+   * @param[in] height Set window height
+   * @return void
+   * @relation
+   * wayland
+   */
   MAYBE_UNUSED static void Resize(void* user_data,
                                   size_t index,
                                   Engine* engine,
@@ -50,16 +50,16 @@ class WaylandVulkanBackend : public Backend {
                                   int32_t height);
 
   /**
-  * @brief Create Vulkan surface
-  * @param[in] user_data Pointer to User data
-  * @param[in] index No use
-  * @param[in] surface Pointer to surface
-  * @param[in] width Set surface width
-  * @param[in] height Set surface height
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Create Vulkan surface
+   * @param[in] user_data Pointer to User data
+   * @param[in] index No use
+   * @param[in] surface Pointer to surface
+   * @param[in] width Set surface width
+   * @param[in] height Set surface height
+   * @return void
+   * @relation
+   * wayland
+   */
   MAYBE_UNUSED static void CreateSurface(void* user_data,
                                          size_t index,
                                          wl_surface* surface,
@@ -67,21 +67,21 @@ class WaylandVulkanBackend : public Backend {
                                          int32_t height);
 
   /**
-  * @brief Get FlutterRendererConfig
-  * @return FlutterRendererConfig
-  * @retval Pointer to FlutterRendererConfig
-  * @relation
-  * wayland
-  */
+   * @brief Get FlutterRendererConfig
+   * @return FlutterRendererConfig
+   * @retval Pointer to FlutterRendererConfig
+   * @relation
+   * wayland
+   */
   FlutterRendererConfig GetRenderConfig() override;
 
   /**
-  * @brief Get FlutterCompositor
-  * @return FlutterCompositor
-  * @retval Pointer to FlutterCompositor
-  * @relation
-  * wayland
-  */
+   * @brief Get FlutterCompositor
+   * @return FlutterCompositor
+   * @retval Pointer to FlutterCompositor
+   * @relation
+   * wayland
+   */
   FlutterCompositor GetCompositorConfig() override;
 
  private:
@@ -129,102 +129,102 @@ class WaylandVulkanBackend : public Backend {
   bool enable_validation_layers_;
   bool resize_pending_;
 
-   /**
-  * @brief Create Vulkan instance
-  * @return void
-  * @relation
-  * wayland
-  */
+  /**
+   * @brief Create Vulkan instance
+   * @return void
+   * @relation
+   * wayland
+   */
   void createInstance();
 
   /**
-  * @brief Setup Vulkan debug callback
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Setup Vulkan debug callback
+   * @return void
+   * @relation
+   * wayland
+   */
   void setupDebugMessenger();
 
   /**
-  * @brief Find a compatible Vulkan physical device
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Find a compatible Vulkan physical device
+   * @return void
+   * @relation
+   * wayland
+   */
   void findPhysicalDevice();
 
   /**
-  * @brief Create Vulkan logical device
-  * @return void
-  * @relation
-  * wayland
-  */
+   * @brief Create Vulkan logical device
+   * @return void
+   * @relation
+   * wayland
+   */
   void createLogicalDevice();
 
   /**
-  * @brief Initialize Vulkan swapchain
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Initialize Vulkan swapchain
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   bool InitializeSwapchain();
 
   /**
-  * @brief Get Vulkan layer properties
-  * @return std::vector<VkLayerProperties>
-  * @retval Vulkan Layer Properties
-  * @relation
-  * wayland
-  */
+   * @brief Get Vulkan layer properties
+   * @return std::vector<VkLayerProperties>
+   * @retval Vulkan Layer Properties
+   * @relation
+   * wayland
+   */
   static std::vector<VkLayerProperties> enumerateInstanceLayerProperties();
 
   /**
-  * @brief Get Vulkan extension properties
-  * @return std::vector<VkExtensionProperties>
-  * @retval Vulkan Extension Properties
-  * @relation
-  * wayland
-  */
+   * @brief Get Vulkan extension properties
+   * @return std::vector<VkExtensionProperties>
+   * @retval Vulkan Extension Properties
+   * @relation
+   * wayland
+   */
   static std::vector<VkExtensionProperties>
   enumerateInstanceExtensionProperties();
 
   /**
-  * @brief Callback to get the next Vulkan image
-  * @param[in] user_data Pointer to User data
-  * @param[in] frame_info No use
-  * @return FlutterVulkanImage
-  * @retval Next Vulkan image
-  * @relation
-  * wayland
-  */
+   * @brief Callback to get the next Vulkan image
+   * @param[in] user_data Pointer to User data
+   * @param[in] frame_info No use
+   * @return FlutterVulkanImage
+   * @retval Next Vulkan image
+   * @relation
+   * wayland
+   */
   static FlutterVulkanImage GetNextImageCallback(
       void* user_data,
       const FlutterFrameInfo* frame_info);
 
   /**
-  * @brief Callback to queue Vulkan image for presentation
-  * @param[in] user_data Pointer to User data
-  * @param[in] image No use
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Callback to queue Vulkan image for presentation
+   * @param[in] user_data Pointer to User data
+   * @param[in] image No use
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * wayland
+   */
   static bool PresentCallback(void* user_data, const FlutterVulkanImage* image);
 
   /**
-  * @brief Callback to Get instance Process Address
-  * @param[in] user_data Pointer to User data
-  * @param[in] instance Vulkan instance handle
-  * @param[in] procname Process name
-  * @return void*
-  * @retval Instance Process Address
-  * @relation
-  * wayland
-  */
+   * @brief Callback to Get instance Process Address
+   * @param[in] user_data Pointer to User data
+   * @param[in] instance Vulkan instance handle
+   * @param[in] procname Process name
+   * @return void*
+   * @retval Instance Process Address
+   * @relation
+   * wayland
+   */
   static void* GetInstanceProcAddressCallback(
       void* user_data,
       FlutterVulkanInstanceHandle instance,
@@ -234,16 +234,16 @@ class WaylandVulkanBackend : public Backend {
   VkDebugUtilsMessengerEXT mDebugMessenger = VK_NULL_HANDLE;
 
   /**
-  * @brief Callback to VK_EXT_debug_utils
-  * @param[in] severity Bitmask of VkDebugUtilsMessageSeverityFlagBitsEXT
-  * @param[in] types No use
-  * @param[in] cbdata Structure specifying parameters returned to the callback
-  * @param[in] pUserData No use
-  * @return VkBool32
-  * @retval VK_FALSE Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Callback to VK_EXT_debug_utils
+   * @param[in] severity Bitmask of VkDebugUtilsMessageSeverityFlagBitsEXT
+   * @param[in] types No use
+   * @param[in] cbdata Structure specifying parameters returned to the callback
+   * @param[in] pUserData No use
+   * @return VkBool32
+   * @retval VK_FALSE Abnormal end
+   * @relation
+   * wayland
+   */
   static VKAPI_ATTR VkBool32
 
       VKAPI_CALL
@@ -253,20 +253,20 @@ class WaylandVulkanBackend : public Backend {
                          void* pUserData);
 
   /**
-  * @brief Callback to VK_EXT_debug_report
-  * @param[in] flags Bitmask of VkDebugReportFlagBitsEXT
-  * @param[in] objectType No use
-  * @param[in] object No use
-  * @param[in] location No use
-  * @param[in] messageCode No use
-  * @param[in] pLayerPrefix The name of the component
-  * @param[in] pMessage Output message
-  * @param[in] pUserData No use
-  * @return VkBool32
-  * @retval VK_FALSE Abnormal end
-  * @relation
-  * wayland
-  */
+   * @brief Callback to VK_EXT_debug_report
+   * @param[in] flags Bitmask of VkDebugReportFlagBitsEXT
+   * @param[in] objectType No use
+   * @param[in] object No use
+   * @param[in] location No use
+   * @param[in] messageCode No use
+   * @param[in] pLayerPrefix The name of the component
+   * @param[in] pMessage Output message
+   * @param[in] pUserData No use
+   * @return VkBool32
+   * @retval VK_FALSE Abnormal end
+   * @relation
+   * wayland
+   */
   static VKAPI_ATTR VkBool32
 
       VKAPI_CALL
@@ -280,44 +280,44 @@ class WaylandVulkanBackend : public Backend {
                           void* pUserData);
 
   /**
-  * @brief Callback to output information "CollectBackingStore"
-  * @param[in] renderer No use
-  * @param[in] user_data No use
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * internal
-  */
+   * @brief Callback to output information "CollectBackingStore"
+   * @param[in] renderer No use
+   * @param[in] user_data No use
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * internal
+   */
   static bool CollectBackingStore(const FlutterBackingStore* renderer,
                                   void* user_data);
 
   /**
-  * @brief Callback to output information "CreateBackingStore"
-  * @param[in] config No use
-  * @param[in] backing_store_out No use
-  * @param[in] user_data No use
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * internal
-  */
+   * @brief Callback to output information "CreateBackingStore"
+   * @param[in] config No use
+   * @param[in] backing_store_out No use
+   * @param[in] user_data No use
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * internal
+   */
   static bool CreateBackingStore(const FlutterBackingStoreConfig* config,
                                  FlutterBackingStore* backing_store_out,
                                  void* user_data);
 
   /**
-  * @brief Callback to output information "PresentLayers"
-  * @param[in] layers No use
-  * @param[in] layers_count No use
-  * @param[in] user_data No use
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * internal
-  */
+   * @brief Callback to output information "PresentLayers"
+   * @param[in] layers No use
+   * @param[in] layers_count No use
+   * @param[in] user_data No use
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * internal
+   */
   static bool PresentLayers(const FlutterLayer** layers,
                             size_t layers_count,
                             void* user_data);

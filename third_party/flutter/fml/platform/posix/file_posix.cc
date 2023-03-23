@@ -74,7 +74,6 @@ fml::UniqueFD OpenFile(const fml::UniqueFD& base_directory,
                        const char* path,
                        bool create_if_necessary,
                        FilePermission permission) {
-  TRACE_EVENT0("flutter", "fml::OpenFile");
   if (path == nullptr) {
     return {};
   }

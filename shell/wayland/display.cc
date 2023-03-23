@@ -597,7 +597,6 @@ void Display::keyboard_handle_key(void* data,
   std::shared_ptr<DelegateHandleKey> delegate = nullptr;
 #endif
 
-
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
       d->m_keysym_pressed = keysym;
@@ -613,12 +612,12 @@ void Display::keyboard_handle_key(void* data,
 #endif
 #if ENABLE_PLUGIN_KEY_EVENT && ENABLE_PLUGIN_TEXT_INPUT
       // The both of TextInput and KeyEvent is enabled.
-      delegate = std::move(TextInput::GetDelegate(text_input,
-          kFlutterKeyEventTypeRepeat,
-          d->m_repeat_code, d->m_keysym_pressed));
+      delegate = std::move(
+          TextInput::GetDelegate(text_input, kFlutterKeyEventTypeRepeat,
+                                 d->m_repeat_code, d->m_keysym_pressed));
 #elif !(ENABLE_PLUGIN_KEY_EVENT) && ENABLE_PLUGIN_TEXT_INPUT
-      // Only TextInput is enabled.
-      TextInput::keyboard_handle_key(text_input, keysym, state);
+    // Only TextInput is enabled.
+    TextInput::keyboard_handle_key(text_input, keysym, state);
 #endif
 #if ENABLE_PLUGIN_TEXT_INPUT
     }
@@ -627,14 +626,14 @@ void Display::keyboard_handle_key(void* data,
 #if ENABLE_PLUGIN_KEY_EVENT
     if (key_event) {
       KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeDown,
-          xkb_scancode, keysym, std::move(delegate));
+                                    xkb_scancode, keysym, std::move(delegate));
     }
 #endif
   } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
 #if ENABLE_PLUGIN_KEY_EVENT
     if (key_event) {
       KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
-          xkb_scancode, keysym, nullptr);
+                                    xkb_scancode, keysym, nullptr);
     }
 #endif
     if (d->m_repeat_code == xkb_scancode) {
@@ -697,13 +696,13 @@ void Display::keyboard_repeat_func(void* data) {
 #endif
 #if ENABLE_PLUGIN_KEY_EVENT && ENABLE_PLUGIN_TEXT_INPUT
     // The both of TextInput and KeyEvent is enabled.
-    delegate = std::move(TextInput::GetDelegate(text_input,
-      kFlutterKeyEventTypeRepeat,
-      d->m_repeat_code, d->m_keysym_pressed));
+    delegate = std::move(
+        TextInput::GetDelegate(text_input, kFlutterKeyEventTypeRepeat,
+                               d->m_repeat_code, d->m_keysym_pressed));
 #elif !(ENABLE_PLUGIN_KEY_EVENT) && ENABLE_PLUGIN_TEXT_INPUT
-    // Only TextInput is enabled.
-    TextInput::keyboard_handle_key(text_input, d->m_keysym_pressed,
-                                   WL_KEYBOARD_KEY_STATE_PRESSED);
+  // Only TextInput is enabled.
+  TextInput::keyboard_handle_key(text_input, d->m_keysym_pressed,
+                                 WL_KEYBOARD_KEY_STATE_PRESSED);
 #endif
 #if ENABLE_PLUGIN_TEXT_INPUT
   }
@@ -712,7 +711,8 @@ void Display::keyboard_repeat_func(void* data) {
 #if ENABLE_PLUGIN_KEY_EVENT
   if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
     KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeRepeat,
-        d->m_repeat_code, d->m_keysym_pressed, std::move(delegate));
+                                  d->m_repeat_code, d->m_keysym_pressed,
+                                  std::move(delegate));
   }
 #endif
 }
@@ -842,8 +842,7 @@ void Display::AglShellDoReady() const {
   }
 }
 
-void Display::SetEngine(wl_surface* surface,
-                        Engine* engine) {
+void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
   m_active_surface = surface;
   m_surface_engine_map[surface] = engine;
@@ -852,8 +851,8 @@ void Display::SetEngine(wl_surface* surface,
 bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
   (void)device;
   if (!m_enable_cursor) {
-    wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
-                          m_cursor_surface, 0,0);
+    wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial, m_cursor_surface,
+                          0, 0);
     wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
     wl_surface_commit(m_cursor_surface);
     return true;

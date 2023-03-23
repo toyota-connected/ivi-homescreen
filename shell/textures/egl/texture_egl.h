@@ -109,7 +109,6 @@ class TextureEgl {
    */
   void Initialize();
 
-
  protected:
   static std::shared_ptr<TextureEgl> sInstance;
 };

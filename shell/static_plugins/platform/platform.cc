@@ -15,10 +15,10 @@
 
 #include "platform.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/shell/platform/common/json_method_codec.h>
 
 #include "engine.h"
+#include "logging.h"
 
 std::string g_clipboard;
 

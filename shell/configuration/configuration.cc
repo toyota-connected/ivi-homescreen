@@ -18,9 +18,9 @@
 #include <fstream>
 #include <sstream>
 
+#include <rapidjson/document.h>
 #include "constants.h"
-#include "flutter/fml/logging.h"
-#include "rapidjson/document.h"
+#include "logging.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
@@ -200,7 +200,8 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (cli.view.pixel_ratio > 0) {
     instance.view.pixel_ratio = cli.view.pixel_ratio;
   }
-  if (cli.view.fullscreen_set && cli.view.fullscreen != instance.view.fullscreen) {
+  if (cli.view.fullscreen_set &&
+      cli.view.fullscreen != instance.view.fullscreen) {
     instance.view.fullscreen = cli.view.fullscreen;
   }
 }

@@ -22,6 +22,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif ()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/third_party/sanitizers-cmake/cmake)
 
 if (NOT BUILD_NUMBER)
     set(BUILD_NUMBER 0)
@@ -41,11 +42,7 @@ message(STATUS "Version ................ ${PROJECT_VERSION}")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+include(compiler)
 
 add_subdirectory(third_party)
 add_subdirectory(shell)

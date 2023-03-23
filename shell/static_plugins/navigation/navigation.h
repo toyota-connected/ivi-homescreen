@@ -25,7 +25,7 @@ class Navigation {
 
   /**
    * @brief Callback function for platform messages about navigation
-   * @param[in] message Recieve message
+   * @param[in] message Receive message
    * @param[in] userdata Pointer to User data
    * @return void
    * @relation
