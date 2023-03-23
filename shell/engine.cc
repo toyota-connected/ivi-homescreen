@@ -430,7 +430,7 @@ FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
                      return element.first == texture_id;
                    });
   if (search != m_texture_registry.end()) {
-    ((Texture*)search->second)->Dispose(texture_id);
+    ((Texture*)search->second)->Dispose(static_cast<uint32_t>(texture_id));
     FML_DLOG(INFO) << "(" << m_index << ") Texture Disposed (" << texture_id
                    << ")";
     return kSuccess;
@@ -458,7 +458,11 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
   }
   FlutterPlatformMessageResponseHandle* handle;
   m_proc_table.PlatformMessageCreateResponseHandle(
-      m_flutter_engine, [](const uint8_t* data, size_t size, void* userdata) {},
+      m_flutter_engine, [](const uint8_t* data, size_t size, void* userdata) {
+        (void)data;
+        (void)size;
+        (void)userdata;
+      },
       nullptr, &handle);
   const FlutterPlatformMessage msg{
       sizeof(FlutterPlatformMessage), channel, message, message_size, handle,

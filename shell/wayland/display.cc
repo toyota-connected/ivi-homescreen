@@ -241,8 +241,8 @@ void Display::display_handle_geometry(void* data,
   (void)transform;
 
   auto* oi = static_cast<output_info_t*>(data);
-  oi->physical_width = physical_width;
-  oi->physical_height = physical_height;
+  oi->physical_width = static_cast<unsigned int>(physical_width);
+  oi->physical_height = static_cast<unsigned int>(physical_height);
 
   FML_DLOG(INFO) << "Physical width: " << physical_width << " mm x "
                  << physical_height << " mm";
@@ -257,8 +257,8 @@ void Display::display_handle_mode(void* data,
   (void)wl_output;
   (void)flags;
   auto* oi = static_cast<output_info_t*>(data);
-  oi->width = width;
-  oi->height = height;
+  oi->width = static_cast<unsigned int>(width);
+  oi->height = static_cast<unsigned int>(height);
   oi->refresh_rate = refresh;
 
   FML_DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
@@ -557,6 +557,9 @@ void Display::keyboard_handle_key(void* data,
                                   uint32_t time,
                                   uint32_t key,
                                   uint32_t state) {
+  (void)keyboard;
+  (void)serial;
+  (void)time;
   auto* d = static_cast<Display*>(data);
 
   if (!d->m_xkb_state)
@@ -911,11 +914,11 @@ int32_t Display::GetBufferScale(uint32_t index) {
     if (m_buffer_scale_enable) {
       return m_all_outputs[index]->scale;
     } else {
-      return kDefaultBufferScale;
+      return (int32_t)kDefaultBufferScale;
     }
   }
   FML_DLOG(ERROR) << "Invalid output index: " << index;
-  return kDefaultBufferScale;
+  return (int32_t)kDefaultBufferScale;
 }
 
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {

@@ -17,7 +17,6 @@ extern "C" {
 #include "backend/wayland_egl.h"
 #include "engine.h"
 #include "hexdump.h"
-#include "logging.h"
 #include "nv12.h"
 #include "platform_channel.h"
 #include "textures/texture.h"
@@ -30,8 +29,8 @@ static GLuint vertexShader, fragmentShader;
 
 static GLuint vertex_arr_id;
 
-static GLuint vertexbuffer;
-static GLuint coordbuffer;
+static GLuint vertex_buffer;
+static GLuint coord_buffer;
 
 constexpr char kUriPrefixFile[] = "file://";
 
@@ -59,8 +58,8 @@ typedef enum {
 class CustomData {
  public:
   bool initialized = false;
-  GstElement *pipeline{}, *playbin{}, *decoder{}, *videoconvert{},
-      *videoscale{}, *sink{};
+  GstElement *pipeline{}, *playbin{}, *decoder{}, *video_convert{},
+      *video_scale{}, *sink{};
   GMainLoop* main_loop{};
   gint n_video{};
   gint current_video{};
@@ -96,7 +95,11 @@ static std::map<int64_t, std::shared_ptr<CustomData>> global_map;
                 << "\"\n"                                                  \
                 << ss.str();
 #else
-#define PrintMessageAsHex(a, b)
+#define PrintMessageAsHex(a, b) \
+  {                             \
+    (void)a;                    \
+    (void)b;                    \
+  }
 #endif
 
 /**
@@ -223,11 +226,11 @@ void draw_core(nv12::Shader* shader) {
   glUseProgram(shader->program);
 
   glEnableVertexAttribArray(0);
-  glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
   glEnableVertexAttribArray(1);
-  glBindBuffer(GL_ARRAY_BUFFER, coordbuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, coord_buffer);
   glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 
   glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -252,13 +255,13 @@ void handoff_handler(GstElement* fakesink,
                      GstBuffer* buffer,
                      GstPad* pad,
                      gpointer _data) {
+  (void)fakesink;
+  (void)pad;
   auto data = (CustomData*)_data;
   assert(data->texture);
   int64_t textureId = data->texture->GetId();
 
   GstVideoFrame frame;
-  GstVideoMeta* meta;
-  GstMapInfo map;
 
   if (!data->initialized) {
     return;
@@ -275,8 +278,6 @@ void handoff_handler(GstElement* fakesink,
     glBindVertexArray(vertex_arr_id);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    size_t width = data->info.width;
-    size_t height = data->info.height;
     guint n_planes = GST_VIDEO_INFO_N_PLANES(&data->info);
     if (n_planes == 2) {
       // Assume NV12
@@ -292,7 +293,7 @@ void handoff_handler(GstElement* fakesink,
     } else {
       // Assume RGB
       gpointer video_frame_plane_buffer = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
-      loadRGBPixels(textureId, (unsigned char*)video_frame_plane_buffer,
+      loadRGBPixels(static_cast<GLuint>(textureId), (unsigned char*)video_frame_plane_buffer,
                     data->info.width, data->info.height);
     }
     gst_video_frame_unmap(&frame);
@@ -341,7 +342,8 @@ static void prepare(CustomData* data) {
                  << ", height: " << data->info.height;
   // set to the target
   if (!gst_video_info_set_format(&data->info, GST_VIDEO_FORMAT_NV12,
-                                 data->width, data->height)) {
+                                 static_cast<guint>(data->width),
+                                 static_cast<guint>(data->height))) {
     FML_DLOG(ERROR) << "Failed to set the video info to target NV12";
   }
   data->initialized = true;
@@ -361,8 +363,7 @@ static void prepare(CustomData* data) {
 static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
   GError* err;
   gchar* debug_info;
-  int64_t textureId =
-      data->texture == nullptr ? 0 : data->texture->GetId();
+  int64_t textureId = data->texture == nullptr ? 0 : data->texture->GetId();
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
       gst_message_parse_error(msg, &err, &debug_info);
@@ -1107,14 +1108,14 @@ void main_loop(CustomData* data) {
   data->decoder = gst_element_factory_create(decoder_factory, "decoder");
   assert(data->decoder);
 
-  data->videoconvert = gst_element_factory_make("videoconvert", nullptr);
-  assert(data->videoconvert);
+  data->video_convert = gst_element_factory_make("videoconvert", nullptr);
+  assert(data->video_convert);
 
   GstCaps* caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
                                       "NV12", nullptr);
 
-  data->videoscale = gst_element_factory_make("videoscale", nullptr);
-  assert(data->videoscale);
+  data->video_scale = gst_element_factory_make("videoscale", nullptr);
+  assert(data->video_scale);
 
   GstCaps* scale =
       gst_caps_new_simple("video/x-raw", "width", G_TYPE_INT, data->width,
@@ -1122,14 +1123,14 @@ void main_loop(CustomData* data) {
 
   data->pipeline = gst_bin_new(nullptr);
 
-  gst_bin_add_many((GstBin*)data->pipeline, data->decoder, data->videoconvert,
-                   data->videoscale, data->sink, nullptr);
-  if (!gst_element_link(data->decoder, data->videoconvert)) {
+  gst_bin_add_many((GstBin*)data->pipeline, data->decoder, data->video_convert,
+                   data->video_scale, data->sink, nullptr);
+  if (!gst_element_link(data->decoder, data->video_convert)) {
     FML_DLOG(ERROR) << "(" << data->engine->GetIndex()
                     << ") Failed to link decoder with videoconvert";
   }
 
-  if (!gst_element_link_filtered(data->videoconvert, data->videoscale, caps)) {
+  if (!gst_element_link_filtered(data->video_convert, data->video_scale, caps)) {
     FML_DLOG(ERROR)
         << "(" << data->engine->GetIndex()
         << ") Failed to link videoconvert with videoscale using filter";
@@ -1148,7 +1149,7 @@ void main_loop(CustomData* data) {
   gst_element_add_pad(data->pipeline, ghost_pad);
   gst_object_unref(pad);
 
-  if (!gst_element_link_filtered(data->videoscale, data->sink, scale)) {
+  if (!gst_element_link_filtered(data->video_scale, data->sink, scale)) {
     FML_DLOG(ERROR) << "(" << data->engine->GetIndex()
                     << ") Failed to link videoscale with fakesink using filter";
   }
@@ -1210,7 +1211,8 @@ void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
   auto method = obj->method_name();
 
-  GLuint textureId = strtol(&message->channel[34], nullptr, 10);
+  auto textureId = static_cast<GLuint>(
+      static_cast<GLuint>(strtol(&message->channel[34], nullptr, 10)));
   std::shared_ptr<CustomData> data = global_map[textureId];
 
   if (method == "listen") {
@@ -1327,7 +1329,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
     }
   }
 
-  GLuint textureId = -1;
+  auto textureId = static_cast<GLuint>(-1);
 
   std::lock_guard<std::mutex> lock(gst_mutex);
 
@@ -1347,7 +1349,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   glClear(GL_COLOR_BUFFER_BIT);
 
   gint size = data->width * data->height * 3;
-  auto buffer = new unsigned char[size]{0};
+  auto buffer = new unsigned char[static_cast<unsigned long>(size)]{0};
 
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, data->width, data->height, 0, GL_RGB,
@@ -1378,8 +1380,8 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
       0.5f,  -0.5f, 0.0f, -0.5f, -0.5f, 0.0f, -0.5f, 0.5f,  0.0f,
   };
 
-  glGenBuffers(1, &vertexbuffer);
-  glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
+  glGenBuffers(1, &vertex_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
   glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data),
                g_vertex_buffer_data, GL_STATIC_DRAW);
 
@@ -1388,16 +1390,16 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
 
       1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f,
   };
-  glGenBuffers(1, &coordbuffer);
-  glBindBuffer(GL_ARRAY_BUFFER, coordbuffer);
+  glGenBuffers(1, &coord_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, coord_buffer);
   glBufferData(GL_ARRAY_BUFFER, sizeof(coord_buffer_data), coord_buffer_data,
                GL_STATIC_DRAW);
 
   glEnableVertexAttribArray(0);
-  glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
   glEnableVertexAttribArray(1);
-  glBindBuffer(GL_ARRAY_BUFFER, coordbuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, coord_buffer);
   glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
   glDrawArrays(GL_TRIANGLES, 0, 6);
   glDisableVertexAttribArray(0);
@@ -1473,7 +1475,7 @@ void GstreamerEgl::OnDispose(const FlutterPlatformMessage* message,
     return;
   }
 
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   engine->TextureDispose(textureId);
   auto search = global_map.find(textureId);
@@ -1551,7 +1553,7 @@ void GstreamerEgl::OnSetLooping(const FlutterPlatformMessage* message,
     return;
   }
 
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {
@@ -1597,7 +1599,7 @@ void GstreamerEgl::OnSetVolume(const FlutterPlatformMessage* message,
     return;
   }
 
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {
@@ -1641,7 +1643,7 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
     return;
   }
 
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {
@@ -1728,7 +1730,7 @@ void GstreamerEgl::OnPlay(const FlutterPlatformMessage* message,
                                         encoded->data(), encoded->size());
     return;
   }
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {
@@ -1793,7 +1795,7 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
                                         encoded->data(), encoded->size());
     return;
   }
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {
@@ -1871,7 +1873,7 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
   }
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {
@@ -1952,7 +1954,7 @@ void GstreamerEgl::OnPause(const FlutterPlatformMessage* message,
                                         encoded->data(), encoded->size());
     return;
   }
-  GLuint textureId = std::get<int>(it->second);
+  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   auto search = global_map.find(textureId);
   if (search == global_map.end()) {

@@ -15,10 +15,7 @@
 #include <sstream>
 
 #include "flutter/fml/eintr_wrapper.h"
-#include "flutter/fml/logging.h"
 #include "flutter/fml/mapping.h"
-#include "flutter/fml/trace_event.h"
-#include "flutter/fml/unique_fd.h"
 
 namespace fml {
 
@@ -110,7 +107,8 @@ fml::UniqueFD OpenDirectory(const fml::UniqueFD& base_directory,
 
   if (create_if_necessary && !FileExists(base_directory, path)) {
     if (::mkdirat(base_directory.get(), path,
-                  ToPosixCreateModeFlags(permission) | S_IXUSR) != 0) {
+                  static_cast<__mode_t>(ToPosixCreateModeFlags(permission) |
+                                        S_IXUSR)) != 0) {
       return {};
     }
   }
@@ -143,7 +141,7 @@ bool IsDirectory(const fml::UniqueFD& base_directory, const char* path) {
 }
 
 bool IsFile(const std::string& path) {
-  struct stat buf;
+  struct stat buf{};
   if (stat(path.c_str(), &buf) != 0) {
     return false;
   }
@@ -156,7 +154,7 @@ bool TruncateFile(const fml::UniqueFD& file, size_t size) {
     return false;
   }
 
-  return ::ftruncate(file.get(), size) == 0;
+  return ::ftruncate(file.get(), static_cast<off_t>(size)) == 0;
 }
 
 bool UnlinkDirectory(const char* path) {
@@ -208,13 +206,14 @@ bool WriteAtomically(const fml::UniqueFD& base_directory,
     return false;
   }
 
-  ssize_t remaining = data.GetSize();
+  auto remaining = static_cast<ssize_t>(data.GetSize());
   ssize_t written = 0;
   ssize_t offset = 0;
 
   while (remaining > 0) {
     written = FML_HANDLE_EINTR(
-        ::write(temp_file.get(), data.GetMapping() + offset, remaining));
+        ::write(temp_file.get(), data.GetMapping() + offset,
+                                 static_cast<size_t>(remaining)));
 
     if (written == -1) {
       return false;

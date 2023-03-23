@@ -43,7 +43,7 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   FML_DLOG(INFO) << "EGL has " << count << " configs";
 
   auto* configs =
-      reinterpret_cast<EGLConfig*>(calloc(count, sizeof(EGLConfig)));
+      reinterpret_cast<EGLConfig*>(calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
   assert(configs);
 
   if (debug) {
@@ -81,6 +81,8 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
 
   ClearCurrent();
+
+  (void)ret;
 }
 
 Egl::~Egl() {
@@ -482,7 +484,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
 
   const char* s = eglQueryString(m_dpy, EGL_EXTENSIONS);
 
-  print_extension_list((char*)s);
+  print_extension_list(static_cast<const char*>(s));
 
   EGLint num_config;
   EGLBoolean status = eglGetConfigs(m_dpy, configs, count, &num_config);
