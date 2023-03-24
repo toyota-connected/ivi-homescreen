@@ -72,7 +72,7 @@ string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--no-undefined")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--gc-sections")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--as-needed")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,nodlopen -Wl,-z,nodump")
-string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,noexecstack -Wl")
+string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,noexecstack")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,relro -Wl,-z,now")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -pie")
 
