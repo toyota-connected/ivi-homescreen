@@ -53,4 +53,9 @@ endif ()
 add_library(wayland-gen STATIC ${WAYLAND_PROTOCOL_SOURCES})
 target_include_directories(wayland-gen PUBLIC ${WAYLAND_INCLUDE_DIRS})
 target_link_libraries(wayland-gen PUBLIC ${WAYLAND_LIBRARIES})
+
+if (IPO_SUPPORT_RESULT)
+    set_property(TARGET wayland-gen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
+
 add_sanitizers(wayland-gen)

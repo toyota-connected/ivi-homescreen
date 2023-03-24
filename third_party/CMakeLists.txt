@@ -51,4 +51,8 @@ target_include_directories(flutter PUBLIC
         flutter/shell/platform/common/client_wrapper/include
         )
 
+if (IPO_SUPPORT_RESULT)
+    set_property(TARGET flutter PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
+
 add_sanitizers(flutter)
