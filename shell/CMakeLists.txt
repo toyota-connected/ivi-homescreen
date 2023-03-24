@@ -22,7 +22,7 @@ include(FindThreads)
 
 include(wayland)
 
-set(SRC_FILES
+add_executable(homescreen
         app.cc
         configuration/configuration.cc
         engine.cc
@@ -35,23 +35,24 @@ set(SRC_FILES
         wayland/window.cc
         )
 
-if (BUILD_BACKEND_WAYLAND_EGL)
-    list(APPEND SRC_FILES
-            backend/wayland_egl.cc
-            backend/egl.cc
-            backend/gl_process_resolver.cc)
-elseif (BUILD_BACKEND_WAYLAND_VULKAN)
-    list(APPEND SRC_FILES backend/wayland_vulkan.cc)
+include(plugins)
+include(textures)
+
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
 endif ()
 
 if (BUILD_PLUGIN_COMP_SURF)
-    list(APPEND SRC_FILES view/compositor_surface.cc)
+    target_sources(homescreen PRIVATE view/compositor_surface.cc)
 endif ()
 
-add_executable(homescreen ${SRC_FILES})
-
-include(plugins)
-include(textures)
+if (BUILD_BACKEND_WAYLAND_EGL)
+    target_sources(homescreen PRIVATE
+        backend/wayland_egl.cc
+        backend/egl.cc
+        backend/gl_process_resolver.cc
+    )
+endif()
 
 target_compile_definitions(homescreen
         PRIVATE
@@ -65,7 +66,8 @@ target_compile_definitions(homescreen
         FILAMENT_SUPPORTS_WAYLAND
         )
 
-include_directories(
+target_include_directories(homescreen
+        PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
@@ -73,7 +75,7 @@ include_directories(
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ..
-)
+        )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
