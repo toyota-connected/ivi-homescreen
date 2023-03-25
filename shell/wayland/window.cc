@@ -90,7 +90,8 @@ WaylandWindow::WaylandWindow(size_t index,
       m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_RIGHT, 0);
       break;
     default:
-      assert(!"Invalid surface role type supplied");
+      FML_LOG(ERROR) << "Invalid surface role type supplied";
+      assert(false);
   }
 
   // this makes the start-up from the beginning with the correction dimensions
@@ -267,7 +268,9 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
   m_flutter_engine = engine;
   if (m_flutter_engine) {
     auto result =
-        m_flutter_engine->SetWindowSize(m_geometry.height, m_geometry.width);
+        m_flutter_engine->SetWindowSize(
+        static_cast<size_t>(m_geometry.height),
+                                        static_cast<size_t>(m_geometry.width));
     if (result != kSuccess) {
       FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
     }

@@ -198,7 +198,10 @@ std::string TraceToString(T string) {
 }
 
 inline void SplitArgumentsCollect(std::vector<const char*>& keys,
-                                  std::vector<std::string>& values) {}
+                                  std::vector<std::string>& values) {
+  (void)keys;
+  (void)values;
+}
 
 template <typename Key, typename Value, typename... Args>
 void SplitArgumentsCollect(std::vector<const char*>& keys,

@@ -16,6 +16,12 @@ IVI Homescreen for Wayland
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
 
+# Sanitizer Support
+
+You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
+
+If sanitizers are supported by your compiler, the specified targets will be build with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
+
 # Backend Support
 
 ### EGL Backend
@@ -97,9 +103,9 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
 
-`cursor_theme` - Sets cursor theme to use.
+`cursor_theme` - Sets cursor theme to use.  This only applies to command line, and global parameter options.
 
-`disable_cursor` - Disables the cursor.
+`disable_cursor` - Disables the cursor.  This only applies to command line, and global parameter options.
 
 `debug_backend` - Enables Backend Debug logic.
 

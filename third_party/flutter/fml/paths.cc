@@ -39,11 +39,12 @@ std::string SanitizeURIEscapedCharacters(const std::string& str) {
         return "";
       }
       const std::string hex = str.substr(i + 1, 2);
-      const unsigned char c = strtoul(hex.c_str(), nullptr, 16);
+      const auto c =
+          static_cast<const unsigned char>(strtoul(hex.c_str(), nullptr, 16));
       if (!c) {
         return "";
       }
-      result += c;
+      result += static_cast<std::basic_string<char>::value_type>(c);
       i += 2;
     } else {
       result += str[i];
