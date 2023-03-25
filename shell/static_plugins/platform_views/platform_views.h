@@ -16,20 +16,20 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class PlatformViews {
  public:
   static constexpr char kChannelName[] = "samples.flutter.io/platform_view";
 
   /**
-  * @brief Callback function for platform messages about platform view
-  * @param[in] message Recieve message
-  * @param[in] userdata Pointer to User data
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Callback function for platform messages about platform view
+   * @param[in] message Receive message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };

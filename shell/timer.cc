@@ -15,18 +15,16 @@
  */
 
 #include "timer.h"
-#include "constants.h"
-
-#include <flutter/fml/logging.h>
 
 #include <cerrno>
 #include <cstring>
 #include <memory>
-#include <string>
 
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+
+#include "logging.h"
 
 #define DEBUG_EVENT_TIMER 0
 

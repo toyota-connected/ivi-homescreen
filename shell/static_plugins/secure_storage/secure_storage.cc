@@ -16,10 +16,10 @@
 
 #include "secure_storage.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
+#include "logging.h"
 
 static SecureStorage* pInstance_;
 static std::mutex mutex_;

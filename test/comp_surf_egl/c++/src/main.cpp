@@ -26,7 +26,7 @@
 #define API_EXPORT __attribute__((visibility("default")))
 
 // #############################################################################
-//  ivi-homescreen API
+//  flutter-auto API
 // #############################################################################
 
 extern "C" struct comp_surf_Context {

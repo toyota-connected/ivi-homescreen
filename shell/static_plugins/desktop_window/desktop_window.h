@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class DesktopWindow {
  public:
@@ -24,7 +24,7 @@ class DesktopWindow {
 
   /**
    * @brief Callback function for platform messages about desktop_window
-   * @param[in] message Recieve message
+   * @param[in] message Receive message
    * @param[in] userdata Pointer to User data
    * @return void
    * @relation

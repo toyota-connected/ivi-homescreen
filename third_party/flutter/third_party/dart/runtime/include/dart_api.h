@@ -1563,7 +1563,7 @@ DART_EXPORT DART_WARN_UNUSED_RESULT Dart_Handle Dart_HandleMessage(void);
 
 /**
  * Drains the microtask queue, then blocks the calling thread until the current
- * isolate recieves a message, then handles all messages.
+ * isolate receives a message, then handles all messages.
  *
  * \param timeout_millis When non-zero, the call returns after the indicated
           number of milliseconds even if no message was received.

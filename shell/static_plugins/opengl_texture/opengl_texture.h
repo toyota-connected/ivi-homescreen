@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class OpenGlTexture {
  public:
@@ -24,7 +24,7 @@ class OpenGlTexture {
 
   /**
    * @brief Callback function for platform messages about opengl texture
-   * @param[in] message Recieve message
+   * @param[in] message Receive message
    * @param[in] userdata Pointer to User data
    * @return void
    * @relation

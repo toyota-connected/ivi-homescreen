@@ -21,7 +21,7 @@
 #include <cstring>
 
 #include "gl_process_resolver.h"
-#include "third_party/flutter/fml/logging.h"
+#include "logging.h"
 
 Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
     : m_dpy(get_egl_display(platform, native_display, nullptr)),
@@ -43,7 +43,7 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   FML_DLOG(INFO) << "EGL has " << count << " configs";
 
   auto* configs =
-      reinterpret_cast<EGLConfig*>(calloc(count, sizeof(EGLConfig)));
+      reinterpret_cast<EGLConfig*>(calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
   assert(configs);
 
   if (debug) {
@@ -72,18 +72,17 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   m_context = eglCreateContext(m_dpy, m_config, EGL_NO_CONTEXT,
                                kEglContextAttribs.data());
   assert(m_context);
-  // FML_DLOG(INFO) << "m_context = " << m_context;
 
   m_resource_context =
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
   assert(m_resource_context);
-  // FML_DLOG(INFO) << "m_resource_context = " << m_resource_context;
 
   m_texture_context =
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
-  // FML_DLOG(INFO) << "m_texture_context = " << m_texture_context;
 
   ClearCurrent();
+
+  (void)ret;
 }
 
 Egl::~Egl() {
@@ -485,7 +484,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
 
   const char* s = eglQueryString(m_dpy, EGL_EXTENSIONS);
 
-  print_extension_list((char*)s);
+  print_extension_list(static_cast<const char*>(s));
 
   EGLint num_config;
   EGLBoolean status = eglGetConfigs(m_dpy, configs, count, &num_config);
