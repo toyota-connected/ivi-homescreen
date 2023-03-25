@@ -151,10 +151,11 @@ bool TextInputModel::Backspace() {
   size_t position = selection_.position();
   if (position != editable_range().start()) {
     int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
-    text_.erase(position - count, count);
-    selection_ = TextRange(position - count);
+    text_.erase(position - static_cast<size_t>(count), static_cast<size_t>(count));
+    selection_ = TextRange(position - static_cast<size_t>(count));
     if (composing_) {
-      composing_range_.set_end(composing_range_.end() - count);
+      composing_range_.set_end(composing_range_.end() -
+                               static_cast<size_t>(count));
     }
     return true;
   }
@@ -169,9 +170,10 @@ bool TextInputModel::Delete() {
   size_t position = selection_.position();
   if (position < editable_range().end()) {
     int count = IsLeadingSurrogate(text_.at(position)) ? 2 : 1;
-    text_.erase(position, count);
+    text_.erase(position, static_cast<size_t>(count));
     if (composing_) {
-      composing_range_.set_end(composing_range_.end() - count);
+      composing_range_.set_end(composing_range_.end() -
+                               static_cast<size_t>(count));
     }
     return true;
   }
@@ -265,7 +267,7 @@ bool TextInputModel::MoveCursorForward() {
   size_t position = selection_.position();
   if (position != editable_range().end()) {
     int count = IsLeadingSurrogate(text_.at(position)) ? 2 : 1;
-    selection_ = TextRange(position + count);
+    selection_ = TextRange(position + static_cast<size_t>(count));
     return true;
   }
   return false;
@@ -281,7 +283,7 @@ bool TextInputModel::MoveCursorBack() {
   size_t position = selection_.position();
   if (position != editable_range().start()) {
     int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
-    selection_ = TextRange(position - count);
+    selection_ = TextRange(position - static_cast<size_t>(count));
     return true;
   }
   return false;
@@ -295,7 +297,7 @@ int TextInputModel::GetCursorOffset() const {
   // Measure the length of the current text up to the selection extent.
   // There is probably a much more efficient way of doing this.
   auto leading_text = text_.substr(0, selection_.extent());
-  return fml::Utf16ToUtf8(leading_text).size();
+  return static_cast<int>(fml::Utf16ToUtf8(leading_text).size());
 }
 
 }  // namespace flutter

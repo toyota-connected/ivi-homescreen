@@ -28,8 +28,8 @@
 #include "flutter/shell/platform/common/json_method_codec.h"
 #include "flutter/shell/platform/common/text_input_model.h"
 
-#include <shell/platform/embedder/embedder.h>
 #include <rapidjson/document.h>
+#include <shell/platform/embedder/embedder.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "constants.h"
@@ -47,37 +47,37 @@ class TextInput : public flutter::BinaryMessenger {
   explicit TextInput();
 
   /**
-  * @brief Callback function for platform messages about textinput
-  * @param[in] message Recieve message
-  * @param[in] userdata Pointer to User data
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Callback function for platform messages about textinput
+   * @param[in] message Receive message
+   * @param[in] userdata Pointer to User data
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
   /**
-  * @brief Set the Flutter engine for text input
-  * @param[in] engine Pointer to Flutter engine
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Set the Flutter engine for text input
+   * @param[in] engine Pointer to Flutter engine
+   * @return void
+   * @relation
+   * flutter
+   */
   void SetEngine(const std::shared_ptr<Engine>& engine);
 
   /**
-  * @brief Update keyboard key status
-  * @param[in] data Pointer to User data
-  * @param[in] keyboard No use
-  * @param[in] serial No use
-  * @param[in] time No use
-  * @param[in] keysym Keyboard key
-  * @param[in] state Keyboard key status
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Update keyboard key status
+   * @param[in] data Pointer to User data
+   * @param[in] keyboard No use
+   * @param[in] serial No use
+   * @param[in] time No use
+   * @param[in] keysym Keyboard key
+   * @param[in] state Keyboard key status
+   * @return void
+   * @relation
+   * flutter
+   */
   static void keyboard_handle_key(void* data,
                                   xkb_keysym_t keysym,
                                   uint32_t state);
@@ -89,8 +89,10 @@ class TextInput : public flutter::BinaryMessenger {
       uint32_t xkb_scancode,
       xkb_keysym_t keysym);
 
-  static void handle_key_hook(void *data, FlutterKeyEventType type,
-      uint32_t xkb_scancode, xkb_keysym_t keysym);
+  static void handle_key_hook(void* data,
+                              FlutterKeyEventType type,
+                              uint32_t xkb_scancode,
+                              xkb_keysym_t keysym);
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(TextInput);
@@ -127,22 +129,22 @@ class TextInput : public flutter::BinaryMessenger {
 
   // Sends the current state of the given model to the Flutter engine.
   /**
-  * @brief Sends the current state of the given model to the Flutter engine
-  * @param[in] model Pointer to model
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Sends the current state of the given model to the Flutter engine
+   * @param[in] model Pointer to model
+   * @return void
+   * @relation
+   * flutter
+   */
   void SendStateUpdate(const flutter::TextInputModel& model);
 
   // Sends an action triggered by the Enter key to the Flutter engine.
   /**
-  * @brief Sends an action triggered by the Enter key to the Flutter engine
-  * @param[in] model Pointer to model
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Sends an action triggered by the Enter key to the Flutter engine
+   * @param[in] model Pointer to model
+   * @return void
+   * @relation
+   * flutter
+   */
   void EnterPressed(flutter::TextInputModel* model);
 
   // The MethodChannel used for communication with the Flutter engine.
@@ -169,28 +171,30 @@ class TextInput : public flutter::BinaryMessenger {
   MAYBE_UNUSED flutter::BinaryMessageHandler last_message_handler_;
 
   /**
-  * @brief Sends a message to the Flutter engine on this channel expecting a reply
-  * @param[in] channel This channel
-  * @param[in] message Send message
-  * @param[in] message_size Send message size
-  * @param[in] reply Binary message reply callback
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Sends a message to the Flutter engine on this channel expecting a
+   * reply
+   * @param[in] channel This channel
+   * @param[in] message Send message
+   * @param[in] message_size Send message size
+   * @param[in] reply Binary message reply callback
+   * @return void
+   * @relation
+   * flutter
+   */
   void Send(const std::string& channel,
             const uint8_t* message,
             size_t message_size,
             flutter::BinaryReply reply) const override;
 
   /**
-  * @brief Registers a handler to be invoked when the Flutter application sends a message to its host platform
-  * @param[in] channel This channel
-  * @param[in] handler Handler for incoming binary messages from Flutter
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Registers a handler to be invoked when the Flutter application sends
+   * a message to its host platform
+   * @param[in] channel This channel
+   * @param[in] handler Handler for incoming binary messages from Flutter
+   * @return void
+   * @relation
+   * flutter
+   */
   void SetMessageHandler(const std::string& channel,
                          flutter::BinaryMessageHandler handler) override;
 };

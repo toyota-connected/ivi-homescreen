@@ -17,88 +17,42 @@
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-
-string(APPEND CMAKE_ASM_FLAGS " -fno-integrated-as")
-
-string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
-
-string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--no-undefined")
-string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-fvisibility=hidden")
-string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
-string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--gc-sections")
-string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--as-needed")
-
-if (CMAKE_SIZEOF_VOID_P EQUAL 8)
-    add_compile_definitions(ENV64BIT)
-elseif (CMAKE_SIZEOF_VOID_P EQUAL 4)
-    add_compile_definitions(ENV32BIT)
-endif ()
-
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
 include(wayland)
 
-set(SRC_FILES
-        main.cc
+add_executable(homescreen
         app.cc
+        configuration/configuration.cc
+        engine.cc
+        main.cc
+        platform_channel.cc
+        textures/texture.cc
+        timer.cc
+        view/flutter_view.cc
         wayland/display.cc
         wayland/window.cc
-
-        view/flutter_view.cc
-        configuration/configuration.cc
-
-        engine.cc
-        platform_channel.cc
-        timer.cc
-
-        textures/texture.cc
-
-        ../third_party/flutter/shell/platform/common/client_wrapper/core_implementations.cc
-        ../third_party/flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
-        ../third_party/flutter/shell/platform/common/client_wrapper/standard_codec.cc
-        ../third_party/flutter/shell/platform/common/json_message_codec.cc
-        ../third_party/flutter/shell/platform/common/json_method_codec.cc
-        ../third_party/flutter/shell/platform/common/path_utils.cc
-        ../third_party/flutter/shell/platform/common/text_editing_delta.cc
-        ../third_party/flutter/shell/platform/common/text_input_model.cc
-
-        ../third_party/flutter/fml/platform/linux/paths_linux.cc
-
-        ../third_party/flutter/fml/platform/posix/file_posix.cc
-        ../third_party/flutter/fml/platform/posix/paths_posix.cc
-        ../third_party/flutter/fml/platform/posix/posix_wrappers_posix.cc
-        ../third_party/flutter/fml/platform/posix/shared_mutex_posix.cc
-
-        ../third_party/flutter/fml/command_line.cc
-        ../third_party/flutter/fml/file.cc
-        ../third_party/flutter/fml/log_settings.cc
-        ../third_party/flutter/fml/log_settings_state.cc
-        ../third_party/flutter/fml/logging.cc
-        ../third_party/flutter/fml/paths.cc
-        ../third_party/flutter/fml/string_conversion.cc
-        ../third_party/flutter/fml/unique_fd.cc
-
-        ${WAYLAND_PROTOCOL_SOURCES}
         )
-
-if (BUILD_BACKEND_WAYLAND_EGL)
-    list(APPEND SRC_FILES
-            backend/wayland_egl.cc
-            backend/egl.cc
-            backend/gl_process_resolver.cc)
-elseif (BUILD_BACKEND_WAYLAND_VULKAN)
-    list(APPEND SRC_FILES backend/wayland_vulkan.cc)
-endif ()
-
-if (BUILD_PLUGIN_COMP_SURF)
-    list(APPEND SRC_FILES view/compositor_surface.cc)
-endif ()
-
-add_executable(homescreen ${SRC_FILES})
 
 include(plugins)
 include(textures)
+
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
+endif ()
+
+if (BUILD_PLUGIN_COMP_SURF)
+    target_sources(homescreen PRIVATE view/compositor_surface.cc)
+endif ()
+
+if (BUILD_BACKEND_WAYLAND_EGL)
+    target_sources(homescreen PRIVATE
+        backend/wayland_egl.cc
+        backend/egl.cc
+        backend/gl_process_resolver.cc
+    )
+endif()
 
 target_compile_definitions(homescreen
         PRIVATE
@@ -112,7 +66,8 @@ target_compile_definitions(homescreen
         FILAMENT_SUPPORTS_WAYLAND
         )
 
-include_directories(
+target_include_directories(homescreen
+        PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
@@ -120,12 +75,7 @@ include_directories(
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ..
-        ../third_party
-        ../third_party/flutter
-        ../third_party/flutter/shell/platform/common/public
-        ../third_party/flutter/shell/platform/common/client_wrapper/include
-        ../third_party/rapidjson/include
-)
+        )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
@@ -138,7 +88,8 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
 endif ()
 
 target_link_libraries(homescreen PRIVATE
-        ${WAYLAND_LIBRARIES}
+        flutter
+        wayland-gen
         Threads::Threads
         dl
         ${GST_LIBRARIES}
@@ -151,11 +102,14 @@ target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}
         )
 
+add_sanitizers(homescreen)
+
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif ()
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(homescreen PRIVATE ${CONTEXT_COMPILE_OPTIONS})
     target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 

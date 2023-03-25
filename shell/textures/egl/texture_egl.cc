@@ -21,7 +21,7 @@ void TextureEgl::SetView(FlutterView* view) {
 }
 
 void TextureEgl::SetEngine(std::shared_ptr<Engine> engine) {
-    m_engine = std::move(engine);
+  m_engine = std::move(engine);
 };
 
 flutter::EncodableValue TextureEgl::Create(
@@ -30,26 +30,20 @@ flutter::EncodableValue TextureEgl::Create(
     int32_t width,
     int32_t height,
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
-
-  switch(texture_id) {
+  switch (texture_id) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
     case kTextureEgl_ObjectId_Test: {
-      m_textures->push_back(
-          std::make_unique<TextureTestEgl>(m_flutter_view)
-          );
+      m_textures->push_back(std::make_unique<TextureTestEgl>(m_flutter_view));
       m_textures->back()->SetEngine(engine);
-      return m_textures->back()->Create(
-          width, height, args);
+      return m_textures->back()->Create(width, height, args);
     }
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
     case kTextureEgl_ObjectId_Navigation: {
       m_textures->push_back(
-          std::make_unique<TextureNaviRender>(m_flutter_view)
-      );
+          std::make_unique<TextureNaviRender>(m_flutter_view));
       m_textures->back()->SetEngine(engine);
-      return m_textures->back()->Create(
-          width, height, args);
+      return m_textures->back()->Create(width, height, args);
     }
 #endif
     default: {
@@ -62,17 +56,17 @@ flutter::EncodableValue TextureEgl::Create(
 }
 
 void TextureEgl::Dispose() {
-  for(auto &item : *m_textures) {
-    switch(item->GetId()) {
+  for (auto& item : *m_textures) {
+    switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
       case kTextureEgl_ObjectId_Test: {
-        TextureTestEgl::Dispose(item.get(), item->GetId());
+        TextureTestEgl::Dispose(item.get(), static_cast<GLuint>(item->GetId()));
         break;
       }
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
       case kTextureEgl_ObjectId_Navigation: {
-        TextureNaviRender::Dispose(item.get(), item->GetId());
+        TextureNaviRender::Dispose(item.get(), static_cast<GLuint>(item->GetId()));
         break;
       }
 #endif
@@ -83,7 +77,7 @@ void TextureEgl::Dispose() {
 }
 
 void TextureEgl::Draw() {
-  for(auto &item : *m_textures) {
+  for (auto& item : *m_textures) {
     switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
       case kTextureEgl_ObjectId_Test: {
@@ -105,7 +99,7 @@ void TextureEgl::Draw() {
 }
 
 void TextureEgl::RunTask() {
-  for(auto &item : *m_textures) {
+  for (auto& item : *m_textures) {
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
     if (item->GetId() == kTextureEgl_ObjectId_Navigation) {
       TextureNaviRender::RunTask(item.get());
