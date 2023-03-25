@@ -1,6 +1,9 @@
 # flutter-auto
 
-Flutter Auto
+[![Build Status](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml)
+
+
+flutter-auto for Wayland
 
 * Strongly Typed (C++)
 * Lightweight
@@ -378,12 +381,12 @@ Defaults to Wayland, no need to do anything special
 
 ## CI Example
 
-    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/ivi-homescreen-linux.yml
+    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/flutter-auto-linux.yml
 
 ## Debian Package
 
     make package -j
-    sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
+    sudo apt install ./flutter-auto-1.0.0-Release-beta-Linux-x86_64.deb
 
 # Flutter Application
 ## Build
@@ -391,7 +394,7 @@ Defaults to Wayland, no need to do anything special
 Confirm flutter/bin is in the path using: `flutter doctor -v`
 
     cd ~/development/my_flutter_app
-    flutter channel beta
+    flutter channel stable
     flutter upgrade
     flutter config --enable-linux-desktop
     flutter create .
@@ -399,32 +402,23 @@ Confirm flutter/bin is in the path using: `flutter doctor -v`
 
 ## Install
 
-loading path for application is: `/usr/local/share/flutter-auto/bundle`
+create a bundle folder using this pattern:
 
-This is used to leverage symlinks.  Such as:
+    <bundle folder name>
+        data
+            flutter_assets - from flutter build folder
+            [icudtl.dat] - optional
+        lib
+            [libflutter_engine.so] - optional
 
-    cd /usr/local/share/flutter-auto
-    sudo rm -rf bundle
-    sudo ln -sf ~/development/my_flutter_app/build/ bundle
-
-Or
-
-    sudo mkdir -p /usr/local/share/flutter-auto/my_flutter_app/
-    sudo cp -r build/* /usr/local/share/flutter-auto/my_flutter_app/
-    sudo ln -sf /usr/local/share/flutter-auto/my_flutter_app/ bundle
 
 ## Running on desktop
 
-Copy a current icudtl.dat to /usr/local/share/flutter
-Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point downloaded engine for build:
-
-    cd <flutter-auto build>
-    export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
-    flutter-auto
+    flutter-auto --b=<bunle folder name>
 
 ## Debug
 
-Setup custom devices to control ivi-homescreen via debugger. 
+Setup custom devices to control flutter-auto via debugger. 
 
 # CMAKE dependency paths
 

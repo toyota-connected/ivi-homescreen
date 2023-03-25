@@ -549,6 +549,9 @@ void Display::keyboard_handle_key(void* data,
                                   uint32_t /* time */,
                                   uint32_t key,
                                   uint32_t state) {
+  (void)keyboard;
+  (void)serial;
+  (void)time;
   auto* d = static_cast<Display*>(data);
 
   if (!d->m_xkb_state)
@@ -810,8 +813,7 @@ void Display::AglShellDoReady() const {
   }
 }
 
-void Display::SetEngine(wl_surface* surface,
-                        Engine* engine) {
+void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
   m_active_surface = surface;
   m_surface_engine_map[surface] = engine;

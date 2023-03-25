@@ -124,11 +124,13 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 
-target_link_directories(flutter-auto PRIVATE
+target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}
 )
 
 add_sanitizers(homescreen)
+
+add_sanitizers(${PROJECT_NAME})
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -139,4 +141,4 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
-install(TARGETS flutter-auto DESTINATION bin)
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)

@@ -34,7 +34,6 @@ jobs:
           mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
           libxkbcommon-dev
           cmake --version
-
       - name: Configure
         run: |
           mkdir -p ${{github.workspace}}/build/release-egl
@@ -43,48 +42,40 @@ jobs:
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D LLVM_ROOT=/usr/lib/llvm-14
-
           mkdir -p ${{github.workspace}}/build/debug-egl
           CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
             -B ${{github.workspace}}/build/debug-egl \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D LLVM_ROOT=/usr/lib/llvm-14
-
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug-egl
         run: |
           rm -rf _packages || true
           make package -j
           ls -la _packages
-
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-egl-dbg.Linux.tar.gz.zip
           path: |
             build/debug-egl/_packages/flutter-auto-dbg-*-Linux.tar.gz
-
       - name: Publish Debug Artifact Debian
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-egl-dbg.amd64.deb.zip
           path: |
             build/debug-egl/_packages/flutter-auto-dbg*_amd64.*deb
-
       - name: Publish Debug Artifact RPM
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-egl-dbg.x86_64.rpm.zip
           path: |
             build/debug-egl/_packages/flutter-auto-dbg-*.x86_64.rpm
-
       - name: Build Release Packages
         working-directory: ${{github.workspace}}/build/release-egl
         run: |
@@ -98,28 +89,24 @@ jobs:
           ls -la shell/flutter-auto
           echo "List Dependencies"
           ldd shell/flutter-auto
-
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-egl.Linux.tar.gz.zip
           path: |
             build/release-egl/_packages/flutter-auto-*-Linux.tar.gz
-
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-egl.amd64.deb.zip
           path: |
             build/release-egl/_packages/flutter-auto_*_amd64.deb
-
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-egl.x86_64.rpm.zip
           path: |
             build/release-egl/_packages/flutter-auto-*.x86_64.rpm
-
   x86_64_vulkan:
     if: ${{ github.server_url == 'https://github.com' &&  always() }}
     runs-on: ubuntu-20.04
@@ -139,7 +126,6 @@ jobs:
             libc++-14-dev libc++abi-14-dev libunwind-14-dev libxkbcommon-dev
           clang++ --version
           cmake --version
-
       - name: Configure
         run: |
           mkdir -p ${{github.workspace}}/build/release-vulkan
@@ -152,7 +138,6 @@ jobs:
             -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D LLVM_ROOT=/usr/lib/llvm-14
-
           mkdir -p ${{github.workspace}}/build/debug
           CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake \
             -B ${{github.workspace}}/build/debug-vulkan \
@@ -163,35 +148,30 @@ jobs:
             -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D LLVM_ROOT=/usr/lib/llvm-14
-
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug-vulkan
         run: |
           rm -rf _packages || true
           make package -j
           ls -la _packages
-
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan-dbg.Linux.tar.gz.zip
           path: |
             build/debug-vulkan/_packages/flutter-auto-dbg-*-Linux.tar.gz
-
       - name: Publish Debug Artifact Debian
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan-dbg.amd64.deb.zip
           path: |
             build/debug-vulkan/_packages/flutter-auto-dbg*_amd64.*deb
-
       - name: Publish Debug Artifact RPM
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan-dbg.x86_64.rpm.zip
           path: |
             build/debug-vulkan/_packages/flutter-auto-dbg-*.x86_64.rpm
-
       - name: Build Release Packages
         working-directory: ${{github.workspace}}/build/release-vulkan
         run: |
@@ -205,21 +185,18 @@ jobs:
           ls -la shell/flutter-auto
           echo "List Dependencies"
           ldd shell/flutter-auto
-
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan.Linux.tar.gz.zip
           path: |
             build/release-vulkan/_packages/flutter-auto-*-Linux.tar.gz
-
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v3
         with:
           name: flutter-auto-vulkan.amd64.deb.zip
           path: |
             build/release-vulkan/_packages/flutter-auto_*_amd64.deb
-
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v3
         with:

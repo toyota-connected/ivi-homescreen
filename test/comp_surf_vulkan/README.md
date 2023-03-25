@@ -8,9 +8,9 @@ CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake ..
 sudo make install
 ```
 
-### ivi-homescreen
+### flutter-auto
 
-Ensure `ivi-homescreen` is built with the following flag:
+Ensure `flutter-auto` is built with the following flag:
 
     -DBUILD_PLUGIN_COMP_SURF=ON
 

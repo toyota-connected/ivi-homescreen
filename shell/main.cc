@@ -98,8 +98,6 @@ int main(int argc, char** argv) {
 
   config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
   for (int i = 1; i < argc; ++i) {
-    config.view.vm_args.emplace_back(argv[i]);
-  }
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 

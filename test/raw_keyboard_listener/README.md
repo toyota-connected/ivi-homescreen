@@ -2,7 +2,7 @@
 
 ### Wayland Compositor Key Event / Text Editor functional test
 
-Ensure the `ivi-homescreen` build includes the following flags:
+Ensure the `flutter-auto` build includes the following flags:
 
     -DBUILD_PLUGIN_TEXT_INPUT=ON
     -DBUILD_PLUGIN_KEY_EVENT=ON

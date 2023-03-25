@@ -31,7 +31,7 @@ extern "C" {
 typedef struct comp_surf_Context comp_surf_Context;
 
 // #############################################################################
-//  ivi-homescreen API
+//  flutter-auto API
 // #############################################################################
 
 uint32_t comp_surf_version();
