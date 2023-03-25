@@ -19,7 +19,7 @@
 #include <dlfcn.h>
 #include <cassert>
 
-#include "third_party/flutter/fml/logging.h"
+#include "logging.h"
 
 std::shared_ptr<EglProcessResolver> GlProcessResolver::sInstance = nullptr;
 

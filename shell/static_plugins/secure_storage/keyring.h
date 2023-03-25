@@ -16,12 +16,12 @@
 
 #pragma once
 
-#include <flutter/fml/logging.h>
 #include <libsecret/secret.h>
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>
 #include <memory>
 #include "g_hash_table.h"
+#include "logging.h"
 
 namespace secret {
 
@@ -40,15 +40,15 @@ class Keyring {
   }
 
   /**
-  * @brief Add new a key and value to the keyring
-  * @param[in] key A key to add
-  * @param[in] value The value to associate with the key
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * flutter
-  */
+   * @brief Add new a key and value to the keyring
+   * @param[in] key A key to add
+   * @param[in] value The value to associate with the key
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * flutter
+   */
   bool addItem(const char* key, const char* value) {
     rapidjson::Document root = readFromKeyring();
     if (root.IsObject() && root.HasMember(key) && root[key].IsString()) {
@@ -61,13 +61,13 @@ class Keyring {
   }
 
   /**
-  * @brief Get the string associate with a key from keyring
-  * @param[in] key A key to get string
-  * @return std::string
-  * @retval The associated string, or "" if the key is not found
-  * @relation
-  * flutter
-  */
+   * @brief Get the string associate with a key from keyring
+   * @param[in] key A key to get string
+   * @return std::string
+   * @retval The associated string, or "" if the key is not found
+   * @relation
+   * flutter
+   */
   std::string getItem(const char* key) {
     rapidjson::Document root = readFromKeyring();
     if (root.IsObject() && root.HasMember(key) && root[key].IsString()) {
@@ -77,12 +77,12 @@ class Keyring {
   }
 
   /**
-  * @brief Delete key and value from keyring
-  * @param[in] key A key to delete
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Delete key and value from keyring
+   * @param[in] key A key to delete
+   * @return void
+   * @relation
+   * flutter
+   */
   void deleteItem(const char* key) {
     rapidjson::Document root = readFromKeyring();
     if (root.HasMember(key)) {
@@ -92,13 +92,13 @@ class Keyring {
   }
 
   /**
-  * @brief Empty keyring
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * flutter
-  */
+   * @brief Empty keyring
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * flutter
+   */
   bool deleteKeyring() {
     rapidjson::Document d;
     d.SetObject();
@@ -106,14 +106,14 @@ class Keyring {
   }
 
   /**
-  * @brief Store a password in the secret service
-  * @param[in] d A document for parsing JSON text as DOM
-  * @return bool
-  * @retval true Normal end
-  * @retval false Abnormal end
-  * @relation
-  * flutter
-  */
+   * @brief Store a password in the secret service
+   * @param[in] d A document for parsing JSON text as DOM
+   * @return bool
+   * @retval true Normal end
+   * @retval false Abnormal end
+   * @relation
+   * flutter
+   */
   bool storeToKeyring(rapidjson::Document& d) {
     std::unique_ptr<GError> err = nullptr;
     GError* errPtr = err.get();
@@ -135,12 +135,12 @@ class Keyring {
   }
 
   /**
-  * @brief Lookup a password in the secret service
-  * @return rapidjson::Document
-  * @retval A new password string
-  * @relation
-  * flutter
-  */
+   * @brief Lookup a password in the secret service
+   * @return rapidjson::Document
+   * @retval A new password string
+   * @relation
+   * flutter
+   */
   rapidjson::Document readFromKeyring() {
     rapidjson::Document d;
     std::unique_ptr<GError> err = nullptr;

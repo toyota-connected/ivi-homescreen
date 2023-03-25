@@ -14,11 +14,11 @@
 
 #include "package_info.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
 #include "hexdump.h"
+#include "logging.h"
 
 void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {

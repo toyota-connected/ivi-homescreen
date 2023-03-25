@@ -18,9 +18,9 @@
 #include <fstream>
 #include <sstream>
 
+#include <rapidjson/document.h>
 #include "constants.h"
-#include "flutter/fml/logging.h"
-#include "rapidjson/document.h"
+#include "logging.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
@@ -45,13 +45,14 @@ void Configuration::getViewParameters(
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
-    instance.view.wl_output_index = obj[kOutputIndex].GetInt();
+    instance.view.wl_output_index =
+        static_cast<uint32_t>(obj[kOutputIndex].GetInt());
   }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
-    instance.view.width = obj[kWidthKey].GetInt();
+    instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
   }
   if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsInt()) {
-    instance.view.height = obj[kHeightKey].GetInt();
+    instance.view.height = static_cast<uint32_t>(obj[kHeightKey].GetInt());
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
@@ -70,14 +71,20 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
+  if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
+    instance.debug_backend = obj[kDebugBackendKey].GetBool();
+  }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
+    instance.view.fps_output_console =
+        static_cast<uint32_t>(obj[kFpsOutputConsole].GetInt());
   }
   if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetInt();
+    instance.view.fps_output_overlay =
+        static_cast<uint32_t>(obj[kFpsOutputOverlay].GetInt());
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetInt();
+    instance.view.fps_output_frequency =
+        static_cast<uint32_t>(obj[kFpsOutputFrequency].GetInt());
   }
 }
 
@@ -117,10 +124,10 @@ void Configuration::getGlobalParameters(
         obj[kAccessibilityFeaturesKey].GetInt();
   }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
-    instance.view.width = obj[kWidthKey].GetInt();
+    instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
   }
   if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsInt()) {
-    instance.view.height = obj[kHeightKey].GetInt();
+    instance.view.height = static_cast<uint32_t>(obj[kHeightKey].GetInt());
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
@@ -129,13 +136,16 @@ void Configuration::getGlobalParameters(
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
   if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].GetInt();
+    instance.view.fps_output_console =
+        static_cast<uint32_t>(obj[kFpsOutputConsole].GetInt());
   }
   if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetInt();
+    instance.view.fps_output_overlay =
+        static_cast<uint32_t>(obj[kFpsOutputOverlay].GetInt());
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetInt();
+    instance.view.fps_output_frequency =
+        static_cast<uint32_t>(obj[kFpsOutputFrequency].GetInt());
   }
 }
 
@@ -147,7 +157,7 @@ void Configuration::getView(rapidjson::Document& doc,
     if (index > arr.Capacity())
       assert(false);
 
-    getViewParameters(arr[index].GetObject(), instance);
+    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(), instance);
     getGlobalParameters(doc.GetObject(), instance);
   } else {
     getViewParameters(doc[kViewKey].GetObject(), instance);
@@ -165,10 +175,10 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (!cli.cursor_theme.empty()) {
     instance.cursor_theme = cli.cursor_theme;
   }
-  if (cli.disable_cursor != instance.disable_cursor) {
+  if (cli.disable_cursor_set && cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
   }
-  if (cli.debug_backend != instance.debug_backend) {
+  if (cli.debug_backend_set && cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
   }
   if (!cli.view.vm_args.empty()) {
@@ -197,7 +207,8 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (cli.view.pixel_ratio > 0) {
     instance.view.pixel_ratio = cli.view.pixel_ratio;
   }
-  if (cli.view.fullscreen != instance.view.fullscreen) {
+  if (cli.view.fullscreen_set &&
+      cli.view.fullscreen != instance.view.fullscreen) {
     instance.view.fullscreen = cli.view.fullscreen;
   }
 }

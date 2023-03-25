@@ -14,10 +14,10 @@
 
 #include "mouse_cursor.h"
 
-#include <flutter/fml/logging.h>
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
+#include "logging.h"
 
 #include <iostream>
 

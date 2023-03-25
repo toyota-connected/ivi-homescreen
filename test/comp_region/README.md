@@ -6,7 +6,7 @@ The Compositor Region plugin enables Dart to create input and or opaque regions 
 
 ### Requirements
 
-Ensure the `ivi-homescreen` build includes the following flag:
+Ensure the `flutter-auto` build includes the following flag:
 
     -DBUILD_PLUGIN_COMP_REGION=ON
 

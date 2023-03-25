@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
 #include "engine.h"
@@ -51,15 +51,15 @@ class Backend {
   const Backend& operator=(const Backend&) = delete;
 
   /**
-  * @brief Execute the callback function for window resizing
-  * @param[in] index Set Application ID
-  * @param[in] flutter_engine Pointer to Flutter engine
-  * @param[in] width Set window width
-  * @param[in] height Set window height
-  * @return void
-  * @relation
-  * internal
-  */
+   * @brief Execute the callback function for window resizing
+   * @param[in] index Set Application ID
+   * @param[in] flutter_engine Pointer to Flutter engine
+   * @param[in] width Set window width
+   * @param[in] height Set window height
+   * @return void
+   * @relation
+   * internal
+   */
   void Resize(size_t index,
               const std::shared_ptr<Engine>& flutter_engine,
               int32_t width,
@@ -71,15 +71,15 @@ class Backend {
   }
 
   /**
-  * @brief Execute the callback function for surface creating
-  * @param[in] index Set Application ID
-  * @param[in] surface Pointer to surface
-  * @param[in] width Set surface width
-  * @param[in] height Set surface height
-  * @return void
-  * @relation
-  * internal
-  */
+   * @brief Execute the callback function for surface creating
+   * @param[in] index Set Application ID
+   * @param[in] surface Pointer to surface
+   * @param[in] width Set surface width
+   * @param[in] height Set surface height
+   * @return void
+   * @relation
+   * internal
+   */
   void CreateSurface(size_t index,
                      struct wl_surface* surface,
                      int32_t width,
@@ -90,21 +90,21 @@ class Backend {
   }
 
   /**
-  * @brief Get an empty FlutterRendererConfig
-  * @return FlutterRendererConfig
-  * @retval Pointer to FlutterRendererConfig
-  * @relation
-  * internal
-  */
+   * @brief Get an empty FlutterRendererConfig
+   * @return FlutterRendererConfig
+   * @retval Pointer to FlutterRendererConfig
+   * @relation
+   * internal
+   */
   virtual FlutterRendererConfig GetRenderConfig() { return {}; }
 
   /**
-  * @brief Get an empty FlutterCompositor
-  * @return FlutterCompositor
-  * @retval Pointer to FlutterCompositor
-  * @relation
-  * internal
-  */
+   * @brief Get an empty FlutterCompositor
+   * @return FlutterCompositor
+   * @retval Pointer to FlutterCompositor
+   * @relation
+   * internal
+   */
   MAYBE_UNUSED virtual FlutterCompositor GetCompositorConfig() { return {}; }
 
  private:

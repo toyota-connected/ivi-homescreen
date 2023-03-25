@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 #include <string>
 
 class Platform {
@@ -25,7 +25,7 @@ class Platform {
 
   /**
    * @brief Callback function for platform messages about platform
-   * @param[in] message Recieve message
+   * @param[in] message Receive message
    * @param[in] userdata Pointer to User data
    * @return void
    * @relation

@@ -1,17 +1,24 @@
 # flutter-auto
 
-Flutter Auto
+[![Build Status](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml)
 
-* Strongly Typed (C++)
-* Lightweight
-  * Clang 11 Release Stripped = 151k
-  * GCC 9.3 Release Stripped = 168k
+
+flutter-auto for Wayland
+
 * Source runs on Desktop and Yocto Linux
   * Ubuntu 18+
   * Fedora 33+
   * Yocto Dunfell+
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
+* Vulkan or GLES backend
+* Runs on AGL Compositor, Weston, Sway, etc
+
+# Sanitizer Support
+
+You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
+
+If sanitizers are supported by your compiler, the specified targets will be build with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
 
 # Backend Support
 
@@ -94,9 +101,9 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
 
-`cursor_theme` - Sets cursor theme to use.
+`cursor_theme` - Sets cursor theme to use.  This only applies to command line, and global parameter options.
 
-`disable_cursor` - Disables the cursor.
+`disable_cursor` - Disables the cursor.  This only applies to command line, and global parameter options.
 
 `debug_backend` - Enables Backend Debug logic.
 
@@ -247,24 +254,24 @@ Defaults to Wayland, no need to do anything special
 
     git clone https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
-    CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
 
 ### Clang Toolchain Setup
 
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
-    sudo ./llvm.sh 12
-    sudo apt-get install -y libc++-12-dev libc++abi-12-dev libunwind-dev
+    sudo ./llvm.sh 14
+    sudo apt-get install -y libc++-14-dev libc++abi-14-dev libunwind-dev
 
 ## CI Example
 
-    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/ivi-homescreen-linux.yml
+    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/flutter-auto-linux.yml
 
 ## Debian Package
 
     make package -j
-    sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
+    sudo apt install ./flutter-auto-1.0.0-Release-beta-Linux-x86_64.deb
 
 # Flutter Application
 ## Build
@@ -272,7 +279,7 @@ Defaults to Wayland, no need to do anything special
 Confirm flutter/bin is in the path using: `flutter doctor -v`
 
     cd ~/development/my_flutter_app
-    flutter channel beta
+    flutter channel stable
     flutter upgrade
     flutter config --enable-linux-desktop
     flutter create .
@@ -280,32 +287,23 @@ Confirm flutter/bin is in the path using: `flutter doctor -v`
 
 ## Install
 
-loading path for application is: `/usr/local/share/flutter-auto/bundle`
+create a bundle folder using this pattern:
 
-This is used to leverage symlinks.  Such as:
+    <bundle folder name>
+        data
+            flutter_assets - from flutter build folder
+            [icudtl.dat] - optional
+        lib
+            [libflutter_engine.so] - optional
 
-    cd /usr/local/share/flutter-auto
-    sudo rm -rf bundle
-    sudo ln -sf ~/development/my_flutter_app/build/ bundle
-
-Or
-
-    sudo mkdir -p /usr/local/share/flutter-auto/my_flutter_app/
-    sudo cp -r build/* /usr/local/share/flutter-auto/my_flutter_app/
-    sudo ln -sf /usr/local/share/flutter-auto/my_flutter_app/ bundle
 
 ## Running on desktop
 
-Copy a current icudtl.dat to /usr/local/share/flutter
-Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point downloaded engine for build:
-
-    cd <flutter-auto build>
-    export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
-    flutter-auto
+    flutter-auto --b=<bunle folder name>
 
 ## Debug
 
-Setup custom devices to control ivi-homescreen via debugger. 
+Setup custom devices to control flutter-auto via debugger. 
 
 # CMAKE dependency paths
 

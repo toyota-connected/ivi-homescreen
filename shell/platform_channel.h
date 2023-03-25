@@ -20,7 +20,7 @@
 #include <map>
 #include <string>
 
-#include <flutter_embedder.h>
+#include <shell/platform/embedder/embedder.h>
 
 class PlatformChannel {
  protected:
@@ -36,12 +36,12 @@ class PlatformChannel {
   const PlatformChannel& operator=(const PlatformChannel&) = delete;
 
   /**
-  * @brief Get instance of PlatformChannel
-  * @return PlatformChannel*
-  * @retval Pointer to PlatformChannel that is a singleton.
-  * @relation
-  * flutter
-  */
+   * @brief Get instance of PlatformChannel
+   * @return PlatformChannel*
+   * @retval Pointer to PlatformChannel that is a singleton.
+   * @relation
+   * flutter
+   */
   static PlatformChannel* GetInstance() {
     if (singleton == nullptr)
       singleton = new PlatformChannel;
@@ -49,24 +49,24 @@ class PlatformChannel {
   }
 
   /**
-  * @brief Get platform message handler
-  * @return std::map<std::string, FlutterPlatformMessageCallback>
-  * @retval Handler from channel name to Flutter platform message callback
-  * @relation
-  * flutter
-  */
+   * @brief Get platform message handler
+   * @return std::map<std::string, FlutterPlatformMessageCallback>
+   * @retval Handler from channel name to Flutter platform message callback
+   * @relation
+   * flutter
+   */
   std::map<std::string, FlutterPlatformMessageCallback> GetHandler() {
     return m_platform_message_handlers;
   }
 
   /**
-  * @brief Register flutter platform message callback
-  * @param[in] channel String of channel name
-  * @param[in] callback Flutter platform message callback
-  * @return void
-  * @relation
-  * flutter
-  */
+   * @brief Register flutter platform message callback
+   * @param[in] channel String of channel name
+   * @param[in] callback Flutter platform message callback
+   * @return void
+   * @relation
+   * flutter
+   */
   void RegisterCallback(const char* channel,
                         FlutterPlatformMessageCallback callback) {
     m_platform_message_handlers.emplace(std::string(channel), callback);

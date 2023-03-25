@@ -24,7 +24,7 @@
 */
 var NAVTREE =
 [
-  [ "ivi-homescreen", "index.html", ]
+  [ "flutter-auto", "index.html", ]
 ];
 
 var NAVTREEINDEX =

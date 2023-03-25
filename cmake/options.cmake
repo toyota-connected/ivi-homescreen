@@ -1,5 +1,6 @@
 #
 # Copyright 2020 Toyota Connected North America
+# @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -58,3 +59,8 @@ option(BUILD_BACKEND_WAYLAND_DRM "Build Backend Wayland DRM" OFF)
 if (BUILD_BACKEND_WAYLAND_DRM)
     add_compile_definitions(BUILD_BACKEND_WAYLAND_DRM)
 endif ()
+
+#
+# Sanitizers
+#
+find_package(Sanitizers)
