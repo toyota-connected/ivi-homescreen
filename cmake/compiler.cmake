@@ -17,6 +17,30 @@
 
 include_guard()
 
+macro(COMPILER_FLAGS_APPEND scope add_val conflict_match)
+    if ((NOT "${conflict_match}" STREQUAL "") AND
+    (("$ENV{CC}" MATCHES "${conflict_match}") OR
+    ("$ENV{CXX}" MATCHES "${conflict_match}") OR
+    ("$ENV{CFLAGS}" MATCHES "${conflict_match}") OR
+    ("$ENV{CXXFLAGS}" MATCHES "${conflict_match}")))
+        return()
+    endif ()
+
+    if (${scope} STREQUAL "RELEASE")
+        string(APPEND CMAKE_C_FLAGS_RELEASE ${add_val})
+        string(APPEND CMAKE_CXX_FLAGS_RELEASE ${add_val})
+        message("-- APPEND RELEASE FLAGS: ${add_val}")
+    elseif (${scope} STREQUAL "DEBUG")
+        string(APPEND CMAKE_C_FLAGS_DEBUG ${add_val})
+        string(APPEND CMAKE_CXX_FLAGS_DEBUG ${add_val})
+        message("-- APPEND DEBUG FLAGS: ${add_val}")
+    else ()
+        string(APPEND CMAKE_C_FLAGS ${add_val})
+        string(APPEND CMAKE_CXX_FLAGS ${add_val})
+        message("-- APPEND FLAGS: ${add_val}")
+    endif ()
+endmacro(COMPILER_FLAGS_APPEND)
+
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -54,24 +78,19 @@ add_compile_definitions(
         $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
 )
 
-string(APPEND CMAKE_C_FLAGS_RELEASE " -fstack-protector-all")
-string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-omit-frame-pointer")
-string(APPEND CMAKE_C_FLAGS_RELEASE " -Wformat=2")
-string(APPEND CMAKE_C_FLAGS_RELEASE " -D_FORTIFY_SOURCE=2")
+COMPILER_FLAGS_APPEND(RELEASE " -fstack-protector-all" "")
+COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" ".*omit-frame-pointer.*")
+COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" ".*-Wformat=[0-9]+.*")
+COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" ".*-D_FORTIFY_SOURCE.*")
 
 string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
-
-string(APPEND CMAKE_CXX_FLAGS_RELEASE " -fstack-protector-all")
-string(APPEND CMAKE_CXX_FLAGS_RELEASE " -fno-omit-frame-pointer")
-string(APPEND CMAKE_CXX_FLAGS_RELEASE " -Wformat=2")
-string(APPEND CMAKE_CXX_FLAGS_RELEASE " -D_FORTIFY_SOURCE=2")
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--no-undefined")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--gc-sections")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--as-needed")
-string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,nodlopen -Wl,-z,nodump")
+string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,nodlopen")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,noexecstack")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,-z,relro -Wl,-z,now")
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -pie")
