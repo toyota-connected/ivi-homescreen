@@ -78,7 +78,7 @@ add_compile_definitions(
         $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
 )
 
-COMPILER_FLAGS_APPEND(RELEASE " -fstack-protector-all" "")
+COMPILER_FLAGS_APPEND(RELEASE " -fstack-protector-all" ".*stack-protector.*")
 COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" ".*omit-frame-pointer.*")
 COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" ".*-Wformat=[0-9]+.*")
 COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" ".*-D_FORTIFY_SOURCE.*")
