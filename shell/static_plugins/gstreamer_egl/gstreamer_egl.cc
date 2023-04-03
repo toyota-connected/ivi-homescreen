@@ -1292,7 +1292,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   }
 
   it = args->find(flutter::EncodableValue("width"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     flutter::EncodableValue encodedValue = it->second;
 
     data->width = std::get<int32_t>(encodedValue);
@@ -1300,7 +1300,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
     data->width = data->info.width;
   }
   it = args->find(flutter::EncodableValue("height"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     flutter::EncodableValue encodedValue = it->second;
     data->height = std::get<int32_t>(encodedValue);
   } else {
@@ -1467,7 +1467,7 @@ void GstreamerEgl::OnDispose(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = dispose_error("textureId not provided");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1545,7 +1545,7 @@ void GstreamerEgl::OnSetLooping(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = setLooping_error("setLooping requires textureId");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1591,7 +1591,7 @@ void GstreamerEgl::OnSetVolume(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = setLooping_error("setVolume requires textureId");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1611,7 +1611,7 @@ void GstreamerEgl::OnSetVolume(const FlutterPlatformMessage* message,
   }
   std::shared_ptr<CustomData> data = search->second;
   it = args->find(flutter::EncodableValue("volume"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = setLooping_error("setVolume requires volume");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1635,7 +1635,7 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = setLooping_error("setPlaybackSpeed requires textureId");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1655,7 +1655,7 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
   }
   std::shared_ptr<CustomData> data = search->second;
   it = args->find(flutter::EncodableValue("speed"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = setLooping_error("setPlaybackSpeed requires speed");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1723,7 +1723,7 @@ void GstreamerEgl::OnPlay(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = play_error("play requires textureId");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1788,7 +1788,7 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = position_error("textureId required");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1867,7 +1867,7 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = seekTo_error("textureId required");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1886,7 +1886,7 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
   std::shared_ptr<CustomData> data = search->second;
 
   it = args->find(flutter::EncodableValue("position"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = seekTo_error("position required");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1947,7 +1947,7 @@ void GstreamerEgl::OnPause(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
-  if (it == args->end()) {
+  if (it == args->end() || it->second.IsNull()) {
     auto value = pause_error("textureId required");
     auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1997,7 +1997,7 @@ void GstreamerEgl::OnSetMixWithOthers(const FlutterPlatformMessage* message,
   auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("mixWithOthers"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     FML_DLOG(INFO) << "(" << engine->GetIndex()
                    << ") mixWithOthers: " << std::get<bool>(it->second);
   }

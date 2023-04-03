@@ -37,7 +37,7 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       std::string url;
       auto it = args->find(flutter::EncodableValue(kUrlKey));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         url = std::get<std::string>(it->second);
       }
 
@@ -64,7 +64,7 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       auto it = args->find(flutter::EncodableValue(kUrlKey));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         url = std::get<std::string>(it->second);
         flutter::EncodableValue response(
             (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||

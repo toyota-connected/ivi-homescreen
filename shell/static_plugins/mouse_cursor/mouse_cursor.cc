@@ -35,13 +35,13 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       int32_t device = 0;
       auto it = args->find(flutter::EncodableValue("device"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         device = std::get<int32_t>(it->second);
       }
 
       std::string kind;
       it = args->find(flutter::EncodableValue("kind"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         kind = std::get<std::string>(it->second);
       }
 

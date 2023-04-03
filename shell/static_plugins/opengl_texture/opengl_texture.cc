@@ -22,9 +22,9 @@
 
 void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
+  std::unique_ptr<std::vector<uint8_t>> result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
@@ -35,20 +35,20 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       int64_t textureId = 0;
       auto it = args->find(flutter::EncodableValue("textureId"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         flutter::EncodableValue encodedValue = it->second;
         textureId = encodedValue.LongValue();
       }
 
       double width = 0;
       it = args->find(flutter::EncodableValue("width"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         width = std::get<double>(it->second);
       }
 
       double height = 0;
       it = args->find(flutter::EncodableValue("height"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         height = std::get<double>(it->second);
       }
 
