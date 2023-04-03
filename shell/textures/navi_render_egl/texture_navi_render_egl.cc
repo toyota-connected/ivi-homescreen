@@ -39,13 +39,13 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   std::string access_token;
   auto it = args->find(flutter::EncodableValue("access_token"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     access_token = std::get<std::string>(it->second);
   }
 
   std::string module;
   it = args->find(flutter::EncodableValue("module"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     module = std::get<std::string>(it->second);
   }
   if (module.empty()) {
@@ -55,7 +55,7 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   std::string asset_path;
   it = args->find(flutter::EncodableValue("asset_path"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     asset_path = std::get<std::string>(it->second);
   }
   if (asset_path.empty()) {
@@ -64,7 +64,7 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   std::string cache_folder;
   it = args->find(flutter::EncodableValue("cache_folder"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     cache_folder = std::get<std::string>(it->second);
   }
   if (cache_folder.empty()) {
@@ -74,7 +74,7 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   std::string misc_folder;
   it = args->find(flutter::EncodableValue("misc_folder"));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     misc_folder = std::get<std::string>(it->second);
   }
   if (cache_folder.empty()) {

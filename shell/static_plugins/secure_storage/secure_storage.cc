@@ -82,13 +82,13 @@ void SecureStorage::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   std::string keyString;
   auto it = args->find(flutter::EncodableValue(kKey));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     keyString = std::get<std::string>(it->second);
   }
 
   std::string valueString;
   it = args->find(flutter::EncodableValue(kValue));
-  if (it != args->end()) {
+  if (it != args->end() && !it->second.IsNull()) {
     valueString = std::get<std::string>(it->second);
   }
 
