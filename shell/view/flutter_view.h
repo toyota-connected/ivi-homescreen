@@ -167,4 +167,6 @@ class FlutterView {
     uint32_t counter;
     long long pretime;
   } m_fps{};
+
+  uint64_t m_pointer_events{};
 };

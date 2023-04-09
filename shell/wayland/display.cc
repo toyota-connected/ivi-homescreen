@@ -361,7 +361,7 @@ void Display::pointer_handle_enter(void* data,
   d->m_pointer.serial = serial;
 
   if (d->m_active_engine) {
-    d->m_active_engine->SendMouseEvent(
+    d->m_active_engine->CoalesceMouseEvent(
         kFlutterPointerSignalKindNone, FlutterPointerPhase::kAdd,
         d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
         d->m_pointer.buttons);
@@ -379,7 +379,7 @@ void Display::pointer_handle_leave(void* data,
   d->m_pointer.serial = serial;
 
   if (d->m_active_engine) {
-    d->m_active_engine->SendMouseEvent(kFlutterPointerSignalKindNone,
+    d->m_active_engine->CoalesceMouseEvent(kFlutterPointerSignalKindNone,
                                        FlutterPointerPhase::kRemove, 0.0, 0.0,
                                        0.0, 0.0, d->m_pointer.buttons);
   }
@@ -400,7 +400,7 @@ void Display::pointer_handle_motion(void* data,
   if (d->m_active_engine) {
     FlutterPointerPhase phase =
         pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover;
-    d->m_active_engine->SendMouseEvent(
+    d->m_active_engine->CoalesceMouseEvent(
         kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
         d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
   }
@@ -435,7 +435,7 @@ void Display::pointer_handle_button(void* data,
   }
 
   if (d->m_active_engine) {
-    d->m_active_engine->SendMouseEvent(
+    d->m_active_engine->CoalesceMouseEvent(
         kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
         d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
   }
@@ -452,7 +452,7 @@ void Display::pointer_handle_axis(void* data,
   d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
 
   if (d->m_active_engine) {
-    d->m_active_engine->SendMouseEvent(
+    d->m_active_engine->CoalesceMouseEvent(
         kFlutterPointerSignalKindScroll, FlutterPointerPhase::kMove,
         d->m_pointer.event.surface_x, d->m_pointer.event.surface_y,
         d->m_pointer.event.axes[1].value, d->m_pointer.event.axes[0].value,
@@ -733,18 +733,16 @@ void Display::touch_handle_down(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  bool first_down = (d->m_touch.down_count[id] == 0);
-  d->m_touch.down_count[id] += 1;
-
   d->m_touch.surface_x = x_w;
   d->m_touch.surface_y = y_w;
 
   d->m_active_surface = surface;
   d->m_touch_engine = d->m_surface_engine_map[surface];
   if (d->m_touch_engine) {
-    d->m_touch_engine->SendTouchEvent(
-        (first_down ? FlutterPointerPhase::kDown : FlutterPointerPhase::kMove),
-        wl_fixed_to_double(x_w), wl_fixed_to_double(y_w), id);
+    d->m_touch_engine->CoalesceTouchEvent(
+        FlutterPointerPhase::kDown,
+        wl_fixed_to_double(x_w),
+        wl_fixed_to_double(y_w), id);
   }
 }
 
@@ -759,12 +757,9 @@ void Display::touch_handle_up(void* data,
 
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.down_count[id] -= 1;
-
   if (d->m_touch_engine) {
-    bool last_up = (d->m_touch.down_count[id] == 0);
-    d->m_touch_engine->SendTouchEvent(
-        (last_up ? FlutterPointerPhase::kUp : FlutterPointerPhase::kMove),
+    d->m_touch_engine->CoalesceTouchEvent(
+        FlutterPointerPhase::kUp,
         wl_fixed_to_double(d->m_touch.surface_x),
         wl_fixed_to_double(d->m_touch.surface_y), id);
   }
@@ -784,7 +779,7 @@ void Display::touch_handle_motion(void* data,
   d->m_touch.surface_y = y_w;
 
   if (d->m_touch_engine) {
-    d->m_touch_engine->SendTouchEvent(FlutterPointerPhase::kMove,
+    d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kMove,
                                       wl_fixed_to_double(x_w),
                                       wl_fixed_to_double(y_w), id);
   }
@@ -794,7 +789,8 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* wl_touch) {
   (void)wl_touch;
   auto* d = static_cast<Display*>(data);
   if (d->m_touch_engine) {
-    d->m_touch_engine->SendTouchEvent(FlutterPointerPhase::kCancel,
+    FML_DLOG(INFO) << "touch_handle_cancel";
+    d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kCancel,
                                       d->m_pointer.event.surface_x,
                                       d->m_pointer.event.surface_y, 0);
   }

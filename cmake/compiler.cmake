@@ -63,7 +63,7 @@ add_compile_options(
         -Wformat-security
         -Wconversion
         -Wcast-align
-        -Wcast-qual
+        #-Wcast-qual
         $<$<COMPILE_LANGUAGE:CXX>:-Wunused-parameter>
         $<$<COMPILE_LANGUAGE:CXX>:-Winvalid-offsetof>
         $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>

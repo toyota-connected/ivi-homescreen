@@ -332,7 +332,7 @@ class Engine {
   MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
 
   /**
-   * @brief Send mouse event
+   * @brief Coalesce mouse event
    * @param[in] signal Kind of the signal
    * @param[in] phase Phase of the event
    * @param[in] x X coordinate of the event
@@ -344,7 +344,7 @@ class Engine {
    * @relation
    * flutter
    */
-  void SendMouseEvent(FlutterPointerSignalKind signal,
+  void CoalesceMouseEvent(FlutterPointerSignalKind signal,
                       FlutterPointerPhase phase,
                       double x,
                       double y,
@@ -353,7 +353,7 @@ class Engine {
                       int64_t buttons);
 
   /**
-   * @brief Send touch event
+   * @brief Coalesce touch event
    * @param[in] phase Phase of the pointer event
    * @param[in] x X coordinate of the pointer event
    * @param[in] y Y coordinate of the pointer event
@@ -362,10 +362,18 @@ class Engine {
    * @relation
    * flutter
    */
-  void SendTouchEvent(FlutterPointerPhase phase,
+  void CoalesceTouchEvent(FlutterPointerPhase phase,
                       double x,
                       double y,
                       int32_t device);
+
+  /**
+   * @brief Send coalesced Pointer events
+   * @return void
+   * @relation
+   * flutter
+   */
+  void SendPointerEvents();
 
   /**
    * @brief get texture object
@@ -510,4 +518,8 @@ class Engine {
    */
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
   LoadAotData(const std::string& aot_data_path) const;
+
+  size_t m_pointer_count = 0;
+  FlutterPointerEvent m_pointer_events[kMaxPointerEvent];
+  std::mutex m_pointer_mutex;
 };

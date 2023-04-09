@@ -284,13 +284,11 @@ class Display {
     MAYBE_UNUSED uint32_t event_mask;
     uint32_t time;
     uint32_t serial;
-    struct touch_point points[kMaxTouchPoints];
   };
 
   struct touch {
     struct wl_touch* touch;
     struct touch_event event;
-    int down_count[kMaxTouchPoints];
 
     wl_fixed_t surface_x, surface_y;
     uint32_t state;
