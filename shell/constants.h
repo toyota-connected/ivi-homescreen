@@ -36,8 +36,9 @@ constexpr char kCursorKindClick[] = "hand";
 constexpr char kCursorKindText[] = "left_ptr";
 constexpr char kCursorKindForbidden[] = "pirate";
 
-// Touch
-constexpr int kMaxTouchPoints = 10;
+// Mouse/Touch
+static constexpr int kMaxPointerEvent = 20;
+static constexpr int kPointerEventModulus = 2;
 
 // Locale
 constexpr char kDefaultLocaleLanguageCode[] = "en";

@@ -507,21 +507,23 @@ Engine::UpdateLocales(const FlutterLocale** locales, size_t locales_count) {
   return m_proc_table.UpdateLocales(m_flutter_engine, locales, locales_count);
 }
 
-void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
+void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
                             FlutterPointerPhase phase,
                             double x,
                             double y,
                             double scroll_delta_x,
                             double scroll_delta_y,
                             int64_t buttons) {
-  FlutterPointerEvent msg = {
+  auto timestamp = m_proc_table.GetCurrentTime() / 1000;
+  std::scoped_lock lock(m_pointer_mutex);
+  assert(m_pointer_count < kMaxPointerEvent);
+  m_pointer_events[m_pointer_count] = {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = m_proc_table.GetCurrentTime() / 1000,
+    .timestamp = timestamp,
 #elif defined(ENV32BIT)
-    .timestamp = static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 &
-                                     0xFFFFFFFFULL),
+    .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -532,27 +534,23 @@ void Engine::SendMouseEvent(FlutterPointerSignalKind signal,
     .device_kind = kFlutterPointerDeviceKindMouse,
     .buttons = buttons
   };
-
-#if 0
-  FML_DLOG(INFO) << "[SendMouseEvent] phase: " << phase << ", x: " << x
-                 << ", y: " << y << ", signal_kind: " << signal << ", "
-                 << ", buttons: " << msg.buttons;
-#endif
-  m_proc_table.SendPointerEvent(m_flutter_engine, &msg, 1);
+  m_pointer_count++;
 }
 
-void Engine::SendTouchEvent(FlutterPointerPhase phase,
+void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
                             double x,
                             double y,
                             int32_t device) {
-  FlutterPointerEvent msg = {
+  auto timestamp = m_proc_table.GetCurrentTime() / 1000;
+  std::scoped_lock lock(m_pointer_mutex);
+  assert(m_pointer_count < kMaxPointerEvent);
+  m_pointer_events[m_pointer_count] = {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = m_proc_table.GetCurrentTime() / 1000,
+    .timestamp = timestamp,
 #elif defined(ENV32BIT)
-    .timestamp = static_cast<size_t>(m_proc_table.GetCurrentTime() / 1000 &
-                                     0xFFFFFFFFULL),
+    .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
     .x = x,
     .y = y,
@@ -563,8 +561,17 @@ void Engine::SendTouchEvent(FlutterPointerPhase phase,
     .device_kind = kFlutterPointerDeviceKindTouch,
     .buttons = 0
   };
+  m_pointer_count++;
+}
 
-  m_proc_table.SendPointerEvent(m_flutter_engine, &msg, 1);
+void Engine::SendPointerEvents() {
+  if (m_pointer_count && m_flutter_engine) {
+    std::scoped_lock lock(m_pointer_mutex);
+    m_proc_table.SendPointerEvent(m_flutter_engine, m_pointer_events,
+                                  m_pointer_count);
+    m_pointer_count = 0;
+    memset(m_pointer_events, 0, sizeof(FlutterPointerEvent) * kMaxPointerEvent);
+  }
 }
 
 FlutterEngineAOTData Engine::LoadAotData(

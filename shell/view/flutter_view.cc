@@ -147,6 +147,11 @@ void FlutterView::RunTasks() {
     surface.second->RunTask();
   }
 #endif
+
+  m_pointer_events++;
+  if (m_pointer_events % kPointerEventModulus == 0) {
+    m_flutter_engine->SendPointerEvents();
+  }
 }
 
 // calc and output the FPS
