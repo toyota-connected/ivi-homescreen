@@ -1,8 +1,8 @@
-<map id="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/wayland/display.h" name="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/wayland/display.h">
-<area shape="rect" id="node1" title=" " alt="" coords="437,5,613,91"/>
-<area shape="rect" id="node2" href="$app_8cc.html" title=" " alt="" coords="5,139,181,224"/>
-<area shape="rect" id="node3" href="$compositor__surface_8cc.html" title=" " alt="" coords="206,139,413,224"/>
-<area shape="rect" id="node4" href="$flutter__view_8cc.html" title=" " alt="" coords="437,139,613,224"/>
-<area shape="rect" id="node5" href="$display_8cc.html" title=" " alt="" coords="637,139,813,224"/>
-<area shape="rect" id="node6" href="$window_8cc.html" title=" " alt="" coords="837,139,1013,224"/>
+<map id="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/wayland/display.h" name="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/wayland/display.h">
+<area shape="rect" id="node1" title=" " alt="" coords="447,5,668,105"/>
+<area shape="rect" id="node2" href="$app_8cc.html" title=" " alt="" coords="5,161,213,246"/>
+<area shape="rect" id="node3" href="$compositor__surface_8cc.html" title=" " alt="" coords="237,153,435,253"/>
+<area shape="rect" id="node4" href="$flutter__view_8cc.html" title=" " alt="" coords="459,153,656,253"/>
+<area shape="rect" id="node5" href="$display_8cc.html" title=" " alt="" coords="680,153,901,253"/>
+<area shape="rect" id="node6" href="$window_8cc.html" title=" " alt="" coords="925,153,1147,253"/>
 </map>
