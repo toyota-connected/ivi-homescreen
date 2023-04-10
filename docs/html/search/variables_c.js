@@ -122,7 +122,7 @@ var searchData=
   ['m_5ftimerspec_1796',['m_timerspec',['../class_event_timer.html#a958f8535619519176119bebed3348a2e',1,'EventTimer']]],
   ['m_5ftouch_1797',['m_touch',['../struct_display.html#ad4d6d190fb29693ae2adf3f981b518e3',1,'Display']]],
   ['m_5ftouch_5fengine_1798',['m_touch_engine',['../struct_display.html#a89abb5b703122ecfd342ed5fdab01756',1,'Display']]],
-  ['m_5ftype_1799',['m_type',['../struct_wayland_window.html#a8dad9f57cf8f8fa1b5a8fc5376d31648',1,'WaylandWindow::m_type()'],['../struct_compositor_surface.html#a8fea260367713a852d4a7a0876d685bd',1,'CompositorSurface::m_type()'],['../class_delegate_handle_key.html#aee7d74a2896c119cf10f275d7733c641',1,'DelegateHandleKey::m_type()']]],
+  ['m_5ftype_1799',['m_type',['../struct_wayland_window.html#a8dad9f57cf8f8fa1b5a8fc5376d31648',1,'WaylandWindow::m_type()'],['../struct_compositor_surface.html#ab35c8e20210306de3a5077087dc0747a',1,'CompositorSurface::m_type()'],['../class_delegate_handle_key.html#aee7d74a2896c119cf10f275d7733c641',1,'DelegateHandleKey::m_type()']]],
   ['m_5fuser_5fdata_1800',['m_user_data',['../class_backend.html#a3f6aaa8156d69973b899112e144bcef9',1,'Backend']]],
   ['m_5fview_1801',['m_view',['../class_engine.html#a0412693d3bb0e6dd9599431ba502b09a',1,'Engine']]],
   ['m_5fviews_1802',['m_views',['../class_app.html#a1600ef40990ce232f87c22dea76d1411',1,'App']]],

@@ -86,6 +86,10 @@ Engine::Engine(FlutterView* view,
       }) {
   FML_DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
 
+  // Touch events
+  m_pointer_events.reserve(kMaxPointerEvent);
+  m_pointer_events.clear();
+
   ///
   /// libflutter_engine.so loading
   ///
@@ -458,7 +462,8 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
   }
   FlutterPlatformMessageResponseHandle* handle;
   m_proc_table.PlatformMessageCreateResponseHandle(
-      m_flutter_engine, [](const uint8_t* data, size_t size, void* userdata) {
+      m_flutter_engine,
+      [](const uint8_t* data, size_t size, void* userdata) {
         (void)data;
         (void)size;
         (void)userdata;
@@ -508,16 +513,15 @@ Engine::UpdateLocales(const FlutterLocale** locales, size_t locales_count) {
 }
 
 void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
-                            FlutterPointerPhase phase,
-                            double x,
-                            double y,
-                            double scroll_delta_x,
-                            double scroll_delta_y,
-                            int64_t buttons) {
+                                FlutterPointerPhase phase,
+                                double x,
+                                double y,
+                                double scroll_delta_x,
+                                double scroll_delta_y,
+                                int64_t buttons) {
   auto timestamp = m_proc_table.GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  assert(m_pointer_count < kMaxPointerEvent);
-  m_pointer_events[m_pointer_count] = {
+  m_pointer_events.emplace_back(FlutterPointerEvent {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
 #if defined(ENV64BIT)
@@ -532,19 +536,21 @@ void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
     .scroll_delta_x = scroll_delta_x,
     .scroll_delta_y = scroll_delta_y,
     .device_kind = kFlutterPointerDeviceKindMouse,
-    .buttons = buttons
-  };
-  m_pointer_count++;
+    .buttons = buttons,
+    .pan_x = 0,
+    .pan_y = 0,
+    .scale = 0,
+    .rotation = 0
+  });
 }
 
 void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
-                            double x,
-                            double y,
-                            int32_t device) {
+                                double x,
+                                double y,
+                                int32_t device) {
   auto timestamp = m_proc_table.GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  assert(m_pointer_count < kMaxPointerEvent);
-  m_pointer_events[m_pointer_count] = {
+  m_pointer_events.emplace_back(FlutterPointerEvent {
     .struct_size = sizeof(FlutterPointerEvent),
     .phase = phase,
 #if defined(ENV64BIT)
@@ -559,18 +565,20 @@ void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
     .scroll_delta_x = 0.0,
     .scroll_delta_y = 0.0,
     .device_kind = kFlutterPointerDeviceKindTouch,
-    .buttons = 0
-  };
-  m_pointer_count++;
+    .buttons = 0,
+    .pan_x = 0,
+    .pan_y = 0,
+    .scale = 0,
+    .rotation = 0
+  });
 }
 
 void Engine::SendPointerEvents() {
-  if (m_pointer_count && m_flutter_engine) {
+  if (!m_pointer_events.empty() && m_flutter_engine) {
     std::scoped_lock lock(m_pointer_mutex);
-    m_proc_table.SendPointerEvent(m_flutter_engine, m_pointer_events,
-                                  m_pointer_count);
-    m_pointer_count = 0;
-    memset(m_pointer_events, 0, sizeof(FlutterPointerEvent) * kMaxPointerEvent);
+    m_proc_table.SendPointerEvent(m_flutter_engine, m_pointer_events.data(),
+                                  m_pointer_events.size());
+    m_pointer_events.clear();
   }
 }
 

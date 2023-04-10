@@ -522,7 +522,6 @@ class Engine {
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
   LoadAotData(const std::string& aot_data_path) const;
 
-  size_t m_pointer_count = 0;
-  FlutterPointerEvent m_pointer_events[kMaxPointerEvent];
+  std::vector<FlutterPointerEvent> m_pointer_events;
   std::mutex m_pointer_mutex;
 };

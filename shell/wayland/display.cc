@@ -733,8 +733,8 @@ void Display::touch_handle_down(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.surface_x = x_w;
-  d->m_touch.surface_y = y_w;
+  d->m_touch.surface_x[id] = x_w;
+  d->m_touch.surface_y[id] = y_w;
 
   d->m_active_surface = surface;
   d->m_touch_engine = d->m_surface_engine_map[surface];
@@ -759,9 +759,8 @@ void Display::touch_handle_up(void* data,
 
   if (d->m_touch_engine) {
     d->m_touch_engine->CoalesceTouchEvent(
-        FlutterPointerPhase::kUp,
-        wl_fixed_to_double(d->m_touch.surface_x),
-        wl_fixed_to_double(d->m_touch.surface_y), id);
+        FlutterPointerPhase::kUp, wl_fixed_to_double(d->m_touch.surface_x[id]),
+        wl_fixed_to_double(d->m_touch.surface_y[id]), id);
   }
 }
 
@@ -775,8 +774,8 @@ void Display::touch_handle_motion(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.surface_x = x_w;
-  d->m_touch.surface_y = y_w;
+  d->m_touch.surface_x[id] = x_w;
+  d->m_touch.surface_y[id] = y_w;
 
   if (d->m_touch_engine) {
     d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kMove,

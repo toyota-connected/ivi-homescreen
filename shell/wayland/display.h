@@ -289,8 +289,8 @@ class Display {
   struct touch {
     struct wl_touch* touch;
     struct touch_event event;
-
-    wl_fixed_t surface_x, surface_y;
+    wl_fixed_t surface_x[kMaxTouchFinger];
+    wl_fixed_t surface_y[kMaxTouchFinger];
     uint32_t state;
     FlutterPointerPhase phase;
   } m_touch{};
