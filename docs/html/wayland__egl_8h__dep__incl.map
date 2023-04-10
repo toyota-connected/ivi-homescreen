@@ -1,7 +1,7 @@
-<map id="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/backend/wayland_egl.h" name="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/backend/wayland_egl.h">
-<area shape="rect" id="node1" title=" " alt="" coords="327,5,505,91"/>
-<area shape="rect" id="node2" href="$wayland__egl_8cc.html" title=" " alt="" coords="5,146,189,231"/>
-<area shape="rect" id="node3" href="$gstreamer__egl_8cc.html" title=" " alt="" coords="213,139,400,239"/>
-<area shape="rect" id="node4" href="$texture__navi__render__egl_8cc.html" title=" " alt="" coords="424,139,627,239"/>
-<area shape="rect" id="node5" href="$texture__test__egl_8cc.html" title=" " alt="" coords="651,139,837,239"/>
+<map id="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/backend/wayland_egl.h" name="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/backend/wayland_egl.h">
+<area shape="rect" id="node1" title=" " alt="" coords="425,5,645,105"/>
+<area shape="rect" id="node2" href="$wayland__egl_8cc.html" title=" " alt="" coords="5,161,225,261"/>
+<area shape="rect" id="node3" href="$gstreamer__egl_8cc.html" title=" " alt="" coords="250,161,541,261"/>
+<area shape="rect" id="node4" href="$texture__navi__render__egl_8cc.html" title=" " alt="" coords="565,153,785,268"/>
+<area shape="rect" id="node5" href="$texture__test__egl_8cc.html" title=" " alt="" coords="809,161,1029,261"/>
 </map>
