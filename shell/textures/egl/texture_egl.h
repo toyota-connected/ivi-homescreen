@@ -32,6 +32,8 @@ class TextureEgl {
 
   /**
    * @brief Get flutter OpenGL texture
+   * @param[in] engine pointer to flutter engine
+   * @param[in] texture_id texture id
    * @param[in] width Width
    * @param[in] height Height
    * @param[in] args from Dart

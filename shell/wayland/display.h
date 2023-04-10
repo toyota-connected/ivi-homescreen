@@ -185,12 +185,12 @@ class Display {
   /**
    * @brief Set key event
    * @param[in] surface Image
-   * @param[in] text_input Pointer of KeyEvent to set
+   * @param[in] key_event Pointer of KeyEvent to set
    * @return void
    * @relation
    * wayland
    */
-  void SetKeyEvent(wl_surface* surface, KeyEvent* keyevent);
+  void SetKeyEvent(wl_surface* surface, KeyEvent* key_event);
 
   wl_output* GetWlOutput(uint32_t index) {
     if (index <= m_all_outputs.size()) {

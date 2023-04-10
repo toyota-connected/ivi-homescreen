@@ -64,6 +64,7 @@ class TextureTestEgl : public Texture {
   /**
    * @brief Dispose assigned EGL texture id
    * @param[in,out] userdata Pointer to TextureTestEgl
+   * @param[in] name Texture2D id
    * @return void
    * @relation
    * wayland, flutter
