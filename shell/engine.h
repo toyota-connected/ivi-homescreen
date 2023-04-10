@@ -194,6 +194,9 @@ class Engine {
 
   /**
    * @brief Create texture
+   * @param[in] texture_id passed from Flutter
+   * @param[in] width passed from Flutter
+   * @param[in] height passed from Flutter
    * @param[in] args passed from Flutter
    * @return flutter::EncodableValue
    * @retval The result of create texture

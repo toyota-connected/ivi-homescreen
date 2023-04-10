@@ -69,11 +69,8 @@ class TextInput : public flutter::BinaryMessenger {
   /**
    * @brief Update keyboard key status
    * @param[in] data Pointer to User data
-   * @param[in] keyboard No use
-   * @param[in] serial No use
-   * @param[in] time No use
-   * @param[in] keysym Keyboard key
-   * @param[in] state Keyboard key status
+   * @param[in] keysym key symbol
+   * @param[in] state key state
    * @return void
    * @relation
    * flutter

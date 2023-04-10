@@ -33,7 +33,7 @@ class EventTimer {
  public:
   /**
    * @brief Constructor of EventTimer
-   * @param[in] The type of clock for a timer
+   * @param[in] clock The type of clock for a timer
    * @param[in] callback a callback to run when a timer alarmes
    * @param[in] callback_data an arument for a callback
    * @return EventTimer

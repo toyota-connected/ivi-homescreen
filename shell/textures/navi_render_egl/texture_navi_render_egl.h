@@ -55,6 +55,7 @@ class TextureNaviRender : public Texture {
   /**
    * @brief Dispose Navigation Instance
    * @param[in,out] userdata Pointer to TextureNaviRender
+   * @param[in] name Texture2d id
    * @return void
    * @relation
    * wayland, flutter
