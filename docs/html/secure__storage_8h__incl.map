@@ -1,15 +1,15 @@
-<map id="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/static_plugins/secure_storage/secure_storage.h" name="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/static_plugins/secure_storage/secure_storage.h">
-<area shape="rect" id="node1" title=" " alt="" coords="235,5,428,105"/>
-<area shape="rect" id="node2" title=" " alt="" coords="5,153,188,195"/>
-<area shape="rect" id="node3" title=" " alt="" coords="213,161,277,187"/>
-<area shape="rect" id="node4" title=" " alt="" coords="301,161,361,187"/>
-<area shape="rect" id="node5" title=" " alt="" coords="386,161,573,187"/>
-<area shape="rect" id="node6" href="$keyring_8h.html" title=" " alt="" coords="597,161,679,187"/>
-<area shape="rect" id="node7" title=" " alt="" coords="465,317,600,344"/>
-<area shape="rect" id="node8" title=" " alt="" coords="318,243,481,269"/>
-<area shape="rect" id="node9" title=" " alt="" coords="505,243,640,269"/>
-<area shape="rect" id="node10" title=" " alt="" coords="665,243,742,269"/>
-<area shape="rect" id="node11" href="$g__hash__table_8h.html" title=" " alt="" coords="766,243,886,269"/>
-<area shape="rect" id="node12" href="$logging_8h.html" title=" " alt="" coords="910,243,993,269"/>
-<area shape="rect" id="node13" title=" " alt="" coords="876,317,1027,344"/>
+<map id="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/static_plugins/secure_storage/secure_storage.h" name="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/static_plugins/secure_storage/secure_storage.h">
+<area shape="rect" id="node1" title=" " alt="" coords="218,5,445,120"/>
+<area shape="rect" id="node2" title=" " alt="" coords="5,168,188,209"/>
+<area shape="rect" id="node3" title=" " alt="" coords="213,175,277,202"/>
+<area shape="rect" id="node4" title=" " alt="" coords="301,175,361,202"/>
+<area shape="rect" id="node5" title=" " alt="" coords="386,175,573,202"/>
+<area shape="rect" id="node6" href="$keyring_8h.html" title=" " alt="" coords="597,175,679,202"/>
+<area shape="rect" id="node7" title=" " alt="" coords="465,332,600,359"/>
+<area shape="rect" id="node8" title=" " alt="" coords="318,257,481,284"/>
+<area shape="rect" id="node9" title=" " alt="" coords="505,257,640,284"/>
+<area shape="rect" id="node10" title=" " alt="" coords="665,257,742,284"/>
+<area shape="rect" id="node11" href="$g__hash__table_8h.html" title=" " alt="" coords="766,257,886,284"/>
+<area shape="rect" id="node12" href="$logging_8h.html" title=" " alt="" coords="910,257,993,284"/>
+<area shape="rect" id="node13" title=" " alt="" coords="876,332,1027,359"/>
 </map>

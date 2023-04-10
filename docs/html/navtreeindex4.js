@@ -1,6 +1,6 @@
 var NAVTREEINDEX4 =
 {
-"struct_compositor_surface.html#aab721b37da3f3096a9a7ef5dcb943d0f":[1,0,6,31],
+"struct_compositor_surface.html#ab35c8e20210306de3a5077087dc0747a":[1,0,6,32],
 "struct_compositor_surface.html#ab7a1276526b27ab9f14308dbc5209a16":[1,0,6,18],
 "struct_compositor_surface.html#ac808f20a34e2d981dcaeb8678a0c52bb":[1,0,6,29],
 "struct_compositor_surface.html#ac9af66b36ec5dc2c2e261ab1adf0f1ab":[1,0,6,1],

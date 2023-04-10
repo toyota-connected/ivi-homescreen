@@ -41,7 +41,7 @@ var struct_compositor_surface =
     [ "m_origin_y", "struct_compositor_surface.html#ac808f20a34e2d981dcaeb8678a0c52bb", null ],
     [ "m_subsurface", "struct_compositor_surface.html#a1826ed704c5a74302842cf7355e3136f", null ],
     [ "m_sync", "struct_compositor_surface.html#aab721b37da3f3096a9a7ef5dcb943d0f", null ],
-    [ "m_type", "struct_compositor_surface.html#a8fea260367713a852d4a7a0876d685bd", null ],
+    [ "m_type", "struct_compositor_surface.html#ab35c8e20210306de3a5077087dc0747a", null ],
     [ "m_wl", "struct_compositor_surface.html#a6b4d4bc2ca52698f581ca9f6c9a56f4e", null ],
     [ "m_z_order", "struct_compositor_surface.html#a1ae63fccd7e19814143a7aba5b635537", null ],
     [ "resize", "struct_compositor_surface.html#a5b20c7154834bd69ef33e611c9c533d5", null ],

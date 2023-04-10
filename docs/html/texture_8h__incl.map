@@ -1,12 +1,12 @@
-<map id="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/textures/texture.h" name="/home/joel.winarske@toyotaconnected.com/development/stargate/ivi&#45;homescreen/shell/textures/texture.h">
-<area shape="rect" id="node1" title=" " alt="" coords="272,5,448,91"/>
-<area shape="rect" id="node2" title=" " alt="" coords="5,139,83,165"/>
-<area shape="rect" id="node3" title=" " alt="" coords="107,139,170,165"/>
-<area shape="rect" id="node4" title=" " alt="" coords="365,221,448,247"/>
-<area shape="rect" id="node5" title=" " alt="" coords="245,139,349,165"/>
-<area shape="rect" id="node6" title=" " alt="" coords="373,139,472,165"/>
-<area shape="rect" id="node7" title=" " alt="" coords="496,139,683,165"/>
-<area shape="rect" id="node8" title=" " alt="" coords="751,213,934,255"/>
-<area shape="rect" id="node9" href="$constants_8h.html" title=" " alt="" coords="707,139,805,165"/>
-<area shape="rect" id="node10" title=" " alt="" coords="671,221,727,247"/>
+<map id="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/textures/texture.h" name="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/textures/texture.h">
+<area shape="rect" id="node1" title=" " alt="" coords="250,5,470,105"/>
+<area shape="rect" id="node2" title=" " alt="" coords="5,153,83,180"/>
+<area shape="rect" id="node3" title=" " alt="" coords="107,153,170,180"/>
+<area shape="rect" id="node4" title=" " alt="" coords="365,235,448,262"/>
+<area shape="rect" id="node5" title=" " alt="" coords="245,153,349,180"/>
+<area shape="rect" id="node6" title=" " alt="" coords="373,153,472,180"/>
+<area shape="rect" id="node7" title=" " alt="" coords="496,153,683,180"/>
+<area shape="rect" id="node8" title=" " alt="" coords="751,228,934,269"/>
+<area shape="rect" id="node9" href="$constants_8h.html" title=" " alt="" coords="707,153,805,180"/>
+<area shape="rect" id="node10" title=" " alt="" coords="671,235,727,262"/>
 </map>
