@@ -21,6 +21,7 @@
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <filesystem>
 #include <flutter/encodable_value.h>
 #include <shell/platform/embedder/embedder.h>
 #include <map>
@@ -409,7 +410,10 @@ class Engine {
    * @relation
    * flutter
    */
-  std::string GetAssetDirectory() { return m_assets_path; }
+  std::string GetAssetDirectory() {
+    std::filesystem::path p = m_assets_path;
+    return std::filesystem::absolute(p);
+  }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
   TextInput* m_text_input{};

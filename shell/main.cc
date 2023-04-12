@@ -21,6 +21,7 @@
 #include "configuration/configuration.h"
 
 #include <flutter/fml/command_line.h>
+#include <filesystem>
 
 volatile bool running = true;
 
@@ -124,8 +125,8 @@ int main(int argc, char** argv) {
     }
     if (cl.HasOption("b")) {
       cl.GetOptionValue("b", &config.view.bundle_path);
-      if (config.view.bundle_path.empty()) {
-        FML_LOG(ERROR) << "--b (Bundle Path) option requires an argument (e.g. "
+      if (config.view.bundle_path.empty() || !std::filesystem::is_directory(config.view.bundle_path)) {
+        FML_LOG(ERROR) << "--b (Bundle Path) option requires a directory path argument (e.g. "
                           "--b=/usr/share/gallery)";
         return EXIT_FAILURE;
       }

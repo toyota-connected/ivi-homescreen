@@ -58,10 +58,21 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         return;
       }
 
-      std::string assets_path;
-      it = args->find(flutter::EncodableValue(kArgAssetsPath));
+      bool map_flutter_assets = false;
+      it = args->find(flutter::EncodableValue(kArgMapFlutterAssetsPath));
       if (it != args->end() && !it->second.IsNull()) {
-        assets_path = std::get<std::string>(it->second);
+        map_flutter_assets = std::get<bool>(it->second);
+      }
+
+      std::string assets_path;
+      if (map_flutter_assets) {
+        assets_path = engine->GetAssetDirectory();
+      }
+      else {
+        it = args->find(flutter::EncodableValue(kArgAssetsPath));
+        if (it != args->end() && !it->second.IsNull()) {
+          assets_path = std::get<std::string>(it->second);
+        }
       }
 
       std::string cache_folder;

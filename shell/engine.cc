@@ -17,12 +17,10 @@
 #include <vector>
 
 #include <dlfcn.h>
-#include <sys/types.h>
 #include <cassert>
 
 #include <flutter/fml/file.h>
 #include <flutter/fml/paths.h>
-#include <filesystem>
 
 #include "constants.h"
 #include "engine.h"
