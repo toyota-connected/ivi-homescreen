@@ -53,10 +53,21 @@ flutter::EncodableValue TextureNaviRender::Create(
     FML_LOG(INFO) << "\"module\" not set, using " << module;
   }
 
-  std::string asset_path;
-  it = args->find(flutter::EncodableValue("asset_path"));
+  bool map_flutter_assets = false;
+  it = args->find(flutter::EncodableValue("map_flutter_assets"));
   if (it != args->end() && !it->second.IsNull()) {
-    asset_path = std::get<std::string>(it->second);
+    map_flutter_assets = std::get<bool>(it->second);
+  }
+
+  std::string asset_path;
+  if (map_flutter_assets) {
+    asset_path = obj->m_flutter_engine->GetAssetDirectory();
+  }
+  else {
+    it = args->find(flutter::EncodableValue("asset_path"));
+    if (it != args->end() && !it->second.IsNull()) {
+      asset_path = std::get<std::string>(it->second);
+    }
   }
   if (asset_path.empty()) {
     FML_LOG(ERROR) << "\"asset_path\" not set!!";

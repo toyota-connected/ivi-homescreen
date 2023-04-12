@@ -27,6 +27,7 @@ class CompositorSurfacePlugin {
 
   static constexpr char kArgView[] = "view";
   static constexpr char kArgModule[] = "module";
+  static constexpr char kArgMapFlutterAssetsPath[] = "map_flutter_assets";
   static constexpr char kArgAssetsPath[] = "assets_path";
   static constexpr char kCacheFolder[] = "cache_folder";
   static constexpr char kMiscFolder[] = "misc_folder";
