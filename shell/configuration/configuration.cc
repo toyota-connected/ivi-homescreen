@@ -57,6 +57,9 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
+    instance.view.pixel_ratio = obj[kPixelRatioKey].GetInt();
+  }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
@@ -131,6 +134,9 @@ void Configuration::getGlobalParameters(
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+  }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
+    instance.view.pixel_ratio = obj[kPixelRatioKey].GetInt();
   }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
