@@ -47,6 +47,19 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
+  } else if (method == kPlaySoundMethod) {
+    if (!args->IsNull() && args->IsString()) {
+      auto sound_type = args->GetString();
+      if (0 == strcmp(sound_type, kSoundTypeClick)) {
+        FML_DLOG(INFO) << "(" << engine->GetIndex() << ") SystemSound.play ** click **";
+        result = codec.EncodeSuccessEnvelope();
+      } else if (0 == strcmp(sound_type, kSoundTypeAlert)) {
+        FML_DLOG(INFO) << "(" << engine->GetIndex() << ")  SystemSound.play ** alert **";
+        result = codec.EncodeSuccessEnvelope();
+      }
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+    }
   } else if (method == kMethodClipboardHasStrings) {
     if (!args->IsNull() && args->IsString()) {
       auto format = args->GetString();
