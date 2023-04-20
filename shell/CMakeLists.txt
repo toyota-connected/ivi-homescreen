@@ -33,6 +33,9 @@ add_executable(homescreen
         view/flutter_view.cc
         wayland/display.cc
         wayland/window.cc
+        logging/logging.cc
+        logging/dlt/dlt.cc
+        logging/dlt/libdlt.cc
         )
 
 include(plugins)
@@ -68,13 +71,14 @@ target_compile_definitions(homescreen
 
 target_include_directories(homescreen
         PRIVATE
+        ..
+        logging
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
-        ..
         )
 
 if (BUILD_BACKEND_WAYLAND_EGL)

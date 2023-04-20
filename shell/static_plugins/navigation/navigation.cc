@@ -29,7 +29,7 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   if (method == kSelectSingleEntryHistory) {
     if (obj->arguments()->IsNull()) {
-      FML_LOG(INFO) << "(" << engine->GetIndex()
+      LOG(INFO) << "(" << engine->GetIndex()
                     << ") Navigation: Select Single Entry History";
       result = codec.EncodeSuccessEnvelope();
     } else {
@@ -37,7 +37,7 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
     }
   } else if (method == kSelectMultiEntryHistory) {
     if (obj->arguments()->IsNull()) {
-      FML_LOG(INFO) << "(" << engine->GetIndex()
+      LOG(INFO) << "(" << engine->GetIndex()
                     << ") Navigation: Select Multiple Entry History";
       result = codec.EncodeSuccessEnvelope();
     } else {
@@ -52,7 +52,7 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
       info.state =
           !(*args)["state"].IsNull() ? (*args)["state"].GetString() : "";
       info.replace = (*args)["replace"].GetBool();
-      FML_LOG(INFO) << "(" << engine->GetIndex()
+      LOG(INFO) << "(" << engine->GetIndex()
                     << ") Navigation: Route Information Updated"
                        "\n\tlocation: "
                     << info.location << "\n\tstate: " << info.state
@@ -62,7 +62,7 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Navigation: " << method
+    DLOG(INFO) << "(" << engine->GetIndex() << ") Navigation: " << method
                    << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "unhandled Method");
   }

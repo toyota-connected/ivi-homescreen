@@ -77,7 +77,7 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(ERROR) << "url_launcher: " << method << " is unhandled";
+    DLOG(ERROR) << "url_launcher: " << method << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),

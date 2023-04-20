@@ -50,7 +50,7 @@ flutter::EncodableValue TextureNaviRender::Create(
   }
   if (module.empty()) {
     module = kNaviRenderSoName;
-    FML_LOG(INFO) << "\"module\" not set, using " << module;
+    LOG(INFO) << "\"module\" not set, using " << module;
   }
 
   bool map_flutter_assets = false;
@@ -70,7 +70,7 @@ flutter::EncodableValue TextureNaviRender::Create(
     }
   }
   if (asset_path.empty()) {
-    FML_LOG(ERROR) << "\"asset_path\" not set!!";
+    LOG(ERROR) << "\"asset_path\" not set!!";
   }
 
   std::string cache_folder;
@@ -79,7 +79,7 @@ flutter::EncodableValue TextureNaviRender::Create(
     cache_folder = std::get<std::string>(it->second);
   }
   if (cache_folder.empty()) {
-    FML_LOG(ERROR) << "\"cache_folder\" not set!!";
+    LOG(ERROR) << "\"cache_folder\" not set!!";
   }
   mkdir(cache_folder.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
@@ -89,15 +89,15 @@ flutter::EncodableValue TextureNaviRender::Create(
     misc_folder = std::get<std::string>(it->second);
   }
   if (cache_folder.empty()) {
-    FML_LOG(ERROR) << "\"misc_folder\" not set!!";
+    LOG(ERROR) << "\"misc_folder\" not set!!";
   }
 
   if (!obj->m_h_module) {
-    FML_DLOG(INFO) << "Attempting to open [" << module << "]";
+    DLOG(INFO) << "Attempting to open [" << module << "]";
     obj->m_h_module = dlopen(module.c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (obj->m_h_module) {
       obj->InitRenderApi();
-      FML_LOG(INFO) << "navigation render interface version: "
+      LOG(INFO) << "navigation render interface version: "
                     << obj->m_render_api.version();
     } else {
       return flutter::EncodableValue(flutter::EncodableMap{
@@ -107,7 +107,7 @@ flutter::EncodableValue TextureNaviRender::Create(
     }
   }
 
-  FML_DLOG(INFO) << "Initializing Navigation Texture (" << obj->m_width << " x "
+  DLOG(INFO) << "Initializing Navigation Texture (" << obj->m_width << " x "
                  << obj->m_height << ")";
 
   std::lock_guard<std::mutex> guard(g_gl_mutex);

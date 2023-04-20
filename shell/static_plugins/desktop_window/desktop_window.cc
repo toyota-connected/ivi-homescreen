@@ -32,11 +32,11 @@ void DesktopWindow::OnPlatformMessage(const FlutterPlatformMessage* message,
     if (!obj->arguments()->IsNull()) {
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      FML_DLOG(INFO) << "desktop_window";
+      DLOG(INFO) << "desktop_window";
 
       for (auto it : *args) {
         auto key = std::get<std::string>(it.first);
-        FML_DLOG(INFO) << key;
+        DLOG(INFO) << key;
       }
 
       int64_t setMinWindowSize = 0;
@@ -60,9 +60,9 @@ void DesktopWindow::OnPlatformMessage(const FlutterPlatformMessage* message,
         height = encodedValue.LongValue();
       }
 
-      FML_DLOG(INFO) << "setMinWindowSize: " << setMinWindowSize;
-      FML_DLOG(INFO) << "width: " << width;
-      FML_DLOG(INFO) << "height: " << height;
+      DLOG(INFO) << "setMinWindowSize: " << setMinWindowSize;
+      DLOG(INFO) << "width: " << width;
+      DLOG(INFO) << "height: " << height;
     }
   }
 

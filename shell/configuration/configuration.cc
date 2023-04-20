@@ -24,7 +24,7 @@
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
-    FML_LOG(ERROR) << "JSON Configuration requires a \"view\" object";
+    LOG(ERROR) << "JSON Configuration requires a \"view\" object";
     exit(EXIT_FAILURE);
   }
 
@@ -226,14 +226,14 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
   if (!config.json_configuration_path.empty()) {
     doc = getJsonDocument(config.json_configuration_path);
     if (!doc.IsObject()) {
-      FML_LOG(ERROR) << "Invalid JSON Configuration file";
+      LOG(ERROR) << "Invalid JSON Configuration file";
       exit(EXIT_FAILURE);
     }
 
     view_count = getViewCount(doc);
   }
 
-  FML_DLOG(INFO) << "View Count: " << view_count;
+  DLOG(INFO) << "View Count: " << view_count;
   std::vector<struct Config> res;
   res.reserve(view_count);
   for (int i = 0; i < view_count; i++) {
@@ -247,7 +247,7 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
       cfg.view.window_type = "NORMAL";
 
     if (cfg.view.bundle_path.empty()) {
-      FML_LOG(ERROR) << "A bundle path must be specified";
+      LOG(ERROR) << "A bundle path must be specified";
       exit(EXIT_FAILURE);
     }
     if (cfg.view.width == 0) {
@@ -274,7 +274,7 @@ rapidjson::Document Configuration::getJsonDocument(
     const std::string& filename) {
   std::ifstream json_file(filename);
   if (!json_file.is_open()) {
-    FML_LOG(ERROR) << "Unable to open file " << filename;
+    LOG(ERROR) << "Unable to open file " << filename;
     exit(EXIT_FAILURE);
   }
 
@@ -287,38 +287,38 @@ rapidjson::Document Configuration::getJsonDocument(
 }
 
 void Configuration::PrintConfig(const Config& config) {
-  FML_LOG(INFO) << "**********";
-  FML_LOG(INFO) << "* Global *";
-  FML_LOG(INFO) << "**********";
-  FML_LOG(INFO) << "Application Id: .......... " << config.app_id;
+  LOG(INFO) << "**********";
+  LOG(INFO) << "* Global *";
+  LOG(INFO) << "**********";
+  LOG(INFO) << "Application Id: .......... " << config.app_id;
   if (!config.json_configuration_path.empty())
-    FML_LOG(INFO) << "JSON Configuration: ...... "
+    LOG(INFO) << "JSON Configuration: ...... "
                   << config.json_configuration_path;
-  FML_LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
-  FML_LOG(INFO) << "Disable Cursor: .......... "
+  LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
+  LOG(INFO) << "Disable Cursor: .......... "
                 << (config.disable_cursor ? "true" : "false");
-  FML_LOG(INFO) << "Debug Backend: ........... "
+  LOG(INFO) << "Debug Backend: ........... "
                 << (config.debug_backend ? "true" : "false");
-  FML_LOG(INFO) << "********";
-  FML_LOG(INFO) << "* View *";
-  FML_LOG(INFO) << "********";
+  LOG(INFO) << "********";
+  LOG(INFO) << "* View *";
+  LOG(INFO) << "********";
   if (!config.view.vm_args.empty()) {
-    FML_LOG(INFO) << "VM Args:";
+    LOG(INFO) << "VM Args:";
     for (auto const& arg : config.view.vm_args) {
-      FML_LOG(INFO) << arg;
+      LOG(INFO) << arg;
     }
   }
-  FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
-  FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
-  FML_LOG(INFO) << "Output Index: ............. "
+  LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
+  LOG(INFO) << "Window Type: .............. " << config.view.window_type;
+  LOG(INFO) << "Output Index: ............. "
                 << config.view.wl_output_index;
-  FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
+  LOG(INFO) << "Size: ..................... " << config.view.width << " x "
                 << config.view.height;
   if (config.view.pixel_ratio != kDefaultPixelRatio) {
-    FML_LOG(INFO) << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+    LOG(INFO) << "Pixel Ratio: .............. " << config.view.pixel_ratio;
   }
-  FML_LOG(INFO) << "Fullscreen: ............... "
+  LOG(INFO) << "Fullscreen: ............... "
                 << (config.view.fullscreen ? "true" : "false");
-  FML_LOG(INFO) << "Accessibility Features: ... "
+  LOG(INFO) << "Accessibility Features: ... "
                 << config.view.accessibility_features;
 }

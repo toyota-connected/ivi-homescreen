@@ -44,7 +44,7 @@ WaylandWindow::WaylandWindow(size_t index,
       m_type(get_window_type(type)),
       m_app_id(std::move(app_id)),
       m_fullscreen(fullscreen) {  // disable vsync
-  FML_DLOG(INFO) << "(" << m_index << ") + WaylandWindow()";
+  DLOG(INFO) << "(" << m_index << ") + WaylandWindow()";
 
   m_fps_counter = 0;
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
@@ -90,7 +90,7 @@ WaylandWindow::WaylandWindow(size_t index,
       m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_RIGHT, 0);
       break;
     default:
-      FML_LOG(ERROR) << "Invalid surface role type supplied";
+      LOG(ERROR) << "Invalid surface role type supplied";
       assert(false);
   }
 
@@ -108,11 +108,11 @@ WaylandWindow::WaylandWindow(size_t index,
   m_backend->CreateSurface(m_index, m_base_surface, m_geometry.width,
                            m_geometry.height);
 
-  FML_DLOG(INFO) << "(" << m_index << ") - WaylandWindow()";
+  DLOG(INFO) << "(" << m_index << ") - WaylandWindow()";
 }
 
 WaylandWindow::~WaylandWindow() {
-  FML_DLOG(INFO) << "(" << m_index << ") + ~WaylandWindow()";
+  DLOG(INFO) << "(" << m_index << ") + ~WaylandWindow()";
 
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
@@ -125,7 +125,7 @@ WaylandWindow::~WaylandWindow() {
 
   wl_surface_destroy(m_base_surface);
 
-  FML_DLOG(INFO) << "(" << m_index << ") - ~WaylandWindow()";
+  DLOG(INFO) << "(" << m_index << ") - ~WaylandWindow()";
 }
 
 void WaylandWindow::handle_base_surface_enter(void* data,
@@ -140,7 +140,7 @@ void WaylandWindow::handle_base_surface_enter(void* data,
   auto result =
       d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
   if (result != kSuccess) {
-    FML_LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
+    LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
   }
 }
 
@@ -150,7 +150,7 @@ void WaylandWindow::handle_base_surface_leave(void* data,
   (void)data;
   (void)surface;
   (void)output;
-  FML_DLOG(INFO) << "Leaving output";
+  DLOG(INFO) << "Leaving output";
 }
 
 const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
@@ -272,14 +272,14 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
         static_cast<size_t>(m_geometry.height),
                                         static_cast<size_t>(m_geometry.width));
     if (result != kSuccess) {
-      FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+      LOG(ERROR) << "Failed to set Flutter Engine Window Size";
     }
 
     auto buffer_scale = m_display->GetBufferScale(m_output_index);
 
     result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
     if (result != kSuccess) {
-      FML_LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
+      LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
     }
   }
 }

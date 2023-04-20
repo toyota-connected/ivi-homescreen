@@ -38,7 +38,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       MethodSetApplicationSwitcherDescription description{};
       description.label = (*args)["label"].GetString();
       description.primaryColor = (*args)["primaryColor"].GetUint();
-      FML_DLOG(INFO)
+      DLOG(INFO)
           << "(" << engine->GetIndex()
           << ") Platform: ApplicationSwitcherDescription\n\tlabel: \""
           << description.label
@@ -51,10 +51,10 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
     if (!args->IsNull() && args->IsString()) {
       auto sound_type = args->GetString();
       if (0 == strcmp(sound_type, kSoundTypeClick)) {
-        FML_DLOG(INFO) << "(" << engine->GetIndex() << ") SystemSound.play ** click **";
+        DLOG(INFO) << "(" << engine->GetIndex() << ") SystemSound.play ** click **";
         result = codec.EncodeSuccessEnvelope();
       } else if (0 == strcmp(sound_type, kSoundTypeAlert)) {
-        FML_DLOG(INFO) << "(" << engine->GetIndex() << ")  SystemSound.play ** alert **";
+        DLOG(INFO) << "(" << engine->GetIndex() << ")  SystemSound.play ** alert **";
         result = codec.EncodeSuccessEnvelope();
       }
     } else {
@@ -96,7 +96,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
   } else if (method == kMethodClipboardSetData) {
     if (!args->IsNull() && args->HasMember("text") &&
         !((*args)["text"].IsNull())) {
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Clipboard Data Set: \n"
+      DLOG(INFO) << "(" << engine->GetIndex() << ") Clipboard Data Set: \n"
                      << (*args)["text"].GetString();
       g_clipboard.assign((*args)["text"].GetString());
       result = codec.EncodeSuccessEnvelope();
@@ -104,18 +104,18 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kMethodSetEnabledSystemUIOverlays) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex()
+    DLOG(INFO) << "(" << engine->GetIndex()
                    << ") System UI Overlays Enabled";
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kHapticFeedbackVibrate) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex()
+    DLOG(INFO) << "(" << engine->GetIndex()
                    << ") Haptic Feedback - Vibrate";
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kSystemChrome_setPreferredOrientations) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") setPreferredOrientations";
+    DLOG(INFO) << "(" << engine->GetIndex() << ") setPreferredOrientations";
     if (!args->IsNull()) {
       for (const auto& field : args->GetArray()) {
-        FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+        DLOG(INFO) << "(" << engine->GetIndex() << ") "
                        << field.GetString();
       }
     }
@@ -127,7 +127,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemNavigationBarColor].IsNumber()) {
       style.systemNavigationBarColor =
           (*args)[kSystemNavigationBarColor].GetUint();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kSystemNavigationBarColor << ": "
                      << style.systemNavigationBarColor;
     }
@@ -136,7 +136,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemNavigationBarDividerColor].IsNumber()) {
       style.systemNavigationBarDividerColor =
           (*args)[kSystemNavigationBarDividerColor].GetUint();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kSystemNavigationBarDividerColor << ": "
                      << style.systemNavigationBarDividerColor;
     }
@@ -145,7 +145,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemStatusBarContrastEnforced].IsBool()) {
       style.systemStatusBarContrastEnforced =
           (*args)[kSystemStatusBarContrastEnforced].GetBool();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kSystemStatusBarContrastEnforced << ": "
                      << style.systemStatusBarContrastEnforced;
     }
@@ -153,14 +153,14 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         !(*args)[kStatusBarColor].IsNull() &&
         (*args)[kStatusBarColor].IsNumber()) {
       style.statusBarColor = (*args)[kStatusBarColor].GetUint();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") " << kStatusBarColor
+      DLOG(INFO) << "(" << engine->GetIndex() << ") " << kStatusBarColor
                      << ": " << style.statusBarColor;
     }
     if (args->HasMember(kStatusBarBrightness) &&
         !(*args)[kStatusBarBrightness].IsNull() &&
         (*args)[kStatusBarBrightness].IsString()) {
       style.statusBarBrightness = (*args)[kStatusBarBrightness].GetString();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kStatusBarBrightness << ": "
                      << style.statusBarBrightness;
     }
@@ -169,7 +169,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kStatusBarIconBrightness].IsString()) {
       style.statusBarIconBrightness =
           (*args)[kStatusBarIconBrightness].GetString();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kStatusBarIconBrightness << ": "
                      << style.statusBarIconBrightness;
     }
@@ -178,7 +178,7 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemNavigationBarIconBrightness].IsString()) {
       style.systemNavigationBarIconBrightness =
           (*args)[kSystemNavigationBarIconBrightness].GetString();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kSystemNavigationBarIconBrightness << ": "
                      << style.systemNavigationBarIconBrightness;
     }
@@ -187,13 +187,13 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemNavigationBarContrastEnforced].IsBool()) {
       style.systemNavigationBarContrastEnforced =
           (*args)[kSystemNavigationBarContrastEnforced].GetBool();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
+      DLOG(INFO) << "(" << engine->GetIndex() << ") "
                      << kSystemNavigationBarContrastEnforced << ": "
                      << style.systemNavigationBarContrastEnforced;
     }
     result = codec.EncodeSuccessEnvelope();
   } else {
-    FML_DLOG(ERROR) << "(" << engine->GetIndex() << ") Platform: " << method
+    DLOG(ERROR) << "(" << engine->GetIndex() << ") Platform: " << method
                     << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }

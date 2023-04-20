@@ -71,7 +71,7 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
   auto ret = FL_KEY_EV_RET_FAILED;
 
   if (reply_size == 0) {
-    FML_DLOG(ERROR) << "KeyEvent: BinaryReply: reply_size is 0";
+    DLOG(ERROR) << "KeyEvent: BinaryReply: reply_size is 0";
     return ret;
   }
 
@@ -79,18 +79,18 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
       flutter::JsonMessageCodec::GetInstance().DecodeMessage(reply, reply_size);
   if (decoded == nullptr) {
     /* could not decode */
-    FML_DLOG(ERROR) << "KeyEvent: BinaryReply: could not decoded";
+    DLOG(ERROR) << "KeyEvent: BinaryReply: could not decoded";
     return ret;
   }
 
   auto handled = decoded->FindMember(kHandled);
   if (handled == decoded->MemberEnd()) {
-    FML_DLOG(ERROR) << "KeyEvent: BinaryReply: could not found key \""
+    DLOG(ERROR) << "KeyEvent: BinaryReply: could not found key \""
                     << kHandled << "\"";
 
     // check the reply contents
     for (auto& m : decoded->GetObject()) {
-      FML_DLOG(ERROR) << "key: " << m.name.GetString()
+      DLOG(ERROR) << "key: " << m.name.GetString()
                       << " type: " << m.value.GetType();
     }
 
@@ -98,7 +98,7 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
   }
 
   if (!(handled->value.IsBool())) {
-    FML_DLOG(ERROR) << "KeyEvent: BinaryReply: key \"" << kHandled
+    DLOG(ERROR) << "KeyEvent: BinaryReply: key \"" << kHandled
                     << "\" is not bool. unexpected.";
     return ret;
   }
