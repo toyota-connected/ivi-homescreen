@@ -36,7 +36,7 @@ int EglProcessResolver::GetHandle(std::array<char[kSoMaxLength], kSoCount> arr,
   for (const auto& item : arr) {
     handle = dlopen(item, RTLD_LAZY | RTLD_LOCAL);
     if (handle) {
-      FML_DLOG(INFO) << "dlopen: " << item;
+      DLOG(INFO) << "dlopen: " << item;
       break;
     }
   }
@@ -57,7 +57,7 @@ void EglProcessResolver::Initialize() {
     if (handle) {
       m_handles.push_back(handle);
     } else {
-      FML_LOG(ERROR) << soNames[0] << ": Library not found";
+      LOG(ERROR) << soNames[0] << ": Library not found";
       assert(false);
     }
   }
@@ -65,7 +65,7 @@ void EglProcessResolver::Initialize() {
 
 void* EglProcessResolver::process_resolver(const char* name) {
   if (name == nullptr) {
-    FML_LOG(ERROR) << "gl_proc_resolver for nullptr; ignoring";
+    LOG(ERROR) << "gl_proc_resolver for nullptr; ignoring";
     return nullptr;
   }
 
@@ -82,7 +82,7 @@ void* EglProcessResolver::process_resolver(const char* name) {
     return address;
   }
 
-  FML_LOG(ERROR) << "gl_proc_resolver: could not resolve symbol \"" << name
+  LOG(ERROR) << "gl_proc_resolver: could not resolve symbol \"" << name
                  << "\"";
 
   return nullptr;

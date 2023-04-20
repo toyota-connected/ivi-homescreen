@@ -39,7 +39,7 @@ Texture::Texture(uint32_t id,
       m_width(width) {}
 
 Texture::~Texture() {
-  FML_DLOG(INFO) << "Texture Destructor";
+  DLOG(INFO) << "Texture Destructor";
 }
 
 void Texture::GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out) {

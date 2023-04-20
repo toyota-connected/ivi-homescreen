@@ -34,7 +34,7 @@ Display::Display(bool enable_cursor,
     : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
-  FML_DLOG(INFO) << "+ Display()";
+  DLOG(INFO) << "+ Display()";
 
   for (auto const& cfg : configs) {
     // check if we actually need to bind to agl-shell
@@ -47,7 +47,7 @@ Display::Display(bool enable_cursor,
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
-    FML_LOG(ERROR) << "Failed to connect to Wayland display. "
+    LOG(ERROR) << "Failed to connect to Wayland display. "
                    << strerror(errno);
     exit(-1);
   }
@@ -63,7 +63,7 @@ Display::Display(bool enable_cursor,
         continue;
     }
     if (!m_agl.bound_ok) {
-      FML_LOG(ERROR)
+      LOG(ERROR)
           << "agl_shell extension already in use by other shell client.";
       exit(EXIT_FAILURE);
     }
@@ -72,14 +72,14 @@ Display::Display(bool enable_cursor,
   }
 
   if (!m_agl.shell && m_agl.bind_to_agl_shell) {
-    FML_LOG(INFO) << "agl_shell extension not present";
+    LOG(INFO) << "agl_shell extension not present";
   }
 
-  FML_DLOG(INFO) << "- Display()";
+  DLOG(INFO) << "- Display()";
 }
 
 Display::~Display() {
-  FML_DLOG(INFO) << "+ ~Display()";
+  DLOG(INFO) << "+ ~Display()";
 
   if (m_shm)
     wl_shm_destroy(m_shm);
@@ -106,7 +106,7 @@ Display::~Display() {
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
 
-  FML_DLOG(INFO) << "- ~Display()";
+  DLOG(INFO) << "- ~Display()";
 }
 
 /**
@@ -136,14 +136,14 @@ void Display::registry_handle_global(void* data,
                                      uint32_t version) {
   auto* d = static_cast<Display*>(data);
 
-  FML_DLOG(INFO) << "Wayland: " << interface << " version " << version;
+  DLOG(INFO) << "Wayland: " << interface << " version " << version;
 
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
     if (version >= 3) {
       d->m_compositor = static_cast<struct wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
                            std::min(static_cast<uint32_t>(3), version)));
-      FML_DLOG(INFO) << "\tBuffer Scale Enabled";
+      DLOG(INFO) << "\tBuffer Scale Enabled";
       d->m_buffer_scale_enable = true;
     } else {
       d->m_compositor = static_cast<struct wl_compositor*>(
@@ -179,7 +179,7 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_output_interface,
                          std::min(static_cast<uint32_t>(2), version)));
     wl_output_add_listener(oi->output, &output_listener, oi.get());
-    FML_DLOG(INFO) << "Wayland: Output [" << d->m_all_outputs.size() << "]";
+    DLOG(INFO) << "Wayland: Output [" << d->m_all_outputs.size() << "]";
     d->m_all_outputs.push_back(oi);
   } else if (strcmp(interface, wl_seat_interface.name) == 0) {
     d->m_seat = static_cast<wl_seat*>(
@@ -204,7 +204,7 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(1), version)));
     }
     d->m_agl.version = version;
-    FML_LOG(INFO) << "agl_shell version: " << version;
+    LOG(INFO) << "agl_shell version: " << version;
   }
 }
 
@@ -244,7 +244,7 @@ void Display::display_handle_geometry(void* data,
   oi->physical_width = static_cast<unsigned int>(physical_width);
   oi->physical_height = static_cast<unsigned int>(physical_height);
 
-  FML_DLOG(INFO) << "Physical width: " << physical_width << " mm x "
+  DLOG(INFO) << "Physical width: " << physical_width << " mm x "
                  << physical_height << " mm";
 }
 
@@ -261,7 +261,7 @@ void Display::display_handle_mode(void* data,
   oi->height = static_cast<unsigned int>(height);
   oi->refresh_rate = refresh;
 
-  FML_DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
+  DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
                  << (refresh > 1000 ? refresh / 1000.0 : (double)refresh)
                  << " Hz";
 }
@@ -273,7 +273,7 @@ void Display::display_handle_scale(void* data,
   auto* oi = static_cast<output_info_t*>(data);
   oi->scale = factor;
 
-  FML_DLOG(INFO) << "Display Scale Factor: " << factor;
+  DLOG(INFO) << "Display Scale Factor: " << factor;
 }
 
 void Display::display_handle_done(void* data, struct wl_output* wl_output) {
@@ -300,7 +300,7 @@ void Display::seat_handle_capabilities(void* data,
   auto* d = static_cast<Display*>(data);
 
   if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
-    FML_LOG(INFO) << "Pointer Present";
+    LOG(INFO) << "Pointer Present";
     d->m_pointer.pointer = wl_seat_get_pointer(seat);
     wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
   } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.pointer) {
@@ -309,7 +309,7 @@ void Display::seat_handle_capabilities(void* data,
   }
 
   if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
-    FML_LOG(INFO) << "Keyboard Present";
+    LOG(INFO) << "Keyboard Present";
     d->m_keyboard = wl_seat_get_keyboard(seat);
     wl_keyboard_add_listener(d->m_keyboard, &keyboard_listener, d);
   } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard) {
@@ -318,7 +318,7 @@ void Display::seat_handle_capabilities(void* data,
   }
 
   if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
-    FML_LOG(INFO) << "Touch Present";
+    LOG(INFO) << "Touch Present";
     d->m_touch.touch = wl_seat_get_touch(seat);
     wl_touch_set_user_data(d->m_touch.touch, d);
     wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
@@ -333,7 +333,7 @@ void Display::seat_handle_name(void* data,
                                const char* name) {
   (void)data;
   (void)seat;
-  FML_DLOG(INFO) << "Seat: " << name;
+  DLOG(INFO) << "Seat: " << name;
 }
 
 const struct wl_seat_listener Display::seat_listener = {
@@ -580,14 +580,14 @@ void Display::keyboard_handle_key(void* data,
     const xkb_keysym_t* keysyms;
     int res = xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &keysyms);
     if (res == 0) {
-      FML_LOG(INFO) << "xkb_scancode has no keysyms: "
+      LOG(INFO) << "xkb_scancode has no keysyms: "
                     << "0x" << std::hex << xkb_scancode;
       keysym = XKB_KEY_NoSymbol;
     } else {
       // only use the first symbol until the use case for two is clarified
       keysym = keysyms[0];
       for (int i = 0; i < res; i++) {
-        FML_LOG(INFO) << "xkb keysym: " << std::hex << "0x" << keysyms;
+        LOG(INFO) << "xkb keysym: " << std::hex << "0x" << keysyms;
       }
     }
   }
@@ -606,7 +606,7 @@ void Display::keyboard_handle_key(void* data,
       d->m_repeat_code = xkb_scancode;
       d->m_repeat_timer->arm();
     } else {
-      FML_DLOG(INFO) << "key does not repeat: " << std::hex << "0x"
+      DLOG(INFO) << "key does not repeat: " << std::hex << "0x"
                      << xkb_scancode;
     }
 
@@ -670,7 +670,7 @@ void Display::keyboard_handle_repeat_info(void* data,
 
   d->m_repeat_timer->set_timerspec(rate, delay);
 
-  FML_DLOG(INFO) << "[keyboard repeat info] rate: " << rate
+  DLOG(INFO) << "[keyboard repeat info] rate: " << rate
                  << ", delay: " << delay;
 }
 
@@ -788,7 +788,7 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* wl_touch) {
   (void)wl_touch;
   auto* d = static_cast<Display*>(data);
   if (d->m_touch_engine) {
-    FML_DLOG(INFO) << "touch_handle_cancel";
+    DLOG(INFO) << "touch_handle_cancel";
     d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kCancel,
                                       d->m_pointer.event.surface_x,
                                       d->m_pointer.event.surface_y, 0);
@@ -867,13 +867,13 @@ bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
     } else if (kind == "forbidden") {
       cursor_name = kCursorKindForbidden;
     } else {
-      FML_DLOG(INFO) << "Cursor Kind = " << kind;
+      DLOG(INFO) << "Cursor Kind = " << kind;
       return false;
     }
 
     auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
-      FML_DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
+      DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
       return false;
     }
     auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
@@ -888,7 +888,7 @@ bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
                         (int32_t)cursor->images[0]->height);
       wl_surface_commit(m_cursor_surface);
     } else {
-      FML_DLOG(INFO) << "Failed to set cursor: Invalid Cursor Buffer";
+      DLOG(INFO) << "Failed to set cursor: Invalid Cursor Buffer";
       return false;
     }
   }
@@ -912,7 +912,7 @@ int32_t Display::GetBufferScale(uint32_t index) {
       return (int32_t)kDefaultBufferScale;
     }
   }
-  FML_DLOG(ERROR) << "Invalid output index: " << index;
+  DLOG(ERROR) << "Invalid output index: " << index;
   return (int32_t)kDefaultBufferScale;
 }
 

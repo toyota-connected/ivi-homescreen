@@ -65,6 +65,12 @@ static constexpr char kApplicationName[] = "homescreen";
 static constexpr char kXdgApplicationDir[] = ".homescreen";
 static constexpr char kXdgConfigDir[] = ".config";
 
+// DLT Logging
+static constexpr char kDltAppId[] = "HMIF";
+static constexpr char kDltAppIdDescription[] = "HMI Flutter";
+static constexpr char kDltContextId[] = "FEMB";
+static constexpr char kDltContextIdDescription[] = "Flutter Embedder";
+
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
@@ -100,7 +106,7 @@ constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
 
 #if defined(__GNUC__)
 #ifndef MAYBE_UNUSED
-#define MAYBE_UNUSED
+#define MAYBE_UNUSED [[maybe_unused]]
 #endif
 #ifndef NODISCARD
 #define NODISCARD

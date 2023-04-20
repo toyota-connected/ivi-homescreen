@@ -79,22 +79,22 @@ class Shader {
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
       switch (glCheckFramebufferStatus(GL_FRAMEBUFFER)) {
         case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-          FML_LOG(ERROR)
+          LOG(ERROR)
               << "failed to draw to framebuffer: "
                  "the framebuffer attachment points are framebuffer incomplete";
           break;
         case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-          FML_LOG(ERROR) << "failed to draw to framebuffer: "
+          LOG(ERROR) << "failed to draw to framebuffer: "
                             "the framebuffer does not have at least one image "
                             "attached to it";
           break;
         case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS:
-          FML_LOG(ERROR) << "failed to draw to framebuffer: "
+          LOG(ERROR) << "failed to draw to framebuffer: "
                             "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS";
           break;
         case GL_FRAMEBUFFER_UNSUPPORTED:
         default:
-          FML_LOG(ERROR)
+          LOG(ERROR)
               << "failed to draw to framebuffer: target is the default "
                  "framebuffer, but the default framebuffer does not exist";
           break;

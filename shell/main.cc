@@ -19,6 +19,7 @@
 
 #include "app.h"
 #include "configuration/configuration.h"
+#include "logging/logging.h"
 
 #include <flutter/fml/command_line.h>
 #include <filesystem>
@@ -34,7 +35,7 @@ volatile bool running = true;
  */
 void SignalHandler(int signal) {
   (void)signal;
-  FML_DLOG(INFO) << "Ctl+C";
+  DLOG(INFO) << "Ctl+C";
   running = false;
 }
 
@@ -83,7 +84,11 @@ int main(int argc, char** argv) {
         .disable_cursor_set{}, .debug_backend{}, .debug_backend_set{}, .view{},
   };
 
-  FML_LOG(INFO) << GIT_BRANCH " @ " GIT_HASH;
+  if (Dlt::IsSupported()) {
+    Dlt::Register();
+  }
+
+  LOG(INFO) << GIT_BRANCH " @ " GIT_HASH;
 
   config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
   for (int i = 1; i < argc; ++i) {
@@ -96,11 +101,11 @@ int main(int argc, char** argv) {
     if (cl.HasOption("j")) {
       cl.GetOptionValue("j", &config.json_configuration_path);
       if (config.json_configuration_path.empty()) {
-        FML_LOG(ERROR) << "--j option requires an argument (e.g. "
+        LOG(ERROR) << "--j option requires an argument (e.g. "
                           "--j=/tmp/cfg-dbg.json)";
         return EXIT_FAILURE;
       }
-      FML_DLOG(INFO) << "Json Configuration: "
+      DLOG(INFO) << "Json Configuration: "
                      << config.json_configuration_path;
       RemoveArgument(config.view.vm_args,
                      "--j=" + config.json_configuration_path);
@@ -109,12 +114,12 @@ int main(int argc, char** argv) {
       std::string accessibility_feature_flag_str;
       cl.GetOptionValue("a", &accessibility_feature_flag_str);
       if (!IsNumber(accessibility_feature_flag_str)) {
-        FML_LOG(ERROR)
+        LOG(ERROR)
             << "--a option (Accessibility Features) requires an integer value";
         return EXIT_FAILURE;
       }
       if (accessibility_feature_flag_str.empty()) {
-        FML_LOG(ERROR) << "--a option (Accessibility Features) requires an "
+        LOG(ERROR) << "--a option (Accessibility Features) requires an "
                           "argument (e.g. --a=31)";
         return EXIT_FAILURE;
       }
@@ -126,27 +131,27 @@ int main(int argc, char** argv) {
     if (cl.HasOption("b")) {
       cl.GetOptionValue("b", &config.view.bundle_path);
       if (config.view.bundle_path.empty() || !std::filesystem::is_directory(config.view.bundle_path)) {
-        FML_LOG(ERROR) << "--b (Bundle Path) option requires a directory path argument (e.g. "
+        LOG(ERROR) << "--b (Bundle Path) option requires a directory path argument (e.g. "
                           "--b=/usr/share/gallery)";
         return EXIT_FAILURE;
       }
-      FML_DLOG(INFO) << "Bundle Path: " << config.view.bundle_path;
+      DLOG(INFO) << "Bundle Path: " << config.view.bundle_path;
       RemoveArgument(config.view.vm_args, "--b=" + config.view.bundle_path);
     }
     if (cl.HasOption("c")) {
-      FML_DLOG(INFO) << "Disable Cursor";
+      DLOG(INFO) << "Disable Cursor";
       config.disable_cursor = true;
       config.disable_cursor_set = true;
       RemoveArgument(config.view.vm_args, "--c");
     }
     if (cl.HasOption("d")) {
-      FML_DLOG(INFO) << "Backend Debug";
+      DLOG(INFO) << "Backend Debug";
       config.debug_backend = true;
       config.debug_backend_set = true;
       RemoveArgument(config.view.vm_args, "--d");
     }
     if (cl.HasOption("f")) {
-      FML_DLOG(INFO) << "Fullscreen";
+      DLOG(INFO) << "Fullscreen";
       config.view.fullscreen = true;
       config.view.fullscreen_set = true;
       RemoveArgument(config.view.vm_args, "--f");
@@ -155,11 +160,11 @@ int main(int argc, char** argv) {
       std::string width_str;
       cl.GetOptionValue("w", &width_str);
       if (!IsNumber(width_str)) {
-        FML_LOG(ERROR) << "--w option (Width) requires an integer value";
+        LOG(ERROR) << "--w option (Width) requires an integer value";
         return EXIT_FAILURE;
       }
       if (width_str.empty()) {
-        FML_LOG(ERROR)
+        LOG(ERROR)
             << "--w option (Width) requires an argument (e.g. --w=720)";
         return EXIT_FAILURE;
       }
@@ -170,11 +175,11 @@ int main(int argc, char** argv) {
       std::string height_str;
       cl.GetOptionValue("h", &height_str);
       if (!IsNumber(height_str)) {
-        FML_LOG(ERROR) << "--h option (Height) requires an integer value";
+        LOG(ERROR) << "--h option (Height) requires an integer value";
         return EXIT_FAILURE;
       }
       if (height_str.empty()) {
-        FML_LOG(ERROR)
+        LOG(ERROR)
             << "--h option (Height) requires an argument (e.g. --w=1280)";
         return EXIT_FAILURE;
       }
@@ -184,21 +189,21 @@ int main(int argc, char** argv) {
     if (cl.HasOption("t")) {
       cl.GetOptionValue("t", &config.cursor_theme);
       if (config.cursor_theme.empty()) {
-        FML_LOG(ERROR)
+        LOG(ERROR)
             << "--t option requires an argument (e.g. --t=DMZ-White)";
         return EXIT_FAILURE;
       }
-      FML_DLOG(INFO) << "Cursor Theme: " << config.cursor_theme;
+      DLOG(INFO) << "Cursor Theme: " << config.cursor_theme;
       RemoveArgument(config.view.vm_args, "--t=" + config.cursor_theme);
     }
     if (cl.HasOption("window-type")) {
       cl.GetOptionValue("window-type", &config.view.window_type);
       if (config.view.window_type.empty()) {
-        FML_LOG(ERROR) << "--window-type option requires an argument (e.g. "
+        LOG(ERROR) << "--window-type option requires an argument (e.g. "
                           "--window-type=BG)";
         return EXIT_FAILURE;
       }
-      FML_DLOG(INFO) << "Window Type: " << config.view.window_type;
+      DLOG(INFO) << "Window Type: " << config.view.window_type;
       RemoveArgument(config.view.vm_args,
                      "--window-type=" + config.view.window_type);
     }
@@ -206,12 +211,12 @@ int main(int argc, char** argv) {
       std::string output_index_str;
       cl.GetOptionValue("output-index", &output_index_str);
       if (!IsNumber(output_index_str)) {
-        FML_LOG(ERROR) << "--output-index option (Wayland Output Index) "
+        LOG(ERROR) << "--output-index option (Wayland Output Index) "
                           "requires an integer value";
         return EXIT_FAILURE;
       }
       if (output_index_str.empty()) {
-        FML_LOG(ERROR) << "--output-index option (Wayland Output Index) "
+        LOG(ERROR) << "--output-index option (Wayland Output Index) "
                           "requires an argument (e.g. --output-index=1)";
         return EXIT_FAILURE;
       }
@@ -222,11 +227,11 @@ int main(int argc, char** argv) {
     if (cl.HasOption("xdg-shell-app-id")) {
       cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
       if (config.app_id.empty()) {
-        FML_LOG(ERROR) << "--xdg-shell-app-id option requires an argument "
+        LOG(ERROR) << "--xdg-shell-app-id option requires an argument "
                           "(e.g. --xdg-shell-app-id=gallery)";
         return EXIT_FAILURE;
       }
-      FML_DLOG(INFO) << "Application ID: " << config.app_id;
+      DLOG(INFO) << "Application ID: " << config.app_id;
       RemoveArgument(config.view.vm_args,
                      "--xdg-shell-app-id=" + config.app_id);
     }
@@ -234,7 +239,7 @@ int main(int argc, char** argv) {
       std::string pixel_ratio_str;
       cl.GetOptionValue("p", &pixel_ratio_str);
       if (pixel_ratio_str.empty()) {
-        FML_LOG(ERROR) << "--p option (Pixel Ratio) requires an argument "
+        LOG(ERROR) << "--p option (Pixel Ratio) requires an argument "
                           "(e.g. --p=1.1234)";
         return EXIT_FAILURE;
       }
@@ -247,9 +252,9 @@ int main(int argc, char** argv) {
 
   auto vm_arg_count = config.view.vm_args.size();
   if (vm_arg_count) {
-    FML_DLOG(INFO) << "VM Arg Count: " << vm_arg_count;
+    DLOG(INFO) << "VM Arg Count: " << vm_arg_count;
     for (auto const& arg : config.view.vm_args) {
-      FML_DLOG(INFO) << arg;
+      DLOG(INFO) << arg;
     }
   }
 
@@ -267,6 +272,10 @@ int main(int argc, char** argv) {
   int ret = 0;
   while (running && ret != -1) {
     ret = app.Loop();
+  }
+
+  if (Dlt::IsSupported()) {
+    Dlt::Unregister();
   }
 
   return EXIT_SUCCESS;

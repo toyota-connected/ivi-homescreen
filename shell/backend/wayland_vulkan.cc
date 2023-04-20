@@ -35,7 +35,7 @@ WaylandVulkanBackend::WaylandVulkanBackend(struct wl_display* display,
       resize_pending_(false),
       Backend(this, Resize, CreateSurface) {
   if (!bluevk::initialize()) {
-    FML_LOG(ERROR) << "BlueVK is unable to load entry points.\n";
+    LOG(ERROR) << "BlueVK is unable to load entry points.\n";
     exit(EXIT_FAILURE);
   }
   createInstance();
@@ -132,10 +132,10 @@ void WaylandVulkanBackend::createInstance() {
   state_.enabled_instance_extensions.push_back(
       VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 
-  FML_LOG(INFO) << "Enabling " << state_.enabled_instance_extensions.size()
+  LOG(INFO) << "Enabling " << state_.enabled_instance_extensions.size()
                 << " instance extensions:";
   for (const auto& extension : state_.enabled_instance_extensions) {
-    FML_LOG(INFO) << "  - " << extension;
+    LOG(INFO) << "  - " << extension;
   }
 
   VkApplicationInfo app_info = {
@@ -188,7 +188,7 @@ void WaylandVulkanBackend::createInstance() {
 
   if (bluevk::vkCreateInstance(&info, nullptr, &state_.instance) !=
       VK_SUCCESS) {
-    FML_LOG(ERROR) << "Failed to create Vulkan instance." << std::endl;
+    LOG(ERROR) << "Failed to create Vulkan instance." << std::endl;
     exit(EXIT_FAILURE);
   }
 
@@ -216,7 +216,7 @@ void WaylandVulkanBackend::setupDebugMessenger() {
     if (bluevk::vkCreateDebugUtilsMessengerEXT(state_.instance, &createInfo,
                                                VKALLOC, &mDebugMessenger) !=
         VK_SUCCESS) {
-      FML_LOG(ERROR) << "Unable to create Vulkan debug callback";
+      LOG(ERROR) << "Unable to create Vulkan debug callback";
     }
   } else if (bluevk::vkCreateDebugReportCallbackEXT) {
     const VkDebugReportCallbackCreateInfoEXT cbinfo = {
@@ -225,7 +225,7 @@ void WaylandVulkanBackend::setupDebugMessenger() {
         debugReportCallback, nullptr};
     if (bluevk::vkCreateDebugReportCallbackEXT(
             state_.instance, &cbinfo, VKALLOC, &mDebugCallback) != VK_SUCCESS) {
-      FML_LOG(ERROR) << "Unable to create Vulkan debug callback";
+      LOG(ERROR) << "Unable to create Vulkan debug callback";
     }
   }
 }
@@ -240,7 +240,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
                                               physical_devices.data());
   assert(result == VK_SUCCESS);
 
-  FML_DLOG(INFO) << "Enumerating " << count << " physical device(s).";
+  DLOG(INFO) << "Enumerating " << count << " physical device(s).";
 
   uint32_t selected_score = 0;
   for (const auto& pdevice : physical_devices) {
@@ -249,7 +249,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     bluevk::vkGetPhysicalDeviceProperties(pdevice, &properties);
     bluevk::vkGetPhysicalDeviceFeatures(pdevice, &features);
 
-    FML_DLOG(INFO) << "Checking device: " << properties.deviceName;
+    DLOG(INFO) << "Checking device: " << properties.deviceName;
 
     uint32_t score = 0;
     std::vector<const char*> supported_extensions;
@@ -278,7 +278,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     // Skip physical devices that don't have a graphics queue.
     if (!graphics_queue_family.has_value()) {
-      FML_LOG(INFO) << "  - Skipping due to no suitable graphics queues.";
+      LOG(INFO) << "  - Skipping due to no suitable graphics queues.";
       continue;
     }
 
@@ -335,7 +335,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     // Skip physical devices that don't have swapchain support.
     if (!supports_swapchain) {
-      FML_DLOG(INFO) << "  - Skipping due to lack of swapchain support.";
+      DLOG(INFO) << "  - Skipping due to lack of swapchain support.";
       continue;
     }
 
@@ -343,7 +343,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     score += properties.limits.maxImageDimension2D;
 
     if (selected_score < score) {
-      FML_DLOG(INFO) << "  - This is the best device so far. Score: 0x"
+      DLOG(INFO) << "  - This is the best device so far. Score: 0x"
                      << std::hex << score << std::dec;
 
       selected_score = score;
@@ -370,7 +370,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
         };
         bluevk::vkGetPhysicalDeviceProperties2KHR(state_.physical_device,
                                                   &physicalDeviceProperties2);
-        FML_LOG(INFO) << "Vulkan device driver: " << driverProperties.driverName
+        LOG(INFO) << "Vulkan device driver: " << driverProperties.driverName
                       << " " << driverProperties.driverInfo;
       }
 
@@ -381,7 +381,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
       const uint32_t deviceID = properties.deviceID;
       const int major = VK_VERSION_MAJOR(properties.apiVersion);
       const int minor = VK_VERSION_MINOR(properties.apiVersion);
-      FML_LOG(INFO) << "vendor " << std::hex << vendorID << ", "
+      LOG(INFO) << "vendor " << std::hex << vendorID << ", "
                     << "device " << deviceID << ", "
                     << "driver " << driverVersion << ", " << std::dec << "api "
                     << major << "." << minor;
@@ -390,17 +390,17 @@ void WaylandVulkanBackend::findPhysicalDevice() {
   }
 
   if (state_.physical_device == nullptr) {
-    FML_LOG(ERROR) << "Failed to find a compatible Vulkan physical device."
+    LOG(ERROR) << "Failed to find a compatible Vulkan physical device."
                    << std::endl;
     exit(EXIT_FAILURE);
   }
 }
 
 void WaylandVulkanBackend::createLogicalDevice() {
-  FML_DLOG(INFO) << "Enabling " << state_.enabled_device_extensions.size()
+  DLOG(INFO) << "Enabling " << state_.enabled_device_extensions.size()
                  << " device extensions:";
   for (const char* extension : state_.enabled_device_extensions) {
-    FML_DLOG(INFO) << "  - " << extension;
+    DLOG(INFO) << "  - " << extension;
   }
 
   float priority = 1.0f;
@@ -426,7 +426,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
                                            nullptr, &state_.device);
   if (result != VK_SUCCESS) {
     state_.device = VK_NULL_HANDLE;
-    FML_LOG(ERROR) << "Failed to create Vulkan logical device: " << result;
+    LOG(ERROR) << "Failed to create Vulkan logical device: " << result;
     exit(EXIT_FAILURE);
   }
 
@@ -506,7 +506,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   // there is no limit on the number of images, though there may be limits
   // related to the total amount of memory used by presentable images."
   if (maxImageCount != 0 && desiredImageCount > maxImageCount) {
-    FML_LOG(ERROR) << "Swap chain does not support " << desiredImageCount
+    LOG(ERROR) << "Swap chain does not support " << desiredImageCount
                    << " images.";
     desiredImageCount = surface_capabilities.minImageCount;
   }
@@ -568,7 +568,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   VkResult result = bluevk::vkCreateSwapchainKHR(state_.device, &info, VKALLOC,
                                                  &state_.swapchain);
   if (result != VK_SUCCESS) {
-    FML_LOG(ERROR) << "vkGetSwapchainImagesKHR(): " << result;
+    LOG(ERROR) << "vkGetSwapchainImagesKHR(): " << result;
     return false;
   }
 
@@ -708,9 +708,9 @@ VKAPI_ATTR VkBool32
   (void)messageCode;
   (void)pUserData;
   if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-    FML_LOG(ERROR) << "VULKAN ERROR: (" << pLayerPrefix << ") " << pMessage;
+    LOG(ERROR) << "VULKAN ERROR: (" << pLayerPrefix << ") " << pMessage;
   } else {
-    FML_LOG(WARNING) << "VULKAN WARNING: (" << pLayerPrefix << ") " << pMessage;
+    LOG(WARNING) << "VULKAN WARNING: (" << pLayerPrefix << ") " << pMessage;
   }
   return VK_FALSE;
 }
@@ -726,7 +726,7 @@ VKAPI_ATTR VkBool32
   (void)types;
   (void)pUserData;
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    FML_LOG(ERROR) << "VULKAN ERROR: (" << cbdata->pMessageIdName << ") "
+    LOG(ERROR) << "VULKAN ERROR: (" << cbdata->pMessageIdName << ") "
                    << cbdata->pMessage;
   } else {
     // TODO: emit best practices warnings about aggressive pipeline barriers.
@@ -734,7 +734,7 @@ VKAPI_ATTR VkBool32
         strstr(cbdata->pMessage, "ALL_COMMANDS_BIT")) {
       return VK_FALSE;
     }
-    FML_LOG(WARNING) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
+    LOG(WARNING) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
                      << cbdata->pMessage;
   }
   return VK_TRUE;
@@ -835,7 +835,7 @@ void WaylandVulkanBackend::Resize(void* user_data,
     if (engine) {
       auto result = engine->SetWindowSize(height, width);
       if (result != kSuccess) {
-        FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+        LOG(ERROR) << "Failed to set Flutter Engine Window Size";
       }
     }
   }
@@ -850,7 +850,7 @@ void WaylandVulkanBackend::CreateSurface(void* user_data,
   (void)width;
   (void)height;
 
-  FML_DLOG(INFO) << "CreateSurface";
+  DLOG(INFO) << "CreateSurface";
   auto b = reinterpret_cast<WaylandVulkanBackend*>(user_data);
 
   assert(b->state_.instance != VK_NULL_HANDLE);
@@ -870,7 +870,7 @@ void WaylandVulkanBackend::CreateSurface(void* user_data,
   VkResult result = bluevk::vkCreateWaylandSurfaceKHR(
       b->state_.instance, &createInfo, nullptr, &b->state_.surface);
   if (result != VK_SUCCESS) {
-    FML_LOG(ERROR) << "vkCreateWaylandSurfaceKHR failed.";
+    LOG(ERROR) << "vkCreateWaylandSurfaceKHR failed.";
     assert(false);
   }
 
@@ -905,7 +905,7 @@ void WaylandVulkanBackend::CreateSurface(void* user_data,
   // --------------------------------------------------------------------------
 
   if (!b->InitializeSwapchain()) {
-    FML_LOG(ERROR) << "Failed to create swapchain.";
+    LOG(ERROR) << "Failed to create swapchain.";
     exit(EXIT_FAILURE);
   }
 }
@@ -915,7 +915,7 @@ bool WaylandVulkanBackend::CollectBackingStore(
     void* user_data) {
   (void)renderer;
   (void)user_data;
-  FML_DLOG(INFO) << "CollectBackingStore";
+  DLOG(INFO) << "CollectBackingStore";
   return false;
 }
 
@@ -926,7 +926,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
   (void)config;
   (void)backing_store_out;
   (void)user_data;
-  FML_DLOG(INFO) << "CreateBackingStore";
+  DLOG(INFO) << "CreateBackingStore";
 #if 0
     auto surface_size = SkISize::Make(config->size.width, config->size.height);
     TestVulkanImage* test_image = new TestVulkanImage(
@@ -966,7 +966,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
     );
 
     if (!surface) {
-      FML_LOG(ERROR) << "Could not create Skia surface from Vulkan image.";
+      LOG(ERROR) << "Could not create Skia surface from Vulkan image.";
       return false;
     }
     backing_store_out->type = kFlutterBackingStoreTypeVulkan;
@@ -1006,6 +1006,6 @@ bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
   (void)layers;
   (void)layers_count;
   (void)user_data;
-  FML_DLOG(INFO) << "PresentLayers";
+  DLOG(INFO) << "PresentLayers";
   return false;
 }

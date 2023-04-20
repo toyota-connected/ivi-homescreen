@@ -52,7 +52,7 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(INFO) << "MouseCursor: " << method << " is unhandled";
+    DLOG(INFO) << "MouseCursor: " << method << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

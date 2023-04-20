@@ -121,7 +121,7 @@ void CompositorSurface::init_api(CompositorSurface* obj) {
   if (obj->m_api.version) {
     auto version = obj->m_api.version();
     if (version != kCompSurfExpectedInterfaceVersion) {
-      FML_LOG(ERROR) << "Unexpected interface version: " << version;
+      LOG(ERROR) << "Unexpected interface version: " << version;
       exit(1);
     }
   } else {
@@ -161,7 +161,7 @@ void CompositorSurface::init_api(CompositorSurface* obj) {
   return;
 
 invalid:
-  FML_LOG(ERROR) << "Invalid API";
+  LOG(ERROR) << "Invalid API";
   exit(1);
 }
 
@@ -170,7 +170,7 @@ std::string CompositorSurface::GetFilePath(const char* folder) {
 
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {
-      FML_LOG(ERROR) << "GetCachePath create_directories failed: " << path;
+      LOG(ERROR) << "GetCachePath create_directories failed: " << path;
       exit(EXIT_FAILURE);
     }
   }

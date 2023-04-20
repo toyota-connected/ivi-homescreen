@@ -28,9 +28,9 @@ void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto method = obj->method_name();
 
   if (method == kMethodGet) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Restoration: Get";
+    DLOG(INFO) << "(" << engine->GetIndex() << ") Restoration: Get";
   } else {
-    FML_DLOG(ERROR) << "(" << engine->GetIndex() << ") Restoration: " << method
+    DLOG(ERROR) << "(" << engine->GetIndex() << ") Restoration: " << method
                     << " is unhandled";
   }
 

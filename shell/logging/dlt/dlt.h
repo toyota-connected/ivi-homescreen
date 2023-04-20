@@ -1,6 +1,5 @@
 /*
- * Copyright 2020 Toyota Connected North America
- * @copyright Copyright (c) 2022 Woven Alpha, Inc.
+ * Copyright 2023 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,4 +16,19 @@
 
 #pragma once
 
-#include "flutter/fml/logging.h"
+#include "dlt/libdlt.h"
+#include "flutter/fml/macros.h"
+
+class Dlt {
+ public:
+  static bool IsSupported();
+
+  static bool Register();
+
+  static bool Unregister();
+
+  static void LogString(DltLogLevelType log_level, const char* buff);
+
+ private:
+  FML_DISALLOW_COPY_AND_ASSIGN(Dlt);
+};

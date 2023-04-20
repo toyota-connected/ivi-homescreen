@@ -107,7 +107,7 @@ void WaylandEglBackend::Resize(void* user_data,
       auto result = engine->SetWindowSize(static_cast<size_t>(height),
                                           static_cast<size_t>(width));
       if (result != kSuccess) {
-        FML_LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+        LOG(ERROR) << "Failed to set Flutter Engine Window Size";
       }
     }
     wl_egl_window_resize(b->m_egl_window, width, height, 0, 0);

@@ -31,12 +31,12 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   if (method == "switchView") {
     if (args && !args->IsNull()) {
-      FML_DLOG(INFO) << "switchView: " << args->LongValue();
+      DLOG(INFO) << "switchView: " << args->LongValue();
       auto res = flutter::EncodableValue(args->LongValue());
       result = codec.EncodeSuccessEnvelope(&res);
     }
   } else {
-    FML_DLOG(ERROR) << "PlatformViews: " << method << " is unhandled";
+    DLOG(ERROR) << "PlatformViews: " << method << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

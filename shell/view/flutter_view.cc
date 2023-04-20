@@ -85,7 +85,7 @@ void FlutterView::Initialize() {
   m_flutter_engine->Run(pthread_self());
 
   if (!m_flutter_engine->IsRunning()) {
-    FML_LOG(ERROR) << "Failed to Run Engine";
+    LOG(ERROR) << "Failed to Run Engine";
     exit(EXIT_FAILURE);
   }
 
@@ -94,7 +94,7 @@ void FlutterView::Initialize() {
                                m_flutter_engine.get());
   m_wayland_window->SetEngine(m_flutter_engine);
 
-  FML_DLOG(INFO) << "(" << m_index << ") Engine running...";
+  DLOG(INFO) << "(" << m_index << ") Engine running...";
 
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   m_text_input->SetEngine(m_flutter_engine);
@@ -169,7 +169,7 @@ void FlutterView::DrawFps(long long end_time) {
 
       if (0 < (m_fps.output & 0x01)) {
         if (0 < (m_fps.output & 0x01)) {
-          FML_LOG(INFO) << "(" << m_index << ") FPS = " << fps_loop << " "
+          LOG(INFO) << "(" << m_index << ") FPS = " << fps_loop << " "
                         << fps_redraw;
         }
       }
@@ -200,7 +200,7 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   auto tEnd = std::chrono::steady_clock::now();
   auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
-  FML_LOG(INFO) << "comp surf init: " << (float)tDiff;
+  LOG(INFO) << "comp surf init: " << (float)tDiff;
 
   return static_cast<size_t>(index);
 }
@@ -239,7 +239,7 @@ void FlutterView::SetRegion(
   auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
-    FML_DLOG(INFO) << "Set Region: type: " << type << ", x: " << region.x
+    DLOG(INFO) << "Set Region: type: " << type << ", x: " << region.x
                    << ", y: " << region.y << ", width: " << region.width
                    << ", height: " << region.height;
 
