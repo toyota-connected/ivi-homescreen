@@ -106,26 +106,28 @@ void CompositorRegionPlugin::OnPlatformMessage(
     }
     auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
     if (args == nullptr) {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
       break;
     }
 
     /* Clear array */
     auto it = args->find(flutter::EncodableValue(kArgClear));
-    if (it == args->end() || it->second.IsNull()) {
-      break;
+    if (it != args->end() && !it->second.IsNull()) {
+      auto types = std::get<flutter::EncodableList>(it->second);
+      ClearGroups(types, engine->GetView());
     }
-    auto types = std::get<flutter::EncodableList>(it->second);
-    ClearGroups(types, engine->GetView());
 
     /* Group array */
     it = args->find(flutter::EncodableValue(kArgGroups));
     if (it == args->end() || it->second.IsNull()) {
+      flutter::EncodableValue value;
+      result = codec.EncodeSuccessEnvelope(&value);
       break;
     }
     auto groups = std::get<flutter::EncodableList>(it->second);
     flutter::EncodableValue value = HandleGroups(groups, engine->GetView());
     result = codec.EncodeSuccessEnvelope(&value);
-  } while (0);
+  } while (false);
 
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
