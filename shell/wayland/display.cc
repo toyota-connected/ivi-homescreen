@@ -447,6 +447,7 @@ void Display::pointer_handle_axis(void* data,
                                   uint32_t axis,
                                   wl_fixed_t value) {
   (void)wl_pointer;
+#if defined(ENABLE_POINTER_AXIS_HANDLER)
   auto* d = static_cast<Display*>(data);
   d->m_pointer.event.time = time;
   d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
@@ -458,6 +459,12 @@ void Display::pointer_handle_axis(void* data,
         d->m_pointer.event.axes[1].value, d->m_pointer.event.axes[0].value,
         d->m_pointer.buttons);
   }
+#else
+  (void)data;
+  (void)time;
+  (void)axis;
+  (void)value;
+#endif
 }
 
 void Display::pointer_handle_frame(void* data, struct wl_pointer* wl_pointer) {
