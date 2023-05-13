@@ -3,6 +3,7 @@ var class_compositor_surface_plugin =
     [ "OnPlatformMessage", "class_compositor_surface_plugin.html#a31482d29d37967307aeac1b566dbb743", null ],
     [ "kArgAssetsPath", "class_compositor_surface_plugin.html#a5e3209c0a01db0c5e39dec891f6054da", null ],
     [ "kArgHeight", "class_compositor_surface_plugin.html#accbb5260905ff4085264708a0b548230", null ],
+    [ "kArgMapFlutterAssetsPath", "class_compositor_surface_plugin.html#ab8ec9503eb9c89f13fe27cbc5f74b474", null ],
     [ "kArgModule", "class_compositor_surface_plugin.html#abb1e862713f6572b948db06ca4763f24", null ],
     [ "kArgSync", "class_compositor_surface_plugin.html#aff539c1b7a0e65bfffce98f47a9e950c", null ],
     [ "kArgType", "class_compositor_surface_plugin.html#ac6dfe09ae271d7edaf999fd7ec18fe1b", null ],

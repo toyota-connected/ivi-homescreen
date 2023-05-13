@@ -47,8 +47,7 @@ Display::Display(bool enable_cursor,
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
-    LOG(ERROR) << "Failed to connect to Wayland display. "
-                   << strerror(errno);
+    LOG(ERROR) << "Failed to connect to Wayland display. " << strerror(errno);
     exit(-1);
   }
 
@@ -63,8 +62,7 @@ Display::Display(bool enable_cursor,
         continue;
     }
     if (!m_agl.bound_ok) {
-      LOG(ERROR)
-          << "agl_shell extension already in use by other shell client.";
+      LOG(ERROR) << "agl_shell extension already in use by other shell client.";
       exit(EXIT_FAILURE);
     }
   } else {
@@ -86,6 +84,12 @@ Display::~Display() {
 
   if (m_agl.shell)
     agl_shell_destroy(m_agl.shell);
+
+  if (m_ivi_shell.application)
+    ivi_application_destroy(m_ivi_shell.application);
+
+  if (m_ivi_shell.ivi_wm)
+    ivi_wm_destroy(m_ivi_shell.ivi_wm);
 
   if (m_subcompositor)
     wl_subcompositor_destroy(m_subcompositor);
@@ -155,12 +159,16 @@ void Display::registry_handle_global(void* data,
     d->m_subcompositor = static_cast<struct wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
-  } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+  }
+#if defined(ENABLE_XDG_CLIENT)
+  else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
     d->m_xdg_wm_base = static_cast<struct xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface,
                          std::min(static_cast<uint32_t>(3), version)));
     xdg_wm_base_add_listener(d->m_xdg_wm_base, &xdg_wm_base_listener, d);
-  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  }
+#endif
+  else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<struct wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface,
                          std::min(static_cast<uint32_t>(1), version)));
@@ -190,9 +198,10 @@ void Display::registry_handle_global(void* data,
     d->m_repeat_timer =
         std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
     d->m_repeat_timer->set_timerspec(40, 400);
-
-  } else if (strcmp(interface, agl_shell_interface.name) == 0 &&
-             d->m_agl.bind_to_agl_shell) {
+  }
+#if defined(ENABLE_AGL_CLIENT)
+  else if (strcmp(interface, agl_shell_interface.name) == 0 &&
+           d->m_agl.bind_to_agl_shell) {
     if (version >= 2) {
       d->m_agl.shell = static_cast<struct agl_shell*>(
           wl_registry_bind(registry, name, &agl_shell_interface,
@@ -204,8 +213,21 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(1), version)));
     }
     d->m_agl.version = version;
-    LOG(INFO) << "agl_shell version: " << version;
+    LOG(INFO) << "Wayland: agl_shell version: " << version;
   }
+#endif
+#if defined(ENABLE_IVI_SHELL_CLIENT)
+  else if (strcmp(interface, ivi_application_interface.name) == 0) {
+    d->m_ivi_shell.application = static_cast<struct ivi_application*>(
+        wl_registry_bind(registry, name, &ivi_application_interface, 1));
+    LOG(INFO) << "Wayland: ivi_application version: " << version;
+  } else if (strcmp(interface, ivi_wm_interface.name) == 0) {
+    d->m_ivi_shell.ivi_wm = static_cast<struct ivi_wm*>(
+        wl_registry_bind(registry, name, &ivi_wm_interface, 1));
+    ivi_wm_add_listener(d->m_ivi_shell.ivi_wm, &ivi_wm_listener, data);
+    LOG(INFO) << "Wayland: ivi_wm version: " << version;
+  }
+#endif
 }
 
 void Display::registry_handle_global_remove(void* data,
@@ -245,7 +267,7 @@ void Display::display_handle_geometry(void* data,
   oi->physical_height = static_cast<unsigned int>(physical_height);
 
   DLOG(INFO) << "Physical width: " << physical_width << " mm x "
-                 << physical_height << " mm";
+             << physical_height << " mm";
 }
 
 void Display::display_handle_mode(void* data,
@@ -262,8 +284,7 @@ void Display::display_handle_mode(void* data,
   oi->refresh_rate = refresh;
 
   DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
-                 << (refresh > 1000 ? refresh / 1000.0 : (double)refresh)
-                 << " Hz";
+             << (refresh > 1000 ? refresh / 1000.0 : (double)refresh) << " Hz";
 }
 
 void Display::display_handle_scale(void* data,
@@ -380,8 +401,8 @@ void Display::pointer_handle_leave(void* data,
 
   if (d->m_active_engine) {
     d->m_active_engine->CoalesceMouseEvent(kFlutterPointerSignalKindNone,
-                                       FlutterPointerPhase::kRemove, 0.0, 0.0,
-                                       0.0, 0.0, d->m_pointer.buttons);
+                                           FlutterPointerPhase::kRemove, 0.0,
+                                           0.0, 0.0, 0.0, d->m_pointer.buttons);
   }
 }
 
@@ -584,17 +605,18 @@ void Display::keyboard_handle_key(void* data,
   //
   xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, xkb_scancode);
   if (keysym == XKB_KEY_NoSymbol) {
-    const xkb_keysym_t* keysyms;
-    int res = xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &keysyms);
+    const xkb_keysym_t* key_symbols;
+    int res =
+        xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &key_symbols);
     if (res == 0) {
-      LOG(INFO) << "xkb_scancode has no keysyms: "
-                    << "0x" << std::hex << xkb_scancode;
+      LOG(INFO) << "xkb_scancode has no key symbols: "
+                << "0x" << std::hex << xkb_scancode;
       keysym = XKB_KEY_NoSymbol;
     } else {
       // only use the first symbol until the use case for two is clarified
-      keysym = keysyms[0];
+      keysym = key_symbols[0];
       for (int i = 0; i < res; i++) {
-        LOG(INFO) << "xkb keysym: " << std::hex << "0x" << keysyms;
+        LOG(INFO) << "xkb keysym: " << std::hex << "0x" << key_symbols;
       }
     }
   }
@@ -613,8 +635,7 @@ void Display::keyboard_handle_key(void* data,
       d->m_repeat_code = xkb_scancode;
       d->m_repeat_timer->arm();
     } else {
-      DLOG(INFO) << "key does not repeat: " << std::hex << "0x"
-                     << xkb_scancode;
+      DLOG(INFO) << "key does not repeat: " << std::hex << "0x" << xkb_scancode;
     }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
@@ -677,8 +698,7 @@ void Display::keyboard_handle_repeat_info(void* data,
 
   d->m_repeat_timer->set_timerspec(rate, delay);
 
-  DLOG(INFO) << "[keyboard repeat info] rate: " << rate
-                 << ", delay: " << delay;
+  DLOG(INFO) << "[keyboard repeat info] rate: " << rate << ", delay: " << delay;
 }
 
 const struct wl_keyboard_listener Display::keyboard_listener = {
@@ -746,10 +766,9 @@ void Display::touch_handle_down(void* data,
   d->m_active_surface = surface;
   d->m_touch_engine = d->m_surface_engine_map[surface];
   if (d->m_touch_engine) {
-    d->m_touch_engine->CoalesceTouchEvent(
-        FlutterPointerPhase::kDown,
-        wl_fixed_to_double(x_w),
-        wl_fixed_to_double(y_w), id);
+    d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kDown,
+                                          wl_fixed_to_double(x_w),
+                                          wl_fixed_to_double(y_w), id);
   }
 }
 
@@ -786,8 +805,8 @@ void Display::touch_handle_motion(void* data,
 
   if (d->m_touch_engine) {
     d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kMove,
-                                      wl_fixed_to_double(x_w),
-                                      wl_fixed_to_double(y_w), id);
+                                          wl_fixed_to_double(x_w),
+                                          wl_fixed_to_double(y_w), id);
   }
 }
 
@@ -797,8 +816,8 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* wl_touch) {
   if (d->m_touch_engine) {
     DLOG(INFO) << "touch_handle_cancel";
     d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kCancel,
-                                      d->m_pointer.event.surface_x,
-                                      d->m_pointer.event.surface_y, 0);
+                                          d->m_pointer.event.surface_x,
+                                          d->m_pointer.event.surface_y, 0);
   }
 }
 
@@ -914,13 +933,26 @@ void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
 int32_t Display::GetBufferScale(uint32_t index) {
   if (index < m_all_outputs.size()) {
     if (m_buffer_scale_enable) {
-      return m_all_outputs[index]->scale;
+      if (m_all_outputs[index]->scale == 0) {
+        return 1;
+      } else {
+        return m_all_outputs[index]->scale;
+      }
     } else {
       return (int32_t)kDefaultBufferScale;
     }
   }
-  DLOG(ERROR) << "Invalid output index: " << index;
+  DLOG(ERROR) << "GetBufferScale: Invalid output index: " << index;
   return (int32_t)kDefaultBufferScale;
+}
+
+std::pair<int32_t, int32_t> Display::GetPhysicalSize(uint32_t index) {
+  if (index < m_all_outputs.size()) {
+    return {m_all_outputs[index]->physical_width,
+            m_all_outputs[index]->physical_height};
+  }
+  DLOG(ERROR) << "GetPhysicalSize: Invalid output index: " << index;
+  return {0, 0};
 }
 
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
@@ -940,4 +972,205 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
 const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
+};
+
+void Display::ivi_wm_surface_visibility(void* data,
+                                        struct ivi_wm* ivi_wm,
+                                        uint32_t surface_id,
+                                        int32_t visibility) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_visibility: " << surface_id
+             << ", visibility: " << visibility;
+}
+
+void Display::ivi_wm_layer_visibility(void* data,
+                                      struct ivi_wm* ivi_wm,
+                                      uint32_t layer_id,
+                                      int32_t visibility) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_visibility: " << layer_id
+             << ", visibility: " << visibility;
+}
+
+void Display::ivi_wm_surface_opacity(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t surface_id,
+                                     wl_fixed_t opacity) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_opacity: " << surface_id
+             << ", opacity: " << opacity;
+}
+
+void Display::ivi_wm_layer_opacity(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t layer_id,
+                                   wl_fixed_t opacity) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_opacity: " << layer_id
+             << ", opacity: " << opacity;
+}
+
+void Display::ivi_wm_surface_source_rectangle(void* data,
+                                              struct ivi_wm* ivi_wm,
+                                              uint32_t surface_id,
+                                              int32_t x,
+                                              int32_t y,
+                                              int32_t width,
+                                              int32_t height) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_source_rectangle: " << surface_id
+             << ", x: " << x << ", y: " << y << ", width: " << width
+             << ", height: " << height;
+}
+
+void Display::ivi_wm_layer_source_rectangle(void* data,
+                                            struct ivi_wm* ivi_wm,
+                                            uint32_t layer_id,
+                                            int32_t x,
+                                            int32_t y,
+                                            int32_t width,
+                                            int32_t height) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_source_rectangle: " << layer_id << ", x: " << x
+             << ", y: " << y << ", width: " << width << ", height: " << height;
+}
+
+void Display::ivi_wm_surface_destination_rectangle(void* data,
+                                                   struct ivi_wm* ivi_wm,
+                                                   uint32_t surface_id,
+                                                   int32_t x,
+                                                   int32_t y,
+                                                   int32_t width,
+                                                   int32_t height) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_destination_rectangle: " << surface_id
+             << ", x: " << x << ", y: " << y << ", width: " << width
+             << ", height: " << height;
+}
+
+void Display::ivi_wm_layer_destination_rectangle(void* data,
+                                                 struct ivi_wm* ivi_wm,
+                                                 uint32_t layer_id,
+                                                 int32_t x,
+                                                 int32_t y,
+                                                 int32_t width,
+                                                 int32_t height) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_destination_rectangle: " << layer_id
+             << ", x: " << x << ", y: " << y << ", width: " << width
+             << ", height: " << height;
+}
+
+void Display::ivi_wm_surface_created(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t surface_id) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_created: " << surface_id;
+}
+
+void Display::ivi_wm_layer_created(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t layer_id) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_created: " << layer_id;
+}
+
+void Display::ivi_wm_surface_destroyed(void* data,
+                                       struct ivi_wm* ivi_wm,
+                                       uint32_t surface_id) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_destroyed: " << surface_id;
+}
+
+void Display::ivi_wm_layer_destroyed(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t layer_id) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_destroyed: " << layer_id;
+}
+
+void Display::ivi_wm_surface_error(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t object_id,
+                                   uint32_t error,
+                                   const char* message) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_error: " << object_id << ", error (" << error
+             << "), " << message;
+}
+
+void Display::ivi_wm_layer_error(void* data,
+                                 struct ivi_wm* ivi_wm,
+                                 uint32_t object_id,
+                                 uint32_t error,
+                                 const char* message) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_error: " << object_id << ", error (" << error
+             << "), " << message;
+}
+
+void Display::ivi_wm_surface_size(void* data,
+                                  struct ivi_wm* ivi_wm,
+                                  uint32_t surface_id,
+                                  int32_t width,
+                                  int32_t height) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_size: " << surface_id << ", width " << width
+             << ", height " << height;
+}
+
+void Display::ivi_wm_surface_stats(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t surface_id,
+                                   uint32_t frame_count,
+                                   uint32_t pid) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_surface_stats: " << surface_id << ", frame_count "
+             << frame_count << ", pid " << pid;
+}
+
+void Display::ivi_wm_layer_surface_added(void* data,
+                                         struct ivi_wm* ivi_wm,
+                                         uint32_t layer_id,
+                                         uint32_t surface_id) {
+  (void)data;
+  (void)ivi_wm;
+  DLOG(INFO) << "ivi_wm_layer_surface_added: " << layer_id << ", "
+             << surface_id;
+}
+
+const struct ivi_wm_listener Display::ivi_wm_listener = {
+    .surface_visibility = ivi_wm_surface_visibility,
+    .layer_visibility = ivi_wm_layer_visibility,
+    .surface_opacity = ivi_wm_surface_opacity,
+    .layer_opacity = ivi_wm_layer_opacity,
+    .surface_source_rectangle = ivi_wm_surface_source_rectangle,
+    .layer_source_rectangle = ivi_wm_layer_source_rectangle,
+    .surface_destination_rectangle = ivi_wm_surface_destination_rectangle,
+    .layer_destination_rectangle = ivi_wm_layer_destination_rectangle,
+    .surface_created = ivi_wm_surface_created,
+    .layer_created = ivi_wm_layer_created,
+    .surface_destroyed = ivi_wm_surface_destroyed,
+    .layer_destroyed = ivi_wm_layer_destroyed,
+    .surface_error = ivi_wm_surface_error,
+    .layer_error = ivi_wm_layer_error,
+    .surface_size = ivi_wm_surface_size,
+    .surface_stats = ivi_wm_surface_stats,
+    .layer_surface_added = ivi_wm_layer_surface_added,
 };

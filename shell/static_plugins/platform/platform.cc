@@ -38,11 +38,10 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       MethodSetApplicationSwitcherDescription description{};
       description.label = (*args)["label"].GetString();
       description.primaryColor = (*args)["primaryColor"].GetUint();
-      DLOG(INFO)
-          << "(" << engine->GetIndex()
-          << ") Platform: ApplicationSwitcherDescription\n\tlabel: \""
-          << description.label
-          << "\"\n\tprimaryColor: " << description.primaryColor;
+      DLOG(INFO) << "(" << engine->GetIndex()
+                 << ") Platform: ApplicationSwitcherDescription\n\tlabel: \""
+                 << description.label
+                 << "\"\n\tprimaryColor: " << description.primaryColor;
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
@@ -51,10 +50,12 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
     if (!args->IsNull() && args->IsString()) {
       auto sound_type = args->GetString();
       if (0 == strcmp(sound_type, kSoundTypeClick)) {
-        DLOG(INFO) << "(" << engine->GetIndex() << ") SystemSound.play ** click **";
+        DLOG(INFO) << "(" << engine->GetIndex()
+                   << ") SystemSound.play ** click **";
         result = codec.EncodeSuccessEnvelope();
       } else if (0 == strcmp(sound_type, kSoundTypeAlert)) {
-        DLOG(INFO) << "(" << engine->GetIndex() << ")  SystemSound.play ** alert **";
+        DLOG(INFO) << "(" << engine->GetIndex()
+                   << ")  SystemSound.play ** alert **";
         result = codec.EncodeSuccessEnvelope();
       }
     } else {
@@ -97,26 +98,23 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
     if (!args->IsNull() && args->HasMember("text") &&
         !((*args)["text"].IsNull())) {
       DLOG(INFO) << "(" << engine->GetIndex() << ") Clipboard Data Set: \n"
-                     << (*args)["text"].GetString();
+                 << (*args)["text"].GetString();
       g_clipboard.assign((*args)["text"].GetString());
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kMethodSetEnabledSystemUIOverlays) {
-    DLOG(INFO) << "(" << engine->GetIndex()
-                   << ") System UI Overlays Enabled";
+    DLOG(INFO) << "(" << engine->GetIndex() << ") System UI Overlays Enabled";
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kHapticFeedbackVibrate) {
-    DLOG(INFO) << "(" << engine->GetIndex()
-                   << ") Haptic Feedback - Vibrate";
+    DLOG(INFO) << "(" << engine->GetIndex() << ") Haptic Feedback - Vibrate";
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kSystemChrome_setPreferredOrientations) {
     DLOG(INFO) << "(" << engine->GetIndex() << ") setPreferredOrientations";
     if (!args->IsNull()) {
       for (const auto& field : args->GetArray()) {
-        DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                       << field.GetString();
+        DLOG(INFO) << "(" << engine->GetIndex() << ") " << field.GetString();
       }
     }
     result = codec.EncodeSuccessEnvelope();
@@ -128,8 +126,8 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       style.systemNavigationBarColor =
           (*args)[kSystemNavigationBarColor].GetUint();
       DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarColor << ": "
-                     << style.systemNavigationBarColor;
+                 << kSystemNavigationBarColor << ": "
+                 << style.systemNavigationBarColor;
     }
     if (args->HasMember(kSystemNavigationBarDividerColor) &&
         !(*args)[kSystemNavigationBarDividerColor].IsNull() &&
@@ -137,8 +135,8 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       style.systemNavigationBarDividerColor =
           (*args)[kSystemNavigationBarDividerColor].GetUint();
       DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarDividerColor << ": "
-                     << style.systemNavigationBarDividerColor;
+                 << kSystemNavigationBarDividerColor << ": "
+                 << style.systemNavigationBarDividerColor;
     }
     if (args->HasMember(kSystemStatusBarContrastEnforced) &&
         !(*args)[kSystemStatusBarContrastEnforced].IsNull() &&
@@ -146,23 +144,22 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       style.systemStatusBarContrastEnforced =
           (*args)[kSystemStatusBarContrastEnforced].GetBool();
       DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemStatusBarContrastEnforced << ": "
-                     << style.systemStatusBarContrastEnforced;
+                 << kSystemStatusBarContrastEnforced << ": "
+                 << style.systemStatusBarContrastEnforced;
     }
     if (args->HasMember(kStatusBarColor) &&
         !(*args)[kStatusBarColor].IsNull() &&
         (*args)[kStatusBarColor].IsNumber()) {
       style.statusBarColor = (*args)[kStatusBarColor].GetUint();
-      DLOG(INFO) << "(" << engine->GetIndex() << ") " << kStatusBarColor
-                     << ": " << style.statusBarColor;
+      DLOG(INFO) << "(" << engine->GetIndex() << ") " << kStatusBarColor << ": "
+                 << style.statusBarColor;
     }
     if (args->HasMember(kStatusBarBrightness) &&
         !(*args)[kStatusBarBrightness].IsNull() &&
         (*args)[kStatusBarBrightness].IsString()) {
       style.statusBarBrightness = (*args)[kStatusBarBrightness].GetString();
-      DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kStatusBarBrightness << ": "
-                     << style.statusBarBrightness;
+      DLOG(INFO) << "(" << engine->GetIndex() << ") " << kStatusBarBrightness
+                 << ": " << style.statusBarBrightness;
     }
     if (args->HasMember(kStatusBarIconBrightness) &&
         !(*args)[kStatusBarIconBrightness].IsNull() &&
@@ -170,8 +167,8 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       style.statusBarIconBrightness =
           (*args)[kStatusBarIconBrightness].GetString();
       DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kStatusBarIconBrightness << ": "
-                     << style.statusBarIconBrightness;
+                 << kStatusBarIconBrightness << ": "
+                 << style.statusBarIconBrightness;
     }
     if (args->HasMember(kSystemNavigationBarIconBrightness) &&
         !(*args)[kSystemNavigationBarIconBrightness].IsNull() &&
@@ -179,8 +176,8 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       style.systemNavigationBarIconBrightness =
           (*args)[kSystemNavigationBarIconBrightness].GetString();
       DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarIconBrightness << ": "
-                     << style.systemNavigationBarIconBrightness;
+                 << kSystemNavigationBarIconBrightness << ": "
+                 << style.systemNavigationBarIconBrightness;
     }
     if (args->HasMember(kSystemNavigationBarContrastEnforced) &&
         !(*args)[kSystemNavigationBarContrastEnforced].IsNull() &&
@@ -188,13 +185,13 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       style.systemNavigationBarContrastEnforced =
           (*args)[kSystemNavigationBarContrastEnforced].GetBool();
       DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarContrastEnforced << ": "
-                     << style.systemNavigationBarContrastEnforced;
+                 << kSystemNavigationBarContrastEnforced << ": "
+                 << style.systemNavigationBarContrastEnforced;
     }
     result = codec.EncodeSuccessEnvelope();
   } else {
     DLOG(ERROR) << "(" << engine->GetIndex() << ") Platform: " << method
-                    << " is unhandled";
+                << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

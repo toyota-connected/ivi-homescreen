@@ -1,12 +1,12 @@
-<map id="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/textures/texture.h" name="/home/joel.winarske@toyotaconnected.com/development/workspace&#45;automation&#45;configs/app/ivi&#45;homescreen/shell/textures/texture.h">
-<area shape="rect" id="node1" title=" " alt="" coords="250,5,470,105"/>
-<area shape="rect" id="node2" title=" " alt="" coords="5,153,83,180"/>
-<area shape="rect" id="node3" title=" " alt="" coords="107,153,170,180"/>
-<area shape="rect" id="node4" title=" " alt="" coords="365,235,448,262"/>
-<area shape="rect" id="node5" title=" " alt="" coords="245,153,349,180"/>
-<area shape="rect" id="node6" title=" " alt="" coords="373,153,472,180"/>
-<area shape="rect" id="node7" title=" " alt="" coords="496,153,683,180"/>
-<area shape="rect" id="node8" title=" " alt="" coords="751,228,934,269"/>
-<area shape="rect" id="node9" href="$constants_8h.html" title=" " alt="" coords="707,153,805,180"/>
-<area shape="rect" id="node10" title=" " alt="" coords="671,235,727,262"/>
+<map id="/mnt/raid10/stargate/ivi&#45;homescreen/shell/textures/texture.h" name="/mnt/raid10/stargate/ivi&#45;homescreen/shell/textures/texture.h">
+<area shape="rect" id="node1" title=" " alt="" coords="269,5,414,60"/>
+<area shape="rect" id="node2" title=" " alt="" coords="5,108,75,133"/>
+<area shape="rect" id="node3" title=" " alt="" coords="99,108,157,133"/>
+<area shape="rect" id="node4" title=" " alt="" coords="345,189,425,214"/>
+<area shape="rect" id="node5" title=" " alt="" coords="232,108,331,133"/>
+<area shape="rect" id="node6" title=" " alt="" coords="355,108,451,133"/>
+<area shape="rect" id="node7" title=" " alt="" coords="475,108,642,133"/>
+<area shape="rect" id="node8" title=" " alt="" coords="714,181,875,221"/>
+<area shape="rect" id="node9" href="$constants_8h.html" title=" " alt="" coords="667,108,757,133"/>
+<area shape="rect" id="node10" title=" " alt="" coords="639,189,689,214"/>
 </map>

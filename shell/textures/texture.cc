@@ -84,8 +84,8 @@ void Texture::Enable(GLuint name) {
       assert(false);
     }
 
-    if (kSuccess != m_flutter_engine->MarkExternalTextureFrameAvailable(
-                        m_flutter_engine, name)) {
+    if (kSuccess !=
+        Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, name)) {
       assert(false);
     }
     m_enabled = true;
@@ -115,7 +115,6 @@ void Texture::SetEngine(Engine* engine) {
 void Texture::FrameReady() {
   if (m_flutter_engine)
     for (auto name : m_name) {
-      m_flutter_engine->MarkExternalTextureFrameAvailable(m_flutter_engine,
-                                                          name);
+      Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, name);
     }
 }

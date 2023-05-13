@@ -9,7 +9,7 @@ var class_event_timer =
     [ "arm", "class_event_timer.html#ae2fccc9b5d1bb425b3518642e9047606", null ],
     [ "close_evfd", "class_event_timer.html#aad722f0cd32403b0df53630b4a385cd1", null ],
     [ "disarm", "class_event_timer.html#a6063e44be076283832dfb4ea29711be4", null ],
-    [ "operator=", "class_event_timer.html#acccf9b04a1671d71ffa2da140ae6cbd3", null ],
+    [ "operator=", "class_event_timer.html#a783e71b9468257c5edfe9658ddccef06", null ],
     [ "run", "class_event_timer.html#a6549f2317c3a40f4f6a4311e2b5cf4f2", null ],
     [ "set_timerspec", "class_event_timer.html#a8fcd9c6fac2eaed08e99504b5b1c15b0", null ],
     [ "unwatch_timerfd", "class_event_timer.html#a543d866098ff75a6d4dfb441da5cbf63", null ],

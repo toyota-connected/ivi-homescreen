@@ -20,7 +20,7 @@
 void CompositorRegionPlugin::ClearGroups(flutter::EncodableList& types,
                                          FlutterView* view) {
   for (auto const& encoded_types : types) {
-    if (encoded_types.IsNull()){
+    if (encoded_types.IsNull()) {
       continue;
     }
     std::string type = std::get<std::string>(encoded_types);
@@ -34,7 +34,7 @@ flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
   flutter::EncodableList results;
 
   for (auto const& group : groups) {
-    if (group.IsNull()){
+    if (group.IsNull()) {
       continue;
     }
     auto arguments = std::get<flutter::EncodableMap>(group);
@@ -95,7 +95,8 @@ void CompositorRegionPlugin::OnPlatformMessage(
     void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  std::unique_ptr<std::vector<uint8_t>> result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
+  std::unique_ptr<std::vector<uint8_t>> result =
+      codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   do {
@@ -104,7 +105,7 @@ void CompositorRegionPlugin::OnPlatformMessage(
       break;
     }
     auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
-    if (args == nullptr){
+    if (args == nullptr) {
       break;
     }
 
@@ -115,7 +116,7 @@ void CompositorRegionPlugin::OnPlatformMessage(
     }
     auto types = std::get<flutter::EncodableList>(it->second);
     ClearGroups(types, engine->GetView());
-    
+
     /* Group array */
     it = args->find(flutter::EncodableValue(kArgGroups));
     if (it == args->end() || it->second.IsNull()) {
@@ -124,7 +125,7 @@ void CompositorRegionPlugin::OnPlatformMessage(
     auto groups = std::get<flutter::EncodableList>(it->second);
     flutter::EncodableValue value = HandleGroups(groups, engine->GetView());
     result = codec.EncodeSuccessEnvelope(&value);
-  } while (0); 
+  } while (0);
 
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());

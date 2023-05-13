@@ -16,8 +16,6 @@
 
 #include "wayland_egl.h"
 
-#include <cstring>
-
 #include <wayland-egl.h>
 
 #include "constants.h"

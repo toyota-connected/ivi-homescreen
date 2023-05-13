@@ -16,11 +16,9 @@
 
 #include "egl.h"
 
-#include <dlfcn.h>
 #include <cassert>
 #include <cstring>
 
-#include "gl_process_resolver.h"
 #include "logging.h"
 
 Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
@@ -42,8 +40,8 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   assert(count);
   DLOG(INFO) << "EGL has " << count << " configs";
 
-  auto* configs =
-      reinterpret_cast<EGLConfig*>(calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
+  auto* configs = reinterpret_cast<EGLConfig*>(
+      calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
   assert(configs);
 
   if (debug) {
@@ -474,12 +472,11 @@ static struct egl_config_attribute egl_config_attributes[] = {
 
 void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
   DLOG(INFO) << "OpenGL ES Attributes:";
-  DLOG(INFO) << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR)
-                 << "\"";
+  DLOG(INFO) << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR) << "\"";
   DLOG(INFO) << "\tEGL_VERSION: \"" << eglQueryString(m_dpy, EGL_VERSION)
-                 << "\"";
+             << "\"";
   DLOG(INFO) << "\tEGL_CLIENT_APIS: \""
-                 << eglQueryString(m_dpy, EGL_CLIENT_APIS) << "\"";
+             << eglQueryString(m_dpy, EGL_CLIENT_APIS) << "\"";
   DLOG(INFO) << "\tEGL_EXTENSIONS:";
 
   const char* s = eglQueryString(m_dpy, EGL_EXTENSIONS);
@@ -500,22 +497,21 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
       EGLint value = 0;
       eglGetConfigAttrib(m_dpy, configs[i], egl_config_attribute.id, &value);
       if (egl_config_attribute.cardinality == 0) {
-        DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": "
-                       << (int)value;
+        DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": " << (int)value;
       } else if (egl_config_attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
         for (size_t k = 0; k < (size_t)egl_config_attribute.cardinality; k++) {
           if (egl_config_attribute.values[k].id == value) {
             DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": "
-                           << egl_config_attribute.values[k].name;
+                       << egl_config_attribute.values[k].name;
             known_value = true;
             break;
           }
         }
         if (!known_value) {
           DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": unknown ("
-                         << value << ")";
+                     << value << ")";
         }
       } else {
         /* Bitfield */

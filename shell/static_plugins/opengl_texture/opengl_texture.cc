@@ -24,7 +24,8 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  std::unique_ptr<std::vector<uint8_t>> result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+  std::unique_ptr<std::vector<uint8_t>> result =
+      codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();

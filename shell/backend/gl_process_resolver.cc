@@ -82,8 +82,7 @@ void* EglProcessResolver::process_resolver(const char* name) {
     return address;
   }
 
-  LOG(ERROR) << "gl_proc_resolver: could not resolve symbol \"" << name
-                 << "\"";
+  LOG(ERROR) << "gl_proc_resolver: could not resolve symbol \"" << name << "\"";
 
   return nullptr;
 }

@@ -21,9 +21,9 @@
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
-#include <filesystem>
 #include <flutter/encodable_value.h>
 #include <shell/platform/embedder/embedder.h>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -349,12 +349,12 @@ class Engine {
    * flutter
    */
   void CoalesceMouseEvent(FlutterPointerSignalKind signal,
-                      FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      double scroll_delta_x,
-                      double scroll_delta_y,
-                      int64_t buttons);
+                          FlutterPointerPhase phase,
+                          double x,
+                          double y,
+                          double scroll_delta_x,
+                          double scroll_delta_y,
+                          int64_t buttons);
 
   /**
    * @brief Coalesce touch event
@@ -367,9 +367,9 @@ class Engine {
    * flutter
    */
   void CoalesceTouchEvent(FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      int32_t device);
+                          double x,
+                          double y,
+                          int32_t device);
 
   /**
    * @brief Send coalesced Pointer events

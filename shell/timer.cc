@@ -41,8 +41,7 @@ EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
     evfd = epoll_create1(EPOLL_CLOEXEC);
     if (evfd < 0) {
       if (errno != EINVAL) {
-        LOG(ERROR) << "Failed to create epoll fd cloexec. "
-                       << strerror(errno);
+        LOG(ERROR) << "Failed to create epoll fd cloexec. " << strerror(errno);
         exit(-1);
       } else {
         // fallback
@@ -218,7 +217,7 @@ void EventTimer::run(struct timer_task* task, uint32_t events) {
 
   if (events != EPOLLIN)
     LOG(ERROR) << "Found Unexpected timerfd events: " << std::showbase
-                   << std::hex << events << std::noshowbase;
+               << std::hex << events << std::noshowbase;
 
   if (!(events & EPOLLIN))
     return;

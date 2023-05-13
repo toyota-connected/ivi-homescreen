@@ -4,9 +4,9 @@ var class_flutter_view =
     [ "~FlutterView", "class_flutter_view.html#a36cc3e62affe1501952d752b3c04e372", null ],
     [ "DrawFps", "class_flutter_view.html#ad770deee7b7abede153e5030593c40e2", null ],
     [ "FML_DISALLOW_COPY_AND_ASSIGN", "class_flutter_view.html#ac28934fb23dac10a5894c9d29d580708", null ],
-    [ "GetBackend", "class_flutter_view.html#af4e8611dd11a75ad78d6b6b0fcd1caf1", null ],
+    [ "GetBackend", "class_flutter_view.html#a35245365e0dede4bae75867cc9fb690a", null ],
     [ "GetIndex", "class_flutter_view.html#aae9d0156287b62261bf688b05731b152", null ],
-    [ "GetWindow", "class_flutter_view.html#a48f46ee0c5fe74fdc8012e13227af136", null ],
+    [ "GetWindow", "class_flutter_view.html#ae9967cce3b74573e16c3c1b025ab35f5", null ],
     [ "Initialize", "class_flutter_view.html#acb9b9d5025bec903c5a330bd4590c07c", null ],
     [ "RunTasks", "class_flutter_view.html#a2e3a5b9ce31ab68d27b4bcdbf634b270", null ],
     [ "counter", "class_flutter_view.html#a4df0d4327b2bc9cf10bf3d0110909f25", null ],
@@ -20,5 +20,5 @@ var class_flutter_view =
     [ "m_wayland_window", "class_flutter_view.html#a6527730ddc744fb052ce746a4594adac", null ],
     [ "output", "class_flutter_view.html#a865e7718f2fe800850e67f94691b46ad", null ],
     [ "period", "class_flutter_view.html#a3cebb4c6af6427af42b05e366c84d4b2", null ],
-    [ "pretime", "class_flutter_view.html#ab183c5ceae95108ac3c6ba1e6fea9899", null ]
+    [ "pre_time", "class_flutter_view.html#a49fc672ba896f846678cb7f17dc30c28", null ]
 ];

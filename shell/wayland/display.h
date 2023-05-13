@@ -30,6 +30,8 @@
 
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
+#include "ivi-application-client-protocol.h"
+#include "ivi-wm-client-protocol.h"
 #include "static_plugins/key_event/key_event.h"
 #include "static_plugins/text_input/text_input.h"
 #include "timer.h"
@@ -79,7 +81,7 @@ class Display {
 
   /**
    * @brief Get display
-   * @return wl_subcompositor*
+   * @return wl_display*
    * @retval Pointer to display
    * @relation
    * wayland
@@ -97,6 +99,17 @@ class Display {
    * wayland
    */
   struct xdg_wm_base* GetXdgWmBase() { return m_xdg_wm_base; }
+
+  /**
+   * @brief Get ivi_application instance
+   * @return ivi_application*
+   * @retval Pointer to IVI Application
+   * @relation
+   * ivi-shell
+   */
+  struct ivi_application* GetIviApplication() const {
+    return m_ivi_shell.application;
+  }
 
   /**
    * @brief Get shared memory
@@ -201,6 +214,8 @@ class Display {
 
   int32_t GetBufferScale(uint32_t index);
 
+  std::pair<int32_t, int32_t> GetPhysicalSize(uint32_t index);
+
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
@@ -229,6 +244,11 @@ class Display {
     bool bound_ok{};
     uint32_t version = 0;
   } m_agl;
+
+  struct ivi_shell {
+    struct ivi_application* application = nullptr;
+    struct ivi_wm* ivi_wm = nullptr;
+  } m_ivi_shell;
 
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};
@@ -835,4 +855,87 @@ class Display {
   static void agl_shell_bound_fail(void* data, struct agl_shell* shell);
 
   static const struct agl_shell_listener agl_shell_listener;
+
+  static void ivi_wm_surface_visibility(void* data,
+                                        struct ivi_wm* ivi_wm,
+                                        uint32_t surface_id,
+                                        int32_t visibility);
+  static void ivi_wm_layer_visibility(void* data,
+                                      struct ivi_wm* ivi_wm,
+                                      uint32_t layer_id,
+                                      int32_t visibility);
+  static void ivi_wm_surface_opacity(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t surface_id,
+                                     wl_fixed_t opacity);
+  static void ivi_wm_layer_opacity(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t layer_id,
+                                   wl_fixed_t opacity);
+  static void ivi_wm_surface_source_rectangle(void* data,
+                                              struct ivi_wm* ivi_wm,
+                                              uint32_t surface_id,
+                                              int32_t x,
+                                              int32_t y,
+                                              int32_t width,
+                                              int32_t height);
+  static void ivi_wm_layer_source_rectangle(void* data,
+                                            struct ivi_wm* ivi_wm,
+                                            uint32_t layer_id,
+                                            int32_t x,
+                                            int32_t y,
+                                            int32_t width,
+                                            int32_t height);
+  static void ivi_wm_surface_destination_rectangle(void* data,
+                                                   struct ivi_wm* ivi_wm,
+                                                   uint32_t surface_id,
+                                                   int32_t x,
+                                                   int32_t y,
+                                                   int32_t width,
+                                                   int32_t height);
+  static void ivi_wm_layer_destination_rectangle(void* data,
+                                                 struct ivi_wm* ivi_wm,
+                                                 uint32_t layer_id,
+                                                 int32_t x,
+                                                 int32_t y,
+                                                 int32_t width,
+                                                 int32_t height);
+  static void ivi_wm_surface_created(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t surface_id);
+  static void ivi_wm_layer_created(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t layer_id);
+  static void ivi_wm_surface_destroyed(void* data,
+                                       struct ivi_wm* ivi_wm,
+                                       uint32_t surface_id);
+  static void ivi_wm_layer_destroyed(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t layer_id);
+  static void ivi_wm_surface_error(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t object_id,
+                                   uint32_t error,
+                                   const char* message);
+  static void ivi_wm_layer_error(void* data,
+                                 struct ivi_wm* ivi_wm,
+                                 uint32_t object_id,
+                                 uint32_t error,
+                                 const char* message);
+  static void ivi_wm_surface_size(void* data,
+                                  struct ivi_wm* ivi_wm,
+                                  uint32_t surface_id,
+                                  int32_t width,
+                                  int32_t height);
+  static void ivi_wm_surface_stats(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t surface_id,
+                                   uint32_t frame_count,
+                                   uint32_t pid);
+  static void ivi_wm_layer_surface_added(void* data,
+                                         struct ivi_wm* ivi_wm,
+                                         uint32_t layer_id,
+                                         uint32_t surface_id);
+
+  static const struct ivi_wm_listener ivi_wm_listener;
 };

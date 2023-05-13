@@ -1,6 +1,9 @@
 var searchData=
 [
-  ['region_5ft_1018',['REGION_T',['../struct_compositor_region_plugin_1_1_r_e_g_i_o_n___t.html',1,'CompositorRegionPlugin']]],
-  ['restoration_1019',['Restoration',['../class_restoration.html',1,'']]],
-  ['routeinformation_1020',['RouteInformation',['../struct_navigation_1_1_route_information.html',1,'Navigation']]]
+  ['packageinfo_0',['PackageInfo',['../class_package_info.html',1,'']]],
+  ['platform_1',['Platform',['../class_platform.html',1,'']]],
+  ['platformchannel_2',['PlatformChannel',['../class_platform_channel.html',1,'']]],
+  ['platformviews_3',['PlatformViews',['../class_platform_views.html',1,'']]],
+  ['pointer_4',['pointer',['../struct_display_1_1pointer.html',1,'Display']]],
+  ['pointer_5fevent_5',['pointer_event',['../struct_display_1_1pointer__event.html',1,'Display']]]
 ];

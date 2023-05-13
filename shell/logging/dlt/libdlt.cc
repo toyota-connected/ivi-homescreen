@@ -20,7 +20,6 @@
 
 #include <dlfcn.h>
 
-
 LibDltExports::LibDltExports(void* lib) {
   GetFuncAddress(lib, "dlt_check_library_version", &CheckLibraryVersion);
   GetFuncAddress(lib, "dlt_register_app", &RegisterApp);

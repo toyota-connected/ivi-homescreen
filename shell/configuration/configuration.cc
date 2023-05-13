@@ -60,6 +60,10 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetInt();
   }
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
+    instance.view.ivi_surface_id =
+        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
+  }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
@@ -138,6 +142,10 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetInt();
   }
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
+    instance.view.ivi_surface_id =
+        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
+  }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
   }
@@ -163,7 +171,8 @@ void Configuration::getView(rapidjson::Document& doc,
     if (index > arr.Capacity())
       assert(false);
 
-    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(), instance);
+    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(),
+                      instance);
     getGlobalParameters(doc.GetObject(), instance);
   } else {
     getViewParameters(doc[kViewKey].GetObject(), instance);
@@ -212,6 +221,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   }
   if (cli.view.pixel_ratio > 0) {
     instance.view.pixel_ratio = cli.view.pixel_ratio;
+  }
+  if (cli.view.ivi_surface_id > 0) {
+    instance.view.ivi_surface_id = cli.view.ivi_surface_id;
   }
   if (cli.view.fullscreen_set &&
       cli.view.fullscreen != instance.view.fullscreen) {
@@ -293,12 +305,12 @@ void Configuration::PrintConfig(const Config& config) {
   LOG(INFO) << "Application Id: .......... " << config.app_id;
   if (!config.json_configuration_path.empty())
     LOG(INFO) << "JSON Configuration: ...... "
-                  << config.json_configuration_path;
+              << config.json_configuration_path;
   LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
   LOG(INFO) << "Disable Cursor: .......... "
-                << (config.disable_cursor ? "true" : "false");
+            << (config.disable_cursor ? "true" : "false");
   LOG(INFO) << "Debug Backend: ........... "
-                << (config.debug_backend ? "true" : "false");
+            << (config.debug_backend ? "true" : "false");
   LOG(INFO) << "********";
   LOG(INFO) << "* View *";
   LOG(INFO) << "********";
@@ -310,15 +322,17 @@ void Configuration::PrintConfig(const Config& config) {
   }
   LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
   LOG(INFO) << "Window Type: .............. " << config.view.window_type;
-  LOG(INFO) << "Output Index: ............. "
-                << config.view.wl_output_index;
+  LOG(INFO) << "Output Index: ............. " << config.view.wl_output_index;
   LOG(INFO) << "Size: ..................... " << config.view.width << " x "
-                << config.view.height;
+            << config.view.height;
   if (config.view.pixel_ratio != kDefaultPixelRatio) {
     LOG(INFO) << "Pixel Ratio: .............. " << config.view.pixel_ratio;
   }
+  if (config.view.ivi_surface_id > 0) {
+    LOG(INFO) << "IVI Surface ID: ........... " << config.view.ivi_surface_id;
+  }
   LOG(INFO) << "Fullscreen: ............... "
-                << (config.view.fullscreen ? "true" : "false");
+            << (config.view.fullscreen ? "true" : "false");
   LOG(INFO) << "Accessibility Features: ... "
-                << config.view.accessibility_features;
+            << config.view.accessibility_features;
 }

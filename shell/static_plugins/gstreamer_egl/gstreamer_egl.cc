@@ -88,12 +88,12 @@ static std::mutex gst_mutex;
 static std::map<int64_t, std::shared_ptr<CustomData>> global_map;
 
 #if GSTREAMER_DEBUG
-#define PrintMessageAsHex(index, message)                                  \
-  std::stringstream ss;                                                    \
-  ss << Hexdump((message)->message, (message)->message_size);              \
+#define PrintMessageAsHex(index, message)                              \
+  std::stringstream ss;                                                \
+  ss << Hexdump((message)->message, (message)->message_size);          \
   LOG(INFO) << "(" << (index) << ") Channel: \"" << (message)->channel \
-                << "\"\n"                                                  \
-                << ss.str();
+            << "\"\n"                                                  \
+            << ss.str();
 #else
 #define PrintMessageAsHex(a, b) \
   {                             \
@@ -293,8 +293,9 @@ void handoff_handler(GstElement* fakesink,
     } else {
       // Assume RGB
       gpointer video_frame_plane_buffer = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
-      loadRGBPixels(static_cast<GLuint>(textureId), (unsigned char*)video_frame_plane_buffer,
-                    data->info.width, data->info.height);
+      loadRGBPixels(static_cast<GLuint>(textureId),
+                    (unsigned char*)video_frame_plane_buffer, data->info.width,
+                    data->info.height);
     }
     gst_video_frame_unmap(&frame);
 
@@ -339,7 +340,7 @@ static void prepare(CustomData* data) {
     return;
   }
   DLOG(INFO) << "original video width: " << data->info.width
-                 << ", height: " << data->info.height;
+             << ", height: " << data->info.height;
   // set to the target
   if (!gst_video_info_set_format(&data->info, GST_VIDEO_FORMAT_NV12,
                                  static_cast<guint>(data->width),
@@ -367,10 +368,9 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
       gst_message_parse_error(msg, &err, &debug_info);
-      DLOG(ERROR) << "Error received from element "
-                      << GST_OBJECT_NAME(msg->src) << ":" << err->message;
-      DLOG(ERROR) << "Debug information "
-                      << (debug_info ? debug_info : "none");
+      DLOG(ERROR) << "Error received from element " << GST_OBJECT_NAME(msg->src)
+                  << ":" << err->message;
+      DLOG(ERROR) << "Debug information " << (debug_info ? debug_info : "none");
       gst_object_unref(bus);
       g_clear_error(&err);
       g_free(debug_info);
@@ -409,8 +409,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
                                       &pending_state);
       if (GST_MESSAGE_SRC(msg) == GST_OBJECT(data->playbin)) {
         if (new_state == GST_STATE_PLAYING) {
-          DLOG(INFO) << "message state changed, start playing "
-                         << textureId;
+          DLOG(INFO) << "message state changed, start playing " << textureId;
           prepare(data);
         } else if (new_state == GST_STATE_READY) {
           DLOG(INFO) << "message state changed, ready " << textureId;
@@ -566,7 +565,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
     // element specific message
     case GST_MESSAGE_ELEMENT: {
       DLOG(INFO) << "message-element: "
-                     << gst_structure_get_name(gst_message_get_structure(msg));
+                 << gst_structure_get_name(gst_message_get_structure(msg));
       break;
     }
     case GST_MESSAGE_TAG: {
@@ -582,7 +581,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
 #if GSTREAMER_DEBUG
     {
       DLOG(INFO) << "GST Message Type: "
-                     << gst_message_type_get_name(GST_MESSAGE_TYPE(msg));
+                 << gst_message_type_get_name(GST_MESSAGE_TYPE(msg));
       break;
     }
 #else
@@ -1072,8 +1071,8 @@ const char* map_ffmpeg_plugin(AVCodecID codec_id) {
  */
 void main_loop(CustomData* data) {
   DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") [main_loop] start data thread "
-                 << "- textureId: " << data->texture->GetId();
+             << ") [main_loop] start data thread "
+             << "- textureId: " << data->texture->GetId();
   GMainContext* context = g_main_context_new();
   g_main_context_push_thread_default(context);
 
@@ -1096,14 +1095,14 @@ void main_loop(CustomData* data) {
   gulong sig =
       g_signal_connect(data->sink, "handoff", (GCallback)handoff_handler, data);
   DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") [main_loop] register signal " << sig;
+             << ") [main_loop] register signal " << sig;
 
   auto decoder_factory =
       gst_element_factory_find(map_ffmpeg_plugin(data->codec_id));
   if (decoder_factory == nullptr) {
     LOG(ERROR) << "(" << data->engine->GetIndex()
-                   << ") Failed to find decoder: "
-                   << map_ffmpeg_plugin(data->codec_id);
+               << ") Failed to find decoder: "
+               << map_ffmpeg_plugin(data->codec_id);
   }
   data->decoder = gst_element_factory_create(decoder_factory, "decoder");
   assert(data->decoder);
@@ -1127,13 +1126,13 @@ void main_loop(CustomData* data) {
                    data->video_scale, data->sink, nullptr);
   if (!gst_element_link(data->decoder, data->video_convert)) {
     DLOG(ERROR) << "(" << data->engine->GetIndex()
-                    << ") Failed to link decoder with videoconvert";
+                << ") Failed to link decoder with videoconvert";
   }
 
-  if (!gst_element_link_filtered(data->video_convert, data->video_scale, caps)) {
-    DLOG(ERROR)
-        << "(" << data->engine->GetIndex()
-        << ") Failed to link videoconvert with videoscale using filter";
+  if (!gst_element_link_filtered(data->video_convert, data->video_scale,
+                                 caps)) {
+    DLOG(ERROR) << "(" << data->engine->GetIndex()
+                << ") Failed to link videoconvert with videoscale using filter";
   }
 
   gst_caps_unref(caps);
@@ -1141,7 +1140,7 @@ void main_loop(CustomData* data) {
   GstPad* pad = gst_element_get_static_pad(data->decoder, "sink");
   if (gst_pad_is_linked(pad)) {
     DLOG(ERROR) << "(" << data->engine->GetIndex()
-                    << ") already linked, ignore";
+                << ") already linked, ignore";
     return;
   }
   GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
@@ -1151,7 +1150,7 @@ void main_loop(CustomData* data) {
 
   if (!gst_element_link_filtered(data->video_scale, data->sink, scale)) {
     DLOG(ERROR) << "(" << data->engine->GetIndex()
-                    << ") Failed to link videoscale with fakesink using filter";
+                << ") Failed to link videoscale with fakesink using filter";
   }
   gst_caps_unref(scale);
 
@@ -1170,8 +1169,7 @@ void main_loop(CustomData* data) {
   g_main_loop_run(data->main_loop);
   g_main_loop_unref(data->main_loop);
   data->main_loop = nullptr;
-  DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") [main_loop] mainloop end";
+  DLOG(INFO) << "(" << data->engine->GetIndex() << ") [main_loop] mainloop end";
 }
 
 void GstreamerEgl::OnInitialize(const FlutterPlatformMessage* message,
@@ -1264,7 +1262,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
         return;
       }
       DLOG(INFO) << "(" << data->engine->GetIndex()
-                     << ") load uri: " << data->uri;
+                 << ") load uri: " << data->uri;
     }
   }
   it = args->find(flutter::EncodableValue("asset"));
@@ -1272,7 +1270,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
     if (std::holds_alternative<std::string>(it->second)) {
       std::string asset_path = std::get<std::string>(it->second);
       DLOG(INFO) << "(" << data->engine->GetIndex()
-                     << ") asset_path: " << asset_path;
+                 << ") asset_path: " << asset_path;
       if (asset_path[0] == '/') {
         data->uri = paths::JoinPaths({kUriPrefixFile, asset_path});
       } else {
@@ -1280,7 +1278,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
             {kUriPrefixFile, engine->GetAssetDirectory(), asset_path});
       }
       DLOG(INFO) << "(" << data->engine->GetIndex()
-                     << ") asset uri: " << data->uri;
+                 << ") asset uri: " << data->uri;
     }
   }
 
@@ -1288,7 +1286,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   if (!get_video_info(data->uri.c_str(), data->info.width, data->info.height,
                       data->duration, data->codec_id)) {
     LOG(ERROR) << "(" << data->engine->GetIndex()
-                   << ") Failed to get video info";
+               << ") Failed to get video info";
   }
 
   it = args->find(flutter::EncodableValue("width"));
@@ -1311,21 +1309,21 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
       DLOG(INFO) << "(" << data->engine->GetIndex()
-                     << ") packageName: " << std::get<std::string>(it->second);
+                 << ") packageName: " << std::get<std::string>(it->second);
     }
   }
   it = args->find(flutter::EncodableValue("formatHint"));
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
       DLOG(INFO) << "(" << data->engine->GetIndex()
-                     << ") formatHint: " << std::get<std::string>(it->second);
+                 << ") formatHint: " << std::get<std::string>(it->second);
     }
   }
   it = args->find(flutter::EncodableValue("httpHeaders"));
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
       DLOG(INFO) << "(" << data->engine->GetIndex()
-                     << ") httpHeaders: " << std::get<std::string>(it->second);
+                 << ") httpHeaders: " << std::get<std::string>(it->second);
     }
   }
 
@@ -1364,7 +1362,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   glGenerateMipmap(GL_TEXTURE_2D);
 
   DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") fetch Texture: " << textureId;
+             << ") fetch Texture: " << textureId;
   data->texture =
       new Texture(textureId, GL_TEXTURE_2D, GL_RGBA8, nullptr, nullptr);
   auto engine_shr = std::shared_ptr<Engine>(engine);
@@ -1408,13 +1406,13 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   surface->ClearCurrent();
   data->texture->Enable(textureId);
   DLOG(INFO) << "(" << engine->GetIndex() << ") Register "
-                 << data->texture->GetId() << " done";
+             << data->texture->GetId() << " done";
 
   std::stringstream ss_event_name;
   ss_event_name << kChannelGstreamerEventPrefix << textureId;
   auto event_name = ss_event_name.str();
   DLOG(INFO) << "(" << engine->GetIndex()
-                 << ") Register Stream: " << event_name;
+             << ") Register Stream: " << event_name;
 
   global_map[textureId] = std::shared_ptr<CustomData>(data);
   PlatformChannel::GetInstance()->RegisterCallback(event_name.c_str(), OnEvent);
@@ -1908,7 +1906,7 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
   }
 
   DLOG(INFO) << "(" << engine->GetIndex() << ") textureId: " << textureId
-                 << ", seek to " << position;
+             << ", seek to " << position;
 
   SendSuccess(engine, message->response_handle);
 }
@@ -1999,7 +1997,7 @@ void GstreamerEgl::OnSetMixWithOthers(const FlutterPlatformMessage* message,
   auto it = args->find(flutter::EncodableValue("mixWithOthers"));
   if (it != args->end() && !it->second.IsNull()) {
     DLOG(INFO) << "(" << engine->GetIndex()
-                   << ") mixWithOthers: " << std::get<bool>(it->second);
+               << ") mixWithOthers: " << std::get<bool>(it->second);
   }
 
   SendSuccess(engine, message->response_handle);

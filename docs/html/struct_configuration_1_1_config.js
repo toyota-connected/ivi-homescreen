@@ -14,6 +14,7 @@ var struct_configuration_1_1_config =
     [ "fullscreen", "struct_configuration_1_1_config.html#aa4c1bb11b43b082a65bb4931064b0ab2", null ],
     [ "fullscreen_set", "struct_configuration_1_1_config.html#a9fdc540cd9d177cee50f0e1bb0efde88", null ],
     [ "height", "struct_configuration_1_1_config.html#aecb8364f5a9a69c8e99c400a988be39e", null ],
+    [ "ivi_surface_id", "struct_configuration_1_1_config.html#aa3537f88f700d7ab65956bfe7b2a7c49", null ],
     [ "json_configuration_path", "struct_configuration_1_1_config.html#a72f2642f79fa41228d72cb27f2ef3359", null ],
     [ "pixel_ratio", "struct_configuration_1_1_config.html#a322dda065643160ee583f7f866f40aea", null ],
     [ "view", "struct_configuration_1_1_config.html#aa227edcf6b14abd59f6d879931566d27", null ],

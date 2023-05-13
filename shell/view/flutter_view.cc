@@ -60,12 +60,17 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.debug_backend);
 #endif
 
+  auto output = m_wayland_display->GetWlOutput(m_config.view.wl_output_index);
+  auto output_index = m_config.view.wl_output_index;
+
+  DLOG(INFO) << "Width: " << m_config.view.width
+             << ", Height: " << m_config.view.height;
+
   m_wayland_window = std::make_shared<WaylandWindow>(
-      m_index, display, m_config.view.window_type,
-      m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
-      m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
-      m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
-      m_backend.get());
+      m_index, display, m_config.view.window_type, output, output_index,
+      m_config.app_id, m_config.view.fullscreen, m_config.view.width,
+      m_config.view.height, m_config.view.pixel_ratio, m_backend.get(),
+      m_config.view.ivi_surface_id);
 }
 
 FlutterView::~FlutterView() = default;
@@ -128,9 +133,9 @@ void FlutterView::Initialize() {
     }
 
     m_fps.period *= (1000 / 16);
-    m_fps.pretime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
+    m_fps.pre_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
   }
 }
 
@@ -160,17 +165,17 @@ void FlutterView::DrawFps(long long end_time) {
     m_fps.counter++;
 
     if (m_fps.period <= m_fps.counter) {
-      auto fps_loop = (m_fps.counter * 1000) / (end_time - m_fps.pretime);
+      auto fps_loop = (m_fps.counter * 1000) / (end_time - m_fps.pre_time);
       auto fps_redraw = (m_wayland_window->GetFpsCounter() * 1000) /
-                        (end_time - m_fps.pretime);
+                        (end_time - m_fps.pre_time);
 
       m_fps.counter = 0;
-      m_fps.pretime = end_time;
+      m_fps.pre_time = end_time;
 
       if (0 < (m_fps.output & 0x01)) {
         if (0 < (m_fps.output & 0x01)) {
           LOG(INFO) << "(" << m_index << ") FPS = " << fps_loop << " "
-                        << fps_redraw;
+                    << fps_redraw;
         }
       }
     }
@@ -240,8 +245,8 @@ void FlutterView::SetRegion(
 
   for (auto const& region : regions) {
     DLOG(INFO) << "Set Region: type: " << type << ", x: " << region.x
-                   << ", y: " << region.y << ", width: " << region.width
-                   << ", height: " << region.height;
+               << ", y: " << region.y << ", width: " << region.width
+               << ", height: " << region.height;
 
     wl_region_add(base_region, region.x, region.y, region.width, region.height);
   }

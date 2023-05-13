@@ -51,11 +51,11 @@ endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_sources(homescreen PRIVATE
-        backend/wayland_egl.cc
-        backend/egl.cc
-        backend/gl_process_resolver.cc
-    )
-endif()
+            backend/wayland_egl.cc
+            backend/egl.cc
+            backend/gl_process_resolver.cc
+            )
+endif ()
 
 target_compile_definitions(homescreen
         PRIVATE

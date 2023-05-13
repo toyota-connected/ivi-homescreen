@@ -25,6 +25,8 @@
 #include "constants.h"
 
 #include "backend/backend.h"
+#include "ivi-application-client-protocol.h"
+#include "ivi-wm-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 // workaround for Wayland macro not compiling in C++
@@ -63,7 +65,8 @@ class WaylandWindow {
                 int32_t width,
                 int32_t height,
                 double pixel_ratio,
-                Backend* backend);
+                Backend* backend,
+                uint32_t ivi_surface_id);
 
   ~WaylandWindow();
 
@@ -138,6 +141,7 @@ class WaylandWindow {
   std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
 
+  uint32_t m_ivi_surface_id;
   bool m_fullscreen{};
   bool m_maximized{};
   MAYBE_UNUSED bool m_resize{};
@@ -157,10 +161,12 @@ class WaylandWindow {
 
   struct xdg_surface* m_xdg_surface;
   struct xdg_toplevel* m_xdg_toplevel;
+  static const struct xdg_surface_listener xdg_surface_listener;
+
+  struct ivi_surface* m_ivi_surface;
+  static const struct ivi_surface_listener ivi_surface_listener;
 
   struct wl_callback* m_base_frame_callback;
-
-  static const struct xdg_surface_listener xdg_surface_listener;
 
   static const struct wl_surface_listener m_base_surface_listener;
 
@@ -204,6 +210,21 @@ class WaylandWindow {
                                            uint32_t serial);
 
   static const struct xdg_toplevel_listener xdg_toplevel_listener;
+
+  /**
+   * @brief Response to configure event
+   * @param[in] data Pointer to WaylandWindow type
+   * @param[in] ivi_surface Surfaces in the domain of ivi-shell
+   * @param[in] width width of the surface
+   * @param[in] height height of the surface
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void handle_ivi_surface_configure(void* data,
+                                           struct ivi_surface* ivi_surface,
+                                           int32_t width,
+                                           int32_t height);
 
   /**
    * @brief Response to configure event
