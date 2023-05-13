@@ -56,7 +56,8 @@ inline void GetFuncAddress(void* library,
                            FunctionPointer* out) {
   auto symbol = dlsym(library, function_name);
   if (!symbol) {
-    std::cerr << "GetFuncAddress: " << function_name << " not found!" << std::endl;
+    std::cerr << "GetFuncAddress: " << function_name << " not found!"
+              << std::endl;
     const char* reason = dlerror();
     (void)reason;
   }

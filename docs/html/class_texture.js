@@ -10,7 +10,7 @@ var class_texture =
     [ "FrameReady", "class_texture.html#a6a3ca8cb9bb0337ec9c1c8a7e5a8ec39", null ],
     [ "GetFlutterOpenGLTexture", "class_texture.html#a46fbdc903d8448548d5acd2d2a1c6481", null ],
     [ "GetId", "class_texture.html#a2c0038249d6a80dffc15b1599a6ac385", null ],
-    [ "operator=", "class_texture.html#a467e3ce0911b607cd56c6ff61fe572b5", null ],
+    [ "operator=", "class_texture.html#afd23b464ac78cddaf9af8ddc434617ad", null ],
     [ "SetEngine", "class_texture.html#ab2de662625f1241a957cb39deb3048d8", null ],
     [ "m_create_callback", "class_texture.html#aee13965c916230a41ee300523be69498", null ],
     [ "m_dispose_callback", "class_texture.html#a54298130203620754166d0c69af315fc", null ],

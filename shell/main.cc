@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
   };
 
   if (Dlt::IsSupported()) {
-    Dlt::Register();
+    // Dlt::Register();
   }
 
   LOG(INFO) << GIT_BRANCH " @ " GIT_HASH;
@@ -102,11 +102,10 @@ int main(int argc, char** argv) {
       cl.GetOptionValue("j", &config.json_configuration_path);
       if (config.json_configuration_path.empty()) {
         LOG(ERROR) << "--j option requires an argument (e.g. "
-                          "--j=/tmp/cfg-dbg.json)";
+                      "--j=/tmp/cfg-dbg.json)";
         return EXIT_FAILURE;
       }
-      DLOG(INFO) << "Json Configuration: "
-                     << config.json_configuration_path;
+      DLOG(INFO) << "Json Configuration: " << config.json_configuration_path;
       RemoveArgument(config.view.vm_args,
                      "--j=" + config.json_configuration_path);
     }
@@ -120,7 +119,7 @@ int main(int argc, char** argv) {
       }
       if (accessibility_feature_flag_str.empty()) {
         LOG(ERROR) << "--a option (Accessibility Features) requires an "
-                          "argument (e.g. --a=31)";
+                      "argument (e.g. --a=31)";
         return EXIT_FAILURE;
       }
       config.view.accessibility_features =
@@ -130,9 +129,11 @@ int main(int argc, char** argv) {
     }
     if (cl.HasOption("b")) {
       cl.GetOptionValue("b", &config.view.bundle_path);
-      if (config.view.bundle_path.empty() || !std::filesystem::is_directory(config.view.bundle_path)) {
-        LOG(ERROR) << "--b (Bundle Path) option requires a directory path argument (e.g. "
-                          "--b=/usr/share/gallery)";
+      if (config.view.bundle_path.empty() ||
+          !std::filesystem::is_directory(config.view.bundle_path)) {
+        LOG(ERROR) << "--b (Bundle Path) option requires a directory path "
+                      "argument (e.g. "
+                      "--b=/usr/share/gallery)";
         return EXIT_FAILURE;
       }
       DLOG(INFO) << "Bundle Path: " << config.view.bundle_path;
@@ -164,8 +165,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
       }
       if (width_str.empty()) {
-        LOG(ERROR)
-            << "--w option (Width) requires an argument (e.g. --w=720)";
+        LOG(ERROR) << "--w option (Width) requires an argument (e.g. --w=720)";
         return EXIT_FAILURE;
       }
       config.view.width = static_cast<uint32_t>(std::stoul(width_str));
@@ -189,8 +189,7 @@ int main(int argc, char** argv) {
     if (cl.HasOption("t")) {
       cl.GetOptionValue("t", &config.cursor_theme);
       if (config.cursor_theme.empty()) {
-        LOG(ERROR)
-            << "--t option requires an argument (e.g. --t=DMZ-White)";
+        LOG(ERROR) << "--t option requires an argument (e.g. --t=DMZ-White)";
         return EXIT_FAILURE;
       }
       DLOG(INFO) << "Cursor Theme: " << config.cursor_theme;
@@ -200,7 +199,7 @@ int main(int argc, char** argv) {
       cl.GetOptionValue("window-type", &config.view.window_type);
       if (config.view.window_type.empty()) {
         LOG(ERROR) << "--window-type option requires an argument (e.g. "
-                          "--window-type=BG)";
+                      "--window-type=BG)";
         return EXIT_FAILURE;
       }
       DLOG(INFO) << "Window Type: " << config.view.window_type;
@@ -212,12 +211,12 @@ int main(int argc, char** argv) {
       cl.GetOptionValue("output-index", &output_index_str);
       if (!IsNumber(output_index_str)) {
         LOG(ERROR) << "--output-index option (Wayland Output Index) "
-                          "requires an integer value";
+                      "requires an integer value";
         return EXIT_FAILURE;
       }
       if (output_index_str.empty()) {
         LOG(ERROR) << "--output-index option (Wayland Output Index) "
-                          "requires an argument (e.g. --output-index=1)";
+                      "requires an argument (e.g. --output-index=1)";
         return EXIT_FAILURE;
       }
       config.view.wl_output_index =
@@ -228,7 +227,7 @@ int main(int argc, char** argv) {
       cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
       if (config.app_id.empty()) {
         LOG(ERROR) << "--xdg-shell-app-id option requires an argument "
-                          "(e.g. --xdg-shell-app-id=gallery)";
+                      "(e.g. --xdg-shell-app-id=gallery)";
         return EXIT_FAILURE;
       }
       DLOG(INFO) << "Application ID: " << config.app_id;
@@ -240,13 +239,25 @@ int main(int argc, char** argv) {
       cl.GetOptionValue("p", &pixel_ratio_str);
       if (pixel_ratio_str.empty()) {
         LOG(ERROR) << "--p option (Pixel Ratio) requires an argument "
-                          "(e.g. --p=1.1234)";
+                      "(e.g. --p=1.1234)";
         return EXIT_FAILURE;
       }
 
-      char* ptr;
-      config.view.pixel_ratio = strtod(pixel_ratio_str.c_str(), &ptr);
+      config.view.pixel_ratio = strtod(pixel_ratio_str.c_str(), nullptr);
       RemoveArgument(config.view.vm_args, "--p=" + pixel_ratio_str);
+    }
+    if (cl.HasOption("i")) {
+      std::string ivi_surface_id_str;
+      cl.GetOptionValue("i", &ivi_surface_id_str);
+      if (ivi_surface_id_str.empty()) {
+        LOG(ERROR) << "--i option (IVI Surface ID) requires an argument "
+                      "(e.g. --i=2)";
+        return EXIT_FAILURE;
+      }
+
+      config.view.ivi_surface_id = static_cast<uint32_t>(
+          strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
+      RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
     }
   }
 
@@ -275,7 +286,7 @@ int main(int argc, char** argv) {
   }
 
   if (Dlt::IsSupported()) {
-    Dlt::Unregister();
+    // Dlt::Unregister();
   }
 
   return EXIT_SUCCESS;

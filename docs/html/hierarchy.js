@@ -23,6 +23,9 @@ var hierarchy =
     [ "CustomHexdump< RowSize, ShowAscii >", "struct_custom_hexdump.html", null ],
     [ "DelegateHandleKey", "class_delegate_handle_key.html", null ],
     [ "DesktopWindow", "class_desktop_window.html", null ],
+    [ "Dlt", "class_dlt.html", null ],
+    [ "DltContext", "struct_dlt_context.html", null ],
+    [ "DltContextData", "struct_dlt_context_data.html", null ],
     [ "Egl", "class_egl.html", [
       [ "WaylandEglBackend", "class_wayland_egl_backend.html", null ]
     ] ],
@@ -40,10 +43,21 @@ var hierarchy =
     [ "GstreamerEgl", "class_gstreamer_egl.html", null ],
     [ "IosFlagSaver", "class_ios_flag_saver.html", null ],
     [ "Isolate", "class_isolate.html", null ],
+    [ "Display::ivi_shell", "struct_display_1_1ivi__shell.html", null ],
+    [ "ivi_surface_listener", null, [
+      [ "WaylandWindow", "struct_wayland_window.html", null ]
+    ] ],
+    [ "ivi_wm_listener", null, [
+      [ "Display", "struct_display.html", null ]
+    ] ],
     [ "keyboard_listener", null, [
       [ "Display", "struct_display.html", null ]
     ] ],
     [ "secret::Keyring", "classsecret_1_1_keyring.html", null ],
+    [ "LibDlt", "class_lib_dlt.html", null ],
+    [ "LibDltExports", "struct_lib_dlt_exports.html", null ],
+    [ "LogMessage", "class_log_message.html", null ],
+    [ "LogMessageVoid", "class_log_message_void.html", null ],
     [ "m_base_surface_frame_listener", null, [
       [ "WaylandWindow", "struct_wayland_window.html", null ]
     ] ],

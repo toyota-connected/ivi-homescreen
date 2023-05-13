@@ -78,6 +78,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `--h={int value}` - Sets View height.  Requires an integer value.
 
+`--i={int value}` - Sets ivi-shell surface ID.  Requires an integer value.
+
 `--p={int value}` - Sets Pixel Ratio.  Requires a double value.
 
 `--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
@@ -125,6 +127,8 @@ it will create borderless windows in no particular position.
 `vm_args` - Array of strings which get passed to the VM instance as command line arguments.
 
 `fullscreen` - Sets window to fullscreen.
+
+`ivi_surface_id` - Sets ivi-shell surface ID.
 
 `fps_output_console` - Setting to `1` FPS count is output to stdout.
 
@@ -204,6 +208,69 @@ All other parameters get assigned using the following ordering:
 1. JSON Configuration View object parameters
 2. JSON Configuration Global (non-view) parameters
 3. Command Line parameters (Overrides View and Global parameters)
+
+# CMake Build flags
+
+`ENABLE_POINTER_AXIS_HANDLER` - Enable Mouse Axis Handler.  Defaults to OFF
+
+`ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
+
+`ENABLE_AGL_CLIENT` - Enable AGL Client.  Defaults to OFF
+
+`ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
+
+`DISABLE_FLUTTER_LOG_MESSAGES` - Disable Flutter Engine Log output.  Defaults to OFF
+
+`BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
+
+`BUILD_EGL_TRANSPARENCY` - Build with EGL Transparency Enabled.  Defaults to ON
+
+`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backend for Vulkan.  Defaults to ON
+
+`BUILD_BACKEND_WAYLAND_DRM` - Build Backend Wayland DRM.  Defaults to OFF
+
+`BUILD_TEXTURE_EGL` - Include EGL Textures.  Defaults to ON
+
+`BUILD_TEXTURE_TEST_EGL` - Includes Test Texture.  Defaults to OFF
+
+`BUILD_TEXTURE_NAVI_RENDER_EGL` - Includes Navi Texture.  Defaults to ON
+
+`BUILD_PLUGIN_ISOLATE` - Include Isolate Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_RESTORATION` - Include Restoration Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_PLATFORM` - Include Platform Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_MOUSE_CURSOR` - Include Mouse Cursor Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_GSTREAMER_EGL` - Include GStreamer Plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_TEXT_INPUT` - Includes Text Input Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_KEY_EVENT` - Includes Key Event Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_PACKAGE_INFO` - Include PackageInfo Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_COMP_SURF` - Include Compositor Surface Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_COMP_REGION` - Include Compositor Region Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_OPENGL_TEXTURE` - Includes OpenGL Texture Plugin.  Defaults to ON 
+
+`BUILD_PLUGIN_NAVIGATION` - Includes Navigation Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_ACCESSIBILITY` - Includes Accessibility Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_PLATFORM_VIEW` - Includes PlatformView Plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_DESKTOP_WINDOW` - Includes Desktop Window Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
+
+
+_**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
 # x86_64 Desktop development notes
 

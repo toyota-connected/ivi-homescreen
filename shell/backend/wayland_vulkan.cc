@@ -133,7 +133,7 @@ void WaylandVulkanBackend::createInstance() {
       VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 
   LOG(INFO) << "Enabling " << state_.enabled_instance_extensions.size()
-                << " instance extensions:";
+            << " instance extensions:";
   for (const auto& extension : state_.enabled_instance_extensions) {
     LOG(INFO) << "  - " << extension;
   }
@@ -343,8 +343,8 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     score += properties.limits.maxImageDimension2D;
 
     if (selected_score < score) {
-      DLOG(INFO) << "  - This is the best device so far. Score: 0x"
-                     << std::hex << score << std::dec;
+      DLOG(INFO) << "  - This is the best device so far. Score: 0x" << std::hex
+                 << score << std::dec;
 
       selected_score = score;
       state_.physical_device = pdevice;
@@ -371,7 +371,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
         bluevk::vkGetPhysicalDeviceProperties2KHR(state_.physical_device,
                                                   &physicalDeviceProperties2);
         LOG(INFO) << "Vulkan device driver: " << driverProperties.driverName
-                      << " " << driverProperties.driverInfo;
+                  << " " << driverProperties.driverInfo;
       }
 
       // Print out some properties of the GPU for diagnostic purposes.
@@ -382,23 +382,23 @@ void WaylandVulkanBackend::findPhysicalDevice() {
       const int major = VK_VERSION_MAJOR(properties.apiVersion);
       const int minor = VK_VERSION_MINOR(properties.apiVersion);
       LOG(INFO) << "vendor " << std::hex << vendorID << ", "
-                    << "device " << deviceID << ", "
-                    << "driver " << driverVersion << ", " << std::dec << "api "
-                    << major << "." << minor;
+                << "device " << deviceID << ", "
+                << "driver " << driverVersion << ", " << std::dec << "api "
+                << major << "." << minor;
       break;
     }
   }
 
   if (state_.physical_device == nullptr) {
     LOG(ERROR) << "Failed to find a compatible Vulkan physical device."
-                   << std::endl;
+               << std::endl;
     exit(EXIT_FAILURE);
   }
 }
 
 void WaylandVulkanBackend::createLogicalDevice() {
   DLOG(INFO) << "Enabling " << state_.enabled_device_extensions.size()
-                 << " device extensions:";
+             << " device extensions:";
   for (const char* extension : state_.enabled_device_extensions) {
     DLOG(INFO) << "  - " << extension;
   }
@@ -507,7 +507,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   // related to the total amount of memory used by presentable images."
   if (maxImageCount != 0 && desiredImageCount > maxImageCount) {
     LOG(ERROR) << "Swap chain does not support " << desiredImageCount
-                   << " images.";
+               << " images.";
     desiredImageCount = surface_capabilities.minImageCount;
   }
 
@@ -727,7 +727,7 @@ VKAPI_ATTR VkBool32
   (void)pUserData;
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
     LOG(ERROR) << "VULKAN ERROR: (" << cbdata->pMessageIdName << ") "
-                   << cbdata->pMessage;
+               << cbdata->pMessage;
   } else {
     // TODO: emit best practices warnings about aggressive pipeline barriers.
     if (strstr(cbdata->pMessage, "ALL_GRAPHICS_BIT") ||
@@ -735,7 +735,7 @@ VKAPI_ATTR VkBool32
       return VK_FALSE;
     }
     LOG(WARNING) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
-                     << cbdata->pMessage;
+                 << cbdata->pMessage;
   }
   return VK_TRUE;
 }

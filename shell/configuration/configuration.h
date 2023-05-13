@@ -42,6 +42,7 @@ class Configuration {
       bool fullscreen;
       bool fullscreen_set;
       double pixel_ratio;
+      uint32_t ivi_surface_id;
       uint32_t fps_output_console;
       uint32_t fps_output_overlay;
       uint32_t fps_output_frequency;
@@ -78,6 +79,7 @@ class Configuration {
   static constexpr char kWidthKey[] = "width";
   static constexpr char kHeightKey[] = "height";
   static constexpr char kPixelRatioKey[] = "pixel_ratio";
+  static constexpr char kIviSurfaceIdKey[] = "ivi_surface_id";
   static constexpr char kAccessibilityFeaturesKey[] = "accessibility_features";
   static constexpr char kVmArgsKey[] = "vm_args";
   static constexpr char kFullscreenKey[] = "fullscreen";

@@ -15,7 +15,7 @@ var gstreamer__egl_8cc =
     [ "loadRGBPixels", "gstreamer__egl_8cc.html#a065a8d37a80edf0b90b33103a3c02b4b", null ],
     [ "LoadShaders", "gstreamer__egl_8cc.html#a3b204b34682e3c788997960e83c0e324", null ],
     [ "main_loop", "gstreamer__egl_8cc.html#afc01f600e7992f2dfef5c0563734a073", null ],
-    [ "map_ffmpeg_plugin", "gstreamer__egl_8cc.html#a7958b8533b1485210ced6f1c97ca9eb9", null ],
+    [ "map_ffmpeg_plugin", "gstreamer__egl_8cc.html#a98e7cd70ffe75f42c5c2a828aec902ca", null ],
     [ "OnEvent", "gstreamer__egl_8cc.html#a9cd95b1788c3b37ce278d09e0bb5822a", null ],
     [ "pause_error", "gstreamer__egl_8cc.html#aac456646b3863a5815c4efd2ef6b238c", null ],
     [ "play_error", "gstreamer__egl_8cc.html#a4997b2ce19a6a22ac8755d438862a3e7", null ],

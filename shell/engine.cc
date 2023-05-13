@@ -66,7 +66,7 @@ Engine::Engine(FlutterView* view,
                   std::stringstream ss;
                   ss << Hexdump(message->message, message->message_size);
                   DLOG(INFO) << "Channel: \"" << message->channel << "\"\n"
-                                 << ss.str();
+                             << ss.str();
                   engine->SendPlatformMessageResponse(message->response_handle,
                                                       nullptr, 0);
                 } else {
@@ -77,9 +77,15 @@ Engine::Engine(FlutterView* view,
           .is_persistent_cache_read_only = false,
           .log_message_callback =
               [](const char* tag, const char* message, void* user_data) {
+#if defined(DISABLE_FLUTTER_LOG_MESSAGES)
+                (void)tag;
+                (void)message;
+                (void)user_data;
+#else
                 auto engine = reinterpret_cast<Engine*>(user_data);
-                LOG(INFO)
-                    << "(" << engine->m_index << ") " << tag << ": " << message;
+                LOG(INFO) << "(" << engine->m_index << ") " << tag << ": "
+                          << message;
+#endif
               },
       }) {
   DLOG(INFO) << "(" << m_index << ") +Engine::Engine";
@@ -100,7 +106,7 @@ Engine::Engine(FlutterView* view,
     engine_file_path = fml::paths::JoinPaths({bundle_path, kBundleEngine});
     if (fml::IsFile(engine_file_path)) {
       DLOG(INFO) << "(" << m_index
-                     << ") libflutter_engine.so: " << engine_file_path;
+                 << ") libflutter_engine.so: " << engine_file_path;
     } else {
       engine_file_path = kSystemEngine;
     }
@@ -144,7 +150,7 @@ Engine::Engine(FlutterView* view,
   }
   if (!fml::IsFile(m_icu_data_path)) {
     LOG(ERROR) << "(" << m_index << ") " << m_icu_data_path
-                   << " is not present.";
+               << " is not present.";
     assert(false);
   }
   DLOG(INFO) << "(" << m_index << ") icudtl.dat: " << m_icu_data_path;
@@ -165,7 +171,7 @@ Engine::Engine(FlutterView* view,
         fml::paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
     if (!fml::IsFile(kernel_snapshot)) {
       LOG(ERROR) << "(" << m_index << ") " << kernel_snapshot
-                     << " missing Flutter Kernel";
+                 << " missing Flutter Kernel";
       exit(EXIT_FAILURE);
     }
   }
@@ -248,7 +254,7 @@ FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
       FLUTTER_ENGINE_VERSION, &config, &m_args, this, &m_flutter_engine);
   if (result != kSuccess) {
     DLOG(ERROR) << "(" << m_index
-                    << ") FlutterEngineRun failed or engine is null";
+                << ") FlutterEngineRun failed or engine is null";
     return result;
   }
 
@@ -273,8 +279,7 @@ FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
 
   if (kSuccess != m_proc_table.UpdateLocales(m_flutter_engine, locales.data(),
                                              locales.size())) {
-    DLOG(ERROR) << "(" << m_index
-                    << ") Failed to set Flutter Engine Locale";
+    DLOG(ERROR) << "(" << m_index << ") Failed to set Flutter Engine Locale";
   }
 
   // Set Accessibility Features
@@ -303,7 +308,7 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
   auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
     DLOG(ERROR) << "(" << m_index
-                    << ") Failed send initial window size to flutter";
+                << ") Failed send initial window size to flutter";
     assert(false);
   }
 
@@ -329,13 +334,12 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
     DLOG(ERROR) << "(" << m_index
-                    << ") Failed send initial window size to flutter";
+                << ") Failed send initial window size to flutter";
     assert(false);
   }
 
   DLOG(INFO) << "(" << m_index << ") SetWindowSize: width=" << m_prev_width
-                 << ", height=" << m_prev_height
-                 << ", pixel_ratio=" << pixel_ratio;
+             << ", height=" << m_prev_height << ", pixel_ratio=" << pixel_ratio;
 
   return kSuccess;
 }
@@ -344,7 +348,7 @@ FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
                                                Texture* texture) {
   this->m_texture_registry[texture_id] = texture;
   DLOG(INFO) << "(" << m_index << ") Added Texture (" << texture_id
-                 << ") to registry";
+             << ") to registry";
   return kSuccess;
 }
 
@@ -357,16 +361,15 @@ Engine::TextureRegistryRemove(int64_t texture_id) {
                    });
   if (search != m_texture_registry.end()) {
     DLOG(INFO) << "(" << m_index << ") Removing Texture (" << texture_id
-                   << ") from registry " << search->second;
+               << ") from registry " << search->second;
     m_texture_registry.erase(search);
     LOG(INFO) << "(" << m_index << ") Removed Texture (" << texture_id
-                  << ") from registry";
+              << ") from registry";
 
     return kSuccess;
   }
-  DLOG(INFO) << "(" << m_index
-                 << ") Texture Already removed from registry: (" << texture_id
-                 << ")";
+  DLOG(INFO) << "(" << m_index << ") Texture Already removed from registry: ("
+             << texture_id << ")";
   return kInvalidArguments;
 }
 
@@ -393,7 +396,7 @@ flutter::EncodableValue Engine::TextureCreate(
     int32_t height,
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
   DLOG(INFO) << "(" << m_index << ") Engine::TextureCreate: <" << texture_id
-                 << ">";
+             << ">";
 
   auto texture = this->m_texture_registry[texture_id];
 
@@ -423,8 +426,8 @@ std::string Engine::GetFilePath(size_t index) {
 }
 
 FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
-  DLOG(INFO) << "(" << m_index << ") OpenGL Texture: dispose ("
-                 << texture_id << ")";
+  DLOG(INFO) << "(" << m_index << ") OpenGL Texture: dispose (" << texture_id
+             << ")";
 
   auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
@@ -433,8 +436,7 @@ FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
                    });
   if (search != m_texture_registry.end()) {
     ((Texture*)search->second)->Dispose(static_cast<uint32_t>(texture_id));
-    DLOG(INFO) << "(" << m_index << ") Texture Disposed (" << texture_id
-                   << ")";
+    DLOG(INFO) << "(" << m_index << ") Texture Disposed (" << texture_id << ")";
     return kSuccess;
   }
   return kInvalidArguments;
@@ -520,25 +522,16 @@ void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
   auto timestamp = m_proc_table.GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
   m_pointer_events.emplace_back(FlutterPointerEvent {
-    .struct_size = sizeof(FlutterPointerEvent),
-    .phase = phase,
+    .struct_size = sizeof(FlutterPointerEvent), .phase = phase,
 #if defined(ENV64BIT)
     .timestamp = timestamp,
 #elif defined(ENV32BIT)
     .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
-    .x = x,
-    .y = y,
-    .device = 0,
-    .signal_kind = signal,
-    .scroll_delta_x = scroll_delta_x,
-    .scroll_delta_y = scroll_delta_y,
-    .device_kind = kFlutterPointerDeviceKindMouse,
-    .buttons = buttons,
-    .pan_x = 0,
-    .pan_y = 0,
-    .scale = 0,
-    .rotation = 0
+    .x = x, .y = y, .device = 0, .signal_kind = signal,
+    .scroll_delta_x = scroll_delta_x, .scroll_delta_y = scroll_delta_y,
+    .device_kind = kFlutterPointerDeviceKindMouse, .buttons = buttons,
+    .pan_x = 0, .pan_y = 0, .scale = 0, .rotation = 0
   });
 }
 
@@ -549,25 +542,16 @@ void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
   auto timestamp = m_proc_table.GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
   m_pointer_events.emplace_back(FlutterPointerEvent {
-    .struct_size = sizeof(FlutterPointerEvent),
-    .phase = phase,
+    .struct_size = sizeof(FlutterPointerEvent), .phase = phase,
 #if defined(ENV64BIT)
     .timestamp = timestamp,
 #elif defined(ENV32BIT)
     .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
-    .x = x,
-    .y = y,
-    .device = device,
-    .signal_kind = kFlutterPointerSignalKindNone,
-    .scroll_delta_x = 0.0,
-    .scroll_delta_y = 0.0,
-    .device_kind = kFlutterPointerDeviceKindTouch,
-    .buttons = 0,
-    .pan_x = 0,
-    .pan_y = 0,
-    .scale = 0,
-    .rotation = 0
+    .x = x, .y = y, .device = device,
+    .signal_kind = kFlutterPointerSignalKindNone, .scroll_delta_x = 0.0,
+    .scroll_delta_y = 0.0, .device_kind = kFlutterPointerDeviceKindTouch,
+    .buttons = 0, .pan_x = 0, .pan_y = 0, .scale = 0, .rotation = 0
   });
 }
 
@@ -597,8 +581,8 @@ FlutterEngineAOTData Engine::LoadAotData(
   auto result = m_proc_table.CreateAOTData(&source, &data);
   if (result != kSuccess) {
     DLOG(ERROR) << "(" << m_index
-                    << ") Failed to load AOT data from: " << aot_data_path
-                    << std::endl;
+                << ") Failed to load AOT data from: " << aot_data_path
+                << std::endl;
     return nullptr;
   }
   return data;

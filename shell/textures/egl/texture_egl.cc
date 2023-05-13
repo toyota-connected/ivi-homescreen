@@ -66,7 +66,8 @@ void TextureEgl::Dispose() {
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
       case kTextureEgl_ObjectId_Navigation: {
-        TextureNaviRender::Dispose(item.get(), static_cast<GLuint>(item->GetId()));
+        TextureNaviRender::Dispose(item.get(),
+                                   static_cast<GLuint>(item->GetId()));
         break;
       }
 #endif

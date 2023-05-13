@@ -30,7 +30,7 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
   if (method == kSelectSingleEntryHistory) {
     if (obj->arguments()->IsNull()) {
       LOG(INFO) << "(" << engine->GetIndex()
-                    << ") Navigation: Select Single Entry History";
+                << ") Navigation: Select Single Entry History";
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
@@ -38,7 +38,7 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
   } else if (method == kSelectMultiEntryHistory) {
     if (obj->arguments()->IsNull()) {
       LOG(INFO) << "(" << engine->GetIndex()
-                    << ") Navigation: Select Multiple Entry History";
+                << ") Navigation: Select Multiple Entry History";
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
@@ -53,17 +53,17 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
           !(*args)["state"].IsNull() ? (*args)["state"].GetString() : "";
       info.replace = (*args)["replace"].GetBool();
       LOG(INFO) << "(" << engine->GetIndex()
-                    << ") Navigation: Route Information Updated"
-                       "\n\tlocation: "
-                    << info.location << "\n\tstate: " << info.state
-                    << "\n\treplace: " << info.replace;
+                << ") Navigation: Route Information Updated"
+                   "\n\tlocation: "
+                << info.location << "\n\tstate: " << info.state
+                << "\n\treplace: " << info.replace;
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
     DLOG(INFO) << "(" << engine->GetIndex() << ") Navigation: " << method
-                   << " is unhandled";
+               << " is unhandled";
     result = codec.EncodeErrorEnvelope("unhandled_method", "unhandled Method");
   }
 

@@ -62,8 +62,7 @@ flutter::EncodableValue TextureNaviRender::Create(
   std::string asset_path;
   if (map_flutter_assets) {
     asset_path = obj->m_flutter_engine->GetAssetDirectory();
-  }
-  else {
+  } else {
     it = args->find(flutter::EncodableValue("asset_path"));
     if (it != args->end() && !it->second.IsNull()) {
       asset_path = std::get<std::string>(it->second);
@@ -98,7 +97,7 @@ flutter::EncodableValue TextureNaviRender::Create(
     if (obj->m_h_module) {
       obj->InitRenderApi();
       LOG(INFO) << "navigation render interface version: "
-                    << obj->m_render_api.version();
+                << obj->m_render_api.version();
     } else {
       return flutter::EncodableValue(flutter::EncodableMap{
           {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
@@ -108,7 +107,7 @@ flutter::EncodableValue TextureNaviRender::Create(
   }
 
   DLOG(INFO) << "Initializing Navigation Texture (" << obj->m_width << " x "
-                 << obj->m_height << ")";
+             << obj->m_height << ")";
 
   std::lock_guard<std::mutex> guard(g_gl_mutex);
 

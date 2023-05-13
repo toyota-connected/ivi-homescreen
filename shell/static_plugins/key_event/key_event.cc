@@ -85,13 +85,13 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
 
   auto handled = decoded->FindMember(kHandled);
   if (handled == decoded->MemberEnd()) {
-    DLOG(ERROR) << "KeyEvent: BinaryReply: could not found key \""
-                    << kHandled << "\"";
+    DLOG(ERROR) << "KeyEvent: BinaryReply: could not found key \"" << kHandled
+                << "\"";
 
     // check the reply contents
     for (auto& m : decoded->GetObject()) {
       DLOG(ERROR) << "key: " << m.name.GetString()
-                      << " type: " << m.value.GetType();
+                  << " type: " << m.value.GetType();
     }
 
     return ret;
@@ -99,7 +99,7 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
 
   if (!(handled->value.IsBool())) {
     DLOG(ERROR) << "KeyEvent: BinaryReply: key \"" << kHandled
-                    << "\" is not bool. unexpected.";
+                << "\" is not bool. unexpected.";
     return ret;
   }
 

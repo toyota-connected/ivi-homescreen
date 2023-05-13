@@ -1,6 +1,6 @@
 var searchData=
 [
-  ['securestorage_1021',['SecureStorage',['../class_secure_storage.html',1,'']]],
-  ['shader_1022',['Shader',['../classnv12_1_1_shader.html',1,'nv12']]],
-  ['systemuioverlaystyle_1023',['SystemUiOverlayStyle',['../struct_platform_1_1_system_ui_overlay_style.html',1,'Platform']]]
+  ['region_5ft_0',['REGION_T',['../struct_compositor_region_plugin_1_1_r_e_g_i_o_n___t.html',1,'CompositorRegionPlugin']]],
+  ['restoration_1',['Restoration',['../class_restoration.html',1,'']]],
+  ['routeinformation_2',['RouteInformation',['../struct_navigation_1_1_route_information.html',1,'Navigation']]]
 ];

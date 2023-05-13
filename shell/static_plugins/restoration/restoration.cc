@@ -31,7 +31,7 @@ void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
     DLOG(INFO) << "(" << engine->GetIndex() << ") Restoration: Get";
   } else {
     DLOG(ERROR) << "(" << engine->GetIndex() << ") Restoration: " << method
-                    << " is unhandled";
+                << " is unhandled";
   }
 
   engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);

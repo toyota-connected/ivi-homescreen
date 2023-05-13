@@ -24,7 +24,8 @@ void CompositorSurfacePlugin::OnPlatformMessage(
     void* userdata) {
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  std::unique_ptr<std::vector<uint8_t>> result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
+  std::unique_ptr<std::vector<uint8_t>> result =
+      codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
@@ -67,8 +68,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
       std::string assets_path;
       if (map_flutter_assets) {
         assets_path = engine->GetAssetDirectory();
-      }
-      else {
+      } else {
         it = args->find(flutter::EncodableValue(kArgAssetsPath));
         if (it != args->end() && !it->second.IsNull()) {
           assets_path = std::get<std::string>(it->second);

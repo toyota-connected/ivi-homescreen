@@ -94,7 +94,7 @@ void SecureStorage::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   if (method == kWrite) {
     DLOG(INFO) << "secure_storage: [Write] key: " << keyString
-                   << ", value: " << valueString;
+               << ", value: " << valueString;
     write(keyString.c_str(), valueString.c_str());
     auto val = flutter::EncodableValue(true);
     result = codec.EncodeSuccessEnvelope(&val);

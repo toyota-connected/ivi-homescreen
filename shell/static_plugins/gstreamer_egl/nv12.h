@@ -85,12 +85,12 @@ class Shader {
           break;
         case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
           LOG(ERROR) << "failed to draw to framebuffer: "
-                            "the framebuffer does not have at least one image "
-                            "attached to it";
+                        "the framebuffer does not have at least one image "
+                        "attached to it";
           break;
         case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS:
           LOG(ERROR) << "failed to draw to framebuffer: "
-                            "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS";
+                        "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS";
           break;
         case GL_FRAMEBUFFER_UNSUPPORTED:
         default:
