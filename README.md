@@ -321,7 +321,7 @@ Defaults to Wayland, no need to do anything special
 
     git clone https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
-    CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
 
 ### Clang Toolchain Setup
