@@ -29,10 +29,14 @@
 #include "timer.h"
 
 Display::Display(bool enable_cursor,
+                 bool enable_pointer,
+                 bool enable_keyboard,
                  std::string cursor_theme_name,
                  const std::vector<Configuration::Config>& configs)
     : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
       m_enable_cursor(enable_cursor),
+      m_enable_pointer(enable_pointer),
+      m_enable_keyboard(enable_keyboard),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   DLOG(INFO) << "+ Display()";
 
@@ -320,22 +324,26 @@ void Display::seat_handle_capabilities(void* data,
                                        uint32_t caps) {
   auto* d = static_cast<Display*>(data);
 
-  if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
-    LOG(INFO) << "Pointer Present";
-    d->m_pointer.pointer = wl_seat_get_pointer(seat);
-    wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
-  } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.pointer) {
-    wl_pointer_release(d->m_pointer.pointer);
-    d->m_pointer.pointer = nullptr;
+  if (d->m_enable_pointer) {
+    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
+      LOG(INFO) << "Pointer Present";
+      d->m_pointer.pointer = wl_seat_get_pointer(seat);
+      wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
+    } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.pointer) {
+      wl_pointer_release(d->m_pointer.pointer);
+      d->m_pointer.pointer = nullptr;
+    }
   }
 
-  if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
-    LOG(INFO) << "Keyboard Present";
-    d->m_keyboard = wl_seat_get_keyboard(seat);
-    wl_keyboard_add_listener(d->m_keyboard, &keyboard_listener, d);
-  } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard) {
-    wl_keyboard_release(d->m_keyboard);
-    d->m_keyboard = nullptr;
+  if (d->m_enable_keyboard) {
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
+      LOG(INFO) << "Keyboard Present";
+      d->m_keyboard = wl_seat_get_keyboard(seat);
+      wl_keyboard_add_listener(d->m_keyboard, &keyboard_listener, d);
+    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard) {
+      wl_keyboard_release(d->m_keyboard);
+      d->m_keyboard = nullptr;
+    }
   }
 
   if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
