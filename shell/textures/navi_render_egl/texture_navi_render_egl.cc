@@ -165,7 +165,7 @@ flutter::EncodableValue TextureNaviRender::Create(
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("textureId"),
-       flutter::EncodableValue(obj->m_texture_id)},
+       flutter::EncodableValue(static_cast<int>(obj->m_texture_id))},
       {flutter::EncodableValue("width"), flutter::EncodableValue(obj->m_width)},
       {flutter::EncodableValue("height"),
        flutter::EncodableValue(obj->m_height)},
