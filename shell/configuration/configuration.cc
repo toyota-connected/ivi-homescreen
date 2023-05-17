@@ -107,6 +107,12 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kDisableCursorKey) && obj[kDisableCursorKey].IsBool()) {
     instance.disable_cursor = obj[kDisableCursorKey].GetBool();
   }
+  if (obj.HasMember(kDisablePointerKey) && obj[kDisablePointerKey].IsBool()) {
+    instance.disable_pointer = obj[kDisablePointerKey].GetBool();
+  }
+  if (obj.HasMember(kDisableKeyboardKey) && obj[kDisableKeyboardKey].IsBool()) {
+    instance.disable_keyboard = obj[kDisableKeyboardKey].GetBool();
+  }
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
   }
@@ -192,6 +198,12 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   }
   if (cli.disable_cursor_set && cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
+  }
+  if (cli.disable_pointer_set && cli.disable_pointer != instance.disable_pointer) {
+    instance.disable_pointer = cli.disable_pointer;
+  }
+  if (cli.disable_keyboard_set && cli.disable_keyboard != instance.disable_keyboard) {
+    instance.disable_keyboard = cli.disable_keyboard;
   }
   if (cli.debug_backend_set && cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
@@ -309,6 +321,10 @@ void Configuration::PrintConfig(const Config& config) {
   LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
   LOG(INFO) << "Disable Cursor: .......... "
             << (config.disable_cursor ? "true" : "false");
+  LOG(INFO) << "Disable Pointer: .......... "
+            << (config.disable_pointer ? "true" : "false");
+  LOG(INFO) << "Disable Keyboard: .......... "
+            << (config.disable_keyboard ? "true" : "false");
   LOG(INFO) << "Debug Backend: ........... "
             << (config.debug_backend ? "true" : "false");
   LOG(INFO) << "********";

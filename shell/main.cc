@@ -81,7 +81,9 @@ void RemoveArgument(std::vector<std::string>& args, const std::string& arg) {
 int main(int argc, char** argv) {
   struct Configuration::Config config {
     .app_id{}, .json_configuration_path{}, .cursor_theme{}, .disable_cursor{},
-        .disable_cursor_set{}, .debug_backend{}, .debug_backend_set{}, .view{},
+        .disable_cursor_set{}, .disable_pointer{}, .disable_pointer_set{},
+        .disable_keyboard{}, .disable_keyboard_set{}, .debug_backend{},
+        .debug_backend_set{}, .view{},
   };
 
   if (Dlt::IsSupported()) {
@@ -233,6 +235,18 @@ int main(int argc, char** argv) {
       DLOG(INFO) << "Application ID: " << config.app_id;
       RemoveArgument(config.view.vm_args,
                      "--xdg-shell-app-id=" + config.app_id);
+    }
+    if (cl.HasOption("disable-pointer")) {
+      DLOG(INFO) << "Disable Pointer";
+      config.disable_pointer = true;
+      config.disable_pointer_set = true;
+      RemoveArgument(config.view.vm_args, "--disable-pointer");
+    }
+    if (cl.HasOption("disable-keyboard")) {
+      DLOG(INFO) << "Disable Keyboard";
+      config.disable_keyboard = true;
+      config.disable_keyboard_set = true;
+      RemoveArgument(config.view.vm_args, "--disable-keyboard");
     }
     if (cl.HasOption("p")) {
       std::string pixel_ratio_str;

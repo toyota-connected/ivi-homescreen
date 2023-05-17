@@ -44,6 +44,8 @@ class Engine;
 class Display {
  public:
   explicit Display(bool enable_cursor,
+                   bool disable_pointer,
+                   bool disable_keyboard,
                    std::string cursor_theme_name,
                    const std::vector<Configuration::Config>& configs);
 
@@ -251,6 +253,8 @@ class Display {
   } m_ivi_shell;
 
   bool m_enable_cursor;
+  bool m_enable_pointer;
+  bool m_enable_keyboard;
   struct wl_surface* m_cursor_surface{};
   std::string m_cursor_theme_name;
 
