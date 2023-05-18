@@ -39,15 +39,6 @@ endif ()
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
 #
-# Pointer Axis Handler - Defaults to off
-# - mouse wheel scroll events
-#
-option(ENABLE_POINTER_AXIS_HANDLER "Enable Mouse Axis Handler" OFF)
-if (ENABLE_POINTER_AXIS_HANDLER)
-    add_compile_definitions(ENABLE_POINTER_AXIS_HANDLER)
-endif ()
-
-#
 # Enable XDG Client
 #
 option(ENABLE_XDG_CLIENT "Enable XDG Client" ON)
