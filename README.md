@@ -214,8 +214,6 @@ All other parameters get assigned using the following ordering:
 
 # CMake Build flags
 
-`ENABLE_POINTER_AXIS_HANDLER` - Enable Mouse Axis Handler.  Defaults to OFF
-
 `ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
 
 `ENABLE_AGL_CLIENT` - Enable AGL Client.  Defaults to OFF
