@@ -954,12 +954,12 @@ int32_t Display::GetBufferScale(uint32_t index) {
   return (int32_t)kDefaultBufferScale;
 }
 
-std::pair<int32_t, int32_t> Display::GetPhysicalSize(uint32_t index) {
+std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) {
   if (index < m_all_outputs.size()) {
-    return {m_all_outputs[index]->physical_width,
-            m_all_outputs[index]->physical_height};
+    return {m_all_outputs[index]->width,
+            m_all_outputs[index]->height};
   }
-  DLOG(ERROR) << "GetPhysicalSize: Invalid output index: " << index;
+  DLOG(ERROR) << "GetVideoModeSize: Invalid output index: " << index;
   return {0, 0};
 }
 
