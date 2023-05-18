@@ -216,7 +216,7 @@ class Display {
 
   int32_t GetBufferScale(uint32_t index);
 
-  std::pair<int32_t, int32_t> GetPhysicalSize(uint32_t index);
+  std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index);
 
  private:
   std::shared_ptr<Engine> m_flutter_engine;

@@ -202,7 +202,7 @@ void WaylandWindow::handle_ivi_surface_configure(
   if (width > 0 && height > 0) {
     if (w->m_fullscreen) {
       DLOG(INFO) << "Setting Fullscreen";
-      auto extents = w->m_display->GetPhysicalSize(w->m_output_index);
+      auto extents = w->m_display->GetVideoModeSize(w->m_output_index);
       width = extents.first;
       height = extents.second;
     }
