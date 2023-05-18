@@ -44,8 +44,7 @@ class Engine;
 class Display {
  public:
   explicit Display(bool enable_cursor,
-                   bool disable_pointer,
-                   bool disable_keyboard,
+                   const std::string& ignore_wayland_event,
                    std::string cursor_theme_name,
                    const std::vector<Configuration::Config>& configs);
 
@@ -253,10 +252,17 @@ class Display {
   } m_ivi_shell;
 
   bool m_enable_cursor;
-  bool m_enable_pointer;
-  bool m_enable_keyboard;
   struct wl_surface* m_cursor_surface{};
   std::string m_cursor_theme_name;
+
+  struct wayland_event_mask {
+    bool pointer;
+    bool pointer_axis;
+    bool pointer_buttons;
+    bool pointer_motion;
+    bool keyboard;
+    bool touch;
+  } m_wayland_event_mask{};
 
   typedef struct output_info {
     struct wl_output* output;
@@ -335,6 +341,12 @@ class Display {
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
   bool m_buffer_scale_enable{};
+
+  static void wayland_event_mask_update(
+      const std::string& ignore_wayland_events,
+      struct wayland_event_mask& mask);
+
+  static void wayland_event_mask_print(struct wayland_event_mask& mask);
 
   static const struct wl_registry_listener registry_listener;
 
