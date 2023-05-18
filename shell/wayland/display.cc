@@ -29,16 +29,15 @@
 #include "timer.h"
 
 Display::Display(bool enable_cursor,
-                 bool enable_pointer,
-                 bool enable_keyboard,
+                 const std::string& ignore_wayland_event,
                  std::string cursor_theme_name,
                  const std::vector<Configuration::Config>& configs)
     : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
       m_enable_cursor(enable_cursor),
-      m_enable_pointer(enable_pointer),
-      m_enable_keyboard(enable_keyboard),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   DLOG(INFO) << "+ Display()";
+
+  wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
 
   for (auto const& cfg : configs) {
     // check if we actually need to bind to agl-shell
@@ -324,7 +323,7 @@ void Display::seat_handle_capabilities(void* data,
                                        uint32_t caps) {
   auto* d = static_cast<Display*>(data);
 
-  if (d->m_enable_pointer) {
+  if (!d->m_wayland_event_mask.pointer) {
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
       LOG(INFO) << "Pointer Present";
       d->m_pointer.pointer = wl_seat_get_pointer(seat);
@@ -335,7 +334,7 @@ void Display::seat_handle_capabilities(void* data,
     }
   }
 
-  if (d->m_enable_keyboard) {
+  if (!d->m_wayland_event_mask.keyboard) {
     if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
       LOG(INFO) << "Keyboard Present";
       d->m_keyboard = wl_seat_get_keyboard(seat);
@@ -346,14 +345,16 @@ void Display::seat_handle_capabilities(void* data,
     }
   }
 
-  if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
-    LOG(INFO) << "Touch Present";
-    d->m_touch.touch = wl_seat_get_touch(seat);
-    wl_touch_set_user_data(d->m_touch.touch, d);
-    wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
-  } else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch.touch) {
-    wl_touch_release(d->m_touch.touch);
-    d->m_touch.touch = nullptr;
+  if (!d->m_wayland_event_mask.touch) {
+    if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
+      LOG(INFO) << "Touch Present";
+      d->m_touch.touch = wl_seat_get_touch(seat);
+      wl_touch_set_user_data(d->m_touch.touch, d);
+      wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
+    } else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch.touch) {
+      wl_touch_release(d->m_touch.touch);
+      d->m_touch.touch = nullptr;
+    }
   }
 }
 
@@ -423,15 +424,17 @@ void Display::pointer_handle_motion(void* data,
   (void)time;
   auto* d = static_cast<Display*>(data);
 
-  d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
-  d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
+  if (!d->m_wayland_event_mask.pointer_motion) {
+    d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
+    d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
 
-  if (d->m_active_engine) {
-    FlutterPointerPhase phase =
-        pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover;
-    d->m_active_engine->CoalesceMouseEvent(
-        kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
-        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+    if (d->m_active_engine) {
+      FlutterPointerPhase phase =
+          pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover;
+      d->m_active_engine->CoalesceMouseEvent(
+          kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
+          d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+    }
   }
 }
 
@@ -444,29 +447,30 @@ void Display::pointer_handle_button(void* data,
   (void)wl_pointer;
   (void)time;
   auto* d = static_cast<Display*>(data);
+  if (!d->m_wayland_event_mask.pointer_buttons) {
+    d->m_pointer.event.button = button;
+    d->m_pointer.event.state = state;
+    d->m_pointer.serial = serial;
 
-  d->m_pointer.event.button = button;
-  d->m_pointer.event.state = state;
-  d->m_pointer.serial = serial;
+    if (button == BTN_LEFT)
+      d->m_pointer.buttons = kFlutterPointerButtonMousePrimary;
+    else if (button == BTN_MIDDLE)
+      d->m_pointer.buttons = kFlutterPointerButtonMouseMiddle;
+    else if (button == BTN_RIGHT)
+      d->m_pointer.buttons = kFlutterPointerButtonMouseSecondary;
 
-  if (button == BTN_LEFT)
-    d->m_pointer.buttons = kFlutterPointerButtonMousePrimary;
-  else if (button == BTN_MIDDLE)
-    d->m_pointer.buttons = kFlutterPointerButtonMouseMiddle;
-  else if (button == BTN_RIGHT)
-    d->m_pointer.buttons = kFlutterPointerButtonMouseSecondary;
+    FlutterPointerPhase phase{};
+    if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
+      phase = kDown;
+    } else if (state == WL_POINTER_BUTTON_STATE_RELEASED) {
+      phase = kUp;
+    }
 
-  FlutterPointerPhase phase{};
-  if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
-    phase = kDown;
-  } else if (state == WL_POINTER_BUTTON_STATE_RELEASED) {
-    phase = kUp;
-  }
-
-  if (d->m_active_engine) {
-    d->m_active_engine->CoalesceMouseEvent(
-        kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
-        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+    if (d->m_active_engine) {
+      d->m_active_engine->CoalesceMouseEvent(
+          kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
+          d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+    }
   }
 }
 
@@ -476,24 +480,19 @@ void Display::pointer_handle_axis(void* data,
                                   uint32_t axis,
                                   wl_fixed_t value) {
   (void)wl_pointer;
-#if defined(ENABLE_POINTER_AXIS_HANDLER)
   auto* d = static_cast<Display*>(data);
-  d->m_pointer.event.time = time;
-  d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
+  if (!d->m_wayland_event_mask.pointer_axis) {
+    d->m_pointer.event.time = time;
+    d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
 
-  if (d->m_active_engine) {
-    d->m_active_engine->CoalesceMouseEvent(
-        kFlutterPointerSignalKindScroll, FlutterPointerPhase::kMove,
-        d->m_pointer.event.surface_x, d->m_pointer.event.surface_y,
-        d->m_pointer.event.axes[1].value, d->m_pointer.event.axes[0].value,
-        d->m_pointer.buttons);
+    if (d->m_active_engine) {
+      d->m_active_engine->CoalesceMouseEvent(
+          kFlutterPointerSignalKindScroll, FlutterPointerPhase::kMove,
+          d->m_pointer.event.surface_x, d->m_pointer.event.surface_y,
+          d->m_pointer.event.axes[1].value, d->m_pointer.event.axes[0].value,
+          d->m_pointer.buttons);
+    }
   }
-#else
-  (void)data;
-  (void)time;
-  (void)axis;
-  (void)value;
-#endif
 }
 
 void Display::pointer_handle_frame(void* data, struct wl_pointer* wl_pointer) {
@@ -956,8 +955,7 @@ int32_t Display::GetBufferScale(uint32_t index) {
 
 std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) {
   if (index < m_all_outputs.size()) {
-    return {m_all_outputs[index]->width,
-            m_all_outputs[index]->height};
+    return {m_all_outputs[index]->width, m_all_outputs[index]->height};
   }
   DLOG(ERROR) << "GetVideoModeSize: Invalid output index: " << index;
   return {0, 0};
@@ -1182,3 +1180,60 @@ const struct ivi_wm_listener Display::ivi_wm_listener = {
     .surface_stats = ivi_wm_surface_stats,
     .layer_surface_added = ivi_wm_layer_surface_added,
 };
+
+void Display::wayland_event_mask_print(struct wayland_event_mask& mask) {
+  std::string out;
+  std::stringstream ss(out);
+  ss << "Wayland Event Mask";
+  if (mask.pointer)
+    ss << "\n\tpointer";
+  if (mask.pointer_axis)
+    ss << "\n\tpointer-axis";
+  if (mask.pointer_buttons)
+    ss << "\n\tpointer-buttons";
+  if (mask.pointer_motion)
+    ss << "\n\tpointer-motion";
+  if (mask.keyboard)
+    ss << "\n\tkeyboard";
+  if (mask.touch)
+    ss << "\n\ttouch";
+
+  LOG(INFO) << ss.str();
+}
+
+void Display::wayland_event_mask_update(
+    const std::string& ignore_wayland_events,
+    struct wayland_event_mask& mask) {
+  std::string events;
+  events.reserve(ignore_wayland_events.size());
+  for (char event : ignore_wayland_events) {
+    if (event != ' ' && event != '"')
+      events += event;
+  }
+
+  std::transform(events.begin(), events.end(), events.begin(),
+                 [](char c) { return std::tolower((unsigned char)c); });
+
+  std::stringstream ss(events);
+  while (ss.good()) {
+    std::string event;
+    getline(ss, event, ',');
+    if (event == "pointer")
+      mask.pointer = true;
+    else if (event == "pointer-axis")
+      mask.pointer_axis = true;
+    else if (event == "pointer-buttons")
+      mask.pointer_buttons = true;
+    else if (event == "pointer-motion")
+      mask.pointer_motion = true;
+    else if (event == "keyboard")
+      mask.keyboard = true;
+    else if (event == "touch")
+      mask.touch = true;
+    else
+      LOG(INFO) << "Unknown Wayland Event Mask: [" << event << "]";
+  }
+  if (!ignore_wayland_events.empty()) {
+    wayland_event_mask_print(mask);
+  }
+}

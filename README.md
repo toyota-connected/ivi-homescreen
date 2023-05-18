@@ -85,7 +85,6 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 `--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
 
 `--b={path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
-
 ```
   Flutter Application (bundle folder)
     data/flutter_assets
@@ -94,6 +93,10 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
     lib/libflutter_engine.so (optional - overrides system path)
 ```
 * `--j=` - Sets the JSON configuration file.
+* `--wayland-event-mask` - Sets events to ignore. e.g. --wayland-event-mask=pointer-axis, or --wayland-event-mask="pointer-axis, touch"
+
+  * Available parameters are:
+      pointer, pointer-axis, pointer-buttons, pointer-motion, keyboard, touch
 
 * Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
 

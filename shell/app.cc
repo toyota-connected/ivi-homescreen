@@ -24,8 +24,7 @@
 
 App::App(const std::vector<Configuration::Config>& configs)
     : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
-                                                  !configs[0].disable_pointer,
-                                                  !configs[0].disable_keyboard,
+                                                  configs[0].wayland_event_mask,
                                                   configs[0].cursor_theme,
                                                   configs)) {
   DLOG(INFO) << "+App::App";

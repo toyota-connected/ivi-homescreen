@@ -28,10 +28,7 @@ class Configuration {
     std::string cursor_theme;
     bool disable_cursor;
     bool disable_cursor_set;
-    bool disable_pointer;
-    bool disable_pointer_set;
-    bool disable_keyboard;
-    bool disable_keyboard_set;
+    std::string wayland_event_mask;
     bool debug_backend;
     bool debug_backend_set;
 
@@ -89,8 +86,7 @@ class Configuration {
   static constexpr char kFullscreenKey[] = "fullscreen";
   static constexpr char kAppIdKey[] = "app_id";
   static constexpr char kCursorThemeKey[] = "cursor_theme";
-  static constexpr char kDisableKeyboardKey[] = "disable_keyboard";
-  static constexpr char kDisablePointerKey[] = "disable_mouse";
+  static constexpr char kIgnoreWaylandEventKey[] = "ignore_wayland_event";
   static constexpr char kDisableCursorKey[] = "disable_cursor";
   static constexpr char kDebugBackendKey[] = "debug_backend";
   static constexpr char kFpsOutputConsole[] = "fps_output_console";
