@@ -112,6 +112,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `debug_backend` - Enables Backend Debug logic.
 
+`wayland_event_mask` - See command line option --wayland-event-mask
+
 #### View Specific
 
 `view` - Minimum required.  Can be single object or array.
