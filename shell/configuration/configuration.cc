@@ -107,9 +107,9 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kDisableCursorKey) && obj[kDisableCursorKey].IsBool()) {
     instance.disable_cursor = obj[kDisableCursorKey].GetBool();
   }
-  if (obj.HasMember(kIgnoreWaylandEventKey) &&
-      obj[kIgnoreWaylandEventKey].IsString()) {
-    instance.wayland_event_mask = obj[kIgnoreWaylandEventKey].GetString();
+  if (obj.HasMember(kWaylandEventMaskKey) &&
+      obj[kWaylandEventMaskKey].IsString()) {
+    instance.wayland_event_mask = obj[kWaylandEventMaskKey].GetString();
   }
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();

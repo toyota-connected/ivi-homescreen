@@ -86,7 +86,7 @@ class Configuration {
   static constexpr char kFullscreenKey[] = "fullscreen";
   static constexpr char kAppIdKey[] = "app_id";
   static constexpr char kCursorThemeKey[] = "cursor_theme";
-  static constexpr char kIgnoreWaylandEventKey[] = "ignore_wayland_event";
+  static constexpr char kWaylandEventMaskKey[] = "wayland_event_mask";
   static constexpr char kDisableCursorKey[] = "disable_cursor";
   static constexpr char kDebugBackendKey[] = "debug_backend";
   static constexpr char kFpsOutputConsole[] = "fps_output_console";
