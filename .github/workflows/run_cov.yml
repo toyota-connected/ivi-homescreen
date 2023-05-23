@@ -1,0 +1,119 @@
+---
+name: run-cov
+
+on:
+  workflow_call:
+    inputs:
+      SOFTWARE_PART_NAME:
+        required: true
+        type: string
+      UPLOAD_ARTIFACTORY_DIR_NAME:
+        required: true
+        type: string
+
+jobs:
+  run-cov:
+    name: Run Coverity
+    strategy:
+      fail-fast: false
+      matrix:
+        analyse-target:
+          - ${{ inputs.SOFTWARE_PART_NAME }}
+        include:
+          - analyse-target: ${{ inputs.SOFTWARE_PART_NAME }}
+          - upload-artifactory-dir-name: ${{ inputs.UPLOAD_ARTIFACTORY_DIR_NAME }}
+    runs-on: [self-hosted, 3x-large-runner]
+    container:
+      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/tmc/ci-securecoding-sdk:1.0.1-cov23.3
+      options: --user root
+      credentials:
+        username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+        password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+      volumes:
+        - ${{ github.workspace }}/workdir:/workdir
+    env:
+      RULE_SET_DIR: "rule_set"
+      OUTPUT_DIR: "output"
+      COV_PATH: "/opt/cov-analysis-linux64-2023.3.0"
+      ANALYSE_TARGET: ${{ matrix.analyse-target }}
+      UPLOAD_ARTIFACTORY_DIR_NAME: ${{ matrix.upload-artifactory-dir-name }}
+      TMCSTARGATE_ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+      TMCSTARGATE_ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+      TMCSTARGATE_GITHUB_USER: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
+      TMCSTARGATE_GITHUB_TOKEN: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+    steps:
+      - name: Setup environment
+        run: |
+          # Crete the output dir
+          mkdir -p /workdir/${{ env.OUTPUT_DIR }}/
+
+          # Add authentication info to netrc
+          echo "machine github.tmc-stargate.com login ${{env.TMCSTARGATE_GITHUB_USER}} password ${{env.TMCSTARGATE_GITHUB_TOKEN}}" >> ~/.netrc
+          echo "machine artifactory-ha.tmc-stargate.com login ${{env.TMCSTARGATE_ARTIFACTORY_USERNAME}} password ${{env.TMCSTARGATE_ARTIFACTORY_PASSWORD}}" >> ~/.netrc
+
+          # Set environment Variable
+          export COV_PATH=${{ env.COV_PATH }}
+          export RULE_SET_DIR=${{ env.RULE_SET_DIR }}
+          export OUTPUT_DIR=${{ env.OUTPUT_DIR }}
+
+      - name: Checkout Analyse Target Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+          repository: arene-os-services-cockpit-tmc-wa/${{ env.ANALYSE_TARGET }}
+          path: ${{ env.ANALYSE_TARGET }}
+          token: ${{ env.TMCSTARGATE_GITHUB_TOKEN }}
+          set-safe-directory: false
+      - name: Checkout coverity-scan-results-to-sarif
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+          repository: arene-os-services-cockpit-tmc/arene-ivi-infra-coverity-scan-results-to-sarif
+          path: coverity-scan-results-to-sarif
+          token: ${{ env.TMCSTARGATE_GITHUB_TOKEN }}
+          set-safe-directory: false
+      - name: Download rule set from Artifactory
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
+        with:
+          mode: download
+          option: --flat --threads=8
+          username: ${{ env.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          password: ${{ env.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          path-to-download-to: /workdir/${{ env.RULE_SET_DIR }}/
+          target-path-in-artifactory: arene-os-services-cockpit-generic-local-private/tmp/coverity_rule_set_files/
+      - name: Run Coverity
+        shell: bash
+        run: |
+          pushd ${{ env.ANALYSE_TARGET }}
+          git submodule update --init
+          git submodule update --remote
+
+          # Run script to execution Coverity
+          source .spl-tools/run_cov.sh
+          popd # ${{ env.ANALYSE_TARGET }}
+      - name: Convert Json to Sarif
+        shell: bash
+        run: |
+          echo "-- Convert Json to Sarif --"
+          cp ./${{ env.ANALYSE_TARGET }}/coverity_result.json ./coverity-scan-results-to-sarif
+
+          pushd coverity-scan-results-to-sarif
+          # Convert Analysis result Json to Sarif
+          env INPUT_PIPELINE-RESULTS-JSON="./coverity_result.json" \
+          INPUT_OUTPUT-RESULTS-SARIF="./coverity_result.sarif" \
+          ${{ env.COV_PATH }}/node/bin/node ./index.js
+          cp ./coverity_result.sarif /workdir/${{ env.OUTPUT_DIR }}/
+          popd # coverity-scan-results-to-sarif
+      - name: Upload SARIF file to Artifactory
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
+        with:
+          mode: upload
+          option: --flat --threads=8
+          username: ${{ env.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          password: ${{ env.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          path-to-upload-from: /workdir/${{ env.OUTPUT_DIR }}/coverity_result.sarif
+          target-path-in-artifactory: arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/${{ env.ANALYSE_TARGET }}/analyse/${{ env.UPLOAD_ARTIFACTORY_DIR_NAME }}/
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: |
+          ls -A | xargs rm -rf
