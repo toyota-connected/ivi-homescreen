@@ -1,0 +1,130 @@
+{
+    "part_number": "ivi-homescreen",
+    "name": "ivi-homescreen",
+    "description": "ivi-homescreen for IVI and IC",
+    "repo_url": "https://github.tmc-stargate.com/arene-os-services-cockpit-tmc-wa/ivi-homescreen",
+    "bom_file": "",
+    "version": "6.7.3",
+    "owner": "Cockpit SDK",
+    "owner_email": "cockpit-integration-infrastructure@woven-planet.global",
+    "company": "Woven Alpha",
+    "license": [
+        "Woven"
+    ],
+    "ci_version": "0.0.118",
+    "ci_version_policy": ">=0.0.118",
+    "project": "",
+    "repo_type": "github",
+    "type": null,
+    "code_base": [
+        {
+            "name": "cb-ivi-homescreen",
+            "update_submodules": false,
+            "dependencies": [
+                "requirements.bzl"
+            ],
+            "sbom_files": [
+                ".spl/build/sbom"
+            ],
+            "pre_build_steps": [],
+            "build_steps": [
+                {
+                    "name": "build",
+                    "relative_path": "../",
+                    "commands": [
+                        "echo \"-------Execute build-------\"",
+                        "git submodule update --remote",
+                        ".spl-tools/build.sh run"
+                    ],
+                    "use_os_system": false,
+                    "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
+                },
+                {
+                    "name": "generate sbom",
+                    "relative_path": "../",
+                    "commands": [
+                        "echo \"NOTE: If the repository is other than meta-xxx, spdx files are not copied because they are not created.\"",
+                        "mkdir -p .spl/build/sbom",
+                        "mkdir -p $(pwd)/workdir/tmp-glibc/deploy/spdx",
+                        "cp -r $(pwd)/workdir/tmp-glibc/deploy/spdx .spl/build/sbom"
+                    ],
+                    "use_os_system": false,
+                    "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
+                }
+            ],
+            "post_build_steps": [],
+            "post_test_steps": [],
+            "tag_substitution": {
+                "tags_substitutes": {},
+                "__serialization_type__": "pyplatform.bom.software_part.tag_substitution.TagSubstitution"
+            },
+            "additional_artifacts": [],
+            "test_steps": [],
+            "coverage_analysis_steps": [
+                {
+                    "name": "coverage",
+                    "relative_path": "",
+                    "commands": [
+                        "echo \"-------Execute Coverage-------\"",
+                        "git submodule update --remote",
+                        ".spl-tools/coverage.sh run"
+                    ],
+                    "use_os_system": false,
+                    "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
+                }
+            ],
+            "code_analysis_steps": [
+                {
+                    "name": "arene_coverity",
+                    "relative_path": "",
+                    "commands": [
+                        "echo \"------- Copy Sarif to .spl/analyse -------\"",
+                        "mkdir -p .spl/analyse",
+                        "if [ -e ./download_sarif/coverity_result.sarif ]; then cp ./download_sarif/coverity_result.sarif .spl/analyse/; fi"
+                    ],
+                    "use_os_system": true,
+                    "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
+                }
+            ],
+            "dependency_management": "bazel",
+            "coverage_analysis_result_path": null,
+            "coverage_analysis_result_format": null,
+            "__serialization_type__": "pyplatform.bom.software_part.code_base_custom.CustomCodeBase"
+        }
+    ],
+    "package": [
+        {
+            "name": "CockpitSDKPackage",
+            "package_name": "cockpit-sdk-ivi-homescreen",
+            "code_base_reference": [
+                "cb-ivi-homescreen"
+            ],
+            "development_repository": "https://artifactory-ha.tmc-stargate.com/artifactory/arene-os-services-cockpit-generic-local-qualcomm-aubass/spl/ivi-homescreen/publish",
+            "production_repository": "https://artifactory-ha.tmc-stargate.com/artifactory/arene-os-services-cockpit-generic-local-qualcomm-aubass/spl/ivi-homescreen/publish",
+            "pre_create_steps": [],
+            "post_create_steps": [],
+            "validation_steps": [],
+            "post_upload_steps": [],
+            "install_local": false,
+            "package_target_name": null,
+            "package_bazel_config": null,
+            "package_file_extension": ".tar.gz",
+            "upload_timeout": 1200,
+            "create_steps": [
+                {
+                    "name": "package",
+                    "relative_path": "",
+                    "commands": [
+                        "base=$(basename $PWD) && cd .. && tar -czf workspace.tar.gz $base"
+                    ],
+                    "use_os_system": true,
+                    "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
+                }
+            ],
+            "create_package_path": "../workspace.tar.gz",
+            "__serialization_type__": "pyplatform.bom.software_part.package_bazel.BazelPackage"
+        }
+    ],
+    "requirements": [],
+    "__serialization_type__": "pyplatform.bom.software_part.part_definitions.PartDefinitions"
+}

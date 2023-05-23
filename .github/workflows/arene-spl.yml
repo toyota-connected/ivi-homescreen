@@ -1,0 +1,381 @@
+---
+name: arene-spl
+
+on:
+  workflow_dispatch:
+
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+    branches:
+      - "master"
+  pull_request:
+    branches:
+      - "master"
+
+permissions:
+  id-token: write         # For OIDC
+  contents: read          # For actions/checkout
+  actions: read           # For codeql-action/upload-sarif
+  security-events: write  # For codeql-action/upload-sarif
+
+env:
+  COORDINATOR_ACCESS_TOKEN: ${{ secrets.USG_GIT_TOKEN }}
+
+jobs:
+  set-run-datetime:
+    name: Set RUN_DATETIME
+    if: ${{ !startswith(github.event.ref, 'refs/tags/') }}
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    outputs:
+      run-datetime: ${{ steps.set-run-datetime.outputs.run-datetime }}
+    steps:
+      - name: Set RUN_DATETIME environment variable
+        id: set-run-datetime
+        shell: bash
+        run: |
+          RUN_DATETIME=$(date "+%Y%m%d-%H%M%S")
+          echo "::set-output name=run-datetime::${RUN_DATETIME}"
+
+  build:
+    name: Build
+    if: ${{ !startswith(github.event.ref, 'refs/tags/') }}
+    runs-on: [self-hosted, large-runner]
+    steps:
+      - name: Setup environment
+        env:
+          TMCSTARGATE_ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          TMCSTARGATE_ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          TMCSTARGATE_GITHUB_USER: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
+          TMCSTARGATE_GITHUB_TOKEN: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+        run: |
+          # for github
+          echo "machine github.tmc-stargate.com login ${TMCSTARGATE_GITHUB_USER} password ${TMCSTARGATE_GITHUB_TOKEN}" >> ~/.netrc
+          # for artifactory
+          echo "machine artifactory-ha.tmc-stargate.com login ${TMCSTARGATE_ARTIFACTORY_USERNAME} password ${TMCSTARGATE_ARTIFACTORY_PASSWORD}" >> ~/.netrc
+          # for poky-container
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # for docker resistory
+          docker login \
+            https://docker.artifactory-ha.tmc-stargate.com/ \
+            -u ${TMCSTARGATE_ARTIFACTORY_USERNAME} \
+            -p ${TMCSTARGATE_ARTIFACTORY_PASSWORD}
+          docker login \
+            https://arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/ \
+            -u ${TMCSTARGATE_ARTIFACTORY_USERNAME} \
+            -p ${TMCSTARGATE_ARTIFACTORY_PASSWORD}
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          ssh-known-hosts: ${{ secrets.ARENE_GIT_SERVER_SSH_KNOWN_HOST }}
+          ssh-key: ${{ secrets.CENTRAL_GITHUB_SSH_KEY }}
+      - id: ssh-setup
+        uses: arene-os/arene-os-actions/ssh-setup@v1.14.0
+        with:
+          ssh_dir: ${{ github.workspace }}/.home/.ssh
+          known_hosts: ${{ secrets.SG_GITHUB_SSH_KNOWN_HOSTS }}
+          private_key: ${{ secrets.SG_GITHUB_PRIVATE_SSH_KEY }}
+      - name: Generate netrc for USG Artifactory
+        uses: arene-os/arene-os-actions/generate-netrc@v1.14.0
+        with:
+          file-name: ${{ github.workspace }}/.home/.netrc
+          host-name: artifactory-ha.tmc-stargate.com
+          login: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          password: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Build
+        uses: arene-release/spl-shared-ci/spl-action/build@stable
+        with:
+          ARTIFACTORY_USERNAME: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: |
+          ls -A | sudo xargs rm -rf
+
+  run-cov:
+    name: Workflow Call
+    if: ${{ true }}
+    needs: set-run-datetime
+    uses: ./.github/workflows/run_cov.yml
+    with:
+      SOFTWARE_PART_NAME: ivi-homescreen
+      UPLOAD_ARTIFACTORY_DIR_NAME: ${{ needs.set-run-datetime.outputs.run-datetime }}
+    secrets: inherit
+
+  analyse:
+    name: Analyse
+    if: ${{ true }}
+    needs: [set-run-datetime, run-cov]
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    steps:
+      - name: Setup environment
+        env:
+          TMCSTARGATE_ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          TMCSTARGATE_ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          TMCSTARGATE_GITHUB_USER: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
+          TMCSTARGATE_GITHUB_TOKEN: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+        run: |
+          # for github
+          echo "machine github.tmc-stargate.com login ${TMCSTARGATE_GITHUB_USER} password ${TMCSTARGATE_GITHUB_TOKEN}" >> ~/.netrc
+          # for artifactory
+          echo "machine artifactory-ha.tmc-stargate.com login ${TMCSTARGATE_ARTIFACTORY_USERNAME} password ${TMCSTARGATE_ARTIFACTORY_PASSWORD}" >> ~/.netrc
+          # Install jfrog CLI
+          wget -qO - https://releases.jfrog.io/artifactory/jfrog-gpg-public/jfrog\_public\_gpg.key | sudo apt-key add -
+          echo "deb https://releases.jfrog.io/artifactory/jfrog-debs xenial contrib" | sudo tee -a /etc/apt/sources.list;
+          sudo apt update -y
+          sudo apt install -y jfrog-cli-v2
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      - name: Download SARIF file
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
+        with:
+          mode: download
+          option: --flat --threads=8
+          username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          path-to-download-to: ./download_sarif/
+          target-path-in-artifactory: arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/ivi-homescreen/analyse/${{ needs.set-run-datetime.outputs.run-datetime }}/coverity_result.sarif
+      - name: Code Analysis
+        uses: arene-release/spl-shared-ci/spl-action/analyse_code@stable
+        with:
+          ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+
+  run-integration-test:
+    name: Test
+    needs: [set-run-datetime, build]
+    uses: ./.github/workflows/it.yml
+    with:
+      run-datetime: ${{ needs.set-run-datetime.outputs.run-datetime }}
+    secrets: inherit
+
+  update-jama:
+    name: Update JAMA
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    needs: [set-run-datetime, run-integration-test]
+    if: always() && ${{ !startswith(github.event.ref, 'refs/tags/') }}
+    env:
+      IT_RESULTS_PATH: arene-os-services-cockpit-generic/spl/ivi-homescreen/it/${{ needs.set-run-datetime.outputs.run-datetime }}/
+    container:
+      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/cockpit-generic:latest
+      options: --user cockpit-user
+      credentials:
+        username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+        password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+      volumes:
+        - ${{ github.workspace }}/workdir:/workdir
+    steps:
+      - name: create workdir
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/create-workdir@1.1.1
+        with:
+          workdir-owner: cockpit-user
+          workdir-group: cockpit-user
+          workdir-path: /workdir
+          path-to-exclude: arene-cockpit-misc-actions
+      - name: Checkout repository of arene-ivi-misc-integ-integrator
+        uses: actions/checkout@v3.0.2
+        with:
+          repository: arene-os-services-cockpit-tmc-wa/arene-ivi-misc-integ-integrator
+          path: workdir/arene-ivi-misc-integ-integrator
+          set-safe-directory: false
+          token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+          ref: master
+      - name: Checkout repository of arene-ivi-infra-req-analyst
+        uses: actions/checkout@v3.0.2
+        with:
+          repository: arene-os-services-cockpit-tmc-wa/arene-ivi-infra-req-analyst
+          path: workdir/arene-ivi-infra-req-analyst
+          set-safe-directory: false
+          token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+          ref: master
+      - name: Download IT Results from Artifactory
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
+        with:
+          mode: download
+          option: --threads=8 --flat
+          username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          path-to-download-to: /workdir/test-report/
+          target-path-in-artifactory: ${IT_RESULTS_PATH}
+      - name: Parse IT Results
+        working-directory: /workdir
+        shell: bash
+        run: |
+          mkdir -p test-report
+          ./arene-ivi-misc-integ-integrator/it_results_parser.py \
+            ./test-report \
+            ./it_results.csv
+          echo "--------------"
+          echo "IT Results"
+          echo "--------------"
+          cat ./it_results.csv
+          IT_RESULTS_NUM=$(cat it_results.csv | wc -l)
+          sudo chmod o+w "${GITHUB_ENV}"
+          if [ "${IT_RESULTS_NUM}" -gt 1 ];then
+            echo "EXECUTE_IT_RESULTS_UPLOAD_FLG=true" >> ${GITHUB_ENV}
+          else
+            echo "EXECUTE_IT_RESULTS_UPLOAD_FLG=false" >> ${GITHUB_ENV}
+          fi
+      - name: Get test_runs info
+        if: ${{ env.EXECUTE_IT_RESULTS_UPLOAD_FLG == 'true' }}
+        working-directory: /workdir/arene-ivi-infra-req-analyst
+        env:
+          JAMA_CLIENT_ID: ${{ secrets.JAMA_CLIENT_ID }}
+          JAMA_CLIENT_SECRET: ${{ secrets.JAMA_CLIENT_SECRET }}
+        shell: bash
+        run: ./toolbox/jama.sh cache.test_runs
+      - name: Update IT results to JAMA
+        if: ${{ env.EXECUTE_IT_RESULTS_UPLOAD_FLG == 'true' }}
+        working-directory: /workdir
+        env:
+          JAMA_CLIENT_ID: ${{ secrets.JAMA_CLIENT_ID_WRITE }}
+          JAMA_CLIENT_SECRET: ${{ secrets.JAMA_CLIENT_SECRET_WRITE }}
+          JAMA_SEARCH_URL: "stargate.jamacloud.com"
+        shell: bash
+        run: |
+          ./arene-ivi-misc-integ-integrator/update_it_results_to_jama.sh \
+            ./it_results.csv \
+            ./arene-ivi-infra-req-analyst/cache/jama.json
+      - name: remove work directory
+        if: always()
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/remove-workdir@1.1.1
+
+  coverage:
+    name: Coverage
+    needs: run-integration-test
+    if: ${{ !startswith(github.event.ref, 'refs/tags/') }}
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    env:
+        TMCSTARGATE_ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+        TMCSTARGATE_ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+    steps:
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.20.3
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          ssh-known-hosts: ${{ secrets.ARENE_GIT_SERVER_SSH_KNOWN_HOST }}
+          ssh-key: ${{ secrets.CENTRAL_GITHUB_SSH_KEY }}
+      - id: ssh-setup
+        uses: arene-os/arene-os-actions/ssh-setup@v1.20.3
+        with:
+          ssh_dir: ${{ github.workspace }}/.home/.ssh
+          known_hosts: ${{ secrets.ARENE_GIT_SERVER_SSH_KNOWN_HOST }}
+          private_key: ${{ secrets.CENTRAL_GITHUB_SSH_KEY }}
+      - name: Generate netrc for USG Artifactory
+        uses: arene-os/arene-os-actions/generate-netrc@v1.20.3
+        with:
+          file-name: ${{ github.workspace }}/.home/.netrc
+          host-name: artifactory-ha.tmc-stargate.com
+          login: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          password: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Setup environment
+        run: |
+          # for artifactory
+          echo "machine artifactory-ha.tmc-stargate.com login ${TMCSTARGATE_ARTIFACTORY_USERNAME} password ${TMCSTARGATE_ARTIFACTORY_PASSWORD}" >> ~/.netrc
+      - name: Coverage
+        uses: arene-release/spl-shared-ci/spl-action/analyse_coverage@stable
+        with:
+          ARTIFACTORY_USERNAME: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: |
+          ls -A | sudo xargs rm -rf
+
+  release:
+    name: Release
+    needs: coverage
+    if:
+      ${{ github.event.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch) }}
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    steps:
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          ssh-known-hosts: ${{ secrets.ARENE_GIT_SERVER_SSH_KNOWN_HOST }}
+          ssh-key: ${{ secrets.CENTRAL_GITHUB_SSH_KEY }}
+      - name: Release
+        uses: arene-release/spl-shared-ci/spl-action/release@stable
+        with:
+          ARTIFACTORY_USERNAME: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: |
+          ls -A | sudo xargs rm -rf
+
+  publish:
+    name: Publish
+    if: ${{ startswith(github.event.ref, 'refs/tags/') }}
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    steps:
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          ssh-known-hosts: ${{ secrets.ARENE_GIT_SERVER_SSH_KNOWN_HOST }}
+          ssh-key: ${{ secrets.CENTRAL_GITHUB_SSH_KEY }}
+      - id: ssh-setup
+        uses: arene-os/arene-os-actions/ssh-setup@v1.14.0
+        with:
+          ssh_dir: ${{ github.workspace }}/.home/.ssh
+          known_hosts: ${{ secrets.SG_GITHUB_SSH_KNOWN_HOSTS }}
+          private_key: ${{ secrets.SG_GITHUB_PRIVATE_SSH_KEY }}
+      - name: Generate netrc for USG Artifactory
+        uses: arene-os/arene-os-actions/generate-netrc@v1.14.0
+        with:
+          file-name: ${{ github.workspace }}/.home/.netrc
+          host-name: artifactory-ha.tmc-stargate.com
+          login: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          password: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Generate netrc for USG Artifactory for SPL publish
+        uses: arene-os/arene-os-actions/generate-netrc@v1.16.0
+        with:
+          file-name: ${{ github.workspace }}/.spl/.netrc
+          host-name: artifactory-ha.tmc-stargate.com
+          login: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          password: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Publish
+        uses: arene-release/spl-shared-ci/spl-action/publish@stable
+        with:
+          ARTIFACTORY_USERNAME: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+          BUILD_BEFORE_PUBLISH: false
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: |
+          ls -A | sudo xargs rm -rf
+
+  deploy:
+    name: Deploy
+    needs: publish
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    steps:
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
+      - name: Deploy
+        uses: arene-release/spl-shared-ci/spl-action/deploy@stable
+        with:
+          ARTIFACTORY_USERNAME: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: |
+          ls -A | sudo xargs rm -rf
