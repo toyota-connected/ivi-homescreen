@@ -1,0 +1,20 @@
+---
+name: it
+  
+on:
+  workflow_call:
+    inputs:
+      run-datetime:
+        required: true
+        type: string
+
+jobs:
+  IT:
+    runs-on: [self-hosted, large-runner]
+    steps:
+    - name: Initialize
+      env:
+        RUN_DATETIME: ${{ inputs.run-datetime }}
+      shell: bash
+      run: |
+        echo "IT job is none. (${RUN_DATETIME})"
