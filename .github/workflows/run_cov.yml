@@ -4,10 +4,16 @@ name: run-cov
 on:
   workflow_call:
     inputs:
+      SOFTWARE_PART_ORG:
+        required: true
+        type: string
       SOFTWARE_PART_NAME:
         required: true
         type: string
-      UPLOAD_ARTIFACTORY_DIR_NAME:
+      RUN_DATETIME:
+        required: true
+        type: string
+      TARGET_UNIT_NAMES:
         required: true
         type: string
 
@@ -17,103 +23,150 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        analyse-target:
-          - ${{ inputs.SOFTWARE_PART_NAME }}
-        include:
-          - analyse-target: ${{ inputs.SOFTWARE_PART_NAME }}
-          - upload-artifactory-dir-name: ${{ inputs.UPLOAD_ARTIFACTORY_DIR_NAME }}
+        analyse-target: ${{ fromJson(inputs.TARGET_UNIT_NAMES) }}
     runs-on: [self-hosted, 3x-large-runner]
-    container:
-      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/tmc/ci-securecoding-sdk:1.0.1-cov23.3
-      options: --user root
-      credentials:
-        username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
-        password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
-      volumes:
-        - ${{ github.workspace }}/workdir:/workdir
     env:
-      RULE_SET_DIR: "rule_set"
-      OUTPUT_DIR: "output"
-      COV_PATH: "/opt/cov-analysis-linux64-2023.3.0"
-      ANALYSE_TARGET: ${{ matrix.analyse-target }}
-      UPLOAD_ARTIFACTORY_DIR_NAME: ${{ matrix.upload-artifactory-dir-name }}
+      COVERITY_DOCKER_IMAGE_VERSION: "1.0.2-cov23.3"
+      TARGET_UNIT_NAMES: ${{ matrix.analyse-target }}
+      RUN_DATETIME: ${{ inputs.RUN_DATETIME }}
+      SOFTWARE_PART_ORG: ${{ inputs.SOFTWARE_PART_ORG }}
+      SOFTWARE_PART_NAME : ${{ inputs.SOFTWARE_PART_NAME }}
       TMCSTARGATE_ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
       TMCSTARGATE_ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
       TMCSTARGATE_GITHUB_USER: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
       TMCSTARGATE_GITHUB_TOKEN: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
     steps:
+      - name: Initialize workdir
+        run: |
+          ls -A | sudo xargs rm -rf
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
+      - name: Install packages
+        shell: bash
+        run: |
+          # Install jfrog CLI
+          wget -qO - https://releases.jfrog.io/artifactory/jfrog-gpg-public/jfrog\_public\_gpg.key | sudo apt-key add -
+          echo "deb https://releases.jfrog.io/artifactory/jfrog-debs xenial contrib" | sudo tee -a /etc/apt/sources.list;
+          sudo apt update -y
+          sudo apt install -y jfrog-cli-v2
+          sudo apt -y install nodejs
+          sudo apt -y install jq
       - name: Setup environment
         run: |
-          # Crete the output dir
-          mkdir -p /workdir/${{ env.OUTPUT_DIR }}/
-
-          # Add authentication info to netrc
-          echo "machine github.tmc-stargate.com login ${{env.TMCSTARGATE_GITHUB_USER}} password ${{env.TMCSTARGATE_GITHUB_TOKEN}}" >> ~/.netrc
-          echo "machine artifactory-ha.tmc-stargate.com login ${{env.TMCSTARGATE_ARTIFACTORY_USERNAME}} password ${{env.TMCSTARGATE_ARTIFACTORY_PASSWORD}}" >> ~/.netrc
-
-          # Set environment Variable
-          export COV_PATH=${{ env.COV_PATH }}
-          export RULE_SET_DIR=${{ env.RULE_SET_DIR }}
-          export OUTPUT_DIR=${{ env.OUTPUT_DIR }}
-
+          # for github
+          echo "machine github.tmc-stargate.com login ${TMCSTARGATE_GITHUB_USER} password ${TMCSTARGATE_GITHUB_TOKEN}" >> ~/.netrc
+          # for artifactory
+          echo "machine artifactory-ha.tmc-stargate.com login ${TMCSTARGATE_ARTIFACTORY_USERNAME} password ${TMCSTARGATE_ARTIFACTORY_PASSWORD}" >> ~/.netrc
+      - name: Create workdir
+        shell: bash
+        run: |
+          mkdir -p workdir
+          mkdir -p workdir/coverity_results
       - name: Checkout Analyse Target Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 1
-          repository: arene-os-services-cockpit-tmc-wa/${{ env.ANALYSE_TARGET }}
-          path: ${{ env.ANALYSE_TARGET }}
+          repository: ${{ env.SOFTWARE_PART_ORG }}/${{ env.SOFTWARE_PART_NAME }}
           token: ${{ env.TMCSTARGATE_GITHUB_TOKEN }}
           set-safe-directory: false
+          path: workdir/${{ env.SOFTWARE_PART_NAME }}
+          ref: master
+      - name: Checkout arene-ivi-misc-misra-compliance-tools
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+          repository: arene-os-services-cockpit-tmc/arene-ivi-misc-misra-compliance-tools
+          token: ${{ env.TMCSTARGATE_GITHUB_TOKEN }}
+          set-safe-directory: false
+          path: workdir/arene-ivi-misc-misra-compliance-tools
+          ref: main
       - name: Checkout coverity-scan-results-to-sarif
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 1
           repository: arene-os-services-cockpit-tmc/arene-ivi-infra-coverity-scan-results-to-sarif
-          path: coverity-scan-results-to-sarif
           token: ${{ env.TMCSTARGATE_GITHUB_TOKEN }}
           set-safe-directory: false
-      - name: Download rule set from Artifactory
+          path: workdir/coverity-scan-results-to-sarif
+          ref: master
+      - name: Serch newest Cockpit SDK
+        working-directory: workdir
+        shell: bash
+        run: |
+          jfrog config add \
+            --interactive=false \
+            --artifactory-url=https://artifactory-ha.tmc-stargate.com/artifactory/ \
+            --password=${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }} \
+            --user=${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          jfrog rt ping
+          NEWEST_SDK=$(jfrog rt search \
+            --include-dirs \
+            --recursive=false \
+            arene-os-services-cockpit-generic/spl/cockpit-sdk-ivi/build/ \
+            | jq .[].path | grep -E "spl-[0-9]" | sed "s|\"||g" | sed "s|^.*/||g" | sort | tail -1)
+          echo "SDK name : ${NEWEST_SDK}"
+          echo "NEWEST_SDK=${NEWEST_SDK}" >> ${GITHUB_ENV}
+      - name: Download Cockpit SDK
         uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
         with:
           mode: download
           option: --flat --threads=8
-          username: ${{ env.TMCSTARGATE_ARTIFACTORY_USERNAME }}
-          password: ${{ env.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
-          path-to-download-to: /workdir/${{ env.RULE_SET_DIR }}/
-          target-path-in-artifactory: arene-os-services-cockpit-generic-local-private/tmp/coverity_rule_set_files/
-      - name: Run Coverity
+          username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          path-to-download-to: ./workdir/cockpit-sdk-ivi/
+          target-path-in-artifactory: arene-os-services-cockpit-generic/spl/cockpit-sdk-ivi/build/${NEWEST_SDK}/toolchain/x86/debug/
+      - name: Install Cockpit SDK
+        working-directory: workdir
         shell: bash
         run: |
-          pushd ${{ env.ANALYSE_TARGET }}
-          git submodule update --init
-          git submodule update --remote
-
-          # Run script to execution Coverity
-          source .spl-tools/run_cov.sh
-          popd # ${{ env.ANALYSE_TARGET }}
+          echo "-------------------------------------"
+          echo "SDK name : ${NEWEST_SDK}"
+          echo "-------------------------------------"
+          chmod a+x ./cockpit-sdk-ivi/*-genericx86-64.sh
+          ./cockpit-sdk-ivi/*-genericx86-64.sh -y -d `pwd`/arene-ivi-sdk
+      - name: Download Docker image
+        working-directory: workdir
+        shell: bash
+        run: |
+          # change mount directory
+          sed -i "s|-v /home:/home|-v /home:/home -v `pwd`:`pwd`|g" ./arene-ivi-misc-misra-compliance-tools/setup_coverity_docker.sh
+          docker login \
+            arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com \
+            -u ${TMCSTARGATE_ARTIFACTORY_USERNAME} \
+            -p ${TMCSTARGATE_ARTIFACTORY_PASSWORD}
+          ./arene-ivi-misc-misra-compliance-tools/setup_coverity_docker.sh ${COVERITY_DOCKER_IMAGE_VERSION}
+      - name: Execute static analysis
+        working-directory: workdir/arene-ivi-misc-misra-compliance-tools
+        shell: bash
+        run: |
+          . /opt/actions-runner/_work/${SOFTWARE_PART_NAME}/${SOFTWARE_PART_NAME}/workdir/arene-ivi-sdk/environment-setup-core2-64-arene-linux
+          ./exec_coverity_analysis_for_local.sh ../${SOFTWARE_PART_NAME}/${TARGET_UNIT_NAMES}
+          cp ./XXX_dr_Local_*.json ../coverity_results
       - name: Convert Json to Sarif
+        working-directory: workdir
         shell: bash
         run: |
           echo "-- Convert Json to Sarif --"
-          cp ./${{ env.ANALYSE_TARGET }}/coverity_result.json ./coverity-scan-results-to-sarif
-
+          cp ./arene-ivi-misc-misra-compliance-tools/XXX_dr_Local_*.json ./coverity-scan-results-to-sarif
           pushd coverity-scan-results-to-sarif
           # Convert Analysis result Json to Sarif
-          env INPUT_PIPELINE-RESULTS-JSON="./coverity_result.json" \
-          INPUT_OUTPUT-RESULTS-SARIF="./coverity_result.sarif" \
-          ${{ env.COV_PATH }}/node/bin/node ./index.js
-          cp ./coverity_result.sarif /workdir/${{ env.OUTPUT_DIR }}/
+          for f in XXX_dr_Local_*.json;do
+            env INPUT_PIPELINE-RESULTS-JSON="./${f}" \
+            INPUT_OUTPUT-RESULTS-SARIF="./${f%.json}.sarif" \
+            node ./index.js
+          done
+          cp ./XXX_dr_Local_*.sarif ../coverity_results
           popd # coverity-scan-results-to-sarif
-      - name: Upload SARIF file to Artifactory
+      - name: Upload JSON and SARIF file to Artifactory
         uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
         with:
           mode: upload
           option: --flat --threads=8
           username: ${{ env.TMCSTARGATE_ARTIFACTORY_USERNAME }}
           password: ${{ env.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
-          path-to-upload-from: /workdir/${{ env.OUTPUT_DIR }}/coverity_result.sarif
-          target-path-in-artifactory: arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/${{ env.ANALYSE_TARGET }}/analyse/${{ env.UPLOAD_ARTIFACTORY_DIR_NAME }}/
+          path-to-upload-from: workdir/coverity_results/
+          target-path-in-artifactory: arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/${{ env.SOFTWARE_PART_NAME }}/analyse/${{ env.RUN_DATETIME }}/
       - name: Finalize workdir
         if: ${{ always() }}
         run: |
-          ls -A | xargs rm -rf
+          ls -A | sudo xargs rm -rf

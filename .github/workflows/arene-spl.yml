@@ -8,10 +8,10 @@ on:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
     branches:
-      - "main"
+      - "master"
   pull_request:
     branches:
-      - "main"
+      - "master"
 
 permissions:
   id-token: write         # For OIDC
@@ -102,8 +102,10 @@ jobs:
     needs: set-run-datetime
     uses: ./.github/workflows/run_cov.yml
     with:
+      SOFTWARE_PART_ORG: arene-os-services-cockpit-tmc-wa
       SOFTWARE_PART_NAME: ivi-homescreen
-      UPLOAD_ARTIFACTORY_DIR_NAME: ${{ needs.set-run-datetime.outputs.run-datetime }}
+      RUN_DATETIME: ${{ needs.set-run-datetime.outputs.run-datetime }}
+      TARGET_UNIT_NAMES: '["ivi-homescreen"]'
     secrets: inherit
 
   analyse:
@@ -112,6 +114,10 @@ jobs:
     needs: [set-run-datetime, run-cov]
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
     steps:
+      - name: Initialize workdir
+        run: ls -A | sudo xargs rm -rf
+      - name: Fix up pre checkout
+        uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
       - name: Setup environment
         env:
           TMCSTARGATE_ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
@@ -131,7 +137,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          ref: main
+          ref: master
       - name: Download SARIF file
         uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
         with:
@@ -140,12 +146,24 @@ jobs:
           username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
           password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
           path-to-download-to: ./download_sarif/
-          target-path-in-artifactory: arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/ivi-homescreen/analyse/${{ needs.set-run-datetime.outputs.run-datetime }}/coverity_result.sarif
+          target-path-in-artifactory: arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/ivi-homescreen/analyse/${{ needs.set-run-datetime.outputs.run-datetime }}/*.sarif
       - name: Code Analysis
         uses: arene-release/spl-shared-ci/spl-action/analyse_code@stable
         with:
           ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
           ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+      - name: Set coverity-artifactory-path
+        shell: bash
+        run: |
+          echo "arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/ivi-homescreen/analyse/${{ needs.set-run-datetime.outputs.run-datetime }}/" > coverity-artifactory-path.txt
+      - name: Upload Coverty results artifactory path text file
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverity-artifactory-path
+          path: coverity-artifactory-path.txt
+      - name: Finalize workdir
+        if: ${{ always() }}
+        run: ls -A | sudo xargs rm -rf
 
   run-integration-test:
     name: Test
