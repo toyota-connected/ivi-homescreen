@@ -65,6 +65,8 @@ class WaylandWindow {
                 int32_t width,
                 int32_t height,
                 double pixel_ratio,
+                uint32_t activation_area_x,
+                uint32_t activation_area_y,
                 Backend* backend,
                 uint32_t ivi_surface_id);
 
@@ -161,6 +163,10 @@ class WaylandWindow {
     int32_t width;
     int32_t height;
   } m_geometry;
+  struct {
+    uint32_t x;
+    uint32_t y;
+  } m_activation_area;
   struct {
     int32_t width;
     int32_t height;
