@@ -68,10 +68,12 @@ FlutterView::FlutterView(Configuration::Config config,
                m_config.view.height);
 
   m_wayland_window = std::make_shared<WaylandWindow>(
-      m_index, display, m_config.view.window_type, output, output_index,
-      m_config.app_id, m_config.view.fullscreen, m_config.view.width,
-      m_config.view.height, m_config.view.pixel_ratio, m_backend.get(),
-      m_config.view.ivi_surface_id);
+      m_index, display, m_config.view.window_type,
+      m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
+      m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
+      m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
+      m_config.view.activation_area_x, m_config.view.activation_area_y,
+      m_backend.get(), m_config.view.ivi_surface_id);
 }
 
 FlutterView::~FlutterView() = default;

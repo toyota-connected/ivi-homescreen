@@ -96,6 +96,17 @@ void Configuration::getViewParameters(
     instance.view.fps_output_frequency =
         static_cast<uint32_t>(obj[kFpsOutputFrequency].GetInt());
   }
+
+  if (obj.HasMember(kWindowActivationAreaKey)) {
+    const rapidjson::GenericValue val =
+        obj[kWindowActivationAreaKey].GetObject();
+
+    instance.view.activation_area_x = val["x"].GetInt();
+    instance.view.activation_area_y = val["y"].GetInt();
+
+    FML_LOG(INFO) << "activation area x " << instance.view.activation_area_x;
+    FML_LOG(INFO) << "activation area y " << instance.view.activation_area_y;
+  }
 }
 
 void Configuration::getGlobalParameters(
