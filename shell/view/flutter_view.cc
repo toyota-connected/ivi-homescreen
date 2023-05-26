@@ -65,6 +65,7 @@ FlutterView::FlutterView(Configuration::Config config,
       m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
       m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
       m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
+      m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_backend.get());
 }
 

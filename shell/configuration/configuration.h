@@ -39,6 +39,8 @@ class Configuration {
       int32_t accessibility_features;
       uint32_t width;
       uint32_t height;
+      uint32_t activation_area_x;
+      uint32_t activation_area_y;
       bool fullscreen;
       bool fullscreen_set;
       double pixel_ratio;
@@ -75,6 +77,7 @@ class Configuration {
   static constexpr char kBundlePathKey[] = "bundle_path";
   static constexpr char kWindowTypeKey[] = "window_type";
   static constexpr char kOutputIndex[] = "output_index";
+  static constexpr char kWindowActivationAreaKey[] = "window_activation_area";
   static constexpr char kWidthKey[] = "width";
   static constexpr char kHeightKey[] = "height";
   static constexpr char kPixelRatioKey[] = "pixel_ratio";
