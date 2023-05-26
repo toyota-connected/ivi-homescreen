@@ -275,9 +275,12 @@ void Display::display_handle_mode(void* data,
                                   int height,
                                   int refresh) {
   auto* oi = static_cast<output_info_t*>(data);
-  oi->width = static_cast<unsigned int>(width);
-  oi->height = static_cast<unsigned int>(height);
-  oi->refresh_rate = refresh;
+
+  if (flags == WL_OUTPUT_MODE_CURRENT) {
+    oi->height = static_cast<unsigned int>(height);
+    oi->width = static_cast<unsigned int>(width);
+    oi->refresh_rate = refresh;
+  }
 
   SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height,
                (refresh > 1000 ? refresh / 1000.0 : (double)refresh));
