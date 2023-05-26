@@ -257,7 +257,7 @@ void Display::display_handle_geometry(void* data,
                                       int /* subpixel */,
                                       const char* /* make */,
                                       const char* /* model */,
-                                      int /* transform */) {
+                                      int transform) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->physical_width = static_cast<unsigned int>(physical_width);
   oi->physical_height = static_cast<unsigned int>(physical_height);
@@ -269,7 +269,7 @@ void Display::display_handle_geometry(void* data,
 
 void Display::display_handle_mode(void* data,
                                   struct wl_output* /* wl_output */,
-                                  uint32_t /* flags */,
+                                  uint32_t flags,
                                   int width,
                                   int height,
                                   int refresh) {
@@ -954,7 +954,7 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
 }
 
 void Display::agl_shell_app_state(void* data,
-                                  struct agl_shell* agl_shell,
+                                  struct agl_shell* /* agl_shell */,
                                   const char* app_id,
                                   uint32_t state) {
   auto* d = static_cast<Display*>(data);
