@@ -31,6 +31,8 @@ WaylandWindow::WaylandWindow(size_t index,
                              int32_t width,
                              int32_t height,
                              double pixel_ratio,
+                             uint32_t activation_area_x,
+                             uint32_t activation_area_y,
                              Backend* backend)
     : m_index(index),
       m_display(std::move(display)),
@@ -41,6 +43,7 @@ WaylandWindow::WaylandWindow(size_t index,
       m_geometry({width, height}),
       m_window_size({width, height}),
       m_pixel_ratio(pixel_ratio),
+      m_activation_area({activation_area_x, activation_area_y}),
       m_type(get_window_type(type)),
       m_app_id(std::move(app_id)),
       m_fullscreen(fullscreen) {  // disable vsync
@@ -76,7 +79,11 @@ WaylandWindow::WaylandWindow(size_t index,
       break;
     case WINDOW_BG:
       m_display->AglShellDoBackground(m_base_surface, 0);
-      m_display->AglShellDoSetupActivationArea(0, 160, 0);
+      if (m_activation_area.x > 0 && m_activation_area.y > 0)
+        m_display->AglShellDoSetupActivationArea(m_activation_area.x,
+                                                 m_activation_area.y, 0);
+      else
+        m_display->AglShellDoSetupActivationArea(0, 160, 0);
       break;
     case WINDOW_PANEL_TOP:
       m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_TOP, 0);
