@@ -909,6 +909,22 @@ class Display {
    */
   static void agl_shell_bound_fail(void* data, struct agl_shell* shell);
 
+  /**
+   * @brief AGL app_state event
+   * @param[in,out] data Data of type Display
+   * @param[in] shell No use
+   * @param[in] app_id the application id for which this event was sent
+   * @param[in] state the state: CREATED/TERMINATED/ACTIVATED/DEACTIVATED
+   * @return void
+   * @relation
+   * wayland, agl-shell
+   * @note Do nothing
+   */
+  static void agl_shell_app_state(void* data,
+                                  struct agl_shell* agl_shell,
+                                  const char* app_id,
+                                  uint32_t state);
+
   static const struct agl_shell_listener agl_shell_listener;
 
   /**

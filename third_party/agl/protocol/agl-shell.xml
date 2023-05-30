@@ -22,7 +22,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
   </copyright>
-  <interface name="agl_shell" version="2">
+  <interface name="agl_shell" version="3">
     <description summary="user interface for Automotive Grade Linux platform">
       Starting with version 2 of the protocol, the client is required to wait
       for the 'bound_ok' or 'bound_fail' events in order to proceed further.
@@ -58,6 +58,13 @@
       <entry name="bottom" value="1"/>
       <entry name="left" value="2"/>
       <entry name="right" value="3"/>
+    </enum>
+
+    <enum name="app_state" since="3">
+      <entry name="started" value="0"/>
+      <entry name="terminated" value="1"/>
+      <entry name="activated" value="2"/>
+      <entry name="deactivated" value="3"/>
     </enum>
 
     <request name="ready">
@@ -155,6 +162,18 @@
       <description summary="destroys the factory object">
       </description>
     </request>
+
+    <event name="app_state" since="3">
+      <description summary="event sent when an application suffered state modification">
+        Informs the client that an application has changed its state to another,
+        specified by the app_state enum. Client can use this event to track
+        current application state. For instance to know when the application has
+        started, or when terminated/stopped.
+      </description>
+      <arg name="app_id" type="string"/>
+      <arg name="state" type="uint" enum="app_state"/>
+    </event>
+
 
   </interface>
 </protocol>
