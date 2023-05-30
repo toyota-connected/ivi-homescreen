@@ -195,7 +195,7 @@ void Display::registry_handle_global(void* data,
     if (version >= 2) {
       d->m_agl.shell = static_cast<struct agl_shell*>(
           wl_registry_bind(registry, name, &agl_shell_interface,
-                           std::min(static_cast<uint32_t>(3), version)));
+                           std::min(static_cast<uint32_t>(4), version)));
       agl_shell_add_listener(d->m_agl.shell, &agl_shell_listener, data);
     } else {
       d->m_agl.shell = static_cast<struct agl_shell*>(
@@ -846,6 +846,27 @@ void Display::AglShellDoReady() const {
   if (m_agl.shell) {
     agl_shell_ready(m_agl.shell);
   }
+}
+
+void Display::AglShellDoSetupActivationArea(uint32_t x,
+                                            uint32_t y,
+                                            uint32_t index) {
+  uint32_t width = m_all_outputs[index]->width;
+  uint32_t height = m_all_outputs[index]->height - (2 * y);
+
+  if (!m_agl.shell)
+    return;
+
+  if (m_all_outputs[index]->transform == WL_OUTPUT_TRANSFORM_90) {
+    width = m_all_outputs[index]->height;
+    height = m_all_outputs[index]->width - (2 * y);
+  }
+
+  FML_LOG(INFO) << "Using custom rectangle [" << width << "x" << height << "+"
+                << x << "x" << y << "] for activation";
+
+  agl_shell_set_activate_region(m_agl.shell, m_all_outputs[index]->output, x, y,
+                                width, height);
 }
 
 void Display::SetEngine(wl_surface* surface, Engine* engine) {

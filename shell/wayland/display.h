@@ -151,6 +151,35 @@ class Display {
   void AglShellDoReady() const;
 
   /**
+   * @brief AglShell: Set up an activation area where to display the client's
+   * window
+   * @return void
+   * @param[in] x the x position for the activation rectangle
+   * @param[in] y the y position for the activation rectangle
+   * @param[index] the output, as a number
+   * @relation
+   *
+   * see agl-shell::set_activate_region request for more information. The x and
+   * y values are the position of an activation rectangle, with the width and
+   * height grabbed from the output itself. This would specify the area where
+   * the client's window will be displayed.
+   *
+   * --------------------
+   * |                  |
+   * |  (x, y)          |
+   * |  +--------       |
+   * |  |       |       |
+   * |  |       | height|
+   * |  |       |       |
+   * |  ---------       |
+   * |    width		|
+   * .			|
+   * |			|
+   * --------------------
+   */
+  void AglShellDoSetupActivationArea(uint32_t x, uint32_t y, uint32_t index);
+
+  /**
    * @brief Set Engine
    * @param[in] surface Image
    * @param[in] engine Engine

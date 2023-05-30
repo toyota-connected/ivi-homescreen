@@ -76,6 +76,7 @@ WaylandWindow::WaylandWindow(size_t index,
       break;
     case WINDOW_BG:
       m_display->AglShellDoBackground(m_base_surface, 0);
+      m_display->AglShellDoSetupActivationArea(0, 160, 0);
       break;
     case WINDOW_PANEL_TOP:
       m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_TOP, 0);
