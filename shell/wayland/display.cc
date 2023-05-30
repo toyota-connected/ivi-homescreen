@@ -243,6 +243,7 @@ void Display::display_handle_geometry(void* data,
   auto* oi = static_cast<output_info_t*>(data);
   oi->physical_width = static_cast<unsigned int>(physical_width);
   oi->physical_height = static_cast<unsigned int>(physical_height);
+  oi->transform = transform;
 
   FML_DLOG(INFO) << "Physical width: " << physical_width << " mm x "
                  << physical_height << " mm";
