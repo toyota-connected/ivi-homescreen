@@ -927,6 +927,16 @@ void Display::agl_shell_app_state(void* data,
   switch (state) {
     case AGL_SHELL_APP_STATE_STARTED:
       FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_STARTED for app_id " << app_id;
+
+      if (d->m_agl.shell) {
+	      // we always assume the first output advertised by the wl_output
+	      // interface
+	      unsigned int default_output_index = 0;
+
+	      agl_shell_activate_app(d->m_agl.shell, app_id,
+			             d->m_all_outputs[default_output_index]->output);
+      }
+
       break;
     case AGL_SHELL_APP_STATE_TERMINATED:
       FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_TERMINATED for app_id "
