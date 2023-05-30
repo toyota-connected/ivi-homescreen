@@ -299,6 +299,7 @@ class Display {
     MAYBE_UNUSED int refresh_rate;
     int32_t scale;
     MAYBE_UNUSED bool done;
+    int transform;
   } output_info_t;
 
   struct pointer_event {
