@@ -213,7 +213,7 @@ void Display::registry_handle_global(void* data,
     if (version >= 2) {
       d->m_agl.shell = static_cast<struct agl_shell*>(
           wl_registry_bind(registry, name, &agl_shell_interface,
-                           std::min(static_cast<uint32_t>(2), version)));
+                           std::min(static_cast<uint32_t>(3), version)));
       agl_shell_add_listener(d->m_agl.shell, &agl_shell_listener, data);
     } else {
       d->m_agl.shell = static_cast<struct agl_shell*>(
@@ -932,9 +932,33 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
   d->m_agl.bound_ok = false;
 }
 
+void Display::agl_shell_app_state(void* data,
+                                  struct agl_shell* agl_shell,
+                                  const char* app_id,
+                                  uint32_t state) {
+  auto* d = static_cast<Display*>(data);
+
+  switch (state) {
+    case AGL_SHELL_APP_STATE_STARTED:
+      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_STARTED for app_id " << app_id;
+      break;
+    case AGL_SHELL_APP_STATE_TERMINATED:
+      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_TERMINATED for app_id "
+                     << app_id;
+      break;
+    case AGL_SHELL_APP_STATE_ACTIVATED:
+      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_ACTIVATED for app_id "
+                     << app_id;
+      break;
+    default:
+      break;
+  }
+}
+
 const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
+    .app_state = agl_shell_app_state,
 };
 
 void Display::ivi_wm_surface_visibility(void* /* data */,
