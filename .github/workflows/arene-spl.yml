@@ -105,7 +105,7 @@ jobs:
       SOFTWARE_PART_ORG: arene-os-services-cockpit-tmc-wa
       SOFTWARE_PART_NAME: ivi-homescreen
       RUN_DATETIME: ${{ needs.set-run-datetime.outputs.run-datetime }}
-      TARGET_UNIT_NAMES: '["ivi-homescreen"]'
+      BUILD_PATHS: '["ivi-homescreen/."]'
     secrets: inherit
 
   analyse:

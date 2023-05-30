@@ -13,7 +13,7 @@ on:
       RUN_DATETIME:
         required: true
         type: string
-      TARGET_UNIT_NAMES:
+      BUILD_PATHS:
         required: true
         type: string
 
@@ -23,11 +23,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        analyse-target: ${{ fromJson(inputs.TARGET_UNIT_NAMES) }}
+        analyse-target: ${{ fromJson(inputs.BUILD_PATHS) }}
     runs-on: [self-hosted, 3x-large-runner]
     env:
       COVERITY_DOCKER_IMAGE_VERSION: "1.0.2-cov23.3"
-      TARGET_UNIT_NAMES: ${{ matrix.analyse-target }}
+      BUILD_PATHS: ${{ matrix.analyse-target }}
       RUN_DATETIME: ${{ inputs.RUN_DATETIME }}
       SOFTWARE_PART_ORG: ${{ inputs.SOFTWARE_PART_ORG }}
       SOFTWARE_PART_NAME : ${{ inputs.SOFTWARE_PART_NAME }}
@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           . /opt/actions-runner/_work/${SOFTWARE_PART_NAME}/${SOFTWARE_PART_NAME}/workdir/arene-ivi-sdk/environment-setup-core2-64-arene-linux
-          ./exec_coverity_analysis_for_local.sh ../${SOFTWARE_PART_NAME}/${TARGET_UNIT_NAMES}
+          ./exec_coverity_analysis_for_local.sh ../${BUILD_PATHS}
           cp ./XXX_dr_Local_*.json ../coverity_results
       - name: Convert Json to Sarif
         working-directory: workdir
