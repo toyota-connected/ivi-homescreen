@@ -8,10 +8,10 @@ on:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
     branches:
-      - ${{ github.event.repository.default_branch }}
+      - "master"
   pull_request:
     branches:
-      - ${{ github.event.repository.default_branch }}
+      - "master"
 
 permissions:
   id-token: write         # For OIDC
