@@ -66,8 +66,8 @@ void Configuration::getViewParameters(
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
-    instance.view.accessibility_features =
-        obj[kAccessibilityFeaturesKey].GetInt();
+    instance.view.accessibility_features = MaskAccessibilityFeatures(
+        obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
     auto args = obj[kVmArgsKey].GetArray();
@@ -131,8 +131,8 @@ void Configuration::getGlobalParameters(
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
-    instance.view.accessibility_features =
-        obj[kAccessibilityFeaturesKey].GetInt();
+    instance.view.accessibility_features = MaskAccessibilityFeatures(
+        obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
     instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
@@ -218,7 +218,8 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
     instance.view.wl_output_index = cli.view.wl_output_index;
   }
   if (cli.view.accessibility_features > 0) {
-    instance.view.accessibility_features = cli.view.accessibility_features;
+    instance.view.accessibility_features = MaskAccessibilityFeatures(
+        cli.view.accessibility_features);
   }
   if (cli.view.width > 0) {
     instance.view.width = cli.view.width;
@@ -345,4 +346,9 @@ void Configuration::PrintConfig(const Config& config) {
             << (config.view.fullscreen ? "true" : "false");
   LOG(INFO) << "Accessibility Features: ... "
             << config.view.accessibility_features;
+}
+
+int32_t Configuration::MaskAccessibilityFeatures(int32_t accessibility_features) {
+  accessibility_features &= 0b1111111;
+  return accessibility_features;
 }

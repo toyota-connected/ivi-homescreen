@@ -140,6 +140,8 @@ int main(int argc, char** argv) {
       if (ret) {
         return ret;
       }
+      config.view.accessibility_features =
+        Configuration::MaskAccessibilityFeatures(config.view.accessibility_features);
       RemoveArgument(config.view.vm_args,
                      "--a=" + accessibility_feature_flag_str);
     }
