@@ -5,7 +5,8 @@
          "bundle_path":"/usr/share/homescreen/bundle",
          "window_type": "NORMAL",
          "fullscreen": true,
-         "ivi_surface_id": 1
+         "ivi_surface_id": 1,
+         "accessibility_features": %%ACCESSIBILITY%%
       }
    ]
 }

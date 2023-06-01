@@ -24,7 +24,27 @@ Please run `test_accessibility_features_cmdline.sh` with `--b` option and so on 
 $ ./test_accessibility_features_cmdline.sh --b=/usr/share/homescreen/bundle --f --i=1
 ```
 
-Please prepare your json config file and install it into your machine.
+Please prepare your json config file.
+The json file must have the entry `"accessibility_features": %%ACCESSIBILITY%%` like the following.
+
+```
+{
+   "app_id": "homescreen",
+   "view":[
+      {
+         "bundle_path":"/usr/share/homescreen/bundle",
+         "window_type": "NORMAL",
+         "fullscreen": true,
+         "ivi_surface_id": 1,
+         "accessibility_features": %%ACCESSIBILITY%%
+      }
+   ]
+}
+```
+
+The part `%%ACCESSIBILITY%%` will be overloaded by the script.
+
+Please install your json config file into your machine.
 
 Please run `test_accessibility_features_json.sh` with the path to your json config file like the following.
 

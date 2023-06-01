@@ -5,7 +5,10 @@ stop_bg() {
   ps aux | grep "$EXEC" | awk '{print $2}' | xargs kill -TERM > /dev/null 2>&1
 }
 
-ARGS="--j=$1"
+ABS_PATH=$(readlink -f $1)
+BASENAME=$(basename ${ABS_PATH})
+
+ARGS="--j=/tmp/${BASENAME}"
 
 EXEC="homescreen"
 which homescreen && EXEC=$(which homescreen)
@@ -13,7 +16,9 @@ which flutter-auto && EXEC=$(which flutter-auto)
 
 for i in `seq 0 255`; do
   stop_bg &
-  ret=$($EXEC $ARGS --a=$i 2>&1 | grep "Accessibility Features:")
+  cp ${ABS_PATH} /tmp/${BASENAME}
+  sed -i "s|%%ACCESSIBILITY%%|${i}|g" /tmp/${BASENAME}
+  ret=$($EXEC $ARGS 2>&1 | grep "Accessibility Features:")
 
   if [ "$i" = "$(echo "$ret" | sed "s|.*Accessibility Features: ... \(.*\)|\1|g")" ]; then
     echo "OK: $i"
