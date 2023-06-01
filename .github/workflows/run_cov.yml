@@ -26,7 +26,7 @@ jobs:
         analyse-target: ${{ fromJson(inputs.BUILD_PATHS) }}
     runs-on: [self-hosted, 3x-large-runner]
     env:
-      COVERITY_DOCKER_IMAGE_VERSION: "1.0.2-cov23.3"
+      COVERITY_DOCKER_IMAGE_VERSION: "1.0.3-cov23.3"
       BUILD_PATHS: ${{ matrix.analyse-target }}
       RUN_DATETIME: ${{ inputs.RUN_DATETIME }}
       SOFTWARE_PART_ORG: ${{ inputs.SOFTWARE_PART_ORG }}
@@ -51,6 +51,7 @@ jobs:
           sudo apt install -y jfrog-cli-v2
           sudo apt -y install nodejs
           sudo apt -y install jq
+          sudo apt -y install moreutils
       - name: Setup environment
         run: |
           # for github
@@ -150,8 +151,12 @@ jobs:
           cp ./arene-ivi-misc-misra-compliance-tools/XXX_dr_Local_*.json ./coverity-scan-results-to-sarif
           pushd coverity-scan-results-to-sarif
           # Convert Analysis result Json to Sarif
+          filter_expression='del(.issues[] | select(.judgement.Action != "FixCode"))'
           for f in XXX_dr_Local_*.json;do
-            env INPUT_PIPELINE-RESULTS-JSON="./${f}" \
+            echo "-- Filter Coverity Results --"
+            jq --indent 4 "$filter_expression" ./${f} | sponge ./filtered_${f}
+            echo "Filtered file: ${f}"
+            env INPUT_PIPELINE-RESULTS-JSON="./filtered_${f}" \
             INPUT_OUTPUT-RESULTS-SARIF="./${f%.json}.sarif" \
             node ./index.js
           done
