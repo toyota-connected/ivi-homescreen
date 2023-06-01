@@ -57,6 +57,7 @@ Display::Display(bool enable_cursor,
 
   m_registry = wl_display_get_registry(m_display);
   wl_registry_add_listener(m_registry, &registry_listener, this);
+  wl_display_dispatch(m_display);
 
   if (m_agl.shell && m_agl.bind_to_agl_shell && m_agl.version >= 2) {
     int ret = 0;
@@ -70,8 +71,6 @@ Display::Display(bool enable_cursor,
           "agl_shell extension already in use by other shell client.");
       exit(EXIT_FAILURE);
     }
-  } else {
-    wl_display_dispatch(m_display);
   }
 
   if (!m_agl.shell && m_agl.bind_to_agl_shell) {
