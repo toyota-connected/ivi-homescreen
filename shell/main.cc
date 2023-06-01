@@ -113,18 +113,33 @@ int main(int argc, char** argv) {
     if (cl.HasOption("a")) {
       std::string accessibility_feature_flag_str;
       cl.GetOptionValue("a", &accessibility_feature_flag_str);
-      if (!IsNumber(accessibility_feature_flag_str)) {
-        LOG(ERROR)
-            << "--a option (Accessibility Features) requires an integer value";
-        return EXIT_FAILURE;
-      }
       if (accessibility_feature_flag_str.empty()) {
         LOG(ERROR) << "--a option (Accessibility Features) requires an "
                       "argument (e.g. --a=31)";
         return EXIT_FAILURE;
       }
-      config.view.accessibility_features =
-          static_cast<int32_t>(std::stol(accessibility_feature_flag_str));
+      int ret = 0;
+      try {
+        // The following styles are acceptable:
+        // 1. decimal: --a=31
+        // 2. hex: --a=0x3
+        // 3. octet: --a=03
+        config.view.accessibility_features =
+          static_cast<int32_t>(std::stol(accessibility_feature_flag_str, nullptr, 0));
+      } catch (const std::invalid_argument& e) {
+        LOG(ERROR)
+            << "--a option (Accessibility Features) requires an integer value";
+        ret = EXIT_FAILURE;
+      } catch (const std::out_of_range& e) {
+        LOG(ERROR)
+            << "The specified value to --a option, "
+            << accessibility_feature_flag_str
+            << " is out of range.";
+        ret = EXIT_FAILURE;
+      }
+      if (ret) {
+        return ret;
+      }
       RemoveArgument(config.view.vm_args,
                      "--a=" + accessibility_feature_flag_str);
     }
