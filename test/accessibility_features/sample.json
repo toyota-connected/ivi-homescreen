@@ -1,0 +1,11 @@
+{
+   "app_id": "homescreen",
+   "view":[
+      {
+         "bundle_path":"/usr/share/homescreen/bundle",
+         "window_type": "NORMAL",
+         "fullscreen": true,
+         "ivi_surface_id": 1
+      }
+   ]
+}
