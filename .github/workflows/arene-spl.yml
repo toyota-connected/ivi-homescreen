@@ -137,7 +137,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          ref: master
+          ref: main
       - name: Download SARIF file
         uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
         with:

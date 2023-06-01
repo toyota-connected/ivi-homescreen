@@ -70,7 +70,7 @@ jobs:
           token: ${{ env.TMCSTARGATE_GITHUB_TOKEN }}
           set-safe-directory: false
           path: workdir/${{ env.SOFTWARE_PART_NAME }}
-          ref: master
+          ref: main
       - name: Checkout arene-ivi-misc-misra-compliance-tools
         uses: actions/checkout@v3
         with:
