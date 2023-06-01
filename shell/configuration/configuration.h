@@ -70,6 +70,20 @@ class Configuration {
    */
   static void PrintConfig(const Config&);
 
+  /**
+   * @brief mask the accessibility_features
+   * @param[in] accessibility_features accessibility_features value
+   * @return int32_t
+   * @retval masked accessibility_features value
+   * @relation internal
+   *
+   * accessibility_features is expressed as bit flags.
+   * please see FlutterAccessibilityFeature enum
+   * in third_party/flutter/shell/platform/embedder/embedder.h.
+   * 0b1111111 is the maximum value of accessibility_features.
+   */
+  static int32_t MaskAccessibilityFeatures(int32_t accessibility_features);
+
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
 
  private:
