@@ -4,7 +4,7 @@
     "description": "ivi-homescreen for IVI and IC",
     "repo_url": "https://github.tmc-stargate.com/arene-os-services-cockpit-tmc-wa/ivi-homescreen",
     "bom_file": "",
-    "version": "6.8.1001",
+    "version": "6.8.1002",
     "owner": "Cockpit SDK",
     "owner_email": "cockpit-integration-infrastructure@woven-planet.global",
     "company": "Woven Alpha",
@@ -80,7 +80,7 @@
                     "commands": [
                         "echo \"------- Copy Sarif to .spl/analyse -------\"",
                         "mkdir -p .spl/analyse",
-                        "if [ -e ./download_sarif/coverity_result.sarif ]; then cp ./download_sarif/coverity_result.sarif .spl/analyse/; fi"
+                        "if [ \"$(ls ./download_sarif/*.sarif 2>/dev/null)\" != \"\" ]; then cp ./download_sarif/*.sarif .spl/analyse/; fi"
                     ],
                     "use_os_system": true,
                     "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
