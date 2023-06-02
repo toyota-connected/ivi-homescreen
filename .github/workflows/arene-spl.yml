@@ -150,8 +150,8 @@ jobs:
       - name: Code Analysis
         uses: arene-release/spl-shared-ci/spl-action/analyse_code@stable
         with:
-          ARTIFACTORY_USERNAME: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
-          ARTIFACTORY_PASSWORD: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+          ARTIFACTORY_USERNAME: ${{ secrets.USG_ARTIFACTORY_API_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.USG_ARTIFACTORY_API_KEY }}
       - name: Set coverity-artifactory-path
         shell: bash
         run: |
