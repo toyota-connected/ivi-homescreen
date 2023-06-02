@@ -311,7 +311,7 @@ jobs:
 
   release:
     name: Release
-    needs: coverage
+    needs: [coverage, analyse]
     if:
       ${{ github.event.ref == format('refs/heads/{0}',
       github.event.repository.default_branch) }}
@@ -379,14 +379,12 @@ jobs:
           ref: 'main'
           token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
           path: ${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/
-      # TODO (AGLDEV-36236): Replace hardcoded run_id with identifier for
-      # the current CI run when this publish job is invoked.  
       - name: Retrieve Coverity Results Path Artifact 
         uses: synced-actions/dawidd6-action-download-artifact@v2.26.0
         continue-on-error: false
         with: 
           github_token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
-          run_id: 1557799
+          commit: ${{ github.sha }}
           name: coverity-artifactory-path
           path: ./coverity-artifactory-path/
           if_no_artifact_found: fail
