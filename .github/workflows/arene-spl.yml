@@ -359,6 +359,7 @@ jobs:
           known_hosts: ${{ secrets.SG_GITHUB_SSH_KNOWN_HOSTS }}
           private_key: ${{ secrets.SG_GITHUB_PRIVATE_SSH_KEY }}
       - name: Env Setup
+        if: ${{ true }}
         run: |  
           # Install jfrog CLI
           wget -qO - https://releases.jfrog.io/artifactory/jfrog-gpg-public/jfrog\_public\_gpg.key | sudo apt-key add -
@@ -366,12 +367,14 @@ jobs:
           sudo apt update -y
           sudo apt install -y jfrog-cli-v2
       - name: Login to arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com
+        if: ${{ true }}
         uses: synced-actions/docker-login-action@v1
         with:
           registry: arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com
           username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
           password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
       - name: Checkout MISRA Compliant Tool
+        if: ${{ true }}
         uses: actions/checkout@v3
         with:
           repository: 'arene-os-services-cockpit-tmc/arene-ivi-misc-misra-compliance-tools'
@@ -380,6 +383,7 @@ jobs:
           token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
           path: ${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/
       - name: Retrieve Coverity Results Path Artifact 
+        if: ${{ true }}
         uses: synced-actions/dawidd6-action-download-artifact@v2.26.0
         continue-on-error: false
         with: 
@@ -389,10 +393,12 @@ jobs:
           path: ./coverity-artifactory-path/
           if_no_artifact_found: fail
       - name: Extract Coverity Results Path
+        if: ${{ true }}
         run: |
           COVERITY_RESULTS_PATH=$(cat ./coverity-artifactory-path/coverity-artifactory-path.txt)
           echo "COVERITY_RESULTS_PATH=$COVERITY_RESULTS_PATH" >> ${GITHUB_ENV}
       - name: Download Coverity Result files
+        if: ${{ true }}
         uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
         with:
           mode: download
@@ -402,6 +408,7 @@ jobs:
           path-to-download-to: ${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/coverity_results/
           target-path-in-artifactory: $COVERITY_RESULTS_PATH
       - name: Generate GCS and DR reports 
+        if: ${{ true }}
         shell: bash
         run: |
           DOCKER_COV_VER=1.0.2-cov23.3
