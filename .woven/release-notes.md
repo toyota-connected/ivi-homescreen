@@ -1,11 +1,11 @@
 
 # Bug Fixes
 
-* For verification purpose
+* None
 
 # New Features
 
-* For verification purpose
+* None
 
 # Improvements / Comments
 
@@ -48,3 +48,5 @@ Every Line containing one of the following Tag will not be used to produce the P
 * **[None]**
 
 :pencil: The match is not case-sensitive!
+
+    
