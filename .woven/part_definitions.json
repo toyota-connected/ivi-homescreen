@@ -3,19 +3,16 @@
     "name": "ivi-homescreen",
     "description": "ivi-homescreen for IVI and IC",
     "repo_url": "https://github.tmc-stargate.com/arene-os-services-cockpit-tmc-wa/ivi-homescreen",
-    "bom_file": "",
-    "version": "7.0.1001",
+    "version": "7.0.1002",
     "owner": "Cockpit SDK",
     "owner_email": "cockpit-integration-infrastructure@woven-planet.global",
     "company": "Woven Alpha",
     "license": [
         "Woven"
     ],
-    "ci_version": "0.0.118",
-    "ci_version_policy": ">=0.0.118",
-    "project": "",
+    "ci_version": "0.0.135",
+    "ci_version_policy": ">=0.0.135",
     "repo_type": "github",
-    "type": null,
     "code_base": [
         {
             "name": "cb-ivi-homescreen",
@@ -26,7 +23,6 @@
             "sbom_files": [
                 ".spl/build/sbom"
             ],
-            "pre_build_steps": [],
             "build_steps": [
                 {
                     "name": "build",
@@ -36,7 +32,7 @@
                         "git submodule update --remote",
                         ".spl-tools/build.sh run"
                     ],
-                    "use_os_system": false,
+                    "use_os_system": true,
                     "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
                 },
                 {
@@ -48,35 +44,28 @@
                         "mkdir -p $(pwd)/workdir/tmp-glibc/deploy/spdx",
                         "cp -r $(pwd)/workdir/tmp-glibc/deploy/spdx .spl/build/sbom"
                     ],
-                    "use_os_system": false,
+                    "use_os_system": true,
                     "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
                 }
             ],
-            "post_build_steps": [],
-            "post_test_steps": [],
             "tag_substitution": {
-                "tags_substitutes": {},
                 "__serialization_type__": "pyplatform.bom.software_part.tag_substitution.TagSubstitution"
             },
-            "additional_artifacts": [],
-            "test_steps": [],
             "coverage_analysis_steps": [
                 {
                     "name": "coverage",
-                    "relative_path": "",
                     "commands": [
                         "echo \"-------Execute Coverage-------\"",
                         "git submodule update --remote",
                         ".spl-tools/coverage.sh run"
                     ],
-                    "use_os_system": false,
+                    "use_os_system": true,
                     "__serialization_type__": "pyplatform.bom.software_part.operation_step.OperationStep"
                 }
             ],
             "code_analysis_steps": [
                 {
                     "name": "arene_coverity",
-                    "relative_path": "",
                     "commands": [
                         "echo \"------- Copy Sarif to .spl/analyse -------\"",
                         "mkdir -p .spl/analyse",
@@ -101,19 +90,12 @@
             ],
             "development_repository": "https://artifactory-ha.tmc-stargate.com/artifactory/arene-os-services-cockpit-generic-local-qualcomm-aubass/spl/ivi-homescreen/publish",
             "production_repository": "https://artifactory-ha.tmc-stargate.com/artifactory/arene-os-services-cockpit-generic-local-qualcomm-aubass/spl/ivi-homescreen/publish",
-            "pre_create_steps": [],
-            "post_create_steps": [],
-            "validation_steps": [],
-            "post_upload_steps": [],
             "install_local": false,
-            "package_target_name": null,
-            "package_bazel_config": null,
             "package_file_extension": ".tar.gz",
             "upload_timeout": 1200,
             "create_steps": [
                 {
                     "name": "package",
-                    "relative_path": "",
                     "commands": [
                         "base=$(basename $PWD) && cd .. && tar -czf workspace.tar.gz $base"
                     ],
@@ -132,19 +114,12 @@
             ],
             "development_repository": "https://artifactory-ha.tmc-stargate.com/artifactory/arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/ivi-homescreen/publish",
             "production_repository": "https://artifactory-ha.tmc-stargate.com/artifactory/arene-os-services-cockpit-generic-local-tmc-wa-aubass/spl/ivi-homescreen/publish",
-            "pre_create_steps": [],
-            "post_create_steps": [],
-            "validation_steps": [],
-            "post_upload_steps": [],
             "install_local": false,
-            "package_target_name": null,
-            "package_bazel_config": null,
             "package_file_extension": ".tar.gz",
             "upload_timeout": 1200,
             "create_steps": [
                 {
                     "name": "package",
-                    "relative_path": "",
                     "commands": [
                         "base=$PWD && cd misra-compliance-tool/gcs_dr/ && tar -czf ivi-homescreen-coverity.tar.gz MISRA_ARTIFACTS*/ && mv ivi-homescreen-coverity.tar.gz $base/.."
                     ],
@@ -156,6 +131,5 @@
             "__serialization_type__": "pyplatform.bom.software_part.package_bazel.BazelPackage"
         }
     ],
-    "requirements": [],
     "__serialization_type__": "pyplatform.bom.software_part.part_definitions.PartDefinitions"
 }
