@@ -339,9 +339,9 @@ jobs:
   publish:
     name: Publish
     if: ${{ startswith(github.event.ref, 'refs/tags/') }}
-    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    runs-on: [self-hosted, large-runner]
     env: 
-      BASE_RUNNER_DIR: /runner/_work/ivi-homescreen/ivi-homescreen
+      DOCKER_COV_VER: "1.0.3-cov23.3"
     steps:
       - name: Fix up pre checkout
         uses: arene-os/arene-os-actions/fixup-pre-checkout@v1.14.0
@@ -381,7 +381,7 @@ jobs:
           github-server-url: 'https://github.tmc-stargate.com'
           ref: 'main'
           token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
-          path: ${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/
+          path: ${{ github.workspace }}/misra-compliance-tool/
       - name: Retrieve Coverity Results Path Artifact 
         if: ${{ true }}
         uses: synced-actions/dawidd6-action-download-artifact@v2.26.0
@@ -405,32 +405,23 @@ jobs:
           option: --flat --threads=8
           username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
           password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
-          path-to-download-to: ${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/coverity_results/
+          path-to-download-to: ${{ github.workspace }}/misra-compliance-tool/coverity_results/
           target-path-in-artifactory: $COVERITY_RESULTS_PATH
       - name: Generate GCS and DR reports 
         if: ${{ true }}
         shell: bash
         run: |
-          DOCKER_COV_VER=1.0.2-cov23.3
-          cd ${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/coverity_results/
+          cd ${{ github.workspace }}/misra-compliance-tool/coverity_results/
           # Delete Sarif Files (Not Needed for MISRA Tool)
           rm *.sarif
           mv *.json ../
           cd ..
-          bash ./setup_coverity_docker.sh ${DOCKER_COV_VER}
-          cd gcs_dr 
-          docker start securecoding-sdk
-          secure_coding_container=$(docker ps -aqf "name=securecoding-sdk")
-          # Transfer files from host to container for use in docker exec of script
-          docker cp /runner/ $secure_coding_container:/
-          # Generate PDF files from JSON 
+          # Change mount directory
+          sed -i "s|-v /home:/home|-v /home:/home -v `pwd`:`pwd`|g" ./setup_coverity_docker.sh
+          bash ./setup_coverity_docker.sh ${{ env.DOCKER_COV_VER }}
+          cd gcs_dr
+          # Generate PDF files from JSON
           bash gen_misra_compliant_artifacts_in_local.sh
-          # Start container again (script stops it) to transfer GCS_DR files (includes PDF) 
-          # from it to host 
-          docker start securecoding-sdk
-          docker cp $secure_coding_container:${{ env.BASE_RUNNER_DIR }}/misra-compliance-tool/gcs_dr/ ./tmp/
-          mv ./tmp/*.pdf ./MISRA_ARTIFACTS*/
-          docker stop securecoding-sdk
       - name: Generate netrc for USG Artifactory
         uses: arene-os/arene-os-actions/generate-netrc@v1.14.0
         with:
