@@ -98,19 +98,19 @@ jobs:
 
   run-cov:
     name: Workflow Call
-    if: ${{ true }}
+    if: ${{ false }}
     needs: set-run-datetime
     uses: ./.github/workflows/run_cov.yml
     with:
       SOFTWARE_PART_ORG: arene-os-services-cockpit-tmc-wa
       SOFTWARE_PART_NAME: ivi-homescreen
       RUN_DATETIME: ${{ needs.set-run-datetime.outputs.run-datetime }}
-      BUILD_PATHS: '["ivi-homescreen/."]'
+      BUILD_PATHS: '[]'
     secrets: inherit
 
   analyse:
     name: Analyse
-    if: ${{ true }}
+    if: ${{ false }}
     needs: [set-run-datetime, run-cov]
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
     steps:
@@ -359,7 +359,7 @@ jobs:
           known_hosts: ${{ secrets.SG_GITHUB_SSH_KNOWN_HOSTS }}
           private_key: ${{ secrets.SG_GITHUB_PRIVATE_SSH_KEY }}
       - name: Env Setup
-        if: ${{ true }}
+        if: ${{ false }}
         run: |  
           # Install jfrog CLI
           wget -qO - https://releases.jfrog.io/artifactory/jfrog-gpg-public/jfrog\_public\_gpg.key | sudo apt-key add -
@@ -367,14 +367,14 @@ jobs:
           sudo apt update -y
           sudo apt install -y jfrog-cli-v2
       - name: Login to arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com
-        if: ${{ true }}
+        if: ${{ false }}
         uses: synced-actions/docker-login-action@v1
         with:
           registry: arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com
           username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
           password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
       - name: Checkout MISRA Compliant Tool
-        if: ${{ true }}
+        if: ${{ false }}
         uses: actions/checkout@v3
         with:
           repository: 'arene-os-services-cockpit-tmc/arene-ivi-misc-misra-compliance-tools'
@@ -383,7 +383,7 @@ jobs:
           token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
           path: ${{ github.workspace }}/misra-compliance-tool/
       - name: Retrieve Coverity Results Path Artifact 
-        if: ${{ true }}
+        if: ${{ false }}
         uses: synced-actions/dawidd6-action-download-artifact@v2.26.0
         continue-on-error: false
         with: 
@@ -393,12 +393,12 @@ jobs:
           path: ./coverity-artifactory-path/
           if_no_artifact_found: fail
       - name: Extract Coverity Results Path
-        if: ${{ true }}
+        if: ${{ false }}
         run: |
           COVERITY_RESULTS_PATH=$(cat ./coverity-artifactory-path/coverity-artifactory-path.txt)
           echo "COVERITY_RESULTS_PATH=$COVERITY_RESULTS_PATH" >> ${GITHUB_ENV}
       - name: Download Coverity Result files
-        if: ${{ true }}
+        if: ${{ false }}
         uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/jfrog@1.4.0
         with:
           mode: download
@@ -408,7 +408,7 @@ jobs:
           path-to-download-to: ${{ github.workspace }}/misra-compliance-tool/coverity_results/
           target-path-in-artifactory: $COVERITY_RESULTS_PATH
       - name: Generate GCS and DR reports 
-        if: ${{ true }}
+        if: ${{ false }}
         shell: bash
         run: |
           cd ${{ github.workspace }}/misra-compliance-tool/coverity_results/
