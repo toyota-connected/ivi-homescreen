@@ -3,7 +3,7 @@
     "name": "ivi-homescreen",
     "description": "ivi-homescreen for IVI and IC",
     "repo_url": "https://github.tmc-stargate.com/arene-os-services-cockpit-tmc-wa/ivi-homescreen",
-    "version": "7.0.1003",
+    "version": "7.0.1004",
     "owner": "Cockpit SDK",
     "owner_email": "cockpit-integration-infrastructure@woven-planet.global",
     "company": "Woven Alpha",
