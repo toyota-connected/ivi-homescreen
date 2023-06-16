@@ -59,16 +59,17 @@ flutter::EncodableValue TextureTestEgl::Create(
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("textureId"),
-       flutter::EncodableValue(textureId)},
-      {flutter::EncodableValue("width"), flutter::EncodableValue(obj->m_width)},
+       flutter::EncodableValue(static_cast<int64_t>(textureId))},
+      {flutter::EncodableValue("width"),
+       flutter::EncodableValue(static_cast<int64_t>(obj->m_width))},
       {flutter::EncodableValue("height"),
-       flutter::EncodableValue(obj->m_height)},
+       flutter::EncodableValue(static_cast<int64_t>(obj->m_height))},
       {flutter::EncodableValue("GL_target"),
-       flutter::EncodableValue(obj->m_target)},
+       flutter::EncodableValue(static_cast<int64_t>(obj->m_target))},
       {flutter::EncodableValue("GL_format"),
-       flutter::EncodableValue(obj->m_format)},
+       flutter::EncodableValue(static_cast<int64_t>(obj->m_format))},
       {flutter::EncodableValue("GL_textureId"),
-       flutter::EncodableValue(textureId)}});
+       flutter::EncodableValue(static_cast<int64_t>(textureId))}});
 }
 
 void TextureTestEgl::Dispose(void* userdata, GLuint name) {
