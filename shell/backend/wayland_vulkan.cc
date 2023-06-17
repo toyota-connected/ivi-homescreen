@@ -710,7 +710,7 @@ VKAPI_ATTR VkBool32
   if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
     LOG(ERROR) << "VULKAN ERROR: (" << pLayerPrefix << ") " << pMessage;
   } else {
-    LOG(WARNING) << "VULKAN WARNING: (" << pLayerPrefix << ") " << pMessage;
+    LOG(WARN) << "VULKAN WARNING: (" << pLayerPrefix << ") " << pMessage;
   }
   return VK_FALSE;
 }
@@ -734,7 +734,7 @@ VKAPI_ATTR VkBool32
         strstr(cbdata->pMessage, "ALL_COMMANDS_BIT")) {
       return VK_FALSE;
     }
-    LOG(WARNING) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
+    LOG(WARN) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
                  << cbdata->pMessage;
   }
   return VK_TRUE;
