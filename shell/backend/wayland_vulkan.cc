@@ -183,7 +183,7 @@ void WaylandVulkanBackend::createInstance() {
       break;
     }
   }
-  info.enabledLayerCount = state_.enabled_layer_extensions.size();
+  info.enabledLayerCount = static_cast<uint32_t>(state_.enabled_layer_extensions.size());
   info.ppEnabledLayerNames = state_.enabled_layer_extensions.data();
 
   if (bluevk::vkCreateInstance(&info, nullptr, &state_.instance) !=
@@ -830,10 +830,11 @@ void WaylandVulkanBackend::Resize(void* user_data,
   auto b = reinterpret_cast<WaylandVulkanBackend*>(user_data);
   if (b->width_ != width || b->height_ != height) {
     b->resize_pending_ = true;
-    b->width_ = width;
-    b->height_ = height;
+    b->width_ = static_cast<uint32_t>(width);
+    b->height_ = static_cast<uint32_t>(height);
     if (engine) {
-      auto result = engine->SetWindowSize(height, width);
+      auto result = engine->SetWindowSize(static_cast<size_t>(height),
+                                          static_cast<size_t>(width));
       if (result != kSuccess) {
         LOG(ERROR) << "Failed to set Flutter Engine Window Size";
       }
