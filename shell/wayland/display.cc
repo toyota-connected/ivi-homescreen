@@ -258,11 +258,13 @@ void Display::display_handle_mode(void* data,
   (void)flags;
   auto* oi = static_cast<output_info_t*>(data);
 
-  if (flags == WL_OUTPUT_MODE_CURRENT) {
+  if ((flags & WL_OUTPUT_MODE_CURRENT) == WL_OUTPUT_MODE_CURRENT) {
     oi->height = static_cast<unsigned int>(height);
     oi->width = static_cast<unsigned int>(width);
     oi->refresh_rate = refresh;
   }
+
+  assert(oi->height && oi->width);
 
   FML_DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
                  << (refresh > 1000 ? refresh / 1000.0 : (double)refresh)
