@@ -276,7 +276,7 @@ void Display::display_handle_mode(void* data,
                                   int refresh) {
   auto* oi = static_cast<output_info_t*>(data);
 
-  if (flags == WL_OUTPUT_MODE_CURRENT) {
+  if ((flags & WL_OUTPUT_MODE_CURRENT) == WL_OUTPUT_MODE_CURRENT) {
     oi->height = static_cast<unsigned int>(height);
     oi->width = static_cast<unsigned int>(width);
     oi->refresh_rate = refresh;
