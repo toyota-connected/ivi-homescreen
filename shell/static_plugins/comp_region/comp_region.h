@@ -52,11 +52,36 @@ class CompositorRegionPlugin {
     int32_t height;
   } REGION_T;
 
+  /**
+   * @brief Handle a platform message from the Flutter engine.
+   * @param[in] message The message from the Flutter engine.
+   * @param[in] userdata The user data.
+   * @return void
+   * @relation
+   * flutter
+   */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 
  private:
+  /**
+   * @brief Handle a platform message per flutter view groups.
+   * @param[in] groups flutter view groups.
+   * @param[in] view flutter view.
+   * @return flutter::EncodableValue
+   * @retval encoded value
+   * @relation
+   * flutter
+   */
   static flutter::EncodableValue HandleGroups(flutter::EncodableList& groups,
                                               FlutterView* view);
+  /**
+   * @brief Clear flutter view groups.
+   * @param[in] types flutter view group types.
+   * @param[in] view flutter view.
+   * @return void
+   * @relation
+   * flutter
+   */
   static void ClearGroups(flutter::EncodableList& types, FlutterView* view);
 };

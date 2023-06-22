@@ -21,12 +21,41 @@
 
 class Dlt {
  public:
+  /**
+   * @brief Check if DLT is supported on the current platform.
+   * @return boot
+   * @retval true if DLT is supported, false otherwise.
+   * @relation
+   * dlt
+   */
   static bool IsSupported();
 
+  /**
+   * @brief Register DLT context.
+   * @return boot
+   * @retval true if DLT is registered, false otherwise.
+   * @relation
+   * dlt
+   */
   static bool Register();
 
+  /**
+   * @brief Unregister DLT context.
+   * @return boot
+   * @retval true if DLT is unregistered, false otherwise.
+   * @relation
+   * dlt
+   */
   static bool Unregister();
 
+  /**
+   * @brief Convert a specified string to DLT log string.
+   * @param[in] log_level DLT log level.
+   * @param[in] buff String to be converted.
+   * @return void
+   * @relation
+   * dlt
+   */
   static void LogString(DltLogLevelType log_level, const char* buff);
 
  private:
