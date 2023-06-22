@@ -25,8 +25,8 @@ TextureNaviRender::TextureNaviRender(FlutterView* view)
 
 TextureNaviRender::~TextureNaviRender() {
   if (m_h_module) {
-    for (auto ctx : m_render_api.ctx) {
-      m_render_api.de_initialize(ctx);
+    for (auto const& [key, context] : m_render_api.ctx) {
+      m_render_api.de_initialize(context);
     }
     dlclose(m_h_module);
   }
@@ -143,15 +143,17 @@ flutter::EncodableValue TextureNaviRender::Create(
          flutter::EncodableValue("Bad framebuffer status")}});
   }
 
-  obj->m_render_api.ctx.push_back(obj->m_render_api.initialize(
+  auto context = obj->m_render_api.initialize(
       access_token.c_str(), obj->m_width, obj->m_height, asset_path.c_str(),
-      cache_folder.c_str(), misc_folder.c_str(), &obj->m_texture_id));
-  if (!obj->m_render_api.ctx.back()) {
+      cache_folder.c_str(), misc_folder.c_str(), &obj->m_texture_id);
+
+  if (!context) {
     return flutter::EncodableValue(flutter::EncodableMap{
         {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
         {flutter::EncodableValue("error"),
          flutter::EncodableValue("Navigation Failed to Initialize")}});
   }
+  obj->m_render_api.ctx[obj->m_texture_id] = context;
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -160,7 +162,7 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   obj->Enable(obj->m_texture_id);
 
-  obj->m_initialized = true;
+  obj->m_run_enable = true;
 
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
@@ -170,12 +172,14 @@ flutter::EncodableValue TextureNaviRender::Create(
       {flutter::EncodableValue("height"),
        flutter::EncodableValue(obj->m_height)},
       {flutter::EncodableValue("render_ctx"),
-       flutter::EncodableValue(
-           reinterpret_cast<int64_t>(obj->m_render_api.ctx.back()))}});
+       flutter::EncodableValue(reinterpret_cast<int64_t>(context))}});
 }
 
 void TextureNaviRender::Dispose(void* userdata, GLuint name) {
   auto* obj = (TextureNaviRender*)userdata;
+  auto context = obj->m_render_api.ctx[obj->m_texture_id];
+  obj->m_run_enable = false;
+  obj->m_render_api.de_initialize(context);
   obj->Disable(name);
   std::lock_guard<std::mutex> guard(g_gl_mutex);
   glDeleteTextures(1, &obj->m_texture_id);
@@ -184,18 +188,20 @@ void TextureNaviRender::Dispose(void* userdata, GLuint name) {
 
 void TextureNaviRender::RunTask(void* userdata) {
   auto* obj = (TextureNaviRender*)userdata;
-  for (auto ctx : obj->m_render_api.ctx) {
-    obj->m_render_api.run_task(ctx);
+  for (auto [key, context] : obj->m_render_api.ctx) {
+    if(obj->m_run_enable) {
+        obj->m_render_api.run_task(context);
+    }
   }
 }
 
 void TextureNaviRender::Draw(void* userdata) {
   auto* obj = (TextureNaviRender*)userdata;
 
-  if (!obj->m_draw_next || !obj->m_initialized)
+  if (!obj->m_draw_next || !obj->m_run_enable)
     return;
 
-  for (auto ctx : obj->m_render_api.ctx) {
+  for (auto const& [key, context] : obj->m_render_api.ctx) {
     std::lock_guard<std::mutex> guard(g_gl_mutex);
     obj->m_egl_backend->MakeTextureCurrent();
 
@@ -203,7 +209,7 @@ void TextureNaviRender::Draw(void* userdata) {
     glBindFramebuffer(GL_FRAMEBUFFER, obj->m_fbo);
     glViewport(0, 0, obj->m_width, obj->m_height);
 
-    obj->m_render_api.render(ctx, obj->m_fbo);
+    obj->m_render_api.render(context, obj->m_fbo);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 

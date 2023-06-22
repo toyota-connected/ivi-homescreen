@@ -67,7 +67,7 @@ class TextureNaviRender : public Texture {
 
   WaylandEglBackend* m_egl_backend;
   std::string m_map_base_path;
-  bool m_initialized{};
+  bool m_run_enable{};
 
   GLuint m_fbo{};
   GLuint m_texture_id{};
@@ -92,7 +92,7 @@ class TextureNaviRender : public Texture {
   struct {
     NAV_RENDER_API_VERSION_T* version{};
 
-    std::vector<NAV_RENDER_API_CONTEXT_T*> ctx{};
+    std::map<GLuint, NAV_RENDER_API_CONTEXT_T*> ctx{};
     NAV_RENDER_API_LOAD_GL_FUNCTIONS* gl_loader{};
     NAV_RENDER_API_INITIALIZE_T* initialize{};
     NAV_RENDER_API_DE_INITIALIZE_T* de_initialize{};
