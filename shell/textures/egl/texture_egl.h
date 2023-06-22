@@ -26,8 +26,22 @@ class TextureEgl {
  public:
   ~TextureEgl();
 
+  /**
+   * @brief Set FlutterView
+   * @param[in] view pointer to FlutterView
+   * @return void
+   * @relation
+   * flutter
+   */
   void SetView(FlutterView* view);
 
+  /**
+   * @brief Set Engine
+   * @param[in] engine pointer to Engine
+   * @return void
+   * @relation
+   * flutter
+   */
   void SetEngine(std::shared_ptr<Engine> engine);
 
   /**

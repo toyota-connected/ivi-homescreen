@@ -92,6 +92,16 @@ class WaylandWindow {
    */
   uint32_t GetFpsCounter();
 
+  /**
+   * @brief activate a system cursor
+   * @param[in] device Device
+   * @param[in] kind Kind of a cursor
+   * @return bool
+   * @retval true Success
+   * @retval false Failure
+   * @relation
+   * platform
+   */
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
   /**
@@ -254,6 +264,15 @@ class WaylandWindow {
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
 
+  /**
+   * @brief handler for frame event of a base surface
+   * @param[in] data Pointer to WaylandWindow type
+   * @param[in] callback a callback for frame event
+   * @param[in] time No use
+   * @return void
+   * @relation
+   * wayland
+   */
   static void on_frame_base_surface(void* data,
                                     struct wl_callback* callback,
                                     uint32_t time);

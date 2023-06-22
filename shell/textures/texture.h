@@ -121,6 +121,13 @@ class Texture {
    */
   void FrameReady();
 
+  /**
+   * @brief Get texture id
+   * @return int64_t
+   * @retval Texture id
+   * @relation
+   * wayland, flutter
+   */
   int64_t GetId() { return m_id; }
 
  protected:
