@@ -19,10 +19,10 @@ include_guard()
 
 function(COMPILER_FLAGS_APPEND scope add_val conflict_match)
     if ((NOT "${conflict_match}" STREQUAL "") AND
-        ((${CMAKE_C_COMPILER_ARG1} MATCHES ${conflict_match}) OR
-         (${CMAKE_CXX_COMPILER_ARG1} MATCHES ${conflict_match}) OR
-         ($ENV{CFLAGS} MATCHES ${conflict_match}) OR
-         ($ENV{CXXFLAGS} MATCHES ${conflict_match})))
+    ((${CMAKE_C_COMPILER_ARG1} MATCHES ${conflict_match}) OR
+    (${CMAKE_CXX_COMPILER_ARG1} MATCHES ${conflict_match}) OR
+    ($ENV{CFLAGS} MATCHES ${conflict_match}) OR
+    ($ENV{CXXFLAGS} MATCHES ${conflict_match})))
         message("-- IGNORE APPEND FLAGS .... ${add_val}")
         return()
     endif ()
@@ -84,7 +84,9 @@ COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" "-f(no-)?omit-frame-poi
 COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" "-Wformat(=[0-9]+)?")
 COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" "-D_FORTIFY_SOURCE(=[0-9]+)?")
 
-string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
+if (NOT BUILD_CRASH_HANDLER)
+    string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
+endif ()
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
 

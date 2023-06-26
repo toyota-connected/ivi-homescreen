@@ -74,6 +74,10 @@ static constexpr char kDltContextIdDescription[] = "Flutter Embedder";
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
+// Crash Handler
+static constexpr char kCrashHandlerDsn[] = CRASH_HANDLER_DSN;
+static constexpr char kCrashHandlerRelease[] = CRASH_HANDLER_RELEASE;
+
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off
     EGL_CONTEXT_MAJOR_VERSION, 3,

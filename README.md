@@ -391,6 +391,35 @@ Path prefix used to determine required files is determined at build.
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
+# Crash Handler
+
+Sentry-native support is available for Crash Handling.  This pushes a mini-dump to the cloud for triage and tracking.
+
+To create user account and get DNS See https://sentry.io/welcome/
+
+Required CMake Variables
+
+    -DBUILD_CRASH_HANDLER=ON
+    -DCRASH_HANDLER_DSN="dsn from your account"
+
+Required source repo:  https://github.com/getsentry/sentry-native
+
+### Example Build steps
+
+sentry build
+
+    git clone https://github.com/getsentry/sentry-native
+    mkdir build && cd build
+    cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_STAGING_PREFIX=`pwd`/out/usr
+    make install
+
+ivi-homescreen build
+
+    git clone https://github.com/toyota-connected/ivi-homescreen
+    mkdir build && cd build
+    CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake .. -DBUILD_CRASH_HANDLER=ON -DCRASH_HANDLER_DSN="dsn from your account" -DLLVM_ROOT=/usr/lib/llvm-14
+    make -j
+    LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
 
 # Yocto recipes
 

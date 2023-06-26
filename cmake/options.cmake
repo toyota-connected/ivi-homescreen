@@ -93,6 +93,21 @@ if (BUILD_BACKEND_WAYLAND_DRM)
 endif ()
 
 #
+# Crash Handler
+#
+option(BUILD_CRASH_HANDLER "Build Crash Handler" OFF)
+if (BUILD_CRASH_HANDLER)
+    add_compile_definitions(
+            BUILD_CRASH_HANDLER
+            CRASH_HANDLER_DSN="${CRASH_HANDLER_DSN}"
+            CRASH_HANDLER_RELEASE="${PROJECT_NAME}@${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
+else ()
+    add_compile_definitions(
+            CRASH_HANDLER_DSN=""
+            CRASH_HANDLER_RELEASE="")
+endif ()
+
+#
 # Sanitizers
 #
 find_package(Sanitizers)

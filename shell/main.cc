@@ -24,6 +24,10 @@
 #include <flutter/fml/command_line.h>
 #include <filesystem>
 
+#if defined(BUILD_CRASH_HANDLER)
+#include "crash_handler.h"
+#endif
+
 volatile bool running = true;
 
 /**
@@ -84,6 +88,10 @@ int main(int argc, char** argv) {
         .disable_cursor_set{}, .wayland_event_mask{}, .debug_backend{},
         .debug_backend_set{}, .view{},
   };
+
+#if defined(BUILD_CRASH_HANDLER)
+  auto crash_handler = std::make_unique<CrashHandler>();
+#endif
 
   if (Dlt::IsSupported()) {
     Dlt::Register();
@@ -316,6 +324,10 @@ int main(int argc, char** argv) {
   if (Dlt::IsSupported()) {
     Dlt::Unregister();
   }
+
+#if defined(BUILD_CRASH_HANDLER)
+  (void)crash_handler.release();
+#endif
 
   return EXIT_SUCCESS;
 }
