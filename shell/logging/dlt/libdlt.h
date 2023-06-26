@@ -82,7 +82,6 @@ struct LibDltExports {
                                     const char*,
                                     const char*) = nullptr;
   DltReturnValue (*UnregisterContext)(DltContext*) = nullptr;
-  DltReturnValue (*GetAppId)(char*) = nullptr;
   DltReturnValue (*UserLogWriteStart)(DltContext*,
                                       DltContextData*,
                                       DltLogLevelType) = nullptr;

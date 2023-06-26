@@ -26,7 +26,6 @@ LibDltExports::LibDltExports(void* lib) {
   GetFuncAddress(lib, "dlt_unregister_app", &UnregisterApp);
   GetFuncAddress(lib, "dlt_register_context", &RegisterContext);
   GetFuncAddress(lib, "dlt_unregister_context", &UnregisterContext);
-  GetFuncAddress(lib, "dlt_get_appid", &GetAppId);
   GetFuncAddress(lib, "dlt_user_log_write_start", &UserLogWriteStart);
   GetFuncAddress(lib, "dlt_user_log_write_finish", &UserLogWriteFinish);
   GetFuncAddress(lib, "dlt_user_log_write_string", &UserLogWriteString);
