@@ -39,7 +39,7 @@ set(FLUTTER_SRC_FILES
         flutter/fml/unique_fd.cc
         )
 
-add_library(flutter STATIC ${FLUTTER_SRC_FILES} )
+add_library(flutter STATIC ${FLUTTER_SRC_FILES})
 
 target_compile_options(flutter PRIVATE ${CONTEXT_COMPILE_OPTIONS})
 target_include_directories(flutter PUBLIC
@@ -56,3 +56,7 @@ if (IPO_SUPPORT_RESULT)
 endif ()
 
 add_sanitizers(flutter)
+
+if (BUILD_CRASH_HANDLER)
+    find_package(sentry REQUIRED GLOBAL)
+endif ()

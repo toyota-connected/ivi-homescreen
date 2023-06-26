@@ -57,6 +57,10 @@ if (BUILD_BACKEND_WAYLAND_EGL)
             )
 endif ()
 
+if (BUILD_CRASH_HANDLER)
+    target_sources(homescreen PRIVATE crash_handler.cc)
+endif ()
+
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL
@@ -90,6 +94,9 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(homescreen PRIVATE bluevk)
 endif ()
+if (BUILD_CRASH_HANDLER)
+    target_link_libraries(homescreen PRIVATE sentry::sentry)
+endif ()
 
 target_link_libraries(homescreen PRIVATE
         flutter
@@ -100,7 +107,13 @@ target_link_libraries(homescreen PRIVATE
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
+        unwind
         )
+
+if (BUILD_CRASH_HANDLER)
+    target_link_libraries(homescreen PRIVATE unwind)
+endif ()
+
 
 target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}
