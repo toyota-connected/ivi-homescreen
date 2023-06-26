@@ -29,24 +29,36 @@ bool Dlt::IsSupported() {
 }
 
 bool Dlt::Register() {
-  char app_id_[5]{};
+  char appid[5]{};
 
-  if (DltReturnValue::Ok != LibDlt->GetAppId(app_id_))
-    return false;
+  auto res = LibDlt->CheckLibraryVersion(DLT_PACKAGE_MAJOR_VERSION,
+                                         DLT_PACKAGE_MINOR_VERSION);
+  if (res != DltReturnValue::Ok) {
+    std::cerr << "[DLT] lib version != " << DLT_PACKAGE_MAJOR_VERSION << "."
+              << DLT_PACKAGE_MINOR_VERSION << std::endl;
+  }
+  res = LibDlt->RegisterApp(kDltAppId, kDltAppIdDescription);
+  if (res != DltReturnValue::Ok) {
+    std::cerr << "[DLT] RegisterApp: " << res << std::endl;
+  }
 
-  if (app_id_[0] == 0) {
+  if (!gContextSet) {
     if (DltReturnValue::Ok !=
-        LibDlt->RegisterApp(kDltAppId, kDltAppIdDescription)) {
+        LibDlt->RegisterContext(&gContext, kDltContextId,
+                                kDltContextIdDescription)) {
+      std::cerr << "[DLT] Failed to register context" << std::endl;
       return false;
     }
-
-    if (!gContextSet) {
-      if (DltReturnValue::Ok !=
-          LibDlt->RegisterContext(&gContext, kDltContextId,
-                                  kDltContextIdDescription)) {
-        return false;
+    gContextSet = true;
+  }
+  // Check it if we have it
+  if (LibDlt->GetAppId) {
+    res = LibDlt->GetAppId(appid);
+    if (DltReturnValue::Ok == res) {
+      if (kDltAppId != std::string(appid)) {
+        std::cerr << "[DLT] AppId was not set correctly: " << kDltAppId
+                  << " != " << appid << std::endl;
       }
-      gContextSet = true;
     }
   }
 
@@ -54,16 +66,16 @@ bool Dlt::Register() {
 }
 
 bool Dlt::Unregister() {
-  if (gContextSet) {
-    if (DltReturnValue::Ok != LibDlt->UnregisterContext(&gContext)) {
-      return false;
-    }
-    memset(&gContext, 0, sizeof(DltContext));
-    gContextSet = false;
+  auto res = LibDlt->UnregisterContext(&gContext);
+  if (res != DltReturnValue::Ok) {
+    std::cerr << "[DLT] unregister context failed" << std::endl;
   }
+  memset(&gContext, 0, sizeof(DltContext));
+  gContextSet = false;
 
-  if (DltReturnValue::Ok != LibDlt->UnregisterApp()) {
-    return false;
+  res = LibDlt->UnregisterApp();
+  if (res != DltReturnValue::Ok) {
+    std::cerr << "[DLT] UnregisterApp: " << res << std::endl;
   }
 
   return true;
@@ -73,11 +85,12 @@ MAYBE_UNUSED
 void Dlt::LogString(DltLogLevelType log_level, const char* buff) {
   if (gContextSet) {
     DltContextData log_local;
-    if (DltReturnValue::True ==
-        LibDlt->UserLogWriteStart(&gContext, &log_local, log_level)) {
+    auto res = LibDlt->UserLogWriteStart(&gContext, &log_local, log_level);
+    if (res == DltReturnValue::True) {
       (void)LibDlt->UserLogWriteString(&log_local, buff);
       (void)LibDlt->UserLogWriteFinish(&log_local);
     }
+
     if (log_level == DltLogLevelType::LOG_FATAL) {
       Dlt::Unregister();
     }

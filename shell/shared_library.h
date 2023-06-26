@@ -20,6 +20,8 @@
 #include <cassert>
 #include <iostream>
 
+#include "logging.h"
+
 /**
  * @brief Dynamic Symbol Resolver
  * @param[in] library The library to look for symbol in
@@ -56,10 +58,8 @@ inline void GetFuncAddress(void* library,
                            FunctionPointer* out) {
   auto symbol = dlsym(library, function_name);
   if (!symbol) {
-    std::cerr << "GetFuncAddress: " << function_name << " not found!"
-              << std::endl;
     const char* reason = dlerror();
-    (void)reason;
+    DLOG(WARN) << "GetFuncAddress: " << function_name << " " << reason << std::endl;
   }
   *out = reinterpret_cast<FunctionPointer>(symbol);
 }

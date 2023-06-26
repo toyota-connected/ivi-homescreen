@@ -18,6 +18,9 @@
 
 #include <cstdint>
 
+static constexpr char DLT_PACKAGE_MAJOR_VERSION[] = "2";
+static constexpr char DLT_PACKAGE_MINOR_VERSION[] = "18";
+
 constexpr int kDltIdSize = 4;
 
 typedef struct {
@@ -73,22 +76,17 @@ struct LibDltExports {
   explicit LibDltExports(void* lib);
 
   DltReturnValue (*CheckLibraryVersion)(const char*, const char*) = nullptr;
-
   DltReturnValue (*RegisterApp)(const char*, const char*) = nullptr;
   DltReturnValue (*UnregisterApp)() = nullptr;
-
   DltReturnValue (*RegisterContext)(DltContext*,
                                     const char*,
                                     const char*) = nullptr;
   DltReturnValue (*UnregisterContext)(DltContext*) = nullptr;
-
   DltReturnValue (*GetAppId)(char*) = nullptr;
-
   DltReturnValue (*UserLogWriteStart)(DltContext*,
                                       DltContextData*,
                                       DltLogLevelType) = nullptr;
   DltReturnValue (*UserLogWriteFinish)(DltContextData*) = nullptr;
-
   DltReturnValue (*UserLogWriteString)(DltContextData*, const char*) = nullptr;
   DltReturnValue (*UserLogWriteInt)(DltContextData*, int) = nullptr;
   DltReturnValue (*UserLogWriteInt8)(DltContextData*, int8_t) = nullptr;
