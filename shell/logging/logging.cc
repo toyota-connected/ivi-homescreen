@@ -46,6 +46,10 @@ LogMessage::LogMessage(DltLogLevelType severity,
                        int line,
                        const char* condition)
     : severity_(severity), file_(file), line_(line) {
+  if (LibDlt::IsPresent()) {
+    return;
+  }
+
   stream_ << "[";
   if (severity >= DltLogLevelType::LOG_DEFAULT &&
       severity < LOG_NUM_SEVERITIES) {

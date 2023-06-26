@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
   };
 
   if (Dlt::IsSupported()) {
-    // Dlt::Register();
+    Dlt::Register();
   }
 
   LOG(INFO) << GIT_BRANCH " @ " GIT_HASH;
@@ -124,24 +124,23 @@ int main(int argc, char** argv) {
         // 1. decimal: --a=31
         // 2. hex: --a=0x3
         // 3. octet: --a=03
-        config.view.accessibility_features =
-          static_cast<int32_t>(std::stol(accessibility_feature_flag_str, nullptr, 0));
+        config.view.accessibility_features = static_cast<int32_t>(
+            std::stol(accessibility_feature_flag_str, nullptr, 0));
       } catch (const std::invalid_argument& e) {
         LOG(ERROR)
             << "--a option (Accessibility Features) requires an integer value";
         ret = EXIT_FAILURE;
       } catch (const std::out_of_range& e) {
-        LOG(ERROR)
-            << "The specified value to --a option, "
-            << accessibility_feature_flag_str
-            << " is out of range.";
+        LOG(ERROR) << "The specified value to --a option, "
+                   << accessibility_feature_flag_str << " is out of range.";
         ret = EXIT_FAILURE;
       }
       if (ret) {
         return ret;
       }
       config.view.accessibility_features =
-        Configuration::MaskAccessibilityFeatures(config.view.accessibility_features);
+          Configuration::MaskAccessibilityFeatures(
+              config.view.accessibility_features);
       RemoveArgument(config.view.vm_args,
                      "--a=" + accessibility_feature_flag_str);
     }
@@ -315,7 +314,7 @@ int main(int argc, char** argv) {
   }
 
   if (Dlt::IsSupported()) {
-    // Dlt::Unregister();
+    Dlt::Unregister();
   }
 
   return EXIT_SUCCESS;
