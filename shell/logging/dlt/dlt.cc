@@ -29,8 +29,6 @@ bool Dlt::IsSupported() {
 }
 
 bool Dlt::Register() {
-  char appid[5]{};
-
   auto res = LibDlt->CheckLibraryVersion(DLT_PACKAGE_MAJOR_VERSION,
                                          DLT_PACKAGE_MINOR_VERSION);
   if (res != DltReturnValue::Ok) {
@@ -50,16 +48,6 @@ bool Dlt::Register() {
       return false;
     }
     gContextSet = true;
-  }
-  // Check it if we have it
-  if (LibDlt->GetAppId) {
-    res = LibDlt->GetAppId(appid);
-    if (DltReturnValue::Ok == res) {
-      if (kDltAppId != std::string(appid)) {
-        std::cerr << "[DLT] AppId was not set correctly: " << kDltAppId
-                  << " != " << appid << std::endl;
-      }
-    }
   }
 
   return true;

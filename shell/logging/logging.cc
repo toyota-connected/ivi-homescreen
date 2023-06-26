@@ -68,7 +68,9 @@ LogMessage::LogMessage(DltLogLevelType severity,
 }
 
 LogMessage::~LogMessage() {
-  stream_ << std::endl;
+  if (!LibDlt::IsPresent()) {
+    stream_ << std::endl;
+  }
 
   Dlt::LogString(severity_, stream_.str().c_str());
 
