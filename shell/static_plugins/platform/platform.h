@@ -155,4 +155,6 @@ class Platform {
       "systemNavigationBarContrastEnforced";
   static constexpr char kSystemChrome_setPreferredOrientations[] =
       "SystemChrome.setPreferredOrientations";
+  static constexpr char kSystemChrome_setEnabledSystemUIMode[] =
+      "SystemChrome.setEnabledSystemUIMode";
 };
