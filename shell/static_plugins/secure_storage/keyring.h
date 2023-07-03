@@ -123,7 +123,7 @@ class Keyring {
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     d.Accept(writer);
 
-    auto res = secret_password_storev_sync (
+    auto res = (bool)secret_password_storev_sync (
         &m_schema, m_attributes.getGHashTable(), nullptr, m_label.c_str(),
         buffer.GetString(), nullptr, &errPtr);
 

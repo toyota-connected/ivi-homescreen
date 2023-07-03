@@ -58,7 +58,7 @@ void Configuration::getViewParameters(
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
-    instance.view.pixel_ratio = obj[kPixelRatioKey].GetInt();
+    instance.view.pixel_ratio = static_cast<double>(obj[kPixelRatioKey].GetInt());
   }
   if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
     instance.view.ivi_surface_id =
@@ -127,7 +127,7 @@ void Configuration::getGlobalParameters(
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
-    instance.view.wl_output_index = obj[kOutputIndex].IsInt();
+    instance.view.wl_output_index = static_cast<uint32_t>(obj[kOutputIndex].IsInt());
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
@@ -144,7 +144,7 @@ void Configuration::getGlobalParameters(
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
-    instance.view.pixel_ratio = obj[kPixelRatioKey].GetInt();
+    instance.view.pixel_ratio = static_cast<double>(obj[kPixelRatioKey].GetInt());
   }
   if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
     instance.view.ivi_surface_id =
