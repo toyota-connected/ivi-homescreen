@@ -118,6 +118,16 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       }
     }
     result = codec.EncodeSuccessEnvelope();
+  } else if (method == kSystemChrome_setEnabledSystemUIMode) {
+    if (!args->IsNull() && args->IsString()) {
+      DLOG(WARN) << "(" << engine->GetIndex()
+                 << ") SystemChrome.setEnabledSystemUIMode: "
+                 << args->GetString();
+    } else {
+      DLOG(WARN) << "(" << engine->GetIndex()
+                 << ") SystemChrome.setEnabledSystemUIMode: Unkown";
+    }
+    result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSetSystemUiOverlayStyle) {
     SystemUiOverlayStyle style{};
     if (args->HasMember(kSystemNavigationBarColor) &&
