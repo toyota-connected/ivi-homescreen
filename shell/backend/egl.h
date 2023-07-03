@@ -107,6 +107,31 @@ class Egl {
    */
   EGLSurface create_egl_surface(void* native_window, const EGLint* attrib_list);
 
+  /**
+   * @brief Auxiliary function used to check if the given list of extensions
+   * contains the requested extension name.
+   * @param[in] name name of extension
+   * @return bool
+   * @retval if extension is present
+   * @relation
+   * EGL
+   */
+  bool HasExtension(const char* name);
+
+  /**
+   * @brief Auxiliary function used to transform a FlutterRect into the format
+   * that is expected by the EGL functions
+   * @param[in] rect FlutterRect
+   * @return array of EGLint
+   * @retval if extension is present
+   * @relation
+   * EGL
+   */
+  std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
+
+  EGLDisplay GetDisplay() { return m_dpy; }
+
+ protected:
   EGLSurface m_egl_surface{};
 
  private:
@@ -115,7 +140,7 @@ class Egl {
 
   int m_buffer_size;
 
-  EGLDisplay m_dpy;
+  EGLDisplay m_dpy{};
   EGLContext m_context{};
   EGLContext m_resource_context{};
 

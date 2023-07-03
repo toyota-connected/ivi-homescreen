@@ -150,6 +150,28 @@ bool Egl::MakeTextureCurrent() {
   return false;
 }
 
+bool Egl::HasExtension(const char* name) {
+  static const char* extensions = nullptr;
+  if (extensions == nullptr) {
+    extensions = eglQueryString(m_dpy, EGL_EXTENSIONS);
+  }
+  const char* r = strstr(extensions, name);
+  auto len = strlen(name);
+  // check that the extension name is terminated by space or null terminator
+  return r != nullptr && (r[len] == ' ' || r[len] == 0);
+}
+
+std::array<EGLint, 4> Egl::RectToInts(const FlutterRect rect) const {
+  EGLint height;
+  eglQuerySurface(m_dpy, m_egl_surface, EGL_HEIGHT, &height);
+
+  std::array<EGLint, 4> res{
+      static_cast<int>(rect.left), height - static_cast<int>(rect.bottom),
+      static_cast<int>(rect.right) - static_cast<int>(rect.left),
+      static_cast<int>(rect.bottom) - static_cast<int>(rect.top)};
+  return res;
+}
+
 // Print a list of extensions, with word-wrapping.
 void Egl::print_extension_list(const char* ext) {
   const char indentString[] = "\t    ";
