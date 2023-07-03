@@ -65,7 +65,7 @@ endif ()
 #
 # Disable Flutter Engine Log Message Output
 #
-option(DISABLE_FLUTTER_LOG_MESSAGES "Disable Flutter Engine Log output" OFF)
+option(DISABLE_FLUTTER_LOG_MESSAGES "Disable Flutter Engine Log output" ON)
 if (DISABLE_FLUTTER_LOG_MESSAGES)
     add_compile_definitions(DISABLE_FLUTTER_LOG_MESSAGES)
 endif ()
