@@ -127,7 +127,7 @@ void Configuration::getGlobalParameters(
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
-    instance.view.wl_output_index = static_cast<uint32_t>(obj[kOutputIndex].IsInt());
+    instance.view.wl_output_index = static_cast<uint32_t>(obj[kOutputIndex].GetInt());
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
