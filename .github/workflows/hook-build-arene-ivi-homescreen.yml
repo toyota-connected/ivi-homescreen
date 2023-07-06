@@ -1,0 +1,100 @@
+---
+name: hook-build-arene-ivi-homescreen
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  hook-build:
+    runs-on: [ self-hosted, x-large-runner ]
+    timeout-minutes: 600
+    container:
+      image: arene-os-services-cockpit-docker.artifactory-ha.tmc-stargate.com/cockpit-poky:latest
+      options: --user cockpit-user
+      credentials:
+        username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+        password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+      volumes:
+        - ${{ github.workspace }}/workdir:/workdir
+    env:
+      component: ${{ 'arene-ivi' }}
+      unit: ${{ 'homescreen' }}
+      GITHUB_URL: "https://github.tmc-stargate.com/arene-os-services-cockpit-tmc-wa/"
+      TARGET_REPOSITORY: "ivi-homescreen"
+
+    steps:
+      - name: create workdir
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/create-workdir@1.5.0
+        with:
+          workdir-owner: cockpit-user
+          workdir-group: cockpit-user
+          workdir-path: /workdir
+
+      - name: setup netrc
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/setup-netrc@1.5.0
+        with:
+          stargate-github-user: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
+          stargate-github-token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+          stargate-artifactory-username: ${{ secrets.TMCSTARGATE_ARTIFACTORY_USERNAME }}
+          stargate-artifactory-password: ${{ secrets.TMCSTARGATE_ARTIFACTORY_PASSWORD }}
+
+      - name: Checkout repository of arene-ivi-misc-integ-integrator
+        uses: actions/checkout@v3.0.2
+        with:
+          repository: arene-os-services-cockpit-tmc-wa/arene-ivi-misc-integ-integrator
+          path: workdir/arene-ivi-misc-integ-integrator
+          token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+
+      - name: Branch name of the merge destination
+        run: echo "branch=\"${GITHUB_REF#refs/heads/}\""
+        id: merge_branch
+
+      - name: Execute workflow_dispatch hook build in Github Actions
+        working-directory: ${{ github.workspace }}/workdir
+        env:
+          BRANCH_MASTER: ${{ steps.merge_branch.outputs.branch }}
+        shell: bash
+        run: |
+          set -e
+          # Fix configration to TMCSG Artifactory
+          echo 'CONFIG_CICD_P21AGL_DL_MIRROR="https://artifactory-ha.tmc-stargate.com:443/artifactory/arene-os-services-cockpit-generic/yocto/downloads/"' >> ./arene-ivi-misc-integ-integrator/config.txt
+          echo 'CONFIG_CICD_P21AGL_SS_MIRROR="https://artifactory-ha.tmc-stargate.com:443/artifactory/arene-os-services-cockpit-generic/yocto/sstate-cache/ivi/x86_64/"' >> ./arene-ivi-misc-integ-integrator/config.txt
+          export PATH="${PATH}:/home/cockpit-user/bin"
+          # Execute the build script
+          ./arene-ivi-misc-integ-integrator/github_hook_x86_for_github_actions.sh master "${TARGET_REPOSITORY}" "${BRANCH_MASTER}" "${component}" "${unit}" "${GITHUB_URL}"
+
+      - name: Finalize (SUCCESS)
+        if: ${{ success() }}
+        working-directory: ${{ github.workspace }}/workdir
+        env:
+          BRANCH_MASTER: ${{ steps.merge_branch.outputs.branch }}
+          SLACK_INCOMING_WEBHOOK_URL: ${{secrets.SLACK_INCOMING_WEBHOOK_HOOK_BUILD_CH_URL}}
+        run: |
+          #!/usr/bin/env bash
+          set -e
+          echo "-- Send messages to slack. --"
+          ./arene-ivi-misc-integ-integrator/slack_notify_for_github.sh success "${TARGET_REPOSITORY}" "${BRANCH_MASTER}"
+          # Remove the checkout repository
+          if [ -e "arene-ivi-misc-integ-integrator" ];then
+            rm -rf ./arene-ivi-misc-integ-integrator
+          fi
+
+      - name: Finalize (FAILURE)
+        if: ${{ failure() }}
+        working-directory: ${{ github.workspace }}/workdir
+        env:
+          BRANCH_MASTER: ${{ steps.merge_branch.outputs.branch }}
+          SLACK_INCOMING_WEBHOOK_URL: ${{secrets.SLACK_INCOMING_WEBHOOK_HOOK_BUILD_CH_URL}}
+        run: |
+          #!/usr/bin/env bash
+          set -e
+          echo "-- Send messages to slack. --"
+          ./arene-ivi-misc-integ-integrator/slack_notify_for_github.sh failure "${TARGET_REPOSITORY}" "${BRANCH_MASTER}"
+          # Remove the checkout repository
+          if [ -e "arene-ivi-misc-integ-integrator" ];then
+            rm -rf ./arene-ivi-misc-integ-integrator
+          fi
+
+      - name: remove work directory
+        uses: arene-os-services-cockpit-wa/arene-cockpit-misc-actions/remove-workdir@1.5.0
