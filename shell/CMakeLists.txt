@@ -107,7 +107,6 @@ target_link_libraries(homescreen PRIVATE
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
-        unwind
         )
 
 if (BUILD_CRASH_HANDLER)
