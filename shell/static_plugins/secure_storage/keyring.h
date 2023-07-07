@@ -123,9 +123,11 @@ class Keyring {
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     d.Accept(writer);
 
-    bool result = secret_password_storev_sync(
+    auto res = secret_password_storev_sync (
         &m_schema, m_attributes.getGHashTable(), nullptr, m_label.c_str(),
         buffer.GetString(), nullptr, &errPtr);
+
+    auto result = static_cast<bool>(res);
 
     if (err) {
       throw std::runtime_error(err->message);
