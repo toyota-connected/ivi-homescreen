@@ -67,6 +67,31 @@ void RemoveArgument(std::vector<std::string>& args, const std::string& arg) {
 }
 
 /**
+ * @brief Print command line options
+ * @return void
+ * @relation
+ * internal
+ */
+void PrintUsage()
+{
+  printf("Usage: homescreen [options] [flutter VM arguments]\n");
+  printf("Options:\n");
+  printf("   --b=<dir path>                Path to a bundle directory (required)\n");
+  printf("   --j=<file path>               Path to a json configuration file\n");
+  printf("   --a=<integer>                 Accessibility feature flags\n");
+  printf("   --c                           Disable cursor\n");
+  printf("   --d                           Debug backend\n");
+  printf("   --f                           Full screen\n");
+  printf("   --w=<integer>                 Output width in pixels\n");
+  printf("   --h=<integer>                 Output height in pixels\n");
+  printf("   --p=<decimal>                 Pixel ratio\n");
+  printf("   --t=<string>                  Cursor theme name\n");
+  printf("   --window-type=<string>        Window type\n");
+  printf("   --output-index=<integer>      Wayland output index\n");
+  printf("   --xdg-shell-app-id=<string>   XDG shell app id\n");
+}
+
+/**
  * @brief Main function
  * @param[in] argc Number of arguments
  * @param[in] argv Arguments passed to the program
@@ -92,6 +117,10 @@ int main(int argc, char** argv) {
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
   if (!cl.options().empty()) {
+    if (cl.HasOption("help")) {
+      PrintUsage();
+      return 1;
+    }
     if (cl.HasOption("j")) {
       cl.GetOptionValue("j", &config.json_configuration_path);
       if (config.json_configuration_path.empty()) {
