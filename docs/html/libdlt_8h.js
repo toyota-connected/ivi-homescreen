@@ -31,6 +31,8 @@ var libdlt_8h =
       [ "TIMESTAMP_AUTO", "libdlt_8h.html#a7e59dfd486f785503ffaa0b9996d1493a85cfcddcc4d3c0951de24113e661cdde", null ],
       [ "TIMESTAMP_USER", "libdlt_8h.html#a7e59dfd486f785503ffaa0b9996d1493a1edbcb739d1665628224934ac3666e49", null ]
     ] ],
+    [ "DLT_PACKAGE_MAJOR_VERSION", "libdlt_8h.html#a407d689096bfe2629198ca127796ad75", null ],
+    [ "DLT_PACKAGE_MINOR_VERSION", "libdlt_8h.html#ab8e8f39718eceaa61506c7e121c62b2a", null ],
     [ "kDltIdSize", "libdlt_8h.html#a453c4f0525c87700cfca3667f33e89f4", null ],
     [ "LibDlt", "libdlt_8h.html#a848203c35c8145023666f98a52ab73a3", null ]
 ];

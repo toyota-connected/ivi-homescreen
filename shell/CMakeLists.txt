@@ -33,13 +33,14 @@ add_executable(homescreen
         view/flutter_view.cc
         wayland/display.cc
         wayland/window.cc
-        logging/logging.cc
-        logging/dlt/dlt.cc
-        logging/dlt/libdlt.cc
         )
 
 include(plugins)
 include(textures)
+
+if (ENABLE_DLT)
+    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+endif ()
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
@@ -83,6 +84,7 @@ target_include_directories(homescreen
         ${GST_VIDEO_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
+        ../third_party/spdlog-1.12.0/include
         )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
@@ -107,6 +109,7 @@ target_link_libraries(homescreen PRIVATE
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
+        spdlog::spdlog
         )
 
 if (BUILD_CRASH_HANDLER)

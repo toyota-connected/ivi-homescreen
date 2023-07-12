@@ -7,5 +7,6 @@ var searchData=
   ['handle_5ftoplevel_5fconfigure_4',['handle_toplevel_configure',['../struct_wayland_window.html#af3a5cf0e25824402fa0199e92ea4026b',1,'WaylandWindow']]],
   ['handle_5fxdg_5fsurface_5fconfigure_5',['handle_xdg_surface_configure',['../struct_wayland_window.html#a34a3abbdcb859471c935416fc4fcf30d',1,'WaylandWindow']]],
   ['handlegroups_6',['HandleGroups',['../class_compositor_region_plugin.html#adadf5d455413a01c96a2efb3d27dbed2',1,'CompositorRegionPlugin']]],
-  ['handoff_5fhandler_7',['handoff_handler',['../gstreamer__egl_8cc.html#a4f627a22d3ba290f78447937a00f6c2a',1,'gstreamer_egl.cc']]]
+  ['handoff_5fhandler_7',['handoff_handler',['../gstreamer__egl_8cc.html#af99ac256937bc197565dc514f1aed39f',1,'gstreamer_egl.cc']]],
+  ['hasextension_8',['HasExtension',['../class_egl.html#a61b89fbe7dbf537acd210f74dd69a728',1,'Egl']]]
 ];

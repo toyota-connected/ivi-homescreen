@@ -21,7 +21,7 @@ extern "C" {
 #include "platform_channel.h"
 #include "textures/texture.h"
 
-#define GSTREAMER_DEBUG 0
+#define GSTREAMER_DEBUG 1
 
 using namespace fml;
 
@@ -88,12 +88,10 @@ static std::mutex gst_mutex;
 static std::map<int64_t, std::shared_ptr<CustomData>> global_map;
 
 #if GSTREAMER_DEBUG
-#define PrintMessageAsHex(index, message)                              \
-  std::stringstream ss;                                                \
-  ss << Hexdump((message)->message, (message)->message_size);          \
-  LOG(INFO) << "(" << (index) << ") Channel: \"" << (message)->channel \
-            << "\"\n"                                                  \
-            << ss.str();
+#define PrintMessageAsHex(index, message)                     \
+  std::stringstream ss;                                       \
+  ss << Hexdump((message)->message, (message)->message_size); \
+  spdlog::info("({}) Channel: \"{}\" ", index, (message)->channel, ss.str());
 #else
 #define PrintMessageAsHex(a, b) \
   {                             \
@@ -144,13 +142,13 @@ bool get_video_info(const char* url,
   AVFormatContext* fmt_ctx = avformat_alloc_context();
 
   if (avformat_open_input(&fmt_ctx, url, nullptr, nullptr) < 0) {
-    LOG(ERROR) << "Unable to open: " << url;
+    spdlog::error("Unable to open: {}", url);
     avformat_free_context(fmt_ctx);
     return false;
   }
 
   if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
-    LOG(ERROR) << "Cannot find stream information: " << url;
+    spdlog::error("Cannot find stream information: {}", url);
     avformat_free_context(fmt_ctx);
     return false;
   }
@@ -162,7 +160,7 @@ bool get_video_info(const char* url,
 #endif
   int ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
   if (ret < 0) {
-    DLOG(ERROR) << "Cannot find a video stream in the input file";
+    SPDLOG_DEBUG("Cannot find a video stream in the input file");
     avformat_free_context(fmt_ctx);
     return false;
   }
@@ -251,12 +249,10 @@ void draw_core(nv12::Shader* shader) {
  * @relation
  * flutter
  */
-void handoff_handler(GstElement* fakesink,
+void handoff_handler(GstElement* /* fakesink */,
                      GstBuffer* buffer,
-                     GstPad* pad,
+                     GstPad* /* pad */,
                      gpointer _data) {
-  (void)fakesink;
-  (void)pad;
   auto data = (CustomData*)_data;
   assert(data->texture);
   int64_t textureId = data->texture->GetId();
@@ -308,7 +304,7 @@ void handoff_handler(GstElement* fakesink,
     surface->ClearCurrent();
     data->texture->FrameReady();
   } else {
-    DLOG(ERROR) << "Cannot read video frame out from buffer";
+    SPDLOG_DEBUG("Cannot read video frame out from buffer");
   }
 }
 
@@ -322,12 +318,12 @@ void handoff_handler(GstElement* fakesink,
 static void prepare(CustomData* data) {
   GstElement* playbin = data->playbin;
   g_object_get(playbin, "n-video", &(data->n_video), nullptr);
-  DLOG(INFO) << data->n_video << " video streams";
+  SPDLOG_DEBUG("{} video streams", data->n_video);
   g_object_get(playbin, "current-video", &(data->current_video), nullptr);
   GstPad* pad = nullptr;
   g_signal_emit_by_name(playbin, "get-video-pad", data->current_video, &pad);
   if (!pad) {
-    DLOG(INFO) << "Failed to get video pad, stream number might not exist";
+    SPDLOG_ERROR("Failed to get video pad, stream number might not exist");
     g_main_loop_quit(data->main_loop);
     return;
   }
@@ -335,17 +331,17 @@ static void prepare(CustomData* data) {
   assert(caps);
   std::lock_guard<std::mutex> lock(gst_mutex);
   if (!gst_video_info_from_caps(&data->info, caps)) {
-    DLOG(ERROR) << "Fail to get video info from the cap";
+    SPDLOG_ERROR("Fail to get video info from the cap");
     g_main_loop_quit(data->main_loop);
     return;
   }
-  DLOG(INFO) << "original video width: " << data->info.width
-             << ", height: " << data->info.height;
+  SPDLOG_ERROR("original video width: {}, height: {}", data->info.width,
+               data->info.height);
   // set to the target
   if (!gst_video_info_set_format(&data->info, GST_VIDEO_FORMAT_NV12,
                                  static_cast<guint>(data->width),
                                  static_cast<guint>(data->height))) {
-    DLOG(ERROR) << "Failed to set the video info to target NV12";
+    SPDLOG_ERROR("Failed to set the video info to target NV12");
   }
   data->initialized = true;
 }
@@ -368,22 +364,22 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
       gst_message_parse_error(msg, &err, &debug_info);
-      DLOG(ERROR) << "Error received from element " << GST_OBJECT_NAME(msg->src)
-                  << ":" << err->message;
-      DLOG(ERROR) << "Debug information " << (debug_info ? debug_info : "none");
+      SPDLOG_ERROR("Error received from element {}:{}",
+                   GST_OBJECT_NAME(msg->src), err->message);
+      SPDLOG_ERROR("Debug information {}", (debug_info ? debug_info : "none"));
       gst_object_unref(bus);
       g_clear_error(&err);
       g_free(debug_info);
       g_main_loop_quit(data->main_loop);
       break;
     case GST_MESSAGE_EOS: {
-      DLOG(INFO) << "EOS " << textureId;
+      SPDLOG_INFO("EOS {}", textureId);
       if (data->is_looping) {
         if (!gst_element_seek_simple(
                 data->playbin, GST_FORMAT_TIME,
                 (GstSeekFlags)(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
                 0)) {
-          DLOG(ERROR) << "loop seek to 0 fail";
+          SPDLOG_ERROR("loop seek to 0 fail");
         }
         return TRUE;
       }
@@ -398,7 +394,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
       std::stringstream ss_event;
       ss_event << GstreamerEgl::kChannelGstreamerEventPrefix << textureId;
       auto event_name = ss_event.str();
-      DLOG(INFO) << "send event completed " << event_name;
+      SPDLOG_INFO("send event completed {}", event_name);
       data->engine->SendPlatformMessage(event_name.c_str(), result->data(),
                                         result->size());
       break;
@@ -409,10 +405,10 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
                                       &pending_state);
       if (GST_MESSAGE_SRC(msg) == GST_OBJECT(data->playbin)) {
         if (new_state == GST_STATE_PLAYING) {
-          DLOG(INFO) << "message state changed, start playing " << textureId;
+          SPDLOG_INFO("message state changed, start playing {}", textureId);
           prepare(data);
         } else if (new_state == GST_STATE_READY) {
-          DLOG(INFO) << "message state changed, ready " << textureId;
+          SPDLOG_INFO("message state changed, ready {}", textureId);
         }
       }
       break;
@@ -427,22 +423,22 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
         gst_query_parse_duration(query, nullptr, &data->duration);
         g_print("duration = %" GST_TIME_FORMAT, GST_TIME_ARGS(data->duration));
       } else {
-        DLOG(INFO) << "Duration query failed...";
+        SPDLOG_INFO("Duration query failed...");
       }
       gst_query_unref(query);
       break;
     }
 #endif
     case GST_MESSAGE_LATENCY: {
-      DLOG(INFO) << "Latency";
+      SPDLOG_INFO("Latency");
       break;
     }
     case GST_MESSAGE_WARNING: {
-      DLOG(INFO) << "Warning";
+      SPDLOG_INFO("Warning");
       break;
     }
     case GST_MESSAGE_ASYNC_DONE: {
-      DLOG(INFO) << "Async Done";
+      SPDLOG_INFO("Async Done");
       // bufferingEnd
       break;
     }
@@ -450,7 +446,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
       GstClock* clock;
       gst_message_parse_new_clock(msg, &clock);
       GstClockTime time = gst_clock_get_time(clock);
-      DLOG(INFO) << "New Clock: " << time;
+      SPDLOG_INFO("New Clock: {}", time);
       break;
     }
     case GST_MESSAGE_BUFFERING: {
@@ -460,7 +456,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
 
       gint percent;
       gst_message_parse_buffering(msg, &percent);
-      // DLOG(INFO) << "Buffering: " << percent << "%";
+      // SPDLOG_INFO("Buffering: {}%", percent);
 
       // TODO - bufferingUpdate
 
@@ -517,20 +513,20 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
               gchar* path;
               GstTask* task = nullptr;
 
-              DLOG(INFO) << "STREAM_STATUS:";
+              SPDLOG_INFO("STREAM_STATUS:");
               gst_message_parse_stream_status(msg, &type, &owner);
 
               val = gst_message_get_stream_status_object(msg);
 
-              DLOG(INFO) << "\ttype:   " << type;
+              SPDLOG_INFO("\ttype:   {}", type);
               path = gst_object_get_path_string(GST_MESSAGE_SRC(msg));
-              DLOG(INFO) << "\tsource: " << path;
+              SPDLOG_INFO("\tsource: {}", path);
               g_free(path);
               path = gst_object_get_path_string(GST_OBJECT(owner));
-              DLOG(INFO) << "\towner:  " << path;
+              SPDLOG_INFO("\towner:  {}", path);
               g_free(path);
-              DLOG(INFO) << "\tobject: type " << G_VALUE_TYPE_NAME(val)
-                             << ", value " << g_value_get_object(val);
+              SPDLOG_INFO("\tobject: type {}, value {}", G_VALUE_TYPE_NAME(val),
+                             g_value_get_object(val));
 
               /* see if we know how to deal with this object */
               if (G_VALUE_TYPE(val) == GST_TYPE_TASK) {
@@ -539,10 +535,10 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
 
               switch (type) {
                 case GST_STREAM_STATUS_TYPE_CREATE:
-                  DLOG(INFO) << "Created task: " << task;
+                  SPDLOG_INFO("Created task: {}", task);
                   break;
                 case GST_STREAM_STATUS_TYPE_ENTER:
-                  // DLOG(INFO) << "raising task priority";
+                  SPDLOG_INFO("raising task priority");
                   // setpriority (PRIO_PROCESS, 0, -10);
                   break;
                 case GST_STREAM_STATUS_TYPE_LEAVE:
@@ -564,14 +560,14 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
 #if GSTREAMER_DEBUG
     // element specific message
     case GST_MESSAGE_ELEMENT: {
-      DLOG(INFO) << "message-element: "
-                 << gst_structure_get_name(gst_message_get_structure(msg));
+      SPDLOG_INFO("message-element: {}",
+                  gst_structure_get_name(gst_message_get_structure(msg)));
       break;
     }
     case GST_MESSAGE_TAG: {
       GstTagList* tags = nullptr;
       gst_message_parse_tag(msg, &tags);
-      DLOG(INFO) << "Got tags from element " << GST_OBJECT_NAME(msg->src);
+      SPDLOG_INFO("Got tags from element {}", GST_OBJECT_NAME(msg->src));
       // handle_tags (tags);
       gst_tag_list_unref(tags);
       break;
@@ -580,8 +576,8 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
     default:
 #if GSTREAMER_DEBUG
     {
-      DLOG(INFO) << "GST Message Type: "
-                 << gst_message_type_get_name(GST_MESSAGE_TYPE(msg));
+      SPDLOG_INFO("GST Message Type: {}",
+                  gst_message_type_get_name(GST_MESSAGE_TYPE(msg)));
       break;
     }
 #else
@@ -613,7 +609,7 @@ GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
   glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &result);
   if (result == GL_FALSE) {
     glGetShaderInfoLog(vertexShader, 1000, &length, info);
-    DLOG(ERROR) << "Failed to compile " << info;
+    SPDLOG_ERROR("Failed to compile {}", info);
     return 0;
   }
 
@@ -623,7 +619,7 @@ GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
   glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &result);
   if (result == GL_FALSE) {
     glGetShaderInfoLog(fragmentShader, 1000, &length, info);
-    DLOG(ERROR) << "Fail to compile " << info;
+    SPDLOG_ERROR("Fail to compile {}", info);
     return 0;
   }
 
@@ -635,7 +631,7 @@ GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
   glGetProgramiv(shaderProgram, GL_LINK_STATUS, &result);
   if (result == GL_FALSE) {
     glGetProgramInfoLog(shaderProgram, 1000, &length, info);
-    DLOG(ERROR) << "Fail to link " << info;
+    SPDLOG_ERROR("Fail to link {}", info);
     return 0;
   }
 
@@ -1057,7 +1053,7 @@ const char* map_ffmpeg_plugin(AVCodecID codec_id) {
     case AV_CODEC_ID_ZMBV:
       return "avdec_zmbv";
     default:
-      DLOG(ERROR) << "not supported";
+      SPDLOG_ERROR("not supported");
       return "";
   }
 }
@@ -1070,9 +1066,8 @@ const char* map_ffmpeg_plugin(AVCodecID codec_id) {
  * flutter
  */
 void main_loop(CustomData* data) {
-  DLOG(INFO) << "(" << data->engine->GetIndex()
-             << ") [main_loop] start data thread "
-             << "- textureId: " << data->texture->GetId();
+  SPDLOG_INFO("({}) [main_loop] start data thread - textureId: {}",
+              data->engine->GetIndex(), data->texture->GetId());
   GMainContext* context = g_main_context_new();
   g_main_context_push_thread_default(context);
 
@@ -1094,15 +1089,14 @@ void main_loop(CustomData* data) {
   g_object_set(data->sink, "can-activate-pull", TRUE, nullptr);
   gulong sig =
       g_signal_connect(data->sink, "handoff", (GCallback)handoff_handler, data);
-  DLOG(INFO) << "(" << data->engine->GetIndex()
-             << ") [main_loop] register signal " << sig;
+  SPDLOG_INFO("({}) [main_loop] register signal {}", data->engine->GetIndex(),
+              sig);
 
   auto decoder_factory =
       gst_element_factory_find(map_ffmpeg_plugin(data->codec_id));
   if (decoder_factory == nullptr) {
-    LOG(ERROR) << "(" << data->engine->GetIndex()
-               << ") Failed to find decoder: "
-               << map_ffmpeg_plugin(data->codec_id);
+    spdlog::error("({}) Failed to find decoder: {}", data->engine->GetIndex(),
+                  map_ffmpeg_plugin(data->codec_id));
   }
   data->decoder = gst_element_factory_create(decoder_factory, "decoder");
   assert(data->decoder);
@@ -1125,22 +1119,22 @@ void main_loop(CustomData* data) {
   gst_bin_add_many((GstBin*)data->pipeline, data->decoder, data->video_convert,
                    data->video_scale, data->sink, nullptr);
   if (!gst_element_link(data->decoder, data->video_convert)) {
-    DLOG(ERROR) << "(" << data->engine->GetIndex()
-                << ") Failed to link decoder with videoconvert";
+    SPDLOG_ERROR("({}) Failed to link decoder with videoconvert",
+                 data->engine->GetIndex());
   }
 
   if (!gst_element_link_filtered(data->video_convert, data->video_scale,
                                  caps)) {
-    DLOG(ERROR) << "(" << data->engine->GetIndex()
-                << ") Failed to link videoconvert with videoscale using filter";
+    SPDLOG_ERROR(
+        "({}) Failed to link videoconvert with videoscale using filter",
+        data->engine->GetIndex());
   }
 
   gst_caps_unref(caps);
 
   GstPad* pad = gst_element_get_static_pad(data->decoder, "sink");
   if (gst_pad_is_linked(pad)) {
-    DLOG(ERROR) << "(" << data->engine->GetIndex()
-                << ") already linked, ignore";
+    SPDLOG_ERROR("({}) already linked, ignore", data->engine->GetIndex());
     return;
   }
   GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
@@ -1149,8 +1143,8 @@ void main_loop(CustomData* data) {
   gst_object_unref(pad);
 
   if (!gst_element_link_filtered(data->video_scale, data->sink, scale)) {
-    DLOG(ERROR) << "(" << data->engine->GetIndex()
-                << ") Failed to link videoscale with fakesink using filter";
+    SPDLOG_ERROR("({}) Failed to link videoscale with fakesink using filter",
+                 data->engine->GetIndex());
   }
   gst_caps_unref(scale);
 
@@ -1169,7 +1163,7 @@ void main_loop(CustomData* data) {
   g_main_loop_run(data->main_loop);
   g_main_loop_unref(data->main_loop);
   data->main_loop = nullptr;
-  DLOG(INFO) << "(" << data->engine->GetIndex() << ") [main_loop] mainloop end";
+  SPDLOG_INFO("({}) [main_loop] mainloop end", data->engine->GetIndex());
 }
 
 void GstreamerEgl::OnInitialize(const FlutterPlatformMessage* message,
@@ -1215,7 +1209,7 @@ void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
 
   if (method == "listen") {
     data->events_enabled = true;
-    DLOG(INFO) << "Video Player Event Register: listen " << textureId;
+    SPDLOG_INFO("Video Player Event Register: listen {}", textureId);
 
     // send initialized event
     flutter::EncodableValue res(flutter::EncodableMap{
@@ -1233,7 +1227,7 @@ void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
                                 result->size());
     return;
   } else if (method == "cancel") {
-    DLOG(INFO) << "Video Player Event cancel " << textureId;
+    SPDLOG_INFO("Video Player Event cancel {}", textureId);
     data->events_enabled = false;
     auto result = codec.EncodeSuccessEnvelope();
     engine->SendPlatformMessageResponse(message->response_handle,
@@ -1258,35 +1252,31 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
     if (std::holds_alternative<std::string>(it->second)) {
       data->uri = std::get<std::string>(it->second);
       if (data->uri.empty()) {
-        DLOG(ERROR) << "(" << data->engine->GetIndex() << ") uri is empty";
+        SPDLOG_ERROR("({}) uri is empty", data->engine->GetIndex());
         return;
       }
-      DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") load uri: " << data->uri;
+      SPDLOG_INFO("({}) load uri: {}", data->engine->GetIndex(), data->uri);
     }
   }
   it = args->find(flutter::EncodableValue("asset"));
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
       std::string asset_path = std::get<std::string>(it->second);
-      DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") asset_path: " << asset_path;
+      SPDLOG_INFO("({}) asset_path: {}", data->engine->GetIndex(), asset_path);
       if (asset_path[0] == '/') {
         data->uri = paths::JoinPaths({kUriPrefixFile, asset_path});
       } else {
         data->uri = paths::JoinPaths(
             {kUriPrefixFile, engine->GetAssetDirectory(), asset_path});
       }
-      DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") asset uri: " << data->uri;
+      SPDLOG_INFO("({}) asset uri: {}", data->engine->GetIndex(), data->uri);
     }
   }
 
   // Get stream information
   if (!get_video_info(data->uri.c_str(), data->info.width, data->info.height,
                       data->duration, data->codec_id)) {
-    LOG(ERROR) << "(" << data->engine->GetIndex()
-               << ") Failed to get video info";
+    spdlog::error("({}) Failed to get video info", data->engine->GetIndex());
   }
 
   it = args->find(flutter::EncodableValue("width"));
@@ -1308,22 +1298,22 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   it = args->find(flutter::EncodableValue("packageName"));
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
-      DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") packageName: " << std::get<std::string>(it->second);
+      SPDLOG_INFO("({}) packageName: {}", data->engine->GetIndex(),
+                  std::get<std::string>(it->second));
     }
   }
   it = args->find(flutter::EncodableValue("formatHint"));
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
-      DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") formatHint: " << std::get<std::string>(it->second);
+      SPDLOG_INFO("({}) formatHint: {}", data->engine->GetIndex(),
+                  std::get<std::string>(it->second));
     }
   }
   it = args->find(flutter::EncodableValue("httpHeaders"));
   if (it != args->end() && !it->second.IsNull()) {
     if (std::holds_alternative<std::string>(it->second)) {
-      DLOG(INFO) << "(" << data->engine->GetIndex()
-                 << ") httpHeaders: " << std::get<std::string>(it->second);
+      SPDLOG_INFO("({}) httpHeaders: {}", data->engine->GetIndex(),
+                  std::get<std::string>(it->second));
     }
   }
 
@@ -1361,8 +1351,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glGenerateMipmap(GL_TEXTURE_2D);
 
-  DLOG(INFO) << "(" << data->engine->GetIndex()
-             << ") fetch Texture: " << textureId;
+  SPDLOG_INFO("({}) fetch Texture: {}", data->engine->GetIndex(), textureId);
   data->texture =
       new Texture(textureId, GL_TEXTURE_2D, GL_RGBA8, nullptr, nullptr);
   auto engine_shr = std::shared_ptr<Engine>(engine);
@@ -1405,14 +1394,13 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   glFinish();
   surface->ClearCurrent();
   data->texture->Enable(textureId);
-  DLOG(INFO) << "(" << engine->GetIndex() << ") Register "
-             << data->texture->GetId() << " done";
+  SPDLOG_INFO("({}) Register {} done", engine->GetIndex(),
+              data->texture->GetId());
 
   std::stringstream ss_event_name;
   ss_event_name << kChannelGstreamerEventPrefix << textureId;
   auto event_name = ss_event_name.str();
-  DLOG(INFO) << "(" << engine->GetIndex()
-             << ") Register Stream: " << event_name;
+  SPDLOG_INFO("({}) Register Stream: {}", engine->GetIndex(), event_name);
 
   global_map[textureId] = std::shared_ptr<CustomData>(data);
   PlatformChannel::GetInstance()->RegisterCallback(event_name.c_str(), OnEvent);
@@ -1441,7 +1429,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
  * flutter
  */
 flutter::EncodableValue dispose_error(const char* error_msg) {
-  DLOG(ERROR) << "[dispose error] " << error_msg;
+  SPDLOG_ERROR("[dispose error] {}", error_msg);
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"),
@@ -1505,7 +1493,7 @@ void GstreamerEgl::OnDispose(const FlutterPlatformMessage* message,
   g_main_loop_quit(data->main_loop);
   g_main_loop_unref(data->main_loop);
   data->gthread.join();
-  DLOG(INFO) << "dispose done";
+  SPDLOG_INFO("dispose done");
 
   SendSuccess(engine, message->response_handle);
 }
@@ -1519,7 +1507,7 @@ void GstreamerEgl::OnDispose(const FlutterPlatformMessage* message,
  * flutter
  */
 flutter::EncodableValue setLooping_error(const char* error_msg) {
-  DLOG(ERROR) << "[setLooping error] " << error_msg;
+  SPDLOG_ERROR("[setLooping error] {}", error_msg);
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"),
@@ -1572,7 +1560,7 @@ void GstreamerEgl::OnSetLooping(const FlutterPlatformMessage* message,
   }
   if (std::holds_alternative<bool>(it->second)) {
     data->is_looping = std::get<bool>(it->second);
-    DLOG(INFO) << "is_looping: " << data->is_looping;
+    SPDLOG_INFO("is_looping: {}", data->is_looping);
   }
 
   SendSuccess(engine, message->response_handle);
@@ -1618,7 +1606,7 @@ void GstreamerEgl::OnSetVolume(const FlutterPlatformMessage* message,
   }
   data->volume = std::get<double>(it->second);
 
-  DLOG(INFO) << "volume: " << data->volume;
+  SPDLOG_INFO("volume: {}", data->volume);
 
   SendSuccess(engine, message->response_handle);
 }
@@ -1664,7 +1652,7 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
 
   gint64 position;
   if (!gst_element_query_position(data->playbin, GST_FORMAT_TIME, &position)) {
-    LOG(ERROR) << "Unable to retrieve current position";
+    SPDLOG_ERROR("Unable to retrieve current position");
     return;
   }
 
@@ -1683,7 +1671,7 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
 
   gst_element_send_event(data->sink, seek_event);
 
-  DLOG(INFO) << "Playback speed: " << data->rate;
+  SPDLOG_INFO("Playback speed: {}", data->rate);
 
   SendSuccess(engine, message->response_handle);
 }
@@ -1697,7 +1685,7 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
  * flutter
  */
 flutter::EncodableValue play_error(const char* error_msg) {
-  DLOG(ERROR) << "[play error] " << error_msg;
+  SPDLOG_ERROR("[play error] {}", error_msg);
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"),
@@ -1762,7 +1750,7 @@ void GstreamerEgl::OnPlay(const FlutterPlatformMessage* message,
  * flutter
  */
 flutter::EncodableValue position_error(const char* error_msg) {
-  DLOG(ERROR) << "[position error] " << error_msg;
+  SPDLOG_ERROR("[position error] {}", error_msg);
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"),
@@ -1810,7 +1798,7 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
       gst_element_query_duration(data->playbin, GST_FORMAT_TIME,
                                  &data->duration)) {
 #if GSTREAMER_DEBUG
-    DLOG(INFO) << "position: " << data->position / AV_TIME_BASE;
+    SPDLOG_INFO("position: {}", data->position / AV_TIME_BASE);
 #endif
   }
 
@@ -1841,7 +1829,7 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
  * flutter
  */
 flutter::EncodableValue seekTo_error(const char* error_msg) {
-  DLOG(ERROR) << "[seekTo error] " << error_msg;
+  SPDLOG_ERROR("[seekTo error] {}", error_msg);
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"),
@@ -1905,8 +1893,8 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
     return;
   }
 
-  DLOG(INFO) << "(" << engine->GetIndex() << ") textureId: " << textureId
-             << ", seek to " << position;
+  SPDLOG_INFO("({}) textureId: {}, seek to {}", engine->GetIndex(), textureId,
+              position);
 
   SendSuccess(engine, message->response_handle);
 }
@@ -1920,7 +1908,7 @@ void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
  * flutter
  */
 flutter::EncodableValue pause_error(const char* error_msg) {
-  DLOG(ERROR) << "[pause error] " << error_msg;
+  SPDLOG_ERROR("[pause error] {}", error_msg);
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"),
@@ -1963,13 +1951,13 @@ void GstreamerEgl::OnPause(const FlutterPlatformMessage* message,
     return;
   }
 
-  DLOG(INFO) << "(" << index << ") Pause: " << textureId;
+  SPDLOG_INFO("({}) Pause: {}", index, textureId);
 
   std::shared_ptr<CustomData> data = search->second;
   GstState state;
   gst_element_get_state(data->playbin, &state, nullptr, GST_CLOCK_TIME_NONE);
   if (state != GST_STATE_NULL) {
-    DLOG(INFO) << "(" << index << ") Set pipeline to pause state";
+    SPDLOG_INFO("({}) Set pipeline to pause state", index);
     data->target_state = GST_STATE_PAUSED;
     GstStateChangeReturn ret =
         gst_element_set_state(data->playbin, GST_STATE_PAUSED);
@@ -1996,8 +1984,8 @@ void GstreamerEgl::OnSetMixWithOthers(const FlutterPlatformMessage* message,
 
   auto it = args->find(flutter::EncodableValue("mixWithOthers"));
   if (it != args->end() && !it->second.IsNull()) {
-    DLOG(INFO) << "(" << engine->GetIndex()
-               << ") mixWithOthers: " << std::get<bool>(it->second);
+    SPDLOG_INFO("({}) mixWithOthers: {}", engine->GetIndex(),
+                std::get<bool>(it->second));
   }
 
   SendSuccess(engine, message->response_handle);

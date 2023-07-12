@@ -49,6 +49,7 @@ target_include_directories(flutter PUBLIC
         flutter/third_party/rapidjson/include
         flutter/shell/platform/common/public
         flutter/shell/platform/common/client_wrapper/include
+        spdlog-1.12.0/include
         )
 
 if (IPO_SUPPORT_RESULT)
@@ -60,3 +61,6 @@ add_sanitizers(flutter)
 if (BUILD_CRASH_HANDLER)
     find_package(sentry REQUIRED GLOBAL)
 endif ()
+
+set(SPDLOG_NO_THREAD_ID ON)
+add_subdirectory(spdlog-1.12.0)

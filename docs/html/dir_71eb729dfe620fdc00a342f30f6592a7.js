@@ -10,6 +10,8 @@ var dir_71eb729dfe620fdc00a342f30f6592a7 =
     [ "app.cc", "app_8cc.html", null ],
     [ "app.h", "app_8h.html", "app_8h" ],
     [ "constants.h", "constants_8h.html", "constants_8h" ],
+    [ "crash_handler.cc", "crash__handler_8cc.html", "crash__handler_8cc" ],
+    [ "crash_handler.h", "crash__handler_8h.html", "crash__handler_8h" ],
     [ "engine.cc", "engine_8cc.html", null ],
     [ "engine.h", "engine_8h.html", "engine_8h" ],
     [ "hexdump.h", "hexdump_8h.html", "hexdump_8h" ],

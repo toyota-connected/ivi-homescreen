@@ -16,6 +16,7 @@
 
 #include "flutter/fml/eintr_wrapper.h"
 #include "flutter/fml/mapping.h"
+#include "spdlog/spdlog.h"
 
 namespace fml {
 
@@ -172,7 +173,7 @@ bool UnlinkFile(const char* path) {
 bool UnlinkFile(const fml::UniqueFD& base_directory, const char* path) {
   int code = ::unlinkat(base_directory.get(), path, 0);
   if (code != 0) {
-    FML_DLOG(ERROR) << strerror(errno);
+    SPDLOG_ERROR(strerror(errno));
   }
   return code == 0;
 }
@@ -234,13 +235,13 @@ bool WriteAtomically(const fml::UniqueFD& base_directory,
 bool VisitFiles(const fml::UniqueFD& directory, const FileVisitor& visitor) {
   fml::UniqueFD dup_fd(dup(directory.get()));
   if (!dup_fd.is_valid()) {
-    FML_DLOG(ERROR) << "Can't dup the directory fd. Error: " << strerror(errno);
+    SPDLOG_ERROR("Can't dup the directory fd. Error: {}", strerror(errno));
     return true;  // continue to visit other files
   }
 
   fml::UniqueDir dir(::fdopendir(dup_fd.get()));
   if (!dir.is_valid()) {
-    FML_DLOG(ERROR) << "Can't open the directory. Error: " << strerror(errno);
+    SPDLOG_ERROR("Can't open the directory. Error: {}", strerror(errno));
     return true;  // continue to visit other files
   }
 

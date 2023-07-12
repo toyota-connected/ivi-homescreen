@@ -7,85 +7,81 @@
 
 #include <sstream>
 
+#include "spdlog/cfg/env.h"
+#include "spdlog/sinks/callback_sink.h"
+#include "spdlog/sinks/ringbuffer_sink.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
+#include "spdlog/sinks/stdout_sinks.h"
+#include "spdlog/spdlog.h"
+
+#if defined(ENABLE_DLT)
 #include "dlt/dlt.h"
-#include "flutter/fml/macros.h"
-
-class LogMessageVoid {
- public:
-  void operator&(std::ostream&) {}
-};
-
-class LogMessage {
- public:
-  LogMessage(DltLogLevelType severity,
-             const char* file,
-             int line,
-             const char* condition);
-  ~LogMessage();
-
-  std::ostream& stream() { return stream_; }
-
- private:
-  std::ostringstream stream_;
-  const DltLogLevelType severity_;
-  const char* file_;
-  const int line_;
-
-  FML_DISALLOW_COPY_AND_ASSIGN(LogMessage);
-};
-
-// Gets the FML_VLOG default verbosity level.
-int GetVlogVerbosity();
-
-// Returns true if |severity| is at or above the current minimum log level.
-// LOG_FATAL and above is always true.
-bool ShouldCreateLogMessage(DltLogLevelType severity);
-
-[[noreturn]] void KillProcess();
-
-#define LOG_STREAM(severity)                                               \
-  LogMessage(DltLogLevelType::LOG_##severity, __FILE__, __LINE__, nullptr) \
-      .stream()
-
-#define LAZY_STREAM(stream, condition) \
-  !(condition) ? (void)0 : LogMessageVoid() & (stream)
-
-#define EAT_STREAM_PARAMETERS(ignored) \
-  true || (ignored)                    \
-      ? (void)0                        \
-      : LogMessageVoid() &             \
-            LogMessage(DltLogLevelType::LOG_FATAL, 0, 0, nullptr).stream()
-
-#define LOG_IS_ON(severity) \
-  (ShouldCreateLogMessage(DltLogLevelType::LOG_##severity))
-
-#define LOG(severity) LAZY_STREAM(LOG_STREAM(severity), LOG_IS_ON(severity))
-
-#define CHECK(condition)                                                     \
-  LAZY_STREAM(                                                               \
-      LogMessage(DltLogLevelType::LOG_FATAL, __FILE__, __LINE__, #condition) \
-          .stream(),                                                         \
-      !(condition))
-
-#define VLOG_IS_ON(verbose_level) ((verbose_level) <= GetVlogVerbosity())
-
-// The VLOG macros log with negative verbosities.
-#define VLOG_STREAM(verbose_level) \
-  LogMessage(-verbose_level, __FILE__, __LINE__, nullptr).stream()
-
-#define VLOG(verbose_level) \
-  LAZY_STREAM(VLOG_STREAM(verbose_level), VLOG_IS_ON(verbose_level))
-
-#ifndef NDEBUG
-#define DLOG(severity) LOG(severity)
-#define DCHECK(condition) CHECK(condition)
-#else
-#define DLOG(severity) EAT_STREAM_PARAMETERS(true)
-#define DCHECK(condition) EAT_STREAM_PARAMETERS(condition)
 #endif
 
-#define UNREACHABLE()                          \
-  {                                            \
-    LOG(ERROR) << "Reached unreachable code."; \
-    KillProcess();                             \
+#include "constants.h"
+
+static std::shared_ptr<spdlog::logger> gLogger{};
+static std::shared_ptr<
+    spdlog::sinks::ansicolor_stdout_sink<spdlog::details::console_mutex>>
+    gConsoleSink;
+
+inline void LoggingPrologue() {
+  spdlog::cfg::load_env_levels();
+
+#if defined(ENABLE_DLT)
+  if (Dlt::IsSupported()) {
+    Dlt::Register();
+    gLogger = spdlog::callback_logger_mt(
+        "primary", [](const spdlog::details::log_msg& msg) {
+          switch (msg.level) {
+            case SPDLOG_LEVEL_TRACE:
+              Dlt::LogString(DltLogLevelType::LOG_VERBOSE, msg.payload.data());
+              break;
+            case SPDLOG_LEVEL_DEBUG:
+              Dlt::LogString(DltLogLevelType::LOG_DEBUG, msg.payload.data());
+              break;
+            case SPDLOG_LEVEL_INFO:
+              Dlt::LogString(DltLogLevelType::LOG_INFO, msg.payload.data());
+              break;
+            case SPDLOG_LEVEL_WARN:
+              Dlt::LogString(DltLogLevelType::LOG_WARN, msg.payload.data());
+              break;
+            case SPDLOG_LEVEL_ERROR:
+              Dlt::LogString(DltLogLevelType::LOG_ERROR, msg.payload.data());
+              break;
+            case SPDLOG_LEVEL_CRITICAL:
+              Dlt::LogString(DltLogLevelType::LOG_FATAL, msg.payload.data());
+              break;
+            default:
+              break;
+          }
+        });
+    spdlog::set_default_logger(gLogger);
+    spdlog::set_pattern("%v");
+  } else {
+#endif
+    gConsoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    gLogger = std::make_shared<spdlog::logger>("primary", gConsoleSink);
+    spdlog::set_default_logger(gLogger);
+    spdlog::set_pattern("[%H:%M:%S.%f] [%L] %v");
+#if defined(ENABLE_DLT)
   }
+#endif
+
+  spdlog::flush_on(spdlog::level::err);
+  spdlog::flush_every(std::chrono::seconds(kLogFlushInterval));
+}
+
+inline void LoggingEpilogue() {
+#if defined(ENABLE_DLT)
+  if (Dlt::IsSupported()) {
+    // switch logger to console, since we are unregistering DLT
+    gLogger.reset();
+    gConsoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    gLogger = std::make_shared<spdlog::logger>("post-dlt", gConsoleSink);
+    spdlog::register_logger(gLogger);
+
+    Dlt::Unregister();
+  }
+#endif
+}

@@ -133,11 +133,13 @@ Classes</h2></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display_1_1touch__point.html">touch_point</a></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display_1_1wayland__event__mask.html">wayland_event_mask</a></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-methods" name="pub-methods"></a>
 Public Member Functions</h2></td></tr>
-<tr class="memitem:a776bdb715c119f19be957c475ad442df"><td class="memItemLeft" align="right" valign="top">&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a776bdb715c119f19be957c475ad442df">Display</a> (bool enable_cursor, std::string cursor_theme_name, const std::vector&lt; <a class="el" href="struct_configuration_1_1_config.html">Configuration::Config</a> &gt; &amp;configs)</td></tr>
-<tr class="separator:a776bdb715c119f19be957c475ad442df"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:acec3ad4addb57436f0ee3dd968ef8a15"><td class="memItemLeft" align="right" valign="top">&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#acec3ad4addb57436f0ee3dd968ef8a15">Display</a> (bool enable_cursor, const std::string &amp;ignore_wayland_event, std::string cursor_theme_name, const std::vector&lt; <a class="el" href="struct_configuration_1_1_config.html">Configuration::Config</a> &gt; &amp;configs)</td></tr>
+<tr class="separator:acec3ad4addb57436f0ee3dd968ef8a15"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ac2607a6bb236c55547a4223d40d85d1f"><td class="memItemLeft" align="right" valign="top">&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ac2607a6bb236c55547a4223d40d85d1f">~Display</a> ()</td></tr>
 <tr class="separator:ac2607a6bb236c55547a4223d40d85d1f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ae1118f43bafe4938374715f2bf65c8bd"><td class="memItemLeft" align="right" valign="top">&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ae1118f43bafe4938374715f2bf65c8bd">Display</a> (const <a class="el" href="struct_display.html">Display</a> &amp;)=delete</td></tr>
@@ -187,11 +189,14 @@ Public Member Functions</h2></td></tr>
 <tr class="memdesc:a1e6c5798ed6bbe98198dae6c43c74a7e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Set key event.  <a href="struct_display.html#a1e6c5798ed6bbe98198dae6c43c74a7e">More...</a><br /></td></tr>
 <tr class="separator:a1e6c5798ed6bbe98198dae6c43c74a7e"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:acc089d2dbdbb0d0002c201987ec470b2"><td class="memItemLeft" align="right" valign="top">wl_output *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#acc089d2dbdbb0d0002c201987ec470b2">GetWlOutput</a> (uint32_t index)</td></tr>
+<tr class="memdesc:acc089d2dbdbb0d0002c201987ec470b2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Get wl_output of a specified index of a view.  <a href="struct_display.html#acc089d2dbdbb0d0002c201987ec470b2">More...</a><br /></td></tr>
 <tr class="separator:acc089d2dbdbb0d0002c201987ec470b2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a02a22076e4bf99f5950f7e6bb6b95db7"><td class="memItemLeft" align="right" valign="top">int32_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a02a22076e4bf99f5950f7e6bb6b95db7">GetBufferScale</a> (uint32_t index)</td></tr>
+<tr class="memdesc:a02a22076e4bf99f5950f7e6bb6b95db7"><td class="mdescLeft">&#160;</td><td class="mdescRight">Get a buffer scale of a specified index of a view.  <a href="struct_display.html#a02a22076e4bf99f5950f7e6bb6b95db7">More...</a><br /></td></tr>
 <tr class="separator:a02a22076e4bf99f5950f7e6bb6b95db7"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a086c0c7d8bdb37e513b7fdfd6007cb5d"><td class="memItemLeft" align="right" valign="top">std::pair&lt; int32_t, int32_t &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a086c0c7d8bdb37e513b7fdfd6007cb5d">GetPhysicalSize</a> (uint32_t index)</td></tr>
-<tr class="separator:a086c0c7d8bdb37e513b7fdfd6007cb5d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac63123ffa39454b48bf5ae6555c8f723"><td class="memItemLeft" align="right" valign="top">std::pair&lt; int32_t, int32_t &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ac63123ffa39454b48bf5ae6555c8f723">GetVideoModeSize</a> (uint32_t index)</td></tr>
+<tr class="memdesc:ac63123ffa39454b48bf5ae6555c8f723"><td class="mdescLeft">&#160;</td><td class="mdescRight">Get a video mode size of a specified index of a view.  <a href="struct_display.html#ac63123ffa39454b48bf5ae6555c8f723">More...</a><br /></td></tr>
+<tr class="separator:ac63123ffa39454b48bf5ae6555c8f723"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
 Public Attributes</h2></td></tr>
@@ -289,6 +294,10 @@ Private Types</h2></td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pri-static-methods" name="pri-static-methods"></a>
 Static Private Member Functions</h2></td></tr>
+<tr class="memitem:aaa28e491167ae03c8e97bef7b047bdec"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#aaa28e491167ae03c8e97bef7b047bdec">wayland_event_mask_update</a> (const std::string &amp;ignore_wayland_events, struct <a class="el" href="struct_display_1_1wayland__event__mask.html">wayland_event_mask</a> &amp;mask)</td></tr>
+<tr class="separator:aaa28e491167ae03c8e97bef7b047bdec"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac7f79dc9b19444830982a6d34d638ada"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ac7f79dc9b19444830982a6d34d638ada">wayland_event_mask_print</a> (struct <a class="el" href="struct_display_1_1wayland__event__mask.html">wayland_event_mask</a> &amp;mask)</td></tr>
+<tr class="separator:ac7f79dc9b19444830982a6d34d638ada"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2bdd9f469c644a916506d7991575efc4"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a2bdd9f469c644a916506d7991575efc4">registry_handle_global</a> (void *data, struct wl_registry *registry, uint32_t <a class="el" href="struct_display.html#a8fae90515aa2b1087429e8b4f8cffc40">name</a>, const char *interface, uint32_t version)</td></tr>
 <tr class="memdesc:a2bdd9f469c644a916506d7991575efc4"><td class="mdescLeft">&#160;</td><td class="mdescRight">Receive wl_registry events from Wayland server.  <a href="struct_display.html#a2bdd9f469c644a916506d7991575efc4">More...</a><br /></td></tr>
 <tr class="separator:a2bdd9f469c644a916506d7991575efc4"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -389,38 +398,55 @@ Static Private Member Functions</h2></td></tr>
 <tr class="memdesc:a7bfeca328fa2a6d66d5451f6807f44c1"><td class="mdescLeft">&#160;</td><td class="mdescRight">AGL bound fail.  <a href="struct_display.html#a7bfeca328fa2a6d66d5451f6807f44c1">More...</a><br /></td></tr>
 <tr class="separator:a7bfeca328fa2a6d66d5451f6807f44c1"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:abee738242dc4220aec1cb1ee90f1499f"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#abee738242dc4220aec1cb1ee90f1499f">ivi_wm_surface_visibility</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id, int32_t visibility)</td></tr>
+<tr class="memdesc:abee738242dc4220aec1cb1ee90f1499f"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of a visibility of a ivi shell surface  <a href="struct_display.html#abee738242dc4220aec1cb1ee90f1499f">More...</a><br /></td></tr>
 <tr class="separator:abee738242dc4220aec1cb1ee90f1499f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:afc04d2d1ac115b1a55bc6d33b96eb51b"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#afc04d2d1ac115b1a55bc6d33b96eb51b">ivi_wm_layer_visibility</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id, int32_t visibility)</td></tr>
+<tr class="memdesc:afc04d2d1ac115b1a55bc6d33b96eb51b"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of a visibility of a ivi shell layer  <a href="struct_display.html#afc04d2d1ac115b1a55bc6d33b96eb51b">More...</a><br /></td></tr>
 <tr class="separator:afc04d2d1ac115b1a55bc6d33b96eb51b"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1ae072df8a3058faa7f80d0f032477da"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a1ae072df8a3058faa7f80d0f032477da">ivi_wm_surface_opacity</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id, wl_fixed_t opacity)</td></tr>
+<tr class="memdesc:a1ae072df8a3058faa7f80d0f032477da"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of an opacity of a ivi shell surface  <a href="struct_display.html#a1ae072df8a3058faa7f80d0f032477da">More...</a><br /></td></tr>
 <tr class="separator:a1ae072df8a3058faa7f80d0f032477da"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aec92cb35ea5223674e0b1da8b5cfa1b5"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#aec92cb35ea5223674e0b1da8b5cfa1b5">ivi_wm_layer_opacity</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id, wl_fixed_t opacity)</td></tr>
+<tr class="memdesc:aec92cb35ea5223674e0b1da8b5cfa1b5"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of an opacity of a ivi shell layer  <a href="struct_display.html#aec92cb35ea5223674e0b1da8b5cfa1b5">More...</a><br /></td></tr>
 <tr class="separator:aec92cb35ea5223674e0b1da8b5cfa1b5"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:adfd68e027620f485bd1849d6d22c1b97"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#adfd68e027620f485bd1849d6d22c1b97">ivi_wm_surface_source_rectangle</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id, int32_t x, int32_t y, int32_t width, int32_t height)</td></tr>
+<tr class="memdesc:adfd68e027620f485bd1849d6d22c1b97"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of a source rectangle of a ivi shell surface  <a href="struct_display.html#adfd68e027620f485bd1849d6d22c1b97">More...</a><br /></td></tr>
 <tr class="separator:adfd68e027620f485bd1849d6d22c1b97"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2640bed3247498242d01aedce15ee379"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a2640bed3247498242d01aedce15ee379">ivi_wm_layer_source_rectangle</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id, int32_t x, int32_t y, int32_t width, int32_t height)</td></tr>
+<tr class="memdesc:a2640bed3247498242d01aedce15ee379"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of a source rectangle of a ivi shell layer  <a href="struct_display.html#a2640bed3247498242d01aedce15ee379">More...</a><br /></td></tr>
 <tr class="separator:a2640bed3247498242d01aedce15ee379"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ace80a71e98b6722b5ceb9f88d3245dac"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ace80a71e98b6722b5ceb9f88d3245dac">ivi_wm_surface_destination_rectangle</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id, int32_t x, int32_t y, int32_t width, int32_t height)</td></tr>
+<tr class="memdesc:ace80a71e98b6722b5ceb9f88d3245dac"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of a destination rectangle of a ivi shell surface  <a href="struct_display.html#ace80a71e98b6722b5ceb9f88d3245dac">More...</a><br /></td></tr>
 <tr class="separator:ace80a71e98b6722b5ceb9f88d3245dac"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:acd9be09ddd903b13a4f060cea07830ab"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#acd9be09ddd903b13a4f060cea07830ab">ivi_wm_layer_destination_rectangle</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id, int32_t x, int32_t y, int32_t width, int32_t height)</td></tr>
+<tr class="memdesc:acd9be09ddd903b13a4f060cea07830ab"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler of a destination rectangle of a ivi shell layer  <a href="struct_display.html#acd9be09ddd903b13a4f060cea07830ab">More...</a><br /></td></tr>
 <tr class="separator:acd9be09ddd903b13a4f060cea07830ab"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7a49e2519d294e9fdbe32cc6092b38cd"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a7a49e2519d294e9fdbe32cc6092b38cd">ivi_wm_surface_created</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id)</td></tr>
+<tr class="memdesc:a7a49e2519d294e9fdbe32cc6092b38cd"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for created event of a ivi shell surface  <a href="struct_display.html#a7a49e2519d294e9fdbe32cc6092b38cd">More...</a><br /></td></tr>
 <tr class="separator:a7a49e2519d294e9fdbe32cc6092b38cd"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a4bb46b79c0e3445460e1a9b9c1c87dbf"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a4bb46b79c0e3445460e1a9b9c1c87dbf">ivi_wm_layer_created</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id)</td></tr>
+<tr class="memdesc:a4bb46b79c0e3445460e1a9b9c1c87dbf"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for created event of a ivi shell layer  <a href="struct_display.html#a4bb46b79c0e3445460e1a9b9c1c87dbf">More...</a><br /></td></tr>
 <tr class="separator:a4bb46b79c0e3445460e1a9b9c1c87dbf"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a798342c0ad6c37e7b84ff61c994e8d70"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a798342c0ad6c37e7b84ff61c994e8d70">ivi_wm_surface_destroyed</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id)</td></tr>
+<tr class="memdesc:a798342c0ad6c37e7b84ff61c994e8d70"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for destroyed event of a ivi shell surface  <a href="struct_display.html#a798342c0ad6c37e7b84ff61c994e8d70">More...</a><br /></td></tr>
 <tr class="separator:a798342c0ad6c37e7b84ff61c994e8d70"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:acd0d31fed807a88fb35a6534e4f5e7b7"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#acd0d31fed807a88fb35a6534e4f5e7b7">ivi_wm_layer_destroyed</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id)</td></tr>
+<tr class="memdesc:acd0d31fed807a88fb35a6534e4f5e7b7"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for destroyed event of a ivi shell layer  <a href="struct_display.html#acd0d31fed807a88fb35a6534e4f5e7b7">More...</a><br /></td></tr>
 <tr class="separator:acd0d31fed807a88fb35a6534e4f5e7b7"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af777332740c6a7fc1183b6d60796bcf2"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#af777332740c6a7fc1183b6d60796bcf2">ivi_wm_surface_error</a> (void *data, struct ivi_wm *ivi_wm, uint32_t object_id, uint32_t error, const char *message)</td></tr>
+<tr class="memdesc:af777332740c6a7fc1183b6d60796bcf2"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for error event of a ivi shell surface  <a href="struct_display.html#af777332740c6a7fc1183b6d60796bcf2">More...</a><br /></td></tr>
 <tr class="separator:af777332740c6a7fc1183b6d60796bcf2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ab20a462572f5721af46c8ab73c8940c8"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ab20a462572f5721af46c8ab73c8940c8">ivi_wm_layer_error</a> (void *data, struct ivi_wm *ivi_wm, uint32_t object_id, uint32_t error, const char *message)</td></tr>
+<tr class="memdesc:ab20a462572f5721af46c8ab73c8940c8"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for error event of a ivi shell layer  <a href="struct_display.html#ab20a462572f5721af46c8ab73c8940c8">More...</a><br /></td></tr>
 <tr class="separator:ab20a462572f5721af46c8ab73c8940c8"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad257310b20ea03027ea329593b8ab6ec"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ad257310b20ea03027ea329593b8ab6ec">ivi_wm_surface_size</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id, int32_t width, int32_t height)</td></tr>
+<tr class="memdesc:ad257310b20ea03027ea329593b8ab6ec"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for a size of a ivi shell surface  <a href="struct_display.html#ad257310b20ea03027ea329593b8ab6ec">More...</a><br /></td></tr>
 <tr class="separator:ad257310b20ea03027ea329593b8ab6ec"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1bf485708b138ee72e76191f01b29c23"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a1bf485708b138ee72e76191f01b29c23">ivi_wm_surface_stats</a> (void *data, struct ivi_wm *ivi_wm, uint32_t surface_id, uint32_t frame_count, uint32_t pid)</td></tr>
+<tr class="memdesc:a1bf485708b138ee72e76191f01b29c23"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for stats of a ivi shell surface  <a href="struct_display.html#a1bf485708b138ee72e76191f01b29c23">More...</a><br /></td></tr>
 <tr class="separator:a1bf485708b138ee72e76191f01b29c23"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2100ce53bdb6338b314cd27089be0d92"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a2100ce53bdb6338b314cd27089be0d92">ivi_wm_layer_surface_added</a> (void *data, struct ivi_wm *ivi_wm, uint32_t layer_id, uint32_t surface_id)</td></tr>
+<tr class="memdesc:a2100ce53bdb6338b314cd27089be0d92"><td class="mdescLeft">&#160;</td><td class="mdescRight">handler for surface added event of a ivi shell layer  <a href="struct_display.html#a2100ce53bdb6338b314cd27089be0d92">More...</a><br /></td></tr>
 <tr class="separator:a2100ce53bdb6338b314cd27089be0d92"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pri-attribs" name="pri-attribs"></a>
@@ -463,6 +489,8 @@ Private Attributes</h2></td></tr>
 <tr class="separator:a03be0f6b7b0221406d368b864a9d3d78"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1d4b9a585145ce4717231f6600c0bb79"><td class="memItemLeft" align="right" valign="top">std::string&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a1d4b9a585145ce4717231f6600c0bb79">m_cursor_theme_name</a></td></tr>
 <tr class="separator:a1d4b9a585145ce4717231f6600c0bb79"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a59f936c922033b32a608fd4d4dab12d4"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="struct_display_1_1wayland__event__mask.html">Display::wayland_event_mask</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a59f936c922033b32a608fd4d4dab12d4">m_wayland_event_mask</a></td></tr>
+<tr class="separator:a59f936c922033b32a608fd4d4dab12d4"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a9886efbbb9f96a17f302f2c443cfe963"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="struct_display_1_1pointer.html">Display::pointer</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#a9886efbbb9f96a17f302f2c443cfe963">m_pointer</a></td></tr>
 <tr class="separator:a9886efbbb9f96a17f302f2c443cfe963"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad4d6d190fb29693ae2adf3f981b518e3"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="struct_display_1_1touch.html">Display::touch</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="struct_display.html#ad4d6d190fb29693ae2adf3f981b518e3">m_touch</a></td></tr>
@@ -533,8 +561,8 @@ Static Private Attributes</h2></td></tr>
 </div>
 </div>
 <h2 class="groupheader">Constructor &amp; Destructor Documentation</h2>
-<a id="a776bdb715c119f19be957c475ad442df" name="a776bdb715c119f19be957c475ad442df"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a776bdb715c119f19be957c475ad442df">&#9670;&#160;</a></span>Display() <span class="overload">[1/2]</span></h2>
+<a id="acec3ad4addb57436f0ee3dd968ef8a15" name="acec3ad4addb57436f0ee3dd968ef8a15"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#acec3ad4addb57436f0ee3dd968ef8a15">&#9670;&#160;</a></span>Display() <span class="overload">[1/2]</span></h2>
 
 <div class="memitem">
 <div class="memproto">
@@ -547,6 +575,12 @@ Static Private Attributes</h2></td></tr>
           <td>(</td>
           <td class="paramtype">bool&#160;</td>
           <td class="paramname"><em>enable_cursor</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const std::string &amp;&#160;</td>
+          <td class="paramname"><em>ignore_wayland_event</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
@@ -1162,6 +1196,22 @@ Static Private Attributes</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
+<p>Get a buffer scale of a specified index of a view. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>Index of a view </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>int32_t </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">Buffer</td><td>scale </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="a4121610d7dd0df6947cf82c13e56be55" name="a4121610d7dd0df6947cf82c13e56be55"></a>
@@ -1269,24 +1319,6 @@ Static Private Attributes</h2></td></tr>
 
 </div>
 </div>
-<a id="a086c0c7d8bdb37e513b7fdfd6007cb5d" name="a086c0c7d8bdb37e513b7fdfd6007cb5d"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a086c0c7d8bdb37e513b7fdfd6007cb5d">&#9670;&#160;</a></span>GetPhysicalSize()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">std::pair&lt; int32_t, int32_t &gt; Display::GetPhysicalSize </td>
-          <td>(</td>
-          <td class="paramtype">uint32_t&#160;</td>
-          <td class="paramname"><em>index</em></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
 <a id="acce0dc67b598209c82f3be5267f3b035" name="acce0dc67b598209c82f3be5267f3b035"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#acce0dc67b598209c82f3be5267f3b035">&#9670;&#160;</a></span>GetShm()</h2>
 
@@ -1357,6 +1389,40 @@ Static Private Attributes</h2></td></tr>
 
 </div>
 </div>
+<a id="ac63123ffa39454b48bf5ae6555c8f723" name="ac63123ffa39454b48bf5ae6555c8f723"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ac63123ffa39454b48bf5ae6555c8f723">&#9670;&#160;</a></span>GetVideoModeSize()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">std::pair&lt; int32_t, int32_t &gt; Display::GetVideoModeSize </td>
+          <td>(</td>
+          <td class="paramtype">uint32_t&#160;</td>
+          <td class="paramname"><em>index</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Get a video mode size of a specified index of a view. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>Index of a view </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>std::pair&lt;int32_t, int32_t&gt; </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">Video</td><td>mode size </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
+</div>
+</div>
 <a id="acc089d2dbdbb0d0002c201987ec470b2" name="acc089d2dbdbb0d0002c201987ec470b2"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#acc089d2dbdbb0d0002c201987ec470b2">&#9670;&#160;</a></span>GetWlOutput()</h2>
 
@@ -1380,6 +1446,22 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>Get wl_output of a specified index of a view. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>Index of a view </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>wl_output* </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">Pointer</td><td>to wl_output </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -1458,6 +1540,18 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler for created event of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>layer id </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="acd9be09ddd903b13a4f060cea07830ab" name="acd9be09ddd903b13a4f060cea07830ab"></a>
@@ -1524,6 +1618,22 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler of a destination rectangle of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>layer id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">x</td><td>x position of destination rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">y</td><td>y position of destination rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">width</td><td>width of destination rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">height</td><td>height of destination rectangle </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="acd0d31fed807a88fb35a6534e4f5e7b7" name="acd0d31fed807a88fb35a6534e4f5e7b7"></a>
@@ -1565,6 +1675,18 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler for destroyed event of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>layer id </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -1620,6 +1742,20 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler for error event of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">object_id</td><td>wayland object id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">error</td><td>error code </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">message</td><td>error message </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="aec92cb35ea5223674e0b1da8b5cfa1b5" name="aec92cb35ea5223674e0b1da8b5cfa1b5"></a>
@@ -1667,6 +1803,19 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler of an opacity of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>layer id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">opacity</td><td>opacity </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -1734,6 +1883,22 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler of a source rectangle of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>layer id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">x</td><td>x position of source rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">y</td><td>y position of source rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">width</td><td>width of source rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">height</td><td>height of source rectangle </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="a2100ce53bdb6338b314cd27089be0d92" name="a2100ce53bdb6338b314cd27089be0d92"></a>
@@ -1781,6 +1946,19 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler for surface added event of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">layer_id</td><td>layer id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -1830,6 +2008,19 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler of a visibility of a ivi shell layer </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>layer id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">visibility</td><td>visibility </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="a7a49e2519d294e9fdbe32cc6092b38cd" name="a7a49e2519d294e9fdbe32cc6092b38cd"></a>
@@ -1871,6 +2062,18 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler for created event of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -1938,6 +2141,22 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler of a destination rectangle of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">x</td><td>x position of destination rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">y</td><td>y position of destination rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">width</td><td>width of destination rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">height</td><td>height of destination rectangle </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="a798342c0ad6c37e7b84ff61c994e8d70" name="a798342c0ad6c37e7b84ff61c994e8d70"></a>
@@ -1979,6 +2198,18 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler for destroyed event of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -2034,6 +2265,20 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler for error event of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">object_id</td><td>wayland object id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">error</td><td>error code </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">message</td><td>error message </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="a1ae072df8a3058faa7f80d0f032477da" name="a1ae072df8a3058faa7f80d0f032477da"></a>
@@ -2081,6 +2326,19 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler of an opacity of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">opacity</td><td>opacity </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -2135,6 +2393,20 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler for a size of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">width</td><td>width of a surface </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">height</td><td>height of a surface </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -2202,6 +2474,22 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler of a source rectangle of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">x</td><td>x position of source rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">y</td><td>y position of source rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">width</td><td>width of source rectangle </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">height</td><td>height of source rectangle </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="a1bf485708b138ee72e76191f01b29c23" name="a1bf485708b138ee72e76191f01b29c23"></a>
@@ -2256,6 +2544,20 @@ Static Private Attributes</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>handler for stats of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">frame_count</td><td>frame count </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">pid</td><td>process id </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
+
 </div>
 </div>
 <a id="abee738242dc4220aec1cb1ee90f1499f" name="abee738242dc4220aec1cb1ee90f1499f"></a>
@@ -2303,6 +2605,19 @@ Static Private Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>handler of a visibility of a ivi shell surface </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">data</td><td>Data of type <a class="el" href="struct_display.html">Display</a> </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">ivi_wm</td><td>ivi shell window manager </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">surface_id</td><td>surface id </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">visibility</td><td>visibility </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>wayland </dd></dl>
 
 </div>
 </div>
@@ -4157,6 +4472,68 @@ Static Private Attributes</h2></td></tr>
 
 </div>
 </div>
+<a id="ac7f79dc9b19444830982a6d34d638ada" name="ac7f79dc9b19444830982a6d34d638ada"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ac7f79dc9b19444830982a6d34d638ada">&#9670;&#160;</a></span>wayland_event_mask_print()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">void Display::wayland_event_mask_print </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="struct_display_1_1wayland__event__mask.html">wayland_event_mask</a> &amp;&#160;</td>
+          <td class="paramname"><em>mask</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">static</span><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="aaa28e491167ae03c8e97bef7b047bdec" name="aaa28e491167ae03c8e97bef7b047bdec"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aaa28e491167ae03c8e97bef7b047bdec">&#9670;&#160;</a></span>wayland_event_mask_update()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">void Display::wayland_event_mask_update </td>
+          <td>(</td>
+          <td class="paramtype">const std::string &amp;&#160;</td>
+          <td class="paramname"><em>ignore_wayland_events</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">struct <a class="el" href="struct_display_1_1wayland__event__mask.html">wayland_event_mask</a> &amp;&#160;</td>
+          <td class="paramname"><em>mask</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">static</span><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
 <h2 class="groupheader">Member Data Documentation</h2>
 <a id="a68041fd7587425d947eaa7fa90ba272e" name="a68041fd7587425d947eaa7fa90ba272e"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a68041fd7587425d947eaa7fa90ba272e">&#9670;&#160;</a></span>agl_shell_listener</h2>
@@ -5207,6 +5584,28 @@ Static Private Attributes</h2></td></tr>
       <table class="memname">
         <tr>
           <td class="memname"><a class="el" href="class_engine.html">Engine</a>* Display::m_touch_engine {}</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="a59f936c922033b32a608fd4d4dab12d4" name="a59f936c922033b32a608fd4d4dab12d4"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a59f936c922033b32a608fd4d4dab12d4">&#9670;&#160;</a></span>m_wayland_event_mask</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="struct_display_1_1wayland__event__mask.html">Display::wayland_event_mask</a> Display::m_wayland_event_mask</td>
         </tr>
       </table>
   </td>

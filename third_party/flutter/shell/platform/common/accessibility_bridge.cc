@@ -9,6 +9,7 @@
 
 #include "flutter/third_party/accessibility/ax/ax_tree_update.h"
 #include "flutter/third_party/accessibility/base/logging.h"
+#include "spdlog/spdlog.h"
 
 namespace flutter {  // namespace
 
@@ -55,7 +56,7 @@ void AccessibilityBridge::CommitUpdates() {
 
     std::string error = tree_.error();
     if (!error.empty()) {
-      FML_LOG(ERROR) << "Failed to update ui::AXTree, error: " << error;
+      SPDLOG_ERROR("Failed to update ui::AXTree, error: {}", error);
       assert(false);
       return;
     }
@@ -94,7 +95,7 @@ void AccessibilityBridge::CommitUpdates() {
 
   std::string error = tree_.error();
   if (!error.empty()) {
-    FML_LOG(ERROR) << "Failed to update ui::AXTree, error: " << error;
+    SPDLOG_ERROR("Failed to update ui::AXTree, error: {}", error);
     return;
   }
   // Handles accessibility events as the result of the semantics update.

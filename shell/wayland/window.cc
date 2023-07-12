@@ -44,7 +44,7 @@ WaylandWindow::WaylandWindow(size_t index,
       m_app_id(std::move(app_id)),
       m_ivi_surface_id(ivi_surface_id),
       m_fullscreen(fullscreen) {  // disable vsync
-  DLOG(INFO) << "(" << m_index << ") + WaylandWindow()";
+  SPDLOG_TRACE("({}) + WaylandWindow()", m_index);
 
   m_fps_counter = 0;
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
@@ -57,13 +57,13 @@ WaylandWindow::WaylandWindow(size_t index,
   auto ivi_application = m_display->GetIviApplication();
   if (ivi_application) {
     if (m_ivi_surface_id == 0) {
-      FML_LOG(ERROR) << "IVI Surface ID not set";
-      exit(-1);
+      spdlog::critical("IVI Surface ID not set");
+      exit(EXIT_FAILURE);
     }
     m_ivi_surface = ivi_application_surface_create(
         ivi_application, m_ivi_surface_id, m_base_surface);
     if (m_ivi_surface == nullptr) {
-      FML_LOG(ERROR) << "Failed to create ivi_client_surface";
+      spdlog::error("Failed to create ivi_client_surface");
     }
     ivi_surface_add_listener(m_ivi_surface, &ivi_surface_listener, this);
 
@@ -108,7 +108,7 @@ WaylandWindow::WaylandWindow(size_t index,
       m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_RIGHT, 0);
       break;
     default:
-      LOG(ERROR) << "Invalid surface role type supplied";
+      spdlog::critical("Invalid surface role type supplied");
       assert(false);
   }
 
@@ -126,11 +126,11 @@ WaylandWindow::WaylandWindow(size_t index,
   m_backend->CreateSurface(m_index, m_base_surface, m_geometry.width,
                            m_geometry.height);
 
-  DLOG(INFO) << "(" << m_index << ") - WaylandWindow()";
+  SPDLOG_TRACE("({}) - WaylandWindow()", m_index);
 }
 
 WaylandWindow::~WaylandWindow() {
-  DLOG(INFO) << "(" << m_index << ") + ~WaylandWindow()";
+  SPDLOG_TRACE("({}) + ~WaylandWindow()", m_index);
 
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
@@ -146,32 +146,27 @@ WaylandWindow::~WaylandWindow() {
 
   wl_surface_destroy(m_base_surface);
 
-  DLOG(INFO) << "(" << m_index << ") - ~WaylandWindow()";
+  SPDLOG_TRACE("({}) - ~WaylandWindow()", m_index);
 }
 
 void WaylandWindow::handle_base_surface_enter(void* data,
-                                              struct wl_surface* surface,
-                                              struct wl_output* output) {
+                                              struct wl_surface* /* surface */,
+                                              struct wl_output* /* output */) {
   auto* d = static_cast<WaylandWindow*>(data);
-  (void)surface;
-  (void)output;
 
   auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
 
   auto result =
       d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
   if (result != kSuccess) {
-    LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
+    spdlog::error("Failed to set Flutter Engine Pixel Ratio");
   }
 }
 
-void WaylandWindow::handle_base_surface_leave(void* data,
-                                              struct wl_surface* surface,
-                                              struct wl_output* output) {
-  (void)data;
-  (void)surface;
-  (void)output;
-  DLOG(INFO) << "Leaving output";
+void WaylandWindow::handle_base_surface_leave(void* /* data */,
+                                              struct wl_surface* /* surface */,
+                                              struct wl_output* /* output */) {
+  SPDLOG_DEBUG("Leaving output");
 }
 
 const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
@@ -193,15 +188,14 @@ const struct xdg_surface_listener WaylandWindow::xdg_surface_listener = {
 
 void WaylandWindow::handle_ivi_surface_configure(
     void* data,
-    struct ivi_surface* ivi_surface,
+    struct ivi_surface* /* ivi_surface */,
     int32_t width,
     int32_t height) {
-  (void)ivi_surface;
   auto* w = reinterpret_cast<WaylandWindow*>(data);
 
   if (width > 0 && height > 0) {
     if (w->m_fullscreen) {
-      DLOG(INFO) << "Setting Fullscreen";
+      SPDLOG_DEBUG("Setting Fullscreen");
       auto extents = w->m_display->GetVideoModeSize(w->m_output_index);
       width = extents.first;
       height = extents.second;
@@ -224,11 +218,10 @@ const struct ivi_surface_listener WaylandWindow::ivi_surface_listener = {
     .configure = handle_ivi_surface_configure};
 
 void WaylandWindow::handle_toplevel_configure(void* data,
-                                              struct xdg_toplevel* toplevel,
+                                              struct xdg_toplevel* /* toplevel */,
                                               int32_t width,
                                               int32_t height,
                                               struct wl_array* states) {
-  (void)toplevel;
   auto* w = reinterpret_cast<WaylandWindow*>(data);
 
   w->m_fullscreen = false;
@@ -272,8 +265,7 @@ void WaylandWindow::handle_toplevel_configure(void* data,
 }
 
 void WaylandWindow::handle_toplevel_close(void* data,
-                                          struct xdg_toplevel* xdg_toplevel) {
-  (void)xdg_toplevel;
+                                          struct xdg_toplevel* /* xdg_toplevel */) {
   auto* w = reinterpret_cast<WaylandWindow*>(data);
   w->m_running = false;
 }
@@ -288,8 +280,7 @@ const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
 
 void WaylandWindow::on_frame_base_surface(void* data,
                                           struct wl_callback* callback,
-                                          uint32_t time) {
-  (void)time;
+                                          uint32_t /* time */) {
   auto* window = reinterpret_cast<WaylandWindow*>(data);
 
   if (callback)
@@ -324,14 +315,14 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
         m_flutter_engine->SetWindowSize(static_cast<size_t>(m_geometry.height),
                                         static_cast<size_t>(m_geometry.width));
     if (result != kSuccess) {
-      LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+      spdlog::error("Failed to set Flutter Engine Window Size");
     }
 
     auto buffer_scale = m_display->GetBufferScale(m_output_index);
 
     result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
     if (result != kSuccess) {
-      LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
+      spdlog::error("Failed to set Flutter Engine Pixel Ratio");
     }
   }
 }

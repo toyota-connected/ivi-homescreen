@@ -35,7 +35,7 @@ WaylandVulkanBackend::WaylandVulkanBackend(struct wl_display* display,
       resize_pending_(false),
       Backend(this, Resize, CreateSurface) {
   if (!bluevk::initialize()) {
-    LOG(ERROR) << "BlueVK is unable to load entry points.\n";
+    spdlog::critical("BlueVK is unable to load entry points.\n");
     exit(EXIT_FAILURE);
   }
   createInstance();
@@ -132,11 +132,12 @@ void WaylandVulkanBackend::createInstance() {
   state_.enabled_instance_extensions.push_back(
       VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 
-  LOG(INFO) << "Enabling " << state_.enabled_instance_extensions.size()
-            << " instance extensions:";
+  std::stringstream ss;
+  ss << "Enabling {} instance extensions: " << state_.enabled_instance_extensions.size();
   for (const auto& extension : state_.enabled_instance_extensions) {
-    LOG(INFO) << "  - " << extension;
+    ss << "  - " << extension;
   }
+  spdlog::info(ss.str());
 
   VkApplicationInfo app_info = {
       .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -157,19 +158,22 @@ void WaylandVulkanBackend::createInstance() {
       .ppEnabledExtensionNames = state_.enabled_instance_extensions.data(),
   };
 
-  VkValidationFeaturesEXT features = {};
+#if 0 //TODO not currently used
   VkValidationFeatureEnableEXT enables[] = {
       VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
       // TODO: Enable synchronization validation.
       // VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
   };
+
   if (state_.validationFeaturesSupported) {
+    VkValidationFeaturesEXT features{};
     features.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
     features.enabledValidationFeatureCount =
         sizeof(enables) / sizeof(enables[0]);
     features.pEnabledValidationFeatures = enables;
-    //    info.pNext = &features;
+    info.pNext = &features;
   }
+#endif
 
   static constexpr char VK_LAYER_KHRONOS_VALIDATION_NAME[] =
       "VK_LAYER_KHRONOS_validation";
@@ -183,12 +187,13 @@ void WaylandVulkanBackend::createInstance() {
       break;
     }
   }
-  info.enabledLayerCount = static_cast<uint32_t>(state_.enabled_layer_extensions.size());
+  info.enabledLayerCount =
+      static_cast<uint32_t>(state_.enabled_layer_extensions.size());
   info.ppEnabledLayerNames = state_.enabled_layer_extensions.data();
 
   if (bluevk::vkCreateInstance(&info, nullptr, &state_.instance) !=
       VK_SUCCESS) {
-    LOG(ERROR) << "Failed to create Vulkan instance." << std::endl;
+    spdlog::critical("Failed to create Vulkan instance.");
     exit(EXIT_FAILURE);
   }
 
@@ -216,7 +221,7 @@ void WaylandVulkanBackend::setupDebugMessenger() {
     if (bluevk::vkCreateDebugUtilsMessengerEXT(state_.instance, &createInfo,
                                                VKALLOC, &mDebugMessenger) !=
         VK_SUCCESS) {
-      LOG(ERROR) << "Unable to create Vulkan debug callback";
+      spdlog::error("Unable to create Vulkan debug callback");
     }
   } else if (bluevk::vkCreateDebugReportCallbackEXT) {
     const VkDebugReportCallbackCreateInfoEXT cbinfo = {
@@ -225,7 +230,7 @@ void WaylandVulkanBackend::setupDebugMessenger() {
         debugReportCallback, nullptr};
     if (bluevk::vkCreateDebugReportCallbackEXT(
             state_.instance, &cbinfo, VKALLOC, &mDebugCallback) != VK_SUCCESS) {
-      LOG(ERROR) << "Unable to create Vulkan debug callback";
+      spdlog::error("Unable to create Vulkan debug callback");
     }
   }
 }
@@ -240,7 +245,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
                                               physical_devices.data());
   assert(result == VK_SUCCESS);
 
-  DLOG(INFO) << "Enumerating " << count << " physical device(s).";
+  SPDLOG_DEBUG("Enumerating {} physical device(s).", count);
 
   uint32_t selected_score = 0;
   for (const auto& pdevice : physical_devices) {
@@ -249,7 +254,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     bluevk::vkGetPhysicalDeviceProperties(pdevice, &properties);
     bluevk::vkGetPhysicalDeviceFeatures(pdevice, &features);
 
-    DLOG(INFO) << "Checking device: " << properties.deviceName;
+    SPDLOG_DEBUG("Checking device: {}", properties.deviceName);
 
     uint32_t score = 0;
     std::vector<const char*> supported_extensions;
@@ -278,7 +283,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     // Skip physical devices that don't have a graphics queue.
     if (!graphics_queue_family.has_value()) {
-      LOG(INFO) << "  - Skipping due to no suitable graphics queues.";
+      spdlog::info("  - Skipping due to no suitable graphics queues.");
       continue;
     }
 
@@ -335,7 +340,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     // Skip physical devices that don't have swapchain support.
     if (!supports_swapchain) {
-      DLOG(INFO) << "  - Skipping due to lack of swapchain support.";
+      SPDLOG_DEBUG("  - Skipping due to lack of swapchain support.");
       continue;
     }
 
@@ -343,8 +348,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     score += properties.limits.maxImageDimension2D;
 
     if (selected_score < score) {
-      DLOG(INFO) << "  - This is the best device so far. Score: 0x" << std::hex
-                 << score << std::dec;
+      SPDLOG_DEBUG("  - This is the best device so far. Score: 0x{:x}", score);
 
       selected_score = score;
       state_.physical_device = pdevice;
@@ -370,8 +374,8 @@ void WaylandVulkanBackend::findPhysicalDevice() {
         };
         bluevk::vkGetPhysicalDeviceProperties2KHR(state_.physical_device,
                                                   &physicalDeviceProperties2);
-        LOG(INFO) << "Vulkan device driver: " << driverProperties.driverName
-                  << " " << driverProperties.driverInfo;
+        spdlog::info("Vulkan device driver: {} {}", driverProperties.driverName,
+                     driverProperties.driverInfo);
       }
 
       // Print out some properties of the GPU for diagnostic purposes.
@@ -381,27 +385,28 @@ void WaylandVulkanBackend::findPhysicalDevice() {
       const uint32_t deviceID = properties.deviceID;
       const int major = VK_VERSION_MAJOR(properties.apiVersion);
       const int minor = VK_VERSION_MINOR(properties.apiVersion);
-      LOG(INFO) << "vendor " << std::hex << vendorID << ", "
-                << "device " << deviceID << ", "
-                << "driver " << driverVersion << ", " << std::dec << "api "
-                << major << "." << minor;
+      spdlog::info("vendor {:x}, device {:x}, driver {:x}, api {}.{}", vendorID,
+                   deviceID, driverVersion, major, minor);
       break;
     }
   }
 
   if (state_.physical_device == nullptr) {
-    LOG(ERROR) << "Failed to find a compatible Vulkan physical device."
-               << std::endl;
+    spdlog::critical("Failed to find a compatible Vulkan physical device.");
     exit(EXIT_FAILURE);
   }
 }
 
 void WaylandVulkanBackend::createLogicalDevice() {
-  DLOG(INFO) << "Enabling " << state_.enabled_device_extensions.size()
-             << " device extensions:";
+#if !defined(NDEBUG)
+  std::stringstream ss;
+  ss << "Enabling " << state_.enabled_device_extensions.size()
+     << " device extensions:";
   for (const char* extension : state_.enabled_device_extensions) {
-    DLOG(INFO) << "  - " << extension;
+    ss << "  - " << extension;
   }
+  SPDLOG_DEBUG(ss.str());
+#endif
 
   float priority = 1.0f;
   VkDeviceQueueCreateInfo graphics_queue = {
@@ -426,7 +431,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
                                            nullptr, &state_.device);
   if (result != VK_SUCCESS) {
     state_.device = VK_NULL_HANDLE;
-    LOG(ERROR) << "Failed to create Vulkan logical device: " << result;
+    spdlog::critical("Failed to create Vulkan logical device: {}", static_cast<int32_t>(result));
     exit(EXIT_FAILURE);
   }
 
@@ -506,8 +511,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   // there is no limit on the number of images, though there may be limits
   // related to the total amount of memory used by presentable images."
   if (maxImageCount != 0 && desiredImageCount > maxImageCount) {
-    LOG(ERROR) << "Swap chain does not support " << desiredImageCount
-               << " images.";
+    spdlog::error("Swap chain does not support {} images.", desiredImageCount);
     desiredImageCount = surface_capabilities.minImageCount;
   }
 
@@ -568,7 +572,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   VkResult result = bluevk::vkCreateSwapchainKHR(state_.device, &info, VKALLOC,
                                                  &state_.swapchain);
   if (result != VK_SUCCESS) {
-    LOG(ERROR) << "vkGetSwapchainImagesKHR(): " << result;
+    spdlog::error("vkGetSwapchainImagesKHR(): {}", static_cast<int32_t>(result));
     return false;
   }
 
@@ -708,9 +712,9 @@ VKAPI_ATTR VkBool32
   (void)messageCode;
   (void)pUserData;
   if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-    LOG(ERROR) << "VULKAN ERROR: (" << pLayerPrefix << ") " << pMessage;
+    spdlog::error("VULKAN ERROR: ({}) {}", pLayerPrefix, pMessage);
   } else {
-    LOG(WARN) << "VULKAN WARNING: (" << pLayerPrefix << ") " << pMessage;
+    spdlog::warn("VULKAN WARNING: ({}) {}", pLayerPrefix, pMessage);
   }
   return VK_FALSE;
 }
@@ -726,16 +730,16 @@ VKAPI_ATTR VkBool32
   (void)types;
   (void)pUserData;
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    LOG(ERROR) << "VULKAN ERROR: (" << cbdata->pMessageIdName << ") "
-               << cbdata->pMessage;
+    spdlog::error("VULKAN ERROR: ({}) {}", cbdata->pMessageIdName,
+                  cbdata->pMessage);
   } else {
     // TODO: emit best practices warnings about aggressive pipeline barriers.
     if (strstr(cbdata->pMessage, "ALL_GRAPHICS_BIT") ||
         strstr(cbdata->pMessage, "ALL_COMMANDS_BIT")) {
       return VK_FALSE;
     }
-    LOG(WARN) << "VULKAN WARNING: (" << cbdata->pMessageIdName << ") "
-                 << cbdata->pMessage;
+    spdlog::warn("VULKAN WARNING: ({}) {}", cbdata->pMessageIdName,
+                 cbdata->pMessage);
   }
   return VK_TRUE;
 }
@@ -836,7 +840,7 @@ void WaylandVulkanBackend::Resize(void* user_data,
       auto result = engine->SetWindowSize(static_cast<size_t>(height),
                                           static_cast<size_t>(width));
       if (result != kSuccess) {
-        LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+        spdlog::error("Failed to set Flutter Engine Window Size");
       }
     }
   }
@@ -851,7 +855,7 @@ void WaylandVulkanBackend::CreateSurface(void* user_data,
   (void)width;
   (void)height;
 
-  DLOG(INFO) << "CreateSurface";
+  SPDLOG_DEBUG("CreateSurface");
   auto b = reinterpret_cast<WaylandVulkanBackend*>(user_data);
 
   assert(b->state_.instance != VK_NULL_HANDLE);
@@ -871,8 +875,9 @@ void WaylandVulkanBackend::CreateSurface(void* user_data,
   VkResult result = bluevk::vkCreateWaylandSurfaceKHR(
       b->state_.instance, &createInfo, nullptr, &b->state_.surface);
   if (result != VK_SUCCESS) {
-    LOG(ERROR) << "vkCreateWaylandSurfaceKHR failed.";
+    spdlog::critical("vkCreateWaylandSurfaceKHR failed.");
     assert(false);
+    exit(EXIT_FAILURE);
   }
 
   b->findPhysicalDevice();
@@ -906,7 +911,7 @@ void WaylandVulkanBackend::CreateSurface(void* user_data,
   // --------------------------------------------------------------------------
 
   if (!b->InitializeSwapchain()) {
-    LOG(ERROR) << "Failed to create swapchain.";
+    spdlog::critical("Failed to create swapchain.");
     exit(EXIT_FAILURE);
   }
 }
@@ -916,7 +921,7 @@ bool WaylandVulkanBackend::CollectBackingStore(
     void* user_data) {
   (void)renderer;
   (void)user_data;
-  DLOG(INFO) << "CollectBackingStore";
+  SPDLOG_DEBUG("CollectBackingStore");
   return false;
 }
 
@@ -927,7 +932,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
   (void)config;
   (void)backing_store_out;
   (void)user_data;
-  DLOG(INFO) << "CreateBackingStore";
+  SPDLOG_DEBUG("CreateBackingStore");
 #if 0
     auto surface_size = SkISize::Make(config->size.width, config->size.height);
     TestVulkanImage* test_image = new TestVulkanImage(
@@ -967,7 +972,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
     );
 
     if (!surface) {
-      LOG(ERROR) << "Could not create Skia surface from Vulkan image.";
+      spdlog::error("Could not create Skia surface from Vulkan image.");
       return false;
     }
     backing_store_out->type = kFlutterBackingStoreTypeVulkan;
@@ -1007,6 +1012,6 @@ bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
   (void)layers;
   (void)layers_count;
   (void)user_data;
-  DLOG(INFO) << "PresentLayers";
+  SPDLOG_DEBUG("PresentLayers");
   return false;
 }

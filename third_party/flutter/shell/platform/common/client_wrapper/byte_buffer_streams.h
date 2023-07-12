@@ -46,7 +46,7 @@ class ByteBufferStreamReader : public ByteStreamReader {
 
   // |ByteStreamReader|
   void ReadAlignment(uint8_t alignment) override {
-    uint8_t mod = location_ % alignment;
+    auto mod = static_cast<uint8_t>(location_ % alignment);
     if (mod) {
       location_ += alignment - mod;
     }
@@ -84,7 +84,7 @@ class ByteBufferStreamWriter : public ByteStreamWriter {
 
   // |ByteStreamWriter|
   void WriteAlignment(uint8_t alignment) {
-    uint8_t mod = bytes_->size() % alignment;
+    auto mod = static_cast<uint8_t>(bytes_->size() % alignment);
     if (mod) {
       for (int i = 0; i < alignment - mod; ++i) {
         WriteByte(0);

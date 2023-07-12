@@ -63,11 +63,19 @@ if (ENABLE_IVI_SHELL_CLIENT)
 endif ()
 
 #
-# Disable Flutter Engine Log Message Output
+# Enable Dart VM console redirection
 #
-option(DISABLE_FLUTTER_LOG_MESSAGES "Disable Flutter Engine Log output" ON)
-if (DISABLE_FLUTTER_LOG_MESSAGES)
-    add_compile_definitions(DISABLE_FLUTTER_LOG_MESSAGES)
+option(ENABLE_DART_VM_LOGGING "Enable Dart VM console redirection" ON)
+if (ENABLE_DART_VM_LOGGING)
+    add_compile_definitions(ENABLE_DART_VM_LOGGING)
+endif ()
+
+#
+# DLT
+#
+option(ENABLE_DLT "Enable DLT logging" ON)
+if (ENABLE_DLT)
+    add_compile_definitions(ENABLE_DLT)
 endif ()
 
 #

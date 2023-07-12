@@ -16,8 +16,10 @@ var searchData=
   ['display_5fhandle_5fdone_13',['display_handle_done',['../struct_display.html#a83e80704ecb44878d80374f3aa0d27ac',1,'Display']]],
   ['display_5fhandle_5fgeometry_14',['display_handle_geometry',['../struct_display.html#a9a86d3162322fc8f3b04cbe137696ccb',1,'Display']]],
   ['display_5fhandle_5fmode_15',['display_handle_mode',['../struct_display.html#a651addb83ef25b85258afa4189a4113b',1,'Display']]],
-  ['done_16',['done',['../struct_display_1_1output__info.html#a23dd94257532934eded449d4cfd4d60f',1,'Display::output_info']]],
-  ['down_17',['down',['../struct_display.html#a107cff49ab579d2c55042849c6f7c1ca',1,'Display']]],
-  ['draw_5fframe_18',['draw_frame',['../struct_compositor_surface.html#a7a1bd37b70b031576e2ec18660b5ec1b',1,'CompositorSurface']]],
-  ['duration_19',['duration',['../class_custom_data.html#a805e3e93288b2a8721d5378b88945d85',1,'CustomData']]]
+  ['dlt_5fpackage_5fmajor_5fversion_16',['DLT_PACKAGE_MAJOR_VERSION',['../libdlt_8h.html#a407d689096bfe2629198ca127796ad75',1,'libdlt.h']]],
+  ['dlt_5fpackage_5fminor_5fversion_17',['DLT_PACKAGE_MINOR_VERSION',['../libdlt_8h.html#ab8e8f39718eceaa61506c7e121c62b2a',1,'libdlt.h']]],
+  ['done_18',['done',['../struct_display_1_1output__info.html#a23dd94257532934eded449d4cfd4d60f',1,'Display::output_info']]],
+  ['down_19',['down',['../struct_display.html#a107cff49ab579d2c55042849c6f7c1ca',1,'Display']]],
+  ['draw_5fframe_20',['draw_frame',['../struct_compositor_surface.html#a7a1bd37b70b031576e2ec18660b5ec1b',1,'CompositorSurface']]],
+  ['duration_21',['duration',['../class_custom_data.html#a805e3e93288b2a8721d5378b88945d85',1,'CustomData']]]
 ];

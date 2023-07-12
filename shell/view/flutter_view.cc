@@ -64,8 +64,8 @@ FlutterView::FlutterView(Configuration::Config config,
   auto output = m_wayland_display->GetWlOutput(m_config.view.wl_output_index);
   auto output_index = m_config.view.wl_output_index;
 
-  DLOG(INFO) << "Width: " << m_config.view.width
-             << ", Height: " << m_config.view.height;
+  SPDLOG_DEBUG("Width: {}, Height: {}", m_config.view.width,
+               m_config.view.height);
 
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type, output, output_index,
@@ -91,7 +91,7 @@ void FlutterView::Initialize() {
   m_flutter_engine->Run(pthread_self());
 
   if (!m_flutter_engine->IsRunning()) {
-    LOG(ERROR) << "Failed to Run Engine";
+    spdlog::critical("Failed to Run Engine");
     exit(EXIT_FAILURE);
   }
 
@@ -100,7 +100,7 @@ void FlutterView::Initialize() {
                                m_flutter_engine.get());
   m_wayland_window->SetEngine(m_flutter_engine);
 
-  DLOG(INFO) << "(" << m_index << ") Engine running...";
+  SPDLOG_DEBUG("({}) Engine running...", m_index);
 
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   m_text_input->SetEngine(m_flutter_engine);
@@ -175,8 +175,7 @@ void FlutterView::DrawFps(long long end_time) {
 
       if (0 < (m_fps.output & 0x01)) {
         if (0 < (m_fps.output & 0x01)) {
-          LOG(INFO) << "(" << m_index << ") FPS = " << fps_loop << " "
-                    << fps_redraw;
+          spdlog::info("({}) FPS = {} {}", m_index, fps_loop, fps_redraw);
         }
       }
     }
@@ -206,7 +205,7 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   auto tEnd = std::chrono::steady_clock::now();
   auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
-  LOG(INFO) << "comp surf init: " << (float)tDiff;
+  spdlog::info("comp surf init: {}", (float)tDiff);
 
   return static_cast<size_t>(index);
 }
@@ -245,10 +244,8 @@ void FlutterView::SetRegion(
   auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
-    DLOG(INFO) << "Set Region: type: " << type << ", x: " << region.x
-               << ", y: " << region.y << ", width: " << region.width
-               << ", height: " << region.height;
-
+    SPDLOG_DEBUG("Set Region: type: {}, x: {}, y: {}, width: {}, height: {}",
+                 type, region.x, region.y, region.width, region.height);
     wl_region_add(base_region, region.x, region.y, region.width, region.height);
   }
 

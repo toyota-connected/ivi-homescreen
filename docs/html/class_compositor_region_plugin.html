@@ -115,6 +115,7 @@ Classes</h2></td></tr>
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-static-methods" name="pub-static-methods"></a>
 Static Public Member Functions</h2></td></tr>
 <tr class="memitem:a8b06ec8da95d74cb71d9c7f2b40e0d7a"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_compositor_region_plugin.html#a8b06ec8da95d74cb71d9c7f2b40e0d7a">OnPlatformMessage</a> (const FlutterPlatformMessage *message, void *userdata)</td></tr>
+<tr class="memdesc:a8b06ec8da95d74cb71d9c7f2b40e0d7a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Handle a platform message from the Flutter engine.  <a href="class_compositor_region_plugin.html#a8b06ec8da95d74cb71d9c7f2b40e0d7a">More...</a><br /></td></tr>
 <tr class="separator:a8b06ec8da95d74cb71d9c7f2b40e0d7a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-static-attribs" name="pub-static-attribs"></a>
@@ -143,8 +144,10 @@ Static Public Attributes</h2></td></tr>
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pri-static-methods" name="pri-static-methods"></a>
 Static Private Member Functions</h2></td></tr>
 <tr class="memitem:adadf5d455413a01c96a2efb3d27dbed2"><td class="memItemLeft" align="right" valign="top">static flutter::EncodableValue&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_compositor_region_plugin.html#adadf5d455413a01c96a2efb3d27dbed2">HandleGroups</a> (flutter::EncodableList &amp;groups, <a class="el" href="class_flutter_view.html">FlutterView</a> *view)</td></tr>
+<tr class="memdesc:adadf5d455413a01c96a2efb3d27dbed2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Handle a platform message per flutter view groups.  <a href="class_compositor_region_plugin.html#adadf5d455413a01c96a2efb3d27dbed2">More...</a><br /></td></tr>
 <tr class="separator:adadf5d455413a01c96a2efb3d27dbed2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad96439c22069272a25c7832b2089ffbf"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_compositor_region_plugin.html#ad96439c22069272a25c7832b2089ffbf">ClearGroups</a> (flutter::EncodableList &amp;types, <a class="el" href="class_flutter_view.html">FlutterView</a> *view)</td></tr>
+<tr class="memdesc:ad96439c22069272a25c7832b2089ffbf"><td class="mdescLeft">&#160;</td><td class="mdescRight">Clear flutter view groups.  <a href="class_compositor_region_plugin.html#ad96439c22069272a25c7832b2089ffbf">More...</a><br /></td></tr>
 <tr class="separator:ad96439c22069272a25c7832b2089ffbf"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
 <h2 class="groupheader">Member Function Documentation</h2>
@@ -182,6 +185,17 @@ Static Private Member Functions</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>Clear flutter view groups. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">types</td><td>flutter view group types. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">view</td><td>flutter view. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>flutter </dd></dl>
+
 </div>
 </div>
 <a id="adadf5d455413a01c96a2efb3d27dbed2" name="adadf5d455413a01c96a2efb3d27dbed2"></a>
@@ -218,6 +232,23 @@ Static Private Member Functions</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>Handle a platform message per flutter view groups. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">groups</td><td>flutter view groups. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">view</td><td>flutter view. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>flutter::EncodableValue </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">encoded</td><td>value </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>flutter </dd></dl>
+
 </div>
 </div>
 <a id="a8b06ec8da95d74cb71d9c7f2b40e0d7a" name="a8b06ec8da95d74cb71d9c7f2b40e0d7a"></a>
@@ -253,6 +284,17 @@ Static Private Member Functions</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>Handle a platform message from the Flutter engine. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">message</td><td>The message from the Flutter engine. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">userdata</td><td>The user data. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>flutter </dd></dl>
 
 </div>
 </div>

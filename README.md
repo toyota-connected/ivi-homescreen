@@ -222,7 +222,9 @@ All other parameters get assigned using the following ordering:
 
 `ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
 
-`DISABLE_FLUTTER_LOG_MESSAGES` - Disable Flutter Engine Log output.  Defaults to OFF
+`ENABLE_DART_VM_LOGGING` - Enable Dart VM Logging.  Defaults to ON
+
+`ENABLE_DLT` - Enable DLT logging.  Defaults to ON
 
 `BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
 
@@ -390,6 +392,17 @@ Path prefix used to determine required files is determined at build.
 
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
+
+# DLT logging
+
+To test DLT logging on desktop use the following
+
+### Ubuntu
+
+### Fedora
+    sudo dnf install dlt-libs-devel dlt-dameon dlt-tools
+    dlt-daemon
+    dlt-receive -a localhost
 
 # Crash Handler
 

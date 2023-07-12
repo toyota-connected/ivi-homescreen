@@ -155,6 +155,7 @@ Public Member Functions</h2></td></tr>
 <tr class="memdesc:a6a3ca8cb9bb0337ec9c1c8a7e5a8ec39 inherit pub_methods_class_texture"><td class="mdescLeft">&#160;</td><td class="mdescRight">Ready that a new texture frame is available for a given texture id.  <a href="class_texture.html#a6a3ca8cb9bb0337ec9c1c8a7e5a8ec39">More...</a><br /></td></tr>
 <tr class="separator:a6a3ca8cb9bb0337ec9c1c8a7e5a8ec39 inherit pub_methods_class_texture"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a2c0038249d6a80dffc15b1599a6ac385 inherit pub_methods_class_texture"><td class="memItemLeft" align="right" valign="top">int64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_texture.html#a2c0038249d6a80dffc15b1599a6ac385">GetId</a> ()</td></tr>
+<tr class="memdesc:a2c0038249d6a80dffc15b1599a6ac385 inherit pub_methods_class_texture"><td class="mdescLeft">&#160;</td><td class="mdescRight">Get texture id.  <a href="class_texture.html#a2c0038249d6a80dffc15b1599a6ac385">More...</a><br /></td></tr>
 <tr class="separator:a2c0038249d6a80dffc15b1599a6ac385 inherit pub_methods_class_texture"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-static-methods" name="pub-static-methods"></a>
@@ -187,8 +188,8 @@ Private Attributes</h2></td></tr>
 <tr class="separator:ae6ac118a8eb8aaa71ead21447891213d"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a4aaf63679edd90f1b40c9e979be7c372"><td class="memItemLeft" align="right" valign="top">std::string&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_texture_navi_render.html#a4aaf63679edd90f1b40c9e979be7c372">m_map_base_path</a></td></tr>
 <tr class="separator:a4aaf63679edd90f1b40c9e979be7c372"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a919aea2f2a16350ecf45760cbabb8ff5"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_texture_navi_render.html#a919aea2f2a16350ecf45760cbabb8ff5">m_initialized</a> {}</td></tr>
-<tr class="separator:a919aea2f2a16350ecf45760cbabb8ff5"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a22e842325e566f061c5544ad0ee99088"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_texture_navi_render.html#a22e842325e566f061c5544ad0ee99088">m_run_enable</a> {}</td></tr>
+<tr class="separator:a22e842325e566f061c5544ad0ee99088"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7cdf832f00199b844dbc1afa5ca639b2"><td class="memItemLeft" align="right" valign="top">GLuint&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_texture_navi_render.html#a7cdf832f00199b844dbc1afa5ca639b2">m_fbo</a> {}</td></tr>
 <tr class="separator:a7cdf832f00199b844dbc1afa5ca639b2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a337e3072b5705ce3fe8579bc0c8d51c2"><td class="memItemLeft" align="right" valign="top">GLuint&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_texture_navi_render.html#a337e3072b5705ce3fe8579bc0c8d51c2">m_texture_id</a> {}</td></tr>
@@ -196,8 +197,8 @@ Private Attributes</h2></td></tr>
 <tr class="memitem:a2c50fc39076901aac03e8748841b5256"><td class="memItemLeft" >struct {</td></tr>
 <tr class="memitem:af76d03db2df2bbcd0e629fb04786b1a9"><td class="memItemLeft" >&#160;&#160;&#160;<a class="el" href="render__api_8h.html#af3c0e3cc2b94d2442a5bca7349153048">NAV_RENDER_API_VERSION_T</a> *&#160;&#160;&#160;<a class="el" href="class_texture_navi_render.html#a22582688b0688daca4cee8d0068971b4">version</a> {}</td></tr>
 <tr class="separator:af76d03db2df2bbcd0e629fb04786b1a9"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:acc9911458f04d5e1078b6bff10bb8fb8"><td class="memItemLeft" >&#160;&#160;&#160;std::vector&lt; <a class="el" href="render__api_8h.html#ab31da35145cd1696e4898c268883c92e">NAV_RENDER_API_CONTEXT_T</a> * &gt;&#160;&#160;&#160;<a class="el" href="class_texture_navi_render.html#a077d2e7ebb76f20969f8d11ce611e4aa">ctx</a> {}</td></tr>
-<tr class="separator:acc9911458f04d5e1078b6bff10bb8fb8"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a87c5853e39f0ac056b9f387f82ba593a"><td class="memItemLeft" >&#160;&#160;&#160;std::map&lt; GLuint, <a class="el" href="render__api_8h.html#ab31da35145cd1696e4898c268883c92e">NAV_RENDER_API_CONTEXT_T</a> * &gt;&#160;&#160;&#160;<a class="el" href="class_texture_navi_render.html#adf55fdd6a0635eb69f8b6f53b7ba3def">ctx</a> {}</td></tr>
+<tr class="separator:a87c5853e39f0ac056b9f387f82ba593a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ac8c5741480e55deafdfa2fe1d6dc79bf"><td class="memItemLeft" >&#160;&#160;&#160;<a class="el" href="render__api_8h.html#ac2cd4ca0fc0803974e3762efe3d0fd45">NAV_RENDER_API_LOAD_GL_FUNCTIONS</a> *&#160;&#160;&#160;<a class="el" href="class_texture_navi_render.html#a95809812d135a0e2005248ffd1569c9b">gl_loader</a> {}</td></tr>
 <tr class="separator:ac8c5741480e55deafdfa2fe1d6dc79bf"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a837aa407d6b025a9ea2ffda097f433b1"><td class="memItemLeft" >&#160;&#160;&#160;<a class="el" href="render__api_8h.html#a2302f076c01c8b10c2684c2502069d23">NAV_RENDER_API_INITIALIZE_T</a> *&#160;&#160;&#160;<a class="el" href="class_texture_navi_render.html#a758e5b988384a1d8dc11a56ed4b1b342">initialize</a> {}</td></tr>
@@ -548,14 +549,14 @@ Additional Inherited Members</h2></td></tr>
 </div>
 </div>
 <h2 class="groupheader">Member Data Documentation</h2>
-<a id="a077d2e7ebb76f20969f8d11ce611e4aa" name="a077d2e7ebb76f20969f8d11ce611e4aa"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a077d2e7ebb76f20969f8d11ce611e4aa">&#9670;&#160;</a></span>ctx</h2>
+<a id="adf55fdd6a0635eb69f8b6f53b7ba3def" name="adf55fdd6a0635eb69f8b6f53b7ba3def"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#adf55fdd6a0635eb69f8b6f53b7ba3def">&#9670;&#160;</a></span>ctx</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">std::vector&lt;<a class="el" href="render__api_8h.html#ab31da35145cd1696e4898c268883c92e">NAV_RENDER_API_CONTEXT_T</a>*&gt; TextureNaviRender::ctx {}</td>
+          <td class="memname">std::map&lt;GLuint, <a class="el" href="render__api_8h.html#ab31da35145cd1696e4898c268883c92e">NAV_RENDER_API_CONTEXT_T</a>*&gt; TextureNaviRender::ctx {}</td>
         </tr>
       </table>
 </div><div class="memdoc">
@@ -692,28 +693,6 @@ Additional Inherited Members</h2></td></tr>
 
 </div>
 </div>
-<a id="a919aea2f2a16350ecf45760cbabb8ff5" name="a919aea2f2a16350ecf45760cbabb8ff5"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a919aea2f2a16350ecf45760cbabb8ff5">&#9670;&#160;</a></span>m_initialized</h2>
-
-<div class="memitem">
-<div class="memproto">
-<table class="mlabels">
-  <tr>
-  <td class="mlabels-left">
-      <table class="memname">
-        <tr>
-          <td class="memname">bool TextureNaviRender::m_initialized {}</td>
-        </tr>
-      </table>
-  </td>
-  <td class="mlabels-right">
-<span class="mlabels"><span class="mlabel">private</span></span>  </td>
-  </tr>
-</table>
-</div><div class="memdoc">
-
-</div>
-</div>
 <a id="a4aaf63679edd90f1b40c9e979be7c372" name="a4aaf63679edd90f1b40c9e979be7c372"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a4aaf63679edd90f1b40c9e979be7c372">&#9670;&#160;</a></span>m_map_base_path</h2>
 
@@ -746,6 +725,28 @@ Additional Inherited Members</h2></td></tr>
           <td class="memname">struct  { ... }  TextureNaviRender::m_render_api</td>
         </tr>
       </table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="a22e842325e566f061c5544ad0ee99088" name="a22e842325e566f061c5544ad0ee99088"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a22e842325e566f061c5544ad0ee99088">&#9670;&#160;</a></span>m_run_enable</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">bool TextureNaviRender::m_run_enable {}</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
 </div><div class="memdoc">
 
 </div>
