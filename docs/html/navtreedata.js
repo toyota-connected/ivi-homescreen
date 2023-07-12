@@ -29,7 +29,8 @@ var NAVTREE =
       [ "Namespace List", "namespaces.html", "namespaces_dup" ],
       [ "Namespace Members", "namespacemembers.html", [
         [ "All", "namespacemembers.html", null ],
-        [ "Variables", "namespacemembers_vars.html", null ]
+        [ "Variables", "namespacemembers_vars.html", null ],
+        [ "Typedefs", "namespacemembers_type.html", null ]
       ] ]
     ] ],
     [ "Classes", "annotated.html", [
@@ -63,12 +64,12 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "accessibility_8cc.html",
-"class_event_timer.html#a241ad4f1924281c07d13575e67a2fd62",
-"class_text_input.html#af03ad181b33121ac0c3aa478fbb85b28",
-"constants_8h.html#a50433327388189c62a199fda01648c1a",
-"libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6aa3ef94389ab73a1180ea959f49e2a595",
-"struct_display.html#a89abb5b703122ecfd342ed5fdab01756",
-"structegl__config__attribute.html#ab791ca50c4d506b9efa7bb74d6582485"
+"class_engine.html#ad1c01469ee628b9d6816bdb3ac20317a",
+"class_text_input.html#acf28461d2a55bcd731991946543bdbfe",
+"compositor__surface__api_8h.html#a224510144776437ca93fbf819e3b674c",
+"gstreamer__egl_8h_source.html",
+"struct_display.html#a4e670aeb7240ae418c8ffce8cadcf1b9",
+"struct_wayland_window.html#a8fe83a2e987c056ac9d61284a66c8367"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronisation';

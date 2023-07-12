@@ -1,14 +1,20 @@
 <map id="/mnt/raid10/stargate/ivi&#45;homescreen/shell/static_plugins/secure_storage/keyring.h" name="/mnt/raid10/stargate/ivi&#45;homescreen/shell/static_plugins/secure_storage/keyring.h">
-<area shape="rect" id="node1" title=" " alt="" coords="243,5,393,75"/>
-<area shape="rect" id="node2" title=" " alt="" coords="133,196,255,221"/>
-<area shape="rect" id="node3" title=" " alt="" coords="26,123,173,148"/>
-<area shape="rect" id="node4" title=" " alt="" coords="197,123,319,148"/>
-<area shape="rect" id="node5" title=" " alt="" coords="343,123,413,148"/>
-<area shape="rect" id="node6" href="$g__hash__table_8h.html" title=" " alt="" coords="437,123,548,148"/>
-<area shape="rect" id="node7" href="$logging_8h.html" title=" " alt="" coords="573,123,647,148"/>
-<area shape="rect" id="node8" title=" " alt="" coords="483,196,553,221"/>
-<area shape="rect" id="node9" href="$dlt_8h.html" title=" " alt="" coords="577,196,643,221"/>
-<area shape="rect" id="node12" title=" " alt="" coords="613,269,748,295"/>
-<area shape="rect" id="node10" href="$libdlt_8h.html" title=" " alt="" coords="511,269,589,295"/>
-<area shape="rect" id="node11" title=" " alt="" coords="519,343,581,368"/>
+<area shape="rect" id="node1" title=" " alt="" coords="295,5,444,75"/>
+<area shape="rect" id="node2" title=" " alt="" coords="5,203,128,229"/>
+<area shape="rect" id="node3" title=" " alt="" coords="77,123,224,148"/>
+<area shape="rect" id="node4" title=" " alt="" coords="249,123,370,148"/>
+<area shape="rect" id="node5" title=" " alt="" coords="395,123,464,148"/>
+<area shape="rect" id="node6" href="$g__hash__table_8h.html" title=" " alt="" coords="489,123,599,148"/>
+<area shape="rect" id="node7" href="$logging_8h.html" title=" " alt="" coords="624,123,699,148"/>
+<area shape="rect" id="node8" title=" " alt="" coords="165,203,235,229"/>
+<area shape="rect" id="node9" title=" " alt="" coords="259,203,376,229"/>
+<area shape="rect" id="node10" title=" " alt="" coords="400,196,547,236"/>
+<area shape="rect" id="node11" title=" " alt="" coords="571,196,723,236"/>
+<area shape="rect" id="node12" title=" " alt="" coords="747,196,882,236"/>
+<area shape="rect" id="node13" title=" " alt="" coords="906,196,1041,236"/>
+<area shape="rect" id="node14" title=" " alt="" coords="1065,203,1178,229"/>
+<area shape="rect" id="node15" href="$constants_8h.html" title=" " alt="" coords="1203,203,1293,229"/>
+<area shape="rect" id="node16" title=" " alt="" coords="1063,291,1143,317"/>
+<area shape="rect" id="node17" title=" " alt="" coords="1167,284,1329,324"/>
+<area shape="rect" id="node18" title=" " alt="" coords="1353,291,1404,317"/>
 </map>

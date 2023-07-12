@@ -9,7 +9,7 @@
 std::shared_ptr<TextureEgl> TextureEgl::sInstance = nullptr;
 
 TextureEgl::~TextureEgl() {
-  DLOG(INFO) << "~TextureEgl";
+  SPDLOG_DEBUG("~TextureEgl");
 }
 
 void TextureEgl::Initialize() {

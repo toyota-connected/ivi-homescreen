@@ -121,6 +121,15 @@ class Engine {
   FlutterEngineResult SetPixelRatio(double pixel_ratio);
 
   /**
+   * @brief Shutsdown Flutter Engine Instance
+   * @return FlutterEngineResult
+   * @retval The result of shutting down the engine
+   * @relation
+   * flutter
+   */
+  FlutterEngineResult Shutdown();
+
+  /**
    * @brief Check if engine is running
    * @return bool
    * @retval true If running
@@ -514,6 +523,9 @@ class Engine {
       m_taskrunner;
 
   FlutterEngineAOTData m_aot_data;
+
+  std::mutex m_queue_lock{};
+  std::shared_ptr<std::queue<std::string>> m_vm_queue{};
 
   /**
    * @brief Load AOT data

@@ -181,44 +181,46 @@ $(document).ready(function(){initNavTree('keyring_8h_source.html',''); initResiz
 <div class="line"><a id="l00123" name="l00123"></a><span class="lineno">  123</span>    rapidjson::Writer&lt;rapidjson::StringBuffer&gt; writer(buffer);</div>
 <div class="line"><a id="l00124" name="l00124"></a><span class="lineno">  124</span>    d.Accept(writer);</div>
 <div class="line"><a id="l00125" name="l00125"></a><span class="lineno">  125</span> </div>
-<div class="line"><a id="l00126" name="l00126"></a><span class="lineno">  126</span>    <span class="keywordtype">bool</span> result = secret_password_storev_sync(</div>
+<div class="line"><a id="l00126" name="l00126"></a><span class="lineno">  126</span>    <span class="keyword">auto</span> res = secret_password_storev_sync (</div>
 <div class="line"><a id="l00127" name="l00127"></a><span class="lineno">  127</span>        &amp;<a class="code hl_variable" href="classsecret_1_1_keyring.html#a0da16a7633feb710b9c1950e94885f80">m_schema</a>, <a class="code hl_variable" href="classsecret_1_1_keyring.html#afc068367a7a3d362a3279f63b2ff2c88">m_attributes</a>.<a class="code hl_function" href="classsecret_1_1_f_hash_table.html#a579f5c45f2200b4ce1cd3b718229704b">getGHashTable</a>(), <span class="keyword">nullptr</span>, <a class="code hl_variable" href="classsecret_1_1_keyring.html#a3d7fab11476ba28fd6bed2b2f0f21151">m_label</a>.c_str(),</div>
 <div class="line"><a id="l00128" name="l00128"></a><span class="lineno">  128</span>        buffer.GetString(), <span class="keyword">nullptr</span>, &amp;errPtr);</div>
 <div class="line"><a id="l00129" name="l00129"></a><span class="lineno">  129</span> </div>
-<div class="line"><a id="l00130" name="l00130"></a><span class="lineno">  130</span>    <span class="keywordflow">if</span> (err) {</div>
-<div class="line"><a id="l00131" name="l00131"></a><span class="lineno">  131</span>      <span class="keywordflow">throw</span> std::runtime_error(err-&gt;message);</div>
-<div class="line"><a id="l00132" name="l00132"></a><span class="lineno">  132</span>    }</div>
-<div class="line"><a id="l00133" name="l00133"></a><span class="lineno">  133</span> </div>
-<div class="line"><a id="l00134" name="l00134"></a><span class="lineno">  134</span>    <span class="keywordflow">return</span> result;</div>
-<div class="line"><a id="l00135" name="l00135"></a><span class="lineno">  135</span>  }</div>
-<div class="line"><a id="l00136" name="l00136"></a><span class="lineno">  136</span> </div>
-<div class="line"><a id="l00144" name="l00144"></a><span class="lineno"><a class="line" href="classsecret_1_1_keyring.html#ae5d4d971795cc2ba3feb49646f0722b7">  144</a></span>  rapidjson::Document <a class="code hl_function" href="classsecret_1_1_keyring.html#ae5d4d971795cc2ba3feb49646f0722b7">readFromKeyring</a>() {</div>
-<div class="line"><a id="l00145" name="l00145"></a><span class="lineno">  145</span>    rapidjson::Document d;</div>
-<div class="line"><a id="l00146" name="l00146"></a><span class="lineno">  146</span>    std::unique_ptr&lt;GError&gt; err = <span class="keyword">nullptr</span>;</div>
-<div class="line"><a id="l00147" name="l00147"></a><span class="lineno">  147</span>    GError* errPtr = err.get();</div>
-<div class="line"><a id="l00148" name="l00148"></a><span class="lineno">  148</span> </div>
-<div class="line"><a id="l00149" name="l00149"></a><span class="lineno">  149</span>    <span class="keyword">const</span> gchar* result = secret_password_lookupv_sync(</div>
-<div class="line"><a id="l00150" name="l00150"></a><span class="lineno">  150</span>        &amp;<a class="code hl_variable" href="classsecret_1_1_keyring.html#a0da16a7633feb710b9c1950e94885f80">m_schema</a>, <a class="code hl_variable" href="classsecret_1_1_keyring.html#afc068367a7a3d362a3279f63b2ff2c88">m_attributes</a>.<a class="code hl_function" href="classsecret_1_1_f_hash_table.html#a579f5c45f2200b4ce1cd3b718229704b">getGHashTable</a>(), <span class="keyword">nullptr</span>, &amp;errPtr);</div>
-<div class="line"><a id="l00151" name="l00151"></a><span class="lineno">  151</span> </div>
-<div class="line"><a id="l00152" name="l00152"></a><span class="lineno">  152</span>    <span class="keywordflow">if</span> (err) {</div>
-<div class="line"><a id="l00153" name="l00153"></a><span class="lineno">  153</span>      <span class="keywordflow">throw</span> std::runtime_error(err-&gt;message);</div>
-<div class="line"><a id="l00154" name="l00154"></a><span class="lineno">  154</span>    }</div>
-<div class="line"><a id="l00155" name="l00155"></a><span class="lineno">  155</span> </div>
-<div class="line"><a id="l00156" name="l00156"></a><span class="lineno">  156</span>    <span class="keywordflow">if</span> (result != <span class="keyword">nullptr</span> &amp;&amp; strcmp(result, <span class="stringliteral">&quot;&quot;</span>) != 0 &amp;&amp;</div>
-<div class="line"><a id="l00157" name="l00157"></a><span class="lineno">  157</span>        !d.Parse(result).HasParseError()) {</div>
-<div class="line"><a id="l00158" name="l00158"></a><span class="lineno">  158</span>      <span class="keywordflow">if</span> (strcmp(result, <span class="stringliteral">&quot;null&quot;</span>) == 0) {</div>
-<div class="line"><a id="l00159" name="l00159"></a><span class="lineno">  159</span>        <span class="keyword">const</span> <span class="keywordtype">char</span>* json = <span class="stringliteral">&quot;{}&quot;</span>;</div>
-<div class="line"><a id="l00160" name="l00160"></a><span class="lineno">  160</span>        d.Parse(json);</div>
-<div class="line"><a id="l00161" name="l00161"></a><span class="lineno">  161</span>      }</div>
-<div class="line"><a id="l00162" name="l00162"></a><span class="lineno">  162</span>      <span class="keywordflow">return</span> d;</div>
-<div class="line"><a id="l00163" name="l00163"></a><span class="lineno">  163</span>    }</div>
-<div class="line"><a id="l00164" name="l00164"></a><span class="lineno">  164</span> </div>
-<div class="line"><a id="l00165" name="l00165"></a><span class="lineno">  165</span>    this-&gt;<a class="code hl_function" href="classsecret_1_1_keyring.html#ae7fa34523c1600a13b3f361c117426f2">storeToKeyring</a>(d);</div>
-<div class="line"><a id="l00166" name="l00166"></a><span class="lineno">  166</span>    <span class="keywordflow">return</span> d;</div>
-<div class="line"><a id="l00167" name="l00167"></a><span class="lineno">  167</span>  }</div>
-<div class="line"><a id="l00168" name="l00168"></a><span class="lineno">  168</span>};</div>
-<div class="line"><a id="l00169" name="l00169"></a><span class="lineno">  169</span> </div>
-<div class="line"><a id="l00170" name="l00170"></a><span class="lineno">  170</span>}  <span class="comment">// namespace secret</span></div>
+<div class="line"><a id="l00130" name="l00130"></a><span class="lineno">  130</span>    <span class="keyword">auto</span> result = <span class="keyword">static_cast&lt;</span><span class="keywordtype">bool</span><span class="keyword">&gt;</span>(res);</div>
+<div class="line"><a id="l00131" name="l00131"></a><span class="lineno">  131</span> </div>
+<div class="line"><a id="l00132" name="l00132"></a><span class="lineno">  132</span>    <span class="keywordflow">if</span> (err) {</div>
+<div class="line"><a id="l00133" name="l00133"></a><span class="lineno">  133</span>      <span class="keywordflow">throw</span> std::runtime_error(err-&gt;message);</div>
+<div class="line"><a id="l00134" name="l00134"></a><span class="lineno">  134</span>    }</div>
+<div class="line"><a id="l00135" name="l00135"></a><span class="lineno">  135</span> </div>
+<div class="line"><a id="l00136" name="l00136"></a><span class="lineno">  136</span>    <span class="keywordflow">return</span> result;</div>
+<div class="line"><a id="l00137" name="l00137"></a><span class="lineno">  137</span>  }</div>
+<div class="line"><a id="l00138" name="l00138"></a><span class="lineno">  138</span> </div>
+<div class="line"><a id="l00146" name="l00146"></a><span class="lineno"><a class="line" href="classsecret_1_1_keyring.html#ae5d4d971795cc2ba3feb49646f0722b7">  146</a></span>  rapidjson::Document <a class="code hl_function" href="classsecret_1_1_keyring.html#ae5d4d971795cc2ba3feb49646f0722b7">readFromKeyring</a>() {</div>
+<div class="line"><a id="l00147" name="l00147"></a><span class="lineno">  147</span>    rapidjson::Document d;</div>
+<div class="line"><a id="l00148" name="l00148"></a><span class="lineno">  148</span>    std::unique_ptr&lt;GError&gt; err = <span class="keyword">nullptr</span>;</div>
+<div class="line"><a id="l00149" name="l00149"></a><span class="lineno">  149</span>    GError* errPtr = err.get();</div>
+<div class="line"><a id="l00150" name="l00150"></a><span class="lineno">  150</span> </div>
+<div class="line"><a id="l00151" name="l00151"></a><span class="lineno">  151</span>    <span class="keyword">const</span> gchar* result = secret_password_lookupv_sync(</div>
+<div class="line"><a id="l00152" name="l00152"></a><span class="lineno">  152</span>        &amp;<a class="code hl_variable" href="classsecret_1_1_keyring.html#a0da16a7633feb710b9c1950e94885f80">m_schema</a>, <a class="code hl_variable" href="classsecret_1_1_keyring.html#afc068367a7a3d362a3279f63b2ff2c88">m_attributes</a>.<a class="code hl_function" href="classsecret_1_1_f_hash_table.html#a579f5c45f2200b4ce1cd3b718229704b">getGHashTable</a>(), <span class="keyword">nullptr</span>, &amp;errPtr);</div>
+<div class="line"><a id="l00153" name="l00153"></a><span class="lineno">  153</span> </div>
+<div class="line"><a id="l00154" name="l00154"></a><span class="lineno">  154</span>    <span class="keywordflow">if</span> (err) {</div>
+<div class="line"><a id="l00155" name="l00155"></a><span class="lineno">  155</span>      <span class="keywordflow">throw</span> std::runtime_error(err-&gt;message);</div>
+<div class="line"><a id="l00156" name="l00156"></a><span class="lineno">  156</span>    }</div>
+<div class="line"><a id="l00157" name="l00157"></a><span class="lineno">  157</span> </div>
+<div class="line"><a id="l00158" name="l00158"></a><span class="lineno">  158</span>    <span class="keywordflow">if</span> (result != <span class="keyword">nullptr</span> &amp;&amp; strcmp(result, <span class="stringliteral">&quot;&quot;</span>) != 0 &amp;&amp;</div>
+<div class="line"><a id="l00159" name="l00159"></a><span class="lineno">  159</span>        !d.Parse(result).HasParseError()) {</div>
+<div class="line"><a id="l00160" name="l00160"></a><span class="lineno">  160</span>      <span class="keywordflow">if</span> (strcmp(result, <span class="stringliteral">&quot;null&quot;</span>) == 0) {</div>
+<div class="line"><a id="l00161" name="l00161"></a><span class="lineno">  161</span>        <span class="keyword">const</span> <span class="keywordtype">char</span>* json = <span class="stringliteral">&quot;{}&quot;</span>;</div>
+<div class="line"><a id="l00162" name="l00162"></a><span class="lineno">  162</span>        d.Parse(json);</div>
+<div class="line"><a id="l00163" name="l00163"></a><span class="lineno">  163</span>      }</div>
+<div class="line"><a id="l00164" name="l00164"></a><span class="lineno">  164</span>      <span class="keywordflow">return</span> d;</div>
+<div class="line"><a id="l00165" name="l00165"></a><span class="lineno">  165</span>    }</div>
+<div class="line"><a id="l00166" name="l00166"></a><span class="lineno">  166</span> </div>
+<div class="line"><a id="l00167" name="l00167"></a><span class="lineno">  167</span>    this-&gt;<a class="code hl_function" href="classsecret_1_1_keyring.html#ae7fa34523c1600a13b3f361c117426f2">storeToKeyring</a>(d);</div>
+<div class="line"><a id="l00168" name="l00168"></a><span class="lineno">  168</span>    <span class="keywordflow">return</span> d;</div>
+<div class="line"><a id="l00169" name="l00169"></a><span class="lineno">  169</span>  }</div>
+<div class="line"><a id="l00170" name="l00170"></a><span class="lineno">  170</span>};</div>
+<div class="line"><a id="l00171" name="l00171"></a><span class="lineno">  171</span> </div>
+<div class="line"><a id="l00172" name="l00172"></a><span class="lineno">  172</span>}  <span class="comment">// namespace secret</span></div>
 <div class="ttc" id="aclasssecret_1_1_f_hash_table_html"><div class="ttname"><a href="classsecret_1_1_f_hash_table.html">secret::FHashTable</a></div><div class="ttdef"><b>Definition:</b> g_hash_table.h:23</div></div>
 <div class="ttc" id="aclasssecret_1_1_f_hash_table_html_a579f5c45f2200b4ce1cd3b718229704b"><div class="ttname"><a href="classsecret_1_1_f_hash_table.html#a579f5c45f2200b4ce1cd3b718229704b">secret::FHashTable::getGHashTable</a></div><div class="ttdeci">GHashTable * getGHashTable()</div><div class="ttdoc">Get GHashTable.</div><div class="ttdef"><b>Definition:</b> g_hash_table.h:36</div></div>
 <div class="ttc" id="aclasssecret_1_1_keyring_html"><div class="ttname"><a href="classsecret_1_1_keyring.html">secret::Keyring</a></div><div class="ttdef"><b>Definition:</b> keyring.h:28</div></div>
@@ -229,7 +231,7 @@ $(document).ready(function(){initNavTree('keyring_8h_source.html',''); initResiz
 <div class="ttc" id="aclasssecret_1_1_keyring_html_a81e45a4f53248e13ff894e6edf5d65ca"><div class="ttname"><a href="classsecret_1_1_keyring.html#a81e45a4f53248e13ff894e6edf5d65ca">secret::Keyring::deleteItem</a></div><div class="ttdeci">void deleteItem(const char *key)</div><div class="ttdoc">Delete key and value from keyring.</div><div class="ttdef"><b>Definition:</b> keyring.h:86</div></div>
 <div class="ttc" id="aclasssecret_1_1_keyring_html_a9c3ae148822a6bb87fc7f034775f060d"><div class="ttname"><a href="classsecret_1_1_keyring.html#a9c3ae148822a6bb87fc7f034775f060d">secret::Keyring::Keyring</a></div><div class="ttdeci">Keyring(const char *_label=&quot;default&quot;)</div><div class="ttdef"><b>Definition:</b> keyring.h:34</div></div>
 <div class="ttc" id="aclasssecret_1_1_keyring_html_acf501dd7c28f26d3a679a42dcea4b6ef"><div class="ttname"><a href="classsecret_1_1_keyring.html#acf501dd7c28f26d3a679a42dcea4b6ef">secret::Keyring::getItem</a></div><div class="ttdeci">std::string getItem(const char *key)</div><div class="ttdoc">Get the string associate with a key from keyring.</div><div class="ttdef"><b>Definition:</b> keyring.h:71</div></div>
-<div class="ttc" id="aclasssecret_1_1_keyring_html_ae5d4d971795cc2ba3feb49646f0722b7"><div class="ttname"><a href="classsecret_1_1_keyring.html#ae5d4d971795cc2ba3feb49646f0722b7">secret::Keyring::readFromKeyring</a></div><div class="ttdeci">rapidjson::Document readFromKeyring()</div><div class="ttdoc">Lookup a password in the secret service.</div><div class="ttdef"><b>Definition:</b> keyring.h:144</div></div>
+<div class="ttc" id="aclasssecret_1_1_keyring_html_ae5d4d971795cc2ba3feb49646f0722b7"><div class="ttname"><a href="classsecret_1_1_keyring.html#ae5d4d971795cc2ba3feb49646f0722b7">secret::Keyring::readFromKeyring</a></div><div class="ttdeci">rapidjson::Document readFromKeyring()</div><div class="ttdoc">Lookup a password in the secret service.</div><div class="ttdef"><b>Definition:</b> keyring.h:146</div></div>
 <div class="ttc" id="aclasssecret_1_1_keyring_html_ae7fa34523c1600a13b3f361c117426f2"><div class="ttname"><a href="classsecret_1_1_keyring.html#ae7fa34523c1600a13b3f361c117426f2">secret::Keyring::storeToKeyring</a></div><div class="ttdeci">bool storeToKeyring(rapidjson::Document &amp;d)</div><div class="ttdoc">Store a password in the secret service.</div><div class="ttdef"><b>Definition:</b> keyring.h:117</div></div>
 <div class="ttc" id="aclasssecret_1_1_keyring_html_afc068367a7a3d362a3279f63b2ff2c88"><div class="ttname"><a href="classsecret_1_1_keyring.html#afc068367a7a3d362a3279f63b2ff2c88">secret::Keyring::m_attributes</a></div><div class="ttdeci">FHashTable m_attributes</div><div class="ttdef"><b>Definition:</b> keyring.h:29</div></div>
 <div class="ttc" id="ag__hash__table_8h_html"><div class="ttname"><a href="g__hash__table_8h.html">g_hash_table.h</a></div></div>

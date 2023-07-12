@@ -96,365 +96,140 @@ $(document).ready(function(){initNavTree('logging_8h.html',''); initResizable();
 
 <div class="header">
   <div class="summary">
-<a href="#nested-classes">Classes</a> &#124;
-<a href="#define-members">Macros</a> &#124;
-<a href="#func-members">Functions</a>  </div>
+<a href="#func-members">Functions</a> &#124;
+<a href="#var-members">Variables</a>  </div>
   <div class="headertitle"><div class="title">logging.h File Reference</div></div>
 </div><!--header-->
 <div class="contents">
 <div class="textblock"><code>#include &lt;sstream&gt;</code><br />
-<code>#include &quot;<a class="el" href="dlt_8h_source.html">dlt/dlt.h</a>&quot;</code><br />
-<code>#include &quot;flutter/fml/macros.h&quot;</code><br />
+<code>#include &quot;spdlog/cfg/env.h&quot;</code><br />
+<code>#include &quot;spdlog/sinks/callback_sink.h&quot;</code><br />
+<code>#include &quot;spdlog/sinks/ringbuffer_sink.h&quot;</code><br />
+<code>#include &quot;spdlog/sinks/stdout_color_sinks.h&quot;</code><br />
+<code>#include &quot;spdlog/sinks/stdout_sinks.h&quot;</code><br />
+<code>#include &quot;spdlog/spdlog.h&quot;</code><br />
+<code>#include &quot;<a class="el" href="constants_8h_source.html">constants.h</a>&quot;</code><br />
 </div><div class="textblock"><div class="dynheader">
 Include dependency graph for logging.h:</div>
 <div class="dyncontent">
-<div class="center"><iframe scrolling="no" frameborder="0" src="logging_8h__incl.svg" width="276" height="286"><p><b>This browser is not able to show SVG: try Firefox, Chrome, Safari, or Opera instead.</b></p></iframe></div>
+<div class="center"><iframe scrolling="no" frameborder="0" src="logging_8h__incl.svg" width="1250" height="242"><p><b>This browser is not able to show SVG: try Firefox, Chrome, Safari, or Opera instead.</b></p></iframe>
+</div>
 </div>
 </div><div class="textblock"><div class="dynheader">
 This graph shows which files directly or indirectly include this file:</div>
 <div class="dyncontent">
-<div class="center"><iframe scrolling="no" frameborder="0" src="logging_8h__dep__incl.svg" width="4943" height="770"><p><b>This browser is not able to show SVG: try Firefox, Chrome, Safari, or Opera instead.</b></p></iframe></div>
+<div class="center"><iframe scrolling="no" frameborder="0" src="logging_8h__dep__incl.svg" width="5228" height="770"><p><b>This browser is not able to show SVG: try Firefox, Chrome, Safari, or Opera instead.</b></p></iframe>
+</div>
 </div>
 </div>
 <p><a href="logging_8h_source.html">Go to the source code of this file.</a></p>
 <table class="memberdecls">
-<tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="nested-classes" name="nested-classes"></a>
-Classes</h2></td></tr>
-<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">class &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_log_message_void.html">LogMessageVoid</a></td></tr>
-<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">class &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_log_message.html">LogMessage</a></td></tr>
-<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
-</table><table class="memberdecls">
-<tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="define-members" name="define-members"></a>
-Macros</h2></td></tr>
-<tr class="memitem:a0149a6226a959330c2f215ae755c389a"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a0149a6226a959330c2f215ae755c389a">LOG_STREAM</a>(severity)</td></tr>
-<tr class="separator:a0149a6226a959330c2f215ae755c389a"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a94ae03353d79e045db6454206d2b8f91"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a>(stream,  condition)&#160;&#160;&#160;  !(condition) ? (void)0 : <a class="el" href="class_log_message_void.html">LogMessageVoid</a>() &amp; (stream)</td></tr>
-<tr class="separator:a94ae03353d79e045db6454206d2b8f91"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:aaa306112ebe717767675ee2b15681114"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#aaa306112ebe717767675ee2b15681114">EAT_STREAM_PARAMETERS</a>(ignored)</td></tr>
-<tr class="separator:aaa306112ebe717767675ee2b15681114"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:aef0acce046f9f20622cecbbaf7118e61"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#aef0acce046f9f20622cecbbaf7118e61">LOG_IS_ON</a>(severity)&#160;&#160;&#160;  (<a class="el" href="logging_8cc.html#a0e2c60c5a702b547f0ccf8a687a8b108">ShouldCreateLogMessage</a>(DltLogLevelType::LOG_##severity))</td></tr>
-<tr class="separator:aef0acce046f9f20622cecbbaf7118e61"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:accad43a85d781d53381cd53a9894b6ae"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#accad43a85d781d53381cd53a9894b6ae">LOG</a>(severity)&#160;&#160;&#160;<a class="el" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a>(<a class="el" href="logging_8h.html#a0149a6226a959330c2f215ae755c389a">LOG_STREAM</a>(severity), <a class="el" href="logging_8h.html#aef0acce046f9f20622cecbbaf7118e61">LOG_IS_ON</a>(severity))</td></tr>
-<tr class="separator:accad43a85d781d53381cd53a9894b6ae"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a3e1cfef60e774a81f30eaddf26a3a274"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a3e1cfef60e774a81f30eaddf26a3a274">CHECK</a>(condition)</td></tr>
-<tr class="separator:a3e1cfef60e774a81f30eaddf26a3a274"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:af6bf96c798677e654c069c0f6939d894"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#af6bf96c798677e654c069c0f6939d894">VLOG_IS_ON</a>(verbose_level)&#160;&#160;&#160;((verbose_level) &lt;= <a class="el" href="logging_8h.html#aa446051d01c17fdd2e38aa7cda00a284">GetVlogVerbosity</a>())</td></tr>
-<tr class="separator:af6bf96c798677e654c069c0f6939d894"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:aa3e0a8a0e13bfe73c54ac13b126baa44"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#aa3e0a8a0e13bfe73c54ac13b126baa44">VLOG_STREAM</a>(verbose_level)&#160;&#160;&#160;  <a class="el" href="class_log_message.html">LogMessage</a>(-verbose_level, __FILE__, __LINE__, nullptr).stream()</td></tr>
-<tr class="separator:aa3e0a8a0e13bfe73c54ac13b126baa44"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a0f383369246b98205c4c67a144b40164"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a0f383369246b98205c4c67a144b40164">VLOG</a>(verbose_level)&#160;&#160;&#160;  <a class="el" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a>(<a class="el" href="logging_8h.html#aa3e0a8a0e13bfe73c54ac13b126baa44">VLOG_STREAM</a>(verbose_level), <a class="el" href="logging_8h.html#af6bf96c798677e654c069c0f6939d894">VLOG_IS_ON</a>(verbose_level))</td></tr>
-<tr class="separator:a0f383369246b98205c4c67a144b40164"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a30c3e3c313489ab5e42bb12fcfcc5968"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a30c3e3c313489ab5e42bb12fcfcc5968">DLOG</a>(severity)&#160;&#160;&#160;<a class="el" href="logging_8h.html#accad43a85d781d53381cd53a9894b6ae">LOG</a>(severity)</td></tr>
-<tr class="separator:a30c3e3c313489ab5e42bb12fcfcc5968"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ae17f8119c108cf3070bad3449c7e0006"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#ae17f8119c108cf3070bad3449c7e0006">DCHECK</a>(condition)&#160;&#160;&#160;<a class="el" href="logging_8h.html#a3e1cfef60e774a81f30eaddf26a3a274">CHECK</a>(condition)</td></tr>
-<tr class="separator:ae17f8119c108cf3070bad3449c7e0006"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a0bc63b24b654ca433be7b97a3edde132"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a0bc63b24b654ca433be7b97a3edde132">UNREACHABLE</a>()</td></tr>
-<tr class="separator:a0bc63b24b654ca433be7b97a3edde132"><td class="memSeparator" colspan="2">&#160;</td></tr>
-</table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="func-members" name="func-members"></a>
 Functions</h2></td></tr>
-<tr class="memitem:aa446051d01c17fdd2e38aa7cda00a284"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#aa446051d01c17fdd2e38aa7cda00a284">GetVlogVerbosity</a> ()</td></tr>
-<tr class="separator:aa446051d01c17fdd2e38aa7cda00a284"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a0e2c60c5a702b547f0ccf8a687a8b108"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a0e2c60c5a702b547f0ccf8a687a8b108">ShouldCreateLogMessage</a> (<a class="el" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a> severity)</td></tr>
-<tr class="separator:a0e2c60c5a702b547f0ccf8a687a8b108"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a2405e8217329337ab72a85fba66f0dd1"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a2405e8217329337ab72a85fba66f0dd1">KillProcess</a> ()</td></tr>
-<tr class="separator:a2405e8217329337ab72a85fba66f0dd1"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a3fce3bd8739fb922e9f155c8d0b43fca"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a3fce3bd8739fb922e9f155c8d0b43fca">LoggingPrologue</a> ()</td></tr>
+<tr class="separator:a3fce3bd8739fb922e9f155c8d0b43fca"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ad72dfaf8e23c74affe6e1ee71a97f72e"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#ad72dfaf8e23c74affe6e1ee71a97f72e">LoggingEpilogue</a> ()</td></tr>
+<tr class="separator:ad72dfaf8e23c74affe6e1ee71a97f72e"><td class="memSeparator" colspan="2">&#160;</td></tr>
+</table><table class="memberdecls">
+<tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="var-members" name="var-members"></a>
+Variables</h2></td></tr>
+<tr class="memitem:ad5673eba27ce3f71180bfb32308b130b"><td class="memItemLeft" align="right" valign="top">static std::shared_ptr&lt; spdlog::logger &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a> {}</td></tr>
+<tr class="separator:ad5673eba27ce3f71180bfb32308b130b"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a8491e3707e98f464e198a5c5eb1aaf95"><td class="memItemLeft" align="right" valign="top">static std::shared_ptr&lt; spdlog::sinks::ansicolor_stdout_sink&lt; spdlog::details::console_mutex &gt; &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a></td></tr>
+<tr class="separator:a8491e3707e98f464e198a5c5eb1aaf95"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
-<h2 class="groupheader">Macro Definition Documentation</h2>
-<a id="a3e1cfef60e774a81f30eaddf26a3a274" name="a3e1cfef60e774a81f30eaddf26a3a274"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a3e1cfef60e774a81f30eaddf26a3a274">&#9670;&#160;</a></span>CHECK</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define CHECK</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">condition</td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">  <a class="code hl_define" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a>(                                                               \</div>
-<div class="line">      <a class="code hl_class" href="class_log_message.html">LogMessage</a>(<a class="code hl_enumvalue" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6ac630750884d91cb9767ef2200bbb048b">DltLogLevelType::LOG_FATAL</a>, __FILE__, __LINE__, #condition) \</div>
-<div class="line">          .stream(),                                                         \</div>
-<div class="line">      !(condition))</div>
-<div class="ttc" id="aclass_log_message_html"><div class="ttname"><a href="class_log_message.html">LogMessage</a></div><div class="ttdef"><b>Definition:</b> logging.h:18</div></div>
-<div class="ttc" id="alibdlt_8h_html_af69fa5fab3efb6780bb9d9ec2535cbb6ac630750884d91cb9767ef2200bbb048b"><div class="ttname"><a href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6ac630750884d91cb9767ef2200bbb048b">LOG_FATAL</a></div><div class="ttdeci">@ LOG_FATAL</div><div class="ttdef"><b>Definition:</b> libdlt.h:49</div></div>
-<div class="ttc" id="alogging_8h_html_a94ae03353d79e045db6454206d2b8f91"><div class="ttname"><a href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a></div><div class="ttdeci">#define LAZY_STREAM(stream, condition)</div><div class="ttdef"><b>Definition:</b> logging.h:50</div></div>
-</div><!-- fragment -->
-</div>
-</div>
-<a id="ae17f8119c108cf3070bad3449c7e0006" name="ae17f8119c108cf3070bad3449c7e0006"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ae17f8119c108cf3070bad3449c7e0006">&#9670;&#160;</a></span>DCHECK</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define DCHECK</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">condition</td><td>)</td>
-          <td>&#160;&#160;&#160;<a class="el" href="logging_8h.html#a3e1cfef60e774a81f30eaddf26a3a274">CHECK</a>(condition)</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="a30c3e3c313489ab5e42bb12fcfcc5968" name="a30c3e3c313489ab5e42bb12fcfcc5968"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a30c3e3c313489ab5e42bb12fcfcc5968">&#9670;&#160;</a></span>DLOG</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define DLOG</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">severity</td><td>)</td>
-          <td>&#160;&#160;&#160;<a class="el" href="logging_8h.html#accad43a85d781d53381cd53a9894b6ae">LOG</a>(severity)</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="aaa306112ebe717767675ee2b15681114" name="aaa306112ebe717767675ee2b15681114"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#aaa306112ebe717767675ee2b15681114">&#9670;&#160;</a></span>EAT_STREAM_PARAMETERS</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define EAT_STREAM_PARAMETERS</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">ignored</td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">  <span class="keyword">true</span> || (ignored)                    \</div>
-<div class="line">      ? (<span class="keywordtype">void</span>)0                        \</div>
-<div class="line">      : <a class="code hl_class" href="class_log_message_void.html">LogMessageVoid</a>() &amp;             \</div>
-<div class="line">            LogMessage(<a class="code hl_enumvalue" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6ac630750884d91cb9767ef2200bbb048b">DltLogLevelType::LOG_FATAL</a>, 0, 0, <span class="keyword">nullptr</span>).stream()</div>
-<div class="ttc" id="aclass_log_message_void_html"><div class="ttname"><a href="class_log_message_void.html">LogMessageVoid</a></div><div class="ttdef"><b>Definition:</b> logging.h:13</div></div>
-</div><!-- fragment -->
-</div>
-</div>
-<a id="a94ae03353d79e045db6454206d2b8f91" name="a94ae03353d79e045db6454206d2b8f91"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a94ae03353d79e045db6454206d2b8f91">&#9670;&#160;</a></span>LAZY_STREAM</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define LAZY_STREAM</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">stream, </td>
-        </tr>
-        <tr>
-          <td class="paramkey"></td>
-          <td></td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">condition&#160;</td>
-        </tr>
-        <tr>
-          <td></td>
-          <td>)</td>
-          <td></td><td>&#160;&#160;&#160;  !(condition) ? (void)0 : <a class="el" href="class_log_message_void.html">LogMessageVoid</a>() &amp; (stream)</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="accad43a85d781d53381cd53a9894b6ae" name="accad43a85d781d53381cd53a9894b6ae"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#accad43a85d781d53381cd53a9894b6ae">&#9670;&#160;</a></span>LOG</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define LOG</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">severity</td><td>)</td>
-          <td>&#160;&#160;&#160;<a class="el" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a>(<a class="el" href="logging_8h.html#a0149a6226a959330c2f215ae755c389a">LOG_STREAM</a>(severity), <a class="el" href="logging_8h.html#aef0acce046f9f20622cecbbaf7118e61">LOG_IS_ON</a>(severity))</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="aef0acce046f9f20622cecbbaf7118e61" name="aef0acce046f9f20622cecbbaf7118e61"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#aef0acce046f9f20622cecbbaf7118e61">&#9670;&#160;</a></span>LOG_IS_ON</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define LOG_IS_ON</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">severity</td><td>)</td>
-          <td>&#160;&#160;&#160;  (<a class="el" href="logging_8cc.html#a0e2c60c5a702b547f0ccf8a687a8b108">ShouldCreateLogMessage</a>(DltLogLevelType::LOG_##severity))</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="a0149a6226a959330c2f215ae755c389a" name="a0149a6226a959330c2f215ae755c389a"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a0149a6226a959330c2f215ae755c389a">&#9670;&#160;</a></span>LOG_STREAM</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define LOG_STREAM</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">severity</td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">  <a class="code hl_class" href="class_log_message.html">LogMessage</a>(DltLogLevelType::LOG_##severity, __FILE__, __LINE__, <span class="keyword">nullptr</span>) \</div>
-<div class="line">      .<a class="code hl_function" href="class_log_message.html#a19c6efe25cab21dc823fdf141a1a9359">stream</a>()</div>
-<div class="ttc" id="aclass_log_message_html_a19c6efe25cab21dc823fdf141a1a9359"><div class="ttname"><a href="class_log_message.html#a19c6efe25cab21dc823fdf141a1a9359">LogMessage::stream</a></div><div class="ttdeci">std::ostream &amp; stream()</div><div class="ttdef"><b>Definition:</b> logging.h:26</div></div>
-</div><!-- fragment -->
-</div>
-</div>
-<a id="a0bc63b24b654ca433be7b97a3edde132" name="a0bc63b24b654ca433be7b97a3edde132"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a0bc63b24b654ca433be7b97a3edde132">&#9670;&#160;</a></span>UNREACHABLE</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define UNREACHABLE</td>
-          <td>(</td>
-          <td class="paramname"></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">  {                                            \</div>
-<div class="line">    LOG(ERROR) &lt;&lt; <span class="stringliteral">&quot;Reached unreachable code.&quot;</span>; \</div>
-<div class="line">    KillProcess();                             \</div>
-<div class="line">  }</div>
-</div><!-- fragment -->
-</div>
-</div>
-<a id="a0f383369246b98205c4c67a144b40164" name="a0f383369246b98205c4c67a144b40164"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a0f383369246b98205c4c67a144b40164">&#9670;&#160;</a></span>VLOG</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define VLOG</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">verbose_level</td><td>)</td>
-          <td>&#160;&#160;&#160;  <a class="el" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">LAZY_STREAM</a>(<a class="el" href="logging_8h.html#aa3e0a8a0e13bfe73c54ac13b126baa44">VLOG_STREAM</a>(verbose_level), <a class="el" href="logging_8h.html#af6bf96c798677e654c069c0f6939d894">VLOG_IS_ON</a>(verbose_level))</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="af6bf96c798677e654c069c0f6939d894" name="af6bf96c798677e654c069c0f6939d894"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#af6bf96c798677e654c069c0f6939d894">&#9670;&#160;</a></span>VLOG_IS_ON</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define VLOG_IS_ON</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">verbose_level</td><td>)</td>
-          <td>&#160;&#160;&#160;((verbose_level) &lt;= <a class="el" href="logging_8h.html#aa446051d01c17fdd2e38aa7cda00a284">GetVlogVerbosity</a>())</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
-<a id="aa3e0a8a0e13bfe73c54ac13b126baa44" name="aa3e0a8a0e13bfe73c54ac13b126baa44"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#aa3e0a8a0e13bfe73c54ac13b126baa44">&#9670;&#160;</a></span>VLOG_STREAM</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define VLOG_STREAM</td>
-          <td>(</td>
-          <td class="paramtype">&#160;</td>
-          <td class="paramname">verbose_level</td><td>)</td>
-          <td>&#160;&#160;&#160;  <a class="el" href="class_log_message.html">LogMessage</a>(-verbose_level, __FILE__, __LINE__, nullptr).stream()</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-</div>
-</div>
 <h2 class="groupheader">Function Documentation</h2>
-<a id="aa446051d01c17fdd2e38aa7cda00a284" name="aa446051d01c17fdd2e38aa7cda00a284"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#aa446051d01c17fdd2e38aa7cda00a284">&#9670;&#160;</a></span>GetVlogVerbosity()</h2>
+<a id="ad72dfaf8e23c74affe6e1ee71a97f72e" name="ad72dfaf8e23c74affe6e1ee71a97f72e"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ad72dfaf8e23c74affe6e1ee71a97f72e">&#9670;&#160;</a></span>LoggingEpilogue()</h2>
 
 <div class="memitem">
 <div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
       <table class="memname">
         <tr>
-          <td class="memname">int GetVlogVerbosity </td>
+          <td class="memname">void LoggingEpilogue </td>
           <td>(</td>
           <td class="paramname"></td><td>)</td>
           <td></td>
         </tr>
       </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">inline</span></span>  </td>
+  </tr>
+</table>
 </div><div class="memdoc">
 
 </div>
 </div>
-<a id="a2405e8217329337ab72a85fba66f0dd1" name="a2405e8217329337ab72a85fba66f0dd1"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a2405e8217329337ab72a85fba66f0dd1">&#9670;&#160;</a></span>KillProcess()</h2>
+<a id="a3fce3bd8739fb922e9f155c8d0b43fca" name="a3fce3bd8739fb922e9f155c8d0b43fca"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a3fce3bd8739fb922e9f155c8d0b43fca">&#9670;&#160;</a></span>LoggingPrologue()</h2>
 
 <div class="memitem">
 <div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
       <table class="memname">
         <tr>
-          <td class="memname">void KillProcess </td>
+          <td class="memname">void LoggingPrologue </td>
           <td>(</td>
           <td class="paramname"></td><td>)</td>
           <td></td>
         </tr>
       </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">inline</span></span>  </td>
+  </tr>
+</table>
 </div><div class="memdoc">
 
 </div>
 </div>
-<a id="a0e2c60c5a702b547f0ccf8a687a8b108" name="a0e2c60c5a702b547f0ccf8a687a8b108"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a0e2c60c5a702b547f0ccf8a687a8b108">&#9670;&#160;</a></span>ShouldCreateLogMessage()</h2>
+<h2 class="groupheader">Variable Documentation</h2>
+<a id="a8491e3707e98f464e198a5c5eb1aaf95" name="a8491e3707e98f464e198a5c5eb1aaf95"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a8491e3707e98f464e198a5c5eb1aaf95">&#9670;&#160;</a></span>gConsoleSink</h2>
 
 <div class="memitem">
 <div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
       <table class="memname">
         <tr>
-          <td class="memname">bool ShouldCreateLogMessage </td>
-          <td>(</td>
-          <td class="paramtype"><a class="el" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a>&#160;</td>
-          <td class="paramname"><em>severity</em></td><td>)</td>
-          <td></td>
+          <td class="memname">std::shared_ptr&lt; spdlog::sinks::ansicolor_stdout_sink&lt;spdlog::details::console_mutex&gt; &gt; gConsoleSink</td>
         </tr>
       </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">static</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="ad5673eba27ce3f71180bfb32308b130b" name="ad5673eba27ce3f71180bfb32308b130b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ad5673eba27ce3f71180bfb32308b130b">&#9670;&#160;</a></span>gLogger</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">std::shared_ptr&lt;spdlog::logger&gt; gLogger {}</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">static</span></span>  </td>
+  </tr>
+</table>
 </div><div class="memdoc">
 
 </div>

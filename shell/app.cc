@@ -27,7 +27,7 @@ App::App(const std::vector<Configuration::Config>& configs)
                                                   configs[0].wayland_event_mask,
                                                   configs[0].cursor_theme,
                                                   configs)) {
-  DLOG(INFO) << "+App::App";
+  SPDLOG_DEBUG("+App::App");
   bool found_view_with_bg = false;
 
   size_t index = 0;
@@ -48,7 +48,7 @@ App::App(const std::vector<Configuration::Config>& configs)
   if (found_view_with_bg)
     m_wayland_display->AglShellDoReady();
 
-  DLOG(INFO) << "-App::App";
+  SPDLOG_DEBUG("-App::App");
 }
 
 int App::Loop() {

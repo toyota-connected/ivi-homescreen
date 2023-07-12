@@ -58,8 +58,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             return b->MakeResourceCurrent();
           },
           .fbo_reset_after_present = true,
-          .gl_proc_resolver = [](void* userdata, const char* name) -> void* {
-            (void)userdata;
+          .gl_proc_resolver = [](void* /* userdata */, const char* name) -> void* {
             return GlProcessResolver::GetInstance().process_resolver(name);
           },
           .gl_external_texture_frame_callback =
@@ -192,18 +191,17 @@ FlutterCompositor WaylandEglBackend::GetCompositorConfig() {
 }
 
 void WaylandEglBackend::Resize(void* user_data,
-                               size_t index,
+                               size_t /* index */,
                                Engine* engine,
                                int32_t width,
                                int32_t height) {
-  (void)index;
   auto b = reinterpret_cast<WaylandEglBackend*>(user_data);
   if (b->m_egl_window) {
     if (engine) {
       auto result = engine->SetWindowSize(static_cast<size_t>(height),
                                           static_cast<size_t>(width));
       if (result != kSuccess) {
-        LOG(ERROR) << "Failed to set Flutter Engine Window Size";
+        spdlog::error("Failed to set Flutter Engine Window Size");
       }
     }
     wl_egl_window_resize(b->m_egl_window, width, height, 0, 0);
@@ -211,11 +209,10 @@ void WaylandEglBackend::Resize(void* user_data,
 }
 
 void WaylandEglBackend::CreateSurface(void* user_data,
-                                      size_t index,
+                                      size_t /* index */,
                                       wl_surface* surface,
                                       int32_t width,
                                       int32_t height) {
-  (void)index;
   auto b = reinterpret_cast<WaylandEglBackend*>(user_data);
   b->m_egl_window = wl_egl_window_create(surface, width, height);
   b->m_egl_surface = b->create_egl_surface(b->m_egl_window, nullptr);

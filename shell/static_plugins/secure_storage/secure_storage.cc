@@ -93,35 +93,35 @@ void SecureStorage::OnPlatformMessage(const FlutterPlatformMessage* message,
   }
 
   if (method == kWrite) {
-    DLOG(INFO) << "secure_storage: [Write] key: " << keyString
-               << ", value: " << valueString;
+    SPDLOG_DEBUG("secure_storage: [Write] key: {}, value: {}", keyString,
+                 valueString);
     write(keyString.c_str(), valueString.c_str());
     auto val = flutter::EncodableValue(true);
     result = codec.EncodeSuccessEnvelope(&val);
   } else if (method == kRead) {
-    DLOG(INFO) << "secure_storage: [Read] key: " << keyString;
+    SPDLOG_DEBUG("secure_storage: [Read] key: {}", keyString);
     auto val = read(keyString.c_str());
     result = codec.EncodeSuccessEnvelope(&val);
   } else if (method == kReadAll) {
-    DLOG(INFO) << "secure_storage: [ReadAll]";
+    SPDLOG_DEBUG("secure_storage: [ReadAll]");
     auto val = readAll();
     result = codec.EncodeSuccessEnvelope(&val);
   } else if (method == kDelete) {
-    DLOG(INFO) << "secure_storage: [Delete]";
+    SPDLOG_DEBUG("secure_storage: [Delete]");
     deleteIt(keyString.c_str());
     auto val = flutter::EncodableValue(true);
     result = codec.EncodeSuccessEnvelope(&val);
   } else if (method == kDeleteAll) {
-    DLOG(INFO) << "secure_storage: [DeleteAll]";
+    SPDLOG_DEBUG("secure_storage: [DeleteAll]");
     deleteAll();
     auto val = flutter::EncodableValue(true);
     result = codec.EncodeSuccessEnvelope(&val);
   } else if (method == kContainsKey) {
-    DLOG(INFO) << "secure_storage: [ContainsKey]";
+    SPDLOG_DEBUG("secure_storage: [ContainsKey]");
     auto val = containsKey(keyString.c_str());
     result = codec.EncodeSuccessEnvelope(&val);
   } else {
-    DLOG(ERROR) << "secure_storage: " << method << " is unhandled";
+    spdlog::error("secure_storage: {} is unhandled", method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),

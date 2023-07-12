@@ -28,6 +28,7 @@ var class_engine =
     [ "SendPointerEvents", "class_engine.html#ab575a2587495e5e5e7cd9dd62b78105b", null ],
     [ "SetPixelRatio", "class_engine.html#aacdb67e10d0b80a1fea7b451ee588126", null ],
     [ "SetWindowSize", "class_engine.html#a89f438c8bdcf7d05e525cf9d0d40e583", null ],
+    [ "Shutdown", "class_engine.html#a2fb1cc651d3365da73cd5050699b81ec", null ],
     [ "TextureCreate", "class_engine.html#a223526d8618bb0024f99ca8122066407", null ],
     [ "TextureDisable", "class_engine.html#a90745cd51061b0eeff37e651b4cbb3e0", null ],
     [ "TextureDispose", "class_engine.html#a26ca317d2f6f02c5e29d630961d796c7", null ],
@@ -58,8 +59,10 @@ var class_engine =
     [ "m_prev_pixel_ratio", "class_engine.html#a3a5b3536302bd013bc6699badbd3bc62", null ],
     [ "m_prev_width", "class_engine.html#a501b288cde3eb19834ed42cefc6214b1", null ],
     [ "m_proc_table", "class_engine.html#a035a26c0938e5814c03a26ce1a342437", null ],
+    [ "m_queue_lock", "class_engine.html#a0883658e1311ec80369b52ad549cf06b", null ],
     [ "m_running", "class_engine.html#a591388ed76cd76bcd399265621c245f8", null ],
     [ "m_taskrunner", "class_engine.html#a5a28336993ee67cc6cba7e6b27f1d0db", null ],
     [ "m_texture_registry", "class_engine.html#a808da24bf4fcbca89a3a186320abdcb8", null ],
-    [ "m_view", "class_engine.html#a0412693d3bb0e6dd9599431ba502b09a", null ]
+    [ "m_view", "class_engine.html#a0412693d3bb0e6dd9599431ba502b09a", null ],
+    [ "m_vm_queue", "class_engine.html#a1298d9d16dc40308e415ab8f09236c00", null ]
 ];

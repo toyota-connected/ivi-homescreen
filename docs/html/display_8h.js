@@ -3,6 +3,7 @@ var display_8h =
     [ "Display", "struct_display.html", "struct_display" ],
     [ "Display::agl", "struct_display_1_1agl.html", "struct_display_1_1agl" ],
     [ "Display::ivi_shell", "struct_display_1_1ivi__shell.html", "struct_display_1_1ivi__shell" ],
+    [ "Display::wayland_event_mask", "struct_display_1_1wayland__event__mask.html", "struct_display_1_1wayland__event__mask" ],
     [ "Display::output_info", "struct_display_1_1output__info.html", "struct_display_1_1output__info" ],
     [ "Display::pointer_event", "struct_display_1_1pointer__event.html", "struct_display_1_1pointer__event" ],
     [ "Display::pointer", "struct_display_1_1pointer.html", "struct_display_1_1pointer" ],

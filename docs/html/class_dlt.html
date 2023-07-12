@@ -108,12 +108,16 @@ $(document).ready(function(){initNavTree('class_dlt.html',''); initResizable(); 
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-static-methods" name="pub-static-methods"></a>
 Static Public Member Functions</h2></td></tr>
 <tr class="memitem:a5ae376652b380bd10a6de1e4d3c2c281"><td class="memItemLeft" align="right" valign="top">static bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_dlt.html#a5ae376652b380bd10a6de1e4d3c2c281">IsSupported</a> ()</td></tr>
+<tr class="memdesc:a5ae376652b380bd10a6de1e4d3c2c281"><td class="mdescLeft">&#160;</td><td class="mdescRight">Check if DLT is supported on the current platform.  <a href="class_dlt.html#a5ae376652b380bd10a6de1e4d3c2c281">More...</a><br /></td></tr>
 <tr class="separator:a5ae376652b380bd10a6de1e4d3c2c281"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a89633185f08187508131a94b5d0e1e3d"><td class="memItemLeft" align="right" valign="top">static bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_dlt.html#a89633185f08187508131a94b5d0e1e3d">Register</a> ()</td></tr>
+<tr class="memdesc:a89633185f08187508131a94b5d0e1e3d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Register DLT context.  <a href="class_dlt.html#a89633185f08187508131a94b5d0e1e3d">More...</a><br /></td></tr>
 <tr class="separator:a89633185f08187508131a94b5d0e1e3d"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a0e3ce32dfd5e21aaa24b050b21d2ae2e"><td class="memItemLeft" align="right" valign="top">static bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_dlt.html#a0e3ce32dfd5e21aaa24b050b21d2ae2e">Unregister</a> ()</td></tr>
+<tr class="memdesc:a0e3ce32dfd5e21aaa24b050b21d2ae2e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Unregister DLT context.  <a href="class_dlt.html#a0e3ce32dfd5e21aaa24b050b21d2ae2e">More...</a><br /></td></tr>
 <tr class="separator:a0e3ce32dfd5e21aaa24b050b21d2ae2e"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a13d3c4fac51a9256b92c18166165671d"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_dlt.html#a13d3c4fac51a9256b92c18166165671d">LogString</a> (<a class="el" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a> log_level, const char *buff)</td></tr>
+<tr class="memdesc:a13d3c4fac51a9256b92c18166165671d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Convert a specified string to DLT log string.  <a href="class_dlt.html#a13d3c4fac51a9256b92c18166165671d">More...</a><br /></td></tr>
 <tr class="separator:a13d3c4fac51a9256b92c18166165671d"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pri-methods" name="pri-methods"></a>
@@ -171,6 +175,16 @@ Private Member Functions</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>Check if DLT is supported on the current platform. </p>
+<dl class="section return"><dt>Returns</dt><dd>boot </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">true</td><td>if DLT is supported, false otherwise. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>dlt </dd></dl>
+
 </div>
 </div>
 <a id="a13d3c4fac51a9256b92c18166165671d" name="a13d3c4fac51a9256b92c18166165671d"></a>
@@ -207,6 +221,17 @@ Private Member Functions</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>Convert a specified string to DLT log string. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">log_level</td><td>DLT log level. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">buff</td><td>String to be converted. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
+<dl class="section user"><dt>Relations</dt><dd>dlt </dd></dl>
+
 </div>
 </div>
 <a id="a89633185f08187508131a94b5d0e1e3d" name="a89633185f08187508131a94b5d0e1e3d"></a>
@@ -232,6 +257,16 @@ Private Member Functions</h2></td></tr>
 </table>
 </div><div class="memdoc">
 
+<p>Register DLT context. </p>
+<dl class="section return"><dt>Returns</dt><dd>boot </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">true</td><td>if DLT is registered, false otherwise. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>dlt </dd></dl>
+
 </div>
 </div>
 <a id="a0e3ce32dfd5e21aaa24b050b21d2ae2e" name="a0e3ce32dfd5e21aaa24b050b21d2ae2e"></a>
@@ -256,6 +291,16 @@ Private Member Functions</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
+
+<p>Unregister DLT context. </p>
+<dl class="section return"><dt>Returns</dt><dd>boot </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">true</td><td>if DLT is unregistered, false otherwise. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>dlt </dd></dl>
 
 </div>
 </div>

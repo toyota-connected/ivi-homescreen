@@ -28,10 +28,10 @@ void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto method = obj->method_name();
 
   if (method == kMethodGet) {
-    DLOG(INFO) << "(" << engine->GetIndex() << ") Restoration: Get";
+    SPDLOG_DEBUG("({}) Restoration: Get", engine->GetIndex());
   } else {
-    DLOG(ERROR) << "(" << engine->GetIndex() << ") Restoration: " << method
-                << " is unhandled";
+    SPDLOG_DEBUG("({}) Restoration: {} is unhandled", engine->GetIndex(),
+                 method);
   }
 
   engine->SendPlatformMessageResponse(message->response_handle, nullptr, 0);

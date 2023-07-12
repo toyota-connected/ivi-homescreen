@@ -20,10 +20,18 @@
 #include <shell/platform/embedder/embedder.h>
 #include <array>
 
+// GIT
+constexpr char kGitBranch[] = GIT_BRANCH;
+constexpr char kGitCommitHash[] = GIT_HASH;
+
 // Screen Size
 constexpr int32_t kDefaultViewWidth = 1920;
 constexpr int32_t kDefaultViewHeight = 720;
 constexpr int kEglBufferSize = 24;
+
+// Logging
+constexpr int32_t kLogFlushInterval = 5;
+constexpr int32_t kVmLogChunkMax = 10;
 
 // Scale Factor
 constexpr double kDefaultBufferScale = 1.0;

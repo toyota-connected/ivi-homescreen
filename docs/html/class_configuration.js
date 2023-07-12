@@ -8,6 +8,7 @@ var class_configuration =
     [ "getView", "class_configuration.html#ab18e05db517eeb7fff6d8cf186fdb1e4", null ],
     [ "getViewCount", "class_configuration.html#a56a5751e13393de660d28a590b1886f4", null ],
     [ "getViewParameters", "class_configuration.html#a185449095aaa68b82d910518b198f333", null ],
+    [ "MaskAccessibilityFeatures", "class_configuration.html#a620f455fdd667da17aece964220d0da8", null ],
     [ "ParseConfig", "class_configuration.html#a5cca4bae6fa2b1ab4c96c67495cee7f5", null ],
     [ "PrintConfig", "class_configuration.html#a24b26ceac3b2731ec879fcd6ec3eca3f", null ],
     [ "kAccessibilityFeaturesKey", "class_configuration.html#a1424a3bb618262b9ef773922502dc1ec", null ],
@@ -26,6 +27,7 @@ var class_configuration =
     [ "kPixelRatioKey", "class_configuration.html#acc8d022f00d9ae79f691657795eb2ae7", null ],
     [ "kViewKey", "class_configuration.html#af2d52e92b22e5dd54747ac92a6305cbf", null ],
     [ "kVmArgsKey", "class_configuration.html#a0f591d48ba078091bd63fa2d9741b09b", null ],
+    [ "kWaylandEventMaskKey", "class_configuration.html#a379cffa1e1c5665d7f4bcc1151da031e", null ],
     [ "kWidthKey", "class_configuration.html#a6c8bb4d891fcfc233e124baf9ce50999", null ],
     [ "kWindowTypeKey", "class_configuration.html#a1b380506d3ab2943a9d5ba5c5eb4ccc8", null ]
 ];

@@ -7,6 +7,11 @@ var annotated_dup =
       [ "FHashTable", "classsecret_1_1_f_hash_table.html", "classsecret_1_1_f_hash_table" ],
       [ "Keyring", "classsecret_1_1_keyring.html", "classsecret_1_1_keyring" ]
     ] ],
+    [ "spdlog", "namespacespdlog.html", [
+      [ "sinks", "namespacespdlog_1_1sinks.html", [
+        [ "dlt_sink", "classspdlog_1_1sinks_1_1dlt__sink.html", "classspdlog_1_1sinks_1_1dlt__sink" ]
+      ] ]
+    ] ],
     [ "Accessibility", "class_accessibility.html", "class_accessibility" ],
     [ "App", "class_app.html", "class_app" ],
     [ "Backend", "class_backend.html", "class_backend" ],
@@ -14,6 +19,7 @@ var annotated_dup =
     [ "CompositorSurface", "struct_compositor_surface.html", "struct_compositor_surface" ],
     [ "CompositorSurfacePlugin", "class_compositor_surface_plugin.html", "class_compositor_surface_plugin" ],
     [ "Configuration", "class_configuration.html", "class_configuration" ],
+    [ "CrashHandler", "class_crash_handler.html", "class_crash_handler" ],
     [ "CustomData", "class_custom_data.html", "class_custom_data" ],
     [ "CustomHexdump", "struct_custom_hexdump.html", "struct_custom_hexdump" ],
     [ "DelegateHandleKey", "class_delegate_handle_key.html", "class_delegate_handle_key" ],
@@ -36,8 +42,6 @@ var annotated_dup =
     [ "KeyEvent", "class_key_event.html", "class_key_event" ],
     [ "LibDlt", "class_lib_dlt.html", "class_lib_dlt" ],
     [ "LibDltExports", "struct_lib_dlt_exports.html", "struct_lib_dlt_exports" ],
-    [ "LogMessage", "class_log_message.html", "class_log_message" ],
-    [ "LogMessageVoid", "class_log_message_void.html", "class_log_message_void" ],
     [ "MouseCursor", "class_mouse_cursor.html", "class_mouse_cursor" ],
     [ "Navigation", "class_navigation.html", "class_navigation" ],
     [ "OpenGlTexture", "class_open_gl_texture.html", "class_open_gl_texture" ],

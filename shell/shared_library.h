@@ -59,7 +59,7 @@ inline void GetFuncAddress(void* library,
   auto symbol = dlsym(library, function_name);
   if (!symbol) {
     const char* reason = dlerror();
-    DLOG(WARN) << "GetFuncAddress: " << function_name << " " << reason << std::endl;
+    spdlog::debug("GetFuncAddress: {} - {}", function_name, reason);
   }
   *out = reinterpret_cast<FunctionPointer>(symbol);
 }

@@ -2,7 +2,7 @@ var gstreamer__egl_8cc =
 [
     [ "CustomData", "class_custom_data.html", "class_custom_data" ],
     [ "GSTREAMER_DEBUG", "gstreamer__egl_8cc.html#a248d01a1260d258f1e45c94374b26c3d", null ],
-    [ "PrintMessageAsHex", "gstreamer__egl_8cc.html#a523a2c53f4f54fc19cebc6d4a49701c2", null ],
+    [ "PrintMessageAsHex", "gstreamer__egl_8cc.html#a30a2b58b979e83d7987a565cb107c29b", null ],
     [ "GstPlayFlags", "gstreamer__egl_8cc.html#a07d3b88c255a128da30868f3e6ddee87", [
       [ "GST_PLAY_FLAG_AUDIO", "gstreamer__egl_8cc.html#a07d3b88c255a128da30868f3e6ddee87aaeb5a913be21baf07577f65da1a34ce1", null ],
       [ "GST_PLAY_FLAG_VIDEO", "gstreamer__egl_8cc.html#a07d3b88c255a128da30868f3e6ddee87aeae6f5d5e803796fd937fba0055608b9", null ],
@@ -11,7 +11,7 @@ var gstreamer__egl_8cc =
     [ "dispose_error", "gstreamer__egl_8cc.html#afc02a7013eea749e5f96eedec02df7cb", null ],
     [ "draw_core", "gstreamer__egl_8cc.html#af718f621672c98cd721278ca5b8ea9bc", null ],
     [ "get_video_info", "gstreamer__egl_8cc.html#a2f78652f20e424d364e4ee05daf5bda6", null ],
-    [ "handoff_handler", "gstreamer__egl_8cc.html#a4f627a22d3ba290f78447937a00f6c2a", null ],
+    [ "handoff_handler", "gstreamer__egl_8cc.html#af99ac256937bc197565dc514f1aed39f", null ],
     [ "loadRGBPixels", "gstreamer__egl_8cc.html#a065a8d37a80edf0b90b33103a3c02b4b", null ],
     [ "LoadShaders", "gstreamer__egl_8cc.html#a3b204b34682e3c788997960e83c0e324", null ],
     [ "main_loop", "gstreamer__egl_8cc.html#afc01f600e7992f2dfef5c0563734a073", null ],

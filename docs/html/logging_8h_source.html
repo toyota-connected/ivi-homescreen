@@ -107,103 +107,94 @@ $(document).ready(function(){initNavTree('logging_8h_source.html',''); initResiz
 <div class="line"><a id="l00007" name="l00007"></a><span class="lineno">    7</span> </div>
 <div class="line"><a id="l00008" name="l00008"></a><span class="lineno">    8</span><span class="preprocessor">#include &lt;sstream&gt;</span></div>
 <div class="line"><a id="l00009" name="l00009"></a><span class="lineno">    9</span> </div>
-<div class="line"><a id="l00010" name="l00010"></a><span class="lineno">   10</span><span class="preprocessor">#include &quot;<a class="code" href="dlt_8h.html">dlt/dlt.h</a>&quot;</span></div>
-<div class="line"><a id="l00011" name="l00011"></a><span class="lineno">   11</span><span class="preprocessor">#include &quot;flutter/fml/macros.h&quot;</span></div>
-<div class="line"><a id="l00012" name="l00012"></a><span class="lineno">   12</span> </div>
-<div class="line"><a id="l00013" name="l00013"></a><span class="lineno"><a class="line" href="class_log_message_void.html">   13</a></span><span class="keyword">class </span><a class="code hl_class" href="class_log_message_void.html">LogMessageVoid</a> {</div>
-<div class="line"><a id="l00014" name="l00014"></a><span class="lineno">   14</span> <span class="keyword">public</span>:</div>
-<div class="line"><a id="l00015" name="l00015"></a><span class="lineno"><a class="line" href="class_log_message_void.html#ab9a837e38aa4aa6d7b467a6f64cd7b66">   15</a></span>  <span class="keywordtype">void</span> <a class="code hl_function" href="class_log_message_void.html#ab9a837e38aa4aa6d7b467a6f64cd7b66">operator&amp;</a>(std::ostream&amp;) {}</div>
-<div class="line"><a id="l00016" name="l00016"></a><span class="lineno">   16</span>};</div>
-<div class="line"><a id="l00017" name="l00017"></a><span class="lineno">   17</span> </div>
-<div class="line"><a id="l00018" name="l00018"></a><span class="lineno"><a class="line" href="class_log_message.html">   18</a></span><span class="keyword">class </span><a class="code hl_class" href="class_log_message.html">LogMessage</a> {</div>
-<div class="line"><a id="l00019" name="l00019"></a><span class="lineno">   19</span> <span class="keyword">public</span>:</div>
-<div class="line"><a id="l00020" name="l00020"></a><span class="lineno">   20</span>  <a class="code hl_class" href="class_log_message.html">LogMessage</a>(<a class="code hl_enumeration" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a> severity,</div>
-<div class="line"><a id="l00021" name="l00021"></a><span class="lineno">   21</span>             <span class="keyword">const</span> <span class="keywordtype">char</span>* file,</div>
-<div class="line"><a id="l00022" name="l00022"></a><span class="lineno">   22</span>             <span class="keywordtype">int</span> line,</div>
-<div class="line"><a id="l00023" name="l00023"></a><span class="lineno">   23</span>             <span class="keyword">const</span> <span class="keywordtype">char</span>* condition);</div>
-<div class="line"><a id="l00024" name="l00024"></a><span class="lineno">   24</span>  <a class="code hl_function" href="class_log_message.html#a6b6ffe80b4859c0907c3b653d4d11485">~LogMessage</a>();</div>
-<div class="line"><a id="l00025" name="l00025"></a><span class="lineno">   25</span> </div>
-<div class="line"><a id="l00026" name="l00026"></a><span class="lineno"><a class="line" href="class_log_message.html#a19c6efe25cab21dc823fdf141a1a9359">   26</a></span>  std::ostream&amp; <a class="code hl_function" href="class_log_message.html#a19c6efe25cab21dc823fdf141a1a9359">stream</a>() { <span class="keywordflow">return</span> <a class="code hl_variable" href="class_log_message.html#afc69c6b8764f96d1e6c425ea13762748">stream_</a>; }</div>
+<div class="line"><a id="l00010" name="l00010"></a><span class="lineno">   10</span><span class="preprocessor">#include &quot;spdlog/cfg/env.h&quot;</span></div>
+<div class="line"><a id="l00011" name="l00011"></a><span class="lineno">   11</span><span class="preprocessor">#include &quot;spdlog/sinks/callback_sink.h&quot;</span></div>
+<div class="line"><a id="l00012" name="l00012"></a><span class="lineno">   12</span><span class="preprocessor">#include &quot;spdlog/sinks/ringbuffer_sink.h&quot;</span></div>
+<div class="line"><a id="l00013" name="l00013"></a><span class="lineno">   13</span><span class="preprocessor">#include &quot;spdlog/sinks/stdout_color_sinks.h&quot;</span></div>
+<div class="line"><a id="l00014" name="l00014"></a><span class="lineno">   14</span><span class="preprocessor">#include &quot;spdlog/sinks/stdout_sinks.h&quot;</span></div>
+<div class="line"><a id="l00015" name="l00015"></a><span class="lineno">   15</span><span class="preprocessor">#include &quot;spdlog/spdlog.h&quot;</span></div>
+<div class="line"><a id="l00016" name="l00016"></a><span class="lineno">   16</span> </div>
+<div class="line"><a id="l00017" name="l00017"></a><span class="lineno">   17</span><span class="preprocessor">#if defined(ENABLE_DLT)</span></div>
+<div class="line"><a id="l00018" name="l00018"></a><span class="lineno">   18</span><span class="preprocessor">#include &quot;<a class="code" href="dlt_8h.html">dlt/dlt.h</a>&quot;</span></div>
+<div class="line"><a id="l00019" name="l00019"></a><span class="lineno">   19</span><span class="preprocessor">#endif</span></div>
+<div class="line"><a id="l00020" name="l00020"></a><span class="lineno">   20</span> </div>
+<div class="line"><a id="l00021" name="l00021"></a><span class="lineno">   21</span><span class="preprocessor">#include &quot;<a class="code" href="constants_8h.html">constants.h</a>&quot;</span></div>
+<div class="line"><a id="l00022" name="l00022"></a><span class="lineno">   22</span> </div>
+<div class="line"><a id="l00023" name="l00023"></a><span class="lineno"><a class="line" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">   23</a></span><span class="keyword">static</span> std::shared_ptr&lt;spdlog::logger&gt; <a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a>{};</div>
+<div class="line"><a id="l00024" name="l00024"></a><span class="lineno">   24</span><span class="keyword">static</span> std::shared_ptr&lt;</div>
+<div class="line"><a id="l00025" name="l00025"></a><span class="lineno">   25</span>    spdlog::sinks::ansicolor_stdout_sink&lt;spdlog::details::console_mutex&gt;&gt;</div>
+<div class="line"><a id="l00026" name="l00026"></a><span class="lineno"><a class="line" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">   26</a></span>    <a class="code hl_variable" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a>;</div>
 <div class="line"><a id="l00027" name="l00027"></a><span class="lineno">   27</span> </div>
-<div class="line"><a id="l00028" name="l00028"></a><span class="lineno">   28</span> <span class="keyword">private</span>:</div>
-<div class="line"><a id="l00029" name="l00029"></a><span class="lineno"><a class="line" href="class_log_message.html#afc69c6b8764f96d1e6c425ea13762748">   29</a></span>  std::ostringstream <a class="code hl_variable" href="class_log_message.html#afc69c6b8764f96d1e6c425ea13762748">stream_</a>;</div>
-<div class="line"><a id="l00030" name="l00030"></a><span class="lineno"><a class="line" href="class_log_message.html#a36894581b03b6fa538465e8d99989838">   30</a></span>  <span class="keyword">const</span> <a class="code hl_enumeration" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a> <a class="code hl_variable" href="class_log_message.html#a36894581b03b6fa538465e8d99989838">severity_</a>;</div>
-<div class="line"><a id="l00031" name="l00031"></a><span class="lineno"><a class="line" href="class_log_message.html#a7d37ab0885a1e9ab3bcb708200a97aa8">   31</a></span>  <span class="keyword">const</span> <span class="keywordtype">char</span>* <a class="code hl_variable" href="class_log_message.html#a7d37ab0885a1e9ab3bcb708200a97aa8">file_</a>;</div>
-<div class="line"><a id="l00032" name="l00032"></a><span class="lineno"><a class="line" href="class_log_message.html#a865516108600970ef3fa099aba89311c">   32</a></span>  <span class="keyword">const</span> <span class="keywordtype">int</span> <a class="code hl_variable" href="class_log_message.html#a865516108600970ef3fa099aba89311c">line_</a>;</div>
-<div class="line"><a id="l00033" name="l00033"></a><span class="lineno">   33</span> </div>
-<div class="line"><a id="l00034" name="l00034"></a><span class="lineno"><a class="line" href="class_log_message.html#a1638d642a9abe7312fefabbcdaf70550">   34</a></span>  <a class="code hl_function" href="class_log_message.html#a1638d642a9abe7312fefabbcdaf70550">FML_DISALLOW_COPY_AND_ASSIGN</a>(<a class="code hl_class" href="class_log_message.html">LogMessage</a>);</div>
-<div class="line"><a id="l00035" name="l00035"></a><span class="lineno">   35</span>};</div>
-<div class="line"><a id="l00036" name="l00036"></a><span class="lineno">   36</span> </div>
-<div class="line"><a id="l00037" name="l00037"></a><span class="lineno">   37</span><span class="comment">// Gets the FML_VLOG default verbosity level.</span></div>
-<div class="line"><a id="l00038" name="l00038"></a><span class="lineno"><a class="line" href="logging_8h.html#aa446051d01c17fdd2e38aa7cda00a284">   38</a></span><span class="keywordtype">int</span> <a class="code hl_function" href="logging_8h.html#aa446051d01c17fdd2e38aa7cda00a284">GetVlogVerbosity</a>();</div>
-<div class="line"><a id="l00039" name="l00039"></a><span class="lineno">   39</span> </div>
-<div class="line"><a id="l00040" name="l00040"></a><span class="lineno">   40</span><span class="comment">// Returns true if |severity| is at or above the current minimum log level.</span></div>
-<div class="line"><a id="l00041" name="l00041"></a><span class="lineno">   41</span><span class="comment">// LOG_FATAL and above is always true.</span></div>
-<div class="line"><a id="l00042" name="l00042"></a><span class="lineno">   42</span><span class="keywordtype">bool</span> <a class="code hl_function" href="logging_8h.html#a0e2c60c5a702b547f0ccf8a687a8b108">ShouldCreateLogMessage</a>(<a class="code hl_enumeration" href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a> severity);</div>
-<div class="line"><a id="l00043" name="l00043"></a><span class="lineno">   43</span> </div>
-<div class="line"><a id="l00044" name="l00044"></a><span class="lineno">   44</span>[[noreturn]] <span class="keywordtype">void</span> <a class="code hl_function" href="logging_8h.html#a2405e8217329337ab72a85fba66f0dd1">KillProcess</a>();</div>
-<div class="line"><a id="l00045" name="l00045"></a><span class="lineno">   45</span> </div>
-<div class="line"><a id="l00046" name="l00046"></a><span class="lineno"><a class="line" href="logging_8h.html#a0149a6226a959330c2f215ae755c389a">   46</a></span><span class="preprocessor">#define LOG_STREAM(severity)                                               \</span></div>
-<div class="line"><a id="l00047" name="l00047"></a><span class="lineno">   47</span><span class="preprocessor">  LogMessage(DltLogLevelType::LOG_##severity, __FILE__, __LINE__, nullptr) \</span></div>
-<div class="line"><a id="l00048" name="l00048"></a><span class="lineno">   48</span><span class="preprocessor">      .stream()</span></div>
-<div class="line"><a id="l00049" name="l00049"></a><span class="lineno">   49</span> </div>
-<div class="line"><a id="l00050" name="l00050"></a><span class="lineno"><a class="line" href="logging_8h.html#a94ae03353d79e045db6454206d2b8f91">   50</a></span><span class="preprocessor">#define LAZY_STREAM(stream, condition) \</span></div>
-<div class="line"><a id="l00051" name="l00051"></a><span class="lineno">   51</span><span class="preprocessor">  !(condition) ? (void)0 : LogMessageVoid() &amp; (stream)</span></div>
-<div class="line"><a id="l00052" name="l00052"></a><span class="lineno">   52</span> </div>
-<div class="line"><a id="l00053" name="l00053"></a><span class="lineno"><a class="line" href="logging_8h.html#aaa306112ebe717767675ee2b15681114">   53</a></span><span class="preprocessor">#define EAT_STREAM_PARAMETERS(ignored) \</span></div>
-<div class="line"><a id="l00054" name="l00054"></a><span class="lineno">   54</span><span class="preprocessor">  true || (ignored)                    \</span></div>
-<div class="line"><a id="l00055" name="l00055"></a><span class="lineno">   55</span><span class="preprocessor">      ? (void)0                        \</span></div>
-<div class="line"><a id="l00056" name="l00056"></a><span class="lineno">   56</span><span class="preprocessor">      : LogMessageVoid() &amp;             \</span></div>
-<div class="line"><a id="l00057" name="l00057"></a><span class="lineno">   57</span><span class="preprocessor">            LogMessage(DltLogLevelType::LOG_FATAL, 0, 0, nullptr).stream()</span></div>
-<div class="line"><a id="l00058" name="l00058"></a><span class="lineno">   58</span> </div>
-<div class="line"><a id="l00059" name="l00059"></a><span class="lineno"><a class="line" href="logging_8h.html#aef0acce046f9f20622cecbbaf7118e61">   59</a></span><span class="preprocessor">#define LOG_IS_ON(severity) \</span></div>
-<div class="line"><a id="l00060" name="l00060"></a><span class="lineno">   60</span><span class="preprocessor">  (ShouldCreateLogMessage(DltLogLevelType::LOG_##severity))</span></div>
-<div class="line"><a id="l00061" name="l00061"></a><span class="lineno">   61</span> </div>
-<div class="line"><a id="l00062" name="l00062"></a><span class="lineno"><a class="line" href="logging_8h.html#accad43a85d781d53381cd53a9894b6ae">   62</a></span><span class="preprocessor">#define LOG(severity) LAZY_STREAM(LOG_STREAM(severity), LOG_IS_ON(severity))</span></div>
-<div class="line"><a id="l00063" name="l00063"></a><span class="lineno">   63</span> </div>
-<div class="line"><a id="l00064" name="l00064"></a><span class="lineno"><a class="line" href="logging_8h.html#a3e1cfef60e774a81f30eaddf26a3a274">   64</a></span><span class="preprocessor">#define CHECK(condition)                                                     \</span></div>
-<div class="line"><a id="l00065" name="l00065"></a><span class="lineno">   65</span><span class="preprocessor">  LAZY_STREAM(                                                               \</span></div>
-<div class="line"><a id="l00066" name="l00066"></a><span class="lineno">   66</span><span class="preprocessor">      LogMessage(DltLogLevelType::LOG_FATAL, __FILE__, __LINE__, #condition) \</span></div>
-<div class="line"><a id="l00067" name="l00067"></a><span class="lineno">   67</span><span class="preprocessor">          .stream(),                                                         \</span></div>
-<div class="line"><a id="l00068" name="l00068"></a><span class="lineno">   68</span><span class="preprocessor">      !(condition))</span></div>
-<div class="line"><a id="l00069" name="l00069"></a><span class="lineno">   69</span> </div>
-<div class="line"><a id="l00070" name="l00070"></a><span class="lineno"><a class="line" href="logging_8h.html#af6bf96c798677e654c069c0f6939d894">   70</a></span><span class="preprocessor">#define VLOG_IS_ON(verbose_level) ((verbose_level) &lt;= GetVlogVerbosity())</span></div>
-<div class="line"><a id="l00071" name="l00071"></a><span class="lineno">   71</span> </div>
-<div class="line"><a id="l00072" name="l00072"></a><span class="lineno">   72</span><span class="comment">// The VLOG macros log with negative verbosities.</span></div>
-<div class="line"><a id="l00073" name="l00073"></a><span class="lineno"><a class="line" href="logging_8h.html#aa3e0a8a0e13bfe73c54ac13b126baa44">   73</a></span><span class="preprocessor">#define VLOG_STREAM(verbose_level) \</span></div>
-<div class="line"><a id="l00074" name="l00074"></a><span class="lineno">   74</span><span class="preprocessor">  LogMessage(-verbose_level, __FILE__, __LINE__, nullptr).stream()</span></div>
-<div class="line"><a id="l00075" name="l00075"></a><span class="lineno">   75</span> </div>
-<div class="line"><a id="l00076" name="l00076"></a><span class="lineno"><a class="line" href="logging_8h.html#a0f383369246b98205c4c67a144b40164">   76</a></span><span class="preprocessor">#define VLOG(verbose_level) \</span></div>
-<div class="line"><a id="l00077" name="l00077"></a><span class="lineno">   77</span><span class="preprocessor">  LAZY_STREAM(VLOG_STREAM(verbose_level), VLOG_IS_ON(verbose_level))</span></div>
-<div class="line"><a id="l00078" name="l00078"></a><span class="lineno">   78</span> </div>
-<div class="line"><a id="l00079" name="l00079"></a><span class="lineno">   79</span><span class="preprocessor">#ifndef NDEBUG</span></div>
-<div class="line"><a id="l00080" name="l00080"></a><span class="lineno"><a class="line" href="logging_8h.html#a30c3e3c313489ab5e42bb12fcfcc5968">   80</a></span><span class="preprocessor">#define DLOG(severity) LOG(severity)</span></div>
-<div class="line"><a id="l00081" name="l00081"></a><span class="lineno"><a class="line" href="logging_8h.html#ae17f8119c108cf3070bad3449c7e0006">   81</a></span><span class="preprocessor">#define DCHECK(condition) CHECK(condition)</span></div>
-<div class="line"><a id="l00082" name="l00082"></a><span class="lineno">   82</span><span class="preprocessor">#else</span></div>
-<div class="line"><a id="l00083" name="l00083"></a><span class="lineno">   83</span><span class="preprocessor">#define DLOG(severity) EAT_STREAM_PARAMETERS(true)</span></div>
-<div class="line"><a id="l00084" name="l00084"></a><span class="lineno">   84</span><span class="preprocessor">#define DCHECK(condition) EAT_STREAM_PARAMETERS(condition)</span></div>
-<div class="line"><a id="l00085" name="l00085"></a><span class="lineno">   85</span><span class="preprocessor">#endif</span></div>
-<div class="line"><a id="l00086" name="l00086"></a><span class="lineno">   86</span> </div>
-<div class="line"><a id="l00087" name="l00087"></a><span class="lineno"><a class="line" href="logging_8h.html#a0bc63b24b654ca433be7b97a3edde132">   87</a></span><span class="preprocessor">#define UNREACHABLE()                          \</span></div>
-<div class="line"><a id="l00088" name="l00088"></a><span class="lineno">   88</span><span class="preprocessor">  {                                            \</span></div>
-<div class="line"><a id="l00089" name="l00089"></a><span class="lineno">   89</span><span class="preprocessor">    LOG(ERROR) &lt;&lt; &quot;Reached unreachable code.&quot;</span>; \</div>
-<div class="line"><a id="l00090" name="l00090"></a><span class="lineno">   90</span>    KillProcess();                             \</div>
-<div class="line"><a id="l00091" name="l00091"></a><span class="lineno">   91</span>  }</div>
-<div class="ttc" id="aclass_log_message_html"><div class="ttname"><a href="class_log_message.html">LogMessage</a></div><div class="ttdef"><b>Definition:</b> logging.h:18</div></div>
-<div class="ttc" id="aclass_log_message_html_a1638d642a9abe7312fefabbcdaf70550"><div class="ttname"><a href="class_log_message.html#a1638d642a9abe7312fefabbcdaf70550">LogMessage::FML_DISALLOW_COPY_AND_ASSIGN</a></div><div class="ttdeci">FML_DISALLOW_COPY_AND_ASSIGN(LogMessage)</div></div>
-<div class="ttc" id="aclass_log_message_html_a19c6efe25cab21dc823fdf141a1a9359"><div class="ttname"><a href="class_log_message.html#a19c6efe25cab21dc823fdf141a1a9359">LogMessage::stream</a></div><div class="ttdeci">std::ostream &amp; stream()</div><div class="ttdef"><b>Definition:</b> logging.h:26</div></div>
-<div class="ttc" id="aclass_log_message_html_a36894581b03b6fa538465e8d99989838"><div class="ttname"><a href="class_log_message.html#a36894581b03b6fa538465e8d99989838">LogMessage::severity_</a></div><div class="ttdeci">const DltLogLevelType severity_</div><div class="ttdef"><b>Definition:</b> logging.h:30</div></div>
-<div class="ttc" id="aclass_log_message_html_a6b6ffe80b4859c0907c3b653d4d11485"><div class="ttname"><a href="class_log_message.html#a6b6ffe80b4859c0907c3b653d4d11485">LogMessage::~LogMessage</a></div><div class="ttdeci">~LogMessage()</div><div class="ttdef"><b>Definition:</b> logging.cc:66</div></div>
-<div class="ttc" id="aclass_log_message_html_a7d37ab0885a1e9ab3bcb708200a97aa8"><div class="ttname"><a href="class_log_message.html#a7d37ab0885a1e9ab3bcb708200a97aa8">LogMessage::file_</a></div><div class="ttdeci">const char * file_</div><div class="ttdef"><b>Definition:</b> logging.h:31</div></div>
-<div class="ttc" id="aclass_log_message_html_a865516108600970ef3fa099aba89311c"><div class="ttname"><a href="class_log_message.html#a865516108600970ef3fa099aba89311c">LogMessage::line_</a></div><div class="ttdeci">const int line_</div><div class="ttdef"><b>Definition:</b> logging.h:32</div></div>
-<div class="ttc" id="aclass_log_message_html_afc69c6b8764f96d1e6c425ea13762748"><div class="ttname"><a href="class_log_message.html#afc69c6b8764f96d1e6c425ea13762748">LogMessage::stream_</a></div><div class="ttdeci">std::ostringstream stream_</div><div class="ttdef"><b>Definition:</b> logging.h:29</div></div>
-<div class="ttc" id="aclass_log_message_void_html"><div class="ttname"><a href="class_log_message_void.html">LogMessageVoid</a></div><div class="ttdef"><b>Definition:</b> logging.h:13</div></div>
-<div class="ttc" id="aclass_log_message_void_html_ab9a837e38aa4aa6d7b467a6f64cd7b66"><div class="ttname"><a href="class_log_message_void.html#ab9a837e38aa4aa6d7b467a6f64cd7b66">LogMessageVoid::operator&amp;</a></div><div class="ttdeci">void operator&amp;(std::ostream &amp;)</div><div class="ttdef"><b>Definition:</b> logging.h:15</div></div>
+<div class="line"><a id="l00028" name="l00028"></a><span class="lineno"><a class="line" href="logging_8h.html#a3fce3bd8739fb922e9f155c8d0b43fca">   28</a></span><span class="keyword">inline</span> <span class="keywordtype">void</span> <a class="code hl_function" href="logging_8h.html#a3fce3bd8739fb922e9f155c8d0b43fca">LoggingPrologue</a>() {</div>
+<div class="line"><a id="l00029" name="l00029"></a><span class="lineno">   29</span>  spdlog::cfg::load_env_levels();</div>
+<div class="line"><a id="l00030" name="l00030"></a><span class="lineno">   30</span> </div>
+<div class="line"><a id="l00031" name="l00031"></a><span class="lineno">   31</span><span class="preprocessor">#if defined(ENABLE_DLT)</span></div>
+<div class="line"><a id="l00032" name="l00032"></a><span class="lineno">   32</span>  <span class="keywordflow">if</span> (<a class="code hl_function" href="class_dlt.html#a5ae376652b380bd10a6de1e4d3c2c281">Dlt::IsSupported</a>()) {</div>
+<div class="line"><a id="l00033" name="l00033"></a><span class="lineno">   33</span>    <a class="code hl_function" href="class_dlt.html#a89633185f08187508131a94b5d0e1e3d">Dlt::Register</a>();</div>
+<div class="line"><a id="l00034" name="l00034"></a><span class="lineno">   34</span>    <a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a> = spdlog::callback_logger_mt(</div>
+<div class="line"><a id="l00035" name="l00035"></a><span class="lineno">   35</span>        <span class="stringliteral">&quot;primary&quot;</span>, [](<span class="keyword">const</span> spdlog::details::log_msg&amp; msg) {</div>
+<div class="line"><a id="l00036" name="l00036"></a><span class="lineno">   36</span>          <span class="keywordflow">switch</span> (msg.level) {</div>
+<div class="line"><a id="l00037" name="l00037"></a><span class="lineno">   37</span>            case SPDLOG_LEVEL_TRACE:</div>
+<div class="line"><a id="l00038" name="l00038"></a><span class="lineno">   38</span>              Dlt::LogString(DltLogLevelType::LOG_VERBOSE, msg.payload.data());</div>
+<div class="line"><a id="l00039" name="l00039"></a><span class="lineno">   39</span>              break;</div>
+<div class="line"><a id="l00040" name="l00040"></a><span class="lineno">   40</span>            case SPDLOG_LEVEL_DEBUG:</div>
+<div class="line"><a id="l00041" name="l00041"></a><span class="lineno">   41</span>              Dlt::LogString(DltLogLevelType::LOG_DEBUG, msg.payload.data());</div>
+<div class="line"><a id="l00042" name="l00042"></a><span class="lineno">   42</span>              break;</div>
+<div class="line"><a id="l00043" name="l00043"></a><span class="lineno">   43</span>            case SPDLOG_LEVEL_INFO:</div>
+<div class="line"><a id="l00044" name="l00044"></a><span class="lineno">   44</span>              Dlt::LogString(DltLogLevelType::LOG_INFO, msg.payload.data());</div>
+<div class="line"><a id="l00045" name="l00045"></a><span class="lineno">   45</span>              break;</div>
+<div class="line"><a id="l00046" name="l00046"></a><span class="lineno">   46</span>            case SPDLOG_LEVEL_WARN:</div>
+<div class="line"><a id="l00047" name="l00047"></a><span class="lineno">   47</span>              Dlt::LogString(DltLogLevelType::LOG_WARN, msg.payload.data());</div>
+<div class="line"><a id="l00048" name="l00048"></a><span class="lineno">   48</span>              break;</div>
+<div class="line"><a id="l00049" name="l00049"></a><span class="lineno">   49</span>            case SPDLOG_LEVEL_ERROR:</div>
+<div class="line"><a id="l00050" name="l00050"></a><span class="lineno">   50</span>              Dlt::LogString(DltLogLevelType::LOG_ERROR, msg.payload.data());</div>
+<div class="line"><a id="l00051" name="l00051"></a><span class="lineno">   51</span>              break;</div>
+<div class="line"><a id="l00052" name="l00052"></a><span class="lineno">   52</span>            case SPDLOG_LEVEL_CRITICAL:</div>
+<div class="line"><a id="l00053" name="l00053"></a><span class="lineno">   53</span>              Dlt::LogString(DltLogLevelType::LOG_FATAL, msg.payload.data());</div>
+<div class="line"><a id="l00054" name="l00054"></a><span class="lineno">   54</span>              break;</div>
+<div class="line"><a id="l00055" name="l00055"></a><span class="lineno">   55</span>            default:</div>
+<div class="line"><a id="l00056" name="l00056"></a><span class="lineno">   56</span>              break;</div>
+<div class="line"><a id="l00057" name="l00057"></a><span class="lineno">   57</span>          }</div>
+<div class="line"><a id="l00058" name="l00058"></a><span class="lineno">   58</span>        });</div>
+<div class="line"><a id="l00059" name="l00059"></a><span class="lineno">   59</span>    spdlog::set_default_logger(<a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a>);</div>
+<div class="line"><a id="l00060" name="l00060"></a><span class="lineno">   60</span>    spdlog::set_pattern(<span class="stringliteral">&quot;%v&quot;</span>);</div>
+<div class="line"><a id="l00061" name="l00061"></a><span class="lineno">   61</span>  } <span class="keywordflow">else</span> {</div>
+<div class="line"><a id="l00062" name="l00062"></a><span class="lineno">   62</span><span class="preprocessor">#endif</span></div>
+<div class="line"><a id="l00063" name="l00063"></a><span class="lineno">   63</span>    <a class="code hl_variable" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a> = std::make_shared&lt;spdlog::sinks::stdout_color_sink_mt&gt;();</div>
+<div class="line"><a id="l00064" name="l00064"></a><span class="lineno">   64</span>    <a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a> = std::make_shared&lt;spdlog::logger&gt;(<span class="stringliteral">&quot;primary&quot;</span>, <a class="code hl_variable" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a>);</div>
+<div class="line"><a id="l00065" name="l00065"></a><span class="lineno">   65</span>    spdlog::set_default_logger(<a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a>);</div>
+<div class="line"><a id="l00066" name="l00066"></a><span class="lineno">   66</span>    spdlog::set_pattern(<span class="stringliteral">&quot;[%H:%M:%S.%f] [%L] %v&quot;</span>);</div>
+<div class="line"><a id="l00067" name="l00067"></a><span class="lineno">   67</span><span class="preprocessor">#if defined(ENABLE_DLT)</span></div>
+<div class="line"><a id="l00068" name="l00068"></a><span class="lineno">   68</span>  }</div>
+<div class="line"><a id="l00069" name="l00069"></a><span class="lineno">   69</span><span class="preprocessor">#endif</span></div>
+<div class="line"><a id="l00070" name="l00070"></a><span class="lineno">   70</span> </div>
+<div class="line"><a id="l00071" name="l00071"></a><span class="lineno">   71</span>  spdlog::flush_on(spdlog::level::err);</div>
+<div class="line"><a id="l00072" name="l00072"></a><span class="lineno">   72</span>  spdlog::flush_every(std::chrono::seconds(<a class="code hl_variable" href="constants_8h.html#af2d95ef74bcef66cd82828112e52121b">kLogFlushInterval</a>));</div>
+<div class="line"><a id="l00073" name="l00073"></a><span class="lineno">   73</span>}</div>
+<div class="line"><a id="l00074" name="l00074"></a><span class="lineno">   74</span> </div>
+<div class="line"><a id="l00075" name="l00075"></a><span class="lineno"><a class="line" href="logging_8h.html#ad72dfaf8e23c74affe6e1ee71a97f72e">   75</a></span><span class="keyword">inline</span> <span class="keywordtype">void</span> <a class="code hl_function" href="logging_8h.html#ad72dfaf8e23c74affe6e1ee71a97f72e">LoggingEpilogue</a>() {</div>
+<div class="line"><a id="l00076" name="l00076"></a><span class="lineno">   76</span><span class="preprocessor">#if defined(ENABLE_DLT)</span></div>
+<div class="line"><a id="l00077" name="l00077"></a><span class="lineno">   77</span>  <span class="keywordflow">if</span> (<a class="code hl_function" href="class_dlt.html#a5ae376652b380bd10a6de1e4d3c2c281">Dlt::IsSupported</a>()) {</div>
+<div class="line"><a id="l00078" name="l00078"></a><span class="lineno">   78</span>    <span class="comment">// switch logger to console, since we are unregistering DLT</span></div>
+<div class="line"><a id="l00079" name="l00079"></a><span class="lineno">   79</span>    <a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a>.reset();</div>
+<div class="line"><a id="l00080" name="l00080"></a><span class="lineno">   80</span>    <a class="code hl_variable" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a> = std::make_shared&lt;spdlog::sinks::stdout_color_sink_mt&gt;();</div>
+<div class="line"><a id="l00081" name="l00081"></a><span class="lineno">   81</span>    <a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a> = std::make_shared&lt;spdlog::logger&gt;(<span class="stringliteral">&quot;post-dlt&quot;</span>, <a class="code hl_variable" href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a>);</div>
+<div class="line"><a id="l00082" name="l00082"></a><span class="lineno">   82</span>    spdlog::register_logger(<a class="code hl_variable" href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a>);</div>
+<div class="line"><a id="l00083" name="l00083"></a><span class="lineno">   83</span> </div>
+<div class="line"><a id="l00084" name="l00084"></a><span class="lineno">   84</span>    <a class="code hl_function" href="class_dlt.html#a0e3ce32dfd5e21aaa24b050b21d2ae2e">Dlt::Unregister</a>();</div>
+<div class="line"><a id="l00085" name="l00085"></a><span class="lineno">   85</span>  }</div>
+<div class="line"><a id="l00086" name="l00086"></a><span class="lineno">   86</span><span class="preprocessor">#endif</span></div>
+<div class="line"><a id="l00087" name="l00087"></a><span class="lineno">   87</span>}</div>
+<div class="ttc" id="aclass_dlt_html_a0e3ce32dfd5e21aaa24b050b21d2ae2e"><div class="ttname"><a href="class_dlt.html#a0e3ce32dfd5e21aaa24b050b21d2ae2e">Dlt::Unregister</a></div><div class="ttdeci">static bool Unregister()</div><div class="ttdoc">Unregister DLT context.</div><div class="ttdef"><b>Definition:</b> dlt.cc:56</div></div>
+<div class="ttc" id="aclass_dlt_html_a5ae376652b380bd10a6de1e4d3c2c281"><div class="ttname"><a href="class_dlt.html#a5ae376652b380bd10a6de1e4d3c2c281">Dlt::IsSupported</a></div><div class="ttdeci">static bool IsSupported()</div><div class="ttdoc">Check if DLT is supported on the current platform.</div><div class="ttdef"><b>Definition:</b> dlt.cc:27</div></div>
+<div class="ttc" id="aclass_dlt_html_a89633185f08187508131a94b5d0e1e3d"><div class="ttname"><a href="class_dlt.html#a89633185f08187508131a94b5d0e1e3d">Dlt::Register</a></div><div class="ttdeci">static bool Register()</div><div class="ttdoc">Register DLT context.</div><div class="ttdef"><b>Definition:</b> dlt.cc:31</div></div>
+<div class="ttc" id="aconstants_8h_html"><div class="ttname"><a href="constants_8h.html">constants.h</a></div></div>
+<div class="ttc" id="aconstants_8h_html_af2d95ef74bcef66cd82828112e52121b"><div class="ttname"><a href="constants_8h.html#af2d95ef74bcef66cd82828112e52121b">kLogFlushInterval</a></div><div class="ttdeci">constexpr int32_t kLogFlushInterval</div><div class="ttdef"><b>Definition:</b> constants.h:33</div></div>
 <div class="ttc" id="adlt_8h_html"><div class="ttname"><a href="dlt_8h.html">dlt.h</a></div></div>
-<div class="ttc" id="alibdlt_8h_html_af69fa5fab3efb6780bb9d9ec2535cbb6"><div class="ttname"><a href="libdlt_8h.html#af69fa5fab3efb6780bb9d9ec2535cbb6">DltLogLevelType</a></div><div class="ttdeci">DltLogLevelType</div><div class="ttdef"><b>Definition:</b> libdlt.h:46</div></div>
-<div class="ttc" id="alogging_8h_html_a0e2c60c5a702b547f0ccf8a687a8b108"><div class="ttname"><a href="logging_8h.html#a0e2c60c5a702b547f0ccf8a687a8b108">ShouldCreateLogMessage</a></div><div class="ttdeci">bool ShouldCreateLogMessage(DltLogLevelType severity)</div><div class="ttdef"><b>Definition:</b> logging.cc:76</div></div>
-<div class="ttc" id="alogging_8h_html_a2405e8217329337ab72a85fba66f0dd1"><div class="ttname"><a href="logging_8h.html#a2405e8217329337ab72a85fba66f0dd1">KillProcess</a></div><div class="ttdeci">void KillProcess()</div><div class="ttdef"><b>Definition:</b> logging.cc:80</div></div>
-<div class="ttc" id="alogging_8h_html_aa446051d01c17fdd2e38aa7cda00a284"><div class="ttname"><a href="logging_8h.html#aa446051d01c17fdd2e38aa7cda00a284">GetVlogVerbosity</a></div><div class="ttdeci">int GetVlogVerbosity()</div></div>
+<div class="ttc" id="alogging_8h_html_a3fce3bd8739fb922e9f155c8d0b43fca"><div class="ttname"><a href="logging_8h.html#a3fce3bd8739fb922e9f155c8d0b43fca">LoggingPrologue</a></div><div class="ttdeci">void LoggingPrologue()</div><div class="ttdef"><b>Definition:</b> logging.h:28</div></div>
+<div class="ttc" id="alogging_8h_html_a8491e3707e98f464e198a5c5eb1aaf95"><div class="ttname"><a href="logging_8h.html#a8491e3707e98f464e198a5c5eb1aaf95">gConsoleSink</a></div><div class="ttdeci">static std::shared_ptr&lt; spdlog::sinks::ansicolor_stdout_sink&lt; spdlog::details::console_mutex &gt; &gt; gConsoleSink</div><div class="ttdef"><b>Definition:</b> logging.h:26</div></div>
+<div class="ttc" id="alogging_8h_html_ad5673eba27ce3f71180bfb32308b130b"><div class="ttname"><a href="logging_8h.html#ad5673eba27ce3f71180bfb32308b130b">gLogger</a></div><div class="ttdeci">static std::shared_ptr&lt; spdlog::logger &gt; gLogger</div><div class="ttdef"><b>Definition:</b> logging.h:23</div></div>
+<div class="ttc" id="alogging_8h_html_ad72dfaf8e23c74affe6e1ee71a97f72e"><div class="ttname"><a href="logging_8h.html#ad72dfaf8e23c74affe6e1ee71a97f72e">LoggingEpilogue</a></div><div class="ttdeci">void LoggingEpilogue()</div><div class="ttdef"><b>Definition:</b> logging.h:75</div></div>
 </div><!-- fragment --></div><!-- contents -->
 </div><!-- doc-content -->
 <!-- start footer part -->

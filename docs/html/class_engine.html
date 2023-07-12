@@ -142,6 +142,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:aacdb67e10d0b80a1fea7b451ee588126"><td class="memItemLeft" align="right" valign="top">FlutterEngineResult&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#aacdb67e10d0b80a1fea7b451ee588126">SetPixelRatio</a> (double pixel_ratio)</td></tr>
 <tr class="memdesc:aacdb67e10d0b80a1fea7b451ee588126"><td class="mdescLeft">&#160;</td><td class="mdescRight">Set pixel ratio of flutter.  <a href="class_engine.html#aacdb67e10d0b80a1fea7b451ee588126">More...</a><br /></td></tr>
 <tr class="separator:aacdb67e10d0b80a1fea7b451ee588126"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a2fb1cc651d3365da73cd5050699b81ec"><td class="memItemLeft" align="right" valign="top">FlutterEngineResult&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#a2fb1cc651d3365da73cd5050699b81ec">Shutdown</a> ()</td></tr>
+<tr class="memdesc:a2fb1cc651d3365da73cd5050699b81ec"><td class="mdescLeft">&#160;</td><td class="mdescRight">Shutsdown Flutter <a class="el" href="class_engine.html">Engine</a> Instance.  <a href="class_engine.html#a2fb1cc651d3365da73cd5050699b81ec">More...</a><br /></td></tr>
+<tr class="separator:a2fb1cc651d3365da73cd5050699b81ec"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a96fbaebec1936cf4440f93b59a7c5148"><td class="memItemLeft" align="right" valign="top">MAYBE_UNUSED NODISCARD bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#a96fbaebec1936cf4440f93b59a7c5148">IsRunning</a> () const</td></tr>
 <tr class="memdesc:a96fbaebec1936cf4440f93b59a7c5148"><td class="mdescLeft">&#160;</td><td class="mdescRight">Check if engine is running.  <a href="class_engine.html#a96fbaebec1936cf4440f93b59a7c5148">More...</a><br /></td></tr>
 <tr class="separator:a96fbaebec1936cf4440f93b59a7c5148"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -276,6 +279,10 @@ Private Attributes</h2></td></tr>
 <tr class="separator:a5a28336993ee67cc6cba7e6b27f1d0db"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a96d9abdade7cdd54d56bbdab3736100f"><td class="memItemLeft" align="right" valign="top">FlutterEngineAOTData&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#a96d9abdade7cdd54d56bbdab3736100f">m_aot_data</a></td></tr>
 <tr class="separator:a96d9abdade7cdd54d56bbdab3736100f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a0883658e1311ec80369b52ad549cf06b"><td class="memItemLeft" align="right" valign="top">std::mutex&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#a0883658e1311ec80369b52ad549cf06b">m_queue_lock</a> {}</td></tr>
+<tr class="separator:a0883658e1311ec80369b52ad549cf06b"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a1298d9d16dc40308e415ab8f09236c00"><td class="memItemLeft" align="right" valign="top">std::shared_ptr&lt; std::queue&lt; std::string &gt; &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#a1298d9d16dc40308e415ab8f09236c00">m_vm_queue</a> {}</td></tr>
+<tr class="separator:a1298d9d16dc40308e415ab8f09236c00"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ac85934f54371b608e61ae50c09664c03"><td class="memItemLeft" align="right" valign="top">std::vector&lt; FlutterPointerEvent &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#ac85934f54371b608e61ae50c09664c03">m_pointer_events</a></td></tr>
 <tr class="separator:ac85934f54371b608e61ae50c09664c03"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a3ab821cca5b2b7e740429f34b046d744"><td class="memItemLeft" align="right" valign="top">std::mutex&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_engine.html#a3ab821cca5b2b7e740429f34b046d744">m_pointer_mutex</a></td></tr>
@@ -1352,6 +1359,33 @@ Private Attributes</h2></td></tr>
 
 </div>
 </div>
+<a id="a2fb1cc651d3365da73cd5050699b81ec" name="a2fb1cc651d3365da73cd5050699b81ec"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a2fb1cc651d3365da73cd5050699b81ec">&#9670;&#160;</a></span>Shutdown()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">FlutterEngineResult Engine::Shutdown </td>
+          <td>(</td>
+          <td class="paramname"></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Shutsdown Flutter <a class="el" href="class_engine.html">Engine</a> Instance. </p>
+<dl class="section return"><dt>Returns</dt><dd>FlutterEngineResult </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">The</td><td>result of shutting down the engine </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>flutter </dd></dl>
+
+</div>
+</div>
 <a id="a223526d8618bb0024f99ca8122066407" name="a223526d8618bb0024f99ca8122066407"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a223526d8618bb0024f99ca8122066407">&#9670;&#160;</a></span>TextureCreate()</h2>
 
@@ -2156,6 +2190,28 @@ Private Attributes</h2></td></tr>
 
 </div>
 </div>
+<a id="a0883658e1311ec80369b52ad549cf06b" name="a0883658e1311ec80369b52ad549cf06b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a0883658e1311ec80369b52ad549cf06b">&#9670;&#160;</a></span>m_queue_lock</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">std::mutex Engine::m_queue_lock {}</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
 <a id="a591388ed76cd76bcd399265621c245f8" name="a591388ed76cd76bcd399265621c245f8"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a591388ed76cd76bcd399265621c245f8">&#9670;&#160;</a></span>m_running</h2>
 
@@ -2233,6 +2289,28 @@ Private Attributes</h2></td></tr>
       <table class="memname">
         <tr>
           <td class="memname"><a class="el" href="class_flutter_view.html">FlutterView</a>* Engine::m_view</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="a1298d9d16dc40308e415ab8f09236c00" name="a1298d9d16dc40308e415ab8f09236c00"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a1298d9d16dc40308e415ab8f09236c00">&#9670;&#160;</a></span>m_vm_queue</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">std::shared_ptr&lt;std::queue&lt;std::string&gt; &gt; Engine::m_vm_queue {}</td>
         </tr>
       </table>
   </td>

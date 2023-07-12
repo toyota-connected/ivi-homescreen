@@ -126,6 +126,9 @@ Static Public Member Functions</h2></td></tr>
 <tr class="memitem:a24b26ceac3b2731ec879fcd6ec3eca3f"><td class="memItemLeft" align="right" valign="top">static void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_configuration.html#a24b26ceac3b2731ec879fcd6ec3eca3f">PrintConfig</a> (const <a class="el" href="struct_configuration_1_1_config.html">Config</a> &amp;)</td></tr>
 <tr class="memdesc:a24b26ceac3b2731ec879fcd6ec3eca3f"><td class="mdescLeft">&#160;</td><td class="mdescRight">Print the contents of the configuration to the log.  <a href="class_configuration.html#a24b26ceac3b2731ec879fcd6ec3eca3f">More...</a><br /></td></tr>
 <tr class="separator:a24b26ceac3b2731ec879fcd6ec3eca3f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a620f455fdd667da17aece964220d0da8"><td class="memItemLeft" align="right" valign="top">static int32_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_configuration.html#a620f455fdd667da17aece964220d0da8">MaskAccessibilityFeatures</a> (int32_t accessibility_features)</td></tr>
+<tr class="memdesc:a620f455fdd667da17aece964220d0da8"><td class="mdescLeft">&#160;</td><td class="mdescRight">mask the accessibility_features  <a href="class_configuration.html#a620f455fdd667da17aece964220d0da8">More...</a><br /></td></tr>
+<tr class="separator:a620f455fdd667da17aece964220d0da8"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pri-static-methods" name="pri-static-methods"></a>
 Static Private Member Functions</h2></td></tr>
@@ -176,6 +179,8 @@ Static Private Attributes</h2></td></tr>
 <tr class="separator:a1d3990ef5c0aa25e3cbce7d960a06d84"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:abafd94615057159ae8488671500474d9"><td class="memItemLeft" align="right" valign="top">static constexpr char&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_configuration.html#abafd94615057159ae8488671500474d9">kCursorThemeKey</a> [] = &quot;cursor_theme&quot;</td></tr>
 <tr class="separator:abafd94615057159ae8488671500474d9"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a379cffa1e1c5665d7f4bcc1151da031e"><td class="memItemLeft" align="right" valign="top">static constexpr char&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_configuration.html#a379cffa1e1c5665d7f4bcc1151da031e">kWaylandEventMaskKey</a> [] = &quot;wayland_event_mask&quot;</td></tr>
+<tr class="separator:a379cffa1e1c5665d7f4bcc1151da031e"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a84246603cec5fd77cb3f1ea8d207f37e"><td class="memItemLeft" align="right" valign="top">static constexpr char&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_configuration.html#a84246603cec5fd77cb3f1ea8d207f37e">kDisableCursorKey</a> [] = &quot;disable_cursor&quot;</td></tr>
 <tr class="separator:a84246603cec5fd77cb3f1ea8d207f37e"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a6b34f3ac87aa0807bf119e9496596453"><td class="memItemLeft" align="right" valign="top">static constexpr char&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_configuration.html#a6b34f3ac87aa0807bf119e9496596453">kDebugBackendKey</a> [] = &quot;debug_backend&quot;</td></tr>
@@ -482,6 +487,49 @@ Static Private Attributes</h2></td></tr>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
 <dl class="section user"><dt>Relations</dt><dd>internal </dd></dl>
+
+</div>
+</div>
+<a id="a620f455fdd667da17aece964220d0da8" name="a620f455fdd667da17aece964220d0da8"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a620f455fdd667da17aece964220d0da8">&#9670;&#160;</a></span>MaskAccessibilityFeatures()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">int32_t Configuration::MaskAccessibilityFeatures </td>
+          <td>(</td>
+          <td class="paramtype">int32_t&#160;</td>
+          <td class="paramname"><em>accessibility_features</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">static</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+<p>mask the accessibility_features </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">accessibility_features</td><td>accessibility_features value </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>int32_t </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">masked</td><td>accessibility_features value </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations internal</dt><dd></dd></dl>
+<p>accessibility_features is expressed as bit flags. please see FlutterAccessibilityFeature enum in third_party/flutter/shell/platform/embedder/embedder.h. 0b1111111 is the maximum value of accessibility_features. </p>
 
 </div>
 </div>
@@ -905,6 +953,28 @@ Static Private Attributes</h2></td></tr>
       <table class="memname">
         <tr>
           <td class="memname">constexpr char Configuration::kVmArgsKey[] = &quot;vm_args&quot;</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">static</span><span class="mlabel">constexpr</span><span class="mlabel">private</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="a379cffa1e1c5665d7f4bcc1151da031e" name="a379cffa1e1c5665d7f4bcc1151da031e"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a379cffa1e1c5665d7f4bcc1151da031e">&#9670;&#160;</a></span>kWaylandEventMaskKey</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">constexpr char Configuration::kWaylandEventMaskKey[] = &quot;wayland_event_mask&quot;</td>
         </tr>
       </table>
   </td>

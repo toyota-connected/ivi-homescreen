@@ -19,6 +19,7 @@ var struct_configuration_1_1_config =
     [ "pixel_ratio", "struct_configuration_1_1_config.html#a322dda065643160ee583f7f866f40aea", null ],
     [ "view", "struct_configuration_1_1_config.html#aa227edcf6b14abd59f6d879931566d27", null ],
     [ "vm_args", "struct_configuration_1_1_config.html#ab8bd8948594dbe0d7e884f0e347e0221", null ],
+    [ "wayland_event_mask", "struct_configuration_1_1_config.html#a8e0d22b6c69d8d513d9913158c1f680e", null ],
     [ "width", "struct_configuration_1_1_config.html#a64de3a972c6e13c8eb7827c9756f8483", null ],
     [ "window_type", "struct_configuration_1_1_config.html#a335788a438cf8bee646c044124f541fb", null ],
     [ "wl_output_index", "struct_configuration_1_1_config.html#a14a7cf243d6b93b9642c64bfebb8454b", null ]

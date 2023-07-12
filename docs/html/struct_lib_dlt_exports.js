@@ -3,7 +3,6 @@ var struct_lib_dlt_exports =
     [ "LibDltExports", "struct_lib_dlt_exports.html#a9337d641ad53f6489df793191eebc63a", null ],
     [ "LibDltExports", "struct_lib_dlt_exports.html#a153c3e7d78727a28d7837853d653a4c7", null ],
     [ "CheckLibraryVersion", "struct_lib_dlt_exports.html#a942a9d0dbf1f93307d0fbe11fc83348c", null ],
-    [ "GetAppId", "struct_lib_dlt_exports.html#a76de12198c7d06c185de50a4967ac78d", null ],
     [ "RegisterApp", "struct_lib_dlt_exports.html#afb136cefe6b8bd093b612e878286368a", null ],
     [ "RegisterContext", "struct_lib_dlt_exports.html#a3baaf2558fae455bf80f28480da752b4", null ],
     [ "UnregisterApp", "struct_lib_dlt_exports.html#a5c9dd07b80cf474aa6476547055fc0a7", null ],

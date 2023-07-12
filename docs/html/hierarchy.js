@@ -10,6 +10,9 @@ var hierarchy =
       [ "WaylandEglBackend", "class_wayland_egl_backend.html", null ],
       [ "WaylandVulkanBackend", "class_wayland_vulkan_backend.html", null ]
     ] ],
+    [ "base_sink", null, [
+      [ "spdlog::sinks::dlt_sink< Mutex >", "classspdlog_1_1sinks_1_1dlt__sink.html", null ]
+    ] ],
     [ "flutter::BinaryMessenger", null, [
       [ "KeyEvent", "class_key_event.html", null ],
       [ "TextInput", "class_text_input.html", null ]
@@ -19,6 +22,7 @@ var hierarchy =
     [ "CompositorSurfacePlugin", "class_compositor_surface_plugin.html", null ],
     [ "Configuration::Config", "struct_configuration_1_1_config.html", null ],
     [ "Configuration", "class_configuration.html", null ],
+    [ "CrashHandler", "class_crash_handler.html", null ],
     [ "CustomData", "class_custom_data.html", null ],
     [ "CustomHexdump< RowSize, ShowAscii >", "struct_custom_hexdump.html", null ],
     [ "DelegateHandleKey", "class_delegate_handle_key.html", null ],
@@ -56,8 +60,6 @@ var hierarchy =
     [ "secret::Keyring", "classsecret_1_1_keyring.html", null ],
     [ "LibDlt", "class_lib_dlt.html", null ],
     [ "LibDltExports", "struct_lib_dlt_exports.html", null ],
-    [ "LogMessage", "class_log_message.html", null ],
-    [ "LogMessageVoid", "class_log_message_void.html", null ],
     [ "m_base_surface_frame_listener", null, [
       [ "WaylandWindow", "struct_wayland_window.html", null ]
     ] ],
@@ -110,6 +112,7 @@ var hierarchy =
     [ "Display::touch_point", "struct_display_1_1touch__point.html", null ],
     [ "UrlLauncher", "class_url_launcher.html", null ],
     [ "Utils", "class_utils.html", null ],
+    [ "Display::wayland_event_mask", "struct_display_1_1wayland__event__mask.html", null ],
     [ "CompositorSurface::wl", "struct_compositor_surface_1_1wl.html", null ],
     [ "xdg_surface_listener", null, [
       [ "WaylandWindow", "struct_wayland_window.html", null ]

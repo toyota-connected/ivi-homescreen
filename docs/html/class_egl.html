@@ -98,7 +98,7 @@ $(document).ready(function(){initNavTree('class_egl.html',''); initResizable(); 
   <div class="summary">
 <a href="#pub-methods">Public Member Functions</a> &#124;
 <a href="#pub-static-methods">Static Public Member Functions</a> &#124;
-<a href="#pub-attribs">Public Attributes</a> &#124;
+<a href="#pro-attribs">Protected Attributes</a> &#124;
 <a href="#pri-methods">Private Member Functions</a> &#124;
 <a href="#pri-static-methods">Static Private Member Functions</a> &#124;
 <a href="#pri-attribs">Private Attributes</a> &#124;
@@ -138,6 +138,14 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a62b0b0b84d6485fecc88fa2abcfee97b"><td class="memItemLeft" align="right" valign="top">EGLSurface&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a62b0b0b84d6485fecc88fa2abcfee97b">create_egl_surface</a> (void *native_window, const EGLint *attrib_list)</td></tr>
 <tr class="memdesc:a62b0b0b84d6485fecc88fa2abcfee97b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Create a new EGL window surface.  <a href="class_egl.html#a62b0b0b84d6485fecc88fa2abcfee97b">More...</a><br /></td></tr>
 <tr class="separator:a62b0b0b84d6485fecc88fa2abcfee97b"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a61b89fbe7dbf537acd210f74dd69a728"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a61b89fbe7dbf537acd210f74dd69a728">HasExtension</a> (const char *name)</td></tr>
+<tr class="memdesc:a61b89fbe7dbf537acd210f74dd69a728"><td class="mdescLeft">&#160;</td><td class="mdescRight">Auxiliary function used to check if the given list of extensions contains the requested extension name.  <a href="class_egl.html#a61b89fbe7dbf537acd210f74dd69a728">More...</a><br /></td></tr>
+<tr class="separator:a61b89fbe7dbf537acd210f74dd69a728"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a3e25ded8110e519b231652889284d598"><td class="memItemLeft" align="right" valign="top">std::array&lt; EGLint, 4 &gt;&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a3e25ded8110e519b231652889284d598">RectToInts</a> (FlutterRect rect) const</td></tr>
+<tr class="memdesc:a3e25ded8110e519b231652889284d598"><td class="mdescLeft">&#160;</td><td class="mdescRight">Auxiliary function used to transform a FlutterRect into the format that is expected by the EGL functions.  <a href="class_egl.html#a3e25ded8110e519b231652889284d598">More...</a><br /></td></tr>
+<tr class="separator:a3e25ded8110e519b231652889284d598"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aa4c3666c312b871bfca7fd9fb72224a4"><td class="memItemLeft" align="right" valign="top">EGLDisplay&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#aa4c3666c312b871bfca7fd9fb72224a4">GetDisplay</a> ()</td></tr>
+<tr class="separator:aa4c3666c312b871bfca7fd9fb72224a4"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-static-methods" name="pub-static-methods"></a>
 Static Public Member Functions</h2></td></tr>
@@ -145,8 +153,8 @@ Static Public Member Functions</h2></td></tr>
 <tr class="memdesc:a64d968b6b6a63a99b3acec9ea592331f"><td class="mdescLeft">&#160;</td><td class="mdescRight">Get an EGL display connection.  <a href="class_egl.html#a64d968b6b6a63a99b3acec9ea592331f">More...</a><br /></td></tr>
 <tr class="separator:a64d968b6b6a63a99b3acec9ea592331f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
-<tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
-Public Attributes</h2></td></tr>
+<tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pro-attribs" name="pro-attribs"></a>
+Protected Attributes</h2></td></tr>
 <tr class="memitem:a216d1ed345b6c6826e1e28d9150597e9"><td class="memItemLeft" align="right" valign="top">EGLSurface&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a216d1ed345b6c6826e1e28d9150597e9">m_egl_surface</a> {}</td></tr>
 <tr class="separator:a216d1ed345b6c6826e1e28d9150597e9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
@@ -179,7 +187,7 @@ Private Attributes</h2></td></tr>
 <tr class="separator:ad2993a11a2357d8b8e007c44fb564cc3"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7450844242f09dd61b9532dcc149ecaa"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a7450844242f09dd61b9532dcc149ecaa">m_buffer_size</a></td></tr>
 <tr class="separator:a7450844242f09dd61b9532dcc149ecaa"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a4be82aa500468737360d437112894b43"><td class="memItemLeft" align="right" valign="top">EGLDisplay&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a4be82aa500468737360d437112894b43">m_dpy</a></td></tr>
+<tr class="memitem:a4be82aa500468737360d437112894b43"><td class="memItemLeft" align="right" valign="top">EGLDisplay&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a4be82aa500468737360d437112894b43">m_dpy</a> {}</td></tr>
 <tr class="separator:a4be82aa500468737360d437112894b43"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a0166bcf23a4ad1bb82fab54b065b4d96"><td class="memItemLeft" align="right" valign="top">EGLContext&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="class_egl.html#a0166bcf23a4ad1bb82fab54b065b4d96">m_context</a> {}</td></tr>
 <tr class="separator:a0166bcf23a4ad1bb82fab54b065b4d96"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -459,6 +467,65 @@ Private Attributes</h2></td></tr>
 
 </div>
 </div>
+<a id="aa4c3666c312b871bfca7fd9fb72224a4" name="aa4c3666c312b871bfca7fd9fb72224a4"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aa4c3666c312b871bfca7fd9fb72224a4">&#9670;&#160;</a></span>GetDisplay()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">EGLDisplay Egl::GetDisplay </td>
+          <td>(</td>
+          <td class="paramname"></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">inline</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="a61b89fbe7dbf537acd210f74dd69a728" name="a61b89fbe7dbf537acd210f74dd69a728"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a61b89fbe7dbf537acd210f74dd69a728">&#9670;&#160;</a></span>HasExtension()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">bool Egl::HasExtension </td>
+          <td>(</td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>name</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Auxiliary function used to check if the given list of extensions contains the requested extension name. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">name</td><td>name of extension </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>bool </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">if</td><td>extension is present </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>EGL </dd></dl>
+
+</div>
+</div>
 <a id="a4e13b8b30832cb9aea5cbf627c1d84ce" name="a4e13b8b30832cb9aea5cbf627c1d84ce"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a4e13b8b30832cb9aea5cbf627c1d84ce">&#9670;&#160;</a></span>MakeCurrent()</h2>
 
@@ -576,6 +643,40 @@ Private Attributes</h2></td></tr>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>void </dd></dl>
 <dl class="section user"><dt>Relations</dt><dd>internal </dd></dl>
+
+</div>
+</div>
+<a id="a3e25ded8110e519b231652889284d598" name="a3e25ded8110e519b231652889284d598"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a3e25ded8110e519b231652889284d598">&#9670;&#160;</a></span>RectToInts()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">std::array&lt; EGLint, 4 &gt; Egl::RectToInts </td>
+          <td>(</td>
+          <td class="paramtype">FlutterRect&#160;</td>
+          <td class="paramname"><em>rect</em></td><td>)</td>
+          <td> const</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Auxiliary function used to transform a FlutterRect into the format that is expected by the EGL functions. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">rect</td><td>FlutterRect </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>array of EGLint </dd></dl>
+<dl class="retval"><dt>Return values</dt><dd>
+  <table class="retval">
+    <tr><td class="paramname">if</td><td>extension is present </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section user"><dt>Relations</dt><dd>EGL </dd></dl>
 
 </div>
 </div>
@@ -806,7 +907,7 @@ Private Attributes</h2></td></tr>
   <td class="mlabels-left">
       <table class="memname">
         <tr>
-          <td class="memname">EGLDisplay Egl::m_dpy</td>
+          <td class="memname">EGLDisplay Egl::m_dpy {}</td>
         </tr>
       </table>
   </td>
@@ -823,11 +924,19 @@ Private Attributes</h2></td></tr>
 
 <div class="memitem">
 <div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
       <table class="memname">
         <tr>
           <td class="memname">EGLSurface Egl::m_egl_surface {}</td>
         </tr>
       </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel">protected</span></span>  </td>
+  </tr>
+</table>
 </div><div class="memdoc">
 
 </div>

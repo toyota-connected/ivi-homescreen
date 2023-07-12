@@ -1,5 +1,5 @@
 var searchData=
 [
-  ['encodablevaluecallback_0',['EncodableValueCallback',['../texture_8h.html#a3001c5f6723cb187fdb0aeb8067a1a73',1,'texture.h']]],
-  ['evtimer_5fcb_1',['evtimer_cb',['../timer_8h.html#a8da3683ef9def1705361dca7e5c24fea',1,'timer.h']]]
+  ['dlt_5fsink_5fmt_0',['dlt_sink_mt',['../namespacespdlog_1_1sinks.html#aab812c08164d157963e1cba1afb29b61',1,'spdlog::sinks']]],
+  ['dlt_5fsink_5fst_1',['dlt_sink_st',['../namespacespdlog_1_1sinks.html#a807db5075dd7df884fa638959a0cb7c3',1,'spdlog::sinks']]]
 ];

@@ -6,6 +6,7 @@ var searchData=
   ['compositorsurfaceplugin_3',['CompositorSurfacePlugin',['../class_compositor_surface_plugin.html',1,'']]],
   ['config_4',['Config',['../struct_configuration_1_1_config.html',1,'Configuration']]],
   ['configuration_5',['Configuration',['../class_configuration.html',1,'']]],
-  ['customdata_6',['CustomData',['../class_custom_data.html',1,'']]],
-  ['customhexdump_7',['CustomHexdump',['../struct_custom_hexdump.html',1,'']]]
+  ['crashhandler_6',['CrashHandler',['../class_crash_handler.html',1,'']]],
+  ['customdata_7',['CustomData',['../class_custom_data.html',1,'']]],
+  ['customhexdump_8',['CustomHexdump',['../struct_custom_hexdump.html',1,'']]]
 ];

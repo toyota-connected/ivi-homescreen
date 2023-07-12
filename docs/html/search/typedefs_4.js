@@ -1,5 +1,4 @@
 var searchData=
 [
-  ['handlekeyhook_0',['HandleKeyHook',['../class_delegate_handle_key.html#a3a6523303d4e2310da64bb4c8dd06aae',1,'DelegateHandleKey']]],
-  ['hexdump_1',['Hexdump',['../hexdump_8h.html#a08f9aba675cf3794be4e4842b65e8423',1,'hexdump.h']]]
+  ['glloaderfunction_0',['GlLoaderFunction',['../render__api_8h.html#ab1ca3436bea5cc29e08498eeffb7a0ea',1,'render_api.h']]]
 ];

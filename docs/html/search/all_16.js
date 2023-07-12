@@ -6,7 +6,7 @@ var searchData=
   ['value_5f_3',['value_',['../class_secure_storage.html#a8dde792df4a01d84ad14df0e0cf7eddf',1,'SecureStorage']]],
   ['values_4',['values',['../structegl__config__attribute.html#a3495da6cf70ef970235c831fed4bce12',1,'egl_config_attribute']]],
   ['verbose_5fmode_5',['verbose_mode',['../struct_dlt_context_data.html#ab8b8fc8131229f25a38fc6b8f1011fdf',1,'DltContextData']]],
-  ['version_6',['version',['../struct_compositor_surface.html#ae16a7de1206b96ee5facd27b8d926f87',1,'CompositorSurface::version()'],['../struct_display_1_1agl.html#ab1529b49bd078c683209bb4600abf54e',1,'Display::agl::version()'],['../class_texture_navi_render.html#a22582688b0688daca4cee8d0068971b4',1,'TextureNaviRender::version()']]],
+  ['version_6',['version',['../class_texture_navi_render.html#a22582688b0688daca4cee8d0068971b4',1,'TextureNaviRender::version()'],['../struct_compositor_surface.html#ae16a7de1206b96ee5facd27b8d926f87',1,'CompositorSurface::version()'],['../struct_display_1_1agl.html#ab1529b49bd078c683209bb4600abf54e',1,'Display::agl::version()']]],
   ['vertex_5farr_5fid_7',['vertex_arr_id',['../gstreamer__egl_8cc.html#a97101470cfd3706d33cf0cb6f9cf0c30',1,'gstreamer_egl.cc']]],
   ['vertex_5fbuffer_8',['vertex_buffer',['../gstreamer__egl_8cc.html#aa45581ffb1d69ebea243f2192ce387be',1,'gstreamer_egl.cc']]],
   ['vertexshader_9',['vertexShader',['../gstreamer__egl_8cc.html#aff4cf7548dc507a02192ad289d424873',1,'gstreamer_egl.cc']]],
@@ -15,10 +15,7 @@ var searchData=
   ['video_5fscale_12',['video_scale',['../class_custom_data.html#abf25400bde0f617fc69be61ead0a84d3',1,'CustomData']]],
   ['view_13',['view',['../struct_configuration_1_1_config.html#aa227edcf6b14abd59f6d879931566d27',1,'Configuration::Config']]],
   ['vkalloc_14',['VKALLOC',['../constants_8h.html#a5b5762f60135578ecf09626d69da4ce7',1,'constants.h']]],
-  ['vlog_15',['VLOG',['../logging_8h.html#a0f383369246b98205c4c67a144b40164',1,'logging.h']]],
-  ['vlog_5fis_5fon_16',['VLOG_IS_ON',['../logging_8h.html#af6bf96c798677e654c069c0f6939d894',1,'logging.h']]],
-  ['vlog_5fstream_17',['VLOG_STREAM',['../logging_8h.html#aa3e0a8a0e13bfe73c54ac13b126baa44',1,'logging.h']]],
-  ['vm_5fargs_18',['vm_args',['../struct_configuration_1_1_config.html#ab8bd8948594dbe0d7e884f0e347e0221',1,'Configuration::Config']]],
-  ['volume_19',['volume',['../class_custom_data.html#a3201ddfaae446e10339e6e7350344990',1,'CustomData']]],
-  ['vulkan_20',['vulkan',['../struct_compositor_surface.html#ac9af66b36ec5dc2c2e261ab1adf0f1aba732efa3323f8cd5d6c639775832ae589',1,'CompositorSurface']]]
+  ['vm_5fargs_15',['vm_args',['../struct_configuration_1_1_config.html#ab8bd8948594dbe0d7e884f0e347e0221',1,'Configuration::Config']]],
+  ['volume_16',['volume',['../class_custom_data.html#a3201ddfaae446e10339e6e7350344990',1,'CustomData']]],
+  ['vulkan_17',['vulkan',['../struct_compositor_surface.html#ac9af66b36ec5dc2c2e261ab1adf0f1aba732efa3323f8cd5d6c639775832ae589',1,'CompositorSurface']]]
 ];

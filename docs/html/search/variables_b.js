@@ -16,8 +16,7 @@ var searchData=
   ['layer_5fvisibility_13',['layer_visibility',['../struct_display.html#a28737f318c4c40fd65dbb29165527a6e',1,'Display']]],
   ['leave_14',['leave',['../struct_display.html#a8773865988f3c7fc7aeb5cfa68544252',1,'Display::leave()'],['../struct_wayland_window.html#ac412c27fc590e896f6f22479b54334cf',1,'WaylandWindow::leave()']]],
   ['libdlt_15',['LibDlt',['../libdlt_8cc.html#a00bd00f4c6ec1bc18bbb19a9031b30d1',1,'LibDlt():&#160;libdlt.cc'],['../libdlt_8h.html#a848203c35c8145023666f98a52ab73a3',1,'LibDlt():&#160;libdlt.cc']]],
-  ['line_5f_16',['line_',['../class_log_message.html#a865516108600970ef3fa099aba89311c',1,'LogMessage']]],
-  ['loader_17',['loader',['../struct_compositor_surface.html#ad905204e91395a0b568838db60b3164c',1,'CompositorSurface']]],
-  ['location_18',['location',['../struct_navigation_1_1_route_information.html#abb51ef881daae56df4b9b57edc1b4e84',1,'Navigation::RouteInformation']]],
-  ['log_5flevel_19',['log_level',['../struct_dlt_context_data.html#af99d75e9d39ab96dc0abf78053053b53',1,'DltContextData']]]
+  ['loader_16',['loader',['../struct_compositor_surface.html#ad905204e91395a0b568838db60b3164c',1,'CompositorSurface']]],
+  ['location_17',['location',['../struct_navigation_1_1_route_information.html#abb51ef881daae56df4b9b57edc1b4e84',1,'Navigation::RouteInformation']]],
+  ['log_5flevel_18',['log_level',['../struct_dlt_context_data.html#af99d75e9d39ab96dc0abf78053053b53',1,'DltContextData']]]
 ];

@@ -18,6 +18,9 @@
 
 #include "dlt/libdlt.h"
 #include "flutter/fml/macros.h"
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/callback_sink.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 class Dlt {
  public:

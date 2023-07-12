@@ -51,7 +51,7 @@ bool loadLibrary() {
 
     module = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (module == nullptr) {
-        FML_LOG(ERROR) << "Unable to load Vulkan from " << path;
+        spdlog::error("Unable to load Vulkan from {}", path);
     }
     return module != nullptr;
 }

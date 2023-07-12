@@ -35,7 +35,7 @@ Display::Display(bool enable_cursor,
     : m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)),
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
-  DLOG(INFO) << "+ Display()";
+  SPDLOG_TRACE("+ Display()");
 
   wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
 
@@ -50,7 +50,8 @@ Display::Display(bool enable_cursor,
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
-    LOG(ERROR) << "Failed to connect to Wayland display. " << strerror(errno);
+    spdlog::critical("Failed to connect to Wayland display. {}",
+                     strerror(errno));
     exit(-1);
   }
 
@@ -65,7 +66,8 @@ Display::Display(bool enable_cursor,
         continue;
     }
     if (!m_agl.bound_ok) {
-      LOG(ERROR) << "agl_shell extension already in use by other shell client.";
+      spdlog::critical(
+          "agl_shell extension already in use by other shell client.");
       exit(EXIT_FAILURE);
     }
   } else {
@@ -73,14 +75,14 @@ Display::Display(bool enable_cursor,
   }
 
   if (!m_agl.shell && m_agl.bind_to_agl_shell) {
-    LOG(INFO) << "agl_shell extension not present";
+    spdlog::info("agl_shell extension not present");
   }
 
-  DLOG(INFO) << "- Display()";
+  SPDLOG_TRACE("- Display()");
 }
 
 Display::~Display() {
-  DLOG(INFO) << "+ ~Display()";
+  SPDLOG_TRACE("+ ~Display()");
 
   if (m_shm)
     wl_shm_destroy(m_shm);
@@ -113,7 +115,7 @@ Display::~Display() {
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
 
-  DLOG(INFO) << "- ~Display()";
+  SPDLOG_TRACE("- ~Display()");
 }
 
 /**
@@ -125,10 +127,9 @@ Display::~Display() {
  * @relation
  * wayland
  */
-static void xdg_wm_base_ping(void* data,
+static void xdg_wm_base_ping(void* /* data */,
                              struct xdg_wm_base* xdg_wm_base,
                              uint32_t serial) {
-  (void)data;
   xdg_wm_base_pong(xdg_wm_base, serial);
 }
 
@@ -143,14 +144,14 @@ void Display::registry_handle_global(void* data,
                                      uint32_t version) {
   auto* d = static_cast<Display*>(data);
 
-  DLOG(INFO) << "Wayland: " << interface << " version " << version;
+  SPDLOG_DEBUG("Wayland: {} version {}", interface, version);
 
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
     if (version >= 3) {
       d->m_compositor = static_cast<struct wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
                            std::min(static_cast<uint32_t>(3), version)));
-      DLOG(INFO) << "\tBuffer Scale Enabled";
+      SPDLOG_DEBUG("\tBuffer Scale Enabled");
       d->m_buffer_scale_enable = true;
     } else {
       d->m_compositor = static_cast<struct wl_compositor*>(
@@ -190,7 +191,7 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_output_interface,
                          std::min(static_cast<uint32_t>(2), version)));
     wl_output_add_listener(oi->output, &output_listener, oi.get());
-    DLOG(INFO) << "Wayland: Output [" << d->m_all_outputs.size() << "]";
+    SPDLOG_DEBUG("Wayland: Output [{}]", d->m_all_outputs.size());
     d->m_all_outputs.push_back(oi);
   } else if (strcmp(interface, wl_seat_interface.name) == 0) {
     d->m_seat = static_cast<wl_seat*>(
@@ -216,29 +217,26 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(1), version)));
     }
     d->m_agl.version = version;
-    LOG(INFO) << "Wayland: agl_shell version: " << version;
+    spdlog::info("Wayland: agl_shell version: {}", version);
   }
 #endif
 #if defined(ENABLE_IVI_SHELL_CLIENT)
   else if (strcmp(interface, ivi_application_interface.name) == 0) {
     d->m_ivi_shell.application = static_cast<struct ivi_application*>(
         wl_registry_bind(registry, name, &ivi_application_interface, 1));
-    LOG(INFO) << "Wayland: ivi_application version: " << version;
+    spdlog::info("Wayland: ivi_application version: {}", version);
   } else if (strcmp(interface, ivi_wm_interface.name) == 0) {
     d->m_ivi_shell.ivi_wm = static_cast<struct ivi_wm*>(
         wl_registry_bind(registry, name, &ivi_wm_interface, 1));
     ivi_wm_add_listener(d->m_ivi_shell.ivi_wm, &ivi_wm_listener, data);
-    LOG(INFO) << "Wayland: ivi_wm version: " << version;
+    spdlog::info("Wayland: ivi_wm version: {}", version);
   }
 #endif
 }
 
-void Display::registry_handle_global_remove(void* data,
-                                            struct wl_registry* reg,
-                                            uint32_t id) {
-  (void)data;
-  (void)reg;
-  (void)id;
+void Display::registry_handle_global_remove(void* /* data */,
+                                            struct wl_registry* /* reg */,
+                                            uint32_t /* id */) {
 }
 
 const struct wl_registry_listener Display::registry_listener = {
@@ -247,61 +245,48 @@ const struct wl_registry_listener Display::registry_listener = {
 };
 
 void Display::display_handle_geometry(void* data,
-                                      struct wl_output* wl_output,
-                                      int x,
-                                      int y,
+                                      struct wl_output* /* wl_output */,
+                                      int /* x */,
+                                      int /* y */,
                                       int physical_width,
                                       int physical_height,
-                                      int subpixel,
-                                      const char* make,
-                                      const char* model,
-                                      int transform) {
-  (void)data;
-  (void)wl_output;
-  (void)x;
-  (void)y;
-  (void)subpixel;
-  (void)make;
-  (void)model;
-  (void)transform;
-
+                                      int /* subpixel */,
+                                      const char* /* make */,
+                                      const char* /* model */,
+                                      int /* transform */) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->physical_width = static_cast<unsigned int>(physical_width);
   oi->physical_height = static_cast<unsigned int>(physical_height);
 
-  DLOG(INFO) << "Physical width: " << physical_width << " mm x "
-             << physical_height << " mm";
+  SPDLOG_DEBUG("Physical width: {} mm x {} mm", physical_width,
+               physical_height);
 }
 
 void Display::display_handle_mode(void* data,
-                                  struct wl_output* wl_output,
-                                  uint32_t flags,
+                                  struct wl_output* /* wl_output */,
+                                  uint32_t /* flags */,
                                   int width,
                                   int height,
                                   int refresh) {
-  (void)wl_output;
-  (void)flags;
   auto* oi = static_cast<output_info_t*>(data);
   oi->width = static_cast<unsigned int>(width);
   oi->height = static_cast<unsigned int>(height);
   oi->refresh_rate = refresh;
 
-  DLOG(INFO) << "Video mode: " << width << " x " << height << " @ "
-             << (refresh > 1000 ? refresh / 1000.0 : (double)refresh) << " Hz";
+  SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height,
+               (refresh > 1000 ? refresh / 1000.0 : (double)refresh));
 }
 
 void Display::display_handle_scale(void* data,
-                                   struct wl_output* wl_output,
+                                   struct wl_output* /* wl_output */,
                                    int32_t factor) {
-  (void)wl_output;
   auto* oi = static_cast<output_info_t*>(data);
   oi->scale = factor;
 
-  DLOG(INFO) << "Display Scale Factor: " << factor;
+  SPDLOG_DEBUG("Display Scale Factor: {}", factor);
 }
 
-void Display::display_handle_done(void* data, struct wl_output* wl_output) {
-  (void)wl_output;
+void Display::display_handle_done(void* data, struct wl_output* /* wl_output */) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->done = true;
 }
@@ -310,10 +295,7 @@ const struct wl_output_listener Display::output_listener = {
     display_handle_geometry, display_handle_mode, display_handle_done,
     display_handle_scale};
 
-void Display::shm_format(void* data, struct wl_shm* wl_shm, uint32_t format) {
-  (void)data;
-  (void)wl_shm;
-  (void)format;
+void Display::shm_format(void* /* data */, struct wl_shm* /* wl_shm */, uint32_t /* format */) {
 }
 
 const struct wl_shm_listener Display::shm_listener = {shm_format};
@@ -325,7 +307,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.pointer) {
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
-      LOG(INFO) << "Pointer Present";
+      spdlog::info("Pointer Present");
       d->m_pointer.pointer = wl_seat_get_pointer(seat);
       wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
     } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.pointer) {
@@ -336,7 +318,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.keyboard) {
     if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
-      LOG(INFO) << "Keyboard Present";
+      spdlog::info("Keyboard Present");
       d->m_keyboard = wl_seat_get_keyboard(seat);
       wl_keyboard_add_listener(d->m_keyboard, &keyboard_listener, d);
     } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard) {
@@ -347,7 +329,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.touch) {
     if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
-      LOG(INFO) << "Touch Present";
+      spdlog::info("Touch Present");
       d->m_touch.touch = wl_seat_get_touch(seat);
       wl_touch_set_user_data(d->m_touch.touch, d);
       wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
@@ -358,12 +340,11 @@ void Display::seat_handle_capabilities(void* data,
   }
 }
 
-void Display::seat_handle_name(void* data,
-                               struct wl_seat* seat,
+void Display::seat_handle_name(void* /* data */,
+                               struct wl_seat* /* seat */,
                                const char* name) {
-  (void)data;
-  (void)seat;
-  DLOG(INFO) << "Seat: " << name;
+  (void)name;
+  SPDLOG_DEBUG("Seat: {}", name);
 }
 
 const struct wl_seat_listener Display::seat_listener = {
@@ -376,12 +357,11 @@ bool Display::pointerButtonStatePressed(struct pointer* p) {
 }
 
 void Display::pointer_handle_enter(void* data,
-                                   struct wl_pointer* pointer,
+                                   struct wl_pointer* /* pointer */,
                                    uint32_t serial,
                                    struct wl_surface* surface,
                                    wl_fixed_t sx,
                                    wl_fixed_t sy) {
-  (void)pointer;
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
   d->m_active_engine = d->m_surface_engine_map[surface];
@@ -399,11 +379,9 @@ void Display::pointer_handle_enter(void* data,
 }
 
 void Display::pointer_handle_leave(void* data,
-                                   struct wl_pointer* pointer,
+                                   struct wl_pointer* /* pointer */,
                                    uint32_t serial,
-                                   struct wl_surface* surface) {
-  (void)pointer;
-  (void)surface;
+                                   struct wl_surface* /* surface */) {
   auto* d = static_cast<Display*>(data);
 
   d->m_pointer.serial = serial;
@@ -416,12 +394,10 @@ void Display::pointer_handle_leave(void* data,
 }
 
 void Display::pointer_handle_motion(void* data,
-                                    struct wl_pointer* pointer,
-                                    uint32_t time,
+                                    struct wl_pointer* /* pointer */,
+                                    uint32_t /* time */,
                                     wl_fixed_t sx,
                                     wl_fixed_t sy) {
-  (void)pointer;
-  (void)time;
   auto* d = static_cast<Display*>(data);
 
   if (!d->m_wayland_event_mask.pointer_motion) {
@@ -439,13 +415,11 @@ void Display::pointer_handle_motion(void* data,
 }
 
 void Display::pointer_handle_button(void* data,
-                                    struct wl_pointer* wl_pointer,
+                                    struct wl_pointer* /* wl_pointer */,
                                     uint32_t serial,
-                                    uint32_t time,
+                                    uint32_t /* time */,
                                     uint32_t button,
                                     uint32_t state) {
-  (void)wl_pointer;
-  (void)time;
   auto* d = static_cast<Display*>(data);
   if (!d->m_wayland_event_mask.pointer_buttons) {
     d->m_pointer.event.button = button;
@@ -475,11 +449,10 @@ void Display::pointer_handle_button(void* data,
 }
 
 void Display::pointer_handle_axis(void* data,
-                                  struct wl_pointer* wl_pointer,
+                                  struct wl_pointer* /* wl_pointer */,
                                   uint32_t time,
                                   uint32_t axis,
                                   wl_fixed_t value) {
-  (void)wl_pointer;
   auto* d = static_cast<Display*>(data);
   if (!d->m_wayland_event_mask.pointer_axis) {
     d->m_pointer.event.time = time;
@@ -495,37 +468,24 @@ void Display::pointer_handle_axis(void* data,
   }
 }
 
-void Display::pointer_handle_frame(void* data, struct wl_pointer* wl_pointer) {
-  (void)data;
-  (void)wl_pointer;
+void Display::pointer_handle_frame(void* /* data */, struct wl_pointer* /* wl_pointer */) {
 }
 
-void Display::pointer_handle_axis_source(void* data,
-                                         struct wl_pointer* wl_pointer,
-                                         uint32_t axis_source) {
-  (void)data;
-  (void)wl_pointer;
-  (void)axis_source;
+void Display::pointer_handle_axis_source(void* /* data */,
+                                         struct wl_pointer* /* wl_pointer */,
+                                         uint32_t /* axis_source */) {
 }
 
-void Display::pointer_handle_axis_stop(void* data,
-                                       struct wl_pointer* wl_pointer,
-                                       uint32_t time,
-                                       uint32_t axis) {
-  (void)data;
-  (void)wl_pointer;
-  (void)time;
-  (void)axis;
+void Display::pointer_handle_axis_stop(void* /* data */,
+                                       struct wl_pointer* /* wl_pointer */,
+                                       uint32_t /* time */,
+                                       uint32_t /* axis */) {
 }
 
-void Display::pointer_handle_axis_discrete(void* data,
-                                           struct wl_pointer* wl_pointer,
-                                           uint32_t axis,
-                                           int32_t discrete) {
-  (void)data;
-  (void)wl_pointer;
-  (void)axis;
-  (void)discrete;
+void Display::pointer_handle_axis_discrete(void* /* data */,
+                                           struct wl_pointer* /* wl_pointer */,
+                                           uint32_t /* axis */,
+                                           int32_t /* discrete */) {
 }
 
 const struct wl_pointer_listener Display::pointer_listener = {
@@ -541,38 +501,29 @@ const struct wl_pointer_listener Display::pointer_listener = {
 };
 
 void Display::keyboard_handle_enter(void* data,
-                                    struct wl_keyboard* keyboard,
-                                    uint32_t serial,
+                                    struct wl_keyboard* /* keyboard */,
+                                    uint32_t /* serial */,
                                     struct wl_surface* surface,
-                                    struct wl_array* keys) {
-  (void)keyboard;
-  (void)serial;
-  (void)keys;
+                                    struct wl_array* /* keys */) {
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
   d->m_active_engine = d->m_surface_engine_map[surface];
 }
 
 void Display::keyboard_handle_leave(void* data,
-                                    struct wl_keyboard* keyboard,
-                                    uint32_t serial,
-                                    struct wl_surface* surface) {
-  (void)keyboard;
-  (void)serial;
-  (void)surface;
-
+                                    struct wl_keyboard* /* keyboard */,
+                                    uint32_t /* serial */,
+                                    struct wl_surface* /* surface */) {
   auto* d = static_cast<Display*>(data);
 
   d->m_repeat_timer->disarm();
 }
 
 void Display::keyboard_handle_keymap(void* data,
-                                     struct wl_keyboard* keyboard,
-                                     uint32_t format,
+                                     struct wl_keyboard* /* keyboard */,
+                                     uint32_t /* format */,
                                      int fd,
                                      uint32_t size) {
-  (void)keyboard;
-  (void)format;
   auto* d = static_cast<Display*>(data);
   char* keymap_string =
       static_cast<char*>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
@@ -587,14 +538,11 @@ void Display::keyboard_handle_keymap(void* data,
 }
 
 void Display::keyboard_handle_key(void* data,
-                                  struct wl_keyboard* keyboard,
-                                  uint32_t serial,
-                                  uint32_t time,
+                                  struct wl_keyboard* /* keyboard */,
+                                  uint32_t /* serial */,
+                                  uint32_t /* time */,
                                   uint32_t key,
                                   uint32_t state) {
-  (void)keyboard;
-  (void)serial;
-  (void)time;
   auto* d = static_cast<Display*>(data);
 
   if (!d->m_xkb_state)
@@ -616,14 +564,13 @@ void Display::keyboard_handle_key(void* data,
     int res =
         xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &key_symbols);
     if (res == 0) {
-      LOG(INFO) << "xkb_scancode has no key symbols: "
-                << "0x" << std::hex << xkb_scancode;
+      spdlog::info("xkb_scancode has no key symbols: 0x{:x}", xkb_scancode);
       keysym = XKB_KEY_NoSymbol;
     } else {
       // only use the first symbol until the use case for two is clarified
       keysym = key_symbols[0];
       for (int i = 0; i < res; i++) {
-        LOG(INFO) << "xkb keysym: " << std::hex << "0x" << key_symbols;
+        spdlog::info("xkb keysym: 0x{:x}", key_symbols[i]);
       }
     }
   }
@@ -642,7 +589,7 @@ void Display::keyboard_handle_key(void* data,
       d->m_repeat_code = xkb_scancode;
       d->m_repeat_timer->arm();
     } else {
-      DLOG(INFO) << "key does not repeat: " << std::hex << "0x" << xkb_scancode;
+      SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
     }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
@@ -682,30 +629,26 @@ void Display::keyboard_handle_key(void* data,
 }
 
 void Display::keyboard_handle_modifiers(void* data,
-                                        struct wl_keyboard* keyboard,
-                                        uint32_t serial,
+                                        struct wl_keyboard* /* keyboard */,
+                                        uint32_t /* serial */,
                                         uint32_t mods_depressed,
                                         uint32_t mods_latched,
                                         uint32_t mods_locked,
                                         uint32_t group) {
-  (void)keyboard;
-  (void)serial;
   auto* d = static_cast<Display*>(data);
   xkb_state_update_mask(d->m_xkb_state, mods_depressed, mods_latched,
                         mods_locked, 0, 0, group);
 }
 
 void Display::keyboard_handle_repeat_info(void* data,
-                                          struct wl_keyboard* wl_keyboard,
+                                          struct wl_keyboard* /* wl_keyboard */,
                                           int32_t rate,
                                           int32_t delay) {
-  (void)wl_keyboard;
-
   auto d = reinterpret_cast<Display*>(data);
 
   d->m_repeat_timer->set_timerspec(rate, delay);
 
-  DLOG(INFO) << "[keyboard repeat info] rate: " << rate << ", delay: " << delay;
+  SPDLOG_DEBUG("[keyboard repeat info] rate: {}, delay: {}", rate, delay);
 }
 
 const struct wl_keyboard_listener Display::keyboard_listener = {
@@ -755,16 +698,13 @@ void Display::keyboard_repeat_func(void* data) {
 }
 
 void Display::touch_handle_down(void* data,
-                                struct wl_touch* wl_touch,
-                                uint32_t serial,
-                                uint32_t time,
+                                struct wl_touch* /* wl_touch */,
+                                uint32_t /* serial */,
+                                uint32_t /* time */,
                                 struct wl_surface* surface,
                                 int32_t id,
                                 wl_fixed_t x_w,
                                 wl_fixed_t y_w) {
-  (void)wl_touch;
-  (void)serial;
-  (void)time;
   auto* d = static_cast<Display*>(data);
 
   d->m_touch.surface_x[id] = x_w;
@@ -780,14 +720,10 @@ void Display::touch_handle_down(void* data,
 }
 
 void Display::touch_handle_up(void* data,
-                              struct wl_touch* wl_touch,
-                              uint32_t serial,
-                              uint32_t time,
+                              struct wl_touch* /* wl_touch */,
+                              uint32_t /* serial */,
+                              uint32_t /* time */,
                               int32_t id) {
-  (void)wl_touch;
-  (void)serial;
-  (void)time;
-
   auto* d = static_cast<Display*>(data);
 
   if (d->m_touch_engine) {
@@ -798,13 +734,11 @@ void Display::touch_handle_up(void* data,
 }
 
 void Display::touch_handle_motion(void* data,
-                                  struct wl_touch* wl_touch,
-                                  uint32_t time,
+                                  struct wl_touch* /* wl_touch */,
+                                  uint32_t /* time */,
                                   int32_t id,
                                   wl_fixed_t x_w,
                                   wl_fixed_t y_w) {
-  (void)wl_touch;
-  (void)time;
   auto* d = static_cast<Display*>(data);
 
   d->m_touch.surface_x[id] = x_w;
@@ -817,20 +751,17 @@ void Display::touch_handle_motion(void* data,
   }
 }
 
-void Display::touch_handle_cancel(void* data, struct wl_touch* wl_touch) {
-  (void)wl_touch;
+void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   auto* d = static_cast<Display*>(data);
   if (d->m_touch_engine) {
-    DLOG(INFO) << "touch_handle_cancel";
+    SPDLOG_DEBUG("touch_handle_cancel");
     d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kCancel,
                                           d->m_pointer.event.surface_x,
                                           d->m_pointer.event.surface_y, 0);
   }
 }
 
-void Display::touch_handle_frame(void* data, struct wl_touch* wl_touch) {
-  (void)data;
-  (void)wl_touch;
+void Display::touch_handle_frame(void* /* data */, struct wl_touch* /* wl_touch */) {
 }
 
 const struct wl_touch_listener Display::touch_listener = {
@@ -900,13 +831,13 @@ bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
     } else if (kind == "forbidden") {
       cursor_name = kCursorKindForbidden;
     } else {
-      DLOG(INFO) << "Cursor Kind = " << kind;
+      SPDLOG_DEBUG("Cursor Kind = {}", kind);
       return false;
     }
 
     auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
-      DLOG(INFO) << "Cursor [" << cursor_name << "] not found";
+      SPDLOG_DEBUG("Cursor [{}] not found", cursor_name);
       return false;
     }
     auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
@@ -921,7 +852,7 @@ bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
                         (int32_t)cursor->images[0]->height);
       wl_surface_commit(m_cursor_surface);
     } else {
-      DLOG(INFO) << "Failed to set cursor: Invalid Cursor Buffer";
+      SPDLOG_DEBUG("Failed to set cursor: Invalid Cursor Buffer");
       return false;
     }
   }
@@ -949,7 +880,7 @@ int32_t Display::GetBufferScale(uint32_t index) {
       return (int32_t)kDefaultBufferScale;
     }
   }
-  DLOG(ERROR) << "GetBufferScale: Invalid output index: " << index;
+  SPDLOG_DEBUG("GetBufferScale: Invalid output index: {}", index);
   return (int32_t)kDefaultBufferScale;
 }
 
@@ -957,7 +888,7 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) {
   if (index < m_all_outputs.size()) {
     return {m_all_outputs[index]->width, m_all_outputs[index]->height};
   }
-  DLOG(ERROR) << "GetVideoModeSize: Invalid output index: " << index;
+  SPDLOG_DEBUG("GetVideoModeSize: Invalid output index: {}", index);
   return {0, 0};
 }
 
@@ -980,185 +911,198 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_fail = agl_shell_bound_fail,
 };
 
-void Display::ivi_wm_surface_visibility(void* data,
-                                        struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_visibility(void* /* data */,
+                                        struct ivi_wm* /* ivi_wm */,
                                         uint32_t surface_id,
                                         int32_t visibility) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_visibility: " << surface_id
-             << ", visibility: " << visibility;
+  (void)surface_id;
+  (void)visibility;
+  SPDLOG_DEBUG("ivi_wm_surface_visibility: {}, visibility: {}", surface_id,
+               visibility);
 }
 
-void Display::ivi_wm_layer_visibility(void* data,
-                                      struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_visibility(void* /* data */,
+                                      struct ivi_wm* /* ivi_wm */,
                                       uint32_t layer_id,
                                       int32_t visibility) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_visibility: " << layer_id
-             << ", visibility: " << visibility;
+  (void)layer_id;
+  (void)visibility;
+  SPDLOG_DEBUG("ivi_wm_layer_visibility: {}, visibility: {}", layer_id,
+               visibility);
 }
 
-void Display::ivi_wm_surface_opacity(void* data,
-                                     struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_opacity(void* /* data */,
+                                     struct ivi_wm* /* ivi_wm */,
                                      uint32_t surface_id,
                                      wl_fixed_t opacity) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_opacity: " << surface_id
-             << ", opacity: " << opacity;
+  (void)surface_id;
+  (void)opacity;
+  SPDLOG_DEBUG("ivi_wm_surface_opacity: {}, opacity: {}", surface_id, opacity);
 }
 
-void Display::ivi_wm_layer_opacity(void* data,
-                                   struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_opacity(void* /* data */,
+                                   struct ivi_wm* /* ivi_wm */,
                                    uint32_t layer_id,
                                    wl_fixed_t opacity) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_opacity: " << layer_id
-             << ", opacity: " << opacity;
+  (void)layer_id;
+  (void)opacity;
+  SPDLOG_DEBUG("ivi_wm_layer_opacity: {}, opacity: {}", layer_id, opacity);
 }
 
-void Display::ivi_wm_surface_source_rectangle(void* data,
-                                              struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_source_rectangle(void* /* data */,
+                                              struct ivi_wm* /* ivi_wm */,
                                               uint32_t surface_id,
                                               int32_t x,
                                               int32_t y,
                                               int32_t width,
                                               int32_t height) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_source_rectangle: " << surface_id
-             << ", x: " << x << ", y: " << y << ", width: " << width
-             << ", height: " << height;
+  (void)surface_id;
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  SPDLOG_DEBUG(
+      "ivi_wm_surface_source_rectangle: {}, x: {}, y: {}, width: {}, height: "
+      "{}",
+      surface_id, x, y, width, height);
 }
 
-void Display::ivi_wm_layer_source_rectangle(void* data,
-                                            struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_source_rectangle(void* /* data */,
+                                            struct ivi_wm* /* ivi_wm */,
                                             uint32_t layer_id,
                                             int32_t x,
                                             int32_t y,
                                             int32_t width,
                                             int32_t height) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_source_rectangle: " << layer_id << ", x: " << x
-             << ", y: " << y << ", width: " << width << ", height: " << height;
+  (void)layer_id;
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  SPDLOG_DEBUG(
+      "ivi_wm_layer_source_rectangle: {}, x: {}, y: {}, width: {}, height: {}",
+      layer_id, x, y, width, height);
 }
 
-void Display::ivi_wm_surface_destination_rectangle(void* data,
-                                                   struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_destination_rectangle(void* /* data */,
+                                                   struct ivi_wm* /* ivi_wm */,
                                                    uint32_t surface_id,
                                                    int32_t x,
                                                    int32_t y,
                                                    int32_t width,
                                                    int32_t height) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_destination_rectangle: " << surface_id
-             << ", x: " << x << ", y: " << y << ", width: " << width
-             << ", height: " << height;
+  (void)surface_id;
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  SPDLOG_DEBUG(
+      "ivi_wm_surface_destination_rectangle: {}, x: {}, y: {}, width: {}, "
+      "height: {}",
+      surface_id, x, y, width, height);
 }
 
-void Display::ivi_wm_layer_destination_rectangle(void* data,
-                                                 struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_destination_rectangle(void* /* data */,
+                                                 struct ivi_wm* /* ivi_wm */,
                                                  uint32_t layer_id,
                                                  int32_t x,
                                                  int32_t y,
                                                  int32_t width,
                                                  int32_t height) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_destination_rectangle: " << layer_id
-             << ", x: " << x << ", y: " << y << ", width: " << width
-             << ", height: " << height;
+  (void)layer_id;
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  SPDLOG_DEBUG(
+      "ivi_wm_surface_destination_rectangle: {}, , x: {}, y: {}, width: {}, "
+      "height: {}",
+      layer_id, x, y, width, height);
 }
 
-void Display::ivi_wm_surface_created(void* data,
-                                     struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_created(void* /* data */,
+                                     struct ivi_wm* /* ivi_wm */,
                                      uint32_t surface_id) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_created: " << surface_id;
+  (void)surface_id;
+  SPDLOG_DEBUG("ivi_wm_surface_created: {}", surface_id);
 }
 
-void Display::ivi_wm_layer_created(void* data,
-                                   struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_created(void* /* data */,
+                                   struct ivi_wm* /* ivi_wm */,
                                    uint32_t layer_id) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_created: " << layer_id;
+  (void)layer_id;
+  SPDLOG_DEBUG("ivi_wm_layer_created: {}", layer_id);
 }
 
-void Display::ivi_wm_surface_destroyed(void* data,
-                                       struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_destroyed(void* /* data */,
+                                       struct ivi_wm* /* ivi_wm */,
                                        uint32_t surface_id) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_destroyed: " << surface_id;
+  (void)surface_id;
+  SPDLOG_DEBUG("ivi_wm_surface_destroyed: {}", surface_id);
 }
 
-void Display::ivi_wm_layer_destroyed(void* data,
-                                     struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_destroyed(void* /* data */,
+                                     struct ivi_wm* /* ivi_wm */,
                                      uint32_t layer_id) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_destroyed: " << layer_id;
+  (void)layer_id;
+  SPDLOG_DEBUG("ivi_wm_layer_destroyed: {}", layer_id);
 }
 
-void Display::ivi_wm_surface_error(void* data,
-                                   struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_error(void* /* data */,
+                                   struct ivi_wm* /* ivi_wm */,
                                    uint32_t object_id,
                                    uint32_t error,
                                    const char* message) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_error: " << object_id << ", error (" << error
-             << "), " << message;
+  (void)object_id;
+  (void)error;
+  (void)message;
+  SPDLOG_DEBUG("ivi_wm_surface_error: {}, error ({}), {}", object_id, error,
+               message);
 }
 
-void Display::ivi_wm_layer_error(void* data,
-                                 struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_error(void* /* data */,
+                                 struct ivi_wm* /* ivi_wm */,
                                  uint32_t object_id,
                                  uint32_t error,
                                  const char* message) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_error: " << object_id << ", error (" << error
-             << "), " << message;
+  (void)object_id;
+  (void)error;
+  (void)message;
+  SPDLOG_DEBUG("ivi_wm_layer_error: {}, error ({}), {}", object_id, error,
+               message);
 }
 
-void Display::ivi_wm_surface_size(void* data,
-                                  struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_size(void* /* data */,
+                                  struct ivi_wm* /* ivi_wm */,
                                   uint32_t surface_id,
                                   int32_t width,
                                   int32_t height) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_size: " << surface_id << ", width " << width
-             << ", height " << height;
+  (void)surface_id;
+  (void)width;
+  (void)height;
+  SPDLOG_DEBUG("ivi_wm_surface_size: {}, width {}, height {}", surface_id,
+               width, height);
 }
 
-void Display::ivi_wm_surface_stats(void* data,
-                                   struct ivi_wm* ivi_wm,
+void Display::ivi_wm_surface_stats(void* /* data */,
+                                   struct ivi_wm* /* ivi_wm */,
                                    uint32_t surface_id,
                                    uint32_t frame_count,
                                    uint32_t pid) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_surface_stats: " << surface_id << ", frame_count "
-             << frame_count << ", pid " << pid;
+  (void)surface_id;
+  (void)frame_count;
+  (void)pid;
+  SPDLOG_DEBUG("ivi_wm_surface_stats: {}, frame_count {}, pid {}", surface_id,
+               frame_count, pid);
 }
 
-void Display::ivi_wm_layer_surface_added(void* data,
-                                         struct ivi_wm* ivi_wm,
+void Display::ivi_wm_layer_surface_added(void* /* data */,
+                                         struct ivi_wm* /* ivi_wm */,
                                          uint32_t layer_id,
                                          uint32_t surface_id) {
-  (void)data;
-  (void)ivi_wm;
-  DLOG(INFO) << "ivi_wm_layer_surface_added: " << layer_id << ", "
-             << surface_id;
+  (void)layer_id;
+  (void)surface_id;
+  SPDLOG_DEBUG("ivi_wm_layer_surface_added: {}, {}", layer_id, surface_id);
 }
 
 const struct ivi_wm_listener Display::ivi_wm_listener = {
@@ -1198,7 +1142,7 @@ void Display::wayland_event_mask_print(struct wayland_event_mask& mask) {
   if (mask.touch)
     ss << "\n\ttouch";
 
-  LOG(INFO) << ss.str();
+  spdlog::info(ss.str());
 }
 
 void Display::wayland_event_mask_update(
@@ -1230,8 +1174,8 @@ void Display::wayland_event_mask_update(
       mask.keyboard = true;
     else if (event == "touch")
       mask.touch = true;
-    else
-      LOG(INFO) << "Unknown Wayland Event Mask: [" << event << "]";
+    else if (!event.empty())
+      spdlog::warn("Unknown Wayland Event Mask: [{}]", event);
   }
   if (!ignore_wayland_events.empty()) {
     wayland_event_mask_print(mask);

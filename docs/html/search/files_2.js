@@ -10,5 +10,7 @@ var searchData=
   ['compositor_5fsurface_5fapi_2eh_7',['compositor_surface_api.h',['../compositor__surface__api_8h.html',1,'']]],
   ['configuration_2ecc_8',['configuration.cc',['../configuration_8cc.html',1,'']]],
   ['configuration_2eh_9',['configuration.h',['../configuration_8h.html',1,'']]],
-  ['constants_2eh_10',['constants.h',['../constants_8h.html',1,'']]]
+  ['constants_2eh_10',['constants.h',['../constants_8h.html',1,'']]],
+  ['crash_5fhandler_2ecc_11',['crash_handler.cc',['../crash__handler_8cc.html',1,'']]],
+  ['crash_5fhandler_2eh_12',['crash_handler.h',['../crash__handler_8h.html',1,'']]]
 ];

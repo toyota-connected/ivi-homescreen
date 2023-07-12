@@ -17,6 +17,7 @@ var class_platform =
     [ "kStatusBarBrightness", "class_platform.html#ac664a07c517861f633642c4414d682c3", null ],
     [ "kStatusBarColor", "class_platform.html#a9f9e8f22d1ba46cebd6b41ae9b57fc87", null ],
     [ "kStatusBarIconBrightness", "class_platform.html#a3c766e2af763570c9b83f0714a8d154e", null ],
+    [ "kSystemChrome_setEnabledSystemUIMode", "class_platform.html#adc8d1c3105a52c47c0d8d6af9576ca13", null ],
     [ "kSystemChrome_setPreferredOrientations", "class_platform.html#abd619e352c23f089824a9dce1efe9b07", null ],
     [ "kSystemNavigationBarColor", "class_platform.html#ace969a4c6ac8a338f4128e131e3a3b25", null ],
     [ "kSystemNavigationBarContrastEnforced", "class_platform.html#a71b84b2bb46721b1190ddc0389613ac3", null ],

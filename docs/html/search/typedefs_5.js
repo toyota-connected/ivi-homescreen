@@ -1,4 +1,5 @@
 var searchData=
 [
-  ['loaderfunction_0',['LoaderFunction',['../compositor__surface__api_8h.html#a1a69b01d24ba98bffb2913af80c7c877',1,'compositor_surface_api.h']]]
+  ['handlekeyhook_0',['HandleKeyHook',['../class_delegate_handle_key.html#a3a6523303d4e2310da64bb4c8dd06aae',1,'DelegateHandleKey']]],
+  ['hexdump_1',['Hexdump',['../hexdump_8h.html#a08f9aba675cf3794be4e4842b65e8423',1,'hexdump.h']]]
 ];
