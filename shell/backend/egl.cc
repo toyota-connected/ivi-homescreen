@@ -18,6 +18,8 @@
 
 #include <cassert>
 #include <cstring>
+#include <sstream>
+
 
 #include "logging.h"
 
