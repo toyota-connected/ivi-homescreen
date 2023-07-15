@@ -33,6 +33,7 @@ add_executable(homescreen
         view/flutter_view.cc
         wayland/display.cc
         wayland/window.cc
+        logging/logging.cc
         )
 
 include(plugins)
@@ -109,7 +110,6 @@ target_link_libraries(homescreen PRIVATE
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
-        spdlog::spdlog
         )
 
 if (BUILD_CRASH_HANDLER)

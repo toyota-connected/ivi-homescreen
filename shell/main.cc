@@ -29,6 +29,8 @@
 
 volatile bool running = true;
 
+std::unique_ptr<Logging> logger_;
+
 /**
  * @brief Signal handler
  * @param[in] signal No use
@@ -91,7 +93,7 @@ int main(int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
-  LoggingPrologue();
+  auto logger_ = std::make_unique<Logging>();
 
   config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
   for (int i = 1; i < argc; ++i) {
@@ -329,7 +331,7 @@ int main(int argc, char** argv) {
     ret = app.Loop();
   }
 
-  LoggingEpilogue();
+  logger_.reset();
 
 #if defined(BUILD_CRASH_HANDLER)
   (void)crash_handler.release();
