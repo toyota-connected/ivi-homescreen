@@ -1,9 +1,0 @@
-<map id="/mnt/raid10/stargate/ivi&#45;homescreen/shell/backend/egl.h" name="/mnt/raid10/stargate/ivi&#45;homescreen/shell/backend/egl.h">
-<area shape="rect" id="node1" title=" " alt="" coords="116,5,261,60"/>
-<area shape="rect" id="node2" href="$egl_8cc.html" title=" " alt="" coords="5,108,151,163"/>
-<area shape="rect" id="node3" href="$wayland__egl_8cc.html" title=" " alt="" coords="67,218,236,273"/>
-<area shape="rect" id="node4" href="$wayland__egl_8h.html" title=" " alt="" coords="263,108,426,163"/>
-<area shape="rect" id="node5" href="$gstreamer__egl_8cc.html" title=" " alt="" coords="261,211,429,280"/>
-<area shape="rect" id="node6" href="$texture__navi__render__egl_8cc.html" title=" " alt="" coords="453,211,660,280"/>
-<area shape="rect" id="node7" href="$texture__test__egl_8cc.html" title=" " alt="" coords="684,211,851,280"/>
-</map>

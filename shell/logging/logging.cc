@@ -16,8 +16,6 @@
 
 #include "logging.h"
 
-#include <sstream>
-
 #include <spdlog/cfg/env.h>
 #if defined(ENABLE_DLT)
 #include <spdlog/sinks/callback_sink.h>
