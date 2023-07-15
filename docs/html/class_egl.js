@@ -12,7 +12,7 @@ var class_egl =
     [ "MakeCurrent", "class_egl.html#a4e13b8b30832cb9aea5cbf627c1d84ce", null ],
     [ "MakeResourceCurrent", "class_egl.html#a9ea1c277bd2ac003a25eeef022114ade", null ],
     [ "MakeTextureCurrent", "class_egl.html#a9f124f0aad7cfdef8c0b9b8bb5d270f0", null ],
-    [ "print_extension_list", "class_egl.html#abbe8001bddeb4d8af620dd019ebcdfb8", null ],
+    [ "print_extension_list", "class_egl.html#a11e36525e963896260fd5cee62c90a56", null ],
     [ "RectToInts", "class_egl.html#a3e25ded8110e519b231652889284d598", null ],
     [ "ReportGlesAttributes", "class_egl.html#aa82049ab16c425f58b71a03b76fc99b4", null ],
     [ "sDebugCallback", "class_egl.html#a7775eacf9e8e7b0bf000a7f63db5e74b", null ],
