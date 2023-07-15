@@ -206,5 +206,5 @@ class Egl {
    * @relation
    * internal
    */
-  static void print_extension_list(const char* ext);
+  static void print_extension_list(EGLDisplay dpy);
 };
