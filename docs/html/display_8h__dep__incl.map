@@ -1,8 +1,0 @@
-<map id="/mnt/raid10/stargate/ivi&#45;homescreen/shell/wayland/display.h" name="/mnt/raid10/stargate/ivi&#45;homescreen/shell/wayland/display.h">
-<area shape="rect" id="node1" title=" " alt="" coords="389,5,535,60"/>
-<area shape="rect" id="node2" href="$app_8cc.html" title=" " alt="" coords="5,108,151,163"/>
-<area shape="rect" id="node3" href="$compositor__surface_8cc.html" title=" " alt="" coords="175,108,365,163"/>
-<area shape="rect" id="node4" href="$flutter__view_8cc.html" title=" " alt="" coords="389,108,535,163"/>
-<area shape="rect" id="node5" href="$display_8cc.html" title=" " alt="" coords="559,108,704,163"/>
-<area shape="rect" id="node6" href="$window_8cc.html" title=" " alt="" coords="728,108,873,163"/>
-</map>

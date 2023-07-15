@@ -556,25 +556,25 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
 
   spdlog::info("EGL framebuffer configurations:");
   for (EGLint i = 0; i < num_config; i++) {
-    ss << "\tConfiguration #" << (int)i << ":";
+    ss << "\tConfiguration #" << i;
     spdlog::info(ss.str().c_str());
     ss.str("");
     ss.clear();
-    for (auto& egl_config_attribute : egl_config_attributes) {
+    for (auto& attribute : egl_config_attributes) {
       EGLint value = 0;
-      eglGetConfigAttrib(m_dpy, configs[i], egl_config_attribute.id, &value);
-      if (egl_config_attribute.cardinality == 0) {
-        ss << "\t\t" << egl_config_attribute.name << ": " << (int)value;
+      eglGetConfigAttrib(m_dpy, configs[i], attribute.id, &value);
+      if (attribute.cardinality == 0) {
+        ss << "\t\t" << attribute.name << ": " << value;
         spdlog::info(ss.str().c_str());
         ss.str("");
         ss.clear();
-      } else if (egl_config_attribute.cardinality > 0) {
+      } else if (attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
-        for (size_t k = 0; k < (size_t)egl_config_attribute.cardinality; k++) {
-          if (egl_config_attribute.values[k].id == value) {
-            ss << "\t\t" << egl_config_attribute.name << ": "
-               << egl_config_attribute.values[k].name;
+        for (size_t k = 0; k < (size_t)attribute.cardinality; k++) {
+          if (attribute.values[k].id == value) {
+            ss << "\t\t" << attribute.name << ": "
+               << attribute.values[k].name;
             spdlog::info(ss.str().c_str());
             ss.str("");
             ss.clear();
@@ -583,7 +583,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           }
         }
         if (!known_value) {
-          ss << "\t\t" << egl_config_attribute.name << ": unknown (" << value
+          ss << "\t\t" << attribute.name << ": unknown (" << value
              << ")";
           spdlog::info(ss.str().c_str());
           ss.str("");
@@ -591,21 +591,21 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
         }
       } else {
         /* Bitfield */
-        ss << "\t\t" << egl_config_attribute.name << ": ";
+        ss << "\t\t" << attribute.name << ": ";
         if (value == 0) {
           ss << "none";
           spdlog::info(ss.str().c_str());
           ss.str("");
           ss.clear();
         } else {
-          for (size_t k = 0; k < (size_t)-egl_config_attribute.cardinality;
+          for (size_t k = 0; k < (size_t)-attribute.cardinality;
                k++) {
-            if (egl_config_attribute.values[k].id & value) {
-              value &= ~egl_config_attribute.values[k].id;
+            if (attribute.values[k].id & value) {
+              value &= ~attribute.values[k].id;
               if (value != 0) {
-                ss << egl_config_attribute.values[k].name << " | ";
+                ss << attribute.values[k].name << " | ";
               } else {
-                ss << egl_config_attribute.values[k].name;
+                ss << attribute.values[k].name;
                 spdlog::info(ss.str().c_str());
                 ss.str("");
                 ss.clear();

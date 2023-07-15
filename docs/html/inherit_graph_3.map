@@ -1,6 +1,0 @@
-<map id="Graphical Class Hierarchy" name="Graphical Class Hierarchy">
-<area shape="rect" id="node1" href="$class_backend.html" title=" " alt="" coords="5,55,79,80"/>
-<area shape="rect" id="node2" href="$class_wayland_egl_backend.html" title=" " alt="" coords="137,5,279,31"/>
-<area shape="rect" id="node3" href="$class_wayland_vulkan_backend.html" title=" " alt="" coords="127,55,289,80"/>
-<area shape="rect" id="node4" href="$class_egl.html" title=" " alt="" coords="21,5,63,31"/>
-</map>
