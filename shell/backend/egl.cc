@@ -174,18 +174,20 @@ std::array<EGLint, 4> Egl::RectToInts(const FlutterRect rect) const {
 }
 
 // Print a list of extensions, with word-wrapping.
-void Egl::print_extension_list(const char* ext) {
-  std::stringstream ss;
+void Egl::print_extension_list(EGLDisplay dpy) {
   const char indentString[] = "\t    ";
   const int indent = 4;
   const int max = 79;
   int width, i, j;
 
+  const char* ext = eglQueryString(dpy, EGL_EXTENSIONS);
+
   if (!ext || !ext[0])
     return;
 
   width = indent;
-  ss << "EGL_EXTENSIONS:" << std::endl << indentString;
+  std::stringstream ss;
+  ss << indentString;
   i = j = 0;
   while (true) {
     if (ext[j] == ' ' || ext[j] == 0) {
@@ -193,7 +195,9 @@ void Egl::print_extension_list(const char* ext) {
       const int len = j - i;
       if (width + len > max) {
         /* start a new line */
-        ss << "\n";
+        spdlog::info(ss.str().c_str());
+        ss.str("");
+        ss.clear();
         width = indent;
         ss << indentString;
       }
@@ -217,8 +221,9 @@ void Egl::print_extension_list(const char* ext) {
     }
     j++;
   }
-  ss << "\n";
-  spdlog::info(ss.str());
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
 }
 
 #define COUNT_OF(x) (sizeof(x) / sizeof(0 [x]))
@@ -496,14 +501,19 @@ static struct egl_config_attribute egl_config_attributes[] = {
 };
 
 void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
+  std::stringstream ss;
   spdlog::info("OpenGL ES Attributes:");
-  spdlog::info("\tEGL_VENDOR: \"{}\"", eglQueryString(m_dpy, EGL_VENDOR));
-  spdlog::info("\tEGL_VERSION: \"{}\"", eglQueryString(m_dpy, EGL_VERSION));
-  spdlog::info("\tEGL_CLIENT_APIS: \"{}\"",
-               eglQueryString(m_dpy, EGL_CLIENT_APIS));
+  ss << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR) << "\"";
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "\tEGL_CLIENT_APIS: \"" << eglQueryString(m_dpy, EGL_CLIENT_APIS) << "\"";
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  spdlog::info("\tEGL_EXTENSIONS:");
 
-  const char* s = eglQueryString(m_dpy, EGL_EXTENSIONS);
-  print_extension_list(static_cast<const char*>(s));
+  print_extension_list(m_dpy);
 
   EGLint num_config;
   EGLBoolean status = eglGetConfigs(m_dpy, configs, count, &num_config);
@@ -513,34 +523,46 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
   }
 
   spdlog::info("EGL framebuffer configurations:");
-  std::stringstream ss;
   for (EGLint i = 0; i < num_config; i++) {
-    spdlog::info("\tConfiguration #{}:\n\"", (int)i);
+    ss << "\tConfiguration #" << (int)i << ":";
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
     for (auto& egl_config_attribute : egl_config_attributes) {
-      spdlog::info("{} {}", egl_config_attribute.id, egl_config_attribute.name);
       EGLint value = 0;
       eglGetConfigAttrib(m_dpy, configs[i], egl_config_attribute.id, &value);
-      ss << "\t\t" << egl_config_attribute.name << " ";
       if (egl_config_attribute.cardinality == 0) {
-        ss << (int)value << std::endl;
+        ss << "\t\t" << egl_config_attribute.name << ": " << (int)value;
+        spdlog::info(ss.str().c_str());
+        ss.str("");
+        ss.clear();
       } else if (egl_config_attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
         for (size_t k = 0; k < (size_t)egl_config_attribute.cardinality; k++) {
           if (egl_config_attribute.values[k].id == value) {
-            ss << "\t\t" << egl_config_attribute.name << " : "
-               << egl_config_attribute.values[k].name << std::endl;
+            ss << "\t\t" << egl_config_attribute.name << ": " << egl_config_attribute.values[k].name;
+            spdlog::info(ss.str().c_str());
+            ss.str("");
+            ss.clear();
             known_value = true;
             break;
           }
         }
         if (!known_value) {
-          ss << "\t\t" << egl_config_attribute.name << ": unknown (" << value << ")" << std::endl;
+          ss << "\t\t" << egl_config_attribute.name << ": unknown (" << value << ")";
+          spdlog::info(ss.str().c_str());
+          ss.str("");
+          ss.clear();
         }
       } else {
         /* Bitfield */
+        ss << "\t\t" << egl_config_attribute.name << ": ";
         if (value == 0) {
-          ss << "none" << std::endl;
+          ss << "none";
+          spdlog::info(ss.str().c_str());
+          ss.str("");
+          ss.clear();
         } else {
           for (size_t k = 0; k < (size_t)-egl_config_attribute.cardinality;
                k++) {
@@ -550,17 +572,25 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
                 ss << egl_config_attribute.values[k].name << " | ";
               } else {
                 ss << egl_config_attribute.values[k].name;
+                spdlog::info(ss.str().c_str());
+                ss.str("");
+                ss.clear();
               }
             }
           }
           if (value != 0) {
-            ss << (int)value << std::endl;
+            ss << (int)value;
+            spdlog::info(ss.str().c_str());
+            ss.str("");
+            ss.clear();
           }
         }
       }
     }
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
-  spdlog::info(ss.str());
 }
 
 void Egl::sDebugCallback(EGLenum error,
