@@ -684,10 +684,16 @@ void Egl::EGL_KHR_debug_init() {
 }
 
 void* Egl::get_egl_proc_address(const char* address) {
-  const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+  static const char* extensions = nullptr;
+  static bool valid_platform = false;
 
-  if (extensions && (strstr(extensions, "EGL_EXT_platform_wayland") ||
-                     strstr(extensions, "EGL_KHR_platform_wayland"))) {
+  if (!extensions) {
+    extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+    valid_platform = (strstr(extensions, "EGL_EXT_platform_wayland") ||
+     strstr(extensions, "EGL_KHR_platform_wayland"));
+  }
+
+  if (valid_platform) {
     return (void*)eglGetProcAddress(address);
   }
 
