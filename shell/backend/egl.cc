@@ -33,7 +33,11 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   ret = eglBindAPI(EGL_OPENGL_ES_API);
   assert(ret == EGL_TRUE);
 
-  EGL_KHR_debug_init();
+  std::unordered_map<EGLDisplay, const char*> extensions;
+
+#if !defined(NDEBUG)
+  EGL_KHR_debug_init(extensions);
+#endif
 
   EGLint count;
   eglGetConfigs(m_dpy, nullptr, 0, &count);
@@ -77,6 +81,26 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
 
   m_texture_context =
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
+
+  /* setup for Damage Region Management */
+  if (HasExtension(extensions, m_dpy, "EGL_EXT_swap_buffers_with_damage")) {
+    m_pfSwapBufferWithDamage =
+        reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
+            eglGetProcAddress("eglSwapBuffersWithDamageEXT"));
+  } else if (HasExtension(extensions, m_dpy,
+                          "EGL_KHR_swap_buffers_with_damage")) {
+    m_pfSwapBufferWithDamage =
+        reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
+            eglGetProcAddress("eglSwapBuffersWithDamageKHR"));
+  }
+
+  if (HasExtension(extensions, m_dpy, "EGL_KHR_partial_update")) {
+    m_pfSetDamageRegion = reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
+        eglGetProcAddress("eglSetDamageRegionKHR"));
+  }
+
+  m_has_gl_ext_buffer_age =
+      HasExtension(extensions, m_dpy, "GL_EXT_buffer_age");
 
   ClearCurrent();
 
@@ -151,12 +175,17 @@ bool Egl::MakeTextureCurrent() {
   return false;
 }
 
-bool Egl::HasExtension(const char* name) {
-  static const char* extensions = nullptr;
-  if (extensions == nullptr) {
-    extensions = eglQueryString(m_dpy, EGL_EXTENSIONS);
+bool Egl::HasExtension(std::unordered_map<EGLDisplay, const char*>& extensions,
+                       EGLDisplay dpy,
+                       const char* name) {
+  auto got = extensions.find(dpy);
+  if (got == extensions.end()) {
+    extensions[dpy] = eglQueryString(dpy, EGL_EXTENSIONS);
   }
-  const char* r = strstr(extensions, name);
+  const char* r = strstr(extensions[dpy], name);
+  if (!r) {
+    spdlog::info("{} Not Found", name);
+  }
   auto len = strlen(name);
   // check that the extension name is terminated by space or null terminator
   return r != nullptr && (r[len] == ' ' || r[len] == 0);
@@ -507,7 +536,8 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
   spdlog::info(ss.str().c_str());
   ss.str("");
   ss.clear();
-  ss << "\tEGL_CLIENT_APIS: \"" << eglQueryString(m_dpy, EGL_CLIENT_APIS) << "\"";
+  ss << "\tEGL_CLIENT_APIS: \"" << eglQueryString(m_dpy, EGL_CLIENT_APIS)
+     << "\"";
   spdlog::info(ss.str().c_str());
   ss.str("");
   ss.clear();
@@ -541,7 +571,8 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
         bool known_value = false;
         for (size_t k = 0; k < (size_t)egl_config_attribute.cardinality; k++) {
           if (egl_config_attribute.values[k].id == value) {
-            ss << "\t\t" << egl_config_attribute.name << ": " << egl_config_attribute.values[k].name;
+            ss << "\t\t" << egl_config_attribute.name << ": "
+               << egl_config_attribute.values[k].name;
             spdlog::info(ss.str().c_str());
             ss.str("");
             ss.clear();
@@ -550,7 +581,8 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           }
         }
         if (!known_value) {
-          ss << "\t\t" << egl_config_attribute.name << ": unknown (" << value << ")";
+          ss << "\t\t" << egl_config_attribute.name << ": unknown (" << value
+             << ")";
           spdlog::info(ss.str().c_str());
           ss.str("");
           ss.clear();
@@ -649,15 +681,14 @@ void Egl::sDebugCallback(EGLenum error,
   spdlog::error("\tmessage: {}", ((message == nullptr) ? "" : message));
 }
 
-void Egl::EGL_KHR_debug_init() {
-  const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-
-  if (extensions && (strstr(extensions, "EGL_KHR_debug"))) {
+void Egl::EGL_KHR_debug_init(
+    std::unordered_map<EGLDisplay, const char*>& extensions) {
+  if (HasExtension(extensions, EGL_NO_DISPLAY, "EGL_KHR_debug")) {
     SPDLOG_DEBUG("EGL_KHR_debug initialized");
 
     m_pfDebugMessageControl =
-        (PFNEGLDEBUGMESSAGECONTROLKHRPROC)get_egl_proc_address(
-            "eglDebugMessageControlKHR");
+        reinterpret_cast<PFNEGLDEBUGMESSAGECONTROLKHRPROC>(
+            eglGetProcAddress("eglDebugMessageControlKHR"));
     assert(m_pfDebugMessageControl);
 
     const EGLAttrib sDebugAttribList[] = {EGL_DEBUG_MSG_CRITICAL_KHR,
@@ -673,31 +704,14 @@ void Egl::EGL_KHR_debug_init() {
 
     m_pfDebugMessageControl(sDebugCallback, sDebugAttribList);
 
-    m_pfQueryDebug =
-        (PFNEGLQUERYDEBUGKHRPROC)get_egl_proc_address("eglQueryDebugKHR");
+    m_pfQueryDebug = reinterpret_cast<PFNEGLQUERYDEBUGKHRPROC>(
+        eglGetProcAddress("eglQueryDebugKHR"));
     assert(m_pfQueryDebug);
 
-    m_pfLabelObject =
-        (PFNEGLLABELOBJECTKHRPROC)get_egl_proc_address("eglLabelObjectKHR");
+    m_pfLabelObject = reinterpret_cast<PFNEGLLABELOBJECTKHRPROC>(
+        eglGetProcAddress("eglLabelObjectKHR"));
     assert(m_pfLabelObject);
   }
-}
-
-void* Egl::get_egl_proc_address(const char* address) {
-  static const char* extensions = nullptr;
-  static bool valid_platform = false;
-
-  if (!extensions) {
-    extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-    valid_platform = (strstr(extensions, "EGL_EXT_platform_wayland") ||
-     strstr(extensions, "EGL_KHR_platform_wayland"));
-  }
-
-  if (valid_platform) {
-    return (void*)eglGetProcAddress(address);
-  }
-
-  return nullptr;
 }
 
 EGLDisplay Egl::get_egl_display(EGLenum platform,
@@ -710,9 +724,8 @@ EGLDisplay Egl::get_egl_display(EGLenum platform,
     return dpy;
 
   if (!get_platform_display) {
-    get_platform_display =
-        (PFNEGLGETPLATFORMDISPLAYEXTPROC)get_egl_proc_address(
-            "eglGetPlatformDisplayEXT");
+    get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+        eglGetProcAddress("eglGetPlatformDisplayEXT"));
   }
 
   if (get_platform_display) {
@@ -731,8 +744,8 @@ EGLSurface Egl::create_egl_surface(void* native_window,
 
   if (!create_platform_window) {
     create_platform_window =
-        (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)get_egl_proc_address(
-            "eglCreatePlatformWindowSurfaceEXT");
+        reinterpret_cast<PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC>(
+            eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT"));
   }
 
   if (create_platform_window)
