@@ -69,6 +69,8 @@ void* EglProcessResolver::process_resolver(const char* name) {
     return nullptr;
   }
 
+  SPDLOG_TRACE(name);
+
   void* address;
 
   for (auto& item : m_handles) {
@@ -76,6 +78,8 @@ void* EglProcessResolver::process_resolver(const char* name) {
     if (address)
       return address;
   }
+
+  SPDLOG_TRACE("** EGL fail over");
 
   address = reinterpret_cast<void*>(eglGetProcAddress(name));
   if (address) {

@@ -58,7 +58,8 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             return b->MakeResourceCurrent();
           },
           .fbo_reset_after_present = true,
-          .gl_proc_resolver = [](void* /* userdata */, const char* name) -> void* {
+          .gl_proc_resolver = [](void* /* userdata */,
+                                 const char* name) -> void* {
             return GlProcessResolver::GetInstance().process_resolver(name);
           },
           .gl_external_texture_frame_callback =
@@ -81,35 +82,13 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                                   const FlutterPresentInfo* info) -> bool {
             auto e = reinterpret_cast<Engine*>(userdata);
             auto* b = (WaylandEglBackend*)(e->GetBackend());
+            auto set_damage_region_ = b->GetSetDamageRegion();
+            auto swap_buffers_with_damage_ = b->GetSwapBuffersWithDamage();
 
             // Free the existing damage that was allocated to this frame.
             if (b->m_existing_damage_map[info->fbo_id] != nullptr) {
               free(b->m_existing_damage_map[info->fbo_id]);
               b->m_existing_damage_map[info->fbo_id] = nullptr;
-            }
-
-            // Retrieve the set damage region function.
-            PFNEGLSETDAMAGEREGIONKHRPROC set_damage_region_ = nullptr;
-            if (b->HasExtension("EGL_KHR_partial_update")) {
-              set_damage_region_ =
-                  reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
-                      GlProcessResolver::GetInstance().process_resolver(
-                          "eglSetDamageRegionKHR"));
-            }
-
-            // Retrieve the swap buffers with damage function.
-            PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC swap_buffers_with_damage_ =
-                nullptr;
-            if (b->HasExtension("EGL_EXT_swap_buffers_with_damage")) {
-              swap_buffers_with_damage_ =
-                  reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
-                      GlProcessResolver::GetInstance().process_resolver(
-                          "eglSwapBuffersWithDamageEXT"));
-            } else if (b->HasExtension("EGL_KHR_swap_buffers_with_damage")) {
-              swap_buffers_with_damage_ =
-                  reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
-                      GlProcessResolver::GetInstance().process_resolver(
-                          "eglSwapBuffersWithDamageKHR"));
             }
 
             if (set_damage_region_) {
@@ -144,7 +123,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             // Given the FBO age, create existing damage region by joining all
             // frame damages since FBO was last used
             EGLint age;
-            if (b->HasExtension("GL_EXT_buffer_age")) {
+            if (b->HasExtBufferAge()) {
               eglQuerySurface(b->GetDisplay(), b->m_egl_surface,
                               EGL_BUFFER_AGE_EXT, &age);
             } else {
