@@ -10,6 +10,7 @@
 #include <wayland-client.h>
 
 #include "compositor_surface_api.h"
+#include "constants.h"
 
 class Display;
 
@@ -66,7 +67,7 @@ class CompositorSurface {
    * @relation
    * internal
    */
-  [[nodiscard]] void* GetContext() const { return m_context; }
+  NODISCARD void* GetContext() const { return m_context; }
 
   /**
    * @brief run a plugin context task
@@ -127,7 +128,7 @@ class CompositorSurface {
   std::string m_assets_path;
   std::string m_cache_path;
   std::string m_misc_path;
-  [[maybe_unused]] PARAM_SURFACE_T m_type;
+  MAYBE_UNUSED PARAM_SURFACE_T m_type;
   PARAM_Z_ORDER_T m_z_order;
   PARAM_SYNC_T m_sync;
   int width_;
