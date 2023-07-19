@@ -301,7 +301,7 @@ void WaylandWindow::on_frame_base_surface(void* data,
   window->m_fps_counter++;
   window->m_fps_counter++;
 
-  wl_surface_commit(window->m_base_surface);
+  //wl_surface_commit(window->m_base_surface);
 }
 
 uint32_t WaylandWindow::GetFpsCounter() {
