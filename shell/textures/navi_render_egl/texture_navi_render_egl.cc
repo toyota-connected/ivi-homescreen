@@ -8,6 +8,7 @@
 #include <cmath>
 #include <memory>
 
+#include "backend/gl_process_resolver.h"
 #include "backend/wayland_egl.h"
 #include "logging.h"
 #include "view/flutter_view.h"
@@ -96,7 +97,7 @@ flutter::EncodableValue TextureNaviRender::Create(
     obj->m_h_module = dlopen(module.c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (obj->m_h_module) {
       obj->InitRenderApi();
-      spdlog::info("navigation render interface version: {}",
+      spdlog::info("navigation render interface version: 0x{:x}",
                    obj->m_render_api.version());
     } else {
       return flutter::EncodableValue(flutter::EncodableMap{
@@ -104,6 +105,12 @@ flutter::EncodableValue TextureNaviRender::Create(
           {flutter::EncodableValue("error"),
            flutter::EncodableValue("Failed to load module")}});
     }
+  }
+
+  obj->m_interface_version = 0;
+  it = args->find(flutter::EncodableValue("intf_ver"));
+  if (it != args->end() && !it->second.IsNull()) {
+    obj->m_interface_version = std::get<int>(it->second);
   }
 
   SPDLOG_DEBUG("Initializing Navigation Texture ({} x {})", obj->m_width,
@@ -143,9 +150,51 @@ flutter::EncodableValue TextureNaviRender::Create(
          flutter::EncodableValue("Bad framebuffer status")}});
   }
 
-  auto context = obj->m_render_api.initialize(
-      access_token.c_str(), obj->m_width, obj->m_height, asset_path.c_str(),
-      cache_folder.c_str(), misc_folder.c_str(), &obj->m_texture_id);
+  NAV_RENDER_API_CONTEXT_T* context = nullptr;
+  if (obj->m_interface_version < 2) {
+    context = obj->m_render_api.initialize(
+        access_token.c_str(), obj->m_width, obj->m_height, asset_path.c_str(),
+        cache_folder.c_str(), misc_folder.c_str());
+  } else if (obj->m_interface_version == 2) {
+    NavRenderConfig nav_render_init = {
+        .access_token = access_token.c_str(),
+        .width = obj->m_width,
+        .height = obj->m_height,
+        .asset_path = asset_path.c_str(),
+        .cache_folder = cache_folder.c_str(),
+        .misc_folder = misc_folder.c_str(),
+        .pfnLogger =
+            [](int level, const char* /* context */, const char* message) {
+              switch (level) {
+                case SPDLOG_LEVEL_TRACE:
+                  spdlog::trace(message);
+                  break;
+                case SPDLOG_LEVEL_DEBUG:
+                  spdlog::debug(message);
+                  break;
+                case SPDLOG_LEVEL_INFO:
+                  spdlog::info(message);
+                  break;
+                case SPDLOG_LEVEL_WARN:
+                  spdlog::warn(message);
+                  break;
+                case SPDLOG_LEVEL_ERROR:
+                  spdlog::error(message);
+                  break;
+                case SPDLOG_LEVEL_CRITICAL:
+                  spdlog::critical(message);
+                  break;
+                default:
+                case SPDLOG_LEVEL_OFF:
+                  break;
+              }
+            },
+        .pfnGlLoader = [](void* /* userdata */,
+                          const char* procname) -> const void* {
+          return GlProcessResolver::GetInstance().process_resolver(procname);
+        }};
+    context = obj->m_render_api.initialize2(&nav_render_init);
+  }
 
   if (!context) {
     return flutter::EncodableValue(flutter::EncodableMap{
@@ -229,12 +278,13 @@ void TextureNaviRender::InitRenderApi() {
     assert(false);
   }
 
-  m_render_api.gl_loader = reinterpret_cast<NAV_RENDER_API_LOAD_GL_FUNCTIONS*>(
-      dlsym(m_h_module, "nav_render_load_gl_functions"));
-  assert(m_render_api.gl_loader);
   m_render_api.initialize = reinterpret_cast<NAV_RENDER_API_INITIALIZE_T*>(
       dlsym(m_h_module, "nav_render_initialize"));
-  assert(m_render_api.initialize);
+  m_render_api.initialize2 = reinterpret_cast<NAV_RENDER_API_INITIALIZE2_T*>(
+      dlsym(m_h_module, "nav_render_initialize2"));
+
+  assert(m_render_api.initialize || m_render_api.initialize2);
+
   m_render_api.de_initialize =
       reinterpret_cast<NAV_RENDER_API_DE_INITIALIZE_T*>(
           dlsym(m_h_module, "nav_render_de_initialize"));

@@ -120,7 +120,7 @@ void CompositorSurface::init_api(CompositorSurface* obj) {
   if (obj->m_api.version) {
     auto version = obj->m_api.version();
     if (version != kCompSurfExpectedInterfaceVersion) {
-      spdlog::critical("Unexpected interface version: {}", version);
+      spdlog::critical("Unexpected interface version: 0x{:x}", version);
       exit(1);
     }
   } else {
