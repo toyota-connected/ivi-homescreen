@@ -47,6 +47,11 @@ include(compiler)
 add_subdirectory(third_party)
 add_subdirectory(shell)
 add_subdirectory(docs)
+if(DEFINED BUILD_UNIT_TEST)
+    enable_testing()
+    add_subdirectory(test)
+endif(DEFINED BUILD_UNIT_TEST)
+
 
 if (NOT CMAKE_CROSSCOMPILING)
     include(packaging)

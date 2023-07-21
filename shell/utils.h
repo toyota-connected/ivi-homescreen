@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "fml/paths.h"
 #include "constants.h"
 
 class Utils {
