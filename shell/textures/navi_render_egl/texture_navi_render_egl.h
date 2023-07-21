@@ -71,6 +71,7 @@ class TextureNaviRender : public Texture {
 
   GLuint m_fbo{};
   GLuint m_texture_id{};
+  int m_interface_version{};
 
   static std::map<std::string, std::string> m_styles;
 
@@ -93,8 +94,8 @@ class TextureNaviRender : public Texture {
     NAV_RENDER_API_VERSION_T* version{};
 
     std::map<GLuint, NAV_RENDER_API_CONTEXT_T*> ctx{};
-    NAV_RENDER_API_LOAD_GL_FUNCTIONS* gl_loader{};
     NAV_RENDER_API_INITIALIZE_T* initialize{};
+    NAV_RENDER_API_INITIALIZE2_T* initialize2{};
     NAV_RENDER_API_DE_INITIALIZE_T* de_initialize{};
     NAV_RENDER_API_RUN_TASK_T* run_task{};
     NAV_RENDER_API_RENDER_T* render{};
