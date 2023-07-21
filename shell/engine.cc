@@ -379,7 +379,7 @@ Engine::TextureRegistryRemove(int64_t texture_id) {
                    });
   if (search != m_texture_registry.end()) {
     SPDLOG_DEBUG("({}) Removing Texture ({}) from registry {}", m_index,
-                 texture_id, search->second);
+                 texture_id, static_cast<void*>(search->second));
     m_texture_registry.erase(search);
     spdlog::info("({}) Removed Texture ({}) from registry", m_index,
                  texture_id);
