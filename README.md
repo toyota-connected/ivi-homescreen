@@ -14,6 +14,50 @@ IVI Homescreen for Wayland
 * Compositor Sub-surface/Region support
 * Vulkan / EGL backend support
 
+# Logging
+
+Logging supports the following levels
+* trace
+* debug
+* info
+* warn
+* error
+* critical
+* off
+
+If environmental variable SPDLOG_LEVEL is not set, logging defaults to info.
+
+To set logging to trace use
+
+    SPDLOG_LEVEL=trace
+
+To set logging to debug use
+
+    SPDLOG_LEVEL=debug
+
+# DLT logging
+
+To test DLT logging on desktop use the following
+
+Ubuntu packages
+
+    sudo apt-get install libdlt-dev dlt-viewer dlt-daemon dlt-tools
+
+Fedora packages
+
+    sudo dnf install dlt-libs-devel dlt-dameon dlt-tools
+
+### Logging with DLT
+
+Start new terminal
+
+    dlt-daemon
+
+#### View DLT log output in a terminal
+Start new terminal
+
+    dlt-receive -a localhost
+
 # Sanitizer Support
 
 You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
@@ -392,17 +436,6 @@ Path prefix used to determine required files is determined at build.
 
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
-
-# DLT logging
-
-To test DLT logging on desktop use the following
-
-### Ubuntu
-
-### Fedora
-    sudo dnf install dlt-libs-devel dlt-dameon dlt-tools
-    dlt-daemon
-    dlt-receive -a localhost
 
 # Crash Handler
 
