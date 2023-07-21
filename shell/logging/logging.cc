@@ -22,10 +22,7 @@
 #endif
 #include <spdlog/sinks/ringbuffer_sink.h>
 
-
 Logging::Logging() {
-  spdlog::cfg::load_env_levels();
-
 #if defined(ENABLE_DLT)
   if (Dlt::IsSupported()) {
     Dlt::Register();
@@ -68,6 +65,7 @@ Logging::Logging() {
 
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(kLogFlushInterval));
+  spdlog::cfg::load_env_levels();
 }
 
 Logging::~Logging() {
