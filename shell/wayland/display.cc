@@ -153,6 +153,9 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(3), version)));
       SPDLOG_DEBUG("\tBuffer Scale Enabled");
       d->m_buffer_scale_enable = true;
+      if (d->m_shm) {
+        d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
+      }
     } else {
       d->m_compositor = static_cast<struct wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
@@ -182,7 +185,9 @@ void Display::registry_handle_global(void* data,
       d->m_cursor_theme = wl_cursor_theme_load(d->m_cursor_theme_name.c_str(),
                                                kCursorSize, d->m_shm);
     }
-    d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
+    if (d->m_compositor) {
+      d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
+    }
   } else if (strcmp(interface, wl_output_interface.name) == 0) {
     auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
