@@ -98,7 +98,7 @@ class WaylandEglBackend : public Egl, public Backend {
 
   // Keeps track of the most recent frame damages so that existing damage can
   // be easily computed.
-  std::list<FlutterRect> m_damage_history;
+  std::list<FlutterRect> m_damage_history{};
 
   /**
    * @brief Auxiliary function to union the damage regions comprised by two
