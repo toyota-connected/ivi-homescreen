@@ -127,4 +127,9 @@ if (BUILD_PLUGIN_INTEGRATION_TEST)
     ENABLE_PLUGIN(integration_test)
 endif ()
 
+option(BUILD_PLUGIN_LOGGING "Includes Logging Plugin" ON)
+if (BUILD_PLUGIN_LOGGING)
+    ENABLE_PLUGIN(logging)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")

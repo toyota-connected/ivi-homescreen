@@ -318,6 +318,10 @@ All other parameters get assigned using the following ordering:
 
 `BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
 
+`BUILD_PLUGIN_INTEGRATION_TEST` - Includes Flutter Integration Test Plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_LOGGING` - Includes Logging Plugin.  Defaults to OFF
+
 
 _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
