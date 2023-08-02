@@ -62,6 +62,9 @@
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
 #include "static_plugins/secure_storage/secure_storage.h"
 #endif
+#ifdef ENABLE_PLUGIN_INTEGRATION_TEST
+#include "static_plugins/integration_test/integration_test.h"
+#endif
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
 
@@ -121,5 +124,9 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
   RegisterCallback(SecureStorage::kChannelName,
                    &SecureStorage::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_INTEGRATION_TEST
+  RegisterCallback(IntegrationTestPlugin::kChannelName,
+                   &IntegrationTestPlugin::OnPlatformMessage);
 #endif
 }

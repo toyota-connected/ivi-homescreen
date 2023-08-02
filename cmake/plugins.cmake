@@ -122,5 +122,9 @@ if (BUILD_PLUGIN_SECURE_STORAGE)
     pkg_check_modules(PLUGIN_SECURE_STORAGE REQUIRED libsecret-1)
 endif ()
 
+option(BUILD_PLUGIN_INTEGRATION_TEST "Included Flutter Integration Test support" OFF)
+if (BUILD_PLUGIN_INTEGRATION_TEST)
+    ENABLE_PLUGIN(integration_test)
+endif ()
 
 message(STATUS "Plugin Config .......... ${PLUGINS}")
