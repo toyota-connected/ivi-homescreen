@@ -52,3 +52,4 @@ set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
 add_subdirectory(template-test-case)
+add_subdirectory(utils-test)
