@@ -71,6 +71,7 @@ class TextureNaviRender : public Texture {
 
   GLuint m_fbo{};
   GLuint m_texture_id{};
+  GLuint m_rbo{};
   int m_interface_version{};
 
   static std::map<std::string, std::string> m_styles;
