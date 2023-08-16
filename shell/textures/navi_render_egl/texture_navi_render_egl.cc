@@ -256,17 +256,8 @@ void TextureNaviRender::Draw(void* userdata) {
   for (auto const& [key, context] : obj->m_render_api.ctx) {
     std::lock_guard<std::mutex> guard(g_gl_mutex);
     obj->m_egl_backend->MakeTextureCurrent();
-
-    glClear(GL_COLOR_BUFFER_BIT);
-    glBindFramebuffer(GL_FRAMEBUFFER, obj->m_fbo);
-    glViewport(0, 0, obj->m_width, obj->m_height);
-
     obj->m_render_api.render(context, obj->m_fbo);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
     obj->m_egl_backend->ClearCurrent();
-
     obj->m_draw_next = false;
     obj->FrameReady();
   }
