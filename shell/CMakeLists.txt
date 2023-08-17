@@ -35,7 +35,7 @@ add_executable(homescreen
         wayland/window.cc
         logging/logging.cc
         task_runner.cc
-        )
+)
 
 include(plugins)
 include(textures)
@@ -57,7 +57,7 @@ if (BUILD_BACKEND_WAYLAND_EGL)
             backend/wayland_egl.cc
             backend/egl.cc
             backend/gl_process_resolver.cc
-            )
+    )
 endif ()
 
 if (BUILD_CRASH_HANDLER)
@@ -75,7 +75,7 @@ target_compile_definitions(homescreen
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
         ASIO_NO_TYPEID
-        )
+)
 
 target_include_directories(homescreen
         PRIVATE
@@ -88,7 +88,8 @@ target_include_directories(homescreen
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ../third_party/spdlog-1.12.0/include
-        )
+        ../third_party/asio-1-28-1/asio/include
+)
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
@@ -112,7 +113,7 @@ target_link_libraries(homescreen PRIVATE
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
-        )
+)
 
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(homescreen PRIVATE unwind)
@@ -121,7 +122,7 @@ endif ()
 
 target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}
-        )
+)
 
 add_sanitizers(homescreen)
 
