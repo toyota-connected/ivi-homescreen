@@ -67,5 +67,3 @@ set(SPDLOG_NO_THREAD_ID ON)
 set(SPDLOG_BUILD_PIC ON)
 add_subdirectory(spdlog-1.12.0)
 add_subdirectory(googletest)
-
-include_directories(asio-1-28-1/asio/include)
