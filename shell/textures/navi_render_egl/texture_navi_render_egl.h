@@ -67,7 +67,7 @@ class TextureNaviRender : public Texture {
 
   WaylandEglBackend* m_egl_backend;
   std::string m_map_base_path;
-  bool m_run_enable{};
+  volatile bool m_run_enable{};
 
   GLuint m_fbo{};
   GLuint m_texture_id{};

@@ -80,7 +80,7 @@ Engine::Engine(FlutterView* view,
 #if defined(ENABLE_DART_VM_LOGGING)
                 auto engine = reinterpret_cast<Engine*>(user_data);
                 std::scoped_lock<std::mutex> lock(engine->m_queue_lock);
-                engine->m_vm_queue->push(message);
+                engine->m_vm_queue->emplace(message);
 #else
                 (void)message;
                 (void)user_data;
@@ -89,11 +89,15 @@ Engine::Engine(FlutterView* view,
       }) {
   SPDLOG_TRACE("({}) +Engine::Engine", m_index);
 
+  /// Task Runner
+  m_platform_task_runner =
+      std::make_unique<TaskRunner>("Platform", m_proc_table, m_flutter_engine);
+
   m_vm_queue = std::make_shared<std::queue<std::string>>();
 
   // Touch events
-  m_pointer_events.reserve(kMaxPointerEvent);
   m_pointer_events.clear();
+  m_pointer_events.reserve(kMaxPointerEvent);
 
   // Touch events
   m_pointer_events.reserve(kMaxPointerEvent);
@@ -183,36 +187,25 @@ Engine::Engine(FlutterView* view,
     }
   }
 
-  // Configure task runner interop
-  m_platform_task_runner = {
+  /// Configure task runner interop
+  m_platform_task_runner_description = {
       .struct_size = sizeof(FlutterTaskRunnerDescription),
       .user_data = this,
       .runs_task_on_current_thread_callback = [](void* context) -> bool {
-        return pthread_equal(
-                   pthread_self(),
-                   static_cast<Engine*>(context)->m_event_loop_thread) != 0;
+        return reinterpret_cast<Engine*>(context)
+            ->m_platform_task_runner->IsThreadEqual(pthread_self());
       },
       .post_task_callback = [](FlutterTask task, uint64_t target_time,
                                void* context) -> void {
-        auto* e = static_cast<Engine*>(context);
-        e->m_taskrunner.emplace(target_time, task);
-        if (!e->m_running) {
-          uint64_t current = e->m_proc_table.GetCurrentTime();
-          if (current >= e->m_taskrunner.top().first) {
-            auto item = e->m_taskrunner.top();
-            SPDLOG_DEBUG("({}) Running Task\0", e->GetIndex());
-            if (kSuccess ==
-                e->m_proc_table.RunTask(e->m_flutter_engine, &item.second)) {
-              e->m_taskrunner.pop();
-            }
-          }
-        }
+        auto e = reinterpret_cast<Engine*>(context);
+        e->m_platform_task_runner->QueueFlutterTask(e->m_index, target_time,
+                                                    task, context);
       },
   };
 
   m_custom_task_runners = {
       .struct_size = sizeof(FlutterCustomTaskRunners),
-      .platform_task_runner = &m_platform_task_runner,
+      .platform_task_runner = &m_platform_task_runner_description,
   };
 
   m_args.custom_task_runners = &m_custom_task_runners;
@@ -228,23 +221,13 @@ Engine::~Engine() {
     }
     dlclose(m_engine_so_handle);
   }
+  m_platform_task_runner.reset();
   m_vm_queue.reset();
 }
 
 FlutterEngineResult Engine::RunTask() {
   if (!m_flutter_engine) {
     return kSuccess;
-  }
-
-  // Handles tasks
-  if (!m_taskrunner.empty()) {
-    uint64_t current = m_proc_table.GetCurrentTime();
-    if (current >= m_taskrunner.top().first) {
-      auto item = m_taskrunner.top();
-      // SPDLOG_DEBUG("({}) Running Task: {}", m_index, current - item.first);
-      m_taskrunner.pop();
-      return m_proc_table.RunTask(m_flutter_engine, &item.second);
-    }
   }
 
   if (!m_vm_queue->empty()) {
@@ -619,10 +602,10 @@ MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
 #endif
 
 #if ENABLE_PLUGIN_KEY_EVENT
-[[maybe_unused]] void Engine::SetKeyEvent(KeyEvent* key_event) {
+MAYBE_UNUSED void Engine::SetKeyEvent(KeyEvent* key_event) {
   m_key_event = key_event;
 }
-[[maybe_unused]] KeyEvent* Engine::GetKeyEvent() const {
+MAYBE_UNUSED KeyEvent* Engine::GetKeyEvent() const {
   return m_key_event;
 }
 #endif

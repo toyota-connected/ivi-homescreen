@@ -34,6 +34,7 @@ add_executable(homescreen
         wayland/display.cc
         wayland/window.cc
         logging/logging.cc
+        task_runner.cc
         )
 
 include(plugins)
@@ -73,6 +74,7 @@ target_compile_definitions(homescreen
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
+        ASIO_NO_TYPEID
         )
 
 target_include_directories(homescreen

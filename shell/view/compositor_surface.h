@@ -75,7 +75,11 @@ class CompositorSurface {
    * @relation
    * wayland
    */
-  void RunTask() const { m_api.run_task(m_context); }
+  void RunTask() const {
+    if (m_context) {
+      m_api.run_task(m_context);
+    }
+  }
 
   /**
    * @brief dispose a surface context
