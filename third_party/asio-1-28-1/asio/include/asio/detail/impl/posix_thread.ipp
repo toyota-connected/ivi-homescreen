@@ -48,7 +48,7 @@ std::size_t posix_thread::hardware_concurrency()
 #if defined(_SC_NPROCESSORS_ONLN)
   long result = sysconf(_SC_NPROCESSORS_ONLN);
   if (result > 0)
-    return result;
+    return static_cast<std::size_t>(result);
 #endif // defined(_SC_NPROCESSORS_ONLN)
   return 0;
 }

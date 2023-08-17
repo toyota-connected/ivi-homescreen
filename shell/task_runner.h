@@ -16,8 +16,10 @@
 
 #pragma once
 
-#include <asio.hpp>
 #include <memory>
+
+#include "asio/io_context.hpp"
+#include "asio/io_context_strand.hpp"
 
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 

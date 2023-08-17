@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-
-#include <asio.hpp>
 #include <queue>
+
+#include "asio/bind_executor.hpp"
+#include "asio/executor.hpp"
+#include "asio/io_context.hpp"
+#include "asio/io_context_strand.hpp"
 
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 
 #include "logging/logging.h"
-
 
 class handler_priority_queue : public asio::execution_context {
  public:
@@ -41,8 +43,7 @@ class handler_priority_queue : public asio::execution_context {
       if (current >= target_time) {
         handlers_.top()->execute();
         handlers_.pop();
-      }
-      else {
+      } else {
         spdlog::debug("Task Pending Delta: {}", target_time - current);
         break;
       }
@@ -51,7 +52,8 @@ class handler_priority_queue : public asio::execution_context {
 
   class executor {
    public:
-    executor(handler_priority_queue& q, uint64_t t) : context_(q), timestamp_(t) {}
+    executor(handler_priority_queue& q, uint64_t t)
+        : context_(q), timestamp_(t) {}
 
     handler_priority_queue& context() const noexcept { return context_; }
 
@@ -87,7 +89,8 @@ class handler_priority_queue : public asio::execution_context {
   };
 
   template <typename Handler>
-  asio::executor_binder<Handler, executor> wrap(uint64_t timestamp, Handler handler) {
+  asio::executor_binder<Handler, executor> wrap(uint64_t timestamp,
+                                                Handler handler) {
     return asio::bind_executor(executor(*this, timestamp), std::move(handler));
   }
 

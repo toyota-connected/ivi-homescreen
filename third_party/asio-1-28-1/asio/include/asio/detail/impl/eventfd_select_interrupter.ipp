@@ -118,7 +118,7 @@ void eventfd_select_interrupter::recreate()
 void eventfd_select_interrupter::interrupt()
 {
   uint64_t counter(1UL);
-  int result = ::write(write_descriptor_, &counter, sizeof(uint64_t));
+  int result = static_cast<int>(::write(write_descriptor_, &counter, sizeof(uint64_t)));
   (void)result;
 }
 
@@ -131,7 +131,7 @@ bool eventfd_select_interrupter::reset()
       // Only perform one read. The kernel maintains an atomic counter.
       uint64_t counter(0);
       errno = 0;
-      int bytes_read = ::read(read_descriptor_, &counter, sizeof(uint64_t));
+      int bytes_read = static_cast<int>(::read(read_descriptor_, &counter, sizeof(uint64_t)));
       if (bytes_read < 0 && errno == EINTR)
         continue;
       return true;
@@ -143,7 +143,7 @@ bool eventfd_select_interrupter::reset()
     {
       // Clear all data from the pipe.
       char data[1024];
-      int bytes_read = ::read(read_descriptor_, data, sizeof(data));
+      int bytes_read = static_cast<int>(::read(read_descriptor_, data, sizeof(data)));
       if (bytes_read == sizeof(data))
         continue;
       if (bytes_read > 0)

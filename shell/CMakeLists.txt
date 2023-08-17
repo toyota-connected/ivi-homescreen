@@ -74,6 +74,8 @@ target_compile_definitions(homescreen
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
+        ASIO_STANDALONE
+        ASIO_HEADER_ONLY
         ASIO_NO_TYPEID
 )
 
