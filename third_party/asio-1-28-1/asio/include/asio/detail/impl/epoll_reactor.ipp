@@ -496,7 +496,7 @@ void epoll_reactor::run(long usec, op_queue<operation>& ops)
     timeout = 0;
   else
   {
-    timeout = (usec < 0) ? -1 : ((usec - 1) / 1000 + 1);
+    timeout = static_cast<int>((usec < 0) ? -1 : ((usec - 1) / 1000 + 1));
     if (timer_fd_ == -1)
     {
       mutex::scoped_lock lock(mutex_);
@@ -705,8 +705,8 @@ int epoll_reactor::get_timeout(int msec)
   // By default we will wait no longer than 5 minutes. This will ensure that
   // any changes to the system clock are detected after no longer than this.
   const int max_msec = 5 * 60 * 1000;
-  return timer_queues_.wait_duration_msec(
-      (msec < 0 || max_msec < msec) ? max_msec : msec);
+  return static_cast<int>(timer_queues_.wait_duration_msec(
+      (msec < 0 || max_msec < msec) ? max_msec : msec));
 }
 
 #if defined(ASIO_HAS_TIMERFD)
@@ -770,7 +770,7 @@ operation* epoll_reactor::descriptor_state::perform_io(uint32_t events)
 
   // Exception operations must be processed first to ensure that any
   // out-of-band data is read before normal data.
-  static const int flag[max_ops] = { EPOLLIN, EPOLLOUT, EPOLLPRI };
+  static const uint32_t flag[max_ops] = { EPOLLIN, EPOLLOUT, EPOLLPRI };
   for (int j = max_ops - 1; j >= 0; --j)
   {
     if (events & (flag[j] | EPOLLERR | EPOLLHUP))

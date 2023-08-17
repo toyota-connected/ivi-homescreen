@@ -21,7 +21,7 @@
 TaskRunner::TaskRunner(std::string name,
                        FlutterEngineProcTable& proc_table,
                        FlutterEngine& engine)
-    : io_context_(std::make_unique<asio::io_service>(ASIO_CONCURRENCY_HINT_1)),
+    : io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(std::make_unique<asio::io_context::work>(*io_context_)),
       name_(std::move(name)),
       engine_(engine),
