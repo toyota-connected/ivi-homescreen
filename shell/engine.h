@@ -37,6 +37,7 @@
 #include "platform_channel.h"
 #include "static_plugins/key_event/key_event.h"
 #include "static_plugins/text_input/text_input.h"
+#include "task_runner.h"
 #include "view/flutter_view.h"
 
 class App;
@@ -299,7 +300,7 @@ class Engine {
   bool SendPlatformMessage(const char* channel,
                            const uint8_t* message,
                            size_t message_size,
-                           const FlutterBinaryReplyUserdata reply,
+                           FlutterBinaryReplyUserdata reply,
                            void* userdata) const;
 
   /**
@@ -506,21 +507,9 @@ class Engine {
   void* m_engine_so_handle;
   FlutterEngineProcTable m_proc_table{};
 
-  FlutterTaskRunnerDescription m_platform_task_runner{};
+  std::unique_ptr<TaskRunner> m_platform_task_runner;
+  FlutterTaskRunnerDescription m_platform_task_runner_description{};
   FlutterCustomTaskRunners m_custom_task_runners{};
-
-  class CompareFlutterTask {
-   public:
-    bool operator()(std::pair<uint64_t, FlutterTask> n1,
-                    std::pair<uint64_t, FlutterTask> n2) {
-      return n1.first > n2.first;
-    }
-  };
-
-  std::priority_queue<std::pair<uint64_t, FlutterTask>,
-                      std::vector<std::pair<uint64_t, FlutterTask>>,
-                      CompareFlutterTask>
-      m_taskrunner;
 
   FlutterEngineAOTData m_aot_data;
 

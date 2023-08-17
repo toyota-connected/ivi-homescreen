@@ -104,7 +104,7 @@ class FlutterView {
    * @relation
    * internal
    */
-  [[nodiscard]] uint64_t GetIndex() const { return m_index; }
+  NODISCARD uint64_t GetIndex() const { return m_index; }
 
   /**
    * @brief Draw FPS to calc and output

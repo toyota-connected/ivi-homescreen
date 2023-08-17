@@ -142,7 +142,7 @@ class Texture {
 
   MAYBE_UNUSED EGLSurface m_surface{};
 
-  bool m_draw_next;
+  volatile bool m_draw_next;
 
  private:
   const EncodableValueCallback m_create_callback;

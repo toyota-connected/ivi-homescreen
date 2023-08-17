@@ -41,6 +41,7 @@ std::unique_ptr<Logging> logger_;
 void SignalHandler(int /* signal */) {
   SPDLOG_INFO("Ctl+C");
   running = false;
+  exit(0);
 }
 
 /**
