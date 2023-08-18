@@ -16,6 +16,8 @@
 
 #include "task_runner.h"
 
+#include "asio/post.hpp"
+
 #include "logging/logging.h"
 
 TaskRunner::TaskRunner(std::string name,
@@ -40,7 +42,7 @@ TaskRunner::TaskRunner(std::string name,
     }
   });
 
-  strand_->post([&]() {
+  asio::post(*strand_, [&]() {
     spdlog::debug("[0x{:x}] {} Task Runner", pthread_self(), name_);
   });
 }
@@ -58,12 +60,12 @@ void TaskRunner::QueueFlutterTask(size_t index,
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
   auto current = proc_table_.GetCurrentTime();
   if (current >= target_time) {
-    strand_->post([&, index, task]() {
+    asio::post(*strand_, [&, index, task]() {
       SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
       proc_table_.RunTask(engine_, &task);
     });
   } else {
-    strand_->post(pri_queue_->wrap(target_time, [&, index, task]() {
+    asio::post(*strand_, pri_queue_->wrap(target_time, [&, index, task]() {
       SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
       proc_table_.RunTask(engine_, &task);
     }));
