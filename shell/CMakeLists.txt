@@ -78,6 +78,7 @@ target_compile_definitions(homescreen
         ASIO_HEADER_ONLY
         ASIO_NO_TYPEID
         ASIO_DISABLE_HANDLER_TYPE_REQUIREMENTS
+        ASIO_NO_DEPRECATED
 )
 
 target_include_directories(homescreen

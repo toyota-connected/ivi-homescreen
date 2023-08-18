@@ -18,6 +18,7 @@
 
 #include <memory>
 
+#include "asio/executor_work_guard.hpp"
 #include "asio/io_context.hpp"
 #include "asio/io_context_strand.hpp"
 
@@ -51,7 +52,7 @@ class TaskRunner {
   std::thread thread_;
   pthread_t pthread_self_;
   std::unique_ptr<asio::io_context> io_context_;
-  std::unique_ptr<asio::io_context::work> work_;
+  asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
   std::unique_ptr<asio::io_context::strand> strand_;
   std::unique_ptr<handler_priority_queue> pri_queue_;
 };
