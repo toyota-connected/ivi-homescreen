@@ -24,6 +24,9 @@ typedef NAV_RENDER_API_CONTEXT_T* NAV_RENDER_API_INITIALIZE_T(
     const char* miscPath);
 
 typedef struct {
+  void* dpy;
+  void* context;
+  uint32_t framebufferId;
   const char* access_token;
   int width;
   int height;
@@ -32,6 +35,7 @@ typedef struct {
   const char* misc_folder;
   LoggerFunction pfnLogger;
   GlLoaderFunction pfnGlLoader;
+  const void* native_window;
 } NavRenderConfig;
 
 typedef NAV_RENDER_API_CONTEXT_T* NAV_RENDER_API_INITIALIZE2_T(
@@ -51,6 +55,8 @@ typedef void NAV_RENDER_API_RUN_TASK_T(NAV_RENDER_API_CONTEXT_T* ctx);
 
 typedef void NAV_RENDER_API_RENDER_T(NAV_RENDER_API_CONTEXT_T* ctx,
                                      uint32_t framebufferId);
+
+typedef void NAV_RENDER_API_RENDER2_T(NAV_RENDER_API_CONTEXT_T* ctx);
 
 typedef void NAV_RENDER_API_RESIZE_T(NAV_RENDER_API_CONTEXT_T* ctx,
                                      int width,
