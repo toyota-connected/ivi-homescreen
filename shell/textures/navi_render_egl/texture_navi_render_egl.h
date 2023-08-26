@@ -100,6 +100,7 @@ class TextureNaviRender : public Texture {
     NAV_RENDER_API_DE_INITIALIZE_T* de_initialize{};
     NAV_RENDER_API_RUN_TASK_T* run_task{};
     NAV_RENDER_API_RENDER_T* render{};
+    NAV_RENDER_API_RENDER2_T* render2{};
     NAV_RENDER_API_RESIZE_T* resize{};
 
   } m_render_api;

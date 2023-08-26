@@ -154,6 +154,8 @@ class Egl {
 
   EGLDisplay GetDisplay() { return m_dpy; }
 
+  EGLContext GetTextureContext() { return m_texture_context; }
+
  protected:
   EGLSurface m_egl_surface{};
 

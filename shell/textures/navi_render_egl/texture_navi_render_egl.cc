@@ -92,6 +92,12 @@ flutter::EncodableValue TextureNaviRender::Create(
     spdlog::error("\"misc_folder\" not set!!");
   }
 
+  obj->m_interface_version = 0;
+  it = args->find(flutter::EncodableValue("intf_ver"));
+  if (it != args->end() && !it->second.IsNull()) {
+    obj->m_interface_version = std::get<int>(it->second);
+  }
+
   if (!obj->m_h_module) {
     SPDLOG_DEBUG("Attempting to open [{}]", module);
     obj->m_h_module = dlopen(module.c_str(), RTLD_NOW | RTLD_GLOBAL);
@@ -105,12 +111,6 @@ flutter::EncodableValue TextureNaviRender::Create(
           {flutter::EncodableValue("error"),
            flutter::EncodableValue("Failed to load module")}});
     }
-  }
-
-  obj->m_interface_version = 0;
-  it = args->find(flutter::EncodableValue("intf_ver"));
-  if (it != args->end() && !it->second.IsNull()) {
-    obj->m_interface_version = std::get<int>(it->second);
   }
 
   SPDLOG_DEBUG("Initializing Navigation Texture ({} x {})", obj->m_width,
@@ -195,6 +195,9 @@ flutter::EncodableValue TextureNaviRender::Create(
                           const char* procname) -> const void* {
           return GlProcessResolver::GetInstance().process_resolver(procname);
         }};
+    nav_render_init.dpy = obj->m_egl_backend->GetDisplay();
+    nav_render_init.context = obj->m_egl_backend->GetTextureContext();
+    nav_render_init.framebufferId = obj->m_fbo;
     context = obj->m_render_api.initialize2(&nav_render_init);
   }
 
@@ -255,9 +258,21 @@ void TextureNaviRender::Draw(void* userdata) {
 
   for (auto const& [key, context] : obj->m_render_api.ctx) {
     std::lock_guard<std::mutex> guard(g_gl_mutex);
-    obj->m_egl_backend->MakeTextureCurrent();
-    obj->m_render_api.render(context, obj->m_fbo);
-    obj->m_egl_backend->ClearCurrent();
+    if (obj->m_interface_version == 2) {
+      obj->m_render_api.render2(context);
+    } else {
+      obj->m_egl_backend->MakeTextureCurrent();
+
+      glClear(GL_COLOR_BUFFER_BIT);
+      glBindFramebuffer(GL_FRAMEBUFFER, obj->m_fbo);
+      glViewport(0, 0, obj->m_width, obj->m_height);
+
+      obj->m_render_api.render(context, obj->m_fbo);
+
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+      obj->m_egl_backend->ClearCurrent();
+    }
     obj->m_draw_next = false;
     obj->FrameReady();
   }
@@ -286,9 +301,15 @@ void TextureNaviRender::InitRenderApi() {
   m_render_api.run_task = reinterpret_cast<NAV_RENDER_API_RUN_TASK_T*>(
       dlsym(m_h_module, "nav_render_run_task"));
   assert(m_render_api.run_task);
-  m_render_api.render = reinterpret_cast<NAV_RENDER_API_RENDER_T*>(
-      dlsym(m_h_module, "nav_render_render"));
-  assert(m_render_api.render);
+  if (m_interface_version == 2) {
+    m_render_api.render2 = reinterpret_cast<NAV_RENDER_API_RENDER2_T*>(
+        dlsym(m_h_module, "nav_render_render2"));
+    assert(m_render_api.render2);
+  } else {
+    m_render_api.render = reinterpret_cast<NAV_RENDER_API_RENDER_T*>(
+        dlsym(m_h_module, "nav_render_render"));
+    assert(m_render_api.render);
+  }
   m_render_api.resize = reinterpret_cast<NAV_RENDER_API_RESIZE_T*>(
       dlsym(m_h_module, "nav_render_resize"));
   assert(m_render_api.resize);
