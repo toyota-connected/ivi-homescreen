@@ -24,7 +24,7 @@
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
-    FML_LOG(ERROR) << "JSON Configuration requires a \"view\" object";
+    spdlog::critical("JSON Configuration requires a \"view\" object");
     exit(EXIT_FAILURE);
   }
 
@@ -57,10 +57,17 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
+    instance.view.pixel_ratio = static_cast<double>(obj[kPixelRatioKey].GetInt());
+  }
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
+    instance.view.ivi_surface_id =
+        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
+  }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
-        obj[kAccessibilityFeaturesKey].GetInt();
+        MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
     auto args = obj[kVmArgsKey].GetArray();
@@ -100,6 +107,10 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kDisableCursorKey) && obj[kDisableCursorKey].IsBool()) {
     instance.disable_cursor = obj[kDisableCursorKey].GetBool();
   }
+  if (obj.HasMember(kWaylandEventMaskKey) &&
+      obj[kWaylandEventMaskKey].IsString()) {
+    instance.wayland_event_mask = obj[kWaylandEventMaskKey].GetString();
+  }
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
   }
@@ -116,12 +127,12 @@ void Configuration::getGlobalParameters(
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
-    instance.view.wl_output_index = obj[kOutputIndex].IsInt();
+    instance.view.wl_output_index = obj[kOutputIndex].GetUint();
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
-        obj[kAccessibilityFeaturesKey].GetInt();
+        MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
     instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
@@ -131,6 +142,13 @@ void Configuration::getGlobalParameters(
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+  }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
+    instance.view.pixel_ratio = static_cast<double>(obj[kPixelRatioKey].GetInt());
+  }
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
+    instance.view.ivi_surface_id =
+        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
   }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
@@ -157,7 +175,8 @@ void Configuration::getView(rapidjson::Document& doc,
     if (index > arr.Capacity())
       assert(false);
 
-    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(), instance);
+    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(),
+                      instance);
     getGlobalParameters(doc.GetObject(), instance);
   } else {
     getViewParameters(doc[kViewKey].GetObject(), instance);
@@ -178,6 +197,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (cli.disable_cursor_set && cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
   }
+  if (!cli.wayland_event_mask.empty()) {
+    instance.wayland_event_mask = cli.wayland_event_mask;
+  }
   if (cli.debug_backend_set && cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
   }
@@ -196,7 +218,8 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
     instance.view.wl_output_index = cli.view.wl_output_index;
   }
   if (cli.view.accessibility_features > 0) {
-    instance.view.accessibility_features = cli.view.accessibility_features;
+    instance.view.accessibility_features =
+        MaskAccessibilityFeatures(cli.view.accessibility_features);
   }
   if (cli.view.width > 0) {
     instance.view.width = cli.view.width;
@@ -206,6 +229,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   }
   if (cli.view.pixel_ratio > 0) {
     instance.view.pixel_ratio = cli.view.pixel_ratio;
+  }
+  if (cli.view.ivi_surface_id > 0) {
+    instance.view.ivi_surface_id = cli.view.ivi_surface_id;
   }
   if (cli.view.fullscreen_set &&
       cli.view.fullscreen != instance.view.fullscreen) {
@@ -220,14 +246,14 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
   if (!config.json_configuration_path.empty()) {
     doc = getJsonDocument(config.json_configuration_path);
     if (!doc.IsObject()) {
-      FML_LOG(ERROR) << "Invalid JSON Configuration file";
+      spdlog::critical("Invalid JSON Configuration file");
       exit(EXIT_FAILURE);
     }
 
     view_count = getViewCount(doc);
   }
 
-  FML_DLOG(INFO) << "View Count: " << view_count;
+  SPDLOG_DEBUG("View Count: {}", view_count);
   std::vector<struct Config> res;
   res.reserve(view_count);
   for (int i = 0; i < view_count; i++) {
@@ -241,7 +267,7 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
       cfg.view.window_type = "NORMAL";
 
     if (cfg.view.bundle_path.empty()) {
-      FML_LOG(ERROR) << "A bundle path must be specified";
+      spdlog::critical("A bundle path must be specified");
       exit(EXIT_FAILURE);
     }
     if (cfg.view.width == 0) {
@@ -268,7 +294,7 @@ rapidjson::Document Configuration::getJsonDocument(
     const std::string& filename) {
   std::ifstream json_file(filename);
   if (!json_file.is_open()) {
-    FML_LOG(ERROR) << "Unable to open file " << filename;
+    spdlog::critical("Unable to open file {}", filename);
     exit(EXIT_FAILURE);
   }
 
@@ -281,38 +307,98 @@ rapidjson::Document Configuration::getJsonDocument(
 }
 
 void Configuration::PrintConfig(const Config& config) {
-  FML_LOG(INFO) << "**********";
-  FML_LOG(INFO) << "* Global *";
-  FML_LOG(INFO) << "**********";
-  FML_LOG(INFO) << "Application Id: .......... " << config.app_id;
-  if (!config.json_configuration_path.empty())
-    FML_LOG(INFO) << "JSON Configuration: ...... "
-                  << config.json_configuration_path;
-  FML_LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
-  FML_LOG(INFO) << "Disable Cursor: .......... "
-                << (config.disable_cursor ? "true" : "false");
-  FML_LOG(INFO) << "Debug Backend: ........... "
-                << (config.debug_backend ? "true" : "false");
-  FML_LOG(INFO) << "********";
-  FML_LOG(INFO) << "* View *";
-  FML_LOG(INFO) << "********";
+  std::stringstream ss;
+  ss << kGitBranch << " @ " << kGitCommitHash;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+
+  spdlog::info("**********");
+  spdlog::info("* Global *");
+  spdlog::info("**********");
+  if (!config.app_id.empty()) {
+    ss << "Application Id: .......... " << config.app_id;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  if (!config.json_configuration_path.empty()) {
+    ss << "JSON Configuration: ...... " << config.json_configuration_path;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  if (!config.cursor_theme.empty()) {
+    ss << "Cursor Theme: ............ " << config.cursor_theme;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  ss << "Disable Cursor: .......... " << (config.disable_cursor ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  if (!config.wayland_event_mask.empty()) {
+    ss << "Wayland Event Mask: ...... " << config.wayland_event_mask;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  ss << "Debug Backend: ........... " << (config.debug_backend ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  spdlog::info("********");
+  spdlog::info("* View *");
+  spdlog::info("********");
   if (!config.view.vm_args.empty()) {
-    FML_LOG(INFO) << "VM Args:";
+    spdlog::info("VM Args:");
     for (auto const& arg : config.view.vm_args) {
-      FML_LOG(INFO) << arg;
+      spdlog::info(arg);
     }
   }
-  FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
-  FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
-  FML_LOG(INFO) << "Output Index: ............. "
-                << config.view.wl_output_index;
-  FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
-                << config.view.height;
+  ss << "Bundle Path: .............. " << config.view.bundle_path;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Window Type: .............. " << config.view.window_type;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Output Index: ............. " << config.view.wl_output_index;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Size: ..................... " << config.view.width << " x "
+     << config.view.height;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
   if (config.view.pixel_ratio != kDefaultPixelRatio) {
-    FML_LOG(INFO) << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+    ss << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
-  FML_LOG(INFO) << "Fullscreen: ............... "
-                << (config.view.fullscreen ? "true" : "false");
-  FML_LOG(INFO) << "Accessibility Features: ... "
-                << config.view.accessibility_features;
+  if (config.view.ivi_surface_id > 0) {
+    ss << "IVI Surface ID: ........... " << config.view.ivi_surface_id;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  ss << "Fullscreen: ............... "
+     << (config.view.fullscreen ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Accessibility Features: ... " << config.view.accessibility_features;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+}
+
+int32_t Configuration::MaskAccessibilityFeatures(
+    int32_t accessibility_features) {
+  accessibility_features &= 0b1111111;
+  return accessibility_features;
 }

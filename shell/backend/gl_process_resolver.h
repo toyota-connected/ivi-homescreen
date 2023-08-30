@@ -26,8 +26,8 @@ class EglProcessResolver {
   static constexpr size_t kSoCount = 2UL;
   static constexpr size_t kSoMaxLength = 15;
   static constexpr std::array<char[kSoMaxLength], kSoCount> kGlSoNames[]{
-      {"libEGL.so"},
       {"libGLESv2"},
+      {"libEGL.so"},
   };
 
   ~EglProcessResolver();

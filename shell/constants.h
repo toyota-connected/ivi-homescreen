@@ -20,10 +20,18 @@
 #include <shell/platform/embedder/embedder.h>
 #include <array>
 
+// GIT
+constexpr char kGitBranch[] = GIT_BRANCH;
+constexpr char kGitCommitHash[] = GIT_HASH;
+
 // Screen Size
 constexpr int32_t kDefaultViewWidth = 1920;
 constexpr int32_t kDefaultViewHeight = 720;
 constexpr int kEglBufferSize = 24;
+
+// Logging
+constexpr int32_t kLogFlushInterval = 5;
+constexpr int32_t kVmLogChunkMax = 10;
 
 // Scale Factor
 constexpr double kDefaultBufferScale = 1.0;
@@ -36,8 +44,11 @@ constexpr char kCursorKindClick[] = "hand";
 constexpr char kCursorKindText[] = "left_ptr";
 constexpr char kCursorKindForbidden[] = "pirate";
 
-// Touch
-constexpr int kMaxTouchPoints = 10;
+// Mouse/Touch
+static constexpr int kMaxTouchFinger = 10;
+static constexpr int kPointerEventModulus = 2;
+static constexpr int kMaxPointerEvent =
+    kMaxTouchFinger * (15 * kPointerEventModulus);
 
 // Locale
 constexpr char kDefaultLocaleLanguageCode[] = "en";
@@ -62,13 +73,30 @@ static constexpr char kApplicationName[] = "homescreen";
 static constexpr char kXdgApplicationDir[] = ".homescreen";
 static constexpr char kXdgConfigDir[] = ".config";
 
+// DLT Logging
+static constexpr char kDltAppId[] = "HMIF";
+static constexpr char kDltAppIdDescription[] = "HMI Flutter";
+static constexpr char kDltContextId[] = "FEMB";
+static constexpr char kDltContextIdDescription[] = "Flutter Embedder";
+
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
+// Crash Handler
+static constexpr char kCrashHandlerDsn[] = CRASH_HANDLER_DSN;
+static constexpr char kCrashHandlerRelease[] = CRASH_HANDLER_RELEASE;
+
+#if !defined(NDEBUG)
+static constexpr std::array<EGLint, 7> kEglContextAttribs = {{
+#else
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
+#endif
     // clang-format off
     EGL_CONTEXT_MAJOR_VERSION, 3,
     EGL_CONTEXT_MAJOR_VERSION, 2,
+#if !defined(NDEBUG)
+    EGL_CONTEXT_OPENGL_DEBUG, EGL_TRUE,
+#endif
     EGL_NONE
     // clang-format on
 }};

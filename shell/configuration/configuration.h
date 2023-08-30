@@ -28,6 +28,7 @@ class Configuration {
     std::string cursor_theme;
     bool disable_cursor;
     bool disable_cursor_set;
+    std::string wayland_event_mask;
     bool debug_backend;
     bool debug_backend_set;
 
@@ -42,6 +43,7 @@ class Configuration {
       bool fullscreen;
       bool fullscreen_set;
       double pixel_ratio;
+      uint32_t ivi_surface_id;
       uint32_t fps_output_console;
       uint32_t fps_output_overlay;
       uint32_t fps_output_frequency;
@@ -68,6 +70,20 @@ class Configuration {
    */
   static void PrintConfig(const Config&);
 
+  /**
+   * @brief mask the accessibility_features
+   * @param[in] accessibility_features accessibility_features value
+   * @return int32_t
+   * @retval masked accessibility_features value
+   * @relation internal
+   *
+   * accessibility_features is expressed as bit flags.
+   * please see FlutterAccessibilityFeature enum
+   * in third_party/flutter/shell/platform/embedder/embedder.h.
+   * 0b1111111 is the maximum value of accessibility_features.
+   */
+  static int32_t MaskAccessibilityFeatures(int32_t accessibility_features);
+
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
 
  private:
@@ -78,11 +94,13 @@ class Configuration {
   static constexpr char kWidthKey[] = "width";
   static constexpr char kHeightKey[] = "height";
   static constexpr char kPixelRatioKey[] = "pixel_ratio";
+  static constexpr char kIviSurfaceIdKey[] = "ivi_surface_id";
   static constexpr char kAccessibilityFeaturesKey[] = "accessibility_features";
   static constexpr char kVmArgsKey[] = "vm_args";
   static constexpr char kFullscreenKey[] = "fullscreen";
   static constexpr char kAppIdKey[] = "app_id";
   static constexpr char kCursorThemeKey[] = "cursor_theme";
+  static constexpr char kWaylandEventMaskKey[] = "wayland_event_mask";
   static constexpr char kDisableCursorKey[] = "disable_cursor";
   static constexpr char kDebugBackendKey[] = "debug_backend";
   static constexpr char kFpsOutputConsole[] = "fps_output_console";

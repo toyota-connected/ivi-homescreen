@@ -39,7 +39,7 @@ Texture::Texture(uint32_t id,
       m_width(width) {}
 
 Texture::~Texture() {
-  FML_DLOG(INFO) << "Texture Destructor";
+  SPDLOG_DEBUG("Texture Destructor");
 }
 
 void Texture::GetFlutterOpenGLTexture(FlutterOpenGLTexture* texture_out) {
@@ -72,20 +72,20 @@ void Texture::Dispose(GLuint name) {
 
 void Texture::Enable(GLuint name) {
   if (m_flutter_engine) {
-    m_name.push_back(name);
+    m_name.push_back(static_cast<int64_t>(name));
 
     // Add again for assigned EGL texture id
     // EGL assigns Textures starting in low digits
     // Keep values passed to open_gl texture high to prevent collision
     // no plan to enforce overwriting
-    m_flutter_engine->TextureRegistryAdd(name, this);
+    m_flutter_engine->TextureRegistryAdd(static_cast<int64_t>(name), this);
 
-    if (kSuccess != m_flutter_engine->TextureEnable(name)) {
+    if (kSuccess != m_flutter_engine->TextureEnable(static_cast<int64_t>(name))) {
       assert(false);
     }
 
-    if (kSuccess != m_flutter_engine->MarkExternalTextureFrameAvailable(
-                        m_flutter_engine, name)) {
+    if (kSuccess !=
+        Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, static_cast<int64_t>(name))) {
       assert(false);
     }
     m_enabled = true;
@@ -96,7 +96,7 @@ void Texture::Disable(GLuint name) {
   assert(m_flutter_engine);
   assert(name);
 
-  m_flutter_engine->TextureDisable(name);
+  m_flutter_engine->TextureDisable(static_cast<int64_t>(name));
   m_enabled = false;
 
   auto i = find(m_name.begin(), m_name.end(), name);
@@ -115,7 +115,6 @@ void Texture::SetEngine(Engine* engine) {
 void Texture::FrameReady() {
   if (m_flutter_engine)
     for (auto name : m_name) {
-      m_flutter_engine->MarkExternalTextureFrameAvailable(m_flutter_engine,
-                                                          name);
+      Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, name);
     }
 }

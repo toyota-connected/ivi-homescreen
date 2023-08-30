@@ -55,6 +55,7 @@ class TextureNaviRender : public Texture {
   /**
    * @brief Dispose Navigation Instance
    * @param[in,out] userdata Pointer to TextureNaviRender
+   * @param[in] name Texture2d id
    * @return void
    * @relation
    * wayland, flutter
@@ -66,10 +67,12 @@ class TextureNaviRender : public Texture {
 
   WaylandEglBackend* m_egl_backend;
   std::string m_map_base_path;
-  bool m_initialized{};
+  volatile bool m_run_enable{};
 
   GLuint m_fbo{};
   GLuint m_texture_id{};
+  GLuint m_rbo{};
+  int m_interface_version{};
 
   static std::map<std::string, std::string> m_styles;
 
@@ -91,12 +94,13 @@ class TextureNaviRender : public Texture {
   struct {
     NAV_RENDER_API_VERSION_T* version{};
 
-    std::vector<NAV_RENDER_API_CONTEXT_T*> ctx{};
-    NAV_RENDER_API_LOAD_GL_FUNCTIONS* gl_loader{};
+    std::map<GLuint, NAV_RENDER_API_CONTEXT_T*> ctx{};
     NAV_RENDER_API_INITIALIZE_T* initialize{};
+    NAV_RENDER_API_INITIALIZE2_T* initialize2{};
     NAV_RENDER_API_DE_INITIALIZE_T* de_initialize{};
     NAV_RENDER_API_RUN_TASK_T* run_task{};
     NAV_RENDER_API_RENDER_T* render{};
+    NAV_RENDER_API_RENDER2_T* render2{};
     NAV_RENDER_API_RESIZE_T* resize{};
 
   } m_render_api;

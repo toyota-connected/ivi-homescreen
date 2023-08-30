@@ -37,7 +37,7 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       std::string url;
       auto it = args->find(flutter::EncodableValue(kUrlKey));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         url = std::get<std::string>(it->second);
       }
 
@@ -64,7 +64,7 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
       auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       auto it = args->find(flutter::EncodableValue(kUrlKey));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         url = std::get<std::string>(it->second);
         flutter::EncodableValue response(
             (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||
@@ -77,7 +77,7 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(ERROR) << "url_launcher: " << method << " is unhandled";
+    SPDLOG_DEBUG("url_launcher: {} is unhandled", method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),

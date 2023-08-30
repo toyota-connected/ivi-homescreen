@@ -44,6 +44,12 @@ wayland_generate(
 wayland_generate(
         ${WAYLAND_PROTOCOLS_BASE}/stable/xdg-shell/xdg-shell.xml
         ${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-client-protocol)
+wayland_generate(
+        ${CMAKE_SOURCE_DIR}/third_party/weston/protocol/ivi-application.xml
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-application-client-protocol)
+wayland_generate(
+        ${CMAKE_SOURCE_DIR}/third_party/weston/protocol/ivi-wm.xml
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-wm-client-protocol)
 if (BUILD_BACKEND_WAYLAND_DRM)
     wayland_generate(
             ${WAYLAND_PROTOCOLS_BASE}/staging/drm-lease/drm-lease-v1.xml
