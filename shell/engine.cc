@@ -99,10 +99,6 @@ Engine::Engine(FlutterView* view,
   m_pointer_events.clear();
   m_pointer_events.reserve(kMaxPointerEvent);
 
-  // Touch events
-  m_pointer_events.reserve(kMaxPointerEvent);
-  m_pointer_events.clear();
-
   ///
   /// libflutter_engine.so loading
   ///

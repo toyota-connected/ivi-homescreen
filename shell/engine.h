@@ -377,9 +377,9 @@ class Engine {
    * flutter
    */
   void CoalesceTouchEvent(FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      int32_t device);
+                          double x,
+                          double y,
+                          int32_t device);
 
   /**
    * @brief Send coalesced Pointer events

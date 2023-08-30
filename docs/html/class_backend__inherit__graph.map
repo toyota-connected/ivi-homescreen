@@ -1,5 +1,0 @@
-<map id="Backend" name="Backend">
-<area shape="rect" id="node1" title=" " alt="" coords="138,5,215,32"/>
-<area shape="rect" id="node2" href="$class_wayland_egl_backend.html" title=" " alt="" coords="5,80,159,107"/>
-<area shape="rect" id="node3" href="$class_wayland_vulkan_backend.html" title=" " alt="" coords="183,80,359,107"/>
-</map>
