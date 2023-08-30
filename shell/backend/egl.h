@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include <EGL/egl.h>
@@ -107,6 +108,55 @@ class Egl {
    */
   EGLSurface create_egl_surface(void* native_window, const EGLint* attrib_list);
 
+  /**
+   * @brief Function that returns a function pointer to
+   * PFNEGLSETDAMAGEREGIONKHRPROC
+   * @return PFNEGLSETDAMAGEREGIONKHRPROC
+   * @retval nullptr if extensions are not supported
+   * @relation
+   * EGL
+   */
+  PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() {
+    return m_pfSetDamageRegion;
+  }
+
+  /**
+   * @brief Function that returns a function pointer to
+   * PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
+   * @return PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
+   * @retval nullptr if extensions are not supported
+   * @relation
+   * EGL
+   */
+  PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC GetSwapBuffersWithDamage() {
+    return m_pfSwapBufferWithDamage;
+  }
+
+  /**
+   * @brief Function that returns if GL Ext Buffer Age is supported
+   * @return bool
+   * @retval true if extension is available
+   * @relation
+   * EGL
+   */
+  bool HasExtBufferAge() const { return m_has_gl_ext_buffer_age; }
+
+  /**
+   * @brief Auxiliary function used to transform a FlutterRect into the format
+   * that is expected by the EGL functions
+   * @param[in] rect FlutterRect
+   * @return array of EGLint
+   * @retval if extension is present
+   * @relation
+   * EGL
+   */
+  std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
+
+  EGLDisplay GetDisplay() { return m_dpy; }
+
+  EGLContext GetTextureContext() { return m_texture_context; }
+
+ protected:
   EGLSurface m_egl_surface{};
 
  private:
@@ -115,7 +165,7 @@ class Egl {
 
   int m_buffer_size;
 
-  EGLDisplay m_dpy;
+  EGLDisplay m_dpy{};
   EGLContext m_context{};
   EGLContext m_resource_context{};
 
@@ -125,6 +175,25 @@ class Egl {
   PFNEGLDEBUGMESSAGECONTROLKHRPROC m_pfDebugMessageControl{};
   PFNEGLQUERYDEBUGKHRPROC m_pfQueryDebug{};
   PFNEGLLABELOBJECTKHRPROC m_pfLabelObject{};
+
+  PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC m_pfSwapBufferWithDamage{};
+  PFNEGLSETDAMAGEREGIONKHRPROC m_pfSetDamageRegion{};
+  bool m_has_gl_ext_buffer_age{};
+
+  /**
+   * @brief Auxiliary function used to check if the given list of extensions
+   * contains the requested extension name.
+   * @param[in] dpy EGL display
+   * @param[in] name name of extension
+   * @return bool
+   * @retval if extension is present
+   * @relation
+   * EGL
+   */
+  static bool HasExtension(
+      std::unordered_map<EGLDisplay, const char*>& extensions,
+      EGLDisplay dpy,
+      const char* name);
 
   /**
    * @brief Report the contents of EGL attributes and frame buffer
@@ -157,22 +226,13 @@ class Egl {
                              const char* message);
 
   /**
-   * @brief Get address of EGL function
-   * @param[in] address Function name
-   * @return void*
-   * @retval Function address
-   * @relation
-   * wayland
-   */
-  static void* get_egl_proc_address(const char* address);
-
-  /**
    * @brief Initialize of EGL KHR_debug
+* @param[in] extensions unordered_map of EGL extensions
    * @return void
    * @relation
    * wayland
    */
-  void EGL_KHR_debug_init();
+  void EGL_KHR_debug_init(std::unordered_map<EGLDisplay, const char*>& extensions);
 
   /**
    * @brief Print a list of extensions, with word-wrapping
@@ -181,5 +241,5 @@ class Egl {
    * @relation
    * internal
    */
-  static void print_extension_list(const char* ext);
+  static void print_extension_list(EGLDisplay dpy);
 };

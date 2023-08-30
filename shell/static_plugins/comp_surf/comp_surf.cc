@@ -22,9 +22,10 @@
 void CompositorSurfacePlugin::OnPlatformMessage(
     const FlutterPlatformMessage* message,
     void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
+  std::unique_ptr<std::vector<uint8_t>> result =
+      codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
@@ -47,7 +48,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
 
       std::string module_str;
       it = args->find(flutter::EncodableValue(kArgModule));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         module_str = std::get<std::string>(it->second);
       }
       auto h_module = dlopen(module_str.c_str(), RTLD_LAZY);
@@ -58,27 +59,37 @@ void CompositorSurfacePlugin::OnPlatformMessage(
         return;
       }
 
+      bool map_flutter_assets = false;
+      it = args->find(flutter::EncodableValue(kArgMapFlutterAssetsPath));
+      if (it != args->end() && !it->second.IsNull()) {
+        map_flutter_assets = std::get<bool>(it->second);
+      }
+
       std::string assets_path;
-      it = args->find(flutter::EncodableValue(kArgAssetsPath));
-      if (it != args->end()) {
-        assets_path = std::get<std::string>(it->second);
+      if (map_flutter_assets) {
+        assets_path = engine->GetAssetDirectory();
+      } else {
+        it = args->find(flutter::EncodableValue(kArgAssetsPath));
+        if (it != args->end() && !it->second.IsNull()) {
+          assets_path = std::get<std::string>(it->second);
+        }
       }
 
       std::string cache_folder;
       it = args->find(flutter::EncodableValue(kCacheFolder));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         cache_folder = std::get<std::string>(it->second);
       }
 
       std::string misc_folder;
       it = args->find(flutter::EncodableValue(kMiscFolder));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         misc_folder = std::get<std::string>(it->second);
       }
 
       std::string type_str;
       it = args->find(flutter::EncodableValue(kArgType));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         type_str = std::get<std::string>(it->second);
       }
       CompositorSurface::PARAM_SURFACE_T type;
@@ -96,7 +107,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
 
       std::string z_order_str;
       it = args->find(flutter::EncodableValue(kArgZOrder));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         z_order_str = std::get<std::string>(it->second);
       }
       CompositorSurface::PARAM_Z_ORDER_T z_order;
@@ -113,7 +124,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
 
       std::string sync_str;
       it = args->find(flutter::EncodableValue(kArgSync));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         sync_str = std::get<std::string>(it->second);
       }
       CompositorSurface::PARAM_SYNC_T sync;
@@ -131,25 +142,25 @@ void CompositorSurfacePlugin::OnPlatformMessage(
 
       auto width = kDefaultViewWidth;
       it = args->find(flutter::EncodableValue(kArgWidth));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         width = std::get<int>(it->second);
       }
 
       auto height = kDefaultViewHeight;
       it = args->find(flutter::EncodableValue(kArgHeight));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         height = std::get<int>(it->second);
       }
 
       auto x = 0;
       it = args->find(flutter::EncodableValue(kArgX));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         x = std::get<int32_t>(it->second);
       }
 
       auto y = 0;
       it = args->find(flutter::EncodableValue(kArgY));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         y = std::get<int32_t>(it->second);
       }
 
@@ -190,7 +201,7 @@ void CompositorSurfacePlugin::OnPlatformMessage(
 
       auto index = 0;
       it = args->find(flutter::EncodableValue(kSurfaceIndex));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         index = std::get<int>(it->second);
       }
 

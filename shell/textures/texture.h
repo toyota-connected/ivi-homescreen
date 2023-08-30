@@ -121,6 +121,13 @@ class Texture {
    */
   void FrameReady();
 
+  /**
+   * @brief Get texture id
+   * @return int64_t
+   * @retval Texture id
+   * @relation
+   * wayland, flutter
+   */
   int64_t GetId() { return m_id; }
 
  protected:
@@ -135,7 +142,7 @@ class Texture {
 
   MAYBE_UNUSED EGLSurface m_surface{};
 
-  bool m_draw_next;
+  volatile bool m_draw_next;
 
  private:
   const EncodableValueCallback m_create_callback;

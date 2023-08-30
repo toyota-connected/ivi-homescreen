@@ -1,20 +1,62 @@
 # ivi-homescreen
 
-[![Build Status](https://img.shields.io/github/workflow/status/toyota-connected/ivi-homescreen/ivi-homescreen-linux/main?logoColor=red&logo=ubuntu)](https://github.com/toyota-connected/ivi-homescreen/actions) [![Total alerts](https://img.shields.io/lgtm/alerts/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/alerts/) [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/toyota-connected/ivi-homescreen.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/toyota-connected/ivi-homescreen/context:cpp) [![Coverity Scan Build Status](https://scan.coverity.com/projects/23813/badge.svg)](https://scan.coverity.com/projects/toyota-connected-ivi-homescreen)
-
 
 IVI Homescreen for Wayland
 
 * Strongly Typed (C++)
 * Lightweight
-  * Clang 11 Release Stripped = 151k
-  * GCC 9.3 Release Stripped = 168k
 * Source runs on Desktop and Yocto Linux
   * Ubuntu 18+
   * Fedora 33+
   * Yocto Dunfell+
 * Platform Channels enabled/disabled via CMake
 * OpenGL Texture Framework
+* Compositor Sub-surface/Region support
+* Vulkan / EGL backend support
+
+# Logging
+
+Logging supports the following levels
+* trace
+* debug
+* info
+* warn
+* error
+* critical
+* off
+
+If environmental variable SPDLOG_LEVEL is not set, logging defaults to info.
+
+To set logging to trace use
+
+    SPDLOG_LEVEL=trace
+
+To set logging to debug use
+
+    SPDLOG_LEVEL=debug
+
+# DLT logging
+
+To test DLT logging on desktop use the following
+
+Ubuntu packages
+
+    sudo apt-get install libdlt-dev dlt-viewer dlt-daemon dlt-tools
+
+Fedora packages
+
+    sudo dnf install dlt-libs-devel dlt-dameon dlt-tools
+
+### Logging with DLT
+
+Start new terminal
+
+    dlt-daemon
+
+#### View DLT log output in a terminal
+Start new terminal
+
+    dlt-receive -a localhost
 
 # Sanitizer Support
 
@@ -80,12 +122,13 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `--h={int value}` - Sets View height.  Requires an integer value.
 
+`--i={int value}` - Sets ivi-shell surface ID.  Requires an integer value.
+
 `--p={int value}` - Sets Pixel Ratio.  Requires a double value.
 
 `--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
 
 `--b={path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
-
 ```
   Flutter Application (bundle folder)
     data/flutter_assets
@@ -94,6 +137,10 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
     lib/libflutter_engine.so (optional - overrides system path)
 ```
 * `--j=` - Sets the JSON configuration file.
+* `--wayland-event-mask` - Sets events to ignore. e.g. --wayland-event-mask=pointer-axis, or --wayland-event-mask="pointer-axis, touch"
+
+  * Available parameters are:
+      pointer, pointer-axis, pointer-buttons, pointer-motion, keyboard, touch
 
 * Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
 
@@ -108,6 +155,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 `disable_cursor` - Disables the cursor.  This only applies to command line, and global parameter options.
 
 `debug_backend` - Enables Backend Debug logic.
+
+`wayland_event_mask` - See command line option --wayland-event-mask
 
 #### View Specific
 
@@ -127,6 +176,8 @@ it will create borderless windows in no particular position.
 `vm_args` - Array of strings which get passed to the VM instance as command line arguments.
 
 `fullscreen` - Sets window to fullscreen.
+
+`ivi_surface_id` - Sets ivi-shell surface ID.
 
 `fps_output_console` - Setting to `1` FPS count is output to stdout.
 
@@ -207,6 +258,73 @@ All other parameters get assigned using the following ordering:
 2. JSON Configuration Global (non-view) parameters
 3. Command Line parameters (Overrides View and Global parameters)
 
+# CMake Build flags
+
+`ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
+
+`ENABLE_AGL_CLIENT` - Enable AGL Client.  Defaults to OFF
+
+`ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
+
+`ENABLE_DART_VM_LOGGING` - Enable Dart VM Logging.  Defaults to ON
+
+`ENABLE_DLT` - Enable DLT logging.  Defaults to ON
+
+`BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
+
+`BUILD_EGL_TRANSPARENCY` - Build with EGL Transparency Enabled.  Defaults to ON
+
+`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backend for Vulkan.  Defaults to ON
+
+`BUILD_BACKEND_WAYLAND_DRM` - Build Backend Wayland DRM.  Defaults to OFF
+
+`BUILD_TEXTURE_EGL` - Include EGL Textures.  Defaults to ON
+
+`BUILD_TEXTURE_TEST_EGL` - Includes Test Texture.  Defaults to OFF
+
+`BUILD_TEXTURE_NAVI_RENDER_EGL` - Includes Navi Texture.  Defaults to ON
+
+`BUILD_PLUGIN_ISOLATE` - Include Isolate Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_RESTORATION` - Include Restoration Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_PLATFORM` - Include Platform Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_MOUSE_CURSOR` - Include Mouse Cursor Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_GSTREAMER_EGL` - Include GStreamer Plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_TEXT_INPUT` - Includes Text Input Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_KEY_EVENT` - Includes Key Event Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_PACKAGE_INFO` - Include PackageInfo Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_COMP_SURF` - Include Compositor Surface Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_COMP_REGION` - Include Compositor Region Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_OPENGL_TEXTURE` - Includes OpenGL Texture Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_NAVIGATION` - Includes Navigation Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_ACCESSIBILITY` - Includes Accessibility Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_PLATFORM_VIEW` - Includes PlatformView Plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_DESKTOP_WINDOW` - Includes Desktop Window Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
+
+`BUILD_PLUGIN_INTEGRATION_TEST` - Includes Flutter Integration Test Plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_LOGGING` - Includes Logging Plugin.  Defaults to OFF
+
+
+_**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
+
 # x86_64 Desktop development notes
 
 ## NVidia GL errors
@@ -252,19 +370,12 @@ Defaults to Wayland, no need to do anything special
     cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
 
-## Clang/libc++ Build
+## GCC Build
 
     git clone https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
-    CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
-
-### Clang Toolchain Setup
-
-    wget https://apt.llvm.org/llvm.sh
-    chmod +x llvm.sh
-    sudo ./llvm.sh 12
-    sudo apt-get install -y libc++-12-dev libc++abi-12-dev libunwind-dev
 
 ## CI Example
 
@@ -323,6 +434,35 @@ Path prefix used to determine required files is determined at build.
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
+# Crash Handler
+
+Sentry-native support is available for Crash Handling.  This pushes a mini-dump to the cloud for triage and tracking.
+
+To create user account and get DNS See https://sentry.io/welcome/
+
+Required CMake Variables
+
+    -DBUILD_CRASH_HANDLER=ON
+    -DCRASH_HANDLER_DSN="dsn from your account"
+
+Required source repo:  https://github.com/getsentry/sentry-native
+
+### Example Build steps
+
+sentry build
+
+    git clone https://github.com/getsentry/sentry-native
+    mkdir build && cd build
+    cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_STAGING_PREFIX=`pwd`/out/usr
+    make install
+
+ivi-homescreen build
+
+    git clone https://github.com/toyota-connected/ivi-homescreen
+    mkdir build && cd build
+    cmake .. -DBUILD_CRASH_HANDLER=ON -DCRASH_HANDLER_DSN="dsn from your account"
+    make -j
+    LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
 
 # Yocto recipes
 

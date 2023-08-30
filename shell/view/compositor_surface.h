@@ -10,6 +10,7 @@
 #include <wayland-client.h>
 
 #include "compositor_surface_api.h"
+#include "constants.h"
 
 class Display;
 
@@ -51,17 +52,67 @@ class CompositorSurface {
 
   ~CompositorSurface() = default;
 
+  /**
+   * @brief Initialize the compositor surface plugin.
+   * @return void
+   * @relation
+   * plugin
+   */
   void InitializePlugin();
 
-  [[nodiscard]] void* GetContext() const { return m_context; }
+  /**
+   * @brief get a context of a plugin
+   * @return void*
+   * @retval context
+   * @relation
+   * internal
+   */
+  NODISCARD void* GetContext() const { return m_context; }
 
-  void RunTask() const { m_api.run_task(m_context); }
+  /**
+   * @brief run a plugin context task
+   * @return void
+   * @relation
+   * wayland
+   */
+  void RunTask() const {
+    if (m_context) {
+      m_api.run_task(m_context);
+    }
+  }
 
+  /**
+   * @brief dispose a surface context
+   * @param[in] userdata
+   * @return void
+   * @relation
+   * flutter
+   */
   static void Dispose(void* userdata);
 
+  /**
+   * @brief start frames of a plugin
+   * @return void
+   * @relation
+   * wayland
+   */
   void StartFrames();
+  /**
+   * @brief stop frames of a plugin
+   * @return void
+   * @relation
+   * wayland
+   */
   void StopFrames();
 
+  /**
+   * @brief the utility to get a file path of a specified folder
+   * @param[in] folder the folder name
+   * @return std::string
+   * @retval the file path
+   * @relation
+   * internal
+   */
   static std::string GetFilePath(const char* folder);
 
  private:
@@ -81,7 +132,7 @@ class CompositorSurface {
   std::string m_assets_path;
   std::string m_cache_path;
   std::string m_misc_path;
-  [[maybe_unused]] PARAM_SURFACE_T m_type;
+  MAYBE_UNUSED PARAM_SURFACE_T m_type;
   PARAM_Z_ORDER_T m_z_order;
   PARAM_SYNC_T m_sync;
   int width_;
@@ -103,7 +154,23 @@ class CompositorSurface {
 
   struct wl_callback* m_callback;
 
+  /**
+   * @brief Initialize a compositor surface plugin API.
+   * @param[in] obj the compositor surfaces
+   * @return void
+   * @relation
+   * plugin
+   */
   static void init_api(CompositorSurface* obj);
+  /**
+   * @brief draw a frame of a plugin and run a callback of a plugin
+   * @param[in] data user data
+   * @param[in] callback the callback of a plugin
+   * @param[in] time time spent to draw a frame
+   * @return void
+   * @relation
+   * plugin, wayland
+   */
   static void on_frame(void* data, struct wl_callback* callback, uint32_t time);
   static const struct wl_callback_listener frame_listener;
 };

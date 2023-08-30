@@ -29,16 +29,16 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   if (method == kSelectSingleEntryHistory) {
     if (obj->arguments()->IsNull()) {
-      FML_LOG(INFO) << "(" << engine->GetIndex()
-                    << ") Navigation: Select Single Entry History";
+      spdlog::info("({}) Navigation: Select Single Entry History",
+                   engine->GetIndex());
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kSelectMultiEntryHistory) {
     if (obj->arguments()->IsNull()) {
-      FML_LOG(INFO) << "(" << engine->GetIndex()
-                    << ") Navigation: Select Multiple Entry History";
+      spdlog::info("({}) Navigation: Select Multiple Entry History",
+                   engine->GetIndex());
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
@@ -52,18 +52,18 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
       info.state =
           !(*args)["state"].IsNull() ? (*args)["state"].GetString() : "";
       info.replace = (*args)["replace"].GetBool();
-      FML_LOG(INFO) << "(" << engine->GetIndex()
-                    << ") Navigation: Route Information Updated"
-                       "\n\tlocation: "
-                    << info.location << "\n\tstate: " << info.state
-                    << "\n\treplace: " << info.replace;
+      spdlog::info(
+          "({}) Navigation: Route Information Updated"
+          "\n\tlocation: {} \n\tstate: {}\n\treplace: {}",
+          engine->GetIndex(), info.location, info.state, info.replace);
+
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Navigation: " << method
-                   << " is unhandled";
+    SPDLOG_DEBUG("({}) Navigation: {} is unhandled", engine->GetIndex(),
+                 method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "unhandled Method");
   }
 

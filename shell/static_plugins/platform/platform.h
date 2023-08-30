@@ -136,11 +136,9 @@ class Platform {
 #endif
   static constexpr char kTextPlainFormat[] = "text/plain";
 
-#if 0
-    static constexpr char kPlaySoundMethod[] = "SystemSound.play";
-    static constexpr char kSoundTypeAlert[] = "SystemSoundType.alert";
-    static constexpr char kSoundTypeClick[] = "SystemSoundType.click";
-#endif
+  static constexpr char kPlaySoundMethod[] = "SystemSound.play";
+  static constexpr char kSoundTypeAlert[] = "SystemSoundType.alert";
+  static constexpr char kSoundTypeClick[] = "SystemSoundType.click";
 
   static constexpr char kSystemNavigationBarColor[] =
       "systemNavigationBarColor";
@@ -157,4 +155,6 @@ class Platform {
       "systemNavigationBarContrastEnforced";
   static constexpr char kSystemChrome_setPreferredOrientations[] =
       "SystemChrome.setPreferredOrientations";
+  static constexpr char kSystemChrome_setEnabledSystemUIMode[] =
+      "SystemChrome.setEnabledSystemUIMode";
 };

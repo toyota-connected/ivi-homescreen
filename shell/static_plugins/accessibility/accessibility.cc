@@ -32,8 +32,8 @@ void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
         std::get<flutter::EncodableMap>(map[flutter::EncodableValue("data")]);
     auto msg = std::get<std::string>(data[flutter::EncodableValue("message")]);
 
-    FML_DLOG(INFO) << "(" << engine->GetIndex()
-                   << ") Accessibility: type: " << type << ", message: " << msg;
+    SPDLOG_DEBUG("({}) Accessibility: type: {}, message: {}",
+                 engine->GetIndex(), type, msg);
 
     if (type == "disableAnimations") {
       auto value = engine->GetAccessibilityFeatures();
@@ -46,9 +46,8 @@ void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
                      kFlutterAccessibilityFeatureDisableAnimations;
       }
       engine->UpdateAccessibilityFeatures(value);
-      FML_DLOG(INFO) << "(" << engine->GetIndex()
-                     << ") Accessibility: type: " << type
-                     << ", enabled: " << (enabled ? "true" : "false");
+      SPDLOG_DEBUG("({}) Accessibility: type: {}, enabled: {}",
+                   engine->GetIndex(), type, (enabled ? "true" : "false"));
     }
   }
 

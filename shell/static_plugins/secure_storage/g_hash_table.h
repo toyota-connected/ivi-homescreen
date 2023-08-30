@@ -46,7 +46,8 @@ class FHashTable {
    * flutter
    */
   bool insert(const char* key, const char* value) {
-    return g_hash_table_insert(m_hashTable, (void*)key, (void*)value);
+    auto result = g_hash_table_insert(m_hashTable, (void*)key, (void*)value);
+    return static_cast<bool>(result);
   }
 
   /**
@@ -58,7 +59,8 @@ class FHashTable {
    * flutter
    */
   const char* get(const char* key) {
-    return (const char*)g_hash_table_lookup(m_hashTable, (void*)key);
+    auto result = g_hash_table_lookup(m_hashTable, (void*)key);
+    return static_cast<const char*>(result);
   }
 
   /**
@@ -71,7 +73,8 @@ class FHashTable {
    * flutter
    */
   bool contains(const char* key) {
-    return g_hash_table_contains(m_hashTable, (void*)key);
+    auto result = g_hash_table_contains(m_hashTable, (void*)key);
+    return static_cast<bool>(result);
   }
 
   ~FHashTable() { g_hash_table_destroy(m_hashTable); }
