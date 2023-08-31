@@ -19,10 +19,10 @@ include_guard()
 
 function(COMPILER_FLAGS_APPEND scope add_val conflict_match)
     if ((NOT "${conflict_match}" STREQUAL "") AND
-    ((${CMAKE_C_COMPILER_ARG1} MATCHES ${conflict_match}) OR
-    (${CMAKE_CXX_COMPILER_ARG1} MATCHES ${conflict_match}) OR
-    ($ENV{CFLAGS} MATCHES ${conflict_match}) OR
-    ($ENV{CXXFLAGS} MATCHES ${conflict_match})))
+        ((${CMAKE_C_COMPILER_ARG1} MATCHES ${conflict_match}) OR
+         (${CMAKE_CXX_COMPILER_ARG1} MATCHES ${conflict_match}) OR
+         ($ENV{CFLAGS} MATCHES ${conflict_match}) OR
+         ($ENV{CXXFLAGS} MATCHES ${conflict_match})))
         message("-- IGNORE APPEND FLAGS .... ${add_val}")
         return()
     endif ()

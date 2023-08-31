@@ -43,7 +43,6 @@ CompositorSurface::CompositorSurface(
       m_origin_y(y),
       m_context(nullptr),
       m_callback(nullptr) {
-  (void)key;
   // API
   init_api(this);
 

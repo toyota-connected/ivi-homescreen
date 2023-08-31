@@ -10,18 +10,18 @@ This plugin enables it and provide how to configure it via command line or json.
 
 ### Requirements
 
-Ensure the `ivi-homescreen` build includes the following flag:
+Ensure the `flutter-auto` build includes the following flag:
 
     -D CMAKE_BUILD_TYPE=Debug  -DBUILD_PLUGIN_ACCESSIBILITY=ON
 
 ### How to Run
 
-Please install `ivi-homescreen` in PATH.
+Please install `flutter-auto` in PATH.
 
 Please run `test_accessibility_features_cmdline.sh` with `--b` option and so on like the following.
 
 ```
-$ ./test_accessibility_features_cmdline.sh --b=/usr/share/homescreen/bundle --f --i=1
+$ ./test_accessibility_features_cmdline.sh --b=/usr/share/flutter-auto/bundle --f --i=1
 ```
 
 Please prepare your json config file.
@@ -29,10 +29,10 @@ The json file must have the entry `"accessibility_features": %%ACCESSIBILITY%%` 
 
 ```
 {
-   "app_id": "homescreen",
+   "app_id": "flutter-auto",
    "view":[
       {
-         "bundle_path":"/usr/share/homescreen/bundle",
+         "bundle_path":"/usr/share/flutter-auto/bundle",
          "window_type": "NORMAL",
          "fullscreen": true,
          "ivi_surface_id": 1,

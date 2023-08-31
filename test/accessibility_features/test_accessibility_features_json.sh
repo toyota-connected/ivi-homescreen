@@ -10,8 +10,8 @@ BASENAME=$(basename ${ABS_PATH})
 
 ARGS="--j=/tmp/${BASENAME}"
 
-EXEC="homescreen"
-which homescreen && EXEC=$(which homescreen)
+EXEC="flutter-auto"
+which flutter-auto && EXEC=$(which flutter-auto)
 which flutter-auto && EXEC=$(which flutter-auto)
 
 for i in `seq 0 255`; do

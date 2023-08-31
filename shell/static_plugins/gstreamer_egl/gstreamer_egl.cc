@@ -253,8 +253,6 @@ void handoff_handler(GstElement* /* fakesink */,
                      GstBuffer* buffer,
                      GstPad* /* pad */,
                      gpointer _data) {
-  (void)fakesink;
-  (void)pad;
   auto data = (CustomData*)_data;
   assert(data->texture);
   int64_t textureId = data->texture->GetId();

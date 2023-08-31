@@ -22,7 +22,7 @@ include(FindThreads)
 
 include(wayland)
 
-add_executable(homescreen
+add_executable(flutter-auto
         app.cc
         configuration/configuration.cc
         engine.cc
@@ -41,19 +41,19 @@ include(plugins)
 include(textures)
 
 if (ENABLE_DLT)
-    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+    target_sources(flutter-auto PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
+    target_sources(flutter-auto PRIVATE backend/wayland_vulkan.cc)
 endif ()
 
 if (BUILD_PLUGIN_COMP_SURF)
-    target_sources(homescreen PRIVATE view/compositor_surface.cc)
+    target_sources(flutter-auto PRIVATE view/compositor_surface.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_sources(homescreen PRIVATE
+    target_sources(flutter-auto PRIVATE
             backend/wayland_egl.cc
             backend/egl.cc
             backend/gl_process_resolver.cc
@@ -61,10 +61,10 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 
 if (BUILD_CRASH_HANDLER)
-    target_sources(homescreen PRIVATE crash_handler.cc)
+    target_sources(flutter-auto PRIVATE crash_handler.cc)
 endif ()
 
-target_compile_definitions(homescreen
+target_compile_definitions(flutter-auto
         PRIVATE
         HAVE_STRCHRNUL
         EGL_NO_X11
@@ -81,7 +81,7 @@ target_compile_definitions(homescreen
         ASIO_NO_DEPRECATED
 )
 
-target_include_directories(homescreen
+target_include_directories(flutter-auto
         PRIVATE
         ..
         logging
@@ -96,19 +96,19 @@ target_include_directories(homescreen
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_link_libraries(homescreen PRIVATE EGL GLESv2)
+    target_link_libraries(flutter-auto PRIVATE EGL GLESv2)
 endif ()
 if (BUILD_PLUGIN_COMP_SURF)
-    target_link_libraries(homescreen PRIVATE EGL)
+    target_link_libraries(flutter-auto PRIVATE EGL)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_link_libraries(homescreen PRIVATE bluevk)
+    target_link_libraries(flutter-auto PRIVATE bluevk)
 endif ()
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE sentry::sentry)
+    target_link_libraries(flutter-auto PRIVATE sentry::sentry)
 endif ()
 
-target_link_libraries(homescreen PRIVATE
+target_link_libraries(flutter-auto PRIVATE
         flutter
         wayland-gen
         Threads::Threads
@@ -120,25 +120,23 @@ target_link_libraries(homescreen PRIVATE
 )
 
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE unwind)
+    target_link_libraries(flutter-auto PRIVATE unwind)
 endif ()
 
 
-target_link_directories(${PROJECT_NAME} PRIVATE
+target_link_directories(flutter-auto PRIVATE
         ${CMAKE_BINARY_DIR}
 )
 
-add_sanitizers(homescreen)
-
-add_sanitizers(${PROJECT_NAME})
+add_sanitizers(flutter-auto)
 
 if (IPO_SUPPORT_RESULT)
-    set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET flutter-auto PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(homescreen PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
+    target_compile_options(flutter-auto PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+    target_link_options(flutter-auto PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
-install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+install(TARGETS flutter-auto DESTINATION bin)

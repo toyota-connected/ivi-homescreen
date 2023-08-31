@@ -22,8 +22,6 @@
 
 std::string g_clipboard;
 
-std::string g_clipboard;
-
 void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;

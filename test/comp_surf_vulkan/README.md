@@ -22,5 +22,5 @@ The following expects the use of Flutter Workspace Automation:
 ```
 flutter run -d flutter-auto
 q
-homescreen --b=/tmp/test_comp_surf_vulkan
+flutter-auto --b=/tmp/test_comp_surf_vulkan
 ```

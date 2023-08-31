@@ -301,7 +301,7 @@ void WaylandWindow::on_frame_base_surface(void* data,
   window->m_fps_counter++;
   window->m_fps_counter++;
 
-  //wl_surface_commit(window->m_base_surface);
+  wl_surface_commit(window->m_base_surface);
 }
 
 uint32_t WaylandWindow::GetFpsCounter() {
@@ -331,13 +331,6 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
     result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
     if (result != kSuccess) {
       spdlog::error("Failed to set Flutter Engine Pixel Ratio");
-    }
-
-    auto buffer_scale = m_display->GetBufferScale(m_output_index);
-
-    result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
-    if (result != kSuccess) {
-      FML_LOG(ERROR) << "Failed to set Flutter Engine Pixel Ratio";
     }
   }
 }

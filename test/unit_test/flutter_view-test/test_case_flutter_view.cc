@@ -19,11 +19,11 @@ FlutterView* createFlutterViewInstance() {
 }
 
 /****************************************************************
-Test Case Name.Test Name： HomescreenFlutterViewConstructor_Lv1Normal001
+Test Case Name.Test Name： FlutterAutoFlutterViewConstructor_Lv1Normal001
 Use Case Name: Provide wayland client function
 Test Summary：Test the constructor of FlutterView class
 ***************************************************************/
-TEST(HomescreenFlutterViewConstructor, Lv1Normal001) {
+TEST(FlutterAutoFlutterViewConstructor, Lv1Normal001) {
     // call target function
     FlutterView* view = createFlutterViewInstance();
 
@@ -32,11 +32,11 @@ TEST(HomescreenFlutterViewConstructor, Lv1Normal001) {
 }
 
 /****************************************************************
-Test Case Name.Test Name： HomescreenFlutterViewCreateSurface_Lv1Normal001
+Test Case Name.Test Name： FlutterAutoFlutterViewCreateSurface_Lv1Normal001
 Use Case Name: Provide wayland client function
 Test Summary：Test the function of CreateSurface
 ***************************************************************/
-TEST(HomescreenFlutterViewCreateSurface, Lv1Normalcase001) {
+TEST(FlutterAutoFlutterViewCreateSurface, Lv1Normalcase001) {
     FlutterView* view = createFlutterViewInstance();
 
     // call target function
@@ -59,11 +59,11 @@ TEST(HomescreenFlutterViewCreateSurface, Lv1Normalcase001) {
 
 
 /****************************************************************
-Test Case Name.Test Name： HomescreenFlutterViewDisposeSurface_Lv1Normal001
+Test Case Name.Test Name： FlutterAutoFlutterViewDisposeSurface_Lv1Normal001
 Use Case Name: Provide wayland client function
 Test Summary：Test the function of DisposeSurface
 ***************************************************************/
-TEST(HomescreenFlutterViewDisposeSurface, Lv1Normalcase001) {
+TEST(FlutterAutoFlutterViewDisposeSurface, Lv1Normalcase001) {
     FlutterView* view = createFlutterViewInstance();
 
     int h_module = 0;

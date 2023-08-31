@@ -1,8 +1,8 @@
 {
-   "app_id": "homescreen",
+   "app_id": "flutter-auto",
    "view":[
       {
-         "bundle_path":"/usr/share/homescreen/bundle",
+         "bundle_path":"/usr/share/flutter-auto/bundle",
          "window_type": "NORMAL",
          "fullscreen": true,
          "ivi_surface_id": 1,

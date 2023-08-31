@@ -7,8 +7,8 @@ stop_bg() {
 
 ARGS="$@"
 
-EXEC="homescreen"
-which homescreen && EXEC=$(which homescreen)
+EXEC="flutter-auto"
+which flutter-auto && EXEC=$(which flutter-auto)
 which flutter-auto && EXEC=$(which flutter-auto)
 
 echo "Test decimal:"

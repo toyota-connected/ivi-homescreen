@@ -119,10 +119,12 @@ int main(int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
-  auto logger_ = std::make_unique<Logging>();
+  logger_ = std::make_unique<Logging>();
 
   config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
   for (int i = 1; i < argc; ++i) {
+    config.view.vm_args.emplace_back(argv[i]);
+  }
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
@@ -342,19 +344,6 @@ int main(int argc, char** argv) {
       FML_DLOG(INFO) << "Application ID: " << config.app_id;
       RemoveArgument(config.view.vm_args,
                      "--xdg-shell-app-id=" + config.app_id);
-    }
-    if (cl.HasOption("p")) {
-      std::string pixel_ratio_str;
-      cl.GetOptionValue("p", &pixel_ratio_str);
-      if (pixel_ratio_str.empty()) {
-        FML_LOG(ERROR) << "--p option (Pixel Ratio) requires an argument "
-                          "(e.g. --p=1.1234)";
-        return EXIT_FAILURE;
-      }
-
-      char* ptr;
-      config.view.pixel_ratio = strtod(pixel_ratio_str.c_str(), &ptr);
-      RemoveArgument(config.view.vm_args, "--p=" + pixel_ratio_str);
     }
   }
 

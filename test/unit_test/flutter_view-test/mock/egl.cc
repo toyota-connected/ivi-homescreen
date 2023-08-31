@@ -21,7 +21,7 @@
 #include <sstream>
 
 
-#include "logging.h"
+#include "logging/logging.h"
 
 Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
     : m_dpy(get_egl_display(platform, native_display, nullptr)),

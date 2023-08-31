@@ -20,7 +20,7 @@
 #include <cassert>
 #include <iostream>
 
-#include "logging.h"
+#include "logging/logging.h"
 
 /**
  * @brief Dynamic Symbol Resolver

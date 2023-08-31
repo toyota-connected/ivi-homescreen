@@ -24,7 +24,7 @@
 */
 var NAVTREE =
 [
-  [ "ivi-homescreen", "index.html", [
+  [ "flutter-auto", "index.html", [
     [ "Namespaces", "namespaces.html", [
       [ "Namespace List", "namespaces.html", "namespaces_dup" ],
       [ "Namespace Members", "namespacemembers.html", [
@@ -65,12 +65,12 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "accessibility_8cc.html",
-"class_engine.html#abf2577412e3dee1d335e8d24711f5794",
-"class_task_runner.html#ac7eddc19b9de5bea2a2b414166afc0f2",
-"classnv12_1_1_shader.html#a9ba9910dbdd39e34166c39cfceae16dc",
-"functions_vars.html",
-"struct_compositor_surface.html#ae16a7de1206b96ee5facd27b8d926f87",
-"struct_display_1_1touch__point.html#a3a21f25ba5bb7380dc4976a51a808ae7"
+"class_engine.html#abd04154107ac314ef0624ae54f5694a2",
+"class_task_runner.html#ac4d7e39b2449160e4ef26ba7695b6e78",
+"classnv12_1_1_shader.html#aca86136dae968d75b23abd4eaae78c54",
+"functions_vars_b.html",
+"struct_compositor_surface.html#ae08b6cca37b84b557b707f9d0e6aac01",
+"struct_display_1_1touch__event.html"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronisation';

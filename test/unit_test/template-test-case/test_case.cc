@@ -7,7 +7,7 @@
 
 TEST(test_template, case_a) {
     auto input_value = "TEST";
-    auto expected_value = std::string("TEST/.config/homescreen");
+    auto expected_value = std::string("TEST/.config/flutter-auto");
     setenv("XDG_CONFIG_HOME", input_value, true);
     auto home_path = Utils::GetConfigHomePath();
     EXPECT_EQ(home_path, expected_value);

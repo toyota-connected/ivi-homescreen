@@ -21,7 +21,6 @@
 
 #include <flutter/fml/file.h>
 #include <flutter/fml/paths.h>
-#include <filesystem>
 
 #include "constants.h"
 #include "engine.h"

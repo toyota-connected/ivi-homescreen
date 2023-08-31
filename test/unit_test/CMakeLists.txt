@@ -2,10 +2,10 @@
 # TYPICAL_TEST_DEFINITIONS  : compile definition of typical test
 # TYPICAL_TEST_INC_DIRS     : include directories of typical test
 # TYPICAL_TEST_LINK_LIBS    : link libraries of typical test
-get_target_property(TYPICAL_TEST_SOURCES homescreen SOURCES)
+get_target_property(TYPICAL_TEST_SOURCES flutter-auto SOURCES)
 list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*main\.cc" )
 list(TRANSFORM TYPICAL_TEST_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/shell/)
-# If TYPICLA_TEST_DEFINITIONS is set to the same as the homescreen build, it will change depending on the cmake arguments. 
+# If TYPICLA_TEST_DEFINITIONS is set to the same as the flutter-auto build, it will change depending on the cmake arguments. 
 # When tweaking TYPICLA_TEST_DEFINITIONS in CMakeLists.txt for each test case, it is better to always set TYPICLA_TEST_DEFINITIONS the same.
 # Therefore, TYPICLA_TEST_DEFINITIONS is set one by one withoud includeing options.cmake and plugins.cmake.
 list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_XDG_CLIENT)
@@ -45,9 +45,9 @@ list(APPEND TYPICAL_TEST_DEFINITIONS PATH_PREFIX="${CMAKE_INSTALL_PREFIX}")
 list(APPEND TYPICAL_TEST_DEFINITIONS WL_EGL_PLATFORM)
 list(APPEND TYPICAL_TEST_DEFINITIONS FILAMENT_SUPPORTS_WAYLAND)
 
-get_target_property(TYPICAL_TEST_INC_DIRS homescreen INCLUDE_DIRECTORIES)
+get_target_property(TYPICAL_TEST_INC_DIRS flutter-auto INCLUDE_DIRECTORIES)
 list(APPEND TYPICAL_TEST_INC_DIRS ${CMAKE_BINARY_DIR}/shell)
-get_target_property(TYPICAL_TEST_LINK_LIBS homescreen LINK_LIBRARIES)
+get_target_property(TYPICAL_TEST_LINK_LIBS flutter-auto LINK_LIBRARIES)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 

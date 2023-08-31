@@ -1,6 +1,6 @@
 # test-case specific settings
 # when creating new test-case, you need to change here
-set(TESTCASE_NAME "ivi-homescreen_utils_ut_test_driver")
+set(TESTCASE_NAME "flutter-auto_utils_ut_test_driver")
 set(TESTCASE_CC test_case_utils.cc)
 # set(TESTCASE_MOCK timer.cc)
 # list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*${TESTCASE_MOCK}")

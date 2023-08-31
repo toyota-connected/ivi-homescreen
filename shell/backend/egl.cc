@@ -20,6 +20,7 @@
 #include <cstring>
 #include <sstream>
 
+
 #include "logging.h"
 
 Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)

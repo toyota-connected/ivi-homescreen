@@ -1,9 +1,8 @@
 # flutter-auto
 
-[![Build Status](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/flutter-auto-linux.yml)
 
 
-flutter-auto for Wayland
+Flutter-Auto for Wayland
 
 * Strongly Typed (C++)
 * Lightweight
@@ -449,13 +448,13 @@ sentry build
     cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_STAGING_PREFIX=`pwd`/out/usr
     make install
 
-ivi-homescreen build
+flutter-auto build
 
     git clone https://github.com/toyota-connected/ivi-homescreen
     mkdir build && cd build
     cmake .. -DBUILD_CRASH_HANDLER=ON -DCRASH_HANDLER_DSN="dsn from your account"
     make -j
-    LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
+    LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib flutter-auto --b=<your bundle folder> --f
 
 # Yocto recipes
 

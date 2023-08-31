@@ -187,7 +187,6 @@ void Display::registry_handle_global(void* data,
     if (d->m_compositor) {
       d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
-    d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
   } else if (strcmp(interface, wl_output_interface.name) == 0) {
     auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
@@ -258,7 +257,7 @@ void Display::display_handle_geometry(void* data,
                                       int /* subpixel */,
                                       const char* /* make */,
                                       const char* /* model */,
-                                      int /* transform */) {
+                                      int transform) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->physical_width = static_cast<unsigned int>(physical_width);
   oi->physical_height = static_cast<unsigned int>(physical_height);
@@ -270,7 +269,7 @@ void Display::display_handle_geometry(void* data,
 
 void Display::display_handle_mode(void* data,
                                   struct wl_output* /* wl_output */,
-                                  uint32_t /* flags */,
+                                  uint32_t flags,
                                   int width,
                                   int height,
                                   int refresh) {
@@ -552,9 +551,6 @@ void Display::keyboard_handle_key(void* data,
                                   uint32_t /* time */,
                                   uint32_t key,
                                   uint32_t state) {
-  (void)keyboard;
-  (void)serial;
-  (void)time;
   auto* d = static_cast<Display*>(data);
 
   if (!d->m_xkb_state)
@@ -940,7 +936,7 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
 }
 
 void Display::agl_shell_app_state(void* data,
-                                  struct agl_shell* agl_shell,
+                                  struct agl_shell* /* agl_shell */,
                                   const char* app_id,
                                   uint32_t state) {
   auto* d = static_cast<Display*>(data);

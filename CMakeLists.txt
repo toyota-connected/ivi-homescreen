@@ -30,7 +30,7 @@ endif ()
 
 project(flutter-auto
         VERSION "1.0.${BUILD_NUMBER}"
-        DESCRIPTION "IVI Flutter Shell"
+        DESCRIPTION "Flutter Auto Shell"
         LANGUAGES CXX C
         )
 
