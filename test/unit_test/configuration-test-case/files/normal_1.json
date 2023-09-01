@@ -1,18 +1,19 @@
 {
   "app_id": "homescreen",
-  "cursor_theme": "",
+  "cursor_theme": "DMZ-White",
   "disable_cursor": true,
   "debug_backend": true,
   "view": [
     {
       "bundle_path": "/usr/share/",
-      "window_type": "NORMAL",
+      "window_type": "BG",
       "output_index": 1,
       "width": 1280,
       "height": 720,
       "accessibility_features": 0,
+      "pixel_ratio": 2.0,
       "vm_args": [],
-      "fullscreen": false,
+      "fullscreen": true,
       "ivi_surface_id": 1
     }
   ]

@@ -60,6 +60,14 @@ get_target_property(TYPICAL_TEST_LINK_LIBS homescreen LINK_LIBRARIES)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
+# Calculate test coverage
+if(COVERAGE)
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} --coverage")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/run-ut-coverage.sh
+        DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+
 add_subdirectory(template-test-case)
 add_subdirectory(utils-test)
 add_subdirectory(flutter_view-test)

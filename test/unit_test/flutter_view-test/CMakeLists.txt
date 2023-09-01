@@ -1,6 +1,6 @@
 # test-case specific settings
 # when creating new test-case, you need to change here
-set(TESTCASE_NAME "flutter_view_unit_test")
+set(TESTCASE_NAME "homescreen_flutter_view_ut_test_driver")
 set(TESTCASE_CC test_case_flutter_view.cc)
 
 # add mock files to target source
