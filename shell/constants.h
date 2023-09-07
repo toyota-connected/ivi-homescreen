@@ -86,17 +86,10 @@ constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 static constexpr char kCrashHandlerDsn[] = CRASH_HANDLER_DSN;
 static constexpr char kCrashHandlerRelease[] = CRASH_HANDLER_RELEASE;
 
-#if !defined(NDEBUG)
-static constexpr std::array<EGLint, 7> kEglContextAttribs = {{
-#else
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
-#endif
     // clang-format off
     EGL_CONTEXT_MAJOR_VERSION, 3,
     EGL_CONTEXT_MAJOR_VERSION, 2,
-#if !defined(NDEBUG)
-    EGL_CONTEXT_OPENGL_DEBUG, EGL_TRUE,
-#endif
     EGL_NONE
     // clang-format on
 }};
