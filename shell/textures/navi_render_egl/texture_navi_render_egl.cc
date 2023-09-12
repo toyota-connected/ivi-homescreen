@@ -159,6 +159,9 @@ flutter::EncodableValue TextureNaviRender::Create(
         cache_folder.c_str(), misc_folder.c_str());
   } else if (obj->m_interface_version == 2) {
     NavRenderConfig nav_render_init = {
+        .dpy = obj->m_egl_backend->GetDisplay(),
+        .context = obj->m_egl_backend->GetTextureContext(),
+        .framebufferId = obj->m_fbo,
         .access_token = access_token.c_str(),
         .width = obj->m_width,
         .height = obj->m_height,
