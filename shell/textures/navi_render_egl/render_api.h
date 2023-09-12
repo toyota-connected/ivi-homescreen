@@ -13,7 +13,7 @@ typedef const void* (*GlLoaderFunction)(void* userdata, const char* procname);
 
 typedef void (*LoggerFunction)(int level,
                                const char* context,
-                               char const* message);
+                               const char* message);
 
 typedef NAV_RENDER_API_CONTEXT_T* NAV_RENDER_API_INITIALIZE_T(
     const char* accessToken,
