@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <mutex>
 
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
@@ -361,7 +362,20 @@ class Display {
   std::map<wl_surface*, TextInput*> m_text_input;
   std::map<wl_surface*, KeyEvent*> m_key_event;
 
+  std::mutex m_lock;
   uint32_t m_repeat_code{};
+
+  /**
+   * @brief set repeat code
+   * @param[in] repeat_code a repeat code
+   * @return void
+   * @relation
+   * internal
+   */
+  static inline void set_repeat_code(Display *d, uint32_t repeat_code) {
+    std::lock_guard<std::mutex> lock(d->m_lock);
+    d->m_repeat_code = repeat_code;
+  }
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
   bool m_buffer_scale_enable{};
