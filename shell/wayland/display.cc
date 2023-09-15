@@ -510,23 +510,36 @@ void Display::keyboard_handle_enter(void* data,
                                     uint32_t /* serial */,
                                     struct wl_surface* surface,
                                     struct wl_array* /* keys */) {
-  SPDLOG_DEBUG("+ Display::keyboard_handle_enter()");
+  SPDLOG_TRACE("+ Display::keyboard_handle_enter()");
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
   d->m_active_engine = d->m_surface_engine_map[surface];
-  SPDLOG_DEBUG("- Display::keyboard_handle_enter()");
+  SPDLOG_TRACE("- Display::keyboard_handle_enter()");
 }
 
 void Display::keyboard_handle_leave(void* data,
                                     struct wl_keyboard* /* keyboard */,
                                     uint32_t /* serial */,
                                     struct wl_surface* /* surface */) {
-  SPDLOG_DEBUG("+ Display::keyboard_handle_leave()");
+  SPDLOG_TRACE("+ Display::keyboard_handle_leave()");
   auto* d = static_cast<Display*>(data);
 
-  d->m_repeat_timer->disarm();
+  /* The keyboard input focus's leaving
+   * is consider to release all of keys.
+   * So, any procedures for key release events should be done.
+   */
+#if ENABLE_PLUGIN_KEY_EVENT
+  auto key_event = d->m_key_event[d->m_active_surface];
+  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
+    KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
+        d->m_repeat_code, d->m_keysym_pressed, nullptr);
+  }
+#endif
 
-  SPDLOG_DEBUG("- Display::keyboard_handle_leave()");
+  d->m_repeat_timer->disarm();
+  d->set_repeat_code(d, XKB_KEY_NoSymbol);
+
+  SPDLOG_TRACE("- Display::keyboard_handle_leave()");
 }
 
 void Display::keyboard_handle_keymap(void* data,
@@ -596,7 +609,7 @@ void Display::keyboard_handle_key(void* data,
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
       d->m_keysym_pressed = keysym;
-      d->m_repeat_code = xkb_scancode;
+      d->set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
     } else {
       SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
@@ -633,7 +646,7 @@ void Display::keyboard_handle_key(void* data,
 #endif
     if (d->m_repeat_code == xkb_scancode) {
       d->m_repeat_timer->disarm();
-      d->m_repeat_code = XKB_KEY_NoSymbol;
+      d->set_repeat_code(d, XKB_KEY_NoSymbol);
     }
   }
 }
