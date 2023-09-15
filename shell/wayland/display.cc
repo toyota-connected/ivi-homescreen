@@ -510,18 +510,23 @@ void Display::keyboard_handle_enter(void* data,
                                     uint32_t /* serial */,
                                     struct wl_surface* surface,
                                     struct wl_array* /* keys */) {
+  SPDLOG_DEBUG("+ Display::keyboard_handle_enter()");
   auto* d = static_cast<Display*>(data);
   d->m_active_surface = surface;
   d->m_active_engine = d->m_surface_engine_map[surface];
+  SPDLOG_DEBUG("- Display::keyboard_handle_enter()");
 }
 
 void Display::keyboard_handle_leave(void* data,
                                     struct wl_keyboard* /* keyboard */,
                                     uint32_t /* serial */,
                                     struct wl_surface* /* surface */) {
+  SPDLOG_DEBUG("+ Display::keyboard_handle_leave()");
   auto* d = static_cast<Display*>(data);
 
   d->m_repeat_timer->disarm();
+
+  SPDLOG_DEBUG("- Display::keyboard_handle_leave()");
 }
 
 void Display::keyboard_handle_keymap(void* data,
