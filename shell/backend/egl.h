@@ -161,9 +161,9 @@ class Egl {
 
  private:
   EGLConfig m_config{};
-  EGLContext m_texture_context;
+  EGLContext m_texture_context{};
 
-  int m_buffer_size;
+  int m_buffer_size{};
 
   EGLDisplay m_dpy{};
   EGLContext m_context{};

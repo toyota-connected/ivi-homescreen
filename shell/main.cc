@@ -26,7 +26,7 @@
 
 volatile bool running = true;
 
-std::unique_ptr<Logging> logger_;
+std::unique_ptr<Logging> gLogger;
 
 /**
  * @brief Signal handler
@@ -52,19 +52,13 @@ void SignalHandler(int /* signal */) {
  * wayland, flutter
  */
 int main(int argc, char** argv) {
-  struct Configuration::Config config {
-    .app_id{}, .json_configuration_path{}, .cursor_theme{}, .disable_cursor{},
-        .disable_cursor_set{}, .wayland_event_mask{}, .debug_backend{},
-        .debug_backend_set{}, .view{},
-  };
-
 #if defined(BUILD_CRASH_HANDLER)
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
-  auto logger_ = std::make_unique<Logging>();
+  gLogger = std::make_unique<Logging>();
 
-  config = Configuration::ConfigFromArgcArgv(argc, argv);
+  auto config = Configuration::ConfigFromArgcArgv(argc, argv);
 
   auto vm_arg_count = config.view.vm_args.size();
   if (vm_arg_count) {
@@ -91,7 +85,7 @@ int main(int argc, char** argv) {
     ret = app.Loop();
   }
 
-  logger_.reset();
+  gLogger.reset();
 
 #if defined(BUILD_CRASH_HANDLER)
   (void)crash_handler.release();

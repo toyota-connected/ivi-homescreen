@@ -123,7 +123,7 @@ void EventTimer::arm() {
   SPDLOG_TRACE("- EventTimer::arm()");
 }
 
-void EventTimer::disarm() {
+void EventTimer::disarm() const {
   SPDLOG_TRACE("+ EventTimer::disarm()");
 
   struct itimerspec timerspec = {};
@@ -165,7 +165,7 @@ void EventTimer::_unwatch_fd(int fd) {
   watched_fd--;
 }
 
-void EventTimer::unwatch_timerfd() {
+void EventTimer::unwatch_timerfd() const {
   SPDLOG_TRACE("+ EventTimer::unwatch_timerfd()");
   _unwatch_fd(m_timerfd);
   SPDLOG_TRACE("- EventTimer::unwatch_timerfd()");

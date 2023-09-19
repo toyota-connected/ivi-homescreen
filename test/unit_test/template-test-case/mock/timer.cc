@@ -18,7 +18,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <memory>
 
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
@@ -26,21 +25,19 @@
 
 #include "logging.h"
 
-#define DEBUG_EVENT_TIMER 0
-
 uint32_t EventTimer::watched_fd = 0;
 int EventTimer::evfd = -1;
 
 EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
     : m_callback(callback), m_callback_data(callback_data) {
-
   SPDLOG_TRACE("+ EventTimer()");
   if (evfd < 0) {
     // initialize class-global epoll fd
     evfd = epoll_create1(EPOLL_CLOEXEC);
     if (evfd < 0) {
       if (errno != EINVAL) {
-        spdlog::critical("Failed to create epoll fd cloexec. {}", strerror(errno));
+        spdlog::critical("Failed to create epoll fd cloexec. {}",
+                         strerror(errno));
         exit(-1);
       } else {
         // fallback
@@ -85,8 +82,7 @@ void EventTimer::close_evfd() {
 void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
   SPDLOG_TRACE("+ EventTimer::set_timerspec()");
 
-  int32_t repeat_rate_sec, repeat_rate_nsec, repeat_delay_sec,
-      repeat_delay_nsec = 0;
+  int32_t repeat_rate_sec, repeat_rate_nsec, repeat_delay_sec;
 
   if (rate == 0)
     return;
@@ -97,7 +93,7 @@ void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
 
   repeat_delay_sec = delay / 1000;
   delay -= (repeat_delay_sec * 1000);
-  repeat_delay_nsec = delay * 1000 * 1000;
+  auto repeat_delay_nsec = delay * 1000 * 1000;
 
   m_timerspec.it_interval.tv_sec = repeat_rate_sec;
   m_timerspec.it_interval.tv_nsec = repeat_rate_nsec;
@@ -108,7 +104,7 @@ void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
 }
 
 void EventTimer::_arm(int fd, struct itimerspec* timerspec) {
-  auto ret = timerfd_settime(fd, 0, timerspec, NULL);
+  auto ret = timerfd_settime(fd, 0, timerspec, nullptr);
   if (ret < 0) {
     spdlog::critical("Failed to release timer. {}", strerror(errno));
     exit(-1);
@@ -123,7 +119,7 @@ void EventTimer::arm() {
   SPDLOG_TRACE("- EventTimer::arm()");
 }
 
-void EventTimer::disarm() {
+void EventTimer::disarm() const {
   SPDLOG_TRACE("+ EventTimer::disarm()");
 
   struct itimerspec timerspec = {};
@@ -134,7 +130,7 @@ void EventTimer::disarm() {
 }
 
 void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
-  struct epoll_event ep;
+  struct epoll_event ep{};
 
   if (evfd < 0) {
     spdlog::critical("Unexpected call _watch_fd(). Ignored.");
@@ -149,7 +145,7 @@ void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
 
 void EventTimer::watch_timerfd() {
   SPDLOG_TRACE("+ EventTimer::watch_timerfd()");
-  m_task.run = this->run;
+  m_task.run = EventTimer::run;
   m_task.data = reinterpret_cast<void*>(this);
 
   _watch_fd(m_timerfd, EPOLLIN, &m_task);
@@ -165,7 +161,7 @@ void EventTimer::_unwatch_fd(int fd) {
   watched_fd--;
 }
 
-void EventTimer::unwatch_timerfd() {
+void EventTimer::unwatch_timerfd() const {
   SPDLOG_TRACE("+ EventTimer::unwatch_timerfd()");
   _unwatch_fd(m_timerfd);
   SPDLOG_TRACE("- EventTimer::unwatch_timerfd()");
@@ -176,8 +172,7 @@ void EventTimer::wait_event() {
 
   auto ready = epoll_wait(evfd, ep, sizeof(ep) / sizeof(ep[0]), 0);
   for (auto i = 0; i < ready; i++) {
-    auto task =
-        reinterpret_cast<struct timer_task*>(ep[i].data.ptr);
+    auto task = reinterpret_cast<struct timer_task*>(ep[i].data.ptr);
     task->run(task, ep[i].events);
   }
 }

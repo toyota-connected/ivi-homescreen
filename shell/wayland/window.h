@@ -113,7 +113,7 @@ class WaylandWindow {
    */
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
-  uint32_t m_fps_counter;
+  uint32_t m_fps_counter{};
 
   /**
    * @brief Get window_type
@@ -169,14 +169,14 @@ class WaylandWindow {
   enum window_type m_type;
   std::string m_app_id;
 
-  struct xdg_surface* m_xdg_surface;
-  struct xdg_toplevel* m_xdg_toplevel;
+  struct xdg_surface* m_xdg_surface{};
+  struct xdg_toplevel* m_xdg_toplevel{};
   static const struct xdg_surface_listener xdg_surface_listener;
 
-  struct ivi_surface* m_ivi_surface;
+  struct ivi_surface* m_ivi_surface{};
   static const struct ivi_surface_listener ivi_surface_listener;
 
-  struct wl_callback* m_base_frame_callback;
+  struct wl_callback* m_base_frame_callback{};
 
   static const struct wl_surface_listener m_base_surface_listener;
 

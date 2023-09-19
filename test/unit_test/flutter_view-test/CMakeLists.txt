@@ -5,40 +5,40 @@ set(TESTCASE_CC test_case_flutter_view.cc)
 
 # add mock files to target source
 set(TESTCASE_MOCK display.cc; egl.cc; window.cc; compositor_surface.cc)
-foreach(mock IN LISTS TESTCASE_MOCK)
+foreach (mock IN LISTS TESTCASE_MOCK)
     list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*/${mock}")
     list(APPEND TYPICAL_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/mock/${mock})
-endforeach()
+endforeach ()
 
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # Basically, the following statements need not be modified
 add_executable(
-    ${TESTCASE_NAME}
-    ${TYPICAL_TEST_SOURCES}
-    ${TESTCASE_CC}
+        ${TESTCASE_NAME}
+        ${TYPICAL_TEST_SOURCES}
+        ${TESTCASE_CC}
 )
 
 target_compile_definitions(
-    ${TESTCASE_NAME}
-    PRIVATE
-    ${TYPICAL_TEST_DEFINITIONS}
+        ${TESTCASE_NAME}
+        PRIVATE
+        ${TYPICAL_TEST_DEFINITIONS}
 )
 
 target_include_directories(
-    ${TESTCASE_NAME}
-    PRIVATE
-    ${TYPICAL_TEST_INC_DIRS}
+        ${TESTCASE_NAME}
+        PRIVATE
+        ${TYPICAL_TEST_INC_DIRS}
 )
 
 target_link_libraries(
-    ${TESTCASE_NAME}
-    PRIVATE
-    gtest_main
-    ${TYPICAL_TEST_LINK_LIBS}
+        ${TESTCASE_NAME}
+        PRIVATE
+        gtest_main
+        ${TYPICAL_TEST_LINK_LIBS}
 )
 
 add_test(
-    NAME ${TESTCASE_NAME}
-    COMMAND ${TESTCASE_NAME}
+        NAME ${TESTCASE_NAME}
+        COMMAND ${TESTCASE_NAME}
 )

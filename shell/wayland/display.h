@@ -245,8 +245,8 @@ class Display {
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
-  struct wl_display* m_display;
-  struct wl_registry* m_registry;
+  struct wl_display* m_display{};
+  struct wl_registry* m_registry{};
   struct wl_compositor* m_compositor{};
   struct wl_subcompositor* m_subcompositor{};
   struct wl_shm* m_shm{};

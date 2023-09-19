@@ -32,7 +32,7 @@ project(ivi-homescreen
         VERSION "1.0.${BUILD_NUMBER}"
         DESCRIPTION "IVI Flutter Shell"
         LANGUAGES CXX C
-        )
+)
 
 include(context)
 include(options)
@@ -47,11 +47,11 @@ include(compiler)
 add_subdirectory(third_party)
 add_subdirectory(shell)
 add_subdirectory(docs)
-if(DEFINED BUILD_UNIT_TEST)
+
+if (BUILD_UNIT_TESTS)
     enable_testing()
     add_subdirectory(test)
-endif(DEFINED BUILD_UNIT_TEST)
-
+endif ()
 
 if (NOT CMAKE_CROSSCOMPILING)
     include(packaging)

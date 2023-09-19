@@ -127,7 +127,7 @@ class CompositorSurface {
 
   wl m_wl{};
 
-  wl_subsurface* m_subsurface;
+  wl_subsurface* m_subsurface{};
   void* m_h_module;
   std::string m_assets_path;
   std::string m_cache_path;

@@ -116,6 +116,12 @@ else ()
 endif ()
 
 #
+# Unit Tests
+#
+option(BUILD_UNIT_TESTS "Build Unit Tests" OFF)
+MESSAGE(STATUS "Build Unit Tests ....... ${BUILD_UNIT_TESTS}")
+
+#
 # Sanitizers
 #
 find_package(Sanitizers)

@@ -50,9 +50,9 @@ class EventTimer {
   static int evfd;
 
   int m_timerfd;
-  struct itimerspec m_timerspec;
+  struct itimerspec m_timerspec{};
 
-  struct timer_task m_task;
+  struct timer_task m_task{};
   evtimer_cb m_callback;
   void* m_callback_data;
 
@@ -62,7 +62,7 @@ class EventTimer {
    * @relation
    * internal
    */
-  static void close_evfd(void);
+  static void close_evfd();
 
   /**
    * @brief specify timer spec
@@ -80,14 +80,14 @@ class EventTimer {
    * @relation
    * internal
    */
-  void arm(void);
+  void arm();
   /**
    * @brief run when a timer is stopped
    * @return void
    * @relation
    * internal
    */
-  void disarm(void);
+  void disarm() const;
 
   /**
    * @brief register timerfd
@@ -95,14 +95,14 @@ class EventTimer {
    * @relation
    * internal
    */
-  void watch_timerfd(void);
+  void watch_timerfd();
   /**
    * @brief unregister timerfd
    * @return void
    * @relation
    * internal
    */
-  void unwatch_timerfd(void);
+  void unwatch_timerfd() const;
 
   /**
    * @brief run callback
@@ -120,7 +120,7 @@ class EventTimer {
    * @relation
    * internal
    */
-  static void wait_event(void);
+  static void wait_event();
 
  private:
   /**
