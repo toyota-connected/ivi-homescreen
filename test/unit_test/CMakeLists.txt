@@ -3,16 +3,18 @@
 # TYPICAL_TEST_INC_DIRS     : include directories of typical test
 # TYPICAL_TEST_LINK_LIBS    : link libraries of typical test
 get_target_property(TYPICAL_TEST_SOURCES homescreen SOURCES)
-list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*main\.cc" )
+list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*main\.cc")
 list(TRANSFORM TYPICAL_TEST_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/shell/)
-# If TYPICLA_TEST_DEFINITIONS is set to the same as the homescreen build, it will change depending on the cmake arguments. 
-# When tweaking TYPICLA_TEST_DEFINITIONS in CMakeLists.txt for each test case, it is better to always set TYPICLA_TEST_DEFINITIONS the same.
-# Therefore, TYPICLA_TEST_DEFINITIONS is set one by one withoud includeing options.cmake and plugins.cmake.
+# If TYPICAL_TEST_DEFINITIONS is set to the same as the homescreen build, it will change depending on the cmake arguments.
+# When tweaking TYPICAL_TEST_DEFINITIONS in CMakeLists.txt for each test case, it is better to always set TYPICAL_TEST_DEFINITIONS the same.
+# Therefore, TYPICAL_TEST_DEFINITIONS is set one by one without including options.cmake and plugins.cmake.
 list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_XDG_CLIENT)
 list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_AGL_CLIENT)
 list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_IVI_SHELL_CLIENT)
 list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_DART_VM_LOGGING)
-list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_DLT)
+if (ENABLE_DLT)
+    list(APPEND TYPICAL_TEST_DEFINITIONS ENABLE_DLT)
+endif ()
 list(APPEND TYPICAL_TEST_DEFINITIONS BUILD_BACKEND_WAYLAND_EGL)
 list(APPEND TYPICAL_TEST_DEFINITIONS BUILD_EGL_ENABLE_TRANSPARENCY)
 list(APPEND TYPICAL_TEST_DEFINITIONS BUILD_BACKEND_WAYLAND_VULKAN)

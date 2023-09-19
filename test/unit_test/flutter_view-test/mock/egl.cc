@@ -20,13 +20,14 @@
 #include <cstring>
 #include <sstream>
 
-
 #include "logging.h"
 
-Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
-    : m_dpy(get_egl_display(platform, native_display, nullptr)),
-      m_buffer_size(buffer_size) {
-    /* Delete implementation */
+Egl::Egl(void* native_display,
+         EGLenum platform,
+         int /* buffer_size */,
+         bool /* debug */)
+    : m_dpy(get_egl_display(platform, native_display, nullptr)) {
+  /* Delete implementation */
 }
 
 Egl::~Egl() {
@@ -493,8 +494,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
         bool known_value = false;
         for (size_t k = 0; k < (size_t)attribute.cardinality; k++) {
           if (attribute.values[k].id == value) {
-            ss << "\t\t" << attribute.name << ": "
-               << attribute.values[k].name;
+            ss << "\t\t" << attribute.name << ": " << attribute.values[k].name;
             spdlog::info(ss.str().c_str());
             ss.str("");
             ss.clear();
@@ -503,8 +503,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           }
         }
         if (!known_value) {
-          ss << "\t\t" << attribute.name << ": unknown (" << value
-             << ")";
+          ss << "\t\t" << attribute.name << ": unknown (" << value << ")";
           spdlog::info(ss.str().c_str());
           ss.str("");
           ss.clear();
@@ -518,8 +517,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           ss.str("");
           ss.clear();
         } else {
-          for (size_t k = 0; k < (size_t)-attribute.cardinality;
-               k++) {
+          for (size_t k = 0; k < (size_t)-attribute.cardinality; k++) {
             if (attribute.values[k].id & value) {
               value &= ~attribute.values[k].id;
               if (value != 0) {
