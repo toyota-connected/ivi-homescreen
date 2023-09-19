@@ -409,8 +409,10 @@ Configuration::Config Configuration::ConfigFromArgcArgv(int argc, const char* co
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv);
 
-  int convert = Configuration::ConvertCommandlineToConfig(cl, config);
-  assert(convert == EXIT_SUCCESS);
+  if (EXIT_SUCCESS != Configuration::ConvertCommandlineToConfig(cl, config)) {
+    spdlog::critical("Failed to Convert Command Line");
+    exit(EXIT_FAILURE);
+  }
 
   return config;
 }
