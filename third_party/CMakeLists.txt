@@ -37,7 +37,7 @@ set(FLUTTER_SRC_FILES
         flutter/fml/paths.cc
         flutter/fml/string_conversion.cc
         flutter/fml/unique_fd.cc
-        )
+)
 
 add_library(flutter STATIC ${FLUTTER_SRC_FILES})
 
@@ -50,7 +50,7 @@ target_include_directories(flutter PUBLIC
         flutter/shell/platform/common/public
         flutter/shell/platform/common/client_wrapper/include
         spdlog-1.12.0/include
-        )
+)
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET flutter PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -66,4 +66,7 @@ set(SPDLOG_NO_EXCEPTIONS ON)
 set(SPDLOG_NO_THREAD_ID ON)
 set(SPDLOG_BUILD_PIC ON)
 add_subdirectory(spdlog-1.12.0)
-add_subdirectory(googletest)
+
+if (BUILD_UNIT_TESTS)
+    add_subdirectory(googletest)
+endif ()

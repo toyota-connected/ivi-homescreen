@@ -6,31 +6,32 @@ list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # Basically, the following statements need not be modified
 add_executable(
-    ${TESTCASE_NAME} 
-    ${TYPICAL_TEST_SOURCES}
-    ${TESTCASE_CC}
+        ${TESTCASE_NAME}
+        ${TYPICAL_TEST_SOURCES}
+        ${TESTCASE_CC}
 )
 
 target_compile_definitions(
-    ${TESTCASE_NAME} 
-    PRIVATE
-    ${TYPICAL_TEST_DEFINITIONS}
+        ${TESTCASE_NAME}
+        PRIVATE
+        ${TYPICAL_TEST_DEFINITIONS}
+        SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 target_include_directories(
-    ${TESTCASE_NAME} 
-    PRIVATE
-    ${TYPICAL_TEST_INC_DIRS}
+        ${TESTCASE_NAME}
+        PRIVATE
+        ${TYPICAL_TEST_INC_DIRS}
 )
 
 target_link_libraries(
-    ${TESTCASE_NAME} 
-    PRIVATE
-    gtest_main
-    ${TYPICAL_TEST_LINK_LIBS}
+        ${TESTCASE_NAME}
+        PRIVATE
+        gtest_main
+        ${TYPICAL_TEST_LINK_LIBS}
 )
 
 add_test(
-    NAME ${TESTCASE_NAME}
-    COMMAND ${TESTCASE_NAME}
+        NAME ${TESTCASE_NAME}
+        COMMAND ${TESTCASE_NAME}
 )

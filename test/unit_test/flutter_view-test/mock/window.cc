@@ -16,8 +16,8 @@
 
 #include <utility>
 
-#include "wayland/display.h"
 #include "engine.h"
+#include "wayland/display.h"
 
 WaylandWindow::WaylandWindow(size_t index,
                              std::shared_ptr<Display> display,
@@ -44,7 +44,7 @@ WaylandWindow::WaylandWindow(size_t index,
       m_app_id(std::move(app_id)),
       m_ivi_surface_id(ivi_surface_id),
       m_fullscreen(fullscreen) {  // disable vsync
-  /* Delete implementation */ 
+  /* Delete implementation */
 }
 
 WaylandWindow::~WaylandWindow() {
@@ -135,11 +135,12 @@ void WaylandWindow::handle_ivi_surface_configure(
 const struct ivi_surface_listener WaylandWindow::ivi_surface_listener = {
     .configure = handle_ivi_surface_configure};
 
-void WaylandWindow::handle_toplevel_configure(void* data,
-                                              struct xdg_toplevel* /* toplevel */,
-                                              int32_t width,
-                                              int32_t height,
-                                              struct wl_array* states) {
+void WaylandWindow::handle_toplevel_configure(
+    void* data,
+    struct xdg_toplevel* /* toplevel */,
+    int32_t width,
+    int32_t height,
+    struct wl_array* states) {
   auto* w = reinterpret_cast<WaylandWindow*>(data);
 
   w->m_fullscreen = false;
@@ -182,8 +183,9 @@ void WaylandWindow::handle_toplevel_configure(void* data,
                        w->m_geometry.height);
 }
 
-void WaylandWindow::handle_toplevel_close(void* data,
-                                          struct xdg_toplevel* /* xdg_toplevel */) {
+void WaylandWindow::handle_toplevel_close(
+    void* data,
+    struct xdg_toplevel* /* xdg_toplevel */) {
   auto* w = reinterpret_cast<WaylandWindow*>(data);
   w->m_running = false;
 }

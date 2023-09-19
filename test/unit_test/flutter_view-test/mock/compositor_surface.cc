@@ -3,22 +3,18 @@
 
 #include <filesystem>
 
-#include <flutter/fml/paths.h>
-
 #include <dlfcn.h>
 
-#include <EGL/eglext.h>
 #include <wayland-egl.h>
 #include <utility>
 
-#include "../utils.h"
 #include "../view/flutter_view.h"
 #include "../wayland/display.h"
 
 CompositorSurface::CompositorSurface(
     int64_t /* key */,
-    const std::shared_ptr<Display>& display,
-    const std::shared_ptr<WaylandWindow>& window,
+    const std::shared_ptr<Display>& /* display */,
+    const std::shared_ptr<WaylandWindow>& /* window */,
     void* h_module,
     std::string assets_path,
     const std::string& cache_folder,
@@ -43,11 +39,11 @@ CompositorSurface::CompositorSurface(
       m_origin_y(y),
       m_context(nullptr),
       m_callback(nullptr) {
-      /* Delete implementation */
+  /* Delete implementation */
 }
 
-void CompositorSurface::Dispose(void* userdata) {
-      /* Delete implementation */
+void CompositorSurface::Dispose(void* /* userdata */) {
+  /* Delete implementation */
 }
 
 void CompositorSurface::init_api(CompositorSurface* obj) {
@@ -114,7 +110,7 @@ std::string CompositorSurface::GetFilePath(const char* folder) {
 }
 
 void CompositorSurface::InitializePlugin() {
-      /* Delete implementation */
+  /* Delete implementation */
 }
 
 void CompositorSurface::StartFrames() {
@@ -125,7 +121,7 @@ void CompositorSurface::StartFrames() {
 }
 
 void CompositorSurface::StopFrames() {
-      /* Delete implementation */
+  /* Delete implementation */
 }
 
 void CompositorSurface::on_frame(void* data,
