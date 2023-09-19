@@ -38,3 +38,29 @@ TEST(HomescreenUtilsTrim, Lv1Normal001) {
     std::string output = Utils::trim(input, "ut");
     EXPECT_EQ("nit tes", output);
 }
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenUtilsIsNumber_Lv1Normal001
+Use Case Name: Intialization
+Test Summary：Test the function of IsNumber
+***************************************************************/
+
+TEST(HomescreenUtilsIsNumber, Lv1Normal001) {
+    bool result = Utils::IsNumber("1234567890");
+    EXPECT_EQ(true, result);
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenUtilsRemoveArgument_Lv1Normal001
+Use Case Name: Intialization
+Test Summary：Test the function of RemoveArgument
+***************************************************************/
+
+TEST(HomescreenUtilsRemoveArgument, Lv1Normal001) {
+    std::vector<std::string> args{"test1", "test2", "test3"};
+    Utils::RemoveArgument(args, "test2");
+
+    for(std::string str : args) {
+        EXPECT_STRNE("test2", str.c_str());
+    }
+}

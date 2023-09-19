@@ -1,0 +1,19 @@
+{
+  "app_id":"homescreen",
+  "cursor_theme":"",
+  "disable_cursor":true,
+  "debug_backend":true,
+  "view":[
+    {
+      "bundle_path":"/usr/share/",
+      "window_type":"NORMAL",
+      "output_index":1,
+      "width":1280,
+      "height":720,
+      "accessibility_features":0,
+      "vm_args":[],
+      "fullscreen":false,
+      "ivi_surface_id":1
+    }
+  ]
+}

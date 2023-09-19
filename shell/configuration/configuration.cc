@@ -17,10 +17,13 @@
 
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 
 #include <rapidjson/document.h>
 #include "constants.h"
 #include "logging.h"
+#include "utils.h"
+#include <flutter/fml/command_line.h>
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
@@ -395,6 +398,229 @@ void Configuration::PrintConfig(const Config& config) {
   spdlog::info(ss.str().c_str());
   ss.str("");
   ss.clear();
+}
+
+Configuration::Config Configuration::ConfigFromArgcArgv(int argc, const char* const* argv) {
+  struct Configuration::Config config{};
+  config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
+  for (int i = 1; i < argc; ++i) {
+    config.view.vm_args.emplace_back(argv[i]);
+  }
+
+  auto cl = fml::CommandLineFromArgcArgv(argc, argv);
+
+  int convert = Configuration::ConvertCommandlineToConfig(cl, config);
+  assert(convert == EXIT_SUCCESS);
+
+  return config;
+}
+
+int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuration::Config& config) {
+
+  if (!cl.options().empty()) {
+    if (cl.HasOption("j")) {
+      cl.GetOptionValue("j", &config.json_configuration_path);
+      if (config.json_configuration_path.empty()) {
+        spdlog::critical(
+            "--j option requires an argument (e.g. "
+            "--j=/tmp/cfg-dbg.json)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Json Configuration: {}", config.json_configuration_path);
+      Utils::RemoveArgument(config.view.vm_args,
+                     "--j=" + config.json_configuration_path);
+    }
+    if (cl.HasOption("a")) {
+      std::string accessibility_feature_flag_str;
+      cl.GetOptionValue("a", &accessibility_feature_flag_str);
+      if (accessibility_feature_flag_str.empty()) {
+        spdlog::critical(
+            "--a option (Accessibility Features) requires an "
+            "argument (e.g. --a=31)");
+        return EXIT_FAILURE;
+      }
+      int ret = 0;
+      try {
+        // The following styles are acceptable:
+        // 1. decimal: --a=31
+        // 2. hex: --a=0x3
+        // 3. octet: --a=03
+        config.view.accessibility_features = static_cast<int32_t>(
+            std::stol(accessibility_feature_flag_str, nullptr, 0));
+      } catch (const std::invalid_argument& e) {
+        spdlog::critical(
+            "--a option (Accessibility Features) requires an integer value");
+        ret = EXIT_FAILURE;
+      } catch (const std::out_of_range& e) {
+        spdlog::critical(
+            "The specified value to --a option, {} is out of range.",
+            accessibility_feature_flag_str);
+        ret = EXIT_FAILURE;
+      }
+      if (ret) {
+        return ret;
+      }
+      config.view.accessibility_features =
+          Configuration::MaskAccessibilityFeatures(
+              config.view.accessibility_features);
+      Utils::RemoveArgument(config.view.vm_args,
+                     "--a=" + accessibility_feature_flag_str);
+    }
+    if (cl.HasOption("b")) {
+      cl.GetOptionValue("b", &config.view.bundle_path);
+      if (config.view.bundle_path.empty() ||
+          !std::filesystem::is_directory(config.view.bundle_path)) {
+        spdlog::critical(
+            "--b (Bundle Path) option requires a directory path "
+            "argument (e.g. "
+            "--b=/usr/share/gallery)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Bundle Path: {}", config.view.bundle_path);
+      Utils::RemoveArgument(config.view.vm_args, "--b=" + config.view.bundle_path);
+    }
+    if (cl.HasOption("c")) {
+      SPDLOG_DEBUG("Disable Cursor");
+      config.disable_cursor = true;
+      config.disable_cursor_set = true;
+      Utils::RemoveArgument(config.view.vm_args, "--c");
+    }
+    if (cl.HasOption("d")) {
+      SPDLOG_DEBUG("Backend Debug");
+      config.debug_backend = true;
+      config.debug_backend_set = true;
+      Utils::RemoveArgument(config.view.vm_args, "--d");
+    }
+    if (cl.HasOption("f")) {
+      SPDLOG_DEBUG("Fullscreen");
+      config.view.fullscreen = true;
+      config.view.fullscreen_set = true;
+      Utils::RemoveArgument(config.view.vm_args, "--f");
+    }
+    if (cl.HasOption("w")) {
+      std::string width_str;
+      cl.GetOptionValue("w", &width_str);
+      if (!Utils::IsNumber(width_str)) {
+        spdlog::critical("--w option (Width) requires an integer value");
+        return EXIT_FAILURE;
+      }
+      if (width_str.empty()) {
+        spdlog::critical(
+            "--w option (Width) requires an argument (e.g. --w=720)");
+        return EXIT_FAILURE;
+      }
+      config.view.width = static_cast<uint32_t>(std::stoul(width_str));
+      Utils::RemoveArgument(config.view.vm_args, "--w=" + width_str);
+    }
+    if (cl.HasOption("h")) {
+      std::string height_str;
+      cl.GetOptionValue("h", &height_str);
+      if (!Utils::IsNumber(height_str)) {
+        spdlog::critical("--h option (Height) requires an integer value");
+        return EXIT_FAILURE;
+      }
+      if (height_str.empty()) {
+        spdlog::critical(
+            "--h option (Height) requires an argument (e.g. --w=1280)");
+        return EXIT_FAILURE;
+      }
+      config.view.height = static_cast<uint32_t>(std::stoul(height_str));
+      Utils::RemoveArgument(config.view.vm_args, "--h=" + height_str);
+    }
+    if (cl.HasOption("t")) {
+      cl.GetOptionValue("t", &config.cursor_theme);
+      if (config.cursor_theme.empty()) {
+        spdlog::critical(
+            "--t option requires an argument (e.g. --t=DMZ-White)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Cursor Theme: {}", config.cursor_theme);
+      Utils::RemoveArgument(config.view.vm_args, "--t=" + config.cursor_theme);
+    }
+    if (cl.HasOption("window-type")) {
+      cl.GetOptionValue("window-type", &config.view.window_type);
+      if (config.view.window_type.empty()) {
+        spdlog::critical(
+            "--window-type option requires an argument (e.g. "
+            "--window-type=BG)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Window Type: {}", config.view.window_type);
+      Utils::RemoveArgument(config.view.vm_args,
+                     "--window-type=" + config.view.window_type);
+    }
+    if (cl.HasOption("output-index")) {
+      std::string output_index_str;
+      cl.GetOptionValue("output-index", &output_index_str);
+      if (!Utils::IsNumber(output_index_str)) {
+        spdlog::critical(
+            "--output-index option (Wayland Output Index) "
+            "requires an integer value");
+        return EXIT_FAILURE;
+      }
+      if (output_index_str.empty()) {
+        spdlog::critical(
+            "--output-index option (Wayland Output Index) "
+            "requires an argument (e.g. --output-index=1)");
+        return EXIT_FAILURE;
+      }
+      config.view.wl_output_index =
+          static_cast<uint32_t>(std::stoul(output_index_str));
+      Utils::RemoveArgument(config.view.vm_args, "--output-index=" + output_index_str);
+    }
+    if (cl.HasOption("xdg-shell-app-id")) {
+      cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
+      if (config.app_id.empty()) {
+        spdlog::critical(
+            "--xdg-shell-app-id option requires an argument "
+            "(e.g. --xdg-shell-app-id=gallery)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Application ID: {}", config.app_id);
+      Utils::RemoveArgument(config.view.vm_args,
+                     "--xdg-shell-app-id=" + config.app_id);
+    }
+    if (cl.HasOption("wayland-event-mask")) {
+      cl.GetOptionValue("wayland-event-mask", &config.wayland_event_mask);
+      if (config.wayland_event_mask.empty()) {
+        spdlog::critical(
+            "--wayland-event-mask option requires an argument "
+            "(e.g. --wayland-event-mask=pointer-axis,keyboard)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Wayland Event Mask: {}", config.wayland_event_mask);
+      Utils::RemoveArgument(config.view.vm_args,
+                     "--wayland-event-mask=" + config.wayland_event_mask);
+    }
+    if (cl.HasOption("p")) {
+      std::string pixel_ratio_str;
+      cl.GetOptionValue("p", &pixel_ratio_str);
+      if (pixel_ratio_str.empty()) {
+        spdlog::critical(
+            "--p option (Pixel Ratio) requires an argument "
+            "(e.g. --p=1.1234)");
+        return EXIT_FAILURE;
+      }
+
+      config.view.pixel_ratio = strtod(pixel_ratio_str.c_str(), nullptr);
+      Utils::RemoveArgument(config.view.vm_args, "--p=" + pixel_ratio_str);
+    }
+    if (cl.HasOption("i")) {
+      std::string ivi_surface_id_str;
+      cl.GetOptionValue("i", &ivi_surface_id_str);
+      if (ivi_surface_id_str.empty()) {
+        spdlog::critical(
+            "--i option (IVI Surface ID) requires an argument "
+            "(e.g. --i=2)");
+        return EXIT_FAILURE;
+      }
+
+      config.view.ivi_surface_id = static_cast<uint32_t>(
+          strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
+      Utils::RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
+    }
+  }
+  return EXIT_SUCCESS;
 }
 
 int32_t Configuration::MaskAccessibilityFeatures(

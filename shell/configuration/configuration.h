@@ -19,6 +19,8 @@
 
 #include "flutter/fml/macros.h"
 #include "rapidjson/document.h"
+#include <flutter/fml/command_line.h>
+#include "utils.h"
 
 class Configuration {
  public:
@@ -71,22 +73,20 @@ class Configuration {
   static void PrintConfig(const Config&);
 
   /**
-   * @brief mask the accessibility_features
-   * @param[in] accessibility_features accessibility_features value
-   * @return int32_t
-   * @retval masked accessibility_features value
-   * @relation internal
-   *
-   * accessibility_features is expressed as bit flags.
-   * please see FlutterAccessibilityFeature enum
-   * in third_party/flutter/shell/platform/embedder/embedder.h.
-   * 0b1111111 is the maximum value of accessibility_features.
+   * @brief config file generate from argc and argv
+   * @param[in] argc argument count
+   * @param[in] argv argument vector
+   * @return Config
+   * @retval generated config object
+   * @relation
+   * internal
    */
-  static int32_t MaskAccessibilityFeatures(int32_t accessibility_features);
+  static Config ConfigFromArgcArgv(int argc, const char* const* argv);
 
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
 
- private:
+ PRIVATE:
+
   static constexpr char kViewKey[] = "view";
   static constexpr char kBundlePathKey[] = "bundle_path";
   static constexpr char kWindowTypeKey[] = "window_type";
@@ -171,4 +171,30 @@ class Configuration {
    * internal
    */
   static void getCliOverrides(Config& instance, Config& cli);
+
+  /**
+   * @brief mask the accessibility_features
+   * @param[in] accessibility_features accessibility_features value
+   * @return int32_t
+   * @retval masked accessibility_features value
+   * @relation internal
+   *
+   * accessibility_features is expressed as bit flags.
+   * please see FlutterAccessibilityFeature enum
+   * in third_party/flutter/shell/platform/embedder/embedder.h.
+   * 0b1111111 is the maximum value of accessibility_features.
+   */
+  static int32_t MaskAccessibilityFeatures(int32_t accessibility_features);
+
+  /**
+   * @brief Convert fml::CommandLine file to Config file
+   * @param[in,out] cl Commandline file
+   * @param[in,out] config Config file
+   * @return int
+   * @retval success(0) ot failure(1)
+   * @relation
+   * internal
+   */
+  static int ConvertCommandlineToConfig(fml::CommandLine& cl, Config& config);
+
 };
