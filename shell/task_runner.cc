@@ -43,7 +43,7 @@ TaskRunner::TaskRunner(std::string name,
   });
 
   asio::post(*strand_, [&]() {
-    spdlog::debug("[0x{:x}] {} Task Runner", pthread_self(), name_);
+    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self());
   });
 }
 
