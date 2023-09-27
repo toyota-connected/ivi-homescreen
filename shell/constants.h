@@ -94,11 +94,12 @@ static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format on
 }};
 
-static constexpr std::array<EGLint, 15> kEglConfigAttribs = {{
+static constexpr std::array<EGLint, 23> kEglConfigAttribs = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+
     EGL_RED_SIZE, 8,
     EGL_GREEN_SIZE, 8,
     EGL_BLUE_SIZE, 8,
@@ -107,6 +108,14 @@ static constexpr std::array<EGLint, 15> kEglConfigAttribs = {{
 #else
     EGL_ALPHA_SIZE, 0,
 #endif
+#if defined(BUILD_EGL_ENABLE_3D)
+    EGL_STENCIL_SIZE, 8,
+    EGL_DEPTH_SIZE, 16,
+#else
+    EGL_STENCIL_SIZE, 0,
+    EGL_DEPTH_SIZE, 0,
+#endif
+
     EGL_NONE // termination sentinel
     // clang-format on
 }};
@@ -118,10 +127,10 @@ constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
 
 #if defined(__GNUC__)
 #ifndef MAYBE_UNUSED
-#define MAYBE_UNUSED
+#define MAYBE_UNUSED [[maybe_unused]]
 #endif
 #ifndef NODISCARD
-#define NODISCARD
+#define NODISCARD [[nodiscard]]
 #endif
 #endif
 

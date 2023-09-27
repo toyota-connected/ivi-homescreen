@@ -222,7 +222,7 @@ class KeyEvent : public flutter::BinaryMessenger {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED NODISCARD void SetMessageHandler(
+  MAYBE_UNUSED void SetMessageHandler(
       const std::string& channel,
       flutter::BinaryMessageHandler handler) override;
 };
