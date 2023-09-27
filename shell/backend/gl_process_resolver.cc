@@ -29,17 +29,13 @@ EglProcessResolver::~EglProcessResolver() {
   }
 }
 
-int EglProcessResolver::GetHandle(std::array<char[kSoMaxLength], kSoCount> arr,
-                                  void** out_handle) {
-  void* handle = nullptr;
-
-  for (const auto& item : arr) {
-    handle = dlopen(item, RTLD_LAZY | RTLD_LOCAL);
-    if (handle) {
-      SPDLOG_DEBUG("dlopen: {}", item);
-      break;
-    }
+int EglProcessResolver::GetHandle(std::string lib, void** out_handle) {
+  auto handle = dlopen(lib.c_str(), RTLD_LAZY | RTLD_LOCAL);
+#if !defined(NDEBUG)
+  if (handle) {
+    SPDLOG_DEBUG("dlopen: {}", lib);
   }
+#endif
 
   if (handle == nullptr) {
     return -1;
@@ -52,12 +48,14 @@ int EglProcessResolver::GetHandle(std::array<char[kSoMaxLength], kSoCount> arr,
 
 void EglProcessResolver::Initialize() {
   void* handle;
-  for (const auto& soNames : kGlSoNames) {
-    GetHandle(soNames, &handle);
+  std::vector<std::string> libs(
+      kGlSoNames, kGlSoNames + (sizeof kGlSoNames / sizeof kGlSoNames[0]));
+  for (const auto& name : libs) {
+    GetHandle(name, &handle);
     if (handle) {
       m_handles.push_back(handle);
     } else {
-      spdlog::critical("{}: Library not found", soNames[0]);
+      spdlog::critical("{}: Library not found", name[0]);
       assert(false);
     }
   }
@@ -69,17 +67,17 @@ void* EglProcessResolver::process_resolver(const char* name) {
     return nullptr;
   }
 
-  SPDLOG_TRACE(name);
-
   void* address;
 
-  for (auto& item : m_handles) {
-    address = dlsym(item, name);
-    if (address)
+  for (auto& handle : m_handles) {
+    address = dlsym(handle, name);
+    if (address) {
+      SPDLOG_TRACE("{}", name);
       return address;
+    }
   }
 
-  SPDLOG_TRACE("** EGL fail over");
+  SPDLOG_TRACE("** eglGetProcAddress({})", name);
 
   address = reinterpret_cast<void*>(eglGetProcAddress(name));
   if (address) {

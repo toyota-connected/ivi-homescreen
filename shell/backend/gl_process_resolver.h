@@ -23,12 +23,8 @@
 
 class EglProcessResolver {
  public:
-  static constexpr size_t kSoCount = 2UL;
-  static constexpr size_t kSoMaxLength = 15;
-  static constexpr std::array<char[kSoMaxLength], kSoCount> kGlSoNames[]{
-      {"libGLESv2"},
-      {"libEGL.so"},
-  };
+  static constexpr char kGlSoNames[2UL][13UL] = {{"libGLESv2.so"},
+                                                 {"libEGL.so"}};
 
   ~EglProcessResolver();
 
@@ -42,7 +38,7 @@ class EglProcessResolver {
 
   /**
    * @brief Get DLL handle
-   * @param[in] arr Array of .so file names
+   * @param[in] name of library
    * @param[out] out_handle DLL handle
    * @return int
    * @retval 1 Normal end
@@ -50,8 +46,7 @@ class EglProcessResolver {
    * @relation
    * internal
    */
-  static int GetHandle(std::array<char[kSoMaxLength], kSoCount> arr,
-                       void** out_handle);
+  static int GetHandle(std::string lib, void** out_handle);
 
   /**
    * @brief Resolve the process

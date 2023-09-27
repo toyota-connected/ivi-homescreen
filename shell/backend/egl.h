@@ -25,6 +25,7 @@
 
 #include "constants.h"
 
+
 class Egl {
  public:
   Egl(void* native_display, EGLenum platform, int buffer_size, bool debug);
@@ -139,7 +140,7 @@ class Egl {
    * @relation
    * EGL
    */
-  bool HasExtBufferAge() const { return m_has_gl_ext_buffer_age; }
+  bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
 
   /**
    * @brief Auxiliary function used to transform a FlutterRect into the format
@@ -178,7 +179,7 @@ class Egl {
 
   PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC m_pfSwapBufferWithDamage{};
   PFNEGLSETDAMAGEREGIONKHRPROC m_pfSetDamageRegion{};
-  bool m_has_gl_ext_buffer_age{};
+  bool m_has_egl_ext_buffer_age{};
 
   /**
    * @brief Auxiliary function used to check if the given list of extensions
@@ -190,10 +191,21 @@ class Egl {
    * @relation
    * EGL
    */
-  static bool HasExtension(
+  static bool HasEGLExtension(
       std::unordered_map<EGLDisplay, const char*>& extensions,
       EGLDisplay dpy,
       const char* name);
+
+  /**
+   * @brief Auxiliary function used to check if the GL extension
+   * is available.
+   * @param[in] name name of extension
+   * @return bool
+   * @retval if extension is present
+   * @relation
+   * EGL
+   */
+  static bool HasGLExtension(const char* name);
 
   /**
    * @brief Report the contents of EGL attributes and frame buffer
@@ -227,12 +239,13 @@ class Egl {
 
   /**
    * @brief Initialize of EGL KHR_debug
-* @param[in] extensions unordered_map of EGL extensions
+   * @param[in] extensions unordered_map of EGL extensions
    * @return void
    * @relation
    * wayland
    */
-  void EGL_KHR_debug_init(std::unordered_map<EGLDisplay, const char*>& extensions);
+  void EGL_KHR_debug_init(
+      std::unordered_map<EGLDisplay, const char*>& extensions);
 
   /**
    * @brief Print a list of extensions, with word-wrapping
