@@ -37,6 +37,7 @@ class Navigation {
  private:
   struct RouteInformation {
     std::string location;
+    std::string uri;
     std::string state;
     bool replace;
   };

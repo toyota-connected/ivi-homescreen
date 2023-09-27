@@ -196,6 +196,12 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
                    style.systemNavigationBarContrastEnforced);
     }
     result = codec.EncodeSuccessEnvelope();
+  } else if (method == kLiveText_isLiveTextInputAvailable) {
+    SPDLOG_DEBUG("({}) {}", engine->GetIndex(), kLiveText_isLiveTextInputAvailable);
+    result = codec.EncodeSuccessEnvelope();
+  } else if (method == kSystemInitializationComplete) {
+    SPDLOG_DEBUG("({}) {}", engine->GetIndex(), kSystemInitializationComplete);
+    result = codec.EncodeSuccessEnvelope();
   } else {
     spdlog::error("({}) Platform: {} is unhandled", engine->GetIndex(), method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");

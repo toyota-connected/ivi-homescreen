@@ -157,4 +157,9 @@ class Platform {
       "SystemChrome.setPreferredOrientations";
   static constexpr char kSystemChrome_setEnabledSystemUIMode[] =
       "SystemChrome.setEnabledSystemUIMode";
+
+  static constexpr char kSystemInitializationComplete[] =
+      "System.initializationComplete";
+  static constexpr char kLiveText_isLiveTextInputAvailable[] =
+      "LiveText.isLiveTextInputAvailable";
 };
