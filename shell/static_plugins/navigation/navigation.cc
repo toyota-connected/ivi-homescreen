@@ -58,6 +58,19 @@ void Navigation::OnPlatformMessage(const FlutterPlatformMessage* message,
           engine->GetIndex(), info.location, info.state, info.replace);
 
       result = codec.EncodeSuccessEnvelope();
+    }
+    else if (!args->IsNull() && args->HasMember("uri") && args->HasMember("state") && args->HasMember("replace")) {
+      RouteInformation info{};
+      info.uri = (*args)["uri"].GetString();
+      info.state =
+          !(*args)["state"].IsNull() ? (*args)["state"].GetString() : "";
+      info.replace = (*args)["replace"].GetBool();
+      spdlog::info(
+          "({}) Navigation: Route Information Updated"
+          "\n\turi: {} \n\tstate: {}\n\treplace: {}",
+          engine->GetIndex(), info.uri, info.state, info.replace);
+
+      result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }

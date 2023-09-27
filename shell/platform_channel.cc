@@ -68,6 +68,9 @@
 #ifdef ENABLE_PLUGIN_LOGGING
 #include "static_plugins/logging/logging.h"
 #endif
+#ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
+#include "static_plugins/keyboard_manager/keyboard_manager.h"
+#endif
 
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
@@ -136,5 +139,9 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_LOGGING
   RegisterCallback(LoggingPlugin::kChannelName,
                    &LoggingPlugin::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
+  RegisterCallback(KeyboardManager::kChannelName,
+                   &KeyboardManager::OnPlatformMessage);
 #endif
 }

@@ -132,4 +132,9 @@ if (BUILD_PLUGIN_LOGGING)
     ENABLE_PLUGIN(logging)
 endif ()
 
+option(BUILD_PLUGIN_KEYBOARD_MANAGER "Include Keyboard Manager" ON)
+if (BUILD_PLUGIN_KEYBOARD_MANAGER)
+    ENABLE_PLUGIN(keyboard_manager)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")
