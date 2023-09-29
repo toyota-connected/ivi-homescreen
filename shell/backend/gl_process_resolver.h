@@ -23,8 +23,8 @@
 
 class EglProcessResolver {
  public:
-  static constexpr char kGlSoNames[2UL][13UL] = {{"libGLESv2.so"},
-                                                 {"libEGL.so"}};
+  static constexpr char kGlSoNames[2UL][15UL] = {{"libGLESv2.so.2"},
+                                                 {"libEGL.so.1"}};
 
   ~EglProcessResolver();
 
