@@ -3,24 +3,29 @@
 ### build
 ```bash
 $ mkdir build && cd build
-$ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DBUILD_UNIT_TESTS=1
+build$ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DBUILD_UNIT_TESTS=1 -DCMAKE_BUILD_TYPE=Debug
 ```
 
-### run test
+### run all test
 ```bash
-$ ./test/unit_test/template-test-case/templateTest
+build$ ctest
+```
+
+### run test per test case
+```bash
+build$ ./test/unit_test/template-test-case/templateTest
 ```
 
 ## Run all test with measuring coverage
 ### build and run test
 ```bash
-$ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DBUILD_UNIT_TESTS=1 -DCOVERAGE=1
-$ ./run-ut-coverage.sh
+build$ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DBUILD_UNIT_TESTS=1 -DCOVERAGE=1 -DCMAKE_BUILD_TYPE=Debug
+build$ ./run-ut-coverage.sh
 ```
 
 ### Open html files.
 (ex: use firefox)
 
 ```bash
-$ firefox lcovHtml/index.html
+build$ firefox lcovHtml/index.html
 ```
