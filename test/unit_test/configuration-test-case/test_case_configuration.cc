@@ -174,7 +174,8 @@ TEST(HomescreenConfigurationgetView, Lv1Normal002) {
       "\"disable_cursor\":true,"
       "\"debug_backend\":true,"
       "\"bundle_path\":\"/home\","
-      "\"window_type\":\"NORMAL\""
+      "\"window_type\":\"NORMAL\","
+      "\"view\":{}"
       "}";
   rapidjson::Document doc;
   doc.Parse(json_str.c_str());

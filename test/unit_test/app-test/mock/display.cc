@@ -35,9 +35,6 @@ Display::Display(bool enable_cursor,
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   /* Delete implementation */
-
-  /* avoid assert at GetDisplay() method */
-  m_display = (struct wl_display*)malloc(sizeof(m_display));
 }
 
 Display::~Display() {
@@ -702,13 +699,8 @@ const struct wl_touch_listener Display::touch_listener = {
 };
 
 int Display::PollEvents() {
-  while (wl_display_prepare_read(m_display) != 0) {
-    wl_display_dispatch_pending(m_display);
-  }
-  wl_display_flush(m_display);
-
-  wl_display_read_events(m_display);
-  return wl_display_dispatch_pending(m_display);
+   /* Delete implementation */
+  return 1;
 }
 
 void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) {

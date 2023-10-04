@@ -2,6 +2,7 @@
 #include "gtest/gtest.h"
 #include "utils.h"
 #include "view/flutter_view.h"
+#include "view/compositor_surface_api.h"
 #include "wayland/display.h"
 
 FlutterView* createFlutterViewInstance() {
@@ -74,4 +75,82 @@ TEST(HomescreenFlutterViewDisposeSurface, Lv1Normalcase001) {
 
   // check comp_surf array content was deleted
   EXPECT_TRUE(view->m_comp_surf.empty());
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenFlutterViewGetSurfaceContext_Lv1Normal002
+Use Case Name: Provide wayland client function
+Test Summary：Test the function of DrawFps
+***************************************************************/
+TEST(HomescreenFlutterViewDrawFps, Lv1Normalcase001) {
+    FlutterView* view = createFlutterViewInstance();
+
+    int h_module = 0;
+    view->CreateSurface(
+        &h_module, "", "", "",
+        CompositorSurface::PARAM_SURFACE_T::egl,
+        CompositorSurface::PARAM_Z_ORDER_T::above,
+        CompositorSurface::PARAM_SYNC_T::sync,
+        kDefaultViewWidth,
+        kDefaultViewHeight,
+        0,
+        0
+    );
+
+    // call target function with invalid index
+    view->DrawFps(1);
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenFlutterViewGetSurfaceContext_Lv1Normal001
+Use Case Name: Provide wayland client function
+Test Summary：Test the function of GetSurfaceContext
+***************************************************************/
+TEST(HomescreenFlutterViewGetSurfaceContext, Lv1Normalcase001) {
+    FlutterView* view = createFlutterViewInstance();
+
+    int h_module = 0;
+    view->CreateSurface(
+        &h_module, "", "", "",
+        CompositorSurface::PARAM_SURFACE_T::egl,
+        CompositorSurface::PARAM_Z_ORDER_T::above,
+        CompositorSurface::PARAM_SYNC_T::sync,
+        kDefaultViewWidth,
+        kDefaultViewHeight,
+        0,
+        0
+    );
+
+    // call target function
+    auto *ret_context = view->GetSurfaceContext(0);
+
+    // Deleted mock functions that set value m_context at InitializePlugin.
+    // So m_context is null pointer.
+    EXPECT_TRUE(ret_context == nullptr);
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenFlutterViewGetSurfaceContext_Lv1Normal002
+Use Case Name: Provide wayland client function
+Test Summary：Test the function of GetSurfaceContext
+***************************************************************/
+TEST(HomescreenFlutterViewGetSurfaceContext, Lv1Normalcase002) {
+    FlutterView* view = createFlutterViewInstance();
+
+    int h_module = 0;
+    view->CreateSurface(
+        &h_module, "", "", "",
+        CompositorSurface::PARAM_SURFACE_T::egl,
+        CompositorSurface::PARAM_Z_ORDER_T::above,
+        CompositorSurface::PARAM_SYNC_T::sync,
+        kDefaultViewWidth,
+        kDefaultViewHeight,
+        0,
+        0
+    );
+
+    // call target function with invalid index
+    auto *ret_context = view->GetSurfaceContext(2);
+
+    EXPECT_TRUE(ret_context == nullptr);
 }

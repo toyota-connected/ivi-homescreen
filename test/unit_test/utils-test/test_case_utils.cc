@@ -63,3 +63,66 @@ TEST(HomescreenUtilsRemoveArgument, Lv1Normal001) {
     EXPECT_STRNE("test2", str.c_str());
   }
 }
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenUtilsRemoveArgument_Lv1Abnormal001
+Use Case Name: Initialization
+Test Summary：Test the function of RemoveArgument
+***************************************************************/
+
+TEST(HomescreenUtilsRemoveArgument, Lv1Abnormal001) {
+  std::vector<std::string> expected_args{"test1", "test2", "test3"};
+  std::vector<std::string> args{"test1", "test2", "test3"};
+  Utils::RemoveArgument(args, "test");
+
+  EXPECT_EQ(expected_args.size(), args.size());
+  EXPECT_TRUE(std::equal(expected_args.cbegin(), expected_args.cend(), args.cbegin()));
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenUtilsGetHomePath_Lv1Normal001
+Use Case Name: Initialization
+Test Summary：Test GetHomePath with setting HOME env param
+***************************************************************/
+
+TEST(HomescreenUtilsGetHomePath, Lv1Normal001) {
+  std::string expected_value = getenv("HOME");
+  expected_value = expected_value + "/" + kXdgApplicationDir;
+
+  auto home_path = Utils::GetHomePath();
+  EXPECT_EQ(home_path, expected_value);
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenUtilsGetConfigHomePath_Lv1Normal001
+Use Case Name: Initialization
+Test Summary：Test GetConfigHomePath with setting XDG_CONFIG_HOME env param
+***************************************************************/
+
+TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal001) {
+  auto input_value = "TEST";
+  auto expected_value = std::string("TEST/.config/homescreen");
+  setenv("XDG_CONFIG_HOME", input_value, true);
+
+  auto home_path = Utils::GetConfigHomePath();
+
+  EXPECT_EQ(home_path, expected_value);
+
+  // delete param
+  unsetenv("XDG_CONFIG_HOME");
+}
+
+/****************************************************************
+Test Case Name.Test Name： HomescreenUtilsGetConfigHomePath_Lv1Normal002
+Use Case Name: Initialization
+Test Summary：Test GetConfigHomePath without setting XDG_CONFIG_HOME env param
+***************************************************************/
+
+TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal002) {
+  std::string expected_value = getenv("HOME");
+  expected_value = expected_value + "/" + kXdgApplicationDir;
+
+  // if XDG_CONFIG_HOME does not set, ret value is home path
+  auto home_path = Utils::GetConfigHomePath();
+  EXPECT_EQ(home_path, expected_value);
+}
