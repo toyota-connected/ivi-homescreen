@@ -137,4 +137,10 @@ if (BUILD_PLUGIN_KEYBOARD_MANAGER)
     ENABLE_PLUGIN(keyboard_manager)
 endif ()
 
+option(BUILD_PLUGIN_GOOGLE_SIGN_IN "Include Google Sign In manager" OFF)
+if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
+    ENABLE_PLUGIN(google_sign_in)
+    pkg_check_modules(LIBCURL REQUIRED libcurl)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")
