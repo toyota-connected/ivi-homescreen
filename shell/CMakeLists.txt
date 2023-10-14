@@ -26,6 +26,7 @@ add_executable(homescreen
         app.cc
         configuration/configuration.cc
         engine.cc
+        json_utils.cc
         main.cc
         platform_channel.cc
         textures/texture.cc
@@ -64,6 +65,10 @@ if (BUILD_CRASH_HANDLER)
     target_sources(homescreen PRIVATE crash_handler.cc)
 endif ()
 
+if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
+    target_sources(homescreen PRIVATE curl_client/curl_client.cc)
+endif ()
+
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL
@@ -89,6 +94,7 @@ target_include_directories(homescreen
         ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
+        ${LIBCURL_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ../third_party/spdlog-1.12.0/include
@@ -115,6 +121,7 @@ target_link_libraries(homescreen PRIVATE
         dl
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}
+        ${LIBCURL_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
 )
