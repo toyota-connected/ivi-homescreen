@@ -29,6 +29,8 @@ WaylandWindow::WaylandWindow(size_t index,
                              int32_t width,
                              int32_t height,
                              double pixel_ratio,
+                             uint32_t /* activation_area_x */,
+                             uint32_t /* activation_area_y */,
                              Backend* backend,
                              uint32_t ivi_surface_id)
     : m_index(index),
