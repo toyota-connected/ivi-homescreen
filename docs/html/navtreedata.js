@@ -24,12 +24,57 @@
 */
 var NAVTREE =
 [
-  [ "flutter-auto", "index.html", ]
+  [ "flutter-auto", "index.html", [
+    [ "Google Sign In", "md__mnt_raid10_ivi_homescreen_agl_shell_static_plugins_google_sign_in__r_e_a_d_m_e.html", [
+      [ "Configuration", "md__mnt_raid10_ivi_homescreen_agl_shell_static_plugins_google_sign_in__r_e_a_d_m_e.html#autotoc_md1", null ]
+    ] ],
+    [ "Namespaces", "namespaces.html", [
+      [ "Namespace List", "namespaces.html", "namespaces_dup" ],
+      [ "Namespace Members", "namespacemembers.html", [
+        [ "All", "namespacemembers.html", null ],
+        [ "Variables", "namespacemembers_vars.html", null ],
+        [ "Typedefs", "namespacemembers_type.html", null ]
+      ] ]
+    ] ],
+    [ "Classes", "annotated.html", [
+      [ "Class List", "annotated.html", "annotated_dup" ],
+      [ "Class Index", "classes.html", null ],
+      [ "Class Hierarchy", "hierarchy.html", "hierarchy" ],
+      [ "Class Members", "functions.html", [
+        [ "All", "functions.html", "functions_dup" ],
+        [ "Functions", "functions_func.html", "functions_func" ],
+        [ "Variables", "functions_vars.html", "functions_vars" ],
+        [ "Typedefs", "functions_type.html", null ],
+        [ "Enumerations", "functions_enum.html", null ],
+        [ "Enumerator", "functions_eval.html", null ],
+        [ "Related Functions", "functions_rela.html", null ]
+      ] ]
+    ] ],
+    [ "Files", "files.html", [
+      [ "File List", "files.html", "files_dup" ],
+      [ "File Members", "globals.html", [
+        [ "All", "globals.html", null ],
+        [ "Functions", "globals_func.html", null ],
+        [ "Variables", "globals_vars.html", null ],
+        [ "Typedefs", "globals_type.html", null ],
+        [ "Enumerations", "globals_enum.html", null ],
+        [ "Enumerator", "globals_eval.html", null ],
+        [ "Macros", "globals_defs.html", null ]
+      ] ]
+    ] ]
+  ] ]
 ];
 
 var NAVTREEINDEX =
 [
-"index.html"
+"accessibility_8cc.html",
+"class_engine.html#a90745cd51061b0eeff37e651b4cbb3e0",
+"class_mouse_cursor.html",
+"class_wayland_vulkan_backend.html#a0b3ee8b2ce54fa33e3296ba7eb559dd0",
+"dir_8c67335c2aec2a35f54e6b2091e1e851.html",
+"md__mnt_raid10_ivi_homescreen_agl_shell_static_plugins_google_sign_in__r_e_a_d_m_e.html",
+"struct_display.html#aa30a717ddf438ed618bdaa0d7ebe1b55",
+"struct_wayland_window.html#ae1e7f3c73a66762f6987b8f318d9538a"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronisation';

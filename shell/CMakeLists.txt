@@ -26,6 +26,7 @@ add_executable(${PROJECT_NAME}
         app.cc
         configuration/configuration.cc
         engine.cc
+        json_utils.cc
         main.cc
         platform_channel.cc
         textures/texture.cc
@@ -33,10 +34,16 @@ add_executable(${PROJECT_NAME}
         view/flutter_view.cc
         wayland/display.cc
         wayland/window.cc
-        )
+        logging/logging.cc
+        task_runner.cc
+)
 
 include(plugins)
 include(textures)
+
+if (ENABLE_DLT)
+    target_sources(${PROJECT_NAME} PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+endif ()
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan.cc)
@@ -48,11 +55,19 @@ endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
-        backend/wayland_egl.cc
-        backend/egl.cc
-        backend/gl_process_resolver.cc
+            backend/wayland_egl.cc
+            backend/egl.cc
+            backend/gl_process_resolver.cc
     )
-endif()
+endif ()
+
+if (BUILD_CRASH_HANDLER)
+    target_sources(${PROJECT_NAME} PRIVATE crash_handler.cc)
+endif ()
+
+if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
+    target_sources(${PROJECT_NAME} PRIVATE curl_client/curl_client.cc)
+endif ()
 
 target_compile_definitions(${PROJECT_NAME}
         PRIVATE
@@ -64,18 +79,27 @@ target_compile_definitions(${PROJECT_NAME}
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
-        )
+        ASIO_STANDALONE
+        ASIO_HEADER_ONLY
+        ASIO_NO_TYPEID
+        ASIO_DISABLE_HANDLER_TYPE_REQUIREMENTS
+        ASIO_NO_DEPRECATED
+)
 
 target_include_directories(${PROJECT_NAME}
         PRIVATE
+        ..
+        logging
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
+        ${LIBCURL_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
-        ..
-        )
+        ../third_party/spdlog-1.12.0/include
+        ../third_party/asio-1-28-1/asio/include
+)
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(${PROJECT_NAME} PRIVATE EGL GLESv2)
@@ -86,6 +110,9 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(${PROJECT_NAME} PRIVATE bluevk)
 endif ()
+if (BUILD_CRASH_HANDLER)
+    target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry)
+endif ()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         flutter
@@ -94,13 +121,19 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         dl
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}
+        ${LIBCURL_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
-        )
+)
+
+if (BUILD_CRASH_HANDLER)
+    target_link_libraries(${PROJECT_NAME} PRIVATE unwind)
+endif ()
+
 
 target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}
-        )
+)
 
 add_sanitizers(${PROJECT_NAME})
 

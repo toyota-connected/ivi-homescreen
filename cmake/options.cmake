@@ -39,6 +39,46 @@ endif ()
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
 #
+# Enable XDG Client
+#
+option(ENABLE_XDG_CLIENT "Enable XDG Client" ON)
+if (ENABLE_XDG_CLIENT)
+    add_compile_definitions(ENABLE_XDG_CLIENT)
+endif ()
+
+#
+# Enable AGL Client
+#
+option(ENABLE_AGL_CLIENT "Enable AGL Client" OFF)
+if (ENABLE_AGL_CLIENT)
+    add_compile_definitions(ENABLE_AGL_CLIENT)
+endif ()
+
+#
+# Enable ivi-shell Client
+#
+option(ENABLE_IVI_SHELL_CLIENT "Enable ivi-shell Client" OFF)
+if (ENABLE_IVI_SHELL_CLIENT)
+    add_compile_definitions(ENABLE_IVI_SHELL_CLIENT)
+endif ()
+
+#
+# Enable Dart VM console redirection
+#
+option(ENABLE_DART_VM_LOGGING "Enable Dart VM console redirection" ON)
+if (ENABLE_DART_VM_LOGGING)
+    add_compile_definitions(ENABLE_DART_VM_LOGGING)
+endif ()
+
+#
+# DLT
+#
+option(ENABLE_DLT "Enable DLT logging" ON)
+if (ENABLE_DLT)
+    add_compile_definitions(ENABLE_DLT)
+endif ()
+
+#
 # backend selection
 #
 option(BUILD_BACKEND_WAYLAND_EGL "Build Backend for EGL" ON)
@@ -47,6 +87,10 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     option(BUILD_EGL_TRANSPARENCY "Build with EGL Transparency Enabled" ON)
     if (BUILD_EGL_TRANSPARENCY)
         add_compile_definitions(BUILD_EGL_ENABLE_TRANSPARENCY)
+    endif ()
+    option(BUILD_EGL_ENABLE_3D "Build with EGL Stencil, Depth, and Stencil config Enabled" ON)
+    if (BUILD_EGL_ENABLE_3D)
+        add_compile_definitions(BUILD_EGL_ENABLE_3D)
     endif ()
 else ()
     option(BUILD_BACKEND_WAYLAND_VULKAN "Build Backend for Vulkan" ON)
@@ -59,6 +103,27 @@ option(BUILD_BACKEND_WAYLAND_DRM "Build Backend Wayland DRM" OFF)
 if (BUILD_BACKEND_WAYLAND_DRM)
     add_compile_definitions(BUILD_BACKEND_WAYLAND_DRM)
 endif ()
+
+#
+# Crash Handler
+#
+option(BUILD_CRASH_HANDLER "Build Crash Handler" OFF)
+if (BUILD_CRASH_HANDLER)
+    add_compile_definitions(
+            BUILD_CRASH_HANDLER
+            CRASH_HANDLER_DSN="${CRASH_HANDLER_DSN}"
+            CRASH_HANDLER_RELEASE="${PROJECT_NAME}@${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
+else ()
+    add_compile_definitions(
+            CRASH_HANDLER_DSN=""
+            CRASH_HANDLER_RELEASE="")
+endif ()
+
+#
+# Unit Tests
+#
+option(BUILD_UNIT_TESTS "Build Unit Tests" OFF)
+MESSAGE(STATUS "Build Unit Tests ....... ${BUILD_UNIT_TESTS}")
 
 #
 # Sanitizers

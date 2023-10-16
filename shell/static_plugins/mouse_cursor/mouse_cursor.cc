@@ -35,13 +35,13 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
 
       int32_t device = 0;
       auto it = args->find(flutter::EncodableValue("device"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         device = std::get<int32_t>(it->second);
       }
 
       std::string kind;
       it = args->find(flutter::EncodableValue("kind"));
-      if (it != args->end()) {
+      if (it != args->end() && !it->second.IsNull()) {
         kind = std::get<std::string>(it->second);
       }
 
@@ -52,7 +52,7 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else {
-    FML_DLOG(INFO) << "MouseCursor: " << method << " is unhandled";
+    SPDLOG_DEBUG("MouseCursor: {} is unhandled", method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <list>
 #include <memory>
 #include <vector>
 
@@ -25,7 +26,13 @@
 
 class WaylandEglBackend : public Egl, public Backend {
  public:
+  // Maximum damage history - for triple buffering we need to store damage for
+  // last two frames.
+  static const int kMaxHistorySize = 10;
+
   WaylandEglBackend(struct wl_display* display,
+                    uint32_t initial_width,
+                    uint32_t initial_height,
                     bool debug_backend,
                     int buffer_size = kEglBufferSize);
 
@@ -83,4 +90,22 @@ class WaylandEglBackend : public Egl, public Backend {
 
  private:
   wl_egl_window* m_egl_window{};
+  uint32_t m_initial_width;
+  uint32_t m_initial_height;
+
+  // Keeps track of the existing damage associated with each FBO ID
+  std::unordered_map<intptr_t, FlutterRect*> m_existing_damage_map;
+
+  // Keeps track of the most recent frame damages so that existing damage can
+  // be easily computed.
+  std::list<FlutterRect> m_damage_history{};
+
+  /**
+   * @brief Auxiliary function to union the damage regions comprised by two
+   * FlutterRect element. It saves the result of this join in the rect variable.
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void JoinFlutterRect(FlutterRect* rect, FlutterRect additional_rect);
 };

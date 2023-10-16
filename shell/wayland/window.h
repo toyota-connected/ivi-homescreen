@@ -25,6 +25,8 @@
 #include "constants.h"
 
 #include "backend/backend.h"
+#include "ivi-application-client-protocol.h"
+#include "ivi-wm-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 // workaround for Wayland macro not compiling in C++
@@ -65,7 +67,8 @@ class WaylandWindow {
                 double pixel_ratio,
                 uint32_t activation_area_x,
                 uint32_t activation_area_y,
-                Backend* backend);
+                Backend* backend,
+                uint32_t ivi_surface_id);
 
   ~WaylandWindow();
 
@@ -91,6 +94,16 @@ class WaylandWindow {
    */
   uint32_t GetFpsCounter();
 
+  /**
+   * @brief activate a system cursor
+   * @param[in] device Device
+   * @param[in] kind Kind of a cursor
+   * @return bool
+   * @retval true Success
+   * @retval false Failure
+   * @relation
+   * platform
+   */
   bool ActivateSystemCursor(int32_t device, const std::string& kind);
 
   /**
@@ -102,7 +115,7 @@ class WaylandWindow {
    */
   wl_surface* GetBaseSurface() { return m_base_surface; }
 
-  uint32_t m_fps_counter;
+  uint32_t m_fps_counter{};
 
   /**
    * @brief Get window_type
@@ -140,6 +153,7 @@ class WaylandWindow {
   std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
 
+  uint32_t m_ivi_surface_id;
   bool m_fullscreen{};
   bool m_maximized{};
   MAYBE_UNUSED bool m_resize{};
@@ -161,12 +175,14 @@ class WaylandWindow {
   enum window_type m_type;
   std::string m_app_id;
 
-  struct xdg_surface* m_xdg_surface;
-  struct xdg_toplevel* m_xdg_toplevel;
-
-  struct wl_callback* m_base_frame_callback;
-
+  struct xdg_surface* m_xdg_surface{};
+  struct xdg_toplevel* m_xdg_toplevel{};
   static const struct xdg_surface_listener xdg_surface_listener;
+
+  struct ivi_surface* m_ivi_surface{};
+  static const struct ivi_surface_listener ivi_surface_listener;
+
+  struct wl_callback* m_base_frame_callback{};
 
   static const struct wl_surface_listener m_base_surface_listener;
 
@@ -214,6 +230,21 @@ class WaylandWindow {
   /**
    * @brief Response to configure event
    * @param[in] data Pointer to WaylandWindow type
+   * @param[in] ivi_surface Surfaces in the domain of ivi-shell
+   * @param[in] width width of the surface
+   * @param[in] height height of the surface
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void handle_ivi_surface_configure(void* data,
+                                           struct ivi_surface* ivi_surface,
+                                           int32_t width,
+                                           int32_t height);
+
+  /**
+   * @brief Response to configure event
+   * @param[in] data Pointer to WaylandWindow type
    * @param[in] toplevel No use
    * @param[in] width Width
    * @param[in] height Height
@@ -239,6 +270,15 @@ class WaylandWindow {
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
 
+  /**
+   * @brief handler for frame event of a base surface
+   * @param[in] data Pointer to WaylandWindow type
+   * @param[in] callback a callback for frame event
+   * @param[in] time No use
+   * @return void
+   * @relation
+   * wayland
+   */
   static void on_frame_base_surface(void* data,
                                     struct wl_callback* callback,
                                     uint32_t time);

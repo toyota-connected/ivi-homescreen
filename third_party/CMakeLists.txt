@@ -37,9 +37,9 @@ set(FLUTTER_SRC_FILES
         flutter/fml/paths.cc
         flutter/fml/string_conversion.cc
         flutter/fml/unique_fd.cc
-        )
+)
 
-add_library(flutter STATIC ${FLUTTER_SRC_FILES} )
+add_library(flutter STATIC ${FLUTTER_SRC_FILES})
 
 target_compile_options(flutter PRIVATE ${CONTEXT_COMPILE_OPTIONS})
 target_include_directories(flutter PUBLIC
@@ -49,10 +49,24 @@ target_include_directories(flutter PUBLIC
         flutter/third_party/rapidjson/include
         flutter/shell/platform/common/public
         flutter/shell/platform/common/client_wrapper/include
-        )
+        spdlog-1.12.0/include
+)
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET flutter PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif ()
 
 add_sanitizers(flutter)
+
+if (BUILD_CRASH_HANDLER)
+    find_package(sentry REQUIRED GLOBAL)
+endif ()
+
+set(SPDLOG_NO_EXCEPTIONS ON)
+set(SPDLOG_NO_THREAD_ID ON)
+set(SPDLOG_BUILD_PIC ON)
+add_subdirectory(spdlog-1.12.0)
+
+if (BUILD_UNIT_TESTS)
+    add_subdirectory(googletest)
+endif ()

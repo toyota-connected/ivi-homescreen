@@ -58,7 +58,7 @@ class Backend {
    * @param[in] height Set window height
    * @return void
    * @relation
-   * internal
+   * flutter, wayland
    */
   void Resize(size_t index,
               const std::shared_ptr<Engine>& flutter_engine,
@@ -78,7 +78,7 @@ class Backend {
    * @param[in] height Set surface height
    * @return void
    * @relation
-   * internal
+   * wayland, (flutter)
    */
   void CreateSurface(size_t index,
                      struct wl_surface* surface,

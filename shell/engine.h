@@ -23,6 +23,7 @@
 #include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
 #include <shell/platform/embedder/embedder.h>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,7 @@
 #include "platform_channel.h"
 #include "static_plugins/key_event/key_event.h"
 #include "static_plugins/text_input/text_input.h"
+#include "task_runner.h"
 #include "view/flutter_view.h"
 
 class App;
@@ -120,6 +122,15 @@ class Engine {
   FlutterEngineResult SetPixelRatio(double pixel_ratio);
 
   /**
+   * @brief Shutsdown Flutter Engine Instance
+   * @return FlutterEngineResult
+   * @retval The result of shutting down the engine
+   * @relation
+   * flutter
+   */
+  FlutterEngineResult Shutdown();
+
+  /**
    * @brief Check if engine is running
    * @return bool
    * @retval true If running
@@ -194,6 +205,9 @@ class Engine {
 
   /**
    * @brief Create texture
+   * @param[in] texture_id passed from Flutter
+   * @param[in] width passed from Flutter
+   * @param[in] height passed from Flutter
    * @param[in] args passed from Flutter
    * @return flutter::EncodableValue
    * @retval The result of create texture
@@ -286,7 +300,7 @@ class Engine {
   bool SendPlatformMessage(const char* channel,
                            const uint8_t* message,
                            size_t message_size,
-                           const FlutterBinaryReplyUserdata reply,
+                           FlutterBinaryReplyUserdata reply,
                            void* userdata) const;
 
   /**
@@ -332,7 +346,7 @@ class Engine {
   MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
 
   /**
-   * @brief Send mouse event
+   * @brief Coalesce mouse event
    * @param[in] signal Kind of the signal
    * @param[in] phase Phase of the event
    * @param[in] x X coordinate of the event
@@ -344,16 +358,16 @@ class Engine {
    * @relation
    * flutter
    */
-  void SendMouseEvent(FlutterPointerSignalKind signal,
-                      FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      double scroll_delta_x,
-                      double scroll_delta_y,
-                      int64_t buttons);
+  void CoalesceMouseEvent(FlutterPointerSignalKind signal,
+                          FlutterPointerPhase phase,
+                          double x,
+                          double y,
+                          double scroll_delta_x,
+                          double scroll_delta_y,
+                          int64_t buttons);
 
   /**
-   * @brief Send touch event
+   * @brief Coalesce touch event
    * @param[in] phase Phase of the pointer event
    * @param[in] x X coordinate of the pointer event
    * @param[in] y Y coordinate of the pointer event
@@ -362,10 +376,18 @@ class Engine {
    * @relation
    * flutter
    */
-  void SendTouchEvent(FlutterPointerPhase phase,
-                      double x,
-                      double y,
-                      int32_t device);
+  void CoalesceTouchEvent(FlutterPointerPhase phase,
+                          double x,
+                          double y,
+                          int32_t device);
+
+  /**
+   * @brief Send coalesced Pointer events
+   * @return void
+   * @relation
+   * flutter
+   */
+  void SendPointerEvents();
 
   /**
    * @brief get texture object
@@ -398,7 +420,10 @@ class Engine {
    * @relation
    * flutter
    */
-  std::string GetAssetDirectory() { return m_assets_path; }
+  std::string GetAssetDirectory() {
+    std::filesystem::path p = m_assets_path;
+    return std::filesystem::absolute(p);
+  }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
   TextInput* m_text_input{};
@@ -482,23 +507,14 @@ class Engine {
   void* m_engine_so_handle;
   FlutterEngineProcTable m_proc_table{};
 
-  FlutterTaskRunnerDescription m_platform_task_runner{};
+  std::unique_ptr<TaskRunner> m_platform_task_runner;
+  FlutterTaskRunnerDescription m_platform_task_runner_description{};
   FlutterCustomTaskRunners m_custom_task_runners{};
 
-  class CompareFlutterTask {
-   public:
-    bool operator()(std::pair<uint64_t, FlutterTask> n1,
-                    std::pair<uint64_t, FlutterTask> n2) {
-      return n1.first > n2.first;
-    }
-  };
-
-  std::priority_queue<std::pair<uint64_t, FlutterTask>,
-                      std::vector<std::pair<uint64_t, FlutterTask>>,
-                      CompareFlutterTask>
-      m_taskrunner;
-
   FlutterEngineAOTData m_aot_data;
+
+  std::mutex m_queue_lock{};
+  std::shared_ptr<std::queue<std::string>> m_vm_queue{};
 
   /**
    * @brief Load AOT data
@@ -510,4 +526,7 @@ class Engine {
    */
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
   LoadAotData(const std::string& aot_data_path) const;
+
+  std::vector<FlutterPointerEvent> m_pointer_events;
+  std::mutex m_pointer_mutex;
 };

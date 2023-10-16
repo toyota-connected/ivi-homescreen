@@ -30,7 +30,7 @@ void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto method = obj->method_name();
 
   if (method == "getAll") {
-    FML_DLOG(INFO) << "PackageInfo: getAll";
+    SPDLOG_DEBUG("PackageInfo: getAll");
 
     flutter::EncodableValue value(flutter::EncodableMap{
         {flutter::EncodableValue("appName"),
@@ -43,7 +43,7 @@ void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
 
     result = codec.EncodeSuccessEnvelope(&value);
   } else {
-    FML_LOG(ERROR) << "PackageInfo: " << method << " is unhandled";
+    spdlog::error("PackageInfo: {} is unhandled", method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

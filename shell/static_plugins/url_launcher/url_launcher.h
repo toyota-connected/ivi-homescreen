@@ -20,7 +20,7 @@
 
 class UrlLauncher {
  public:
-  static constexpr char kChannelName[] = "plugins.flutter.io/url_launcher";
+  static constexpr char kChannelName[] = "plugins.flutter.io/url_launcher_linux";
 
   /**
    * @brief Callback function for platform messages about url launcher

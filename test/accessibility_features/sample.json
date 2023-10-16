@@ -1,0 +1,12 @@
+{
+   "app_id": "flutter-auto",
+   "view":[
+      {
+         "bundle_path":"/usr/share/flutter-auto/bundle",
+         "window_type": "NORMAL",
+         "fullscreen": true,
+         "ivi_surface_id": 1,
+         "accessibility_features": %%ACCESSIBILITY%%
+      }
+   ]
+}

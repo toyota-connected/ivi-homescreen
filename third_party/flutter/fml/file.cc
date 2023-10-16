@@ -7,6 +7,8 @@
 #include "flutter/fml/logging.h"
 #include "flutter/fml/unique_fd.h"
 
+#include "spdlog/spdlog.h"
+
 namespace fml {
 
 static fml::UniqueFD CreateDirectory(const fml::UniqueFD& base_directory,
@@ -55,7 +57,7 @@ ScopedTemporaryDirectory::~ScopedTemporaryDirectory() {
   // POSIX requires the directory to be empty before UnlinkDirectory.
   if (path_ != "") {
     if (!RemoveFilesInDirectory(dir_fd_)) {
-      FML_LOG(ERROR) << "Could not clean directory: " << path_;
+      SPDLOG_ERROR("Could not clean directory: {}", path_);
     }
   }
 
@@ -63,7 +65,7 @@ ScopedTemporaryDirectory::~ScopedTemporaryDirectory() {
   dir_fd_.reset();
   if (path_ != "") {
     if (!UnlinkDirectory(path_.c_str())) {
-      FML_LOG(ERROR) << "Could not remove directory: " << path_;
+      SPDLOG_ERROR("Could not remove directory: {}", path_);
     }
   }
 }
@@ -79,7 +81,7 @@ bool VisitFilesRecursively(const fml::UniqueFD& directory,
     if (IsDirectory(directory, filename.c_str())) {
       UniqueFD sub_dir = OpenDirectoryReadOnly(directory, filename.c_str());
       if (!sub_dir.is_valid()) {
-        FML_LOG(ERROR) << "Can't open sub-directory: " << filename;
+        SPDLOG_ERROR("Can't open sub-directory: {}", filename);
         return true;
       }
       return VisitFiles(sub_dir, recursive_visitor);

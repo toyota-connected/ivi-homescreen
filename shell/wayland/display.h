@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -30,6 +31,8 @@
 
 #include "agl-shell-client-protocol.h"
 #include "constants.h"
+#include "ivi-application-client-protocol.h"
+#include "ivi-wm-client-protocol.h"
 #include "static_plugins/key_event/key_event.h"
 #include "static_plugins/text_input/text_input.h"
 #include "timer.h"
@@ -42,6 +45,7 @@ class Engine;
 class Display {
  public:
   explicit Display(bool enable_cursor,
+                   const std::string& ignore_wayland_event,
                    std::string cursor_theme_name,
                    const std::vector<Configuration::Config>& configs);
 
@@ -79,7 +83,7 @@ class Display {
 
   /**
    * @brief Get display
-   * @return wl_subcompositor*
+   * @return wl_display*
    * @retval Pointer to display
    * @relation
    * wayland
@@ -97,6 +101,17 @@ class Display {
    * wayland
    */
   struct xdg_wm_base* GetXdgWmBase() { return m_xdg_wm_base; }
+
+  /**
+   * @brief Get ivi_application instance
+   * @return ivi_application*
+   * @retval Pointer to IVI Application
+   * @relation
+   * ivi-shell
+   */
+  struct ivi_application* GetIviApplication() const {
+    return m_ivi_shell.application;
+  }
 
   /**
    * @brief Get shared memory
@@ -214,13 +229,21 @@ class Display {
   /**
    * @brief Set key event
    * @param[in] surface Image
-   * @param[in] text_input Pointer of KeyEvent to set
+   * @param[in] key_event Pointer of KeyEvent to set
    * @return void
    * @relation
    * wayland
    */
-  void SetKeyEvent(wl_surface* surface, KeyEvent* keyevent);
+  void SetKeyEvent(wl_surface* surface, KeyEvent* key_event);
 
+  /**
+   * @brief Get wl_output of a specified index of a view
+   * @param[in] index Index of a view
+   * @return wl_output*
+   * @retval Pointer to wl_output
+   * @relation
+   * wayland
+   */
   wl_output* GetWlOutput(uint32_t index) {
     if (index <= m_all_outputs.size()) {
       return m_all_outputs[index]->output;
@@ -228,13 +251,31 @@ class Display {
     return nullptr;
   }
 
+  /**
+   * @brief Get a buffer scale of a specified index of a view
+   * @param[in] index Index of a view
+   * @return int32_t
+   * @retval Buffer scale
+   * @relation
+   * wayland
+   */
   int32_t GetBufferScale(uint32_t index);
+
+  /**
+   * @brief Get a video mode size of a specified index of a view
+   * @param[in] index Index of a view
+   * @return std::pair<int32_t, int32_t>
+   * @retval Video mode size
+   * @relation
+   * wayland
+   */
+  std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index);
 
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
-  struct wl_display* m_display;
-  struct wl_registry* m_registry;
+  struct wl_display* m_display{};
+  struct wl_registry* m_registry{};
   struct wl_compositor* m_compositor{};
   struct wl_subcompositor* m_subcompositor{};
   struct wl_shm* m_shm{};
@@ -259,9 +300,23 @@ class Display {
     uint32_t version = 0;
   } m_agl;
 
+  struct ivi_shell {
+    struct ivi_application* application = nullptr;
+    struct ivi_wm* ivi_wm = nullptr;
+  } m_ivi_shell;
+
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};
   std::string m_cursor_theme_name;
+
+  struct wayland_event_mask {
+    bool pointer;
+    bool pointer_axis;
+    bool pointer_buttons;
+    bool pointer_motion;
+    bool keyboard;
+    bool touch;
+  } m_wayland_event_mask{};
 
   typedef struct output_info {
     struct wl_output* output;
@@ -314,15 +369,13 @@ class Display {
     MAYBE_UNUSED uint32_t event_mask;
     uint32_t time;
     uint32_t serial;
-    struct touch_point points[kMaxTouchPoints];
   };
 
   struct touch {
     struct wl_touch* touch;
     struct touch_event event;
-    int down_count[kMaxTouchPoints];
-
-    wl_fixed_t surface_x, surface_y;
+    wl_fixed_t surface_x[kMaxTouchFinger];
+    wl_fixed_t surface_y[kMaxTouchFinger];
     uint32_t state;
     FlutterPointerPhase phase;
   } m_touch{};
@@ -339,10 +392,29 @@ class Display {
   std::map<wl_surface*, TextInput*> m_text_input;
   std::map<wl_surface*, KeyEvent*> m_key_event;
 
+  std::mutex m_lock;
   uint32_t m_repeat_code{};
+
+  /**
+   * @brief set repeat code
+   * @param[in] repeat_code a repeat code
+   * @return void
+   * @relation
+   * internal
+   */
+  static inline void set_repeat_code(Display* d, uint32_t repeat_code) {
+    std::lock_guard<std::mutex> lock(d->m_lock);
+    d->m_repeat_code = repeat_code;
+  }
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
   bool m_buffer_scale_enable{};
+
+  static void wayland_event_mask_update(
+      const std::string& ignore_wayland_events,
+      struct wayland_event_mask& mask);
+
+  static void wayland_event_mask_print(struct wayland_event_mask& mask);
 
   static const struct wl_registry_listener registry_listener;
 
@@ -883,4 +955,269 @@ class Display {
                                   uint32_t state);
 
   static const struct agl_shell_listener agl_shell_listener;
+
+  /**
+   * @brief handler of a visibility of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @param[in] visibility visibility
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_visibility(void* data,
+                                        struct ivi_wm* ivi_wm,
+                                        uint32_t surface_id,
+                                        int32_t visibility);
+  /**
+   * @brief handler of a visibility of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id layer id
+   * @param[in] visibility visibility
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_visibility(void* data,
+                                      struct ivi_wm* ivi_wm,
+                                      uint32_t layer_id,
+                                      int32_t visibility);
+  /**
+   * @brief handler of an opacity of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @param[in] opacity opacity
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_opacity(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t surface_id,
+                                     wl_fixed_t opacity);
+  /**
+   * @brief handler of an opacity of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id layer id
+   * @param[in] opacity opacity
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_opacity(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t layer_id,
+                                   wl_fixed_t opacity);
+  /**
+   * @brief handler of a source rectangle of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @param[in] x x position of source rectangle
+   * @param[in] y y position of source rectangle
+   * @param[in] width width of source rectangle
+   * @param[in] height height of source rectangle
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_source_rectangle(void* data,
+                                              struct ivi_wm* ivi_wm,
+                                              uint32_t surface_id,
+                                              int32_t x,
+                                              int32_t y,
+                                              int32_t width,
+                                              int32_t height);
+  /**
+   * @brief handler of a source rectangle of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id layer id
+   * @param[in] x x position of source rectangle
+   * @param[in] y y position of source rectangle
+   * @param[in] width width of source rectangle
+   * @param[in] height height of source rectangle
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_source_rectangle(void* data,
+                                            struct ivi_wm* ivi_wm,
+                                            uint32_t layer_id,
+                                            int32_t x,
+                                            int32_t y,
+                                            int32_t width,
+                                            int32_t height);
+  /**
+   * @brief handler of a destination rectangle of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @param[in] x x position of destination rectangle
+   * @param[in] y y position of destination rectangle
+   * @param[in] width width of destination rectangle
+   * @param[in] height height of destination rectangle
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_destination_rectangle(void* data,
+                                                   struct ivi_wm* ivi_wm,
+                                                   uint32_t surface_id,
+                                                   int32_t x,
+                                                   int32_t y,
+                                                   int32_t width,
+                                                   int32_t height);
+  /**
+   * @brief handler of a destination rectangle of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id layer id
+   * @param[in] x x position of destination rectangle
+   * @param[in] y y position of destination rectangle
+   * @param[in] width width of destination rectangle
+   * @param[in] height height of destination rectangle
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_destination_rectangle(void* data,
+                                                 struct ivi_wm* ivi_wm,
+                                                 uint32_t layer_id,
+                                                 int32_t x,
+                                                 int32_t y,
+                                                 int32_t width,
+                                                 int32_t height);
+  /**
+   * @brief handler for created event of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_created(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t surface_id);
+  /**
+   * @brief handler for created event of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id layer id
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_created(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t layer_id);
+  /**
+   * @brief handler for destroyed event of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_destroyed(void* data,
+                                       struct ivi_wm* ivi_wm,
+                                       uint32_t surface_id);
+  /**
+   * @brief handler for destroyed event of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id layer id
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_destroyed(void* data,
+                                     struct ivi_wm* ivi_wm,
+                                     uint32_t layer_id);
+  /**
+   * @brief handler for error event of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] object_id wayland object id
+   * @param[in] error error code
+   * @param[in] message error message
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_error(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t object_id,
+                                   uint32_t error,
+                                   const char* message);
+  /**
+   * @brief handler for error event of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] object_id wayland object id
+   * @param[in] error error code
+   * @param[in] message error message
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_error(void* data,
+                                 struct ivi_wm* ivi_wm,
+                                 uint32_t object_id,
+                                 uint32_t error,
+                                 const char* message);
+  /**
+   * @brief handler for a size of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @param[in] width width of a surface
+   * @param[in] height height of a surface
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_size(void* data,
+                                  struct ivi_wm* ivi_wm,
+                                  uint32_t surface_id,
+                                  int32_t width,
+                                  int32_t height);
+  /**
+   * @brief handler for stats of a ivi shell surface
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] surface_id surface id
+   * @param[in] frame_count frame count
+   * @param[in] pid process id
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_surface_stats(void* data,
+                                   struct ivi_wm* ivi_wm,
+                                   uint32_t surface_id,
+                                   uint32_t frame_count,
+                                   uint32_t pid);
+  /**
+   * @brief handler for surface added event of a ivi shell layer
+   * @param[in,out] data Data of type Display
+   * @param[in] ivi_wm ivi shell window manager
+   * @param[in] layer_id layer id
+   * @param[in] surface_id surface id
+   * @return void
+   * @relation
+   * wayland
+   */
+  static void ivi_wm_layer_surface_added(void* data,
+                                         struct ivi_wm* ivi_wm,
+                                         uint32_t layer_id,
+                                         uint32_t surface_id);
+
+  static const struct ivi_wm_listener ivi_wm_listener;
 };

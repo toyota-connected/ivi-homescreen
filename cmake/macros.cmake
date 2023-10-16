@@ -20,9 +20,9 @@ macro(ENABLE_TEXTURE texture)
 
     string(TOUPPER ${texture} ucase_texture)
 
-    target_compile_definitions(flutter-auto PRIVATE ENABLE_TEXTURE_${ucase_texture})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_TEXTURE_${ucase_texture})
 
-    target_sources(flutter-auto PRIVATE textures/${texture}/texture_${texture}.cc)
+    target_sources(${PROJECT_NAME} PRIVATE textures/${texture}/texture_${texture}.cc)
 
 endmacro(ENABLE_TEXTURE)
 
@@ -32,8 +32,8 @@ macro(ENABLE_PLUGIN plugin)
 
     string(TOUPPER ${plugin} ucase_plugin)
 
-    target_compile_definitions(flutter-auto PRIVATE ENABLE_PLUGIN_${ucase_plugin})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_PLUGIN_${ucase_plugin})
 
-    target_sources(flutter-auto PRIVATE static_plugins/${plugin}/${plugin}.cc)
+    target_sources(${PROJECT_NAME} PRIVATE static_plugins/${plugin}/${plugin}.cc)
 
 endmacro(ENABLE_PLUGIN)

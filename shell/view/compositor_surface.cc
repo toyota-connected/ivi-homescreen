@@ -16,7 +16,7 @@
 #include "../wayland/display.h"
 
 CompositorSurface::CompositorSurface(
-    int64_t key,
+    int64_t /* key */,
     const std::shared_ptr<Display>& display,
     const std::shared_ptr<WaylandWindow>& window,
     void* h_module,
@@ -43,7 +43,6 @@ CompositorSurface::CompositorSurface(
       m_origin_y(y),
       m_context(nullptr),
       m_callback(nullptr) {
-  (void)key;
   // API
   init_api(this);
 
@@ -58,7 +57,8 @@ CompositorSurface::CompositorSurface(
   auto parent_surface = window->GetBaseSurface();
 
   if (type == CompositorSurface::egl) {
-    m_wl.egl_display = eglGetDisplay((NativeDisplayType)display->GetDisplay());
+    m_wl.egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR,
+                                             display->GetDisplay(), nullptr);
     m_wl.egl_window = wl_egl_window_create(m_wl.surface, width, height);
     assert(m_wl.egl_display);
     assert(m_wl.egl_window);
@@ -120,7 +120,7 @@ void CompositorSurface::init_api(CompositorSurface* obj) {
   if (obj->m_api.version) {
     auto version = obj->m_api.version();
     if (version != kCompSurfExpectedInterfaceVersion) {
-      FML_LOG(ERROR) << "Unexpected interface version: " << version;
+      spdlog::critical("Unexpected interface version: 0x{:x}", version);
       exit(1);
     }
   } else {
@@ -160,7 +160,7 @@ void CompositorSurface::init_api(CompositorSurface* obj) {
   return;
 
 invalid:
-  FML_LOG(ERROR) << "Invalid API";
+  spdlog::critical("Invalid API");
   exit(1);
 }
 
@@ -169,7 +169,7 @@ std::string CompositorSurface::GetFilePath(const char* folder) {
 
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {
-      FML_LOG(ERROR) << "GetCachePath create_directories failed: " << path;
+      spdlog::critical("GetCachePath create_directories failed: {}", path);
       exit(EXIT_FAILURE);
     }
   }

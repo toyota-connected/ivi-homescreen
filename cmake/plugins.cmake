@@ -122,5 +122,25 @@ if (BUILD_PLUGIN_SECURE_STORAGE)
     pkg_check_modules(PLUGIN_SECURE_STORAGE REQUIRED libsecret-1)
 endif ()
 
+option(BUILD_PLUGIN_INTEGRATION_TEST "Included Flutter Integration Test support" OFF)
+if (BUILD_PLUGIN_INTEGRATION_TEST)
+    ENABLE_PLUGIN(integration_test)
+endif ()
+
+option(BUILD_PLUGIN_LOGGING "Includes Logging Plugin" ON)
+if (BUILD_PLUGIN_LOGGING)
+    ENABLE_PLUGIN(logging)
+endif ()
+
+option(BUILD_PLUGIN_KEYBOARD_MANAGER "Include Keyboard Manager" ON)
+if (BUILD_PLUGIN_KEYBOARD_MANAGER)
+    ENABLE_PLUGIN(keyboard_manager)
+endif ()
+
+option(BUILD_PLUGIN_GOOGLE_SIGN_IN "Include Google Sign In manager" OFF)
+if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
+    ENABLE_PLUGIN(google_sign_in)
+    pkg_check_modules(LIBCURL REQUIRED libcurl)
+endif ()
 
 message(STATUS "Plugin Config .......... ${PLUGINS}")
