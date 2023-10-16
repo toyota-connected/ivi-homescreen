@@ -19,10 +19,10 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
 
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
@@ -402,7 +402,7 @@ class Display {
    * @relation
    * internal
    */
-  static inline void set_repeat_code(Display *d, uint32_t repeat_code) {
+  static inline void set_repeat_code(Display* d, uint32_t repeat_code) {
     std::lock_guard<std::mutex> lock(d->m_lock);
     d->m_repeat_code = repeat_code;
   }

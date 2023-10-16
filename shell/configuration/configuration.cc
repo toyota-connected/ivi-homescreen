@@ -15,15 +15,15 @@
 
 #include "configuration.h"
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <filesystem>
 
+#include <flutter/fml/command_line.h>
 #include <rapidjson/document.h>
 #include "constants.h"
 #include "logging.h"
 #include "utils.h"
-#include <flutter/fml/command_line.h>
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
@@ -61,7 +61,8 @@ void Configuration::getViewParameters(
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
-    instance.view.pixel_ratio = static_cast<double>(obj[kPixelRatioKey].GetInt());
+    instance.view.pixel_ratio =
+        static_cast<double>(obj[kPixelRatioKey].GetInt());
   }
   if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
     instance.view.ivi_surface_id =
@@ -104,8 +105,8 @@ void Configuration::getViewParameters(
     instance.view.activation_area_x = val["x"].GetInt();
     instance.view.activation_area_y = val["y"].GetInt();
 
-    FML_LOG(INFO) << "activation area x " << instance.view.activation_area_x;
-    FML_LOG(INFO) << "activation area y " << instance.view.activation_area_y;
+    SPDLOG_DEBUG("activation area x {}", instance.view.activation_area_x);
+    SPDLOG_DEBUG("activation area y {}", instance.view.activation_area_y);
   }
 }
 
@@ -158,7 +159,8 @@ void Configuration::getGlobalParameters(
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
-    instance.view.pixel_ratio = static_cast<double>(obj[kPixelRatioKey].GetInt());
+    instance.view.pixel_ratio =
+        static_cast<double>(obj[kPixelRatioKey].GetInt());
   }
   if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
     instance.view.ivi_surface_id =
@@ -348,7 +350,8 @@ void Configuration::PrintConfig(const Config& config) {
     ss.str("");
     ss.clear();
   }
-  ss << "Disable Cursor: .......... " << (config.disable_cursor ? "true" : "false");
+  ss << "Disable Cursor: .......... "
+     << (config.disable_cursor ? "true" : "false");
   spdlog::info(ss.str().c_str());
   ss.str("");
   ss.clear();
@@ -358,7 +361,8 @@ void Configuration::PrintConfig(const Config& config) {
     ss.str("");
     ss.clear();
   }
-  ss << "Debug Backend: ........... " << (config.debug_backend ? "true" : "false");
+  ss << "Debug Backend: ........... "
+     << (config.debug_backend ? "true" : "false");
   spdlog::info(ss.str().c_str());
   ss.str("");
   ss.clear();
@@ -411,8 +415,10 @@ void Configuration::PrintConfig(const Config& config) {
   ss.clear();
 }
 
-Configuration::Config Configuration::ConfigFromArgcArgv(int argc, const char* const* argv) {
-  struct Configuration::Config config{};
+Configuration::Config Configuration::ConfigFromArgcArgv(
+    int argc,
+    const char* const* argv) {
+  struct Configuration::Config config {};
   config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
   for (int i = 1; i < argc; ++i) {
     config.view.vm_args.emplace_back(argv[i]);
@@ -428,8 +434,8 @@ Configuration::Config Configuration::ConfigFromArgcArgv(int argc, const char* co
   return config;
 }
 
-int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuration::Config& config) {
-
+int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
+                                              Configuration::Config& config) {
   if (!cl.options().empty()) {
     if (cl.HasOption("j")) {
       cl.GetOptionValue("j", &config.json_configuration_path);
@@ -441,7 +447,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       SPDLOG_DEBUG("Json Configuration: {}", config.json_configuration_path);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--j=" + config.json_configuration_path);
+                            "--j=" + config.json_configuration_path);
     }
     if (cl.HasOption("a")) {
       std::string accessibility_feature_flag_str;
@@ -477,7 +483,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
           Configuration::MaskAccessibilityFeatures(
               config.view.accessibility_features);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--a=" + accessibility_feature_flag_str);
+                            "--a=" + accessibility_feature_flag_str);
     }
     if (cl.HasOption("b")) {
       cl.GetOptionValue("b", &config.view.bundle_path);
@@ -490,7 +496,8 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
         return EXIT_FAILURE;
       }
       SPDLOG_DEBUG("Bundle Path: {}", config.view.bundle_path);
-      Utils::RemoveArgument(config.view.vm_args, "--b=" + config.view.bundle_path);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--b=" + config.view.bundle_path);
     }
     if (cl.HasOption("c")) {
       SPDLOG_DEBUG("Disable Cursor");
@@ -560,7 +567,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       SPDLOG_DEBUG("Window Type: {}", config.view.window_type);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--window-type=" + config.view.window_type);
+                            "--window-type=" + config.view.window_type);
     }
     if (cl.HasOption("output-index")) {
       std::string output_index_str;
@@ -579,7 +586,8 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       config.view.wl_output_index =
           static_cast<uint32_t>(std::stoul(output_index_str));
-      Utils::RemoveArgument(config.view.vm_args, "--output-index=" + output_index_str);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--output-index=" + output_index_str);
     }
     if (cl.HasOption("xdg-shell-app-id")) {
       cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
@@ -591,7 +599,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       SPDLOG_DEBUG("Application ID: {}", config.app_id);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--xdg-shell-app-id=" + config.app_id);
+                            "--xdg-shell-app-id=" + config.app_id);
     }
     if (cl.HasOption("wayland-event-mask")) {
       cl.GetOptionValue("wayland-event-mask", &config.wayland_event_mask);
@@ -602,8 +610,8 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
         return EXIT_FAILURE;
       }
       SPDLOG_DEBUG("Wayland Event Mask: {}", config.wayland_event_mask);
-      Utils::RemoveArgument(config.view.vm_args,
-                     "--wayland-event-mask=" + config.wayland_event_mask);
+      Utils::RemoveArgument(config.view.vm_args, "--wayland-event-mask=" +
+                                                     config.wayland_event_mask);
     }
     if (cl.HasOption("p")) {
       std::string pixel_ratio_str;
