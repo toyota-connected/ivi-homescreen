@@ -20,6 +20,9 @@
 void CompositorRegionPlugin::ClearGroups(flutter::EncodableList& types,
                                          FlutterView* view) {
   for (auto const& encoded_types : types) {
+    if (encoded_types.IsNull()) {
+      continue;
+    }
     std::string type = std::get<std::string>(encoded_types);
     view->ClearRegion(type);
   }
@@ -31,17 +34,20 @@ flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
   flutter::EncodableList results;
 
   for (auto const& group : groups) {
+    if (group.IsNull()) {
+      continue;
+    }
     auto arguments = std::get<flutter::EncodableMap>(group);
 
     std::string type;
     auto it = arguments.find(flutter::EncodableValue(kArgGroupType));
-    if (it != arguments.end()) {
+    if (it != arguments.end() && !it->second.IsNull()) {
       type = std::get<std::string>(it->second);
     }
 
     flutter::EncodableList encoded_regions;
     it = arguments.find(flutter::EncodableValue(kArgRegions));
-    if (it != arguments.end()) {
+    if (it != arguments.end() && !it->second.IsNull()) {
       encoded_regions = std::get<flutter::EncodableList>(it->second);
     }
 
@@ -52,25 +58,25 @@ flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
 
         auto x = 0;
         it = args.find(flutter::EncodableValue(kArgRegionX));
-        if (it != args.end()) {
+        if (it != args.end() && !it->second.IsNull()) {
           x = std::get<int32_t>(it->second);
         }
 
         auto y = 0;
         it = args.find(flutter::EncodableValue(kArgRegionY));
-        if (it != args.end()) {
+        if (it != args.end() && !it->second.IsNull()) {
           y = std::get<int32_t>(it->second);
         }
 
         auto width = 0;
         it = args.find(flutter::EncodableValue(kArgRegionWidth));
-        if (it != args.end()) {
+        if (it != args.end() && !it->second.IsNull()) {
           width = std::get<int>(it->second);
         }
 
         auto height = 0;
         it = args.find(flutter::EncodableValue(kArgRegionHeight));
-        if (it != args.end()) {
+        if (it != args.end() && !it->second.IsNull()) {
           height = std::get<int>(it->second);
         }
 
@@ -87,38 +93,42 @@ flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
 void CompositorRegionPlugin::OnPlatformMessage(
     const FlutterPlatformMessage* message,
     void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
   auto engine = reinterpret_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
+  std::unique_ptr<std::vector<uint8_t>> result =
+      codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
-
-  if (method == kMethodMask) {
-    if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
-
-      /* Clear array */
-      auto it = args->find(flutter::EncodableValue(kArgClear));
-      if (it != args->end()) {
-        auto types = std::get<flutter::EncodableList>(it->second);
-        ClearGroups(types, engine->GetView());
-      }
-
-      /* Group array */
-      flutter::EncodableValue value;
-      it = args->find(flutter::EncodableValue(kArgGroups));
-      if (it != args->end()) {
-        auto groups = std::get<flutter::EncodableList>(it->second);
-        value = HandleGroups(groups, engine->GetView());
-      }
-
-      result = codec.EncodeSuccessEnvelope(&value);
-
-    } else {
-      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+  do {
+    auto method = obj->method_name();
+    if (method != kMethodMask) {
+      break;
     }
-  }
+    auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+    if (args == nullptr) {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+      break;
+    }
+
+    /* Clear array */
+    auto it = args->find(flutter::EncodableValue(kArgClear));
+    if (it != args->end() && !it->second.IsNull()) {
+      auto types = std::get<flutter::EncodableList>(it->second);
+      ClearGroups(types, engine->GetView());
+    }
+
+    /* Group array */
+    it = args->find(flutter::EncodableValue(kArgGroups));
+    if (it == args->end() || it->second.IsNull()) {
+      flutter::EncodableValue value;
+      result = codec.EncodeSuccessEnvelope(&value);
+      break;
+    }
+    auto groups = std::get<flutter::EncodableList>(it->second);
+    flutter::EncodableValue value = HandleGroups(groups, engine->GetView());
+    result = codec.EncodeSuccessEnvelope(&value);
+  } while (false);
+
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }

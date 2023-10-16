@@ -17,29 +17,30 @@
 
 include_guard()
 
-macro(COMPILER_FLAGS_APPEND scope add_val conflict_match)
+function(COMPILER_FLAGS_APPEND scope add_val conflict_match)
     if ((NOT "${conflict_match}" STREQUAL "") AND
-    (("$ENV{CC}" MATCHES "${conflict_match}") OR
-    ("$ENV{CXX}" MATCHES "${conflict_match}") OR
-    ("$ENV{CFLAGS}" MATCHES "${conflict_match}") OR
-    ("$ENV{CXXFLAGS}" MATCHES "${conflict_match}")))
+    ((${CMAKE_C_COMPILER_ARG1} MATCHES ${conflict_match}) OR
+    (${CMAKE_CXX_COMPILER_ARG1} MATCHES ${conflict_match}) OR
+    ($ENV{CFLAGS} MATCHES ${conflict_match}) OR
+    ($ENV{CXXFLAGS} MATCHES ${conflict_match})))
+        message("-- IGNORE APPEND FLAGS .... ${add_val}")
         return()
     endif ()
 
     if (${scope} STREQUAL "RELEASE")
-        string(APPEND CMAKE_C_FLAGS_RELEASE ${add_val})
-        string(APPEND CMAKE_CXX_FLAGS_RELEASE ${add_val})
-        message("-- APPEND RELEASE FLAGS: ${add_val}")
+        string(APPEND CMAKE_C_FLAGS_RELEASE "${add_val}")
+        string(APPEND CMAKE_CXX_FLAGS_RELEASE "${add_val}")
+        message("-- APPEND RELEASE FLAGS ... ${add_val}")
     elseif (${scope} STREQUAL "DEBUG")
-        string(APPEND CMAKE_C_FLAGS_DEBUG ${add_val})
-        string(APPEND CMAKE_CXX_FLAGS_DEBUG ${add_val})
-        message("-- APPEND DEBUG FLAGS: ${add_val}")
+        string(APPEND CMAKE_C_FLAGS_DEBUG "${add_val}")
+        string(APPEND CMAKE_CXX_FLAGS_DEBUG "${add_val}")
+        message("-- APPEND DEBUG FLAGS ..... ${add_val}")
     else ()
-        string(APPEND CMAKE_C_FLAGS ${add_val})
-        string(APPEND CMAKE_CXX_FLAGS ${add_val})
-        message("-- APPEND FLAGS: ${add_val}")
+        string(APPEND CMAKE_C_FLAGS "${add_val}")
+        string(APPEND CMAKE_CXX_FLAGS "${add_val}")
+        message("-- APPEND FLAGS ........... ${add_val}")
     endif ()
-endmacro(COMPILER_FLAGS_APPEND)
+endfunction(COMPILER_FLAGS_APPEND)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -62,7 +63,7 @@ add_compile_options(
         -Wformat-security
         -Wconversion
         -Wcast-align
-        -Wcast-qual
+        #-Wcast-qual
         $<$<COMPILE_LANGUAGE:CXX>:-Wunused-parameter>
         $<$<COMPILE_LANGUAGE:CXX>:-Winvalid-offsetof>
         $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
@@ -78,12 +79,14 @@ add_compile_definitions(
         $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
 )
 
-COMPILER_FLAGS_APPEND(RELEASE " -fstack-protector-all" "")
-COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" ".*omit-frame-pointer.*")
-COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" ".*-Wformat=[0-9]+.*")
-COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" ".*-D_FORTIFY_SOURCE.*")
+COMPILER_FLAGS_APPEND(RELEASE " -fstack-protector-all" "-f(no-)?stack-protector(-all|-strong)?")
+COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" "-f(no-)?omit-frame-pointer")
+COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" "-Wformat(=[0-9]+)?")
+COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" "-D_FORTIFY_SOURCE(=[0-9]+)?")
 
-string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
+if (NOT BUILD_CRASH_HANDLER)
+    string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
+endif ()
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
 
@@ -100,3 +103,8 @@ if (CMAKE_SIZEOF_VOID_P EQUAL 8)
 elseif (CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_compile_definitions(ENV32BIT)
 endif ()
+
+message("-- CC ..................... ${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_ARG1}")
+message("-- CXX .................... ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER_ARG1}")
+message("-- CFLAGS ................. ${CMAKE_C_FLAGS}")
+message("-- CXXFLAGS ............... ${CMAKE_CXX_FLAGS}")

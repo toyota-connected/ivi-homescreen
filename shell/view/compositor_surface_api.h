@@ -11,7 +11,7 @@ typedef uint32_t COMP_SURF_API_VERSION_T();
 
 typedef struct CompSurf_Context COMP_SURF_API_CONTEXT_T;
 
-typedef const void* (*LoaderFunction)(void* userdata, char const* procname);
+typedef const void* (*LoaderFunction)(void* userdata, const char* procname);
 
 typedef void COMP_SURF_API_LOAD_FUNCTIONS(void*, LoaderFunction);
 

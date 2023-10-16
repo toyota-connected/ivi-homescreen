@@ -33,22 +33,20 @@ int EventTimer::evfd = -1;
 
 EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
     : m_callback(callback), m_callback_data(callback_data) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer()";
-#endif
+
+  SPDLOG_TRACE("+ EventTimer()");
   if (evfd < 0) {
     // initialize class-global epoll fd
     evfd = epoll_create1(EPOLL_CLOEXEC);
     if (evfd < 0) {
       if (errno != EINVAL) {
-        FML_LOG(ERROR) << "Failed to create epoll fd cloexec. "
-                       << strerror(errno);
+        spdlog::critical("Failed to create epoll fd cloexec. {}", strerror(errno));
         exit(-1);
       } else {
         // fallback
         evfd = epoll_create(1);
         if (evfd < 0) {
-          FML_LOG(ERROR) << "Failed to create epoll fd. " << strerror(errno);
+          spdlog::critical("Failed to create epoll fd. {}", strerror(errno));
           exit(-1);
         }
       }
@@ -57,7 +55,7 @@ EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
 
   m_timerfd = timerfd_create(clock, TFD_CLOEXEC | TFD_NONBLOCK);
   if (m_timerfd == -1) {
-    FML_LOG(ERROR) << "Failed to create timerfd. " << strerror(errno);
+    spdlog::critical("Failed to create timerfd. {}", strerror(errno));
     exit(-1);
   }
 
@@ -65,9 +63,7 @@ EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
 }
 
 EventTimer::~EventTimer() {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ ~EventTimer()";
-#endif
+  SPDLOG_TRACE("+ ~EventTimer()");
 
   unwatch_timerfd();
   close(m_timerfd);
@@ -76,26 +72,18 @@ EventTimer::~EventTimer() {
   if (watched_fd == 0)
     close_evfd();
 
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- ~EventTimer()";
-#endif
+  SPDLOG_TRACE("- ~EventTimer()");
 }
 
-void EventTimer::close_evfd(void) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer::close_evfd()";
-#endif
+void EventTimer::close_evfd() {
+  SPDLOG_TRACE("+ EventTimer::close_evfd()");
   close(evfd);
   evfd = -1;
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- EventTimer::close_evfd()";
-#endif
+  SPDLOG_TRACE("- EventTimer::close_evfd()");
 }
 
 void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer::set_timerspec()";
-#endif
+  SPDLOG_TRACE("+ EventTimer::set_timerspec()");
 
   int32_t repeat_rate_sec, repeat_rate_nsec, repeat_delay_sec,
       repeat_delay_nsec = 0;
@@ -116,50 +104,40 @@ void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
   m_timerspec.it_value.tv_sec = repeat_delay_sec;
   m_timerspec.it_value.tv_nsec = repeat_delay_nsec;
 
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- EventTimer::set_timerspec()";
-#endif
+  SPDLOG_TRACE("- EventTimer::set_timerspec()");
 }
 
 void EventTimer::_arm(int fd, struct itimerspec* timerspec) {
   auto ret = timerfd_settime(fd, 0, timerspec, NULL);
   if (ret < 0) {
-    FML_LOG(ERROR) << "Failed to release timer. " << strerror(errno);
+    spdlog::critical("Failed to release timer. {}", strerror(errno));
     exit(-1);
   }
 }
 
-void EventTimer::arm(void) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer::arm()";
-#endif
+void EventTimer::arm() {
+  SPDLOG_TRACE("+ EventTimer::arm()");
 
   _arm(m_timerfd, &m_timerspec);
 
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- EventTimer::arm()";
-#endif
+  SPDLOG_TRACE("- EventTimer::arm()");
 }
 
-void EventTimer::disarm(void) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer::disarm()";
-#endif
+void EventTimer::disarm() const {
+  SPDLOG_TRACE("+ EventTimer::disarm()");
 
   struct itimerspec timerspec = {};
 
   _arm(m_timerfd, &timerspec);
 
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- EventTimer::disarm()";
-#endif
+  SPDLOG_TRACE("- EventTimer::disarm()");
 }
 
 void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
   struct epoll_event ep;
 
   if (evfd < 0) {
-    FML_LOG(ERROR) << "Unexpected call _watch_fd(). Ignored.";
+    spdlog::critical("Unexpected call _watch_fd(). Ignored.");
     return;
   }
 
@@ -169,44 +147,36 @@ void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
   watched_fd++;
 }
 
-void EventTimer::watch_timerfd(void) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer::watch_timerfd()";
-#endif
+void EventTimer::watch_timerfd() {
+  SPDLOG_TRACE("+ EventTimer::watch_timerfd()");
   m_task.run = this->run;
   m_task.data = reinterpret_cast<void*>(this);
 
   _watch_fd(m_timerfd, EPOLLIN, &m_task);
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- EventTimer::watch_timerfd()";
-#endif
+  SPDLOG_TRACE("- EventTimer::watch_timerfd()");
 }
 
 void EventTimer::_unwatch_fd(int fd) {
   if (evfd < 0) {
-    FML_LOG(ERROR) << "Unexpected call _unwatch_fd(). Ignored.";
+    spdlog::critical("Unexpected call _unwatch_fd(). Ignored.");
     return;
   }
-  epoll_ctl(evfd, EPOLL_CTL_DEL, fd, NULL);
+  epoll_ctl(evfd, EPOLL_CTL_DEL, fd, nullptr);
   watched_fd--;
 }
 
-void EventTimer::unwatch_timerfd(void) {
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "+ EventTimer::unwatch_timerfd()";
-#endif
+void EventTimer::unwatch_timerfd() const {
+  SPDLOG_TRACE("+ EventTimer::unwatch_timerfd()");
   _unwatch_fd(m_timerfd);
-#if DEBUG_EVENT_TIMER
-  FML_DLOG(INFO) << "- EventTimer::unwatch_timerfd()";
-#endif
+  SPDLOG_TRACE("- EventTimer::unwatch_timerfd()");
 }
 
-void EventTimer::wait_event(void) {
+void EventTimer::wait_event() {
   struct epoll_event ep[10];
 
   auto ready = epoll_wait(evfd, ep, sizeof(ep) / sizeof(ep[0]), 0);
   for (auto i = 0; i < ready; i++) {
-    struct timer_task* task =
+    auto task =
         reinterpret_cast<struct timer_task*>(ep[i].data.ptr);
     task->run(task, ep[i].events);
   }
@@ -214,18 +184,17 @@ void EventTimer::wait_event(void) {
 
 void EventTimer::run(struct timer_task* task, uint32_t events) {
   uint64_t event;
-  EventTimer* timer = reinterpret_cast<EventTimer*>(task->data);
+  auto timer = reinterpret_cast<EventTimer*>(task->data);
 
   if (events != EPOLLIN)
-    FML_LOG(ERROR) << "Found Unexpected timerfd events: " << std::showbase
-                   << std::hex << events << std::noshowbase;
+    spdlog::critical("Found Unexpected timerfd events: 0x{:x}", events);
 
   if (!(events & EPOLLIN))
     return;
 
   if (read(timer->m_timerfd, &event, sizeof(event)) != sizeof(event)) {
     if (errno != EAGAIN)
-      FML_LOG(ERROR) << "Failed to read timer. " << strerror(errno);
+      spdlog::critical("Failed to read timer. {}", strerror(errno));
     return;
   }
 

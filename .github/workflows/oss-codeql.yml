@@ -1,0 +1,75 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [ 'main', 'agl' ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ 'main' ]
+  schedule:
+    - cron: '29 4 * * 4'
+
+jobs:
+  analyze:
+    if: ${{ github.server_url == 'https://github.com' &&  always() }}
+    name: Analyze
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'cpp' ]
+        # CodeQL supports [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python', 'ruby' ]
+        # Learn more about CodeQL language support at https://aka.ms/codeql-docs/language-support
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        ref: main
+
+    - name: Install packages
+      run: |
+        echo ${{ github.server_url }}
+        sudo apt-get -y install \
+        libwayland-dev wayland-protocols libxkbcommon-dev \
+        mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+        cmake --version
+        gcc --version
+
+    # Initializes the CodeQL tools for scanning.
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: ${{ matrix.language }}
+        # If you wish to specify custom queries, you can do so here or in a config file.
+        # By default, queries listed here will override any specified in a config file.
+        # Prefix the list here with "+" to use these queries and those in the config file.
+
+        # Details on CodeQL's query packs refer to : https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning#using-queries-in-ql-packs
+        queries: +security-and-quality
+
+    - name: Configure
+      run: |
+        mkdir -p ${{github.workspace}}/build/release
+        cmake \
+          -B ${{github.workspace}}/build/release \
+          -D CMAKE_BUILD_TYPE=Release \
+          -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+          -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+    - name: Build Release Packages
+      working-directory: ${{github.workspace}}/build/release
+      run: |
+        rm -rf _packages || true
+        make package
+        ls -la _packages
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+      with:
+        category: "/language:${{matrix.language}}"

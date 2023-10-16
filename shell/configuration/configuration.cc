@@ -15,16 +15,19 @@
 
 #include "configuration.h"
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#include <flutter/fml/command_line.h>
 #include <rapidjson/document.h>
 #include "constants.h"
 #include "logging.h"
+#include "utils.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
-    FML_LOG(ERROR) << "JSON Configuration requires a \"view\" object";
+    spdlog::critical("JSON Configuration requires a \"view\" object");
     exit(EXIT_FAILURE);
   }
 
@@ -57,10 +60,18 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
   }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
+    instance.view.pixel_ratio =
+        static_cast<double>(obj[kPixelRatioKey].GetInt());
+  }
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
+    instance.view.ivi_surface_id =
+        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
+  }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
-        obj[kAccessibilityFeaturesKey].GetInt();
+        MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
     auto args = obj[kVmArgsKey].GetArray();
@@ -94,8 +105,8 @@ void Configuration::getViewParameters(
     instance.view.activation_area_x = val["x"].GetInt();
     instance.view.activation_area_y = val["y"].GetInt();
 
-    FML_LOG(INFO) << "activation area x " << instance.view.activation_area_x;
-    FML_LOG(INFO) << "activation area y " << instance.view.activation_area_y;
+    SPDLOG_DEBUG("activation area x {}", instance.view.activation_area_x);
+    SPDLOG_DEBUG("activation area y {}", instance.view.activation_area_y);
   }
 }
 
@@ -110,6 +121,10 @@ void Configuration::getGlobalParameters(
   }
   if (obj.HasMember(kDisableCursorKey) && obj[kDisableCursorKey].IsBool()) {
     instance.disable_cursor = obj[kDisableCursorKey].GetBool();
+  }
+  if (obj.HasMember(kWaylandEventMaskKey) &&
+      obj[kWaylandEventMaskKey].IsString()) {
+    instance.wayland_event_mask = obj[kWaylandEventMaskKey].GetString();
   }
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
@@ -127,12 +142,12 @@ void Configuration::getGlobalParameters(
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
   if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
-    instance.view.wl_output_index = obj[kOutputIndex].IsInt();
+    instance.view.wl_output_index = obj[kOutputIndex].GetUint();
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
     instance.view.accessibility_features =
-        obj[kAccessibilityFeaturesKey].GetInt();
+        MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
     instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
@@ -142,6 +157,14 @@ void Configuration::getGlobalParameters(
   }
   if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
     instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+  }
+  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
+    instance.view.pixel_ratio =
+        static_cast<double>(obj[kPixelRatioKey].GetInt());
+  }
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
+    instance.view.ivi_surface_id =
+        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
   }
   if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
     instance.view.fullscreen = obj[kFullscreenKey].GetBool();
@@ -168,7 +191,8 @@ void Configuration::getView(rapidjson::Document& doc,
     if (index > arr.Capacity())
       assert(false);
 
-    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(), instance);
+    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(),
+                      instance);
     getGlobalParameters(doc.GetObject(), instance);
   } else {
     getViewParameters(doc[kViewKey].GetObject(), instance);
@@ -189,6 +213,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   if (cli.disable_cursor_set && cli.disable_cursor != instance.disable_cursor) {
     instance.disable_cursor = cli.disable_cursor;
   }
+  if (!cli.wayland_event_mask.empty()) {
+    instance.wayland_event_mask = cli.wayland_event_mask;
+  }
   if (cli.debug_backend_set && cli.debug_backend != instance.debug_backend) {
     instance.debug_backend = cli.debug_backend;
   }
@@ -207,7 +234,8 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
     instance.view.wl_output_index = cli.view.wl_output_index;
   }
   if (cli.view.accessibility_features > 0) {
-    instance.view.accessibility_features = cli.view.accessibility_features;
+    instance.view.accessibility_features =
+        MaskAccessibilityFeatures(cli.view.accessibility_features);
   }
   if (cli.view.width > 0) {
     instance.view.width = cli.view.width;
@@ -217,6 +245,9 @@ void Configuration::getCliOverrides(Config& instance, Config& cli) {
   }
   if (cli.view.pixel_ratio > 0) {
     instance.view.pixel_ratio = cli.view.pixel_ratio;
+  }
+  if (cli.view.ivi_surface_id > 0) {
+    instance.view.ivi_surface_id = cli.view.ivi_surface_id;
   }
   if (cli.view.fullscreen_set &&
       cli.view.fullscreen != instance.view.fullscreen) {
@@ -231,14 +262,14 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
   if (!config.json_configuration_path.empty()) {
     doc = getJsonDocument(config.json_configuration_path);
     if (!doc.IsObject()) {
-      FML_LOG(ERROR) << "Invalid JSON Configuration file";
+      spdlog::critical("Invalid JSON Configuration file");
       exit(EXIT_FAILURE);
     }
 
     view_count = getViewCount(doc);
   }
 
-  FML_DLOG(INFO) << "View Count: " << view_count;
+  SPDLOG_DEBUG("View Count: {}", view_count);
   std::vector<struct Config> res;
   res.reserve(view_count);
   for (int i = 0; i < view_count; i++) {
@@ -252,7 +283,7 @@ std::vector<struct Configuration::Config> Configuration::ParseConfig(
       cfg.view.window_type = "NORMAL";
 
     if (cfg.view.bundle_path.empty()) {
-      FML_LOG(ERROR) << "A bundle path must be specified";
+      spdlog::critical("A bundle path must be specified");
       exit(EXIT_FAILURE);
     }
     if (cfg.view.width == 0) {
@@ -279,7 +310,7 @@ rapidjson::Document Configuration::getJsonDocument(
     const std::string& filename) {
   std::ifstream json_file(filename);
   if (!json_file.is_open()) {
-    FML_LOG(ERROR) << "Unable to open file " << filename;
+    spdlog::critical("Unable to open file {}", filename);
     exit(EXIT_FAILURE);
   }
 
@@ -292,38 +323,329 @@ rapidjson::Document Configuration::getJsonDocument(
 }
 
 void Configuration::PrintConfig(const Config& config) {
-  FML_LOG(INFO) << "**********";
-  FML_LOG(INFO) << "* Global *";
-  FML_LOG(INFO) << "**********";
-  FML_LOG(INFO) << "Application Id: .......... " << config.app_id;
-  if (!config.json_configuration_path.empty())
-    FML_LOG(INFO) << "JSON Configuration: ...... "
-                  << config.json_configuration_path;
-  FML_LOG(INFO) << "Cursor Theme: ............ " << config.cursor_theme;
-  FML_LOG(INFO) << "Disable Cursor: .......... "
-                << (config.disable_cursor ? "true" : "false");
-  FML_LOG(INFO) << "Debug Backend: ........... "
-                << (config.debug_backend ? "true" : "false");
-  FML_LOG(INFO) << "********";
-  FML_LOG(INFO) << "* View *";
-  FML_LOG(INFO) << "********";
+  std::stringstream ss;
+  ss << kGitBranch << " @ " << kGitCommitHash;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+
+  spdlog::info("**********");
+  spdlog::info("* Global *");
+  spdlog::info("**********");
+  if (!config.app_id.empty()) {
+    ss << "Application Id: .......... " << config.app_id;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  if (!config.json_configuration_path.empty()) {
+    ss << "JSON Configuration: ...... " << config.json_configuration_path;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  if (!config.cursor_theme.empty()) {
+    ss << "Cursor Theme: ............ " << config.cursor_theme;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  ss << "Disable Cursor: .......... "
+     << (config.disable_cursor ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  if (!config.wayland_event_mask.empty()) {
+    ss << "Wayland Event Mask: ...... " << config.wayland_event_mask;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  ss << "Debug Backend: ........... "
+     << (config.debug_backend ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  spdlog::info("********");
+  spdlog::info("* View *");
+  spdlog::info("********");
   if (!config.view.vm_args.empty()) {
-    FML_LOG(INFO) << "VM Args:";
+    spdlog::info("VM Args:");
     for (auto const& arg : config.view.vm_args) {
-      FML_LOG(INFO) << arg;
+      spdlog::info(arg);
     }
   }
-  FML_LOG(INFO) << "Bundle Path: .............. " << config.view.bundle_path;
-  FML_LOG(INFO) << "Window Type: .............. " << config.view.window_type;
-  FML_LOG(INFO) << "Output Index: ............. "
-                << config.view.wl_output_index;
-  FML_LOG(INFO) << "Size: ..................... " << config.view.width << " x "
-                << config.view.height;
+  ss << "Bundle Path: .............. " << config.view.bundle_path;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Window Type: .............. " << config.view.window_type;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Output Index: ............. " << config.view.wl_output_index;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Size: ..................... " << config.view.width << " x "
+     << config.view.height;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
   if (config.view.pixel_ratio != kDefaultPixelRatio) {
-    FML_LOG(INFO) << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+    ss << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
-  FML_LOG(INFO) << "Fullscreen: ............... "
-                << (config.view.fullscreen ? "true" : "false");
-  FML_LOG(INFO) << "Accessibility Features: ... "
-                << config.view.accessibility_features;
+  if (config.view.ivi_surface_id > 0) {
+    ss << "IVI Surface ID: ........... " << config.view.ivi_surface_id;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+  }
+  ss << "Fullscreen: ............... "
+     << (config.view.fullscreen ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Accessibility Features: ... " << config.view.accessibility_features;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+}
+
+Configuration::Config Configuration::ConfigFromArgcArgv(
+    int argc,
+    const char* const* argv) {
+  struct Configuration::Config config {};
+  config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
+  for (int i = 1; i < argc; ++i) {
+    config.view.vm_args.emplace_back(argv[i]);
+  }
+
+  auto cl = fml::CommandLineFromArgcArgv(argc, argv);
+
+  if (EXIT_SUCCESS != Configuration::ConvertCommandlineToConfig(cl, config)) {
+    spdlog::critical("Failed to Convert Command Line");
+    exit(EXIT_FAILURE);
+  }
+
+  return config;
+}
+
+int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
+                                              Configuration::Config& config) {
+  if (!cl.options().empty()) {
+    if (cl.HasOption("j")) {
+      cl.GetOptionValue("j", &config.json_configuration_path);
+      if (config.json_configuration_path.empty()) {
+        spdlog::critical(
+            "--j option requires an argument (e.g. "
+            "--j=/tmp/cfg-dbg.json)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Json Configuration: {}", config.json_configuration_path);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--j=" + config.json_configuration_path);
+    }
+    if (cl.HasOption("a")) {
+      std::string accessibility_feature_flag_str;
+      cl.GetOptionValue("a", &accessibility_feature_flag_str);
+      if (accessibility_feature_flag_str.empty()) {
+        spdlog::critical(
+            "--a option (Accessibility Features) requires an "
+            "argument (e.g. --a=31)");
+        return EXIT_FAILURE;
+      }
+      int ret = 0;
+      try {
+        // The following styles are acceptable:
+        // 1. decimal: --a=31
+        // 2. hex: --a=0x3
+        // 3. octet: --a=03
+        config.view.accessibility_features = static_cast<int32_t>(
+            std::stol(accessibility_feature_flag_str, nullptr, 0));
+      } catch (const std::invalid_argument& e) {
+        spdlog::critical(
+            "--a option (Accessibility Features) requires an integer value");
+        ret = EXIT_FAILURE;
+      } catch (const std::out_of_range& e) {
+        spdlog::critical(
+            "The specified value to --a option, {} is out of range.",
+            accessibility_feature_flag_str);
+        ret = EXIT_FAILURE;
+      }
+      if (ret) {
+        return ret;
+      }
+      config.view.accessibility_features =
+          Configuration::MaskAccessibilityFeatures(
+              config.view.accessibility_features);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--a=" + accessibility_feature_flag_str);
+    }
+    if (cl.HasOption("b")) {
+      cl.GetOptionValue("b", &config.view.bundle_path);
+      if (config.view.bundle_path.empty() ||
+          !std::filesystem::is_directory(config.view.bundle_path)) {
+        spdlog::critical(
+            "--b (Bundle Path) option requires a directory path "
+            "argument (e.g. "
+            "--b=/usr/share/gallery)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Bundle Path: {}", config.view.bundle_path);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--b=" + config.view.bundle_path);
+    }
+    if (cl.HasOption("c")) {
+      SPDLOG_DEBUG("Disable Cursor");
+      config.disable_cursor = true;
+      config.disable_cursor_set = true;
+      Utils::RemoveArgument(config.view.vm_args, "--c");
+    }
+    if (cl.HasOption("d")) {
+      SPDLOG_DEBUG("Backend Debug");
+      config.debug_backend = true;
+      config.debug_backend_set = true;
+      Utils::RemoveArgument(config.view.vm_args, "--d");
+    }
+    if (cl.HasOption("f")) {
+      SPDLOG_DEBUG("Fullscreen");
+      config.view.fullscreen = true;
+      config.view.fullscreen_set = true;
+      Utils::RemoveArgument(config.view.vm_args, "--f");
+    }
+    if (cl.HasOption("w")) {
+      std::string width_str;
+      cl.GetOptionValue("w", &width_str);
+      if (!Utils::IsNumber(width_str)) {
+        spdlog::critical("--w option (Width) requires an integer value");
+        return EXIT_FAILURE;
+      }
+      if (width_str.empty()) {
+        spdlog::critical(
+            "--w option (Width) requires an argument (e.g. --w=720)");
+        return EXIT_FAILURE;
+      }
+      config.view.width = static_cast<uint32_t>(std::stoul(width_str));
+      Utils::RemoveArgument(config.view.vm_args, "--w=" + width_str);
+    }
+    if (cl.HasOption("h")) {
+      std::string height_str;
+      cl.GetOptionValue("h", &height_str);
+      if (!Utils::IsNumber(height_str)) {
+        spdlog::critical("--h option (Height) requires an integer value");
+        return EXIT_FAILURE;
+      }
+      if (height_str.empty()) {
+        spdlog::critical(
+            "--h option (Height) requires an argument (e.g. --w=1280)");
+        return EXIT_FAILURE;
+      }
+      config.view.height = static_cast<uint32_t>(std::stoul(height_str));
+      Utils::RemoveArgument(config.view.vm_args, "--h=" + height_str);
+    }
+    if (cl.HasOption("t")) {
+      cl.GetOptionValue("t", &config.cursor_theme);
+      if (config.cursor_theme.empty()) {
+        spdlog::critical(
+            "--t option requires an argument (e.g. --t=DMZ-White)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Cursor Theme: {}", config.cursor_theme);
+      Utils::RemoveArgument(config.view.vm_args, "--t=" + config.cursor_theme);
+    }
+    if (cl.HasOption("window-type")) {
+      cl.GetOptionValue("window-type", &config.view.window_type);
+      if (config.view.window_type.empty()) {
+        spdlog::critical(
+            "--window-type option requires an argument (e.g. "
+            "--window-type=BG)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Window Type: {}", config.view.window_type);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--window-type=" + config.view.window_type);
+    }
+    if (cl.HasOption("output-index")) {
+      std::string output_index_str;
+      cl.GetOptionValue("output-index", &output_index_str);
+      if (!Utils::IsNumber(output_index_str)) {
+        spdlog::critical(
+            "--output-index option (Wayland Output Index) "
+            "requires an integer value");
+        return EXIT_FAILURE;
+      }
+      if (output_index_str.empty()) {
+        spdlog::critical(
+            "--output-index option (Wayland Output Index) "
+            "requires an argument (e.g. --output-index=1)");
+        return EXIT_FAILURE;
+      }
+      config.view.wl_output_index =
+          static_cast<uint32_t>(std::stoul(output_index_str));
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--output-index=" + output_index_str);
+    }
+    if (cl.HasOption("xdg-shell-app-id")) {
+      cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
+      if (config.app_id.empty()) {
+        spdlog::critical(
+            "--xdg-shell-app-id option requires an argument "
+            "(e.g. --xdg-shell-app-id=gallery)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Application ID: {}", config.app_id);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--xdg-shell-app-id=" + config.app_id);
+    }
+    if (cl.HasOption("wayland-event-mask")) {
+      cl.GetOptionValue("wayland-event-mask", &config.wayland_event_mask);
+      if (config.wayland_event_mask.empty()) {
+        spdlog::critical(
+            "--wayland-event-mask option requires an argument "
+            "(e.g. --wayland-event-mask=pointer-axis,keyboard)");
+        return EXIT_FAILURE;
+      }
+      SPDLOG_DEBUG("Wayland Event Mask: {}", config.wayland_event_mask);
+      Utils::RemoveArgument(config.view.vm_args, "--wayland-event-mask=" +
+                                                     config.wayland_event_mask);
+    }
+    if (cl.HasOption("p")) {
+      std::string pixel_ratio_str;
+      cl.GetOptionValue("p", &pixel_ratio_str);
+      if (pixel_ratio_str.empty()) {
+        spdlog::critical(
+            "--p option (Pixel Ratio) requires an argument "
+            "(e.g. --p=1.1234)");
+        return EXIT_FAILURE;
+      }
+
+      config.view.pixel_ratio = strtod(pixel_ratio_str.c_str(), nullptr);
+      Utils::RemoveArgument(config.view.vm_args, "--p=" + pixel_ratio_str);
+    }
+    if (cl.HasOption("i")) {
+      std::string ivi_surface_id_str;
+      cl.GetOptionValue("i", &ivi_surface_id_str);
+      if (ivi_surface_id_str.empty()) {
+        spdlog::critical(
+            "--i option (IVI Surface ID) requires an argument "
+            "(e.g. --i=2)");
+        return EXIT_FAILURE;
+      }
+
+      config.view.ivi_surface_id = static_cast<uint32_t>(
+          strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
+      Utils::RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
+    }
+  }
+  return EXIT_SUCCESS;
+}
+
+int32_t Configuration::MaskAccessibilityFeatures(
+    int32_t accessibility_features) {
+  accessibility_features &= 0b1111111;
+  return accessibility_features;
 }

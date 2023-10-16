@@ -16,9 +16,11 @@
 
 #include "egl.h"
 
-#include <dlfcn.h>
 #include <cassert>
 #include <cstring>
+#include <sstream>
+
+#include <GLES2/gl2.h>
 
 #include "gl_process_resolver.h"
 #include "logging.h"
@@ -30,20 +32,24 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
 
   EGLBoolean ret = eglInitialize(m_dpy, &m_major, &m_minor);
   assert(ret == EGL_TRUE);
-  FML_DLOG(INFO) << "EGL major: " << m_major << ", minor " << m_minor;
+  SPDLOG_DEBUG("EGL {}.{}", m_major, m_minor);
 
   ret = eglBindAPI(EGL_OPENGL_ES_API);
   assert(ret == EGL_TRUE);
 
-  EGL_KHR_debug_init();
+  std::unordered_map<EGLDisplay, const char*> extensions;
+
+#if !defined(NDEBUG)
+  EGL_KHR_debug_init(extensions);
+#endif
 
   EGLint count;
   eglGetConfigs(m_dpy, nullptr, 0, &count);
   assert(count);
-  FML_DLOG(INFO) << "EGL has " << count << " configs";
+  SPDLOG_DEBUG("EGL has {} configs", count);
 
-  auto* configs =
-      reinterpret_cast<EGLConfig*>(calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
+  auto* configs = reinterpret_cast<EGLConfig*>(
+      calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
   assert(configs);
 
   if (debug) {
@@ -57,7 +63,7 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   EGLint size;
   for (EGLint i = 0; i < n; i++) {
     eglGetConfigAttrib(m_dpy, configs[i], EGL_BUFFER_SIZE, &size);
-    FML_DLOG(INFO) << "Buffer size for config " << i << " is " << size;
+    SPDLOG_DEBUG("Buffer size for config {} is {}", i, size);
     if (m_buffer_size <= size) {
       m_config = configs[i];
       break;
@@ -65,20 +71,107 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   }
   free(configs);
   if (m_config == nullptr) {
-    FML_LOG(ERROR) << "did not find config with buffer size " << m_buffer_size;
+    spdlog::critical("did not find config with buffer size {}", m_buffer_size);
     assert(false);
   }
 
   m_context = eglCreateContext(m_dpy, m_config, EGL_NO_CONTEXT,
                                kEglContextAttribs.data());
   assert(m_context);
+  SPDLOG_TRACE("Context={}", m_context);
 
   m_resource_context =
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
   assert(m_resource_context);
+  SPDLOG_TRACE("Resource Context={}", m_resource_context);
 
   m_texture_context =
       eglCreateContext(m_dpy, m_config, m_context, kEglContextAttribs.data());
+  SPDLOG_TRACE("Texture Context={}", m_texture_context);
+
+  MakeCurrent();
+
+  /* setup for Damage Region Management */
+  if (HasEGLExtension(extensions, m_dpy, "EGL_EXT_swap_buffers_with_damage")) {
+    SPDLOG_DEBUG("EGL_EXT_swap_buffers_with_damage found");
+    m_pfSwapBufferWithDamage =
+        reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
+            eglGetProcAddress("eglSwapBuffersWithDamageEXT"));
+  } else if (HasEGLExtension(extensions, m_dpy,
+                             "EGL_KHR_swap_buffers_with_damage")) {
+    SPDLOG_DEBUG("EGL_KHR_swap_buffers_with_damage found");
+    m_pfSwapBufferWithDamage =
+        reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
+            eglGetProcAddress("eglSwapBuffersWithDamageKHR"));
+  }
+
+  if (HasEGLExtension(extensions, m_dpy, "EGL_KHR_partial_update")) {
+    SPDLOG_DEBUG("EGL_KHR_partial_update found");
+    m_pfSetDamageRegion = reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
+        eglGetProcAddress("eglSetDamageRegionKHR"));
+  }
+
+  m_has_egl_ext_buffer_age =
+      HasEGLExtension(extensions, m_dpy, "EGL_EXT_buffer_age");
+  if (m_has_egl_ext_buffer_age) {
+    SPDLOG_DEBUG("EGL_EXT_buffer_age found");
+  }
+
+#if !defined(NDEBUG)
+  SPDLOG_DEBUG("EGL Version: {}", eglQueryString(m_dpy, EGL_VERSION));
+  SPDLOG_DEBUG("EGL Vendor: {}", eglQueryString(m_dpy, EGL_VENDOR));
+  SPDLOG_DEBUG("EGL Extensions: {}", eglQueryString(m_dpy, EGL_EXTENSIONS));
+
+  auto glGetString_ = reinterpret_cast<PFNGLGETSTRINGPROC>(
+      GlProcessResolver::GetInstance().process_resolver("glGetString"));
+  assert(glGetString_);
+
+  std::stringstream ss;
+  ss << glGetString_(GL_VENDOR);
+  SPDLOG_DEBUG("GL Vendor: {}", ss.str().c_str());
+  ss.clear();
+  ss.str("");
+
+  ss << glGetString_(GL_RENDERER);
+  SPDLOG_DEBUG("GL Renderer: {}", ss.str().c_str());
+  ss.clear();
+  ss.str("");
+
+  ss << glGetString_(GL_VERSION);
+  SPDLOG_DEBUG("GL Version: {}", ss.str().c_str());
+  ss.clear();
+  ss.str("");
+
+  ss << glGetString_(GL_SHADING_LANGUAGE_VERSION);
+  SPDLOG_DEBUG("GL Shading Language Version: {}", ss.str().c_str());
+  ss.clear();
+  ss.str("");
+
+  ss << glGetString_(GL_EXTENSIONS);
+  SPDLOG_DEBUG("GL Extensions: {}", ss.str().c_str());
+  ss.clear();
+  ss.str("");
+
+  int value;
+  eglGetConfigAttrib(m_dpy, m_config, EGL_RENDERABLE_TYPE, &value);
+  SPDLOG_DEBUG("EGL_RENDERABLE_TYPE: 0x{:x}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_RED_SIZE, &value);
+  SPDLOG_DEBUG("EGL_RED_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_GREEN_SIZE, &value);
+  SPDLOG_DEBUG("EGL_GREEN_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_BLUE_SIZE, &value);
+  SPDLOG_DEBUG("EGL_BLUE_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_ALPHA_SIZE, &value);
+  SPDLOG_DEBUG("EGL_ALPHA_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_DEPTH_SIZE, &value);
+  SPDLOG_DEBUG("EGL_DEPTH_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_STENCIL_SIZE, &value);
+  SPDLOG_DEBUG("EGL_STENCIL_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_BUFFER_SIZE, &value);
+  SPDLOG_DEBUG("EGL_BUFFER_SIZE: {}", value);
+  eglGetConfigAttrib(m_dpy, m_config, EGL_SAMPLES, &value);
+  SPDLOG_DEBUG("EGL_SAMPLES: {}", value);
+#endif
 
   ClearCurrent();
 
@@ -91,79 +184,103 @@ Egl::~Egl() {
 }
 
 bool Egl::MakeCurrent() {
-  auto res = eglMakeCurrent(m_dpy, m_egl_surface, m_egl_surface, m_context);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      FML_LOG(ERROR) << "Make current failed: " << egl_error;
-      assert(false);
-    }
+  SPDLOG_TRACE("+MakeCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != m_context) {
+    eglMakeCurrent(m_dpy, m_egl_surface, m_egl_surface, m_context);
+    SPDLOG_TRACE("EGL Context={}", eglGetCurrentContext());
+    assert(m_context == eglGetCurrentContext());
   }
+  SPDLOG_TRACE("-MakeCurrent()");
   return true;
 }
 
 bool Egl::ClearCurrent() {
-  auto res =
-      eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      FML_LOG(ERROR) << "Clear current failed: " << egl_error;
-      assert(false);
-    }
+  SPDLOG_TRACE("+ClearCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != EGL_NO_CONTEXT) {
+    eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    SPDLOG_TRACE("EGL Context={}, thread_id=0x{:x}", eglGetCurrentContext(),
+                 pthread_self());
   }
+  SPDLOG_TRACE("-ClearCurrent()");
   return true;
 }
 
 bool Egl::SwapBuffers() {
-  auto res = eglSwapBuffers(m_dpy, m_egl_surface);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      FML_LOG(ERROR) << "SwapBuffers failed: " << egl_error;
-      assert(false);
-    }
-  }
+  SPDLOG_TRACE("+SwapBuffers(): thread_id=0x{:x}", pthread_self());
+  eglSwapBuffers(m_dpy, m_egl_surface);
+  SPDLOG_TRACE("-SwapBuffers()");
   return true;
 }
 
 bool Egl::MakeResourceCurrent() {
-  auto res =
-      eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_resource_context);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      FML_LOG(ERROR) << "MakeResourceCurrent failed: " << egl_error;
-      assert(false);
-    }
+  SPDLOG_TRACE("+MakeResourceCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != m_context) {
+    eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_resource_context);
+    SPDLOG_TRACE("EGL Context={}, thread_id=0x{:x}", eglGetCurrentContext(),
+                 pthread_self());
+    assert(m_resource_context == eglGetCurrentContext());
   }
+  SPDLOG_TRACE("-MakeResourceCurrent()");
   return true;
 }
 
 bool Egl::MakeTextureCurrent() {
-  auto res =
-      eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_texture_context);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      FML_LOG(ERROR) << "MakeTextureCurrent failed: " << egl_error;
-    }
+  SPDLOG_TRACE("+MakeTextureCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != m_texture_context) {
+    eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_texture_context);
+    SPDLOG_TRACE("EGL Context={}, thread_id=0x{:x}", eglGetCurrentContext(),
+                 pthread_self());
+    assert(m_texture_context == eglGetCurrentContext());
   }
-  return false;
+  SPDLOG_TRACE("-MakeTextureCurrent()");
+  return true;
+}
+
+bool Egl::HasEGLExtension(
+    std::unordered_map<EGLDisplay, const char*>& extensions,
+    EGLDisplay dpy,
+    const char* name) {
+  auto got = extensions.find(dpy);
+  if (got == extensions.end()) {
+    extensions[dpy] = eglQueryString(dpy, EGL_EXTENSIONS);
+  }
+  const char* r = strstr(extensions[dpy], name);
+#if !defined(NDEBUG)
+  if (!r) {
+    SPDLOG_DEBUG("{} Not Found", name);
+  }
+#endif
+  auto len = strlen(name);
+  // check that the extension name is terminated by space or null terminator
+  return r != nullptr && (r[len] == ' ' || r[len] == 0);
+}
+
+std::array<EGLint, 4> Egl::RectToInts(const FlutterRect rect) const {
+  EGLint height;
+  eglQuerySurface(m_dpy, m_egl_surface, EGL_HEIGHT, &height);
+
+  std::array<EGLint, 4> res{
+      static_cast<int>(rect.left), height - static_cast<int>(rect.bottom),
+      static_cast<int>(rect.right) - static_cast<int>(rect.left),
+      static_cast<int>(rect.bottom) - static_cast<int>(rect.top)};
+  return res;
 }
 
 // Print a list of extensions, with word-wrapping.
-void Egl::print_extension_list(const char* ext) {
+void Egl::print_extension_list(EGLDisplay dpy) {
   const char indentString[] = "\t    ";
   const int indent = 4;
   const int max = 79;
   int width, i, j;
 
+  const char* ext = eglQueryString(dpy, EGL_EXTENSIONS);
+
   if (!ext || !ext[0])
     return;
 
   width = indent;
-  fprintf(stderr, "%s", indentString);
+  std::stringstream ss;
+  ss << indentString;
   i = j = 0;
   while (true) {
     if (ext[j] == ' ' || ext[j] == 0) {
@@ -171,13 +288,15 @@ void Egl::print_extension_list(const char* ext) {
       const int len = j - i;
       if (width + len > max) {
         /* start a new line */
-        fprintf(stderr, "\n");
+        spdlog::info(ss.str().c_str());
+        ss.str("");
+        ss.clear();
         width = indent;
-        fprintf(stderr, "%s", indentString);
+        ss << indentString;
       }
       /* print the extension name between ext[i] and ext[j] */
       while (i < j) {
-        fprintf(stderr, "%c", ext[i]);
+        ss << ext[i];
         i++;
       }
       /* either we're all done, or we'll continue with next extension */
@@ -189,13 +308,15 @@ void Egl::print_extension_list(const char* ext) {
         j++;
         if (ext[j] == 0)
           break;
-        fprintf(stderr, ", ");
+        ss << ", ";
         width += 2;
       }
     }
     j++;
   }
-  fprintf(stderr, "\n");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
 }
 
 #define COUNT_OF(x) (sizeof(x) / sizeof(0 [x]))
@@ -473,73 +594,95 @@ static struct egl_config_attribute egl_config_attributes[] = {
 };
 
 void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
-  FML_DLOG(INFO) << "OpenGL ES Attributes:";
-  FML_DLOG(INFO) << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR)
-                 << "\"";
-  FML_DLOG(INFO) << "\tEGL_VERSION: \"" << eglQueryString(m_dpy, EGL_VERSION)
-                 << "\"";
-  FML_DLOG(INFO) << "\tEGL_CLIENT_APIS: \""
-                 << eglQueryString(m_dpy, EGL_CLIENT_APIS) << "\"";
-  FML_DLOG(INFO) << "\tEGL_EXTENSIONS:";
+  std::stringstream ss;
+  spdlog::info("OpenGL ES Attributes:");
+  ss << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR) << "\"";
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "\tEGL_CLIENT_APIS: \"" << eglQueryString(m_dpy, EGL_CLIENT_APIS)
+     << "\"";
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  spdlog::info("\tEGL_EXTENSIONS:");
 
-  const char* s = eglQueryString(m_dpy, EGL_EXTENSIONS);
-
-  print_extension_list(static_cast<const char*>(s));
+  print_extension_list(m_dpy);
 
   EGLint num_config;
   EGLBoolean status = eglGetConfigs(m_dpy, configs, count, &num_config);
   if (status != EGL_TRUE || num_config == 0) {
-    FML_LOG(ERROR) << "failed to get EGL frame buffer configurations";
+    spdlog::error("failed to get EGL frame buffer configurations");
     return;
   }
 
-  FML_DLOG(INFO) << "EGL framebuffer configurations:";
+  spdlog::info("EGL framebuffer configurations:");
   for (EGLint i = 0; i < num_config; i++) {
-    FML_DLOG(INFO) << "\tConfiguration #" << (int)i << ":\n";
-    for (auto& egl_config_attribute : egl_config_attributes) {
+    ss << "\tConfiguration #" << i;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
+    for (auto& attribute : egl_config_attributes) {
       EGLint value = 0;
-      eglGetConfigAttrib(m_dpy, configs[i], egl_config_attribute.id, &value);
-      if (egl_config_attribute.cardinality == 0) {
-        FML_DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": "
-                       << (int)value;
-      } else if (egl_config_attribute.cardinality > 0) {
+      eglGetConfigAttrib(m_dpy, configs[i], attribute.id, &value);
+      if (attribute.cardinality == 0) {
+        ss << "\t\t" << attribute.name << ": " << value;
+        spdlog::info(ss.str().c_str());
+        ss.str("");
+        ss.clear();
+      } else if (attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
-        for (size_t k = 0; k < (size_t)egl_config_attribute.cardinality; k++) {
-          if (egl_config_attribute.values[k].id == value) {
-            FML_DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": "
-                           << egl_config_attribute.values[k].name;
+        for (size_t k = 0; k < (size_t)attribute.cardinality; k++) {
+          if (attribute.values[k].id == value) {
+            ss << "\t\t" << attribute.name << ": " << attribute.values[k].name;
+            spdlog::info(ss.str().c_str());
+            ss.str("");
+            ss.clear();
             known_value = true;
             break;
           }
         }
         if (!known_value) {
-          FML_DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": unknown ("
-                         << value << ")";
+          ss << "\t\t" << attribute.name << ": unknown (" << value << ")";
+          spdlog::info(ss.str().c_str());
+          ss.str("");
+          ss.clear();
         }
       } else {
         /* Bitfield */
-        FML_DLOG(INFO) << "\t\t" << egl_config_attribute.name << ": ";
+        ss << "\t\t" << attribute.name << ": ";
         if (value == 0) {
-          FML_DLOG(INFO) << "none";
+          ss << "none";
+          spdlog::info(ss.str().c_str());
+          ss.str("");
+          ss.clear();
         } else {
-          for (size_t k = 0; k < (size_t)-egl_config_attribute.cardinality;
-               k++) {
-            if (egl_config_attribute.values[k].id & value) {
-              value &= ~egl_config_attribute.values[k].id;
+          for (size_t k = 0; k < (size_t)-attribute.cardinality; k++) {
+            if (attribute.values[k].id & value) {
+              value &= ~attribute.values[k].id;
               if (value != 0) {
-                FML_DLOG(INFO) << egl_config_attribute.values[k].name << " | ";
+                ss << attribute.values[k].name << " | ";
               } else {
-                FML_DLOG(INFO) << egl_config_attribute.values[k].name;
+                ss << attribute.values[k].name;
+                spdlog::info(ss.str().c_str());
+                ss.str("");
+                ss.clear();
               }
             }
           }
           if (value != 0) {
-            FML_DLOG(INFO) << (int)value;
+            ss << (int)value;
+            spdlog::info(ss.str().c_str());
+            ss.str("");
+            ss.clear();
           }
         }
       }
     }
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
 }
 
@@ -549,65 +692,65 @@ void Egl::sDebugCallback(EGLenum error,
                          EGLLabelKHR threadLabel,
                          EGLLabelKHR objectLabel,
                          const char* message) {
-  FML_LOG(ERROR) << "**** EGL Error";
-  FML_LOG(ERROR) << "\terror: " << error;
-  FML_LOG(ERROR) << "\tcommand: " << command;
+  spdlog::error("**** EGL Error");
+  spdlog::error("\terror: {}", error);
+  spdlog::error("\tcommand: {}", command);
   switch (error) {
     case EGL_BAD_ACCESS:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_ACCESS";
+      spdlog::error("\terror: EGL_BAD_ACCESS");
       break;
     case EGL_BAD_ALLOC:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_ALLOC";
+      spdlog::error("\terror: EGL_BAD_ALLOC");
       break;
     case EGL_BAD_ATTRIBUTE:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_ATTRIBUTE";
+      spdlog::error("\terror: EGL_BAD_ATTRIBUTE");
       break;
     case EGL_BAD_CONFIG:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_CONFIG";
+      spdlog::error("\terror: EGL_BAD_CONFIG");
       break;
     case EGL_BAD_CONTEXT:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_CONTEXT";
+      spdlog::error("\terror: EGL_BAD_CONTEXT");
       break;
     case EGL_BAD_CURRENT_SURFACE:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_CURRENT_SURFACE";
+      spdlog::error("\terror: EGL_BAD_CURRENT_SURFACE");
       break;
     case EGL_BAD_DISPLAY:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_DISPLAY";
+      spdlog::error("\terror: EGL_BAD_DISPLAY");
       break;
     case EGL_BAD_MATCH:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_MATCH";
+      spdlog::error("\terror: EGL_BAD_MATCH");
       break;
     case EGL_BAD_NATIVE_PIXMAP:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_NATIVE_PIXMAP";
+      spdlog::error("\terror: EGL_BAD_NATIVE_PIXMAP");
       break;
     case EGL_BAD_NATIVE_WINDOW:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_NATIVE_WINDOW";
+      spdlog::error("\terror: EGL_BAD_NATIVE_WINDOW");
       break;
     case EGL_BAD_PARAMETER:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_PARAMETER";
+      spdlog::error("\terror: EGL_BAD_PARAMETER");
       break;
     case EGL_BAD_SURFACE:
-      FML_LOG(ERROR) << "\terror: EGL_BAD_SURFACE";
+      spdlog::error("\terror: EGL_BAD_SURFACE");
       break;
     default:
-      FML_LOG(ERROR) << "\terror: " << error;
+      spdlog::error("\terror: {}", error);
       break;
   }
-  FML_LOG(ERROR) << "\tmessageType: " << messageType;
-  FML_LOG(ERROR) << "\tthreadLabel: " << threadLabel;
-  FML_LOG(ERROR) << "\tobjectLabel: " << objectLabel;
-  FML_LOG(ERROR) << "\tmessage: " << ((message == nullptr) ? "" : message);
+  spdlog::error("\tmessageType: {}", messageType);
+  spdlog::error("\tthreadLabel: {}", threadLabel);
+  spdlog::error("\tobjectLabel: {}", objectLabel);
+  spdlog::error("\tmessage: {}", ((message == nullptr) ? "" : message));
 }
 
-void Egl::EGL_KHR_debug_init() {
-  const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-
-  if (extensions && (strstr(extensions, "EGL_KHR_debug"))) {
-    FML_DLOG(INFO) << "EGL_KHR_debug initialized";
+void Egl::EGL_KHR_debug_init(
+    std::unordered_map<EGLDisplay, const char*>& extensions) {
+  SPDLOG_TRACE("+EGL_KHR_debug_init");
+  if (HasEGLExtension(extensions, EGL_NO_DISPLAY, "EGL_KHR_debug")) {
+    SPDLOG_DEBUG("EGL_KHR_debug");
 
     m_pfDebugMessageControl =
-        (PFNEGLDEBUGMESSAGECONTROLKHRPROC)get_egl_proc_address(
-            "eglDebugMessageControlKHR");
+        reinterpret_cast<PFNEGLDEBUGMESSAGECONTROLKHRPROC>(
+            eglGetProcAddress("eglDebugMessageControlKHR"));
     assert(m_pfDebugMessageControl);
 
     const EGLAttrib sDebugAttribList[] = {EGL_DEBUG_MSG_CRITICAL_KHR,
@@ -623,25 +766,15 @@ void Egl::EGL_KHR_debug_init() {
 
     m_pfDebugMessageControl(sDebugCallback, sDebugAttribList);
 
-    m_pfQueryDebug =
-        (PFNEGLQUERYDEBUGKHRPROC)get_egl_proc_address("eglQueryDebugKHR");
+    m_pfQueryDebug = reinterpret_cast<PFNEGLQUERYDEBUGKHRPROC>(
+        eglGetProcAddress("eglQueryDebugKHR"));
     assert(m_pfQueryDebug);
 
-    m_pfLabelObject =
-        (PFNEGLLABELOBJECTKHRPROC)get_egl_proc_address("eglLabelObjectKHR");
+    m_pfLabelObject = reinterpret_cast<PFNEGLLABELOBJECTKHRPROC>(
+        eglGetProcAddress("eglLabelObjectKHR"));
     assert(m_pfLabelObject);
   }
-}
-
-void* Egl::get_egl_proc_address(const char* address) {
-  const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-
-  if (extensions && (strstr(extensions, "EGL_EXT_platform_wayland") ||
-                     strstr(extensions, "EGL_KHR_platform_wayland"))) {
-    return (void*)eglGetProcAddress(address);
-  }
-
-  return nullptr;
+  SPDLOG_TRACE("-EGL_KHR_debug_init");
 }
 
 EGLDisplay Egl::get_egl_display(EGLenum platform,
@@ -654,9 +787,8 @@ EGLDisplay Egl::get_egl_display(EGLenum platform,
     return dpy;
 
   if (!get_platform_display) {
-    get_platform_display =
-        (PFNEGLGETPLATFORMDISPLAYEXTPROC)get_egl_proc_address(
-            "eglGetPlatformDisplayEXT");
+    get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+        eglGetProcAddress("eglGetPlatformDisplayEXT"));
   }
 
   if (get_platform_display) {
@@ -675,8 +807,8 @@ EGLSurface Egl::create_egl_surface(void* native_window,
 
   if (!create_platform_window) {
     create_platform_window =
-        (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)get_egl_proc_address(
-            "eglCreatePlatformWindowSurfaceEXT");
+        reinterpret_cast<PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC>(
+            eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT"));
   }
 
   if (create_platform_window)

@@ -38,12 +38,25 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
       MethodSetApplicationSwitcherDescription description{};
       description.label = (*args)["label"].GetString();
       description.primaryColor = (*args)["primaryColor"].GetUint();
-      FML_DLOG(INFO)
-          << "(" << engine->GetIndex()
-          << ") Platform: ApplicationSwitcherDescription\n\tlabel: \""
-          << description.label
-          << "\"\n\tprimaryColor: " << description.primaryColor;
+      SPDLOG_DEBUG(
+          "({}) Platform: ApplicationSwitcherDescription\n\tlabel: "
+          "\"{}\"\n\tprimaryColor: {}",
+          engine->GetIndex(), description.label, description.primaryColor);
+
       result = codec.EncodeSuccessEnvelope();
+    } else {
+      result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
+    }
+  } else if (method == kPlaySoundMethod) {
+    if (!args->IsNull() && args->IsString()) {
+      auto sound_type = args->GetString();
+      if (0 == strcmp(sound_type, kSoundTypeClick)) {
+        SPDLOG_DEBUG("({}) SystemSound.play ** click **", engine->GetIndex());
+        result = codec.EncodeSuccessEnvelope();
+      } else if (0 == strcmp(sound_type, kSoundTypeAlert)) {
+        SPDLOG_DEBUG("({}) SystemSound.play ** alert **", engine->GetIndex());
+        result = codec.EncodeSuccessEnvelope();
+      }
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
@@ -83,28 +96,35 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
   } else if (method == kMethodClipboardSetData) {
     if (!args->IsNull() && args->HasMember("text") &&
         !((*args)["text"].IsNull())) {
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") Clipboard Data Set: \n"
-                     << (*args)["text"].GetString();
+      SPDLOG_DEBUG("({}) Clipboard Data Set: \n{}", engine->GetIndex(),
+                   (*args)["text"].GetString());
       g_clipboard.assign((*args)["text"].GetString());
       result = codec.EncodeSuccessEnvelope();
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kMethodSetEnabledSystemUIOverlays) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex()
-                   << ") System UI Overlays Enabled";
+    SPDLOG_DEBUG("({}) System UI Overlays Enabled", engine->GetIndex());
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kHapticFeedbackVibrate) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex()
-                   << ") Haptic Feedback - Vibrate";
+    SPDLOG_DEBUG("({}) Haptic Feedback - Vibrate", engine->GetIndex());
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kSystemChrome_setPreferredOrientations) {
-    FML_DLOG(INFO) << "(" << engine->GetIndex() << ") setPreferredOrientations";
+    SPDLOG_DEBUG("({}) setPreferredOrientations", engine->GetIndex());
     if (!args->IsNull()) {
       for (const auto& field : args->GetArray()) {
-        FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                       << field.GetString();
+        (void)field;
+        SPDLOG_DEBUG("({}) {}", engine->GetIndex(), field.GetString());
       }
+    }
+    result = codec.EncodeSuccessEnvelope();
+  } else if (method == kSystemChrome_setEnabledSystemUIMode) {
+    if (!args->IsNull() && args->IsString()) {
+      SPDLOG_DEBUG("({}) SystemChrome.setEnabledSystemUIMode: {}",
+                   engine->GetIndex(), args->GetString());
+    } else {
+      SPDLOG_DEBUG("({}) SystemChrome.setEnabledSystemUIMode: Unknown",
+                   engine->GetIndex());
     }
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSetSystemUiOverlayStyle) {
@@ -114,74 +134,76 @@ void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
         (*args)[kSystemNavigationBarColor].IsNumber()) {
       style.systemNavigationBarColor =
           (*args)[kSystemNavigationBarColor].GetUint();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarColor << ": "
-                     << style.systemNavigationBarColor;
+      SPDLOG_DEBUG("({}) {}: {}", engine->GetIndex(), kSystemNavigationBarColor,
+                   style.systemNavigationBarColor);
     }
     if (args->HasMember(kSystemNavigationBarDividerColor) &&
         !(*args)[kSystemNavigationBarDividerColor].IsNull() &&
         (*args)[kSystemNavigationBarDividerColor].IsNumber()) {
       style.systemNavigationBarDividerColor =
           (*args)[kSystemNavigationBarDividerColor].GetUint();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarDividerColor << ": "
-                     << style.systemNavigationBarDividerColor;
+      SPDLOG_DEBUG("({}) {}: {}", engine->GetIndex(),
+                   kSystemNavigationBarDividerColor,
+                   style.systemNavigationBarDividerColor);
     }
     if (args->HasMember(kSystemStatusBarContrastEnforced) &&
         !(*args)[kSystemStatusBarContrastEnforced].IsNull() &&
         (*args)[kSystemStatusBarContrastEnforced].IsBool()) {
       style.systemStatusBarContrastEnforced =
           (*args)[kSystemStatusBarContrastEnforced].GetBool();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemStatusBarContrastEnforced << ": "
-                     << style.systemStatusBarContrastEnforced;
+      SPDLOG_DEBUG("({}) {}: {}", engine->GetIndex(),
+                   kSystemStatusBarContrastEnforced,
+                   style.systemStatusBarContrastEnforced);
     }
     if (args->HasMember(kStatusBarColor) &&
         !(*args)[kStatusBarColor].IsNull() &&
         (*args)[kStatusBarColor].IsNumber()) {
       style.statusBarColor = (*args)[kStatusBarColor].GetUint();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") " << kStatusBarColor
-                     << ": " << style.statusBarColor;
+      SPDLOG_DEBUG("({}) {}:{}", engine->GetIndex(), kStatusBarColor,
+                   style.statusBarColor);
     }
     if (args->HasMember(kStatusBarBrightness) &&
         !(*args)[kStatusBarBrightness].IsNull() &&
         (*args)[kStatusBarBrightness].IsString()) {
       style.statusBarBrightness = (*args)[kStatusBarBrightness].GetString();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kStatusBarBrightness << ": "
-                     << style.statusBarBrightness;
+      SPDLOG_DEBUG("({}) {}:{}", engine->GetIndex(), kStatusBarBrightness,
+                   style.statusBarBrightness);
     }
     if (args->HasMember(kStatusBarIconBrightness) &&
         !(*args)[kStatusBarIconBrightness].IsNull() &&
         (*args)[kStatusBarIconBrightness].IsString()) {
       style.statusBarIconBrightness =
           (*args)[kStatusBarIconBrightness].GetString();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kStatusBarIconBrightness << ": "
-                     << style.statusBarIconBrightness;
+      SPDLOG_DEBUG("({}) {}:{}", engine->GetIndex(), kStatusBarIconBrightness,
+                   style.statusBarIconBrightness);
     }
     if (args->HasMember(kSystemNavigationBarIconBrightness) &&
         !(*args)[kSystemNavigationBarIconBrightness].IsNull() &&
         (*args)[kSystemNavigationBarIconBrightness].IsString()) {
       style.systemNavigationBarIconBrightness =
           (*args)[kSystemNavigationBarIconBrightness].GetString();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarIconBrightness << ": "
-                     << style.systemNavigationBarIconBrightness;
+      SPDLOG_DEBUG("({}) {}:{}", engine->GetIndex(),
+                   kSystemNavigationBarIconBrightness,
+                   style.systemNavigationBarIconBrightness);
     }
     if (args->HasMember(kSystemNavigationBarContrastEnforced) &&
         !(*args)[kSystemNavigationBarContrastEnforced].IsNull() &&
         (*args)[kSystemNavigationBarContrastEnforced].IsBool()) {
       style.systemNavigationBarContrastEnforced =
           (*args)[kSystemNavigationBarContrastEnforced].GetBool();
-      FML_DLOG(INFO) << "(" << engine->GetIndex() << ") "
-                     << kSystemNavigationBarContrastEnforced << ": "
-                     << style.systemNavigationBarContrastEnforced;
+      SPDLOG_DEBUG("({}) {}:{}", engine->GetIndex(),
+                   kSystemNavigationBarContrastEnforced,
+                   style.systemNavigationBarContrastEnforced);
     }
     result = codec.EncodeSuccessEnvelope();
+  } else if (method == kLiveText_isLiveTextInputAvailable) {
+    SPDLOG_DEBUG("({}) {}", engine->GetIndex(), kLiveText_isLiveTextInputAvailable);
+    result = codec.EncodeSuccessEnvelope();
+  } else if (method == kSystemInitializationComplete) {
+    SPDLOG_DEBUG("({}) {}", engine->GetIndex(), kSystemInitializationComplete);
+    result = codec.EncodeSuccessEnvelope();
   } else {
-    FML_DLOG(ERROR) << "(" << engine->GetIndex() << ") Platform: " << method
-                    << " is unhandled";
+    spdlog::error("({}) Platform: {} is unhandled", engine->GetIndex(), method);
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

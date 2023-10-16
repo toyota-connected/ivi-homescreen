@@ -97,11 +97,10 @@ class KeyEvent : public flutter::BinaryMessenger {
   /**
    * @brief the handler for key event
    * @param[in] data Pointer to Ueer data
-   * @param[in] type the type of Flutter KeyEvent
-   * @param[in] code key code
-   * @param[in] sym key symbol
-   * @param[in] hook_data Pointer to Hook data
-   * @paran[in] hook another callback when a key is handled.
+   * @param[in] eventType the type of Flutter KeyEvent
+   * @param[in] xkb_scancode key code
+   * @param[in] keysym key symbol
+   * @param[in] delegate another callback when a key is handled.
    *            This will be called only when a key event is not handled in
    * flutter app.
    * @return void
@@ -142,9 +141,10 @@ class KeyEvent : public flutter::BinaryMessenger {
   /**
    * @brief convert key event from xkb to flutter and send it to flutter engine
    * @param[in] released true if a key is released and vice versa
-   * @param[in] sym key symbol
-   * @param[in] code key code
+   * @param[in] keysym key symbol
+   * @param[in] xkb_scancode key code
    * @param[in] modifiers key modifiers
+   * @param[in] delegate shared pointer to delegate
    * @return void
    * @relation
    * flutter, wayland
@@ -161,9 +161,9 @@ class KeyEvent : public flutter::BinaryMessenger {
 
   /**
    * @brief The reply callback impl for SendPlatformMessage
-   * @param[in] the reply data
-   * @param[in] the reply size
-   * @param[in] user data
+   * @param[in] data reply data
+   * @param[in] data_size reply size
+   * @param[in] userdata data
    * @return void
    * @relation
    * flutter
@@ -185,8 +185,8 @@ class KeyEvent : public flutter::BinaryMessenger {
 
   /**
    * @brief parse a reply from a flutter app
-   * @param[in] the reply data
-   * @param[in] the reply size
+   * @param[in] reply reply data
+   * @param[in] reply_size reply size
    * @return FL_KEY_EV_RET_T
    *         If it is failed to parse a reply, return FL_KEY_EV_RET_FAILED.
    *         If it is complete to parse a reply, return FL_KEY_EV_RET_HANDLED or
@@ -222,7 +222,7 @@ class KeyEvent : public flutter::BinaryMessenger {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED NODISCARD void SetMessageHandler(
+  MAYBE_UNUSED void SetMessageHandler(
       const std::string& channel,
       flutter::BinaryMessageHandler handler) override;
 };

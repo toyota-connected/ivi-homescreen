@@ -20,10 +20,18 @@
 #include <shell/platform/embedder/embedder.h>
 #include <array>
 
+// GIT
+constexpr char kGitBranch[] = GIT_BRANCH;
+constexpr char kGitCommitHash[] = GIT_HASH;
+
 // Screen Size
 constexpr int32_t kDefaultViewWidth = 1920;
 constexpr int32_t kDefaultViewHeight = 720;
 constexpr int kEglBufferSize = 24;
+
+// Logging
+constexpr int32_t kLogFlushInterval = 5;
+constexpr int32_t kVmLogChunkMax = 10;
 
 // Scale Factor
 constexpr double kDefaultBufferScale = 1.0;
@@ -36,8 +44,11 @@ constexpr char kCursorKindClick[] = "hand";
 constexpr char kCursorKindText[] = "left_ptr";
 constexpr char kCursorKindForbidden[] = "pirate";
 
-// Touch
-constexpr int kMaxTouchPoints = 10;
+// Mouse/Touch
+static constexpr int kMaxTouchFinger = 10;
+static constexpr int kPointerEventModulus = 2;
+static constexpr int kMaxPointerEvent =
+    kMaxTouchFinger * (15 * kPointerEventModulus);
 
 // Locale
 constexpr char kDefaultLocaleLanguageCode[] = "en";
@@ -62,8 +73,18 @@ static constexpr char kApplicationName[] = "flutter-auto";
 static constexpr char kXdgApplicationDir[] = ".flutter-auto";
 static constexpr char kXdgConfigDir[] = ".config";
 
+// DLT Logging
+static constexpr char kDltAppId[] = "HMIF";
+static constexpr char kDltAppIdDescription[] = "HMI Flutter";
+static constexpr char kDltContextId[] = "FEMB";
+static constexpr char kDltContextIdDescription[] = "Flutter Embedder";
+
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
+
+// Crash Handler
+static constexpr char kCrashHandlerDsn[] = CRASH_HANDLER_DSN;
+static constexpr char kCrashHandlerRelease[] = CRASH_HANDLER_RELEASE;
 
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off
@@ -73,11 +94,12 @@ static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format on
 }};
 
-static constexpr std::array<EGLint, 15> kEglConfigAttribs = {{
+static constexpr std::array<EGLint, 23> kEglConfigAttribs = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+
     EGL_RED_SIZE, 8,
     EGL_GREEN_SIZE, 8,
     EGL_BLUE_SIZE, 8,
@@ -86,6 +108,14 @@ static constexpr std::array<EGLint, 15> kEglConfigAttribs = {{
 #else
     EGL_ALPHA_SIZE, 0,
 #endif
+#if defined(BUILD_EGL_ENABLE_3D)
+    EGL_STENCIL_SIZE, 8,
+    EGL_DEPTH_SIZE, 16,
+#else
+    EGL_STENCIL_SIZE, 0,
+    EGL_DEPTH_SIZE, 0,
+#endif
+
     EGL_NONE // termination sentinel
     // clang-format on
 }};

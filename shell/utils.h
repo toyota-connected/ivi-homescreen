@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <functional>
 #include <locale>
 
@@ -11,6 +12,14 @@
 #include <cstring>
 
 #include "constants.h"
+#include "fml/paths.h"
+
+/* switch private and public declarations */
+#ifdef UNIT_TEST
+#define PRIVATE public
+#else
+#define PRIVATE private
+#endif
 
 class Utils {
  public:
@@ -105,5 +114,49 @@ class Utils {
       config_home_dir = GetHomePath();
     }
     return config_home_dir;
+  }
+
+  /**
+   * @brief Check if input is a number
+   * @param[in] s String to check if it is a number
+   * @return bool
+   * @retval true If s is a number
+   * @retval false If s is not a number
+   * @relation
+   * internal
+   */
+  static bool IsNumber(const std::string& s) {
+    return std::all_of(s.begin(), s.end(),
+                       [](char c) { return isdigit(c) != 0; });
+  }
+
+  /**
+   * @brief Remove argument from vector
+   * @param[in] args Vector of element that matches the argument to be removed
+   * @param[in] arg Arguments to be removed
+   * @return void
+   * @relation
+   * internal
+   */
+  static void RemoveArgument(std::vector<std::string>& args,
+                             const std::string& arg) {
+    auto result = std::find(args.begin(), args.end(), arg);
+    if (result != args.end()) {
+      args.erase(result);
+    }
+  }
+
+  /**
+   * @brief Get epoch time in seconds
+   * @return current time in epoch seconds
+   * @relation
+   * internal
+   */
+  static int64_t GetEpochTimeInSeconds() {
+    const auto now = std::chrono::system_clock::now();
+    const auto epoch = now.time_since_epoch();
+    const auto seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(epoch);
+    return seconds.count();
   }
 };
