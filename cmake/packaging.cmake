@@ -23,8 +23,8 @@ else ()
 endif ()
 
 set(CPACK_DEFAULT_PACKAGE_DESCRIPTION_SUMMARY "IVI Homescreen - ${CMAKE_BUILD_TYPE}")
-set(CPACK_PACKAGE_VENDOR "Toyota Motor Corporation")
-set(CPACK_PACKAGE_CONTACT "joel.winarske@woven-planet.global")
+set(CPACK_PACKAGE_VENDOR "Toyota Connected North America")
+set(CPACK_PACKAGE_CONTACT "joel.winarske@toyotaconnected.com")
 
 set(CPACK_VERBATIM_VARIABLES YES)
 
@@ -35,7 +35,7 @@ set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
 
 set(CPACK_DEB_COMPONENT_INSTALL YES)
 
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Joel Winarske <joel.winarske@woven-planet.global>")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Joel Winarske <joel.winarske@toyotaconnected.com>")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS YES)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 
