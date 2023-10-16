@@ -1,4 +1,4 @@
-name: stargate-ivi-homescreen-linux
+name: stargate-ivi-homescreen
 
 on:
   pull_request:
@@ -14,6 +14,7 @@ env:
 
 jobs:
   build:
+    if: ${{ github.server_url != 'https://github.com' && always() }}
     runs-on: [ self-hosted ]
     container:
       image: arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com/ivi-homescreen-dev:latest
