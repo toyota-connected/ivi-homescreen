@@ -434,9 +434,35 @@ Configuration::Config Configuration::ConfigFromArgcArgv(
   return config;
 }
 
+void PrintUsage() {
+  fprintf(stdout,
+          "Usage: %s [options] [flutter VM arguments]\n"
+          "Options:\n"
+          "\t--b=<dir path>                Path to a bundle directory (required)\n"
+          "\t--j=<file path>               Path to a json configuration file\n"
+          "\t--a=<integer>                 Accessibility feature flag(s)\n"
+          "\t--c                           Disable cursor\n"
+          "\t--d                           Debug backend\n"
+          "\t--f                           Full screen\n"
+          "\t--w=<integer>                 Output width in pixels\n"
+          "\t--h=<integer>                 Output height in pixels\n"
+          "\t--p=<decimal>                 Pixel ratio\n"
+          "\t--t=<string>                  Cursor theme name\n"
+          "\t--window-type=<string>        AGL window type (only applies to "
+          "AGL-compositor)\n"
+          "\t--output-index=<integer>      Wayland output index\n"
+          "\t--xdg-shell-app-id=<string>   XDG shell app id\n"
+          "\t--wayland-event-mask=<string> Wayland events to mask\n"
+          "\t--i=<ivi surface id>          IVI Surface ID\n", kApplicationName);
+}
+
 int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
                                               Configuration::Config& config) {
   if (!cl.options().empty()) {
+    if (cl.HasOption("?") || cl.HasOption("help")) {
+      PrintUsage();
+      exit(EXIT_SUCCESS);
+    }
     if (cl.HasOption("j")) {
       cl.GetOptionValue("j", &config.json_configuration_path);
       if (config.json_configuration_path.empty()) {
@@ -640,6 +666,10 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
           strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
       Utils::RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
     }
+  }
+  else {
+    PrintUsage();
+    exit(EXIT_SUCCESS);
   }
   return EXIT_SUCCESS;
 }
