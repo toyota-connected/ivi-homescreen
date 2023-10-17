@@ -19,7 +19,10 @@ else()
     message(FATAL_ERROR "Platform not supported. BlueVK supports Linux, Android, MacOS X, and Windows.")
 endif()
 
-include_directories(${PUBLIC_HDR_DIR})
+include_directories(
+        ${PUBLIC_HDR_DIR}
+        ../../../spdlog-1.12.0/include
+)
 
 add_library(${TARGET} STATIC ${PUBLIC_HDRS} ${SRCS})
 
