@@ -41,19 +41,22 @@ jobs:
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            -D BUILD_PLUGIN_SECURE_STORAGE=ON
+            -D BUILD_PLUGIN_SECURE_STORAGE=ON \
+            -D CMAKE_VERBOSE_MAKEFILE=ON
           mkdir -p ${{github.workspace}}/build/debug-egl
           cmake \
             -B ${{github.workspace}}/build/debug-egl \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            -D BUILD_PLUGIN_SECURE_STORAGE=ON
+            -D BUILD_PLUGIN_SECURE_STORAGE=ON \
+            -D CMAKE_VERBOSE_MAKEFILE=ON
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug-egl
         run: |
           rm -rf _packages || true
-          make package -j
+          make flutter-auto VERBOSE=1
+          make package VERBOSE=1
           ls -la _packages
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v3
@@ -77,7 +80,8 @@ jobs:
         working-directory: ${{github.workspace}}/build/release-egl
         run: |
           rm -rf _packages || true
-          make package -j
+          make flutter-auto VERBOSE=1
+          make package VERBOSE=1
           ls -la _packages
           echo "Release Info"
           ls -la shell/flutter-auto
@@ -141,12 +145,14 @@ jobs:
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_PLUGIN_COMP_SURF=ON \
-            -D BUILD_PLUGIN_SECURE_STORAGE=ON
+            -D BUILD_PLUGIN_SECURE_STORAGE=ON \
+            -D CMAKE_VERBOSE_MAKEFILE=ON
       - name: Build Debug Packages
         working-directory: ${{github.workspace}}/build/debug-vulkan
         run: |
           rm -rf _packages || true
-          make package -j
+          make flutter-auto VERBOSE=1
+          make package VERBOSE=1
           ls -la _packages
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v3
@@ -170,7 +176,8 @@ jobs:
         working-directory: ${{github.workspace}}/build/release-vulkan
         run: |
           rm -rf _packages || true
-          make package -j
+          make flutter-auto VERBOSE=1
+          make package VERBOSE=1
           ls -la _packages
           echo "Release Info"
           ls -la shell/flutter-auto
