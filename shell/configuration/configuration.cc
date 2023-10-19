@@ -15,14 +15,14 @@
 
 #include "configuration.h"
 
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 
+#include <flutter/fml/command_line.h>
 #include <rapidjson/document.h>
 #include "constants.h"
 #include "logging.h"
 #include "utils.h"
-#include <flutter/fml/command_line.h>
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
   if (!doc.HasMember(kViewKey)) {
@@ -89,6 +89,17 @@ void Configuration::getViewParameters(
   }
   if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsUint()) {
     instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetUint();
+  }
+
+  if (obj.HasMember(kWindowActivationAreaKey)) {
+    const rapidjson::GenericValue val =
+        obj[kWindowActivationAreaKey].GetObject();
+
+    instance.view.activation_area_x = val["x"].GetInt();
+    instance.view.activation_area_y = val["y"].GetInt();
+
+    SPDLOG_DEBUG("activation area x {}", instance.view.activation_area_x);
+    SPDLOG_DEBUG("activation area y {}", instance.view.activation_area_y);
   }
 }
 
@@ -297,8 +308,10 @@ void Configuration::PrintConfig(const Config& config) {
   spdlog::info("Accessibility Features: ... {}", config.view.accessibility_features);
 }
 
-Configuration::Config Configuration::ConfigFromArgcArgv(int argc, const char* const* argv) {
-  struct Configuration::Config config{};
+Configuration::Config Configuration::ConfigFromArgcArgv(
+    int argc,
+    const char* const* argv) {
+  struct Configuration::Config config {};
   config.view.vm_args.reserve(static_cast<unsigned long>(argc - 1));
   for (int i = 1; i < argc; ++i) {
     config.view.vm_args.emplace_back(argv[i]);
@@ -314,9 +327,35 @@ Configuration::Config Configuration::ConfigFromArgcArgv(int argc, const char* co
   return config;
 }
 
-int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuration::Config& config) {
+void PrintUsage() {
+  fprintf(stdout,
+          "Usage: %s [options] [flutter VM arguments]\n"
+          "Options:\n"
+          "\t--b=<dir path>                Path to a bundle directory (required)\n"
+          "\t--j=<file path>               Path to a json configuration file\n"
+          "\t--a=<integer>                 Accessibility feature flag(s)\n"
+          "\t--c                           Disable cursor\n"
+          "\t--d                           Debug backend\n"
+          "\t--f                           Full screen\n"
+          "\t--w=<integer>                 Output width in pixels\n"
+          "\t--h=<integer>                 Output height in pixels\n"
+          "\t--p=<decimal>                 Pixel ratio\n"
+          "\t--t=<string>                  Cursor theme name\n"
+          "\t--window-type=<string>        AGL window type (only applies to "
+          "AGL-compositor)\n"
+          "\t--output-index=<integer>      Wayland output index\n"
+          "\t--xdg-shell-app-id=<string>   XDG shell app id\n"
+          "\t--wayland-event-mask=<string> Wayland events to mask\n"
+          "\t--i=<ivi surface id>          IVI Surface ID\n", kApplicationName);
+}
 
+int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
+                                              Configuration::Config& config) {
   if (!cl.options().empty()) {
+    if (cl.HasOption("?") || cl.HasOption("help")) {
+      PrintUsage();
+      exit(EXIT_SUCCESS);
+    }
     if (cl.HasOption("j")) {
       cl.GetOptionValue("j", &config.json_configuration_path);
       if (config.json_configuration_path.empty()) {
@@ -327,7 +366,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       SPDLOG_DEBUG("Json Configuration: {}", config.json_configuration_path);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--j=" + config.json_configuration_path);
+                            "--j=" + config.json_configuration_path);
     }
     if (cl.HasOption("a")) {
       std::string accessibility_feature_flag_str;
@@ -363,7 +402,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
           Configuration::MaskAccessibilityFeatures(
               config.view.accessibility_features);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--a=" + accessibility_feature_flag_str);
+                            "--a=" + accessibility_feature_flag_str);
     }
     if (cl.HasOption("b")) {
       cl.GetOptionValue("b", &config.view.bundle_path);
@@ -376,7 +415,8 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
         return EXIT_FAILURE;
       }
       SPDLOG_DEBUG("Bundle Path: {}", config.view.bundle_path);
-      Utils::RemoveArgument(config.view.vm_args, "--b=" + config.view.bundle_path);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--b=" + config.view.bundle_path);
     }
     if (cl.HasOption("c")) {
       SPDLOG_DEBUG("Disable Cursor");
@@ -446,7 +486,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       SPDLOG_DEBUG("Window Type: {}", config.view.window_type);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--window-type=" + config.view.window_type);
+                            "--window-type=" + config.view.window_type);
     }
     if (cl.HasOption("output-index")) {
       std::string output_index_str;
@@ -465,7 +505,8 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       config.view.wl_output_index =
           static_cast<uint32_t>(std::stoul(output_index_str));
-      Utils::RemoveArgument(config.view.vm_args, "--output-index=" + output_index_str);
+      Utils::RemoveArgument(config.view.vm_args,
+                            "--output-index=" + output_index_str);
     }
     if (cl.HasOption("xdg-shell-app-id")) {
       cl.GetOptionValue("xdg-shell-app-id", &config.app_id);
@@ -477,7 +518,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
       }
       SPDLOG_DEBUG("Application ID: {}", config.app_id);
       Utils::RemoveArgument(config.view.vm_args,
-                     "--xdg-shell-app-id=" + config.app_id);
+                            "--xdg-shell-app-id=" + config.app_id);
     }
     if (cl.HasOption("wayland-event-mask")) {
       cl.GetOptionValue("wayland-event-mask", &config.wayland_event_mask);
@@ -488,8 +529,8 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
         return EXIT_FAILURE;
       }
       SPDLOG_DEBUG("Wayland Event Mask: {}", config.wayland_event_mask);
-      Utils::RemoveArgument(config.view.vm_args,
-                     "--wayland-event-mask=" + config.wayland_event_mask);
+      Utils::RemoveArgument(config.view.vm_args, "--wayland-event-mask=" +
+                                                     config.wayland_event_mask);
     }
     if (cl.HasOption("p")) {
       std::string pixel_ratio_str;
@@ -518,6 +559,10 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl, Configuratio
           strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
       Utils::RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
     }
+  }
+  else {
+    PrintUsage();
+    exit(EXIT_SUCCESS);
   }
   return EXIT_SUCCESS;
 }

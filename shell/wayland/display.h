@@ -19,10 +19,10 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
 
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
@@ -166,6 +166,35 @@ class Display {
   void AglShellDoReady() const;
 
   /**
+   * @brief AglShell: Set up an activation area where to display the client's
+   * window
+   * @return void
+   * @param[in] x the x position for the activation rectangle
+   * @param[in] y the y position for the activation rectangle
+   * @param[index] the output, as a number
+   * @relation
+   *
+   * see agl-shell::set_activate_region request for more information. The x and
+   * y values are the position of an activation rectangle, with the width and
+   * height grabbed from the output itself. This would specify the area where
+   * the client's window will be displayed.
+   *
+   * --------------------
+   * |                  |
+   * |  (x, y)          |
+   * |  +--------       |
+   * |  |       |       |
+   * |  |       | height|
+   * |  |       |       |
+   * |  ---------       |
+   * |    width		|
+   * .			|
+   * |			|
+   * --------------------
+   */
+  void AglShellDoSetupActivationArea(uint32_t x, uint32_t y, uint32_t index);
+
+  /**
    * @brief Set Engine
    * @param[in] surface Image
    * @param[in] engine Engine
@@ -266,7 +295,7 @@ class Display {
     bool bind_to_agl_shell = false;
     struct agl_shell* shell{};
 
-    bool wait_for_bound{};
+    bool wait_for_bound = true;
     bool bound_ok{};
     uint32_t version = 0;
   } m_agl;
@@ -299,6 +328,7 @@ class Display {
     MAYBE_UNUSED int refresh_rate;
     int32_t scale;
     MAYBE_UNUSED bool done;
+    int transform;
   } output_info_t;
 
   struct pointer_event {
@@ -372,7 +402,7 @@ class Display {
    * @relation
    * internal
    */
-  static inline void set_repeat_code(Display *d, uint32_t repeat_code) {
+  static inline void set_repeat_code(Display* d, uint32_t repeat_code) {
     std::lock_guard<std::mutex> lock(d->m_lock);
     d->m_repeat_code = repeat_code;
   }
@@ -907,6 +937,22 @@ class Display {
    * @note Do nothing
    */
   static void agl_shell_bound_fail(void* data, struct agl_shell* shell);
+
+  /**
+   * @brief AGL app_state event
+   * @param[in,out] data Data of type Display
+   * @param[in] shell No use
+   * @param[in] app_id the application id for which this event was sent
+   * @param[in] state the state: CREATED/TERMINATED/ACTIVATED/DEACTIVATED
+   * @return void
+   * @relation
+   * wayland, agl-shell
+   * @note Do nothing
+   */
+  static void agl_shell_app_state(void* data,
+                                  struct agl_shell* agl_shell,
+                                  const char* app_id,
+                                  uint32_t state);
 
   static const struct agl_shell_listener agl_shell_listener;
 

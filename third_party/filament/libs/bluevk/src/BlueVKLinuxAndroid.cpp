@@ -18,7 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include <flutter/fml/logging.h>
+#include <spdlog/spdlog.h>
 
 namespace bluevk {
 
