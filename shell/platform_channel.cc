@@ -1,16 +1,18 @@
-// Copyright 2020 Toyota Connected North America
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2020-2023 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "platform_channel.h"
 
@@ -71,7 +73,9 @@
 #ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
 #include "static_plugins/keyboard_manager/keyboard_manager.h"
 #endif
-
+#ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
+#include "static_plugins/google_sign_in/google_sign_in.h"
+#endif
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
 
@@ -143,5 +147,9 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
   RegisterCallback(KeyboardManager::kChannelName,
                    &KeyboardManager::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
+  RegisterCallback(GoogleSignIn::kChannelName,
+                   &GoogleSignIn::OnPlatformMessage);
 #endif
 }

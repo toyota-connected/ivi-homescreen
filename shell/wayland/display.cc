@@ -57,6 +57,7 @@ Display::Display(bool enable_cursor,
 
   m_registry = wl_display_get_registry(m_display);
   wl_registry_add_listener(m_registry, &registry_listener, this);
+  wl_display_dispatch(m_display);
 
   if (m_agl.shell && m_agl.bind_to_agl_shell && m_agl.version >= 2) {
     int ret = 0;
@@ -70,8 +71,6 @@ Display::Display(bool enable_cursor,
           "agl_shell extension already in use by other shell client.");
       exit(EXIT_FAILURE);
     }
-  } else {
-    wl_display_dispatch(m_display);
   }
 
   if (!m_agl.shell && m_agl.bind_to_agl_shell) {
@@ -214,7 +213,7 @@ void Display::registry_handle_global(void* data,
     if (version >= 2) {
       d->m_agl.shell = static_cast<struct agl_shell*>(
           wl_registry_bind(registry, name, &agl_shell_interface,
-                           std::min(static_cast<uint32_t>(2), version)));
+                           std::min(static_cast<uint32_t>(4), version)));
       agl_shell_add_listener(d->m_agl.shell, &agl_shell_listener, data);
     } else {
       d->m_agl.shell = static_cast<struct agl_shell*>(
@@ -241,8 +240,7 @@ void Display::registry_handle_global(void* data,
 
 void Display::registry_handle_global_remove(void* /* data */,
                                             struct wl_registry* /* reg */,
-                                            uint32_t /* id */) {
-}
+                                            uint32_t /* id */) {}
 
 const struct wl_registry_listener Display::registry_listener = {
     registry_handle_global,
@@ -258,10 +256,11 @@ void Display::display_handle_geometry(void* data,
                                       int /* subpixel */,
                                       const char* /* make */,
                                       const char* /* model */,
-                                      int /* transform */) {
+                                      int transform) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->physical_width = static_cast<unsigned int>(physical_width);
   oi->physical_height = static_cast<unsigned int>(physical_height);
+  oi->transform = transform;
 
   SPDLOG_DEBUG("Physical width: {} mm x {} mm", physical_width,
                physical_height);
@@ -269,14 +268,17 @@ void Display::display_handle_geometry(void* data,
 
 void Display::display_handle_mode(void* data,
                                   struct wl_output* /* wl_output */,
-                                  uint32_t /* flags */,
+                                  uint32_t flags,
                                   int width,
                                   int height,
                                   int refresh) {
   auto* oi = static_cast<output_info_t*>(data);
-  oi->width = static_cast<unsigned int>(width);
-  oi->height = static_cast<unsigned int>(height);
-  oi->refresh_rate = refresh;
+
+  if ((flags & WL_OUTPUT_MODE_CURRENT) == WL_OUTPUT_MODE_CURRENT) {
+    oi->height = static_cast<unsigned int>(height);
+    oi->width = static_cast<unsigned int>(width);
+    oi->refresh_rate = refresh;
+  }
 
   SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height,
                (refresh > 1000 ? refresh / 1000.0 : (double)refresh));
@@ -291,7 +293,8 @@ void Display::display_handle_scale(void* data,
   SPDLOG_DEBUG("Display Scale Factor: {}", factor);
 }
 
-void Display::display_handle_done(void* data, struct wl_output* /* wl_output */) {
+void Display::display_handle_done(void* data,
+                                  struct wl_output* /* wl_output */) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->done = true;
 }
@@ -300,8 +303,9 @@ const struct wl_output_listener Display::output_listener = {
     display_handle_geometry, display_handle_mode, display_handle_done,
     display_handle_scale};
 
-void Display::shm_format(void* /* data */, struct wl_shm* /* wl_shm */, uint32_t /* format */) {
-}
+void Display::shm_format(void* /* data */,
+                         struct wl_shm* /* wl_shm */,
+                         uint32_t /* format */) {}
 
 const struct wl_shm_listener Display::shm_listener = {shm_format};
 
@@ -473,25 +477,22 @@ void Display::pointer_handle_axis(void* data,
   }
 }
 
-void Display::pointer_handle_frame(void* /* data */, struct wl_pointer* /* wl_pointer */) {
-}
+void Display::pointer_handle_frame(void* /* data */,
+                                   struct wl_pointer* /* wl_pointer */) {}
 
 void Display::pointer_handle_axis_source(void* /* data */,
                                          struct wl_pointer* /* wl_pointer */,
-                                         uint32_t /* axis_source */) {
-}
+                                         uint32_t /* axis_source */) {}
 
 void Display::pointer_handle_axis_stop(void* /* data */,
                                        struct wl_pointer* /* wl_pointer */,
                                        uint32_t /* time */,
-                                       uint32_t /* axis */) {
-}
+                                       uint32_t /* axis */) {}
 
 void Display::pointer_handle_axis_discrete(void* /* data */,
                                            struct wl_pointer* /* wl_pointer */,
                                            uint32_t /* axis */,
-                                           int32_t /* discrete */) {
-}
+                                           int32_t /* discrete */) {}
 
 const struct wl_pointer_listener Display::pointer_listener = {
     .enter = pointer_handle_enter,
@@ -532,7 +533,8 @@ void Display::keyboard_handle_leave(void* data,
   auto key_event = d->m_key_event[d->m_active_surface];
   if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
     KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
-        d->m_repeat_code, d->m_keysym_pressed, nullptr);
+                                  d->m_repeat_code, d->m_keysym_pressed,
+                                  nullptr);
   }
 #endif
 
@@ -784,8 +786,8 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   }
 }
 
-void Display::touch_handle_frame(void* /* data */, struct wl_touch* /* wl_touch */) {
-}
+void Display::touch_handle_frame(void* /* data */,
+                                 struct wl_touch* /* wl_touch */) {}
 
 const struct wl_touch_listener Display::touch_listener = {
     .down = touch_handle_down,
@@ -825,6 +827,27 @@ void Display::AglShellDoReady() const {
   if (m_agl.shell) {
     agl_shell_ready(m_agl.shell);
   }
+}
+
+void Display::AglShellDoSetupActivationArea(uint32_t x,
+                                            uint32_t y,
+                                            uint32_t index) {
+  uint32_t width = m_all_outputs[index]->width;
+  uint32_t height = m_all_outputs[index]->height - (2 * y);
+
+  if (!m_agl.shell)
+    return;
+
+  if (m_all_outputs[index]->transform == WL_OUTPUT_TRANSFORM_90) {
+    width = m_all_outputs[index]->height;
+    height = m_all_outputs[index]->width - (2 * y);
+  }
+
+  SPDLOG_DEBUG("Using custom rectangle [{}x{}+{}x{}] for activation", width,
+               height, x, y);
+
+  agl_shell_set_activate_region(m_agl.shell, m_all_outputs[index]->output, x, y,
+                                width, height);
 }
 
 void Display::SetEngine(wl_surface* surface, Engine* engine) {
@@ -929,9 +952,43 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
   d->m_agl.bound_ok = false;
 }
 
+void Display::agl_shell_app_state(void* data,
+                                  struct agl_shell* /* agl_shell */,
+                                  const char* app_id,
+                                  uint32_t state) {
+  auto* d = static_cast<Display*>(data);
+
+  switch (state) {
+    case AGL_SHELL_APP_STATE_STARTED:
+      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_STARTED for app_id " << app_id;
+
+      if (d->m_agl.shell) {
+        // we always assume the first output advertised by the wl_output
+        // interface
+        unsigned int default_output_index = 0;
+
+        agl_shell_activate_app(d->m_agl.shell, app_id,
+                               d->m_all_outputs[default_output_index]->output);
+      }
+
+      break;
+    case AGL_SHELL_APP_STATE_TERMINATED:
+      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_TERMINATED for app_id "
+                     << app_id;
+      break;
+    case AGL_SHELL_APP_STATE_ACTIVATED:
+      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_ACTIVATED for app_id "
+                     << app_id;
+      break;
+    default:
+      break;
+  }
+}
+
 const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
+    .app_state = agl_shell_app_state,
 };
 
 void Display::ivi_wm_surface_visibility(void* /* data */,
