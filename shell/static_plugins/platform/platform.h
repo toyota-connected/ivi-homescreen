@@ -121,8 +121,6 @@ class Platform {
       "SystemChrome.setEnabledSystemUIOverlays";
   static constexpr char kHapticFeedbackVibrate[] = "HapticFeedback.vibrate";
 #if 0
-    static constexpr char kMethodSystemNavigatorPopMethod[] = "SystemNavigator.pop";
-
     static constexpr char kBadArgumentsError[] = "Bad Arguments";
     static constexpr char kUnknownClipboardFormatError[] = "Unknown Clipboard Format";
     static constexpr char kFailedError[] = "Failed";
@@ -132,7 +130,6 @@ class Platform {
   static constexpr char kMethodClipboardSetData[] = "Clipboard.setData";
 #if 0
     static constexpr char kGetClipboardDataMethod[] = "Clipboard.getData";
-    static constexpr char kSystemNavigatorPopMethod[] = "SystemNavigator.pop";
 #endif
   static constexpr char kTextPlainFormat[] = "text/plain";
 
