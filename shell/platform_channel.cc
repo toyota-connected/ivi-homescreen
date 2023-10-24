@@ -31,8 +31,8 @@
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "static_plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
-#ifdef ENABLE_PLUGIN_NAVIGATION
-#include "static_plugins/navigation/navigation.h"
+#ifdef ENABLE_PLUGIN_GO_ROUTER
+#include "static_plugins/go_router/go_router.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "static_plugins/comp_surf/comp_surf.h"
@@ -97,8 +97,8 @@ PlatformChannel::PlatformChannel() {
   RegisterCallback(GstreamerEgl::kChannelGstreamerInitialize,
                    &GstreamerEgl::OnInitialize);
 #endif
-#ifdef ENABLE_PLUGIN_NAVIGATION
-  RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
+#ifdef ENABLE_PLUGIN_GO_ROUTER
+  RegisterCallback(GoRouter::kChannelName, &GoRouter::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
   RegisterCallback(CompositorSurfacePlugin::kChannelName,

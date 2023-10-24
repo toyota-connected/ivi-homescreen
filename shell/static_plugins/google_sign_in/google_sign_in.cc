@@ -143,7 +143,9 @@ rapidjson::Document GoogleSignIn::RefreshToken(
 
   // Has token expired?
   auto now = Utils::GetEpochTimeInSeconds();
-  if (now > expires_at) {
+  spdlog::trace("[google_sign_in] Now: {}", now);
+  spdlog::trace("[google_sign_in] Token Expires At: {}", expires_at);
+  if (expires_at > now) {
     spdlog::debug("[Google Sign In] Token Expires In {} Seconds",
                   now - expires_at);
     return std::move(client_credential_doc);
@@ -183,12 +185,23 @@ rapidjson::Document GoogleSignIn::RefreshToken(
 
   doc.Parse(response.c_str());
   if (doc.GetParseError() != rapidjson::kParseErrorNone) {
+    spdlog::error("[google_sign_in] Failure Parsing Refresh Token Response: {}",
+                  static_cast<int>(doc.GetParseError()));
     doc.Parse("{}");
     return std::move(doc);
   }
 
   auto resp = doc.GetObject();
   auto& allocator = doc.GetAllocator();
+
+  if (resp.HasMember("error") && resp["error"].IsString() &&
+      resp.HasMember("error_description") &&
+      resp["error_description"].IsString()) {
+    spdlog::error("[google_sign_in] Refresh Token Error: {} - {}",
+                  resp["error"].GetString(),
+                  resp["error_description"].GetString());
+    return std::move(doc);
+  }
 
   // change expires_in to expires_at
   auto expires_in = resp[kKeyExpiresIn].GetInt64();
