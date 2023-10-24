@@ -28,7 +28,7 @@
 
 class Egl {
  public:
-  Egl(void* native_display, EGLenum platform, int buffer_size, bool debug);
+  Egl(void* native_display, int buffer_size, bool debug);
 
   ~Egl();
 
@@ -83,20 +83,6 @@ class Egl {
    * wayland
    */
   bool MakeTextureCurrent();
-
-  /**
-   * @brief Get an EGL display connection
-   * @param[in] platform Platform
-   * @param[in] native_display The native display
-   * @param[in] attrib_list Display attributes
-   * @return EGLDisplay
-   * @retval An EGL display connection
-   * @relation
-   * wayland
-   */
-  static EGLDisplay get_egl_display(EGLenum platform,
-                                    void* native_display,
-                                    const EGLint* attrib_list);
 
   /**
    * @brief Create a new EGL window surface
