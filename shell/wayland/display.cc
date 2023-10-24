@@ -846,8 +846,10 @@ void Display::AglShellDoSetupActivationArea(uint32_t x,
   SPDLOG_DEBUG("Using custom rectangle [{}x{}+{}x{}] for activation", width,
                height, x, y);
 
-  agl_shell_set_activate_region(m_agl.shell, m_all_outputs[index]->output, x, y,
-                                width, height);
+  agl_shell_set_activate_region(
+      m_agl.shell, m_all_outputs[index]->output, static_cast<int32_t>(x),
+      static_cast<int32_t>(y), static_cast<int32_t>(width),
+      static_cast<int32_t>(height));
 }
 
 void Display::SetEngine(wl_surface* surface, Engine* engine) {

@@ -61,11 +61,17 @@ void TaskRunner::QueueFlutterTask(size_t index,
   auto current = proc_table_.GetCurrentTime();
   if (current >= target_time) {
     asio::post(*strand_, [&, index, task]() {
+#if defined(NDEBUG)
+      (void)index;
+#endif
       SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
       proc_table_.RunTask(engine_, &task);
     });
   } else {
     asio::post(*strand_, pri_queue_->wrap(target_time, [&, index, task]() {
+#if defined(NDEBUG)
+      (void)index;
+#endif
       SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
       proc_table_.RunTask(engine_, &task);
     }));
