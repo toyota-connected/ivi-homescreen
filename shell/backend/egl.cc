@@ -25,8 +25,8 @@
 #include "gl_process_resolver.h"
 #include "logging.h"
 
-Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
-    : m_dpy(get_egl_display(platform, native_display, nullptr)),
+Egl::Egl(void* native_display, int buffer_size, bool debug)
+    : m_dpy(eglGetDisplay((EGLNativeDisplayType)native_display)),
       m_buffer_size(buffer_size) {
   assert(m_dpy);
 
@@ -775,29 +775,6 @@ void Egl::EGL_KHR_debug_init(
     assert(m_pfLabelObject);
   }
   SPDLOG_TRACE("-EGL_KHR_debug_init");
-}
-
-EGLDisplay Egl::get_egl_display(EGLenum platform,
-                                void* native_display,
-                                const EGLint* attrib_list) {
-  static PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = nullptr;
-  static EGLDisplay dpy = nullptr;
-
-  if (dpy != nullptr)
-    return dpy;
-
-  if (!get_platform_display) {
-    get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-        eglGetProcAddress("eglGetPlatformDisplayEXT"));
-  }
-
-  if (get_platform_display) {
-    dpy = get_platform_display(platform, native_display, attrib_list);
-    return dpy;
-  }
-
-  dpy = eglGetDisplay((EGLNativeDisplayType)native_display);
-  return dpy;
 }
 
 EGLSurface Egl::create_egl_surface(void* native_window,
