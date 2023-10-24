@@ -1,7 +1,15 @@
 # test-case specific settings
 # when creating new test-case, you need to change here
-set(TESTCASE_NAME "homescreen_timer_ut_test_driver")
-set(TESTCASE_CC test_case_timer.cc)
+set(TESTCASE_NAME "homescreen_texture_ut_test_driver")
+set(TESTCASE_CC test_case_texture.cc)
+
+# add mock files to target source
+set(TESTCASE_MOCK display.cc; egl.cc; window.cc; compositor_surface.cc engine.cc)
+foreach (mock IN LISTS TESTCASE_MOCK)
+    list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*/${mock}")
+    list(APPEND TYPICAL_TEST_SOURCES ${UNIT_TEST_MOCK_DIR}/${mock})
+endforeach ()
+
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # Basically, the following statements need not be modified
@@ -15,6 +23,7 @@ target_compile_definitions(
         ${TESTCASE_NAME}
         PRIVATE
         ${TYPICAL_TEST_DEFINITIONS}
+        SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 target_include_directories(

@@ -59,6 +59,7 @@ list(APPEND TYPICAL_TEST_INC_DIRS ${CMAKE_BINARY_DIR}/shell)
 get_target_property(TYPICAL_TEST_LINK_LIBS homescreen LINK_LIBRARIES)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
+set(UNIT_TEST_MOCK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mock)
 
 # Calculate test coverage
 if(COVERAGE)
@@ -76,3 +77,4 @@ add_subdirectory(configuration-test-case)
 add_subdirectory(timer-test)
 add_subdirectory(gl_process_resolver-test)
 add_subdirectory(shared_library-test)
+add_subdirectory(texture-test)
