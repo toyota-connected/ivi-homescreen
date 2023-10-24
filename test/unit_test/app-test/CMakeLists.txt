@@ -7,7 +7,7 @@ set(TESTCASE_CC test_case_app.cc)
 set(TESTCASE_MOCK display.cc; egl.cc; flutter_view.cc;)
 foreach (mock IN LISTS TESTCASE_MOCK)
     list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*/${mock}")
-    list(APPEND TYPICAL_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/mock/${mock})
+    list(APPEND TYPICAL_TEST_SOURCES ${UNIT_TEST_MOCK_DIR}/${mock})
 endforeach ()
 
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")

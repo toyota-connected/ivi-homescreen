@@ -35,6 +35,10 @@ Display::Display(bool enable_cursor,
       m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
   /* Delete implementation */
+
+  /* avoid assert at GetDisplay() method */
+  m_display = (struct wl_display*)malloc(sizeof(m_display));
+
 }
 
 Display::~Display() {
