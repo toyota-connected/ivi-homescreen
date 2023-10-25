@@ -29,7 +29,7 @@ WaylandEglBackend::WaylandEglBackend(struct wl_display* display,
                                      uint32_t initial_height,
                                      bool debug_backend,
                                      int buffer_size)
-    : Egl(display, EGL_PLATFORM_WAYLAND_KHR, buffer_size, debug_backend),
+    : Egl(display, buffer_size, debug_backend),
       Backend(this, Resize, CreateSurface),
       m_initial_width(initial_width),
       m_initial_height(initial_height) {}
