@@ -57,8 +57,7 @@ CompositorSurface::CompositorSurface(
   auto parent_surface = window->GetBaseSurface();
 
   if (m_type == CompositorSurface::egl) {
-    m_wl.egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR,
-                                             display->GetDisplay(), nullptr);
+    m_wl.egl_display = eglGetDisplay((NativeDisplayType)display->GetDisplay());
     m_wl.egl_window = wl_egl_window_create(m_wl.surface, width, height);
     assert(m_wl.egl_display);
     assert(m_wl.egl_window);
