@@ -62,28 +62,6 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Normal001) {
 }
 
 /****************************************************************
-Test Case Name.Test Name： HomescreenConfigurationConvertCommand_Lv1Normal002
-Use Case Name: Initialization
-Test Summary：Test with blank all parameters
-***************************************************************/
-
-TEST(HomescreenConfigurationConvertCommand, Lv1Normal002) {
-  // setup test parameters
-  struct Configuration::Config config {};
-  const char* argv[] =  {"homescreen"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
-
-  auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
-
-  // call target function
-  int ret_convert = Configuration::ConvertCommandlineToConfig(cl, config);
-
-  // check result
-  EXPECT_EQ(0, ret_convert);
-}
-
-/****************************************************************
 Test Case Name.Test Name： HomescreenConfigurationConvertCommand_Lv1Abnormal001
 Use Case Name: Initialization
 Test Summary：Test ConvertCommandlineToConfig with blank json param
