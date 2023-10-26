@@ -266,25 +266,49 @@ rapidjson::Document Configuration::getJsonDocument(
 }
 
 void Configuration::PrintConfig(const Config& config) {
-  spdlog::info("{} @ {}", kGitBranch, kGitCommitHash);
+  std::stringstream ss;
+  ss << kGitBranch << " @ " << kGitCommitHash;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+
   spdlog::info("**********");
   spdlog::info("* Global *");
   spdlog::info("**********");
   if (!config.app_id.empty()) {
-    spdlog::info("Application Id: .......... {}", config.app_id);
+    ss << "Application Id: .......... " << config.app_id;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
   if (!config.json_configuration_path.empty()) {
-    spdlog::info("JSON Configuration: ...... {}", config.json_configuration_path);
+    ss << "JSON Configuration: ...... " << config.json_configuration_path;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
   if (!config.cursor_theme.empty()) {
-    spdlog::info("Cursor Theme: ............ {}", config.cursor_theme);
+    ss << "Cursor Theme: ............ " << config.cursor_theme;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
-  spdlog::info("Disable Cursor: .......... {}", config.disable_cursor ? "true" : "false");
-
+  ss << "Disable Cursor: .......... "
+     << (config.disable_cursor ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
   if (!config.wayland_event_mask.empty()) {
-    spdlog::info("Wayland Event Mask: ...... {}", config.wayland_event_mask);
+    ss << "Wayland Event Mask: ...... " << config.wayland_event_mask;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
-  spdlog::info("Debug Backend: ........... {}", config.debug_backend ? "true" : "false");
+  ss << "Debug Backend: ........... "
+     << (config.debug_backend ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
   spdlog::info("********");
   spdlog::info("* View *");
   spdlog::info("********");
@@ -294,18 +318,44 @@ void Configuration::PrintConfig(const Config& config) {
       spdlog::info(arg);
     }
   }
-  spdlog::info("Bundle Path: .............. {}", config.view.bundle_path);
-  spdlog::info("Window Type: .............. {}", config.view.window_type);
-  spdlog::info("Output Index: ............. {}", config.view.wl_output_index);
-  spdlog::info("Size: ..................... {} x {}", config.view.width, config.view.height);
+  ss << "Bundle Path: .............. " << config.view.bundle_path;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Window Type: .............. " << config.view.window_type;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Output Index: ............. " << config.view.wl_output_index;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Size: ..................... " << config.view.width << " x "
+     << config.view.height;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
   if (config.view.pixel_ratio != kDefaultPixelRatio) {
-    spdlog::info("Pixel Ratio: .............. {}", config.view.pixel_ratio);
+    ss << "Pixel Ratio: .............. " << config.view.pixel_ratio;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
   if (config.view.ivi_surface_id > 0) {
-    spdlog::info("IVI Surface ID: ........... {}", config.view.ivi_surface_id);
+    ss << "IVI Surface ID: ........... " << config.view.ivi_surface_id;
+    spdlog::info(ss.str().c_str());
+    ss.str("");
+    ss.clear();
   }
-  spdlog::info("Fullscreen: ............... {}", config.view.fullscreen ? "true" : "false");
-  spdlog::info("Accessibility Features: ... {}", config.view.accessibility_features);
+  ss << "Fullscreen: ............... "
+     << (config.view.fullscreen ? "true" : "false");
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
+  ss << "Accessibility Features: ... " << config.view.accessibility_features;
+  spdlog::info(ss.str().c_str());
+  ss.str("");
+  ss.clear();
 }
 
 Configuration::Config Configuration::ConfigFromArgcArgv(
