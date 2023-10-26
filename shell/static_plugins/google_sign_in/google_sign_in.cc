@@ -332,15 +332,19 @@ bool GoogleSignIn::CredentialsJsonPopulated(
 }
 
 void GoogleSignIn::Init(std::vector<std::string>& requestedScopes,
-                        std::string hostedDomain,
-                        std::string signInOption,
-                        std::string clientId,
-                        std::string serverClientId,
-                        bool forceCodeForRefreshToken) {
+                        const std::string& /* hostedDomain */,
+                        const std::string& /* signInOption */,
+                        const std::string& /* clientId */,
+                        const std::string& /* serverClientId */,
+                        bool /* forceCodeForRefreshToken */) {
   SPDLOG_DEBUG("\trequestedScopes");
+#if !defined(NDEBUG)
   for (auto& scope : requestedScopes) {
-    SPDLOG_DEBUG("\t\t{}", scope);
+    spdlog::debug("\t\t{}", scope);
   }
+#else
+  (void)requestedScopes;
+#endif
   SPDLOG_DEBUG("\thostedDomain: [{}]", hostedDomain);
   SPDLOG_DEBUG("\tsignInOption: [{}]", signInOption);
   SPDLOG_DEBUG("\tclientId: [{}]", clientId);
