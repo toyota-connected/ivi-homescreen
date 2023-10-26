@@ -37,12 +37,6 @@ Egl::Egl(void* native_display, int buffer_size, bool debug)
   ret = eglBindAPI(EGL_OPENGL_ES_API);
   assert(ret == EGL_TRUE);
 
-  std::unordered_map<EGLDisplay, const char*> extensions;
-
-#if !defined(NDEBUG)
-  EGL_KHR_debug_init(extensions);
-#endif
-
   EGLint count;
   eglGetConfigs(m_dpy, nullptr, 0, &count);
   assert(count);
@@ -65,7 +59,7 @@ Egl::Egl(void* native_display, int buffer_size, bool debug)
     eglGetConfigAttrib(m_dpy, configs[i], EGL_BUFFER_SIZE, &size);
     SPDLOG_DEBUG("Buffer size for config {} is {}", i, size);
     if (m_buffer_size <= size) {
-      m_config = configs[i];
+      memcpy(&m_config, &configs[i], sizeof(EGLConfig));
       break;
     }
   }
@@ -91,28 +85,31 @@ Egl::Egl(void* native_display, int buffer_size, bool debug)
 
   MakeCurrent();
 
+  auto extensions = eglQueryString(m_dpy, EGL_EXTENSIONS);
+#if !defined(NDEBUG)
+  EGL_KHR_debug_init(extensions);
+#endif
+
   /* setup for Damage Region Management */
-  if (HasEGLExtension(extensions, m_dpy, "EGL_EXT_swap_buffers_with_damage")) {
+  if (HasEGLExtension(extensions, "EGL_EXT_swap_buffers_with_damage")) {
     SPDLOG_DEBUG("EGL_EXT_swap_buffers_with_damage found");
     m_pfSwapBufferWithDamage =
         reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
             eglGetProcAddress("eglSwapBuffersWithDamageEXT"));
-  } else if (HasEGLExtension(extensions, m_dpy,
-                             "EGL_KHR_swap_buffers_with_damage")) {
+  } else if (HasEGLExtension(extensions, "EGL_KHR_swap_buffers_with_damage")) {
     SPDLOG_DEBUG("EGL_KHR_swap_buffers_with_damage found");
     m_pfSwapBufferWithDamage =
         reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
             eglGetProcAddress("eglSwapBuffersWithDamageKHR"));
   }
 
-  if (HasEGLExtension(extensions, m_dpy, "EGL_KHR_partial_update")) {
+  if (HasEGLExtension(extensions, "EGL_KHR_partial_update")) {
     SPDLOG_DEBUG("EGL_KHR_partial_update found");
     m_pfSetDamageRegion = reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
         eglGetProcAddress("eglSetDamageRegionKHR"));
   }
 
-  m_has_egl_ext_buffer_age =
-      HasEGLExtension(extensions, m_dpy, "EGL_EXT_buffer_age");
+  m_has_egl_ext_buffer_age = HasEGLExtension(extensions, "EGL_EXT_buffer_age");
   if (m_has_egl_ext_buffer_age) {
     SPDLOG_DEBUG("EGL_EXT_buffer_age found");
   }
@@ -232,15 +229,8 @@ bool Egl::MakeTextureCurrent() {
   return true;
 }
 
-bool Egl::HasEGLExtension(
-    std::unordered_map<EGLDisplay, const char*>& extensions,
-    EGLDisplay dpy,
-    const char* name) {
-  auto got = extensions.find(dpy);
-  if (got == extensions.end()) {
-    extensions[dpy] = eglQueryString(dpy, EGL_EXTENSIONS);
-  }
-  const char* r = strstr(extensions[dpy], name);
+bool Egl::HasEGLExtension(const char* extensions, const char* name) {
+  const char* r = strstr(extensions, name);
 #if !defined(NDEBUG)
   if (!r) {
     SPDLOG_DEBUG("{} Not Found", name);
@@ -738,16 +728,14 @@ void Egl::sDebugCallback(EGLenum error,
   spdlog::error("\tmessage: {}", ((message == nullptr) ? "" : message));
 }
 
-void Egl::EGL_KHR_debug_init(
-    std::unordered_map<EGLDisplay, const char*>& extensions) {
-  SPDLOG_TRACE("+EGL_KHR_debug_init");
-  if (HasEGLExtension(extensions, EGL_NO_DISPLAY, "EGL_KHR_debug")) {
+void Egl::EGL_KHR_debug_init(const char* extensions) {
+  if (HasEGLExtension(extensions, "EGL_KHR_debug")) {
     SPDLOG_DEBUG("EGL_KHR_debug");
 
-    m_pfDebugMessageControl =
+    auto pfDebugMessageControl =
         reinterpret_cast<PFNEGLDEBUGMESSAGECONTROLKHRPROC>(
             eglGetProcAddress("eglDebugMessageControlKHR"));
-    assert(m_pfDebugMessageControl);
+    assert(pfDebugMessageControl);
 
     const EGLAttrib sDebugAttribList[] = {EGL_DEBUG_MSG_CRITICAL_KHR,
                                           EGL_TRUE,
@@ -760,17 +748,8 @@ void Egl::EGL_KHR_debug_init(
                                           EGL_NONE,
                                           0};
 
-    m_pfDebugMessageControl(sDebugCallback, sDebugAttribList);
-
-    m_pfQueryDebug = reinterpret_cast<PFNEGLQUERYDEBUGKHRPROC>(
-        eglGetProcAddress("eglQueryDebugKHR"));
-    assert(m_pfQueryDebug);
-
-    m_pfLabelObject = reinterpret_cast<PFNEGLLABELOBJECTKHRPROC>(
-        eglGetProcAddress("eglLabelObjectKHR"));
-    assert(m_pfLabelObject);
+    pfDebugMessageControl(sDebugCallback, sDebugAttribList);
   }
-  SPDLOG_TRACE("-EGL_KHR_debug_init");
 }
 
 EGLSurface Egl::create_egl_surface(void* native_window,
