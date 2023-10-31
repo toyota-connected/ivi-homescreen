@@ -331,25 +331,31 @@ bool GoogleSignIn::CredentialsJsonPopulated(
   return false;
 }
 
-void GoogleSignIn::Init(std::vector<std::string>& requestedScopes,
-                        const std::string& /* hostedDomain */,
-                        const std::string& /* signInOption */,
-                        const std::string& /* clientId */,
-                        const std::string& /* serverClientId */,
-                        bool /* forceCodeForRefreshToken */) {
-  SPDLOG_DEBUG("\trequestedScopes");
+void GoogleSignIn::Init(std::vector<std::string> requestedScopes,
+                        std::string hostedDomain,
+                        std::string signInOption,
+                        std::string clientId,
+                        std::string serverClientId,
+                        bool forceCodeForRefreshToken) {
 #if !defined(NDEBUG)
+  std::stringstream ss;
   for (auto& scope : requestedScopes) {
-    spdlog::debug("\t\t{}", scope);
+    ss << "\n\t" << scope;
   }
-#else
-  (void)requestedScopes;
-#endif
+  SPDLOG_DEBUG("\trequestedScopes: {}", ss.str().c_str());
   SPDLOG_DEBUG("\thostedDomain: [{}]", hostedDomain);
   SPDLOG_DEBUG("\tsignInOption: [{}]", signInOption);
   SPDLOG_DEBUG("\tclientId: [{}]", clientId);
   SPDLOG_DEBUG("\tserverClientId: [{}]", serverClientId);
   SPDLOG_DEBUG("\tforceCodeForRefreshToken: {}", forceCodeForRefreshToken);
+#else
+  (void)requestedScopes;
+  (void)hostedDomain;
+  (void)signInOption;
+  (void)clientId;
+  (void)serverClientId;
+  (void)forceCodeForRefreshToken;
+#endif
 
   auto secret_doc = GetClientSecret();
   if (!SecretJsonPopulated(secret_doc)) {
@@ -585,8 +591,9 @@ void GoogleSignIn::OnPlatformMessage(const FlutterPlatformMessage* message,
       }
     }
 
-    Init(requestedScopes, hostedDomain, signInOption, clientId, serverClientId,
-         forceCodeForRefreshToken);
+    Init(std::move(requestedScopes), std::move(hostedDomain),
+         std::move(signInOption), std::move(clientId),
+         std::move(serverClientId), forceCodeForRefreshToken);
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSignIn) {
     SPDLOG_DEBUG("[google_sign_in] <signIn>");
