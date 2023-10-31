@@ -143,4 +143,9 @@ if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
     pkg_check_modules(LIBCURL REQUIRED libcurl)
 endif ()
 
+option(BUILD_PLUGIN_FILE_SELECTOR "Include File Selector plugin" OFF)
+if (BUILD_PLUGIN_FILE_SELECTOR)
+    ENABLE_PLUGIN(file_selector)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")

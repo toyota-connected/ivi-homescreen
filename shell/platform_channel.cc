@@ -76,6 +76,9 @@
 #ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
 #include "static_plugins/google_sign_in/google_sign_in.h"
 #endif
+#ifdef ENABLE_PLUGIN_FILE_SELECTOR
+#include "static_plugins/file_selector/file_selector.h"
+#endif
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
 
@@ -151,5 +154,9 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
   RegisterCallback(GoogleSignIn::kChannelName,
                    &GoogleSignIn::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_FILE_SELECTOR
+  RegisterCallback(FileSelector::kChannelName,
+                   &FileSelector::OnPlatformMessage);
 #endif
 }
