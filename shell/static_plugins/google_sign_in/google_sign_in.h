@@ -233,11 +233,11 @@ class GoogleSignIn {
    * @relation
    * google_sign_in
    */
-  static void Init(std::vector<std::string>& requestedScopes,
-                   const std::string& hostedDomain,
-                   const std::string& signInOption,
-                   const std::string& clientId,
-                   const std::string& serverClientId,
+  static void Init(std::vector<std::string> requestedScopes,
+                   std::string hostedDomain,
+                   std::string signInOption,
+                   std::string clientId,
+                   std::string serverClientId,
                    bool forceCodeForRefreshToken);
 
   /**
