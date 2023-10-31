@@ -13,6 +13,7 @@
 
 #include "constants.h"
 #include "fml/paths.h"
+#include "logging/logging.h"
 
 /* switch private and public declarations */
 #ifdef UNIT_TEST
@@ -158,5 +159,55 @@ class Utils {
     const auto seconds =
         std::chrono::duration_cast<std::chrono::seconds>(epoch);
     return seconds.count();
+  }
+
+  /**
+   * @brief Split string by token
+   * @return std::vector<std::string>
+   * @relation
+   * internal
+   */
+  static std::vector<std::string> split(std::string str, std::string token) {
+    std::vector<std::string> result;
+    while (str.size()) {
+      auto index = str.find(token);
+      if (index != std::string::npos) {
+        result.push_back(str.substr(0, index));
+        str = str.substr(index + token.size());
+        if (str.size() == 0)
+          result.push_back(str);
+      } else {
+        result.push_back(str);
+        str.clear();
+      }
+    }
+    return result;
+  }
+
+  /**
+   * @brief Execute Command and return result
+   * @return bool
+   * @relation
+   * internal
+   */
+  static bool ExecuteCommand(const char* cmd, char (&result)[PATH_MAX]) {
+    auto fp = popen(cmd, "r");
+    if (fp == nullptr) {
+      spdlog::error("[ExecuteCommand] Failed to Execute Command: ({}) {}",
+                    errno, strerror(errno));
+      spdlog::error("Failed to Execute Command: {}", cmd);
+      return false;
+    }
+
+    while (fgets(result, PATH_MAX, fp) != nullptr) {
+    }
+
+    auto status = pclose(fp);
+    if (status == -1) {
+      spdlog::error("[ExecuteCommand] Failed to Close Pipe: ({}) {}", errno,
+                    strerror(errno));
+      return false;
+    }
+    return true;
   }
 };
