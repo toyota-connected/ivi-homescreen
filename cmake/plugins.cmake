@@ -96,9 +96,9 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     endif ()
 endif ()
 
-option(BUILD_PLUGIN_NAVIGATION "Includes Navigation Plugin" ON)
-if (BUILD_PLUGIN_NAVIGATION)
-    ENABLE_PLUGIN(navigation)
+option(BUILD_PLUGIN_GO_ROUTER "Includes Go Router Plugin" ON)
+if (BUILD_PLUGIN_GO_ROUTER)
+    ENABLE_PLUGIN(go_router)
 endif ()
 
 option(BUILD_PLUGIN_ACCESSIBILITY "Includes Accessibility Plugin" ON)
