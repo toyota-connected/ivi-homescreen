@@ -188,6 +188,7 @@ void WaylandEglBackend::Resize(void* user_data,
         spdlog::error("Failed to set Flutter Engine Window Size");
       }
     }
+    b->UpdateSize(width, height);
     wl_egl_window_resize(b->m_egl_window, width, height, 0, 0);
   }
 }
@@ -198,6 +199,7 @@ void WaylandEglBackend::CreateSurface(void* user_data,
                                       int32_t width,
                                       int32_t height) {
   auto b = reinterpret_cast<WaylandEglBackend*>(user_data);
+  b->UpdateSize(width, height);
   b->m_egl_window = wl_egl_window_create(surface, width, height);
   b->m_egl_surface = b->create_egl_surface(b->m_egl_window, nullptr);
 }
