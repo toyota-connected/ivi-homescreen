@@ -46,6 +46,13 @@ flutter::EncodableValue TextureEgl::Create(
       return m_textures->back()->Create(width, height, args);
     }
 #endif
+#if !defined(ENABLE_TEXTURE_TEST_EGL) || !defined(ENABLE_TEXTURE_NAVI_RENDER_EGL)
+      (void)engine;
+      (void)texture_id;
+      (void)width;
+      (void)height;
+      (void)args;
+#endif
     default: {
       return flutter::EncodableValue(flutter::EncodableMap{
           {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
