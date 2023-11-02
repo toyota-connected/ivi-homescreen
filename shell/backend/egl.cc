@@ -122,32 +122,28 @@ Egl::Egl(void* native_display, int buffer_size, bool debug)
   SPDLOG_DEBUG("EGL Vendor: {}", eglQueryString(m_dpy, EGL_VENDOR));
   SPDLOG_DEBUG("EGL Extensions: {}", eglQueryString(m_dpy, EGL_EXTENSIONS));
 
-  auto glGetString_ = reinterpret_cast<PFNGLGETSTRINGPROC>(
-      GlProcessResolver::GetInstance().process_resolver("glGetString"));
-  assert(glGetString_);
-
   std::stringstream ss;
-  ss << glGetString_(GL_VENDOR);
+  ss << glGetString(GL_VENDOR);
   SPDLOG_DEBUG("GL Vendor: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_RENDERER);
+  ss << glGetString(GL_RENDERER);
   SPDLOG_DEBUG("GL Renderer: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_VERSION);
+  ss << glGetString(GL_VERSION);
   SPDLOG_DEBUG("GL Version: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_SHADING_LANGUAGE_VERSION);
+  ss << glGetString(GL_SHADING_LANGUAGE_VERSION);
   SPDLOG_DEBUG("GL Shading Language Version: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_EXTENSIONS);
+  ss << glGetString(GL_EXTENSIONS);
   SPDLOG_DEBUG("GL Extensions: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
