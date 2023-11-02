@@ -107,11 +107,11 @@ void TextureEgl::Draw() {
 }
 
 void TextureEgl::RunTask() {
-  for (auto& item : *m_textures) {
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+  for (auto& item : *m_textures) {
     if (item->GetId() == kTextureEgl_ObjectId_Navigation) {
       TextureNaviRender::RunTask(item.get());
     }
-#endif
   }
+#endif
 }
