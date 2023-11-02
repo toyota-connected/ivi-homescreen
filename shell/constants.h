@@ -94,7 +94,7 @@ static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format on
 }};
 
-static constexpr std::array<EGLint, 23> kEglConfigAttribs = {{
+static constexpr std::array<EGLint, 27> kEglConfigAttribs = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
@@ -114,6 +114,13 @@ static constexpr std::array<EGLint, 23> kEglConfigAttribs = {{
 #else
     EGL_STENCIL_SIZE, 0,
     EGL_DEPTH_SIZE, 0,
+#endif
+#if defined(BUILD_EGL_ENABLE_MULTISAMPLE)
+    EGL_SAMPLE_BUFFERS, 1,
+    EGL_SAMPLES, 4,
+#else
+    EGL_SAMPLE_BUFFERS, 0,
+    EGL_SAMPLES, 0,
 #endif
 
     EGL_NONE // termination sentinel
