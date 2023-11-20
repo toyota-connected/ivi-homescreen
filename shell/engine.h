@@ -481,6 +481,8 @@ class Engine {
 
   FlutterView* GetView() { return m_view; }
 
+  std::shared_ptr<TaskRunner> GetPlatformRunner() { return m_platform_task_runner; }
+
  private:
   size_t m_index;
   bool m_running;
@@ -507,7 +509,7 @@ class Engine {
   void* m_engine_so_handle;
   FlutterEngineProcTable m_proc_table{};
 
-  std::unique_ptr<TaskRunner> m_platform_task_runner;
+  std::shared_ptr<TaskRunner> m_platform_task_runner;
   FlutterTaskRunnerDescription m_platform_task_runner_description{};
   FlutterCustomTaskRunners m_custom_task_runners{};
 

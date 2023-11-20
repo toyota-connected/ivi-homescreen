@@ -77,3 +77,18 @@ void TaskRunner::QueueFlutterTask(size_t index,
     }));
   }
 }
+
+void TaskRunner::QueuePlatformMessage(
+    const char* channel,
+    std::unique_ptr<std::vector<uint8_t>> message) {
+  post(*strand_, [&, channel, message = std::move(message)]() {
+    const FlutterPlatformMessage msg{
+        sizeof(FlutterPlatformMessage),
+        channel,
+        message->data(),
+        message->size(),
+        nullptr,
+    };
+    proc_table_.SendPlatformMessage(engine_, &msg);
+  });
+}
