@@ -148,4 +148,10 @@ if (BUILD_PLUGIN_FILE_SELECTOR)
     ENABLE_PLUGIN(file_selector)
 endif ()
 
+option(BUILD_PLUGIN_AUDIO_PLAYERS "Include Audio Players plugin" OFF)
+if (BUILD_PLUGIN_AUDIO_PLAYERS)
+    ENABLE_PLUGIN(audio_players)
+    pkg_check_modules(GST REQUIRED gstreamer-1.0>=1.4)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")
