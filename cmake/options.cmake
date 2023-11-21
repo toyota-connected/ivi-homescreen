@@ -124,6 +124,12 @@ else ()
 endif ()
 
 #
+# Docs
+#
+option(BUILD_DOCS "Build documentation" ON)
+MESSAGE(STATUS "Build Documentation .... ${BUILD_DOCS}")
+
+#
 # Unit Tests
 #
 option(BUILD_UNIT_TESTS "Build Unit Tests" OFF)
