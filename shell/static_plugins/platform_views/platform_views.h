@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Toyota Connected North America
+ * Copyright 2020-2023 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 class PlatformViews {
  public:
-  static constexpr char kChannelName[] = "samples.flutter.io/platform_view";
+  static constexpr char kChannelName[] = "flutter/platform_views";
 
   /**
    * @brief Callback function for platform messages about platform view
@@ -32,4 +32,27 @@ class PlatformViews {
    */
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
+
+  PlatformViews(PlatformViews& other) = delete;
+
+  void operator=(const PlatformViews&) = delete;
+
+ private:
+  static constexpr char kMethodCreate[] = "create";
+  static constexpr char kMethodDispose[] = "dispose";
+  static constexpr char kMethodResize[] = "resize";
+  static constexpr char kMethodSetDirection[] = "setDirection";
+  static constexpr char kMethodClearFocus[] = "clearFocus";
+  static constexpr char kMethodOffset[] = "offset";
+  static constexpr char kMethodTouch[] = "touch";
+
+  static constexpr char kKeyId[] = "id";
+  static constexpr char kKeyViewType[] = "viewType";
+  static constexpr char kKeyDirection[] = "direction";
+  static constexpr char kKeyWidth[] = "width";
+  static constexpr char kKeyHeight[] = "height";
+  static constexpr char kKeyParams[] = "params";
+  static constexpr char kKeyTop[] = "top";
+  static constexpr char kKeyLeft[] = "left";
+  static constexpr char kKeyHybrid[] = "hybrid";
 };
