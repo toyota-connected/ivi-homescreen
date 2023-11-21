@@ -91,7 +91,7 @@ Engine::Engine(FlutterView* view,
 
   /// Task Runner
   m_platform_task_runner =
-      std::make_unique<TaskRunner>("Platform", m_proc_table, m_flutter_engine);
+      std::make_shared<TaskRunner>("Platform", m_proc_table, m_flutter_engine);
 
   m_vm_queue = std::make_shared<std::queue<std::string>>();
 
@@ -459,13 +459,8 @@ MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
   if (!m_running) {
     return kInternalInconsistency;
   }
-  FlutterPlatformMessageResponseHandle* handle;
-  m_proc_table.PlatformMessageCreateResponseHandle(
-      m_flutter_engine,
-      [](const uint8_t* /* data */, size_t /* size */, void* /* userdata */) {},
-      nullptr, &handle);
   const FlutterPlatformMessage msg{
-      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
+      sizeof(FlutterPlatformMessage), channel, message, message_size, nullptr,
   };
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
