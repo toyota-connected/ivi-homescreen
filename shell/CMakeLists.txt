@@ -69,6 +69,11 @@ if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
     target_sources(homescreen PRIVATE curl_client/curl_client.cc)
 endif ()
 
+if (BUILD_PLUGIN_AUDIO_PLAYERS)
+    target_sources(homescreen PRIVATE static_plugins/audio_players/audio_player.cc)
+    target_sources(homescreen PRIVATE static_plugins/audio_players/audio_players_context.cc)
+endif ()
+
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL
@@ -91,7 +96,6 @@ target_include_directories(homescreen
         ..
         logging
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
         ${LIBCURL_INCLUDE_DIRS}
