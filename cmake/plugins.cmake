@@ -106,8 +106,8 @@ if (BUILD_PLUGIN_ACCESSIBILITY)
     ENABLE_PLUGIN(accessibility)
 endif ()
 
-option(BUILD_PLUGIN_PLATFORM_VIEW "Includes PlatformView Plugin" OFF)
-if (BUILD_PLUGIN_PLATFORM_VIEW)
+option(BUILD_PLUGIN_PLATFORM_VIEWS "Platform Views support" OFF)
+if (BUILD_PLUGIN_PLATFORM_VIEWS)
     ENABLE_PLUGIN(platform_views)
 endif ()
 
