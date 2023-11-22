@@ -48,7 +48,7 @@ class TaskRunner {
 
   void QueuePlatformMessage(
       const char* channel,
-      std::unique_ptr<std::vector<uint8_t>> message);
+      std::unique_ptr<std::vector<uint8_t>> message) const;
 
   std::string GetName() { return name_; }
 

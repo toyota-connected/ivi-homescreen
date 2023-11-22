@@ -71,7 +71,7 @@ endif ()
 
 if (BUILD_PLUGIN_AUDIO_PLAYERS)
     target_sources(homescreen PRIVATE static_plugins/audio_players/audio_player.cc)
-    target_sources(homescreen PRIVATE static_plugins/audio_players/audio_players_context.cc)
+    target_sources(homescreen PRIVATE static_plugins/audio_players/audio_players_registry.cc)
 endif ()
 
 if (BUILD_PLUGIN_PLATFORM_VIEWS)

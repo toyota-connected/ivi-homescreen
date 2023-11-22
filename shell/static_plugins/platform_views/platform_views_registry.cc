@@ -21,25 +21,25 @@
 #include "platform_views_registry.h"
 
 
-std::shared_ptr<PlatformViewsRegistry> PlatformViewsRegistry::sRegistry = nullptr;
+std::shared_ptr<PlatformViewsRegistry> PlatformViewsRegistry::sInstance = nullptr;
 
-std::mutex gRegistryMutex;
+std::mutex gPlatformViewsRegistryMutex;
 
 PlatformViewsRegistry::PlatformViewsRegistry() = default;
 
 PlatformViewsRegistry::~PlatformViewsRegistry() {
-  sRegistry.reset();
+  sInstance.reset();
 }
 
 void PlatformViewsRegistry::AddPlatformView(
     const int32_t id,
     std::unique_ptr<PlatformView> platform_view) {
-  const std::lock_guard<std::mutex> lock(gRegistryMutex);
+  const std::lock_guard lock(gPlatformViewsRegistryMutex);
   registry_[id] = std::move(platform_view);
 }
 
 PlatformView* PlatformViewsRegistry::GetPlatformView(const int32_t id) {
-  const std::lock_guard<std::mutex> lock(gRegistryMutex);
+  const std::lock_guard lock(gPlatformViewsRegistryMutex);
   if (registry_.find(id) == registry_.end()) {
     return nullptr;
   }
@@ -47,7 +47,7 @@ PlatformView* PlatformViewsRegistry::GetPlatformView(const int32_t id) {
 }
 
 void PlatformViewsRegistry::RemovePlatformView(const int32_t id) {
-  const std::lock_guard<std::mutex> lock(gRegistryMutex);
+  const std::lock_guard lock(gPlatformViewsRegistryMutex);
   const auto it = registry_.find(id);
   if (it != registry_.end())
     registry_.erase(it);

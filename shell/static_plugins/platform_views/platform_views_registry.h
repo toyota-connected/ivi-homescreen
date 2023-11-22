@@ -42,16 +42,16 @@ class PlatformViewsRegistry {
    * @relation
    * internal
    */
-  static PlatformViewsRegistry& GetRegistry() {
-    if (!sRegistry) {
-      sRegistry = std::make_shared<PlatformViewsRegistry>();
+  static PlatformViewsRegistry& GetInstance() {
+    if (!sInstance) {
+      sInstance = std::make_shared<PlatformViewsRegistry>();
     }
-    return *sRegistry;
+    return *sInstance;
   }
 
  private:
   std::map<int32_t, std::unique_ptr<PlatformView>> registry_;
 
  protected:
-  static std::shared_ptr<PlatformViewsRegistry> sRegistry;
+  static std::shared_ptr<PlatformViewsRegistry> sInstance;
 };
