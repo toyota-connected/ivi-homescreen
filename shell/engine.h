@@ -256,21 +256,6 @@ class Engine {
       size_t data_length) const;
 
   /**
-   * @brief Send platform message
-   * @param[in] channel Destination channel
-   * @param[in] message Message to send
-   * @param[in] message_size Size of message
-   * @return bool
-   * @retval true If successed to send message
-   * @retval false If failed to send message
-   * @relation
-   * flutter
-   */
-  bool SendPlatformMessage(const char* channel,
-                           const uint8_t* message,
-                           size_t message_size) const;
-
-  /**
    * @brief PlatformMessage Reply callback
    * @param[in] data payload
    * @param[in] data_size payload size
@@ -282,6 +267,37 @@ class Engine {
   typedef void (*FlutterBinaryReplyUserdata)(const uint8_t* data,
                                              size_t data_size,
                                              void* userdata);
+
+  /**
+   * @brief Send platform message
+   * @param[in] channel Destination channel
+   * @param[in] message Message to send
+   * @param[in] response_handle optional response handle
+   * @return bool
+   * @retval true If successed to send message
+   * @retval false If failed to send message
+   * @relation
+   * flutter
+   */
+  bool SendPlatformMessage(const char* channel,
+                           std::unique_ptr<std::vector<uint8_t>> message,
+                           const FlutterPlatformMessageResponseHandle*
+                               response_handle = nullptr) const;
+
+  /**
+   * @brief Send platform message
+   * @param[in] channel Destination channel
+   * @param[in] message Message to send
+   * @param[in] message_size Size of the message
+   * @return bool
+   * @retval true If successed to send message
+   * @retval false If failed to send message
+   * @relation
+   * flutter
+   */
+  bool SendPlatformMessage(const char* channel,
+                           const uint8_t* message,
+                           size_t message_size) const;
 
   /**
    * @brief Send platform message
@@ -480,8 +496,6 @@ class Engine {
   Backend* GetBackend() { return m_backend; }
 
   FlutterView* GetView() { return m_view; }
-
-  std::shared_ptr<TaskRunner> GetPlatformRunner() { return m_platform_task_runner; }
 
  private:
   size_t m_index;

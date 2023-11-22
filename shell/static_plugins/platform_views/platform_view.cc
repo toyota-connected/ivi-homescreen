@@ -38,7 +38,7 @@ PlatformView::PlatformView(const int32_t id,
 
 PlatformView::~PlatformView() = default;
 
-void PlatformView::Resize(double width, double height) {
+void PlatformView::Resize(const double width, const double height) {
   SPDLOG_DEBUG("Resize [{}]:", viewType_);
   SPDLOG_DEBUG("\twidth: {}", width);
   SPDLOG_DEBUG("\theight: {}", height);

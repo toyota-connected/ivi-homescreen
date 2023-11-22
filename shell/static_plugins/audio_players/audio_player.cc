@@ -38,7 +38,7 @@
  * flutter
  */
 void AudioPlayer::main_loop(AudioPlayer* data) {
-  SPDLOG_INFO("({}) main_loop", data->engine_->GetIndex());
+  SPDLOG_TRACE("({}) main_loop", data->engine_->GetIndex());
   GMainContext* context = g_main_context_new();
   g_main_context_push_thread_default(context);
 
@@ -103,7 +103,7 @@ AudioPlayer::~AudioPlayer() {
   g_main_loop_unref(main_loop_);
   gthread_->join();
   gthread_.reset();
-};
+}
 
 void AudioPlayer::SourceSetup(GstElement* /* playbin */,
                               GstElement* source,
@@ -115,7 +115,9 @@ void AudioPlayer::SourceSetup(GstElement* /* playbin */,
   }
 }
 
-void AudioPlayer::SetSourceUrl(const std::string& url) {
+void AudioPlayer::SetSourceUrl(const std::string& url, const bool isLocal) {
+  spdlog::debug("[{}] SetSourceUrl: {}", playerId_, url);
+  isLocal_ = isLocal;
   if (url_ != url) {
     url_ = url;
     gst_element_set_state(playbin_, GST_STATE_NULL);
@@ -126,16 +128,18 @@ void AudioPlayer::SetSourceUrl(const std::string& url) {
       if (playbin_->current_state != GST_STATE_READY) {
         if (gst_element_set_state(playbin_, GST_STATE_READY) ==
             GST_STATE_CHANGE_FAILURE) {
-          throw std::runtime_error("Unable to set the pipeline to GST_STATE_READY.");
+          throw std::runtime_error(
+              "Unable to set the pipeline to GST_STATE_READY.");
         }
       }
     }
   } else {
-    this->OnPrepared(true);
+    OnPrepared(true);
   }
 }
 
 void AudioPlayer::ReleaseMediaSource() {
+  spdlog::debug("[{}] ReleaseMediaSource", playerId_);
   if (isPlaying_)
     isPlaying_ = false;
   if (isInitialized_)
@@ -149,12 +153,17 @@ void AudioPlayer::ReleaseMediaSource() {
   }
 }
 
+void AudioPlayer::OnTagItem(const GstTagList* /* list */,
+                            const gchar* tag,
+                            AudioPlayer* /* data */) {
+  spdlog::debug("gst: [tag] {} - {}", tag, gst_tag_get_description(tag));
+}
+
 gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
                                    GstMessage* message,
                                    AudioPlayer* data) {
   switch (GST_MESSAGE_TYPE(message)) {
     case GST_MESSAGE_ERROR: {
-      SPDLOG_DEBUG("\tGST_MESSAGE_ERROR");
       GError* err;
       gchar* debug;
 
@@ -164,37 +173,51 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       g_free(debug);
       break;
     }
+    case GST_MESSAGE_NEW_CLOCK:
+      if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_)) {
+        data->OnDurationUpdate();
+      }
+      break;
     case GST_MESSAGE_STATE_CHANGED:
-      GstState old_state, new_state;
-
-      gst_message_parse_state_changed(message, &old_state, &new_state, nullptr);
-      data->OnMediaStateChange(GST_MESSAGE_SRC(message), &old_state,
-                               &new_state);
+      if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_)) {
+        GstState old_state, new_state;
+        gst_message_parse_state_changed(message, &old_state, &new_state,
+                                        nullptr);
+        data->playbin_state_ = new_state;
+        data->OnMediaStateChange(GST_MESSAGE_SRC(message), &old_state,
+                                 &new_state);
+      }
       break;
     case GST_MESSAGE_BUFFERING: {
-      gint percent;
-      gst_message_parse_buffering(message, &percent);
-      spdlog::debug("[audio_player: {}] Buffering: {}%", data->playerId_, percent);
-      if (percent == 100) {
-        gst_element_set_state(data->playbin_, GST_STATE_PLAYING);
-      }
+      gst_message_parse_buffering(message, &data->bufferingPercent_);
       break;
     }
     case GST_MESSAGE_EOS:
-      data->OnPlaybackEnded();
-      break;
-    case GST_MESSAGE_DURATION_CHANGED:
-      data->OnDurationUpdate();
-      break;
-    case GST_MESSAGE_ASYNC_DONE:
-      if (!data->isSeekCompleted_) {
-        data->OnSeekCompleted();
-        data->isSeekCompleted_ = true;
+      if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_)) {
+        if (data->isPlaying_) {
+          data->OnPlaybackEnded();
+        }
       }
       break;
+    case GST_MESSAGE_ASYNC_DONE:
+      if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_)) {
+        if (!data->isSeekCompleted_) {
+          data->OnSeekCompleted();
+          data->isSeekCompleted_ = true;
+        }
+      }
+      break;
+    case GST_MESSAGE_TAG: {
+      GstTagList* tag_list;
+      gst_message_parse_tag(message, &tag_list);
+      gst_tag_list_foreach(tag_list, (GstTagForeachFunc)OnTagItem, data);
+      gst_tag_list_unref(tag_list);
+      break;
+    }
     default:
-      // For more GstMessage types see:
-      // https://gstreamer.freedesktop.org/documentation/gstreamer/gstmessage.html?gi-language=c#enumerations
+      SPDLOG_DEBUG("[{}] gst: [{}] {}", data->playerId_,
+                   GST_OBJECT_NAME(message->src),
+                   GST_MESSAGE_TYPE_NAME(message));
       break;
   }
 
@@ -202,11 +225,13 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
   return TRUE;
 }
 
-void AudioPlayer::OnMediaError(GError* error, gchar* /* debug */) {
+void AudioPlayer::OnMediaError(GError* error, gchar* /* debug */) const {
   gchar const* code = "LinuxAudioError";
   gchar const* message;
   std::stringstream detailsStr;
-  detailsStr << error->message << " (Domain: " << g_quark_to_string(error->domain) << ", Code: " << error->code + ")";
+  detailsStr << error->message
+             << " (Domain: " << g_quark_to_string(error->domain)
+             << ", Code: " << error->code << ")";
   const flutter::EncodableValue details(detailsStr.str().c_str());
   // https://gstreamer.freedesktop.org/documentation/gstreamer/gsterror.html#enumerations
   if (error->domain == GST_STREAM_ERROR) {
@@ -216,26 +241,47 @@ void AudioPlayer::OnMediaError(GError* error, gchar* /* debug */) {
   } else {
     message = "Unknown GstGError. See details.";
   }
-  this->OnError(code, message, details, &error);
+  OnError(code, message, details, &error);
 }
 
 void AudioPlayer::OnError(const gchar* code,
                           const gchar* message,
-                          const flutter::EncodableValue& details,
-                          GError** /* error */) {
-  SPDLOG_ERROR("OnError: ({}) {}", code, message);
-  auto& codec = flutter::StandardMethodCodec::GetInstance();
-  const auto encoded = codec.EncodeErrorEnvelope(code, message, &details);
-  engine_->SendPlatformMessage(eventChannel_.c_str(), encoded->data(), encoded->size());
+                          const flutter::EncodableValue& /* details */,
+                          GError** /* error */) const {
+  auto encoded =
+      flutter::StandardMethodCodec::GetInstance().EncodeErrorEnvelope(code,
+                                                                      message);
+  spdlog::debug("[{}] OnError: ({}) {}", playerId_, code, message);
+  engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
+}
+
+static std::string GetStateName(const GstState* state) {
+  switch (*state) {
+    case GST_STATE_VOID_PENDING:
+      return "GST_STATE_VOID_PENDING";
+    case GST_STATE_NULL:
+      return "GST_STATE_NULL";
+    case GST_STATE_READY:
+      return "GST_STATE_READY";
+    case GST_STATE_PAUSED:
+      return "GST_STATE_PAUSED";
+    case GST_STATE_PLAYING:
+      return "GST_STATE_PLAYING";
+    default:
+      return "";
+  }
 }
 
 void AudioPlayer::OnMediaStateChange(const GstObject* src,
                                      const GstState* old_state,
                                      const GstState* new_state) {
+  SPDLOG_DEBUG("[{}] OnMediaStateChange: old: {}, new: {}", playerId_,
+               GetStateName(old_state), GetStateName(new_state));
+
   if (!playbin_) {
-    this->OnError("LinuxAudioError",
-                  "Player was already disposed (OnMediaStateChange).", nullptr,
-                  nullptr);
+    OnError("LinuxAudioError",
+            "Player was already disposed (OnMediaStateChange).", nullptr,
+            nullptr);
     return;
   }
 
@@ -247,109 +293,116 @@ void AudioPlayer::OnMediaStateChange(const GstObject* src,
         gchar const* errorDescription =
             "Unable to set the pipeline from GST_STATE_READY to "
             "GST_STATE_PAUSED.";
-        if (this->isInitialized_) {
-          this->OnError("LinuxAudioError", errorDescription, nullptr, nullptr);
+        if (isInitialized_) {
+          OnError("LinuxAudioError", errorDescription, nullptr, nullptr);
         } else {
-          this->OnError("LinuxAudioError",
-                        "Failed to set source. For troubleshooting, "
-                        "see: " STR_LINK_TROUBLESHOOTING,
-                        flutter::EncodableValue(errorDescription), nullptr);
+          OnError("LinuxAudioError",
+                  "Failed to set source. For troubleshooting, "
+                  "see: " STR_LINK_TROUBLESHOOTING,
+                  flutter::EncodableValue(errorDescription), nullptr);
         }
       }
-      if (this->isInitialized_) {
-        this->isInitialized_ = false;
+      if (isInitialized_) {
+        isInitialized_ = false;
+        SPDLOG_DEBUG("[{}] isInitialized_ = false", playerId_);
       }
-    } else if (*old_state == GST_STATE_PAUSED &&
+    } else if (*old_state == GST_STATE_READY &&
                *new_state == GST_STATE_PLAYING) {
+      SPDLOG_DEBUG("[{}] QueryDuration", playerId_);
       OnDurationUpdate();
     } else if (*new_state >= GST_STATE_PAUSED) {
-      if (!this->isInitialized_) {
-        this->isInitialized_ = true;
-        this->OnPrepared(true);
-        if (this->isPlaying_) {
+      if (!isInitialized_) {
+        isInitialized_ = true;
+        SPDLOG_DEBUG("[{}] isInitialized_ = true", playerId_);
+        OnPrepared(true);
+        if (isPlaying_) {
           Resume();
         }
       }
-    } else if (this->isInitialized_) {
-      this->isInitialized_ = false;
+    } else if (isInitialized_) {
+      isInitialized_ = false;
     }
   }
 }
 
-void AudioPlayer::OnPrepared(bool isPrepared) {
-  flutter::EncodableMap map = {
-      {flutter::EncodableValue("event"),
-       flutter::EncodableValue("audio.onPrepared")},
-      {flutter::EncodableValue("value"), flutter::EncodableValue(isPrepared)}};
-  auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto encoded = codec.EncodeMessage(map);
-  engine_->GetPlatformRunner()->QueuePlatformMessage(eventChannel_.c_str(),
-                                                     std::move(encoded));
+void AudioPlayer::OnPrepared(bool isPrepared) const {
+  const flutter::EncodableMap map(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("audio.onPrepared")},
+       {flutter::EncodableValue("value"),
+        flutter::EncodableValue(isPrepared)}});
+  auto encoded =
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+  engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
-void AudioPlayer::OnDurationUpdate() {
+void AudioPlayer::OnDurationUpdate() const {
   int64_t duration = GetDuration().value_or(0);
-  flutter::EncodableMap map = {
-      {flutter::EncodableValue("event"),
-       flutter::EncodableValue("audio.onDuration")},
-      {flutter::EncodableValue("value"), flutter::EncodableValue(duration)}};
-  auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto encoded = codec.EncodeMessage(map);
-  engine_->GetPlatformRunner()->QueuePlatformMessage(eventChannel_.c_str(),
-                                                     std::move(encoded));
+  const flutter::EncodableMap map(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("audio.onDuration")},
+       {flutter::EncodableValue("value"), flutter::EncodableValue(duration)}});
+  auto encoded =
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+  spdlog::debug("[{}] audio.onDuration {}", playerId_, duration);
+  engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
-void AudioPlayer::OnSeekCompleted() {
-  flutter::EncodableMap map = {
-      {flutter::EncodableValue("event"),
-       flutter::EncodableValue("audio.onSeekComplete")},
-      {flutter::EncodableValue("value"), flutter::EncodableValue(true)}};
-  auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto encoded = codec.EncodeMessage(map);
-  engine_->GetPlatformRunner()->QueuePlatformMessage(eventChannel_.c_str(),
-                                                     std::move(encoded));
+void AudioPlayer::OnSeekCompleted() const {
+  const flutter::EncodableMap map(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("audio.onSeekComplete")},
+       {flutter::EncodableValue("value"), flutter::EncodableValue(true)}});
+  auto encoded =
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+  spdlog::debug("[{}] audio.onSeekComplete", playerId_);
+  engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
 void AudioPlayer::OnPlaybackEnded() {
-  flutter::EncodableMap map = {
-      {flutter::EncodableValue("event"),
-       flutter::EncodableValue("audio.onComplete")},
-      {flutter::EncodableValue("value"), flutter::EncodableValue(true)}};
-  auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto encoded = codec.EncodeMessage(map);
-  engine_->GetPlatformRunner()->QueuePlatformMessage(eventChannel_.c_str(),
-                                                     std::move(encoded));
-
   if (GetLooping()) {
     Play();
   } else {
     Pause();
     SetPosition(0);
   }
+  const flutter::EncodableMap map(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("audio.onComplete")},
+       {flutter::EncodableValue("value"), flutter::EncodableValue(true)}});
+  auto encoded =
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+  spdlog::debug("[{}] audio.onComplete", playerId_);
+  engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
-void AudioPlayer::OnLog(const gchar* message) {
-  flutter::EncodableMap map{
-      {flutter::EncodableValue("event"),
-       flutter::EncodableValue("audio.onLog")},
-      {flutter::EncodableValue("value"), flutter::EncodableValue(message)}};
-  auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto encoded = codec.EncodeMessage(map);
-  engine_->GetPlatformRunner()->QueuePlatformMessage(eventChannel_.c_str(),
-                                                     std::move(encoded));
+void AudioPlayer::OnLog(const gchar* message) const {
+  const flutter::EncodableMap map(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("audio.onLog")},
+       {flutter::EncodableValue("value"),
+        flutter::EncodableValue(std::string(message))}});
+  auto encoded =
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+  spdlog::debug("[{}] audio.onLog: {}", playerId_, message);
+  engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
 void AudioPlayer::SetReleaseMode(std::string mode) {
+  spdlog::debug("[{}] SetReleaseMode {}", playerId_, mode);
   releaseMode_ = std::move(mode);
 }
 
 void AudioPlayer::SetPlayerMode(std::string playerMode) {
+  spdlog::debug("[{}] SetPlayerMode {}", playerId_, playerMode);
   playerMode_ = std::move(playerMode);
 }
 
-void AudioPlayer::SetBalance(float balance) {
+void AudioPlayer::SetBalance(float balance) const {
+  spdlog::debug("[{}] SetBalance {}", playerId_, balance);
+
   if (!panorama_) {
-    this->OnLog("Audiopanorama was not initialized");
+    OnLog("Audiopanorama was not initialized");
     return;
   }
 
@@ -362,14 +415,18 @@ void AudioPlayer::SetBalance(float balance) {
 }
 
 void AudioPlayer::SetLooping(const bool isLooping) {
+  spdlog::debug("[{}] SetLooping {}", playerId_, isLooping);
   isLooping_ = isLooping;
 }
 
 bool AudioPlayer::GetLooping() const {
+  spdlog::debug("[{}] GetLooping {}", playerId_, isLooping_);
   return isLooping_;
 }
 
-void AudioPlayer::SetVolume(const double volume) {
+void AudioPlayer::SetVolume(const double volume) const {
+  spdlog::debug("[{}] SetVolume", playerId_);
+
   double value = volume;
   if (volume > 1) {
     value = 1;
@@ -388,6 +445,8 @@ void AudioPlayer::SetVolume(const double volume) {
  * @param rate the playback rate (speed)
  */
 void AudioPlayer::SetPlayback(const int64_t position, const double rate) {
+  spdlog::debug("[{}] SetPlayback", playerId_);
+
   if (rate != 0 && playbackRate_ != rate) {
     playbackRate_ = rate;
   }
@@ -395,8 +454,6 @@ void AudioPlayer::SetPlayback(const int64_t position, const double rate) {
   if (!isInitialized_) {
     return;
   }
-  // See:
-  // https://gstreamer.freedesktop.org/documentation/tutorials/basic/playback-speed.html?gi-language=c
   if (!isSeekCompleted_) {
     return;
   }
@@ -422,15 +479,16 @@ void AudioPlayer::SetPlayback(const int64_t position, const double rate) {
   }
 
   if (!gst_element_send_event(playbin_, seek_event)) {
-    this->OnLog((std::string("Could not set playback to position ") +
-                 std::to_string(position) + std::string(" and rate ") +
-                 std::to_string(rate) + std::string("."))
-                    .c_str());
+    std::stringstream ss;
+    ss << "Could not set playback to position " << position << " and rate "
+       << rate;
+    OnLog(ss.str().c_str());
     isSeekCompleted_ = true;
   }
 }
 
 void AudioPlayer::SetPlaybackRate(const double rate) {
+  spdlog::debug("[{}] SetPlaybackRate", playerId_);
   SetPlayback(GetPosition().value_or(0), rate);
 }
 
@@ -438,6 +496,7 @@ void AudioPlayer::SetPlaybackRate(const double rate) {
  * @param position the position in milliseconds
  */
 void AudioPlayer::SetPosition(const int64_t position) {
+  spdlog::debug("[{}] SetPosition", playerId_);
   if (!isInitialized_) {
     return;
   }
@@ -447,36 +506,41 @@ void AudioPlayer::SetPosition(const int64_t position) {
 /**
  * @return int64_t the position in milliseconds
  */
-std::optional<int64_t> AudioPlayer::GetPosition() {
+std::optional<int64_t> AudioPlayer::GetPosition() const {
   gint64 current = 0;
-  if (!gst_element_query_position(playbin_, GST_FORMAT_TIME, &current)) {
-    this->OnLog("Could not query current position.");
-    return std::nullopt;
+  if (playbin_state_ >= GST_STATE_READY) {
+    if (!gst_element_query_position(playbin_, GST_FORMAT_TIME, &current)) {
+      OnLog("Could not query current position.");
+      return std::nullopt;
+    }
+    spdlog::debug("[{}] GetPosition: {}", current);
+    return std::make_optional(current / 1000000);
   }
-  return std::make_optional(current / 1000000);
+  return std::nullopt;
 }
 
 /**
  * @return int64_t the duration in milliseconds
  */
-std::optional<int64_t> AudioPlayer::GetDuration() {
+std::optional<int64_t> AudioPlayer::GetDuration() const {
   gint64 duration = 0;
   if (!gst_element_query_duration(playbin_, GST_FORMAT_TIME, &duration)) {
     // FIXME: Get duration for MP3 with variable bit rate with gst-discoverer:
     // https://gstreamer.freedesktop.org/documentation/pbutils/gstdiscoverer.html?gi-language=c#gst_discoverer_info_get_duration
-    SPDLOG_DEBUG("Could not query current duration.");
-    this->OnLog("Could not query current duration.");
+    OnLog("Could not query current duration");
     return std::nullopt;
   }
   return std::make_optional(duration / 1000000);
 }
 
 void AudioPlayer::Play() {
+  spdlog::debug("[{}] Play", playerId_);
   SetPosition(0);
   Resume();
 }
 
 void AudioPlayer::Pause() {
+  spdlog::debug("[{}] Pause", playerId_);
   if (isPlaying_) {
     isPlaying_ = false;
   }
@@ -491,6 +555,7 @@ void AudioPlayer::Pause() {
 }
 
 void AudioPlayer::Resume() {
+  spdlog::debug("[{}] Resume", playerId_);
   if (!isPlaying_) {
     isPlaying_ = true;
   }
@@ -502,7 +567,8 @@ void AudioPlayer::Resume() {
     // Update duration when start playing, as no event is emitted elsewhere
     OnDurationUpdate();
   } else {
-    throw std::runtime_error("Unable to set the pipeline to GST_STATE_PLAYING.");
+    throw std::runtime_error(
+        "Unable to set the pipeline to GST_STATE_PLAYING.");
   }
 }
 
@@ -546,17 +612,18 @@ void AudioPlayer::Dispose() {
 void AudioPlayer::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+  const auto method = obj->method_name();
 
-  if (method == AudioPlayers::kMethodListen) {
-    SPDLOG_DEBUG("[audio_player] listen");
+  if (kMethodListen == method) {
+    SPDLOG_TRACE("[audio_player] {}: listen", message->channel);
     result = codec.EncodeSuccessEnvelope();
   } else {
-    auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+    const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
     Utils::PrintFlutterEncodableValue(method.c_str(), *args);
     result =
         codec.EncodeErrorEnvelope("unimplemented", "method not implemented");

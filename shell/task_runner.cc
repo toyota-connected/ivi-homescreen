@@ -43,7 +43,8 @@ TaskRunner::TaskRunner(std::string name,
   });
 
   asio::post(*strand_, [&]() {
-    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self());
+    pthread_self_ = pthread_self();
+    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self_);
   });
 }
 
@@ -60,7 +61,7 @@ void TaskRunner::QueueFlutterTask(size_t index,
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
   auto current = proc_table_.GetCurrentTime();
   if (current >= target_time) {
-    asio::post(*strand_, [&, index, task]() {
+    post(*strand_, [&, index, task]() {
 #if defined(NDEBUG)
       (void)index;
 #endif
@@ -69,10 +70,10 @@ void TaskRunner::QueueFlutterTask(size_t index,
     });
   } else {
     asio::post(*strand_, pri_queue_->wrap(target_time, [&, index, task]() {
+      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
 #if defined(NDEBUG)
       (void)index;
 #endif
-      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
       proc_table_.RunTask(engine_, &task);
     }));
   }
@@ -80,7 +81,7 @@ void TaskRunner::QueueFlutterTask(size_t index,
 
 void TaskRunner::QueuePlatformMessage(
     const char* channel,
-    std::unique_ptr<std::vector<uint8_t>> message) {
+    std::unique_ptr<std::vector<uint8_t>> message) const {
   post(*strand_, [&, channel, message = std::move(message)]() {
     const FlutterPlatformMessage msg{
         sizeof(FlutterPlatformMessage),
