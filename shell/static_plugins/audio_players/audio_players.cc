@@ -24,6 +24,8 @@
 #include "engine.h"
 #include "utils.h"
 
+namespace Plugins {
+
 static void OnError(Engine const* engine,
                     const FlutterPlatformMessageResponseHandle* handle,
                     const std::string& error_code,
@@ -311,4 +313,5 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
             p ? p.__cxa_exception_type()->name()
               : "Unknown AudioPlayersLinux error");
   }
+}
 }
