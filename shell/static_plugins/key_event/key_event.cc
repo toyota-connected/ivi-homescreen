@@ -117,7 +117,7 @@ void KeyEvent::SendKeyEvent(bool released,
   rapidjson::Document event(rapidjson::kObjectType);
   auto& allocator = event.GetAllocator();
 
-  uint32_t utf32_code = xkb_keysym_to_utf32(keysym);
+  const uint32_t utf32_code = xkb_keysym_to_utf32(keysym);
 
   event.AddMember(kKeyCodeKey, keysym, allocator);
   event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
@@ -164,11 +164,11 @@ void KeyEvent::SendKeyEvent(bool released,
 
 void KeyEvent::keyboard_handle_key(
     void* data,
-    FlutterKeyEventType eventType,
-    uint32_t xkb_scancode,
-    xkb_keysym_t keysym,
+    const FlutterKeyEventType eventType,
+    const uint32_t xkb_scancode,
+    const xkb_keysym_t keysym,
     std::shared_ptr<DelegateHandleKey> delegate) {
-  auto d = reinterpret_cast<KeyEvent*>(data);
+  const auto d = static_cast<KeyEvent*>(data);
 
   d->SendKeyEvent(eventType == kFlutterKeyEventTypeUp, keysym, xkb_scancode, 0,
                   std::move(delegate));
@@ -176,18 +176,18 @@ void KeyEvent::keyboard_handle_key(
 
 void KeyEvent::Send(const std::string& channel,
                     const uint8_t* message,
-                    size_t message_size,
-                    flutter::BinaryReply reply) const {
+                    const size_t message_size,
+                    const flutter::BinaryReply reply) const {
   last_binary_reply_ = reply;
 
   engine_->SendPlatformMessage(
       channel.c_str(), message, message_size,
-      reinterpret_cast<Engine::FlutterBinaryReplyUserdata>(ReplyHandler),
-      reinterpret_cast<void*>(const_cast<KeyEvent*>(this)));
+      ReplyHandler,
+      const_cast<KeyEvent*>(this));
 }
 
 void KeyEvent::SetMessageHandler(const std::string& channel,
-                                 flutter::BinaryMessageHandler handler) {
+                                 const flutter::BinaryMessageHandler handler) {
   last_message_handler_channel_ = channel;
   last_message_handler_ = handler;
 }

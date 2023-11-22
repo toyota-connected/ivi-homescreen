@@ -270,20 +270,7 @@ FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
   }
 
   // Set available system locales
-  FlutterLocale locale = {};
-  locale.struct_size = sizeof(locale);
-  locale.language_code = kDefaultLocaleLanguageCode;
-  locale.country_code = kDefaultLocaleCountryCode;
-  locale.script_code = kDefaultLocaleScriptCode;
-  locale.variant_code = nullptr;
-
-  std::vector<const FlutterLocale*> locales;
-  locales.push_back(&locale);
-
-  if (kSuccess != m_proc_table.UpdateLocales(m_flutter_engine, locales.data(),
-                                             locales.size())) {
-    spdlog::error("({}) Failed to set Flutter Engine Locale", m_index);
-  }
+  SetUpLocales();
 
   // Set Accessibility Features
   m_proc_table.UpdateAccessibilityFeatures(
@@ -465,22 +452,20 @@ bool Engine::SendPlatformMessage(
     return false;
   }
 
+  FlutterEngineResult result;
   if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
-    m_platform_task_runner->QueuePlatformMessage(channel, std::move(message));
-    return true;
+    auto f = m_platform_task_runner->QueuePlatformMessage(channel,
+                                                          std::move(message));
+    f.wait();
+    result = f.get();
+  } else {
+    const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
+                                     message->data(), message->size(),
+                                     response_handle};
+    result = m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
   }
-  if (!response_handle) {
-    FlutterPlatformMessageResponseHandle* handle;
-    m_proc_table.PlatformMessageCreateResponseHandle(
-        m_flutter_engine,
-        [](const uint8_t* /* data */, size_t /* size */, void* /* userdata */) {
-        },
-        nullptr, &handle);
-  }
-  const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
-                                   message->data(), message->size(),
-                                   response_handle};
-  return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
+
+  return (result == kSuccess);
 }
 
 bool Engine::SendPlatformMessage(const char* channel,
@@ -490,40 +475,54 @@ bool Engine::SendPlatformMessage(const char* channel,
     return false;
   }
 
+  FlutterEngineResult result;
   if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
     auto msg =
         std::make_unique<std::vector<uint8_t>>(message, message + message_size);
-    m_platform_task_runner->QueuePlatformMessage(channel, std::move(msg));
-    return true;
+    auto f =
+        m_platform_task_runner->QueuePlatformMessage(channel, std::move(msg));
+    f.wait();
+    result = f.get();
+  } else {
+    const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
+                                     message, message_size, nullptr};
+    result = m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
   }
-  const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
-                                   message, message_size, nullptr};
-  return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
+  return (result == kSuccess);
 }
 
-MAYBE_UNUSED bool Engine::SendPlatformMessage(
-    const char* channel,
-    const uint8_t* message,
-    const size_t message_size,
-    const FlutterBinaryReplyUserdata reply,
-    void* userdata) const {
+bool Engine::SendPlatformMessage(const char* channel,
+                                 const uint8_t* message,
+                                 const size_t message_size,
+                                 const FlutterDataCallback reply,
+                                 void* userdata) const {
   if (!m_running) {
     return kInternalInconsistency;
   }
   FlutterPlatformMessageResponseHandle* handle;
   m_proc_table.PlatformMessageCreateResponseHandle(m_flutter_engine, reply,
                                                    userdata, &handle);
-  const FlutterPlatformMessage msg{
-      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
-  };
 
-  FlutterEngineResult message_ret =
-      m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  FlutterEngineResult result;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto msg =
+        std::make_unique<std::vector<uint8_t>>(message, message + message_size);
+    auto f = m_platform_task_runner->QueuePlatformMessage(
+        channel, std::move(msg), handle);
+    f.wait();
+    result = f.get();
+  } else {
+    const FlutterPlatformMessage msg{
+        sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
+    };
+
+    result = m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  }
   if (handle != nullptr) {
     m_proc_table.PlatformMessageReleaseResponseHandle(m_flutter_engine, handle);
   }
 
-  return message_ret == kSuccess;
+  return result == kSuccess;
 }
 
 MAYBE_UNUSED FlutterEngineResult
@@ -533,9 +532,34 @@ Engine::UpdateAccessibilityFeatures(int32_t value) {
       m_flutter_engine, static_cast<FlutterAccessibilityFeature>(value));
 }
 
-MAYBE_UNUSED FlutterEngineResult
-Engine::UpdateLocales(const FlutterLocale** locales, size_t locales_count) {
-  return m_proc_table.UpdateLocales(m_flutter_engine, locales, locales_count);
+// Passes locale information to the Flutter engine.
+void Engine::SetUpLocales() const {
+  FlutterLocale locale = {
+    .struct_size = sizeof(FlutterLocale),
+    .language_code = kDefaultLocaleLanguageCode,
+    .country_code = kDefaultLocaleCountryCode,
+    .script_code = kDefaultLocaleScriptCode,
+    .variant_code = nullptr
+  };
+
+  std::vector<const FlutterLocale*> flutter_locale_list;
+  flutter_locale_list.push_back(&locale);
+
+  FlutterEngineResult result;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto f = m_platform_task_runner->QueueUpdateLocales(
+        std::move(flutter_locale_list));
+    f.wait();
+    result = f.get();
+  } else {
+    result =
+        m_proc_table.UpdateLocales(m_flutter_engine, flutter_locale_list.data(),
+                                   flutter_locale_list.size());
+  }
+
+  if (result != kSuccess) {
+    spdlog::error("({}) Failed to set up Flutter locales.", m_index);
+  }
 }
 
 void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
