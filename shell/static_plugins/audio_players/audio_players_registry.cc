@@ -17,11 +17,15 @@
 #include "audio_players_registry.h"
 
 #include <memory>
+#include <mutex>
 
 #include <flutter/standard_message_codec.h>
 
 #include "audio_player.h"
-#include "audio_players.h"
+#include "platform_channel.h"
+#include "logging/logging.h"
+
+namespace Plugins {
 
 std::shared_ptr<AudioPlayersRegistry> AudioPlayersRegistry::sInstance = nullptr;
 
@@ -40,12 +44,12 @@ AudioPlayersRegistry::~AudioPlayersRegistry() = default;
 void AudioPlayersRegistry::AddAudioPlayer(
     const std::string& id,
     std::unique_ptr<AudioPlayer> audio_player) {
-  const std::lock_guard lock(gAudioPlayersRegistryMutex);
+  const std::scoped_lock lock(gAudioPlayersRegistryMutex);
   registry_[id] = std::move(audio_player);
 }
 
 AudioPlayer* AudioPlayersRegistry::GetAudioPlayer(const std::string& id) {
-  const std::lock_guard lock(gAudioPlayersRegistryMutex);
+  const std::scoped_lock lock(gAudioPlayersRegistryMutex);
   if (registry_.find(id) == registry_.end()) {
     return nullptr;
   }
@@ -53,10 +57,12 @@ AudioPlayer* AudioPlayersRegistry::GetAudioPlayer(const std::string& id) {
 }
 
 void AudioPlayersRegistry::RemoveAudioPlayer(const std::string& id) {
-  const std::lock_guard lock(gAudioPlayersRegistryMutex);
+  const std::scoped_lock lock(gAudioPlayersRegistryMutex);
   const auto it = registry_.find(id);
-  if (it != registry_.end())
+  if (it != registry_.end()) {
+    registry_[id].reset();
     registry_.erase(it);
+  }
 }
 
 void AudioPlayersRegistry::on_global_log(const Engine* engine,
@@ -162,3 +168,4 @@ void AudioPlayersRegistry::OnPlatformMessageEvents(
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }
+}  // namespace Plugins

@@ -17,6 +17,9 @@
 
 #pragma once
 
+#include <flutter/encodable_value.h>
+#include <shell/platform/embedder/embedder.h>
+
 #include <optional>
 #include <string>
 #include <thread>
@@ -26,6 +29,8 @@ extern "C" {
 }
 
 #include "engine.h"
+
+namespace Plugins {
 
 class AudioPlayer {
  public:
@@ -145,3 +150,5 @@ class AudioPlayer {
   static void OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata);
 };
+
+}  // namespace AudioPlayers

@@ -79,17 +79,43 @@ void TaskRunner::QueueFlutterTask(size_t index,
   }
 }
 
-void TaskRunner::QueuePlatformMessage(
+std::future<FlutterEngineResult> TaskRunner::QueuePlatformMessage(
     const char* channel,
-    std::unique_ptr<std::vector<uint8_t>> message) const {
-  post(*strand_, [&, channel, message = std::move(message)]() {
+    std::unique_ptr<std::vector<uint8_t>> message,
+    FlutterPlatformMessageResponseHandle* handle) const {
+  auto promise(std::make_unique<std::promise<FlutterEngineResult>>());
+  auto future(promise->get_future());
+
+  post(*strand_, [channel, message = std::move(message), handle,
+                  promise = std::move(promise),
+                  SendPlatformMessage = proc_table_.SendPlatformMessage,
+                  engine = engine_]() {
     const FlutterPlatformMessage msg{
         sizeof(FlutterPlatformMessage),
         channel,
         message->data(),
         message->size(),
-        nullptr,
+        handle,
     };
-    proc_table_.SendPlatformMessage(engine_, &msg);
+
+    promise->set_value(SendPlatformMessage(engine, &msg));
   });
+
+  return future;
+}
+
+std::future<FlutterEngineResult> TaskRunner::QueueUpdateLocales(
+    std::vector<const FlutterLocale*> locales) const {
+  auto promise(std::make_unique<std::promise<FlutterEngineResult>>());
+  auto future(promise->get_future());
+  post(*strand_,
+       [promise = std::move(promise), locales = std::move(locales),
+        UpdateLocales = proc_table_.UpdateLocales, engine = engine_]() {
+         std::vector l(locales.data(), locales.data() + locales.size());
+         const FlutterEngineResult result =
+             UpdateLocales(engine, l.data(), l.size());
+         promise->set_value(result);
+       });
+
+  return future;
 }

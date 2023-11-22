@@ -17,13 +17,11 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <string>
 
 #include <flutter/basic_message_channel.h>
 #include <flutter/binary_messenger.h>
-#include <flutter/shell/platform/common/json_message_codec.h>
 #include "flutter/fml/macros.h"
 
 #include <rapidjson/document.h>
@@ -169,9 +167,9 @@ class KeyEvent : public flutter::BinaryMessenger {
    * flutter
    */
   static void ReplyHandler(const uint8_t* data,
-                           size_t data_size,
+                           const size_t data_size,
                            void* userdata) {
-    auto d = reinterpret_cast<KeyEvent*>(userdata);
+    auto d = static_cast<KeyEvent*>(userdata);
     if (d->last_binary_reply_) {
       d->last_binary_reply_(data, data_size);
     }
