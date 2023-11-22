@@ -20,10 +20,9 @@
 #include <vector>
 
 #include "audio_player.h"
+#include "audio_players_registry.h"
 #include "engine.h"
 #include "utils.h"
-
-std::shared_ptr<AudioPlayersContext> AudioPlayers::sContext = nullptr;
 
 static void OnError(Engine const* engine,
                     const FlutterPlatformMessageResponseHandle* handle,
@@ -61,22 +60,22 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
     return;
   }
   auto method = obj->method_name();
-  SPDLOG_DEBUG("[audio_players] {}", method);
+  SPDLOG_TRACE("[audio_players] {} on {}", method, message->channel);
 
   auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
   try {
     if (method == kMethodCreate) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: {}", playerId);
-      GetContext().AddAudioPlayer(
+      SPDLOG_TRACE("\tplayerId: {}", playerId);
+      AudioPlayersRegistry::GetInstance().AddAudioPlayer(
           playerId, std::make_unique<AudioPlayer>(playerId, engine));
 
     } else if (method == kMethodDispose) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      GetContext().GetAudioPlayer(playerId)->Dispose();
-      GetContext().RemoveAudioPlayer(playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId)->Dispose();
+      AudioPlayersRegistry::GetInstance().RemoveAudioPlayer(playerId);
 
     } else if (method == kMethodSetReleaseMode) {
       std::string playerId;
@@ -91,11 +90,12 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         }
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\treleaseMode: [{}]", releaseMode);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\treleaseMode: [{}]", releaseMode);
 
       auto looping = releaseMode.find("loop") != std::string::npos;
-      auto player = GetContext().GetAudioPlayer(playerId);
+      auto player =
+          AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId);
       player->SetLooping(looping);
 
     } else if (method == kMethodSeek) {
@@ -111,10 +111,11 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         }
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\tposition: [{}]", position);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tposition: [{}]", position);
 
-      auto player = GetContext().GetAudioPlayer(playerId);
+      auto player =
+          AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId);
       player->SetPosition(position);
 
     } else if (method == kMethodSetSourceUrl) {
@@ -139,11 +140,13 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         url = std::string("file://") + url;
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\tisLocal: [{}]", isLocal);
-      SPDLOG_DEBUG("\turl: [{}]", url);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tisLocal: [{}]", isLocal);
+      SPDLOG_TRACE("\turl: [{}]", url);
 
-      GetContext().GetAudioPlayer(playerId)->SetSourceUrl(url);
+      AudioPlayersRegistry::GetInstance()
+          .GetAudioPlayer(playerId)
+          ->SetSourceUrl(url, isLocal);
 
     } else if (method == kMethodSetVolume) {
       std::string playerId;
@@ -158,10 +161,11 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         }
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\tvolume: [{}]", volume);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tvolume: [{}]", volume);
 
-      auto player = GetContext().GetAudioPlayer(playerId);
+      auto player =
+          AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId);
       player->SetVolume(volume);
 
     } else if (method == kMethodSetBalance) {
@@ -177,10 +181,11 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         }
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\tbalance: [{}]", balance);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tbalance: [{}]", balance);
 
-      auto player = GetContext().GetAudioPlayer(playerId);
+      auto player =
+          AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId);
       player->SetBalance(static_cast<float>(balance));
 
     } else if (method == kMethodSetPlaybackRate) {
@@ -196,10 +201,12 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         }
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\tplayback_rate: [{}]", playback_rate);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayback_rate: [{}]", playback_rate);
 
-      GetContext().GetAudioPlayer(playerId)->SetPlaybackRate(playback_rate);
+      AudioPlayersRegistry::GetInstance()
+          .GetAudioPlayer(playerId)
+          ->SetPlaybackRate(playback_rate);
 
     } else if (method == kMethodSetPlayerMode) {
       std::string playerId;
@@ -214,60 +221,68 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
         }
       }
 
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
-      SPDLOG_DEBUG("\tplayerMode: [{}]", playerMode);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerMode: [{}]", playerMode);
 
-      GetContext().GetAudioPlayer(playerId)->SetPlayerMode(
-          std::move(playerMode));
+      AudioPlayersRegistry::GetInstance()
+          .GetAudioPlayer(playerId)
+          ->SetPlayerMode(std::move(playerMode));
 
     } else if (method == kMethodPause) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
-      GetContext().GetAudioPlayer(playerId)->Pause();
+      AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId)->Pause();
 
     } else if (method == kMethodResume) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
-      GetContext().GetAudioPlayer(playerId)->Resume();
+      AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId)->Resume();
 
     } else if (method == kMethodStop) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
-      auto player = GetContext().GetAudioPlayer(playerId);
+      auto player =
+          AudioPlayersRegistry::GetInstance().GetAudioPlayer(playerId);
       player->Pause();
       player->SetPosition(0);
 
     } else if (method == kMethodRelease) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
-      GetContext().GetAudioPlayer(playerId)->ReleaseMediaSource();
+      AudioPlayersRegistry::GetInstance()
+          .GetAudioPlayer(playerId)
+          ->ReleaseMediaSource();
 
     } else if (method == kMethodGetCurrentPosition) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
-      auto position = GetContext().GetAudioPlayer(playerId)->GetPosition();
+      auto position = AudioPlayersRegistry::GetInstance()
+                          .GetAudioPlayer(playerId)
+                          ->GetPosition();
       if (position.has_value()) {
         result = position.value();
-        SPDLOG_ERROR("position: {}", position.value());
+        SPDLOG_TRACE("position: {}", position.value());
       }
     } else if (method == kMethodGetDuration) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
-      auto duration = GetContext().GetAudioPlayer(playerId)->GetDuration();
+      auto duration = AudioPlayersRegistry::GetInstance()
+                          .GetAudioPlayer(playerId)
+                          ->GetDuration();
       if (duration.has_value()) {
         result = duration.value();
-        SPDLOG_DEBUG("\tduration: [{}]", duration.value());
+        SPDLOG_TRACE("\tduration: [{}]", duration.value());
       }
 
     } else if (method == kMethodSetAudioContext) {
       std::string playerId = GetStringValue(kKeyPlayerId, args);
-      SPDLOG_DEBUG("\tplayerId: [{}]", playerId);
+      SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
     } else {
       Utils::PrintFlutterEncodableValue(method.c_str(), *args);
@@ -276,15 +291,16 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
       return;
     }
 
-    if (result.IsNull()) {
-      auto encoded = codec.EncodeSuccessEnvelope();
-      engine->SendPlatformMessageResponse(message->response_handle,
-                                          encoded->data(), encoded->size());
-      return;
+    std::unique_ptr<std::vector<uint8_t>> encoded;
+
+    if (!result.IsNull()) {
+      encoded = codec.EncodeSuccessEnvelope(&result);
+    } else {
+      encoded = codec.EncodeSuccessEnvelope();
     }
-    auto encoded = codec.EncodeSuccessEnvelope(&result);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
+
   } catch (const gchar* error) {
     OnError(engine, message->response_handle, "LinuxAudioError", error);
   } catch (const std::runtime_error& e) {

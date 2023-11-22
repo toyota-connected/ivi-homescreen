@@ -4,10 +4,10 @@
 #include <flutter/fml/paths.h>
 #include <flutter/standard_message_codec.h>
 #include <flutter/standard_method_codec.h>
-#include <gst/gst.h>
-#include <gst/video/video.h>
 
 extern "C" {
+#include <gst/gst.h>
+#include <gst/video/video.h>
 #include <libavformat/avformat.h>
 }
 
@@ -1223,9 +1223,7 @@ void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
          flutter::EncodableValue(data->info.height)},
     });
     auto result = codec.EncodeSuccessEnvelope(&res);
-    engine->SendPlatformMessage(message->channel, result->data(),
-                                result->size());
-    return;
+    engine->SendPlatformMessage(message->channel, std::move(result));
   } else if (method == "cancel") {
     SPDLOG_INFO("Video Player Event cancel {}", textureId);
     data->events_enabled = false;

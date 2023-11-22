@@ -449,19 +449,55 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
     return kInternalInconsistency;
   }
 
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    spdlog::error("Not sending message on Platform Thread");
+  }
+
   return m_proc_table.SendPlatformMessageResponse(m_flutter_engine, handle,
                                                   data, data_length);
 }
 
-MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
-                                              const uint8_t* message,
-                                              const size_t message_size) const {
+bool Engine::SendPlatformMessage(
+    const char* channel,
+    std::unique_ptr<std::vector<uint8_t>> message,
+    const FlutterPlatformMessageResponseHandle* response_handle) const {
   if (!m_running) {
-    return kInternalInconsistency;
+    return false;
   }
-  const FlutterPlatformMessage msg{
-      sizeof(FlutterPlatformMessage), channel, message, message_size, nullptr,
-  };
+
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    m_platform_task_runner->QueuePlatformMessage(channel, std::move(message));
+    return true;
+  }
+  if (!response_handle) {
+    FlutterPlatformMessageResponseHandle* handle;
+    m_proc_table.PlatformMessageCreateResponseHandle(
+        m_flutter_engine,
+        [](const uint8_t* /* data */, size_t /* size */, void* /* userdata */) {
+        },
+        nullptr, &handle);
+  }
+  const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
+                                   message->data(), message->size(),
+                                   response_handle};
+  return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
+}
+
+bool Engine::SendPlatformMessage(const char* channel,
+                                 const uint8_t* message,
+                                 const size_t message_size) const {
+  if (!m_running) {
+    return false;
+  }
+
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto msg =
+        std::make_unique<std::vector<uint8_t>>(message, message + message_size);
+    m_platform_task_runner->QueuePlatformMessage(channel, std::move(msg));
+    return true;
+  }
+  const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
+                                   message, message_size, nullptr};
   return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
 }
 
@@ -511,18 +547,27 @@ void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
                                 int64_t buttons) {
   auto timestamp = m_proc_table.GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  m_pointer_events.emplace_back(FlutterPointerEvent {
-    .struct_size = sizeof(FlutterPointerEvent), .phase = phase,
+  m_pointer_events.emplace_back(
+      FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
+                          .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = timestamp,
+                          .timestamp = timestamp,
 #elif defined(ENV32BIT)
-    .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
+                          .timestamp =
+                              static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
-    .x = x, .y = y, .device = 0, .signal_kind = signal,
-    .scroll_delta_x = scroll_delta_x, .scroll_delta_y = scroll_delta_y,
-    .device_kind = kFlutterPointerDeviceKindMouse, .buttons = buttons,
-    .pan_x = 0, .pan_y = 0, .scale = 0, .rotation = 0
-  });
+                          .x = x,
+                          .y = y,
+                          .device = 0,
+                          .signal_kind = signal,
+                          .scroll_delta_x = scroll_delta_x,
+                          .scroll_delta_y = scroll_delta_y,
+                          .device_kind = kFlutterPointerDeviceKindMouse,
+                          .buttons = buttons,
+                          .pan_x = 0,
+                          .pan_y = 0,
+                          .scale = 0,
+                          .rotation = 0});
 }
 
 void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
@@ -531,18 +576,27 @@ void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
                                 int32_t device) {
   auto timestamp = m_proc_table.GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  m_pointer_events.emplace_back(FlutterPointerEvent {
-    .struct_size = sizeof(FlutterPointerEvent), .phase = phase,
+  m_pointer_events.emplace_back(
+      FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
+                          .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = timestamp,
+                          .timestamp = timestamp,
 #elif defined(ENV32BIT)
-    .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
+                          .timestamp =
+                              static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
-    .x = x, .y = y, .device = device,
-    .signal_kind = kFlutterPointerSignalKindNone, .scroll_delta_x = 0.0,
-    .scroll_delta_y = 0.0, .device_kind = kFlutterPointerDeviceKindTouch,
-    .buttons = 0, .pan_x = 0, .pan_y = 0, .scale = 0, .rotation = 0
-  });
+                          .x = x,
+                          .y = y,
+                          .device = device,
+                          .signal_kind = kFlutterPointerSignalKindNone,
+                          .scroll_delta_x = 0.0,
+                          .scroll_delta_y = 0.0,
+                          .device_kind = kFlutterPointerDeviceKindTouch,
+                          .buttons = 0,
+                          .pan_x = 0,
+                          .pan_y = 0,
+                          .scale = 0,
+                          .rotation = 0});
 }
 
 void Engine::SendPointerEvents() {
