@@ -33,9 +33,9 @@ class AudioPlayer {
 
   ~AudioPlayer();
 
-  std::optional<int64_t> GetPosition();
+  [[nodiscard]] std::optional<int64_t> GetPosition() const;
 
-  std::optional<int64_t> GetDuration();
+  [[nodiscard]] std::optional<int64_t> GetDuration() const;
 
   [[nodiscard]] bool GetLooping() const;
 
@@ -47,26 +47,26 @@ class AudioPlayer {
 
   void Dispose();
 
-  void SetBalance(float balance);
+  void SetBalance(float balance) const;
 
   void SetLooping(bool isLooping);
 
-  void SetVolume(double volume);
+  void SetVolume(double volume) const;
 
   void SetPlaybackRate(double rate);
 
   void SetPosition(int64_t position);
 
-  void SetSourceUrl(const std::string& url);
+  void SetSourceUrl(const std::string& url, bool isLocal);
 
   void ReleaseMediaSource();
 
   void OnError(const gchar* code,
                const gchar* message,
                const flutter::EncodableValue& details,
-               GError** error);
+               GError** error) const;
 
-  void OnLog(const gchar* message);
+  void OnLog(const gchar* message) const;
 
   void SetReleaseMode(std::string mode);
 
@@ -74,6 +74,8 @@ class AudioPlayer {
 
  private:
   static constexpr char kEventChannelPrefix[] = "xyz.luan/audioplayers/events/";
+
+  static constexpr char kMethodListen[] = "listen";
 
   GMainLoop* main_loop_{};
   GstBus* bus_{};
@@ -83,6 +85,7 @@ class AudioPlayer {
   GstElement* audiobin_{};
   GstElement* audiosink_{};
   GstPad* panoramaSinkPad_{};
+  GstState playbin_state_{};
 
   bool isInitialized_{};
   bool isPlaying_{};
@@ -96,6 +99,8 @@ class AudioPlayer {
   std::string eventChannel_;
   std::string releaseMode_;
   std::string playerMode_;
+  bool isLocal_{};
+  gint bufferingPercent_ = 0;
 
   Engine* engine_{};
 
@@ -109,21 +114,25 @@ class AudioPlayer {
                                GstMessage* message,
                                AudioPlayer* data);
 
+  static void OnTagItem(const GstTagList* list,
+                        const gchar* tag,
+                        AudioPlayer* data);
+
   void SetPlayback(int64_t position, double rate);
 
-  void OnMediaError(GError* error, gchar* debug);
+  void OnMediaError(GError* error, gchar* debug) const;
 
   void OnMediaStateChange(const GstObject* src,
                           const GstState* old_state,
                           const GstState* new_state);
 
-  void OnDurationUpdate();
+  void OnDurationUpdate() const;
 
-  void OnSeekCompleted();
+  void OnSeekCompleted() const;
 
   void OnPlaybackEnded();
 
-  void OnPrepared(bool isPrepared);
+  void OnPrepared(bool isPrepared) const;
 
   /**
    * @brief Callback function for platform messages about isolate
