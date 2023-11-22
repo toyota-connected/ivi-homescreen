@@ -47,7 +47,7 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
     double height = 0;
     std::vector<uint8_t> params;
 
-    auto args = std::get_if<flutter::EncodableMap>(arguments);
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
     for (auto& it : *args) {
       auto key = std::get<std::string>(it.first);
       if (key == kKeyId && std::holds_alternative<int32_t>(it.second)) {
@@ -89,29 +89,29 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
                                           result->data(), result->size());
     }
 
-    auto res = flutter::EncodableValue(id);
+    const auto res = flutter::EncodableValue(id);
     result = codec.EncodeSuccessEnvelope(&res);
   } else if (method_name == kMethodDispose) {
     Utils::PrintFlutterEncodableValue("arguments", *arguments);
 
     int32_t id = 0;
-    auto args = std::get_if<flutter::EncodableMap>(arguments);
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
     for (auto& it : *args) {
       if (kKeyId == std::get<std::string>(it.first) &&
           std::holds_alternative<int32_t>(it.second)) {
         id = std::get<int32_t>(it.second);
       }
     }
-    auto* view = PlatformViewsRegistry::GetRegistry().GetPlatformView(id);
+    auto* view = PlatformViewsRegistry::GetInstance().GetPlatformView(id);
     view->~PlatformView();
-    PlatformViewsRegistry::GetRegistry().RemovePlatformView(id);
+    PlatformViewsRegistry::GetInstance().RemovePlatformView(id);
     result = codec.EncodeSuccessEnvelope();
   } else if (method_name == kMethodResize) {
     int32_t id = 0;
     double width = 0;
     double height = 0;
 
-    auto args = std::get_if<flutter::EncodableMap>(arguments);
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
     for (auto& it : *args) {
       if (kKeyId == std::get<std::string>(it.first) &&
           std::holds_alternative<int32_t>(it.second)) {
@@ -125,10 +125,10 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
       }
     }
 
-    PlatformViewsRegistry::GetRegistry().GetPlatformView(id)->Resize(width,
+    PlatformViewsRegistry::GetInstance().GetPlatformView(id)->Resize(width,
                                                                      height);
 
-    auto res = flutter::EncodableValue(flutter::EncodableMap{
+    const auto res = flutter::EncodableValue(flutter::EncodableMap{
         {flutter::EncodableValue("id"), flutter::EncodableValue(id)},
         {flutter::EncodableValue("width"), flutter::EncodableValue(width)},
         {flutter::EncodableValue("height"), flutter::EncodableValue(height)},
@@ -144,7 +144,7 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
     Utils::PrintFlutterEncodableValue("offset", *arguments);
     result = codec.EncodeSuccessEnvelope();
   } else if (method_name == kMethodTouch && !arguments->IsNull()) {
-    auto args = std::get_if<flutter::EncodableList>(arguments);
+    const auto args = std::get_if<flutter::EncodableList>(arguments);
     Utils::PrintFlutterEncodableList("[platform_views] touch:", *args);
     result = codec.EncodeSuccessEnvelope();
   } else {
