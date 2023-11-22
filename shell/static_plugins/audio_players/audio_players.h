@@ -18,6 +18,8 @@
 
 #include <shell/platform/embedder/embedder.h>
 
+namespace Plugins {
+
 class AudioPlayers {
  public:
   AudioPlayers();
@@ -71,3 +73,5 @@ class AudioPlayers {
   static constexpr char kKeyIsLocal[] = "isLocal";
   static constexpr char kKeyUrl[] = "url";
 };
+
+}  // namespace AudioPlayersPlugin

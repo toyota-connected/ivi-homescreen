@@ -25,10 +25,13 @@
 #include <gst/audio/audio.h>
 
 #include "audio_players.h"
+#include "logging/logging.h"
 #include "platform_channel.h"
 
 #define STR_LINK_TROUBLESHOOTING \
   "https://github.com/bluefireteam/audioplayers/blob/main/troubleshooting.md"
+
+namespace Plugins {
 
 /**
  * @brief Main Loop
@@ -632,3 +635,4 @@ void AudioPlayer::OnPlatformMessage(const FlutterPlatformMessage* message,
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }
+}  // namespace Plugins

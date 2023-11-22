@@ -163,7 +163,7 @@ PlatformChannel::PlatformChannel() {
                    &FileSelector::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_AUDIO_PLAYERS
-  RegisterCallback(AudioPlayers::kChannelName,
-                   &AudioPlayers::OnPlatformMessage);
+  RegisterCallback(Plugins::AudioPlayers::kChannelName,
+                   &Plugins::AudioPlayers::OnPlatformMessage);
 #endif
 }
