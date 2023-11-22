@@ -16,15 +16,15 @@
 
 #pragma once
 
+#include <future>
 #include <memory>
 
 #include "asio/executor_work_guard.hpp"
 #include "asio/io_context.hpp"
 #include "asio/io_context_strand.hpp"
 
-#include "third_party/flutter/shell/platform/embedder/embedder.h"
-
 #include "constants.h"
+
 #include "handler_priority_queue.h"
 
 class TaskRunner {
@@ -37,7 +37,7 @@ class TaskRunner {
 
   static pthread_t GetThreadId() { return pthread_self(); };
 
-  NODISCARD bool IsThreadEqual(pthread_t threadid) const {
+  NODISCARD bool IsThreadEqual(const pthread_t threadid) const {
     return pthread_equal(threadid, pthread_self_) != 0;
   };
 
@@ -46,11 +46,19 @@ class TaskRunner {
                         FlutterTask task,
                         void* context);
 
-  void QueuePlatformMessage(
+  std::future<FlutterEngineResult> QueuePlatformMessage(
       const char* channel,
-      std::unique_ptr<std::vector<uint8_t>> message) const;
+      std::unique_ptr<std::vector<uint8_t>> message,
+      FlutterPlatformMessageResponseHandle* handle = nullptr) const;
+
+  NODISCARD std::future<FlutterEngineResult> QueueUpdateLocales(
+      std::vector<const FlutterLocale*> locales) const;
 
   std::string GetName() { return name_; }
+
+  NODISCARD asio::io_context::strand GetStrandContext() const {
+    return *strand_;
+  }
 
  private:
   std::string name_;

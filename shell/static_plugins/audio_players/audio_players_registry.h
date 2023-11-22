@@ -26,9 +26,12 @@ extern "C" {
 #include <gst/gst.h>
 }
 
+class Engine;
+
+namespace Plugins {
+
 class AudioPlayer;
 class AudioPlayers;
-class Engine;
 
 class AudioPlayersRegistry {
  public:
@@ -89,3 +92,4 @@ class AudioPlayersRegistry {
  protected:
   static std::shared_ptr<AudioPlayersRegistry> sInstance;
 };
+}  // namespace Plugins

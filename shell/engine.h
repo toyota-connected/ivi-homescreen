@@ -256,19 +256,6 @@ class Engine {
       size_t data_length) const;
 
   /**
-   * @brief PlatformMessage Reply callback
-   * @param[in] data payload
-   * @param[in] data_size payload size
-   * @param[in] userdata user data
-   * @return void
-   * @relation
-   * flutter
-   */
-  typedef void (*FlutterBinaryReplyUserdata)(const uint8_t* data,
-                                             size_t data_size,
-                                             void* userdata);
-
-  /**
    * @brief Send platform message
    * @param[in] channel Destination channel
    * @param[in] message Message to send
@@ -316,7 +303,7 @@ class Engine {
   bool SendPlatformMessage(const char* channel,
                            const uint8_t* message,
                            size_t message_size,
-                           FlutterBinaryReplyUserdata reply,
+                           FlutterDataCallback reply,
                            void* userdata) const;
 
   /**
@@ -343,14 +330,12 @@ class Engine {
   /**
    * @brief Update locales
    * @param[in] locales Updated locales in the order of preference
-   * @param[in] locales_count Count of locales
    * @return FlutterEngineResult
    * @retval The result of the updating locales
    * @relation
    * flutter
    */
-  MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale** locales,
-                                                 size_t locales_count);
+  MAYBE_UNUSED FlutterEngineResult UpdateLocales(std::vector<FlutterLocale> locales);
 
   /**
    * @brief Get clipboard data
@@ -542,6 +527,14 @@ class Engine {
    */
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
   LoadAotData(const std::string& aot_data_path) const;
+
+  /**
+   * @brief Setup Locales
+   * @return void
+   * @relation
+   * flutter
+   */
+  void SetUpLocales() const;
 
   std::vector<FlutterPointerEvent> m_pointer_events;
   std::mutex m_pointer_mutex;
