@@ -25,7 +25,7 @@
 #include "configuration/configuration.h"
 #include "engine.h"
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
-#include "static_plugins/gstreamer_egl/gstreamer_egl.h"
+#include "plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
