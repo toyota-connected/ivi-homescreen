@@ -6,6 +6,9 @@
 #define FLUTTER_SHELL_PLATFORM_COMMON_CLIENT_WRAPPER_INCLUDE_FLUTTER_BINARY_MESSENGER_H_
 
 #include <functional>
+#if defined(__linux__)
+#include <cstdint>
+#endif
 #include <string>
 
 namespace flutter {

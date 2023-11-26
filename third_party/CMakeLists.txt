@@ -16,6 +16,7 @@ set(FLUTTER_SRC_FILES
         flutter/shell/platform/common/client_wrapper/core_implementations.cc
         flutter/shell/platform/common/client_wrapper/plugin_registrar.cc
         flutter/shell/platform/common/client_wrapper/standard_codec.cc
+        flutter/shell/platform/common/incoming_message_dispatcher.cc
         flutter/shell/platform/common/json_message_codec.cc
         flutter/shell/platform/common/json_method_codec.cc
         flutter/shell/platform/common/path_utils.cc
@@ -49,6 +50,7 @@ target_include_directories(flutter PUBLIC
         flutter/third_party/rapidjson/include
         flutter/shell/platform/common/public
         flutter/shell/platform/common/client_wrapper/include
+        flutter/shell/platform/common/client_wrapper/include/flutter
         spdlog-1.12.0/include
 )
 
@@ -69,4 +71,36 @@ add_subdirectory(spdlog-1.12.0)
 
 if (BUILD_UNIT_TESTS)
     add_subdirectory(googletest)
+endif ()
+
+#
+# Firebase C++ SDK
+#
+if (EXISTS ${FIREBASE_CPP_SDK_ROOT_DIR})
+    set(FIREBASE_PLUGIN_INCLUDE_DIRS
+            ${FIREBASE_CPP_SDK_ROOT_DIR}/app/src/include
+            ${FIREBASE_CPP_SDK_ROOT_DIR}/auth/src/include
+            ${FIREBASE_CPP_SDK_ROOT_DIR}/database/src/include
+            PARENT_SCOPE)
+    set(FIREBASE_PLUGIN_LIB_DIRS
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/installations
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/messaging
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/analytics
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/app_check
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/database
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/dynamic_links
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/remote_config
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/auth
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/app/rest
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/app
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/storage
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/functions
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/gma
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/external/src/zlib-build
+            ${FIREBASE_CPP_SDK_BINARY_DIR}/external/src/flatbuffers-build
+            PARENT_SCOPE)
+
+    message(STATUS "Firebase CPP SDK Root: ${FIREBASE_CPP_SDK_ROOT_DIR}")
+    message(STATUS "FIREBASE_PLUGIN_INCLUDE_DIRS: ${FIREBASE_PLUGIN_INCLUDE_DIRS}")
+    message(STATUS "FIREBASE_PLUGIN_LIB_DIRS: ${FIREBASE_PLUGIN_LIB_DIRS}")
 endif ()
