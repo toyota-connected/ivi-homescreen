@@ -17,12 +17,10 @@
 #include <queue>
 
 #include "asio/bind_executor.hpp"
-#include "asio/executor.hpp"
-#include "asio/io_context.hpp"
-#include "asio/io_context_strand.hpp"
 
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 
+#include "libflutter_engine.h"
 #include "logging/logging.h"
 
 class handler_priority_queue : public asio::execution_context {
@@ -35,10 +33,9 @@ class handler_priority_queue : public asio::execution_context {
     handlers_.push(std::move(handler));
   }
 
-  void execute_all(FlutterEngineProcTable& proc_table,
-                   FlutterEngine& /* engine */) {
+  void execute_all(FlutterEngine& /* engine */) {
     while (!handlers_.empty()) {
-      auto current = proc_table.GetCurrentTime();
+      auto current = LibFlutterEngine->GetCurrentTime();
       auto target_time = handlers_.top()->GetTimestamp();
       if (current >= target_time) {
         handlers_.top()->execute();
