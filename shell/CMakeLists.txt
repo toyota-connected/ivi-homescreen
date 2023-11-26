@@ -27,6 +27,7 @@ add_executable(homescreen
         configuration/configuration.cc
         engine.cc
         json_utils.cc
+        libflutter_engine.cc
         main.cc
         platform_channel.cc
         textures/texture.cc
