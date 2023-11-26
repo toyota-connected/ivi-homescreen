@@ -35,7 +35,7 @@
 #include "constants.h"
 
 #if ENABLE_PLUGIN_KEY_EVENT
-#include "static_plugins/key_event/key_event.h"
+#include "plugins/key_event/key_event.h"
 #endif
 
 class Engine;

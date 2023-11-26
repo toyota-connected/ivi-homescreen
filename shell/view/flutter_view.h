@@ -24,10 +24,10 @@
 #include "textures/egl/texture_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/text_input/text_input.h"
 #endif
 #ifdef ENABLE_PLUGIN_KEY_EVENT
-#include "static_plugins/key_event/key_event.h"
+#include "plugins/key_event/key_event.h"
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
 #include "textures/navi_render_egl/texture_navi_render_egl.h"
@@ -36,7 +36,7 @@
 #include "compositor_surface.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_REGION
-#include "static_plugins/comp_region/comp_region.h"
+#include "plugins/comp_region/comp_region.h"
 #endif
 
 class Display;
