@@ -4,12 +4,9 @@
 
 #include "include/flutter/plugin_registrar.h"
 
-#include <iostream>
 #include <map>
 
 #include "binary_messenger_impl.h"
-#include "include/flutter/engine_method_result.h"
-#include "include/flutter/method_channel.h"
 #include "texture_registrar_impl.h"
 
 namespace flutter {
