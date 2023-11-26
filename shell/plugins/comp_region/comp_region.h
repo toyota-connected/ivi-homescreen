@@ -73,8 +73,8 @@ class CompositorRegionPlugin {
    * @relation
    * flutter
    */
-  static flutter::EncodableValue HandleGroups(flutter::EncodableList& groups,
-                                              FlutterView* view);
+  static flutter::EncodableValue HandleGroups(const flutter::EncodableList& groups,
+                                              const FlutterView* view);
   /**
    * @brief Clear flutter view groups.
    * @param[in] types flutter view group types.
@@ -83,5 +83,5 @@ class CompositorRegionPlugin {
    * @relation
    * flutter
    */
-  static void ClearGroups(flutter::EncodableList& types, FlutterView* view);
+  static void ClearGroups(const flutter::EncodableList& types, const FlutterView* view);
 };

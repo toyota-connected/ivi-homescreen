@@ -108,15 +108,15 @@ static std::map<int64_t, std::shared_ptr<CustomData>> global_map;
  * @relation
  * flutter
  */
-void SendSuccess(Engine* engine,
+void SendSuccess(const Engine* engine,
                  const FlutterPlatformMessageResponseHandle* response_handle) {
   auto& codec = flutter::StandardMessageCodec::GetInstance();
 
-  flutter::EncodableValue value(flutter::EncodableMap{
+  const flutter::EncodableValue value(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue()},
       {flutter::EncodableValue("error"), flutter::EncodableValue()}});
 
-  auto encoded = codec.EncodeMessage(value);
+  const auto encoded = codec.EncodeMessage(value);
   engine->SendPlatformMessageResponse(response_handle, encoded->data(),
                                       encoded->size());
 }
@@ -153,20 +153,15 @@ bool get_video_info(const char* url,
     return false;
   }
 
-#if defined(AVFORMAT_WITH_CONST)
-  const AVCodec* dec = nullptr;
-#else
-  AVCodec* dec;
-#endif
-  int ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
+  const int ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
   if (ret < 0) {
     SPDLOG_DEBUG("Cannot find a video stream in the input file");
     avformat_free_context(fmt_ctx);
     return false;
   }
-  int video_stream_index = ret;
-  AVStream* stream = fmt_ctx->streams[video_stream_index];
-  AVCodecParameters* par = stream->codecpar;
+  const int video_stream_index = ret;
+  const AVStream* stream = fmt_ctx->streams[video_stream_index];
+  const AVCodecParameters* par = stream->codecpar;
 
   codec_id = par->codec_id;
   width = par->width;
@@ -192,9 +187,9 @@ bool get_video_info(const char* url,
  * flutter
  */
 void loadRGBPixels(GLuint textureId,
-                   unsigned char* data,
-                   int width,
-                   int height) {
+                   const unsigned char* data,
+                   const int width,
+                   const int height) {
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, textureId);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -216,7 +211,7 @@ void loadRGBPixels(GLuint textureId,
  * @relation
  * flutter
  */
-void draw_core(nv12::Shader* shader) {
+void draw_core(const nv12::Shader* shader) {
   glViewport(-shader->width / 2, -shader->height / 2, shader->width * 2,
              shader->height * 2);
   glClearColor(0, 0, 0, 0);
@@ -252,10 +247,10 @@ void draw_core(nv12::Shader* shader) {
 void handoff_handler(GstElement* /* fakesink */,
                      GstBuffer* buffer,
                      GstPad* /* pad */,
-                     gpointer _data) {
-  auto data = (CustomData*)_data;
+                     const gpointer _data) {
+  const auto data = static_cast<CustomData*>(_data);
   assert(data->texture);
-  int64_t textureId = data->texture->GetId();
+  const int64_t textureId = data->texture->GetId();
 
   GstVideoFrame frame;
 
@@ -269,28 +264,28 @@ void handoff_handler(GstElement* /* fakesink */,
 
   std::lock_guard<std::mutex> lock(gst_mutex);
   if (gst_video_frame_map(&frame, &data->info, buffer, GST_MAP_READ)) {
-    auto e = (WaylandEglBackend*)data->engine->GetBackend();
+    const auto e = static_cast<WaylandEglBackend*>(data->engine->GetBackend());
     e->MakeTextureCurrent();
     glBindVertexArray(vertex_arr_id);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    guint n_planes = GST_VIDEO_INFO_N_PLANES(&data->info);
+    const guint n_planes = GST_VIDEO_INFO_N_PLANES(&data->info);
     if (n_planes == 2) {
       // Assume NV12
-      gpointer y_buf = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
-      GLsizei y_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0);
-      GLsizei y_pixel_stride = GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0);
-      gpointer uv_buf = GST_VIDEO_FRAME_PLANE_DATA(&frame, 1);
-      GLsizei uv_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1);
-      GLsizei uv_pixel_stride = GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1);
-      data->shader->loadPixels((unsigned char*)y_buf, (unsigned char*)uv_buf,
+      const gpointer y_buf = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
+      const GLsizei y_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0);
+      const GLsizei y_pixel_stride = GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0);
+      const gpointer uv_buf = GST_VIDEO_FRAME_PLANE_DATA(&frame, 1);
+      const GLsizei uv_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1);
+      const GLsizei uv_pixel_stride = GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1);
+      data->shader->loadPixels(static_cast<unsigned char*>(y_buf), static_cast<unsigned char*>(uv_buf),
                                y_pixel_stride, y_stride, uv_pixel_stride,
                                uv_stride);
     } else {
       // Assume RGB
-      gpointer video_frame_plane_buffer = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
+      const gpointer video_frame_plane_buffer = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
       loadRGBPixels(static_cast<GLuint>(textureId),
-                    (unsigned char*)video_frame_plane_buffer, data->info.width,
+                    static_cast<unsigned char*>(video_frame_plane_buffer), data->info.width,
                     data->info.height);
     }
     gst_video_frame_unmap(&frame);
@@ -300,7 +295,7 @@ void handoff_handler(GstElement* /* fakesink */,
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     draw_core(data->shader);
-    auto surface = (WaylandEglBackend*)data->engine->GetBackend();
+    const auto surface = static_cast<WaylandEglBackend*>(data->engine->GetBackend());
     surface->ClearCurrent();
     data->texture->FrameReady();
   } else {
@@ -377,7 +372,7 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
       if (data->is_looping) {
         if (!gst_element_seek_simple(
                 data->playbin, GST_FORMAT_TIME,
-                (GstSeekFlags)(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+                static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
                 0)) {
           SPDLOG_ERROR("loop seek to 0 fail");
         }
@@ -598,7 +593,6 @@ static gboolean sync_bus_call(GstBus* bus, GstMessage* msg, CustomData* data) {
  * flutter
  */
 GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
-  GLuint shaderProgram;
   GLint result;
   GLsizei length;
   GLchar* info{};
@@ -623,7 +617,7 @@ GLuint LoadShaders(const GLchar* vsource, const GLchar* fsource) {
     return 0;
   }
 
-  shaderProgram = glCreateProgram();
+  const GLuint shaderProgram = glCreateProgram();
   glAttachShader(shaderProgram, vertexShader);
   glAttachShader(shaderProgram, fragmentShader);
   glLinkProgram(shaderProgram);
@@ -1088,11 +1082,11 @@ void main_loop(CustomData* data) {
   g_object_set(data->sink, "signal-handoffs", TRUE, nullptr);
   g_object_set(data->sink, "can-activate-pull", TRUE, nullptr);
   gulong sig =
-      g_signal_connect(data->sink, "handoff", (GCallback)handoff_handler, data);
+      g_signal_connect(data->sink, "handoff", reinterpret_cast<GCallback>(handoff_handler), data);
   SPDLOG_INFO("({}) [main_loop] register signal {}", data->engine->GetIndex(),
               sig);
 
-  auto decoder_factory =
+  const auto decoder_factory =
       gst_element_factory_find(map_ffmpeg_plugin(data->codec_id));
   if (decoder_factory == nullptr) {
     spdlog::error("({}) Failed to find decoder: {}", data->engine->GetIndex(),
@@ -1116,7 +1110,7 @@ void main_loop(CustomData* data) {
 
   data->pipeline = gst_bin_new(nullptr);
 
-  gst_bin_add_many((GstBin*)data->pipeline, data->decoder, data->video_convert,
+  gst_bin_add_many(reinterpret_cast<GstBin*>(data->pipeline), data->decoder, data->video_convert,
                    data->video_scale, data->sink, nullptr);
   if (!gst_element_link(data->decoder, data->video_convert)) {
     SPDLOG_ERROR("({}) Failed to link decoder with videoconvert",
@@ -1152,11 +1146,11 @@ void main_loop(CustomData* data) {
 
   GstBus* bus = gst_element_get_bus(data->playbin);
   GSource* bus_source = gst_bus_create_watch(bus);
-  g_source_set_callback(bus_source, (GSourceFunc)gst_bus_async_signal_func,
+  g_source_set_callback(bus_source, reinterpret_cast<GSourceFunc>(gst_bus_async_signal_func),
                         nullptr, nullptr);
   g_source_attach(bus_source, context);
   g_source_unref(bus_source);
-  g_signal_connect(bus, "message", (GCallback)sync_bus_call, data);
+  g_signal_connect(bus, "message", reinterpret_cast<GCallback>(sync_bus_call), data);
   gst_object_unref(bus);
 
   data->main_loop = g_main_loop_new(context, FALSE);
@@ -1168,10 +1162,10 @@ void main_loop(CustomData* data) {
 
 void GstreamerEgl::OnInitialize(const FlutterPlatformMessage* message,
                                 void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
 
-  auto platform_channel = PlatformChannel::GetInstance();
+  const auto platform_channel = PlatformChannel::GetInstance();
   platform_channel->RegisterCallback(kChannelGstreamerCreate, OnCreate);
   platform_channel->RegisterCallback(kChannelGstreamerDispose, OnDispose);
   platform_channel->RegisterCallback(kChannelGstreamerSetLooping, OnSetLooping);
@@ -1197,37 +1191,37 @@ void GstreamerEgl::OnInitialize(const FlutterPlatformMessage* message,
  * flutter
  */
 void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
-  auto method = obj->method_name();
+  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto method = obj->method_name();
 
   auto textureId = static_cast<GLuint>(
       static_cast<GLuint>(strtol(&message->channel[34], nullptr, 10)));
-  std::shared_ptr<CustomData> data = global_map[textureId];
+  const std::shared_ptr<CustomData> data = global_map[textureId];
 
   if (method == "listen") {
     data->events_enabled = true;
     SPDLOG_INFO("Video Player Event Register: listen {}", textureId);
 
     // send initialized event
-    flutter::EncodableValue res(flutter::EncodableMap{
+    const flutter::EncodableValue res(flutter::EncodableMap{
         {flutter::EncodableValue("event"),
          flutter::EncodableValue("initialized")},
         {flutter::EncodableValue("duration"),
-         flutter::EncodableValue((int)(data->duration / AV_TIME_BASE))},
+         flutter::EncodableValue(static_cast<int>(data->duration / AV_TIME_BASE))},
         {flutter::EncodableValue("width"),
-         flutter::EncodableValue(data->info.width)},
+         flutter::EncodableValue(static_cast<int>(data->info.width))},
         {flutter::EncodableValue("height"),
-         flutter::EncodableValue(data->info.height)},
+         flutter::EncodableValue(static_cast<int>(data->info.height))},
     });
     auto result = codec.EncodeSuccessEnvelope(&res);
     engine->SendPlatformMessage(message->channel, std::move(result));
   } else if (method == "cancel") {
     SPDLOG_INFO("Video Player Event cancel {}", textureId);
     data->events_enabled = false;
-    auto result = codec.EncodeSuccessEnvelope();
+    const auto result = codec.EncodeSuccessEnvelope();
     engine->SendPlatformMessageResponse(message->response_handle,
                                         result->data(), result->size());
   }
@@ -1235,12 +1229,12 @@ void OnEvent(const FlutterPlatformMessage* message, void* userdata) {
 
 void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
                             void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
   auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
   auto data = new CustomData();
   data->engine = engine;
   data->initialized = false;
@@ -1320,7 +1314,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   std::lock_guard<std::mutex> lock(gst_mutex);
 
   gst_init(nullptr, nullptr);
-  auto surface = (WaylandEglBackend*)data->engine->GetBackend();
+  auto surface = static_cast<WaylandEglBackend*>(data->engine->GetBackend());
   surface->MakeTextureCurrent();
 
   glGenVertexArrays(1, &vertex_arr_id);
@@ -1359,7 +1353,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
       new nv12::Shader(LoadShaders(vertexSource, nv12::fragmentSource),
                        textureId, data->width, data->height);
 
-  static const GLfloat g_vertex_buffer_data[] = {
+  static constexpr GLfloat g_vertex_buffer_data[] = {
       -0.5f, 0.5f,  0.0f, 0.5f,  0.5f,  0.0f, 0.5f,  -0.5f, 0.0f,
 
       0.5f,  -0.5f, 0.0f, -0.5f, -0.5f, 0.0f, -0.5f, 0.5f,  0.0f,
@@ -1370,7 +1364,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
   glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data),
                g_vertex_buffer_data, GL_STATIC_DRAW);
 
-  static const GLfloat coord_buffer_data[] = {
+  static constexpr GLfloat coord_buffer_data[] = {
       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
 
       1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f,
@@ -1407,7 +1401,7 @@ void GstreamerEgl::OnCreate(const FlutterPlatformMessage* message,
 
   flutter::EncodableValue result(
       flutter::EncodableMap{{flutter::EncodableValue("textureId"),
-                             flutter::EncodableValue((int32_t)textureId)}});
+                             flutter::EncodableValue(static_cast<int32_t>(textureId))}});
 
   flutter::EncodableValue value(flutter::EncodableMap{
       {flutter::EncodableValue("result"), result},
@@ -1443,44 +1437,44 @@ flutter::EncodableValue dispose_error(const char* error_msg) {
 
 void GstreamerEgl::OnDispose(const FlutterPlatformMessage* message,
                              void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
-  auto it = args->find(flutter::EncodableValue("textureId"));
+  const auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = dispose_error("textureId not provided");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = dispose_error("textureId not provided");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
 
-  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
+  const auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
   engine->TextureDispose(textureId);
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = dispose_error("Unable to find textureId");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = dispose_error("Unable to find textureId");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
 
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
 
   gst_object_unref(data->pipeline);
   data->target_state = GST_STATE_NULL;
-  GstStateChangeReturn ret =
+  const GstStateChangeReturn ret =
       gst_element_set_state(data->playbin, GST_STATE_NULL);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    auto value =
+    const auto value =
         dispose_error("Unable to see the pipeline change to play state");
-    auto encoded = codec.EncodeMessage(value);
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     g_main_loop_quit(data->main_loop);
@@ -1521,37 +1515,37 @@ flutter::EncodableValue setLooping_error(const char* error_msg) {
 
 void GstreamerEgl::OnSetLooping(const FlutterPlatformMessage* message,
                                 void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = setLooping_error("setLooping requires textureId");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setLooping requires textureId");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
 
-  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
+  const auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = setLooping_error("setLooping textureId not found");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setLooping textureId not found");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
   it = args->find(flutter::EncodableValue("isLooping"));
   if (it == args->end()) {
-    auto value = setLooping_error("setLooping requires isLooping");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setLooping requires isLooping");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
@@ -1567,37 +1561,37 @@ void GstreamerEgl::OnSetLooping(const FlutterPlatformMessage* message,
 // TODO - implementation specific
 void GstreamerEgl::OnSetVolume(const FlutterPlatformMessage* message,
                                void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = setLooping_error("setVolume requires textureId");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setVolume requires textureId");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
 
-  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
+  const auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = setLooping_error("setVolume textureId not found");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setVolume textureId not found");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
   it = args->find(flutter::EncodableValue("volume"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = setLooping_error("setVolume requires volume");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setVolume requires volume");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
@@ -1611,37 +1605,37 @@ void GstreamerEgl::OnSetVolume(const FlutterPlatformMessage* message,
 
 void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = setLooping_error("setPlaybackSpeed requires textureId");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setPlaybackSpeed requires textureId");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
 
-  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
+  const auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = setLooping_error("setPlaybackSpeed textureId not found");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setPlaybackSpeed textureId not found");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
   it = args->find(flutter::EncodableValue("speed"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = setLooping_error("setPlaybackSpeed requires speed");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = setLooping_error("setPlaybackSpeed requires speed");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
@@ -1658,12 +1652,12 @@ void GstreamerEgl::OnSetPlaybackSpeed(const FlutterPlatformMessage* message,
   if (data->rate > 0) {
     seek_event = gst_event_new_seek(
         data->rate, GST_FORMAT_TIME,
-        (GstSeekFlags)(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
         GST_SEEK_TYPE_SET, position, GST_SEEK_TYPE_END, 0);
   } else {
     seek_event = gst_event_new_seek(
         data->rate, GST_FORMAT_TIME,
-        (GstSeekFlags)(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
         GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, position);
   }
 
@@ -1699,38 +1693,38 @@ flutter::EncodableValue play_error(const char* error_msg) {
 
 void GstreamerEgl::OnPlay(const FlutterPlatformMessage* message,
                           void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
-  auto it = args->find(flutter::EncodableValue("textureId"));
+  const auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = play_error("play requires textureId");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = play_error("play requires textureId");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
+  const auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = play_error("play textureId not found");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = play_error("play textureId not found");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
   data->target_state = GST_STATE_PLAYING;
-  GstStateChangeReturn ret =
+  const GstStateChangeReturn ret =
       gst_element_set_state(data->playbin, GST_STATE_PLAYING);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    auto value = play_error("Unable to see the pipeline to play state");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = play_error("Unable to see the pipeline to play state");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
@@ -1764,32 +1758,32 @@ flutter::EncodableValue position_error(const char* error_msg) {
 
 void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
                               void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
-  auto it = args->find(flutter::EncodableValue("textureId"));
+  const auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = position_error("textureId required");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = position_error("textureId required");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  auto textureId = static_cast<GLuint>(std::get<int>(it->second));
+  const auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = position_error("textureId not found");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = position_error("textureId not found");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  auto data = search->second;
+  const auto data = search->second;
 
   if (gst_element_query_position(data->playbin, GST_FORMAT_TIME,
                                  &data->position) &&
@@ -1804,7 +1798,7 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
       {flutter::EncodableValue("result"),
        flutter::EncodableValue(flutter::EncodableMap{
            {flutter::EncodableValue("textureId"),
-            flutter::EncodableValue((int32_t)textureId)},
+            flutter::EncodableValue(static_cast<int32_t>(textureId))},
            {flutter::EncodableValue("position"),
             flutter::EncodableValue(
                 data->position ? (data->position / AV_TIME_BASE) : 0)},
@@ -1812,8 +1806,8 @@ void GstreamerEgl::OnPosition(const FlutterPlatformMessage* message,
       {flutter::EncodableValue("error"), flutter::EncodableValue()},
   };
 
-  auto value = flutter::EncodableValue(output);
-  auto encoded = codec.EncodeMessage(value);
+  const auto value = flutter::EncodableValue(output);
+  const auto encoded = codec.EncodeMessage(value);
   engine->SendPlatformMessageResponse(message->response_handle, encoded->data(),
                                       encoded->size());
 }
@@ -1843,49 +1837,49 @@ flutter::EncodableValue seekTo_error(const char* error_msg) {
 
 void GstreamerEgl::OnSeekTo(const FlutterPlatformMessage* message,
                             void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
   auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = seekTo_error("textureId required");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = seekTo_error("textureId required");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
   }
   auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = seekTo_error("cannot find textureId");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = seekTo_error("cannot find textureId");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
 
   it = args->find(flutter::EncodableValue("position"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = seekTo_error("position required");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = seekTo_error("position required");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
-  int pos = std::get<int>(it->second);
+  const int pos = std::get<int>(it->second);
   gint64 position = pos * AV_TIME_BASE;
 
   if (!gst_element_seek_simple(
           data->playbin, GST_FORMAT_TIME,
-          (GstSeekFlags)(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+          static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
           position)) {
-    auto value = seekTo_error("seek failed");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = seekTo_error("seek failed");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
@@ -1922,28 +1916,28 @@ flutter::EncodableValue pause_error(const char* error_msg) {
 
 void GstreamerEgl::OnPause(const FlutterPlatformMessage* message,
                            void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto index = engine->GetIndex();
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
-  auto it = args->find(flutter::EncodableValue("textureId"));
+  const auto it = args->find(flutter::EncodableValue("textureId"));
   if (it == args->end() || it->second.IsNull()) {
-    auto value = pause_error("textureId required");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = pause_error("textureId required");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
   }
   auto textureId = static_cast<GLuint>(std::get<int>(it->second));
 
-  auto search = global_map.find(textureId);
+  const auto search = global_map.find(textureId);
   if (search == global_map.end()) {
-    auto value = pause_error("texture not found");
-    auto encoded = codec.EncodeMessage(value);
+    const auto value = pause_error("texture not found");
+    const auto encoded = codec.EncodeMessage(value);
     engine->SendPlatformMessageResponse(message->response_handle,
                                         encoded->data(), encoded->size());
     return;
@@ -1951,17 +1945,17 @@ void GstreamerEgl::OnPause(const FlutterPlatformMessage* message,
 
   SPDLOG_INFO("({}) Pause: {}", index, textureId);
 
-  std::shared_ptr<CustomData> data = search->second;
+  const std::shared_ptr<CustomData> data = search->second;
   GstState state;
   gst_element_get_state(data->playbin, &state, nullptr, GST_CLOCK_TIME_NONE);
   if (state != GST_STATE_NULL) {
     SPDLOG_INFO("({}) Set pipeline to pause state", index);
     data->target_state = GST_STATE_PAUSED;
-    GstStateChangeReturn ret =
+    const GstStateChangeReturn ret =
         gst_element_set_state(data->playbin, GST_STATE_PAUSED);
     if (ret == GST_STATE_CHANGE_FAILURE) {
-      auto value = pause_error("Unable to change pipeline to pause state.");
-      auto encoded = codec.EncodeMessage(value);
+      const auto value = pause_error("Unable to change pipeline to pause state.");
+      const auto encoded = codec.EncodeMessage(value);
       engine->SendPlatformMessageResponse(message->response_handle,
                                           encoded->data(), encoded->size());
       return;
@@ -1973,14 +1967,14 @@ void GstreamerEgl::OnPause(const FlutterPlatformMessage* message,
 
 void GstreamerEgl::OnSetMixWithOthers(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   PrintMessageAsHex(engine->GetIndex(), message);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
   flutter::EncodableValue val = *obj;
-  auto args = std::get_if<flutter::EncodableMap>(&val);
+  const auto args = std::get_if<flutter::EncodableMap>(&val);
 
-  auto it = args->find(flutter::EncodableValue("mixWithOthers"));
+  const auto it = args->find(flutter::EncodableValue("mixWithOthers"));
   if (it != args->end() && !it->second.IsNull()) {
     SPDLOG_INFO("({}) mixWithOthers: {}", engine->GetIndex(),
                 std::get<bool>(it->second));

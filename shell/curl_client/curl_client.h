@@ -22,6 +22,8 @@
 
 #include <curl/curl.h>
 
+#include <constants.h>
+
 class CurlClient {
  public:
   CurlClient();
@@ -29,6 +31,7 @@ class CurlClient {
 
   /**
    * @brief Initialization Function
+   * @param url The url to use
    * @param headers vector of headers to use
    * @param url_form url form key/values
    * @param follow_location follows redirects from server.  Defaults to true
@@ -37,9 +40,9 @@ class CurlClient {
    * @relation
    * google_sign_in
    */
-  bool Init(std::string& url,
-            std::vector<std::string>& headers,
-            std::vector<std::pair<std::string, std::string>>& url_form,
+  bool Init(const std::string& url,
+            const std::vector<std::string>& headers,
+            const std::vector<std::pair<std::string, std::string>>& url_form,
             bool follow_location = true);
 
   /**
@@ -59,10 +62,10 @@ class CurlClient {
    * @relation
    * google_sign_in
    */
-  CURLcode GetCode() { return mCode; }
+  NODISCARD CURLcode GetCode() const { return mCode; }
 
  private:
-  CURL* mConn;
+  CURL* mConn{};
   CURLcode mCode;
   std::string mUrl;
   std::string mPostFields;

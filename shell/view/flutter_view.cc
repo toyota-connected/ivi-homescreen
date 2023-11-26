@@ -34,11 +34,11 @@
 #include "wayland/window.h"
 
 FlutterView::FlutterView(Configuration::Config config,
-                         size_t index,
+                         const size_t index,
                          const std::shared_ptr<Display>& display)
-    : m_config(std::move(config)),
-      m_index(index),
-      m_wayland_display(display)
+    : m_wayland_display(display),
+      m_config(std::move(config)),
+      m_index(index)
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
       ,
       m_text_input(std::make_shared<TextInput>())
@@ -67,7 +67,7 @@ FlutterView::FlutterView(Configuration::Config config,
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
       m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
-      m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen, 
+      m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
       m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_backend.get(), m_config.view.ivi_surface_id);
@@ -193,7 +193,7 @@ size_t FlutterView::CreateSurface(void* h_module,
                                   int height,
                                   int32_t x,
                                   int32_t y) {
-  auto tStart = std::chrono::steady_clock::now();
+  const auto tStart = std::chrono::steady_clock::now();
 
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
@@ -202,9 +202,10 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   m_comp_surf[index]->InitializePlugin();
 
-  auto tEnd = std::chrono::steady_clock::now();
-  auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
-  spdlog::info("comp surf init: {}", (float)tDiff);
+  const auto tEnd = std::chrono::steady_clock::now();
+  const auto tDiff =
+      std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+  spdlog::info("comp surf init: {}", static_cast<float>(tDiff));
 
   return static_cast<size_t>(index);
 }
@@ -227,7 +228,7 @@ void* FlutterView::GetSurfaceContext(int64_t index) {
 #endif
 
 #ifdef ENABLE_PLUGIN_COMP_REGION
-void FlutterView::ClearRegion(std::string& type) {
+void FlutterView::ClearRegion(const std::string& type) const {
   // A NULL wl_region causes the pending input/opaque region to be set to empty.
   if (type == "input") {
     wl_surface_set_input_region(m_wayland_window->GetBaseSurface(), nullptr);
@@ -237,10 +238,10 @@ void FlutterView::ClearRegion(std::string& type) {
 }
 
 void FlutterView::SetRegion(
-    std::string& type,
-    std::vector<CompositorRegionPlugin::REGION_T>& regions) {
-  auto compositor = m_wayland_display->GetCompositor();
-  auto base_region = wl_compositor_create_region(compositor);
+    const std::string& type,
+    const std::vector<CompositorRegionPlugin::REGION_T>& regions) const {
+  const auto compositor = m_wayland_display->GetCompositor();
+  const auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
     SPDLOG_DEBUG("Set Region: type: {}, x: {}, y: {}, width: {}, height: {}",

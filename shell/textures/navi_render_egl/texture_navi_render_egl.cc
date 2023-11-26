@@ -2,6 +2,8 @@
 #include "texture_navi_render_egl.h"
 
 #include <dlfcn.h>
+#include <engine.h>
+
 #include <mutex>
 
 #include <sys/stat.h>
@@ -19,10 +21,10 @@ constexpr char kNaviRenderSoName[] = "libnav_render.so";
 
 std::mutex g_gl_mutex;
 
-TextureNaviRender::TextureNaviRender(FlutterView* view)
+TextureNaviRender::TextureNaviRender(const FlutterView* view)
     : Texture(kMapProviderTextureId, GL_TEXTURE_2D, GL_RGBA8, Create, Dispose),
-      m_h_module(nullptr),
-      m_egl_backend(reinterpret_cast<WaylandEglBackend*>(view->GetBackend())) {}
+      m_egl_backend(reinterpret_cast<WaylandEglBackend*>(view->GetBackend())),
+      m_h_module(nullptr) {}
 
 TextureNaviRender::~TextureNaviRender() {
   if (m_h_module) {
@@ -36,7 +38,7 @@ TextureNaviRender::~TextureNaviRender() {
 flutter::EncodableValue TextureNaviRender::Create(
     void* userdata,
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
-  auto* obj = reinterpret_cast<TextureNaviRender*>(userdata);
+  auto* obj = static_cast<TextureNaviRender*>(userdata);
 
   std::string access_token;
   auto it = args->find(flutter::EncodableValue("access_token"));
@@ -233,8 +235,8 @@ flutter::EncodableValue TextureNaviRender::Create(
 }
 
 void TextureNaviRender::Dispose(void* userdata, GLuint name) {
-  auto* obj = (TextureNaviRender*)userdata;
-  auto context = obj->m_render_api.ctx[obj->m_texture_id];
+  auto* obj = static_cast<TextureNaviRender*>(userdata);
+  const auto context = obj->m_render_api.ctx[obj->m_texture_id];
   obj->m_run_enable = false;
   obj->m_render_api.de_initialize(context);
   obj->Disable(name);
@@ -245,7 +247,7 @@ void TextureNaviRender::Dispose(void* userdata, GLuint name) {
 }
 
 void TextureNaviRender::RunTask(void* userdata) {
-  auto* obj = (TextureNaviRender*)userdata;
+  auto* obj = static_cast<TextureNaviRender*>(userdata);
   for (auto [key, context] : obj->m_render_api.ctx) {
     if (obj->m_run_enable) {
       obj->m_render_api.run_task(context);
@@ -254,7 +256,7 @@ void TextureNaviRender::RunTask(void* userdata) {
 }
 
 void TextureNaviRender::Draw(void* userdata) {
-  auto* obj = (TextureNaviRender*)userdata;
+  auto* obj = static_cast<TextureNaviRender*>(userdata);
 
   if (!obj->m_draw_next || !obj->m_run_enable)
     return;

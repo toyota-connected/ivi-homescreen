@@ -28,8 +28,6 @@
 #include "dlt/dlt.h"
 #endif
 
-#include "constants.h"
-
 class Logging {
  public:
   Logging();

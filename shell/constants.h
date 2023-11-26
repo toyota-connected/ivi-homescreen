@@ -17,7 +17,6 @@
 #pragma once
 
 #include <EGL/egl.h>
-#include <shell/platform/embedder/embedder.h>
 #include <array>
 
 // GIT

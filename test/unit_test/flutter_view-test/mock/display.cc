@@ -37,12 +37,10 @@ Display::Display(bool enable_cursor,
   /* Delete implementation */
 
   /* avoid assert at GetDisplay() method */
-  m_display = (struct wl_display*)malloc(sizeof(m_display));
+  m_display = static_cast<struct wl_display*>(malloc(sizeof(m_display)));
 }
 
-Display::~Display() {
-  /* Delete implementation */
-}
+Display::~Display() = default;
 
 /**
  * @brief Respond to a ping event with a pong request
@@ -204,7 +202,7 @@ void Display::display_handle_mode(void* data,
   oi->refresh_rate = refresh;
 
   SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height,
-               (refresh > 1000 ? refresh / 1000.0 : (double)refresh));
+               (refresh > 1000 ? refresh / 1000.0 : static_cast<double>(refresh)));
 }
 
 void Display::display_handle_scale(void* data,
@@ -238,13 +236,13 @@ void Display::seat_handle_capabilities(void* data,
   auto* d = static_cast<Display*>(data);
 
   if (!d->m_wayland_event_mask.pointer) {
-    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.pointer) {
+    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.wl_pointer) {
       spdlog::info("Pointer Present");
-      d->m_pointer.pointer = wl_seat_get_pointer(seat);
-      wl_pointer_add_listener(d->m_pointer.pointer, &pointer_listener, d);
-    } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.pointer) {
-      wl_pointer_release(d->m_pointer.pointer);
-      d->m_pointer.pointer = nullptr;
+      d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
+      wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
+    } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.wl_pointer) {
+      wl_pointer_release(d->m_pointer.wl_pointer);
+      d->m_pointer.wl_pointer = nullptr;
     }
   }
 
@@ -284,7 +282,7 @@ const struct wl_seat_listener Display::seat_listener = {
     .name = seat_handle_name,
 };
 
-bool Display::pointerButtonStatePressed(struct pointer* p) {
+bool Display::pointerButtonStatePressed(const struct pointer* p) {
   return (p->buttons) && (p->event.state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
@@ -701,7 +699,7 @@ const struct wl_touch_listener Display::touch_listener = {
     .cancel = touch_handle_cancel,
 };
 
-int Display::PollEvents() {
+int Display::PollEvents() const {
   while (wl_display_prepare_read(m_display) != 0) {
     wl_display_dispatch_pending(m_display);
   }
@@ -711,7 +709,7 @@ int Display::PollEvents() {
   return wl_display_dispatch_pending(m_display);
 }
 
-void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) {
+void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) const {
   if (m_agl.shell) {
     agl_shell_set_background(m_agl.shell, surface,
                              m_all_outputs[index]->output);
@@ -720,7 +718,7 @@ void Display::AglShellDoBackground(struct wl_surface* surface, size_t index) {
 
 void Display::AglShellDoPanel(struct wl_surface* surface,
                               enum agl_shell_edge mode,
-                              size_t index) {
+                              size_t index) const {
   if (m_agl.shell) {
     agl_shell_set_panel(m_agl.shell, surface, m_all_outputs[index]->output,
                         mode);
@@ -739,17 +737,17 @@ void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_surface_engine_map[surface] = engine;
 }
 
-bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
+bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) const {
   (void)device;
   if (!m_enable_cursor) {
-    wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial, m_cursor_surface,
+    wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial, m_cursor_surface,
                           0, 0);
     wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
     wl_surface_commit(m_cursor_surface);
     return true;
   }
 
-  if (m_pointer.pointer) {
+  if (m_pointer.wl_pointer) {
     const char* cursor_name;
     if (kind == "basic") {
       cursor_name = kCursorKindBasic;
@@ -764,21 +762,21 @@ bool Display::ActivateSystemCursor(int32_t device, const std::string& kind) {
       return false;
     }
 
-    auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    const auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
       SPDLOG_DEBUG("Cursor [{}] not found", cursor_name);
       return false;
     }
-    auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
+    const auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
     if (cursor_buffer && m_cursor_surface) {
-      wl_pointer_set_cursor(m_pointer.pointer, m_pointer.serial,
+      wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial,
                             m_cursor_surface,
-                            (int32_t)cursor->images[0]->hotspot_x,
-                            (int32_t)cursor->images[0]->hotspot_y);
+                            static_cast<int32_t>(cursor->images[0]->hotspot_x),
+                            static_cast<int32_t>(cursor->images[0]->hotspot_y));
       wl_surface_attach(m_cursor_surface, cursor_buffer, 0, 0);
       wl_surface_damage(m_cursor_surface, 0, 0,
-                        (int32_t)cursor->images[0]->width,
-                        (int32_t)cursor->images[0]->height);
+                        static_cast<int32_t>(cursor->images[0]->width),
+                        static_cast<int32_t>(cursor->images[0]->height));
       wl_surface_commit(m_cursor_surface);
     } else {
       SPDLOG_DEBUG("Failed to set cursor: Invalid Cursor Buffer");
@@ -797,7 +795,7 @@ void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
   m_key_event[surface] = key_event;
 }
 
-int32_t Display::GetBufferScale(uint32_t index) {
+int32_t Display::GetBufferScale(uint32_t index) const {
   if (index < m_all_outputs.size()) {
     if (m_buffer_scale_enable) {
       if (m_all_outputs[index]->scale == 0) {
@@ -806,14 +804,14 @@ int32_t Display::GetBufferScale(uint32_t index) {
         return m_all_outputs[index]->scale;
       }
     } else {
-      return (int32_t)kDefaultBufferScale;
+      return static_cast<int32_t>(kDefaultBufferScale);
     }
   }
   SPDLOG_DEBUG("GetBufferScale: Invalid output index: {}", index);
-  return (int32_t)kDefaultBufferScale;
+  return static_cast<int32_t>(kDefaultBufferScale);
 }
 
-std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) {
+std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   if (index < m_all_outputs.size()) {
     return {m_all_outputs[index]->width, m_all_outputs[index]->height};
   }
@@ -1054,7 +1052,7 @@ const struct ivi_wm_listener Display::ivi_wm_listener = {
     .layer_surface_added = ivi_wm_layer_surface_added,
 };
 
-void Display::wayland_event_mask_print(struct wayland_event_mask& mask) {
+void Display::wayland_event_mask_print(const struct wayland_event_mask& mask) {
   std::string out;
   std::stringstream ss(out);
   ss << "Wayland Event Mask";
@@ -1079,13 +1077,13 @@ void Display::wayland_event_mask_update(
     struct wayland_event_mask& mask) {
   std::string events;
   events.reserve(ignore_wayland_events.size());
-  for (char event : ignore_wayland_events) {
+  for (const char event : ignore_wayland_events) {
     if (event != ' ' && event != '"')
       events += event;
   }
 
   std::transform(events.begin(), events.end(), events.begin(),
-                 [](char c) { return std::tolower((unsigned char)c); });
+                 [](const char c) { return std::tolower(static_cast<unsigned char>(c)); });
 
   std::stringstream ss(events);
   while (ss.good()) {

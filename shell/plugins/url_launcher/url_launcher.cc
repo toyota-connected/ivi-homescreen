@@ -25,23 +25,24 @@
 void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
 
   if (method == kLaunchMethod) {
     if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+      const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       std::string url;
-      auto it = args->find(flutter::EncodableValue(kUrlKey));
+      const auto it = args->find(flutter::EncodableValue(kUrlKey));
       if (it != args->end() && !it->second.IsNull()) {
         url = std::get<std::string>(it->second);
       }
 
-      pid_t pid = fork();
+      const pid_t pid = fork();
       if (pid == 0) {
         execl("/usr/bin/xdg-open", "xdg-open", url.c_str(), nullptr);
         exit(1);
@@ -52,21 +53,23 @@ void UrlLauncher::OnPlatformMessage(const FlutterPlatformMessage* message,
         std::ostringstream error_message;
         error_message << "Failed to open " << url << ": error " << status;
         result = codec.EncodeErrorEnvelope(kLaunchError, error_message.str());
+        engine->SendPlatformMessageResponse(message->response_handle,
+                                            result->data(), result->size());
+        return;
       }
-      auto val = flutter::EncodableValue(true);
+      const auto val = flutter::EncodableValue(true);
       result = codec.EncodeSuccessEnvelope(&val);
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
     }
   } else if (method == kCanLaunchMethod) {
-    std::string url;
     if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+      const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
-      auto it = args->find(flutter::EncodableValue(kUrlKey));
+      const auto it = args->find(flutter::EncodableValue(kUrlKey));
       if (it != args->end() && !it->second.IsNull()) {
-        url = std::get<std::string>(it->second);
-        flutter::EncodableValue response(
+        const std::string url = std::get<std::string>(it->second);
+        const flutter::EncodableValue response(
             (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||
             (url.rfind("ftp:", 0) == 0) || (url.rfind("file:", 0) == 0));
         result = codec.EncodeSuccessEnvelope(&response);

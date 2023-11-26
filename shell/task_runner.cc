@@ -21,13 +21,13 @@
 #include "logging/logging.h"
 
 TaskRunner::TaskRunner(std::string name, FlutterEngine& engine)
-    : io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
-      work_(io_context_->get_executor()),
-      name_(std::move(name)),
+    : name_(std::move(name)),
       engine_(engine),
-      pri_queue_(std::make_unique<handler_priority_queue>()),
       pthread_self_(pthread_self()),
-      strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
+      io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
+      work_(io_context_->get_executor()),
+      strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
+      pri_queue_(std::make_unique<handler_priority_queue>()) {
   thread_ = std::thread([&]() {
     while (io_context_->run_one()) {
       // The custom invocation hook adds the handlers to the priority queue
@@ -55,21 +55,11 @@ void TaskRunner::QueueFlutterTask(size_t index,
                                   FlutterTask task,
                                   void* /* context */) {
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
-  auto current = LibFlutterEngine->GetCurrentTime();
+  const auto current = LibFlutterEngine->GetCurrentTime();
   if (current >= target_time) {
-    post(*strand_, [&, index, task]() {
-#if defined(NDEBUG)
-      (void)index;
-#endif
-      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
-      LibFlutterEngine->RunTask(engine_, &task);
-    });
+    post(*strand_, [&, task]() { LibFlutterEngine->RunTask(engine_, &task); });
   } else {
-    asio::post(*strand_, pri_queue_->wrap(target_time, [&, index, task]() {
-#if defined(NDEBUG)
-      (void)index;
-#endif
-      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
+    asio::post(*strand_, pri_queue_->wrap(target_time, [&, task]() {
       LibFlutterEngine->RunTask(engine_, &task);
     }));
   }

@@ -16,14 +16,11 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
 struct timer_task {
-  void (*run)(struct timer_task* task, uint32_t events);
+  void (*run)(timer_task const* task, uint32_t events);
   void* data;
 };
 
@@ -80,7 +77,7 @@ class EventTimer {
    * @relation
    * internal
    */
-  void arm();
+  void arm() const;
   /**
    * @brief run when a timer is stopped
    * @return void
@@ -112,7 +109,7 @@ class EventTimer {
    * @relation
    * internal
    */
-  static void run(struct timer_task* task, uint32_t events);
+  static void run(timer_task const* task, uint32_t events);
 
   /**
    * @brief check epoll events
@@ -131,7 +128,7 @@ class EventTimer {
    * @relation
    * internal
    */
-  static void _arm(int fd, struct itimerspec* timerspec);
+  static void _arm(int fd, itimerspec const* timerspec);
   /**
    * @brief an internal func for watch_timerfd
    * @param[in] fd timer fd

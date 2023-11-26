@@ -24,14 +24,14 @@
 void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
   auto method = obj->method_name();
   if (method == kMethodActivateSystemCursor) {
     if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+      const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       int32_t device = 0;
       auto it = args->find(flutter::EncodableValue("device"));
@@ -45,7 +45,7 @@ void MouseCursor::OnPlatformMessage(const FlutterPlatformMessage* message,
         kind = std::get<std::string>(it->second);
       }
 
-      auto val =
+      const auto val =
           flutter::EncodableValue(engine->ActivateSystemCursor(device, kind));
       result = codec.EncodeSuccessEnvelope(&val);
     } else {
