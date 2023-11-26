@@ -23,15 +23,14 @@
 #include "asio/io_context.hpp"
 #include "asio/io_context_strand.hpp"
 
-#include "constants.h"
+#include "third_party/flutter/shell/platform/embedder/embedder.h"
 
+#include "constants.h"
 #include "handler_priority_queue.h"
 
 class TaskRunner {
  public:
-  explicit TaskRunner(std::string name,
-                      FlutterEngineProcTable& proc_table,
-                      FlutterEngine& engine);
+  explicit TaskRunner(std::string name, FlutterEngine& engine);
 
   ~TaskRunner();
 
@@ -62,7 +61,6 @@ class TaskRunner {
 
  private:
   std::string name_;
-  FlutterEngineProcTable& proc_table_;
   FlutterEngine& engine_;
   std::thread thread_;
   pthread_t pthread_self_;

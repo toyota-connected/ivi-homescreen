@@ -335,7 +335,8 @@ class Engine {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED FlutterEngineResult UpdateLocales(std::vector<FlutterLocale> locales);
+  MAYBE_UNUSED FlutterEngineResult
+  UpdateLocales(std::vector<FlutterLocale> locales);
 
   /**
    * @brief Get clipboard data
@@ -505,8 +506,6 @@ class Engine {
   FlutterProjectArgs m_args;
   std::string m_clipboard_data;
   pthread_t m_event_loop_thread{};
-  void* m_engine_so_handle;
-  FlutterEngineProcTable m_proc_table{};
 
   std::shared_ptr<TaskRunner> m_platform_task_runner;
   FlutterTaskRunnerDescription m_platform_task_runner_description{};

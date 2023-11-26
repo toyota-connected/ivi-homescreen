@@ -20,14 +20,11 @@
 
 #include "logging/logging.h"
 
-TaskRunner::TaskRunner(std::string name,
-                       FlutterEngineProcTable& proc_table,
-                       FlutterEngine& engine)
+TaskRunner::TaskRunner(std::string name, FlutterEngine& engine)
     : io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(io_context_->get_executor()),
       name_(std::move(name)),
       engine_(engine),
-      proc_table_(proc_table),
       pri_queue_(std::make_unique<handler_priority_queue>()),
       pthread_self_(pthread_self()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
@@ -38,13 +35,12 @@ TaskRunner::TaskRunner(std::string name,
       while (io_context_->poll_one())
         ;
 
-      pri_queue_->execute_all(proc_table_, engine_);
+      pri_queue_->execute_all(engine_);
     }
   });
 
   asio::post(*strand_, [&]() {
-    pthread_self_ = pthread_self();
-    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self_);
+    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self());
   });
 }
 
@@ -59,22 +55,22 @@ void TaskRunner::QueueFlutterTask(size_t index,
                                   FlutterTask task,
                                   void* /* context */) {
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
-  auto current = proc_table_.GetCurrentTime();
+  auto current = LibFlutterEngine->GetCurrentTime();
   if (current >= target_time) {
     post(*strand_, [&, index, task]() {
 #if defined(NDEBUG)
       (void)index;
 #endif
       SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
-      proc_table_.RunTask(engine_, &task);
+      LibFlutterEngine->RunTask(engine_, &task);
     });
   } else {
     asio::post(*strand_, pri_queue_->wrap(target_time, [&, index, task]() {
-      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
 #if defined(NDEBUG)
       (void)index;
 #endif
-      proc_table_.RunTask(engine_, &task);
+      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
+      LibFlutterEngine->RunTask(engine_, &task);
     }));
   }
 }
@@ -87,9 +83,7 @@ std::future<FlutterEngineResult> TaskRunner::QueuePlatformMessage(
   auto future(promise->get_future());
 
   post(*strand_, [channel, message = std::move(message), handle,
-                  promise = std::move(promise),
-                  SendPlatformMessage = proc_table_.SendPlatformMessage,
-                  engine = engine_]() {
+                  promise = std::move(promise), engine = engine_]() {
     const FlutterPlatformMessage msg{
         sizeof(FlutterPlatformMessage),
         channel,
@@ -98,7 +92,7 @@ std::future<FlutterEngineResult> TaskRunner::QueuePlatformMessage(
         handle,
     };
 
-    promise->set_value(SendPlatformMessage(engine, &msg));
+    promise->set_value(LibFlutterEngine->SendPlatformMessage(engine, &msg));
   });
 
   return future;
@@ -110,7 +104,7 @@ std::future<FlutterEngineResult> TaskRunner::QueueUpdateLocales(
   auto future(promise->get_future());
   post(*strand_,
        [promise = std::move(promise), locales = std::move(locales),
-        UpdateLocales = proc_table_.UpdateLocales, engine = engine_]() {
+        UpdateLocales = LibFlutterEngine->UpdateLocales, engine = engine_]() {
          std::vector l(locales.data(), locales.data() + locales.size());
          const FlutterEngineResult result =
              UpdateLocales(engine, l.data(), l.size());
