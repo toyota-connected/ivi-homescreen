@@ -22,22 +22,22 @@
 
 void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   std::unique_ptr<std::vector<uint8_t>> result =
       codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+  const auto method = obj->method_name();
 
   if (method == "create") {
     if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+      const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       int64_t textureId = 0;
       auto it = args->find(flutter::EncodableValue("textureId"));
       if (it != args->end() && !it->second.IsNull()) {
-        flutter::EncodableValue encodedValue = it->second;
+        const flutter::EncodableValue encodedValue = it->second;
         textureId = encodedValue.LongValue();
       }
 
@@ -58,7 +58,7 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
             "argument_error", "textureId, width and height must be non-zero");
       } else {
         // cast size to that what Wayland uses
-        auto value = TextureEgl::GetInstance().Create(
+        const auto value = TextureEgl::GetInstance().Create(
             engine, textureId, static_cast<int32_t>(width),
             static_cast<int32_t>(height), args);
 
@@ -69,12 +69,12 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
     }
   } else if (method == "dispose") {
     if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+      const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       int64_t textureId = 0;
-      auto it = args->find(flutter::EncodableValue("textureId"));
+      const auto it = args->find(flutter::EncodableValue("textureId"));
       if (it != args->end()) {
-        flutter::EncodableValue encodedValue = it->second;
+        const flutter::EncodableValue encodedValue = it->second;
         textureId = encodedValue.LongValue();
       }
 

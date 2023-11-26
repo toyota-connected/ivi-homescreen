@@ -17,7 +17,6 @@
 #pragma once
 
 #include <shell/platform/embedder/embedder.h>
-#include <string>
 
 class GoRouter {
  public:

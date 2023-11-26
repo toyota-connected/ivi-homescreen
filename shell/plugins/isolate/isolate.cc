@@ -20,11 +20,10 @@
 
 void Isolate::OnPlatformMessage(const FlutterPlatformMessage* message,
                                 void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
 
-  result = codec.EncodeSuccessEnvelope();
+  const auto result = codec.EncodeSuccessEnvelope();
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }

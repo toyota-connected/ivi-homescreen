@@ -29,24 +29,23 @@
 
 #include "hexdump.h"
 #include "utils.h"
-#include "wayland-client.h"
 
 Engine::Engine(FlutterView* view,
-               size_t index,
+               const size_t index,
                const std::vector<const char*>& vm_args_c,
                const std::string& bundle_path,
-               int32_t accessibility_features)
+               const int32_t accessibility_features)
     : m_index(index),
       m_running(false),
-      m_view(view),
       m_backend(view->GetBackend()),
       m_egl_window(view->GetWindow()),
-      m_flutter_engine(nullptr),
+      m_view(view),
       m_cache_path(std::move(GetFilePath(index))),
+      m_prev_height(0),
+      m_prev_width(0),
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
-      m_prev_width(0),
-      m_prev_height(0),
+      m_flutter_engine(nullptr),
       m_args({
           .struct_size = sizeof(FlutterProjectArgs),
           .assets_path{},
@@ -55,10 +54,10 @@ Engine::Engine(FlutterView* view,
           .command_line_argv = vm_args_c.data(),
           .platform_message_callback =
               [](const FlutterPlatformMessage* message, void* userdata) {
-                auto engine = reinterpret_cast<Engine*>(userdata);
+                const auto engine = static_cast<Engine*>(userdata);
 
-                auto platform_channel = PlatformChannel::GetInstance();
-                auto callback =
+                const auto platform_channel = PlatformChannel::GetInstance();
+                const auto callback =
                     platform_channel
                         ->GetHandler()[std::string(message->channel)];
 
@@ -78,7 +77,7 @@ Engine::Engine(FlutterView* view,
           .log_message_callback =
               [](const char* /* tag */, const char* message, void* user_data) {
 #if defined(ENABLE_DART_VM_LOGGING)
-                auto engine = reinterpret_cast<Engine*>(user_data);
+                const auto engine = static_cast<Engine*>(user_data);
                 std::scoped_lock<std::mutex> lock(engine->m_queue_lock);
                 engine->m_vm_queue->emplace(message);
 #else
@@ -171,12 +170,12 @@ Engine::Engine(FlutterView* view,
       .struct_size = sizeof(FlutterTaskRunnerDescription),
       .user_data = this,
       .runs_task_on_current_thread_callback = [](void* context) -> bool {
-        return reinterpret_cast<Engine*>(context)
+        return static_cast<Engine*>(context)
             ->m_platform_task_runner->IsThreadEqual(pthread_self());
       },
       .post_task_callback = [](FlutterTask task, uint64_t target_time,
                                void* context) -> void {
-        auto e = reinterpret_cast<Engine*>(context);
+        const auto e = static_cast<Engine*>(context);
         e->m_platform_task_runner->QueueFlutterTask(e->m_index, target_time,
                                                     task, context);
       },
@@ -222,7 +221,7 @@ FlutterEngineResult Engine::RunTask() {
   return kSuccess;
 }
 
-FlutterEngineResult Engine::Shutdown() {
+FlutterEngineResult Engine::Shutdown() const {
   if (!m_flutter_engine) {
     return kSuccess;
   }
@@ -273,12 +272,13 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
   m_prev_width = width;
 
   // Set window size
-  FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
-                                    .width = width,
-                                    .height = height,
-                                    .pixel_ratio = m_prev_pixel_ratio};
+  const FlutterWindowMetricsEvent fwme = {
+      .struct_size = sizeof(FlutterWindowMetricsEvent),
+      .width = width,
+      .height = height,
+      .pixel_ratio = m_prev_pixel_ratio};
 
-  auto result =
+  const auto result =
       LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
     spdlog::critical("({}) Failed send initial window size to flutter",
@@ -300,12 +300,13 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   m_prev_pixel_ratio = pixel_ratio;
 
   // Set window size
-  FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
-                                    .width = m_prev_width,
-                                    .height = m_prev_height,
-                                    .pixel_ratio = pixel_ratio};
+  const FlutterWindowMetricsEvent fwme = {
+      .struct_size = sizeof(FlutterWindowMetricsEvent),
+      .width = m_prev_width,
+      .height = m_prev_height,
+      .pixel_ratio = pixel_ratio};
 
-  auto result =
+  const auto result =
       LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
     spdlog::critical("({}) Failed send initial window size to flutter",
@@ -327,7 +328,7 @@ FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
 
 MAYBE_UNUSED FlutterEngineResult
 Engine::TextureRegistryRemove(int64_t texture_id) {
-  auto search =
+  const auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
                    [&texture_id](const std::pair<int64_t, void*>& element) {
                      return element.first == texture_id;
@@ -372,7 +373,7 @@ flutter::EncodableValue Engine::TextureCreate(
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
   SPDLOG_DEBUG("({}) Engine::TextureCreate: <{}>", m_index, texture_id);
 
-  auto texture = this->m_texture_registry[texture_id];
+  const auto texture = this->m_texture_registry[texture_id];
 
   if (texture != nullptr) {
     return texture->Create(width, height, args);
@@ -402,7 +403,7 @@ std::string Engine::GetFilePath(size_t index) {
 FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
   SPDLOG_DEBUG("({}) OpenGL Texture: dispose ({})", m_index, texture_id);
 
-  auto search =
+  const auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
                    [&texture_id](const std::pair<int64_t, void*>& element) {
                      return element.first == texture_id;
@@ -522,11 +523,11 @@ Engine::UpdateAccessibilityFeatures(int32_t value) {
 
 // Passes locale information to the Flutter engine.
 void Engine::SetUpLocales() const {
-  FlutterLocale locale = {.struct_size = sizeof(FlutterLocale),
-                          .language_code = kDefaultLocaleLanguageCode,
-                          .country_code = kDefaultLocaleCountryCode,
-                          .script_code = kDefaultLocaleScriptCode,
-                          .variant_code = nullptr};
+  constexpr FlutterLocale locale = {.struct_size = sizeof(FlutterLocale),
+                                    .language_code = kDefaultLocaleLanguageCode,
+                                    .country_code = kDefaultLocaleCountryCode,
+                                    .script_code = kDefaultLocaleScriptCode,
+                                    .variant_code = nullptr};
 
   std::vector<const FlutterLocale*> flutter_locale_list;
   flutter_locale_list.push_back(&locale);
@@ -632,8 +633,7 @@ FlutterEngineAOTData Engine::LoadAotData(
   source.elf_path = aot_data_path.c_str();
 
   FlutterEngineAOTData data;
-  auto result = LibFlutterEngine->CreateAOTData(&source, &data);
-  if (result != kSuccess) {
+  if (kSuccess != LibFlutterEngine->CreateAOTData(&source, &data)) {
     spdlog::critical("({}) Failed to load AOT data from: {}", m_index,
                      aot_data_path);
     return nullptr;
@@ -641,7 +641,7 @@ FlutterEngineAOTData Engine::LoadAotData(
   return data;
 }
 
-bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
+bool Engine::ActivateSystemCursor(const int32_t device, const std::string& kind) const {
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
 

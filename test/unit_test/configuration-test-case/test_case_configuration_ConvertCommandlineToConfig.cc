@@ -30,8 +30,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Normal001) {
                          "--wayland-event-mask=touch",
                          "--p=1",
                          "--i=1"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -71,8 +71,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Normal002) {
   // setup test parameters
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -94,8 +94,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal001) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--j="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -119,8 +119,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal002) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--a="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -143,8 +143,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal003) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--a=invalid-value"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -167,8 +167,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal004) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--a=9223372036854775808"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -191,8 +191,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal005) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--b="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -215,8 +215,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal006) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--w="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -239,8 +239,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal007) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--w=abnormal"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -263,8 +263,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal008) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--h="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -287,8 +287,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal009) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--h=abnormal"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -311,8 +311,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal010) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--t="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -335,8 +335,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal011) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--output-index="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -359,8 +359,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal012) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--output-index=abnormal"};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -383,8 +383,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal013) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--xdg-shell-app-id="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -407,8 +407,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal014) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--wayland-event-mask="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -430,8 +430,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal015) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--p="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -453,8 +453,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal016) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--i="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 
@@ -477,8 +477,8 @@ TEST(HomescreenConfigurationConvertCommand, Lv1Abnormal017) {
   struct Configuration::Config config {};
   const char* argv[] =  {"homescreen",
                          "--window-type="};
-  char** argv_p = (char**)&argv;
-  int argc = sizeof(argv) / sizeof(argv[0]);
+  char** argv_p = reinterpret_cast<char**>(&argv);
+  int argc = std::size(argv);
 
   auto cl = fml::CommandLineFromArgcArgv(argc, argv_p);
 

@@ -21,20 +21,20 @@
 
 void DesktopWindow::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+  const auto method = obj->method_name();
 
   if (method == "desktop_window") {
     if (!obj->arguments()->IsNull()) {
-      auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+      const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
 
       SPDLOG_DEBUG("desktop_window");
 
-      for (auto it : *args) {
+      for (auto const& it : *args) {
         auto key = std::get<std::string>(it.first);
         SPDLOG_DEBUG(key);
       }
@@ -42,21 +42,21 @@ void DesktopWindow::OnPlatformMessage(const FlutterPlatformMessage* message,
       int64_t setMinWindowSize = 0;
       auto it = args->find(flutter::EncodableValue("setMinWindowSize"));
       if (it != args->end()) {
-        flutter::EncodableValue encodedValue = it->second;
+        const flutter::EncodableValue encodedValue = it->second;
         setMinWindowSize = encodedValue.LongValue();
       }
 
       int64_t width = 0;
       it = args->find(flutter::EncodableValue("width"));
       if (it != args->end()) {
-        flutter::EncodableValue encodedValue = it->second;
+        const flutter::EncodableValue encodedValue = it->second;
         width = encodedValue.LongValue();
       }
 
       int64_t height = 0;
       it = args->find(flutter::EncodableValue("height"));
       if (it != args->end()) {
-        flutter::EncodableValue encodedValue = it->second;
+        const flutter::EncodableValue encodedValue = it->second;
         height = encodedValue.LongValue();
       }
 
@@ -69,7 +69,7 @@ void DesktopWindow::OnPlatformMessage(const FlutterPlatformMessage* message,
     }
   }
 
-  result = codec.EncodeSuccessEnvelope();
+  const auto result = codec.EncodeSuccessEnvelope();
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }

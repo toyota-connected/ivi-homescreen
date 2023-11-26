@@ -23,16 +23,14 @@
 void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
-
-  if (method == "getAll") {
+  if ("getAll" == obj->method_name()) {
     SPDLOG_DEBUG("PackageInfo: getAll");
 
-    flutter::EncodableValue value(flutter::EncodableMap{
+    const flutter::EncodableValue value(flutter::EncodableMap{
         {flutter::EncodableValue("appName"),
          flutter::EncodableValue("Toyota Connected")},
         {flutter::EncodableValue("packageName"),
@@ -43,7 +41,7 @@ void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
 
     result = codec.EncodeSuccessEnvelope(&value);
   } else {
-    spdlog::error("PackageInfo: {} is unhandled", method);
+    spdlog::error("PackageInfo: {} is unhandled", obj->method_name());
     result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
   }
 

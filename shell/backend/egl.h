@@ -16,12 +16,9 @@
 
 #pragma once
 
-#include <cstdint>
-#include <unordered_map>
-#include <vector>
-
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
 
@@ -102,7 +99,7 @@ class Egl {
    * @relation
    * EGL
    */
-  PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() {
+  NODISCARD PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() const {
     return m_pfSetDamageRegion;
   }
 
@@ -114,7 +111,8 @@ class Egl {
    * @relation
    * EGL
    */
-  PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC GetSwapBuffersWithDamage() {
+  NODISCARD PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
+  GetSwapBuffersWithDamage() const {
     return m_pfSwapBufferWithDamage;
   }
 
@@ -125,7 +123,7 @@ class Egl {
    * @relation
    * EGL
    */
-  bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
+  NODISCARD bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
 
   /**
    * @brief Auxiliary function used to transform a FlutterRect into the format
@@ -136,11 +134,11 @@ class Egl {
    * @relation
    * EGL
    */
-  std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
+  NODISCARD std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
 
-  EGLDisplay GetDisplay() { return m_dpy; }
+  NODISCARD EGLDisplay GetDisplay() { return m_dpy; }
 
-  EGLContext GetTextureContext() { return m_texture_context; }
+  NODISCARD EGLContext GetTextureContext() { return m_texture_context; }
 
  protected:
   EGLSurface m_egl_surface{};
@@ -165,7 +163,7 @@ class Egl {
   /**
    * @brief Auxiliary function used to check if the given list of extensions
    * contains the requested extension name.
-   * @param[in] dpy EGL display
+   * @param[in] extensions EGL display
    * @param[in] name name of extension
    * @return bool
    * @retval if extension is present
@@ -222,11 +220,11 @@ class Egl {
    * @relation
    * wayland
    */
-  void EGL_KHR_debug_init(const char* extensions);
+  static void EGL_KHR_debug_init(const char* extensions);
 
   /**
    * @brief Print a list of extensions, with word-wrapping
-   * @param[in] ext List of extensions
+   * @param[in] dpy List of extensions
    * @return void
    * @relation
    * internal

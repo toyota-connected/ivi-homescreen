@@ -75,8 +75,9 @@ void AudioPlayer::main_loop(AudioPlayer* data) {
 
   data->bus_ = gst_element_get_bus(data->playbin_);
   GSource* bus_source = gst_bus_create_watch(data->bus_);
-  g_source_set_callback(bus_source, (GSourceFunc)gst_bus_async_signal_func,
-                        nullptr, nullptr);
+  g_source_set_callback(
+      bus_source, reinterpret_cast<GSourceFunc>(gst_bus_async_signal_func),
+      nullptr, nullptr);
   g_source_attach(bus_source, context);
   g_source_unref(bus_source);
   g_signal_connect(data->bus_, "message", G_CALLBACK(OnBusMessage), data);
@@ -213,7 +214,8 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
     case GST_MESSAGE_TAG: {
       GstTagList* tag_list;
       gst_message_parse_tag(message, &tag_list);
-      gst_tag_list_foreach(tag_list, (GstTagForeachFunc)OnTagItem, data);
+      gst_tag_list_foreach(
+          tag_list, reinterpret_cast<GstTagForeachFunc>(OnTagItem), data);
       gst_tag_list_unref(tag_list);
       break;
     }
@@ -472,12 +474,12 @@ void AudioPlayer::SetPlayback(const int64_t position, const double rate) {
   if (rate > 0) {
     seek_event = gst_event_new_seek(
         rate, GST_FORMAT_TIME,
-        GstSeekFlags(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
         GST_SEEK_TYPE_SET, position * GST_MSECOND, GST_SEEK_TYPE_NONE, -1);
   } else {
     seek_event = gst_event_new_seek(
         rate, GST_FORMAT_TIME,
-        GstSeekFlags(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
         GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, position * GST_MSECOND);
   }
 
