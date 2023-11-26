@@ -35,8 +35,8 @@
 #include "constants.h"
 #include "logging.h"
 #include "platform_channel.h"
-#include "static_plugins/key_event/key_event.h"
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/key_event/key_event.h"
+#include "plugins/text_input/text_input.h"
 #include "task_runner.h"
 #include "view/flutter_view.h"
 

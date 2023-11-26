@@ -33,8 +33,8 @@
 #include "constants.h"
 #include "ivi-application-client-protocol.h"
 #include "ivi-wm-client-protocol.h"
-#include "static_plugins/key_event/key_event.h"
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/key_event/key_event.h"
+#include "plugins/text_input/text_input.h"
 #include "timer.h"
 #include "xdg-shell-client-protocol.h"
 
