@@ -37,7 +37,7 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
 
   auto method_name = method->method_name();
   SPDLOG_DEBUG("[platform_views] {}", method_name);
-  auto arguments = method->arguments();
+  const auto arguments = method->arguments();
 
   if (method_name == kMethodCreate && !arguments->IsNull()) {
     int32_t id = 0;

@@ -18,7 +18,7 @@
 
 #include "logging.h"
 
-CurlClient::CurlClient() {
+CurlClient::CurlClient() : mCode(CURLE_OK) {
   curl_global_init(CURL_GLOBAL_DEFAULT);
   std::make_unique<char>(CURL_ERROR_SIZE);
 }
@@ -37,10 +37,10 @@ int CurlClient::Writer(char* data,
 }
 
 bool CurlClient::Init(
-    std::string& url,
-    std::vector<std::string>& headers,
-    std::vector<std::pair<std::string, std::string>>& url_form,
-    bool follow_location) {
+    const std::string& url,
+    const std::vector<std::string>& headers,
+    const std::vector<std::pair<std::string, std::string>>& url_form,
+    const bool follow_location) {
   mCode = CURLE_OK;
   mBuffer.clear();
 

@@ -39,7 +39,7 @@ DelegateHandleKey::DelegateHandleKey(void* data,
       m_xkb_scancode(xkb_scancode),
       m_keysym(keysym) {}
 
-void DelegateHandleKey::TriggerHook() {
+void DelegateHandleKey::TriggerHook() const {
   if (m_hook) {
     m_hook(m_data, m_type, m_xkb_scancode, m_keysym);
   }
@@ -61,7 +61,7 @@ void KeyEvent::SetEngine(const std::shared_ptr<Engine>& engine) {
 
 void KeyEvent::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   engine->SendPlatformMessageResponse(message->response_handle,
                                       message->message, message->message_size);
 }
@@ -75,7 +75,7 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
     return ret;
   }
 
-  auto decoded =
+  const auto decoded =
       flutter::JsonMessageCodec::GetInstance().DecodeMessage(reply, reply_size);
   if (decoded == nullptr) {
     /* could not decode */
@@ -83,7 +83,7 @@ KeyEvent::FL_KEY_EV_RET_T KeyEvent::ParseReply(const uint8_t* reply,
     return ret;
   }
 
-  auto handled = decoded->FindMember(kHandled);
+  const auto handled = decoded->FindMember(kHandled);
   if (handled == decoded->MemberEnd()) {
     spdlog::debug("KeyEvent: BinaryReply: could not found key \"{}\"",
                   kHandled);
@@ -113,7 +113,7 @@ void KeyEvent::SendKeyEvent(bool released,
                             xkb_keysym_t keysym,
                             uint32_t xkb_scancode,
                             uint32_t modifiers,
-                            std::shared_ptr<DelegateHandleKey> delegate) {
+                            std::shared_ptr<DelegateHandleKey> delegate) const {
   rapidjson::Document event(rapidjson::kObjectType);
   auto& allocator = event.GetAllocator();
 
@@ -145,9 +145,7 @@ void KeyEvent::SendKeyEvent(bool released,
       return;
     }
 
-    auto ret = ParseReply(reply, reply_size);
-
-    switch (ret) {
+    switch (ParseReply(reply, reply_size)) {
       case FL_KEY_EV_RET_HANDLED:
         // skip any delegates if handled
         break;
@@ -180,10 +178,8 @@ void KeyEvent::Send(const std::string& channel,
                     const flutter::BinaryReply reply) const {
   last_binary_reply_ = reply;
 
-  engine_->SendPlatformMessage(
-      channel.c_str(), message, message_size,
-      ReplyHandler,
-      const_cast<KeyEvent*>(this));
+  engine_->SendPlatformMessage(channel.c_str(), message, message_size,
+                               ReplyHandler, const_cast<KeyEvent*>(this));
 }
 
 void KeyEvent::SetMessageHandler(const std::string& channel,

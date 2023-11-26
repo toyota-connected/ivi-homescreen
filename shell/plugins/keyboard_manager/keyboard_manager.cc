@@ -21,18 +21,18 @@
 
 void KeyboardManager::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   std::unique_ptr<std::vector<uint8_t>> result =
       codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+  const auto method = obj->method_name();
 
   /* Get Keyboard State */
   if (method == kGetKeyboardState) {
     SPDLOG_DEBUG("({}) {}", engine->GetIndex(), kGetKeyboardState);
-    flutter::EncodableValue value(flutter::EncodableMap{
+    const flutter::EncodableValue value(flutter::EncodableMap{
         {flutter::EncodableValue(0),
          flutter::EncodableValue(0)},
     });

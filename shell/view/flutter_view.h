@@ -95,7 +95,7 @@ class FlutterView {
    * @relation
    * wayland, flutter
    */
-  Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
+  NODISCARD Backend* GetBackend() const { return reinterpret_cast<Backend*>(m_backend.get()); }
 
   /**
    * @brief Get an index of flutter views
@@ -177,7 +177,7 @@ class FlutterView {
    * @relation
    * wayland
    */
-  void ClearRegion(std::string& type);
+  void ClearRegion(const std::string& type) const;
 
   /**
    * @brief Set a region of a subsurface
@@ -187,8 +187,8 @@ class FlutterView {
    * @relation
    * wayland
    */
-  void SetRegion(std::string& type,
-                 std::vector<CompositorRegionPlugin::REGION_T>& regions);
+  void SetRegion(const std::string& type,
+                 const std::vector<CompositorRegionPlugin::REGION_T>& regions) const;
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);

@@ -21,11 +21,11 @@
 
 void Restoration::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+  const auto method = obj->method_name();
 
   if (method == kMethodGet) {
     SPDLOG_DEBUG("({}) Restoration: Get", engine->GetIndex());

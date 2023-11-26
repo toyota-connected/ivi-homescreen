@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include <queue>
 
 #include "asio/bind_executor.hpp"
@@ -35,8 +37,8 @@ class handler_priority_queue : public asio::execution_context {
 
   void execute_all(FlutterEngine& /* engine */) {
     while (!handlers_.empty()) {
-      auto current = LibFlutterEngine->GetCurrentTime();
-      auto target_time = handlers_.top()->GetTimestamp();
+      const auto current = LibFlutterEngine->GetCurrentTime();
+      const auto target_time = handlers_.top()->GetTimestamp();
       if (current >= target_time) {
         handlers_.top()->execute();
         handlers_.pop();
@@ -52,7 +54,7 @@ class handler_priority_queue : public asio::execution_context {
     executor(handler_priority_queue& q, uint64_t t)
         : context_(q), timestamp_(t) {}
 
-    handler_priority_queue& context() const noexcept { return context_; }
+    NODISCARD handler_priority_queue& context() const noexcept { return context_; }
 
     template <typename Function, typename Allocator>
     void dispatch(Function f, const Allocator&) const {
@@ -94,13 +96,13 @@ class handler_priority_queue : public asio::execution_context {
  private:
   class queued_handler_base {
    public:
-    queued_handler_base(uint64_t t) : timestamp_(t) {}
+    explicit queued_handler_base(uint64_t t) : timestamp_(t) {}
 
-    virtual ~queued_handler_base() {}
+    virtual ~queued_handler_base() = default;
 
     virtual void execute() = 0;
 
-    uint64_t GetTimestamp() { return timestamp_; }
+    NODISCARD uint64_t GetTimestamp() const { return timestamp_; }
 
     friend bool operator<(
         const std::unique_ptr<queued_handler_base>& a,

@@ -16,10 +16,6 @@
 
 #pragma once
 
-#include <map>
-#include <memory>
-#include <string>
-
 #include "flutter/fml/macros.h"
 
 #include <shell/platform/embedder/embedder.h>

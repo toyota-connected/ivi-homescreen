@@ -44,7 +44,7 @@ class JsonUtils {
    * google_sign_in
    */
   static bool WriteJsonDocumentToFile(std::string& path,
-                                      rapidjson::Document& doc);
+                                      const rapidjson::Document& doc);
 
   /**
    * @brief Function to add empty key to file
