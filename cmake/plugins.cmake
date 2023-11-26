@@ -154,4 +154,13 @@ if (BUILD_PLUGIN_AUDIO_PLAYERS)
     pkg_check_modules(GST REQUIRED gstreamer-1.0>=1.4)
 endif ()
 
+option(BUILD_PLUGIN_FIREBASE_CORE "Include Firebase Core plugin" OFF)
+if (BUILD_PLUGIN_FIREBASE_CORE)
+    if (EXISTS ${FIREBASE_CPP_SDK_ROOT_DIR})
+        ENABLE_PLUGIN(firebase_core)
+    else ()
+        set(BUILD_PLUGIN_FIREBASE_CORE OFF)
+    endif ()
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")
