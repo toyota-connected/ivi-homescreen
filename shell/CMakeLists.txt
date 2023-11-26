@@ -82,6 +82,17 @@ if (BUILD_PLUGIN_PLATFORM_VIEWS)
     )
 endif ()
 
+if (BUILD_PLUGIN_FIREBASE_CORE)
+    target_sources(homescreen PRIVATE
+            plugins/firebase_core/firebase_core_plugin.cpp
+            plugins/firebase_core/firebase_core_plugin_c_api.cpp
+            plugins/firebase_core/firebase_core.cc
+    )
+    target_include_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_INCLUDE_DIRS})
+    target_link_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_LIB_DIRS})
+    target_link_libraries(homescreen PRIVATE firebase_app flatbuffers z)
+endif ()
+
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL

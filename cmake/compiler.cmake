@@ -84,7 +84,9 @@ COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" "-f(no-)?omit-frame-poi
 COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" "-Wformat(=[0-9]+)?")
 COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" "-D_FORTIFY_SOURCE(=[0-9]+)?")
 
-if (NOT BUILD_CRASH_HANDLER)
+if (BUILD_PLUGIN_FIREBASE_CORE OR BUILD_CRASH_HANDLER)
+    string(APPEND CMAKE_CXX_FLAGS " -frtti")
+else ()
     string(APPEND CMAKE_CXX_FLAGS " -fno-rtti")
 endif ()
 
