@@ -23,7 +23,7 @@
 #include "platform_view.h"
 #include "platform_views_registry.h"
 #if defined(ENABLE_PLUGIN_FILAMENT)
-#include "static_plugins/filament/filament.h"
+#include "plugins/filament/filament.h"
 #endif
 
 void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
