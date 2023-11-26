@@ -258,6 +258,7 @@ void AudioPlayer::OnError(const gchar* code,
   engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
+#if !defined(NDEBUG)
 static std::string GetStateName(const GstState* state) {
   switch (*state) {
     case GST_STATE_VOID_PENDING:
@@ -274,6 +275,7 @@ static std::string GetStateName(const GstState* state) {
       return "";
   }
 }
+#endif
 
 void AudioPlayer::OnMediaStateChange(const GstObject* src,
                                      const GstState* old_state,
