@@ -226,7 +226,7 @@ uint32_t WaylandWindow::GetFpsCounter() {
 }
 
 bool WaylandWindow::ActivateSystemCursor(int32_t device,
-                                         const std::string& kind) {
+                                         const std::string& kind) const {
   return m_display->ActivateSystemCursor(device, kind);
 }
 

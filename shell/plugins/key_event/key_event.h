@@ -51,7 +51,7 @@ class DelegateHandleKey {
    * @relation
    * internal
    */
-  void TriggerHook();
+  void TriggerHook() const;
 
  private:
   void* m_data;
@@ -151,7 +151,7 @@ class KeyEvent : public flutter::BinaryMessenger {
                     xkb_keysym_t keysym,
                     uint32_t xkb_scancode,
                     uint32_t modifiers,
-                    std::shared_ptr<DelegateHandleKey> delegate);
+                    std::shared_ptr<DelegateHandleKey> delegate) const;
 
   mutable flutter::BinaryReply last_binary_reply_;
   std::string last_message_handler_channel_;
@@ -169,7 +169,7 @@ class KeyEvent : public flutter::BinaryMessenger {
   static void ReplyHandler(const uint8_t* data,
                            const size_t data_size,
                            void* userdata) {
-    auto d = static_cast<KeyEvent*>(userdata);
+    const auto d = static_cast<KeyEvent*>(userdata);
     if (d->last_binary_reply_) {
       d->last_binary_reply_(data, data_size);
     }

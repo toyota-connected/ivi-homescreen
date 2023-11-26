@@ -16,10 +16,11 @@
 
 #pragma once
 
+#include <memory>
+
 #include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
-#include "engine.h"
 
 class Engine;
 
@@ -60,10 +61,10 @@ class Backend {
    * @relation
    * flutter, wayland
    */
-  void Resize(size_t index,
+  void Resize(const size_t index,
               const std::shared_ptr<Engine>& flutter_engine,
-              int32_t width,
-              int32_t height) {
+              const int32_t width,
+              const int32_t height) const {
     if (m_resize_callback) {
       m_resize_callback(m_user_data, index, flutter_engine.get(), width,
                         height);
@@ -80,10 +81,10 @@ class Backend {
    * @relation
    * wayland, (flutter)
    */
-  void CreateSurface(size_t index,
+  void CreateSurface(const size_t index,
                      struct wl_surface* surface,
-                     int32_t width,
-                     int32_t height) {
+                     const int32_t width,
+                     const int32_t height) const {
     if (m_create_surface_callback) {
       m_create_surface_callback(m_user_data, index, surface, width, height);
     }

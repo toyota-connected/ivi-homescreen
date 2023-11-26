@@ -24,11 +24,12 @@
 void FileSelector::OnPlatformMessage(const FlutterPlatformMessage* message,
                                      void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
-  auto method = obj->method_name();
+  const auto method = obj->method_name();
 
   if (method == kGetDirectoryPath) {
     SPDLOG_DEBUG("[file_selector] getDirectoryPath:");
@@ -164,14 +165,13 @@ void FileSelector::OnPlatformMessage(const FlutterPlatformMessage* message,
           std::holds_alternative<flutter::EncodableList>(it.second)) {
         auto acceptedTypeGroups = std::get<flutter::EncodableList>(it.second);
         for (auto const& group : acceptedTypeGroups) {
-          std::map<flutter::EncodableValue, flutter::EncodableValue> map;
           if (!group.IsNull() &&
               std::holds_alternative<flutter::EncodableMap>(group)) {
-            map = std::get<flutter::EncodableMap>(group);
+            auto map = std::get<flutter::EncodableMap>(group);
             for (const auto& ele : map) {
               if (std::holds_alternative<std::string>(ele.first) &&
                   std::holds_alternative<std::string>(ele.second)) {
-                auto k = std::get<std::string>(ele.first);
+                const auto k = std::get<std::string>(ele.first);
                 if (k == kArgTypeGroupLabel) {
                   label = std::get<std::string>(ele.second);
                   SPDLOG_DEBUG("{}: {}", k, label);

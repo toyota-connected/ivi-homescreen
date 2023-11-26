@@ -17,8 +17,8 @@
 #include "../../view/flutter_view.h"
 #include "engine.h"
 
-void CompositorRegionPlugin::ClearGroups(flutter::EncodableList& types,
-                                         FlutterView* view) {
+void CompositorRegionPlugin::ClearGroups(const flutter::EncodableList& types,
+                                         const FlutterView* view) {
   for (auto const& encoded_types : types) {
     if (encoded_types.IsNull()) {
       continue;
@@ -29,8 +29,8 @@ void CompositorRegionPlugin::ClearGroups(flutter::EncodableList& types,
 }
 
 flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
-    flutter::EncodableList& groups,
-    FlutterView* view) {
+    const flutter::EncodableList& groups,
+    const FlutterView* view) {
   flutter::EncodableList results;
 
   for (auto const& group : groups) {
@@ -83,7 +83,7 @@ flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
         regions.push_back({x, y, width, height});
       }
       view->SetRegion(type, regions);
-      results.emplace_back(type);
+      results.emplace_back(std::move(type));
     }
   }
 
@@ -93,18 +93,18 @@ flutter::EncodableValue CompositorRegionPlugin::HandleGroups(
 void CompositorRegionPlugin::OnPlatformMessage(
     const FlutterPlatformMessage* message,
     void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   std::unique_ptr<std::vector<uint8_t>> result =
       codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
   do {
-    auto method = obj->method_name();
-    if (method != kMethodMask) {
+    if (kMethodMask != obj->method_name()) {
       break;
     }
-    auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
+    const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
     if (args == nullptr) {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
       break;
@@ -113,19 +113,19 @@ void CompositorRegionPlugin::OnPlatformMessage(
     /* Clear array */
     auto it = args->find(flutter::EncodableValue(kArgClear));
     if (it != args->end() && !it->second.IsNull()) {
-      auto types = std::get<flutter::EncodableList>(it->second);
-      ClearGroups(types, engine->GetView());
+      ClearGroups(std::get<flutter::EncodableList>(it->second),
+                  engine->GetView());
     }
 
     /* Group array */
     it = args->find(flutter::EncodableValue(kArgGroups));
     if (it == args->end() || it->second.IsNull()) {
-      flutter::EncodableValue value;
+      const flutter::EncodableValue value;
       result = codec.EncodeSuccessEnvelope(&value);
       break;
     }
-    auto groups = std::get<flutter::EncodableList>(it->second);
-    flutter::EncodableValue value = HandleGroups(groups, engine->GetView());
+    const flutter::EncodableValue value = HandleGroups(
+        std::get<flutter::EncodableList>(it->second), engine->GetView());
     result = codec.EncodeSuccessEnvelope(&value);
   } while (false);
 

@@ -74,7 +74,7 @@ class Utils {
     if (home_dir != nullptr)
       return home_dir;
 
-    auto home_env = getenv("HOME");
+    const auto home_env = getenv("HOME");
 
     std::string tmp;
     if (home_env && *home_env) {
@@ -82,14 +82,14 @@ class Utils {
       tmp = trim(home_env_raw, "\"");
     } else {
       setpwent();
-      auto pw = getpwuid(getuid());
+      const auto pw = getpwuid(getuid());
       endpwent();
 
       if (pw && pw->pw_dir)
         tmp = pw->pw_dir;
     }
 
-    auto path = fml::paths::JoinPaths({tmp, kXdgApplicationDir});
+    const auto path = fml::paths::JoinPaths({tmp, kXdgApplicationDir});
 
     home_dir = strdup(path.c_str());
 
@@ -106,11 +106,11 @@ class Utils {
   static const char* GetConfigHomePath() {
     static const char* config_home_dir = nullptr;
 
-    auto config_env = getenv("XDG_CONFIG_HOME");
+    const auto config_env = getenv("XDG_CONFIG_HOME");
     if (config_env && *config_env) {
       auto config_env_raw = std::string(config_env);
       auto clean = trim(config_env_raw, "\"");
-      auto path =
+      const auto path =
           fml::paths::JoinPaths({clean, kXdgConfigDir, kApplicationName});
       config_home_dir = strdup(path.c_str());
     } else {
@@ -143,7 +143,7 @@ class Utils {
    */
   static void RemoveArgument(std::vector<std::string>& args,
                              const std::string& arg) {
-    auto result = std::find(args.begin(), args.end(), arg);
+    const auto result = std::find(args.begin(), args.end(), arg);
     if (result != args.end()) {
       args.erase(result);
     }
@@ -169,10 +169,10 @@ class Utils {
    * @relation
    * internal
    */
-  static std::vector<std::string> split(std::string str, std::string token) {
+  static std::vector<std::string> split(std::string str, const std::string& token) {
     std::vector<std::string> result;
     while (!str.empty()) {
-      auto index = str.find(token);
+      const auto index = str.find(token);
       if (index != std::string::npos) {
         result.push_back(str.substr(0, index));
         str = str.substr(index + token.size());
@@ -193,7 +193,7 @@ class Utils {
    * internal
    */
   static bool ExecuteCommand(const char* cmd, char (&result)[PATH_MAX]) {
-    auto fp = popen(cmd, "r");
+    const auto fp = popen(cmd, "r");
     if (fp == nullptr) {
       spdlog::error("[ExecuteCommand] Failed to Execute Command: ({}) {}",
                     errno, strerror(errno));
@@ -204,7 +204,7 @@ class Utils {
     while (fgets(result, PATH_MAX, fp) != nullptr) {
     }
 
-    auto status = pclose(fp);
+    const auto status = pclose(fp);
     if (status == -1) {
       spdlog::error("[ExecuteCommand] Failed to Close Pipe: ({}) {}", errno,
                     strerror(errno));
@@ -268,42 +268,42 @@ class Utils {
       auto value = std::get<std::string>(it);
       spdlog::warn("\t{}: std::string: [{}]", key, value);
     } else if (std::holds_alternative<std::vector<uint8_t>>(it)) {
-      auto value = std::get<std::vector<uint8_t>>(it);
+      const auto value = std::get<std::vector<uint8_t>>(it);
       spdlog::warn("\t{}: std::vector<uint8_t>", key);
       for (auto const& v : value) {
         spdlog::warn("\t\t{}", v);
       }
     } else if (std::holds_alternative<std::vector<int32_t>>(it)) {
-      auto value = std::get<std::vector<int32_t>>(it);
+      const auto value = std::get<std::vector<int32_t>>(it);
       spdlog::warn("\t{}: std::vector<int32_t>", key);
       for (auto const& v : value) {
         spdlog::warn("\t\t{}", v);
       }
     } else if (std::holds_alternative<std::vector<int64_t>>(it)) {
-      auto value = std::get<std::vector<int64_t>>(it);
+      const auto value = std::get<std::vector<int64_t>>(it);
       spdlog::warn("\t{}: std::vector<int64_t>", key);
       for (auto const& v : value) {
         spdlog::warn("\t\t{}", v);
       }
     } else if (std::holds_alternative<std::vector<float>>(it)) {
-      auto value = std::get<std::vector<float>>(it);
+      const auto value = std::get<std::vector<float>>(it);
       spdlog::warn("\t{}: std::vector<float>", key);
       for (auto const& v : value) {
         spdlog::warn("\t\t{}", v);
       }
     } else if (std::holds_alternative<std::vector<double>>(it)) {
-      auto value = std::get<std::vector<double>>(it);
+      const auto value = std::get<std::vector<double>>(it);
       spdlog::warn("\t{}: std::vector<double>", key);
       for (auto const& v : value) {
         spdlog::warn("\t\t{}", v);
       }
     } else if (std::holds_alternative<flutter::EncodableList>(it)) {
       spdlog::warn("\t{}: flutter::EncodableList", key);
-      auto val = std::get<flutter::EncodableList>(it);
+      const auto val = std::get<flutter::EncodableList>(it);
       PrintFlutterEncodableList(key, val);
     } else if (std::holds_alternative<flutter::EncodableMap>(it)) {
       spdlog::warn("\t{}: flutter::EncodableMap", key);
-      auto val = std::get<flutter::EncodableMap>(it);
+      const auto val = std::get<flutter::EncodableMap>(it);
       PrintFlutterEncodableMap(key, val);
     } else {
       spdlog::error("\t{}: unknown type", key);

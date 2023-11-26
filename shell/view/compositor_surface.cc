@@ -54,7 +54,7 @@ CompositorSurface::CompositorSurface(
   m_wl.width = static_cast<uint32_t>(width);
   m_wl.height = static_cast<uint32_t>(height);
 
-  auto parent_surface = window->GetBaseSurface();
+  const auto parent_surface = window->GetBaseSurface();
 
   if (m_type == CompositorSurface::egl) {
     m_wl.egl_display = eglGetDisplay((NativeDisplayType)display->GetDisplay());
@@ -87,7 +87,7 @@ CompositorSurface::CompositorSurface(
 }
 
 void CompositorSurface::Dispose(void* userdata) {
-  auto* obj = (CompositorSurface*)userdata;
+  auto* obj = static_cast<CompositorSurface*>(userdata);
 
   obj->m_api.de_initialize(obj->m_context);
   obj->m_context = nullptr;
@@ -198,8 +198,8 @@ void CompositorSurface::StopFrames() {
 
 void CompositorSurface::on_frame(void* data,
                                  struct wl_callback* callback,
-                                 uint32_t time) {
-  auto obj = reinterpret_cast<CompositorSurface*>(data);
+                                 const uint32_t time) {
+  const auto obj = static_cast<CompositorSurface*>(data);
 
   obj->m_callback = nullptr;
 
