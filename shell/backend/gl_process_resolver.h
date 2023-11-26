@@ -19,8 +19,6 @@
 #include <memory>
 #include <vector>
 
-#include "constants.h"
-
 class EglProcessResolver {
  public:
   static constexpr char kGlSoNames[2UL][15UL] = {{"libGLESv2.so.2"},
@@ -38,7 +36,7 @@ class EglProcessResolver {
 
   /**
    * @brief Get DLL handle
-   * @param[in] name of library
+   * @param[in] lib of library
    * @param[out] out_handle DLL handle
    * @return int
    * @retval 1 Normal end
@@ -46,7 +44,7 @@ class EglProcessResolver {
    * @relation
    * internal
    */
-  static int GetHandle(std::string lib, void** out_handle);
+  static int GetHandle(const std::string& lib, void** out_handle);
 
   /**
    * @brief Resolve the process
@@ -56,7 +54,7 @@ class EglProcessResolver {
    * @relation
    * wayland
    */
-  void* process_resolver(const char* name);
+  void* process_resolver(const char* name) const;
 
  private:
   std::vector<void*> m_handles;

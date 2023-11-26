@@ -22,7 +22,6 @@
 #include <rapidjson/filewritestream.h>
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
 
 #include "logging.h"
 
@@ -50,15 +49,15 @@ rapidjson::Document JsonUtils::GetJsonDocumentFromFile(std::string& path,
 }
 
 bool JsonUtils::WriteJsonDocumentToFile(std::string& path,
-                                        rapidjson::Document& doc) {
+                                        const rapidjson::Document& doc) {
   if (path.empty()) {
     spdlog::error("Missing File Path: {}", path);
     return false;
   }
 
   if (!std::filesystem::exists(path)) {
-    std::filesystem::path p(path);
-    std::filesystem::create_directories(p.parent_path());
+    const std::filesystem::path p(path);
+    create_directories(p.parent_path());
   }
 
   FILE* fp = fopen(path.c_str(), "w+");
@@ -67,7 +66,7 @@ bool JsonUtils::WriteJsonDocumentToFile(std::string& path,
     return false;
   }
 
-  const auto bufSize = 1024;
+  constexpr auto bufSize = 1024;
   auto buffer = std::make_unique<char[]>(bufSize);
   rapidjson::FileWriteStream os(fp, buffer.get(), bufSize);
   rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);

@@ -25,7 +25,7 @@ std::string g_clipboard;
 void Platform::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::JsonMethodCodec::GetInstance();
   auto obj = codec.DecodeMethodCall(message->message, message->message_size);
 

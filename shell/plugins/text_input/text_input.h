@@ -25,7 +25,6 @@
 #include <flutter/method_channel.h>
 #include <flutter/method_result_functions.h>
 #include "flutter/fml/macros.h"
-#include "flutter/shell/platform/common/json_method_codec.h"
 #include "flutter/shell/platform/common/text_input_model.h"
 
 #include <rapidjson/document.h>
@@ -132,7 +131,7 @@ class TextInput : public flutter::BinaryMessenger {
    * @relation
    * flutter
    */
-  void SendStateUpdate(const flutter::TextInputModel& model);
+  void SendStateUpdate(const flutter::TextInputModel& model) const;
 
   // Sends an action triggered by the Enter key to the Flutter engine.
   /**
@@ -142,7 +141,7 @@ class TextInput : public flutter::BinaryMessenger {
    * @relation
    * flutter
    */
-  void EnterPressed(flutter::TextInputModel* model);
+  void EnterPressed(flutter::TextInputModel* model) const;
 
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<rapidjson::Document>> channel_;

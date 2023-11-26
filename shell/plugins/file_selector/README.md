@@ -5,6 +5,7 @@ Supports Flutter Packages - File Selector
 https://pub.dev/packages/file_selector
 
 ### Notes
+
 * Depends on zenity being present on system
 * mimeTypes is not currently supported
 

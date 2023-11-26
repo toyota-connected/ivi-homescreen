@@ -17,8 +17,7 @@
 #pragma once
 
 #include <list>
-#include <memory>
-#include <vector>
+#include <unordered_map>
 
 #include "backend/backend.h"
 #include "constants.h"
@@ -28,7 +27,7 @@ class WaylandEglBackend : public Egl, public Backend {
  public:
   // Maximum damage history - for triple buffering we need to store damage for
   // last two frames.
-  static const int kMaxHistorySize = 10;
+  static constexpr int kMaxHistorySize = 10;
 
   WaylandEglBackend(struct wl_display* display,
                     uint32_t initial_width,
@@ -112,5 +111,6 @@ class WaylandEglBackend : public Egl, public Backend {
    * @relation
    * wayland
    */
-  static void JoinFlutterRect(FlutterRect* rect, FlutterRect additional_rect);
+  static void JoinFlutterRect(FlutterRect* rect,
+                              const FlutterRect& additional_rect);
 };

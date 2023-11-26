@@ -104,7 +104,7 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   auto tEnd = std::chrono::steady_clock::now();
   auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
-  spdlog::info("comp surf init: {}", (float)tDiff);
+  spdlog::info("comp surf init: {}", static_cast<float>(tDiff));
 
   return static_cast<size_t>(index);
 }
@@ -127,7 +127,7 @@ void* FlutterView::GetSurfaceContext(int64_t index) {
 #endif
 
 #ifdef ENABLE_PLUGIN_COMP_REGION
-void FlutterView::ClearRegion(std::string& type) {
+void FlutterView::ClearRegion(const std::string& type) const {
   // A NULL wl_region causes the pending input/opaque region to be set to empty.
   if (type == "input") {
     wl_surface_set_input_region(m_wayland_window->GetBaseSurface(), nullptr);
@@ -137,10 +137,10 @@ void FlutterView::ClearRegion(std::string& type) {
 }
 
 void FlutterView::SetRegion(
-    std::string& type,
-    std::vector<CompositorRegionPlugin::REGION_T>& regions) {
-  auto compositor = m_wayland_display->GetCompositor();
-  auto base_region = wl_compositor_create_region(compositor);
+    const std::string& type,
+    const std::vector<CompositorRegionPlugin::REGION_T>& regions) const {
+  const auto compositor = m_wayland_display->GetCompositor();
+  const auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
     SPDLOG_DEBUG("Set Region: type: {}, x: {}, y: {}, width: {}, height: {}",

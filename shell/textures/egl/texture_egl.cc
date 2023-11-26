@@ -4,8 +4,6 @@
 #include <memory>
 #include <utility>
 
-#include "../test_egl/texture_test_egl.h"
-
 std::shared_ptr<TextureEgl> TextureEgl::sInstance = nullptr;
 
 TextureEgl::~TextureEgl() {
@@ -62,7 +60,7 @@ flutter::EncodableValue TextureEgl::Create(
   }
 }
 
-void TextureEgl::Dispose() {
+void TextureEgl::Dispose() const {
   for (auto& item : *m_textures) {
     switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
@@ -84,7 +82,7 @@ void TextureEgl::Dispose() {
   }
 }
 
-void TextureEgl::Draw() {
+void TextureEgl::Draw() const {
   for (auto& item : *m_textures) {
     switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
@@ -106,7 +104,7 @@ void TextureEgl::Draw() {
   }
 }
 
-void TextureEgl::RunTask() {
+void TextureEgl::RunTask() const {
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
   for (auto& item : *m_textures) {
     if (item->GetId() == kTextureEgl_ObjectId_Navigation) {

@@ -51,12 +51,12 @@ App::App(const std::vector<Configuration::Config>& configs)
   SPDLOG_DEBUG("-App::App");
 }
 
-int App::Loop() {
-  auto start_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+int App::Loop() const {
+  const auto start_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
 
-  auto ret = m_wayland_display->PollEvents();
+  const auto ret = m_wayland_display->PollEvents();
 
   for (auto const& view : m_views) {
     view->RunTasks();
@@ -65,13 +65,13 @@ int App::Loop() {
   if (m_wayland_display->m_repeat_timer)
     m_wayland_display->m_repeat_timer->wait_event();
 
-  auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+  const auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now().time_since_epoch())
                       .count();
 
-  auto elapsed = end_time - start_time;
+  const auto elapsed = end_time - start_time;
 
-  auto sleep_time = 16 - elapsed;
+  const auto sleep_time = 16 - elapsed;
 
   if (sleep_time > 0) {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));

@@ -21,9 +21,9 @@
 
 void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
-  auto engine = reinterpret_cast<Engine*>(userdata);
+  const auto engine = static_cast<Engine*>(userdata);
   auto& codec = flutter::StandardMessageCodec::GetInstance();
-  auto obj = codec.DecodeMessage(message->message, message->message_size);
+  const auto obj = codec.DecodeMessage(message->message, message->message_size);
 
   if (!obj->IsNull()) {
     auto map = std::get<flutter::EncodableMap>(*obj);
@@ -37,7 +37,7 @@ void Accessibility::OnPlatformMessage(const FlutterPlatformMessage* message,
 
     if (type == "disableAnimations") {
       auto value = engine->GetAccessibilityFeatures();
-      auto enabled = std::get<bool>(data[flutter::EncodableValue("enabled")]);
+      const auto enabled = std::get<bool>(data[flutter::EncodableValue("enabled")]);
       if (enabled) {
         value |= FlutterAccessibilityFeature::
             kFlutterAccessibilityFeatureDisableAnimations;

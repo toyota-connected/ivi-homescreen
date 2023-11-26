@@ -15,23 +15,25 @@
 
 #include "text_input.h"
 
+#include <shell/platform/common/json_method_codec.h>
+
 #include <memory>
 #include "engine.h"
 
 TextInput::TextInput()
-    : client_id_(0),
-      channel_(std::make_unique<flutter::MethodChannel<rapidjson::Document>>(
+    : channel_(std::make_unique<flutter::MethodChannel<rapidjson::Document>>(
           this,
           kChannelName,
-          &flutter::JsonMethodCodec::GetInstance())) {}
+          &flutter::JsonMethodCodec::GetInstance())),
+      client_id_(0) {}
 
-void TextInput::SendStateUpdate(const flutter::TextInputModel& model) {
+void TextInput::SendStateUpdate(const flutter::TextInputModel& model) const {
   std::unique_ptr<std::vector<uint8_t>> result;
   auto args = std::make_unique<rapidjson::Document>(rapidjson::kArrayType);
   auto& allocator = args->GetAllocator();
   args->PushBack(client_id_, allocator);
 
-  flutter::TextRange selection = model.selection();
+  const flutter::TextRange selection = model.selection();
   rapidjson::Value editing_state(rapidjson::kObjectType);
   editing_state.AddMember(kComposingBaseKey, -1, allocator);
   editing_state.AddMember(kComposingExtentKey, -1, allocator);
@@ -48,7 +50,7 @@ void TextInput::SendStateUpdate(const flutter::TextInputModel& model) {
   channel_->InvokeMethod(kUpdateEditingStateMethod, std::move(args));
 }
 
-void TextInput::EnterPressed(flutter::TextInputModel* model) {
+void TextInput::EnterPressed(flutter::TextInputModel* model) const {
   if (input_type_ == kMultilineInputType) {
     model->AddCodePoint('\n');
     SendStateUpdate(*model);
@@ -72,11 +74,12 @@ void TextInput::SetEngine(const std::shared_ptr<Engine>& engine) {
 void TextInput::OnPlatformMessage(const FlutterPlatformMessage* message,
                                   void* userdata) {
   std::unique_ptr<std::vector<uint8_t>> result;
-  auto engine = reinterpret_cast<Engine*>(userdata);
-  auto text_input = engine->GetTextInput();
+  const auto engine = static_cast<Engine*>(userdata);
+  const auto text_input = engine->GetTextInput();
   auto& codec = flutter::JsonMethodCodec::GetInstance();
-  auto obj = codec.DecodeMethodCall(message->message, message->message_size);
-  auto method = obj->method_name();
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
+  const auto method = obj->method_name();
 
   if (method == kShowMethod || method == kHideMethod) {
     // These methods are no-ops.
@@ -104,16 +107,16 @@ void TextInput::OnPlatformMessage(const FlutterPlatformMessage* message,
     }
     text_input->client_id_ = client_id_json.GetInt();
     text_input->input_action_ = "";
-    auto input_action_json = client_config.FindMember(kTextInputAction);
+    const auto input_action_json = client_config.FindMember(kTextInputAction);
     if (input_action_json != client_config.MemberEnd() &&
         input_action_json->value.IsString()) {
       text_input->input_action_ = input_action_json->value.GetString();
     }
     text_input->input_type_ = "";
-    auto input_type_info_json = client_config.FindMember(kTextInputType);
+    const auto input_type_info_json = client_config.FindMember(kTextInputType);
     if (input_type_info_json != client_config.MemberEnd() &&
         input_type_info_json->value.IsObject()) {
-      auto input_type_json =
+      const auto input_type_json =
           input_type_info_json->value.FindMember(kTextInputTypeName);
       if (input_type_json != input_type_info_json->value.MemberEnd() &&
           input_type_json->value.IsString()) {
@@ -135,15 +138,15 @@ void TextInput::OnPlatformMessage(const FlutterPlatformMessage* message,
           "Set editing state has been invoked, but no client is set.");
       goto done;
     }
-    auto text = args.FindMember(kTextKey);
+    const auto text = args.FindMember(kTextKey);
     if (text == args.MemberEnd() || text->value.IsNull()) {
       result = codec.EncodeErrorEnvelope(
           kBadArgumentError,
           "Set editing state has been invoked, but without text.");
       goto done;
     }
-    auto selection_base = args.FindMember(kSelectionBaseKey);
-    auto selection_extent = args.FindMember(kSelectionExtentKey);
+    const auto selection_base = args.FindMember(kSelectionBaseKey);
+    const auto selection_extent = args.FindMember(kSelectionExtentKey);
     if (selection_base == args.MemberEnd() || selection_base->value.IsNull() ||
         selection_extent == args.MemberEnd() ||
         selection_extent->value.IsNull()) {
@@ -176,7 +179,7 @@ done:
 void TextInput::keyboard_handle_key(void* data,
                                     xkb_keysym_t keysym,
                                     uint32_t state) {
-  auto* text_input = static_cast<TextInput*>(data);
+  const auto* text_input = static_cast<TextInput*>(data);
 
   if (text_input->active_model_ == nullptr) {
     return;
@@ -320,22 +323,25 @@ void TextInput::handle_key_hook(void* data,
   if ((type == kFlutterKeyEventTypeRepeat &&
        xkb_scancode != XKB_KEY_NoSymbol) ||
       (type == kFlutterKeyEventTypeDown)) {
-    text_input->keyboard_handle_key(text_input, keysym,
-                                    WL_KEYBOARD_KEY_STATE_PRESSED);
+    TextInput::keyboard_handle_key(text_input, keysym,
+                                   WL_KEYBOARD_KEY_STATE_PRESSED);
   }
 }
 #endif
 
 void TextInput::Send(const std::string& channel,
                      const uint8_t* message,
-                     size_t message_size,
-                     flutter::BinaryReply reply) const {
-  engine_->SendPlatformMessage(channel.c_str(), message, message_size);
+                     const size_t message_size,
+                     const flutter::BinaryReply reply) const {
+  if (kSuccess !=
+      engine_->SendPlatformMessage(channel.c_str(), message, message_size)) {
+    spdlog::error("Failed to send platform message");
+  }
   last_reply_handler_ = reply;
 }
 
 void TextInput::SetMessageHandler(const std::string& channel,
-                                  flutter::BinaryMessageHandler handler) {
+                                  const flutter::BinaryMessageHandler handler) {
   last_message_handler_channel_ = channel;
   last_message_handler_ = handler;
 }

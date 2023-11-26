@@ -26,7 +26,7 @@
 #include "logging.h"
 
 Egl::Egl(void* native_display, int buffer_size, bool debug)
-    : m_dpy(eglGetDisplay((EGLNativeDisplayType)native_display)),
+    : m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))),
       m_buffer_size(buffer_size) {
   assert(m_dpy);
 
@@ -550,31 +550,31 @@ static struct egl_config_attribute egl_config_attributes[] = {
     {
         .id = EGL_SURFACE_TYPE,
         .name = "EGL_SURFACE_TYPE",
-        .cardinality = -(int32_t)COUNT_OF(egl_enum_surface_type),
+        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_surface_type)),
         .values = egl_enum_surface_type,
     },
     {
         .id = EGL_RENDERABLE_TYPE,
         .name = "EGL_RENDERABLE_TYPE",
-        .cardinality = -(int32_t)COUNT_OF(egl_enum_renderable_type),
+        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_renderable_type)),
         .values = egl_enum_renderable_type,
     },
     {
         .id = EGL_CONFORMANT,
         .name = "EGL_CONFORMANT",
-        .cardinality = -(int32_t)COUNT_OF(egl_enum_conformant),
+        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_conformant)),
         .values = egl_enum_conformant,
     },
     {
         .id = EGL_TRANSPARENT_TYPE,
         .name = "EGL_TRANSPARENT_TYPE",
-        .cardinality = COUNT_OF(egl_enum_transparency),
+        .cardinality = static_cast<int32_t>(COUNT_OF(egl_enum_transparency)),
         .values = egl_enum_transparency,
     },
     {
         .id = EGL_COLOR_BUFFER_TYPE,
         .name = "EGL_COLOR_BUFFER_TYPE",
-        .cardinality = COUNT_OF(egl_enum_color_buffer),
+        .cardinality = static_cast<int32_t>(COUNT_OF(egl_enum_color_buffer)),
         .values = egl_enum_color_buffer,
     },
 };
@@ -619,7 +619,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
       } else if (attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
-        for (size_t k = 0; k < (size_t)attribute.cardinality; k++) {
+        for (size_t k = 0; k < static_cast<size_t>(attribute.cardinality); k++) {
           if (attribute.values[k].id == value) {
             ss << "\t\t" << attribute.name << ": " << attribute.values[k].name;
             spdlog::info(ss.str().c_str());
@@ -644,7 +644,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           ss.str("");
           ss.clear();
         } else {
-          for (size_t k = 0; k < (size_t)-attribute.cardinality; k++) {
+          for (size_t k = 0; k < static_cast<size_t>(-attribute.cardinality); k++) {
             if (attribute.values[k].id & value) {
               value &= ~attribute.values[k].id;
               if (value != 0) {
@@ -767,5 +767,5 @@ EGLSurface Egl::create_egl_surface(void* native_window,
     return create_platform_window(m_dpy, m_config, native_window, attrib_list);
 
   return eglCreateWindowSurface(
-      m_dpy, m_config, (EGLNativeWindowType)native_window, attrib_list);
+      m_dpy, m_config, static_cast<EGLNativeWindowType>(native_window), attrib_list);
 }

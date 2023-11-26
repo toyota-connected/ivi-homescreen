@@ -17,10 +17,6 @@
 
 #pragma once
 
-#include <functional>
-
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
 #include <shell/platform/embedder/embedder.h>
 #include <filesystem>
@@ -34,7 +30,6 @@
 #include "backend/backend.h"
 #include "constants.h"
 #include "logging.h"
-#include "platform_channel.h"
 #include "plugins/key_event/key_event.h"
 #include "plugins/text_input/text_input.h"
 #include "task_runner.h"
@@ -128,7 +123,7 @@ class Engine {
    * @relation
    * flutter
    */
-  FlutterEngineResult Shutdown();
+  NODISCARD FlutterEngineResult Shutdown() const;
 
   /**
    * @brief Check if engine is running
@@ -413,7 +408,7 @@ class Engine {
    * @relation
    * wayland
    */
-  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
 
   /**
    * @brief Get asset directory path
@@ -422,9 +417,9 @@ class Engine {
    * @relation
    * flutter
    */
-  std::string GetAssetDirectory() {
-    std::filesystem::path p = m_assets_path;
-    return std::filesystem::absolute(p);
+  NODISCARD std::string GetAssetDirectory() const {
+    const std::filesystem::path p = m_assets_path;
+    return absolute(p);
   }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
@@ -479,9 +474,9 @@ class Engine {
    * @relation
    * wayland, flutter
    */
-  Backend* GetBackend() { return m_backend; }
+  NODISCARD Backend* GetBackend() const { return m_backend; }
 
-  FlutterView* GetView() { return m_view; }
+  NODISCARD FlutterView* GetView() const { return m_view; }
 
  private:
   size_t m_index;

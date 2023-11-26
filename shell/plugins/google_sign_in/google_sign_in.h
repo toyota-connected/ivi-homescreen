@@ -143,7 +143,7 @@ class GoogleSignIn {
    * google_sign_in
    */
   static bool UpdateClientCredentialFile(
-      rapidjson::Document& client_credential_doc);
+      const rapidjson::Document& client_credential_doc);
 
   /**
    * @brief Function to swap authorization code for OAuth2 token
@@ -202,7 +202,7 @@ class GoogleSignIn {
 
   /**
    * @brief Function to validate secret object
-   * @param client_secret_doc document of secret object
+   * @param secret_doc document of secret object
    * @return bool
    * @retval Returns true if secret object is valid, false if not
    * @relation
@@ -233,7 +233,7 @@ class GoogleSignIn {
    * @relation
    * google_sign_in
    */
-  static void Init(std::vector<std::string> requestedScopes,
+  static void Init(const std::vector<std::string>& requestedScopes,
                    std::string hostedDomain,
                    std::string signInOption,
                    std::string clientId,
@@ -262,7 +262,7 @@ class GoogleSignIn {
    * google_sign_in
    */
   static std::unique_ptr<std::vector<uint8_t>> GetTokens(
-      std::string email,
+      const std::string& email,
       bool shouldRecoverAuth,
       const flutter::StandardMethodCodec& codec);
 };

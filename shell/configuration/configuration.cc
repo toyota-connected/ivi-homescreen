@@ -74,7 +74,7 @@ void Configuration::getViewParameters(
         MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
-    auto args = obj[kVmArgsKey].GetArray();
+    const auto args = obj[kVmArgsKey].GetArray();
     for (auto const& arg : args) {
       instance.view.vm_args.emplace_back(arg.GetString());
     }
@@ -130,7 +130,7 @@ void Configuration::getGlobalParameters(
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
   }
   if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
-    auto args = obj[kVmArgsKey].GetArray();
+    const auto args = obj[kVmArgsKey].GetArray();
     for (auto const& arg : args) {
       instance.view.vm_args.emplace_back(arg.GetString());
     }
@@ -187,7 +187,7 @@ void Configuration::getView(rapidjson::Document& doc,
                             int index,
                             Config& instance) {
   if (doc[kViewKey].IsArray()) {
-    auto arr = doc[kViewKey].GetArray();
+    const auto arr = doc[kViewKey].GetArray();
     if (index > arr.Capacity())
       assert(false);
 
@@ -200,7 +200,7 @@ void Configuration::getView(rapidjson::Document& doc,
   }
 }
 
-void Configuration::getCliOverrides(Config& instance, Config& cli) {
+void Configuration::getCliOverrides(Config& instance, const Config& cli) {
   if (!cli.app_id.empty()) {
     instance.app_id = cli.app_id;
   }
@@ -458,7 +458,7 @@ void PrintUsage() {
       kApplicationName);
 }
 
-int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
+int Configuration::ConvertCommandlineToConfig(const fml::CommandLine& cl,
                                               Configuration::Config& config) {
   if (!cl.options().empty()) {
     if (cl.HasOption("?") || cl.HasOption("help")) {
@@ -494,11 +494,11 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
         // 3. octet: --a=03
         config.view.accessibility_features = static_cast<int32_t>(
             std::stol(accessibility_feature_flag_str, nullptr, 0));
-      } catch (const std::invalid_argument& e) {
+      } catch (const std::invalid_argument& /* e */) {
         spdlog::critical(
             "--a option (Accessibility Features) requires an integer value");
         ret = EXIT_FAILURE;
-      } catch (const std::out_of_range& e) {
+      } catch (const std::out_of_range& /* e */) {
         spdlog::critical(
             "The specified value to --a option, {} is out of range.",
             accessibility_feature_flag_str);
