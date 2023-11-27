@@ -152,7 +152,7 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
 
     } else if (method == kMethodSetVolume) {
       std::string playerId;
-      double volume;
+      double volume = 1.0;
       for (auto& it : *args) {
         if (kKeyPlayerId == std::get<std::string>(it.first) &&
             std::holds_alternative<std::string>(it.second)) {
@@ -172,7 +172,7 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
 
     } else if (method == kMethodSetBalance) {
       std::string playerId;
-      double balance;
+      double balance = 0.0;
       for (auto& it : *args) {
         if (kKeyPlayerId == std::get<std::string>(it.first) &&
             std::holds_alternative<std::string>(it.second)) {
@@ -192,7 +192,7 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
 
     } else if (method == kMethodSetPlaybackRate) {
       std::string playerId;
-      double playback_rate;
+      double playback_rate = 1.0;
       for (auto& it : *args) {
         if (kKeyPlayerId == std::get<std::string>(it.first) &&
             std::holds_alternative<std::string>(it.second)) {
