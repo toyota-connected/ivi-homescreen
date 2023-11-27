@@ -46,3 +46,8 @@ void PlatformView::Resize(const double width, const double height) {
   width_ = width;
   height_ = height;
 }
+
+void PlatformView::Dispose(bool hybrid) const {
+  SPDLOG_DEBUG("Dispose:");
+  SPDLOG_DEBUG("\thybrid: {}", hybrid);
+}

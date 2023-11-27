@@ -20,8 +20,8 @@
 #include "platform_view.h"
 #include "platform_views_registry.h"
 
-
-std::shared_ptr<PlatformViewsRegistry> PlatformViewsRegistry::sInstance = nullptr;
+std::shared_ptr<PlatformViewsRegistry> PlatformViewsRegistry::sInstance =
+    nullptr;
 
 std::mutex gPlatformViewsRegistryMutex;
 
@@ -46,9 +46,12 @@ PlatformView* PlatformViewsRegistry::GetPlatformView(const int32_t id) {
   return registry_[id].get();
 }
 
-void PlatformViewsRegistry::RemovePlatformView(const int32_t id) {
+void PlatformViewsRegistry::RemovePlatformView(const int32_t id, const bool hybrid) {
   const std::lock_guard lock(gPlatformViewsRegistryMutex);
   const auto it = registry_.find(id);
-  if (it != registry_.end())
+  if (it != registry_.end()) {
+    it->second->Dispose(hybrid);
+    it->second.reset();
     registry_.erase(it);
+  }
 }

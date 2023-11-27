@@ -27,7 +27,7 @@ class PlatformViewsRegistry {
 
   void AddPlatformView(int32_t id, std::unique_ptr<PlatformView> platform_view);
 
-  void RemovePlatformView(int32_t id);
+  void RemovePlatformView(int32_t id, bool hybrid);
 
   PlatformView* GetPlatformView(int32_t id);
 
