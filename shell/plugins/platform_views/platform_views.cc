@@ -25,6 +25,9 @@
 #if defined(ENABLE_PLUGIN_FILAMENT)
 #include "plugins/filament/filament.h"
 #endif
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
+#include "plugins/platform_views/platform_view.h"
+#endif
 
 void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
@@ -50,32 +53,40 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
     for (auto& it : *args) {
       auto key = std::get<std::string>(it.first);
-      if (key == kKeyId && std::holds_alternative<int32_t>(it.second)) {
-        id = std::get<int32_t>(it.second);
-      } else if (key == kKeyViewType &&
-                 std::holds_alternative<int32_t>(it.second)) {
-        viewType.assign(std::get<std::string>(it.second));
-      } else if (key == kKeyDirection &&
-                 std::holds_alternative<int32_t>(it.second)) {
+
+      if (key == kKeyDirection && std::holds_alternative<int32_t>(it.second)) {
         direction = std::get<int32_t>(it.second);
-      } else if (key == kKeyWidth &&
-                 std::holds_alternative<double>(it.second)) {
-        width = std::get<double>(it.second);
       } else if (key == kKeyHeight &&
                  std::holds_alternative<double>(it.second)) {
         height = std::get<double>(it.second);
+      } else if (key == kKeyId && std::holds_alternative<int32_t>(it.second)) {
+        id = std::get<int32_t>(it.second);
       } else if (key == kKeyParams &&
                  std::holds_alternative<std::vector<uint8_t>>(it.second)) {
         params = std::get<std::vector<uint8_t>>(it.second);
+      } else if (key == kKeyViewType &&
+                 std::holds_alternative<std::string>(it.second)) {
+        viewType.assign(std::get<std::string>(it.second));
+      } else if (key == kKeyWidth &&
+                 std::holds_alternative<double>(it.second)) {
+        width = std::get<double>(it.second);
       }
     }
 
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
+    if (viewType == "@views/simple-box-view-type") {
+      auto platform_view = std::make_unique<PlatformView>(
+          id, std::move(viewType), direction, width, height);
+      PlatformViewsRegistry::GetInstance().AddPlatformView(
+          id, std::move(platform_view));
+    } else
+#endif
 #if defined(ENABLE_PLUGIN_FILAMENT)
     if (viewType == PlatformViewFilament::kPlatformViewType) {
       std::unique_ptr<PlatformView> platform_view =
           std::make_unique<PlatformViewFilament>(
               id, std::move(viewType), direction, width, height, params);
-      PlatformViewsRegistry::GetRegistry().AddPlatformView(
+      PlatformViewsRegistry::GetInstance().AddPlatformView(
           id, std::move(platform_view));
     } else
 #endif
@@ -92,19 +103,19 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
     const auto res = flutter::EncodableValue(id);
     result = codec.EncodeSuccessEnvelope(&res);
   } else if (method_name == kMethodDispose) {
-    Utils::PrintFlutterEncodableValue("arguments", *arguments);
-
     int32_t id = 0;
+    bool hybrid{};
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
     for (auto& it : *args) {
       if (kKeyId == std::get<std::string>(it.first) &&
           std::holds_alternative<int32_t>(it.second)) {
         id = std::get<int32_t>(it.second);
+      } else if (kKeyHybrid == std::get<std::string>(it.first) &&
+                 std::holds_alternative<bool>(it.second)) {
+        hybrid = std::get<bool>(it.second);
       }
     }
-    auto* view = PlatformViewsRegistry::GetInstance().GetPlatformView(id);
-    view->~PlatformView();
-    PlatformViewsRegistry::GetInstance().RemovePlatformView(id);
+    PlatformViewsRegistry::GetInstance().RemovePlatformView(id, hybrid);
     result = codec.EncodeSuccessEnvelope();
   } else if (method_name == kMethodResize) {
     int32_t id = 0;
