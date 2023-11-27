@@ -19,6 +19,9 @@
 #include <cstdint>
 #include <string>
 
+#include "constants.h"
+#include "logging/logging.h"
+
 class PlatformView {
  public:
   PlatformView(int32_t id,
@@ -31,11 +34,13 @@ class PlatformView {
 
   void Resize(double width, double height);
 
-  [[nodiscard]] int32_t GetId() const { return id_; }
+  NODISCARD int32_t GetId() const { return id_; }
 
   std::string GetViewType() { return viewType_; }
 
-  [[nodiscard]] int32_t GetDirection() const { return direction_; }
+  NODISCARD int32_t GetDirection() const { return direction_; }
+
+  NODISCARD void Dispose(bool hybrid) const;
 
  private:
   int32_t id_;

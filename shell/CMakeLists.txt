@@ -75,7 +75,7 @@ if (BUILD_PLUGIN_AUDIO_PLAYERS)
     target_sources(homescreen PRIVATE plugins/audio_players/audio_players_registry.cc)
 endif ()
 
-if (BUILD_PLUGIN_PLATFORM_VIEWS)
+if (BUILD_PLUGIN_PLATFORM_VIEWS OR BUILD_PLUGIN_LAYER_PLAYGROUND)
     target_sources(homescreen PRIVATE
             plugins/platform_views/platform_view.cc
             plugins/platform_views/platform_views_registry.cc
