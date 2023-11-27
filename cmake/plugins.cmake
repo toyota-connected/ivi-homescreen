@@ -111,6 +111,12 @@ if (BUILD_PLUGIN_PLATFORM_VIEWS)
     ENABLE_PLUGIN(platform_views)
 endif ()
 
+option(BUILD_PLUGIN_LAYER_PLAYGROUND "Layer Playground support" OFF)
+if (BUILD_PLUGIN_LAYER_PLAYGROUND)
+    target_compile_definitions(homescreen PRIVATE ENABLE_PLUGIN_LAYER_PLAYGROUND)
+    set(ENABLE_PLUGIN_LAYER_PLAYGROUND ON)
+endif ()
+
 option(BUILD_PLUGIN_DESKTOP_WINDOW "Includes Desktop Window Plugin" ON)
 if (BUILD_PLUGIN_DESKTOP_WINDOW)
     ENABLE_PLUGIN(desktop_window)
