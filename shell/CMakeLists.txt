@@ -150,7 +150,7 @@ target_link_libraries(homescreen PRIVATE
 )
 
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE unwind)
+    target_link_libraries(homescreen PRIVATE ${LIBUNWIND_LIBRARIES})
 endif ()
 
 
