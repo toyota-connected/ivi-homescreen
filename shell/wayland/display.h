@@ -18,6 +18,7 @@
 #pragma once
 
 #include <chrono>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -271,6 +272,44 @@ class Display {
    */
   std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index);
 
+  /**
+   * @brief deactivate/hide the application pointed by app_id
+   * @param[in] app_id the app_id
+   * @relation
+   * agl_shell
+   */
+  void deactivateApp(std::string app_id);
+  /**
+   * @brief activate/show the application pointed by app_id
+   * @param[in] app_id the app_id
+   * @relation
+   * agl_shell
+   */
+  void activateApp(std::string app_id);
+  /**
+   * @brief Add app_id to a list of list applications
+   * @param[in] app_id the app_id
+   * @relation
+   * agl_shell
+   */
+  void addAppToStack(std::string app_id);
+  /**
+   * @brief Helper to retrieve the output using its output_name
+   * @param[in] output_name a std::string representing the output
+   * @retval an integer that can used to get the proper output
+   * @relation
+   * agl_sell
+   */
+  int find_output_by_name(std::string output_name);
+  /**
+   * @brief helper to process the application status
+   * @param[in] app_id an array of char
+   * @param[in] event_type a std::string representing the type of event (started/stopped/terminated)
+   * @relation
+   * agl_shell
+   */
+  void processAppStatusEvent(const char* app_id, const std::string event_type);
+
  private:
   std::shared_ptr<Engine> m_flutter_engine;
 
@@ -299,6 +338,9 @@ class Display {
     bool bound_ok{};
     uint32_t version = 0;
   } m_agl;
+
+  std::list<std::string> apps_stack;
+  std::list<std::pair<const std::string, const std::string>> pending_app_list;
 
   struct ivi_shell {
     struct ivi_application* application = nullptr;
@@ -981,6 +1023,22 @@ class Display {
                                   struct agl_shell* agl_shell,
                                   const char* app_id,
                                   uint32_t state);
+
+  /**
+   * @brief AGL app_app_on_output event
+   * @param[in,out] data Data of type Display
+   * @param[in] shell No use
+   * @param[in] app_id the application id for which this event was sent
+   * @param[in] state the state: CREATED/TERMINATED/ACTIVATED/DEACTIVATED
+   * @return void
+   * @relation
+   * wayland, agl-shell
+   * @note Do nothing
+   */
+  static void agl_shell_app_on_output(void* data,
+                                      struct agl_shell* agl_shell,
+                                      const char* app_id,
+                                      const char* output_name);
 
   static const struct agl_shell_listener agl_shell_listener;
 
