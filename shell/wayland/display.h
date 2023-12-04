@@ -331,6 +331,8 @@ class Display {
     int32_t scale;
     MAYBE_UNUSED bool done;
     int transform;
+    std::string name;
+    std::string desc;
   } output_info_t;
 
   struct pointer_event {
@@ -522,6 +524,32 @@ class Display {
    * wayland
    */
   static void display_handle_done(void* data, struct wl_output* wl_output);
+
+  /**
+   * @brief Set the display output name
+   * @param[in,out] data Data of type output_info_t*
+   * @param[in] wl_output No use
+   * @param[in] output_name Display name
+   * @return void
+   * @relation
+   * wayland - since @v4 of wl_output
+   */
+  static void display_handle_name(void* data,
+                                  struct wl_output* wl_output,
+                                  const char* output_name);
+
+  /**
+   * @brief Set the display description
+   * @param[in,out] data Data of type output_info_t*
+   * @param[in] wl_output No use
+   * @param[in] desc_name Display description name
+   * @return void
+   * @relation
+   * wayland - since @v4 of wl_output
+   */
+  static void display_handle_desc(void* data,
+                                  struct wl_output* wl_output,
+                                  const char* desc_name);
 
   static const struct wl_shm_listener shm_listener;
 

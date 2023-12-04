@@ -190,9 +190,16 @@ void Display::registry_handle_global(void* data,
     const auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
     oi->global_id = name;
-    oi->output = static_cast<struct wl_output*>(
-        wl_registry_bind(registry, name, &wl_output_interface,
-                         std::min(static_cast<uint32_t>(2), version)));
+    // be compat with v2 as well
+    if (version >= WL_OUTPUT_NAME_SINCE_VERSION &&
+        version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
+      oi->output = static_cast<struct wl_output*>(
+          wl_registry_bind(registry, name, &wl_output_interface,
+                           std::min(static_cast<uint32_t>(4), version)));
+    else
+      oi->output = static_cast<struct wl_output*>(
+          wl_registry_bind(registry, name, &wl_output_interface,
+                           std::min(static_cast<uint32_t>(2), version)));
     wl_output_add_listener(oi->output, &output_listener, oi.get());
     SPDLOG_DEBUG("Wayland: Output [{}]", d->m_all_outputs.size());
     d->m_all_outputs.push_back(oi);
@@ -298,9 +305,28 @@ void Display::display_handle_done(void* data,
   oi->done = true;
 }
 
+void Display::display_handle_name(void* data,
+                                  struct wl_output* /* wl_output */,
+                                  const char* name) {
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->name = std::string(name);
+}
+
+void Display::display_handle_desc(void* data,
+                                  struct wl_output* /* wl_output */,
+                                  const char* desc) {
+  auto* oi = static_cast<output_info_t*>(data);
+  oi->desc = std::string(desc);
+}
+
 const struct wl_output_listener Display::output_listener = {
     display_handle_geometry, display_handle_mode, display_handle_done,
-    display_handle_scale};
+    display_handle_scale
+#if defined(WL_OUTPUT_NAME_SINCE_VERSION) && \
+    defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
+    , display_handle_name,     display_handle_desc
+#endif
+};
 
 void Display::shm_format(void* /* data */,
                          struct wl_shm* /* wl_shm */,
