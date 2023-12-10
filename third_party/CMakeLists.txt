@@ -60,10 +60,6 @@ endif ()
 
 add_sanitizers(flutter)
 
-if (BUILD_CRASH_HANDLER)
-    find_package(sentry REQUIRED GLOBAL)
-endif ()
-
 set(SPDLOG_NO_EXCEPTIONS ON)
 set(SPDLOG_NO_THREAD_ID ON)
 set(SPDLOG_BUILD_PIC ON)
