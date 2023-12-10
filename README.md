@@ -467,7 +467,7 @@ ivi-homescreen build
 
     git clone https://github.com/toyota-connected/ivi-homescreen
     mkdir build && cd build
-    CC=/usr/lib/llvm-14/bin/clang CXX=/usr/lib/llvm-14/bin/clang++ cmake .. -DBUILD_CRASH_HANDLER=ON -DCRASH_HANDLER_DSN="dsn from your account" -DLLVM_ROOT=/usr/lib/llvm-14
+    cmake .. -DBUILD_CRASH_HANDLER=ON -DCRASH_HANDLER_DSN="dsn from your account"
     make -j
     LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
 
