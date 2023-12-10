@@ -134,7 +134,7 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(homescreen PRIVATE bluevk)
 endif ()
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE sentry::sentry)
+    target_link_libraries(homescreen PRIVATE sentry::sentry PkgConfig::UNWIND)
 endif ()
 
 target_link_libraries(homescreen PRIVATE
@@ -148,11 +148,6 @@ target_link_libraries(homescreen PRIVATE
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
 )
-
-if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE unwind)
-endif ()
-
 
 target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}
