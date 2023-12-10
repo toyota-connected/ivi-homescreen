@@ -12,6 +12,8 @@
 #   Test and Google Mock's option() definitions, and thus must be
 #   called *after* the options have been defined.
 
+cmake_policy(SET CMP0148 OLD)
+
 if (POLICY CMP0054)
   cmake_policy(SET CMP0054 NEW)
 endif (POLICY CMP0054)
