@@ -21,12 +21,15 @@
 #include "egl.h"
 #include "engine.h"
 #include "gl_process_resolver.h"
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+
+struct FlutterDesktopEngineState;
 
 WaylandEglBackend::WaylandEglBackend(struct wl_display* display,
-                                     uint32_t initial_width,
-                                     uint32_t initial_height,
-                                     bool debug_backend,
-                                     int buffer_size)
+                                     const uint32_t initial_width,
+                                     const uint32_t initial_height,
+                                     const bool debug_backend,
+                                     const int buffer_size)
     : Egl(display, buffer_size, debug_backend),
       Backend(this, Resize, CreateSurface),
       m_initial_width(initial_width),
@@ -36,23 +39,29 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
   return {.type = kOpenGL,
           .open_gl = {
               .struct_size = sizeof(FlutterOpenGLRendererConfig),
-              .make_current = [](void* userdata) -> bool {
-                const auto e = static_cast<Engine*>(userdata);
-                auto* b = reinterpret_cast<WaylandEglBackend*>(e->GetBackend());
-                return b->MakeCurrent();
+              .make_current = [](void* user_data) -> bool {
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(user_data);
+                return reinterpret_cast<WaylandEglBackend*>(
+                           state->view_controller->engine->GetBackend())
+                    ->MakeCurrent();
               },
               .clear_current = [](void* userdata) -> bool {
-                const auto e = static_cast<Engine*>(userdata);
-                auto* b = reinterpret_cast<WaylandEglBackend*>(e->GetBackend());
-                return b->ClearCurrent();
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(userdata);
+                return reinterpret_cast<WaylandEglBackend*>(
+                           state->view_controller->engine->GetBackend())
+                    ->ClearCurrent();
               },
               .fbo_callback = [](void*) -> uint32_t {
                 return 0;  // FBO0
               },
               .make_resource_current = [](void* userdata) -> bool {
-                const auto e = static_cast<Engine*>(userdata);
-                auto* b = reinterpret_cast<WaylandEglBackend*>(e->GetBackend());
-                return b->MakeResourceCurrent();
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(userdata);
+                return reinterpret_cast<WaylandEglBackend*>(
+                           state->view_controller->engine->GetBackend())
+                    ->MakeResourceCurrent();
               },
               .fbo_reset_after_present = false,
               .gl_proc_resolver = [](void* /* userdata */,
@@ -60,16 +69,18 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                 return GlProcessResolver::GetInstance().process_resolver(name);
               },
               .gl_external_texture_frame_callback =
-                  [](void* userdata, int64_t texture_id, size_t width,
-                     size_t height, FlutterOpenGLTexture* texture_out) -> bool {
-                const auto e = static_cast<Engine*>(userdata);
-                const auto texture = e->GetTextureObj(texture_id);
-                if (texture) {
+                  [](void* userdata, const int64_t texture_id,
+                     const size_t width, const size_t height,
+                     FlutterOpenGLTexture* texture_out) -> bool {
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(userdata);
+                if (state->view_controller->engine->GetTextureObj(texture_id)) {
                   texture_out->name = static_cast<uint32_t>(texture_id);
                   texture_out->width = width;
                   texture_out->height = height;
 #if defined(ENABLE_PLUGIN_OPENGL_TEXTURE)
-                  texture->GetFlutterOpenGLTexture(texture_out);
+                  state->view_controller->engine->GetTextureObj(texture_id)
+                      ->GetFlutterOpenGLTexture(texture_out);
 #endif
                   return true;
                 }
@@ -77,8 +88,10 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
               },
               .present_with_info = [](void* userdata,
                                       const FlutterPresentInfo* info) -> bool {
-                const auto e = static_cast<Engine*>(userdata);
-                auto* b = reinterpret_cast<WaylandEglBackend*>(e->GetBackend());
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(userdata);
+                auto* b = reinterpret_cast<WaylandEglBackend*>(
+                    state->view_controller->engine->GetBackend());
 
                 // Full swap if FlutterPresentInfo is invalid
                 if (info->struct_size != sizeof(FlutterPresentInfo)) {
@@ -91,13 +104,12 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                   b->m_existing_damage_map[info->fbo_id] = nullptr;
                 }
 
-                const auto set_damage_region_ = b->GetSetDamageRegion();
-                if (set_damage_region_) {
+                if (b->GetSetDamageRegion()) {
                   // Set the buffer damage as the damage region.
                   auto buffer_rects =
                       b->RectToInts(info->buffer_damage.damage[0]);
-                  set_damage_region_(b->GetDisplay(), b->m_egl_surface,
-                                     buffer_rects.data(), 1);
+                  b->GetSetDamageRegion()(b->GetDisplay(), b->m_egl_surface,
+                                          buffer_rects.data(), 1);
                 }
 
                 // Add frame damage to damage history
@@ -106,13 +118,11 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                   b->m_damage_history.pop_front();
                 }
 
-                const auto swap_buffers_with_damage_ =
-                    b->GetSwapBuffersWithDamage();
-                if (swap_buffers_with_damage_) {
+                if (b->GetSwapBuffersWithDamage()) {
                   // Swap buffers with frame damage.
                   const auto frame_rects =
                       b->RectToInts(info->frame_damage.damage[0]);
-                  return swap_buffers_with_damage_(
+                  return b->GetSwapBuffersWithDamage()(
                       b->GetDisplay(), b->m_egl_surface, const_cast<int*>(frame_rects.data()), 1);
                 } else {
                   // If the required extensions for partial repaint were not
@@ -121,10 +131,12 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                 }
               },
               .populate_existing_damage =
-                  [](void* userdata, intptr_t fbo_id,
+                  [](void* userdata, const intptr_t fbo_id,
                      FlutterDamage* existing_damage) -> void {
-                const auto e = static_cast<Engine*>(userdata);
-                auto* b = reinterpret_cast<WaylandEglBackend*>(e->GetBackend());
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(userdata);
+                auto* b = reinterpret_cast<WaylandEglBackend*>(
+                    state->view_controller->engine->GetBackend());
                 // Given the FBO age, create existing damage region by joining
                 // all frame damages since FBO was last used
                 EGLint age;

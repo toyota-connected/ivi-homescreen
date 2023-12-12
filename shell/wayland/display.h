@@ -28,16 +28,22 @@
 #include <wayland-cursor.h>
 #include <cassert>
 
-#include "agl-shell-client-protocol.h"
+#include "configuration/configuration.h"
 #include "constants.h"
-#include "ivi-application-client-protocol.h"
-#include "ivi-wm-client-protocol.h"
 #include "plugins/key_event/key_event.h"
 #include "plugins/text_input/text_input.h"
 #include "timer.h"
-#include "xdg-shell-client-protocol.h"
 
-#include "configuration/configuration.h"
+#if defined(ENABLE_AGL_CLIENT)
+#include "agl-shell-client-protocol.h"
+#endif
+#if defined(ENABLE_IVI_SHELL_CLIENT)
+#include "ivi-application-client-protocol.h"
+#include "ivi-wm-client-protocol.h"
+#endif
+#if defined(ENABLE_XDG_CLIENT)
+#include "xdg-shell-client-protocol.h"
+#endif
 
 class Engine;
 
@@ -99,10 +105,12 @@ class Display {
    * @relation
    * wayland
    */
+#if defined(ENABLE_XDG_CLIENT)
   NODISCARD xdg_wm_base* GetXdgWmBase() const {
     assert(m_xdg_wm_base);
     return m_xdg_wm_base;
   }
+#endif
 
   /**
    * @brief Get ivi_application instance
@@ -111,9 +119,11 @@ class Display {
    * @relation
    * ivi-shell
    */
+#if defined(ENABLE_IVI_SHELL_CLIENT)
   NODISCARD ivi_application* GetIviApplication() const {
     return m_ivi_shell.application;
   }
+#endif
 
   /**
    * @brief Get shared memory
@@ -136,6 +146,7 @@ class Display {
    */
   NODISCARD int PollEvents() const;
 
+#if defined(ENABLE_AGL_CLIENT)
   /**
    * @brief AglShell: Do background
    * @param[in] surface Image
@@ -194,7 +205,10 @@ class Display {
    * |			|
    * --------------------
    */
-  void AglShellDoSetupActivationArea(uint32_t x, uint32_t y, uint32_t index) const;
+  void AglShellDoSetupActivationArea(uint32_t x,
+                                     uint32_t y,
+                                     uint32_t index) const;
+#endif
 
   /**
    * @brief Set Engine
@@ -216,7 +230,8 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
+  NODISCARD bool ActivateSystemCursor(int32_t device,
+                                      const std::string& kind) const;
 
   /**
    * @brief Set text input
@@ -405,7 +420,8 @@ class Display {
    * @relation
    * internal
    */
-  static inline void set_repeat_code(Display* display, const uint32_t repeat_code) {
+  static inline void set_repeat_code(Display* display,
+                                     const uint32_t repeat_code) {
     std::lock_guard lock(display->m_lock);
     display->m_repeat_code = repeat_code;
   }

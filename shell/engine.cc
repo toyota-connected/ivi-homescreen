@@ -30,6 +30,10 @@
 #include "hexdump.h"
 #include "utils.h"
 
+extern void EngineOnFlutterPlatformMessage(
+    const FlutterPlatformMessage* engine_message,
+    void* user_data);
+
 Engine::Engine(FlutterView* view,
                const size_t index,
                const std::vector<const char*>& vm_args_c,
@@ -52,39 +56,10 @@ Engine::Engine(FlutterView* view,
           .icu_data_path{},
           .command_line_argc = static_cast<int>(vm_args_c.size()),
           .command_line_argv = vm_args_c.data(),
-          .platform_message_callback =
-              [](const FlutterPlatformMessage* message, void* userdata) {
-                const auto engine = static_cast<Engine*>(userdata);
-
-                const auto platform_channel = PlatformChannel::GetInstance();
-                const auto callback =
-                    platform_channel
-                        ->GetHandler()[std::string(message->channel)];
-
-                if (callback == nullptr) {
-                  std::stringstream ss;
-                  ss << Hexdump(message->message, message->message_size);
-                  spdlog::info("Channel: \"{}\"\n{}", message->channel,
-                               ss.str());
-                  engine->SendPlatformMessageResponse(message->response_handle,
-                                                      nullptr, 0);
-                } else {
-                  callback(message, userdata);
-                }
-              },
+          .platform_message_callback = OnFlutterPlatformMessage,
           .persistent_cache_path = m_cache_path.c_str(),
           .is_persistent_cache_read_only = false,
-          .log_message_callback =
-              [](const char* /* tag */, const char* message, void* user_data) {
-#if defined(ENABLE_DART_VM_LOGGING)
-                const auto engine = static_cast<Engine*>(user_data);
-                std::scoped_lock<std::mutex> lock(engine->m_queue_lock);
-                engine->m_vm_queue->emplace(message);
-#else
-                (void)message;
-                (void)user_data;
-#endif
-              },
+          .log_message_callback = onLogMessageCallback,
       }) {
   SPDLOG_TRACE("({}) +Engine::Engine", m_index);
 
@@ -166,14 +141,15 @@ Engine::Engine(FlutterView* view,
       .struct_size = sizeof(FlutterTaskRunnerDescription),
       .user_data = this,
       .runs_task_on_current_thread_callback = [](void* context) -> bool {
-        return static_cast<Engine*>(context)
-            ->m_platform_task_runner->IsThreadEqual(pthread_self());
+        const auto engine = static_cast<Engine*>(context);
+        return engine->m_platform_task_runner->IsThreadEqual(pthread_self());
       },
-      .post_task_callback = [](FlutterTask task, uint64_t target_time,
+      .post_task_callback = [](const FlutterTask task,
+                               const uint64_t target_time,
                                void* context) -> void {
-        const auto e = static_cast<Engine*>(context);
-        e->m_platform_task_runner->QueueFlutterTask(e->m_index, target_time,
-                                                    task, context);
+        const auto engine = static_cast<Engine*>(context);
+        engine->m_platform_task_runner->QueueFlutterTask(
+            engine->m_index, target_time, task, context);
       },
   };
 
@@ -228,18 +204,16 @@ bool Engine::IsRunning() const {
   return m_running;
 }
 
-FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
+FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   SPDLOG_TRACE("({}) +Engine::Run", m_index);
 
   const auto config = m_backend->GetRenderConfig();
   FlutterEngineResult result = LibFlutterEngine->Initialize(
-      FLUTTER_ENGINE_VERSION, &config, &m_args, this, &m_flutter_engine);
+      FLUTTER_ENGINE_VERSION, &config, &m_args, state, &m_flutter_engine);
   if (result != kSuccess) {
     spdlog::error("({}) FlutterEngineRun failed or engine is null", m_index);
     return result;
   }
-
-  m_event_loop_thread = event_loop_thread_id;
 
   result = LibFlutterEngine->RunInitialized(m_flutter_engine);
   if (result == kSuccess) {
@@ -637,7 +611,8 @@ FlutterEngineAOTData Engine::LoadAotData(
   return data;
 }
 
-bool Engine::ActivateSystemCursor(const int32_t device, const std::string& kind) const {
+bool Engine::ActivateSystemCursor(const int32_t device,
+                                  const std::string& kind) const {
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
 
@@ -660,3 +635,51 @@ MAYBE_UNUSED KeyEvent* Engine::GetKeyEvent() const {
   return m_key_event;
 }
 #endif
+
+void Engine::OnFlutterPlatformMessage(
+    const FlutterPlatformMessage* engine_message,
+    void* user_data) {
+  if (engine_message->struct_size != sizeof(FlutterPlatformMessage)) {
+    spdlog::error("Invalid message size received. Expected: {} but received {}",
+                  sizeof(FlutterPlatformMessage), engine_message->struct_size);
+    return;
+  }
+
+  FlutterDesktopEngineState const* engine_state =
+      static_cast<FlutterDesktopEngineState*>(user_data);
+
+  auto* view = engine_state->view_controller == nullptr
+                   ? nullptr
+                   : engine_state->view_controller->view;
+
+  engine_state->message_dispatcher->HandleMessage(
+      {.struct_size = sizeof(FlutterDesktopMessage),
+       .channel = engine_message->channel,
+       .message = engine_message->message,
+       .message_size = engine_message->message_size,
+       .response_handle = engine_message->response_handle},
+      [view] {
+        if (view) {
+          spdlog::debug("input_block_cb");
+        }
+      },
+      [view] {
+        if (view) {
+          spdlog::debug("input_unblock_cb");
+        }
+      });
+}
+
+void Engine::onLogMessageCallback(const char* /* tag */,
+                                  const char* message,
+                                  void* user_data) {
+#if defined(ENABLE_DART_VM_LOGGING)
+  const auto engine = static_cast<FlutterDesktopEngineState*>(user_data)
+                          ->view_controller->engine;
+  std::scoped_lock<std::mutex> lock(engine->m_queue_lock);
+  engine->m_vm_queue->emplace(message);
+#else
+  (void)message;
+  (void)user_data;
+#endif
+}

@@ -33,17 +33,15 @@
 #include "plugins/key_event/key_event.h"
 #include "plugins/text_input/text_input.h"
 #include "task_runner.h"
+#include "flutter_desktop_engine_state.h"
 #include "view/flutter_view.h"
 
 class App;
-
 class Backend;
-
 class WaylandWindow;
-
 class FlutterView;
-
 class Texture;
+struct FlutterDesktopEngineState;
 
 #if ENABLE_PLUGIN_TEXT_INPUT
 
@@ -87,13 +85,13 @@ class Engine {
 
   /**
    * @brief Run flutter engine
-   * @param[in] event_loop_thread_id ID of the pthread to run
+   * @param[in] FlutterDesktopEngineState pointer to struct of engine state
    * @return FlutterEngineResult
    * @retval The result of the run Flutter engine
    * @relation
    * flutter
    */
-  FlutterEngineResult Run(pthread_t event_loop_thread_id);
+  FlutterEngineResult Run(FlutterDesktopEngineState* state);
 
   /**
    * @brief Set window size of flutter
@@ -408,7 +406,8 @@ class Engine {
    * @relation
    * wayland
    */
-  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
+  NODISCARD bool ActivateSystemCursor(int32_t device,
+                                      const std::string& kind) const;
 
   /**
    * @brief Get asset directory path
@@ -478,6 +477,17 @@ class Engine {
 
   NODISCARD FlutterView* GetView() const { return m_view; }
 
+  static FlutterDesktopMessage ConvertToDesktopMessage(
+      const FlutterPlatformMessage& engine_message);
+
+  static void OnFlutterPlatformMessage(
+      const FlutterPlatformMessage* engine_message,
+      void* user_data);
+
+  static void onLogMessageCallback(const char* tag,
+                                   const char* message,
+                                   void* user_data);
+
  private:
   size_t m_index;
   bool m_running;
@@ -500,7 +510,6 @@ class Engine {
   FlutterEngine m_flutter_engine;
   FlutterProjectArgs m_args;
   std::string m_clipboard_data;
-  pthread_t m_event_loop_thread{};
 
   std::shared_ptr<TaskRunner> m_platform_task_runner;
   FlutterTaskRunnerDescription m_platform_task_runner_description{};

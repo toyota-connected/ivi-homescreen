@@ -14,8 +14,16 @@
 # limitations under the License.
 #
 
+#
+# Client Options
+#
+option(ENABLE_XDG_CLIENT "Enable XDG Client" ON)
+option(ENABLE_AGL_CLIENT "Enable AGL Client" OFF)
+option(ENABLE_IVI_SHELL_CLIENT "Enable ivi-shell Client" OFF)
+
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(WAYLAND REQUIRED wayland-client wayland-egl wayland-cursor xkbcommon)
+pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client wayland-egl wayland-cursor xkbcommon)
+
 set(MIN_PROTOCOL_VER 1.13)
 if (BUILD_BACKEND_WAYLAND_DRM)
     set(MIN_PROTOCOL_VER 1.22)
@@ -39,7 +47,7 @@ endmacro()
 
 set(WAYLAND_PROTOCOL_SOURCES)
 wayland_generate(
-        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/agl/protocol/agl-shell.xml
+        ${CMAKE_SOURCE_DIR}/third_party/agl/protocol/agl-shell.xml
         ${CMAKE_CURRENT_BINARY_DIR}/agl-shell-client-protocol)
 wayland_generate(
         ${WAYLAND_PROTOCOLS_BASE}/stable/xdg-shell/xdg-shell.xml
@@ -57,8 +65,20 @@ if (BUILD_BACKEND_WAYLAND_DRM)
 endif ()
 
 add_library(wayland-gen STATIC ${WAYLAND_PROTOCOL_SOURCES})
-target_include_directories(wayland-gen PUBLIC ${WAYLAND_INCLUDE_DIRS})
-target_link_libraries(wayland-gen PUBLIC ${WAYLAND_LIBRARIES})
+target_link_libraries(wayland-gen PUBLIC PkgConfig::WAYLAND)
+
+
+if (ENABLE_XDG_CLIENT)
+    target_compile_definitions(wayland-gen PUBLIC ENABLE_XDG_CLIENT)
+endif ()
+if (ENABLE_AGL_CLIENT)
+    target_compile_definitions(wayland-gen PUBLIC ENABLE_AGL_CLIENT)
+endif ()
+if (ENABLE_IVI_SHELL_CLIENT)
+    target_compile_definitions(wayland-gen PUBLIC ENABLE_IVI_SHELL_CLIENT)
+endif ()
+
+target_include_directories(wayland-gen PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET wayland-gen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

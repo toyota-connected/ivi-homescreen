@@ -30,8 +30,19 @@
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
 #endif
+
+#include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
+#include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
+#include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
+#include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
+#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
+
+#include "spdlog/fmt/bundled/chrono.h"
 #include "wayland/display.h"
 #include "wayland/window.h"
+
+extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
+                                   FlutterView* view);
 
 FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
@@ -71,6 +82,19 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_backend.get(), m_config.view.ivi_surface_id);
+
+  m_state = std::make_unique<FlutterDesktopViewControllerState>();
+  m_state->view = this;
+  m_state->view_wrapper = std::make_unique<FlutterDesktopView>();
+  m_state->view_wrapper->view = this;
+
+  m_state->engine_state = std::make_unique<FlutterDesktopEngineState>();
+  m_state->engine = m_flutter_engine.get();
+  m_state->engine_state->view_controller = m_state.get();
+
+  SetUpCommonEngineState(m_state->engine_state.get(), this);
+
+  RegisterPlugins(m_state->engine_state.get());
 }
 
 FlutterView::~FlutterView() = default;
@@ -87,7 +111,9 @@ void FlutterView::Initialize() {
       this, m_index, m_command_line_args_c, m_config.view.bundle_path,
       m_config.view.accessibility_features);
 
-  m_flutter_engine->Run(pthread_self());
+  m_state->engine = m_flutter_engine.get();
+
+  m_flutter_engine->Run(m_state->engine_state.get());
 
   if (!m_flutter_engine->IsRunning()) {
     spdlog::critical("Failed to Run Engine");
@@ -261,3 +287,26 @@ void FlutterView::SetRegion(
   wl_region_destroy(base_region);
 }
 #endif
+
+void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
+#if defined(ENABLE_PLUGIN_URL_LAUNCHER)
+  UrlLauncherPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FIREBASE_CORE)
+  FirebaseCorePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FIREBASE_STORAGE)
+  FirebaseStoragePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FIREBASE_AUTH)
+  FirebaseAuthPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_CLOUD_FIRESTORE)
+  CloudFirestorePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+}
