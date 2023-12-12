@@ -104,7 +104,7 @@ class WaylandWindow {
    * @relation
    * platform
    */
-  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
 
   /**
    * @brief Get Base Surface

@@ -34,6 +34,6 @@ macro(ENABLE_PLUGIN plugin)
 
     target_compile_definitions(homescreen PRIVATE ENABLE_PLUGIN_${ucase_plugin})
 
-    target_sources(homescreen PRIVATE static_plugins/${plugin}/${plugin}.cc)
+    target_sources(homescreen PRIVATE plugins/${plugin}/${plugin}.cc)
 
 endmacro(ENABLE_PLUGIN)

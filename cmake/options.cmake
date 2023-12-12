@@ -92,6 +92,10 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     if (BUILD_EGL_ENABLE_3D)
         add_compile_definitions(BUILD_EGL_ENABLE_3D)
     endif ()
+    option(BUILD_EGL_ENABLE_MULTISAMPLE "Build with EGL Sample set to 4" OFF)
+    if (BUILD_EGL_ENABLE_MULTISAMPLE)
+        add_compile_definitions(BUILD_EGL_ENABLE_MULTISAMPLE)
+    endif ()
 else ()
     option(BUILD_BACKEND_WAYLAND_VULKAN "Build Backend for Vulkan" ON)
     if (BUILD_BACKEND_WAYLAND_VULKAN)
@@ -109,6 +113,13 @@ endif ()
 #
 option(BUILD_CRASH_HANDLER "Build Crash Handler" OFF)
 if (BUILD_CRASH_HANDLER)
+    if (NOT EXISTS ${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake)
+        message(FATAL_ERROR "${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake does not exist")
+    endif ()
+    set(sentry_DIR ${SENTRY_NATIVE_LIBDIR}/cmake/sentry)
+    find_package(sentry REQUIRED)
+    find_package(PkgConfig)
+    pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)
     add_compile_definitions(
             BUILD_CRASH_HANDLER
             CRASH_HANDLER_DSN="${CRASH_HANDLER_DSN}"
@@ -118,6 +129,12 @@ else ()
             CRASH_HANDLER_DSN=""
             CRASH_HANDLER_RELEASE="")
 endif ()
+
+#
+# Docs
+#
+option(BUILD_DOCS "Build documentation" ON)
+MESSAGE(STATUS "Build Documentation .... ${BUILD_DOCS}")
 
 #
 # Unit Tests

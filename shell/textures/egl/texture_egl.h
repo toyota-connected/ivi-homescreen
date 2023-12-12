@@ -1,15 +1,10 @@
 
 #pragma once
 
-#include <atomic>
 #include <map>
 #include <memory>
-#include <string>
 
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
-#include <shell/platform/embedder/embedder.h>
 
 #include "../../view/flutter_view.h"
 #include "../texture.h"
@@ -70,7 +65,7 @@ class TextureEgl {
    * @relation
    * wayland, flutter
    */
-  void Draw();
+  void Draw() const;
 
   /**
    * @brief Run Task
@@ -78,7 +73,7 @@ class TextureEgl {
    * @relation
    * wayland, flutter
    */
-  void RunTask();
+  void RunTask() const;
 
   /**
    * @brief Dispose Navigation Instance
@@ -86,7 +81,7 @@ class TextureEgl {
    * @relation
    * wayland, flutter
    */
-  void Dispose();
+  void Dispose() const;
 
   /**
    * @brief Get instance of EglProcessResolver class

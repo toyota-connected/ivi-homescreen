@@ -21,7 +21,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <shell/platform/embedder/embedder.h>
@@ -33,8 +32,8 @@
 #include "constants.h"
 #include "ivi-application-client-protocol.h"
 #include "ivi-wm-client-protocol.h"
-#include "static_plugins/key_event/key_event.h"
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/key_event/key_event.h"
+#include "plugins/text_input/text_input.h"
 #include "timer.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -64,7 +63,7 @@ class Display {
    * @relation
    * wayland
    */
-  struct wl_compositor* GetCompositor() {
+  NODISCARD wl_compositor* GetCompositor() const {
     assert(m_compositor);
     return m_compositor;
   };
@@ -76,7 +75,7 @@ class Display {
    * @relation
    * wayland
    */
-  struct wl_subcompositor* GetSubCompositor() {
+  NODISCARD wl_subcompositor* GetSubCompositor() const {
     assert(m_subcompositor);
     return m_subcompositor;
   };
@@ -88,7 +87,7 @@ class Display {
    * @relation
    * wayland
    */
-  struct wl_display* GetDisplay() {
+  NODISCARD wl_display* GetDisplay() const {
     assert(m_display);
     return m_display;
   }
@@ -100,7 +99,10 @@ class Display {
    * @relation
    * wayland
    */
-  struct xdg_wm_base* GetXdgWmBase() { return m_xdg_wm_base; }
+  NODISCARD xdg_wm_base* GetXdgWmBase() const {
+    assert(m_xdg_wm_base);
+    return m_xdg_wm_base;
+  }
 
   /**
    * @brief Get ivi_application instance
@@ -109,7 +111,7 @@ class Display {
    * @relation
    * ivi-shell
    */
-  struct ivi_application* GetIviApplication() const {
+  NODISCARD ivi_application* GetIviApplication() const {
     return m_ivi_shell.application;
   }
 
@@ -120,7 +122,7 @@ class Display {
    * @relation
    * wayland
    */
-  struct wl_shm* GetShm() {
+  NODISCARD wl_shm* GetShm() const {
     assert(m_shm);
     return m_shm;
   }
@@ -132,7 +134,7 @@ class Display {
    * @relation
    * wayland
    */
-  int PollEvents();
+  NODISCARD int PollEvents() const;
 
   /**
    * @brief AglShell: Do background
@@ -142,7 +144,7 @@ class Display {
    * @relation
    * wayland, agl-shell
    */
-  void AglShellDoBackground(struct wl_surface*, size_t index);
+  void AglShellDoBackground(wl_surface* surface, size_t index) const;
 
   /**
    * @brief AglShell: Do panel
@@ -153,9 +155,9 @@ class Display {
    * @relation
    * wayland, agl-shell
    */
-  void AglShellDoPanel(struct wl_surface*,
+  void AglShellDoPanel(struct wl_surface* surface,
                        enum agl_shell_edge mode,
-                       size_t index);
+                       size_t index) const;
 
   /**
    * @brief AglShell: Do ready
@@ -171,7 +173,7 @@ class Display {
    * @return void
    * @param[in] x the x position for the activation rectangle
    * @param[in] y the y position for the activation rectangle
-   * @param[index] the output, as a number
+   * @param[in] index the output, as a number
    * @relation
    *
    * see agl-shell::set_activate_region request for more information. The x and
@@ -192,7 +194,7 @@ class Display {
    * |			|
    * --------------------
    */
-  void AglShellDoSetupActivationArea(uint32_t x, uint32_t y, uint32_t index);
+  void AglShellDoSetupActivationArea(uint32_t x, uint32_t y, uint32_t index) const;
 
   /**
    * @brief Set Engine
@@ -214,7 +216,7 @@ class Display {
    * @relation
    * wayland
    */
-  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
 
   /**
    * @brief Set text input
@@ -244,7 +246,7 @@ class Display {
    * @relation
    * wayland
    */
-  wl_output* GetWlOutput(uint32_t index) {
+  NODISCARD wl_output* GetWlOutput(const uint32_t index) const {
     if (index <= m_all_outputs.size()) {
       return m_all_outputs[index]->output;
     }
@@ -259,7 +261,7 @@ class Display {
    * @relation
    * wayland
    */
-  int32_t GetBufferScale(uint32_t index);
+  NODISCARD int32_t GetBufferScale(uint32_t index) const;
 
   /**
    * @brief Get a video mode size of a specified index of a view
@@ -269,7 +271,7 @@ class Display {
    * @relation
    * wayland
    */
-  std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index);
+  NODISCARD std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index) const;
 
  private:
   std::shared_ptr<Engine> m_flutter_engine;
@@ -347,7 +349,7 @@ class Display {
   };
 
   struct pointer {
-    struct wl_pointer* pointer;
+    struct wl_pointer* wl_pointer;
     struct pointer_event event;
     uint32_t serial;
 
@@ -371,7 +373,7 @@ class Display {
     uint32_t serial;
   };
 
-  struct touch {
+  struct touch_ {
     struct wl_touch* touch;
     struct touch_event event;
     wl_fixed_t surface_x[kMaxTouchFinger];
@@ -397,14 +399,15 @@ class Display {
 
   /**
    * @brief set repeat code
+   * @param[in] display
    * @param[in] repeat_code a repeat code
    * @return void
    * @relation
    * internal
    */
-  static inline void set_repeat_code(Display* d, uint32_t repeat_code) {
-    std::lock_guard<std::mutex> lock(d->m_lock);
-    d->m_repeat_code = repeat_code;
+  static inline void set_repeat_code(Display* display, const uint32_t repeat_code) {
+    std::lock_guard lock(display->m_lock);
+    display->m_repeat_code = repeat_code;
   }
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
@@ -414,7 +417,7 @@ class Display {
       const std::string& ignore_wayland_events,
       struct wayland_event_mask& mask);
 
-  static void wayland_event_mask_print(struct wayland_event_mask& mask);
+  static void wayland_event_mask_print(struct wayland_event_mask const& mask);
 
   static const struct wl_registry_listener registry_listener;
 
@@ -571,7 +574,7 @@ class Display {
    * @relation
    * wayland
    */
-  static bool pointerButtonStatePressed(struct pointer* p);
+  static bool pointerButtonStatePressed(struct pointer const* p);
 
   /**
    * @brief Pointer goes inside a surface
@@ -941,7 +944,7 @@ class Display {
   /**
    * @brief AGL app_state event
    * @param[in,out] data Data of type Display
-   * @param[in] shell No use
+   * @param[in] agl_shell No use
    * @param[in] app_id the application id for which this event was sent
    * @param[in] state the state: CREATED/TERMINATED/ACTIVATED/DEACTIVATED
    * @return void
@@ -974,7 +977,7 @@ class Display {
    * @brief handler of a visibility of a ivi shell layer
    * @param[in,out] data Data of type Display
    * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id layer id
+   * @param[in] layer_id layer id
    * @param[in] visibility visibility
    * @return void
    * @relation
@@ -1002,7 +1005,7 @@ class Display {
    * @brief handler of an opacity of a ivi shell layer
    * @param[in,out] data Data of type Display
    * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id layer id
+   * @param[in] layer_id layer id
    * @param[in] opacity opacity
    * @return void
    * @relation
@@ -1036,7 +1039,7 @@ class Display {
    * @brief handler of a source rectangle of a ivi shell layer
    * @param[in,out] data Data of type Display
    * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id layer id
+   * @param[in] layer_id layer id
    * @param[in] x x position of source rectangle
    * @param[in] y y position of source rectangle
    * @param[in] width width of source rectangle
@@ -1076,7 +1079,7 @@ class Display {
    * @brief handler of a destination rectangle of a ivi shell layer
    * @param[in,out] data Data of type Display
    * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id layer id
+   * @param[in] layer_id layer id
    * @param[in] x x position of destination rectangle
    * @param[in] y y position of destination rectangle
    * @param[in] width width of destination rectangle
@@ -1108,7 +1111,7 @@ class Display {
    * @brief handler for created event of a ivi shell layer
    * @param[in,out] data Data of type Display
    * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id layer id
+   * @param[in] layer_id layer id
    * @return void
    * @relation
    * wayland
@@ -1132,7 +1135,7 @@ class Display {
    * @brief handler for destroyed event of a ivi shell layer
    * @param[in,out] data Data of type Display
    * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id layer id
+   * @param[in] layer_id layer id
    * @return void
    * @relation
    * wayland

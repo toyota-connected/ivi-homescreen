@@ -22,6 +22,8 @@
 #endif
 #include <spdlog/sinks/ringbuffer_sink.h>
 
+#include <constants.h>
+
 Logging::Logging() {
 #if defined(ENABLE_DLT)
   if (Dlt::IsSupported()) {

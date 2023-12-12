@@ -20,17 +20,14 @@
 
 #include "logging/logging.h"
 
-TaskRunner::TaskRunner(std::string name,
-                       FlutterEngineProcTable& proc_table,
-                       FlutterEngine& engine)
-    : io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
-      work_(io_context_->get_executor()),
-      name_(std::move(name)),
+TaskRunner::TaskRunner(std::string name, FlutterEngine& engine)
+    : name_(std::move(name)),
       engine_(engine),
-      proc_table_(proc_table),
-      pri_queue_(std::make_unique<handler_priority_queue>()),
       pthread_self_(pthread_self()),
-      strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
+      io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
+      work_(io_context_->get_executor()),
+      strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
+      pri_queue_(std::make_unique<handler_priority_queue>()) {
   thread_ = std::thread([&]() {
     while (io_context_->run_one()) {
       // The custom invocation hook adds the handlers to the priority queue
@@ -38,7 +35,7 @@ TaskRunner::TaskRunner(std::string name,
       while (io_context_->poll_one())
         ;
 
-      pri_queue_->execute_all(proc_table_, engine_);
+      pri_queue_->execute_all(engine_);
     }
   });
 
@@ -53,21 +50,57 @@ TaskRunner::~TaskRunner() {
   spdlog::debug("[0x{:x}] {} ~Task Runner", pthread_self(), name_);
 }
 
-void TaskRunner::QueueFlutterTask(size_t index,
+void TaskRunner::QueueFlutterTask(MAYBE_UNUSED size_t index,
                                   uint64_t target_time,
                                   FlutterTask task,
                                   void* /* context */) {
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
-  auto current = proc_table_.GetCurrentTime();
+  (void)index;
+  const auto current = LibFlutterEngine->GetCurrentTime();
   if (current >= target_time) {
-    asio::post(*strand_, [&, index, task]() {
-      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
-      proc_table_.RunTask(engine_, &task);
-    });
+    post(*strand_, [&, task]() { LibFlutterEngine->RunTask(engine_, &task); });
   } else {
-    asio::post(*strand_, pri_queue_->wrap(target_time, [&, index, task]() {
-      SPDLOG_TRACE("({}) [{}] Task Run {}", index, name_, task.task);
-      proc_table_.RunTask(engine_, &task);
+    asio::post(*strand_, pri_queue_->wrap(target_time, [&, task]() {
+      LibFlutterEngine->RunTask(engine_, &task);
     }));
   }
+}
+
+std::future<FlutterEngineResult> TaskRunner::QueuePlatformMessage(
+    const char* channel,
+    std::unique_ptr<std::vector<uint8_t>> message,
+    FlutterPlatformMessageResponseHandle* handle) const {
+  auto promise(std::make_unique<std::promise<FlutterEngineResult>>());
+  auto future(promise->get_future());
+
+  post(*strand_, [channel, message = std::move(message), handle,
+                  promise = std::move(promise), engine = engine_]() {
+    const FlutterPlatformMessage msg{
+        sizeof(FlutterPlatformMessage),
+        channel,
+        message->data(),
+        message->size(),
+        handle,
+    };
+
+    promise->set_value(LibFlutterEngine->SendPlatformMessage(engine, &msg));
+  });
+
+  return future;
+}
+
+std::future<FlutterEngineResult> TaskRunner::QueueUpdateLocales(
+    std::vector<const FlutterLocale*> locales) const {
+  auto promise(std::make_unique<std::promise<FlutterEngineResult>>());
+  auto future(promise->get_future());
+  post(*strand_,
+       [promise = std::move(promise), locales = std::move(locales),
+        UpdateLocales = LibFlutterEngine->UpdateLocales, engine = engine_]() {
+         std::vector l(locales.data(), locales.data() + locales.size());
+         const FlutterEngineResult result =
+             UpdateLocales(engine, l.data(), l.size());
+         promise->set_value(result);
+       });
+
+  return future;
 }

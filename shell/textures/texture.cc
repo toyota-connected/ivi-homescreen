@@ -19,24 +19,24 @@
 #include "engine.h"
 #include "logging.h"
 
-Texture::Texture(uint32_t id,
-                 uint32_t target,
-                 uint32_t format,
-                 EncodableValueCallback create_callback,
-                 TextureCallback dispose_callback,
-                 int width,
-                 int height)
+Texture::Texture(const uint32_t id,
+                 const uint32_t target,
+                 const uint32_t format,
+                 const EncodableValueCallback create_callback,
+                 const TextureCallback dispose_callback,
+                 const int width,
+                 const int height)
     : m_flutter_engine(nullptr),
-      m_create_callback(create_callback),
-      m_dispose_callback(dispose_callback),
       m_enabled(false),
-      m_draw_next(false),
-      m_target(target),
       m_id(id),
       m_name({}),
+      m_target(target),
       m_format(format),
+      m_width(width),
       m_height(height),
-      m_width(width) {}
+      m_draw_next(false),
+      m_create_callback(create_callback),
+      m_dispose_callback(dispose_callback) {}
 
 Texture::~Texture() {
   SPDLOG_DEBUG("Texture Destructor");
@@ -80,12 +80,13 @@ void Texture::Enable(GLuint name) {
     // no plan to enforce overwriting
     m_flutter_engine->TextureRegistryAdd(static_cast<int64_t>(name), this);
 
-    if (kSuccess != m_flutter_engine->TextureEnable(static_cast<int64_t>(name))) {
+    if (kSuccess !=
+        m_flutter_engine->TextureEnable(static_cast<int64_t>(name))) {
       assert(false);
     }
 
-    if (kSuccess !=
-        Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, static_cast<int64_t>(name))) {
+    if (kSuccess != Engine::MarkExternalTextureFrameAvailable(
+                        m_flutter_engine, static_cast<int64_t>(name))) {
       assert(false);
     }
     m_enabled = true;
@@ -99,7 +100,7 @@ void Texture::Disable(GLuint name) {
   m_flutter_engine->TextureDisable(static_cast<int64_t>(name));
   m_enabled = false;
 
-  auto i = find(m_name.begin(), m_name.end(), name);
+  const auto i = find(m_name.begin(), m_name.end(), name);
   if (i != m_name.end()) {
     m_name.erase(i);
   }
@@ -112,9 +113,9 @@ void Texture::SetEngine(Engine* engine) {
   }
 }
 
-void Texture::FrameReady() {
+void Texture::FrameReady() const {
   if (m_flutter_engine)
-    for (auto name : m_name) {
+    for (const auto name : m_name) {
       Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, name);
     }
 }

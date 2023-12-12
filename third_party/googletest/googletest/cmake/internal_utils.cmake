@@ -12,6 +12,10 @@
 #   Test and Google Mock's option() definitions, and thus must be
 #   called *after* the options have been defined.
 
+if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.27.0")
+  cmake_policy(SET CMP0148 OLD)
+endif ()
+
 if (POLICY CMP0054)
   cmake_policy(SET CMP0054 NEW)
 endif (POLICY CMP0054)

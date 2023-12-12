@@ -17,10 +17,6 @@
 
 #pragma once
 
-#include <functional>
-
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
 #include <shell/platform/embedder/embedder.h>
 #include <filesystem>
@@ -34,9 +30,8 @@
 #include "backend/backend.h"
 #include "constants.h"
 #include "logging.h"
-#include "platform_channel.h"
-#include "static_plugins/key_event/key_event.h"
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/key_event/key_event.h"
+#include "plugins/text_input/text_input.h"
 #include "task_runner.h"
 #include "view/flutter_view.h"
 
@@ -128,7 +123,7 @@ class Engine {
    * @relation
    * flutter
    */
-  FlutterEngineResult Shutdown();
+  NODISCARD FlutterEngineResult Shutdown() const;
 
   /**
    * @brief Check if engine is running
@@ -259,7 +254,23 @@ class Engine {
    * @brief Send platform message
    * @param[in] channel Destination channel
    * @param[in] message Message to send
-   * @param[in] message_size Size of message
+   * @param[in] response_handle optional response handle
+   * @return bool
+   * @retval true If successed to send message
+   * @retval false If failed to send message
+   * @relation
+   * flutter
+   */
+  bool SendPlatformMessage(const char* channel,
+                           std::unique_ptr<std::vector<uint8_t>> message,
+                           const FlutterPlatformMessageResponseHandle*
+                               response_handle = nullptr) const;
+
+  /**
+   * @brief Send platform message
+   * @param[in] channel Destination channel
+   * @param[in] message Message to send
+   * @param[in] message_size Size of the message
    * @return bool
    * @retval true If successed to send message
    * @retval false If failed to send message
@@ -269,19 +280,6 @@ class Engine {
   bool SendPlatformMessage(const char* channel,
                            const uint8_t* message,
                            size_t message_size) const;
-
-  /**
-   * @brief PlatformMessage Reply callback
-   * @param[in] data payload
-   * @param[in] data_size payload size
-   * @param[in] userdata user data
-   * @return void
-   * @relation
-   * flutter
-   */
-  typedef void (*FlutterBinaryReplyUserdata)(const uint8_t* data,
-                                             size_t data_size,
-                                             void* userdata);
 
   /**
    * @brief Send platform message
@@ -300,7 +298,7 @@ class Engine {
   bool SendPlatformMessage(const char* channel,
                            const uint8_t* message,
                            size_t message_size,
-                           FlutterBinaryReplyUserdata reply,
+                           FlutterDataCallback reply,
                            void* userdata) const;
 
   /**
@@ -327,14 +325,13 @@ class Engine {
   /**
    * @brief Update locales
    * @param[in] locales Updated locales in the order of preference
-   * @param[in] locales_count Count of locales
    * @return FlutterEngineResult
    * @retval The result of the updating locales
    * @relation
    * flutter
    */
-  MAYBE_UNUSED FlutterEngineResult UpdateLocales(const FlutterLocale** locales,
-                                                 size_t locales_count);
+  MAYBE_UNUSED FlutterEngineResult
+  UpdateLocales(std::vector<FlutterLocale> locales);
 
   /**
    * @brief Get clipboard data
@@ -411,7 +408,7 @@ class Engine {
    * @relation
    * wayland
    */
-  bool ActivateSystemCursor(int32_t device, const std::string& kind);
+  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
 
   /**
    * @brief Get asset directory path
@@ -420,9 +417,9 @@ class Engine {
    * @relation
    * flutter
    */
-  std::string GetAssetDirectory() {
-    std::filesystem::path p = m_assets_path;
-    return std::filesystem::absolute(p);
+  NODISCARD std::string GetAssetDirectory() const {
+    const std::filesystem::path p = m_assets_path;
+    return absolute(p);
   }
 
 #if ENABLE_PLUGIN_TEXT_INPUT
@@ -477,9 +474,9 @@ class Engine {
    * @relation
    * wayland, flutter
    */
-  Backend* GetBackend() { return m_backend; }
+  NODISCARD Backend* GetBackend() const { return m_backend; }
 
-  FlutterView* GetView() { return m_view; }
+  NODISCARD FlutterView* GetView() const { return m_view; }
 
  private:
   size_t m_index;
@@ -504,10 +501,8 @@ class Engine {
   FlutterProjectArgs m_args;
   std::string m_clipboard_data;
   pthread_t m_event_loop_thread{};
-  void* m_engine_so_handle;
-  FlutterEngineProcTable m_proc_table{};
 
-  std::unique_ptr<TaskRunner> m_platform_task_runner;
+  std::shared_ptr<TaskRunner> m_platform_task_runner;
   FlutterTaskRunnerDescription m_platform_task_runner_description{};
   FlutterCustomTaskRunners m_custom_task_runners{};
 
@@ -526,6 +521,14 @@ class Engine {
    */
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
   LoadAotData(const std::string& aot_data_path) const;
+
+  /**
+   * @brief Setup Locales
+   * @return void
+   * @relation
+   * flutter
+   */
+  void SetUpLocales() const;
 
   std::vector<FlutterPointerEvent> m_pointer_events;
   std::mutex m_pointer_mutex;

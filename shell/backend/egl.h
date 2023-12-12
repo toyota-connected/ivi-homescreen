@@ -16,19 +16,15 @@
 
 #pragma once
 
-#include <cstdint>
-#include <unordered_map>
-#include <vector>
-
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
 
-
 class Egl {
  public:
-  Egl(void* native_display, EGLenum platform, int buffer_size, bool debug);
+  Egl(void* native_display, int buffer_size, bool debug);
 
   ~Egl();
 
@@ -85,20 +81,6 @@ class Egl {
   bool MakeTextureCurrent();
 
   /**
-   * @brief Get an EGL display connection
-   * @param[in] platform Platform
-   * @param[in] native_display The native display
-   * @param[in] attrib_list Display attributes
-   * @return EGLDisplay
-   * @retval An EGL display connection
-   * @relation
-   * wayland
-   */
-  static EGLDisplay get_egl_display(EGLenum platform,
-                                    void* native_display,
-                                    const EGLint* attrib_list);
-
-  /**
    * @brief Create a new EGL window surface
    * @param[in] native_window The native window
    * @param[in] attrib_list Window surface attributes
@@ -117,7 +99,7 @@ class Egl {
    * @relation
    * EGL
    */
-  PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() {
+  NODISCARD PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() const {
     return m_pfSetDamageRegion;
   }
 
@@ -129,7 +111,8 @@ class Egl {
    * @relation
    * EGL
    */
-  PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC GetSwapBuffersWithDamage() {
+  NODISCARD PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
+  GetSwapBuffersWithDamage() const {
     return m_pfSwapBufferWithDamage;
   }
 
@@ -140,7 +123,7 @@ class Egl {
    * @relation
    * EGL
    */
-  bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
+  NODISCARD bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
 
   /**
    * @brief Auxiliary function used to transform a FlutterRect into the format
@@ -151,11 +134,11 @@ class Egl {
    * @relation
    * EGL
    */
-  std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
+  NODISCARD std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
 
-  EGLDisplay GetDisplay() { return m_dpy; }
+  NODISCARD EGLDisplay GetDisplay() { return m_dpy; }
 
-  EGLContext GetTextureContext() { return m_texture_context; }
+  NODISCARD EGLContext GetTextureContext() { return m_texture_context; }
 
  protected:
   EGLSurface m_egl_surface{};
@@ -173,10 +156,6 @@ class Egl {
   EGLint m_major{};
   EGLint m_minor{};
 
-  PFNEGLDEBUGMESSAGECONTROLKHRPROC m_pfDebugMessageControl{};
-  PFNEGLQUERYDEBUGKHRPROC m_pfQueryDebug{};
-  PFNEGLLABELOBJECTKHRPROC m_pfLabelObject{};
-
   PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC m_pfSwapBufferWithDamage{};
   PFNEGLSETDAMAGEREGIONKHRPROC m_pfSetDamageRegion{};
   bool m_has_egl_ext_buffer_age{};
@@ -184,17 +163,14 @@ class Egl {
   /**
    * @brief Auxiliary function used to check if the given list of extensions
    * contains the requested extension name.
-   * @param[in] dpy EGL display
+   * @param[in] extensions EGL display
    * @param[in] name name of extension
    * @return bool
    * @retval if extension is present
    * @relation
    * EGL
    */
-  static bool HasEGLExtension(
-      std::unordered_map<EGLDisplay, const char*>& extensions,
-      EGLDisplay dpy,
-      const char* name);
+  static bool HasEGLExtension(const char* extensions, const char* name);
 
   /**
    * @brief Auxiliary function used to check if the GL extension
@@ -239,17 +215,16 @@ class Egl {
 
   /**
    * @brief Initialize of EGL KHR_debug
-   * @param[in] extensions unordered_map of EGL extensions
+   * @param[in] extensions string of EGL extensions
    * @return void
    * @relation
    * wayland
    */
-  void EGL_KHR_debug_init(
-      std::unordered_map<EGLDisplay, const char*>& extensions);
+  static void EGL_KHR_debug_init(const char* extensions);
 
   /**
    * @brief Print a list of extensions, with word-wrapping
-   * @param[in] ext List of extensions
+   * @param[in] dpy List of extensions
    * @return void
    * @relation
    * internal

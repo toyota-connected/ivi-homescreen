@@ -4,7 +4,12 @@
 #include <memory>
 #include <utility>
 
+#ifdef ENABLE_TEXTURE_TEST_EGL
 #include "../test_egl/texture_test_egl.h"
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+#include "../navi_render_egl/texture_navi_render_egl.h"
+#endif
 
 std::shared_ptr<TextureEgl> TextureEgl::sInstance = nullptr;
 
@@ -46,6 +51,13 @@ flutter::EncodableValue TextureEgl::Create(
       return m_textures->back()->Create(width, height, args);
     }
 #endif
+#if !defined(ENABLE_TEXTURE_TEST_EGL) || !defined(ENABLE_TEXTURE_NAVI_RENDER_EGL)
+      (void)engine;
+      (void)texture_id;
+      (void)width;
+      (void)height;
+      (void)args;
+#endif
     default: {
       return flutter::EncodableValue(flutter::EncodableMap{
           {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
@@ -55,7 +67,7 @@ flutter::EncodableValue TextureEgl::Create(
   }
 }
 
-void TextureEgl::Dispose() {
+void TextureEgl::Dispose() const {
   for (auto& item : *m_textures) {
     switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
@@ -77,7 +89,7 @@ void TextureEgl::Dispose() {
   }
 }
 
-void TextureEgl::Draw() {
+void TextureEgl::Draw() const {
   for (auto& item : *m_textures) {
     switch (item->GetId()) {
 #ifdef ENABLE_TEXTURE_TEST_EGL
@@ -99,12 +111,12 @@ void TextureEgl::Draw() {
   }
 }
 
-void TextureEgl::RunTask() {
-  for (auto& item : *m_textures) {
+void TextureEgl::RunTask() const {
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+  for (auto& item : *m_textures) {
     if (item->GetId() == kTextureEgl_ObjectId_Navigation) {
       TextureNaviRender::RunTask(item.get());
     }
-#endif
   }
+#endif
 }

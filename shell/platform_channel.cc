@@ -17,64 +17,70 @@
 #include "platform_channel.h"
 
 #ifdef ENABLE_PLUGIN_ACCESSIBILITY
-#include "static_plugins/accessibility/accessibility.h"
+#include "plugins/accessibility/accessibility.h"
 #endif
 #ifdef ENABLE_PLUGIN_ISOLATE
-#include "static_plugins/isolate/isolate.h"
+#include "plugins/isolate/isolate.h"
 #endif
 #ifdef ENABLE_PLUGIN_RESTORATION
-#include "static_plugins/restoration/restoration.h"
+#include "plugins/restoration/restoration.h"
 #endif
 #ifdef ENABLE_PLUGIN_MOUSE_CURSOR
-#include "static_plugins/mouse_cursor/mouse_cursor.h"
+#include "plugins/mouse_cursor/mouse_cursor.h"
 #endif
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
-#include "static_plugins/gstreamer_egl/gstreamer_egl.h"
+#include "plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
-#ifdef ENABLE_PLUGIN_NAVIGATION
-#include "static_plugins/navigation/navigation.h"
+#ifdef ENABLE_PLUGIN_GO_ROUTER
+#include "plugins/go_router/go_router.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
-#include "static_plugins/comp_surf/comp_surf.h"
+#include "plugins/comp_surf/comp_surf.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_REGION
-#include "static_plugins/comp_region/comp_region.h"
+#include "plugins/comp_region/comp_region.h"
 #endif
 #ifdef ENABLE_PLUGIN_OPENGL_TEXTURE
-#include "static_plugins/opengl_texture/opengl_texture.h"
+#include "plugins/opengl_texture/opengl_texture.h"
 #endif
 #ifdef ENABLE_PLUGIN_PACKAGE_INFO
-#include "static_plugins/package_info/package_info.h"
+#include "plugins/package_info/package_info.h"
 #endif
 #ifdef ENABLE_PLUGIN_PLATFORM
-#include "static_plugins/platform/platform.h"
+#include "plugins/platform/platform.h"
 #endif
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
-#include "static_plugins/platform_views/platform_views.h"
+#include "plugins/platform_views/platform_views.h"
 #endif
 #ifdef ENABLE_PLUGIN_DESKTOP_WINDOW
-#include "static_plugins/desktop_window/desktop_window.h"
+#include "plugins/desktop_window/desktop_window.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/text_input/text_input.h"
 #endif
 #ifdef ENABLE_PLUGIN_URL_LAUNCHER
-#include "static_plugins/url_launcher/url_launcher.h"
+#include "plugins/url_launcher/url_launcher.h"
 #endif
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
-#include "static_plugins/secure_storage/secure_storage.h"
+#include "plugins/secure_storage/secure_storage.h"
 #endif
 #ifdef ENABLE_PLUGIN_INTEGRATION_TEST
-#include "static_plugins/integration_test/integration_test.h"
+#include "plugins/integration_test/integration_test.h"
 #endif
 #ifdef ENABLE_PLUGIN_LOGGING
-#include "static_plugins/logging/logging.h"
+#include "plugins/logging/logging.h"
 #endif
 #ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
-#include "static_plugins/keyboard_manager/keyboard_manager.h"
+#include "plugins/keyboard_manager/keyboard_manager.h"
 #endif
 #ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
-#include "static_plugins/google_sign_in/google_sign_in.h"
+#include "plugins/google_sign_in/google_sign_in.h"
+#endif
+#ifdef ENABLE_PLUGIN_FILE_SELECTOR
+#include "plugins/file_selector/file_selector.h"
+#endif
+#ifdef ENABLE_PLUGIN_AUDIO_PLAYERS
+#include "plugins/audio_players/audio_players.h"
 #endif
 
 PlatformChannel* PlatformChannel::singleton = nullptr;
@@ -97,8 +103,8 @@ PlatformChannel::PlatformChannel() {
   RegisterCallback(GstreamerEgl::kChannelGstreamerInitialize,
                    &GstreamerEgl::OnInitialize);
 #endif
-#ifdef ENABLE_PLUGIN_NAVIGATION
-  RegisterCallback(Navigation::kChannelName, &Navigation::OnPlatformMessage);
+#ifdef ENABLE_PLUGIN_GO_ROUTER
+  RegisterCallback(GoRouter::kChannelName, &GoRouter::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
   RegisterCallback(CompositorSurfacePlugin::kChannelName,
@@ -151,5 +157,13 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
   RegisterCallback(GoogleSignIn::kChannelName,
                    &GoogleSignIn::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_FILE_SELECTOR
+  RegisterCallback(FileSelector::kChannelName,
+                   &FileSelector::OnPlatformMessage);
+#endif
+#ifdef ENABLE_PLUGIN_AUDIO_PLAYERS
+  RegisterCallback(Plugins::AudioPlayers::kChannelName,
+                   &Plugins::AudioPlayers::OnPlatformMessage);
 #endif
 }

@@ -1,14 +1,10 @@
 
 #pragma once
 
-#include <atomic>
 #include <map>
-#include <memory>
 #include <string>
 
-#include <EGL/egl.h>
 #include <GLES3/gl32.h>
-#include <shell/platform/embedder/embedder.h>
 
 #include "../texture.h"
 #include "render_api.h"
@@ -26,7 +22,7 @@ class WaylandEglBackend;
 
 class TextureNaviRender : public Texture {
  public:
-  explicit TextureNaviRender(FlutterView* view);
+  explicit TextureNaviRender(const FlutterView* view);
 
   ~TextureNaviRender();
 

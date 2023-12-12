@@ -17,8 +17,6 @@
 #pragma once
 
 #include <EGL/egl.h>
-#include <shell/platform/embedder/embedder.h>
-#include <wayland-client.h>
 #include <memory>
 
 #include "configuration/configuration.h"
@@ -43,7 +41,7 @@ class App {
    * @relation
    * wayland, flutter
    */
-  int Loop();
+  NODISCARD int Loop() const;
 
  private:
   std::shared_ptr<Display> m_wayland_display;

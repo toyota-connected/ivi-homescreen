@@ -70,7 +70,7 @@ void Configuration::getViewParameters(
         MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
   }
   if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
-    auto args = obj[kVmArgsKey].GetArray();
+    const auto args = obj[kVmArgsKey].GetArray();
     for (auto const& arg : args) {
       instance.view.vm_args.emplace_back(arg.GetString());
     }
@@ -95,8 +95,8 @@ void Configuration::getViewParameters(
     const rapidjson::GenericValue val =
         obj[kWindowActivationAreaKey].GetObject();
 
-    instance.view.activation_area_x = val["x"].GetInt();
-    instance.view.activation_area_y = val["y"].GetInt();
+    instance.view.activation_area_x = static_cast<uint32_t>(val["x"].GetInt());
+    instance.view.activation_area_y = static_cast<uint32_t>(val["y"].GetInt());
 
     SPDLOG_DEBUG("activation area x {}", instance.view.activation_area_x);
     SPDLOG_DEBUG("activation area y {}", instance.view.activation_area_y);
@@ -130,7 +130,7 @@ void Configuration::getView(rapidjson::Document& doc,
                             int index,
                             Config& instance) {
   if (doc[kViewKey].IsArray()) {
-    auto arr = doc[kViewKey].GetArray();
+    const auto arr = doc[kViewKey].GetArray();
     if (index > arr.Capacity())
       assert(false);
 
@@ -143,7 +143,7 @@ void Configuration::getView(rapidjson::Document& doc,
   }
 }
 
-void Configuration::getCliOverrides(Config& instance, Config& cli) {
+void Configuration::getCliOverrides(Config& instance, const Config& cli) {
   if (!cli.app_id.empty()) {
     instance.app_id = cli.app_id;
   }
@@ -378,28 +378,30 @@ Configuration::Config Configuration::ConfigFromArgcArgv(
 }
 
 void PrintUsage() {
-  fprintf(stdout,
-          "Usage: %s [options] [flutter VM arguments]\n"
-          "Options:\n"
-          "\t--b=<dir path>                Path to a bundle directory (required)\n"
-          "\t--j=<file path>               Path to a json configuration file\n"
-          "\t--a=<integer>                 Accessibility feature flag(s)\n"
-          "\t--c                           Disable cursor\n"
-          "\t--d                           Debug backend\n"
-          "\t--f                           Full screen\n"
-          "\t--w=<integer>                 Output width in pixels\n"
-          "\t--h=<integer>                 Output height in pixels\n"
-          "\t--p=<decimal>                 Pixel ratio\n"
-          "\t--t=<string>                  Cursor theme name\n"
-          "\t--window-type=<string>        AGL window type (only applies to "
-          "AGL-compositor)\n"
-          "\t--output-index=<integer>      Wayland output index\n"
-          "\t--xdg-shell-app-id=<string>   XDG shell app id\n"
-          "\t--wayland-event-mask=<string> Wayland events to mask\n"
-          "\t--i=<ivi surface id>          IVI Surface ID\n", kApplicationName);
+  fprintf(
+      stdout,
+      "Usage: %s [options] [flutter VM arguments]\n"
+      "Options:\n"
+      "\t--b=<dir path>                Path to a bundle directory (required)\n"
+      "\t--j=<file path>               Path to a json configuration file\n"
+      "\t--a=<integer>                 Accessibility feature flag(s)\n"
+      "\t--c                           Disable cursor\n"
+      "\t--d                           Debug backend\n"
+      "\t--f                           Full screen\n"
+      "\t--w=<integer>                 Output width in pixels\n"
+      "\t--h=<integer>                 Output height in pixels\n"
+      "\t--p=<decimal>                 Pixel ratio\n"
+      "\t--t=<string>                  Cursor theme name\n"
+      "\t--window-type=<string>        AGL window type (only applies to "
+      "AGL-compositor)\n"
+      "\t--output-index=<integer>      Wayland output index\n"
+      "\t--xdg-shell-app-id=<string>   XDG shell app id\n"
+      "\t--wayland-event-mask=<string> Wayland events to mask\n"
+      "\t--i=<ivi surface id>          IVI Surface ID\n",
+      kApplicationName);
 }
 
-int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
+int Configuration::ConvertCommandlineToConfig(const fml::CommandLine& cl,
                                               Configuration::Config& config) {
   if (!cl.options().empty()) {
     if (cl.HasOption("?") || cl.HasOption("help")) {
@@ -435,11 +437,11 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
         // 3. octet: --a=03
         config.view.accessibility_features = static_cast<int32_t>(
             std::stol(accessibility_feature_flag_str, nullptr, 0));
-      } catch (const std::invalid_argument& e) {
+      } catch (const std::invalid_argument& /* e */) {
         spdlog::critical(
             "--a option (Accessibility Features) requires an integer value");
         ret = EXIT_FAILURE;
-      } catch (const std::out_of_range& e) {
+      } catch (const std::out_of_range& /* e */) {
         spdlog::critical(
             "The specified value to --a option, {} is out of range.",
             accessibility_feature_flag_str);
@@ -609,8 +611,7 @@ int Configuration::ConvertCommandlineToConfig(fml::CommandLine& cl,
           strtoul(ivi_surface_id_str.c_str(), nullptr, 10));
       Utils::RemoveArgument(config.view.vm_args, "--i=" + ivi_surface_id_str);
     }
-  }
-  else {
+  } else {
     PrintUsage();
     exit(EXIT_SUCCESS);
   }

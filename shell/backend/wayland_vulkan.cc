@@ -133,7 +133,8 @@ void WaylandVulkanBackend::createInstance() {
       VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 
   std::stringstream ss;
-  ss << "Enabling {} instance extensions: " << state_.enabled_instance_extensions.size();
+  ss << "Enabling {} instance extensions: "
+     << state_.enabled_instance_extensions.size();
   for (const auto& extension : state_.enabled_instance_extensions) {
     ss << "  - " << extension;
   }
@@ -158,7 +159,7 @@ void WaylandVulkanBackend::createInstance() {
       .ppEnabledExtensionNames = state_.enabled_instance_extensions.data(),
   };
 
-#if 0 //TODO not currently used
+#if 0  // TODO not currently used
   VkValidationFeatureEnableEXT enables[] = {
       VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
       // TODO: Enable synchronization validation.
@@ -431,7 +432,8 @@ void WaylandVulkanBackend::createLogicalDevice() {
                                            nullptr, &state_.device);
   if (result != VK_SUCCESS) {
     state_.device = VK_NULL_HANDLE;
-    spdlog::critical("Failed to create Vulkan logical device: {}", static_cast<int32_t>(result));
+    spdlog::critical("Failed to create Vulkan logical device: {}",
+                     static_cast<int32_t>(result));
     exit(EXIT_FAILURE);
   }
 
@@ -572,7 +574,8 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   VkResult result = bluevk::vkCreateSwapchainKHR(state_.device, &info, VKALLOC,
                                                  &state_.swapchain);
   if (result != VK_SUCCESS) {
-    spdlog::error("vkGetSwapchainImagesKHR(): {}", static_cast<int32_t>(result));
+    spdlog::error("vkGetSwapchainImagesKHR(): {}",
+                  static_cast<int32_t>(result));
     return false;
   }
 
