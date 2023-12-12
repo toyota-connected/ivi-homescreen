@@ -50,11 +50,12 @@ TaskRunner::~TaskRunner() {
   spdlog::debug("[0x{:x}] {} ~Task Runner", pthread_self(), name_);
 }
 
-void TaskRunner::QueueFlutterTask(size_t index,
+void TaskRunner::QueueFlutterTask(MAYBE_UNUSED size_t index,
                                   uint64_t target_time,
                                   FlutterTask task,
                                   void* /* context */) {
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
+  (void)index;
   const auto current = LibFlutterEngine->GetCurrentTime();
   if (current >= target_time) {
     post(*strand_, [&, task]() { LibFlutterEngine->RunTask(engine_, &task); });
