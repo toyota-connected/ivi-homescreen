@@ -20,8 +20,6 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
-include(wayland)
-
 add_executable(homescreen
         app.cc
         configuration/configuration.cc
@@ -39,7 +37,6 @@ add_executable(homescreen
         task_runner.cc
 )
 
-include(plugins)
 include(textures)
 
 if (ENABLE_DLT)
@@ -71,26 +68,15 @@ if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
 endif ()
 
 if (BUILD_PLUGIN_AUDIO_PLAYERS)
-    target_sources(homescreen PRIVATE plugins/audio_players/audio_player.cc)
-    target_sources(homescreen PRIVATE plugins/audio_players/audio_players_registry.cc)
+    target_sources(homescreen PRIVATE ../plugins/audio_players/audio_player.cc)
+    target_sources(homescreen PRIVATE ../plugins/audio_players/audio_players_registry.cc)
 endif ()
 
 if (BUILD_PLUGIN_PLATFORM_VIEWS OR BUILD_PLUGIN_LAYER_PLAYGROUND)
     target_sources(homescreen PRIVATE
-            plugins/platform_views/platform_view.cc
-            plugins/platform_views/platform_views_registry.cc
+            ../plugins/platform_views/platform_view.cc
+            ../plugins/platform_views/platform_views_registry.cc
     )
-endif ()
-
-if (BUILD_PLUGIN_FIREBASE_CORE)
-    target_sources(homescreen PRIVATE
-            plugins/firebase_core/firebase_core_plugin.cpp
-            plugins/firebase_core/firebase_core_plugin_c_api.cpp
-            plugins/firebase_core/firebase_core.cc
-    )
-    target_include_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_INCLUDE_DIRS})
-    target_link_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_LIB_DIRS})
-    target_link_libraries(homescreen PRIVATE firebase_app flatbuffers z)
 endif ()
 
 target_compile_definitions(homescreen
@@ -98,16 +84,10 @@ target_compile_definitions(homescreen
         HAVE_STRCHRNUL
         EGL_NO_X11
         MESA_EGL_NO_X11_HEADERS
-        LINUX
         HAVE_MEMFD_CREATE
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
-        ASIO_STANDALONE
-        ASIO_HEADER_ONLY
-        ASIO_NO_TYPEID
-        ASIO_DISABLE_HANDLER_TYPE_REQUIREMENTS
-        ASIO_NO_DEPRECATED
 )
 
 target_include_directories(homescreen
@@ -120,8 +100,22 @@ target_include_directories(homescreen
         ${LIBCURL_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
         ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
-        ../third_party/spdlog-1.12.0/include
         ../third_party/asio-1-28-1/asio/include
+)
+
+target_link_libraries(homescreen PRIVATE
+        plugin_cloud_firestore
+        plugin_firebase_auth
+        plugin_firebase_storage
+        plugin_url_launcher
+)
+
+target_compile_definitions(homescreen PRIVATE
+        ENABLE_PLUGIN_FIREBASE_CORE
+        ENABLE_PLUGIN_CLOUD_FIRESTORE
+        ENABLE_PLUGIN_FIREBASE_AUTH
+        ENABLE_PLUGIN_FIREBASE_STORAGE
+        ENABLE_PLUGIN_URL_LAUNCHER
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
@@ -138,8 +132,9 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 target_link_libraries(homescreen PRIVATE
-        flutter
+        flutter_common
         wayland-gen
+        platform_homescreen
         Threads::Threads
         dl
         ${GST_LIBRARIES}

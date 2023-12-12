@@ -43,9 +43,29 @@ message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
+include(utils)
+
+#
+# libraries
+#
+include(wayland)
 
 add_subdirectory(third_party)
+add_subdirectory(plugins)
+add_subdirectory(shell/platform/homescreen)
+
+#
+# executable
+#
 add_subdirectory(shell)
+
+#print_target_properties(asio)
+#print_target_properties(flutter_common)
+#print_target_properties(plugin_url_launcher)
+#print_target_properties(platform_homescreen)
+#print_target_properties(homescreen)
+
+
 add_subdirectory(docs)
 
 if (BUILD_UNIT_TESTS)

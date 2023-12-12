@@ -57,6 +57,7 @@ WaylandWindow::WaylandWindow(size_t index,
   wl_callback_add_listener(m_base_frame_callback,
                            &m_base_surface_frame_listener, this);
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
   auto ivi_application = m_display->GetIviApplication();
   if (ivi_application) {
     if (m_ivi_surface_id == 0) {
@@ -71,8 +72,9 @@ WaylandWindow::WaylandWindow(size_t index,
     ivi_surface_add_listener(m_ivi_surface, &ivi_surface_listener, this);
 
     m_wait_for_configure = false;
-
-  } else {
+  }
+#elif defined(ENABLE_XDG_CLIENT)
+  {
     m_xdg_surface =
         xdg_wm_base_get_xdg_surface(m_display->GetXdgWmBase(), m_base_surface);
 
@@ -89,9 +91,11 @@ WaylandWindow::WaylandWindow(size_t index,
 
     m_wait_for_configure = true;
   }
+#endif
 
   wl_surface_commit(m_base_surface);
 
+#if defined(ENABLE_AGL_CLIENT)
   switch (m_type) {
     case WINDOW_NORMAL:
       break;
@@ -119,6 +123,7 @@ WaylandWindow::WaylandWindow(size_t index,
       spdlog::critical("Invalid surface role type supplied");
       assert(false);
   }
+#endif
 
   // this makes the start-up from the beginning with the correction dimensions
   // like starting as maximized/fullscreen, rather than starting up as floating
@@ -143,14 +148,18 @@ WaylandWindow::~WaylandWindow() {
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
   if (m_ivi_surface)
     ivi_surface_destroy(m_ivi_surface);
+#endif
 
+#if defined (ENABLE_XDG_CLIENT)
   if (m_xdg_surface)
     xdg_surface_destroy(m_xdg_surface);
 
   if (m_xdg_toplevel)
     xdg_toplevel_destroy(m_xdg_toplevel);
+#endif
 
   wl_surface_destroy(m_base_surface);
 
@@ -182,6 +191,7 @@ const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
     .leave = handle_base_surface_leave,
 };
 
+#if defined(ENABLE_XDG_CLIENT)
 void WaylandWindow::handle_xdg_surface_configure(
     void* data,
     struct xdg_surface* xdg_surface,
@@ -193,7 +203,9 @@ void WaylandWindow::handle_xdg_surface_configure(
 
 const struct xdg_surface_listener WaylandWindow::xdg_surface_listener = {
     .configure = handle_xdg_surface_configure};
+#endif
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
 void WaylandWindow::handle_ivi_surface_configure(
     void* data,
     struct ivi_surface* /* ivi_surface */,
@@ -224,7 +236,9 @@ void WaylandWindow::handle_ivi_surface_configure(
 
 const struct ivi_surface_listener WaylandWindow::ivi_surface_listener = {
     .configure = handle_ivi_surface_configure};
+#endif
 
+#if defined(ENABLE_XDG_CLIENT)
 void WaylandWindow::handle_toplevel_configure(
     void* data,
     struct xdg_toplevel* /* toplevel */,
@@ -284,6 +298,7 @@ const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
     handle_toplevel_configure,
     handle_toplevel_close,
 };
+#endif
 
 const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
     {on_frame_base_surface};

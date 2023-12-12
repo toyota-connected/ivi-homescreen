@@ -19,9 +19,6 @@
 #ifdef ENABLE_PLUGIN_ACCESSIBILITY
 #include "plugins/accessibility/accessibility.h"
 #endif
-#ifdef ENABLE_PLUGIN_ISOLATE
-#include "plugins/isolate/isolate.h"
-#endif
 #ifdef ENABLE_PLUGIN_RESTORATION
 #include "plugins/restoration/restoration.h"
 #endif
@@ -46,9 +43,6 @@
 #ifdef ENABLE_PLUGIN_PACKAGE_INFO
 #include "plugins/package_info/package_info.h"
 #endif
-#ifdef ENABLE_PLUGIN_PLATFORM
-#include "plugins/platform/platform.h"
-#endif
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
 #include "plugins/platform_views/platform_views.h"
 #endif
@@ -57,9 +51,6 @@
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
 #include "plugins/text_input/text_input.h"
-#endif
-#ifdef ENABLE_PLUGIN_URL_LAUNCHER
-#include "plugins/url_launcher/url_launcher.h"
 #endif
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
 #include "plugins/secure_storage/secure_storage.h"
@@ -90,9 +81,6 @@ PlatformChannel::PlatformChannel() {
   RegisterCallback(Accessibility::kChannelName,
                    &Accessibility::OnPlatformMessage);
 #endif
-#ifdef ENABLE_PLUGIN_ISOLATE
-  RegisterCallback(Isolate::kChannelName, &Isolate::OnPlatformMessage);
-#endif
 #ifdef ENABLE_PLUGIN_RESTORATION
   RegisterCallback(Restoration::kChannelName, &Restoration::OnPlatformMessage);
 #endif
@@ -121,9 +109,6 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_PACKAGE_INFO
   RegisterCallback(PackageInfo::kChannelName, &PackageInfo::OnPlatformMessage);
 #endif
-#ifdef ENABLE_PLUGIN_PLATFORM
-  RegisterCallback(Platform::kChannelName, &Platform::OnPlatformMessage);
-#endif
 #ifdef ENABLE_PLUGIN_PLATFORM_VIEWS
   RegisterCallback(PlatformViews::kChannelName,
                    &PlatformViews::OnPlatformMessage);
@@ -134,9 +119,6 @@ PlatformChannel::PlatformChannel() {
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
   RegisterCallback(TextInput::kChannelName, &TextInput::OnPlatformMessage);
-#endif
-#ifdef ENABLE_PLUGIN_URL_LAUNCHER
-  RegisterCallback(UrlLauncher::kChannelName, &UrlLauncher::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
   RegisterCallback(SecureStorage::kChannelName,

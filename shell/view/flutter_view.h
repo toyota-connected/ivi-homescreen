@@ -19,7 +19,12 @@
 
 #include "configuration/configuration.h"
 #include "flutter/fml/macros.h"
+#include "flutter/shell/platform/common/incoming_message_dispatcher.h"
+#include "flutter_desktop_view_controller_state.h"
+#include "platform/homescreen/platform_handler.h"
+#include "shell/platform/homescreen/client_wrapper/include/flutter/plugin_registrar_homescreen.h"
 #include "wayland/window.h"
+
 #ifdef ENABLE_TEXTURE_EGL
 #include "textures/egl/texture_egl.h"
 #endif
@@ -42,6 +47,7 @@
 class Display;
 class Engine;
 class Backend;
+class PlatformHandler;
 class PlatformChannel;
 class WaylandWindow;
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
@@ -55,6 +61,7 @@ class CompositorSurface;
 #ifdef ENABLE_TEXTURE_EGL
 class TextureEgl;
 #endif
+
 
 class FlutterView {
  public:
@@ -95,7 +102,9 @@ class FlutterView {
    * @relation
    * wayland, flutter
    */
-  NODISCARD Backend* GetBackend() const { return reinterpret_cast<Backend*>(m_backend.get()); }
+  NODISCARD Backend* GetBackend() const {
+    return reinterpret_cast<Backend*>(m_backend.get());
+  }
 
   /**
    * @brief Get an index of flutter views
@@ -187,8 +196,9 @@ class FlutterView {
    * @relation
    * wayland
    */
-  void SetRegion(const std::string& type,
-                 const std::vector<CompositorRegionPlugin::REGION_T>& regions) const;
+  void SetRegion(
+      const std::string& type,
+      const std::vector<CompositorRegionPlugin::REGION_T>& regions) const;
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
@@ -205,6 +215,8 @@ class FlutterView {
   const Configuration::Config m_config;
   std::shared_ptr<PlatformChannel> m_platform_channel;
   size_t m_index;
+
+  std::unique_ptr<FlutterDesktopViewControllerState> m_state;
 
 #ifdef ENABLE_TEXTURE_EGL
   std::unique_ptr<TextureEgl> m_texture_egl;
@@ -224,4 +236,6 @@ class FlutterView {
   } m_fps{};
 
   uint64_t m_pointer_events{};
+
+  static void RegisterPlugins(FlutterDesktopEngineRef engine);
 };

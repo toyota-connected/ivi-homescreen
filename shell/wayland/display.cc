@@ -41,7 +41,8 @@ Display::Display(bool enable_cursor,
 
   for (auto const& cfg : configs) {
     // check if we actually need to bind to agl-shell
-    if (WaylandWindow::WINDOW_NORMAL != WaylandWindow::get_window_type(cfg.view.window_type)) {
+    if (WaylandWindow::WINDOW_NORMAL !=
+        WaylandWindow::get_window_type(cfg.view.window_type)) {
       m_agl.bind_to_agl_shell = true;
       break;
     }
@@ -85,14 +86,18 @@ Display::~Display() {
   if (m_shm)
     wl_shm_destroy(m_shm);
 
+#if defined(ENABLE_AGL_CLIENT)
   if (m_agl.shell)
     agl_shell_destroy(m_agl.shell);
+#endif
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
   if (m_ivi_shell.application)
     ivi_application_destroy(m_ivi_shell.application);
 
   if (m_ivi_shell.ivi_wm)
     ivi_wm_destroy(m_ivi_shell.ivi_wm);
+#endif
 
   if (m_subcompositor)
     wl_subcompositor_destroy(m_subcompositor);
@@ -279,8 +284,9 @@ void Display::display_handle_mode(void* data,
     oi->refresh_rate = refresh;
   }
 
-  SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height,
-               (refresh > 1000 ? refresh / 1000.0 : static_cast<double>(refresh)));
+  SPDLOG_DEBUG(
+      "Video mode: {} x {} @ {} Hz", width, height,
+      (refresh > 1000 ? refresh / 1000.0 : static_cast<double>(refresh)));
 }
 
 void Display::display_handle_scale(void* data,
@@ -318,7 +324,8 @@ void Display::seat_handle_capabilities(void* data,
       spdlog::info("Pointer Present");
       d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
       wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
-    } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer.wl_pointer) {
+    } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) &&
+               d->m_pointer.wl_pointer) {
       wl_pointer_release(d->m_pointer.wl_pointer);
       d->m_pointer.wl_pointer = nullptr;
     }
@@ -685,7 +692,9 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 };
 
 void Display::keyboard_repeat_func(void* data) {
+#if defined(ENABLE_PLUGIN_TEXT_INPUT) || defined(ENABLE_PLUGIN_KEY_EVENT)
   auto d = static_cast<Display*>(data);
+#endif
 
 #if ENABLE_PLUGIN_TEXT_INPUT
   auto text_input = d->m_text_input[d->m_active_surface];
@@ -806,7 +815,9 @@ int Display::PollEvents() const {
   return wl_display_dispatch_pending(m_display);
 }
 
-void Display::AglShellDoBackground(struct wl_surface* surface, const size_t index) const {
+#if defined(ENABLE_AGL_CLIENT)
+void Display::AglShellDoBackground(struct wl_surface* surface,
+                                   const size_t index) const {
   if (m_agl.shell) {
     agl_shell_set_background(m_agl.shell, surface,
                              m_all_outputs[index]->output);
@@ -850,6 +861,7 @@ void Display::AglShellDoSetupActivationArea(uint32_t x,
       static_cast<int32_t>(y), static_cast<int32_t>(width),
       static_cast<int32_t>(height));
 }
+#endif
 
 void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
@@ -857,11 +869,12 @@ void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_surface_engine_map[surface] = engine;
 }
 
-bool Display::ActivateSystemCursor(const int32_t device, const std::string& kind) const {
+bool Display::ActivateSystemCursor(const int32_t device,
+                                   const std::string& kind) const {
   (void)device;
   if (!m_enable_cursor) {
-    wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial, m_cursor_surface,
-                          0, 0);
+    wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial,
+                          m_cursor_surface, 0, 0);
     wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
     wl_surface_commit(m_cursor_surface);
     return true;
@@ -939,6 +952,7 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   return {0, 0};
 }
 
+#if defined(ENABLE_AGL_CLIENT)
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
   (void)shell;
   auto* d = static_cast<Display*>(data);
@@ -991,7 +1005,9 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_fail = agl_shell_bound_fail,
     .app_state = agl_shell_app_state,
 };
+#endif
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
 void Display::ivi_wm_surface_visibility(void* /* data */,
                                         struct ivi_wm* /* ivi_wm */,
                                         uint32_t surface_id,
@@ -1205,6 +1221,7 @@ const struct ivi_wm_listener Display::ivi_wm_listener = {
     .surface_stats = ivi_wm_surface_stats,
     .layer_surface_added = ivi_wm_layer_surface_added,
 };
+#endif
 
 void Display::wayland_event_mask_print(struct wayland_event_mask const& mask) {
   const std::string out;
@@ -1236,8 +1253,9 @@ void Display::wayland_event_mask_update(
       events += event;
   }
 
-  std::transform(events.begin(), events.end(), events.begin(),
-                 [](const char c) { return std::tolower(static_cast<unsigned char>(c)); });
+  std::transform(
+      events.begin(), events.end(), events.begin(),
+      [](const char c) { return std::tolower(static_cast<unsigned char>(c)); });
 
   std::stringstream ss(events);
   while (ss.good()) {

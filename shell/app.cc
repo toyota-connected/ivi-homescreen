@@ -28,7 +28,9 @@ App::App(const std::vector<Configuration::Config>& configs)
                                                   configs[0].cursor_theme,
                                                   configs)) {
   SPDLOG_DEBUG("+App::App");
+#if defined(ENABLE_AGL_CLIENT)
   bool found_view_with_bg = false;
+#endif
 
   size_t index = 0;
   m_views.reserve(configs.size());
@@ -38,23 +40,29 @@ App::App(const std::vector<Configuration::Config>& configs)
     m_views.emplace_back(std::move(view));
     index++;
 
+#if defined(ENABLE_AGL_CLIENT)
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
-        WaylandWindow::WINDOW_BG)
+        WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
+    }
+#endif
   }
 
+#if defined(ENABLE_AGL_CLIENT)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
     m_wayland_display->AglShellDoReady();
+#endif
 
   SPDLOG_DEBUG("-App::App");
 }
 
 int App::Loop() const {
-  const auto start_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
+  const auto start_time =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count();
 
   const auto ret = m_wayland_display->PollEvents();
 
@@ -66,8 +74,8 @@ int App::Loop() const {
     m_wayland_display->m_repeat_timer->wait_event();
 
   const auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now().time_since_epoch())
-                      .count();
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
 
   const auto elapsed = end_time - start_time;
 

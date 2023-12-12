@@ -21,13 +21,19 @@
 
 #include <cassert>
 
-#include "agl-shell-client-protocol.h"
+#include "backend/backend.h"
 #include "constants.h"
 
-#include "backend/backend.h"
+#if defined(ENABLE_AGL_CLIENT)
+#include "agl-shell-client-protocol.h"
+#endif
+#if defined(ENABLE_IVI_SHELL_CLIENT)
 #include "ivi-application-client-protocol.h"
 #include "ivi-wm-client-protocol.h"
+#endif
+#if defined(ENABLE_XDG_CLIENT)
 #include "xdg-shell-client-protocol.h"
+#endif
 
 // workaround for Wayland macro not compiling in C++
 #define WL_ARRAY_FOR_EACH(pos, array, type)                             \
@@ -104,7 +110,8 @@ class WaylandWindow {
    * @relation
    * platform
    */
-  NODISCARD bool ActivateSystemCursor(int32_t device, const std::string& kind) const;
+  NODISCARD bool ActivateSystemCursor(int32_t device,
+                                      const std::string& kind) const;
 
   /**
    * @brief Get Base Surface

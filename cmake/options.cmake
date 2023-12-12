@@ -39,30 +39,6 @@ endif ()
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
 #
-# Enable XDG Client
-#
-option(ENABLE_XDG_CLIENT "Enable XDG Client" ON)
-if (ENABLE_XDG_CLIENT)
-    add_compile_definitions(ENABLE_XDG_CLIENT)
-endif ()
-
-#
-# Enable AGL Client
-#
-option(ENABLE_AGL_CLIENT "Enable AGL Client" OFF)
-if (ENABLE_AGL_CLIENT)
-    add_compile_definitions(ENABLE_AGL_CLIENT)
-endif ()
-
-#
-# Enable ivi-shell Client
-#
-option(ENABLE_IVI_SHELL_CLIENT "Enable ivi-shell Client" OFF)
-if (ENABLE_IVI_SHELL_CLIENT)
-    add_compile_definitions(ENABLE_IVI_SHELL_CLIENT)
-endif ()
-
-#
 # Enable Dart VM console redirection
 #
 option(ENABLE_DART_VM_LOGGING "Enable Dart VM console redirection" ON)
