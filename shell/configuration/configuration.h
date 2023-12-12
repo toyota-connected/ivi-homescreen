@@ -17,9 +17,9 @@
 #include <string>
 #include <vector>
 
+#include <flutter/fml/command_line.h>
 #include "flutter/fml/macros.h"
 #include "rapidjson/document.h"
-#include <flutter/fml/command_line.h>
 #include "utils.h"
 
 class Configuration {
@@ -72,7 +72,7 @@ class Configuration {
    * @relation
    * internal
    */
-  static void PrintConfig(const Config&);
+  static void PrintConfig(const Config& config);
 
   /**
    * @brief config file generate from argc and argv
@@ -87,9 +87,9 @@ class Configuration {
 
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
 
- PRIVATE:
+  PRIVATE :
 
-  static constexpr char kViewKey[] = "view";
+      static constexpr char kViewKey[] = "view";
   static constexpr char kBundlePathKey[] = "bundle_path";
   static constexpr char kWindowTypeKey[] = "window_type";
   static constexpr char kOutputIndex[] = "output_index";
@@ -173,7 +173,7 @@ class Configuration {
    * @relation
    * internal
    */
-  static void getCliOverrides(Config& instance, Config& cli);
+  static void getCliOverrides(Config& instance, const Config& cli);
 
   /**
    * @brief mask the accessibility_features
@@ -198,6 +198,6 @@ class Configuration {
    * @relation
    * internal
    */
-  static int ConvertCommandlineToConfig(fml::CommandLine& cl, Config& config);
-
+  static int ConvertCommandlineToConfig(const fml::CommandLine& cl,
+                                        Config& config);
 };

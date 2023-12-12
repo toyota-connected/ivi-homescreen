@@ -69,13 +69,13 @@ int main(int argc, char** argv) {
     }
   }
 
-  auto configs = Configuration::ParseConfig(config);
+  const auto configs = Configuration::ParseConfig(config);
   for (auto const& c : configs) {
     Configuration::PrintConfig(c);
   }
   assert(!configs.empty());
 
-  App app(configs);
+  const App app(configs);
 
   std::signal(SIGINT, SignalHandler);
 

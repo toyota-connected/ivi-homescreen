@@ -27,6 +27,7 @@ add_executable(homescreen
         configuration/configuration.cc
         engine.cc
         json_utils.cc
+        libflutter_engine.cc
         main.cc
         platform_channel.cc
         textures/texture.cc
@@ -69,6 +70,29 @@ if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
     target_sources(homescreen PRIVATE curl_client/curl_client.cc)
 endif ()
 
+if (BUILD_PLUGIN_AUDIO_PLAYERS)
+    target_sources(homescreen PRIVATE plugins/audio_players/audio_player.cc)
+    target_sources(homescreen PRIVATE plugins/audio_players/audio_players_registry.cc)
+endif ()
+
+if (BUILD_PLUGIN_PLATFORM_VIEWS OR BUILD_PLUGIN_LAYER_PLAYGROUND)
+    target_sources(homescreen PRIVATE
+            plugins/platform_views/platform_view.cc
+            plugins/platform_views/platform_views_registry.cc
+    )
+endif ()
+
+if (BUILD_PLUGIN_FIREBASE_CORE)
+    target_sources(homescreen PRIVATE
+            plugins/firebase_core/firebase_core_plugin.cpp
+            plugins/firebase_core/firebase_core_plugin_c_api.cpp
+            plugins/firebase_core/firebase_core.cc
+    )
+    target_include_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_INCLUDE_DIRS})
+    target_link_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_LIB_DIRS})
+    target_link_libraries(homescreen PRIVATE firebase_app flatbuffers z)
+endif ()
+
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL
@@ -91,7 +115,6 @@ target_include_directories(homescreen
         ..
         logging
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${GLIB2_INCLUDE_DIRS}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
         ${LIBCURL_INCLUDE_DIRS}
@@ -111,7 +134,7 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(homescreen PRIVATE bluevk)
 endif ()
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE sentry::sentry)
+    target_link_libraries(homescreen PRIVATE sentry::sentry PkgConfig::UNWIND)
 endif ()
 
 target_link_libraries(homescreen PRIVATE
@@ -125,11 +148,6 @@ target_link_libraries(homescreen PRIVATE
         ${AVFORMAT_LIBRARIES}
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
 )
-
-if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE unwind)
-endif ()
-
 
 target_link_directories(homescreen PRIVATE
         ${CMAKE_BINARY_DIR}

@@ -24,10 +24,10 @@
 #include "textures/egl/texture_egl.h"
 #endif
 #ifdef ENABLE_PLUGIN_TEXT_INPUT
-#include "static_plugins/text_input/text_input.h"
+#include "plugins/text_input/text_input.h"
 #endif
 #ifdef ENABLE_PLUGIN_KEY_EVENT
-#include "static_plugins/key_event/key_event.h"
+#include "plugins/key_event/key_event.h"
 #endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
 #include "textures/navi_render_egl/texture_navi_render_egl.h"
@@ -36,7 +36,7 @@
 #include "compositor_surface.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_REGION
-#include "static_plugins/comp_region/comp_region.h"
+#include "plugins/comp_region/comp_region.h"
 #endif
 
 class Display;
@@ -95,7 +95,7 @@ class FlutterView {
    * @relation
    * wayland, flutter
    */
-  Backend* GetBackend() { return reinterpret_cast<Backend*>(m_backend.get()); }
+  NODISCARD Backend* GetBackend() const { return reinterpret_cast<Backend*>(m_backend.get()); }
 
   /**
    * @brief Get an index of flutter views
@@ -177,7 +177,7 @@ class FlutterView {
    * @relation
    * wayland
    */
-  void ClearRegion(std::string& type);
+  void ClearRegion(const std::string& type) const;
 
   /**
    * @brief Set a region of a subsurface
@@ -187,8 +187,8 @@ class FlutterView {
    * @relation
    * wayland
    */
-  void SetRegion(std::string& type,
-                 std::vector<CompositorRegionPlugin::REGION_T>& regions);
+  void SetRegion(const std::string& type,
+                 const std::vector<CompositorRegionPlugin::REGION_T>& regions) const;
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);

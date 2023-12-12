@@ -16,7 +16,9 @@
 
 #include "gl_process_resolver.h"
 
+#include <EGL/egl.h>
 #include <dlfcn.h>
+
 #include <cassert>
 
 #include "logging.h"
@@ -24,13 +26,13 @@
 std::shared_ptr<EglProcessResolver> GlProcessResolver::sInstance = nullptr;
 
 EglProcessResolver::~EglProcessResolver() {
-  for (auto& item : m_handles) {
+  for (auto const& item : m_handles) {
     dlclose(item);
   }
 }
 
-int EglProcessResolver::GetHandle(std::string lib, void** out_handle) {
-  auto handle = dlopen(lib.c_str(), RTLD_LAZY | RTLD_LOCAL);
+int EglProcessResolver::GetHandle(const std::string& lib, void** out_handle) {
+  const auto handle = dlopen(lib.c_str(), RTLD_LAZY | RTLD_LOCAL);
 #if !defined(NDEBUG)
   if (handle) {
     SPDLOG_DEBUG("dlopen: {}", lib);
@@ -48,8 +50,8 @@ int EglProcessResolver::GetHandle(std::string lib, void** out_handle) {
 
 void EglProcessResolver::Initialize() {
   void* handle;
-  std::vector<std::string> libs(
-      kGlSoNames, kGlSoNames + (sizeof kGlSoNames / sizeof kGlSoNames[0]));
+  const std::vector<std::string> libs(kGlSoNames,
+                                      kGlSoNames + std::size(kGlSoNames));
   for (const auto& name : libs) {
     GetHandle(name, &handle);
     if (handle) {
@@ -61,7 +63,7 @@ void EglProcessResolver::Initialize() {
   }
 }
 
-void* EglProcessResolver::process_resolver(const char* name) {
+void* EglProcessResolver::process_resolver(const char* name) const {
   if (name == nullptr) {
     spdlog::error("gl_proc_resolver for nullptr; ignoring");
     return nullptr;

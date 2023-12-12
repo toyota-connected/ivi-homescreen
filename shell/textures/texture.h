@@ -20,7 +20,6 @@
 #include <vector>
 
 #include <EGL/egl.h>
-#include <EGL/eglext.h>
 
 #include <GLES2/gl2.h>
 #include <flutter/encodable_value.h>
@@ -119,7 +118,7 @@ class Texture {
    * @relation
    * wayland, flutter
    */
-  void FrameReady();
+  void FrameReady() const;
 
   /**
    * @brief Get texture id
@@ -128,7 +127,7 @@ class Texture {
    * @relation
    * wayland, flutter
    */
-  int64_t GetId() { return m_id; }
+  NODISCARD int64_t GetId() const { return m_id; }
 
  protected:
   Engine* m_flutter_engine;

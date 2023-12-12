@@ -4,7 +4,6 @@
 #include <memory>
 
 #include "configuration/configuration.h"
-#include "flutter/fml/macros.h"
 
 #include <EGL/egl.h>
 #include <wayland-client.h>
@@ -132,7 +131,7 @@ class CompositorSurface {
   std::string m_assets_path;
   std::string m_cache_path;
   std::string m_misc_path;
-  MAYBE_UNUSED PARAM_SURFACE_T m_type;
+  PARAM_SURFACE_T m_type;
   PARAM_Z_ORDER_T m_z_order;
   PARAM_SYNC_T m_sync;
   int width_;

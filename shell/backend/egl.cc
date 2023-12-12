@@ -25,8 +25,8 @@
 #include "gl_process_resolver.h"
 #include "logging.h"
 
-Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
-    : m_dpy(get_egl_display(platform, native_display, nullptr)),
+Egl::Egl(void* native_display, int buffer_size, bool debug)
+    : m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))),
       m_buffer_size(buffer_size) {
   assert(m_dpy);
 
@@ -36,12 +36,6 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
 
   ret = eglBindAPI(EGL_OPENGL_ES_API);
   assert(ret == EGL_TRUE);
-
-  std::unordered_map<EGLDisplay, const char*> extensions;
-
-#if !defined(NDEBUG)
-  EGL_KHR_debug_init(extensions);
-#endif
 
   EGLint count;
   eglGetConfigs(m_dpy, nullptr, 0, &count);
@@ -65,7 +59,7 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
     eglGetConfigAttrib(m_dpy, configs[i], EGL_BUFFER_SIZE, &size);
     SPDLOG_DEBUG("Buffer size for config {} is {}", i, size);
     if (m_buffer_size <= size) {
-      m_config = configs[i];
+      memcpy(&m_config, &configs[i], sizeof(EGLConfig));
       break;
     }
   }
@@ -91,28 +85,31 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
 
   MakeCurrent();
 
+  auto extensions = eglQueryString(m_dpy, EGL_EXTENSIONS);
+#if !defined(NDEBUG)
+  EGL_KHR_debug_init(extensions);
+#endif
+
   /* setup for Damage Region Management */
-  if (HasEGLExtension(extensions, m_dpy, "EGL_EXT_swap_buffers_with_damage")) {
+  if (HasEGLExtension(extensions, "EGL_EXT_swap_buffers_with_damage")) {
     SPDLOG_DEBUG("EGL_EXT_swap_buffers_with_damage found");
     m_pfSwapBufferWithDamage =
         reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
             eglGetProcAddress("eglSwapBuffersWithDamageEXT"));
-  } else if (HasEGLExtension(extensions, m_dpy,
-                             "EGL_KHR_swap_buffers_with_damage")) {
+  } else if (HasEGLExtension(extensions, "EGL_KHR_swap_buffers_with_damage")) {
     SPDLOG_DEBUG("EGL_KHR_swap_buffers_with_damage found");
     m_pfSwapBufferWithDamage =
         reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
             eglGetProcAddress("eglSwapBuffersWithDamageKHR"));
   }
 
-  if (HasEGLExtension(extensions, m_dpy, "EGL_KHR_partial_update")) {
+  if (HasEGLExtension(extensions, "EGL_KHR_partial_update")) {
     SPDLOG_DEBUG("EGL_KHR_partial_update found");
     m_pfSetDamageRegion = reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
         eglGetProcAddress("eglSetDamageRegionKHR"));
   }
 
-  m_has_egl_ext_buffer_age =
-      HasEGLExtension(extensions, m_dpy, "EGL_EXT_buffer_age");
+  m_has_egl_ext_buffer_age = HasEGLExtension(extensions, "EGL_EXT_buffer_age");
   if (m_has_egl_ext_buffer_age) {
     SPDLOG_DEBUG("EGL_EXT_buffer_age found");
   }
@@ -122,32 +119,28 @@ Egl::Egl(void* native_display, EGLenum platform, int buffer_size, bool debug)
   SPDLOG_DEBUG("EGL Vendor: {}", eglQueryString(m_dpy, EGL_VENDOR));
   SPDLOG_DEBUG("EGL Extensions: {}", eglQueryString(m_dpy, EGL_EXTENSIONS));
 
-  auto glGetString_ = reinterpret_cast<PFNGLGETSTRINGPROC>(
-      GlProcessResolver::GetInstance().process_resolver("glGetString"));
-  assert(glGetString_);
-
   std::stringstream ss;
-  ss << glGetString_(GL_VENDOR);
+  ss << glGetString(GL_VENDOR);
   SPDLOG_DEBUG("GL Vendor: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_RENDERER);
+  ss << glGetString(GL_RENDERER);
   SPDLOG_DEBUG("GL Renderer: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_VERSION);
+  ss << glGetString(GL_VERSION);
   SPDLOG_DEBUG("GL Version: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_SHADING_LANGUAGE_VERSION);
+  ss << glGetString(GL_SHADING_LANGUAGE_VERSION);
   SPDLOG_DEBUG("GL Shading Language Version: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
 
-  ss << glGetString_(GL_EXTENSIONS);
+  ss << glGetString(GL_EXTENSIONS);
   SPDLOG_DEBUG("GL Extensions: {}", ss.str().c_str());
   ss.clear();
   ss.str("");
@@ -236,15 +229,8 @@ bool Egl::MakeTextureCurrent() {
   return true;
 }
 
-bool Egl::HasEGLExtension(
-    std::unordered_map<EGLDisplay, const char*>& extensions,
-    EGLDisplay dpy,
-    const char* name) {
-  auto got = extensions.find(dpy);
-  if (got == extensions.end()) {
-    extensions[dpy] = eglQueryString(dpy, EGL_EXTENSIONS);
-  }
-  const char* r = strstr(extensions[dpy], name);
+bool Egl::HasEGLExtension(const char* extensions, const char* name) {
+  const char* r = strstr(extensions, name);
 #if !defined(NDEBUG)
   if (!r) {
     SPDLOG_DEBUG("{} Not Found", name);
@@ -564,31 +550,31 @@ static struct egl_config_attribute egl_config_attributes[] = {
     {
         .id = EGL_SURFACE_TYPE,
         .name = "EGL_SURFACE_TYPE",
-        .cardinality = -(int32_t)COUNT_OF(egl_enum_surface_type),
+        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_surface_type)),
         .values = egl_enum_surface_type,
     },
     {
         .id = EGL_RENDERABLE_TYPE,
         .name = "EGL_RENDERABLE_TYPE",
-        .cardinality = -(int32_t)COUNT_OF(egl_enum_renderable_type),
+        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_renderable_type)),
         .values = egl_enum_renderable_type,
     },
     {
         .id = EGL_CONFORMANT,
         .name = "EGL_CONFORMANT",
-        .cardinality = -(int32_t)COUNT_OF(egl_enum_conformant),
+        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_conformant)),
         .values = egl_enum_conformant,
     },
     {
         .id = EGL_TRANSPARENT_TYPE,
         .name = "EGL_TRANSPARENT_TYPE",
-        .cardinality = COUNT_OF(egl_enum_transparency),
+        .cardinality = static_cast<int32_t>(COUNT_OF(egl_enum_transparency)),
         .values = egl_enum_transparency,
     },
     {
         .id = EGL_COLOR_BUFFER_TYPE,
         .name = "EGL_COLOR_BUFFER_TYPE",
-        .cardinality = COUNT_OF(egl_enum_color_buffer),
+        .cardinality = static_cast<int32_t>(COUNT_OF(egl_enum_color_buffer)),
         .values = egl_enum_color_buffer,
     },
 };
@@ -633,7 +619,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
       } else if (attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
-        for (size_t k = 0; k < (size_t)attribute.cardinality; k++) {
+        for (size_t k = 0; k < static_cast<size_t>(attribute.cardinality); k++) {
           if (attribute.values[k].id == value) {
             ss << "\t\t" << attribute.name << ": " << attribute.values[k].name;
             spdlog::info(ss.str().c_str());
@@ -658,7 +644,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           ss.str("");
           ss.clear();
         } else {
-          for (size_t k = 0; k < (size_t)-attribute.cardinality; k++) {
+          for (size_t k = 0; k < static_cast<size_t>(-attribute.cardinality); k++) {
             if (attribute.values[k].id & value) {
               value &= ~attribute.values[k].id;
               if (value != 0) {
@@ -742,16 +728,14 @@ void Egl::sDebugCallback(EGLenum error,
   spdlog::error("\tmessage: {}", ((message == nullptr) ? "" : message));
 }
 
-void Egl::EGL_KHR_debug_init(
-    std::unordered_map<EGLDisplay, const char*>& extensions) {
-  SPDLOG_TRACE("+EGL_KHR_debug_init");
-  if (HasEGLExtension(extensions, EGL_NO_DISPLAY, "EGL_KHR_debug")) {
+void Egl::EGL_KHR_debug_init(const char* extensions) {
+  if (HasEGLExtension(extensions, "EGL_KHR_debug")) {
     SPDLOG_DEBUG("EGL_KHR_debug");
 
-    m_pfDebugMessageControl =
+    auto pfDebugMessageControl =
         reinterpret_cast<PFNEGLDEBUGMESSAGECONTROLKHRPROC>(
             eglGetProcAddress("eglDebugMessageControlKHR"));
-    assert(m_pfDebugMessageControl);
+    assert(pfDebugMessageControl);
 
     const EGLAttrib sDebugAttribList[] = {EGL_DEBUG_MSG_CRITICAL_KHR,
                                           EGL_TRUE,
@@ -764,40 +748,8 @@ void Egl::EGL_KHR_debug_init(
                                           EGL_NONE,
                                           0};
 
-    m_pfDebugMessageControl(sDebugCallback, sDebugAttribList);
-
-    m_pfQueryDebug = reinterpret_cast<PFNEGLQUERYDEBUGKHRPROC>(
-        eglGetProcAddress("eglQueryDebugKHR"));
-    assert(m_pfQueryDebug);
-
-    m_pfLabelObject = reinterpret_cast<PFNEGLLABELOBJECTKHRPROC>(
-        eglGetProcAddress("eglLabelObjectKHR"));
-    assert(m_pfLabelObject);
+    pfDebugMessageControl(sDebugCallback, sDebugAttribList);
   }
-  SPDLOG_TRACE("-EGL_KHR_debug_init");
-}
-
-EGLDisplay Egl::get_egl_display(EGLenum platform,
-                                void* native_display,
-                                const EGLint* attrib_list) {
-  static PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = nullptr;
-  static EGLDisplay dpy = nullptr;
-
-  if (dpy != nullptr)
-    return dpy;
-
-  if (!get_platform_display) {
-    get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-        eglGetProcAddress("eglGetPlatformDisplayEXT"));
-  }
-
-  if (get_platform_display) {
-    dpy = get_platform_display(platform, native_display, attrib_list);
-    return dpy;
-  }
-
-  dpy = eglGetDisplay((EGLNativeDisplayType)native_display);
-  return dpy;
 }
 
 EGLSurface Egl::create_egl_surface(void* native_window,
@@ -815,5 +767,5 @@ EGLSurface Egl::create_egl_surface(void* native_window,
     return create_platform_window(m_dpy, m_config, native_window, attrib_list);
 
   return eglCreateWindowSurface(
-      m_dpy, m_config, (EGLNativeWindowType)native_window, attrib_list);
+      m_dpy, m_config, static_cast<EGLNativeWindowType>(native_window), attrib_list);
 }

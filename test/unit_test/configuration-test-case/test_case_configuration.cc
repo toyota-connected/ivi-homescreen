@@ -87,7 +87,7 @@ TEST(HomescreenConfigurationConfigFromArgcArgv, Lv1Normal001) {
                          "--p=1",
                          "--window-type=NORMAL",
                          "--xdg-shell-app-id=homescreen"};
-  char** argv_p = (char**)&argv;
+  char** argv_p = reinterpret_cast<char**>(&argv);
 
   // call target function
   config = Configuration::ConfigFromArgcArgv(argc, argv_p);

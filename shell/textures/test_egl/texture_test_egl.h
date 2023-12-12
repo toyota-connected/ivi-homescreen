@@ -16,16 +16,11 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-
 #include <GLES2/gl2.h>
 
 #ifndef GL_RGBA8
 #define GL_RGBA8 0x8058
 #endif
-
-#include <shell/platform/embedder/embedder.h>
 
 #include "flutter/fml/macros.h"
 #include "textures/texture.h"

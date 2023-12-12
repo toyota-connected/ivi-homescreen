@@ -29,24 +29,23 @@
 
 #include "hexdump.h"
 #include "utils.h"
-#include "wayland-client.h"
 
 Engine::Engine(FlutterView* view,
-               size_t index,
+               const size_t index,
                const std::vector<const char*>& vm_args_c,
                const std::string& bundle_path,
-               int32_t accessibility_features)
+               const int32_t accessibility_features)
     : m_index(index),
       m_running(false),
-      m_view(view),
       m_backend(view->GetBackend()),
       m_egl_window(view->GetWindow()),
-      m_flutter_engine(nullptr),
+      m_view(view),
       m_cache_path(std::move(GetFilePath(index))),
+      m_prev_height(0),
+      m_prev_width(0),
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
-      m_prev_width(0),
-      m_prev_height(0),
+      m_flutter_engine(nullptr),
       m_args({
           .struct_size = sizeof(FlutterProjectArgs),
           .assets_path{},
@@ -55,10 +54,10 @@ Engine::Engine(FlutterView* view,
           .command_line_argv = vm_args_c.data(),
           .platform_message_callback =
               [](const FlutterPlatformMessage* message, void* userdata) {
-                auto engine = reinterpret_cast<Engine*>(userdata);
+                const auto engine = static_cast<Engine*>(userdata);
 
-                auto platform_channel = PlatformChannel::GetInstance();
-                auto callback =
+                const auto platform_channel = PlatformChannel::GetInstance();
+                const auto callback =
                     platform_channel
                         ->GetHandler()[std::string(message->channel)];
 
@@ -78,7 +77,7 @@ Engine::Engine(FlutterView* view,
           .log_message_callback =
               [](const char* /* tag */, const char* message, void* user_data) {
 #if defined(ENABLE_DART_VM_LOGGING)
-                auto engine = reinterpret_cast<Engine*>(user_data);
+                const auto engine = static_cast<Engine*>(user_data);
                 std::scoped_lock<std::mutex> lock(engine->m_queue_lock);
                 engine->m_vm_queue->emplace(message);
 #else
@@ -91,7 +90,7 @@ Engine::Engine(FlutterView* view,
 
   /// Task Runner
   m_platform_task_runner =
-      std::make_unique<TaskRunner>("Platform", m_proc_table, m_flutter_engine);
+      std::make_shared<TaskRunner>("Platform", m_flutter_engine);
 
   m_vm_queue = std::make_shared<std::queue<std::string>>();
 
@@ -106,35 +105,18 @@ Engine::Engine(FlutterView* view,
   if (bundle_path.empty()) {
     spdlog::critical("Specify bundle folder using --b= option");
     exit(EXIT_FAILURE);
+  }
+
+  // override path
+  engine_file_path = fml::paths::JoinPaths({bundle_path, kBundleEngine});
+  if (fml::IsFile(engine_file_path)) {
+    SPDLOG_DEBUG("({}) libflutter_engine.so: {}", m_index, engine_file_path);
   } else {
-    // override path
-    engine_file_path = fml::paths::JoinPaths({bundle_path, kBundleEngine});
-    if (fml::IsFile(engine_file_path)) {
-      SPDLOG_DEBUG("({}) libflutter_engine.so: {}", m_index, engine_file_path);
-    } else {
-      engine_file_path = kSystemEngine;
-    }
+    engine_file_path = kSystemEngine;
   }
-  m_engine_so_handle = dlopen(engine_file_path.c_str(), RTLD_LAZY);
-  if (!m_engine_so_handle) {
+
+  if (!LibFlutterEngine::IsPresent(engine_file_path.c_str())) {
     spdlog::critical(dlerror());
-    exit(-1);
-  }
-  dlerror();
-
-  FlutterEngineResult (*GetProcAddresses)(FlutterEngineProcTable*);
-  GetProcAddresses = (FlutterEngineResult(*)(FlutterEngineProcTable*))dlsym(
-      m_engine_so_handle, "FlutterEngineGetProcAddresses");
-
-  char* error = dlerror();
-  if (error != nullptr) {
-    spdlog::critical(error);
-    exit(-1);
-  }
-
-  m_proc_table.struct_size = sizeof(FlutterEngineProcTable);
-  if (kSuccess != GetProcAddresses(&m_proc_table)) {
-    spdlog::critical("FlutterEngineGetProcAddresses != kSuccess");
     exit(-1);
   }
 
@@ -162,7 +144,7 @@ Engine::Engine(FlutterView* view,
   ///
   /// AOT loading
   ///
-  if (m_proc_table.RunsAOTCompiledDartCode()) {
+  if (LibFlutterEngine->RunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
     m_aot_data = LoadAotData(fml::paths::JoinPaths({bundle_path, kBundleAot}));
     if (m_aot_data) {
@@ -188,12 +170,12 @@ Engine::Engine(FlutterView* view,
       .struct_size = sizeof(FlutterTaskRunnerDescription),
       .user_data = this,
       .runs_task_on_current_thread_callback = [](void* context) -> bool {
-        return reinterpret_cast<Engine*>(context)
+        return static_cast<Engine*>(context)
             ->m_platform_task_runner->IsThreadEqual(pthread_self());
       },
       .post_task_callback = [](FlutterTask task, uint64_t target_time,
                                void* context) -> void {
-        auto e = reinterpret_cast<Engine*>(context);
+        const auto e = static_cast<Engine*>(context);
         e->m_platform_task_runner->QueueFlutterTask(e->m_index, target_time,
                                                     task, context);
       },
@@ -211,11 +193,11 @@ Engine::Engine(FlutterView* view,
 
 Engine::~Engine() {
   if (m_running) {
-    m_proc_table.Shutdown(m_flutter_engine);
+    LibFlutterEngine->Deinitialize(m_flutter_engine);
+    LibFlutterEngine->Shutdown(m_flutter_engine);
     if (m_aot_data) {
-      m_proc_table.CollectAOTData(m_aot_data);
+      LibFlutterEngine->CollectAOTData(m_aot_data);
     }
-    dlclose(m_engine_so_handle);
   }
   m_platform_task_runner.reset();
   m_vm_queue.reset();
@@ -239,11 +221,11 @@ FlutterEngineResult Engine::RunTask() {
   return kSuccess;
 }
 
-FlutterEngineResult Engine::Shutdown() {
+FlutterEngineResult Engine::Shutdown() const {
   if (!m_flutter_engine) {
     return kSuccess;
   }
-  return m_proc_table.Shutdown(m_flutter_engine);
+  return LibFlutterEngine->Shutdown(m_flutter_engine);
 }
 
 bool Engine::IsRunning() const {
@@ -253,8 +235,8 @@ bool Engine::IsRunning() const {
 FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
   SPDLOG_TRACE("({}) +Engine::Run", m_index);
 
-  auto config = m_backend->GetRenderConfig();
-  FlutterEngineResult result = m_proc_table.Initialize(
+  const auto config = m_backend->GetRenderConfig();
+  FlutterEngineResult result = LibFlutterEngine->Initialize(
       FLUTTER_ENGINE_VERSION, &config, &m_args, this, &m_flutter_engine);
   if (result != kSuccess) {
     spdlog::error("({}) FlutterEngineRun failed or engine is null", m_index);
@@ -263,30 +245,17 @@ FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
 
   m_event_loop_thread = event_loop_thread_id;
 
-  result = m_proc_table.RunInitialized(m_flutter_engine);
+  result = LibFlutterEngine->RunInitialized(m_flutter_engine);
   if (result == kSuccess) {
     m_running = true;
     SPDLOG_DEBUG("({}) Engine::m_running = {}", m_index, m_running);
   }
 
   // Set available system locales
-  FlutterLocale locale = {};
-  locale.struct_size = sizeof(locale);
-  locale.language_code = kDefaultLocaleLanguageCode;
-  locale.country_code = kDefaultLocaleCountryCode;
-  locale.script_code = kDefaultLocaleScriptCode;
-  locale.variant_code = nullptr;
-
-  std::vector<const FlutterLocale*> locales;
-  locales.push_back(&locale);
-
-  if (kSuccess != m_proc_table.UpdateLocales(m_flutter_engine, locales.data(),
-                                             locales.size())) {
-    spdlog::error("({}) Failed to set Flutter Engine Locale", m_index);
-  }
+  SetUpLocales();
 
   // Set Accessibility Features
-  m_proc_table.UpdateAccessibilityFeatures(
+  LibFlutterEngine->UpdateAccessibilityFeatures(
       m_flutter_engine,
       static_cast<FlutterAccessibilityFeature>(m_accessibility_features));
 
@@ -303,12 +272,14 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
   m_prev_width = width;
 
   // Set window size
-  FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
-                                    .width = width,
-                                    .height = height,
-                                    .pixel_ratio = m_prev_pixel_ratio};
+  const FlutterWindowMetricsEvent fwme = {
+      .struct_size = sizeof(FlutterWindowMetricsEvent),
+      .width = width,
+      .height = height,
+      .pixel_ratio = m_prev_pixel_ratio};
 
-  auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
+  const auto result =
+      LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
     spdlog::critical("({}) Failed send initial window size to flutter",
                      m_index);
@@ -329,12 +300,14 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   m_prev_pixel_ratio = pixel_ratio;
 
   // Set window size
-  FlutterWindowMetricsEvent fwme = {.struct_size = sizeof(fwme),
-                                    .width = m_prev_width,
-                                    .height = m_prev_height,
-                                    .pixel_ratio = pixel_ratio};
+  const FlutterWindowMetricsEvent fwme = {
+      .struct_size = sizeof(FlutterWindowMetricsEvent),
+      .width = m_prev_width,
+      .height = m_prev_height,
+      .pixel_ratio = pixel_ratio};
 
-  auto result = m_proc_table.SendWindowMetricsEvent(m_flutter_engine, &fwme);
+  const auto result =
+      LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
     spdlog::critical("({}) Failed send initial window size to flutter",
                      m_index);
@@ -355,7 +328,7 @@ FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
 
 MAYBE_UNUSED FlutterEngineResult
 Engine::TextureRegistryRemove(int64_t texture_id) {
-  auto search =
+  const auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
                    [&texture_id](const std::pair<int64_t, void*>& element) {
                      return element.first == texture_id;
@@ -376,18 +349,20 @@ Engine::TextureRegistryRemove(int64_t texture_id) {
 
 FlutterEngineResult Engine::TextureEnable(int64_t texture_id) {
   SPDLOG_DEBUG("({}) Enable Texture ID: {}", m_index, texture_id);
-  return m_proc_table.RegisterExternalTexture(m_flutter_engine, texture_id);
+  return LibFlutterEngine->RegisterExternalTexture(m_flutter_engine,
+                                                   texture_id);
 }
 
 FlutterEngineResult Engine::TextureDisable(int64_t texture_id) {
   SPDLOG_DEBUG("({}) Disable Texture ID: {}", m_index, texture_id);
-  return m_proc_table.UnregisterExternalTexture(m_flutter_engine, texture_id);
+  return LibFlutterEngine->UnregisterExternalTexture(m_flutter_engine,
+                                                     texture_id);
 }
 
 FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
     const Engine* engine,
-    int64_t texture_id) {
-  return engine->m_proc_table.MarkExternalTextureFrameAvailable(
+    const int64_t texture_id) {
+  return LibFlutterEngine->MarkExternalTextureFrameAvailable(
       engine->m_flutter_engine, texture_id);
 }
 
@@ -398,7 +373,7 @@ flutter::EncodableValue Engine::TextureCreate(
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
   SPDLOG_DEBUG("({}) Engine::TextureCreate: <{}>", m_index, texture_id);
 
-  auto texture = this->m_texture_registry[texture_id];
+  const auto texture = this->m_texture_registry[texture_id];
 
   if (texture != nullptr) {
     return texture->Create(width, height, args);
@@ -428,7 +403,7 @@ std::string Engine::GetFilePath(size_t index) {
 FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
   SPDLOG_DEBUG("({}) OpenGL Texture: dispose ({})", m_index, texture_id);
 
-  auto search =
+  const auto search =
       std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
                    [&texture_id](const std::pair<int64_t, void*>& element) {
                      return element.first == texture_id;
@@ -449,62 +424,129 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
     return kInternalInconsistency;
   }
 
-  return m_proc_table.SendPlatformMessageResponse(m_flutter_engine, handle,
-                                                  data, data_length);
-}
-
-MAYBE_UNUSED bool Engine::SendPlatformMessage(const char* channel,
-                                              const uint8_t* message,
-                                              const size_t message_size) const {
-  if (!m_running) {
-    return kInternalInconsistency;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    spdlog::error("Not sending message on Platform Thread");
   }
-  FlutterPlatformMessageResponseHandle* handle;
-  m_proc_table.PlatformMessageCreateResponseHandle(
-      m_flutter_engine,
-      [](const uint8_t* /* data */, size_t /* size */, void* /* userdata */) {},
-      nullptr, &handle);
-  const FlutterPlatformMessage msg{
-      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
-  };
-  return (m_proc_table.SendPlatformMessage(m_flutter_engine, &msg) == kSuccess);
+
+  return LibFlutterEngine->SendPlatformMessageResponse(m_flutter_engine, handle,
+                                                       data, data_length);
 }
 
-MAYBE_UNUSED bool Engine::SendPlatformMessage(
+bool Engine::SendPlatformMessage(
     const char* channel,
-    const uint8_t* message,
-    const size_t message_size,
-    const FlutterBinaryReplyUserdata reply,
-    void* userdata) const {
+    std::unique_ptr<std::vector<uint8_t>> message,
+    const FlutterPlatformMessageResponseHandle* response_handle) const {
+  if (!m_running) {
+    return false;
+  }
+
+  FlutterEngineResult result;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto f = m_platform_task_runner->QueuePlatformMessage(channel,
+                                                          std::move(message));
+    f.wait();
+    result = f.get();
+  } else {
+    const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
+                                     message->data(), message->size(),
+                                     response_handle};
+    result = LibFlutterEngine->SendPlatformMessage(m_flutter_engine, &msg);
+  }
+
+  return (result == kSuccess);
+}
+
+bool Engine::SendPlatformMessage(const char* channel,
+                                 const uint8_t* message,
+                                 const size_t message_size) const {
+  if (!m_running) {
+    return false;
+  }
+
+  FlutterEngineResult result;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto msg =
+        std::make_unique<std::vector<uint8_t>>(message, message + message_size);
+    auto f =
+        m_platform_task_runner->QueuePlatformMessage(channel, std::move(msg));
+    f.wait();
+    result = f.get();
+  } else {
+    const FlutterPlatformMessage msg{sizeof(FlutterPlatformMessage), channel,
+                                     message, message_size, nullptr};
+    result = LibFlutterEngine->SendPlatformMessage(m_flutter_engine, &msg);
+  }
+  return (result == kSuccess);
+}
+
+bool Engine::SendPlatformMessage(const char* channel,
+                                 const uint8_t* message,
+                                 const size_t message_size,
+                                 const FlutterDataCallback reply,
+                                 void* userdata) const {
   if (!m_running) {
     return kInternalInconsistency;
   }
   FlutterPlatformMessageResponseHandle* handle;
-  m_proc_table.PlatformMessageCreateResponseHandle(m_flutter_engine, reply,
-                                                   userdata, &handle);
-  const FlutterPlatformMessage msg{
-      sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
-  };
+  LibFlutterEngine->PlatformMessageCreateResponseHandle(m_flutter_engine, reply,
+                                                        userdata, &handle);
 
-  FlutterEngineResult message_ret =
-      m_proc_table.SendPlatformMessage(m_flutter_engine, &msg);
+  FlutterEngineResult result;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto msg =
+        std::make_unique<std::vector<uint8_t>>(message, message + message_size);
+    auto f = m_platform_task_runner->QueuePlatformMessage(
+        channel, std::move(msg), handle);
+    f.wait();
+    result = f.get();
+  } else {
+    const FlutterPlatformMessage msg{
+        sizeof(FlutterPlatformMessage), channel, message, message_size, handle,
+    };
+
+    result = LibFlutterEngine->SendPlatformMessage(m_flutter_engine, &msg);
+  }
   if (handle != nullptr) {
-    m_proc_table.PlatformMessageReleaseResponseHandle(m_flutter_engine, handle);
+    LibFlutterEngine->PlatformMessageReleaseResponseHandle(m_flutter_engine,
+                                                           handle);
   }
 
-  return message_ret == kSuccess;
+  return result == kSuccess;
 }
 
 MAYBE_UNUSED FlutterEngineResult
 Engine::UpdateAccessibilityFeatures(int32_t value) {
   m_accessibility_features = value;
-  return m_proc_table.UpdateAccessibilityFeatures(
+  return LibFlutterEngine->UpdateAccessibilityFeatures(
       m_flutter_engine, static_cast<FlutterAccessibilityFeature>(value));
 }
 
-MAYBE_UNUSED FlutterEngineResult
-Engine::UpdateLocales(const FlutterLocale** locales, size_t locales_count) {
-  return m_proc_table.UpdateLocales(m_flutter_engine, locales, locales_count);
+// Passes locale information to the Flutter engine.
+void Engine::SetUpLocales() const {
+  constexpr FlutterLocale locale = {.struct_size = sizeof(FlutterLocale),
+                                    .language_code = kDefaultLocaleLanguageCode,
+                                    .country_code = kDefaultLocaleCountryCode,
+                                    .script_code = kDefaultLocaleScriptCode,
+                                    .variant_code = nullptr};
+
+  std::vector<const FlutterLocale*> flutter_locale_list;
+  flutter_locale_list.push_back(&locale);
+
+  FlutterEngineResult result;
+  if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
+    auto f = m_platform_task_runner->QueueUpdateLocales(
+        std::move(flutter_locale_list));
+    f.wait();
+    result = f.get();
+  } else {
+    result = LibFlutterEngine->UpdateLocales(m_flutter_engine,
+                                             flutter_locale_list.data(),
+                                             flutter_locale_list.size());
+  }
+
+  if (result != kSuccess) {
+    spdlog::error("({}) Failed to set up Flutter locales.", m_index);
+  }
 }
 
 void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
@@ -514,47 +556,65 @@ void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
                                 double scroll_delta_x,
                                 double scroll_delta_y,
                                 int64_t buttons) {
-  auto timestamp = m_proc_table.GetCurrentTime() / 1000;
+  auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  m_pointer_events.emplace_back(FlutterPointerEvent {
-    .struct_size = sizeof(FlutterPointerEvent), .phase = phase,
+  m_pointer_events.emplace_back(
+      FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
+                          .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = timestamp,
+                          .timestamp = timestamp,
 #elif defined(ENV32BIT)
-    .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
+                          .timestamp =
+                              static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
-    .x = x, .y = y, .device = 0, .signal_kind = signal,
-    .scroll_delta_x = scroll_delta_x, .scroll_delta_y = scroll_delta_y,
-    .device_kind = kFlutterPointerDeviceKindMouse, .buttons = buttons,
-    .pan_x = 0, .pan_y = 0, .scale = 0, .rotation = 0
-  });
+                          .x = x,
+                          .y = y,
+                          .device = 0,
+                          .signal_kind = signal,
+                          .scroll_delta_x = scroll_delta_x,
+                          .scroll_delta_y = scroll_delta_y,
+                          .device_kind = kFlutterPointerDeviceKindMouse,
+                          .buttons = buttons,
+                          .pan_x = 0,
+                          .pan_y = 0,
+                          .scale = 0,
+                          .rotation = 0});
 }
 
 void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
                                 double x,
                                 double y,
                                 int32_t device) {
-  auto timestamp = m_proc_table.GetCurrentTime() / 1000;
+  auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  m_pointer_events.emplace_back(FlutterPointerEvent {
-    .struct_size = sizeof(FlutterPointerEvent), .phase = phase,
+  m_pointer_events.emplace_back(
+      FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
+                          .phase = phase,
 #if defined(ENV64BIT)
-    .timestamp = timestamp,
+                          .timestamp = timestamp,
 #elif defined(ENV32BIT)
-    .timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
+                          .timestamp =
+                              static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
-    .x = x, .y = y, .device = device,
-    .signal_kind = kFlutterPointerSignalKindNone, .scroll_delta_x = 0.0,
-    .scroll_delta_y = 0.0, .device_kind = kFlutterPointerDeviceKindTouch,
-    .buttons = 0, .pan_x = 0, .pan_y = 0, .scale = 0, .rotation = 0
-  });
+                          .x = x,
+                          .y = y,
+                          .device = device,
+                          .signal_kind = kFlutterPointerSignalKindNone,
+                          .scroll_delta_x = 0.0,
+                          .scroll_delta_y = 0.0,
+                          .device_kind = kFlutterPointerDeviceKindTouch,
+                          .buttons = 0,
+                          .pan_x = 0,
+                          .pan_y = 0,
+                          .scale = 0,
+                          .rotation = 0});
 }
 
 void Engine::SendPointerEvents() {
   if (!m_pointer_events.empty() && m_flutter_engine) {
     std::scoped_lock lock(m_pointer_mutex);
-    m_proc_table.SendPointerEvent(m_flutter_engine, m_pointer_events.data(),
-                                  m_pointer_events.size());
+    LibFlutterEngine->SendPointerEvent(
+        m_flutter_engine, m_pointer_events.data(), m_pointer_events.size());
     m_pointer_events.clear();
   }
 }
@@ -573,8 +633,7 @@ FlutterEngineAOTData Engine::LoadAotData(
   source.elf_path = aot_data_path.c_str();
 
   FlutterEngineAOTData data;
-  auto result = m_proc_table.CreateAOTData(&source, &data);
-  if (result != kSuccess) {
+  if (kSuccess != LibFlutterEngine->CreateAOTData(&source, &data)) {
     spdlog::critical("({}) Failed to load AOT data from: {}", m_index,
                      aot_data_path);
     return nullptr;
@@ -582,7 +641,7 @@ FlutterEngineAOTData Engine::LoadAotData(
   return data;
 }
 
-bool Engine::ActivateSystemCursor(int32_t device, const std::string& kind) {
+bool Engine::ActivateSystemCursor(const int32_t device, const std::string& kind) const {
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
 
