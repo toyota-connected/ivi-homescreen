@@ -4,6 +4,13 @@
 #include <memory>
 #include <utility>
 
+#ifdef ENABLE_TEXTURE_TEST_EGL
+#include "../test_egl/texture_test_egl.h"
+#endif
+#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
+#include "../navi_render_egl/texture_navi_render_egl.h"
+#endif
+
 std::shared_ptr<TextureEgl> TextureEgl::sInstance = nullptr;
 
 TextureEgl::~TextureEgl() {

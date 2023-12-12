@@ -113,7 +113,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                   const auto frame_rects =
                       b->RectToInts(info->frame_damage.damage[0]);
                   return swap_buffers_with_damage_(
-                      b->GetDisplay(), b->m_egl_surface, frame_rects.data(), 1);
+                      b->GetDisplay(), b->m_egl_surface, const_cast<int*>(frame_rects.data()), 1);
                 } else {
                   // If the required extensions for partial repaint were not
                   // provided, do full repaint.
