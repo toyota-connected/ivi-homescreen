@@ -69,13 +69,13 @@ target_link_libraries(wayland-gen PUBLIC PkgConfig::WAYLAND)
 
 
 if (ENABLE_XDG_CLIENT)
-    target_compile_definitions(wayland-gen PUBLIC ENABLE_XDG_CLIENT)
+    target_compile_definitions(wayland-gen PUBLIC -DENABLE_XDG_CLIENT)
 endif ()
 if (ENABLE_AGL_CLIENT)
-    target_compile_definitions(wayland-gen PUBLIC ENABLE_AGL_CLIENT)
+    target_compile_definitions(wayland-gen PUBLIC -DENABLE_AGL_CLIENT)
 endif ()
 if (ENABLE_IVI_SHELL_CLIENT)
-    target_compile_definitions(wayland-gen PUBLIC ENABLE_IVI_SHELL_CLIENT)
+    target_compile_definitions(wayland-gen PUBLIC -DENABLE_IVI_SHELL_CLIENT)
 endif ()
 
 target_include_directories(wayland-gen PUBLIC ${CMAKE_CURRENT_BINARY_DIR})

@@ -1,0 +1,1 @@
+add_library(plugin_integration_test STATIC integration_test.cc integration_test.h)

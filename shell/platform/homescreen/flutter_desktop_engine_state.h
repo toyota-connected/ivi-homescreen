@@ -1,21 +1,22 @@
 #pragma once
 
+
 #include "libflutter_engine.h"
 
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/plugin_registrar.h"
 #include "flutter/shell/platform/common/incoming_message_dispatcher.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "flutter_desktop_plugin_registrar.h"
+#include "flutter_desktop_texture_registrar.h"
 #include "platform/homescreen/platform_handler.h"
-#include "plugins/isolate/isolate.h"
-#include "engine.h"
+#include "platform/homescreen/platform_views/platform_views_handler.h"
 
 struct FlutterDesktopViewControllerState;
 struct FlutterDesktopMessenger;
 
 class Engine;
-class IsolateHandler;
 class PlatformHandler;
+class PlatformViewsHandler;
 
 // Custom deleter for FlutterEngineAOTData.
 struct AOTDataDeleter {
@@ -49,14 +50,16 @@ struct FlutterDesktopEngineState {
   // The plugin registrar handle given to API clients.
   std::unique_ptr<FlutterDesktopPluginRegistrar> plugin_registrar;
 
+  // The plugin registrar handle given to API clients.
+  std::unique_ptr<FlutterDesktopTextureRegistrar> texture_registrar;
+
   // The plugin registrar managing internal plugins.
   std::unique_ptr<flutter::PluginRegistrar> internal_plugin_registrar;
 
   // Handler for the flutter/platform channel.
   std::unique_ptr<PlatformHandler> platform_handler{};
 
-  // Handler for the flutter/isolate channel.
-  std::unique_ptr<IsolateHandler> isolate_handler{};
+  std::unique_ptr<PlatformViewsHandler> platform_views_handler{};
 
   // The controller associated with this engine instance, if any.
   // This will always be null for a headless engine.

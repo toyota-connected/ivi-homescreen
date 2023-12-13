@@ -18,7 +18,7 @@
 
 #include "engine.h"
 #include "json_utils.h"
-#include "logging.h"
+#include "logging/logging.h"
 
 rapidjson::Document GoogleSignIn::GetClientSecret() {
   std::string path;

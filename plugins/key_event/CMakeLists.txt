@@ -1,0 +1,3 @@
+
+add_library(plugin_key_event STATIC key_event.cc key_event.h)
+target_link_libraries(plugin_key_event PUBLIC platform_homescreen flutter_common)

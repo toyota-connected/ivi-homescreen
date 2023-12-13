@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "flutter_desktop_plugin_registrar.h"
+#include "flutter_desktop_texture_registrar.h"
+
 #include "flutter_homescreen.h"
 
 #include <algorithm>
@@ -72,13 +75,17 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->internal_plugin_registrar =
       std::make_unique<flutter::PluginRegistrar>(state->plugin_registrar.get());
 
+  // Textures.
+  state->texture_registrar = std::make_unique<FlutterDesktopTextureRegistrar>();
+  state->texture_registrar->engine = state;
+
   // System channel handler.
   state->platform_handler = std::make_unique<PlatformHandler>(
       state->internal_plugin_registrar->messenger(), view);
 
-  // Isolate channel handler.
-  //  state->isolate_handler = std::make_unique<IsolateHandler>(
-  //      state->internal_plugin_registrar->messenger(), view);
+  // Platform Views handler.
+  state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
+      state->internal_plugin_registrar->messenger(), view);
 }
 
 FlutterDesktopEngineRef FlutterDesktopGetEngine(
@@ -187,15 +194,14 @@ void FlutterDesktopMessengerSetCallback(
 }
 
 FlutterDesktopTextureRegistrarRef FlutterDesktopRegistrarGetTextureRegistrar(
-    FlutterDesktopPluginRegistrarRef /* registrar */) {
-  SPDLOG_ERROR("Texture support is not implemented yet.");
-  return nullptr;
+    FlutterDesktopPluginRegistrarRef registrar) {
+  return registrar->engine->texture_registrar.get();
 }
 
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     FlutterDesktopTextureRegistrarRef /* texture_registrar */,
     const FlutterDesktopTextureInfo* /* texture_info */) {
-  SPDLOG_ERROR("Texture support is not implemented yet.");
+  SPDLOG_ERROR("[FlutterDesktopTextureRegistrarRegisterExternalTexture] Not implemented yet.");
   return -1;
 }
 
@@ -204,12 +210,12 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     int64_t /* texture_id */,
     void (* /* callback */)(void* user_data),
     void* /* user_data */) {
-  SPDLOG_ERROR("Texture support is not implemented yet.");
+  SPDLOG_ERROR("[FlutterDesktopTextureRegistrarUnregisterExternalTexture] Not implemented yet.");
 }
 
 bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
     FlutterDesktopTextureRegistrarRef /* texture_registrar */,
     int64_t /* texture_id */) {
-  SPDLOG_ERROR("Texture support is not implemented yet.");
+  SPDLOG_ERROR("[FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable] Not implemented yet.");
   return false;
 }

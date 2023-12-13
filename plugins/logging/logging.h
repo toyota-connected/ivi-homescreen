@@ -16,11 +16,12 @@
 
 #pragma once
 
+#include <mutex>
+
 #include <flutter/standard_method_codec.h>
 #include <shell/platform/embedder/embedder.h>
 
-#include <logging.h>
-#include <mutex>
+#include "../shell/logging/logging.h"
 
 class FlutterView;
 

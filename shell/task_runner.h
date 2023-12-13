@@ -23,7 +23,7 @@
 #include "asio/io_context.hpp"
 #include "asio/io_context_strand.hpp"
 
-#include "third_party/flutter/shell/platform/embedder/embedder.h"
+#include "flutter/shell/platform/embedder/embedder.h"
 
 #include "constants.h"
 #include "handler_priority_queue.h"

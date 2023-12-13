@@ -1,0 +1,1 @@
+add_library(plugin_file_selector STATIC file_selector.cc file_selector.h)

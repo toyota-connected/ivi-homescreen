@@ -20,7 +20,7 @@
 
 #include "asio/bind_executor.hpp"
 
-#include "third_party/flutter/shell/platform/embedder/embedder.h"
+#include "flutter/shell/platform/embedder/embedder.h"
 
 #include "libflutter_engine.h"
 #include "logging/logging.h"

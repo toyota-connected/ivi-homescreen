@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2023 Toyota Connected North America
+ * Copyright 2020 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,45 +14,74 @@
  * limitations under the License.
  */
 
-#include "platform_views.h"
-
-#include <flutter/standard_method_codec.h>
-
-#include "engine.h"
-#include "logging.h"
-#include "platform_view.h"
+#include "platform_views_handler.h"
+#include "platform_views/layer_playground/layer_playground.h"
 #include "platform_views_registry.h"
+#include "platform_view_touch.h"
+
 #if defined(ENABLE_PLUGIN_FILAMENT)
 #include "plugins/filament/filament.h"
 #endif
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
-#include "plugins/platform_views/platform_view.h"
-#endif
 
-void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
-                                      void* userdata) {
-  std::unique_ptr<std::vector<uint8_t>> result;
-  const auto engine = static_cast<Engine*>(userdata);
+#include "shell/logging/logging.h"
+#include "shell/utils.h"
 
-  auto& codec = flutter::StandardMethodCodec::GetInstance();
-  const auto method =
-      codec.DecodeMethodCall(message->message, message->message_size);
+static constexpr char kMethodCreate[] = "create";
+static constexpr char kMethodDispose[] = "dispose";
+static constexpr char kMethodResize[] = "resize";
+static constexpr char kMethodSetDirection[] = "setDirection";
+static constexpr char kMethodClearFocus[] = "clearFocus";
+static constexpr char kMethodOffset[] = "offset";
+static constexpr char kMethodTouch[] = "touch";
 
-  auto method_name = method->method_name();
-  SPDLOG_DEBUG("[platform_views] {}", method_name);
-  const auto arguments = method->arguments();
+static constexpr char kKeyId[] = "id";
+static constexpr char kKeyViewType[] = "viewType";
+static constexpr char kKeyDirection[] = "direction";
+static constexpr char kKeyWidth[] = "width";
+static constexpr char kKeyHeight[] = "height";
+static constexpr char kKeyParams[] = "params";
+static constexpr char kKeyTop[] = "top";
+static constexpr char kKeyLeft[] = "left";
+static constexpr char kKeyHybrid[] = "hybrid";
 
-  if (method_name == kMethodCreate && !arguments->IsNull()) {
+PlatformViewsHandler::PlatformViewsHandler(flutter::BinaryMessenger* messenger,
+                                           FlutterView* view)
+    : channel_(
+          std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+              messenger,
+              "flutter/platform_views",
+              &flutter::StandardMethodCodec::GetInstance())),
+      view_(view) {
+  channel_->SetMethodCallHandler(
+      [this](
+          const flutter::MethodCall<flutter::EncodableValue>& call,
+          const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
+              result) { HandleMethodCall(call, result); });
+}
+
+void PlatformViewsHandler::HandleMethodCall(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
+        result) {
+  const std::string& method_name = method_call.method_name();
+  const auto arguments = method_call.arguments();
+
+  if (arguments->IsNull()) {
+    result->Error("invalid_args", "Arguments are Null");
+    return;
+  }
+
+  if (method_name == kMethodCreate) {
     int32_t id = 0;
     std::string viewType;
     int32_t direction = 0;
     double width = 0;
     double height = 0;
-    std::vector<uint8_t> params;
+    std::vector<uint8_t> params{};
 
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
     for (auto& it : *args) {
-      auto key = std::get<std::string>(it.first);
+      const auto key = std::get<std::string>(it.first);
 
       if (key == kKeyDirection && std::holds_alternative<int32_t>(it.second)) {
         direction = std::get<int32_t>(it.second);
@@ -73,35 +102,31 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
       }
     }
 
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
     if (viewType == "@views/simple-box-view-type") {
-      auto platform_view = std::make_unique<PlatformView>(
-          id, std::move(viewType), direction, width, height);
+      auto platform_view = std::make_unique<LayerPlayground>(
+          id, std::move(viewType), direction, width, height, view_);
       PlatformViewsRegistry::GetInstance().AddPlatformView(
           id, std::move(platform_view));
+      result->Success(id);
     } else
-#endif
 #if defined(ENABLE_PLUGIN_FILAMENT)
-    if (viewType == PlatformViewFilament::kPlatformViewType) {
+        if (viewType == PlatformViewFilament::kPlatformViewType) {
       std::unique_ptr<PlatformView> platform_view =
           std::make_unique<PlatformViewFilament>(
               id, std::move(viewType), direction, width, height, params);
       PlatformViewsRegistry::GetInstance().AddPlatformView(
           id, std::move(platform_view));
+      result->Success(id);
     } else
 #endif
     {
+      (void)id;
       (void)direction;
       (void)width;
       (void)height;
       (void)params;
-      result = codec.EncodeErrorEnvelope("unhandled_platform_view", viewType);
-      engine->SendPlatformMessageResponse(message->response_handle,
-                                          result->data(), result->size());
+      result->NotImplemented();
     }
-
-    const auto res = flutter::EncodableValue(id);
-    result = codec.EncodeSuccessEnvelope(&res);
   } else if (method_name == kMethodDispose) {
     int32_t id = 0;
     bool hybrid{};
@@ -115,8 +140,10 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
         hybrid = std::get<bool>(it.second);
       }
     }
+
     PlatformViewsRegistry::GetInstance().RemovePlatformView(id, hybrid);
-    result = codec.EncodeSuccessEnvelope();
+    result->Success();
+
   } else if (method_name == kMethodResize) {
     int32_t id = 0;
     double width = 0;
@@ -144,26 +171,55 @@ void PlatformViews::OnPlatformMessage(const FlutterPlatformMessage* message,
         {flutter::EncodableValue("width"), flutter::EncodableValue(width)},
         {flutter::EncodableValue("height"), flutter::EncodableValue(height)},
     });
-    result = codec.EncodeSuccessEnvelope(&res);
+    result->Success(res);
   } else if (method_name == kMethodSetDirection) {
-    Utils::PrintFlutterEncodableValue("setDirection", *arguments);
-    result = codec.EncodeSuccessEnvelope();
+    int32_t id = 0;
+    int32_t direction = 0;
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
+    for (auto& it : *args) {
+      if (kKeyId == std::get<std::string>(it.first) &&
+          std::holds_alternative<int32_t>(it.second)) {
+        id = std::get<int32_t>(it.second);
+      } else if (kKeyDirection == std::get<std::string>(it.first) &&
+                 std::holds_alternative<int32_t>(it.second)) {
+        direction = std::get<int32_t>(it.second);
+      }
+    }
+    PlatformViewsRegistry::GetInstance().GetPlatformView(id)->SetDirection(
+        direction);
+    result->Success();
   } else if (method_name == kMethodClearFocus) {
     Utils::PrintFlutterEncodableValue("clearFocus", *arguments);
-    result = codec.EncodeSuccessEnvelope();
+    result->Success();
   } else if (method_name == kMethodOffset) {
-    Utils::PrintFlutterEncodableValue("offset", *arguments);
-    result = codec.EncodeSuccessEnvelope();
+    int32_t id = 0;
+    double left = 0;
+    double top = 0;
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
+    for (auto& it : *args) {
+      if (kKeyId == std::get<std::string>(it.first) &&
+          std::holds_alternative<int32_t>(it.second)) {
+        id = std::get<int32_t>(it.second);
+      } else if (kKeyLeft == std::get<std::string>(it.first) &&
+                 std::holds_alternative<double>(it.second)) {
+        left = std::get<double>(it.second);
+      } else if (kKeyTop == std::get<std::string>(it.first) &&
+                 std::holds_alternative<double>(it.second)) {
+        top = std::get<double>(it.second);
+      }
+    }
+    PlatformViewsRegistry::GetInstance().GetPlatformView(id)->SetOffset(left,
+                                                                        top);
+    result->Success();
   } else if (method_name == kMethodTouch && !arguments->IsNull()) {
-    const auto args = std::get_if<flutter::EncodableList>(arguments);
-    Utils::PrintFlutterEncodableList("[platform_views] touch:", *args);
-    result = codec.EncodeSuccessEnvelope();
+    /// The user touched a platform view within Flutter.
+    const auto& params = std::get_if<flutter::EncodableList>(arguments);
+    auto touch = PlatformViewTouch(*params);
+    touch.Print();
+    result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
     Utils::PrintFlutterEncodableValue("unhandled", *arguments);
-    result = codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
+    result->NotImplemented();
   }
-
-  engine->SendPlatformMessageResponse(message->response_handle, result->data(),
-                                      result->size());
 }
