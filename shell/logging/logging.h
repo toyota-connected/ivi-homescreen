@@ -21,8 +21,8 @@
 #else
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_OFF
 #endif
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 #if defined(ENABLE_DLT)
 #include "dlt/dlt.h"

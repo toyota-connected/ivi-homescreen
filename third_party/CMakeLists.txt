@@ -1,4 +1,12 @@
 
+#
+# Flutter Common library
+#
+add_subdirectory(flutter)
+
+#
+# Filament
+#
 set(LINUX TRUE)
 
 add_compile_definitions(FILAMENT_SUPPORTS_WAYLAND)
@@ -20,6 +28,7 @@ add_subdirectory(asio-1-28-1)
 set(SPDLOG_NO_EXCEPTIONS ON)
 set(SPDLOG_NO_THREAD_ID ON)
 set(SPDLOG_BUILD_PIC ON)
+set(SPDLOG_SANITIZE_ADDRESS ${SANITIZE_ADDRESS})
 add_subdirectory(spdlog-1.12.0)
 
 #
@@ -28,8 +37,3 @@ add_subdirectory(spdlog-1.12.0)
 if (BUILD_UNIT_TESTS)
     add_subdirectory(googletest)
 endif ()
-
-#
-# Flutter Common library
-#
-add_subdirectory(flutter)

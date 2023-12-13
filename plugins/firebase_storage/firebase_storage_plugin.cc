@@ -515,7 +515,7 @@ class PutDataStreamHandler
     future_result.OnCompletion([this](const Future<Metadata>& data_result) {
       if (data_result.error() == firebase::storage::kErrorNone) {
         flutter::EncodableMap event = flutter::EncodableMap();
-        event[kTaskStateName] =
+        event[flutter::EncodableValue(kTaskStateName)] =
             static_cast<int>(PigeonStorageTaskState::success);
         event[EncodableValue(kTaskAppName)] =
             std::string(storage_->app()->name());
@@ -552,8 +552,7 @@ class PutDataStreamHandler
   const void* data_;
   size_t buffer_size_;
   Controller* controller_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_ =
-      nullptr;
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_{};
 };
 
 class PutFileStreamHandler
@@ -622,8 +621,7 @@ class PutFileStreamHandler
   std::string reference_path_;
   std::string file_path_;
   Controller* controller_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_ =
-      nullptr;
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_{};
 };
 
 class GetFileStreamHandler

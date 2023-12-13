@@ -88,12 +88,12 @@ class WaylandEglBackend : public Egl, public Backend {
   FlutterCompositor GetCompositorConfig() override;
 
   void UpdateSize(int _width, int _height) {
-    m_initial_width = _width;
-    m_initial_height = _height;
+    m_initial_width = static_cast<uint32_t>(_width);
+    m_initial_height = static_cast<uint32_t>(_height);
   }
 
  private:
-  wl_egl_window* m_egl_window{};
+  struct wl_egl_window* m_egl_window{};
   uint32_t m_initial_width;
   uint32_t m_initial_height;
 

@@ -15,13 +15,14 @@
  */
 
 #include "platform_views_handler.h"
-#include "platform_views/layer_playground/layer_playground.h"
-#include "platform_views_registry.h"
 #include "platform_view_touch.h"
-
-#if defined(ENABLE_PLUGIN_FILAMENT)
-#include "plugins/filament/filament.h"
+#if defined(ENABLE_VIEW_FILAMENT_VIEW)
+#include "platform_views/filament_view/filament_view.h"
 #endif
+#if defined(ENABLE_VIEW_LAYER_PLAYGROUND)
+#include "platform_views/layer_playground/layer_playground.h"
+#endif
+#include "platform_views_registry.h"
 
 #include "shell/logging/logging.h"
 #include "shell/utils.h"
@@ -53,16 +54,14 @@ PlatformViewsHandler::PlatformViewsHandler(flutter::BinaryMessenger* messenger,
               &flutter::StandardMethodCodec::GetInstance())),
       view_(view) {
   channel_->SetMethodCallHandler(
-      [this](
-          const flutter::MethodCall<flutter::EncodableValue>& call,
-          const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
-              result) { HandleMethodCall(call, result); });
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) { HandleMethodCall(call, std::move(result)); });
 }
 
 void PlatformViewsHandler::HandleMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
-    const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
-        result) {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const std::string& method_name = method_call.method_name();
   const auto arguments = method_call.arguments();
 
@@ -102,21 +101,22 @@ void PlatformViewsHandler::HandleMethodCall(
       }
     }
 
+#if defined(ENABLE_VIEW_LAYER_PLAYGROUND)
     if (viewType == "@views/simple-box-view-type") {
       auto platform_view = std::make_unique<LayerPlayground>(
           id, std::move(viewType), direction, width, height, view_);
       PlatformViewsRegistry::GetInstance().AddPlatformView(
           id, std::move(platform_view));
-      result->Success(id);
+      result->Success(flutter::EncodableValue(id));
     } else
-#if defined(ENABLE_PLUGIN_FILAMENT)
-        if (viewType == PlatformViewFilament::kPlatformViewType) {
-      std::unique_ptr<PlatformView> platform_view =
-          std::make_unique<PlatformViewFilament>(
-              id, std::move(viewType), direction, width, height, params);
+#endif
+#if defined(ENABLE_VIEW_FILAMENT_VIEW)
+        if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
+      auto platform_view = std::make_unique<view_filament_view::FilamentView>(
+          id, std::move(viewType), direction, width, height, params, "", view_);
       PlatformViewsRegistry::GetInstance().AddPlatformView(
           id, std::move(platform_view));
-      result->Success(id);
+      result->Success(flutter::EncodableValue(id));
     } else
 #endif
     {

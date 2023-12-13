@@ -16,10 +16,11 @@
 
 #include "logging.h"
 
-#include <spdlog/cfg/env.h>
+#include "spdlog/cfg/env.h"  // support for loading levels from the environment variable
 #if defined(ENABLE_DLT)
-#include <spdlog/sinks/callback_sink.h>
+#include "spdlog/sinks/callback_sink.h"
 #endif
+#include "spdlog/sinks/ringbuffer_sink.h"
 
 #include <constants.h>
 

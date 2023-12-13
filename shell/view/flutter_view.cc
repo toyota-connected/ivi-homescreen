@@ -289,6 +289,7 @@ void FlutterView::SetRegion(
 #endif
 
 void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
+  (void)engine;
 #if defined(ENABLE_PLUGIN_URL_LAUNCHER)
   UrlLauncherPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));

@@ -82,15 +82,16 @@ PlatformHandler::PlatformHandler(flutter::BinaryMessenger* messenger,
           &flutter::JsonMethodCodec::GetInstance())),
       view_(view) {
   channel_->SetMethodCallHandler(
-      [this](const flutter::MethodCall<rapidjson::Document>& call,
-             const std::unique_ptr<flutter::MethodResult<rapidjson::Document>>&
-                 result) { HandleMethodCall(call, result); });
+      [this](
+          const flutter::MethodCall<rapidjson::Document>& call,
+          std::unique_ptr<flutter::MethodResult<rapidjson::Document>> result) {
+        HandleMethodCall(call, std::move(result));
+      });
 }
 
 void PlatformHandler::HandleMethodCall(
     const flutter::MethodCall<rapidjson::Document>& method_call,
-    const std::unique_ptr<flutter::MethodResult<rapidjson::Document>>& result)
-    const {
+    std::unique_ptr<flutter::MethodResult<rapidjson::Document>> result) const {
   const std::string& method = method_call.method_name();
 
   if (method == kMethodClipboardGetData) {

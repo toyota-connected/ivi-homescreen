@@ -63,9 +63,9 @@ void cloud_firestore_linux::FirestoreCodec::WriteValue(
       const Firestore* firestore = reference.firestore();
       std::string appName = firestore->app()->name();
       std::string databaseUrl = "(default)";
-      flutter::StandardCodecSerializer::WriteValue(appName, stream);
-      flutter::StandardCodecSerializer::WriteValue(reference.path(), stream);
-      flutter::StandardCodecSerializer::WriteValue(databaseUrl, stream);
+      flutter::StandardCodecSerializer::WriteValue(flutter::EncodableValue(appName), stream);
+      flutter::StandardCodecSerializer::WriteValue(flutter::EncodableValue(reference.path()), stream);
+      flutter::StandardCodecSerializer::WriteValue(flutter::EncodableValue(databaseUrl), stream);
     } else if (custom_value.type() ==
                typeid(double)) {  // Assuming Double is standard C++ double
       const double& myDouble = std::any_cast<double>(custom_value);
