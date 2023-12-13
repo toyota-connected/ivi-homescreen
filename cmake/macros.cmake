@@ -20,7 +20,7 @@ macro(ENABLE_TEXTURE texture)
 
     string(TOUPPER ${texture} ucase_texture)
 
-    target_compile_definitions(homescreen PRIVATE ENABLE_TEXTURE_${ucase_texture})
+    target_compile_definitions(homescreen PRIVATE -DENABLE_TEXTURE_${ucase_texture})
 
     target_sources(homescreen PRIVATE textures/${texture}/texture_${texture}.cc)
 
@@ -28,12 +28,29 @@ endmacro(ENABLE_TEXTURE)
 
 macro(ENABLE_PLUGIN plugin)
 
-    #list(APPEND PLUGINS ${plugin})
+    message(STATUS "Enabling Plugin: ${plugin}")
+
+    list(APPEND PLUGINS plugin_${plugin})
 
     string(TOUPPER ${plugin} ucase_plugin)
 
-    # target_compile_definitions(homescreen PRIVATE ENABLE_PLUGIN_${ucase_plugin})
+    add_compile_definitions(-DENABLE_PLUGIN_${ucase_plugin})
 
+    add_subdirectory(plugins/${plugin})
     # target_sources(homescreen PRIVATE plugins/${plugin}/${plugin}.cc)
 
 endmacro(ENABLE_PLUGIN)
+
+macro(ENABLE_VIEW view)
+
+    message(STATUS "Enabling View: ${view}")
+
+    string(TOUPPER ${view} ucase_view)
+
+    add_compile_definitions(-DENABLE_VIEW_${ucase_view})
+
+    add_subdirectory(layer_playground)
+
+endmacro(ENABLE_VIEW)
+
+

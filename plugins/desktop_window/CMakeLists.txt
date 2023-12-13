@@ -1,0 +1,2 @@
+add_library(plugin_desktop_window STATIC desktop_window.cc desktop_window.h)
+target_link_libraries(plugin_desktop_window PUBLIC platform_homescreen flutter_common)

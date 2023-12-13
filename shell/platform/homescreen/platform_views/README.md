@@ -1,7 +1,7 @@
 # Platform Views
 
-This plugin supports the AndroidView interface. Meaning you can take any Platform View Dart code, change the definition
-to use AndroidView, enable the plugin (`-DBUILD_PLUGIN_PLATFORM_VIEWS=ON`) and you will have a working interface.
+This handler supports the AndroidView interface. Meaning you can take any Platform View Dart code, change the definition
+to use AndroidView, and you will have a working interface.
 
 Benefits of using this interface:
 

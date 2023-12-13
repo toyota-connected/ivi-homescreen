@@ -19,7 +19,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include "engine.h"
-#include "logging.h"
+#include "logging/logging.h"
 
 static SecureStorage* pInstance_;
 static std::mutex mutex_;

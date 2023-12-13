@@ -72,13 +72,6 @@ if (BUILD_PLUGIN_AUDIO_PLAYERS)
     target_sources(homescreen PRIVATE ../plugins/audio_players/audio_players_registry.cc)
 endif ()
 
-if (BUILD_PLUGIN_PLATFORM_VIEWS OR BUILD_PLUGIN_LAYER_PLAYGROUND)
-    target_sources(homescreen PRIVATE
-            ../plugins/platform_views/platform_view.cc
-            ../plugins/platform_views/platform_views_registry.cc
-    )
-endif ()
-
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL
@@ -103,20 +96,7 @@ target_include_directories(homescreen
         ../third_party/asio-1-28-1/asio/include
 )
 
-target_link_libraries(homescreen PRIVATE
-        plugin_cloud_firestore
-        plugin_firebase_auth
-        plugin_firebase_storage
-        plugin_url_launcher
-)
-
-target_compile_definitions(homescreen PRIVATE
-        ENABLE_PLUGIN_FIREBASE_CORE
-        ENABLE_PLUGIN_CLOUD_FIRESTORE
-        ENABLE_PLUGIN_FIREBASE_AUTH
-        ENABLE_PLUGIN_FIREBASE_STORAGE
-        ENABLE_PLUGIN_URL_LAUNCHER
-)
+target_link_libraries(homescreen PRIVATE ${PLUGINS})
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)

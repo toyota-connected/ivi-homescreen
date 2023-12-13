@@ -28,6 +28,8 @@
 #include "key_event.h"
 #include "logging.h"
 
+class Engine;
+
 DelegateHandleKey::DelegateHandleKey(void* data,
                                      DelegateHandleKey::HandleKeyHook hook,
                                      FlutterKeyEventType type,

@@ -1,8 +1,5 @@
 #pragma once
 
-#include <engine.h>
-
-#include "flutter_desktop_engine_state.h"
 #include "flutter_desktop_view.h"
 
 struct FlutterDesktopEngineState;

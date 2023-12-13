@@ -3,8 +3,6 @@
 #include <atomic>
 #include <mutex>
 
-#include "flutter_messenger.h"
-
 #include "flutter_desktop_engine_state.h"
 
 struct FlutterDesktopEngineState;

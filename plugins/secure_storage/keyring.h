@@ -21,7 +21,7 @@
 #include <rapidjson/writer.h>
 #include <memory>
 #include "g_hash_table.h"
-#include "logging.h"
+#include "logging/logging.h"
 
 namespace secret {
 

@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <shell/platform/embedder/embedder.h>
+#include <flutter/shell/platform/embedder/embedder.h>
 
 namespace Plugins {
 

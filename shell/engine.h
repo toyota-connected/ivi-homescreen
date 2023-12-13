@@ -29,9 +29,9 @@
 
 #include "backend/backend.h"
 #include "constants.h"
-#include "logging.h"
-#include "plugins/key_event/key_event.h"
-#include "plugins/text_input/text_input.h"
+#include "logging/logging.h"
+//#include "plugins/key_event/key_event.h"
+//#include "plugins/text_input/text_input.h"
 #include "task_runner.h"
 #include "flutter_desktop_engine_state.h"
 #include "view/flutter_view.h"

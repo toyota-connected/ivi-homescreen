@@ -1,0 +1,3 @@
+
+add_library(plugin_restoration STATIC restoration.cc restoration.h)
+target_link_libraries(plugin_restoration PUBLIC platform_homescreen flutter_common)

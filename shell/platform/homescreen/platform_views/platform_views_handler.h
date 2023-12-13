@@ -16,20 +16,31 @@
 
 #pragma once
 
+#include <flutter/binary_messenger.h>
+#include <flutter/encodable_value.h>
+#include <flutter/method_call.h>
+#include <flutter/method_channel.h>
+#include <flutter/method_result.h>
+
+#include <flutter/standard_method_codec.h>
+
 class FlutterView;
 
-class IsolateHandler {
+class PlatformViewsHandler {
  public:
-  explicit IsolateHandler(flutter::BinaryMessenger* messenger,
-                         FlutterView* view);
+  explicit PlatformViewsHandler(flutter::BinaryMessenger* messenger,
+                                FlutterView* view);
 
-private:
+ private:
   // Called when a method is called on |channel_|;
-  static void HandleMethodCall(
+  void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
-      const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>& result)
-      ;
+      const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
+          result);
 
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
+
+  // A reference to the opaque data pointer, if any. Null in headless mode.
+  FlutterView* view_;
 };

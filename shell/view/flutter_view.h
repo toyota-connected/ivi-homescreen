@@ -21,8 +21,7 @@
 #include "flutter/fml/macros.h"
 #include "flutter/shell/platform/common/incoming_message_dispatcher.h"
 #include "flutter_desktop_view_controller_state.h"
-#include "platform/homescreen/platform_handler.h"
-#include "shell/platform/homescreen/client_wrapper/include/flutter/plugin_registrar_homescreen.h"
+#include "platform/homescreen/client_wrapper/include/flutter/plugin_registrar_homescreen.h"
 #include "wayland/window.h"
 
 #ifdef ENABLE_TEXTURE_EGL
@@ -61,7 +60,6 @@ class CompositorSurface;
 #ifdef ENABLE_TEXTURE_EGL
 class TextureEgl;
 #endif
-
 
 class FlutterView {
  public:
@@ -114,6 +112,14 @@ class FlutterView {
    * internal
    */
   NODISCARD uint64_t GetIndex() const { return m_index; }
+
+  /**
+   * @brief Get pointer to Display object
+   * @return Display*
+   * @relation
+   * internal
+   */
+  NODISCARD Display* GetDisplay() const { return m_wayland_display.get(); }
 
   /**
    * @brief Draw FPS to calc and output
