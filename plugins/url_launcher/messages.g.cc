@@ -56,7 +56,7 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 result->Error(output.error().code(), output.error().message());
                 return;
               }
-              result->Success(true);
+              result->Success(flutter::EncodableValue(true));
             } else if ("launch" == call.method_name()) {
               std::string url_arg;
               const auto it = args->find(flutter::EncodableValue("url"));
@@ -73,7 +73,7 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 result->Success(WrapError(output.value()));
                 return;
               }
-              result->Success(true);
+              result->Success(flutter::EncodableValue(true));
             } else {
               result->Error("unimplemented");
             }

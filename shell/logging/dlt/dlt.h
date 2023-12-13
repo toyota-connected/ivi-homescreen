@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "dlt/libdlt.h"
+#include "libdlt.h"
 #include "flutter/fml/macros.h"
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/callback_sink.h"

@@ -18,7 +18,6 @@
 
 #include <EGL/eglext.h>
 
-#include <spdlog/spdlog.h>
 #include <wayland-egl-core.h>
 #include <wayland/display.h>
 
@@ -147,7 +146,7 @@ GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
     GLint infoLen = 0;
     glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
     if (infoLen > 1) {
-      auto* infoLog = static_cast<GLchar*>(malloc(sizeof(char) * infoLen));
+      auto* infoLog = static_cast<GLchar*>(malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
       glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
       spdlog::error("Error compiling shader:\n{}\n", infoLog);
       free(infoLog);
@@ -235,7 +234,7 @@ void LayerPlayground::InitializeScene() {
     GLint infoLen = 0;
     glGetProgramiv(programObject, GL_INFO_LOG_LENGTH, &infoLen);
     if (infoLen > 1) {
-      auto* infoLog = static_cast<GLchar*>(malloc(sizeof(char) * infoLen));
+      auto* infoLog = static_cast<GLchar*>(malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
       glGetProgramInfoLog(programObject, infoLen, nullptr, infoLog);
       spdlog::error("Error linking program:\n{}\n", infoLog);
       free(infoLog);

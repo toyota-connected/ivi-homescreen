@@ -278,7 +278,7 @@ FlutterError CloudFirestorePlugin::ParseError(
       EncodableValue(completed_future.error_message());
 
   return FlutterError("firebase_firestore", completed_future.error_message(),
-                      details);
+                      EncodableValue(details));
 }
 
 firebase::firestore::Source GetSourceFromPigeon(const Source& pigeonSource) {
@@ -346,7 +346,7 @@ EncodableValue ConvertFieldValueToEncodableValue(const FieldValue& fieldValue) {
       for (const auto& val : fieldValue.array_value()) {
         encodableList.push_back(ConvertFieldValueToEncodableValue(val));
       }
-      return encodableList;
+      return EncodableValue(encodableList);
     }
 
     case FieldValue::Type::kGeoPoint: {
@@ -555,7 +555,7 @@ class LoadBundleStreamHandler
                   EncodableValue("Error loading the bundle");
 
               events_->Error("firebase_firestore", "Error loading the bundle",
-                             details);
+                             EncodableValue(details));
               events_->EndOfStream();
               return;
             }
@@ -565,7 +565,7 @@ class LoadBundleStreamHandler
               map[flutter::EncodableValue("taskState")] =
                   flutter::EncodableValue("running");
 
-              events_->Success(map);
+              events_->Success(EncodableValue(map));
               break;
             }
             case LoadBundleTaskProgress::State::kSuccess: {
@@ -573,7 +573,7 @@ class LoadBundleStreamHandler
               map[flutter::EncodableValue("taskState")] =
                   flutter::EncodableValue("success");
 
-              events_->Success(map);
+              events_->Success(EncodableValue(map));
               events_->EndOfStream();
               break;
             }
@@ -920,7 +920,7 @@ class TransactionStreamHandler
             flutter::EncodableMap result;
             result.insert(std::make_pair(flutter::EncodableValue("complete"),
                                          flutter::EncodableValue(true)));
-            events_->Success(result);
+            events_->Success(EncodableValue(result));
           } else {
             events_->Error("transaction_error",
                            completed_future.error_message());
@@ -1005,8 +1005,9 @@ void CloudFirestorePlugin::TransactionStoreResult(
     result(std::nullopt);
 
   } else {
-    result(std::make_optional(FlutterError(
-        "transaction_not_found", "Transaction not found", transaction_id)));
+    result(std::make_optional(FlutterError("transaction_not_found",
+                                           "Transaction not found",
+                                           EncodableValue(transaction_id))));
   }
 }
 
@@ -1539,18 +1540,19 @@ class QuerySnapshotStreamHandler
             std::vector<flutter::EncodableValue> documentChanges;
 
             for (const auto& documentSnapshot : snapshot.documents()) {
-              documents.push_back(ParseDocumentSnapshot(documentSnapshot,
-                                                        serverTimestampBehavior)
-                                      .ToEncodableList());
+              documents.push_back(
+                  EncodableValue(ParseDocumentSnapshot(documentSnapshot,
+                                                       serverTimestampBehavior)
+                                     .ToEncodableList()));
             }
 
             // Assuming querySnapshot.getDocumentChanges() returns an iterable
             // collection
             for (const auto& documentChange :
                  snapshot.DocumentChanges(metadataChanges)) {
-              documentChanges.push_back(
+              documentChanges.push_back(EncodableValue(
                   ParseDocumentChange(documentChange, serverTimestampBehavior)
-                      .ToEncodableList());
+                      .ToEncodableList()));
             }
 
             toListResult[0] = documents;
@@ -1558,14 +1560,15 @@ class QuerySnapshotStreamHandler
             toListResult[2] =
                 ParseSnapshotMetadata(snapshot.metadata()).ToEncodableList();
 
-            events_->Success(toListResult);
+            events_->Success(EncodableValue(toListResult));
           } else {
             EncodableMap details;
             details[EncodableValue("code")] =
                 EncodableValue(CloudFirestorePlugin::GetErrorCode(error));
             details[EncodableValue("message")] = EncodableValue(errorMessage);
 
-            events_->Error("firebase_firestore", errorMessage, details);
+            events_->Error("firebase_firestore", errorMessage,
+                           EncodableValue(details));
             events_->EndOfStream();
           }
         });
@@ -1643,16 +1646,17 @@ class DocumentSnapshotStreamHandler
             firebase::firestore::Error error,
             const std::string& errorMessage) mutable {
           if (error == firebase::firestore::kErrorOk) {
-            events_->Success(
+            events_->Success(EncodableValue(
                 ParseDocumentSnapshot(snapshot, serverTimestampBehavior)
-                    .ToEncodableList());
+                    .ToEncodableList()));
           } else {
             EncodableMap details;
             details[EncodableValue("code")] =
                 EncodableValue(CloudFirestorePlugin::GetErrorCode(error));
             details[EncodableValue("message")] = EncodableValue(errorMessage);
 
-            events_->Error("firebase_firestore", errorMessage, details);
+            events_->Error("firebase_firestore", errorMessage,
+                           EncodableValue(details));
             events_->EndOfStream();
           }
         });

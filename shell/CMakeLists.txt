@@ -96,8 +96,6 @@ target_include_directories(homescreen
         ../third_party/asio-1-28-1/asio/include
 )
 
-target_link_libraries(homescreen PRIVATE ${PLUGINS})
-
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
 endif ()
@@ -112,6 +110,8 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 target_link_libraries(homescreen PRIVATE
+        ${PLUGINS}
+        spdlog
         flutter_common
         wayland-gen
         platform_homescreen
@@ -137,6 +137,8 @@ endif ()
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(homescreen PRIVATE ${CONTEXT_COMPILE_OPTIONS})
     target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
+    #
+    # --rtlib=compiler-rt
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)

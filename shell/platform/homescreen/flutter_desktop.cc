@@ -105,7 +105,7 @@ FlutterDesktopPluginRegistrarRef FlutterDesktopGetPluginRegistrar(
 void FlutterDesktopPluginRegistrarEnableInputBlocking(
     FlutterDesktopPluginRegistrarRef registrar,
     const char* channel) {
-  registrar->engine->message_dispatcher->EnableInputBlockingForChannel(channel);
+    registrar->engine->message_dispatcher->EnableInputBlockingForChannel(channel);
 }
 
 FlutterDesktopMessengerRef FlutterDesktopPluginRegistrarGetMessenger(
@@ -187,7 +187,7 @@ void FlutterDesktopMessengerSendResponse(
 void FlutterDesktopMessengerSetCallback(
     FlutterDesktopMessengerRef messenger,
     const char* channel,
-    const FlutterDesktopMessageCallback callback,
+    FlutterDesktopMessageCallback callback,
     void* user_data) {
   messenger->GetEngine()->message_dispatcher->SetMessageCallback(
       channel, callback, user_data);

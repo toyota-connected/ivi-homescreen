@@ -35,8 +35,7 @@ class PlatformViewsHandler {
   // Called when a method is called on |channel_|;
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
-      const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
-          result);
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;

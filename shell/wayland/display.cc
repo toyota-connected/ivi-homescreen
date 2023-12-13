@@ -694,6 +694,8 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 void Display::keyboard_repeat_func(void* data) {
 #if defined(ENABLE_PLUGIN_TEXT_INPUT) || defined(ENABLE_PLUGIN_KEY_EVENT)
   auto d = static_cast<Display*>(data);
+#else
+  (void)data;
 #endif
 
 #if ENABLE_PLUGIN_TEXT_INPUT
