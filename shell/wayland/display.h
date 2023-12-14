@@ -30,8 +30,8 @@
 
 #include "configuration/configuration.h"
 #include "constants.h"
-#include "plugins/key_event/key_event.h"
-#include "plugins/text_input/text_input.h"
+//TODO #include "plugins/key_event/key_event.h"
+//TODO #include "plugins/text_input/text_input.h"
 #include "timer.h"
 
 #if defined(ENABLE_AGL_CLIENT)
@@ -241,7 +241,7 @@ class Display {
    * @relation
    * wayland
    */
-  void SetTextInput(wl_surface* surface, TextInput* text_input);
+//TODO  void SetTextInput(wl_surface* surface, TextInput* text_input);
 
   /**
    * @brief Set key event
@@ -251,7 +251,7 @@ class Display {
    * @relation
    * wayland
    */
-  void SetKeyEvent(wl_surface* surface, KeyEvent* key_event);
+//TODO  void SetKeyEvent(wl_surface* surface, KeyEvent* key_event);
 
   /**
    * @brief Get wl_output of a specified index of a view
@@ -404,10 +404,10 @@ class Display {
   struct xkb_keymap* m_keymap{};
   struct xkb_state* m_xkb_state{};
 
-  xkb_keysym_t m_keysym_pressed{};
+//TODO  xkb_keysym_t m_keysym_pressed{};
 
-  std::map<wl_surface*, TextInput*> m_text_input;
-  std::map<wl_surface*, KeyEvent*> m_key_event;
+//TODO  std::map<wl_surface*, TextInput*> m_text_input;
+//TODO  std::map<wl_surface*, KeyEvent*> m_key_event;
 
   std::mutex m_lock;
   uint32_t m_repeat_code{};

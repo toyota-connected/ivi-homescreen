@@ -616,7 +616,7 @@ void Display::keyboard_handle_key(void* data,
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
-      d->m_keysym_pressed = keysym;
+//TODO      d->m_keysym_pressed = keysym;
       Display::set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
     } else {
@@ -922,6 +922,7 @@ bool Display::ActivateSystemCursor(const int32_t device,
   return true;
 }
 
+#if 0 //TODO
 void Display::SetTextInput(wl_surface* surface, TextInput* text_input) {
   m_text_input[surface] = text_input;
 }
@@ -929,6 +930,7 @@ void Display::SetTextInput(wl_surface* surface, TextInput* text_input) {
 void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
   m_key_event[surface] = key_event;
 }
+#endif
 
 int32_t Display::GetBufferScale(uint32_t index) const {
   if (index < m_all_outputs.size()) {

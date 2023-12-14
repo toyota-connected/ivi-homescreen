@@ -22,6 +22,8 @@
 #include <flutter/method_channel.h>
 #include <flutter/method_result.h>
 
+#include "flutter_homescreen.h"
+
 #include <flutter/standard_method_codec.h>
 
 class FlutterView;
@@ -29,7 +31,7 @@ class FlutterView;
 class PlatformViewsHandler {
  public:
   explicit PlatformViewsHandler(flutter::BinaryMessenger* messenger,
-                                FlutterView* view);
+                                FlutterDesktopEngineRef engine);
 
  private:
   // Called when a method is called on |channel_|;
@@ -41,5 +43,5 @@ class PlatformViewsHandler {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
 
   // A reference to the opaque data pointer, if any. Null in headless mode.
-  FlutterView* view_;
+  FlutterDesktopEngineRef engine_;
 };

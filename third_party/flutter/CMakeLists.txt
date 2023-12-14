@@ -30,6 +30,8 @@ add_library(flutter_common STATIC
         fml/unique_fd.cc
 )
 
+target_compile_definitions(flutter_common PUBLIC RAPIDJSON_HAS_STDSTRING)
+
 target_compile_options(flutter_common PRIVATE ${CONTEXT_COMPILE_OPTIONS})
 
 target_include_directories(flutter_common PUBLIC
