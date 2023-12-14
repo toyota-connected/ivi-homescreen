@@ -16,10 +16,10 @@
 
 #include "platform_views_handler.h"
 #include "platform_view_touch.h"
-#if defined(ENABLE_VIEW_FILAMENT_VIEW)
-#include "platform_views/filament_view/filament_view.h"
+#if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
+#include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"
 #endif
-#if defined(ENABLE_VIEW_LAYER_PLAYGROUND)
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
 #include "platform_views/layer_playground/layer_playground.h"
 #endif
 #include "platform_views_registry.h"
@@ -46,13 +46,13 @@ static constexpr char kKeyLeft[] = "left";
 static constexpr char kKeyHybrid[] = "hybrid";
 
 PlatformViewsHandler::PlatformViewsHandler(flutter::BinaryMessenger* messenger,
-                                           FlutterView* view)
+                                           FlutterDesktopEngineRef engine)
     : channel_(
           std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
               messenger,
               "flutter/platform_views",
               &flutter::StandardMethodCodec::GetInstance())),
-      view_(view) {
+      engine_(engine) {
   channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
@@ -100,22 +100,24 @@ void PlatformViewsHandler::HandleMethodCall(
         width = std::get<double>(it.second);
       }
     }
-
-#if defined(ENABLE_VIEW_LAYER_PLAYGROUND)
+#if 0
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
     if (viewType == "@views/simple-box-view-type") {
       auto platform_view = std::make_unique<LayerPlayground>(
-          id, std::move(viewType), direction, width, height, view_);
+          id, std::move(viewType), direction, width, height, engine_);
       PlatformViewsRegistry::GetInstance().AddPlatformView(
           id, std::move(platform_view));
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
-#if defined(ENABLE_VIEW_FILAMENT_VIEW)
-        if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
-      auto platform_view = std::make_unique<view_filament_view::FilamentView>(
-          id, std::move(viewType), direction, width, height, params, "", view_);
-      PlatformViewsRegistry::GetInstance().AddPlatformView(
-          id, std::move(platform_view));
+#endif
+#if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
+    if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
+      auto registrar =
+          FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
+      FilamentViewPluginCApiRegisterWithRegistrar(
+          registrar, id, std::move(viewType), direction, width, height, params,
+          engine_->view_controller->engine->GetAssetDirectory(), engine_);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif

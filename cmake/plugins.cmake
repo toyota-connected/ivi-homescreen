@@ -165,4 +165,9 @@ if (BUILD_PLUGIN_CLOUD_FIRESTORE)
     ENABLE_PLUGIN(cloud_firestore)
 endif ()
 
+option(BUILD_PLUGIN_FILAMENT_VIEW "Include Filament View plugin" OFF)
+if (BUILD_PLUGIN_FILAMENT_VIEW)
+    ENABLE_PLUGIN(filament_view)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")

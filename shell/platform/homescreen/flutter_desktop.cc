@@ -11,15 +11,10 @@
 #include <filesystem>
 #include <string>
 
-#include <wayland/window.h>
-#include "flutter/shell/platform/common/client_wrapper/include/flutter/plugin_registrar.h"
-#include "flutter/shell/platform/common/incoming_message_dispatcher.h"
 #include "flutter_desktop_engine_state.h"
 #include "flutter_desktop_messenger.h"
-#include "flutter_desktop_plugin_registrar.h"
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
-#include "shell/libflutter_engine.h"
 
 #include "view/flutter_view.h"
 
@@ -85,7 +80,7 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
 
   // Platform Views handler.
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
-      state->internal_plugin_registrar->messenger(), view);
+      state->internal_plugin_registrar->messenger(), state);
 }
 
 FlutterDesktopEngineRef FlutterDesktopGetEngine(
@@ -105,7 +100,7 @@ FlutterDesktopPluginRegistrarRef FlutterDesktopGetPluginRegistrar(
 void FlutterDesktopPluginRegistrarEnableInputBlocking(
     FlutterDesktopPluginRegistrarRef registrar,
     const char* channel) {
-    registrar->engine->message_dispatcher->EnableInputBlockingForChannel(channel);
+  registrar->engine->message_dispatcher->EnableInputBlockingForChannel(channel);
 }
 
 FlutterDesktopMessengerRef FlutterDesktopPluginRegistrarGetMessenger(
@@ -117,6 +112,11 @@ void FlutterDesktopPluginRegistrarSetDestructionHandler(
     FlutterDesktopPluginRegistrarRef registrar,
     FlutterDesktopOnPluginRegistrarDestroyed callback) {
   registrar->destruction_handler = callback;
+}
+
+FlutterDesktopEngineRef FlutterDesktopPluginRegistrarGetEngine(
+    FlutterDesktopPluginRegistrarRef registrar) {
+  return registrar->engine;
 }
 
 FlutterDesktopWindowRef FlutterDesktopPluginRegistrarGetWindow(
@@ -184,11 +184,10 @@ void FlutterDesktopMessengerSendResponse(
       messenger->GetEngine()->flutter_engine, handle, data, data_length);
 }
 
-void FlutterDesktopMessengerSetCallback(
-    FlutterDesktopMessengerRef messenger,
-    const char* channel,
-    FlutterDesktopMessageCallback callback,
-    void* user_data) {
+void FlutterDesktopMessengerSetCallback(FlutterDesktopMessengerRef messenger,
+                                        const char* channel,
+                                        FlutterDesktopMessageCallback callback,
+                                        void* user_data) {
   messenger->GetEngine()->message_dispatcher->SetMessageCallback(
       channel, callback, user_data);
 }
@@ -201,7 +200,9 @@ FlutterDesktopTextureRegistrarRef FlutterDesktopRegistrarGetTextureRegistrar(
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     FlutterDesktopTextureRegistrarRef /* texture_registrar */,
     const FlutterDesktopTextureInfo* /* texture_info */) {
-  SPDLOG_ERROR("[FlutterDesktopTextureRegistrarRegisterExternalTexture] Not implemented yet.");
+  SPDLOG_ERROR(
+      "[FlutterDesktopTextureRegistrarRegisterExternalTexture] Not implemented "
+      "yet.");
   return -1;
 }
 
@@ -210,12 +211,16 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     int64_t /* texture_id */,
     void (* /* callback */)(void* user_data),
     void* /* user_data */) {
-  SPDLOG_ERROR("[FlutterDesktopTextureRegistrarUnregisterExternalTexture] Not implemented yet.");
+  SPDLOG_ERROR(
+      "[FlutterDesktopTextureRegistrarUnregisterExternalTexture] Not "
+      "implemented yet.");
 }
 
 bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
     FlutterDesktopTextureRegistrarRef /* texture_registrar */,
     int64_t /* texture_id */) {
-  SPDLOG_ERROR("[FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable] Not implemented yet.");
+  SPDLOG_ERROR(
+      "[FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable] Not "
+      "implemented yet.");
   return false;
 }

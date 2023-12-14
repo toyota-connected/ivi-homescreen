@@ -17,8 +17,8 @@
 #ifndef SHELL_PLATFORM_HOMESCREEN_PUBLIC_FLUTTER_HOMESCREEN_H
 #define SHELL_PLATFORM_HOMESCREEN_PUBLIC_FLUTTER_HOMESCREEN_H
 
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "flutter_export.h"
 #include "flutter_messenger.h"
