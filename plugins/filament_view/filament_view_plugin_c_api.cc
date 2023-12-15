@@ -3,6 +3,8 @@
 
 #include <flutter/plugin_registrar.h>
 
+#include <utility>
+
 #include "filament_view_plugin.h"
 
 void FilamentViewPluginCApiRegisterWithRegistrar(
@@ -18,6 +20,6 @@ void FilamentViewPluginCApiRegisterWithRegistrar(
   plugin_filament_view::FilamentViewPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrar>(registrar),
-      id, std::move(viewType), direction, width, height, params, assetDirectory,
-      engine);
+      id, std::move(viewType), direction, width, height, params,
+      std::move(assetDirectory), engine);
 }

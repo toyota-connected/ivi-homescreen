@@ -165,7 +165,7 @@ class ModelStateChannelApi {
   ModelStateChannelApi& operator=(const ModelStateChannelApi&) = delete;
   virtual ~ModelStateChannelApi() = default;
 
-  //TODO
+  // TODO
 
   // The codec used by ModelStateChannelApi.
   static const flutter::StandardMethodCodec& GetCodec();
@@ -187,7 +187,7 @@ class SceneStateApi {
   SceneStateApi& operator=(const SceneStateApi&) = delete;
   virtual ~SceneStateApi() = default;
 
-  //TODO
+  // TODO
 
   // The codec used by SceneStateApi.
   static const flutter::StandardMethodCodec& GetCodec();
@@ -209,7 +209,7 @@ class ShapeStateApi {
   ShapeStateApi& operator=(const ShapeStateApi&) = delete;
   virtual ~ShapeStateApi() = default;
 
-  //TODO
+  // TODO
 
   // The codec used by ShapeStateApi.
   static const flutter::StandardMethodCodec& GetCodec();
@@ -231,7 +231,7 @@ class RendererChannelApi {
   RendererChannelApi& operator=(const RendererChannelApi&) = delete;
   virtual ~RendererChannelApi() = default;
 
-  //TODO
+  // TODO
 
   // The codec used by RendererChannelApi.
   static const flutter::StandardMethodCodec& GetCodec();

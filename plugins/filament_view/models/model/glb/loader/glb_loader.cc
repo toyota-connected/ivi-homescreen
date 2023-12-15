@@ -4,10 +4,9 @@
 
 namespace plugin_filament_view::models::glb {
 
-GlbLoader::GlbLoader(
-    void* context,
-    CustomModelViewer* model_viewer,
-    const std::string& flutter_assets_path)
+GlbLoader::GlbLoader(void* context,
+                     CustomModelViewer* model_viewer,
+                     const std::string& flutter_assets_path)
     : context_(context),
       modelViewer_(model_viewer),
       flutterAssetsPath_(flutter_assets_path) {}

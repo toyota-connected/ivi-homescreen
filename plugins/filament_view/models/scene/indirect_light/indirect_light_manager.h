@@ -27,9 +27,9 @@ namespace plugin_filament_view {
 class IndirectLightManager {
  public:
   IndirectLightManager(void* context,
-               CustomModelViewer* model_viewer,
-               const std::string& flutter_assets_path);
-  void setDefaultIndirectLight(IndirectLight *indirect_light);
+                       CustomModelViewer* model_viewer,
+                       const std::string& flutter_assets_path);
+  void setDefaultIndirectLight(IndirectLight* indirect_light);
 
   // Disallow copy and assign.
   IndirectLightManager(const IndirectLightManager&) = delete;

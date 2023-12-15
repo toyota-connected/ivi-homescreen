@@ -23,7 +23,6 @@
 #include "logging/logging.h"
 #include "utils.h"
 
-
 namespace plugin_filament_view {
 Animation::Animation(void* parent,
                      const std::string& flutter_assets_path,

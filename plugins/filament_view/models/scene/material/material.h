@@ -20,7 +20,6 @@
 
 #include "material_parameter.h"
 
-
 namespace plugin_filament_view {
 class Material {
  public:

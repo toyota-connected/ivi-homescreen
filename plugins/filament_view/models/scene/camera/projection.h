@@ -20,7 +20,6 @@
 
 #include <flutter/encodable_value.h>
 
-
 namespace plugin_filament_view {
 
 class Camera;

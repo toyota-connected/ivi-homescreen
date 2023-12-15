@@ -19,9 +19,8 @@
 #include <flutter/encodable_value.h>
 
 #include "models/scene/material/material_manager.h"
-#include "viewer/custom_model_viewer.h"
 #include "shape.h"
-
+#include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
 class ShapeManager {

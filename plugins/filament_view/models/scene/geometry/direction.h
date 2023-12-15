@@ -20,7 +20,6 @@
 
 #include <optional>
 
-
 namespace plugin_filament_view {
 
 class Direction {

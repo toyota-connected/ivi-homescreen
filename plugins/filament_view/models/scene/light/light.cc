@@ -19,7 +19,6 @@
 #include "logging/logging.h"
 #include "utils.h"
 
-
 namespace plugin_filament_view {
 
 Light::Light(void* parent,

@@ -37,6 +37,10 @@ class PlatformView {
 
   virtual void Resize(double width, double height) = 0;
 
+  [[nodiscard]] std::pair<int32_t, int32_t> GetSize() const {
+    return {width_, height_};
+  }
+
   [[nodiscard]] int32_t GetId() const { return id_; }
 
   std::string GetViewType() { return viewType_; }

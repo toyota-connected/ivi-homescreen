@@ -16,8 +16,8 @@
 
 #include "direction.h"
 
-#include "models/model/model.h"
 #include "logging/logging.h"
+#include "models/model/model.h"
 #include "utils.h"
 
 namespace plugin_filament_view {

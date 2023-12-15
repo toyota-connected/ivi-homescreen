@@ -23,7 +23,6 @@
 #include "models/scene/geometry/size.h"
 #include "models/scene/material/material.h"
 
-
 namespace plugin_filament_view {
 class Ground {
  public:

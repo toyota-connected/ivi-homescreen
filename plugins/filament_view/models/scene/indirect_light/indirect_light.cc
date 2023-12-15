@@ -21,7 +21,6 @@
 #include "logging/logging.h"
 #include "utils.h"
 
-
 namespace plugin_filament_view {
 
 IndirectLight::IndirectLight(void* parent,

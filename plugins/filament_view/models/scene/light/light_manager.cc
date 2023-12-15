@@ -3,17 +3,15 @@
 
 #include "logging/logging.h"
 
-
 namespace plugin_filament_view {
-LightManager::LightManager(
-    CustomModelViewer* model_viewer)
+LightManager::LightManager(CustomModelViewer* model_viewer)
     : model_viewer_(model_viewer) {}
 
-void LightManager::setDefaultLight(){
+void LightManager::setDefaultLight() {
   SPDLOG_DEBUG("LightManager::setDefaultLight");
 }
 
-void LightManager::changeLight(Light* light){
+void LightManager::changeLight(Light* light) {
   light->Print("LightManager::changeLight");
 };
 }  // namespace plugin_filament_view

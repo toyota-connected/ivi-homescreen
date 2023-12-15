@@ -10,4 +10,9 @@ CameraManager::CameraManager(CustomModelViewer* model_viewer)
 void CameraManager::updateCamera(Camera* camera) {
   SPDLOG_DEBUG("CameraManager::updateCamera");
 }
+
+void CameraManager::lookAtDefaultPosition() {
+  SPDLOG_DEBUG("CameraManager::lookAtDefaultPosition");
+}
+
 }  // namespace plugin_filament_view

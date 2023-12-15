@@ -24,7 +24,6 @@
 #include "models/scene/geometry/position.h"
 #include "models/scene/scene.h"
 
-
 namespace plugin_filament_view {
 
 class Animation;
