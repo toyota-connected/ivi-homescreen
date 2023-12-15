@@ -16,7 +16,7 @@ GltfLoader::GltfLoader(void* context,
 std::future<std::string> GltfLoader::loadGltfFromAsset(
     const std::string& path,
     float scale,
-    const Position& centerPosition,
+    const Position* centerPosition,
     const bool isFallback) const {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
@@ -47,7 +47,7 @@ std::future<std::string> GltfLoader::loadGltfFromAsset(
 std::future<std::string> GltfLoader::loadGltfFromUrl(
     const std::string& url,
     float scale,
-    const Position& centerPosition,
+    const Position* centerPosition,
     bool isFallback) const {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());

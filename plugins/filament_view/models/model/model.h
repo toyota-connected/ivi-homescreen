@@ -36,6 +36,36 @@ class Model {
   ~Model() = default;
   void Print(const char* tag);
 
+  bool isGlb() { return is_glb_.has_value() && is_glb_.value(); }
+
+  std::string GetAssetPath() { return assetPath_; }
+  std::string GetUrl() { return url_; }
+
+  float GetScale() { return scale_; }
+
+  Position* GetCenterPosition() {
+    if (center_position_.has_value()) {
+      return center_position_.value().get();
+    }
+    return nullptr;
+  }
+
+  std::optional<Model*> GetFallback() const {
+    if (fallback_.has_value()) {
+      return {fallback_.value().get()};
+    } else {
+      return std::nullopt;
+    }
+  }
+
+  std::optional<Animation*> GetAnimation() const {
+    if (fallback_.has_value()) {
+      return {animation_.value().get()};
+    } else {
+      return std::nullopt;
+    }
+  }
+
   // Disallow copy and assign.
   Model(const Model&) = delete;
   Model& operator=(const Model&) = delete;
@@ -46,7 +76,7 @@ class Model {
   std::string pathPrefix_;
   std::string pathPostfix_;
   std::optional<std::unique_ptr<Model>> fallback_;
-  double scale_ = 1.0;
+  float scale_ = 1.0;
   std::optional<std::unique_ptr<Position>> center_position_;
   std::optional<std::unique_ptr<Animation>> animation_;
   std::optional<std::unique_ptr<Scene>> scene_;

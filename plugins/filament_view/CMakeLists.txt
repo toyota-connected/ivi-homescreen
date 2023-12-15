@@ -64,7 +64,7 @@ add_library(plugin_filament_view STATIC
         scene_controller.cc
 
         models/model/animation/animation.cc
-        models/model/animation_manager.cc
+        models/model/animation/animation_manager.cc
         models/model/common/loader/model_loader.cc
         models/model/glb/loader/glb_loader.cc
         models/model/gltf/loader/gltf_loader.cc

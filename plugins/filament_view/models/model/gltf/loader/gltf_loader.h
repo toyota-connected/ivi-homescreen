@@ -34,12 +34,12 @@ class GltfLoader {
   [[nodiscard]] std::future<std::string> loadGltfFromAsset(
       const std::string& path,
       float scale,
-      const Position& centerPosition,
+      const Position* centerPosition,
       bool isFallback = false) const;
 
   std::future<std::string> loadGltfFromUrl(const std::string& url,
                                            float scale,
-                                           const Position& centerPosition,
+                                           const Position* centerPosition,
                                            bool isFallback = false) const;
 
   // Disallow copy and assign.
