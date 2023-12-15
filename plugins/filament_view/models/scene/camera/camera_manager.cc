@@ -15,4 +15,8 @@ void CameraManager::lookAtDefaultPosition() {
   SPDLOG_DEBUG("CameraManager::lookAtDefaultPosition");
 }
 
+void CameraManager::destroyCamera() {
+  SPDLOG_DEBUG("CameraManager::destroyCamera");
+}
+
 }  // namespace plugin_filament_view

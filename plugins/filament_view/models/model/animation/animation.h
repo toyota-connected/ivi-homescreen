@@ -21,9 +21,9 @@
 #include <optional>
 #include <string>
 
-#include <flutter/encodable_value.h>
+#include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
-#include "model.h"
+#include "models/model/model.h"
 #include "models/scene/geometry/position.h"
 
 namespace plugin_filament_view {

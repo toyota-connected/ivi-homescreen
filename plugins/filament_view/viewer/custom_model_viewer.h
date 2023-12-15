@@ -33,6 +33,7 @@
 #include "models/state/model_state.h"
 
 #include "flutter_desktop_plugin_registrar.h"
+#include "models/model/common/loader/model_loader.h"
 #include "models/model/model.h"
 #include "models/scene/scene.h"
 #include "models/shapes/shape.h"
@@ -42,6 +43,7 @@
 #include "platform_views/platform_view.h"
 
 class CameraManager;
+class ModelLoader;
 
 namespace plugin_filament_view {
 
@@ -51,7 +53,7 @@ using models::state::ShapeState;
 
 class CustomModelViewer {
  public:
-  explicit CustomModelViewer(PlatformView *platformView,
+  explicit CustomModelViewer(PlatformView* platformView,
                              FlutterDesktopEngineState* state,
                              ::filament::Engine* engine,
                              ::filament::gltfio::AssetLoader* assetLoader,
@@ -67,6 +69,8 @@ class CustomModelViewer {
   [[nodiscard]] CameraManager* getCameraManager() const {
     return cameraManager_.get();
   }
+
+  [[nodiscard]] filament::Engine* getEngine() const { return engine_; };
 
  private:
   FlutterDesktopEngineState* state_;
@@ -97,6 +101,8 @@ class CustomModelViewer {
   SceneState currentGroundState_;
   ShapeState currentShapesState_;
 
+  std::unique_ptr<ModelLoader> modelLoader_;
+
   std::unique_ptr<CameraManager> cameraManager_;
   ::filament::gltfio::AssetLoader* assetLoader_;
   ::filament::gltfio::ResourceLoader* resourceLoader_;
@@ -104,6 +110,8 @@ class CustomModelViewer {
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
   static const wl_callback_listener frame_listener;
   void DrawFrame(uint32_t time);
+
+  void destroy();
 
   void setupView();
 };

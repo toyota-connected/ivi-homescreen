@@ -31,6 +31,8 @@ class CameraManager {
 
   void lookAtDefaultPosition();
 
+  void destroyCamera();
+
   // Disallow copy and assign.
   CameraManager(const CameraManager&) = delete;
   CameraManager& operator=(const CameraManager&) = delete;
