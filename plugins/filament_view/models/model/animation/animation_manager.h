@@ -23,11 +23,22 @@ class AnimationManager {
  public:
   explicit AnimationManager(CustomModelViewer* model_viewer);
 
+  std::vector<std::string> getAnimationNames() { return animationNames_; }
+
+  int32_t getAnimationCount() { return animationCount_; }
+
+  int32_t getAnimationIndexByName(const std::string& name) {
+    //TODO
+    return 0;
+  }
+
   // Disallow copy and assign.
   AnimationManager(const AnimationManager&) = delete;
   AnimationManager& operator=(const AnimationManager&) = delete;
 
  private:
   CustomModelViewer* model_viewer_;
+  int32_t animationCount_ = 0;
+  std::vector<std::string> animationNames_;
 };
 }  // namespace plugin_filament_view

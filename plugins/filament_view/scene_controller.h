@@ -5,7 +5,7 @@
 #include <gltfio/ResourceLoader.h>
 
 #include "flutter_desktop_engine_state.h"
-#include "models/model/animation_manager.h"
+#include "models/model/animation/animation_manager.h"
 #include "models/model/glb/loader/glb_loader.h"
 #include "models/model/gltf/loader/gltf_loader.h"
 #include "models/model/model.h"
@@ -24,7 +24,7 @@ namespace plugin_filament_view {
 
 class SceneController {
  public:
-  SceneController(PlatformView *platformView,
+  SceneController(PlatformView* platformView,
                   FlutterDesktopEngineState* state,
                   ::filament::Engine* engine,
                   ::filament::gltfio::AssetLoader* assetLoader,
@@ -34,6 +34,26 @@ class SceneController {
                   std::unique_ptr<Scene> scene,
                   std::unique_ptr<std::vector<std::unique_ptr<Shape>>> shapes,
                   int32_t id);
+
+  int32_t getAnimationCount() { return animationManager_->getAnimationCount(); }
+
+  void changeAnimation(int32_t animationIndex);
+
+  void changeAnimationByName(std::string animationName);
+
+  std::vector<std::string> getAnimationNames() {
+    return animationManager_->getAnimationNames();
+  }
+
+  std::optional<int32_t> getCurrentAnimationIndex() { return currentAnimationIndex_; }
+
+  std::string getAnimationNameByIndex(int32_t index) {
+    auto names = animationManager_->getAnimationNames();
+    if (index <= names.size()) {
+      return names[static_cast<unsigned long>(index)];
+    }
+    return "";
+  }
 
  private:
   int32_t id_;
@@ -53,7 +73,7 @@ class SceneController {
 
   // private val coroutineScope = CoroutineScope(Dispatchers.IO)
 
-  int32_t currentAnimationIndex_;
+  std::optional<int32_t> currentAnimationIndex_;
 
   // private val surfaceView: SurfaceView = SurfaceView(context)
 
@@ -68,7 +88,11 @@ class SceneController {
   std::unique_ptr<MaterialManager> materialManager_;
   std::unique_ptr<ShapeManager> shapeManager_;
 
-  void setUpViewer();
+  void setUpViewer(PlatformView* platformView,
+                   FlutterDesktopEngineState* state,
+                   ::filament::Engine* engine,
+                   ::filament::gltfio::AssetLoader* assetLoader,
+                   ::filament::gltfio::ResourceLoader* resourceLoader);
   void setUpGround();
   void setUpCamera();
   void setUpSkybox();
@@ -76,5 +100,12 @@ class SceneController {
   void setUpIndirectLight();
   void setUpLoadingModel();
   void setUpShapes();
+
+  std::string loadModel(std::optional<Model*> model);
+
+  void setUpAnimation(std::optional<Animation*> animation);
+
+  void makeSurfaceViewTransparent();
+  void makeSurfaceViewNotTransparent();
 };
 }  // namespace plugin_filament_view

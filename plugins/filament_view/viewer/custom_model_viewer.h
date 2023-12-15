@@ -70,7 +70,11 @@ class CustomModelViewer {
     return cameraManager_.get();
   }
 
-  [[nodiscard]] filament::Engine* getEngine() const { return engine_; };
+  [[nodiscard]] filament::Engine* getEngine() const { return engine_; }
+
+  [[nodiscard]] filament::View* getView() const { return view_; }
+
+  [[nodiscard]] filament::Renderer* getRenderer() const { return renderer_; }
 
  private:
   FlutterDesktopEngineState* state_;

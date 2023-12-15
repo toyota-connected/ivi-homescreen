@@ -35,12 +35,12 @@ class GlbLoader {
 
   std::future<std::string> loadGlbFromAsset(const std::string& path,
                                             float scale,
-                                            const Position& centerPosition,
+                                            const Position* centerPosition,
                                             bool isFallback = false) const;
 
   std::future<std::string> loadGlbFromUrl(const std::string& url,
                                           float scale,
-                                          const Position& centerPosition,
+                                          const Position* centerPosition,
                                           bool isFallback = false) const;
 
   // Disallow copy and assign.

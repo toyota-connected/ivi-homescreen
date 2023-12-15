@@ -14,7 +14,7 @@ GlbLoader::GlbLoader(void* context,
 std::future<std::string> GlbLoader::loadGlbFromAsset(
     const std::string& path,
     float scale,
-    const Position& centerPosition,
+    const Position* centerPosition,
     const bool isFallback) const {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
@@ -45,7 +45,7 @@ std::future<std::string> GlbLoader::loadGlbFromAsset(
 std::future<std::string> GlbLoader::loadGlbFromUrl(
     const std::string& url,
     float scale,
-    const Position& centerPosition,
+    const Position* centerPosition,
     bool isFallback) const {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());

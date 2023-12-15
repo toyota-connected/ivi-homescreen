@@ -23,6 +23,22 @@ SceneController::SceneController(
       scene_(std::move(scene)),
       model_(std::move(model)),
       shapes_(std::move(shapes)) {
+  setUpViewer(platformView, state, engine, assetLoader, resourceLoader);
+  setUpGround();
+  setUpCamera();
+  setUpSkybox();
+  setUpLight();
+  setUpIndirectLight();
+  setUpLoadingModel();
+  setUpShapes();
+}
+
+void SceneController::setUpViewer(
+    PlatformView* platformView,
+    FlutterDesktopEngineState* state,
+    ::filament::Engine* engine,
+    ::filament::gltfio::AssetLoader* assetLoader,
+    ::filament::gltfio::ResourceLoader* resourceLoader) {
   modelViewer_ = std::make_unique<CustomModelViewer>(
       platformView, state, engine, assetLoader, resourceLoader);
 
@@ -47,14 +63,6 @@ SceneController::SceneController(
                                                        flutterAssetsPath_);
   shapeManager_ = std::make_unique<ShapeManager>(modelViewer_.get(),
                                                  materialManager_.get());
-
-  setUpGround();
-  setUpCamera();
-  setUpSkybox();
-  setUpLight();
-  setUpIndirectLight();
-  setUpLoadingModel();
-  setUpShapes();
 }
 
 void SceneController::setUpGround() {
@@ -65,15 +73,15 @@ void SceneController::setUpGround() {
 }
 
 void SceneController::setUpCamera() {
-  if (!scene_.get() || !scene_->getCamera())
+  if (!scene_ || !scene_->getCamera())
     return;
 
-  cameraManager_->updateCamera(nullptr);
+  cameraManager_->updateCamera(scene_->getCamera());
 }
 
 void SceneController::setUpSkybox() {
   // TODO post on platform thread
-  if (!scene_.get())
+  if (!scene_)
     return;
 
   auto skybox = scene_->getSkybox();
@@ -129,7 +137,7 @@ void SceneController::setUpSkybox() {
 
 void SceneController::setUpLight() {
   // TODO post on platform thread
-  if (scene_.get()) {
+  if (scene_) {
     auto light = scene_->getLight();
     if (light) {
       lightManager_->changeLight(light);
@@ -190,28 +198,98 @@ void SceneController::setUpIndirectLight() {
     }
 #endif
 }
-void SceneController::setUpLoadingModel() {
-  // TODO post on platform thread
-#if 0
-  val result = loadModel(model)
-  if (result != null && model?.fallback != null) {
-    if (result is Resource.Error) {
-      loadModel(model.fallback)
-      setUpAnimation(model.fallback.animation)
-    } else {
-      setUpAnimation(model.animation)
+
+void SceneController::setUpAnimation(std::optional<Animation*> animation) {
+  if (animation.has_value()) {
+    auto a = animation.value();
+    if (a->GetAutoPlay()) {
+      if (a->GetIndex().has_value()) {
+        currentAnimationIndex_ = a->GetIndex();
+      } else if (!a->GetName().empty()) {
+        currentAnimationIndex_ =
+            animationManager_->getAnimationIndexByName(a->GetName());
+      }
     }
   } else {
-      setUpAnimation(model?.animation)
+    currentAnimationIndex_ = std::nullopt;
   }
-#endif
+}
+
+void SceneController::setUpLoadingModel() {
+  // TODO post on platform thread
+
+  auto result = loadModel(model_.get());
+  if (!result.empty() && model_->GetFallback().has_value()) {
+    if (result == "Resource.Error") {
+      auto f = model_->GetFallback();
+      loadModel(f);
+      setUpAnimation(f.value()->GetAnimation());
+    } else {
+      setUpAnimation(model_->GetAnimation());
+    }
+  } else {
+    setUpAnimation(model_->GetAnimation());
+  }
 }
 
 void SceneController::setUpShapes() {
   // TODO post on platform thread
-  if (shapes_.get()) {
+  if (shapes_) {
     shapeManager_->createShapes(*shapes_);
   }
+}
+
+std::string SceneController::loadModel(std::optional<Model*> model) {
+  std::string result;
+  if (!model.has_value())
+    return "Error.NoModel";
+
+  auto m = model.value();
+  if (m->isGlb()) {
+    if (!m->GetAssetPath().empty()) {
+      auto f = glbLoader_->loadGlbFromAsset(m->GetAssetPath(), m->GetScale(),
+                                            m->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    } else if (!m->GetUrl().empty()) {
+      auto f = glbLoader_->loadGlbFromUrl(m->GetUrl(), m->GetScale(),
+                                          m->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    }
+  } else {
+    if (!m->GetAssetPath().empty()) {
+      auto f = gltfLoader_->loadGltfFromAsset(m->GetAssetPath(), m->GetScale(),
+                                              m->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    } else if (!m->GetUrl().empty()) {
+      auto f = gltfLoader_->loadGltfFromUrl(m->GetUrl(), m->GetScale(),
+                                            m->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    }
+  }
+  return result;
+}
+
+void SceneController::makeSurfaceViewTransparent() {
+  modelViewer_->getView()->setBlendMode(
+      ::filament::View::BlendMode::TRANSLUCENT);
+
+  // TODO
+  // surfaceView.holder.setFormat(PixelFormat.TRANSLUCENT)
+
+  auto clearOptions = modelViewer_->getRenderer()->getClearOptions();
+  clearOptions.clear = true;
+  modelViewer_->getRenderer()->setClearOptions(clearOptions);
+}
+
+void SceneController::makeSurfaceViewNotTransparent() {
+  modelViewer_->getView()->setBlendMode(::filament::View::BlendMode::OPAQUE);
+
+  // TODO surfaceView.setZOrderOnTop(true) // necessary
+  // TODO surfaceView.holder.setFormat(PixelFormat.OPAQUE)
 }
 
 }  // namespace plugin_filament_view
