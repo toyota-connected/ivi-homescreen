@@ -9,29 +9,17 @@
 #include <wayland-client.h>
 
 #include <filament/Engine.h>
-#include <filament/Viewport.h>
 #include <filament/View.h>
+#include <filament/Viewport.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/MaterialProvider.h>
 #include <gltfio/ResourceLoader.h>
 
-#include "models/model/animation_manager.h"
-#include "models/model/glb/loader/glb_loader.h"
-#include "models/model/gltf/loader/gltf_loader.h"
-#include "models/model/model.h"
-#include "models/scene/camera/camera_manager.h"
-#include "models/scene/ground_manager.h"
-#include "models/scene/indirect_light/indirect_light_manager.h"
-#include "models/scene/light/light_manager.h"
-#include "models/scene/material/material_manager.h"
-#include "models/scene/scene.h"
-#include "models/scene/skybox/skybox_manager.h"
-#include "models/shapes/shape.h"
-#include "models/shapes/shape_manager.h"
 #include "platform_views/platform_view.h"
 
 #include <memory>
 
+#include "filament_scene.h"
 #include "flutter_desktop_engine_state.h"
 #include "flutter_homescreen.h"
 #include "view/flutter_view.h"
@@ -148,65 +136,14 @@ class FilamentViewPlugin : public flutter::Plugin,
   FilamentViewPlugin& operator=(const FilamentViewPlugin&) = delete;
 
  private:
-  struct _native_window {
-    struct wl_display* display;
-    struct wl_surface* surface;
-    uint32_t width;
-    uint32_t height;
-  } native_window_;
-
-  FlutterView* view_;
-  wl_display* display_{};
-  wl_surface* surface_;
-  wl_surface* parent_surface_;
-  wl_callback* callback_;
-  wl_subsurface* subsurface_{};
-
-  static void OnFrame(void* data, wl_callback* callback, uint32_t time);
-  static const wl_callback_listener frame_listener;
-
   const std::string flutterAssetsPath_;
 
-  std::optional<int32_t> currentAnimationIndex_;
-
-  std::optional<std::unique_ptr<plugin_filament_view::Model>> model_;
-  std::optional<std::unique_ptr<plugin_filament_view::Scene>> scene_;
-  std::optional<std::unique_ptr<
-      std::vector<std::unique_ptr<plugin_filament_view::Shape>>>>
-      shapes_;
-
   ::filament::Engine* engine_;
-  ::filament::SwapChain* swapChain_;
-  ::filament::Renderer* renderer_;
   ::filament::gltfio::MaterialProvider* materialProvider_;
   ::filament::gltfio::AssetLoader* assetLoader_;
-  std::unique_ptr<filament::gltfio::ResourceLoader> resourceLoader_;
+  ::filament::gltfio::ResourceLoader* resourceLoader_;
 
-  std::unique_ptr<CustomModelViewer> modelViewer_;
-
-  // std::unique_ptr<IBLProfiler> iblProfiler_;
-
-  std::unique_ptr<plugin_filament_view::models::glb::GlbLoader> glbLoader_;
-  std::unique_ptr<plugin_filament_view::models::gltf::GltfLoader> gltfLoader_;
-  std::unique_ptr<LightManager> lightManager_;
-  std::unique_ptr<IndirectLightManager> indirectLightManager_;
-  std::unique_ptr<SkyboxManager> skyboxManager_;
-  std::unique_ptr<AnimationManager> animationManager_;
-  CameraManager* cameraManager_{};
-  std::unique_ptr<GroundManager> groundManager_;
-  std::unique_ptr<MaterialManager> materialManager_;
-  std::unique_ptr<ShapeManager> shapeManager_;
-
-  void setUpViewer();
-  void setUpGround();
-  void setUpCamera();
-  void setUpSkybox();
-  void setUpLight();
-  void setUpIndirectLight();
-  void setUpLoadingModel();
-  void setUpShapes();
-
-  void DrawFrame(uint32_t time) const;
+  std::unique_ptr<FilamentScene> filament_scene_;
 };
 
 }  // namespace plugin_filament_view

@@ -16,10 +16,9 @@
 
 #include "exposure.h"
 
-#include "models/scene/scene.h"
 #include "logging/logging.h"
+#include "models/scene/scene.h"
 #include "utils.h"
-
 
 namespace plugin_filament_view {
 

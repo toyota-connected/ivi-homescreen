@@ -21,7 +21,6 @@
 #include "logging/logging.h"
 #include "utils.h"
 
-
 namespace plugin_filament_view {
 
 Model::Model(void* parent,
@@ -64,9 +63,7 @@ Model::Model(void* parent,
       pathPostfix_ = std::get<std::string>(it.second);
     } else if (key == "scene" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      scene_ = std::make_unique<Scene>(
-          parent, flutterAssetsPath_,
-          flutter::EncodableValue(std::get<flutter::EncodableMap>(it.second)));
+      scene_ = std::make_unique<Scene>(parent, flutterAssetsPath_, it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Model] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);

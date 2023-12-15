@@ -31,10 +31,11 @@ class GltfLoader {
              CustomModelViewer* model_viewer,
              const std::string& flutter_assets_path);
 
-  [[nodiscard]] std::future<std::string> loadGltfFromAsset(const std::string& path,
-                                             float scale,
-                                             const Position& centerPosition,
-                                             bool isFallback = false) const;
+  [[nodiscard]] std::future<std::string> loadGltfFromAsset(
+      const std::string& path,
+      float scale,
+      const Position& centerPosition,
+      bool isFallback = false) const;
 
   std::future<std::string> loadGltfFromUrl(const std::string& url,
                                            float scale,

@@ -22,7 +22,6 @@
 #include "models/scene/geometry/position.h"
 #include "models/scene/material/material.h"
 
-
 namespace plugin_filament_view {
 class Shape {
  public:

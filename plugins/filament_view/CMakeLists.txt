@@ -60,6 +60,9 @@ add_library(plugin_filament_view STATIC
         filament_view_plugin.cc
         messages.g.cc
 
+        filament_scene.cc
+        scene_controller.cc
+
         models/model/animation.cc
         models/model/animation_manager.cc
         models/model/glb/loader/glb_loader.cc

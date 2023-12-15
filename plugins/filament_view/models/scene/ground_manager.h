@@ -19,7 +19,6 @@
 #include "ground.h"
 #include "viewer/custom_model_viewer.h"
 
-
 namespace plugin_filament_view {
 class GroundManager {
  public:
