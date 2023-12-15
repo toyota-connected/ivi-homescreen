@@ -64,6 +64,9 @@ CustomModelViewer::CustomModelViewer(
 
   setupView();
 
+  modelLoader_ =
+      std::make_unique<ModelLoader>(this, assetLoader_, resourceLoader_);
+
   OnFrame(this, nullptr, 0);
 }
 
@@ -73,10 +76,14 @@ CustomModelViewer::~CustomModelViewer() {
     callback_ = nullptr;
   }
 
-  if (swapChain_) {
-    engine_->destroy(swapChain_);
-    swapChain_ = nullptr;
-  }
+  modelLoader_->destroyModel();
+
+  engine_->destroy(swapChain_);
+  engine_->destroy(renderer_);
+  engine_->destroy(view_);
+  engine_->destroy(scene_);
+
+  cameraManager_->destroyCamera();
 
   if (subsurface_) {
     wl_subsurface_destroy(subsurface_);
@@ -128,8 +135,14 @@ void CustomModelViewer::setupView() {
 #endif
 }
 
+/**
+ * Renders the model and updates the Filament camera.
+ *
+ * @param frameTimeNanos time in nanoseconds when the frame started being
+ * rendered
+ */
 void CustomModelViewer::DrawFrame(uint32_t time) {
-  //modelLoader.updateScene()
+  // modelLoader.updateScene()
 
   cameraManager_->lookAtDefaultPosition();
 
@@ -137,7 +150,7 @@ void CustomModelViewer::DrawFrame(uint32_t time) {
   if (renderer_->beginFrame(swapChain_, time)) {
     renderer_->render(view_);
     renderer_->endFrame();
-    //rendererStateFlow.value=frameTimeNanos;
+    // rendererStateFlow.value=frameTimeNanos;
   }
 }
 
@@ -162,7 +175,7 @@ void CustomModelViewer::OnFrame(void* data,
   wl_callback_add_listener(obj->callback_, &CustomModelViewer::frame_listener,
                            data);
 
-//TODO  wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
+  // TODO  wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
 
   wl_surface_commit(obj->surface_);
 }

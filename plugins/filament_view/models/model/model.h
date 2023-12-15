@@ -20,7 +20,7 @@
 #include <optional>
 #include <string>
 
-#include "animation.h"
+#include "models/model/animation/animation.h"
 #include "models/scene/geometry/position.h"
 #include "models/scene/scene.h"
 
