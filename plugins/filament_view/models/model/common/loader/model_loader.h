@@ -40,6 +40,8 @@ class ModelLoader {
                      float scale,
                      bool transform);
 
+  void updateScene();
+
  private:
   CustomModelViewer* modelViewer_;
   ::filament::Engine* engine_;
@@ -49,7 +51,10 @@ class ModelLoader {
 
   filament::gltfio::FilamentAsset* asset_{};
 
-  int readyRenderables_[128]{};  // add up to 128 entities at a time
+  ::filament::gltfio::NodeManager::SceneMask visibleScenes_;
+
+
+  utils::Entity readyRenderables_[128]{};  // add up to 128 entities at a time
 
   // private var fetchResourcesJob: Job? = null
 
@@ -85,8 +90,6 @@ class ModelLoader {
    * Removes the transformation that was set up via transformToUnitCube.
    */
   void clearRootTransform();
-
-  void updateScene();
 
   void populateScene(::filament::gltfio::FilamentAsset* asset);
 
