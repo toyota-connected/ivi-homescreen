@@ -28,6 +28,7 @@
 #include <gltfio/Animator.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/ResourceLoader.h>
+#include <gltfio/NodeManager.h>
 #include <wayland-client.h>
 #include <asio/io_context_strand.hpp>
 
@@ -52,6 +53,7 @@ namespace plugin_filament_view {
 using models::state::ModelState;
 using models::state::SceneState;
 using models::state::ShapeState;
+using SceneMask = ::filament::gltfio::NodeManager::SceneMask;
 
 class CustomModelViewer {
  public:
@@ -75,6 +77,10 @@ class CustomModelViewer {
   [[nodiscard]] filament::Engine* getEngine() const { return engine_; }
 
   [[nodiscard]] filament::View* getView() const { return view_; }
+
+  [[nodiscard]] filament::Scene* getScene() const { return scene_; }
+
+  [[nodiscard]] SceneMask getSceneMask() const { visibleScenes_; }
 
   [[nodiscard]] filament::Renderer* getRenderer() const { return renderer_; }
 
@@ -118,6 +124,8 @@ class CustomModelViewer {
   ::filament::View* view_{};
   ::filament::Renderer* renderer_{};
   ::filament::SwapChain* swapChain_{};
+
+  SceneMask visibleScenes_;
 
   ::filament::gltfio::Animator* animator_;
 

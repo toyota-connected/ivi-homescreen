@@ -155,6 +155,8 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
 
     cameraManager_ = std::make_unique<CameraManager>(this);
     scene_ = engine_->createScene();
+    visibleScenes_.reset();
+    visibleScenes_.set(1);
     view_ = engine_->createView();
     view_->setScene(scene_);
 
@@ -216,7 +218,7 @@ void CustomModelViewer::DrawFrame(uint32_t time) {
   if (filament_api_thread_id_ != pthread_self()) {
     asio::post(*strand_, [&]() {
 
-      // modelLoader.updateScene()
+      modelLoader_->updateScene();
 
       cameraManager_->lookAtDefaultPosition();
 
@@ -227,19 +229,9 @@ void CustomModelViewer::DrawFrame(uint32_t time) {
         // rendererStateFlow.value=frameTimeNanos;
       }
     });
-  } else {
-    spdlog::debug("[DrawFrame]");
-
-    // modelLoader.updateScene()
-
-    cameraManager_->lookAtDefaultPosition();
-
-    // Render the scene, unless the renderer wants to skip the frame.
-    if (renderer_->beginFrame(swapChain_, time)) {
-      renderer_->render(view_);
-      renderer_->endFrame();
-      // rendererStateFlow.value=frameTimeNanos;
-    }
+  }
+  else {
+    assert(false);
   }
 }
 
