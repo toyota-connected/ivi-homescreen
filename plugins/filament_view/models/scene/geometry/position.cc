@@ -23,6 +23,7 @@ namespace plugin_filament_view {
 Position::Position(void* /* parent */,
                    const std::string& /* flutter_assets_path */,
                    const flutter::EncodableMap& params) {
+  SPDLOG_TRACE("++Position::Position");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -39,9 +40,10 @@ Position::Position(void* /* parent */,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Position::Position");
 }
 
-void Position::Print(const char* tag) {
+void Position::Print(const char* tag) const {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Position)", tag);
   if (x_.has_value()) {

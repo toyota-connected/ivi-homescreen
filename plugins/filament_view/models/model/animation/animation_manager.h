@@ -21,14 +21,14 @@
 namespace plugin_filament_view {
 class AnimationManager {
  public:
-  explicit AnimationManager(CustomModelViewer* model_viewer);
+  AnimationManager(CustomModelViewer* model_viewer);
 
   std::vector<std::string> getAnimationNames() { return animationNames_; }
 
   int32_t getAnimationCount() { return animationCount_; }
 
-  int32_t getAnimationIndexByName(const std::string& name) {
-    //TODO
+  int32_t getAnimationIndexByName(const std::string& /* name */) {
+    // TODO
     return 0;
   }
 

@@ -25,6 +25,7 @@ Projection::Projection(void const* parent,
                        const std::string& flutter_assets_path,
                        const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Projection::Projection");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -57,6 +58,7 @@ Projection::Projection(void const* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Projection::Projection");
 }
 
 void Projection::Print(const char* tag) {

@@ -3,26 +3,14 @@
 
 #include <flutter/standard_message_codec.h>
 
-#include <filament/SwapChain.h>
-
-#include "messages.g.h"
-
-#include "logging/logging.h"
-
 #include "filament_scene.h"
+#include "logging/logging.h"
+#include "messages.g.h"
 
 class FlutterView;
 class Display;
 
 namespace plugin_filament_view {
-
-extern "C" {
-extern const uint8_t UBERARCHIVE_PACKAGE[];
-extern int UBERARCHIVE_DEFAULT_OFFSET;
-extern size_t UBERARCHIVE_DEFAULT_SIZE;
-}
-#define UBERARCHIVE_DEFAULT_DATA \
-  (UBERARCHIVE_PACKAGE + UBERARCHIVE_DEFAULT_OFFSET)
 
 // static
 void FilamentViewPlugin::RegisterWithRegistrar(
@@ -58,28 +46,10 @@ FilamentViewPlugin::FilamentViewPlugin(int32_t id,
                                        FlutterDesktopEngineState* state)
     : PlatformView(id, std::move(viewType), direction, width, height),
       flutterAssetsPath_(std::move(assetDirectory)) {
-  SPDLOG_DEBUG("FilamentViewPlugin: [{}] {}, assetDirectory: {}", GetId(),
-               GetViewType(), flutterAssetsPath_);
-
-  engine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
-
-  materialProvider_ = ::filament::gltfio::createUbershaderProvider(
-      engine_, UBERARCHIVE_DEFAULT_DATA, UBERARCHIVE_DEFAULT_SIZE);
-  assetLoader_ =
-      ::filament::gltfio::AssetLoader::create({.engine = engine_,
-                                               .materials = materialProvider_,
-                                               .names = nullptr,
-                                               .entities = nullptr,
-                                               .defaultNodeName = nullptr});
-  // TODO add delete
-  resourceLoader_ = new ::filament::gltfio::ResourceLoader(
-      {.engine = engine_,
-       .gltfPath = nullptr,
-       .normalizeSkinningWeights = true});
-
-  filament_scene_ = std::make_unique<FilamentScene>(
-      this, state, id, params, engine_, assetLoader_, resourceLoader_,
-      flutterAssetsPath_);
+  SPDLOG_TRACE("++FilamentViewPlugin::FilamentViewPlugin");
+  filamentScene_ = std::make_unique<FilamentScene>(this, state, id, params,
+                                                    flutterAssetsPath_);
+  SPDLOG_TRACE("--FilamentViewPlugin::FilamentViewPlugin");
 }
 
 FilamentViewPlugin::~FilamentViewPlugin() = default;

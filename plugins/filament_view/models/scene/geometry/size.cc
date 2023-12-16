@@ -24,6 +24,7 @@ namespace plugin_filament_view {
 Size::Size(void* /* parent */,
            const std::string& /* flutter_assets_path */,
            const flutter::EncodableMap& params) {
+  SPDLOG_TRACE("++Size::Size");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -40,6 +41,7 @@ Size::Size(void* /* parent */,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Size::Size");
 }
 
 Size::Size(double x, double y, double z) {

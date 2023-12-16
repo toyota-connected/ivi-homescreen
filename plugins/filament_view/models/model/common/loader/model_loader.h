@@ -4,6 +4,7 @@
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/ResourceLoader.h>
+#include <asio/io_context_strand.hpp>
 #include "viewer/custom_model_viewer.h"
 
 class CustomModelViewer;
@@ -13,44 +14,44 @@ namespace plugin_filament_view {
 class ModelLoader {
  public:
   ModelLoader(CustomModelViewer* modelViewer,
+              ::filament::Engine* engine,
               ::filament::gltfio::AssetLoader* assetLoader,
-              ::filament::gltfio::ResourceLoader* resourceLoader);
-  ~ModelLoader();
-
+              ::filament::gltfio::ResourceLoader* resourceLoader,
+              asio::io_context::strand* strand);
   /**
    * Frees all entities associated with the most recently-loaded model.
    */
-  void destroyModel();
-
- private:
-  // TODO std::optional<std::unique_ptr<filament::gltfio::FilamentAsset>>
-  // asset_;
-  ::filament::Engine* engine_;
-  ::filament::gltfio::AssetLoader* assetLoader_;
-  ::filament::gltfio::ResourceLoader* resourceLoader_;
-
-  int readyRenderables_[128]{};  // add up to 128 entities at a time
-
-  // private set
-
-  // private var fetchResourcesJob: Job? = null
+  ~ModelLoader();
 
   /**
    * Loads a monolithic binary glTF and populates the Filament scene.
    */
-  void loadModelGlb(uint8_t* buffer,
-                    std::optional<Position> centerPosition,
-                    std::optional<float> scale,
-                    bool transformToUnitCube = false);
+  void loadModelGlb(const std::vector<uint8_t>& buffer,
+                    const Position* centerPosition,
+                    float scale,
+                    bool transform = false);
 
   /**
    * Loads a JSON-style glTF file and populates the Filament scene.
    * The given callback is triggered for each requested resource.
    */
-  void loadModelGltf(uint8_t* buffer,
-                     std::optional<float> scale,
-                     std::optional<Position> centerPosition,
-                     bool transformToUnitCube = false);
+  void loadModelGltf(const std::vector<uint8_t>& buffer,
+                     const Position* centerPosition,
+                     float scale,
+                     bool transform);
+
+ private:
+  CustomModelViewer* modelViewer_;
+  ::filament::Engine* engine_;
+  ::filament::gltfio::AssetLoader* assetLoader_;
+  ::filament::gltfio::ResourceLoader* resourceLoader_;
+  asio::io_context::strand* strand_;
+
+  filament::gltfio::FilamentAsset* asset_{};
+
+  int readyRenderables_[128]{};  // add up to 128 entities at a time
+
+  // private var fetchResourcesJob: Job? = null
 
   /**
    * Loads a JSON-style glTF file and populates the Filament scene.
@@ -76,8 +77,7 @@ class ModelLoader {
    * @param centerPoint Coordinate of center point of unit cube, defaults to <
    * 0, 0, -4 >
    */
-  void transformToUnitCube(std::optional<Position> centerPoint,
-                           std::optional<float> scale);
+  void transformToUnitCube(const Position* centerPoint, float scale);
 
   // fun getModelTransform(): Mat4?
 

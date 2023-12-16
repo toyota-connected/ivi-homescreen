@@ -31,7 +31,7 @@ class Scene {
   Scene(void* parent,
         const std::string& flutter_assets_path,
         const flutter::EncodableValue& val);
-  ~Scene() = default;
+  ~Scene();
   void Print(const char* tag) const;
   [[nodiscard]] Ground* getGround() const {
     return ground_.has_value() ? ground_.value().get() : nullptr;

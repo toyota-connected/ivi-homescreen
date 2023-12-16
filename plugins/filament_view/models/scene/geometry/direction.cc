@@ -24,6 +24,7 @@ namespace plugin_filament_view {
 Direction::Direction(void* /* parent */,
                      const std::string& /* flutter_assets_path */,
                      const flutter::EncodableMap& params) {
+  SPDLOG_TRACE("++Direction::Direction");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -40,6 +41,7 @@ Direction::Direction(void* /* parent */,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Direction::Direction");
 }
 
 void Direction::Print(const char* tag) {

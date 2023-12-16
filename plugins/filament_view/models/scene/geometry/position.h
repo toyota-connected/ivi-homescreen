@@ -27,7 +27,7 @@ class Position {
   Position(void* parent,
            const std::string& flutter_assets_path,
            const flutter::EncodableMap& params);
-  void Print(const char* tag);
+  void Print(const char* tag) const;
 
   // Disallow copy and assign.
   Position(const Position&) = delete;

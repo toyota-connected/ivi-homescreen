@@ -7,23 +7,22 @@
 
 namespace plugin_filament_view {
 
-SceneController::SceneController(
-    PlatformView* platformView,
-    FlutterDesktopEngineState* state,
-    ::filament::Engine* engine,
-    ::filament::gltfio::AssetLoader* assetLoader,
-    ::filament::gltfio::ResourceLoader* resourceLoader,
-    std::string flutterAssetsPath,
-    std::unique_ptr<Model> model,
-    std::unique_ptr<Scene> scene,
-    std::unique_ptr<std::vector<std::unique_ptr<Shape>>> shapes,
-    int32_t id)
+SceneController::SceneController(PlatformView* platformView,
+                                 FlutterDesktopEngineState* state,
+                                 std::string flutterAssetsPath,
+                                 Model* model,
+                                 Scene* scene,
+                                 std::vector<std::unique_ptr<Shape>>* shapes,
+                                 int32_t id)
     : id_(id),
       flutterAssetsPath_(std::move(flutterAssetsPath)),
-      scene_(std::move(scene)),
-      model_(std::move(model)),
-      shapes_(std::move(shapes)) {
-  setUpViewer(platformView, state, engine, assetLoader, resourceLoader);
+      scene_(scene),
+      model_(model),
+      shapes_(shapes) {
+  SPDLOG_TRACE("++SceneController::SceneController");
+  modelViewer_ = std::make_unique<CustomModelViewer>(platformView, state, flutterAssetsPath_);
+
+  setUpViewer();
   setUpGround();
   setUpCamera();
   setUpSkybox();
@@ -31,17 +30,15 @@ SceneController::SceneController(
   setUpIndirectLight();
   setUpLoadingModel();
   setUpShapes();
+
+  SPDLOG_TRACE("--SceneController::SceneController");
 }
 
-void SceneController::setUpViewer(
-    PlatformView* platformView,
-    FlutterDesktopEngineState* state,
-    ::filament::Engine* engine,
-    ::filament::gltfio::AssetLoader* assetLoader,
-    ::filament::gltfio::ResourceLoader* resourceLoader) {
-  modelViewer_ = std::make_unique<CustomModelViewer>(
-      platformView, state, engine, assetLoader, resourceLoader);
+SceneController::~SceneController() {
+  SPDLOG_TRACE("SceneController::~SceneController");
+}
 
+void SceneController::setUpViewer() {
   // TODO surfaceView.setOnTouchListener(modelViewer)
   //  surfaceView.setZOrderOnTop(true) // necessary
 
@@ -66,8 +63,7 @@ void SceneController::setUpViewer(
 }
 
 void SceneController::setUpGround() {
-  // TODO post on platform thread
-  if (scene_.get() && scene_->getGround()) {
+  if (scene_ && scene_->getGround()) {
     groundManager_->createGround(scene_->getGround());
   }
 }
@@ -80,14 +76,13 @@ void SceneController::setUpCamera() {
 }
 
 void SceneController::setUpSkybox() {
-  // TODO post on platform thread
   if (!scene_)
     return;
 
   auto skybox = scene_->getSkybox();
   if (!skybox) {
     skyboxManager_->setDefaultSkybox();
-    // TODO makeSurfaceViewTransparent();
+    makeSurfaceViewTransparent();
   } else {
     const auto type = skybox->GetType();
     if (type.has_value()) {
@@ -136,7 +131,6 @@ void SceneController::setUpSkybox() {
 }
 
 void SceneController::setUpLight() {
-  // TODO post on platform thread
   if (scene_) {
     auto light = scene_->getLight();
     if (light) {
@@ -150,8 +144,7 @@ void SceneController::setUpLight() {
 }
 
 void SceneController::setUpIndirectLight() {
-  // TODO post on platform thread
-  if (scene_.get() && scene_->getIndirectLight()) {
+  if (scene_ && scene_->getIndirectLight()) {
     auto light = scene_->getIndirectLight();
     if (!light) {
       indirectLightManager_->setDefaultIndirectLight(light);
@@ -216,9 +209,8 @@ void SceneController::setUpAnimation(std::optional<Animation*> animation) {
 }
 
 void SceneController::setUpLoadingModel() {
-  // TODO post on platform thread
-
-  auto result = loadModel(model_.get());
+  auto result = loadModel(model_);
+  SPDLOG_DEBUG("setUpLoadingModel: [{}]", result);
   if (!result.empty() && model_->GetFallback().has_value()) {
     if (result == "Resource.Error") {
       auto f = model_->GetFallback();
@@ -233,14 +225,13 @@ void SceneController::setUpLoadingModel() {
 }
 
 void SceneController::setUpShapes() {
-  // TODO post on platform thread
   if (shapes_) {
     shapeManager_->createShapes(*shapes_);
   }
 }
 
 std::string SceneController::loadModel(std::optional<Model*> model) {
-  std::string result;
+  std::string result = "Success";
   if (!model.has_value())
     return "Error.NoModel";
 
@@ -273,6 +264,7 @@ std::string SceneController::loadModel(std::optional<Model*> model) {
   return result;
 }
 
+//TODO Move to model viewer
 void SceneController::makeSurfaceViewTransparent() {
   modelViewer_->getView()->setBlendMode(
       ::filament::View::BlendMode::TRANSLUCENT);
@@ -285,6 +277,7 @@ void SceneController::makeSurfaceViewTransparent() {
   modelViewer_->getRenderer()->setClearOptions(clearOptions);
 }
 
+//TODO Move to model viewer
 void SceneController::makeSurfaceViewNotTransparent() {
   modelViewer_->getView()->setBlendMode(::filament::View::BlendMode::OPAQUE);
 

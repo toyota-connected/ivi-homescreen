@@ -24,16 +24,16 @@ namespace plugin_filament_view {
 
 class SceneController {
  public:
+
   SceneController(PlatformView* platformView,
                   FlutterDesktopEngineState* state,
-                  ::filament::Engine* engine,
-                  ::filament::gltfio::AssetLoader* assetLoader,
-                  ::filament::gltfio::ResourceLoader* resourceLoader,
                   std::string flutterAssetsPath,
-                  std::unique_ptr<Model> model,
-                  std::unique_ptr<Scene> scene,
-                  std::unique_ptr<std::vector<std::unique_ptr<Shape>>> shapes,
+                  Model* model,
+                  Scene* scene,
+                  std::vector<std::unique_ptr<Shape>>* shapes,
                   int32_t id);
+
+  ~SceneController();
 
   int32_t getAnimationCount() { return animationManager_->getAnimationCount(); }
 
@@ -45,7 +45,9 @@ class SceneController {
     return animationManager_->getAnimationNames();
   }
 
-  std::optional<int32_t> getCurrentAnimationIndex() { return currentAnimationIndex_; }
+  std::optional<int32_t> getCurrentAnimationIndex() {
+    return currentAnimationIndex_;
+  }
 
   std::string getAnimationNameByIndex(int32_t index) {
     auto names = animationManager_->getAnimationNames();
@@ -59,9 +61,9 @@ class SceneController {
   int32_t id_;
   std::string flutterAssetsPath_;
 
-  std::unique_ptr<Model> model_;
-  std::unique_ptr<Scene> scene_;
-  std::unique_ptr<std::vector<std::unique_ptr<Shape>>> shapes_;
+  Model* model_;
+  Scene* scene_;
+  std::vector<std::unique_ptr<Shape>>* shapes_;
 
   std::unique_ptr<CustomModelViewer> modelViewer_;
 
@@ -83,16 +85,12 @@ class SceneController {
   std::unique_ptr<IndirectLightManager> indirectLightManager_;
   std::unique_ptr<SkyboxManager> skyboxManager_;
   std::unique_ptr<AnimationManager> animationManager_;
-  CameraManager* cameraManager_;
+  CameraManager* cameraManager_{};
   std::unique_ptr<GroundManager> groundManager_;
   std::unique_ptr<MaterialManager> materialManager_;
   std::unique_ptr<ShapeManager> shapeManager_;
 
-  void setUpViewer(PlatformView* platformView,
-                   FlutterDesktopEngineState* state,
-                   ::filament::Engine* engine,
-                   ::filament::gltfio::AssetLoader* assetLoader,
-                   ::filament::gltfio::ResourceLoader* resourceLoader);
+  void setUpViewer();
   void setUpGround();
   void setUpCamera();
   void setUpSkybox();

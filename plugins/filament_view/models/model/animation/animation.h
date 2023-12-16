@@ -39,7 +39,6 @@ class Animation {
   [[nodiscard]] std::optional<int32_t> GetIndex() const { return index_; }
   [[nodiscard]] std::string GetName() const { return name_; }
 
-
   // Disallow copy and assign.
   Animation(const Animation&) = delete;
   Animation& operator=(const Animation&) = delete;

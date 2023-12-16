@@ -1,6 +1,12 @@
 #include "glb_loader.h"
 
+#include <filesystem>
+#include <fstream>
 #include <sstream>
+
+#include <asio/post.hpp>
+
+#include "logging/logging.h"
 
 namespace plugin_filament_view::models::glb {
 
@@ -9,7 +15,10 @@ GlbLoader::GlbLoader(void* context,
                      const std::string& flutter_assets_path)
     : context_(context),
       modelViewer_(model_viewer),
-      flutterAssetsPath_(flutter_assets_path) {}
+      flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++GlbLoader::GlbLoader");
+  SPDLOG_TRACE("--GlbLoader::GlbLoader");
+}
 
 std::future<std::string> GlbLoader::loadGlbFromAsset(
     const std::string& path,
@@ -19,26 +28,36 @@ std::future<std::string> GlbLoader::loadGlbFromAsset(
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
 
-  if (path.empty()) {
-    modelViewer_->setModelState(ModelState::error);
-    promise->set_value("Asset path is not set");
-  }
+  asio::post(*modelViewer_->getStrandContext(), [&, promise, path, scale, centerPosition] {
+    std::filesystem::path asset_path(flutterAssetsPath_);
+    asset_path /= path;
+    if (path.empty() || !std::filesystem::exists(asset_path)) {
+      modelViewer_->setModelState(ModelState::error);
+      promise->set_value("Asset path not valid");
+    }
+    SPDLOG_DEBUG("Attempting to load {}", asset_path.c_str());
+    SPDLOG_DEBUG("scale: {}", scale);
+    centerPosition->Print("centerPosition");
 
-  modelViewer_->setModelState(ModelState::loading);
+    modelViewer_->setModelState(ModelState::loading);
 
-  // TODO post to platform task runner
-  // TODO bufferResource = readAsset(context, flutterAssetPath_, path);
-  // TODO bufferResource.data?.let{modelViewer.modelLoader.loadModelGlb(it,
-  // true, centerPosition, scale)} modelViewer
+    std::ifstream stream(asset_path, std::ios::in | std::ios::binary);
+    std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(stream)),
+                                std::istreambuf_iterator<char>());
 
-  // TODO error response @withContext Resource.Error(bufferResource.message ?:
-  // "Couldn't load glb model from asset")
+    modelViewer_->getModelLoader()->loadModelGlb(buffer, centerPosition, scale,
+                                                 true);
 
-  modelViewer_->setModelState(isFallback ? ModelState::fallbackLoaded
-                                         : ModelState::loaded);
-  std::stringstream ss;
-  ss << "Loaded glb model successfully from " << path;
-  promise->set_value(ss.str());
+    // TODO error response @withContext Resource.Error(bufferResource.message ?:
+    // "Couldn't load glb model from asset")
+
+    modelViewer_->setModelState(isFallback ? ModelState::fallbackLoaded
+                                           : ModelState::loaded);
+    std::stringstream ss;
+    ss << "Loaded glb model successfully from " << asset_path;
+    promise->set_value(ss.str());
+  });
+
   return future;
 }
 
@@ -47,6 +66,7 @@ std::future<std::string> GlbLoader::loadGlbFromUrl(
     float scale,
     const Position* centerPosition,
     bool isFallback) const {
+  spdlog::error("loadGlbFromUrl not implemented yet");
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
 

@@ -61,7 +61,7 @@ add_library(plugin_filament_view STATIC
         messages.g.cc
 
         filament_scene.cc
-        scene_controller.cc
+        models/scene/scene_controller.cc
 
         models/model/animation/animation.cc
         models/model/animation/animation_manager.cc
@@ -77,6 +77,8 @@ add_library(plugin_filament_view STATIC
         models/scene/geometry/direction.cc
         models/scene/geometry/position.cc
         models/scene/geometry/size.cc
+        models/scene/ground.cc
+        models/scene/ground_manager.cc
         models/scene/indirect_light/indirect_light.cc
         models/scene/indirect_light/indirect_light_manager.cc
         models/scene/light/light.cc
@@ -88,8 +90,6 @@ add_library(plugin_filament_view STATIC
         models/scene/material/texture/texture_sampler.cc
         models/scene/skybox/skybox.cc
         models/scene/skybox/skybox_manager.cc
-        models/scene/ground.cc
-        models/scene/ground_manager.cc
         models/scene/scene.cc
         models/shapes/shape.cc
         models/shapes/shape_manager.cc
@@ -106,6 +106,7 @@ target_include_directories(plugin_filament_view PUBLIC
 # target_link_directories(plugin_filament_view PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 target_link_libraries(plugin_filament_view PUBLIC
+        asio
         filament
         flutter_common
         platform_homescreen
