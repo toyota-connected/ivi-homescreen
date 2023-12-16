@@ -26,7 +26,7 @@
 namespace plugin_filament_view {
 class LightManager {
  public:
-  explicit LightManager(CustomModelViewer* model_viewer);
+  LightManager(CustomModelViewer* model_viewer);
 
   void setDefaultLight();
   void changeLight(Light* light);

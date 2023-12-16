@@ -24,6 +24,7 @@ Scene::Scene(void* parent,
              const std::string& flutter_assets_path,
              const flutter::EncodableValue& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Scene::Scene");
   for (auto& it : std::get<flutter::EncodableMap>(params)) {
     if (it.second.IsNull())
       continue;
@@ -59,6 +60,11 @@ Scene::Scene(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Scene::Scene");
+}
+
+Scene::~Scene() {
+  SPDLOG_TRACE("Scene::~Scene()");
 }
 
 void Scene::Print(const char* tag) const {

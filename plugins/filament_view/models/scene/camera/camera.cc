@@ -29,6 +29,7 @@ Camera::Camera(void* parent,
                const std::string& flutter_assets_path,
                const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Camera::Camera");
   for (const auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -138,6 +139,7 @@ Camera::Camera(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Camera::Camera");
 }
 
 void Camera::Print(const char* tag) {

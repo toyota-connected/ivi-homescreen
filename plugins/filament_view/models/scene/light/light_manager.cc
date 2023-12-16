@@ -5,7 +5,10 @@
 
 namespace plugin_filament_view {
 LightManager::LightManager(CustomModelViewer* model_viewer)
-    : model_viewer_(model_viewer) {}
+    : model_viewer_(model_viewer) {
+  SPDLOG_TRACE("++LightManager::LightManager");
+  SPDLOG_TRACE("--LightManager::LightManager");
+}
 
 void LightManager::setDefaultLight() {
   SPDLOG_DEBUG("LightManager::setDefaultLight");

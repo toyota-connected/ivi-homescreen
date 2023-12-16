@@ -25,7 +25,7 @@ class CustomModelViewer;
 
 class CameraManager {
  public:
-  explicit CameraManager(CustomModelViewer* model_viewer);
+  CameraManager(CustomModelViewer* model_viewer);
 
   void updateCamera(Camera* camera);
 

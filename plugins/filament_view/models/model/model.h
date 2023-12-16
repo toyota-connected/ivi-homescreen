@@ -36,12 +36,17 @@ class Model {
   ~Model() = default;
   void Print(const char* tag);
 
-  bool isGlb() { return is_glb_.has_value() && is_glb_.value(); }
+  bool isGlb() {
+    if (is_glb_.has_value()) {
+      return is_glb_.value();
+    }
+    return false;
+  }
 
   std::string GetAssetPath() { return assetPath_; }
   std::string GetUrl() { return url_; }
 
-  float GetScale() { return scale_; }
+  [[nodiscard]] float GetScale() const { return scale_; }
 
   Position* GetCenterPosition() {
     if (center_position_.has_value()) {
@@ -50,7 +55,7 @@ class Model {
     return nullptr;
   }
 
-  std::optional<Model*> GetFallback() const {
+  [[nodiscard]] std::optional<Model*> GetFallback() const {
     if (fallback_.has_value()) {
       return {fallback_.value().get()};
     } else {
@@ -58,7 +63,7 @@ class Model {
     }
   }
 
-  std::optional<Animation*> GetAnimation() const {
+  [[nodiscard]] std::optional<Animation*> GetAnimation() const {
     if (fallback_.has_value()) {
       return {animation_.value().get()};
     } else {

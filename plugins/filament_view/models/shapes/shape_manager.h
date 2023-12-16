@@ -28,7 +28,7 @@ class ShapeManager {
   ShapeManager(CustomModelViewer* model_viewer,
                MaterialManager* material_manager);
   void createShapes(
-      const std::vector<std::unique_ptr<plugin_filament_view::Shape>>& shapes);
+      const std::vector<std::unique_ptr<Shape>>& shapes);
 
   // Disallow copy and assign.
   ShapeManager(const ShapeManager&) = delete;

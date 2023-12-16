@@ -17,6 +17,7 @@
 #pragma once
 
 #include <functional>
+#include <future>
 
 #include <filament/Camera.h>
 #include <filament/Engine.h>
@@ -28,6 +29,7 @@
 #include <gltfio/AssetLoader.h>
 #include <gltfio/ResourceLoader.h>
 #include <wayland-client.h>
+#include <asio/io_context_strand.hpp>
 
 #include "models/scene/camera/camera_manager.h"
 #include "models/state/model_state.h"
@@ -53,12 +55,12 @@ using models::state::ShapeState;
 
 class CustomModelViewer {
  public:
-  explicit CustomModelViewer(PlatformView* platformView,
-                             FlutterDesktopEngineState* state,
-                             ::filament::Engine* engine,
-                             ::filament::gltfio::AssetLoader* assetLoader,
-                             filament::gltfio::ResourceLoader* resourceLoader);
+  CustomModelViewer(PlatformView* platformView,
+                    FlutterDesktopEngineState* state,
+                    std::string flutterAssetsPath);
   ~CustomModelViewer();
+
+  std::future<bool> Initialize(PlatformView* platformView);
 
   void setModelState(models::state::ModelState modelState);
 
@@ -76,13 +78,33 @@ class CustomModelViewer {
 
   [[nodiscard]] filament::Renderer* getRenderer() const { return renderer_; }
 
+  [[nodiscard]] ModelLoader* getModelLoader() const {
+    return modelLoader_.get();
+  }
+
+  void setAnimator(filament::gltfio::Animator* animator) {
+    animator_ = animator;
+  }
+
+  [[nodiscard]] asio::io_context::strand* getStrandContext() const {
+    return strand_.get();
+  }
+
  private:
   FlutterDesktopEngineState* state_;
-  wl_display* display_;
-  wl_surface* surface_;
-  wl_surface* parent_surface_;
+  const std::string flutterAssetsPath_;
+
+  std::thread filament_api_thread_;
+  pthread_t filament_api_thread_id_{};
+  std::unique_ptr<asio::io_context> io_context_;
+  asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
+  std::unique_ptr<asio::io_context::strand> strand_;
+
+  wl_display* display_{};
+  wl_surface* surface_{};
+  wl_surface* parent_surface_{};
   wl_callback* callback_;
-  wl_subsurface* subsurface_;
+  wl_subsurface* subsurface_{};
 
   struct _native_window {
     struct wl_display* display;
@@ -91,13 +113,13 @@ class CustomModelViewer {
     uint32_t height;
   } native_window_{};
 
-  ::filament::gltfio::Animator* animator_;
+  ::filament::Engine* engine_{};
+  ::filament::Scene* scene_{};
+  ::filament::View* view_{};
+  ::filament::Renderer* renderer_{};
+  ::filament::SwapChain* swapChain_{};
 
-  ::filament::Engine* engine_;
-  ::filament::Scene* scene_;
-  ::filament::View* view_;
-  ::filament::Renderer* renderer_;
-  ::filament::SwapChain* swapChain_;
+  ::filament::gltfio::Animator* animator_;
 
   ModelState currentModelState_;
   SceneState currentSkyboxState_;
@@ -108,14 +130,14 @@ class CustomModelViewer {
   std::unique_ptr<ModelLoader> modelLoader_;
 
   std::unique_ptr<CameraManager> cameraManager_;
-  ::filament::gltfio::AssetLoader* assetLoader_;
-  ::filament::gltfio::ResourceLoader* resourceLoader_;
+
+  ::filament::gltfio::AssetLoader* assetLoader_{};
+  ::filament::gltfio::MaterialProvider* materialProvider_{};
+  ::filament::gltfio::ResourceLoader* resourceLoader_{};
 
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
   static const wl_callback_listener frame_listener;
   void DrawFrame(uint32_t time);
-
-  void destroy();
 
   void setupView();
 };

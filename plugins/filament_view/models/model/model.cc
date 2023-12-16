@@ -27,6 +27,7 @@ Model::Model(void* parent,
              const std::string& flutter_assets_path,
              const flutter::EncodableValue& params)
     : flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Model::Model");
   for (auto& it : std::get<flutter::EncodableMap>(params)) {
     if (it.second.IsNull())
       continue;
@@ -69,6 +70,7 @@ Model::Model(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Model::Model");
 }
 
 void Model::Print(const char* tag) {

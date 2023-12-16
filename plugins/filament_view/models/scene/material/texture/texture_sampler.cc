@@ -25,6 +25,7 @@ TextureSampler::TextureSampler(void* parent,
                                const std::string& flutter_assets_path,
                                const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++TextureSampler::TextureSampler");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -45,6 +46,7 @@ TextureSampler::TextureSampler(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--TextureSampler::TextureSampler");
 }
 
 void TextureSampler::Print(const char* tag) {

@@ -12,6 +12,7 @@ Shape::Shape(void* parent,
              const std::string& flutter_assets_path,
              const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Shape::Shape");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -43,6 +44,7 @@ Shape::Shape(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Shape::Shape");
 }
 
 void Shape::Print(const char* tag) const {

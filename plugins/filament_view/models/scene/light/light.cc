@@ -25,6 +25,7 @@ Light::Light(void* parent,
              const std::string& flutter_assets_path,
              const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Light::Light");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -80,6 +81,7 @@ Light::Light(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Light::Light");
 }
 
 void Light::Print(const char* tag) {

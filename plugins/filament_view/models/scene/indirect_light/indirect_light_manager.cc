@@ -1,6 +1,9 @@
 
 #include "indirect_light_manager.h"
 
+#include "logging/logging.h"
+
+
 namespace plugin_filament_view {
 IndirectLightManager::IndirectLightManager(
     void* context,
@@ -8,7 +11,10 @@ IndirectLightManager::IndirectLightManager(
     const std::string& flutter_assets_path)
     : context_(context),
       model_viewer_(model_viewer),
-      flutterAssetsPath_(flutter_assets_path) {}
+      flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++IndirectLightManager::IndirectLightManager");
+  SPDLOG_TRACE("--IndirectLightManager::IndirectLightManager");
+}
 
 void IndirectLightManager::setDefaultIndirectLight(
     IndirectLight* indirect_light) {

@@ -25,6 +25,7 @@ Ground::Ground(void* parent,
                const std::string& flutter_assets_path,
                const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Ground::Ground");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -58,6 +59,7 @@ Ground::Ground(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Ground::Ground");
 }
 
 void Ground::Print(const char* tag) {

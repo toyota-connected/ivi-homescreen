@@ -26,6 +26,7 @@ Exposure::Exposure(void* parent,
                    const std::string& flutter_assets_path,
                    const flutter::EncodableMap& params)
     : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+  SPDLOG_TRACE("++Exposure::Exposure");
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
@@ -46,6 +47,7 @@ Exposure::Exposure(void* parent,
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+  SPDLOG_TRACE("--Exposure::Exposure");
 }
 
 void Exposure::Print(const char* tag) {

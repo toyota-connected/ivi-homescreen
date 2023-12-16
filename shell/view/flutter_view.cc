@@ -89,7 +89,8 @@ FlutterView::FlutterView(Configuration::Config config,
   m_state->view_wrapper->view = this;
 
   m_state->engine_state = std::make_unique<FlutterDesktopEngineState>();
-  m_state->engine = m_flutter_engine.get();
+  // is set after engine is initialized
+  // m_state->engine = m_flutter_engine.get();
   m_state->engine_state->view_controller = m_state.get();
 
   SetUpCommonEngineState(m_state->engine_state.get(), this);

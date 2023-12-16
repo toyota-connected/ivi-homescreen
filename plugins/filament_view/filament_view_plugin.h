@@ -2,30 +2,20 @@
 #ifndef FLUTTER_PLUGIN_FILAMENT_VIEW_PLUGIN_H_
 #define FLUTTER_PLUGIN_FILAMENT_VIEW_PLUGIN_H_
 
+#include <memory>
+
 #include <flutter/event_channel.h>
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
-
 #include <wayland-client.h>
-
-#include <filament/Engine.h>
-#include <filament/View.h>
-#include <filament/Viewport.h>
-#include <gltfio/AssetLoader.h>
-#include <gltfio/MaterialProvider.h>
-#include <gltfio/ResourceLoader.h>
-
-#include "platform_views/platform_view.h"
-
-#include <memory>
 
 #include "filament_scene.h"
 #include "flutter_desktop_engine_state.h"
 #include "flutter_homescreen.h"
+#include "messages.g.h"
+#include "platform_views/platform_view.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"
-
-#include "messages.g.h"
 
 namespace plugin_filament_view {
 
@@ -138,12 +128,8 @@ class FilamentViewPlugin : public flutter::Plugin,
  private:
   const std::string flutterAssetsPath_;
 
-  ::filament::Engine* engine_;
-  ::filament::gltfio::MaterialProvider* materialProvider_;
-  ::filament::gltfio::AssetLoader* assetLoader_;
-  ::filament::gltfio::ResourceLoader* resourceLoader_;
-
-  std::unique_ptr<FilamentScene> filament_scene_;
+  std::unique_ptr<FilamentScene> filamentScene_;
+  SceneController* sceneController_;
 };
 
 }  // namespace plugin_filament_view
