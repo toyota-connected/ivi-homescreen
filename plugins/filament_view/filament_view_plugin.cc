@@ -48,7 +48,7 @@ FilamentViewPlugin::FilamentViewPlugin(int32_t id,
       flutterAssetsPath_(std::move(assetDirectory)) {
   SPDLOG_TRACE("++FilamentViewPlugin::FilamentViewPlugin");
   filamentScene_ = std::make_unique<FilamentScene>(this, state, id, params,
-                                                    flutterAssetsPath_);
+                                                   flutterAssetsPath_);
   SPDLOG_TRACE("--FilamentViewPlugin::FilamentViewPlugin");
 }
 

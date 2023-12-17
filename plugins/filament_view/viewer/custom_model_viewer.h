@@ -23,6 +23,7 @@
 #include <filament/Engine.h>
 #include <filament/Renderer.h>
 #include <filament/Scene.h>
+#include <filament/Skybox.h>
 #include <filament/SwapChain.h>
 #include <filament/View.h>
 #include <gltfio/Animator.h>
@@ -74,15 +75,13 @@ class CustomModelViewer {
     return cameraManager_.get();
   }
 
-  [[nodiscard]] filament::Engine* getEngine() const { return engine_; }
+  [[nodiscard]] ::filament::Engine* getEngine() const { return engine_; }
 
-  [[nodiscard]] filament::View* getView() const { return view_; }
+  [[nodiscard]] ::filament::View* getView() const { return view_; }
 
-  [[nodiscard]] filament::Scene* getScene() const { return scene_; }
+  [[nodiscard]] ::filament::Scene* getScene() const { return scene_; }
 
-  [[nodiscard]] SceneMask getSceneMask() const { visibleScenes_; }
-
-  [[nodiscard]] filament::Renderer* getRenderer() const { return renderer_; }
+  [[nodiscard]] ::filament::Renderer* getRenderer() const { return renderer_; }
 
   [[nodiscard]] ModelLoader* getModelLoader() const {
     return modelLoader_.get();
@@ -125,8 +124,6 @@ class CustomModelViewer {
   ::filament::Renderer* renderer_{};
   ::filament::SwapChain* swapChain_{};
 
-  SceneMask visibleScenes_;
-
   ::filament::gltfio::Animator* animator_;
 
   ModelState currentModelState_;
@@ -134,6 +131,9 @@ class CustomModelViewer {
   SceneState currentLightState_;
   SceneState currentGroundState_;
   ShapeState currentShapesState_;
+
+  utils::Entity cameraEntity_;
+  filament::Skybox* skybox_ = nullptr;
 
   std::unique_ptr<ModelLoader> modelLoader_;
 

@@ -41,6 +41,7 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/libs/matdbg/libmatdbg_combined.a
         ${FILAMENT_BINARY_DIR}/libs/utils/libutils.a
         ${FILAMENT_BINARY_DIR}/libs/uberz/libuberzlib.a
+        ${FILAMENT_BINARY_DIR}/libs/viewer/libviewer.a
         ${FILAMENT_BINARY_DIR}/filament/libfilament.a
         ${FILAMENT_BINARY_DIR}/third_party/meshoptimizer/tnt/libmeshoptimizer.a
         ${FILAMENT_BINARY_DIR}/third_party/mikktspace/libmikktspace.a
