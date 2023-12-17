@@ -15,6 +15,7 @@ add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE
         ${FILAMENT_SRC_DIR}/filament/include
         ${FILAMENT_SRC_DIR}/filament/backend/include
+        ${FILAMENT_SRC_DIR}/libs/camutils/include
         ${FILAMENT_SRC_DIR}/libs/filabridge/include
         ${FILAMENT_SRC_DIR}/libs/filamat/include
         ${FILAMENT_SRC_DIR}/libs/ibl/include
@@ -29,6 +30,7 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/filament/backend/libbackend.a
         ${FILAMENT_BINARY_DIR}/filament/backend/libvkshaders.a
         ${FILAMENT_BINARY_DIR}/third_party/smol-v/tnt/libsmol-v.a
+        ${FILAMENT_BINARY_DIR}/libs/camutils/libcamutils.a
         ${FILAMENT_BINARY_DIR}/libs/filamat/libfilamat.a
         ${FILAMENT_BINARY_DIR}/libs/filaflat/libfilaflat.a
         ${FILAMENT_BINARY_DIR}/libs/filabridge/libfilabridge.a

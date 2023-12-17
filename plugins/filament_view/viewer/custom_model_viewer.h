@@ -54,7 +54,6 @@ namespace plugin_filament_view {
 using models::state::ModelState;
 using models::state::SceneState;
 using models::state::ShapeState;
-using SceneMask = ::filament::gltfio::NodeManager::SceneMask;
 
 class CustomModelViewer {
  public:
@@ -98,6 +97,8 @@ class CustomModelViewer {
  private:
   FlutterDesktopEngineState* state_;
   const std::string flutterAssetsPath_;
+  int32_t left_;
+  int32_t top_;
 
   std::thread filament_api_thread_;
   pthread_t filament_api_thread_id_{};
@@ -132,7 +133,6 @@ class CustomModelViewer {
   SceneState currentGroundState_;
   ShapeState currentShapesState_;
 
-  utils::Entity cameraEntity_;
   filament::Skybox* skybox_ = nullptr;
 
   std::unique_ptr<ModelLoader> modelLoader_;
