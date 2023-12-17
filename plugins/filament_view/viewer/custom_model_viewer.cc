@@ -28,6 +28,8 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
                                      std::string flutterAssetsPath)
     : state_(state),
       flutterAssetsPath_(std::move(flutterAssetsPath)),
+      left_(platformView->GetOffset().first),
+      top_(platformView->GetOffset().second),
       io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
@@ -45,7 +47,7 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
     spdlog::debug("Filament API thread: 0x{:x}", filament_api_thread_id_);
   });
 
-  /* Setup Wayland variables */
+  /* Setup Wayland sub-surface */
   assert(state);
   assert(state->view_controller);
   auto flutter_view = state->view_controller->view;
@@ -133,10 +135,6 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
     modelLoader_ = std::make_unique<ModelLoader>(
         this, engine_, assetLoader_, resourceLoader_, strand_.get());
 
-    // Sync
-    // wl_subsurface_set_sync(subsurface_);
-    wl_subsurface_set_desync(subsurface_);
-
     renderer_ = engine_->createRenderer();
 
     auto platform_view_size = platformView->GetSize();
@@ -148,14 +146,13 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
     swapChain_ = engine_->createSwapChain(&native_window_);
 
     scene_ = engine_->createScene();
-    view_ = engine_->createView();
-    //Setup camera
-    cameraManager_ = std::make_unique<CameraManager>(this);
 
+    view_ = engine_->createView();
     auto size = platformView->GetSize();
     view_->setViewport({ 0, 0,  static_cast<uint32_t>(size.first), static_cast<uint32_t>(size.second) });
+
+    cameraManager_ = std::make_unique<CameraManager>(this);
     view_->setScene(scene_);
-    view_->setCamera(cameraManager_->getCamera());
     view_->setPostProcessingEnabled(false);
 
     skybox_ = ::filament::Skybox::Builder().build(*engine_);
@@ -249,15 +246,15 @@ void CustomModelViewer::OnFrame(void* data,
 
   obj->DrawFrame(time);
 
-  // Z-Order
-  // wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
-  wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
-
   obj->callback_ = wl_surface_frame(obj->surface_);
   wl_callback_add_listener(obj->callback_, &CustomModelViewer::frame_listener,
                            data);
 
-  // TODO  wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
+  // Z-Order
+  wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
+  //wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
+  wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
+  wl_subsurface_set_desync(obj->subsurface_);
 
   wl_surface_commit(obj->surface_);
 }

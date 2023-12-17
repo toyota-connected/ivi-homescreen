@@ -19,6 +19,7 @@
 #include "camera.h"
 
 #include <filament/Camera.h>
+#include <camutils/Manipulator.h>
 #include <filament/View.h>
 #include <filament/Viewport.h>
 #include <utils/EntityManager.h>
@@ -26,6 +27,8 @@
 #include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
+
+using CameraManipulator = ::filament::camutils::Manipulator<float>;
 
 class CustomModelViewer;
 
@@ -41,11 +44,26 @@ class CameraManager {
 
   [[nodiscard]] ::filament::Camera* getCamera() const { return camera_; }
 
+  //Camera control
+  void onPointerDown(int x, int y);
+
+  void onPointerMove(int x, int y);
+
+  void onPointerUp(int x, int y);
+
   // Disallow copy and assign.
   CameraManager(const CameraManager&) = delete;
   CameraManager& operator=(const CameraManager&) = delete;
 
  private:
+  static constexpr float kNearPlane = 0.05f;   // 5 cm
+  static constexpr float kFarPlane = 1000.0f;  // 1 km
+  static constexpr float kAperture = 16.0f;
+  static constexpr float kShutterSpeed = 1.0f / 125;
+  static constexpr float kSensitivity = 100.0f;
+  static constexpr float kDefaultFocalLength = 28.0f;
+
+  static constexpr ::filament::math::float3 kDefaultObjectPosition = {0.0f, 0.0f, -4.0f};
   static constexpr ::filament::math::float3 kCameraCenter = {0.0f, 0.0f, 0.0f};
   static constexpr ::filament::math::float3 kCameraUp = {0.0f, 1.0f, 0.0f};
   static constexpr float kCameraDist = 3.0f;
@@ -74,7 +92,16 @@ class CameraManager {
   CustomModelViewer* model_viewer_;
   ::filament::Engine* engine_;
   ::filament::View* view_;
-  ::filament::Camera* camera_ = nullptr;
+  ::filament::Camera* camera_{};
+
+  CameraManipulator* manipulator_{};
+
+  double eyePosition_[3]{};
+  double target_[3]{};
+  double upward_[3]{};
+  double* lookEyePositions_{};
+  double* lookTarget_{};
+  double* lookUpward_{};
 
   utils::Entity cameraEntity_;
 
@@ -84,5 +111,7 @@ class CameraManager {
   // displayFramebufferScale_. Generally (1,1) on normal display, (2,2) on OSX
   // with Retina display.
   ImVec2 displayFramebufferScale_;
+
+  void setDefaultCamera();
 };
 }  // namespace plugin_filament_view

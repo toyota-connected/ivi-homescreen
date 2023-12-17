@@ -41,6 +41,10 @@ class PlatformView {
     return {width_, height_};
   }
 
+  [[nodiscard]] std::pair<int32_t, int32_t> GetOffset() const {
+    return {left_, top_};
+  }
+
   [[nodiscard]] int32_t GetId() const { return id_; }
 
   std::string GetViewType() { return viewType_; }
