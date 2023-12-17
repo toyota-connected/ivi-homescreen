@@ -84,22 +84,16 @@ CustomModelViewer::~CustomModelViewer() {
     ::filament::gltfio::AssetLoader::destroy(&assetLoader_);
   }
 
-  // modelLoader_.reset();
-
-  if (swapChain_) {
-    engine_->destroy(swapChain_);
-  }
-  if (renderer_) {
-    engine_->destroy(renderer_);
-  }
-  if (view_) {
-    engine_->destroy(view_);
-  }
-  if (scene_) {
-    engine_->destroy(scene_);
-  }
-
   cameraManager_->destroyCamera();
+
+  engine_->destroy(scene_);
+  engine_->destroy(view_);
+  engine_->destroy(skybox_);
+  engine_->destroy(renderer_);
+  engine_->destroy(swapChain_);
+  ::filament::Engine::destroy(&engine_);
+
+  modelLoader_.reset();
 
   if (subsurface_) {
     wl_subsurface_destroy(subsurface_);
@@ -153,14 +147,21 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
         .height = static_cast<uint32_t>(platform_view_size.second)};
     swapChain_ = engine_->createSwapChain(&native_window_);
 
-    cameraManager_ = std::make_unique<CameraManager>(this);
     scene_ = engine_->createScene();
-    visibleScenes_.reset();
-    visibleScenes_.set(1);
     view_ = engine_->createView();
-    view_->setScene(scene_);
+    //Setup camera
+    cameraManager_ = std::make_unique<CameraManager>(this);
 
-    setupView();
+    auto size = platformView->GetSize();
+    view_->setViewport({ 0, 0,  static_cast<uint32_t>(size.first), static_cast<uint32_t>(size.second) });
+    view_->setScene(scene_);
+    view_->setCamera(cameraManager_->getCamera());
+    view_->setPostProcessingEnabled(false);
+
+    skybox_ = ::filament::Skybox::Builder().build(*engine_);
+    scene_->setSkybox(skybox_);
+
+    //TODO setupView();
 
     promise->set_value(true);
   });
