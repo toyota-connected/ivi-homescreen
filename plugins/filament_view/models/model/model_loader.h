@@ -1,15 +1,15 @@
 
 #pragma once
 
-#include <asio/io_context_strand.hpp>
 #include <filament/IndirectLight.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/ResourceLoader.h>
+#include "asio/io_context_strand.hpp"
 
+#include "models/model/model.h"
 #include "viewer/custom_model_viewer.h"
-
-#include "settings.h"
+#include "viewer/settings.h"
 
 class CustomModelViewer;
 
@@ -17,32 +17,15 @@ namespace plugin_filament_view {
 
 class ModelLoader {
  public:
-  ModelLoader(CustomModelViewer* modelViewer,
-              ::filament::Engine* engine,
-              ::filament::gltfio::AssetLoader* assetLoader,
-              ::filament::gltfio::ResourceLoader* resourceLoader,
-              asio::io_context::strand* strand);
+  ModelLoader(CustomModelViewer* modelViewer);
   /**
    * Frees all entities associated with the most recently-loaded model.
    */
   ~ModelLoader();
 
-  /**
-   * Loads a monolithic binary glTF and populates the Filament scene.
-   */
-  void loadModelGlb(const std::vector<uint8_t>& buffer,
-                    const Position* centerPosition,
-                    float scale,
-                    bool transform = false);
+  std::string loadModel(Model* model);
 
-  /**
-   * Loads a JSON-style glTF file and populates the Filament scene.
-   * The given callback is triggered for each requested resource.
-   */
-  void loadModelGltf(const std::vector<uint8_t>& buffer,
-                     const Position* centerPosition,
-                     float scale,
-                     bool transform);
+  ::filament::gltfio::FilamentAsset *getAsset() const { return asset_; };
 
   void updateScene();
 
@@ -101,15 +84,12 @@ class ModelLoader {
   }
 
  private:
-  // Immutable properties set from the constructor.
-  ::filament::Engine* const engine_;
-  ::filament::Scene* scene_;
-  ::filament::View* view_;
+  std::string assetPath_;
   utils::Entity sunlight_;
   CustomModelViewer* modelViewer_;
   ::filament::gltfio::AssetLoader* assetLoader_;
+  ::filament::gltfio::MaterialProvider* materialProvider_;
   ::filament::gltfio::ResourceLoader* resourceLoader_;
-  asio::io_context::strand* strand_;
 
   // Properties that can be changed from the application.
   filament::gltfio::FilamentAsset* asset_ = nullptr;
@@ -147,6 +127,23 @@ class ModelLoader {
   float curvePlot_[1024 * 3];
 
   // private var fetchResourcesJob: Job? = null
+
+  /**
+   * Loads a monolithic binary glTF and populates the Filament scene.
+   */
+  void loadModelGlb(const std::vector<uint8_t>& buffer,
+                    const Position* centerPosition,
+                    float scale,
+                    bool transform = false);
+
+  /**
+   * Loads a JSON-style glTF file and populates the Filament scene.
+   * The given callback is triggered for each requested resource.
+   */
+  void loadModelGltf(const std::vector<uint8_t>& buffer,
+                     const Position* centerPosition,
+                     float scale,
+                     bool transform);
 
   /**
    * Loads a JSON-style glTF file and populates the Filament scene.
@@ -190,5 +187,26 @@ class ModelLoader {
   // fun Int.getTransform(): Mat4
 
   // fun Int.setTransform(mat: Mat4)
+
+  std::future<std::string> loadGlbFromAsset(const std::string& path,
+                                            float scale,
+                                            const Position* centerPosition,
+                                            bool isFallback = false);
+
+  std::future<std::string> loadGlbFromUrl(const std::string& url,
+                                          float scale,
+                                          const Position* centerPosition,
+                                          bool isFallback = false);
+
+  [[nodiscard]] std::future<std::string> loadGltfFromAsset(
+      const std::string& path,
+      float scale,
+      const Position* centerPosition,
+      bool isFallback = false) const;
+
+  std::future<std::string> loadGltfFromUrl(const std::string& url,
+                                           float scale,
+                                           const Position* centerPosition,
+                                           bool isFallback = false) const;
 };
 }  // namespace plugin_filament_view

@@ -1,43 +1,64 @@
 
 #include "model_loader.h"
 
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
 #include <filament/DebugRegistry.h>
 #include <filament/LightManager.h>
 #include <filament/RenderableManager.h>
 #include <filament/TransformManager.h>
-#include <filament/View.h>
-#include <filament/Viewport.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
+#include "asio/post.hpp"
+
+#include "generated/resources/gltf_demo.h"
+#include "materials/uberarchive.h"
 
 #include "logging/logging.h"
 
 namespace plugin_filament_view {
 
-ModelLoader::ModelLoader(CustomModelViewer* modelViewer,
-                         ::filament::Engine* engine,
-                         ::filament::gltfio::AssetLoader* assetLoader,
-                         ::filament::gltfio::ResourceLoader* resourceLoader,
-                         asio::io_context::strand* strand)
-    : engine_(engine),
-      scene_(modelViewer->getScene()),
-      view_(modelViewer->getView()),
-      // sunlight_(modelViewer->getSunlight()),
-      assetLoader_(assetLoader),
-      resourceLoader_(resourceLoader),
-      strand_(strand),
-      modelViewer_(modelViewer) {
+using ::filament::gltfio::AssetConfiguration;
+using ::filament::gltfio::AssetLoader;
+using ::filament::gltfio::ResourceConfiguration;
+using ::filament::gltfio::ResourceLoader;
+
+ModelLoader::ModelLoader(CustomModelViewer* modelViewer)
+    : modelViewer_(modelViewer) {
   SPDLOG_TRACE("++ModelLoader::ModelLoader");
-  assert(engine);
-  assert(assetLoader);
-  assert(resourceLoader);
-  assert(strand_);
   assert(modelViewer_);
+  auto engine = modelViewer->getEngine();
+  materialProvider_ = ::filament::gltfio::createUbershaderProvider(
+      engine, UBERARCHIVE_DEFAULT_DATA, UBERARCHIVE_DEFAULT_SIZE);
+  SPDLOG_DEBUG("UbershaderProvider MaterialsCount: {}",
+               materialProvider_->getMaterialsCount());
+
+  AssetConfiguration assetConfiguration{};
+  assetConfiguration.engine = engine;
+  assetConfiguration.materials = materialProvider_;
+  assetLoader_ = AssetLoader::create(assetConfiguration);
+
+  ResourceConfiguration resourceConfiguration{};
+  resourceConfiguration.engine = engine;
+  resourceConfiguration.normalizeSkinningWeights = true;
+  resourceLoader_ =
+      new ResourceLoader(resourceConfiguration);
+
+  assetPath_ = modelViewer->getAssetPath();
   visibleScenes_.reset();
   SPDLOG_TRACE("--ModelLoader::ModelLoader");
 }
 
-ModelLoader::~ModelLoader() = default;
+ModelLoader::~ModelLoader() {
+  delete resourceLoader_;
+  resourceLoader_ = nullptr;
+
+  if (assetLoader_) {
+    AssetLoader::destroy(&assetLoader_);
+  }
+}
 
 /**
  * Loads a monolithic binary glTF and populates the Filament scene.
@@ -49,15 +70,6 @@ void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
   // TODO destroyModel();
 
   spdlog::debug("thread_id: 0x{:x}", pthread_self());
-  asset_ = assetLoader_->createAsset(buffer.data(), buffer.size());
-  resourceLoader_->asyncBeginLoad(asset_);
-  modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
-  asset_->releaseSourceData();
-  instance_ = asset_->getInstance();
-  if (transform) {
-    transformToUnitCube(centerPosition, scale);
-  }
-  visibleScenes_.set(1);
 }
 
 void ModelLoader::loadModelGltf(const std::vector<uint8_t>& buffer,
@@ -86,8 +98,8 @@ void ModelLoader::loadModelGltfAsync(
   assert(false);
 }
 
-filament::math::mat4f fitIntoUnitCube(const ::filament::Aabb& bounds,
-                                      float zoffset) {
+filament::math::mat4f inline fitIntoUnitCube(const ::filament::Aabb& bounds,
+                                             float zoffset) {
   filament::math::float3 minpt = bounds.min;
   filament::math::float3 maxpt = bounds.max;
   float maxExtent;
@@ -106,7 +118,8 @@ void ModelLoader::transformToUnitCube(const Position* centerPoint,
   using namespace filament::math;
   using namespace filament::gltfio;
 
-  auto& tcm = engine_->getTransformManager();
+  auto engine = modelViewer_->getEngine();
+  auto& tcm = engine->getTransformManager();
   auto root = tcm.getInstance(asset_->getRoot());
   mat4f transform;
   if (settings_.viewer.autoScaleEnabled) {
@@ -123,16 +136,18 @@ void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {
     return;
   }
 
-  view_ = modelViewer_->getView();
-  scene_ = modelViewer_->getScene();
+  auto engine = modelViewer_->getEngine();
+  auto view = modelViewer_->getView();
+  auto scene = modelViewer_->getScene();
+  settings_ = modelViewer_->getSettings();
 
-  auto& tm = engine_->getTransformManager();
-  auto& rm = engine_->getRenderableManager();
-  auto& lm = engine_->getLightManager();
+  auto& tm = engine->getTransformManager();
+  auto& rm = engine->getRenderableManager();
+  auto& lm = engine->getLightManager();
 
-  auto renderableTreeItem = [this, &rm](utils::Entity entity) {
-    bool rvis = scene_->hasEntity(entity);
-    scene_->addEntity(entity);
+  auto renderableTreeItem = [this, &rm, scene](utils::Entity entity) {
+    bool rvis = scene->hasEntity(entity);
+    scene->addEntity(entity);
 
     auto instance = rm.getInstance(entity);
     bool scaster = rm.isShadowCaster(instance);
@@ -170,16 +185,16 @@ void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {
 #endif
   };
 
-  auto lightTreeItem = [this](utils::Entity entity) {
-    auto& lm = engine_->getLightManager();
-    bool lvis = scene_->hasEntity(entity);
+  auto lightTreeItem = [this, engine, scene](utils::Entity entity) {
+    auto& lm = engine->getLightManager();
+    bool lvis = scene->hasEntity(entity);
     // ImGui::Checkbox("visible", &lvis);
     lvis = true;
 
     if (lvis) {
-      scene_->addEntity(entity);
+      scene->addEntity(entity);
     } else {
-      scene_->remove(entity);
+      scene->remove(entity);
     }
 
     auto instance = lm.getInstance(entity);
@@ -227,24 +242,24 @@ void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {
     }
   };
 
-  ::filament::DebugRegistry& debug = engine_->getDebugRegistry();
+  ::filament::DebugRegistry& debug = engine->getDebugRegistry();
 
   // colorGradingUI(settings_, rangePlot_, curvePlot_, toneMapPlot_);
 
   // At this point, all View settings have been modified,
   //  so we can now push them into the Filament View.
-  applySettings(engine_, settings_.view, view_);
+  applySettings(engine, settings_.view, view);
 
   auto lights = utils::FixedCapacityVector<utils::Entity>::with_capacity(
-      scene_->getEntityCount());
-  scene_->forEach([&](utils::Entity entity) {
+      scene->getEntityCount());
+  scene->forEach([&](utils::Entity entity) {
     if (lm.hasComponent(entity)) {
       lights.push_back(entity);
     }
   });
 
-  applySettings(engine_, settings_.lighting, indirectLight_, sunlight_,
-                lights.data(), lights.size(), &lm, scene_, view_);
+  applySettings(engine, settings_.lighting, indirectLight_, sunlight_,
+                lights.data(), lights.size(), &lm, scene, view);
 
   if (!isRemoteMode()) {
     // Show bounds
@@ -320,9 +335,9 @@ void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {
     }
 
     if (enableWireframe_) {
-      scene_->addEntity(asset_->getWireframe());
+      scene->addEntity(asset_->getWireframe());
     } else {
-      scene_->remove(asset_->getWireframe());
+      scene->remove(asset_->getWireframe());
     }
   }
 }
@@ -341,6 +356,134 @@ void ModelLoader::removeAsset() {
                                              asset_->getEntityCount());
     asset_ = nullptr;
   }
+}
+
+std::future<std::string> ModelLoader::loadGlbFromAsset(
+    const std::string& path,
+    float scale,
+    const Position* centerPosition,
+    const bool isFallback) {
+  const auto promise(std::make_shared<std::promise<std::string>>());
+  auto future(promise->get_future());
+
+  asio::post(*modelViewer_->getStrandContext(), [&, promise, path, scale,
+                                                 centerPosition] {
+    std::filesystem::path asset_path(assetPath_);
+    asset_path /= path;
+    if (path.empty() || !std::filesystem::exists(assetPath_)) {
+      modelViewer_->setModelState(ModelState::error);
+      promise->set_value("Asset path not valid");
+    }
+    SPDLOG_DEBUG("Attempting to load {}", asset_path.c_str());
+    SPDLOG_DEBUG("scale: {}", scale);
+    centerPosition->Print("centerPosition");
+
+    modelViewer_->setModelState(ModelState::loading);
+
+    std::ifstream stream(asset_path, std::ios::in | std::ios::binary);
+    std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(stream)),
+                                std::istreambuf_iterator<char>());
+
+    asset_ = assetLoader_->createAsset(buffer.data(), buffer.size());
+    resourceLoader_->asyncBeginLoad(asset_);
+    modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
+    asset_->releaseSourceData();
+    instance_ = asset_->getInstance();
+    auto settings = modelViewer_->getSettings();
+    if (settings.viewer.autoScaleEnabled) {
+      transformToUnitCube(centerPosition, scale);
+    }
+    visibleScenes_.set(1);
+
+    // TODO error response @withContext Resource.Error(bufferResource.message ?:
+    // "Couldn't load glb model from asset")
+
+    modelViewer_->setModelState(isFallback ? ModelState::fallbackLoaded
+                                           : ModelState::loaded);
+    std::stringstream ss;
+    ss << "Loaded glb model successfully from " << asset_path;
+    promise->set_value(ss.str());
+  });
+
+  return future;
+}
+
+std::future<std::string> ModelLoader::loadGlbFromUrl(
+    const std::string& url,
+    float scale,
+    const Position* centerPosition,
+    bool isFallback) {
+  spdlog::error("loadGlbFromUrl not implemented yet");
+  const auto promise(std::make_shared<std::promise<std::string>>());
+  auto future(promise->get_future());
+
+  // TODO schedule from here
+#if 0
+      try {
+        val buffer = NetworkClient.downloadFile(url) if (buffer != null) {
+          modelViewer.modelLoader.loadModelGlb(buffer, true, centerPosition, scale)
+          modelViewer.setModelState(
+            if (isFallback) ModelState.FALLBACK_LOADED else ModelState.LOADED)
+              return @withContext Resource.Success("Loaded glb model successfully from $url")
+        }
+        else {
+          modelViewer.setModelState(ModelState.ERROR) return @withContext Resource.Error("Couldn't load glb model from url: $url")
+        }
+      } catch (e : Throwable) {
+        modelViewer.setModelState(ModelState.ERROR) return @withContext Resource.Error("Couldn't load glb model from url: $url")
+      }
+    }
+  }
+#endif  // TODO
+
+  if (url.empty()) {
+    modelViewer_->setModelState(ModelState::error);
+    promise->set_value("Url is empty");
+  }
+
+  modelViewer_->setModelState(ModelState::loading);
+  // TODO post to platform runner
+  modelViewer_->setModelState(isFallback ? ModelState::fallbackLoaded
+                                         : ModelState::loaded);
+
+  std::stringstream ss;
+  ss << "Loaded glb model successfully from " << url;
+  promise->set_value(ss.str());
+
+  return future;
+}
+
+std::string ModelLoader::loadModel(Model* model) {
+  std::string result;
+  if (model->isGlb()) {
+    if (!model->GetAssetPath().empty()) {
+      auto f = loadGlbFromAsset(model->GetAssetPath(), model->GetScale(),
+                                model->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    } else if (!model->GetUrl().empty()) {
+      auto f = loadGlbFromUrl(model->GetUrl(), model->GetScale(),
+                              model->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    }
+  }
+#if 0
+    else {
+    if (!model->GetAssetPath().empty()) {
+      auto f = loadGltfFromAsset(model->GetAssetPath(), model->GetScale(),
+                                 model->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    } else if (!model->GetUrl().empty()) {
+      auto f = loadGltfFromUrl(model->GetUrl(), model->GetScale(),
+                               model->GetCenterPosition());
+      f.wait();
+      result = f.get();
+    }
+  }
+#endif
+  return result;
 }
 
 }  // namespace plugin_filament_view
