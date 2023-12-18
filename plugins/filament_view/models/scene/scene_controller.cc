@@ -20,16 +20,16 @@ SceneController::SceneController(PlatformView* platformView,
       model_(model),
       shapes_(shapes) {
   SPDLOG_TRACE("++SceneController::SceneController");
-  modelViewer_ = std::make_unique<CustomModelViewer>(platformView, state, flutterAssetsPath_);
-
-  setUpViewer();
-  setUpGround();
+  setUpViewer(platformView, state);
+  setUpLoadingModel();
   setUpCamera();
+  setUpGround();
   setUpSkybox();
   setUpLight();
   setUpIndirectLight();
-  setUpLoadingModel();
   setUpShapes();
+
+  modelViewer_->setInitialized();
 
   SPDLOG_TRACE("--SceneController::SceneController");
 }
@@ -38,46 +38,37 @@ SceneController::~SceneController() {
   SPDLOG_TRACE("SceneController::~SceneController");
 }
 
-void SceneController::setUpViewer() {
+void SceneController::setUpViewer(PlatformView* platformView, FlutterDesktopEngineState* state) {
+  modelViewer_ = std::make_unique<CustomModelViewer>(platformView, state, flutterAssetsPath_);
+
   // TODO surfaceView.setOnTouchListener(modelViewer)
   //  surfaceView.setZOrderOnTop(true) // necessary
 
-  glbLoader_ = std::make_unique<models::glb::GlbLoader>(
-      nullptr, modelViewer_.get(), flutterAssetsPath_);
-  gltfLoader_ = std::make_unique<models::gltf::GltfLoader>(
-      nullptr, modelViewer_.get(), flutterAssetsPath_);
+  auto view = modelViewer_->getView();
+  auto scene = modelViewer_->getScene();
 
-  lightManager_ = std::make_unique<LightManager>(modelViewer_.get());
-  indirectLightManager_ = std::make_unique<IndirectLightManager>(
-      this, modelViewer_.get(), flutterAssetsPath_);
-  skyboxManager_ = std::make_unique<SkyboxManager>(this, modelViewer_.get(),
-                                                   flutterAssetsPath_);
-  animationManager_ = std::make_unique<AnimationManager>(modelViewer_.get());
-  cameraManager_ = modelViewer_->getCameraManager();
-  groundManager_ =
-      std::make_unique<GroundManager>(modelViewer_.get(), flutterAssetsPath_);
-  materialManager_ = std::make_unique<MaterialManager>(this, modelViewer_.get(),
-                                                       flutterAssetsPath_);
-  shapeManager_ = std::make_unique<ShapeManager>(modelViewer_.get(),
-                                                 materialManager_.get());
+  auto size = platformView->GetSize();
+  view->setViewport({ 0, 0,  static_cast<uint32_t>(size.first), static_cast<uint32_t>(size.second) });
+
+  view->setScene(scene);
+  view->setPostProcessingEnabled(false);
 }
 
 void SceneController::setUpGround() {
-  if (scene_ && scene_->getGround()) {
-    groundManager_->createGround(scene_->getGround());
-  }
+  groundManager_ = std::make_unique<GroundManager>(modelViewer_.get(), flutterAssetsPath_);
+  auto f = groundManager_->createGround();
+  f.wait();
 }
 
 void SceneController::setUpCamera() {
-  if (!scene_ || !scene_->getCamera())
-    return;
-
-  cameraManager_->updateCamera(scene_->getCamera());
+  cameraManager_ = std::make_unique<CameraManager>(modelViewer_.get());
+  auto f = cameraManager_->setupCamera();
+  f.wait();
 }
 
 void SceneController::setUpSkybox() {
-  if (!scene_)
-    return;
+  skyboxManager_ = std::make_unique<SkyboxManager>(this, modelViewer_.get(),
+                                                   flutterAssetsPath_);
 
   auto skybox = scene_->getSkybox();
   if (!skybox) {
@@ -131,6 +122,8 @@ void SceneController::setUpSkybox() {
 }
 
 void SceneController::setUpLight() {
+  lightManager_ = std::make_unique<LightManager>(modelViewer_.get());
+
   if (scene_) {
     auto light = scene_->getLight();
     if (light) {
@@ -144,6 +137,9 @@ void SceneController::setUpLight() {
 }
 
 void SceneController::setUpIndirectLight() {
+  indirectLightManager_ = std::make_unique<IndirectLightManager>(
+      this, modelViewer_.get(), flutterAssetsPath_);
+
   if (scene_ && scene_->getIndirectLight()) {
     auto light = scene_->getIndirectLight();
     if (!light) {
@@ -193,6 +189,7 @@ void SceneController::setUpIndirectLight() {
 }
 
 void SceneController::setUpAnimation(std::optional<Animation*> animation) {
+
   if (animation.has_value()) {
     auto a = animation.value();
     if (a->GetAutoPlay()) {
@@ -209,59 +206,46 @@ void SceneController::setUpAnimation(std::optional<Animation*> animation) {
 }
 
 void SceneController::setUpLoadingModel() {
-  auto result = loadModel(model_);
-  SPDLOG_DEBUG("setUpLoadingModel: [{}]", result);
+  SPDLOG_TRACE("++SceneController::setUpLoadingModel");
+  animationManager_ = std::make_unique<AnimationManager>(modelViewer_.get());
+
+  auto result = modelViewer_->loadModel(model_);
+  SPDLOG_DEBUG("loadModel: {}", result);
   if (!result.empty() && model_->GetFallback().has_value()) {
     if (result == "Resource.Error") {
       auto f = model_->GetFallback();
-      loadModel(f);
-      setUpAnimation(f.value()->GetAnimation());
+      if (f.has_value()) {
+        result = modelViewer_->loadModel(f.value());
+        SPDLOG_DEBUG("Fallback loadModel: {}", result);
+        setUpAnimation(f.value()->GetAnimation());
+      }
+      else {
+        result = "Error.FallbackLoadFailed";
+      }
     } else {
       setUpAnimation(model_->GetAnimation());
     }
   } else {
     setUpAnimation(model_->GetAnimation());
   }
+  SPDLOG_TRACE("--SceneController::setUpLoadingModel");
 }
 
 void SceneController::setUpShapes() {
+  materialManager_ = std::make_unique<MaterialManager>(this, modelViewer_.get(),
+                                                       flutterAssetsPath_);
+  shapeManager_ = std::make_unique<ShapeManager>(modelViewer_.get(),
+                                                 materialManager_.get());
   if (shapes_) {
     shapeManager_->createShapes(*shapes_);
   }
 }
 
 std::string SceneController::loadModel(std::optional<Model*> model) {
-  std::string result = "Success";
   if (!model.has_value())
     return "Error.NoModel";
 
-  auto m = model.value();
-  if (m->isGlb()) {
-    if (!m->GetAssetPath().empty()) {
-      auto f = glbLoader_->loadGlbFromAsset(m->GetAssetPath(), m->GetScale(),
-                                            m->GetCenterPosition());
-      f.wait();
-      result = f.get();
-    } else if (!m->GetUrl().empty()) {
-      auto f = glbLoader_->loadGlbFromUrl(m->GetUrl(), m->GetScale(),
-                                          m->GetCenterPosition());
-      f.wait();
-      result = f.get();
-    }
-  } else {
-    if (!m->GetAssetPath().empty()) {
-      auto f = gltfLoader_->loadGltfFromAsset(m->GetAssetPath(), m->GetScale(),
-                                              m->GetCenterPosition());
-      f.wait();
-      result = f.get();
-    } else if (!m->GetUrl().empty()) {
-      auto f = gltfLoader_->loadGltfFromUrl(m->GetUrl(), m->GetScale(),
-                                            m->GetCenterPosition());
-      f.wait();
-      result = f.get();
-    }
-  }
-  return result;
+  return modelViewer_->loadModel(model.value());
 }
 
 //TODO Move to model viewer

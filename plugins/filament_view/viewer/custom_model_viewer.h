@@ -19,6 +19,8 @@
 #include <functional>
 #include <future>
 
+#include <cstdint>
+
 #include <filament/Camera.h>
 #include <filament/Engine.h>
 #include <filament/Renderer.h>
@@ -37,14 +39,15 @@
 #include "models/state/model_state.h"
 
 #include "flutter_desktop_plugin_registrar.h"
-#include "models/model/common/loader/model_loader.h"
 #include "models/model/model.h"
+#include "models/model/model_loader.h"
 #include "models/scene/scene.h"
 #include "models/shapes/shape.h"
 #include "models/state/model_state.h"
 #include "models/state/scene_state.h"
 #include "models/state/shape_state.h"
 #include "platform_views/platform_view.h"
+#include "settings.h"
 
 class CameraManager;
 class ModelLoader;
@@ -82,6 +85,8 @@ class CustomModelViewer {
 
   [[nodiscard]] ::filament::Renderer* getRenderer() const { return renderer_; }
 
+  std::string loadModel(Model* model);
+
   [[nodiscard]] ModelLoader* getModelLoader() const {
     return modelLoader_.get();
   }
@@ -94,11 +99,29 @@ class CustomModelViewer {
     return strand_.get();
   }
 
+  filament::viewer::Settings& getSettings() { return settings_; }
+
+  filament::gltfio::FilamentAsset* getAsset() { return asset_; }
+
+  bool getActualSize() { return actualSize; }
+
+  void setInitialized() { initialized_ = true; }
+
+  std::string getAssetPath() const { return flutterAssetsPath_; }
+
  private:
+  static constexpr bool actualSize = false;
+  static constexpr bool originIsFarAway = false;
+  static constexpr float originDistance = 1.0f;
+
   FlutterDesktopEngineState* state_;
   const std::string flutterAssetsPath_;
+  filament::viewer::Settings settings_;
+  filament::gltfio::FilamentAsset* asset_;
   int32_t left_;
   int32_t top_;
+
+  bool initialized_{};
 
   std::thread filament_api_thread_;
   pthread_t filament_api_thread_id_{};
@@ -138,10 +161,6 @@ class CustomModelViewer {
   std::unique_ptr<ModelLoader> modelLoader_;
 
   std::unique_ptr<CameraManager> cameraManager_;
-
-  ::filament::gltfio::AssetLoader* assetLoader_{};
-  ::filament::gltfio::MaterialProvider* materialProvider_{};
-  ::filament::gltfio::ResourceLoader* resourceLoader_{};
 
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
   static const wl_callback_listener frame_listener;

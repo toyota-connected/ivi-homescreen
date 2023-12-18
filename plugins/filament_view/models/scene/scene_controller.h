@@ -6,8 +6,6 @@
 
 #include "flutter_desktop_engine_state.h"
 #include "models/model/animation/animation_manager.h"
-#include "models/model/glb/loader/glb_loader.h"
-#include "models/model/gltf/loader/gltf_loader.h"
 #include "models/model/model.h"
 #include "models/scene/ground_manager.h"
 #include "models/scene/indirect_light/indirect_light_manager.h"
@@ -79,24 +77,22 @@ class SceneController {
 
   // private val surfaceView: SurfaceView = SurfaceView(context)
 
-  std::unique_ptr<models::glb::GlbLoader> glbLoader_;
-  std::unique_ptr<models::gltf::GltfLoader> gltfLoader_;
   std::unique_ptr<LightManager> lightManager_;
   std::unique_ptr<IndirectLightManager> indirectLightManager_;
   std::unique_ptr<SkyboxManager> skyboxManager_;
   std::unique_ptr<AnimationManager> animationManager_;
-  CameraManager* cameraManager_{};
+  std::unique_ptr<CameraManager> cameraManager_{};
   std::unique_ptr<GroundManager> groundManager_;
   std::unique_ptr<MaterialManager> materialManager_;
   std::unique_ptr<ShapeManager> shapeManager_;
 
-  void setUpViewer();
-  void setUpGround();
+  void setUpViewer(PlatformView* platformView, FlutterDesktopEngineState* state);
+  void setUpLoadingModel();
   void setUpCamera();
+  void setUpGround();
   void setUpSkybox();
   void setUpLight();
   void setUpIndirectLight();
-  void setUpLoadingModel();
   void setUpShapes();
 
   std::string loadModel(std::optional<Model*> model);

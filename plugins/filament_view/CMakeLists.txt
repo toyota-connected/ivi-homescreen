@@ -23,6 +23,9 @@ target_include_directories(filament INTERFACE
         ${FILAMENT_SRC_DIR}/libs/utils/include
         ${FILAMENT_SRC_DIR}/libs/gltfio/include
         ${FILAMENT_SRC_DIR}/libs
+
+        ${FILAMENT_BINARY_DIR}/libs/gltfio
+        ${FILAMENT_BINARY_DIR}/samples
 )
 target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/libs/bluevk/libbluevk.a
@@ -54,6 +57,9 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/third_party/glslang/tnt/SPIRV/libSPIRV.a
         ${FILAMENT_BINARY_DIR}/tools/matc/libmatlang.a
 
+        #${FILAMENT_BINARY_DIR}/samples/libsample-resources.a
+        ${FILAMENT_BINARY_DIR}/samples/libgltf-demo-resources.a
+
         #${FILAMENT_BINARY_DIR}/libs/matdbg/libmatdbg.a
         Threads::Threads
 )
@@ -68,9 +74,7 @@ add_library(plugin_filament_view STATIC
 
         models/model/animation/animation.cc
         models/model/animation/animation_manager.cc
-        models/model/common/loader/model_loader.cc
-        models/model/glb/loader/glb_loader.cc
-        models/model/gltf/loader/gltf_loader.cc
+        models/model/model_loader.cc
         models/model/model.cc
         models/scene/camera/camera.cc
         models/scene/camera/camera_manager.cc

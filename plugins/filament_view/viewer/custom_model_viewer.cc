@@ -13,14 +13,6 @@ class Display;
 class FlutterView;
 class FilamentViewPlugin;
 
-extern "C" {
-extern const uint8_t UBERARCHIVE_PACKAGE[];
-extern int UBERARCHIVE_DEFAULT_OFFSET;
-extern size_t UBERARCHIVE_DEFAULT_SIZE;
-}
-#define UBERARCHIVE_DEFAULT_DATA \
-  (UBERARCHIVE_PACKAGE + UBERARCHIVE_DEFAULT_OFFSET)
-
 namespace plugin_filament_view {
 
 CustomModelViewer::CustomModelViewer(PlatformView* platformView,
@@ -79,13 +71,6 @@ CustomModelViewer::~CustomModelViewer() {
     callback_ = nullptr;
   }
 
-  delete resourceLoader_;
-  resourceLoader_ = nullptr;
-
-  if (assetLoader_) {
-    ::filament::gltfio::AssetLoader::destroy(&assetLoader_);
-  }
-
   cameraManager_->destroyCamera();
 
   engine_->destroy(scene_);
@@ -114,26 +99,9 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
   auto promise(std::make_shared<std::promise<bool>>());
   auto future(promise->get_future());
   asio::post(*strand_, [&, promise, platformView] {
-
     engine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
 
-    materialProvider_ = ::filament::gltfio::createUbershaderProvider(
-        engine_, UBERARCHIVE_DEFAULT_DATA, UBERARCHIVE_DEFAULT_SIZE);
-    SPDLOG_DEBUG("UbershaderProvider MaterialsCount: {}", materialProvider_->getMaterialsCount());
-
-    ::filament::gltfio::AssetConfiguration assetConfiguration{};
-    assetConfiguration.engine = engine_;
-    assetConfiguration.materials = materialProvider_;
-    assetLoader_ = ::filament::gltfio::AssetLoader::create(assetConfiguration);
-
-    ::filament::gltfio::ResourceConfiguration resourceConfiguration{};
-    resourceConfiguration.engine = engine_;
-    resourceConfiguration.normalizeSkinningWeights = true;
-    resourceLoader_ =
-        new ::filament::gltfio::ResourceLoader(resourceConfiguration);
-
-    modelLoader_ = std::make_unique<ModelLoader>(
-        this, engine_, assetLoader_, resourceLoader_, strand_.get());
+    modelLoader_ = std::make_unique<ModelLoader>(this);
 
     renderer_ = engine_->createRenderer();
 
@@ -146,19 +114,10 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
     swapChain_ = engine_->createSwapChain(&native_window_);
 
     scene_ = engine_->createScene();
-
     view_ = engine_->createView();
-    auto size = platformView->GetSize();
-    view_->setViewport({ 0, 0,  static_cast<uint32_t>(size.first), static_cast<uint32_t>(size.second) });
-
-    cameraManager_ = std::make_unique<CameraManager>(this);
-    view_->setScene(scene_);
     view_->setPostProcessingEnabled(false);
 
-    skybox_ = ::filament::Skybox::Builder().build(*engine_);
-    scene_->setSkybox(skybox_);
-
-    //TODO setupView();
+    // TODO setupView();
 
     promise->set_value(true);
   });
@@ -213,9 +172,9 @@ void CustomModelViewer::setupView() {
  * rendered
  */
 void CustomModelViewer::DrawFrame(uint32_t time) {
-  if (filament_api_thread_id_ != pthread_self()) {
+  if (initialized_) {
+    assert(filament_api_thread_id_ == pthread_self());
     asio::post(*strand_, [&]() {
-
       modelLoader_->updateScene();
 
       cameraManager_->lookAtDefaultPosition();
@@ -227,9 +186,6 @@ void CustomModelViewer::DrawFrame(uint32_t time) {
         // rendererStateFlow.value=frameTimeNanos;
       }
     });
-  }
-  else {
-    assert(false);
   }
 }
 
@@ -252,7 +208,7 @@ void CustomModelViewer::OnFrame(void* data,
 
   // Z-Order
   wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
-  //wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
+  // wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
   wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
   wl_subsurface_set_desync(obj->subsurface_);
 
@@ -261,4 +217,10 @@ void CustomModelViewer::OnFrame(void* data,
 
 const wl_callback_listener CustomModelViewer::frame_listener = {.done =
                                                                     OnFrame};
+
+std::string CustomModelViewer::loadModel(Model* model) {
+  auto result = modelLoader_->loadModel(model);
+  asset_ = modelLoader_->getAsset();
+  return result;
+}
 }  // namespace plugin_filament_view

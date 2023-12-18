@@ -34,15 +34,13 @@ class CustomModelViewer;
 
 class CameraManager {
  public:
-  CameraManager(CustomModelViewer* model_viewer);
+  explicit CameraManager(CustomModelViewer* model_viewer);
 
-  void updateCamera(Camera* camera);
+  std::future<void> setupCamera();
 
   void lookAtDefaultPosition();
 
   void destroyCamera();
-
-  [[nodiscard]] ::filament::Camera* getCamera() const { return camera_; }
 
   //Camera control
   void onPointerDown(int x, int y);
@@ -90,10 +88,7 @@ class CameraManager {
   };
 
   CustomModelViewer* model_viewer_;
-  ::filament::Engine* engine_;
-  ::filament::View* view_;
   ::filament::Camera* camera_{};
-
   CameraManipulator* manipulator_{};
 
   double eyePosition_[3]{};
