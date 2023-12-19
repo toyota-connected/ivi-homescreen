@@ -21,10 +21,10 @@
 
 namespace plugin_filament_view {
 
-LensProjection::LensProjection(void* parent,
-                               const std::string& flutter_assets_path,
-                               const flutter::EncodableMap& params)
-    : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+LensProjection::LensProjection(float focalLength, float aspect)
+    : focalLength_(focalLength), aspect_(aspect), near_(0.0f), far_(0.0f) {}
+
+LensProjection::LensProjection(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++LensProjection::LensProjection");
   for (auto& it : params) {
     if (it.second.IsNull())

@@ -30,8 +30,8 @@
 #include <filament/View.h>
 #include <gltfio/Animator.h>
 #include <gltfio/AssetLoader.h>
-#include <gltfio/ResourceLoader.h>
 #include <gltfio/NodeManager.h>
+#include <gltfio/ResourceLoader.h>
 #include <wayland-client.h>
 #include <asio/io_context_strand.hpp>
 
@@ -67,23 +67,36 @@ class CustomModelViewer {
 
   std::future<bool> Initialize(PlatformView* platformView);
 
+  void setCameraManager(CameraManager* cameraManager) {
+    cameraManager_ = cameraManager;
+  };
+
   void setModelState(models::state::ModelState modelState);
+  void setGroundState(models::state::SceneState sceneState);
+
+#if 0   // TODO
+  const ::filament::math::mat4f& getModelTransform() {
+    return modelLoader_->getModelTransform();
+  };
+#endif  // TODO
 
   // Disallow copy and assign.
   CustomModelViewer(const CustomModelViewer&) = delete;
   CustomModelViewer& operator=(const CustomModelViewer&) = delete;
 
-  [[nodiscard]] CameraManager* getCameraManager() const {
-    return cameraManager_.get();
+  [[nodiscard]] ::filament::Engine* getFilamentEngine() const {
+    return fengine_;
   }
 
-  [[nodiscard]] ::filament::Engine* getEngine() const { return engine_; }
+  [[nodiscard]] ::filament::View* getFilamentView() const { return fview_; }
 
-  [[nodiscard]] ::filament::View* getView() const { return view_; }
+  [[nodiscard]] ::filament::Scene* getFilamentScene() const { return fscene_; }
 
-  [[nodiscard]] ::filament::Scene* getScene() const { return scene_; }
+  [[nodiscard]] ::filament::Renderer* getFilamentRenderer() const {
+    return frenderer_;
+  }
 
-  [[nodiscard]] ::filament::Renderer* getRenderer() const { return renderer_; }
+  [[nodiscard]] Scene* getScene() const { return scene_; }
 
   std::string loadModel(Model* model);
 
@@ -92,7 +105,7 @@ class CustomModelViewer {
   }
 
   void setAnimator(filament::gltfio::Animator* animator) {
-    animator_ = animator;
+    fanimator_ = animator;
   }
 
   [[nodiscard]] asio::io_context::strand* getStrandContext() const {
@@ -105,9 +118,18 @@ class CustomModelViewer {
 
   bool getActualSize() { return actualSize; }
 
-  void setInitialized() { initialized_ = true; }
+  void setInitialized() {
+    initialized_ = true;
+    OnFrame(this, nullptr, 0);
+  }
+
+  pthread_t getFilamentApiThreadId() const { return filament_api_thread_id_; }
 
   std::string getAssetPath() const { return flutterAssetsPath_; }
+
+  void setOffset(double left, double top);
+
+  void resize(double width, double height);
 
  private:
   static constexpr bool actualSize = false;
@@ -142,13 +164,15 @@ class CustomModelViewer {
     uint32_t height;
   } native_window_{};
 
-  ::filament::Engine* engine_{};
-  ::filament::Scene* scene_{};
-  ::filament::View* view_{};
-  ::filament::Renderer* renderer_{};
-  ::filament::SwapChain* swapChain_{};
+  Scene* scene_{};
 
-  ::filament::gltfio::Animator* animator_;
+  ::filament::Engine* fengine_{};
+  ::filament::Scene* fscene_{};
+  ::filament::View* fview_{};
+  ::filament::Renderer* frenderer_{};
+  ::filament::SwapChain* fswapChain_{};
+
+  ::filament::gltfio::Animator* fanimator_;
 
   ModelState currentModelState_;
   SceneState currentSkyboxState_;
@@ -160,7 +184,7 @@ class CustomModelViewer {
 
   std::unique_ptr<ModelLoader> modelLoader_;
 
-  std::unique_ptr<CameraManager> cameraManager_;
+  CameraManager* cameraManager_;
 
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
   static const wl_callback_listener frame_listener;

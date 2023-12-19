@@ -217,8 +217,15 @@ void PlatformViewsHandler::HandleMethodCall(
     /// The user touched a platform view within Flutter.
     const auto& params = std::get_if<flutter::EncodableList>(arguments);
     auto touch = PlatformViewTouch(*params);
-    touch.Print();
-    result->Success();
+    SPDLOG_TRACE("PlatformViewTouch id: {}", touch.getId());
+    auto view = PlatformViewsRegistry::GetInstance().GetPlatformView(touch.getId());
+    if (view) {
+      view->OnTouch(touch.getAction(), touch.getX(), touch.getY());
+      result->Success();
+    }
+    else {
+      result->Error("error", "PlatformView id not registered");
+    }
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
     Utils::PrintFlutterEncodableValue("unhandled", *arguments);

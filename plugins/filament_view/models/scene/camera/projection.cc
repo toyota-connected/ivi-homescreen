@@ -21,10 +21,7 @@
 
 namespace plugin_filament_view {
 
-Projection::Projection(void const* parent,
-                       const std::string& flutter_assets_path,
-                       const flutter::EncodableMap& params)
-    : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+Projection::Projection(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Projection::Projection");
   for (auto& it : params) {
     if (it.second.IsNull())
@@ -97,33 +94,34 @@ void Projection::Print(const char* tag) {
   spdlog::debug("++++++++");
 }
 
-const char* Projection::getTextForType(Projection::Type type) {
+const char* Projection::getTextForType(::filament::Camera::Projection type) {
   return (const char*[]){
       kTypePerspective,
       kTypeOrtho,
   }[static_cast<int>(type)];
 }
 
-Projection::Type Projection::getTypeForText(const std::string& type) {
+::filament::Camera::Projection Projection::getTypeForText(
+    const std::string& type) {
   if (type == kTypePerspective)
-    return Type::perspective;
-  return Type::ortho;
+    return ::filament::Camera::Projection::PERSPECTIVE;
+  return ::filament::Camera::Projection::ORTHO;
 }
 
-const char* Projection::getTextForFov(Projection::Fov fov) {
+const char* Projection::getTextForFov(::filament::Camera::Fov fov) {
   return (const char*[]){
       kFovVertical,
       kFovHorizontal,
   }[static_cast<int>(fov)];
 }
 
-Projection::Fov Projection::getFovForText(const std::string& fov) {
+::filament::Camera::Fov Projection::getFovForText(const std::string& fov) {
   if (fov == kFovVertical) {
-    return Fov::vertical;
+    return ::filament::Camera::Fov::VERTICAL;
   } else if (fov == kFovHorizontal) {
-    return Fov::horizontal;
+    return ::filament::Camera::Fov::HORIZONTAL;
   }
-  return Fov::horizontal;
+  return ::filament::Camera::Fov::HORIZONTAL;
 }
 
 }  // namespace plugin_filament_view

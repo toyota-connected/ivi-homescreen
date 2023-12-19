@@ -29,6 +29,21 @@ class Ground {
   Ground(void* parent,
          const std::string& flutter_assets_path,
          const flutter::EncodableMap& params);
+
+  [[nodiscard]] std::optional<Position*> getCenterPosition() const {
+    return center_position_wrapper_;
+  }
+  [[nodiscard]] std::optional<Direction*> getNormal() const {
+    return normal_wrapper_;
+  }
+  [[nodiscard]] std::optional<Size*> getSize() const { return size_wrapper_; }
+  [[nodiscard]] std::optional<Material*> getMaterial() const {
+    return material_wrapper_;
+  }
+  [[nodiscard]] std::optional<bool> getIsBelowModel() const {
+    return isBelowModel_;
+  }
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
@@ -40,9 +55,13 @@ class Ground {
   const std::string& flutterAssetsPath_;
 
   std::optional<std::unique_ptr<Position>> center_position_;
+  std::optional<Position*> center_position_wrapper_;
   std::optional<std::unique_ptr<Direction>> normal_;
+  std::optional<Direction*> normal_wrapper_;
   std::optional<std::unique_ptr<Size>> size_;
+  std::optional<Size*> size_wrapper_;
   std::optional<std::unique_ptr<Material>> material_;
+  std::optional<Material*> material_wrapper_;
   bool isBelowModel_;
 };
 }  // namespace plugin_filament_view

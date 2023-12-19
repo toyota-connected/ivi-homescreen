@@ -29,7 +29,7 @@ ModelLoader::ModelLoader(CustomModelViewer* modelViewer)
     : modelViewer_(modelViewer) {
   SPDLOG_TRACE("++ModelLoader::ModelLoader");
   assert(modelViewer_);
-  auto engine = modelViewer->getEngine();
+  auto engine = modelViewer->getFilamentEngine();
   materialProvider_ = ::filament::gltfio::createUbershaderProvider(
       engine, UBERARCHIVE_DEFAULT_DATA, UBERARCHIVE_DEFAULT_SIZE);
   SPDLOG_DEBUG("UbershaderProvider MaterialsCount: {}",
@@ -43,8 +43,7 @@ ModelLoader::ModelLoader(CustomModelViewer* modelViewer)
   ResourceConfiguration resourceConfiguration{};
   resourceConfiguration.engine = engine;
   resourceConfiguration.normalizeSkinningWeights = true;
-  resourceLoader_ =
-      new ResourceLoader(resourceConfiguration);
+  resourceLoader_ = new ResourceLoader(resourceConfiguration);
 
   assetPath_ = modelViewer->getAssetPath();
   visibleScenes_.reset();
@@ -118,7 +117,7 @@ void ModelLoader::transformToUnitCube(const Position* centerPoint,
   using namespace filament::math;
   using namespace filament::gltfio;
 
-  auto engine = modelViewer_->getEngine();
+  auto engine = modelViewer_->getFilamentEngine();
   auto& tcm = engine->getTransformManager();
   auto root = tcm.getInstance(asset_->getRoot());
   mat4f transform;
@@ -136,9 +135,9 @@ void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {
     return;
   }
 
-  auto engine = modelViewer_->getEngine();
-  auto view = modelViewer_->getView();
-  auto scene = modelViewer_->getScene();
+  auto engine = modelViewer_->getFilamentEngine();
+  auto view = modelViewer_->getFilamentView();
+  auto scene = modelViewer_->getFilamentScene();
   settings_ = modelViewer_->getSettings();
 
   auto& tm = engine->getTransformManager();
@@ -352,8 +351,8 @@ void ModelLoader::updateScene() {
 
 void ModelLoader::removeAsset() {
   if (!isRemoteMode()) {
-    modelViewer_->getScene()->removeEntities(asset_->getEntities(),
-                                             asset_->getEntityCount());
+    modelViewer_->getFilamentScene()->removeEntities(asset_->getEntities(),
+                                                     asset_->getEntityCount());
     asset_ = nullptr;
   }
 }
@@ -371,20 +370,21 @@ std::future<std::string> ModelLoader::loadGlbFromAsset(
     std::filesystem::path asset_path(assetPath_);
     asset_path /= path;
     if (path.empty() || !std::filesystem::exists(assetPath_)) {
-      modelViewer_->setModelState(ModelState::error);
+      modelViewer_->setModelState(ModelState::ERROR);
       promise->set_value("Asset path not valid");
     }
     SPDLOG_DEBUG("Attempting to load {}", asset_path.c_str());
     SPDLOG_DEBUG("scale: {}", scale);
     centerPosition->Print("centerPosition");
 
-    modelViewer_->setModelState(ModelState::loading);
+    modelViewer_->setModelState(ModelState::LOADING);
 
     std::ifstream stream(asset_path, std::ios::in | std::ios::binary);
     std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(stream)),
                                 std::istreambuf_iterator<char>());
 
-    asset_ = assetLoader_->createAsset(buffer.data(), buffer.size());
+    asset_ = assetLoader_->createAsset(buffer.data(),
+                                       static_cast<uint32_t>(buffer.size()));
     resourceLoader_->asyncBeginLoad(asset_);
     modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
     asset_->releaseSourceData();
@@ -398,8 +398,8 @@ std::future<std::string> ModelLoader::loadGlbFromAsset(
     // TODO error response @withContext Resource.Error(bufferResource.message ?:
     // "Couldn't load glb model from asset")
 
-    modelViewer_->setModelState(isFallback ? ModelState::fallbackLoaded
-                                           : ModelState::loaded);
+    modelViewer_->setModelState(isFallback ? ModelState::FALLBACK_LOADED
+                                           : ModelState::LOADED);
     std::stringstream ss;
     ss << "Loaded glb model successfully from " << asset_path;
     promise->set_value(ss.str());
@@ -410,8 +410,8 @@ std::future<std::string> ModelLoader::loadGlbFromAsset(
 
 std::future<std::string> ModelLoader::loadGlbFromUrl(
     const std::string& url,
-    float scale,
-    const Position* centerPosition,
+    float /* scale */,
+    const Position* /* centerPosition */,
     bool isFallback) {
   spdlog::error("loadGlbFromUrl not implemented yet");
   const auto promise(std::make_shared<std::promise<std::string>>());
@@ -437,14 +437,14 @@ std::future<std::string> ModelLoader::loadGlbFromUrl(
 #endif  // TODO
 
   if (url.empty()) {
-    modelViewer_->setModelState(ModelState::error);
+    modelViewer_->setModelState(ModelState::ERROR);
     promise->set_value("Url is empty");
   }
 
-  modelViewer_->setModelState(ModelState::loading);
+  modelViewer_->setModelState(ModelState::LOADING);
   // TODO post to platform runner
-  modelViewer_->setModelState(isFallback ? ModelState::fallbackLoaded
-                                         : ModelState::loaded);
+  modelViewer_->setModelState(isFallback ? ModelState::FALLBACK_LOADED
+                                         : ModelState::LOADED);
 
   std::stringstream ss;
   ss << "Loaded glb model successfully from " << url;
@@ -484,6 +484,13 @@ std::string ModelLoader::loadModel(Model* model) {
   }
 #endif
   return result;
+}
+
+const ::filament::math::mat4f& ModelLoader::getModelTransform() {
+  auto root = asset_->getRoot();
+  auto& tm = asset_->getEngine()->getTransformManager();
+  auto instance = tm.getInstance(root);
+  return tm.getTransform(instance);
 }
 
 }  // namespace plugin_filament_view

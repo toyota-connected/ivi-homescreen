@@ -1,3 +1,18 @@
+/*
+* Copyright 2020-2023 Toyota Connected North America
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include "scene_controller.h"
 
@@ -38,31 +53,42 @@ SceneController::~SceneController() {
   SPDLOG_TRACE("SceneController::~SceneController");
 }
 
-void SceneController::setUpViewer(PlatformView* platformView, FlutterDesktopEngineState* state) {
-  modelViewer_ = std::make_unique<CustomModelViewer>(platformView, state, flutterAssetsPath_);
-
+void SceneController::setUpViewer(PlatformView* platformView,
+                                  FlutterDesktopEngineState* state) {
+  modelViewer_ = std::make_unique<CustomModelViewer>(platformView, state,
+                                                     flutterAssetsPath_);
   // TODO surfaceView.setOnTouchListener(modelViewer)
   //  surfaceView.setZOrderOnTop(true) // necessary
 
-  auto view = modelViewer_->getView();
-  auto scene = modelViewer_->getScene();
+  auto view = modelViewer_->getFilamentView();
+  auto scene = modelViewer_->getFilamentScene();
 
   auto size = platformView->GetSize();
-  view->setViewport({ 0, 0,  static_cast<uint32_t>(size.first), static_cast<uint32_t>(size.second) });
+  view->setViewport({0, 0, static_cast<uint32_t>(size.first),
+                     static_cast<uint32_t>(size.second)});
 
   view->setScene(scene);
   view->setPostProcessingEnabled(false);
 }
 
 void SceneController::setUpGround() {
-  groundManager_ = std::make_unique<GroundManager>(modelViewer_.get(), flutterAssetsPath_);
+  groundManager_ = std::make_unique<GroundManager>(modelViewer_.get(), nullptr);
   auto f = groundManager_->createGround();
   f.wait();
 }
 
 void SceneController::setUpCamera() {
+  // we own the camera manager
   cameraManager_ = std::make_unique<CameraManager>(modelViewer_.get());
-  auto f = cameraManager_->setupCamera();
+  // update model viewer
+  modelViewer_->setCameraManager(cameraManager_.get());
+
+  auto camera = scene_->getCamera();
+  if (!camera) {
+    return;
+  }
+
+  auto f = cameraManager_->updateCamera(camera);
   f.wait();
 }
 
@@ -189,7 +215,6 @@ void SceneController::setUpIndirectLight() {
 }
 
 void SceneController::setUpAnimation(std::optional<Animation*> animation) {
-
   if (animation.has_value()) {
     auto a = animation.value();
     if (a->GetAutoPlay()) {
@@ -218,8 +243,7 @@ void SceneController::setUpLoadingModel() {
         result = modelViewer_->loadModel(f.value());
         SPDLOG_DEBUG("Fallback loadModel: {}", result);
         setUpAnimation(f.value()->GetAnimation());
-      }
-      else {
+      } else {
         result = "Error.FallbackLoadFailed";
       }
     } else {
@@ -241,6 +265,11 @@ void SceneController::setUpShapes() {
   }
 }
 
+std::string SceneController::setDefaultCamera() {
+  cameraManager_->setDefaultCamera();
+  return "Default camera updated successfully";
+}
+
 std::string SceneController::loadModel(std::optional<Model*> model) {
   if (!model.has_value())
     return "Error.NoModel";
@@ -248,22 +277,23 @@ std::string SceneController::loadModel(std::optional<Model*> model) {
   return modelViewer_->loadModel(model.value());
 }
 
-//TODO Move to model viewer
+// TODO Move to model viewer
 void SceneController::makeSurfaceViewTransparent() {
-  modelViewer_->getView()->setBlendMode(
+  modelViewer_->getFilamentView()->setBlendMode(
       ::filament::View::BlendMode::TRANSLUCENT);
 
   // TODO
   // surfaceView.holder.setFormat(PixelFormat.TRANSLUCENT)
 
-  auto clearOptions = modelViewer_->getRenderer()->getClearOptions();
+  auto clearOptions = modelViewer_->getFilamentRenderer()->getClearOptions();
   clearOptions.clear = true;
-  modelViewer_->getRenderer()->setClearOptions(clearOptions);
+  modelViewer_->getFilamentRenderer()->setClearOptions(clearOptions);
 }
 
-//TODO Move to model viewer
+// TODO Move to model viewer
 void SceneController::makeSurfaceViewNotTransparent() {
-  modelViewer_->getView()->setBlendMode(::filament::View::BlendMode::OPAQUE);
+  modelViewer_->getFilamentView()->setBlendMode(
+      ::filament::View::BlendMode::OPAQUE);
 
   // TODO surfaceView.setZOrderOnTop(true) // necessary
   // TODO surfaceView.holder.setFormat(PixelFormat.OPAQUE)

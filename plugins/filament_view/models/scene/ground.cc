@@ -34,13 +34,14 @@ Ground::Ground(void* parent,
     if (key == "centerPosition" &&
         std::holds_alternative<flutter::EncodableMap>(it.second)) {
       center_position_ = std::make_unique<Position>(
-          parent, flutterAssetsPath_,
           std::get<flutter::EncodableMap>(it.second));
+      center_position_wrapper_ = center_position_.value().get();
     } else if (key == "normal" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       normal_ = std::make_unique<Direction>(
           parent, flutterAssetsPath_,
           std::get<flutter::EncodableMap>(it.second));
+      normal_wrapper_ = normal_.value().get();
     } else if (key == "isBelowModel" &&
                std::holds_alternative<bool>(it.second)) {
       isBelowModel_ = std::get<bool>(it.second);
@@ -49,11 +50,13 @@ Ground::Ground(void* parent,
       size_ =
           std::make_unique<Size>(parent, flutterAssetsPath_,
                                  std::get<flutter::EncodableMap>(it.second));
+      size_wrapper_ = size_.value().get();
     } else if (key == "material" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       material_ = std::make_unique<Material>(
           parent, flutterAssetsPath_,
           std::get<flutter::EncodableMap>(it.second));
+      material_wrapper_ = material_.value().get();
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Ground] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);

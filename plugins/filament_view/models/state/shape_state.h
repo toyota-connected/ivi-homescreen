@@ -1,3 +1,19 @@
+/*
+ * Copyright 2020-2023 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <string>
@@ -7,16 +23,16 @@ namespace plugin_filament_view::models::state {
 /// Represents the state of the Shape.
 enum class ShapeState {
   /// represents idle state.
-  none,
+  NONE,
 
   /// represents loading state.
-  loading,
+  LOADING,
 
   /// represents the scene has finished loading successfully.
-  loaded,
+  LOADED,
 
   /// represents that some error happened while loading the scene.
-  error,
+  ERROR,
 };
 
 static constexpr char kShapeStateNone[] = "NONE";
@@ -26,15 +42,15 @@ static constexpr char kShapeStateError[] = "ERROR";
 
 static ShapeState getSceneShapeForText(const std::string& state) {
   if (state == kShapeStateNone) {
-    return ShapeState::none;
+    return ShapeState::NONE;
   } else if (state == kShapeStateLoading) {
-    return ShapeState::loading;
+    return ShapeState::LOADING;
   } else if (state == kShapeStateLoaded) {
-    return ShapeState::loaded;
+    return ShapeState::LOADED;
   } else if (state == kShapeStateError) {
-    return ShapeState::error;
+    return ShapeState::ERROR;
   }
-  return ShapeState::none;
+  return ShapeState::NONE;
 }
 
 static const char* getTextForShapeState(ShapeState state) {

@@ -46,7 +46,6 @@ Light::Light(void* parent,
     } else if (key == "position" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       position_ = std::make_unique<Position>(
-          parent_, flutterAssetsPath_,
           std::get<flutter::EncodableMap>(it.second));
     } else if (key == "direction" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {

@@ -18,6 +18,7 @@
 
 #include <memory>
 
+#include <camutils/Manipulator.h>
 #include <flutter/encodable_value.h>
 
 #include "exposure.h"
@@ -31,10 +32,58 @@ class Projection;
 
 class Camera {
  public:
-  Camera(void* parent,
-         const std::string& flutter_assets_path,
-         const flutter::EncodableMap& params);
+  Camera(const flutter::EncodableMap& params);
   void Print(const char* tag);
+
+  std::optional<Exposure*> getExposure() const { return exposure_wrapper_; }
+  std::optional<LensProjection*> getLensProjection() const {
+    return lensProjection_wrapper_;
+  }
+  std::optional<Projection*> getProjection() const {
+    return projection_wrapper_;
+  }
+  std::optional<Position*> getTargetPosition() const {
+    return targetPosition_wrapper_;
+  }
+  std::optional<Position*> getUpVector() const { return upVector_wrapper_; }
+  std::optional<float> getZoomSpeed() const { return zoomSpeed_; }
+  std::optional<Position*> getOrbitHomePosition() const {
+    return orbitHomePosition_wrapper_;
+  }
+  std::optional<std::vector<float>*> getOrbitSpeed() const {
+    return orbitSpeed_wrapper_;
+  }
+  std::optional<::filament::camutils::Fov> getFovDirection() const {
+    return fovDirection_;
+  }
+  std::optional<float> getFovDegrees() const { return fovDegrees_; }
+  std::optional<float> getFarPlane() const { return farPlane_; }
+  std::optional<std::vector<float>*> getMapExtent() const {
+    return mapExtent_wrapper_;
+  }
+  std::optional<Position*> getFlightStartPosition() const {
+    return flightStartPosition_wrapper_;
+  }
+  std::optional<std::vector<float>*> getFlightStartOrientation() const {
+    return flightStartOrientation_wrapper_;
+  }
+  std::optional<float> getFlightMoveDamping() const {
+    return flightMoveDamping_;
+  }
+  std::optional<int> getFlightSpeedSteps() const { return flightSpeedSteps_; }
+  std::optional<float> getFlightMaxMoveSpeed() const {
+    return flightMaxMoveSpeed_;
+  }
+  std::optional<std::vector<float>*> getGroundPlane() const {
+    return groundPlane_wrapper_;
+  }
+  std::optional<::filament::camutils::Mode> getMode() const { return mode_; }
+  std::optional<std::vector<double>*> getShift() const {
+    return shift_wrapper_;
+  }
+  std::optional<std::vector<double>*> getScaling() const {
+    return scaling_wrapper_;
+  }
 
   // Disallow copy and assign.
   Camera(const Camera&) = delete;
@@ -46,15 +95,10 @@ class Camera {
     freeFlight,
   };
 
-  enum class Fov {
-    vertical,
-    horizontal,
-  };
-
-  static const char* getTextForMode(Mode mode);
-  static Mode getModeForText(const std::string& mode);
-  static const char* getTextForFov(Fov fov);
-  static Fov getFovForText(const std::string& fov);
+  static const char* getTextForMode(::filament::camutils::Mode mode);
+  static ::filament::camutils::Mode getModeForText(const std::string& mode);
+  static const char* getTextForFov(::filament::camutils::Fov fov);
+  static ::filament::camutils::Fov getFovForText(const std::string& fov);
 
  private:
   static constexpr char kModeOrbit[] = "ORBIT";
@@ -63,18 +107,18 @@ class Camera {
   static constexpr char kFovVertical[] = "VERTICAL";
   static constexpr char kFovHorizontal[] = "HORIZONTAL";
 
-  void* parent_;
-  const std::string& flutterAssetsPath_;
-
   /// An object that control camera Exposure.
   std::optional<std::unique_ptr<Exposure>> exposure_;
+  std::optional<Exposure*> exposure_wrapper_;
 
   /// An object that controls camera projection matrix.
   std::optional<std::unique_ptr<Projection>> projection_;
+  std::optional<Projection*> projection_wrapper_;
 
   /// An object that control camera and set it's projection matrix from the
   /// focal length.
   std::optional<std::unique_ptr<LensProjection>> lensProjection_;
+  std::optional<LensProjection*> lensProjection_wrapper_;
 
   /// Sets an additional matrix that scales the projection matrix.
   /// This is useful to adjust the aspect ratio of the camera independent from
@@ -84,7 +128,8 @@ class Camera {
   ///     matrix.
   //      * yscaling  vertical scaling to be applied after the projection
   //      matrix.
-  std::optional<std::vector<double>> scaling_;
+  std::optional<std::unique_ptr<std::vector<double>>> scaling_;
+  std::optional<std::vector<double>*> scaling_wrapper_;
 
   ///      Sets an additional matrix that shifts (translates) the projection
   ///      matrix.
@@ -94,43 +139,49 @@ class Camera {
   ///      projection
   ///      *  yshift    vertical shift in NDC coordinates applied after the
   ///      projection
-  std::optional<std::vector<double>> shift_;
+  std::optional<std::unique_ptr<std::vector<double>>> shift_;
+  std::optional<std::vector<double>*> shift_wrapper_;
 
   /// Mode of the camera that operates on.
-  Mode mode_ = Mode::orbit;
+  ::filament::camutils::Mode mode_ = ::filament::camutils::Mode::ORBIT;
 
   /// The world-space position of interest, which defaults to (x:0,y:0,z:-4).
   std::optional<std::unique_ptr<Position>> targetPosition_;
+  std::optional<Position*> targetPosition_wrapper_;
 
   /// The orientation for the home position, which defaults to (x:0,y:1,z:0).
   std::optional<std::unique_ptr<Position>> upVector_;
+  std::optional<Position*> upVector_wrapper_;
 
   /// The scroll delta multiplier, which defaults to 0.01.
-  std::optional<double> zoomSpeed_;
+  std::optional<float> zoomSpeed_;
 
   // orbit
   /// The initial eye position in world space for ORBIT mode.
   /// This defaults to (x:0,y:0,z:1).
   std::optional<std::unique_ptr<Position>> orbitHomePosition_;
+  std::optional<Position*> orbitHomePosition_wrapper_;
 
   /// Sets the multiplier with viewport delta for ORBIT mode.This defaults to
   /// 0.01 List of 2 double :[x,y]
-  std::optional<std::vector<double>> orbitSpeed_;
+  std::optional<std::unique_ptr<std::vector<float>>> orbitSpeed_;
+  std::optional<std::vector<float>*> orbitSpeed_wrapper_;
 
   /// The FOV axis that's held constant when the viewport changes.
   /// This defaults to Vertical.
-  Camera::Fov fovDirection_ = Camera::Fov::vertical;
+  ::filament::camutils::Fov fovDirection_ = ::filament::camutils::Fov::VERTICAL;
 
   /// The full FOV (not the half-angle) in the degrees.
   /// This defaults to 33.
-  std::optional<double> fovDegrees_;
+  std::optional<float> fovDegrees_;
 
   /// The distance to the far plane, which defaults to 5000.
-  std::optional<double> farPlane_;
+  std::optional<float> farPlane_;
 
   /// The ground plane size used to compute the home position for MAP mode.
   /// This defaults to 512 x 512
-  std::optional<std::vector<double>> mapExtent_;
+  std::optional<std::unique_ptr<std::vector<float>>> mapExtent_;
+  std::optional<std::vector<float>*> mapExtent_wrapper_;
 
   /// Constrains the zoom-in level. Defaults to 0.
   std::optional<double> mapMinDistance_;
@@ -138,27 +189,30 @@ class Camera {
   /// The initial eye position in world space for FREE_FLIGHT mode.
   /// Defaults to (x:0,y:0,z:0).
   std::optional<std::unique_ptr<Position>> flightStartPosition_;
+  std::optional<Position*> flightStartPosition_wrapper_;
 
   /// The initial orientation in pitch and yaw for FREE_FLIGHT mode.
   /// Defaults to [0,0].
-  std::optional<std::vector<double>> flightStartOrientation_;
+  std::optional<std::unique_ptr<std::vector<float>>> flightStartOrientation_;
+  std::optional<std::vector<float>*> flightStartOrientation_wrapper_;
 
   /// The maximum camera translation speed in world units per second for
   /// FREE_FLIGHT mode. Defaults to 10.
-  std::optional<double> flightMaxMoveSpeed_;
+  std::optional<float> flightMaxMoveSpeed_;
 
   /// The number of speed steps adjustable with scroll wheel for FREE_FLIGHT
   /// mode.
   ///  Defaults to 80.
-  std::optional<int64_t> flightSpeedSteps_;
+  std::optional<int> flightSpeedSteps_;
 
   /// Applies a deceleration to camera movement in FREE_FLIGHT mode. Defaults to
   /// 0 (no damping). Lower values give slower damping times. A good default
   /// is 15.0. Too high a value may lead to instability.
-  std::optional<double> flightMoveDamping_;
+  std::optional<float> flightMoveDamping_;
 
   /// The ground plane equation used for ray casts. This is a plane equation as
   /// in Ax + By + Cz + D = 0. Defaults to (0, 0, 1, 0).
-  std::optional<std::vector<double>> groundPlane_;
+  std::optional<std::unique_ptr<std::vector<float>>> groundPlane_;
+  std::optional<std::vector<float>*> groundPlane_wrapper_;
 };
 }  // namespace plugin_filament_view

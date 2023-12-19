@@ -2,6 +2,7 @@
 #pragma once
 
 #include <filament/IndirectLight.h>
+#include <filament/TransformManager.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/ResourceLoader.h>
@@ -25,7 +26,9 @@ class ModelLoader {
 
   std::string loadModel(Model* model);
 
-  ::filament::gltfio::FilamentAsset *getAsset() const { return asset_; };
+  ::filament::gltfio::FilamentAsset* getAsset() const { return asset_; };
+
+  const ::filament::math::mat4f& getModelTransform();
 
   void updateScene();
 

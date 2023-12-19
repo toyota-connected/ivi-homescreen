@@ -21,22 +21,27 @@
 namespace plugin_filament_view {
 class LensProjection {
  public:
-  LensProjection(void* parent,
-                 const std::string& flutter_assets_path_,
-                 const flutter::EncodableMap& params);
+  LensProjection(float cameraFocalLength, float aspect);
+
+  LensProjection(const flutter::EncodableMap& params);
+
   void Print(const char* tag);
+
+  [[nodiscard]] std::optional<float> getFocalLength() const {
+    return focalLength_;
+  }
+  [[nodiscard]] std::optional<float> getAspect() const { return aspect_; }
+  [[nodiscard]] std::optional<float> getNear() const { return near_; }
+  [[nodiscard]] std::optional<float> getFar() const { return far_; }
 
   // Disallow copy and assign.
   LensProjection(const LensProjection&) = delete;
   LensProjection& operator=(const LensProjection&) = delete;
 
  private:
-  void* parent_;
-  const std::string& flutterAssetsPath_;
-
-  double focalLength_;
-  std::optional<double> aspect_;
-  std::optional<double> near_;
-  std::optional<double> far_;
+  float focalLength_;
+  std::optional<float> aspect_;
+  std::optional<float> near_;
+  std::optional<float> far_;
 };
 }  // namespace plugin_filament_view
