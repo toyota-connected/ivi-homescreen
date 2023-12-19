@@ -18,6 +18,8 @@
 
 #include <optional>
 
+#include <filament/Camera.h>
+
 #include <flutter/encodable_value.h>
 
 namespace plugin_filament_view {
@@ -26,32 +28,35 @@ class Camera;
 
 class Projection {
  public:
-  Projection(void const* parent,
-             const std::string& flutter_assets_path,
-             const flutter::EncodableMap& params);
+  Projection(const flutter::EncodableMap& params);
   void Print(const char* tag);
+
+  [[nodiscard]] std::optional<::filament::Camera::Projection> getProjection()
+      const {
+    return projection_;
+  }
+  [[nodiscard]] std::optional<double> getLeft() const { return left_; }
+  [[nodiscard]] std::optional<double> getRight() const { return right_; }
+  [[nodiscard]] std::optional<double> getTop() const { return top_; }
+  [[nodiscard]] std::optional<double> getBottom() const { return bottom_; }
+  [[nodiscard]] std::optional<double> getNear() const { return near_; }
+  [[nodiscard]] std::optional<double> getFar() const { return far_; }
+  [[nodiscard]] std::optional<double> getFovInDegrees() const {
+    return fovInDegrees_;
+  }
+  [[nodiscard]] std::optional<::filament::Camera::Fov> getDirection() const {
+    return fovDirection_;
+  }
+  [[nodiscard]] std::optional<double> getAspect() const { return aspect_; }
 
   // Disallow copy and assign.
   Projection(const Projection&) = delete;
   Projection& operator=(const Projection&) = delete;
 
-  enum class Type {
-    /// Perspective projection, objects get smaller as they are farther.
-    perspective,
-
-    /// Orthonormal projection, preserves distances.
-    ortho
-  };
-
-  enum class Fov {
-    vertical,
-    horizontal,
-  };
-
-  static const char* getTextForType(Type type);
-  static Type getTypeForText(const std::string& type);
-  static const char* getTextForFov(Fov fov);
-  static Fov getFovForText(const std::string& fov);
+  static const char* getTextForType(::filament::Camera::Projection type);
+  static ::filament::Camera::Projection getTypeForText(const std::string& type);
+  static const char* getTextForFov(::filament::Camera::Fov fov);
+  static ::filament::Camera::Fov getFovForText(const std::string& fov);
 
  private:
   static constexpr char kTypePerspective[] = "PERSPECTIVE";
@@ -59,11 +64,8 @@ class Projection {
   static constexpr char kFovVertical[] = "VERTICAL";
   static constexpr char kFovHorizontal[] = "HORIZONTAL";
 
-  const void* parent_;
-  const std::string& flutterAssetsPath_;
-
   /// Denotes the projection type used by this camera.
-  std::optional<Projection::Type> projection_;
+  std::optional<::filament::Camera::Projection> projection_;
 
   /// distance in world units from the camera to the left plane, at the near
   /// plane. Precondition: left != right
@@ -100,6 +102,6 @@ class Projection {
   std::optional<double> aspect_;
 
   /// direction of the field-of-view parameter.
-  std::optional<Projection::Fov> fovDirection_;
+  std::optional<::filament::Camera::Fov> fovDirection_;
 };
 }  // namespace plugin_filament_view

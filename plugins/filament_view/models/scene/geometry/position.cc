@@ -20,9 +20,10 @@
 #include "utils.h"
 
 namespace plugin_filament_view {
-Position::Position(void* /* parent */,
-                   const std::string& /* flutter_assets_path */,
-                   const flutter::EncodableMap& params) {
+
+Position::Position(float x, float y, float z) : x_(x), y_(y), z_(z) {}
+
+Position::Position(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Position::Position");
   for (auto& it : params) {
     if (it.second.IsNull())
@@ -46,15 +47,9 @@ Position::Position(void* /* parent */,
 void Position::Print(const char* tag) const {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Position)", tag);
-  if (x_.has_value()) {
-    spdlog::debug("\tx: {}", x_.value());
-  }
-  if (y_.has_value()) {
-    spdlog::debug("\ty: {}", y_.value());
-  }
-  if (z_.has_value()) {
-    spdlog::debug("\tz: {}", z_.value());
-  }
+  spdlog::debug("\tx: {}", x_);
+  spdlog::debug("\ty: {}", y_);
+  spdlog::debug("\tz: {}", z_);
   spdlog::debug("++++++++");
 }
 

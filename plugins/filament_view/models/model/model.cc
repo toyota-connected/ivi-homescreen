@@ -43,7 +43,6 @@ Model::Model(void* parent,
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       center_position_ = std::make_unique<Position>(
-          parent, flutterAssetsPath_,
           std::get<flutter::EncodableMap>(it.second));
     } else if (key == "fallback" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {

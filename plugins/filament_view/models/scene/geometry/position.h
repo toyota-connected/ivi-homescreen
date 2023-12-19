@@ -24,9 +24,14 @@ namespace plugin_filament_view {
 
 class Position {
  public:
-  Position(void* parent,
-           const std::string& flutter_assets_path,
-           const flutter::EncodableMap& params);
+  Position(float x, float y, float z);
+
+  explicit Position(const flutter::EncodableMap& params);
+
+  [[nodiscard]] float getX() const { return x_; }
+  [[nodiscard]] float getY() const { return y_; }
+  [[nodiscard]] float getZ() const { return z_; }
+
   void Print(const char* tag) const;
 
   // Disallow copy and assign.
@@ -34,9 +39,9 @@ class Position {
   Position& operator=(const Position&) = delete;
 
  private:
-  std::optional<double> x_;
-  std::optional<double> y_;
-  std::optional<double> z_;
+  float x_;
+  float y_;
+  float z_;
 };
 
 }  // namespace plugin_filament_view

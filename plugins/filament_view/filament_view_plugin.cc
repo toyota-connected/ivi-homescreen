@@ -1,3 +1,18 @@
+/*
+* Copyright 2020-2023 Toyota Connected North America
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include "filament_view_plugin.h"
 
@@ -55,9 +70,7 @@ FilamentViewPlugin::FilamentViewPlugin(int32_t id,
 FilamentViewPlugin::~FilamentViewPlugin() = default;
 
 void FilamentViewPlugin::Resize(double width, double height) {
-  width_ = static_cast<int32_t>(width);
-  height_ = static_cast<int32_t>(height);
-  SPDLOG_TRACE("Resize: {} {}", width, height);
+  filamentScene_->getSceneController()->getModelViewer()->resize(width, height);
 }
 
 void FilamentViewPlugin::SetDirection(int32_t direction) {
@@ -65,20 +78,17 @@ void FilamentViewPlugin::SetDirection(int32_t direction) {
   SPDLOG_TRACE("SetDirection: {}", direction_);
 }
 
+void FilamentViewPlugin::OnTouch(int32_t action, double x, double y) {
+  filamentScene_->getSceneController()->getCameraManager()->onAction(action, x,
+                                                                     y);
+}
+
 void FilamentViewPlugin::SetOffset(double left, double top) {
-  left_ = static_cast<int32_t>(left);
-  top_ = static_cast<int32_t>(top);
-  SPDLOG_TRACE("SetOffset: left: {}, top: {}", left_, top_);
+  filamentScene_->getSceneController()->getModelViewer()->setOffset(left, top);
 }
 
 void FilamentViewPlugin::Dispose(bool /* hybrid */) {
-#if 0
-  if (materialProvider_) {
-    materialProvider_.reset();
-  }
-  materialProvider.destroyMaterials() materialProvider.destroy()
-      assetLoader.destroy() resourceLoader.destroy() engine.destroy()
-#endif
+  filamentScene_.reset();
 }
 
 void FilamentViewPlugin::ChangeAnimationByIndex(

@@ -1,6 +1,21 @@
+/*
+* Copyright 2020-2023 Toyota Connected North America
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
+
 #include "ground_manager.h"
 
-#include <asio/post.hpp>
 #include <filament/Engine.h>
 #include <filament/RenderableManager.h>
 #include <filament/Scene.h>
@@ -10,6 +25,7 @@
 #include <math/norm.h>
 #include <math/vec3.h>
 #include <math/vec4.h>
+#include <asio/post.hpp>
 
 #include "logging/logging.h"
 
@@ -28,8 +44,12 @@ using ::filament::math::packSnorm16;
 using ::filament::math::short4;
 
 GroundManager::GroundManager(CustomModelViewer* model_viewer,
-                             const std::string& flutter_assets_path)
-    : model_viewer_(model_viewer), flutterAssetsPath_(flutter_assets_path) {
+                             MaterialManager* material_manager)
+    : model_viewer_(model_viewer),
+      materialManager_(material_manager),
+      engine_(model_viewer->getFilamentEngine()),
+      ground_(nullptr),
+      plane_geometry_(nullptr) {
   SPDLOG_TRACE("++GroundManager::GroundManager");
   SPDLOG_TRACE("--GroundManager::GroundManager");
 }
@@ -46,103 +66,49 @@ mat4f inline fitIntoUnitCube(const Aabb& bounds, float zoffset) {
   return mat4f::scaling(float3(scaleFactor)) * mat4f::translation(-center);
 }
 
-std::future<void> GroundManager::createGround() {
+std::future<std::string> GroundManager::createGround() {
   SPDLOG_DEBUG("++GroundManager::createGround");
-  const auto promise(std::make_shared<std::promise<void>>());
+  const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
-  asio::post(*model_viewer_->getStrandContext(),[&, promise]{
-    auto engine = model_viewer_->getEngine();
+  model_viewer_->setGroundState(SceneState::LOADING);
+  if (!ground_) {
+    model_viewer_->setGroundState(SceneState::ERROR);
+    promise->set_value("Ground must be provided");
+    return future;
+  }
+  if (ground_->getSize()) {
+    model_viewer_->setGroundState(SceneState::ERROR);
+    promise->set_value("Size must be provided");
+    return future;
+  }
 
-    auto& em = engine->getEntityManager();
-    ::filament::Material* shadowMaterial =
-        ::filament::Material::Builder()
-            .package(GLTF_DEMO_GROUNDSHADOW_DATA,
-                     static_cast<size_t>(GLTF_DEMO_GROUNDSHADOW_SIZE))
-            .build(*engine);
-    auto& viewerOptions = model_viewer_->getSettings().viewer;
-    shadowMaterial->setDefaultParameter("strength",
-                                        viewerOptions.groundShadowStrength);
+  asio::post(*model_viewer_->getStrandContext(), [&, promise] {
+#if 0  // TODO
+    auto materialInstanceResult = materialManger_->getMaterialInstance(ground_->getMaterial());
 
-    const static uint32_t indices[] = {0, 1, 2, 2, 3, 0};
+    auto modelTransform = model_viewer_->getModelTransform();
 
-    auto asset = model_viewer_->getAsset();
-    Aabb aabb = asset->getBoundingBox();
-    if (!model_viewer_->getActualSize()) {
-      mat4f const transform = fitIntoUnitCube(aabb, 4);
-      aabb = aabb.transform(transform);
+    Position* center;
+    if (ground_->getIsBelowModel()) {
+      center = new Position(modelTransform[0, 3], modelTransform[1, 3], modelTransform[2, 3]);
+    }
+    else {
+      if (!ground_->getCenterPosition().has_value()) {
+        promise->set_value("Position must be provided");
+        return;
+      }
+      center = ground_->getCenterPosition().value();
     }
 
-    float3 planeExtent{10.0f * aabb.extent().x, 0.0f, 10.0f * aabb.extent().z};
-
-    const static float3 vertices[] = {
-        {-planeExtent.x, 0, -planeExtent.z},
-        {-planeExtent.x, 0, planeExtent.z},
-        {planeExtent.x, 0, planeExtent.z},
-        {planeExtent.x, 0, -planeExtent.z},
-    };
-
-    short4 const tbn =
-        packSnorm16(mat3f::packTangentFrame(mat3f{float3{1.0f, 0.0f, 0.0f},
-                                                  float3{0.0f, 0.0f, 1.0f},
-                                                  float3{0.0f, 1.0f, 0.0f}})
-                        .xyzw);
-
-    const static ::filament::math::short4 normals[]{tbn, tbn, tbn, tbn};
-
-    VertexBuffer* vertexBuffer =
-        VertexBuffer::Builder()
-            .vertexCount(4)
-            .bufferCount(2)
-            .attribute(VertexAttribute::POSITION, 0,
-                       VertexBuffer::AttributeType::FLOAT3)
-            .attribute(VertexAttribute::TANGENTS, 1,
-                       VertexBuffer::AttributeType::SHORT4)
-            .normalized(VertexAttribute::TANGENTS)
-            .build(*engine);
-
-    vertexBuffer->setBufferAt(
-        *engine, 0,
-        VertexBuffer::BufferDescriptor(
-            vertices, vertexBuffer->getVertexCount() * sizeof(vertices[0])));
-    vertexBuffer->setBufferAt(
-        *engine, 1,
-        VertexBuffer::BufferDescriptor(
-            normals, vertexBuffer->getVertexCount() * sizeof(normals[0])));
-
-    IndexBuffer* indexBuffer =
-        IndexBuffer::Builder().indexCount(6).build(*engine);
-
-    indexBuffer->setBuffer(
-        *engine, IndexBuffer::BufferDescriptor(
-                     indices, indexBuffer->getIndexCount() * sizeof(uint32_t)));
-
-    Entity groundPlane = em.create();
-    RenderableManager::Builder(1)
-        .boundingBox({{}, {planeExtent.x, 1e-4f, planeExtent.z}})
-        .material(0, shadowMaterial->getDefaultInstance())
-        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer,
-                  indexBuffer, 0, 6)
-        .culling(false)
-        .receiveShadows(true)
-        .castShadows(false)
-        .build(*engine, groundPlane);
-
-    auto scene = model_viewer_->getScene();
-    scene->addEntity(groundPlane);
-
-    auto& tcm = engine->getTransformManager();
-    tcm.setTransform(tcm.getInstance(groundPlane),
-                     mat4f::translation(float3{0, aabb.min.y, -4}));
-
-    auto& rcm = engine->getRenderableManager();
-    auto instance = rcm.getInstance(groundPlane);
-    rcm.setLayerMask(instance, 0xff, 0x00);
-
-    groundPlane_ = groundPlane;
-    groundVertexBuffer_ = vertexBuffer;
-    groundIndexBuffer_ = indexBuffer;
-    groundMaterial_ = shadowMaterial;
-    promise->set_value();
+    plane_geometry_ = PlaneGeometry.Builder(
+                                 center = center,
+                                 ground_->getSize(),
+                                 ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
+    delete center;
+    plane_geometry_->setupScene(model_viewer_, materialInstanceResult.data);
+#endif
+    model_viewer_->setGroundState(SceneState::LOADED);
+    promise->set_value("Ground created successfully");
   });
   SPDLOG_DEBUG("--GroundManager::createGround");
   return future;

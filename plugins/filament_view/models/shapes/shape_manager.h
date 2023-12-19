@@ -27,8 +27,7 @@ class ShapeManager {
  public:
   ShapeManager(CustomModelViewer* model_viewer,
                MaterialManager* material_manager);
-  void createShapes(
-      const std::vector<std::unique_ptr<Shape>>& shapes);
+  void createShapes(const std::vector<std::unique_ptr<Shape>>& shapes);
 
   // Disallow copy and assign.
   ShapeManager(const ShapeManager&) = delete;

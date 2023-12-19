@@ -55,6 +55,8 @@ class PlatformView {
 
   virtual void SetOffset(double left, double top) = 0;
 
+  virtual void OnTouch(int32_t action, double x, double y) = 0;
+
   virtual void Dispose(bool hybrid) = 0;
 
  private:

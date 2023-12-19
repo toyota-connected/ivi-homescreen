@@ -21,19 +21,19 @@
 namespace plugin_filament_view {
 class Exposure {
  public:
-  Exposure(void* parent,
-           const std::string& flutter_assets_path,
-           const flutter::EncodableMap& params);
+  Exposure(const flutter::EncodableMap& params);
   void Print(const char* tag);
+
+  std::optional<float> getExposure() const { return exposure_; }
+  std::optional<float> getShutterSpeed() const { return shutterSpeed_; }
+  std::optional<float> getAperture() const { return aperture_; }
+  std::optional<float> getSensitivity() const { return sensitivity_; }
 
   // Disallow copy and assign.
   Exposure(const Exposure&) = delete;
   Exposure& operator=(const Exposure&) = delete;
 
  private:
-  void* parent_;
-  const std::string& flutterAssetsPath_;
-
   /// Aperture in f-stops, clamped between 0.5 and 64. A lower aperture value
   /// increases the exposure, leading to a brighter scene. Realistic values are
   /// between 0.95 and 32.

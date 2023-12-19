@@ -18,8 +18,8 @@
 
 #include "camera.h"
 
-#include <filament/Camera.h>
 #include <camutils/Manipulator.h>
+#include <filament/Camera.h>
 #include <filament/View.h>
 #include <filament/Viewport.h>
 #include <utils/EntityManager.h>
@@ -36,18 +36,35 @@ class CameraManager {
  public:
   explicit CameraManager(CustomModelViewer* model_viewer);
 
-  std::future<void> setupCamera();
+  std::future<void> setDefaultCamera();
 
   void lookAtDefaultPosition();
 
   void destroyCamera();
 
-  //Camera control
-  void onPointerDown(int x, int y);
+  // Camera control
+  void onAction(int32_t action, double x, double y);
 
-  void onPointerMove(int x, int y);
+  float calculateAspectRatio();
 
-  void onPointerUp(int x, int y);
+  void updateCameraManipulator(Camera* cameraInfo);
+
+  void updateCameraOnResize(uint32_t width, uint32_t height);
+
+  std::future<std::string> updateCamera(Camera* cameraInfo);
+
+  std::string updateExposure(std::optional<Exposure*> exposure);
+
+  std::string updateProjection(std::optional<Projection*> projection);
+
+  std::string updateLensProjection(
+      std::optional<LensProjection*> lensProjection);
+
+  void updateCameraProjection();
+
+  std::string updateCameraShift(std::optional<std::vector<double>*> shift);
+
+  std::string updateCameraScaling(std::optional<std::vector<double>*> scaling);
 
   // Disallow copy and assign.
   CameraManager(const CameraManager&) = delete;
@@ -61,7 +78,8 @@ class CameraManager {
   static constexpr float kSensitivity = 100.0f;
   static constexpr float kDefaultFocalLength = 28.0f;
 
-  static constexpr ::filament::math::float3 kDefaultObjectPosition = {0.0f, 0.0f, -4.0f};
+  static constexpr ::filament::math::float3 kDefaultObjectPosition = {
+      0.0f, 0.0f, -4.0f};
   static constexpr ::filament::math::float3 kCameraCenter = {0.0f, 0.0f, 0.0f};
   static constexpr ::filament::math::float3 kCameraUp = {0.0f, 1.0f, 0.0f};
   static constexpr float kCameraDist = 3.0f;
@@ -80,23 +98,21 @@ class CameraManager {
     float operator[](size_t idx) const {
       assert(idx <= 1);
       return (&x)[idx];
-    }  // We very rarely use this [] operator, the assert overhead is fine.
+    }  // We very rarely use this [] operator, assert overhead is fine.
     float& operator[](size_t idx) {
       assert(idx <= 1);
       return (&x)[idx];
-    }  // We very rarely use this [] operator, the assert overhead is fine.
+    }  // We very rarely use this [] operator, assert overhead is fine.
   };
 
-  CustomModelViewer* model_viewer_;
+  ::filament::Engine* engine_{};
   ::filament::Camera* camera_{};
-  CameraManipulator* manipulator_{};
+  CustomModelViewer* model_viewer_{};
+  CameraManipulator* cameraManipulator_{};
 
-  double eyePosition_[3]{};
-  double target_[3]{};
-  double upward_[3]{};
-  double* lookEyePositions_{};
-  double* lookTarget_{};
-  double* lookUpward_{};
+  float cameraFocalLength_{};
+
+  ::filament::math::float3 target_{};
 
   utils::Entity cameraEntity_;
 
@@ -106,7 +122,5 @@ class CameraManager {
   // displayFramebufferScale_. Generally (1,1) on normal display, (2,2) on OSX
   // with Retina display.
   ImVec2 displayFramebufferScale_;
-
-  void setDefaultCamera();
 };
 }  // namespace plugin_filament_view

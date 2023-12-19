@@ -1,3 +1,18 @@
+/*
+* Copyright 2020-2023 Toyota Connected North America
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include "custom_model_viewer.h"
 
@@ -26,12 +41,12 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
       callback_(nullptr),
-      animator_(nullptr),
-      currentModelState_(ModelState::none),
-      currentSkyboxState_(SceneState::none),
-      currentLightState_(SceneState::none),
-      currentGroundState_(SceneState::none),
-      currentShapesState_(ShapeState::none) {
+      fanimator_(nullptr),
+      currentModelState_(ModelState::NONE),
+      currentSkyboxState_(SceneState::NONE),
+      currentLightState_(SceneState::NONE),
+      currentGroundState_(SceneState::NONE),
+      currentShapesState_(ShapeState::NONE) {
   SPDLOG_TRACE("++CustomModelViewer::CustomModelViewer");
   filament_api_thread_ = std::thread([&]() { io_context_->run(); });
   asio::post(*strand_, [&] {
@@ -55,11 +70,11 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
       flutter_view->GetDisplay()->GetSubCompositor(), surface_,
       parent_surface_);
   assert(subsurface_);
+  wl_subsurface_set_desync(subsurface_);
 
   auto f = Initialize(platformView);
   f.wait();
 
-  OnFrame(this, nullptr, 0);
   SPDLOG_TRACE("--CustomModelViewer::CustomModelViewer");
 }
 
@@ -73,12 +88,12 @@ CustomModelViewer::~CustomModelViewer() {
 
   cameraManager_->destroyCamera();
 
-  engine_->destroy(scene_);
-  engine_->destroy(view_);
-  engine_->destroy(skybox_);
-  engine_->destroy(renderer_);
-  engine_->destroy(swapChain_);
-  ::filament::Engine::destroy(&engine_);
+  fengine_->destroy(fscene_);
+  fengine_->destroy(fview_);
+  fengine_->destroy(skybox_);
+  fengine_->destroy(frenderer_);
+  fengine_->destroy(fswapChain_);
+  ::filament::Engine::destroy(&fengine_);
 
   modelLoader_.reset();
 
@@ -99,11 +114,11 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
   auto promise(std::make_shared<std::promise<bool>>());
   auto future(promise->get_future());
   asio::post(*strand_, [&, promise, platformView] {
-    engine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
+    fengine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
 
     modelLoader_ = std::make_unique<ModelLoader>(this);
 
-    renderer_ = engine_->createRenderer();
+    frenderer_ = fengine_->createRenderer();
 
     auto platform_view_size = platformView->GetSize();
     native_window_ = {
@@ -111,13 +126,13 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
         .surface = surface_,
         .width = static_cast<uint32_t>(platform_view_size.first),
         .height = static_cast<uint32_t>(platform_view_size.second)};
-    swapChain_ = engine_->createSwapChain(&native_window_);
+    fswapChain_ = fengine_->createSwapChain(&native_window_);
 
-    scene_ = engine_->createScene();
-    view_ = engine_->createView();
-    view_->setPostProcessingEnabled(false);
+    fscene_ = fengine_->createScene();
+    fview_ = fengine_->createView();
+    fview_->setPostProcessingEnabled(false);
 
-    // TODO setupView();
+    setupView();
 
     promise->set_value(true);
   });
@@ -131,27 +146,33 @@ void CustomModelViewer::setModelState(models::state::ModelState modelState) {
                getTextForModelState(currentModelState_));
 }
 
+void CustomModelViewer::setGroundState(models::state::SceneState sceneState) {
+  currentGroundState_ = sceneState;
+  SPDLOG_DEBUG("[FilamentView] setGroundState: {}",
+               getTextForModelState(currentModelState_));
+}
+
 void CustomModelViewer::setupView() {
   SPDLOG_TRACE("++CustomModelViewer::setupView");
   // on mobile, better use lower quality color buffer
   ::filament::View::RenderQuality renderQuality{};
   renderQuality.hdrColorBuffer = ::filament::View::QualityLevel::MEDIUM;
-  view_->setRenderQuality(renderQuality);
+  fview_->setRenderQuality(renderQuality);
 
   // dynamic resolution often helps a lot
   ::filament::View::DynamicResolutionOptions dynamicResolutionOptions{};
   dynamicResolutionOptions.enabled = true;
   dynamicResolutionOptions.quality = ::filament::View::QualityLevel::MEDIUM;
-  view_->setDynamicResolutionOptions(dynamicResolutionOptions);
+  fview_->setDynamicResolutionOptions(dynamicResolutionOptions);
 
   // MSAA is needed with dynamic resolution MEDIUM
   ::filament::View::MultiSampleAntiAliasingOptions
       multiSampleAntiAliasingOptions{};
   multiSampleAntiAliasingOptions.enabled = true;
-  view_->setMultiSampleAntiAliasingOptions(multiSampleAntiAliasingOptions);
+  fview_->setMultiSampleAntiAliasingOptions(multiSampleAntiAliasingOptions);
 
   // FXAA is pretty economical and helps a lot
-  view_->setAntiAliasing(::filament::View::AntiAliasing::FXAA);
+  fview_->setAntiAliasing(::filament::View::AntiAliasing::FXAA);
 
   // ambient occlusion is the cheapest effect that adds a lot of quality
   ::filament::View::AmbientOcclusionOptions ambientOcclusionOptions{};
@@ -160,7 +181,7 @@ void CustomModelViewer::setupView() {
   // bloom is pretty expensive but adds a fair amount of realism
   ::filament::View::BloomOptions bloomOptions{};
   bloomOptions.enabled = true;
-  view_->setBloomOptions(bloomOptions);
+  fview_->setBloomOptions(bloomOptions);
 
   SPDLOG_TRACE("--CustomModelViewer::setupView");
 }
@@ -172,21 +193,18 @@ void CustomModelViewer::setupView() {
  * rendered
  */
 void CustomModelViewer::DrawFrame(uint32_t time) {
-  if (initialized_) {
-    assert(filament_api_thread_id_ == pthread_self());
-    asio::post(*strand_, [&]() {
-      modelLoader_->updateScene();
+  asio::post(*strand_, [&]() {
+    modelLoader_->updateScene();
 
-      cameraManager_->lookAtDefaultPosition();
+    cameraManager_->lookAtDefaultPosition();
 
-      // Render the scene, unless the renderer wants to skip the frame.
-      if (renderer_->beginFrame(swapChain_, time)) {
-        renderer_->render(view_);
-        renderer_->endFrame();
-        // rendererStateFlow.value=frameTimeNanos;
-      }
-    });
-  }
+    // Render the scene, unless the renderer wants to skip the frame.
+    if (frenderer_->beginFrame(fswapChain_, time)) {
+      frenderer_->render(fview_);
+      frenderer_->endFrame();
+      // rendererStateFlow.value=frameTimeNanos;
+    }
+  });
 }
 
 void CustomModelViewer::OnFrame(void* data,
@@ -210,7 +228,6 @@ void CustomModelViewer::OnFrame(void* data,
   wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
   // wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
   wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
-  wl_subsurface_set_desync(obj->subsurface_);
 
   wl_surface_commit(obj->surface_);
 }
@@ -223,4 +240,18 @@ std::string CustomModelViewer::loadModel(Model* model) {
   asset_ = modelLoader_->getAsset();
   return result;
 }
+
+void CustomModelViewer::setOffset(double left, double top) {
+  left_ = static_cast<int32_t>(left);
+  top_ = static_cast<int32_t>(top);
+}
+
+void CustomModelViewer::resize(double width, double height) {
+  fview_->setViewport({left_, top_, static_cast<uint32_t>(width),
+                       static_cast<uint32_t>(height)});
+
+  cameraManager_->updateCameraOnResize(static_cast<uint32_t>(width),
+                                       static_cast<uint32_t>(height));
+}
+
 }  // namespace plugin_filament_view

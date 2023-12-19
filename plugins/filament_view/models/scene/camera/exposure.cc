@@ -22,10 +22,7 @@
 
 namespace plugin_filament_view {
 
-Exposure::Exposure(void* parent,
-                   const std::string& flutter_assets_path,
-                   const flutter::EncodableMap& params)
-    : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+Exposure::Exposure(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Exposure::Exposure");
   for (auto& it : params) {
     if (it.second.IsNull())

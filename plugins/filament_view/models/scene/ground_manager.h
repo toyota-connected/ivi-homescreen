@@ -19,10 +19,14 @@
 #include "ground.h"
 
 #include <filament/IndexBuffer.h>
-#include <filament/VertexBuffer.h>
 #include <filament/Material.h>
+#include <filament/VertexBuffer.h>
 
+#include "models/scene/ground.h"
+#include "models/scene/material/material_manager.h"
 #include "viewer/custom_model_viewer.h"
+
+class MaterialManager;
 
 namespace plugin_filament_view {
 
@@ -33,10 +37,10 @@ using ::utils::Entity;
 class GroundManager {
  public:
   GroundManager(CustomModelViewer* model_viewer,
-                const std::string& flutter_assets_path);
+                MaterialManager* material_manager);
   void Print(const char* tag);
 
-  std::future<void> createGround();
+  std::future<std::string> createGround();
 
   // Disallow copy and assign.
   GroundManager(const GroundManager&) = delete;
@@ -44,12 +48,16 @@ class GroundManager {
 
  private:
   CustomModelViewer* model_viewer_;
-  const std::string& flutterAssetsPath_;
+  MaterialManager* materialManager_;
+
+  ::filament::Engine* engine_;
+  Ground* ground_;
+  void* plane_geometry_;
+  // TODO PlaneGeometry* plane_geometry_;
 
   Entity groundPlane_;
   VertexBuffer* groundVertexBuffer_;
   IndexBuffer* groundIndexBuffer_;
   ::filament::Material* groundMaterial_;
-
 };
 }  // namespace plugin_filament_view

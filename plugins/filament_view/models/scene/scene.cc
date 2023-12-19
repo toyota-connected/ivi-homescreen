@@ -48,8 +48,7 @@ Scene::Scene(void* parent,
     } else if (key == "camera" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       camera_ =
-          std::make_unique<Camera>(parent, flutterAssetsPath_,
-                                   std::get<flutter::EncodableMap>(it.second));
+          std::make_unique<Camera>(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "ground" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       ground_ =
