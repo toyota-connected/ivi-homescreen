@@ -40,7 +40,8 @@ static constexpr char kSceneStateLoading[] = "LOADING";
 static constexpr char kSceneStateLoaded[] = "LOADED";
 static constexpr char kSceneStateError[] = "ERROR";
 
-static SceneState getSceneStateForText(const std::string& state) {
+[[maybe_unused]] static SceneState getSceneStateForText(
+    const std::string& state) {
   if (state == kSceneStateNone) {
     return SceneState::NONE;
   } else if (state == kSceneStateLoading) {
@@ -53,7 +54,7 @@ static SceneState getSceneStateForText(const std::string& state) {
   return SceneState::NONE;
 }
 
-static const char* getTextForSceneState(SceneState state) {
+[[maybe_unused]] static const char* getTextForSceneState(SceneState state) {
   return (const char*[]){
       /// represents idle state.
       kSceneStateNone,

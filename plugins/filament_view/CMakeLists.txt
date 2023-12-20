@@ -70,36 +70,36 @@ add_library(plugin_filament_view STATIC
         messages.g.cc
 
         filament_scene.cc
-        models/scene/scene_controller.cc
+        core/scene/scene_controller.cc
 
-        models/model/animation/animation.cc
-        models/model/animation/animation_manager.cc
-        models/model/model_loader.cc
-        models/model/model.cc
-        models/scene/camera/camera.cc
-        models/scene/camera/camera_manager.cc
-        models/scene/camera/exposure.cc
-        models/scene/camera/lens_projection.cc
-        models/scene/camera/projection.cc
-        models/scene/geometry/direction.cc
-        models/scene/geometry/position.cc
-        models/scene/geometry/size.cc
-        models/scene/ground.cc
-        models/scene/ground_manager.cc
-        models/scene/indirect_light/indirect_light.cc
-        models/scene/indirect_light/indirect_light_manager.cc
-        models/scene/light/light.cc
-        models/scene/light/light_manager.cc
-        models/scene/material/material.cc
-        models/scene/material/material_manager.cc
-        models/scene/material/material_parameter.cc
-        models/scene/material/texture/texture.cc
-        models/scene/material/texture/texture_sampler.cc
-        models/scene/skybox/skybox.cc
-        models/scene/skybox/skybox_manager.cc
-        models/scene/scene.cc
-        models/shapes/shape.cc
-        models/shapes/shape_manager.cc
+        core/model/animation/animation.cc
+        core/model/animation/animation_manager.cc
+        core/model/model_loader.cc
+        core/model/model.cc
+        core/scene/camera/camera.cc
+        core/scene/camera/camera_manager.cc
+        core/scene/camera/exposure.cc
+        core/scene/camera/lens_projection.cc
+        core/scene/camera/projection.cc
+        core/scene/geometry/direction.cc
+        core/scene/geometry/position.cc
+        core/scene/geometry/size.cc
+        core/scene/ground.cc
+        core/scene/ground_manager.cc
+        core/scene/indirect_light/indirect_light.cc
+        core/scene/indirect_light/indirect_light_manager.cc
+        core/scene/light/light.cc
+        core/scene/light/light_manager.cc
+        core/scene/material/material.cc
+        core/scene/material/material_manager.cc
+        core/scene/material/material_parameter.cc
+        core/scene/material/texture/texture.cc
+        core/scene/material/texture/texture_sampler.cc
+        core/scene/skybox/skybox.cc
+        core/scene/skybox/skybox_manager.cc
+        core/scene/scene.cc
+        core/shapes/shape.cc
+        core/shapes/shape_manager.cc
         viewer/custom_model_viewer.cc
 )
 

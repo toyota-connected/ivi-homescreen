@@ -35,24 +35,25 @@
 #include <wayland-client.h>
 #include <asio/io_context_strand.hpp>
 
-#include "models/scene/camera/camera_manager.h"
+#include "core/scene/camera/camera_manager.h"
 #include "models/state/model_state.h"
 
+#include "core/model/model.h"
+#include "core/model/model_loader.h"
+#include "core/scene/scene.h"
+#include "core/shapes/shape.h"
 #include "flutter_desktop_plugin_registrar.h"
-#include "models/model/model.h"
-#include "models/model/model_loader.h"
-#include "models/scene/scene.h"
-#include "models/shapes/shape.h"
 #include "models/state/model_state.h"
 #include "models/state/scene_state.h"
 #include "models/state/shape_state.h"
 #include "platform_views/platform_view.h"
 #include "settings.h"
 
+namespace plugin_filament_view {
+
 class CameraManager;
 class ModelLoader;
-
-namespace plugin_filament_view {
+class Model;
 
 using models::state::ModelState;
 using models::state::SceneState;
@@ -73,6 +74,7 @@ class CustomModelViewer {
 
   void setModelState(models::state::ModelState modelState);
   void setGroundState(models::state::SceneState sceneState);
+  void setLightState(models::state::SceneState sceneState);
 
 #if 0   // TODO
   const ::filament::math::mat4f& getModelTransform() {
@@ -136,7 +138,7 @@ class CustomModelViewer {
   static constexpr bool originIsFarAway = false;
   static constexpr float originDistance = 1.0f;
 
-  FlutterDesktopEngineState* state_;
+  [[maybe_unused]] FlutterDesktopEngineState* state_;
   const std::string flutterAssetsPath_;
   filament::viewer::Settings settings_;
   filament::gltfio::FilamentAsset* asset_;
@@ -175,10 +177,10 @@ class CustomModelViewer {
   ::filament::gltfio::Animator* fanimator_;
 
   ModelState currentModelState_;
-  SceneState currentSkyboxState_;
-  SceneState currentLightState_;
-  SceneState currentGroundState_;
-  ShapeState currentShapesState_;
+  [[maybe_unused]] SceneState currentSkyboxState_;
+  [[maybe_unused]] SceneState currentLightState_;
+  [[maybe_unused]] SceneState currentGroundState_;
+  [[maybe_unused]] ShapeState currentShapesState_;
 
   filament::Skybox* skybox_ = nullptr;
 

@@ -40,7 +40,8 @@ static constexpr char kShapeStateLoading[] = "LOADING";
 static constexpr char kShapeStateLoaded[] = "LOADED";
 static constexpr char kShapeStateError[] = "ERROR";
 
-static ShapeState getSceneShapeForText(const std::string& state) {
+[[maybe_unused]] static ShapeState getSceneShapeForText(
+    const std::string& state) {
   if (state == kShapeStateNone) {
     return ShapeState::NONE;
   } else if (state == kShapeStateLoading) {
@@ -53,7 +54,7 @@ static ShapeState getSceneShapeForText(const std::string& state) {
   return ShapeState::NONE;
 }
 
-static const char* getTextForShapeState(ShapeState state) {
+[[maybe_unused]] static const char* getTextForShapeState(ShapeState state) {
   return (const char*[]){
       /// represents idle state.
       kShapeStateNone,
