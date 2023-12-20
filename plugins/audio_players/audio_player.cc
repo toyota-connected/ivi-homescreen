@@ -289,7 +289,7 @@ void AudioPlayer::OnMediaStateChange(const GstObject* src,
 
   if (!playbin_) {
     OnError("LinuxAudioError",
-            "Player was already disposed (OnMediaStateChange).", nullptr,
+            "Player was already disposed (OnMediaStateChange).", flutter::EncodableValue(nullptr),
             nullptr);
     return;
   }
@@ -303,7 +303,7 @@ void AudioPlayer::OnMediaStateChange(const GstObject* src,
             "Unable to set the pipeline from GST_STATE_READY to "
             "GST_STATE_PAUSED.";
         if (isInitialized_) {
-          OnError("LinuxAudioError", errorDescription, nullptr, nullptr);
+          OnError("LinuxAudioError", errorDescription, flutter::EncodableValue(nullptr), nullptr);
         } else {
           OnError("LinuxAudioError",
                   "Failed to set source. For troubleshooting, "
@@ -341,7 +341,7 @@ void AudioPlayer::OnPrepared(bool isPrepared) const {
        {flutter::EncodableValue("value"),
         flutter::EncodableValue(isPrepared)}});
   auto encoded =
-      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(flutter::EncodableValue(map));
   engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
 
@@ -352,7 +352,7 @@ void AudioPlayer::OnDurationUpdate() const {
         flutter::EncodableValue("audio.onDuration")},
        {flutter::EncodableValue("value"), flutter::EncodableValue(duration)}});
   auto encoded =
-      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(flutter::EncodableValue(map));
   spdlog::debug("[{}] audio.onDuration {}", playerId_, duration);
   engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
@@ -363,7 +363,7 @@ void AudioPlayer::OnSeekCompleted() const {
         flutter::EncodableValue("audio.onSeekComplete")},
        {flutter::EncodableValue("value"), flutter::EncodableValue(true)}});
   auto encoded =
-      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(flutter::EncodableValue(map));
   spdlog::debug("[{}] audio.onSeekComplete", playerId_);
   engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
@@ -380,7 +380,7 @@ void AudioPlayer::OnPlaybackEnded() {
         flutter::EncodableValue("audio.onComplete")},
        {flutter::EncodableValue("value"), flutter::EncodableValue(true)}});
   auto encoded =
-      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(flutter::EncodableValue(map));
   spdlog::debug("[{}] audio.onComplete", playerId_);
   engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
@@ -392,7 +392,7 @@ void AudioPlayer::OnLog(const gchar* message) const {
        {flutter::EncodableValue("value"),
         flutter::EncodableValue(std::string(message))}});
   auto encoded =
-      flutter::StandardMessageCodec::GetInstance().EncodeMessage(map);
+      flutter::StandardMessageCodec::GetInstance().EncodeMessage(flutter::EncodableValue(map));
   spdlog::debug("[{}] audio.onLog: {}", playerId_, message);
   engine_->SendPlatformMessage(eventChannel_.c_str(), std::move(encoded));
 }
@@ -633,7 +633,7 @@ void AudioPlayer::OnPlatformMessage(const FlutterPlatformMessage* message,
     result = codec.EncodeSuccessEnvelope();
   } else {
     const auto args = std::get_if<flutter::EncodableMap>(obj->arguments());
-    Utils::PrintFlutterEncodableValue(method.c_str(), *args);
+    Utils::PrintFlutterEncodableValue(method.c_str(), flutter::EncodableValue(*args));
     result =
         codec.EncodeErrorEnvelope("unimplemented", "method not implemented");
   }

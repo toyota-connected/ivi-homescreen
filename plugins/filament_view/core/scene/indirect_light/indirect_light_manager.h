@@ -28,10 +28,13 @@
 #include "core/scene/indirect_light/ktx_indirect_light.h"
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 #include "viewer/custom_model_viewer.h"
+#include "core/utils/ibl_profiler.h"
+
 
 namespace plugin_filament_view {
 
 class CustomModelViewer;
+class IBLProfiler;
 class IndirectLight;
 class DefaultIndirectLight;
 class KtxIndirectLight;
@@ -39,7 +42,7 @@ class HdrIndirectLight;
 
 class IndirectLightManager {
  public:
-  IndirectLightManager(CustomModelViewer* model_viewer);
+  IndirectLightManager(CustomModelViewer* model_viewer, IBLProfiler* ibl_profiler);
 
   void setDefaultIndirectLight();
 
@@ -55,7 +58,7 @@ class IndirectLightManager {
   std::future<std::string> setIndirectLightFromHdrUrl(std::string url,
                                                       double intensity);
 
-  std::string loadIndirectLightHdrFromBuffer(const std::vector<uint8_t>& buffer,
+  std::string loadIndirectLightHdrFromFile(const std::string& asset_path,
                                              double intensity);
 
   std::future<std::string> setIndirectLight(
@@ -67,6 +70,7 @@ class IndirectLightManager {
 
  private:
   CustomModelViewer* model_viewer_;
+  IBLProfiler* ibl_prefilter_;
   ::filament::Engine* engine_;
 };
 }  // namespace plugin_filament_view

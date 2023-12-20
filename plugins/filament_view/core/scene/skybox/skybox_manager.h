@@ -21,13 +21,15 @@
 #include "core/scene/geometry/direction.h"
 #include "core/scene/geometry/position.h"
 #include "viewer/custom_model_viewer.h"
+#include "core/utils/ibl_profiler.h"
 
 namespace plugin_filament_view {
 class SkyboxManager {
  public:
-  SkyboxManager(void* context,
-                CustomModelViewer* model_viewer,
+  SkyboxManager(CustomModelViewer* model_viewer,
+                IBLProfiler* ibl_profiler,
                 const std::string& flutter_assets_path);
+
   void setDefaultSkybox();
 
   // Disallow copy and assign.
@@ -35,8 +37,8 @@ class SkyboxManager {
   SkyboxManager& operator=(const SkyboxManager&) = delete;
 
  private:
-  void* context_;
   CustomModelViewer* model_viewer_;
+  IBLProfiler* ibl_profiler_;
   const std::string& flutterAssetsPath_;
 };
 }  // namespace plugin_filament_view

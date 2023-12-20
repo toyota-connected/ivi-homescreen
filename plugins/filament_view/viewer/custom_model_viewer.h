@@ -82,6 +82,8 @@ class CustomModelViewer {
   };
 #endif  // TODO
 
+  void destroyIndirectLight();
+
   // Disallow copy and assign.
   CustomModelViewer(const CustomModelViewer&) = delete;
   CustomModelViewer& operator=(const CustomModelViewer&) = delete;
@@ -141,7 +143,7 @@ class CustomModelViewer {
   [[maybe_unused]] FlutterDesktopEngineState* state_;
   const std::string flutterAssetsPath_;
   filament::viewer::Settings settings_;
-  filament::gltfio::FilamentAsset* asset_;
+  filament::gltfio::FilamentAsset* asset_{};
   int32_t left_;
   int32_t top_;
 
@@ -186,7 +188,7 @@ class CustomModelViewer {
 
   std::unique_ptr<ModelLoader> modelLoader_;
 
-  CameraManager* cameraManager_;
+  CameraManager* cameraManager_{};
 
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
   static const wl_callback_listener frame_listener;

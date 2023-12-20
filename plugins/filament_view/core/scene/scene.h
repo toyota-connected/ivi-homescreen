@@ -28,6 +28,7 @@
 
 namespace plugin_filament_view {
 
+class CustomModelViewer;
 class IndirectLight;
 class Light;
 class Camera;
@@ -49,6 +50,7 @@ class Scene {
 
   friend class Scene;
   friend class SceneController;
+  friend class CustomModelViewer;
 
  private:
   void* parent_;

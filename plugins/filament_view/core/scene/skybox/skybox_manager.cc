@@ -19,11 +19,11 @@
 #include "logging/logging.h"
 
 namespace plugin_filament_view {
-SkyboxManager::SkyboxManager(void* context,
-                             CustomModelViewer* model_viewer,
+SkyboxManager::SkyboxManager(CustomModelViewer* model_viewer,
+                             IBLProfiler* ibl_profiler,
                              const std::string& flutter_assets_path)
-    : context_(context),
-      model_viewer_(model_viewer),
+    : model_viewer_(model_viewer),
+      ibl_profiler_(ibl_profiler),
       flutterAssetsPath_(flutter_assets_path) {
   SPDLOG_TRACE("++SkyboxManager::SkyboxManager");
   SPDLOG_TRACE("--SkyboxManager::SkyboxManager");
