@@ -28,6 +28,7 @@
 #include "core/scene/skybox/skybox_manager.h"
 #include "core/shapes/shape.h"
 #include "core/shapes/shape_manager.h"
+#include "core/utils/ibl_profiler.h"
 #include "flutter_desktop_engine_state.h"
 #include "ground_manager.h"
 #include "platform_views/platform_view.h"
@@ -47,6 +48,7 @@ class CameraManager;
 class GroundManager;
 class MaterialManager;
 class ShapeManager;
+class IBLProfiler;
 
 class SceneController {
  public:
@@ -88,6 +90,7 @@ class SceneController {
 
   // private val surfaceView: SurfaceView = SurfaceView(context)
 
+  std::unique_ptr<plugin_filament_view::IBLProfiler> iblProfiler_;
   std::unique_ptr<plugin_filament_view::LightManager> lightManager_;
   std::unique_ptr<plugin_filament_view::IndirectLightManager>
       indirectLightManager_;
@@ -103,6 +106,7 @@ class SceneController {
   void setUpLoadingModel();
   void setUpCamera();
   void setUpGround();
+  std::future<void> setUpIblProfiler();
   void setUpSkybox();
   void setUpLight();
   void setUpIndirectLight();

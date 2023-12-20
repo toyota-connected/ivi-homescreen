@@ -16,6 +16,7 @@
 
 #include "scene_controller.h"
 
+#include <asio/post.hpp>
 #include <utility>
 
 #include "logging/logging.h"
@@ -90,9 +91,20 @@ void SceneController::setUpCamera() {
   f.wait();
 }
 
+std::future<void> SceneController::setUpIblProfiler() {
+  const auto promise(std::make_shared<std::promise<void>>());
+  auto future(promise->get_future());
+  asio::post(*modelViewer_->getStrandContext(),[&, promise]{
+    iblProfiler_ = std::make_unique<plugin_filament_view::IBLProfiler>(modelViewer_->getFilamentEngine());
+  });
+  return future;
+}
+
 void SceneController::setUpSkybox() {
+  auto f = setUpIblProfiler();
+  f.wait();
   skyboxManager_ = std::make_unique<plugin_filament_view::SkyboxManager>(
-      this, modelViewer_.get(), flutterAssetsPath_);
+      modelViewer_.get(), iblProfiler_.get(), flutterAssetsPath_);
 #if 0
   if (!scene_->skybox_.has_value()) {
     skyboxManager_->setDefaultSkybox();
@@ -161,7 +173,7 @@ void SceneController::setUpLight() {
 
 void SceneController::setUpIndirectLight() {
   indirectLightManager_ =
-      std::make_unique<IndirectLightManager>(modelViewer_.get());
+      std::make_unique<IndirectLightManager>(modelViewer_.get(), iblProfiler_.get());
   if (!scene_->indirect_light_.has_value()) {
     indirectLightManager_->setDefaultIndirectLight();
   } else {

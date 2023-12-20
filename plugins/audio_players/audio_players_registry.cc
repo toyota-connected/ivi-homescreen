@@ -88,6 +88,7 @@ void AudioPlayersRegistry::on_global_error(const Engine* engine,
   engine->SendPlatformMessage(kGlobalChannel, std::move(encoded));
 }
 
+#if 0
 void AudioPlayersRegistry::OnPlatformMessageGlobal(
     const FlutterPlatformMessage* message,
     void* userdata) {
@@ -145,6 +146,7 @@ void AudioPlayersRegistry::OnPlatformMessageGlobal(
   engine->SendPlatformMessageResponse(message->response_handle, result->data(),
                                       result->size());
 }
+#endif
 
 void AudioPlayersRegistry::OnPlatformMessageEvents(
     const FlutterPlatformMessage* message,
@@ -162,7 +164,7 @@ void AudioPlayersRegistry::OnPlatformMessageEvents(
     result = codec.EncodeSuccessEnvelope();
   } else {
     const auto args = std::get_if<flutter::EncodableMap>(method->arguments());
-    Utils::PrintFlutterEncodableValue(method_name.c_str(), *args);
+    Utils::PrintFlutterEncodableValue(method_name.c_str(), flutter::EncodableValue(*args));
     result =
         codec.EncodeErrorEnvelope("unimplemented", "method not implemented");
   }

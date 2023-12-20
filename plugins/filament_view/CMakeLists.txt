@@ -19,6 +19,9 @@ target_include_directories(filament INTERFACE
         ${FILAMENT_SRC_DIR}/libs/filabridge/include
         ${FILAMENT_SRC_DIR}/libs/filamat/include
         ${FILAMENT_SRC_DIR}/libs/ibl/include
+        ${FILAMENT_SRC_DIR}/libs/iblprefilter/include
+        ${FILAMENT_SRC_DIR}/libs/image/include
+        ${FILAMENT_SRC_DIR}/libs/imageio/include
         ${FILAMENT_SRC_DIR}/libs/math/include
         ${FILAMENT_SRC_DIR}/libs/utils/include
         ${FILAMENT_SRC_DIR}/libs/gltfio/include
@@ -42,6 +45,9 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/libs/gltfio/libgltfio_core.a
         ${FILAMENT_BINARY_DIR}/libs/gltfio/libuberarchive.a
         ${FILAMENT_BINARY_DIR}/libs/ibl/libibl.a
+        ${FILAMENT_BINARY_DIR}/libs/iblprefilter/libfilament-iblprefilter.a
+        ${FILAMENT_BINARY_DIR}/libs/image/libimage.a
+        ${FILAMENT_BINARY_DIR}/libs/imageio/libimageio.a
         ${FILAMENT_BINARY_DIR}/libs/ktxreader/libktxreader.a
         ${FILAMENT_BINARY_DIR}/libs/matdbg/libmatdbg_combined.a
         ${FILAMENT_BINARY_DIR}/libs/utils/libutils.a
@@ -56,6 +62,10 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/third_party/glslang/tnt/glslang/libglslang.a
         ${FILAMENT_BINARY_DIR}/third_party/glslang/tnt/SPIRV/libSPIRV.a
         ${FILAMENT_BINARY_DIR}/tools/matc/libmatlang.a
+
+        ${FILAMENT_BINARY_DIR}/third_party/libpng/tnt/libpng.a
+        ${FILAMENT_BINARY_DIR}/third_party/tinyexr/tnt/libtinyexr.a
+        ${FILAMENT_BINARY_DIR}/third_party/libz/tnt/libz.a
 
         #${FILAMENT_BINARY_DIR}/samples/libsample-resources.a
         ${FILAMENT_BINARY_DIR}/samples/libgltf-demo-resources.a
@@ -88,6 +98,7 @@ add_library(plugin_filament_view STATIC
         core/scene/ground_manager.cc
         core/scene/indirect_light/indirect_light.cc
         core/scene/indirect_light/indirect_light_manager.cc
+        core/scene/indirect_light/hdr_loader.cc
         core/scene/light/light.cc
         core/scene/light/light_manager.cc
         core/scene/material/material.cc

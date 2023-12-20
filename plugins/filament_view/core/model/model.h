@@ -82,7 +82,7 @@ class Model {
   std::string pathPrefix_;
   std::string pathPostfix_;
   std::optional<std::unique_ptr<Model>> fallback_;
-  float scale_ = 1.0;
+  double scale_ = 1.0;
   std::optional<std::unique_ptr<Position>> center_position_;
   std::optional<std::unique_ptr<Animation>> animation_;
   std::optional<std::unique_ptr<Scene>> scene_;

@@ -17,19 +17,21 @@
 #include "indirect_light_manager.h"
 
 #include <filesystem>
-#include <fstream>
 #include <memory>
-#include <sstream>
 
+#include <filament/Texture.h>
 #include <asio/post.hpp>
 #include <utility>
 
+#include "hdr_loader.h"
 #include "logging/logging.h"
+#include "textures/texture.h"
 
 namespace plugin_filament_view {
-IndirectLightManager::IndirectLightManager(
-    CustomModelViewer* model_viewer)
+IndirectLightManager::IndirectLightManager(CustomModelViewer* model_viewer,
+                                           IBLProfiler* ibl_profiler)
     : model_viewer_(model_viewer),
+      ibl_prefilter_(ibl_profiler),
       engine_(model_viewer->getFilamentEngine()) {
   SPDLOG_TRACE("++IndirectLightManager::IndirectLightManager");
   setDefaultIndirectLight();
@@ -97,43 +99,34 @@ std::future<std::string> IndirectLightManager::setIndirectLightFromKtxUrl(
   return future;
 }
 
-std::string IndirectLightManager::loadIndirectLightHdrFromBuffer(
-    const std::vector<uint8_t>& buffer,
+std::string IndirectLightManager::loadIndirectLightHdrFromFile(
+    const std::string& asset_path,
     double intensity) {
   model_viewer_->setLightState(SceneState::LOADING);
-#if 0
+
+  ::filament::Texture* texture;
   try {
-    auto texture = HDRLoader.createTexture(engine_, buffer);
-    if (!texture) {
-      model_viewer_->setLightState(SceneState::ERROR);
-      return "Could not decode HDR file";
-    } else {
-      auto skyboxTexture = iblPrefilter->createCubeMapTexture(texture);
-
-      engine_->destroyTexture(texture);
-
-      auto reflections = iblPrefilter->getLightReflection(skyboxTexture);
-
-      auto ibl =
-          ::filament::IndirectLight::Builder()
-              .reflections(reflections)
-              .intensity(intensity.has_value() ? intensity.value() : 30'000.f)
-              .build(engine_);
-
-      // destroy the previous IBl
-      model_viewer_->destroyIndirectLight();
-
-      // model_viewer_->getScene().scene.indirectLight = ibl
-      model_viewer_->setLightState(SceneState::LOADED);
-
-      return "loaded Indirect light successfully";
-    }
+    texture = HDRLoader::createTexture(engine_, asset_path);
   } catch (...) {
     model_viewer_->setLightState(SceneState::ERROR);
     return "Could not decode HDR file";
   }
-#endif  // TODO
+  auto skyboxTexture = ibl_prefilter_->createCubeMapTexture(texture);
+  engine_->destroy(texture);
+
+  auto reflections = ibl_prefilter_->getLightReflection(skyboxTexture);
+
+  auto ibl = ::filament::IndirectLight::Builder()
+                 .reflections(reflections)
+                 .intensity(static_cast<float>(intensity))
+                 .build(*engine_);
+
+  // destroy the previous IBl
+  model_viewer_->destroyIndirectLight();
+
+  model_viewer_->getFilamentView()->getScene()->setIndirectLight(ibl);
   model_viewer_->setLightState(SceneState::LOADED);
+
   return "loaded Indirect light successfully";
 }
 
@@ -143,27 +136,22 @@ std::future<std::string> IndirectLightManager::setIndirectLightFromHdrAsset(
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
   model_viewer_->setLightState(SceneState::LOADING);
-  asio::post(
-      *model_viewer_->getStrandContext(),
-      [&, promise, path = std::move(path), intensity] {
-        std::filesystem::path asset_path(model_viewer_->getAssetPath());
-        asset_path /= path;
-        if (path.empty() || !std::filesystem::exists(asset_path)) {
-          model_viewer_->setModelState(ModelState::ERROR);
-          promise->set_value("Asset path not valid");
-        }
-        try {
-          SPDLOG_DEBUG("Attempting to load {}", asset_path.c_str());
-          std::ifstream stream(asset_path, std::ios::in | std::ios::binary);
-          std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(stream)),
-                                      std::istreambuf_iterator<char>());
-          SPDLOG_DEBUG("Loaded: {}", asset_path.c_str());
-          promise->set_value(loadIndirectLightHdrFromBuffer(buffer, intensity));
-        } catch (...) {
-          model_viewer_->setLightState(SceneState::ERROR);
-          promise->set_value("Couldn't changed Light from asset");
-        }
-      });
+  asio::post(*model_viewer_->getStrandContext(),
+             [&, promise, path = std::move(path), intensity] {
+               std::filesystem::path asset_path(model_viewer_->getAssetPath());
+               asset_path /= path;
+               if (path.empty() || !std::filesystem::exists(asset_path)) {
+                 model_viewer_->setModelState(ModelState::ERROR);
+                 promise->set_value("Asset path not valid");
+               }
+               try {
+                 promise->set_value(loadIndirectLightHdrFromFile(
+                     asset_path.c_str(), intensity));
+               } catch (...) {
+                 model_viewer_->setLightState(SceneState::ERROR);
+                 promise->set_value("Couldn't changed Light from asset");
+               }
+             });
   return future;
 }
 

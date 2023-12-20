@@ -54,7 +54,7 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
     spdlog::debug("Filament API thread: 0x{:x}", filament_api_thread_id_);
   });
 
-  /* Setup Wayland sub-surface */
+  /* Setup Wayland subsurface */
   assert(state);
   assert(state->view_controller);
   auto flutter_view = state->view_controller->view;
@@ -156,6 +156,14 @@ void CustomModelViewer::setLightState(models::state::SceneState sceneState) {
   currentLightState_ = sceneState;
   SPDLOG_DEBUG("[FilamentView] setLightState: {}",
                models::state::getTextForSceneState(currentLightState_));
+}
+
+void CustomModelViewer::destroyIndirectLight() {
+  auto scene = fview_->getScene();
+  auto indirectLight = scene->getIndirectLight();
+  if (indirectLight) {
+    fengine_->destroy(indirectLight);
+  }
 }
 
 void CustomModelViewer::setupView() {

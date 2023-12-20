@@ -38,6 +38,8 @@ class IndirectLight {
   [[nodiscard]] const std::string& getUrl() const { return url_; };
   [[nodiscard]] float getIntensity() const { return intensity_; };
 
+  void destroyIndirectLight();
+
  protected:
   std::string assetPath_;
   std::string url_;

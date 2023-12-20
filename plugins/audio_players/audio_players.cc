@@ -287,7 +287,7 @@ void AudioPlayers::OnPlatformMessage(const FlutterPlatformMessage* message,
       SPDLOG_TRACE("\tplayerId: [{}]", playerId);
 
     } else {
-      Utils::PrintFlutterEncodableValue(method.c_str(), *args);
+      Utils::PrintFlutterEncodableValue(method.c_str(), flutter::EncodableValue(*args));
       OnError(engine, message->response_handle, "unimplemented",
               "method not implemented");
       return;
