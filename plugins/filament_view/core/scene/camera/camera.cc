@@ -36,17 +36,14 @@ Camera::Camera(const flutter::EncodableMap& params) {
         std::holds_alternative<flutter::EncodableMap>(it.second)) {
       exposure_ = std::make_unique<Exposure>(
           std::get<flutter::EncodableMap>(it.second));
-      exposure_wrapper_ = exposure_.value().get();
     } else if (key == "projection" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       projection_ = std::make_unique<Projection>(
           std::get<flutter::EncodableMap>(it.second));
-      projection_wrapper_ = projection_.value().get();
     } else if (key == "lensProjection" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       lensProjection_ = std::make_unique<LensProjection>(
           std::get<flutter::EncodableMap>(it.second));
-      lensProjection_wrapper_ = lensProjection_.value().get();
     } else if (key == "farPlane" && std::holds_alternative<double>(it.second)) {
       farPlane_ = std::get<double>(it.second);
     } else if (key == "flightMaxMoveSpeed" &&
@@ -63,7 +60,7 @@ Camera::Camera(const flutter::EncodableMap& params) {
       auto list = std::get<flutter::EncodableList>(it.second);
       flightStartOrientation_ = std::make_unique<std::vector<float>>();
       for (const auto& item : list) {
-        flightStartOrientation_.value()->emplace_back(std::get<double>(item));
+        flightStartOrientation_->emplace_back(std::get<double>(item));
       }
     } else if (key == "flightStartPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
@@ -83,14 +80,14 @@ Camera::Camera(const flutter::EncodableMap& params) {
       auto list = std::get<flutter::EncodableList>(it.second);
       groundPlane_ = std::make_unique<std::vector<float>>();
       for (const auto& item : list) {
-        groundPlane_.value()->emplace_back(std::get<double>(item));
+        groundPlane_->emplace_back(std::get<double>(item));
       }
     } else if (key == "mapExtent" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableList>(it.second)) {
       auto list = std::get<flutter::EncodableList>(it.second);
       mapExtent_ = std::make_unique<std::vector<float>>();
       for (const auto& item : list) {
-        mapExtent_.value()->emplace_back(std::get<double>(item));
+        mapExtent_->emplace_back(std::get<double>(item));
       }
     } else if (key == "mapMinDistance" && !it.second.IsNull() &&
                std::holds_alternative<double>(it.second)) {
@@ -107,24 +104,22 @@ Camera::Camera(const flutter::EncodableMap& params) {
       auto list = std::get<flutter::EncodableList>(it.second);
       orbitSpeed_ = std::make_unique<std::vector<float>>();
       for (const auto& item : list) {
-        orbitSpeed_.value()->emplace_back(std::get<double>(item));
+        orbitSpeed_->emplace_back(std::get<double>(item));
       }
     } else if (key == "scaling" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableList>(it.second)) {
       auto list = std::get<flutter::EncodableList>(it.second);
       scaling_ = std::make_unique<std::vector<double>>();
       for (const auto& item : list) {
-        scaling_.value()->emplace_back(std::get<double>(item));
+        scaling_->emplace_back(std::get<double>(item));
       }
-      scaling_wrapper_ = scaling_.value().get();
     } else if (key == "shift" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableList>(it.second)) {
       auto list = std::get<flutter::EncodableList>(it.second);
       shift_ = std::make_unique<std::vector<double>>();
       for (const auto& item : list) {
-        shift_.value()->emplace_back(std::get<double>(item));
+        shift_->emplace_back(std::get<double>(item));
       }
-      shift_wrapper_ = shift_.value().get();
     } else if (key == "targetPosition" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       targetPosition_ = std::make_unique<Position>(
@@ -147,14 +142,14 @@ Camera::Camera(const flutter::EncodableMap& params) {
 void Camera::Print(const char* tag) {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Camera)", tag);
-  if (exposure_.has_value()) {
-    exposure_.value()->Print("\texposure");
+  if (exposure_) {
+    exposure_->Print("\texposure");
   }
-  if (projection_.has_value()) {
-    projection_.value()->Print("\tprojection");
+  if (projection_) {
+    projection_->Print("\tprojection");
   }
-  if (lensProjection_.has_value()) {
-    lensProjection_.value()->Print("\tlensProjection");
+  if (lensProjection_) {
+    lensProjection_->Print("\tlensProjection");
   }
   if (farPlane_.has_value()) {
     spdlog::debug("\tfarPlane: {}", farPlane_.value());
@@ -168,13 +163,13 @@ void Camera::Print(const char* tag) {
   if (flightSpeedSteps_.has_value()) {
     spdlog::debug("\tflightSpeedSteps: {}", flightSpeedSteps_.value());
   }
-  if (flightStartOrientation_.has_value()) {
-    for (const auto& it_ : *flightStartOrientation_.value()) {
+  if (flightStartOrientation_) {
+    for (const auto& it_ : *flightStartOrientation_) {
       spdlog::debug("\tflightStartOrientation: {}", it_);
     }
   }
-  if (flightStartPosition_.has_value()) {
-    flightStartPosition_.value()->Print("\tflightStartPosition");
+  if (flightStartPosition_) {
+    flightStartPosition_->Print("\tflightStartPosition");
   }
   if (fovDegrees_.has_value()) {
     spdlog::debug("\tfovDegrees: {}", fovDegrees_.value());
@@ -185,44 +180,44 @@ void Camera::Print(const char* tag) {
   if (farPlane_.has_value()) {
     spdlog::debug("\tfarPlane: {}", farPlane_.value());
   }
-  if (groundPlane_.has_value()) {
-    for (const auto& it_ : *groundPlane_.value()) {
+  if (groundPlane_) {
+    for (const auto& it_ : *groundPlane_) {
       spdlog::debug("\tgroundPlane: {}", it_);
     }
   }
-  if (mapExtent_.has_value()) {
-    for (const auto& it_ : *mapExtent_.value()) {
+  if (mapExtent_) {
+    for (const auto& it_ : *mapExtent_) {
       spdlog::debug("\tmapExtent: {}", it_);
     }
   }
-  if (mapExtent_.has_value()) {
+  if (mapExtent_) {
     spdlog::debug("\tmapMinDistance: {}", mapMinDistance_.value());
   }
   spdlog::debug("\tmode: [{}]", getTextForMode(mode_));
-  if (orbitHomePosition_.has_value()) {
-    orbitHomePosition_.value()->Print("\torbitHomePosition");
+  if (orbitHomePosition_) {
+    orbitHomePosition_->Print("\torbitHomePosition");
   }
   spdlog::debug("\tfovDirection: [{}]", getTextForFov(fovDirection_));
-  if (orbitSpeed_.has_value()) {
-    for (const auto& it_ : *orbitSpeed_.value()) {
+  if (orbitSpeed_) {
+    for (const auto& it_ : *orbitSpeed_) {
       spdlog::debug("\torbitSpeed: {}", it_);
     }
   }
-  if (scaling_.has_value()) {
-    for (const auto& it_ : *scaling_.value()) {
+  if (scaling_) {
+    for (const auto& it_ : *scaling_) {
       spdlog::debug("\tscaling: {}", it_);
     }
   }
-  if (shift_.has_value()) {
-    for (const auto& it_ : *shift_.value()) {
+  if (shift_) {
+    for (const auto& it_ : *shift_) {
       spdlog::debug("\tshift: {}", it_);
     }
   }
-  if (targetPosition_.has_value()) {
-    targetPosition_.value()->Print("\ttargetPosition");
+  if (targetPosition_) {
+    targetPosition_->Print("\ttargetPosition");
   }
-  if (upVector_.has_value()) {
-    upVector_.value()->Print("\tupVector");
+  if (upVector_) {
+    upVector_->Print("\tupVector");
   }
   if (zoomSpeed_.has_value()) {
     spdlog::debug("\tzoomSpeed: {}", zoomSpeed_.value());

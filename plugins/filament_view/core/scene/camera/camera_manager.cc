@@ -54,11 +54,11 @@ std::future<void> CameraManager::setDefaultCamera() {
   return future;
 }
 
-std::string CameraManager::updateExposure(std::optional<Exposure*> exposure) {
-  if (!exposure.has_value()) {
+std::string CameraManager::updateExposure(Exposure* exposure) {
+  if (!exposure) {
     return "Exposure not found";
   }
-  auto e = exposure.value();
+  auto e = exposure;
   if (e->exposure_.has_value()) {
     SPDLOG_DEBUG("[setExposure] exposure: {}", e->exposure_.value());
     camera_->setExposure(e->exposure_.value());
@@ -78,12 +78,11 @@ std::string CameraManager::updateExposure(std::optional<Exposure*> exposure) {
   return "Exposure aperture and shutter speed and sensitivity must be provided";
 }
 
-std::string CameraManager::updateProjection(
-    std::optional<Projection*> projection) {
-  if (!projection.has_value()) {
+std::string CameraManager::updateProjection(Projection* projection) {
+  if (!projection) {
     return "Projection not found";
   }
-  auto p = projection.value();
+  auto p = projection;
   if (p->projection_.has_value() && p->left_.has_value() &&
       p->right_.has_value() && p->top_.has_value() && p->bottom_.has_value()) {
     SPDLOG_DEBUG(
@@ -119,12 +118,11 @@ std::string CameraManager::updateProjection(
   }
 }
 
-std::string CameraManager::updateCameraShift(
-    std::optional<std::vector<double>*> shift) {
-  if (!shift.has_value()) {
+std::string CameraManager::updateCameraShift(std::vector<double>* shift) {
+  if (!shift) {
     return "Camera shift not found";
   }
-  auto s = shift.value();
+  auto s = shift;
   if (s->size() >= 2) {
     return "Camera shift info must be provided";
   }
@@ -133,12 +131,11 @@ std::string CameraManager::updateCameraShift(
   return "Camera shift updated successfully";
 }
 
-std::string CameraManager::updateCameraScaling(
-    std::optional<std::vector<double>*> scaling) {
-  if (!scaling.has_value()) {
+std::string CameraManager::updateCameraScaling(std::vector<double>* scaling) {
+  if (!scaling) {
     return "Camera scaling must be provided";
   }
-  auto s = scaling.value();
+  auto s = scaling;
   if (s->size() >= 2) {
     return "Camera scaling info must be provided";
   }
@@ -154,8 +151,8 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
 
   auto manipulatorBuilder = CameraManipulator::Builder();
 
-  if (cameraInfo->targetPosition_.has_value()) {
-    auto tp = cameraInfo->targetPosition_.value().get();
+  if (cameraInfo->targetPosition_) {
+    auto tp = cameraInfo->targetPosition_.get();
     manipulatorBuilder.targetPosition(tp->x_, tp->y_, tp->z_);
   } else {
     manipulatorBuilder.targetPosition(kDefaultObjectPosition.x,
@@ -163,22 +160,22 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
                                       kDefaultObjectPosition.z);
   }
 
-  if (cameraInfo->upVector_.has_value()) {
-    auto upVector = cameraInfo->upVector_.value().get();
+  if (cameraInfo->upVector_) {
+    auto upVector = cameraInfo->upVector_.get();
     manipulatorBuilder.upVector(upVector->x_, upVector->y_, upVector->z_);
   }
   if (cameraInfo->zoomSpeed_.has_value()) {
     manipulatorBuilder.zoomSpeed(cameraInfo->zoomSpeed_.value());
   }
 
-  if (cameraInfo->orbitHomePosition_.has_value()) {
-    auto orbitHomePosition = cameraInfo->orbitHomePosition_.value().get();
+  if (cameraInfo->orbitHomePosition_) {
+    auto orbitHomePosition = cameraInfo->orbitHomePosition_.get();
     manipulatorBuilder.orbitHomePosition(
         orbitHomePosition->x_, orbitHomePosition->y_, orbitHomePosition->z_);
   }
 
-  if (cameraInfo->orbitSpeed_.has_value()) {
-    auto orbitSpeed = cameraInfo->orbitSpeed_.value().get();
+  if (cameraInfo->orbitSpeed_) {
+    auto orbitSpeed = cameraInfo->orbitSpeed_.get();
     manipulatorBuilder.orbitSpeed(orbitSpeed->at(0), orbitSpeed->at(1));
   }
 
@@ -192,21 +189,20 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
     manipulatorBuilder.farPlane(cameraInfo->farPlane_.value());
   }
 
-  if (cameraInfo->mapExtent_.has_value()) {
-    auto mapExtent = cameraInfo->mapExtent_.value().get();
+  if (cameraInfo->mapExtent_) {
+    auto mapExtent = cameraInfo->mapExtent_.get();
     manipulatorBuilder.mapExtent(mapExtent->at(0), mapExtent->at(1));
   }
 
-  if (cameraInfo->flightStartPosition_.has_value()) {
-    auto flightStartPosition = cameraInfo->flightStartPosition_.value().get();
+  if (cameraInfo->flightStartPosition_) {
+    auto flightStartPosition = cameraInfo->flightStartPosition_.get();
     manipulatorBuilder.flightStartPosition(flightStartPosition->x_,
                                            flightStartPosition->y_,
                                            flightStartPosition->z_);
   }
 
-  if (cameraInfo->flightStartOrientation_.has_value()) {
-    auto flightStartOrientation =
-        cameraInfo->flightStartOrientation_.value().get();
+  if (cameraInfo->flightStartOrientation_) {
+    auto flightStartOrientation = cameraInfo->flightStartOrientation_.get();
     // val pitch = it.getOrElse(0) { 0f }
     auto pitch = flightStartOrientation->at(0);  // 0f;
     // val yaw = it.getOrElse(1) { 0f }
@@ -228,8 +224,8 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
         cameraInfo->flightMaxMoveSpeed_.value());
   }
 
-  if (cameraInfo->groundPlane_.has_value()) {
-    auto groundPlane = cameraInfo->groundPlane_.value().get();
+  if (cameraInfo->groundPlane_) {
+    auto groundPlane = cameraInfo->groundPlane_.get();
     auto a = groundPlane->at(0);  //{ 0f };
     auto b = groundPlane->at(1);  //{ 0f };
     auto c = groundPlane->at(2);  //{ 1f };
@@ -253,11 +249,11 @@ std::future<std::string> CameraManager::updateCamera(Camera* cameraInfo) {
     promise->set_value("Camera not found");
   } else {
     asio::post(model_viewer_->getStrandContext(), [&, promise, cameraInfo] {
-      updateExposure(cameraInfo->exposure_wrapper_);
-      updateProjection(cameraInfo->projection_wrapper_);
-      updateLensProjection(cameraInfo->lensProjection_wrapper_);
-      updateCameraShift(cameraInfo->shift_wrapper_);
-      updateCameraScaling(cameraInfo->scaling_wrapper_);
+      updateExposure(cameraInfo->exposure_.get());
+      updateProjection(cameraInfo->projection_.get());
+      updateLensProjection(cameraInfo->lensProjection_.get());
+      updateCameraShift(cameraInfo->shift_.get());
+      updateCameraScaling(cameraInfo->scaling_.get());
       updateCameraManipulator(cameraInfo);
       promise->set_value("Camera updated successfully");
     });
@@ -304,24 +300,23 @@ void CameraManager::onAction(int32_t action, double x, double y) {
 }
 
 std::string CameraManager::updateLensProjection(
-    std::optional<LensProjection*> lensProjection) {
-  if (!lensProjection.has_value()) {
+    LensProjection* lensProjection) {
+  if (!lensProjection) {
     return "Lens projection not found";
   }
 
-  if (lensProjection.value()->getFocalLength().has_value()) {
-    if (cameraFocalLength_ != lensProjection.value()->getFocalLength().value())
-      cameraFocalLength_ = lensProjection.value()->getFocalLength().value();
-    auto aspect = lensProjection.value()->getAspect().has_value()
-                      ? lensProjection.value()->getAspect().value()
+  if (lensProjection->getFocalLength().has_value()) {
+    if (cameraFocalLength_ != lensProjection->getFocalLength().value())
+      cameraFocalLength_ = lensProjection->getFocalLength().value();
+    auto aspect = lensProjection->getAspect().has_value()
+                      ? lensProjection->getAspect().value()
                       : calculateAspectRatio();
-    camera_->setLensProjection(lensProjection.value()->getFocalLength().value(),
-                               aspect,
-                               lensProjection.value()->getNear().has_value()
-                                   ? lensProjection.value()->getNear().value()
+    camera_->setLensProjection(lensProjection->getFocalLength().value(), aspect,
+                               lensProjection->getNear().has_value()
+                                   ? lensProjection->getNear().value()
                                    : kNearPlane,
-                               lensProjection.value()->getFar().has_value()
-                                   ? lensProjection.value()->getFar().value()
+                               lensProjection->getFar().has_value()
+                                   ? lensProjection->getFar().value()
                                    : kFarPlane);
     return "Lens projection updated successfully";
   }
@@ -330,10 +325,9 @@ std::string CameraManager::updateLensProjection(
 
 void CameraManager::updateCameraProjection() {
   auto aspect = calculateAspectRatio();
-  std::optional<LensProjection*> lensProjection =
-      new LensProjection(cameraFocalLength_, aspect);
+  auto lensProjection = new LensProjection(cameraFocalLength_, aspect);
   updateLensProjection(lensProjection);
-  delete lensProjection.value();
+  delete lensProjection;
 }
 
 float CameraManager::calculateAspectRatio() {

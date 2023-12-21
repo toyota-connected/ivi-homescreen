@@ -45,14 +45,10 @@ class Ground {
  private:
   const std::string& flutterAssetsPath_;
 
-  std::optional<std::unique_ptr<Position>> center_position_;
-  std::optional<Position*> center_position_wrapper_;
-  std::optional<std::unique_ptr<Direction>> normal_;
-  std::optional<Direction*> normal_wrapper_;
-  std::optional<std::unique_ptr<Size>> size_;
-  std::optional<Size*> size_wrapper_;
-  std::optional<std::unique_ptr<Material>> material_;
-  std::optional<Material*> material_wrapper_;
+  std::unique_ptr<Position> center_position_;
+  std::unique_ptr<Direction> normal_;
+  std::unique_ptr<Size> size_;
+  std::unique_ptr<Material> material_;
   bool isBelowModel_;
 };
 }  // namespace plugin_filament_view

@@ -148,17 +148,20 @@ void ModelLoader::transformToUnitCube(const Position* centerPoint,
   } else {
     centerPosition = centerPoint->toFloatArray();
   }
-
+#if 0
   auto& tm = engine_->getTransformManager();
   auto root = tm.getInstance(asset_->getRoot());
   ::filament::mat4f transform;
+#if 0
   if (settings_.viewer.autoScaleEnabled) {
     auto* instance = asset_->getInstance();
     ::filament::Aabb aabb =
         instance ? instance->getBoundingBox() : asset_->getBoundingBox();
     transform = fitIntoUnitCube(aabb, 4);
   }
+#endif
   tm.setTransform(root, transform);
+#endif
 }
 
 void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {

@@ -63,17 +63,14 @@ class Camera {
   static constexpr char kFovHorizontal[] = "HORIZONTAL";
 
   /// An object that control camera Exposure.
-  std::optional<std::unique_ptr<Exposure>> exposure_;
-  std::optional<Exposure*> exposure_wrapper_;
+  std::unique_ptr<Exposure> exposure_;
 
   /// An object that controls camera projection matrix.
-  std::optional<std::unique_ptr<Projection>> projection_;
-  std::optional<Projection*> projection_wrapper_;
+  std::unique_ptr<Projection> projection_;
 
   /// An object that control camera and set it's projection matrix from the
   /// focal length.
-  std::optional<std::unique_ptr<LensProjection>> lensProjection_;
-  std::optional<LensProjection*> lensProjection_wrapper_;
+  std::unique_ptr<LensProjection> lensProjection_;
 
   /// Sets an additional matrix that scales the projection matrix.
   /// This is useful to adjust the aspect ratio of the camera independent from
@@ -83,8 +80,7 @@ class Camera {
   ///     matrix.
   //      * yscaling  vertical scaling to be applied after the projection
   //      matrix.
-  std::optional<std::unique_ptr<std::vector<double>>> scaling_;
-  std::optional<std::vector<double>*> scaling_wrapper_;
+  std::unique_ptr<std::vector<double>> scaling_;
 
   ///      Sets an additional matrix that shifts (translates) the projection
   ///      matrix.
@@ -94,17 +90,16 @@ class Camera {
   ///      projection
   ///      *  yshift    vertical shift in NDC coordinates applied after the
   ///      projection
-  std::optional<std::unique_ptr<std::vector<double>>> shift_;
-  std::optional<std::vector<double>*> shift_wrapper_;
+  std::unique_ptr<std::vector<double>> shift_;
 
   /// Mode of the camera that operates on.
   ::filament::camutils::Mode mode_ = ::filament::camutils::Mode::ORBIT;
 
   /// The world-space position of interest, which defaults to (x:0,y:0,z:-4).
-  std::optional<std::unique_ptr<Position>> targetPosition_;
+  std::unique_ptr<Position> targetPosition_;
 
   /// The orientation for the home position, which defaults to (x:0,y:1,z:0).
-  std::optional<std::unique_ptr<Position>> upVector_;
+  std::unique_ptr<Position> upVector_;
 
   /// The scroll delta multiplier, which defaults to 0.01.
   std::optional<float> zoomSpeed_;
@@ -112,11 +107,11 @@ class Camera {
   // orbit
   /// The initial eye position in world space for ORBIT mode.
   /// This defaults to (x:0,y:0,z:1).
-  std::optional<std::unique_ptr<Position>> orbitHomePosition_;
+  std::unique_ptr<Position> orbitHomePosition_;
 
   /// Sets the multiplier with viewport delta for ORBIT mode.This defaults to
   /// 0.01 List of 2 double :[x,y]
-  std::optional<std::unique_ptr<std::vector<float>>> orbitSpeed_;
+  std::unique_ptr<std::vector<float>> orbitSpeed_;
 
   /// The FOV axis that's held constant when the viewport changes.
   /// This defaults to Vertical.
@@ -131,18 +126,18 @@ class Camera {
 
   /// The ground plane size used to compute the home position for MAP mode.
   /// This defaults to 512 x 512
-  std::optional<std::unique_ptr<std::vector<float>>> mapExtent_;
+  std::unique_ptr<std::vector<float>> mapExtent_;
 
   /// Constrains the zoom-in level. Defaults to 0.
   std::optional<double> mapMinDistance_;
 
   /// The initial eye position in world space for FREE_FLIGHT mode.
   /// Defaults to (x:0,y:0,z:0).
-  std::optional<std::unique_ptr<Position>> flightStartPosition_;
+  std::unique_ptr<Position> flightStartPosition_;
 
   /// The initial orientation in pitch and yaw for FREE_FLIGHT mode.
   /// Defaults to [0,0].
-  std::optional<std::unique_ptr<std::vector<float>>> flightStartOrientation_;
+  std::unique_ptr<std::vector<float>> flightStartOrientation_;
 
   /// The maximum camera translation speed in world units per second for
   /// FREE_FLIGHT mode. Defaults to 10.
@@ -160,6 +155,6 @@ class Camera {
 
   /// The ground plane equation used for ray casts. This is a plane equation as
   /// in Ax + By + Cz + D = 0. Defaults to (0, 0, 1, 0).
-  std::optional<std::unique_ptr<std::vector<float>>> groundPlane_;
+  std::unique_ptr<std::vector<float>> groundPlane_;
 };
 }  // namespace plugin_filament_view

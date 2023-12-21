@@ -62,18 +62,17 @@ class CameraManager {
 
   std::future<std::string> updateCamera(Camera* cameraInfo);
 
-  std::string updateExposure(std::optional<Exposure*> exposure);
+  std::string updateExposure(Exposure* exposure);
 
-  std::string updateProjection(std::optional<Projection*> projection);
+  std::string updateProjection(Projection* projection);
 
-  std::string updateLensProjection(
-      std::optional<LensProjection*> lensProjection);
+  std::string updateLensProjection(LensProjection* lensProjection);
 
   void updateCameraProjection();
 
-  std::string updateCameraShift(std::optional<std::vector<double>*> shift);
+  std::string updateCameraShift(std::vector<double>* shift);
 
-  std::string updateCameraScaling(std::optional<std::vector<double>*> scaling);
+  std::string updateCameraScaling(std::vector<double>* scaling);
 
   // Disallow copy and assign.
   CameraManager(const CameraManager&) = delete;

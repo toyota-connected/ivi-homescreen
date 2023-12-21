@@ -54,7 +54,6 @@ class Animation {
   bool auto_play_;
   std::string asset_path_;
   std::unique_ptr<Position> center_position_;
-  std::optional<Position*> center_position_wrapper_;
   const std::string& flutterAssetsPath_;
 };
 
