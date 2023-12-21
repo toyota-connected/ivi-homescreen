@@ -29,21 +29,28 @@
 namespace plugin_filament_view {
 
 class Exposure;
+
 class Position;
+
 class Projection;
 
 class Camera {
  public:
   Camera(const flutter::EncodableMap& params);
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Camera(const Camera&) = delete;
+
   Camera& operator=(const Camera&) = delete;
 
   static const char* getTextForMode(::filament::camutils::Mode mode);
+
   static ::filament::camutils::Mode getModeForText(const std::string& mode);
+
   static const char* getTextForFov(::filament::camutils::Fov fov);
+
   static ::filament::camutils::Fov getFovForText(const std::string& fov);
 
   friend class CameraManager;

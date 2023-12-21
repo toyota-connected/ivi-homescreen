@@ -33,7 +33,7 @@ std::future<void> CameraManager::setDefaultCamera() {
   const auto promise(std::make_shared<std::promise<void>>());
   auto future(promise->get_future());
 
-  asio::post(*model_viewer_->getStrandContext(), [&, promise] {
+  asio::post(model_viewer_->getStrandContext(), [&, promise] {
     assert(model_viewer_);
     auto fview = model_viewer_->getFilamentView();
     assert(fview);
@@ -252,8 +252,7 @@ std::future<std::string> CameraManager::updateCamera(Camera* cameraInfo) {
   if (!cameraInfo) {
     promise->set_value("Camera not found");
   } else {
-    auto strand = model_viewer_->getStrandContext();
-    asio::post(*strand, [&, promise, cameraInfo] {
+    asio::post(model_viewer_->getStrandContext(), [&, promise, cameraInfo] {
       updateExposure(cameraInfo->exposure_wrapper_);
       updateProjection(cameraInfo->projection_wrapper_);
       updateLensProjection(cameraInfo->lensProjection_wrapper_);

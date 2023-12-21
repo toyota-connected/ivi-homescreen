@@ -32,17 +32,20 @@ class Position;
 
 class Animation {
  public:
-  Animation(void* parent,
-            const std::string& flutter_assets_path,
+  Animation(const std::string& flutter_assets_path,
             const flutter::EncodableMap& params);
+
   void Print(const char* tag);
 
   [[nodiscard]] bool GetAutoPlay() const { return auto_play_; }
+
   [[nodiscard]] std::optional<int32_t> GetIndex() const { return index_; }
+
   [[nodiscard]] std::string GetName() const { return name_; }
 
   // Disallow copy and assign.
   Animation(const Animation&) = delete;
+
   Animation& operator=(const Animation&) = delete;
 
  private:

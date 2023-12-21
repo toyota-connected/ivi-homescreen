@@ -37,12 +37,12 @@ SceneController::SceneController(PlatformView* platformView,
       shapes_(shapes) {
   SPDLOG_TRACE("++SceneController::SceneController");
   setUpViewer(platformView, state);
-  setUpLoadingModel();
-  setUpCamera();
   setUpGround();
+  setUpCamera();
   setUpSkybox();
   setUpLight();
   setUpIndirectLight();
+  setUpLoadingModel();
   setUpShapes();
 
   modelViewer_->setInitialized();
@@ -84,18 +84,19 @@ void SceneController::setUpCamera() {
   // update model viewer
   modelViewer_->setCameraManager(cameraManager_.get());
 
-  if (!scene_->camera_.has_value()) {
+  if (!scene_->camera_) {
     return;
   }
-  auto f = cameraManager_->updateCamera(scene_->camera_.value().get());
+  auto f = cameraManager_->updateCamera(scene_->camera_.get());
   f.wait();
 }
 
 std::future<void> SceneController::setUpIblProfiler() {
   const auto promise(std::make_shared<std::promise<void>>());
   auto future(promise->get_future());
-  asio::post(*modelViewer_->getStrandContext(),[&, promise]{
-    iblProfiler_ = std::make_unique<plugin_filament_view::IBLProfiler>(modelViewer_->getFilamentEngine());
+  asio::post(modelViewer_->getStrandContext(), [&, promise] {
+    iblProfiler_ = std::make_unique<plugin_filament_view::IBLProfiler>(
+        modelViewer_->getFilamentEngine());
   });
   return future;
 }
@@ -105,64 +106,55 @@ void SceneController::setUpSkybox() {
   f.wait();
   skyboxManager_ = std::make_unique<plugin_filament_view::SkyboxManager>(
       modelViewer_.get(), iblProfiler_.get(), flutterAssetsPath_);
-#if 0
-  if (!scene_->skybox_.has_value()) {
+
+  if (!scene_->skybox_) {
     skyboxManager_->setDefaultSkybox();
     makeSurfaceViewTransparent();
   } else {
-    auto s = scene_->skybox_.value().get();
-    const auto type = s->skyboxType_;
-    if (type.has_value()) {
-      SPDLOG_DEBUG("skybox type: {}", type.value());
-    }
-  }
-#endif
+    auto skybox = scene_->skybox_.get();
+    if (dynamic_cast<HdrSkybox*>(skybox)) {
+      auto hdr_skybox = dynamic_cast<HdrSkybox*>(skybox);
+      if (!hdr_skybox->assetPath_.empty()) {
+        auto shouldUpdateLight =
+            (hdr_skybox->assetPath_ == scene_->indirect_light_->getAssetPath());
+        skyboxManager_->setSkyboxFromHdrAsset(
+            hdr_skybox->assetPath_,
+            hdr_skybox->showSun_.has_value() && hdr_skybox->showSun_.value(),
+            shouldUpdateLight, scene_->indirect_light_->getIntensity());
+      } else if (!skybox->getUrl().empty()) {
+        auto shouldUpdateLight =
+            (hdr_skybox->url_ == scene_->indirect_light_->getUrl());
+        skyboxManager_->setSkyboxFromHdrUrl(
+            hdr_skybox->url_,
+            hdr_skybox->showSun_.has_value() && hdr_skybox->showSun_.value(),
+            shouldUpdateLight, scene_->indirect_light_->getIntensity());
+      }
+    } else if (dynamic_cast<KxtSkybox*>(skybox)) {
 #if 0
-  } else {
-    when (skybox) {
-      is KtxSkybox -> {
-        if (!skybox.assetPath.isNullOrEmpty()) {
-          skyboxManger.setSkyboxFromKTXAsset(skybox.assetPath)
-        } else if (!skybox.url.isNullOrEmpty()) {
-        skyboxManger.setSkyboxFromKTXUrl(skybox.url)
-      }
-    }
-    is HdrSkybox -> {
-      if (!skybox.assetPath.isNullOrEmpty()) {
-        val shouldUpdateLight = skybox.assetPath == scene?.indirectLight?.assetPath
-        skyboxManger.setSkyboxFromHdrAsset(
-          skybox.assetPath,
-          skybox.showSun ?: false,
-          shouldUpdateLight,
-          scene?.indirectLight?.intensity
-        )
-      } else if (!skybox.url.isNullOrEmpty()) {
-        val shouldUpdateLight = skybox.url == scene?.indirectLight?.url
-        skyboxManger.setSkyboxFromHdrUrl(
-          skybox.url,
-          skybox.showSun ?: false,
-          shouldUpdateLight,
-          scene?.indirectLight?.intensity
-          )
-      }
-    }
-    is ColoredSkybox -> {
-      if (skybox.color != null) {
-        skyboxManger.setSkyboxFromColor(skybox.color)
-      }
-    }
-
+                auto kxt_skybox = dynamic_cast<KxtSkybox*>(skybox);
+                if (!kxt_skybox->assetPath_.empty()) {
+                  skyboxManager_->setSkyboxFromKTXAsset(kxt_skybox->assetPath_);
+                } else if (!kxt_skybox->url_.empty()) {
+                  skyboxManager_->setSkyboxFromKTXUrl(kxt_skybox->url_);
+                }
+#endif
+    } else if (dynamic_cast<ColorSkybox*>(skybox)) {
+#if 0
+                auto color_skybox = dynamic_cast<ColorSkybox*>(skybox);
+                if (!color_skybox->color_.empty()) {
+                  skyboxManager_->setSkyboxFromColor(color_skybox->color_);
+                }
+#endif
     }
   }
-#endif
 }
 
 void SceneController::setUpLight() {
   lightManager_ = std::make_unique<LightManager>(modelViewer_.get());
 
   if (scene_) {
-    if (scene_->light_.has_value()) {
-      lightManager_->changeLight(scene_->light_.value().get());
+    if (scene_->light_) {
+      lightManager_->changeLight(scene_->light_.get());
     } else {
       lightManager_->setDefaultLight();
     }
@@ -172,12 +164,12 @@ void SceneController::setUpLight() {
 }
 
 void SceneController::setUpIndirectLight() {
-  indirectLightManager_ =
-      std::make_unique<IndirectLightManager>(modelViewer_.get(), iblProfiler_.get());
-  if (!scene_->indirect_light_.has_value()) {
+  indirectLightManager_ = std::make_unique<IndirectLightManager>(
+      modelViewer_.get(), iblProfiler_.get());
+  if (!scene_->indirect_light_) {
     indirectLightManager_->setDefaultIndirectLight();
   } else {
-    auto indirectLight = scene_->indirect_light_.value().get();
+    auto indirectLight = scene_->indirect_light_.get();
     if (dynamic_cast<KtxIndirectLight*>(indirectLight)) {
       if (!indirectLight->getAssetPath().empty()) {
         indirectLightManager_->setIndirectLightFromKtxAsset(
@@ -231,15 +223,15 @@ void SceneController::setUpLoadingModel() {
   SPDLOG_TRACE("++SceneController::setUpLoadingModel");
   animationManager_ = std::make_unique<AnimationManager>(modelViewer_.get());
 
-  auto result = modelViewer_->loadModel(model_);
+  auto result = loadModel(model_);
   SPDLOG_DEBUG("loadModel: {}", result);
-  if (!result.empty() && model_->GetFallback().has_value()) {
+  if (!result.empty() && model_->GetFallback()) {
     if (result == "Resource.Error") {
       auto f = model_->GetFallback();
-      if (f.has_value()) {
-        result = modelViewer_->loadModel(f.value());
+      if (f) {
+        result = loadModel(f);
         SPDLOG_DEBUG("Fallback loadModel: {}", result);
-        setUpAnimation(f.value()->GetAnimation());
+        setUpAnimation(f->GetAnimation());
       } else {
         result = "Error.FallbackLoadFailed";
       }
@@ -267,11 +259,41 @@ std::string SceneController::setDefaultCamera() {
   return "Default camera updated successfully";
 }
 
-std::string SceneController::loadModel(std::optional<Model*> model) {
-  if (!model.has_value())
-    return "Error.NoModel";
-
-  return modelViewer_->loadModel(model.value());
+std::string SceneController::loadModel(Model* model) {
+  std::string result;
+  if (dynamic_cast<GlbModel*>(model)) {
+    auto glb_model = dynamic_cast<GlbModel*>(model);
+    auto loader = modelViewer_->getGlbModelLoader();
+    if (!glb_model->assetPath_.empty()) {
+      auto f =
+          loader->loadGlbFromAsset(glb_model->assetPath_, glb_model->scale_,
+                                   glb_model->center_position_);
+      f.wait();
+      result = f.get();
+    } else if (!glb_model->url_.empty()) {
+      auto f = loader->loadGlbFromUrl(glb_model->url_, glb_model->scale_,
+                                      glb_model->center_position_);
+      f.wait();
+      result = f.get();
+    }
+  } else if (dynamic_cast<GltfModel*>(model)) {
+    auto gltf_model = dynamic_cast<GltfModel*>(model);
+    auto loader = modelViewer_->getGltfModelLoader();
+    if (!gltf_model->assetPath_.empty()) {
+      auto f = loader->loadGltfFromAsset(
+          gltf_model->assetPath_, gltf_model->pathPrefix_,
+          gltf_model->pathPostfix_, gltf_model->scale_,
+          gltf_model->center_position_);
+      f.wait();
+      result = f.get();
+    } else if (!gltf_model->url_.empty()) {
+      auto f = loader->loadGltfFromUrl(gltf_model->url_, gltf_model->scale_,
+                                       gltf_model->center_position_);
+      f.wait();
+      result = f.get();
+    }
+  }
+  return result;
 }
 
 // TODO Move to model viewer

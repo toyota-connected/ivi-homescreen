@@ -25,10 +25,12 @@ class Texture {
  public:
   Texture(const std::string& flutter_assets_path,
           const flutter::EncodableMap& params);
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Texture(const Texture&) = delete;
+
   Texture& operator=(const Texture&) = delete;
 
   enum Type {
@@ -38,6 +40,7 @@ class Texture {
   };
 
   static Type getType(const std::string& type);
+
   static const char* getTextForType(Type type);
 
  private:

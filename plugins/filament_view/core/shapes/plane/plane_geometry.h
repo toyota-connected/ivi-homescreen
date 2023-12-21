@@ -7,9 +7,13 @@
 #include "models/scene/geometry/size.h"
 
 class Direction;
+
 class Geometry;
+
 class Normal;
+
 class Position;
+
 class Size;
 
 namespace plugin_filament_view {
@@ -32,7 +36,9 @@ class PlaneGeometry : public Geometry {
    * @param center Center of the constructed plane
    * @param size  Size of the constructed plane
    */
-  class Builder(Position center = Position(0.0f, 0f, -4f),
+  class Builder(Position
+
+                    center = Position(0.0f, 0f, -4f),
                 Size size = Size(2.0f, 2.0f),
                 Direction normal = Direction(0f, 0f, 1f))
       : Geometry.Builder {
@@ -44,7 +50,9 @@ class PlaneGeometry : public Geometry {
   void update(::filament::Engine* engine,
               Direction normal,
               Position center(this->center),
-              Size size = (this.size)){
+              Size
+
+                  size = (this.size)){
       setBufferVertices(engine, getVertices(center, size, normal))}
 
   std::vector<Vertex> getVertices(Position center = Position(0.0f),

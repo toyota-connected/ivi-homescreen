@@ -37,6 +37,7 @@ class Shape {
 
   // Disallow copy and assign.
   Shape(const Shape&) = delete;
+
   Shape& operator=(const Shape&) = delete;
 
  private:

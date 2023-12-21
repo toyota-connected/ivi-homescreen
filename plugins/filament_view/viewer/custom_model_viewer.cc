@@ -20,12 +20,15 @@
 #include <asio/post.hpp>
 #include <utility>
 
+#include "core/model/glb_loader.h"
 #include "logging/logging.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"
 
 class Display;
+
 class FlutterView;
+
 class FilamentViewPlugin;
 
 namespace plugin_filament_view {
@@ -90,7 +93,7 @@ CustomModelViewer::~CustomModelViewer() {
 
   fengine_->destroy(fscene_);
   fengine_->destroy(fview_);
-  fengine_->destroy(skybox_);
+  fengine_->destroy(fskybox_);
   fengine_->destroy(frenderer_);
   fengine_->destroy(fswapChain_);
   ::filament::Engine::destroy(&fengine_);
@@ -117,6 +120,8 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
     fengine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
 
     modelLoader_ = std::make_unique<ModelLoader>(this);
+    glbLoader_ = std::make_unique<GlbLoader>(this, flutterAssetsPath_);
+    gltfLoader_ = std::make_unique<GltfLoader>(this, flutterAssetsPath_);
 
     frenderer_ = fengine_->createRenderer();
 
@@ -158,11 +163,25 @@ void CustomModelViewer::setLightState(models::state::SceneState sceneState) {
                models::state::getTextForSceneState(currentLightState_));
 }
 
+void CustomModelViewer::setSkyboxState(models::state::SceneState sceneState) {
+  currentSkyboxState_ = sceneState;
+  SPDLOG_DEBUG("[FilamentView] setSkyboxState: {}",
+               models::state::getTextForSceneState(currentSkyboxState_));
+}
+
 void CustomModelViewer::destroyIndirectLight() {
   auto scene = fview_->getScene();
   auto indirectLight = scene->getIndirectLight();
   if (indirectLight) {
     fengine_->destroy(indirectLight);
+  }
+}
+
+void CustomModelViewer::destroySkybox() {
+  auto scene = fview_->getScene();
+  auto skybox = scene->getSkybox();
+  if (skybox) {
+    fengine_->destroy(skybox);
   }
 }
 
@@ -248,12 +267,6 @@ void CustomModelViewer::OnFrame(void* data,
 
 const wl_callback_listener CustomModelViewer::frame_listener = {.done =
                                                                     OnFrame};
-
-std::string CustomModelViewer::loadModel(Model* model) {
-  auto result = modelLoader_->loadModel(model);
-  asset_ = modelLoader_->getAsset();
-  return result;
-}
 
 void CustomModelViewer::setOffset(double left, double top) {
   left_ = static_cast<int32_t>(left);

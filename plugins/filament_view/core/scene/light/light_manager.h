@@ -28,6 +28,7 @@
 namespace plugin_filament_view {
 
 class CustomModelViewer;
+
 class Light;
 
 class LightManager {
@@ -35,10 +36,12 @@ class LightManager {
   explicit LightManager(CustomModelViewer* model_viewer);
 
   void setDefaultLight();
+
   std::future<std::string> changeLight(Light* light);
 
   // Disallow copy and assign.
   LightManager(const LightManager&) = delete;
+
   LightManager& operator=(const LightManager&) = delete;
 
  private:

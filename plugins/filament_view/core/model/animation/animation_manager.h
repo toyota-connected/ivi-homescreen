@@ -22,6 +22,7 @@
 namespace plugin_filament_view {
 
 class CustomModelViewer;
+
 class AnimationManager;
 
 class AnimationManager {
@@ -39,6 +40,7 @@ class AnimationManager {
 
   // Disallow copy and assign.
   AnimationManager(const AnimationManager&) = delete;
+
   AnimationManager& operator=(const AnimationManager&) = delete;
 
   friend class SceneController;

@@ -10,6 +10,7 @@ endif ()
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
+pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE
@@ -85,6 +86,8 @@ add_library(plugin_filament_view STATIC
         core/model/animation/animation.cc
         core/model/animation/animation_manager.cc
         core/model/model_loader.cc
+        core/model/glb_loader.cc
+        core/model/gltf_loader.cc
         core/model/model.cc
         core/scene/camera/camera.cc
         core/scene/camera/camera_manager.cc
@@ -98,7 +101,7 @@ add_library(plugin_filament_view STATIC
         core/scene/ground_manager.cc
         core/scene/indirect_light/indirect_light.cc
         core/scene/indirect_light/indirect_light_manager.cc
-        core/scene/indirect_light/hdr_loader.cc
+        core/utils/hdr_loader.cc
         core/scene/light/light.cc
         core/scene/light/light_manager.cc
         core/scene/material/material.cc
@@ -112,6 +115,8 @@ add_library(plugin_filament_view STATIC
         core/shapes/shape.cc
         core/shapes/shape_manager.cc
         viewer/custom_model_viewer.cc
+
+        ../../shell/curl_client/curl_client.cc
 )
 
 target_compile_definitions(plugin_filament_view PUBLIC ENABLE_PLUGIN_FILAMENT_VIEW)
@@ -128,6 +133,7 @@ target_link_libraries(plugin_filament_view PUBLIC
         filament
         flutter_common
         platform_homescreen
+        PkgConfig::CURL
 )
 
 add_sanitizers(plugin_filament_view)

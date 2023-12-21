@@ -58,36 +58,36 @@ void FilamentViewApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               result->NotImplemented();
             }
 #if 0
-            try {
-              const auto& args = std::get<EncodableList>(message);
-              const auto& encodable_app_arg = args.at(0);
-              if (encodable_app_arg.IsNull()) {
-                reply(WrapError("app_arg unexpectedly null."));
-                return;
-              }
-              const auto& app_arg =
-                  std::any_cast<const FirestorePigeonFirebaseApp&>(
-                      std::get<CustomEncodableValue>(encodable_app_arg));
-              const auto& encodable_bundle_arg = args.at(1);
-              if (encodable_bundle_arg.IsNull()) {
-                reply(WrapError("bundle_arg unexpectedly null."));
-                return;
-              }
-              const auto& bundle_arg =
-                  std::get<std::vector<uint8_t>>(encodable_bundle_arg);
-              api->LoadBundle(
-                  app_arg, bundle_arg, [reply](ErrorOr<std::string>&& output) {
-                    if (output.has_error()) {
-                      reply(WrapError(output.error()));
-                      return;
-                    }
-                    EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
-                    reply(EncodableValue(std::move(wrapped)));
-                  });
-            } catch (const std::exception& exception) {
-              reply(WrapError(exception.what()));
-            }
+                            try {
+                              const auto& args = std::get<EncodableList>(message);
+                              const auto& encodable_app_arg = args.at(0);
+                              if (encodable_app_arg.IsNull()) {
+                                reply(WrapError("app_arg unexpectedly null."));
+                                return;
+                              }
+                              const auto& app_arg =
+                                  std::any_cast<const FirestorePigeonFirebaseApp&>(
+                                      std::get<CustomEncodableValue>(encodable_app_arg));
+                              const auto& encodable_bundle_arg = args.at(1);
+                              if (encodable_bundle_arg.IsNull()) {
+                                reply(WrapError("bundle_arg unexpectedly null."));
+                                return;
+                              }
+                              const auto& bundle_arg =
+                                  std::get<std::vector<uint8_t>>(encodable_bundle_arg);
+                              api->LoadBundle(
+                                  app_arg, bundle_arg, [reply](ErrorOr<std::string>&& output) {
+                                    if (output.has_error()) {
+                                      reply(WrapError(output.error()));
+                                      return;
+                                    }
+                                    EncodableList wrapped;
+                                    wrapped.emplace_back(std::move(output).TakeValue());
+                                    reply(EncodableValue(std::move(wrapped)));
+                                  });
+                            } catch (const std::exception& exception) {
+                              reply(WrapError(exception.what()));
+                            }
 #endif
           });
     } else {

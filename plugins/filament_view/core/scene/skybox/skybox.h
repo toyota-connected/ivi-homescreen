@@ -16,35 +16,84 @@
 
 #pragma once
 
+#include <memory>
+#include <optional>
+#include <string>
+
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
-#include "core/scene/scene_controller.h"
+#include "logging/logging.h"
 
 namespace plugin_filament_view {
 
-class SceneController;
-
 class Skybox {
  public:
-  Skybox(void* parent,
-         const std::string& flutter_assets_path,
-         const flutter::EncodableMap& params);
-  std::optional<int32_t> GetType() { return skyboxType_; }
-  void Print(const char* tag);
+  Skybox(std::string assetPath, std::string url, std::string color);
 
-  // Disallow copy and assign.
-  Skybox(const Skybox&) = delete;
-  Skybox& operator=(const Skybox&) = delete;
+  virtual ~Skybox() = default;
+
+  static std::unique_ptr<Skybox> Deserialize(
+      const flutter::EncodableMap& params);
+
+  [[nodiscard]] const std::string& getAssetPath() const { return assetPath_; }
+
+  [[nodiscard]] const std::string& getUrl() const { return url_; }
+
+  [[nodiscard]] const std::string& getColor() const { return color_; }
+
+ protected:
+  std::string assetPath_;
+  std::string url_;
+  std::string color_;
+};
+
+class HdrSkybox final : public Skybox {
+ public:
+  explicit HdrSkybox(std::optional<std::string> assetPath,
+                     std::optional<std::string> url,
+                     std::optional<bool> showSun)
+      : Skybox(assetPath.has_value() ? std::move(assetPath.value()) : "",
+               url.has_value() ? std::move(url.value()) : "",
+               ""),
+        showSun_(showSun) {}
+
+  ~HdrSkybox() override = default;
+
+  [[nodiscard]] bool getShowSun() const {
+    return showSun_.has_value() && showSun_.value();
+  };
 
   friend class SceneController;
 
  private:
-  void* parent_;
-  const std::string& flutterAssetsPath_;
-
-  std::string assetPath_;
-  std::string url_;
   std::optional<bool> showSun_;
-  std::optional<int32_t> skyboxType_;
 };
+
+class KxtSkybox final : public Skybox {
+ public:
+  explicit KxtSkybox(std::optional<std::string> assetPath,
+                     std::optional<std::string> url)
+      : Skybox(assetPath.has_value() ? std::move(assetPath.value()) : "",
+               url.has_value() ? std::move(url.value()) : "",
+               "") {}
+
+  ~KxtSkybox() override = default;
+
+  friend class SceneController;
+};
+
+class ColorSkybox final : public Skybox {
+ public:
+  explicit ColorSkybox(std::optional<std::string> assetPath,
+                       std::optional<std::string> url,
+                       std::optional<std::string> color)
+      : Skybox(assetPath.has_value() ? std::move(assetPath.value()) : "",
+               url.has_value() ? std::move(url.value()) : "",
+               color.has_value() ? std::move(color.value()) : "") {}
+
+  ~ColorSkybox() override = default;
+
+  friend class SceneController;
+};
+
 }  // namespace plugin_filament_view

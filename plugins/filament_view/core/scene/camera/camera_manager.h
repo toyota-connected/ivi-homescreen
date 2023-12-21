@@ -34,8 +34,11 @@ namespace plugin_filament_view {
 using CameraManipulator = ::filament::camutils::Manipulator<float>;
 
 class Camera;
+
 class CustomModelViewer;
+
 class Exposure;
+
 class Projection;
 
 class CameraManager {
@@ -74,6 +77,7 @@ class CameraManager {
 
   // Disallow copy and assign.
   CameraManager(const CameraManager&) = delete;
+
   CameraManager& operator=(const CameraManager&) = delete;
 
  private:
@@ -96,11 +100,14 @@ class CameraManager {
   // type.
   struct ImVec2 {
     float x, y;
+
     ImVec2() { x = y = 0.0f; }
+
     ImVec2(float _x, float _y) {
       x = _x;
       y = _y;
     }
+
     float operator[](size_t idx) const {
       assert(idx <= 1);
       return (&x)[idx];

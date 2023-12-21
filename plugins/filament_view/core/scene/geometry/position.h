@@ -26,7 +26,9 @@
 #include <optional>
 
 class CameraManager;
+
 class LightManager;
+
 class Light;
 
 namespace plugin_filament_view {
@@ -41,16 +43,19 @@ class Position {
   //[[nodiscard]] float getY() const { return y_; }
   //[[nodiscard]] float getZ() const { return z_; }
 
-  ::filament::math::float3 toFloatArray() { return {x_, y_, z_}; }
+  ::filament::math::float3 toFloatArray() const { return {x_, y_, z_}; }
 
   void Print(const char* tag) const;
 
   // Disallow copy and assign.
   Position(const Position&) = delete;
+
   Position& operator=(const Position&) = delete;
 
   friend class CameraManager;
+
   friend class LightManager;
+
   friend class Light;
 
  private:

@@ -22,72 +22,86 @@
 
 #include "core/model/animation/animation.h"
 #include "core/scene/geometry/position.h"
-#include "core/scene/scene.h"
 
 namespace plugin_filament_view {
 
 class Animation;
-class Scene;
+
+class Position;
 
 class Model {
  public:
-  Model(void* parent,
-        const std::string& flutter_assets_path,
-        const flutter::EncodableValue& params);
-  ~Model() = default;
-  void Print(const char* tag);
+  Model(std::string assetPath,
+        std::string url,
+        Model* fallback,
+        float scale,
+        Position* centerPosition,
+        Animation* animation);
 
-  bool isGlb() {
-    if (is_glb_.has_value()) {
-      return is_glb_.value();
-    }
-    return false;
-  }
+  virtual ~Model() = default;
 
-  std::string GetAssetPath() { return assetPath_; }
-  std::string GetUrl() { return url_; }
+  static std::unique_ptr<Model> Deserialize(
+      const std::string& flutterAssetsPath,
+      const flutter::EncodableValue& params);
 
   [[nodiscard]] float GetScale() const { return scale_; }
 
-  Position* GetCenterPosition() {
-    if (center_position_.has_value()) {
-      return center_position_.value().get();
-    }
-    return nullptr;
-  }
+  [[nodiscard]] Position* GetCenterPosition() const { return center_position_; }
 
-  [[nodiscard]] std::optional<Model*> GetFallback() const {
-    if (fallback_.has_value()) {
-      return {fallback_.value().get()};
-    } else {
-      return std::nullopt;
-    }
-  }
+  [[nodiscard]] Model* GetFallback() const { return fallback_; }
 
-  [[nodiscard]] std::optional<Animation*> GetAnimation() const {
-    if (fallback_.has_value()) {
-      return {animation_.value().get()};
-    } else {
-      return std::nullopt;
-    }
-  }
+  [[nodiscard]] Animation* GetAnimation() const { return animation_; }
 
   // Disallow copy and assign.
   Model(const Model&) = delete;
+
   Model& operator=(const Model&) = delete;
 
- private:
-  const std::string& flutterAssetsPath_;
+ protected:
+  std::string assetPath_;
   std::string url_;
+  Model* fallback_;
+  float scale_;
+  Position* center_position_;
+  Animation* animation_;
+};
+
+class GlbModel final : public Model {
+ public:
+  GlbModel(std::string assetPath,
+           std::string url,
+           Model* fallback,
+           float scale,
+           Position* centerPosition,
+           Animation* animation);
+
+  ~GlbModel() override = default;
+
+  friend class ModelLoader;
+
+  friend class SceneController;
+};
+
+class GltfModel final : public Model {
+ public:
+  GltfModel(std::string assetPath,
+            std::string url,
+            std::string pathPrefix,
+            std::string pathPostfix,
+            Model* fallback,
+            float scale,
+            Position* centerPosition,
+            Animation* animation);
+
+  ~GltfModel() override = default;
+
+  friend class ModelLoader;
+
+  friend class SceneController;
+
+ private:
   std::string pathPrefix_;
   std::string pathPostfix_;
-  std::optional<std::unique_ptr<Model>> fallback_;
-  double scale_ = 1.0;
-  std::optional<std::unique_ptr<Position>> center_position_;
-  std::optional<std::unique_ptr<Animation>> animation_;
-  std::optional<std::unique_ptr<Scene>> scene_;
-  std::optional<bool> is_glb_;
-  std::string assetPath_;
 };
 
 }  // namespace plugin_filament_view

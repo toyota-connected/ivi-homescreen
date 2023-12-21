@@ -21,10 +21,9 @@
 
 namespace plugin_filament_view {
 
-Ground::Ground(void* parent,
-               const std::string& flutter_assets_path,
+Ground::Ground(const std::string& flutter_assets_path,
                const flutter::EncodableMap& params)
-    : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+    : flutterAssetsPath_(flutter_assets_path) {
   SPDLOG_TRACE("++Ground::Ground");
   for (auto& it : params) {
     if (it.second.IsNull())
@@ -47,8 +46,7 @@ Ground::Ground(void* parent,
     } else if (key == "size" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       size_ =
-          std::make_unique<Size>(parent, flutterAssetsPath_,
-                                 std::get<flutter::EncodableMap>(it.second));
+          std::make_unique<Size>(std::get<flutter::EncodableMap>(it.second));
       size_wrapper_ = size_.value().get();
     } else if (key == "material" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {

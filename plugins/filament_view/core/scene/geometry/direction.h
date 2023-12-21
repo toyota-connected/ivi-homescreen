@@ -27,6 +27,7 @@ namespace plugin_filament_view {
 class Direction {
  public:
   Direction(float x, float y, float z) : x_(x), y_(y), z_(z){};
+
   Direction(const flutter::EncodableMap& params);
 
   ::filament::math::float3 toFloatArray() { return {x_, y_, z_}; }
@@ -35,9 +36,11 @@ class Direction {
 
   // Disallow copy and assign.
   Direction(const Direction&) = delete;
+
   Direction& operator=(const Direction&) = delete;
 
   friend class LightManager;
+
   friend class Light;
 
  private:

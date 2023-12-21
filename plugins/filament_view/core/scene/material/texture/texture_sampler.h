@@ -23,10 +23,12 @@ namespace plugin_filament_view::material::texture {
 class TextureSampler {
  public:
   TextureSampler(const flutter::EncodableMap& params);
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   TextureSampler(const TextureSampler&) = delete;
+
   TextureSampler& operator=(const TextureSampler&) = delete;
 
  private:

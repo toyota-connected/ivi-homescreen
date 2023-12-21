@@ -41,9 +41,9 @@ FilamentScene::FilamentScene(PlatformView* platformView,
     auto key = std::get<std::string>(it.first);
 
     if (key == "model") {
-      model_ = std::make_unique<Model>(this, flutterAssetsPath, it.second);
+      model_ = Model::Deserialize(flutterAssetsPath, it.second);
     } else if (key == "scene") {
-      scene_ = std::make_unique<Scene>(nullptr, flutterAssetsPath, it.second);
+      scene_ = std::make_unique<Scene>(flutterAssetsPath, it.second);
     } else if (key == "shapes" &&
                std::holds_alternative<flutter::EncodableList>(it.second)) {
       auto list = std::get<flutter::EncodableList>(it.second);

@@ -26,11 +26,14 @@ class MaterialParameter {
  public:
   MaterialParameter(const std::string& flutter_assets_path,
                     const flutter::EncodableMap& params);
+
   ~MaterialParameter();
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   MaterialParameter(const MaterialParameter&) = delete;
+
   MaterialParameter& operator=(const MaterialParameter&) = delete;
 
  private:
@@ -65,6 +68,7 @@ class MaterialParameter {
   std::optional<std::unique_ptr<material::texture::Texture>> texture_;
 
   static const char* getTextForType(Type type);
+
   static Type getTypeForText(const std::string& type);
 };
 }  // namespace plugin_filament_view
