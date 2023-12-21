@@ -16,61 +16,65 @@
 
 #include "skybox.h"
 
-#include <filesystem>
-
 #include "logging/logging.h"
 #include "utils.h"
 
 namespace plugin_filament_view {
 
-Skybox::Skybox(void* parent,
-               const std::string& flutter_assets_path,
-               const flutter::EncodableMap& params)
-    : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+Skybox::Skybox(std::string assetPath, std::string url, std::string color)
+    : assetPath_(std::move(assetPath)),
+      url_(std::move(url)),
+      color_(std::move(color)) {}
+
+std::unique_ptr<Skybox> Skybox::Deserialize(
+    const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Skybox::Skybox");
+  std::optional<std::string> assetPath;
+  std::optional<std::string> url;
+  std::optional<std::string> color;
+  std::optional<bool> showSun;
+  std::optional<int32_t> skyboxType;
+
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
 
     auto key = std::get<std::string>(it.first);
     if (key == "assetPath" && std::holds_alternative<std::string>(it.second)) {
-      assetPath_ = std::get<std::string>(it.second);
+      assetPath = std::get<std::string>(it.second);
     } else if (key == "url" && std::holds_alternative<std::string>(it.second)) {
-      url_ = std::get<std::string>(it.second);
+      url = std::get<std::string>(it.second);
+    } else if (key == "color" &&
+               std::holds_alternative<std::string>(it.second)) {
+      color = std::get<std::string>(it.second);
     } else if (key == "showSun" && std::holds_alternative<bool>(it.second)) {
-      showSun_ = std::get<bool>(it.second);
+      showSun = std::get<bool>(it.second);
     } else if (key == "skyboxType" &&
                std::holds_alternative<int32_t>(it.second)) {
-      skyboxType_ = std::get<int32_t>(it.second);
+      skyboxType = std::get<int32_t>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[SkyBox] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
+
+  if (skyboxType.has_value()) {
+    if (skyboxType == 1) {
+      spdlog::debug("[Skybox] Type: KxtSkybox");
+      return std::move(std::make_unique<KxtSkybox>(assetPath, url));
+    } else if (skyboxType == 2) {
+      spdlog::debug("[Skybox] Type: HdrSkybox");
+      return std::move(std::make_unique<HdrSkybox>(assetPath, url, showSun));
+    } else if (skyboxType == 3) {
+      spdlog::debug("[Skybox] Type: ColorSkybox");
+      return std::move(std::make_unique<ColorSkybox>(assetPath, url, color));
+    }
+  } else {
+    spdlog::critical("[IndirectLight] Unknown Type: {}", skyboxType.value());
+  }
+
   SPDLOG_TRACE("--Skybox::Skybox");
-}
-
-void Skybox::Print(const char* tag) {
-  spdlog::debug("++++++++");
-  spdlog::debug("{} (Skybox)", tag);
-  if (!assetPath_.empty()) {
-    spdlog::debug("\tassetPath: {}", assetPath_);
-    std::filesystem::path asset_folder(flutterAssetsPath_);
-    spdlog::debug(
-        "\tasset_path {} valid",
-        std::filesystem::exists(asset_folder / assetPath_) ? "is" : "is not");
-  }
-  if (!url_.empty()) {
-    spdlog::debug("\turl: {}", url_);
-  }
-  if (showSun_.has_value()) {
-    spdlog::debug("\tshowSun: {}", showSun_.value());
-  }
-  if (skyboxType_.has_value()) {
-    spdlog::debug("\tskyboxType: {}", skyboxType_.value());
-  }
-
-  spdlog::debug("++++++++");
+  return nullptr;
 }
 
 }  // namespace plugin_filament_view

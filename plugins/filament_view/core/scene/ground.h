@@ -30,20 +30,19 @@ class GroundManager;
 
 class Ground {
  public:
-  Ground(void* parent,
-         const std::string& flutter_assets_path,
+  Ground(const std::string& flutter_assets_path,
          const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Ground(const Ground&) = delete;
+
   Ground& operator=(const Ground&) = delete;
 
   friend class GroundManager;
 
  private:
-  void* parent_;
   const std::string& flutterAssetsPath_;
 
   std::optional<std::unique_ptr<Position>> center_position_;

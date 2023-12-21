@@ -38,16 +38,27 @@
 namespace plugin_filament_view {
 
 class Model;
+
 class Scene;
+
 class LightManager;
+
 class IndirectLightManager;
+
 class SkyboxManager;
+
 class Animation;
+
 class AnimationManager;
+
 class CameraManager;
+
 class GroundManager;
+
 class MaterialManager;
+
 class ShapeManager;
+
 class IBLProfiler;
 
 class SceneController {
@@ -103,22 +114,31 @@ class SceneController {
 
   void setUpViewer(PlatformView* platformView,
                    FlutterDesktopEngineState* state);
+
   void setUpLoadingModel();
+
   void setUpCamera();
+
   void setUpGround();
+
   std::future<void> setUpIblProfiler();
+
   void setUpSkybox();
+
   void setUpLight();
+
   void setUpIndirectLight();
+
   void setUpShapes();
 
   std::string setDefaultCamera();
 
-  std::string loadModel(std::optional<Model*> model);
+  std::string loadModel(Model* model);
 
   void setUpAnimation(std::optional<Animation*> animation);
 
   void makeSurfaceViewTransparent();
+
   void makeSurfaceViewNotTransparent();
 };
 }  // namespace plugin_filament_view

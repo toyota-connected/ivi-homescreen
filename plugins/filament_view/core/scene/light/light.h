@@ -24,6 +24,7 @@
 #include "core/scene/light/light_manager.h"
 
 class Direction;
+
 class Position;
 
 namespace plugin_filament_view {
@@ -40,10 +41,12 @@ class Light {
 
   static ::filament::LightManager::Type textToLightType(
       const std::string& type);
+
   static const char* lightTypeToText(::filament::LightManager::Type type);
 
   // Disallow copy and assign.
   Light(const Light&) = delete;
+
   Light& operator=(const Light&) = delete;
 
   friend class LightManager;

@@ -52,7 +52,7 @@ std::future<std::string> LightManager::changeLight(Light* light) {
     return future;
   }
 
-  asio::post(*model_viewer_->getStrandContext(), [&, promise, light] {
+  asio::post(model_viewer_->getStrandContext(), [&, promise, light] {
     auto builder = ::filament::LightManager::Builder(light->type_);
 
     if (light->color_.has_value()) {

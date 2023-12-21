@@ -22,27 +22,29 @@
 
 #include "core/scene/geometry/direction.h"
 #include "core/scene/geometry/position.h"
-#include "core/scene/indirect_light/default_indirect_light.h"
-#include "core/scene/indirect_light/hdr_indirect_light.h"
 #include "core/scene/indirect_light/indirect_light.h"
-#include "core/scene/indirect_light/ktx_indirect_light.h"
+#include "core/utils/ibl_profiler.h"
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 #include "viewer/custom_model_viewer.h"
-#include "core/utils/ibl_profiler.h"
-
 
 namespace plugin_filament_view {
 
 class CustomModelViewer;
+
 class IBLProfiler;
+
 class IndirectLight;
+
 class DefaultIndirectLight;
+
 class KtxIndirectLight;
+
 class HdrIndirectLight;
 
 class IndirectLightManager {
  public:
-  IndirectLightManager(CustomModelViewer* model_viewer, IBLProfiler* ibl_profiler);
+  IndirectLightManager(CustomModelViewer* model_viewer,
+                       IBLProfiler* ibl_profiler);
 
   void setDefaultIndirectLight();
 
@@ -59,13 +61,14 @@ class IndirectLightManager {
                                                       double intensity);
 
   std::string loadIndirectLightHdrFromFile(const std::string& asset_path,
-                                             double intensity);
+                                           double intensity);
 
   std::future<std::string> setIndirectLight(
       DefaultIndirectLight* indirectLight);
 
   // Disallow copy and assign.
   IndirectLightManager(const IndirectLightManager&) = delete;
+
   IndirectLightManager& operator=(const IndirectLightManager&) = delete;
 
  private:

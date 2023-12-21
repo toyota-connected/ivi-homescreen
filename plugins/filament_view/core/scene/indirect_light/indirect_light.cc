@@ -16,16 +16,15 @@
 
 #include "indirect_light.h"
 
-#include "core/scene/indirect_light/default_indirect_light.h"
-#include "core/scene/indirect_light/hdr_indirect_light.h"
-#include "core/scene/indirect_light/ktx_indirect_light.h"
 #include "logging/logging.h"
 #include "utils.h"
 
 namespace plugin_filament_view {
 
 class DefaultIndirectLight;
+
 class KtxIndirectLight;
+
 class HdrIndirectLight;
 
 IndirectLight::IndirectLight(std::string assetPath,
@@ -69,17 +68,23 @@ std::unique_ptr<IndirectLight> IndirectLight::Deserialize(
 
   if (type.has_value()) {
     if (type == 1) {
-      return std::make_unique<KtxIndirectLight>(assetPath, url, intensity);
+      spdlog::debug("[IndirectLight] Type: KtxIndirectLight");
+      return std::move(std::make_unique<KtxIndirectLight>(
+          std::move(assetPath), std::move(url), intensity));
     } else if (type == 2) {
-      return std::make_unique<HdrIndirectLight>(assetPath, url, intensity);
+      spdlog::debug("[IndirectLight] Type: HdrIndirectLight");
+      return std::move(std::make_unique<HdrIndirectLight>(
+          std::move(assetPath), std::move(url), intensity));
     } else if (type == 3) {
-      return std::make_unique<DefaultIndirectLight>();
+      spdlog::debug("[IndirectLight] Type: DefaultIndirectLight");
+      return std::move(std::make_unique<DefaultIndirectLight>());
     }
   } else {
-    assert(false);
+    spdlog::critical("[IndirectLight] Unknown Type: {}", type.value());
   }
 
   SPDLOG_TRACE("--IndirectLight::Deserialize");
+  return nullptr;
 }
 
 }  // namespace plugin_filament_view

@@ -23,6 +23,7 @@
 #include "messages.g.h"
 
 class FlutterView;
+
 class Display;
 
 namespace plugin_filament_view {

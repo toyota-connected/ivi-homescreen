@@ -21,9 +21,7 @@
 #include "utils.h"
 
 namespace plugin_filament_view {
-Size::Size(void* /* parent */,
-           const std::string& /* flutter_assets_path */,
-           const flutter::EncodableMap& params) {
+Size::Size(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Size::Size");
   for (auto& it : params) {
     if (it.second.IsNull())

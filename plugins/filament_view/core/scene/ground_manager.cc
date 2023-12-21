@@ -82,31 +82,31 @@ std::future<std::string> GroundManager::createGround() {
     return future;
   }
 
-  asio::post(*model_viewer_->getStrandContext(), [&, promise] {
+  asio::post(model_viewer_->getStrandContext(), [&, promise] {
 
 #if 0  // TODO
-    auto materialInstanceResult = materialManger_->getMaterialInstance(ground_->getMaterial());
+            auto materialInstanceResult = materialManger_->getMaterialInstance(ground_->getMaterial());
 
-    auto modelTransform = model_viewer_->getModelTransform();
+            auto modelTransform = model_viewer_->getModelTransform();
 
-    Position* center;
-    if (ground_->getIsBelowModel()) {
-      center = new Position(modelTransform[0, 3], modelTransform[1, 3], modelTransform[2, 3]);
-    }
-    else {
-      if (!ground_->getCenterPosition().has_value()) {
-        promise->set_value("Position must be provided");
-        return;
-      }
-      center = ground_->getCenterPosition().value();
-    }
+            Position* center;
+            if (ground_->getIsBelowModel()) {
+              center = new Position(modelTransform[0, 3], modelTransform[1, 3], modelTransform[2, 3]);
+            }
+            else {
+              if (!ground_->getCenterPosition().has_value()) {
+                promise->set_value("Position must be provided");
+                return;
+              }
+              center = ground_->getCenterPosition().value();
+            }
 
-    plane_geometry_ = PlaneGeometry.Builder(
-                                 center = center,
-                                 ground_->getSize(),
-                                 ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
-    delete center;
-    plane_geometry_->setupScene(model_viewer_, materialInstanceResult.data);
+            plane_geometry_ = PlaneGeometry.Builder(
+                                         center = center,
+                                         ground_->getSize(),
+                                         ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
+            delete center;
+            plane_geometry_->setupScene(model_viewer_, materialInstanceResult.data);
 #endif
     model_viewer_->setGroundState(SceneState::LOADED);
     promise->set_value("Ground created successfully");

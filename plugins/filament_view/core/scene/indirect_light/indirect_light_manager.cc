@@ -23,7 +23,7 @@
 #include <asio/post.hpp>
 #include <utility>
 
-#include "hdr_loader.h"
+#include "core/utils/hdr_loader.h"
 #include "logging/logging.h"
 #include "textures/texture.h"
 
@@ -57,7 +57,7 @@ std::future<std::string> IndirectLightManager::setIndirectLight(
     promise->set_value("Light is null");
     return future;
   }
-  asio::post(*model_viewer_->getStrandContext(), [&, promise, indirectLight] {
+  asio::post(model_viewer_->getStrandContext(), [&, promise, indirectLight] {
     auto builder = ::filament::IndirectLight::Builder();
     builder.intensity(indirectLight->getIntensity());
     builder.radiance(static_cast<uint8_t>(indirectLight->radiance_.size()),
@@ -80,7 +80,7 @@ std::future<std::string> IndirectLightManager::setIndirectLightFromKtxAsset(
     double intensity) {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
-  asio::post(*model_viewer_->getStrandContext(),
+  asio::post(model_viewer_->getStrandContext(),
              [&, promise, path = std::move(path), intensity] {
                promise->set_value("");
              });
@@ -92,7 +92,7 @@ std::future<std::string> IndirectLightManager::setIndirectLightFromKtxUrl(
     double intensity) {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
-  asio::post(*model_viewer_->getStrandContext(),
+  asio::post(model_viewer_->getStrandContext(),
              [&, promise, url = std::move(url), intensity] {
                promise->set_value("");
              });
@@ -136,7 +136,7 @@ std::future<std::string> IndirectLightManager::setIndirectLightFromHdrAsset(
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
   model_viewer_->setLightState(SceneState::LOADING);
-  asio::post(*model_viewer_->getStrandContext(),
+  asio::post(model_viewer_->getStrandContext(),
              [&, promise, path = std::move(path), intensity] {
                std::filesystem::path asset_path(model_viewer_->getAssetPath());
                asset_path /= path;
@@ -160,7 +160,7 @@ std::future<std::string> IndirectLightManager::setIndirectLightFromHdrUrl(
     double intensity) {
   const auto promise(std::make_shared<std::promise<std::string>>());
   auto future(promise->get_future());
-  asio::post(*model_viewer_->getStrandContext(),
+  asio::post(model_viewer_->getStrandContext(),
              [&, promise, url = std::move(url), intensity] {
                promise->set_value("");
              });

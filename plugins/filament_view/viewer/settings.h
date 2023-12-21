@@ -40,6 +40,7 @@ namespace filament {
 using namespace color;
 
 class Skybox;
+
 class Renderer;
 
 namespace viewer {
@@ -84,9 +85,11 @@ using LightManager = filament::LightManager;
 // These functions push all editable property values to their respective
 // Filament objects.
 void applySettings(Engine* engine, const ViewSettings& settings, View* dest);
+
 void applySettings(Engine* engine,
                    const MaterialSettings& settings,
                    MaterialInstance* dest);
+
 void applySettings(Engine* engine,
                    const LightSettings& settings,
                    IndirectLight* ibl,
@@ -96,6 +99,7 @@ void applySettings(Engine* engine,
                    LightManager* lm,
                    Scene* scene,
                    View* view);
+
 void applySettings(Engine* engine,
                    const ViewerOptions& settings,
                    Camera* camera,
@@ -110,6 +114,7 @@ ColorGrading* createColorGrading(const ColorGradingSettings& settings,
 class UTILS_PUBLIC JsonSerializer {
  public:
   JsonSerializer();
+
   ~JsonSerializer();
 
   // Writes a human-readable JSON string into an internal buffer and returns the
@@ -125,6 +130,7 @@ class UTILS_PUBLIC JsonSerializer {
 
  private:
   class Context;
+
   Context* context;
 };
 
@@ -133,17 +139,21 @@ struct GenericToneMapperSettings {
   float midGrayIn = 0.18f;
   float midGrayOut = 0.215f;
   float hdrMax = 10.0f;
+
   bool operator!=(const GenericToneMapperSettings& rhs) const {
     return !(rhs == *this);
   }
+
   bool operator==(const GenericToneMapperSettings& rhs) const;
 };
 
 struct AgxToneMapperSettings {
   AgxToneMapper::AgxLook look = AgxToneMapper::AgxLook::NONE;
+
   bool operator!=(const AgxToneMapperSettings& rhs) const {
     return !(rhs == *this);
   }
+
   bool operator==(const AgxToneMapperSettings& rhs) const;
 };
 
@@ -184,6 +194,7 @@ struct ColorGradingSettings {
   bool operator!=(const ColorGradingSettings& rhs) const {
     return !(rhs == *this);
   }
+
   bool operator==(const ColorGradingSettings& rhs) const;
 };
 

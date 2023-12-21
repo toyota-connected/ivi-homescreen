@@ -24,8 +24,7 @@
 #include "utils.h"
 
 namespace plugin_filament_view {
-Animation::Animation(void* parent,
-                     const std::string& flutter_assets_path,
+Animation::Animation(const std::string& flutter_assets_path,
                      const flutter::EncodableMap& params)
     : flutterAssetsPath_(flutter_assets_path) {
   for (auto& it : params) {

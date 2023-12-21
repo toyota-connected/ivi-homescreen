@@ -29,7 +29,9 @@
 namespace plugin_filament_view {
 
 class Ground;
+
 class MaterialManager;
+
 class CustomModelViewer;
 
 using ::filament::IndexBuffer;
@@ -47,6 +49,7 @@ class GroundManager {
 
   // Disallow copy and assign.
   GroundManager(const GroundManager&) = delete;
+
   GroundManager& operator=(const GroundManager&) = delete;
 
  private:

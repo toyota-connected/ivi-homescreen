@@ -16,30 +16,32 @@
 
 #pragma once
 
-#include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
-
-#include "core/scene/geometry/direction.h"
-#include "core/scene/geometry/position.h"
 #include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
 
 class CustomModelViewer;
 
-class MaterialManager {
+class GlbLoader {
  public:
-  MaterialManager(CustomModelViewer* model_viewer,
-                  const std::string& flutter_assets_path);
+  explicit GlbLoader(CustomModelViewer* modelViewer,
+                     const std::string& flutterAssets);
 
-  // TODO getMaterialInstance(std::optional<Material*>);
+  ~GlbLoader() = default;
 
-  // Disallow copy and assign.
-  MaterialManager(const MaterialManager&) = delete;
+  std::future<std::string> loadGlbFromAsset(const std::string& path,
+                                            float scale,
+                                            const Position* centerPosition,
+                                            bool isFallback = false);
 
-  MaterialManager& operator=(const MaterialManager&) = delete;
+  std::future<std::string> loadGlbFromUrl(const std::string& url,
+                                          float scale,
+                                          const Position* centerPosition,
+                                          bool isFallback = false);
 
  private:
   CustomModelViewer* model_viewer_;
-  const std::string& flutterAssetsPath_;
+  std::string flutterAssets_;
+  const asio::io_context::strand& strand_;
 };
 }  // namespace plugin_filament_view

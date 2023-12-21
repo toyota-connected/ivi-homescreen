@@ -25,6 +25,7 @@ class Geometry {
            std::vector<std::pair<int, int>> offsetsCounts,
            std::vector<Vertex> vertics,
            std::vector<Submesh> submeshes);
+
   ~Geometry();
 
   auto renderable = engine->getEntityManager().create();

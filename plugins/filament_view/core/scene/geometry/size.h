@@ -24,14 +24,15 @@ namespace plugin_filament_view {
 
 class Size {
  public:
-  Size(void* parent,
-       const std::string& flutter_assets_path,
-       const flutter::EncodableMap& params);
+  Size(const flutter::EncodableMap& params);
+
   Size(double x, double y, double z);
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Size(const Size&) = delete;
+
   Size& operator=(const Size&) = delete;
 
  private:

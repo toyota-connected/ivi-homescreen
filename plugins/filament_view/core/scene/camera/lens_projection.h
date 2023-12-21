@@ -30,12 +30,16 @@ class LensProjection {
   [[nodiscard]] std::optional<float> getFocalLength() const {
     return focalLength_;
   }
+
   [[nodiscard]] std::optional<float> getAspect() const { return aspect_; }
+
   [[nodiscard]] std::optional<float> getNear() const { return near_; }
+
   [[nodiscard]] std::optional<float> getFar() const { return far_; }
 
   // Disallow copy and assign.
   LensProjection(const LensProjection&) = delete;
+
   LensProjection& operator=(const LensProjection&) = delete;
 
  private:

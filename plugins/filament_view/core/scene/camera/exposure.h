@@ -26,10 +26,12 @@ class CameraManager;
 class Exposure {
  public:
   Exposure(const flutter::EncodableMap& params);
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Exposure(const Exposure&) = delete;
+
   Exposure& operator=(const Exposure&) = delete;
 
   friend class CameraManager;

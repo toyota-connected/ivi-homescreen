@@ -19,7 +19,6 @@
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
 #include "core/scene/camera/camera.h"
-
 #include "core/scene/ground.h"
 #include "core/scene/indirect_light/indirect_light.h"
 #include "core/scene/light/light.h"
@@ -28,39 +27,45 @@
 
 namespace plugin_filament_view {
 
-class CustomModelViewer;
-class IndirectLight;
-class Light;
 class Camera;
+
+class CustomModelViewer;
+
 class Ground;
+
+class IndirectLight;
+
+class Light;
+
 class SceneController;
+
 class SkyBox;
 
 class Scene {
  public:
-  Scene(void* parent,
-        const std::string& flutter_assets_path,
+  Scene(const std::string& flutter_assets_path,
         const flutter::EncodableValue& val);
+
   ~Scene();
+
   void Print(const char* tag) const;
 
   // Disallow copy and assign.
   Scene(const Scene&) = delete;
+
   Scene& operator=(const Scene&) = delete;
 
-  friend class Scene;
   friend class SceneController;
+
   friend class CustomModelViewer;
 
  private:
-  void* parent_;
   const std::string& flutterAssetsPath_;
 
-  // TODO std::optional<std::unique_ptr<plugin_filament_view::SkyBox>> skybox_;
-  std::optional<std::unique_ptr<plugin_filament_view::IndirectLight>>
-      indirect_light_;
-  std::optional<std::unique_ptr<plugin_filament_view::Light>> light_;
-  std::optional<std::unique_ptr<plugin_filament_view::Camera>> camera_;
-  std::optional<std::unique_ptr<plugin_filament_view::Ground>> ground_;
+  std::unique_ptr<plugin_filament_view::Skybox> skybox_;
+  std::unique_ptr<plugin_filament_view::IndirectLight> indirect_light_;
+  std::unique_ptr<plugin_filament_view::Light> light_;
+  std::unique_ptr<plugin_filament_view::Camera> camera_;
+  std::unique_ptr<plugin_filament_view::Ground> ground_;
 };
 }  // namespace plugin_filament_view

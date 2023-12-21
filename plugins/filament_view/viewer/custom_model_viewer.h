@@ -35,11 +35,11 @@
 #include <wayland-client.h>
 #include <asio/io_context_strand.hpp>
 
-#include "core/scene/camera/camera_manager.h"
-#include "models/state/model_state.h"
-
+#include "core/model/glb_loader.h"
+#include "core/model/gltf_loader.h"
 #include "core/model/model.h"
 #include "core/model/model_loader.h"
+#include "core/scene/camera/camera_manager.h"
 #include "core/scene/scene.h"
 #include "core/shapes/shape.h"
 #include "flutter_desktop_plugin_registrar.h"
@@ -52,8 +52,16 @@
 namespace plugin_filament_view {
 
 class CameraManager;
+
+class GlbLoader;
+
+class GltfLoader;
+
 class ModelLoader;
+
 class Model;
+
+class Scene;
 
 using models::state::ModelState;
 using models::state::SceneState;
@@ -61,9 +69,13 @@ using models::state::ShapeState;
 
 class CustomModelViewer {
  public:
+  static constexpr ::filament::float3 kDefaultObjectPosition = {0.0f, 0.0f,
+                                                                -4.0f};
+
   CustomModelViewer(PlatformView* platformView,
                     FlutterDesktopEngineState* state,
                     std::string flutterAssetsPath);
+
   ~CustomModelViewer();
 
   std::future<bool> Initialize(PlatformView* platformView);
@@ -73,19 +85,20 @@ class CustomModelViewer {
   };
 
   void setModelState(models::state::ModelState modelState);
+
   void setGroundState(models::state::SceneState sceneState);
+
   void setLightState(models::state::SceneState sceneState);
 
-#if 0   // TODO
-  const ::filament::math::mat4f& getModelTransform() {
-    return modelLoader_->getModelTransform();
-  };
-#endif  // TODO
+  void setSkyboxState(models::state::SceneState sceneState);
 
   void destroyIndirectLight();
 
+  void destroySkybox();
+
   // Disallow copy and assign.
   CustomModelViewer(const CustomModelViewer&) = delete;
+
   CustomModelViewer& operator=(const CustomModelViewer&) = delete;
 
   [[nodiscard]] ::filament::Engine* getFilamentEngine() const {
@@ -96,24 +109,32 @@ class CustomModelViewer {
 
   [[nodiscard]] ::filament::Scene* getFilamentScene() const { return fscene_; }
 
+  [[nodiscard]] ::filament::Skybox* getFilamentSkybox() const {
+    return fskybox_;
+  }
+
   [[nodiscard]] ::filament::Renderer* getFilamentRenderer() const {
     return frenderer_;
   }
 
-  [[nodiscard]] Scene* getScene() const { return scene_; }
+  [[nodiscard]] plugin_filament_view::Scene* getScene() const { return scene_; }
 
-  std::string loadModel(Model* model);
+  ModelLoader* getModelLoader() const { return modelLoader_.get(); }
 
-  [[nodiscard]] ModelLoader* getModelLoader() const {
-    return modelLoader_.get();
+  [[nodiscard]] GlbLoader* getGlbModelLoader() const {
+    return glbLoader_.get();
+  }
+
+  [[nodiscard]] GltfLoader* getGltfModelLoader() const {
+    return gltfLoader_.get();
   }
 
   void setAnimator(filament::gltfio::Animator* animator) {
     fanimator_ = animator;
   }
 
-  [[nodiscard]] asio::io_context::strand* getStrandContext() const {
-    return strand_.get();
+  [[nodiscard]] const asio::io_context::strand& getStrandContext() const {
+    return *strand_;
   }
 
   filament::viewer::Settings& getSettings() { return settings_; }
@@ -168,11 +189,12 @@ class CustomModelViewer {
     uint32_t height;
   } native_window_{};
 
-  Scene* scene_{};
+  plugin_filament_view::Scene* scene_{};
 
   ::filament::Engine* fengine_{};
   ::filament::Scene* fscene_{};
   ::filament::View* fview_{};
+  filament::Skybox* fskybox_ = nullptr;
   ::filament::Renderer* frenderer_{};
   ::filament::SwapChain* fswapChain_{};
 
@@ -184,14 +206,16 @@ class CustomModelViewer {
   [[maybe_unused]] SceneState currentGroundState_;
   [[maybe_unused]] ShapeState currentShapesState_;
 
-  filament::Skybox* skybox_ = nullptr;
-
   std::unique_ptr<ModelLoader> modelLoader_;
+  std::unique_ptr<GlbLoader> glbLoader_;
+  std::unique_ptr<GltfLoader> gltfLoader_;
 
   CameraManager* cameraManager_{};
 
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
+
   static const wl_callback_listener frame_listener;
+
   void DrawFrame(uint32_t time);
 
   void setupView();

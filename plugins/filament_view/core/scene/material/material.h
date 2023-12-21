@@ -25,11 +25,14 @@ class Material {
  public:
   Material(const std::string& flutter_assets_path,
            const flutter::EncodableMap& params);
+
   ~Material();
+
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Material(const Material&) = delete;
+
   Material& operator=(const Material&) = delete;
 
  private:

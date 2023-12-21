@@ -16,12 +16,14 @@
 
 #pragma once
 
+#include <future>
+
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
 #include "core/scene/geometry/direction.h"
 #include "core/scene/geometry/position.h"
-#include "viewer/custom_model_viewer.h"
 #include "core/utils/ibl_profiler.h"
+#include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
 class SkyboxManager {
@@ -30,15 +32,49 @@ class SkyboxManager {
                 IBLProfiler* ibl_profiler,
                 const std::string& flutter_assets_path);
 
+  std::future<void> Initialize();
+
   void setDefaultSkybox();
+
+  std::future<std::string> setSkyboxFromHdrAsset(const std::string& path,
+                                                 bool showSun,
+                                                 bool shouldUpdateLight,
+                                                 float intensity);
+
+  std::future<std::string> setSkyboxFromHdrUrl(const std::string& url,
+                                               bool showSun,
+                                               bool shouldUpdateLight,
+                                               float intensity);
+
+  std::future<std::string> setSkyboxFromKTXAsset(const std::string& path);
+
+  std::future<std::string> setSkyboxFromKTXUrl(const std::string& url);
+
+  std::future<std::string> setSkyboxFromColor(const std::string& color);
+
+  std::string loadSkyboxFromHdrBuffer(const std::vector<uint8_t>& buffer,
+                                      bool showSun,
+                                      bool shouldUpdateLight,
+                                      float intensity);
+
+  std::string loadSkyboxFromHdrFile(const std::string assetPath,
+                                    bool showSun,
+                                    bool shouldUpdateLight,
+                                    float intensity);
+
+  void destroySkybox();
 
   // Disallow copy and assign.
   SkyboxManager(const SkyboxManager&) = delete;
+
   SkyboxManager& operator=(const SkyboxManager&) = delete;
 
  private:
   CustomModelViewer* model_viewer_;
+  ::filament::Engine* engine_;
   IBLProfiler* ibl_profiler_;
   const std::string& flutterAssetsPath_;
+
+  void setTransparentSkybox();
 };
 }  // namespace plugin_filament_view

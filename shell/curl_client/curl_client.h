@@ -53,7 +53,17 @@ class CurlClient {
    * @relation
    * google_sign_in
    */
-  std::string RetrieveContent(bool verbose = false);
+  std::string RetrieveContentAsString(bool verbose = false);
+
+  /**
+   * @brief Function to execute http client
+   * @param verbose flag to enable stderr output of curl dialog
+   * @return const std::vector<uint8_t>&
+   * @retval body response of client request
+   * @relation
+   * google_sign_in
+   */
+  const std::vector<uint8_t>& RetrieveContentAsVector(bool verbose = false);
 
   /**
    * @brief Function to return last curl response code
@@ -70,7 +80,8 @@ class CurlClient {
   std::string mUrl;
   std::string mPostFields;
   std::unique_ptr<char> mErrorBuffer;
-  std::string mBuffer;
+  std::string mStringBuffer;
+  std::vector<uint8_t> mVectorBuffer;
 
   /**
    * @brief Callback function for curl client
@@ -83,8 +94,24 @@ class CurlClient {
    * @relation
    * google_sign_in
    */
-  static int Writer(char* data,
-                    size_t size,
-                    size_t num_mem_block,
-                    std::string* writerData);
+  static int StringWriter(char* data,
+                          size_t size,
+                          size_t num_mem_block,
+                          std::string* writerData);
+
+  /**
+   * @brief Callback function for curl client
+   * @param data buffer of response
+   * @param size length of buffer
+   * @param num_mem_block number of memory blocks
+   * @param writerData user pointer
+   * @return int
+   * @retval returns back to curl size of write
+   * @relation
+   * google_sign_in
+   */
+  static int VectorWriter(char* data,
+                          size_t size,
+                          size_t num_mem_block,
+                          std::vector<uint8_t>* writerData);
 };

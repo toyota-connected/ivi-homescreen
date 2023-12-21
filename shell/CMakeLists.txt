@@ -63,7 +63,7 @@ if (BUILD_CRASH_HANDLER)
     target_sources(homescreen PRIVATE crash_handler.cc)
 endif ()
 
-if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
+if (BUILD_PLUGIN_GOOGLE_SIGN_IN OR BUILD_PLUGIN_FILAMENT_VIEW)
     target_sources(homescreen PRIVATE curl_client/curl_client.cc)
 endif ()
 

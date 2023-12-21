@@ -20,10 +20,10 @@
 #include "utils.h"
 
 namespace plugin_filament_view {
-Scene::Scene(void* parent,
-             const std::string& flutter_assets_path,
+
+Scene::Scene(const std::string& flutter_assets_path,
              const flutter::EncodableValue& params)
-    : parent_(parent), flutterAssetsPath_(flutter_assets_path) {
+    : flutterAssetsPath_(flutter_assets_path) {
   SPDLOG_TRACE("++Scene::Scene");
   for (auto& it : std::get<flutter::EncodableMap>(params)) {
     if (it.second.IsNull())
@@ -32,11 +32,8 @@ Scene::Scene(void* parent,
     auto key = std::get<std::string>(it.first);
     if (key == "skybox" &&
         std::holds_alternative<flutter::EncodableMap>(it.second)) {
-#if 0   // TODO
-      skybox_ = std::make_unique<plugin_filament_view::Skybox>(
-          parent, flutterAssetsPath_,
+      skybox_ = plugin_filament_view::Skybox::Deserialize(
           std::get<flutter::EncodableMap>(it.second));
-#endif  // TODO
     } else if (key == "light" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       light_ =
@@ -51,9 +48,8 @@ Scene::Scene(void* parent,
           std::make_unique<Camera>(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "ground" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      ground_ =
-          std::make_unique<Ground>(parent, flutterAssetsPath_,
-                                   std::get<flutter::EncodableMap>(it.second));
+      ground_ = std::make_unique<Ground>(
+          flutterAssetsPath_, std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Scene] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
@@ -70,21 +66,21 @@ void Scene::Print(const char* tag) const {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Scene)", tag);
 #if 0
-  if (skybox_.has_value()) {
-    skybox_.value()->Print("\tskybox");
-  }
+        if (skybox_.has_value()) {
+          skybox_.value()->Print("\tskybox");
+        }
 #endif
-  if (light_.has_value()) {
-    light_.value()->Print("\tlight");
+  if (light_) {
+    light_->Print("\tlight");
   }
-  if (indirect_light_.has_value()) {
-    // indirect_light_.value()->Print("\tindirect_light");
+  if (indirect_light_) {
+    /// indirect_light_->Print("\tindirect_light");
   }
-  if (camera_.has_value()) {
-    camera_.value()->Print("\tcamera");
+  if (camera_) {
+    camera_->Print("\tcamera");
   }
-  if (ground_.has_value()) {
-    ground_.value()->Print("\tground");
+  if (ground_) {
+    ground_->Print("\tground");
   }
   spdlog::debug("++++++++");
 }
