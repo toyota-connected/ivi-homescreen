@@ -34,6 +34,9 @@
 
 namespace plugin_filament_view {
 
+using ::filament::IndexBuffer;
+using ::filament::VertexBuffer;
+using ::utils::Entity;
 using ::filament::Aabb;
 using ::filament::RenderableManager;
 using ::filament::VertexAttribute;
@@ -43,12 +46,13 @@ using ::filament::math::mat4f;
 using ::filament::math::packSnorm16;
 using ::filament::math::short4;
 
-GroundManager::GroundManager(CustomModelViewer* model_viewer,
-                             MaterialManager* material_manager)
-    : model_viewer_(model_viewer),
+GroundManager::GroundManager(CustomModelViewer* modelViewer,
+                             MaterialManager* material_manager,
+                             Ground* ground)
+    : modelViewer_(modelViewer),
       materialManager_(material_manager),
-      engine_(model_viewer->getFilamentEngine()),
-      ground_(nullptr),
+      engine_(modelViewer->getFilamentEngine()),
+      ground_(ground),
       plane_geometry_(nullptr) {
   SPDLOG_TRACE("++GroundManager::GroundManager");
   SPDLOG_TRACE("--GroundManager::GroundManager");
@@ -66,28 +70,42 @@ mat4f inline fitIntoUnitCube(const Aabb& bounds, float zoffset) {
   return mat4f::scaling(float3(scaleFactor)) * mat4f::translation(-center);
 }
 
-std::future<std::string> GroundManager::createGround() {
+std::future<Resource<std::string>> GroundManager::createGround() {
   SPDLOG_DEBUG("++GroundManager::createGround");
-  const auto promise(std::make_shared<std::promise<std::string>>());
+  const auto promise(std::make_shared<std::promise<Resource<std::string>>>());
   auto future(promise->get_future());
-  model_viewer_->setGroundState(SceneState::LOADING);
+
+  modelViewer_->setGroundState(SceneState::LOADING);
+
   if (!ground_) {
-    model_viewer_->setGroundState(SceneState::ERROR);
-    promise->set_value("Ground must be provided");
-    return future;
-  }
-  if (!ground_->size_) {
-    model_viewer_->setGroundState(SceneState::ERROR);
-    promise->set_value("Size must be provided");
+    modelViewer_->setGroundState(SceneState::ERROR);
+    promise->set_value(Resource<std::string>::Error("Ground must be provided"));
+    SPDLOG_DEBUG("--GroundManager::createGround");
     return future;
   }
 
-  asio::post(model_viewer_->getStrandContext(), [&, promise] {
+  if (!ground_->size_) {
+    modelViewer_->setGroundState(SceneState::ERROR);
+    promise->set_value(Resource<std::string>::Error("Size must be provided"));
+    SPDLOG_DEBUG("--GroundManager::createGround");
+    return future;
+  }
+
+  asio::post(modelViewer_->getStrandContext(), [&, promise] {
+
+    auto materialInstanceResult = materialManager_->getMaterialInstance(ground_->material_.get());
+
+    //auto modelTransform = modelViewer_->getModelTransform();
+#if 0
+    auto center = (ground_->isBelowModel_ && modelTransform != nullptr)
+                      ? Position(modelTransform[0][3], modelTransform[1][3], modelTransform[2][3])
+                      : ground_->center_position_ != nullptr
+                            ? ground_->center_position_
+                            : promise->set_value("Position must be provided"); return
+#endif
+
 
 #if 0  // TODO
-            auto materialInstanceResult = materialManger_->getMaterialInstance(ground_->getMaterial());
-
-            auto modelTransform = model_viewer_->getModelTransform();
 
             Position* center;
             if (ground_->getIsBelowModel()) {
@@ -106,12 +124,26 @@ std::future<std::string> GroundManager::createGround() {
                                          ground_->getSize(),
                                          ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
             delete center;
-            plane_geometry_->setupScene(model_viewer_, materialInstanceResult.data);
+            plane_geometry_->setupScene(modelViewer_, materialInstanceResult.data);
 #endif
-    model_viewer_->setGroundState(SceneState::LOADED);
-    promise->set_value("Ground created successfully");
+    modelViewer_->setGroundState(SceneState::LOADED);
+    promise->set_value(Resource<std::string>::Success("Ground created successfully"));
   });
   SPDLOG_DEBUG("--GroundManager::createGround");
   return future;
 }
+
+std::future<Resource<std::string>> GroundManager::updateGround(Ground* newGround) {
+  return std::future<Resource<std::string>>();
+}
+
+std::future<Resource<std::string>> GroundManager::updateGroundMaterial(
+    Material* newMaterial) {
+  return std::future<Resource<std::string>>();
+}
+
+void GroundManager::Print(const char* tag) {
+
+}
+
 }  // namespace plugin_filament_view

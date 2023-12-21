@@ -30,7 +30,7 @@ class Shape;
 
 class ShapeManager {
  public:
-  ShapeManager(CustomModelViewer* model_viewer,
+  ShapeManager(CustomModelViewer* modelViewer,
                MaterialManager* material_manager);
 
   void createShapes(const std::vector<std::unique_ptr<Shape>>& shapes);
@@ -41,7 +41,7 @@ class ShapeManager {
   ShapeManager& operator=(const ShapeManager&) = delete;
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   MaterialManager* material_manager_;
 };
 }  // namespace plugin_filament_view

@@ -17,6 +17,8 @@
 #pragma once
 
 #include "viewer/custom_model_viewer.h"
+#include "core/include/resource.h"
+
 
 namespace plugin_filament_view {
 
@@ -26,24 +28,31 @@ class Position;
 
 class GlbLoader {
  public:
-  explicit GlbLoader(CustomModelViewer* modelViewer,
-                     const std::string& flutterAssets);
+  explicit GlbLoader(CustomModelViewer* modelViewer, std::string flutterAssets);
 
   ~GlbLoader() = default;
 
-  std::future<std::string> loadGlbFromAsset(const std::string& path,
+  std::future<Resource<std::string>> loadGlbFromAsset(const std::string& path,
                                             float scale,
                                             const Position* centerPosition,
                                             bool isFallback = false);
 
-  std::future<std::string> loadGlbFromUrl(const std::string& url,
+  std::future<Resource<std::string>> loadGlbFromUrl(const std::string& url,
                                           float scale,
                                           const Position* centerPosition,
                                           bool isFallback = false);
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   std::string flutterAssets_;
   const asio::io_context::strand& strand_;
+
+  std::vector<char> buffer_;
+  void handleFile(const std::vector<uint8_t>& buffer,
+                  const std::string& fileSource,
+                  float scale,
+                  const Position* centerPosition,
+                  bool isFallback,
+                  const std::shared_ptr<std::promise<Resource<std::string>>>& promise);
 };
 }  // namespace plugin_filament_view

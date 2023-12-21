@@ -32,16 +32,15 @@ class Material {
 
   // Disallow copy and assign.
   Material(const Material&) = delete;
-
   Material& operator=(const Material&) = delete;
+
+  friend class MaterialManager;
 
  private:
   const std::string& flutterAssetsPath_;
 
   std::string assetPath_;
   std::string url_;
-  std::optional<
-      std::unique_ptr<std::vector<std::unique_ptr<MaterialParameter>>>>
-      parameters_;
+  std::vector<std::unique_ptr<MaterialParameter>> parameters_;
 };
 }  // namespace plugin_filament_view

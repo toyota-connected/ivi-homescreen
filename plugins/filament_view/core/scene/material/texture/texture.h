@@ -20,39 +20,41 @@
 
 #include "texture_sampler.h"
 
-namespace plugin_filament_view::material::texture {
+namespace plugin_filament_view {
 class Texture {
  public:
-  Texture(const std::string& flutter_assets_path,
-          const flutter::EncodableMap& params);
+  enum TextureType {
+    COLOR,
+    NORMAL,
+    DATA,
+  };
+
+  Texture(TextureType type,
+          std::string assetPath,
+          std::string url,
+          TextureSampler* sampler);
+
+  ~Texture();
+
+  static std::unique_ptr<Texture> Deserialize(
+      const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 
   // Disallow copy and assign.
   Texture(const Texture&) = delete;
-
   Texture& operator=(const Texture&) = delete;
 
-  enum Type {
-    color,
-    normal,
-    data,
-  };
+  static TextureType getType(const std::string& type);
 
-  static Type getType(const std::string& type);
+  static const char* getTextForType(TextureType type);
 
-  static const char* getTextForType(Type type);
+  friend class TextureLoader;
 
  private:
-  static constexpr char kTypeColor[] = "COLOR";
-  static constexpr char kTypeNormal[] = "NORMAL";
-  static constexpr char kTypeData[] = "DATA";
-
-  const std::string& flutterAssetsPath_;
-
   std::string assetPath_;
   std::string url_;
-  Type type_;
-  std::unique_ptr<TextureSampler> sampler_;
+  TextureType type_;
+  TextureSampler* sampler_;
 };
-}  // namespace plugin_filament_view::material::texture
+}  // namespace plugin_filament_view

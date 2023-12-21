@@ -28,7 +28,7 @@
 namespace plugin_filament_view {
 class SkyboxManager {
  public:
-  SkyboxManager(CustomModelViewer* model_viewer,
+  SkyboxManager(CustomModelViewer* modelViewer,
                 IBLProfiler* ibl_profiler,
                 const std::string& flutter_assets_path);
 
@@ -36,28 +36,28 @@ class SkyboxManager {
 
   void setDefaultSkybox();
 
-  std::future<std::string> setSkyboxFromHdrAsset(const std::string& path,
+  std::future<Resource<std::string>> setSkyboxFromHdrAsset(const std::string& path,
                                                  bool showSun,
                                                  bool shouldUpdateLight,
                                                  float intensity);
 
-  std::future<std::string> setSkyboxFromHdrUrl(const std::string& url,
+  std::future<Resource<std::string>> setSkyboxFromHdrUrl(const std::string& url,
                                                bool showSun,
                                                bool shouldUpdateLight,
                                                float intensity);
 
-  std::future<std::string> setSkyboxFromKTXAsset(const std::string& path);
+  std::future<Resource<std::string>> setSkyboxFromKTXAsset(const std::string& path);
 
-  std::future<std::string> setSkyboxFromKTXUrl(const std::string& url);
+  std::future<Resource<std::string>> setSkyboxFromKTXUrl(const std::string& url);
 
-  std::future<std::string> setSkyboxFromColor(const std::string& color);
+  std::future<Resource<std::string>> setSkyboxFromColor(const std::string& color);
 
-  std::string loadSkyboxFromHdrBuffer(const std::vector<uint8_t>& buffer,
+  Resource<std::string> loadSkyboxFromHdrBuffer(const std::vector<uint8_t>& buffer,
                                       bool showSun,
                                       bool shouldUpdateLight,
                                       float intensity);
 
-  std::string loadSkyboxFromHdrFile(const std::string assetPath,
+  Resource<std::string> loadSkyboxFromHdrFile(const std::string assetPath,
                                     bool showSun,
                                     bool shouldUpdateLight,
                                     float intensity);
@@ -70,7 +70,7 @@ class SkyboxManager {
   SkyboxManager& operator=(const SkyboxManager&) = delete;
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   ::filament::Engine* engine_;
   IBLProfiler* ibl_profiler_;
   const std::string& flutterAssetsPath_;

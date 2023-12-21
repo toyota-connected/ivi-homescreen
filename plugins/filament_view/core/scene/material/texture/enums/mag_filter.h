@@ -16,7 +16,7 @@
 
 #pragma once
 
-namespace plugin_filament_view::material::texture {
+namespace plugin_filament_view {
 
 enum MagFilter {
   /// No filtering. Nearest neighbor is used.
@@ -36,4 +36,4 @@ static const char* getTextForMagFilter(MagFilter mag_filter) {
   }[mag_filter];
 }
 
-}  // namespace plugin_filament_view::material::texture
+}  // namespace plugin_filament_view

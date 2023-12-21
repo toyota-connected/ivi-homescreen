@@ -20,7 +20,7 @@
 
 #include "core/scene/geometry/direction.h"
 #include "core/scene/geometry/position.h"
-#include "core/scene/material/material.h"
+#include "core/scene/material/model/material.h"
 
 namespace plugin_filament_view {
 class Shape {

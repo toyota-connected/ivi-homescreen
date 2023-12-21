@@ -39,12 +39,10 @@ Material::Material(const std::string& flutter_assets_path,
     } else if (key == "parameters" &&
                std::holds_alternative<flutter::EncodableList>(it.second)) {
       auto list = std::get<flutter::EncodableList>(it.second);
-      parameters_ =
-          std::make_unique<std::vector<std::unique_ptr<MaterialParameter>>>();
       for (const auto& it_ : list) {
-        auto parameter = std::make_unique<MaterialParameter>(
-            flutterAssetsPath_, std::get<flutter::EncodableMap>(it_));
-        parameters_.value()->push_back(std::move(parameter));
+        auto parameter = MaterialParameter::Deserialize(
+            flutter_assets_path, std::get<flutter::EncodableMap>(it_));
+        parameters_.push_back(std::move(parameter));
       }
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Material] Unhandled Parameter");
@@ -55,12 +53,10 @@ Material::Material(const std::string& flutter_assets_path,
 }
 
 Material::~Material() {
-  if (parameters_.has_value()) {
-    for (auto& item : *parameters_.value()) {
-      item.reset();
-    }
-    parameters_.reset();
+  for (auto& item : parameters_) {
+    item.reset();
   }
+  parameters_.clear();
 }
 
 void Material::Print(const char* tag) {
@@ -76,10 +72,8 @@ void Material::Print(const char* tag) {
   if (!url_.empty()) {
     spdlog::debug("\turl: [{}]", url_);
   }
-  if (parameters_.has_value()) {
-    for (const auto& param : *parameters_.value()) {
-      param->Print("\tparameter");
-    }
+  for (const auto& param : parameters_) {
+    param->Print("\tparameter");
   }
   spdlog::debug("++++++++");
 }

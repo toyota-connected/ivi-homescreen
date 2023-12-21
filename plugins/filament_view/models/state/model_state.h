@@ -18,7 +18,7 @@
 
 #include <string>
 
-namespace plugin_filament_view::models::state {
+namespace plugin_filament_view {
 
 /// Represents the state of the model.
 enum class ModelState {
@@ -72,4 +72,4 @@ static constexpr char kModelStateError[] = "ERROR";
   }[static_cast<int>(state)];
 }
 
-}  // namespace plugin_filament_view::models::state
+}  // namespace plugin_filament_view

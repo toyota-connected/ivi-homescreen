@@ -16,40 +16,57 @@
 
 #include "material_parameter.h"
 
+#include <utility>
+
 #include "logging/logging.h"
 #include "utils.h"
 
 namespace plugin_filament_view {
 
-MaterialParameter::MaterialParameter(const std::string& flutter_assets_path,
-                                     const flutter::EncodableMap& params)
-    : flutterAssetsPath_(flutter_assets_path) {
-  SPDLOG_TRACE("++MaterialParameter::MaterialParameter");
+MaterialParameter::MaterialParameter(std::string name,
+                                     MaterialType type,
+                                     MaterialValue value)
+    : name_(std::move(name)), type_(type), value_(std::move(value)) {}
+
+std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
+    const std::string& flutter_assets_path,
+    const flutter::EncodableMap& params) {
+  SPDLOG_TRACE("++MaterialParameter::Deserialize");
+  std::optional<std::string> name;
+  std::optional<MaterialType> type;
+  std::optional<flutter::EncodableMap> value;
+
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
 
     auto key = std::get<std::string>(it.first);
     if (key == "name" && std::holds_alternative<std::string>(it.second)) {
-      name_ = std::get<std::string>(it.second);
+      name = std::get<std::string>(it.second);
     } else if (key == "type" &&
                std::holds_alternative<std::string>(it.second)) {
-      type_ = getTypeForText(std::get<std::string>(it.second));
+      type = getTypeForText(std::get<std::string>(it.second));
     } else if (key == "value" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      auto map = std::get<flutter::EncodableMap>(it.second);
-      if (type_ == Type::texture) {
-        texture_ = std::make_unique<material::texture::Texture>(
-            flutterAssetsPath_, map);
-      } else {
-        Utils::PrintFlutterEncodableMap("Not handled!", map);
-      }
+      value = std::get<flutter::EncodableMap>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[MaterialParameter] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
-  SPDLOG_TRACE("--MaterialParameter::MaterialParameter");
+
+  if (type.has_value()) {
+    if (type.value() == MaterialType::TEXTURE) {
+      return std::make_unique<MaterialParameter>(
+          name.has_value() ? name.value() : "", type.value(),
+          Texture::Deserialize(value.value()));
+    } else {
+      spdlog::error("[MaterialParameter::Deserialize] Unhandled Parameter");
+      return {};
+    }
+  }
+
+  SPDLOG_TRACE("--MaterialParameter::Deserialize");
 }
 
 MaterialParameter::~MaterialParameter() {}
@@ -59,45 +76,51 @@ void MaterialParameter::Print(const char* tag) {
   spdlog::debug("{} (MaterialParameter)", tag);
   spdlog::debug("\tname: {}", name_);
   spdlog::debug("\ttype: {}", getTextForType(type_));
-  if (type_ == Type::texture) {
-    if (texture_) {
-      texture_->Print("\ttexture");
+  if (type_ == MaterialType::TEXTURE) {
+    if (std::holds_alternative<std::unique_ptr<Texture>>(value_)) {
+      auto texture = std::get<std::unique_ptr<Texture>>(value_).get();
+      if (texture) {
+        texture->Print("\ttexture");
+      } else {
+        spdlog::debug("[MaterialParameter] Texture Empty");
+      }
     }
   }
   spdlog::debug("++++++++");
 }
 
-const char* MaterialParameter::getTextForType(MaterialParameter::Type type) {
+const char* MaterialParameter::getTextForType(
+    MaterialParameter::MaterialType type) {
   return (const char*[]){
       kColor, kBool,      kBoolVector, kFloat, kFloatVector,
       kInt,   kIntVector, kMat3,       kMat4,  kTexture,
   }[static_cast<int>(type)];
 }
 
-MaterialParameter::Type MaterialParameter::getTypeForText(
+MaterialParameter::MaterialType MaterialParameter::getTypeForText(
     const std::string& type) {
   if (type == kColor) {
-    return Type::color;
+    return MaterialType::COLOR;
   } else if (type == kBool) {
-    return Type::bool_;
+    return MaterialType::BOOL;
   } else if (type == kBoolVector) {
-    return Type::boolVector;
+    return MaterialType::BOOL_VECTOR;
   } else if (type == kFloat) {
-    return Type::float_;
+    return MaterialType::FLOAT;
   } else if (type == kFloatVector) {
-    return Type::floatVector;
+    return MaterialType::FLOAT_VECTOR;
   } else if (type == kInt) {
-    return Type::int_;
+    return MaterialType::INT;
   } else if (type == kIntVector) {
-    return Type::intVector;
+    return MaterialType::INT_VECTOR;
   } else if (type == kMat3) {
-    return Type::mat3;
+    return MaterialType::MAT3;
   } else if (type == kMat4) {
-    return Type::mat4;
+    return MaterialType::MAT4;
   } else if (type == kTexture) {
-    return Type::texture;
+    return MaterialType::TEXTURE;
   }
-  return Type::int_;
+  return MaterialType::INT;
 }
 
 }  // namespace plugin_filament_view

@@ -22,7 +22,7 @@
 #include "core/scene/geometry/position.h"
 #include "core/scene/geometry/size.h"
 #include "core/scene/ground_manager.h"
-#include "core/scene/material/material.h"
+#include "core/scene/material/model/material.h"
 
 namespace plugin_filament_view {
 

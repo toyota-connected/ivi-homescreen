@@ -22,7 +22,11 @@
 #include <filament/Material.h>
 #include <filament/VertexBuffer.h>
 
+#include "core/include/resource.h"
 #include "core/scene/ground.h"
+#include "core/scene/material/model/material.h"
+#include "core/scene/material/loader/material_loader.h"
+#include "core/scene/material/loader/texture_loader.h"
 #include "core/scene/material/material_manager.h"
 #include "viewer/custom_model_viewer.h"
 
@@ -30,30 +34,33 @@ namespace plugin_filament_view {
 
 class Ground;
 
+class Material;
+
 class MaterialManager;
 
 class CustomModelViewer;
 
-using ::filament::IndexBuffer;
-using ::filament::VertexBuffer;
-using ::utils::Entity;
 
 class GroundManager {
  public:
-  GroundManager(CustomModelViewer* model_viewer,
-                MaterialManager* material_manager);
+  GroundManager(CustomModelViewer* modelViewer,
+                MaterialManager* material_manager,
+                Ground* ground);
 
-  std::future<std::string> createGround();
+  std::future<Resource<std::string>> createGround();
+
+  std::future<Resource<std::string>> updateGround(plugin_filament_view::Ground* newGround);
+
+  std::future<Resource<std::string>> updateGroundMaterial(plugin_filament_view::Material* newMaterial);
 
   void Print(const char* tag);
 
   // Disallow copy and assign.
   GroundManager(const GroundManager&) = delete;
-
   GroundManager& operator=(const GroundManager&) = delete;
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   MaterialManager* materialManager_;
 
   ::filament::Engine* engine_;
@@ -61,9 +68,9 @@ class GroundManager {
   void* plane_geometry_;
   // TODO PlaneGeometry* plane_geometry_;
 
-  Entity groundPlane_;
-  VertexBuffer* groundVertexBuffer_{};
-  IndexBuffer* groundIndexBuffer_{};
+  ::utils::Entity groundPlane_;
+  ::filament::VertexBuffer* groundVertexBuffer_{};
+  ::filament::IndexBuffer* groundIndexBuffer_{};
   ::filament::Material* groundMaterial_{};
 };
 }  // namespace plugin_filament_view

@@ -15,7 +15,7 @@
  */
 
 #include "light_manager.h"
-#include "core/utils/color.h"
+#include "core/include/color.h"
 
 #include <filament/Color.h>
 #include <filament/LightManager.h>
@@ -25,8 +25,8 @@
 
 namespace plugin_filament_view {
 
-LightManager::LightManager(CustomModelViewer* model_viewer)
-    : model_viewer_(model_viewer), engine_(model_viewer->getFilamentEngine()) {
+LightManager::LightManager(CustomModelViewer* modelViewer)
+    : modelViewer_(modelViewer), engine_(modelViewer->getFilamentEngine()) {
   SPDLOG_TRACE("++LightManager::LightManager");
   entityLight_ = engine_->getEntityManager().create();
   SPDLOG_TRACE("--LightManager::LightManager");
@@ -38,21 +38,21 @@ void LightManager::setDefaultLight() {
   auto f = changeLight(light.get());
   f.wait();
   light.reset();
-  SPDLOG_TRACE("--LightManager::setDefaultLight");
+  SPDLOG_TRACE("--LightManager::setDefaultLight: {}", f.get().getMessage());
 }
 
-std::future<std::string> LightManager::changeLight(Light* light) {
+std::future<Resource<std::string>> LightManager::changeLight(Light* light) {
   SPDLOG_TRACE("++LightManager::changeLight");
-  const auto promise(std::make_shared<std::promise<std::string>>());
+  const auto promise(std::make_shared<std::promise<Resource<std::string>>>());
   auto future(promise->get_future());
 
   if (!light) {
-    promise->set_value("Light type must be provided");
+    promise->set_value(Resource<std::string>::Error("Light type must be provided"));
     SPDLOG_TRACE("--LightManager::changeLight");
     return future;
   }
 
-  asio::post(model_viewer_->getStrandContext(), [&, promise, light] {
+  asio::post(modelViewer_->getStrandContext(), [&, promise, light] {
     auto builder = ::filament::LightManager::Builder(light->type_);
 
     if (light->color_.has_value()) {
@@ -99,10 +99,10 @@ std::future<std::string> LightManager::changeLight(Light* light) {
     }
 
     builder.build(*engine_, entityLight_);
-    auto scene = model_viewer_->getFilamentScene();
+    auto scene = modelViewer_->getFilamentScene();
     scene->removeEntities(&entityLight_, 1);
     scene->addEntity(entityLight_);
-    promise->set_value("Light created Successfully");
+    promise->set_value(Resource<std::string>::Success("Light created Successfully"));
   });
   SPDLOG_TRACE("--LightManager::changeLight");
   return future;

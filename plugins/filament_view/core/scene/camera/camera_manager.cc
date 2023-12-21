@@ -21,21 +21,20 @@
 #include "logging/logging.h"
 
 namespace plugin_filament_view {
-CameraManager::CameraManager(CustomModelViewer* model_viewer)
-    : model_viewer_(model_viewer), engine_(model_viewer->getFilamentEngine()) {
+CameraManager::CameraManager(CustomModelViewer* modelViewer)
+    : modelViewer_(modelViewer), engine_(modelViewer->getFilamentEngine()) {
   SPDLOG_TRACE("++CameraManager::CameraManager");
   auto f = setDefaultCamera();
-  f.wait();
-  SPDLOG_TRACE("--CameraManager::CameraManager");
+  SPDLOG_TRACE("--CameraManager::CameraManager: {}");
 }
 
 std::future<void> CameraManager::setDefaultCamera() {
   const auto promise(std::make_shared<std::promise<void>>());
   auto future(promise->get_future());
 
-  asio::post(model_viewer_->getStrandContext(), [&, promise] {
-    assert(model_viewer_);
-    auto fview = model_viewer_->getFilamentView();
+  asio::post(modelViewer_->getStrandContext(), [&, promise] {
+    assert(modelViewer_);
+    auto fview = modelViewer_->getFilamentView();
     assert(fview);
     auto viewport = fview->getViewport();
 
@@ -233,29 +232,29 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
     manipulatorBuilder.groundPlane(a, b, c, d);
   }
 
-  auto viewport = model_viewer_->getFilamentView()->getViewport();
+  auto viewport = modelViewer_->getFilamentView()->getViewport();
   manipulatorBuilder.viewport(static_cast<int>(viewport.width),
                               static_cast<int>(viewport.height));
   cameraManipulator_ = manipulatorBuilder.build(cameraInfo->mode_);
 }
 
-std::future<std::string> CameraManager::updateCamera(Camera* cameraInfo) {
+std::future<Resource<std::string>> CameraManager::updateCamera(Camera* cameraInfo) {
   SPDLOG_DEBUG("++CameraManager::updateCamera");
-  const auto promise(std::make_shared<std::promise<std::string>>());
+  const auto promise(std::make_shared<std::promise<Resource<std::string>>>());
   auto future(promise->get_future());
 
-  assert(model_viewer_);
+  assert(modelViewer_);
   if (!cameraInfo) {
-    promise->set_value("Camera not found");
+    promise->set_value(Resource<std::string>::Error("Camera not found"));
   } else {
-    asio::post(model_viewer_->getStrandContext(), [&, promise, cameraInfo] {
+    asio::post(modelViewer_->getStrandContext(), [&, promise, cameraInfo] {
       updateExposure(cameraInfo->exposure_.get());
       updateProjection(cameraInfo->projection_.get());
       updateLensProjection(cameraInfo->lensProjection_.get());
       updateCameraShift(cameraInfo->shift_.get());
       updateCameraScaling(cameraInfo->scaling_.get());
       updateCameraManipulator(cameraInfo);
-      promise->set_value("Camera updated successfully");
+      promise->set_value(Resource<std::string>::Success("Camera updated successfully"));
     });
   }
 
@@ -331,7 +330,7 @@ void CameraManager::updateCameraProjection() {
 }
 
 float CameraManager::calculateAspectRatio() {
-  auto viewport = model_viewer_->getFilamentView()->getViewport();
+  auto viewport = modelViewer_->getFilamentView()->getViewport();
   return static_cast<float>(viewport.width) /
          static_cast<float>(viewport.height);
 }

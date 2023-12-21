@@ -16,7 +16,7 @@
 
 #pragma once
 
-namespace plugin_filament_view::material::texture {
+namespace plugin_filament_view {
 
 enum WrapMode {
   /// The edge of the texture extends to infinity.
@@ -41,4 +41,4 @@ static const char* getTextForWrapMode(WrapMode mode) {
   }[mode];
 }
 
-}  // namespace plugin_filament_view::material::texture
+}  // namespace plugin_filament_view

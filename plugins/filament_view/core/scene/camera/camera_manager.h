@@ -43,7 +43,7 @@ class Projection;
 
 class CameraManager {
  public:
-  explicit CameraManager(CustomModelViewer* model_viewer);
+  explicit CameraManager(CustomModelViewer* modelViewer);
 
   std::future<void> setDefaultCamera();
 
@@ -60,7 +60,7 @@ class CameraManager {
 
   void updateCameraOnResize(uint32_t width, uint32_t height);
 
-  std::future<std::string> updateCamera(Camera* cameraInfo);
+  std::future<Resource<std::string>> updateCamera(Camera* cameraInfo);
 
   std::string updateExposure(Exposure* exposure);
 
@@ -117,9 +117,9 @@ class CameraManager {
     }  // We very rarely use this [] operator, assert overhead is fine.
   };
 
-  ::filament::Engine* engine_{};
+  ::filament::Engine* engine_;
   ::filament::Camera* camera_{};
-  CustomModelViewer* model_viewer_{};
+  CustomModelViewer* modelViewer_{};
   CameraManipulator* cameraManipulator_{};
 
   float cameraFocalLength_{};
