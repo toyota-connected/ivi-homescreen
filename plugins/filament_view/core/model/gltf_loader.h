@@ -22,6 +22,8 @@ namespace plugin_filament_view {
 
 class CustomModelViewer;
 
+class Position;
+
 class GltfLoader {
  public:
   explicit GltfLoader(CustomModelViewer* modelViewer,

@@ -76,7 +76,7 @@ std::future<std::string> GroundManager::createGround() {
     promise->set_value("Ground must be provided");
     return future;
   }
-  if (!ground_->size_.has_value()) {
+  if (!ground_->size_) {
     model_viewer_->setGroundState(SceneState::ERROR);
     promise->set_value("Size must be provided");
     return future;

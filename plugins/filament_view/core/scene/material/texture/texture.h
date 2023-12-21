@@ -53,6 +53,6 @@ class Texture {
   std::string assetPath_;
   std::string url_;
   Type type_;
-  std::optional<std::unique_ptr<TextureSampler>> sampler_;
+  std::unique_ptr<TextureSampler> sampler_;
 };
 }  // namespace plugin_filament_view::material::texture

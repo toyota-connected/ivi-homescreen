@@ -60,8 +60,8 @@ void MaterialParameter::Print(const char* tag) {
   spdlog::debug("\tname: {}", name_);
   spdlog::debug("\ttype: {}", getTextForType(type_));
   if (type_ == Type::texture) {
-    if (texture_.has_value()) {
-      texture_.value()->Print("\ttexture");
+    if (texture_) {
+      texture_->Print("\ttexture");
     }
   }
   spdlog::debug("++++++++");

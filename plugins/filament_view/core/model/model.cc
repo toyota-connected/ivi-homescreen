@@ -68,15 +68,15 @@ std::unique_ptr<Model> Model::Deserialize(
     const std::string& flutterAssetsPath,
     const flutter::EncodableValue& params) {
   SPDLOG_TRACE("++Model::Model");
-  std::optional<std::unique_ptr<Animation>> animation;
-  std::optional<std::unique_ptr<Model>> fallback;
+  std::unique_ptr<Animation> animation;
+  std::unique_ptr<Model> fallback;
   std::optional<std::string> assetPath;
   std::optional<std::string> pathPrefix;
   std::optional<std::string> pathPostfix;
   std::optional<std::string> url;
   std::optional<float> scale;
-  std::optional<std::unique_ptr<Position>> centerPosition;
-  std::optional<std::unique_ptr<Scene>> scene;
+  std::unique_ptr<Position> centerPosition;
+  std::unique_ptr<Scene> scene;
   bool is_glb = false;
 
   for (auto& it : std::get<flutter::EncodableMap>(params)) {
@@ -125,20 +125,20 @@ std::unique_ptr<Model> Model::Deserialize(
     return std::move(std::make_unique<plugin_filament_view::GlbModel>(
         assetPath.has_value() ? std::move(assetPath.value()) : "",
         url.has_value() ? std::move(url.value()) : "",
-        fallback.has_value() ? fallback.value().release() : nullptr,
+        fallback ? fallback.release() : nullptr,
         scale.has_value() ? scale.value() : 1.0f,
-        centerPosition.has_value() ? centerPosition.value().release() : nullptr,
-        animation.has_value() ? animation->release() : nullptr));
+        centerPosition ? centerPosition.release() : nullptr,
+        animation ? animation.release() : nullptr));
   } else {
     return std::move(std::make_unique<plugin_filament_view::GltfModel>(
         assetPath.has_value() ? std::move(assetPath.value()) : "",
         url.has_value() ? std::move(url.value()) : "",
         pathPrefix.has_value() ? std::move(pathPrefix.value()) : "",
         pathPostfix.has_value() ? std::move(pathPostfix.value()) : "",
-        fallback.has_value() ? fallback.value().release() : nullptr,
+        fallback ? fallback.release() : nullptr,
         scale.has_value() ? scale.value() : 1.0f,
-        centerPosition.has_value() ? centerPosition.value().release() : nullptr,
-        animation.has_value() ? animation->release() : nullptr));
+        centerPosition ? centerPosition.release() : nullptr,
+        animation ? animation.release() : nullptr));
   }
   SPDLOG_TRACE("--Model::Model");
 }

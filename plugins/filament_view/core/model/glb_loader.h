@@ -22,6 +22,8 @@ namespace plugin_filament_view {
 
 class CustomModelViewer;
 
+class Position;
+
 class GlbLoader {
  public:
   explicit GlbLoader(CustomModelViewer* modelViewer,

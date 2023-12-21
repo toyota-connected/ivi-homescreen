@@ -65,8 +65,8 @@ void Texture::Print(const char* tag) {
     spdlog::debug("\turl: [{}]", url_);
   }
   spdlog::debug("\ttype: {}", getTextForType(type_));
-  if (sampler_.has_value()) {
-    sampler_.value()->Print("\tsampler");
+  if (sampler_) {
+    sampler_->Print("\tsampler");
   }
   spdlog::debug("++++++++");
 }

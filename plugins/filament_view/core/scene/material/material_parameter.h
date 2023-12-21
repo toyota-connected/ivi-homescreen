@@ -65,7 +65,7 @@ class MaterialParameter {
 
   std::string name_;
   Type type_;
-  std::optional<std::unique_ptr<material::texture::Texture>> texture_;
+  std::unique_ptr<material::texture::Texture> texture_;
 
   static const char* getTextForType(Type type);
 

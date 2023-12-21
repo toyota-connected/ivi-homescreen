@@ -25,34 +25,36 @@ Ground::Ground(const std::string& flutter_assets_path,
                const flutter::EncodableMap& params)
     : flutterAssetsPath_(flutter_assets_path) {
   SPDLOG_TRACE("++Ground::Ground");
+  bool done[5]{};
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
 
     auto key = std::get<std::string>(it.first);
-    if (key == "centerPosition" &&
+    if (!done[0] && key == "centerPosition" &&
         std::holds_alternative<flutter::EncodableMap>(it.second)) {
+      done[0] = true;
       center_position_ = std::make_unique<Position>(
           std::get<flutter::EncodableMap>(it.second));
-      center_position_wrapper_ = center_position_.value().get();
-    } else if (key == "normal" &&
+    } else if (!done[1] && key == "normal" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
+      done[1] = true;
       normal_ = std::make_unique<Direction>(
           std::get<flutter::EncodableMap>(it.second));
-      normal_wrapper_ = normal_.value().get();
-    } else if (key == "isBelowModel" &&
+    } else if (!done[2] && key == "isBelowModel" &&
                std::holds_alternative<bool>(it.second)) {
+      done[2] = true;
       isBelowModel_ = std::get<bool>(it.second);
-    } else if (key == "size" &&
+    } else if (!done[3] && key == "size" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
+      done[3] = true;
       size_ =
           std::make_unique<Size>(std::get<flutter::EncodableMap>(it.second));
-      size_wrapper_ = size_.value().get();
-    } else if (key == "material" &&
+    } else if (!done[4] && key == "material" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
+      done[4] = true;
       material_ = std::make_unique<Material>(
           flutterAssetsPath_, std::get<flutter::EncodableMap>(it.second));
-      material_wrapper_ = material_.value().get();
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Ground] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
@@ -64,18 +66,18 @@ Ground::Ground(const std::string& flutter_assets_path,
 void Ground::Print(const char* tag) {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Ground)", tag);
-  if (center_position_.has_value()) {
-    center_position_.value()->Print("\tcenter_position");
+  if (center_position_) {
+    center_position_->Print("\tcenter_position");
   }
-  if (normal_.has_value()) {
-    normal_.value()->Print("\tnormal");
+  if (normal_) {
+    normal_->Print("\tnormal");
   }
   spdlog::debug("\tisBelowModel: {}", isBelowModel_);
-  if (size_.has_value()) {
-    size_.value()->Print("\tsize");
+  if (size_) {
+    size_->Print("\tsize");
   }
-  if (material_.has_value()) {
-    material_.value()->Print("\tmaterial");
+  if (material_) {
+    material_->Print("\tmaterial");
   }
   spdlog::debug("++++++++");
 }
