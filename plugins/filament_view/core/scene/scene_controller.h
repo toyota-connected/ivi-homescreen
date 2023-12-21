@@ -20,6 +20,7 @@
 #include <gltfio/AssetLoader.h>
 #include <gltfio/ResourceLoader.h>
 
+#include "core/include/resource.h"
 #include "core/model/animation/animation_manager.h"
 #include "core/model/model.h"
 #include "core/scene/indirect_light/indirect_light_manager.h"
@@ -95,11 +96,7 @@ class SceneController {
   // private var sceneStateJob: Job? = null
   // private var shapeStateJob: Job? = null
 
-  // private val coroutineScope = CoroutineScope(Dispatchers.IO)
-
   std::optional<int32_t> currentAnimationIndex_;
-
-  // private val surfaceView: SurfaceView = SurfaceView(context)
 
   std::unique_ptr<plugin_filament_view::IBLProfiler> iblProfiler_;
   std::unique_ptr<plugin_filament_view::LightManager> lightManager_;
@@ -133,7 +130,7 @@ class SceneController {
 
   std::string setDefaultCamera();
 
-  std::string loadModel(Model* model);
+  Resource<std::string> loadModel(Model* model);
 
   void setUpAnimation(std::optional<Animation*> animation);
 

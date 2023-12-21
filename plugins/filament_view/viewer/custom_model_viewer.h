@@ -63,10 +63,6 @@ class Model;
 
 class Scene;
 
-using models::state::ModelState;
-using models::state::SceneState;
-using models::state::ShapeState;
-
 class CustomModelViewer {
  public:
   static constexpr ::filament::float3 kDefaultObjectPosition = {0.0f, 0.0f,
@@ -84,13 +80,13 @@ class CustomModelViewer {
     cameraManager_ = cameraManager;
   };
 
-  void setModelState(models::state::ModelState modelState);
+  void setModelState(ModelState modelState);
 
-  void setGroundState(models::state::SceneState sceneState);
+  void setGroundState(SceneState sceneState);
 
-  void setLightState(models::state::SceneState sceneState);
+  void setLightState(SceneState sceneState);
 
-  void setSkyboxState(models::state::SceneState sceneState);
+  void setSkyboxState(SceneState sceneState);
 
   void destroyIndirectLight();
 

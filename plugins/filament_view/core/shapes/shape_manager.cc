@@ -19,9 +19,9 @@
 #include "logging/logging.h"
 
 namespace plugin_filament_view {
-ShapeManager::ShapeManager(CustomModelViewer* model_viewer,
+ShapeManager::ShapeManager(CustomModelViewer* modelViewer,
                            MaterialManager* material_manager)
-    : model_viewer_(model_viewer), material_manager_(material_manager) {
+    : modelViewer_(modelViewer), material_manager_(material_manager) {
   SPDLOG_TRACE("++ShapeManager::ShapeManager");
   SPDLOG_TRACE("--ShapeManager::ShapeManager");
 }

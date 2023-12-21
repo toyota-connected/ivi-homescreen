@@ -145,28 +145,28 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
   return future;
 }
 
-void CustomModelViewer::setModelState(models::state::ModelState modelState) {
+void CustomModelViewer::setModelState(ModelState modelState) {
   currentModelState_ = modelState;
   SPDLOG_DEBUG("[FilamentView] setModelState: {}",
                getTextForModelState(currentModelState_));
 }
 
-void CustomModelViewer::setGroundState(models::state::SceneState sceneState) {
+void CustomModelViewer::setGroundState(SceneState sceneState) {
   currentGroundState_ = sceneState;
   SPDLOG_DEBUG("[FilamentView] setGroundState: {}",
-               models::state::getTextForSceneState(currentGroundState_));
+               getTextForSceneState(currentGroundState_));
 }
 
-void CustomModelViewer::setLightState(models::state::SceneState sceneState) {
+void CustomModelViewer::setLightState(SceneState sceneState) {
   currentLightState_ = sceneState;
   SPDLOG_DEBUG("[FilamentView] setLightState: {}",
-               models::state::getTextForSceneState(currentLightState_));
+               getTextForSceneState(currentLightState_));
 }
 
-void CustomModelViewer::setSkyboxState(models::state::SceneState sceneState) {
+void CustomModelViewer::setSkyboxState(SceneState sceneState) {
   currentSkyboxState_ = sceneState;
   SPDLOG_DEBUG("[FilamentView] setSkyboxState: {}",
-               models::state::getTextForSceneState(currentSkyboxState_));
+               getTextForSceneState(currentSkyboxState_));
 }
 
 void CustomModelViewer::destroyIndirectLight() {
@@ -226,7 +226,7 @@ void CustomModelViewer::setupView() {
  * rendered
  */
 void CustomModelViewer::DrawFrame(uint32_t time) {
-  asio::post(*strand_, [&]() {
+  asio::post(*strand_, [&, time]() {
     modelLoader_->updateScene();
 
     cameraManager_->lookAtDefaultPosition();
@@ -235,7 +235,6 @@ void CustomModelViewer::DrawFrame(uint32_t time) {
     if (frenderer_->beginFrame(fswapChain_, time)) {
       frenderer_->render(fview_);
       frenderer_->endFrame();
-      // rendererStateFlow.value=frameTimeNanos;
     }
   });
 }

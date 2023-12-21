@@ -24,6 +24,7 @@
 #include "core/scene/geometry/position.h"
 #include "core/scene/light/light.h"
 #include "viewer/custom_model_viewer.h"
+#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 
@@ -33,11 +34,11 @@ class Light;
 
 class LightManager {
  public:
-  explicit LightManager(CustomModelViewer* model_viewer);
+  explicit LightManager(CustomModelViewer* modelViewer);
 
   void setDefaultLight();
 
-  std::future<std::string> changeLight(Light* light);
+  std::future<Resource<std::string>> changeLight(Light* light);
 
   // Disallow copy and assign.
   LightManager(const LightManager&) = delete;
@@ -45,7 +46,7 @@ class LightManager {
   LightManager& operator=(const LightManager&) = delete;
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   ::filament::Engine* engine_;
   utils::Entity entityLight_;
 };

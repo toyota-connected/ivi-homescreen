@@ -22,10 +22,34 @@
 #include "core/scene/material/texture/texture_sampler.h"
 
 namespace plugin_filament_view {
+
+class Texture;
+
+class TextureSampler;
+
+using MaterialValue = std::variant<std::unique_ptr<Texture>>;
+
 class MaterialParameter {
  public:
-  MaterialParameter(const std::string& flutter_assets_path,
-                    const flutter::EncodableMap& params);
+  enum class MaterialType {
+    // color can be presented by int or Color like Colors.white
+    COLOR,
+    BOOL,
+    BOOL_VECTOR,
+    FLOAT,
+    FLOAT_VECTOR,
+    INT,
+    INT_VECTOR,
+    MAT3,
+    MAT4,
+    TEXTURE,
+  };
+
+  MaterialParameter(std::string name, MaterialType type, MaterialValue value);
+
+  static std::unique_ptr<MaterialParameter> Deserialize(
+      const std::string& flutter_assets_path,
+      const flutter::EncodableMap& params);
 
   ~MaterialParameter();
 
@@ -33,23 +57,9 @@ class MaterialParameter {
 
   // Disallow copy and assign.
   MaterialParameter(const MaterialParameter&) = delete;
-
   MaterialParameter& operator=(const MaterialParameter&) = delete;
 
  private:
-  enum class Type {
-    color,
-    bool_,
-    boolVector,
-    float_,
-    floatVector,
-    int_,
-    intVector,
-    mat3,
-    mat4,
-    texture,
-  };
-
   static constexpr char kColor[] = "COLOR";
   static constexpr char kBool[] = "BOOL";
   static constexpr char kBoolVector[] = "BOOL_VECTOR";
@@ -61,14 +71,12 @@ class MaterialParameter {
   static constexpr char kMat4[] = "MAT4";
   static constexpr char kTexture[] = "TEXTURE";
 
-  const std::string& flutterAssetsPath_;
-
   std::string name_;
-  Type type_;
-  std::unique_ptr<material::texture::Texture> texture_;
+  MaterialType type_;
+  std::variant<std::unique_ptr<Texture>> value_;
 
-  static const char* getTextForType(Type type);
+  static const char* getTextForType(MaterialType type);
 
-  static Type getTypeForText(const std::string& type);
+  static MaterialType getTypeForText(const std::string& type);
 };
 }  // namespace plugin_filament_view

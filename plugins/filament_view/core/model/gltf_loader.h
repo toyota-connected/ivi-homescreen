@@ -17,6 +17,7 @@
 #pragma once
 
 #include "viewer/custom_model_viewer.h"
+#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 
@@ -31,20 +32,20 @@ class GltfLoader {
 
   ~GltfLoader() = default;
 
-  std::future<std::string> loadGltfFromAsset(const std::string& path,
-                                             const std::string& prepath,
-                                             const std::string& postpath,
+  static std::future<Resource<std::string>> loadGltfFromAsset(const std::string& path,
+                                             const std::string& pre_path,
+                                             const std::string& post_path,
                                              float scale,
                                              const Position* centerPosition,
                                              bool isFallback = false);
 
-  std::future<std::string> loadGltfFromUrl(const std::string& url,
+  static std::future<Resource<std::string>> loadGltfFromUrl(const std::string& url,
                                            float scale,
                                            const Position* centerPosition,
                                            bool isFallback = false);
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   std::string flutterAssets_;
 };
 }  // namespace plugin_filament_view

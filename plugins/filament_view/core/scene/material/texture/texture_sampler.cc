@@ -19,7 +19,7 @@
 #include "logging/logging.h"
 #include "utils.h"
 
-namespace plugin_filament_view::material::texture {
+namespace plugin_filament_view {
 
 TextureSampler::TextureSampler(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++TextureSampler::TextureSampler");
@@ -64,4 +64,4 @@ void TextureSampler::Print(const char* tag) {
   spdlog::debug("++++++++");
 }
 
-}  // namespace plugin_filament_view::material::texture
+}  // namespace plugin_filament_view

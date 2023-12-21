@@ -16,30 +16,50 @@
 
 #pragma once
 
+#include <memory>
+
+#include <filament/MaterialInstance.h>
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
 #include "core/scene/geometry/direction.h"
 #include "core/scene/geometry/position.h"
+#include "core/scene/material/loader/material_loader.h"
+#include "core/scene/material/loader/texture_loader.h"
+#include "core/scene/material/model/material.h"
+#include "core/scene/material/utils/material_instance.h"
 #include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
 
 class CustomModelViewer;
 
+class Material;
+
+class MaterialLoader;
+
+class MaterialInstance;
+
+class TextureLoader;
+
 class MaterialManager {
  public:
-  MaterialManager(CustomModelViewer* model_viewer,
+  MaterialManager(CustomModelViewer* modelViewer,
                   const std::string& flutter_assets_path);
 
-  // TODO getMaterialInstance(std::optional<Material*>);
+  ::filament::MaterialInstance* getMaterialInstance(Material* material);
 
-  // Disallow copy and assign.
+      // Disallow copy and assign.
   MaterialManager(const MaterialManager&) = delete;
-
   MaterialManager& operator=(const MaterialManager&) = delete;
 
  private:
-  CustomModelViewer* model_viewer_;
+  plugin_filament_view::CustomModelViewer* modelViewer_;
   const std::string& flutterAssetsPath_;
+
+  std::unique_ptr<plugin_filament_view::MaterialLoader> materialLoader_;
+  std::unique_ptr<plugin_filament_view::TextureLoader> textureLoader_;
+
+  ::filament::Material* loadMaterial(Material* material);
+  MaterialInstance* setupMaterialInstance(::filament::Material* materialResult);
 };
 }  // namespace plugin_filament_view

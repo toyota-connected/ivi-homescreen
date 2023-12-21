@@ -73,7 +73,10 @@ void SceneController::setUpViewer(PlatformView* platformView,
 }
 
 void SceneController::setUpGround() {
-  groundManager_ = std::make_unique<GroundManager>(modelViewer_.get(), nullptr);
+  materialManager_ =
+      std::make_unique<MaterialManager>(modelViewer_.get(), flutterAssetsPath_);
+  groundManager_ = std::make_unique<GroundManager>(
+      modelViewer_.get(), materialManager_.get(), scene_->ground_.get());
   auto f = groundManager_->createGround();
   f.wait();
 }
@@ -224,19 +227,15 @@ void SceneController::setUpLoadingModel() {
   animationManager_ = std::make_unique<AnimationManager>(modelViewer_.get());
 
   auto result = loadModel(model_);
-  SPDLOG_DEBUG("loadModel: {}", result);
-  if (!result.empty() && model_->GetFallback()) {
-    if (result == "Resource.Error") {
-      auto f = model_->GetFallback();
-      if (f) {
-        result = loadModel(f);
-        SPDLOG_DEBUG("Fallback loadModel: {}", result);
-        setUpAnimation(f->GetAnimation());
-      } else {
-        result = "Error.FallbackLoadFailed";
-      }
+  SPDLOG_DEBUG("loadModel: {}", result.getMessage());
+  if (result.getStatus() != Status::Success && model_->GetFallback()) {
+    auto fallback = model_->GetFallback();
+    if (fallback) {
+      result = loadModel(fallback);
+      SPDLOG_DEBUG("Fallback loadModel: {}", result.getMessage());
+      setUpAnimation(fallback->GetAnimation());
     } else {
-      setUpAnimation(model_->GetAnimation());
+      spdlog::error("[SceneController] Error.FallbackLoadFailed");
     }
   } else {
     setUpAnimation(model_->GetAnimation());
@@ -245,8 +244,6 @@ void SceneController::setUpLoadingModel() {
 }
 
 void SceneController::setUpShapes() {
-  materialManager_ =
-      std::make_unique<MaterialManager>(modelViewer_.get(), flutterAssetsPath_);
   shapeManager_ = std::make_unique<ShapeManager>(modelViewer_.get(),
                                                  materialManager_.get());
   if (shapes_) {
@@ -259,8 +256,7 @@ std::string SceneController::setDefaultCamera() {
   return "Default camera updated successfully";
 }
 
-std::string SceneController::loadModel(Model* model) {
-  std::string result;
+Resource<std::string> SceneController::loadModel(Model* model) {
   if (dynamic_cast<GlbModel*>(model)) {
     auto glb_model = dynamic_cast<GlbModel*>(model);
     auto loader = modelViewer_->getGlbModelLoader();
@@ -269,31 +265,29 @@ std::string SceneController::loadModel(Model* model) {
           loader->loadGlbFromAsset(glb_model->assetPath_, glb_model->scale_,
                                    glb_model->center_position_);
       f.wait();
-      result = f.get();
+      return f.get();
     } else if (!glb_model->url_.empty()) {
       auto f = loader->loadGlbFromUrl(glb_model->url_, glb_model->scale_,
                                       glb_model->center_position_);
       f.wait();
-      result = f.get();
+      return f.get();
     }
   } else if (dynamic_cast<GltfModel*>(model)) {
     auto gltf_model = dynamic_cast<GltfModel*>(model);
-    auto loader = modelViewer_->getGltfModelLoader();
     if (!gltf_model->assetPath_.empty()) {
-      auto f = loader->loadGltfFromAsset(
+      auto f = GltfLoader::loadGltfFromAsset(
           gltf_model->assetPath_, gltf_model->pathPrefix_,
           gltf_model->pathPostfix_, gltf_model->scale_,
           gltf_model->center_position_);
       f.wait();
-      result = f.get();
+      return f.get();
     } else if (!gltf_model->url_.empty()) {
-      auto f = loader->loadGltfFromUrl(gltf_model->url_, gltf_model->scale_,
-                                       gltf_model->center_position_);
+      auto f = GltfLoader::loadGltfFromUrl(gltf_model->url_, gltf_model->scale_,
+                                           gltf_model->center_position_);
       f.wait();
-      result = f.get();
+      return f.get();
     }
   }
-  return result;
 }
 
 // TODO Move to model viewer

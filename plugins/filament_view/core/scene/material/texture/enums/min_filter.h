@@ -16,7 +16,7 @@
 
 #pragma once
 
-namespace plugin_filament_view::material::texture {
+namespace plugin_filament_view {
 
 enum MinFilter {
   /// No filtering. Nearest neighbor is used.
@@ -57,4 +57,4 @@ static const char* getTextForMinFilter(MinFilter min_filter) {
   }[min_filter];
 }
 
-}  // namespace plugin_filament_view::material::texture
+}  // namespace plugin_filament_view

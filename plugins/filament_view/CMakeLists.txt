@@ -104,11 +104,14 @@ add_library(plugin_filament_view STATIC
         core/utils/hdr_loader.cc
         core/scene/light/light.cc
         core/scene/light/light_manager.cc
-        core/scene/material/material.cc
+        core/scene/material/loader/material_loader.cc
+        core/scene/material/loader/texture_loader.cc
         core/scene/material/material_manager.cc
-        core/scene/material/material_parameter.cc
+        core/scene/material/model/material.cc
+        core/scene/material/model/material_parameter.cc
         core/scene/material/texture/texture.cc
         core/scene/material/texture/texture_sampler.cc
+        core/scene/material/utils/material_instance.cc
         core/scene/skybox/skybox.cc
         core/scene/skybox/skybox_manager.cc
         core/scene/scene.cc

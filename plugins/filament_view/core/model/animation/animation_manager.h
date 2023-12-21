@@ -46,7 +46,7 @@ class AnimationManager {
   friend class SceneController;
 
  private:
-  CustomModelViewer* model_viewer_;
+  CustomModelViewer* modelViewer_;
   int32_t animationCount_ = 0;
   std::vector<std::string> animationNames_;
 };

@@ -18,7 +18,7 @@
 
 #include <string>
 
-namespace plugin_filament_view::models::state {
+namespace plugin_filament_view {
 
 /// Represents the state of the Shape.
 enum class ShapeState {
@@ -70,4 +70,4 @@ static constexpr char kShapeStateError[] = "ERROR";
   }[static_cast<int>(state)];
 }
 
-}  // namespace plugin_filament_view::models::state
+}  // namespace plugin_filament_view

@@ -18,7 +18,7 @@
 
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
-namespace plugin_filament_view::material::texture {
+namespace plugin_filament_view {
 
 class TextureSampler {
  public:
@@ -37,4 +37,4 @@ class TextureSampler {
   std::string wrap_;
   std::optional<double> anisotropy_;
 };
-}  // namespace plugin_filament_view::material::texture
+}  // namespace plugin_filament_view
