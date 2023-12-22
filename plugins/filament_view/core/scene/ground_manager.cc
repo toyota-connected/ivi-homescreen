@@ -29,7 +29,6 @@
 
 #include "logging/logging.h"
 
-#include "generated/resources/gltf_demo.h"
 #include "materials/uberarchive.h"
 
 namespace plugin_filament_view {
