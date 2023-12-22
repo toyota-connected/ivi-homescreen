@@ -6,11 +6,12 @@
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/ResourceLoader.h>
-#include "asio/io_context_strand.hpp"
+#include <asio/io_context_strand.hpp>
 
-#include "model.h"
+#include "core/model/model.h"
 #include "viewer/custom_model_viewer.h"
 #include "viewer/settings.h"
+#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 
@@ -54,11 +55,39 @@ class ModelLoader {
 
   void updateScene();
 
+  std::future<Resource<std::string_view>> loadGlbFromAsset(
+      const std::string& path,
+      float scale,
+      const Position* centerPosition,
+      bool isFallback = false);
+
+  std::future<Resource<std::string_view>> loadGlbFromUrl(
+      const std::string& url,
+      float scale,
+      const Position* centerPosition,
+      bool isFallback = false);
+
+  static std::future<Resource<std::string_view>> loadGltfFromAsset(
+      const std::string& path,
+      const std::string& pre_path,
+      const std::string& post_path,
+      float scale,
+      const Position* centerPosition,
+      bool isFallback = false);
+
+  static std::future<Resource<std::string_view>> loadGltfFromUrl(
+      const std::string& url,
+      float scale,
+      const Position* centerPosition,
+      bool isFallback = false);
+
  private:
+  CustomModelViewer* modelViewer_;
   ::filament::Engine* engine_;
+  const asio::io_context::strand& strand_;
+
   std::string assetPath_;
   utils::Entity sunlight_;
-  CustomModelViewer* modelViewer_;
   ::filament::gltfio::AssetLoader* assetLoader_;
   ::filament::gltfio::MaterialProvider* materialProvider_;
   ::filament::gltfio::ResourceLoader* resourceLoader_;
@@ -72,7 +101,7 @@ class ModelLoader {
 
   ::filament::viewer::Settings settings_;
   std::vector<float> morphWeights_;
-  ::filament::gltfio::NodeManager::SceneMask visibleScenes_;
+  // TODO  ::filament::gltfio::NodeManager::SceneMask visibleScenes_;
 
   void fetchResources(
       ::filament::gltfio::FilamentAsset* asset,
@@ -101,5 +130,16 @@ class ModelLoader {
   ::filament::mat4f getTransform();
 
   void setTransform(::filament::mat4f mat);
+
+
+  std::vector<char> buffer_;
+  void handleFile(
+      const std::vector<uint8_t>& buffer,
+      const std::string& fileSource,
+      float scale,
+      const Position* centerPosition,
+      bool isFallback,
+      const std::shared_ptr<std::promise<Resource<std::string_view>>>& promise);
+
 };
 }  // namespace plugin_filament_view

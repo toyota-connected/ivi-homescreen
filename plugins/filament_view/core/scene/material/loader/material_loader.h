@@ -16,9 +16,10 @@ class MaterialLoader {
   MaterialLoader(CustomModelViewer* modelViewer, const std::string& assetPath);
   ~MaterialLoader() = default;
 
-  ::filament::Material* loadMaterialFromAsset(const std::string& path);
+  Resource<::filament::Material*> loadMaterialFromAsset(
+      const std::string& path);
 
-  ::filament::Material* loadMaterialFromUrl(const std::string& url);
+  Resource<::filament::Material*> loadMaterialFromUrl(const std::string& url);
 
   // Disallow copy and assign.
   MaterialLoader(const MaterialLoader&) = delete;

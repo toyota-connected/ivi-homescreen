@@ -41,13 +41,16 @@ void LightManager::setDefaultLight() {
   SPDLOG_TRACE("--LightManager::setDefaultLight: {}", f.get().getMessage());
 }
 
-std::future<Resource<std::string>> LightManager::changeLight(Light* light) {
+std::future<Resource<std::string_view>> LightManager::changeLight(
+    Light* light) {
   SPDLOG_TRACE("++LightManager::changeLight");
-  const auto promise(std::make_shared<std::promise<Resource<std::string>>>());
+  const auto promise(
+      std::make_shared<std::promise<Resource<std::string_view>>>());
   auto future(promise->get_future());
 
   if (!light) {
-    promise->set_value(Resource<std::string>::Error("Light type must be provided"));
+    promise->set_value(
+        Resource<std::string_view>::Error("Light type must be provided"));
     SPDLOG_TRACE("--LightManager::changeLight");
     return future;
   }
@@ -102,7 +105,8 @@ std::future<Resource<std::string>> LightManager::changeLight(Light* light) {
     auto scene = modelViewer_->getFilamentScene();
     scene->removeEntities(&entityLight_, 1);
     scene->addEntity(entityLight_);
-    promise->set_value(Resource<std::string>::Success("Light created Successfully"));
+    promise->set_value(
+        Resource<std::string_view>::Success("Light created Successfully"));
   });
   SPDLOG_TRACE("--LightManager::changeLight");
   return future;

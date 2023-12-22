@@ -33,22 +33,23 @@ MaterialManager::MaterialManager(CustomModelViewer* modelViewer,
   SPDLOG_TRACE("--MaterialManager::MaterialManager");
 }
 
-::filament::Material* MaterialManager::loadMaterial(Material* material) {
+Resource<::filament::Material*> MaterialManager::loadMaterial(
+    Material* material) {
   // The Future object for loading Material
   if (!material->assetPath_.empty()) {
     return materialLoader_->loadMaterialFromAsset(material->assetPath_);
   } else if (!material->url_.empty()) {
     return materialLoader_->loadMaterialFromUrl(material->url_);
   } else {
-    spdlog::error("You must provide material asset path or url");
-    return nullptr;
+    return Resource<::filament::Material*>::Error(
+        "You must provide material asset path or url");
   }
 }
 
-MaterialInstance* MaterialManager::setupMaterialInstance(
+Resource<::filament::MaterialInstance*> MaterialManager::setupMaterialInstance(
     ::filament::Material* materialResult) {
   if (!materialResult)
-    return nullptr;
+    return Resource<::filament::MaterialInstance*>::Error("argument is NULL");
 
   auto count = materialResult->getParameterCount();
   std::vector<::filament::Material::ParameterInfo> parameters(count);
@@ -69,26 +70,27 @@ MaterialInstance* MaterialManager::setupMaterialInstance(
     }
   }
 
-  return nullptr;
+  return Resource<::filament::MaterialInstance*>::Error("Not implemented yet");
 }
 
-::filament::MaterialInstance* MaterialManager::getMaterialInstance(
+Resource<::filament::MaterialInstance*> MaterialManager::getMaterialInstance(
     Material* material) {
   SPDLOG_TRACE("++MaterialManager::getMaterialInstance");
 
   if (!material) {
-    spdlog::error("Material not found");
-    return nullptr;
+    Resource<::filament::MaterialInstance*>::Error("Material not found");
   }
 
-  ::filament::Material* materialResult = loadMaterial(material);
+  auto materialResult = loadMaterial(material);
 
-  if (!materialResult) {
+  if (materialResult.getStatus() != Status::Success) {
     SPDLOG_TRACE("--MaterialManager::getMaterialInstance");
-    return nullptr;
+    return Resource<::filament::MaterialInstance*>::Error(
+        materialResult.getMessage());
   }
 
-  MaterialInstance* materialInstance = setupMaterialInstance(materialResult);
+  auto materialInstance =
+      setupMaterialInstance(materialResult.getData().value());
 
   SPDLOG_TRACE("--MaterialManager::getMaterialInstance");
   return materialInstance;

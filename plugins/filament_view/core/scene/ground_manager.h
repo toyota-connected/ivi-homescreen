@@ -24,10 +24,10 @@
 
 #include "core/include/resource.h"
 #include "core/scene/ground.h"
-#include "core/scene/material/model/material.h"
 #include "core/scene/material/loader/material_loader.h"
 #include "core/scene/material/loader/texture_loader.h"
 #include "core/scene/material/material_manager.h"
+#include "core/scene/material/model/material.h"
 #include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
@@ -40,18 +40,19 @@ class MaterialManager;
 
 class CustomModelViewer;
 
-
 class GroundManager {
  public:
   GroundManager(CustomModelViewer* modelViewer,
                 MaterialManager* material_manager,
                 Ground* ground);
 
-  std::future<Resource<std::string>> createGround();
+  std::future<Resource<std::string_view>> createGround();
 
-  std::future<Resource<std::string>> updateGround(plugin_filament_view::Ground* newGround);
+  std::future<Resource<std::string_view>> updateGround(
+      plugin_filament_view::Ground* newGround);
 
-  std::future<Resource<std::string>> updateGroundMaterial(plugin_filament_view::Material* newMaterial);
+  std::future<Resource<std::string_view>> updateGroundMaterial(
+      plugin_filament_view::Material* newMaterial);
 
   void Print(const char* tag);
 

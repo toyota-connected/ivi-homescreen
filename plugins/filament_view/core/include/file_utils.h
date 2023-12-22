@@ -1,18 +1,18 @@
 /*
-* Copyright 2020-2023 Toyota Connected North America
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*      http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright 2020-2023 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include <filesystem>
 #include <fstream>
@@ -42,15 +42,18 @@ inline bool isValidFilePath(const std::filesystem::path& path) {
   return true;
 }
 
-inline std::vector<uint8_t> createBuffer(std::ifstream& file, const std::size_t size) {
+inline std::vector<uint8_t> createBuffer(std::ifstream& file,
+                                         const std::size_t size) {
   std::vector<uint8_t> buffer(size);
-  if (!file.read(reinterpret_cast<char*>(buffer.data()), static_cast<long>(buffer.size()))) {
+  if (!file.read(reinterpret_cast<char*>(buffer.data()),
+                 static_cast<long>(buffer.size()))) {
     buffer.clear();
   }
   return buffer;
 }
 
-inline std::optional<std::ifstream> readFileContent(const std::filesystem::path& path) {
+inline std::optional<std::ifstream> readFileContent(
+    const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary | std::ios::ate);
   if (!file.is_open()) {
     spdlog::error("[{}] Failed to open", path.c_str());
@@ -59,15 +62,17 @@ inline std::optional<std::ifstream> readFileContent(const std::filesystem::path&
   return file;
 }
 
-inline std::vector<uint8_t> returnErrorMessageAndBuffer(const std::filesystem::path& path,
-                                                        const std::string& message) {
+inline std::vector<uint8_t> returnErrorMessageAndBuffer(
+    const std::filesystem::path& path,
+    const std::string& message) {
   spdlog::error("[{}] {}", path.c_str(), message);
   return {};
 }
 
 inline std::vector<uint8_t> readBinaryFile(const std::string& dependent_path,
                                            const std::string& main_path) {
-  const std::filesystem::path filePath = getAbsolutePath(dependent_path, main_path);
+  const std::filesystem::path filePath =
+      getAbsolutePath(dependent_path, main_path);
 
   if (!isValidFilePath(filePath)) {
     return returnErrorMessageAndBuffer(filePath, "Invalid path");

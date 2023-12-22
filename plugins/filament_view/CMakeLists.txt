@@ -11,6 +11,7 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
+pkg_check_modules(SDL2 IMPORTED_TARGET REQUIRED sdl2)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE
@@ -27,6 +28,7 @@ target_include_directories(filament INTERFACE
         ${FILAMENT_SRC_DIR}/libs/utils/include
         ${FILAMENT_SRC_DIR}/libs/gltfio/include
         ${FILAMENT_SRC_DIR}/libs
+        ${FILAMENT_SRC_DIR}/third_party/stb
 
         ${FILAMENT_BINARY_DIR}/libs/gltfio
         ${FILAMENT_BINARY_DIR}/samples
@@ -54,6 +56,7 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/libs/utils/libutils.a
         ${FILAMENT_BINARY_DIR}/libs/uberz/libuberzlib.a
         ${FILAMENT_BINARY_DIR}/libs/viewer/libviewer.a
+        ${FILAMENT_BINARY_DIR}/shaders/libshaders.a
         ${FILAMENT_BINARY_DIR}/filament/libfilament.a
         ${FILAMENT_BINARY_DIR}/third_party/meshoptimizer/tnt/libmeshoptimizer.a
         ${FILAMENT_BINARY_DIR}/third_party/mikktspace/libmikktspace.a
@@ -67,6 +70,8 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/third_party/libpng/tnt/libpng.a
         ${FILAMENT_BINARY_DIR}/third_party/tinyexr/tnt/libtinyexr.a
         ${FILAMENT_BINARY_DIR}/third_party/libz/tnt/libz.a
+
+        ${FILAMENT_BINARY_DIR}/third_party/stb/tnt/libstb.a
 
         #${FILAMENT_BINARY_DIR}/samples/libsample-resources.a
         ${FILAMENT_BINARY_DIR}/samples/libgltf-demo-resources.a
@@ -85,9 +90,7 @@ add_library(plugin_filament_view STATIC
 
         core/model/animation/animation.cc
         core/model/animation/animation_manager.cc
-        core/model/model_loader.cc
-        core/model/glb_loader.cc
-        core/model/gltf_loader.cc
+        core/model/loader/model_loader.cc
         core/model/model.cc
         core/scene/camera/camera.cc
         core/scene/camera/camera_manager.cc
@@ -143,4 +146,24 @@ add_sanitizers(plugin_filament_view)
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET plugin_filament_view PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
+
+
+if (SDL2_FOUND)
+    add_executable(simple test/simple.cc)
+    target_link_libraries(simple PUBLIC
+            PkgConfig::SDL2
+            filament
+            ${FILAMENT_BINARY_DIR}/third_party/spirv-tools/source/opt/libSPIRV-Tools-opt.a
+            ${FILAMENT_BINARY_DIR}/third_party/spirv-cross/tnt/libspirv-cross-msl.a
+    )
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(simple PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+        target_link_options(simple PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
+    endif ()
+    add_sanitizers(simple)
+
+    if (IPO_SUPPORT_RESULT)
+        set_property(TARGET simple PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif ()
 endif ()

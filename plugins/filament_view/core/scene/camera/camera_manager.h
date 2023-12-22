@@ -28,6 +28,7 @@
 #include "core/scene/camera/lens_projection.h"
 #include "core/scene/camera/projection.h"
 #include "viewer/custom_model_viewer.h"
+#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 
@@ -60,7 +61,7 @@ class CameraManager {
 
   void updateCameraOnResize(uint32_t width, uint32_t height);
 
-  std::future<Resource<std::string>> updateCamera(Camera* cameraInfo);
+  std::future<Resource<std::string_view>> updateCamera(Camera* cameraInfo);
 
   std::string updateExposure(Exposure* exposure);
 

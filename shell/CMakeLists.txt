@@ -137,8 +137,6 @@ endif ()
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(homescreen PRIVATE ${CONTEXT_COMPILE_OPTIONS})
     target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
-    #
-    # --rtlib=compiler-rt
 endif ()
 
 install(TARGETS homescreen DESTINATION bin)

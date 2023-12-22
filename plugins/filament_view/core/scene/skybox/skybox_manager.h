@@ -36,31 +36,37 @@ class SkyboxManager {
 
   void setDefaultSkybox();
 
-  std::future<Resource<std::string>> setSkyboxFromHdrAsset(const std::string& path,
-                                                 bool showSun,
-                                                 bool shouldUpdateLight,
-                                                 float intensity);
+  std::future<Resource<std::string_view>> setSkyboxFromHdrAsset(
+      const std::string& path,
+      bool showSun,
+      bool shouldUpdateLight,
+      float intensity);
 
-  std::future<Resource<std::string>> setSkyboxFromHdrUrl(const std::string& url,
-                                               bool showSun,
-                                               bool shouldUpdateLight,
-                                               float intensity);
+  std::future<Resource<std::string_view>> setSkyboxFromHdrUrl(
+      const std::string& url,
+      bool showSun,
+      bool shouldUpdateLight,
+      float intensity);
 
-  std::future<Resource<std::string>> setSkyboxFromKTXAsset(const std::string& path);
+  std::future<Resource<std::string_view>> setSkyboxFromKTXAsset(
+      const std::string& path);
 
-  std::future<Resource<std::string>> setSkyboxFromKTXUrl(const std::string& url);
+  std::future<Resource<std::string_view>> setSkyboxFromKTXUrl(
+      const std::string& url);
 
-  std::future<Resource<std::string>> setSkyboxFromColor(const std::string& color);
+  std::future<Resource<std::string_view>> setSkyboxFromColor(
+      const std::string& color);
 
-  Resource<std::string> loadSkyboxFromHdrBuffer(const std::vector<uint8_t>& buffer,
-                                      bool showSun,
-                                      bool shouldUpdateLight,
-                                      float intensity);
+  Resource<std::string_view> loadSkyboxFromHdrBuffer(
+      const std::vector<uint8_t>& buffer,
+      bool showSun,
+      bool shouldUpdateLight,
+      float intensity);
 
-  Resource<std::string> loadSkyboxFromHdrFile(const std::string assetPath,
-                                    bool showSun,
-                                    bool shouldUpdateLight,
-                                    float intensity);
+  Resource<std::string_view> loadSkyboxFromHdrFile(const std::string assetPath,
+                                                   bool showSun,
+                                                   bool shouldUpdateLight,
+                                                   float intensity);
 
   void destroySkybox();
 

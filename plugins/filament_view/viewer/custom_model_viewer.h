@@ -35,10 +35,8 @@
 #include <wayland-client.h>
 #include <asio/io_context_strand.hpp>
 
-#include "core/model/glb_loader.h"
-#include "core/model/gltf_loader.h"
+#include "core/model/loader/model_loader.h"
 #include "core/model/model.h"
-#include "core/model/model_loader.h"
 #include "core/scene/camera/camera_manager.h"
 #include "core/scene/scene.h"
 #include "core/shapes/shape.h"
@@ -52,10 +50,6 @@
 namespace plugin_filament_view {
 
 class CameraManager;
-
-class GlbLoader;
-
-class GltfLoader;
 
 class ModelLoader;
 
@@ -117,14 +111,6 @@ class CustomModelViewer {
 
   ModelLoader* getModelLoader() const { return modelLoader_.get(); }
 
-  [[nodiscard]] GlbLoader* getGlbModelLoader() const {
-    return glbLoader_.get();
-  }
-
-  [[nodiscard]] GltfLoader* getGltfModelLoader() const {
-    return gltfLoader_.get();
-  }
-
   void setAnimator(filament::gltfio::Animator* animator) {
     fanimator_ = animator;
   }
@@ -141,6 +127,7 @@ class CustomModelViewer {
 
   void setInitialized() {
     initialized_ = true;
+    fview_->setVisibleLayers(0x4, 0x4);
     OnFrame(this, nullptr, 0);
   }
 
@@ -203,8 +190,6 @@ class CustomModelViewer {
   [[maybe_unused]] ShapeState currentShapesState_;
 
   std::unique_ptr<ModelLoader> modelLoader_;
-  std::unique_ptr<GlbLoader> glbLoader_;
-  std::unique_ptr<GltfLoader> gltfLoader_;
 
   CameraManager* cameraManager_{};
 
