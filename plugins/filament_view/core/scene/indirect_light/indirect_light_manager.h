@@ -48,22 +48,27 @@ class IndirectLightManager {
 
   void setDefaultIndirectLight();
 
-  std::future<Resource<std::string>> setIndirectLightFromKtxAsset(std::string path,
-                                                        double intensity);
+  std::future<Resource<std::string_view>> setIndirectLightFromKtxAsset(
+      std::string path,
+      double intensity);
 
-  std::future<Resource<std::string>> setIndirectLightFromKtxUrl(std::string url,
-                                                      double intensity);
+  std::future<Resource<std::string_view>> setIndirectLightFromKtxUrl(
+      std::string url,
+      double intensity);
 
-  std::future<Resource<std::string>> setIndirectLightFromHdrAsset(std::string path,
-                                                        double intensity);
+  std::future<Resource<std::string_view>> setIndirectLightFromHdrAsset(
+      std::string path,
+      double intensity);
 
-  std::future<Resource<std::string>> setIndirectLightFromHdrUrl(std::string url,
-                                                      double intensity);
+  std::future<Resource<std::string_view>> setIndirectLightFromHdrUrl(
+      std::string url,
+      double intensity);
 
-  Resource<std::string> loadIndirectLightHdrFromFile(const std::string& asset_path,
-                                           double intensity);
+  Resource<std::string_view> loadIndirectLightHdrFromFile(
+      const std::string& asset_path,
+      double intensity);
 
-  std::future<Resource<std::string>> setIndirectLight(
+  std::future<Resource<std::string_view>> setIndirectLight(
       DefaultIndirectLight* indirectLight);
 
   // Disallow copy and assign.

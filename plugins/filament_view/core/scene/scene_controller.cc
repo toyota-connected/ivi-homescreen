@@ -37,7 +37,7 @@ SceneController::SceneController(PlatformView* platformView,
       shapes_(shapes) {
   SPDLOG_TRACE("++SceneController::SceneController");
   setUpViewer(platformView, state);
-  setUpGround();
+  // setUpGround();
   setUpCamera();
   setUpSkybox();
   setUpLight();
@@ -227,7 +227,6 @@ void SceneController::setUpLoadingModel() {
   animationManager_ = std::make_unique<AnimationManager>(modelViewer_.get());
 
   auto result = loadModel(model_);
-  SPDLOG_DEBUG("loadModel: {}", result.getMessage());
   if (result.getStatus() != Status::Success && model_->GetFallback()) {
     auto fallback = model_->GetFallback();
     if (fallback) {
@@ -256,10 +255,10 @@ std::string SceneController::setDefaultCamera() {
   return "Default camera updated successfully";
 }
 
-Resource<std::string> SceneController::loadModel(Model* model) {
+Resource<std::string_view> SceneController::loadModel(Model* model) {
+  auto loader = modelViewer_->getModelLoader();
   if (dynamic_cast<GlbModel*>(model)) {
     auto glb_model = dynamic_cast<GlbModel*>(model);
-    auto loader = modelViewer_->getGlbModelLoader();
     if (!glb_model->assetPath_.empty()) {
       auto f =
           loader->loadGlbFromAsset(glb_model->assetPath_, glb_model->scale_,
@@ -275,19 +274,20 @@ Resource<std::string> SceneController::loadModel(Model* model) {
   } else if (dynamic_cast<GltfModel*>(model)) {
     auto gltf_model = dynamic_cast<GltfModel*>(model);
     if (!gltf_model->assetPath_.empty()) {
-      auto f = GltfLoader::loadGltfFromAsset(
+      auto f = loader->loadGltfFromAsset(
           gltf_model->assetPath_, gltf_model->pathPrefix_,
           gltf_model->pathPostfix_, gltf_model->scale_,
           gltf_model->center_position_);
       f.wait();
       return f.get();
     } else if (!gltf_model->url_.empty()) {
-      auto f = GltfLoader::loadGltfFromUrl(gltf_model->url_, gltf_model->scale_,
-                                           gltf_model->center_position_);
+      auto f = loader->loadGltfFromUrl(gltf_model->url_, gltf_model->scale_,
+                                       gltf_model->center_position_);
       f.wait();
       return f.get();
     }
   }
+  return Resource<std::string_view>::Error("Unknown");
 }
 
 // TODO Move to model viewer

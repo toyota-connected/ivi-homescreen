@@ -46,9 +46,10 @@ class MaterialManager {
   MaterialManager(CustomModelViewer* modelViewer,
                   const std::string& flutter_assets_path);
 
-  ::filament::MaterialInstance* getMaterialInstance(Material* material);
+  Resource<::filament::MaterialInstance*> getMaterialInstance(
+      Material* material);
 
-      // Disallow copy and assign.
+  // Disallow copy and assign.
   MaterialManager(const MaterialManager&) = delete;
   MaterialManager& operator=(const MaterialManager&) = delete;
 
@@ -59,7 +60,8 @@ class MaterialManager {
   std::unique_ptr<plugin_filament_view::MaterialLoader> materialLoader_;
   std::unique_ptr<plugin_filament_view::TextureLoader> textureLoader_;
 
-  ::filament::Material* loadMaterial(Material* material);
-  MaterialInstance* setupMaterialInstance(::filament::Material* materialResult);
+  Resource<::filament::Material*> loadMaterial(Material* material);
+  Resource<::filament::MaterialInstance*> setupMaterialInstance(
+      ::filament::Material* materialResult);
 };
 }  // namespace plugin_filament_view

@@ -130,7 +130,7 @@ class SceneController {
 
   std::string setDefaultCamera();
 
-  Resource<std::string> loadModel(Model* model);
+  Resource<std::string_view> loadModel(Model* model);
 
   void setUpAnimation(std::optional<Animation*> animation);
 

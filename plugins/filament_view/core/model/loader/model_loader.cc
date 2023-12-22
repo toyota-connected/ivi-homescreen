@@ -23,9 +23,12 @@
 #include <filament/TransformManager.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
+#include <asio/post.hpp>
 
 #include "materials/uberarchive.h"
 
+#include "../../shell/curl_client/curl_client.h"
+#include "core/include/file_utils.h"
 #include "logging/logging.h"
 
 namespace plugin_filament_view {
@@ -36,28 +39,29 @@ using ::filament::gltfio::ResourceConfiguration;
 using ::filament::gltfio::ResourceLoader;
 
 ModelLoader::ModelLoader(CustomModelViewer* modelViewer)
-    : engine_(modelViewer->getFilamentEngine()), modelViewer_(modelViewer) {
+    : modelViewer_(modelViewer), strand_(modelViewer->getStrandContext()) {
   SPDLOG_TRACE("++ModelLoader::ModelLoader");
   assert(modelViewer_);
-  auto engine = modelViewer->getFilamentEngine();
+  engine_ = modelViewer->getFilamentEngine();
+  assetPath_ = modelViewer->getAssetPath();
+
   materialProvider_ = ::filament::gltfio::createUbershaderProvider(
-      engine, UBERARCHIVE_DEFAULT_DATA,
+      engine_, UBERARCHIVE_DEFAULT_DATA,
       static_cast<size_t>(UBERARCHIVE_DEFAULT_SIZE));
   SPDLOG_DEBUG("UbershaderProvider MaterialsCount: {}",
                materialProvider_->getMaterialsCount());
 
   AssetConfiguration assetConfiguration{};
-  assetConfiguration.engine = engine;
+  assetConfiguration.engine = engine_;
   assetConfiguration.materials = materialProvider_;
   assetLoader_ = AssetLoader::create(assetConfiguration);
 
   ResourceConfiguration resourceConfiguration{};
-  resourceConfiguration.engine = engine;
+  resourceConfiguration.engine = engine_;
   resourceConfiguration.normalizeSkinningWeights = true;
   resourceLoader_ = new ResourceLoader(resourceConfiguration);
 
   assetPath_ = modelViewer->getAssetPath();
-  visibleScenes_.reset();
   SPDLOG_TRACE("--ModelLoader::ModelLoader");
 }
 
@@ -218,4 +222,90 @@ const ::filament::math::mat4f& ModelLoader::getModelTransform() {
   auto instance = tm.getInstance(root);
   return tm.getTransform(instance);
 }
+
+std::future<Resource<std::string_view>> ModelLoader::loadGlbFromAsset(
+    const std::string& path,
+    float scale,
+    const Position* centerPosition,
+    bool isFallback) {
+  const auto promise(
+      std::make_shared<std::promise<Resource<std::string_view>>>());
+  auto promise_future(promise->get_future());
+  modelViewer_->setModelState(ModelState::LOADING);
+  asio::post(strand_, [&, promise, path, scale, centerPosition, isFallback] {
+    auto buffer = readBinaryFile(path, assetPath_);
+    handleFile(buffer, path, scale, centerPosition, isFallback, promise);
+  });
+  return promise_future;
+}
+
+std::future<Resource<std::string_view>> ModelLoader::loadGlbFromUrl(
+    const std::string& url,
+    float scale,
+    const Position* centerPosition,
+    bool isFallback) {
+  const auto promise(
+      std::make_shared<std::promise<Resource<std::string_view>>>());
+  auto promise_future(promise->get_future());
+  modelViewer_->setModelState(ModelState::LOADING);
+  asio::post(strand_, [&, promise, url, scale, centerPosition, isFallback] {
+    CurlClient client;
+    client.Init(url, {}, {});
+    auto buffer = client.RetrieveContentAsVector();
+    if (client.GetCode() != CURLE_OK) {
+      modelViewer_->setModelState(ModelState::ERROR);
+      promise->set_value(
+          Resource<std::string_view>::Error("Couldn't load Glb from " + url));
+    }
+    handleFile(buffer, url, scale, centerPosition, isFallback, promise);
+  });
+  return promise_future;
+}
+
+void ModelLoader::handleFile(
+    const std::vector<uint8_t>& buffer,
+    const std::string& fileSource,
+    float scale,
+    const Position* centerPosition,
+    bool isFallback,
+    const std::shared_ptr<std::promise<Resource<std::string_view>>>& promise) {
+  if (!buffer.empty()) {
+    loadModelGlb(buffer, centerPosition, scale, true);
+    modelViewer_->setModelState(isFallback ? ModelState::FALLBACK_LOADED
+                                           : ModelState::LOADED);
+    promise->set_value(Resource<std::string_view>::Success(
+        "Loaded glb model successfully from " + fileSource));
+  } else {
+    modelViewer_->setModelState(ModelState::ERROR);
+    promise->set_value(Resource<std::string_view>::Error(
+        "Couldn't load glb model from " + fileSource));
+  }
+}
+
+std::future<Resource<std::string_view>> ModelLoader::loadGltfFromAsset(
+    const std::string& path,
+    const std::string& pre_path,
+    const std::string& post_path,
+    float scale,
+    const Position* centerPosition,
+    bool isFallback) {
+  const auto promise(
+      std::make_shared<std::promise<Resource<std::string_view>>>());
+  auto future(promise->get_future());
+  promise->set_value(Resource<std::string_view>::Error("Not implemented yet"));
+  return future;
+}
+
+std::future<Resource<std::string_view>> ModelLoader::loadGltfFromUrl(
+    const std::string& url,
+    float scale,
+    const Position* centerPosition,
+    bool isFallback) {
+  const auto promise(
+      std::make_shared<std::promise<Resource<std::string_view>>>());
+  auto future(promise->get_future());
+  promise->set_value(Resource<std::string_view>::Error("Not implemented yet"));
+  return future;
+}
+
 }  // namespace plugin_filament_view

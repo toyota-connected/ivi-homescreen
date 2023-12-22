@@ -11,6 +11,7 @@ class TextureLoader;
 
 class MaterialInstance : public ::filament::MaterialInstance {
  public:
-  void setParameter(::filament::Material::ParameterInfo info, TextureLoader* loader);
+  void setParameter(::filament::Material::ParameterInfo info,
+                    TextureLoader* loader);
 };
 }  // namespace plugin_filament_view

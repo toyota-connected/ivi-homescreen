@@ -1,6 +1,7 @@
 
 #include "core/scene/material/loader/material_loader.h"
 
+#include <stb_image.h>
 #include <asio/post.hpp>
 
 #include "../../shell/curl_client/curl_client.h"
@@ -15,7 +16,7 @@ MaterialLoader::MaterialLoader(CustomModelViewer* modelViewer,
       engine_(modelViewer->getFilamentEngine()),
       strand_(modelViewer->getStrandContext()) {}
 
-::filament::Material* MaterialLoader::loadMaterialFromAsset(
+Resource<::filament::Material*> MaterialLoader::loadMaterialFromAsset(
     const std::string& path) {
   auto buffer = readBinaryFile(path, assetPath_);
 
@@ -23,31 +24,30 @@ MaterialLoader::MaterialLoader(CustomModelViewer* modelViewer,
     auto material = ::filament::Material::Builder()
                         .package(buffer.data(), buffer.size())
                         .build(*engine_);
-    return material;
+    return Resource<::filament::Material*>::Success(material);
   } else {
-    spdlog::error("Could not load material from asset.");
-    return nullptr;
+    return Resource<::filament::Material*>::Error(
+        "Could not load material from asset.");
   }
 }
 
-::filament::Material* MaterialLoader::loadMaterialFromUrl(
+Resource<::filament::Material*> MaterialLoader::loadMaterialFromUrl(
     const std::string& url) {
   CurlClient client;
   client.Init(url, {}, {});
   std::vector<uint8_t> buffer = client.RetrieveContentAsVector();
   if (client.GetCode() != CURLE_OK) {
-    spdlog::error("Failed to load material from {}", url);
-    return nullptr;
+    return Resource<::filament::Material*>::Error("Failed to load material from " + url);
   }
 
   if (!buffer.empty()) {
     auto material = ::filament::Material::Builder()
                         .package(buffer.data(), buffer.size())
                         .build(*engine_);
-    return material;
+    return Resource<::filament::Material*>::Success(material);
   } else {
-    spdlog::error("Could not load material from asset.");
-    return nullptr;
+    return Resource<::filament::Material*>::Error(
+        "Could not load material from asset.");
   }
 }
 }  // namespace plugin_filament_view

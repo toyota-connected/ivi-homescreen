@@ -20,7 +20,6 @@
 #include <asio/post.hpp>
 #include <utility>
 
-#include "core/model/glb_loader.h"
 #include "logging/logging.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"
@@ -58,21 +57,14 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
   });
 
   /* Setup Wayland subsurface */
-  assert(state);
-  assert(state->view_controller);
   auto flutter_view = state->view_controller->view;
-  assert(flutter_view);
   display_ = flutter_view->GetDisplay()->GetDisplay();
-  assert(display_);
   parent_surface_ = flutter_view->GetWindow()->GetBaseSurface();
-  assert(parent_surface_);
   surface_ =
       wl_compositor_create_surface(flutter_view->GetDisplay()->GetCompositor());
-  assert(surface_);
   subsurface_ = wl_subcompositor_get_subsurface(
       flutter_view->GetDisplay()->GetSubCompositor(), surface_,
       parent_surface_);
-  assert(subsurface_);
   wl_subsurface_set_desync(subsurface_);
 
   auto f = Initialize(platformView);
@@ -117,27 +109,25 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
   auto promise(std::make_shared<std::promise<bool>>());
   auto future(promise->get_future());
   asio::post(*strand_, [&, promise, platformView] {
-    fengine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
-
-    modelLoader_ = std::make_unique<ModelLoader>(this);
-    glbLoader_ = std::make_unique<GlbLoader>(this, flutterAssetsPath_);
-    gltfLoader_ = std::make_unique<GltfLoader>(this, flutterAssetsPath_);
-
-    frenderer_ = fengine_->createRenderer();
-
     auto platform_view_size = platformView->GetSize();
     native_window_ = {
         .display = display_,
         .surface = surface_,
         .width = static_cast<uint32_t>(platform_view_size.first),
         .height = static_cast<uint32_t>(platform_view_size.second)};
+
+    fengine_ = ::filament::Engine::create(::filament::Engine::Backend::VULKAN);
     fswapChain_ = fengine_->createSwapChain(&native_window_);
+    frenderer_ = fengine_->createRenderer();
 
-    fscene_ = fengine_->createScene();
     fview_ = fengine_->createView();
-    fview_->setPostProcessingEnabled(false);
+    fscene_ = fengine_->createScene();
 
-    setupView();
+    // TODO fview_->setPostProcessingEnabled(false);
+
+    // TODO setupView();
+
+    modelLoader_ = std::make_unique<ModelLoader>(this);
 
     promise->set_value(true);
   });

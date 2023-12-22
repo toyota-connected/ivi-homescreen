@@ -20,11 +20,11 @@
 
 #include <future>
 
+#include "core/include/resource.h"
 #include "core/scene/geometry/direction.h"
 #include "core/scene/geometry/position.h"
 #include "core/scene/light/light.h"
 #include "viewer/custom_model_viewer.h"
-#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 
@@ -38,7 +38,7 @@ class LightManager {
 
   void setDefaultLight();
 
-  std::future<Resource<std::string>> changeLight(Light* light);
+  std::future<Resource<std::string_view>> changeLight(Light* light);
 
   // Disallow copy and assign.
   LightManager(const LightManager&) = delete;

@@ -238,14 +238,16 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
   cameraManipulator_ = manipulatorBuilder.build(cameraInfo->mode_);
 }
 
-std::future<Resource<std::string>> CameraManager::updateCamera(Camera* cameraInfo) {
+std::future<Resource<std::string_view>> CameraManager::updateCamera(
+    Camera* cameraInfo) {
   SPDLOG_DEBUG("++CameraManager::updateCamera");
-  const auto promise(std::make_shared<std::promise<Resource<std::string>>>());
+  const auto promise(
+      std::make_shared<std::promise<Resource<std::string_view>>>());
   auto future(promise->get_future());
 
   assert(modelViewer_);
   if (!cameraInfo) {
-    promise->set_value(Resource<std::string>::Error("Camera not found"));
+    promise->set_value(Resource<std::string_view>::Error("Camera not found"));
   } else {
     asio::post(modelViewer_->getStrandContext(), [&, promise, cameraInfo] {
       updateExposure(cameraInfo->exposure_.get());
@@ -254,7 +256,8 @@ std::future<Resource<std::string>> CameraManager::updateCamera(Camera* cameraInf
       updateCameraShift(cameraInfo->shift_.get());
       updateCameraScaling(cameraInfo->scaling_.get());
       updateCameraManipulator(cameraInfo);
-      promise->set_value(Resource<std::string>::Success("Camera updated successfully"));
+      promise->set_value(
+          Resource<std::string_view>::Success("Camera updated successfully"));
     });
   }
 
