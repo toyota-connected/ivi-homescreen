@@ -11,7 +11,6 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
-pkg_check_modules(SDL2 IMPORTED_TARGET REQUIRED sdl2)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE
@@ -71,12 +70,6 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/third_party/tinyexr/tnt/libtinyexr.a
         ${FILAMENT_BINARY_DIR}/third_party/libz/tnt/libz.a
 
-        ${FILAMENT_BINARY_DIR}/third_party/stb/tnt/libstb.a
-
-        #${FILAMENT_BINARY_DIR}/samples/libsample-resources.a
-        ${FILAMENT_BINARY_DIR}/samples/libgltf-demo-resources.a
-
-        #${FILAMENT_BINARY_DIR}/libs/matdbg/libmatdbg.a
         Threads::Threads
 )
 
@@ -149,6 +142,10 @@ if (IPO_SUPPORT_RESULT)
 endif ()
 
 
+#
+# Simple Example
+#
+pkg_check_modules(SDL2 IMPORTED_TARGET REQUIRED sdl2)
 if (SDL2_FOUND)
     add_executable(simple test/simple.cc)
     target_link_libraries(simple PUBLIC
