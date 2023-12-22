@@ -1,6 +1,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <camutils/Manipulator.h>
 #include <filamat/MaterialBuilder.h>
 #include <filament/Camera.h>
 #include <filament/Engine.h>
@@ -24,6 +25,9 @@
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_video.h>
 
+using CameraManipulator = ::filament::camutils::Manipulator<float>;
+
+/// passed into Filament backend.  Requires static
 static struct {
   struct wl_display* display;
   struct wl_surface* surface;
@@ -34,11 +38,15 @@ static struct {
 volatile uint32_t gWidth, gHeight;
 
 /**
- * @brief Event handler for window resize events
+ * @brief Callback function for handling resize events.
  *
- * @param data The user data associated with the window
- * @param event The SDL event being handled
- * @return int Returns 0 on success, a negative error code on failure
+ * This function is called when an SDL_WINDOWEVENT_RESIZED event is triggered
+ * for the specified window. It retrieves the new window size and updates
+ * the global variables gWidth and gHeight accordingly.
+ *
+ * @param data A pointer to user-defined data (in this case, the SDL_Window*).
+ * @param event A pointer to the SDL_Event structure containing the event data.
+ * @return Returns 0 on success, or a negative value on failure.
  */
 static int OnResize(void* data, SDL_Event* event) {
   if (event->type == SDL_WINDOWEVENT &&
@@ -52,26 +60,14 @@ static int OnResize(void* data, SDL_Event* event) {
 }
 
 /**
- * @brief Retrieves the native window handle from an SDL window object.
+ * @brief Retrieve the native window handle associated with an SDL window.
  *
- * This function returns the native window handle of an SDL window object,
- * depending on the underlying window system.
+ * This function returns the native window handle for a given SDL window.
+ * The native window handle is specific to the underlying windowing subsystem.
  *
- * @param sdlWindow Pointer to the SDL window object.
- * @return A void pointer to the native window handle.
- *     - For X11 window system, the native window handle is a `Window` object.
- *     - For Wayland window system, the native window handle is stored in a
- * `native_window` struct which contains the Wayland display, surface, width,
- * and height.
- *     - For other window systems, `nullptr` is returned and an error message is
- * printed to the console.
- *
- * @note The `gWidth` and `gHeight` variables are defined elsewhere and are used
- * to store the window size when using the Wayland window system.
- * @note The `native_window` struct is defined elsewhere and is used to store
- * the native window handle for the Wayland window system.
- * @note It is the caller's responsibility to ensure that the return value is
- * properly cast to the appropriate type based on the window system being used.
+ * @param sdlWindow A pointer to the SDL window for which to retrieve the native window handle.
+ * @return A void pointer to the native window handle. The type of the pointer depends on the underlying windowing subsystem.
+ *         If the native window handle cannot be determined, nullptr is returned.
  */
 void* getNativeWindow(SDL_Window* sdlWindow) {
   SDL_SysWMinfo wmi;
@@ -84,7 +80,6 @@ void* getNativeWindow(SDL_Window* sdlWindow) {
     // The default Wayland swap chain extent is {0,0}
     // hence having to set the size
     SDL_GetWindowSizeInPixels(sdlWindow, (int*)&gWidth, (int*)&gHeight);
-    // requires static
     native_window = {wmi.info.wl.display, wmi.info.wl.surface, gWidth, gHeight};
     return (void*)&native_window;
   } else {
@@ -94,17 +89,9 @@ void* getNativeWindow(SDL_Window* sdlWindow) {
 }
 
 /**
- * @brief Creates an SDL window with specified parameters.
+ * @brief Creates an SDL window with specified properties.
  *
- * The function creates an SDL window with the given title, position, size, and
- * window flags. The window is shown, resizable, and allows high DPI.
- *
- * @return The created SDL window on success, or nullptr if an error occurred.
- *
- * Example usage:
- * @code{cpp}
- * SDL_Window* window = createWindow();
- * @endcode
+ * @return SDL_Window* The created window. Returns nullptr in case of failure.
  */
 SDL_Window* createWindow() {
   const uint32_t windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN |
@@ -121,22 +108,38 @@ SDL_Window* createWindow() {
   return win;
 }
 
-/**
- * @brief Initializes and runs a Filament application.
- *
- * This function initializes the SDL library, creates a window using the
- * createWindow() function, and sets up the Filament engine, renderer, camera,
- * scene, and other necessary components. It then enters a main loop, rendering
- * the scene and handling input events until the application is closed.
- *
- * @return 0 if the application exits successfully.
- */
-int main() {
-  SDL_Init(SDL_INIT_VIDEO);
+struct {
+  filament::Engine* engine{};
+  filament::SwapChain* swapChain{};
+  filament::Renderer* renderer{};
+  filament::Scene* scene{};
+  filament::View* view{};
+  filament::Skybox* skybox{};
 
+  filament::Camera* camera{};
+  CameraManipulator* cameraManipulator{};
+
+  utils::Entity cameraEntity;
+  utils::Entity light;
+
+  struct {
+    utils::Entity renderable;
+    filament::IndexBuffer* indexBuffer{};
+    filament::VertexBuffer* vertexBuffer{};
+    filament::MaterialInstance* materialInstance{};
+    filament::Material* material{};
+  } quad;
+} gContext;
+
+/**
+ * Adds a quad to the scene.
+ * This function creates a quad mesh, assigns vertex and index buffers,
+ * creates a material, sets default material parameters, and adds the
+ * quad to the scene.
+ */
+void addQuadToScene() {
   using namespace filament;
   using namespace math;
-  using namespace utils;
 
   static constexpr uint32_t indices[] = {0, 1, 2, 2, 3, 0};
 
@@ -154,26 +157,8 @@ int main() {
           .xyzw);
 
   const static math::short4 normals[]{tbn, tbn, tbn, tbn};
-  SDL_Window* window = createWindow();
 
-  Engine* engine = Engine::create(filament::backend::Backend::VULKAN);
-  SwapChain* swapChain = engine->createSwapChain(getNativeWindow(window));
-  Renderer* renderer = engine->createRenderer();
-
-  auto cameraEntity = EntityManager::get().create();
-  Camera* camera = engine->createCamera(cameraEntity);
-  camera->lookAt(float3(0, 50.5f, 0), float3(0, 0, 0), float3(1.f, 0, 0));
-  camera->setProjection(45.0, double(gWidth) / gHeight, 0.1, 50,
-                        Camera::Fov::VERTICAL);
-
-  Scene* scene = engine->createScene();
-
-  View* view = engine->createView();
-  view->setCamera(camera);
-  view->setViewport({0, 0, gWidth, gHeight});
-  view->setScene(scene);
-
-  VertexBuffer* vertexBuffer =
+  auto vertexBuffer = gContext.quad.vertexBuffer =
       VertexBuffer::Builder()
           .vertexCount(4)
           .bufferCount(2)
@@ -182,26 +167,24 @@ int main() {
           .attribute(VertexAttribute::TANGENTS, 1,
                      VertexBuffer::AttributeType::SHORT4)
           .normalized(VertexAttribute::TANGENTS)
-          .build(*engine);
+          .build(*gContext.engine);
 
   vertexBuffer->setBufferAt(
-      *engine, 0,
+      *gContext.engine, 0,
       VertexBuffer::BufferDescriptor(
           vertices, vertexBuffer->getVertexCount() * sizeof(vertices[0])));
   vertexBuffer->setBufferAt(
-      *engine, 1,
+      *gContext.engine, 1,
       VertexBuffer::BufferDescriptor(
           normals, vertexBuffer->getVertexCount() * sizeof(normals[0])));
 
-  IndexBuffer* indexBuffer =
-      IndexBuffer::Builder().indexCount(6).build(*engine);
+  auto indexBuffer = gContext.quad.indexBuffer =
+      IndexBuffer::Builder().indexCount(6).build(*gContext.engine);
 
   indexBuffer->setBuffer(
-      *engine, IndexBuffer::BufferDescriptor(
-                   indices, indexBuffer->getIndexCount() * sizeof(uint32_t)));
-
-  auto skybox = Skybox::Builder().color({0.5, 0.5, 0.5, 1.0}).build(*engine);
-  scene->setSkybox(skybox);
+      *gContext.engine,
+      IndexBuffer::BufferDescriptor(
+          indices, indexBuffer->getIndexCount() * sizeof(uint32_t)));
 
   filamat::MaterialBuilder::init();
   filamat::MaterialBuilder builder;
@@ -222,42 +205,132 @@ int main() {
       .targetApi(filamat::MaterialBuilder::TargetApi::ALL)
       .platform(filamat::MaterialBuilder::Platform::ALL);
 
-  filamat::Package package = builder.build(engine->getJobSystem());
+  filamat::Package package = builder.build(gContext.engine->getJobSystem());
 
-  Material* material = Material::Builder()
-                           .package(package.getData(), package.getSize())
-                           .build(*engine);
-  material->setDefaultParameter("baseColor", RgbType::LINEAR, float3{0, 1, 0});
-  material->setDefaultParameter("metallic", 0.0f);
-  material->setDefaultParameter("roughness", 0.4f);
-  material->setDefaultParameter("reflectance", 0.5f);
+  gContext.quad.material = Material::Builder()
+                               .package(package.getData(), package.getSize())
+                               .build(*gContext.engine);
+  gContext.quad.material->setDefaultParameter("baseColor", RgbType::LINEAR,
+                                              float3{0, 1, 0});
+  gContext.quad.material->setDefaultParameter("metallic", 0.0f);
+  gContext.quad.material->setDefaultParameter("roughness", 0.4f);
+  gContext.quad.material->setDefaultParameter("reflectance", 0.5f);
 
-  MaterialInstance* materialInstance = material->createInstance();
+  gContext.quad.materialInstance = gContext.quad.material->createInstance();
 
-  Entity renderable = EntityManager::get().create();
+  gContext.quad.renderable = utils::EntityManager::get().create();
+  RenderableManager::Builder(1)
+      .boundingBox({{-1, -1, -1}, {1, 1, 1}})
+      .material(0, gContext.quad.materialInstance)
+      .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer,
+                indexBuffer, 0, 6)
+      .culling(false)
+      .build(*gContext.engine, gContext.quad.renderable);
+  gContext.scene->addEntity(gContext.quad.renderable);
+}
 
-  Entity light = EntityManager::get().create();
+/**
+ * @brief Set the default camera for the scene.
+ *
+ * This function creates and configures a default camera for the scene. It sets the camera's exposure parameters,
+ * creates a camera manipulator, and sets the camera's viewport, look-at position, projection, and assigns it to the view.
+ */
+void setDefaultCamera() {
+  using namespace filament;
+  using namespace math;
 
+  static constexpr float kAperture = 16.0f;
+  static constexpr float kShutterSpeed = 1.0f / 125;
+  static constexpr float kSensitivity = 100.0f;
+
+  auto viewport = gContext.view->getViewport();
+
+  /// Create camera
+  gContext.cameraEntity = utils::EntityManager::get().create();
+  gContext.camera = gContext.engine->createCamera(gContext.cameraEntity);
+
+  /// With the default parameters, the scene must contain at least one Light of
+  /// intensity similar to the sun (e.g.: a 100,000 lux directional light).
+  gContext.camera->setExposure(kAperture, kShutterSpeed, kSensitivity);
+
+  /// Create camera manipulator
+  gContext.cameraManipulator = CameraManipulator::Builder()
+                                   .viewport(static_cast<int>(viewport.width),
+                                             static_cast<int>(viewport.height))
+                                   .orbitHomePosition(0, 50.5f, 0) // eye
+                                   .targetPosition(0, 0, 0)        // center
+                                   .upVector(1.f, 0, 0)            // up
+                                   .build(::filament::camutils::Mode::ORBIT);
+
+  gContext.cameraManipulator->setViewport(static_cast<int>(viewport.width),
+                                          static_cast<int>(viewport.height));
+
+  filament::math::float3 eye, center, up;
+  gContext.cameraManipulator->getLookAt(&eye, &center, &up);
+  gContext.camera->lookAt(eye, center, up);
+  gContext.camera->setProjection(
+      60,
+      static_cast<float>(viewport.width) / static_cast<float>(viewport.height),
+      0.1, 10);
+
+  gContext.view->setCamera(gContext.camera);
+}
+
+/**
+ * @brief Initializes the SDL video subsystem and creates a window.
+ *
+ * It creates a SDL window using SDL_CreateWindow function and sets the window flags.
+ * The window is resizable and supports Vulkan rendering.
+ *
+ * @return A pointer to the created SDL window, or nullptr on error.
+ */
+int main() {
+  SDL_Init(SDL_INIT_VIDEO);
+
+  using namespace filament;
+  using namespace math;
+  using namespace utils;
+
+  SDL_Window* window = createWindow();
+
+  /// Core
+  gContext.engine = Engine::create(filament::backend::Backend::VULKAN);
+  gContext.swapChain =
+      gContext.engine->createSwapChain(getNativeWindow(window));
+  gContext.renderer = gContext.engine->createRenderer();
+
+  /// Scene
+  gContext.scene = gContext.engine->createScene();
+
+  /// View
+  gContext.view = gContext.engine->createView();
+  gContext.view->setViewport({0, 0, gWidth, gHeight});
+  gContext.view->setScene(gContext.scene);
+
+  /// Camera - requires valid view
+  setDefaultCamera();
+
+  /// Skybox
+  gContext.skybox =
+      Skybox::Builder().color({0.5, 0.5, 0.5, 1.0}).build(*gContext.engine);
+  gContext.scene->setSkybox(gContext.skybox);
+
+  /// Direct Lighting
+  gContext.light = EntityManager::get().create();
   LightManager::Builder(LightManager::Type::SUN)
       .color(Color::toLinear<ACCURATE>(sRGBColor(0.98f, 0.92f, 0.89f)))
       .intensity(110000)
       .direction({0.7, -1, -0.8})
       .sunAngularRadius(1.9f)
       .castShadows(true)
-      .build(*engine, light);
+      .build(*gContext.engine, gContext.light);
 
-  scene->addEntity(light);
+  gContext.scene->addEntity(gContext.light);
 
-  // build a quad
-  RenderableManager::Builder(1)
-      .boundingBox({{-1, -1, -1}, {1, 1, 1}})
-      .material(0, materialInstance)
-      .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer,
-                indexBuffer, 0, 6)
-      .culling(false)
-      .build(*engine, renderable);
-  scene->addEntity(renderable);
+  /// Build a quad
+  addQuadToScene();
 
+  /// Display loop
   volatile uint32_t prev_width = gWidth;
   volatile uint32_t prev_height = gHeight;
   bool keep_window_open = true;
@@ -268,42 +341,64 @@ int main() {
         case SDL_QUIT:
           keep_window_open = false;
           break;
+        case SDL_MOUSEBUTTONDOWN:
+          gContext.cameraManipulator->grabBegin(e.button.x, e.button.y, true);
+          break;
+        case SDL_MOUSEMOTION:
+          gContext.cameraManipulator->grabUpdate(e.motion.x, e.motion.y);
+          break;
+        case SDL_MOUSEBUTTONUP:
+          gContext.cameraManipulator->grabEnd();
+          break;
+        case SDL_MOUSEWHEEL:
+          gContext.cameraManipulator->scroll(e.wheel.mouseX, e.wheel.mouseY,
+                                             e.wheel.preciseY * 20.0f);
+          break;
       }
 
       if (prev_width != gWidth || prev_height != gHeight) {
         prev_width = gWidth;
         prev_height = gHeight;
-        engine->destroy(swapChain);
-        swapChain = engine->createSwapChain(getNativeWindow(window));
-        view->setViewport({0, 0, gWidth, gHeight});
-        camera->setProjection(45.0, double(gWidth) / gHeight, 0.1, 50,
-                              Camera::Fov::VERTICAL);
+        gContext.engine->flushAndWait();
+        gContext.engine->destroy(gContext.swapChain);
+        gContext.swapChain =
+            gContext.engine->createSwapChain(getNativeWindow(window));
+        gContext.view->setViewport({0, 0, gWidth, gHeight});
+        gContext.cameraManipulator->setViewport((int)gWidth, (int)gHeight);
+        gContext.camera->setProjection(
+            60, static_cast<float>(gWidth) / static_cast<float>(gHeight), 0.1,
+            10);
       }
 
+      float3 eye, center, up;
+      gContext.cameraManipulator->getLookAt(&eye, &center, &up);
+      gContext.camera->lookAt(eye, center, up);
+
       // beginFrame() returns false if we need to skip a frame
-      if (renderer->beginFrame(swapChain)) {
+      if (gContext.renderer->beginFrame(gContext.swapChain)) {
         // for each View
-        renderer->render(view);
-        renderer->endFrame();
+        gContext.renderer->render(gContext.view);
+        gContext.renderer->endFrame();
       }
       SDL_UpdateWindowSurface(window);
       SDL_Delay(16);
     }
   }
 
-  engine->destroy(scene);
-  engine->destroy(view);
-  engine->destroy(cameraEntity);
-  engine->destroy(light);
-  engine->destroy(skybox);
-  engine->destroy(renderable);
-  engine->destroy(indexBuffer);
-  engine->destroy(vertexBuffer);
-  engine->destroy(materialInstance);
-  engine->destroy(material);
-  engine->destroy(renderer);
-  engine->destroy(swapChain);
-  Engine::destroy(engine);
+  gContext.engine->destroy(gContext.scene);
+  gContext.engine->destroy(gContext.view);
+  gContext.engine->destroyCameraComponent(gContext.cameraEntity);
+  delete gContext.cameraManipulator;
+  gContext.engine->destroy(gContext.light);
+  gContext.engine->destroy(gContext.skybox);
+  gContext.engine->destroy(gContext.quad.renderable);
+  gContext.engine->destroy(gContext.quad.indexBuffer);
+  gContext.engine->destroy(gContext.quad.vertexBuffer);
+  gContext.engine->destroy(gContext.quad.materialInstance);
+  gContext.engine->destroy(gContext.quad.material);
+  gContext.engine->destroy(gContext.renderer);
+  gContext.engine->destroy(gContext.swapChain);
+  Engine::destroy(gContext.engine);
 
   SDL_Quit();
   return 0;

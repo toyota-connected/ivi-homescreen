@@ -46,7 +46,8 @@ std::future<void> CameraManager::setDefaultCamera() {
                       static_cast<int>(viewport.height))
             .build(::filament::camutils::Mode::ORBIT);
 
-    camera_ = engine_->createCamera(engine_->getEntityManager().create());
+    cameraEntity_ = engine_->getEntityManager().create();
+    camera_ = engine_->createCamera(cameraEntity_);
     camera_->setExposure(kAperture, kShutterSpeed, kSensitivity);
     promise->set_value();
   });
@@ -276,7 +277,6 @@ void CameraManager::lookAtDefaultPosition() {
 void CameraManager::destroyCamera() {
   SPDLOG_DEBUG("++CameraManager::destroyCamera");
   engine_->destroyCameraComponent(cameraEntity_);
-  utils::EntityManager::get().destroy(cameraEntity_);
   SPDLOG_DEBUG("--CameraManager::destroyCamera");
 }
 
