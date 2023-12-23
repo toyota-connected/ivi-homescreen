@@ -11,6 +11,7 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
+find_package(glm REQUIRED)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE
@@ -28,6 +29,7 @@ target_include_directories(filament INTERFACE
         ${FILAMENT_SRC_DIR}/libs/gltfio/include
         ${FILAMENT_SRC_DIR}/libs
         ${FILAMENT_SRC_DIR}/third_party/stb
+        ${FILAMENT_SRC_DIR}/third_party/libassimp/include
 
         ${FILAMENT_BINARY_DIR}/libs/gltfio
         ${FILAMENT_BINARY_DIR}/samples
@@ -132,6 +134,7 @@ target_link_libraries(plugin_filament_view PUBLIC
         filament
         flutter_common
         platform_homescreen
+        glm::glm
         PkgConfig::CURL
 )
 

@@ -65,6 +65,7 @@ CustomModelViewer::CustomModelViewer(PlatformView* platformView,
   subsurface_ = wl_subcompositor_get_subsurface(
       flutter_view->GetDisplay()->GetSubCompositor(), surface_,
       parent_surface_);
+
   wl_subsurface_set_desync(subsurface_);
 
   auto f = Initialize(platformView);
@@ -120,12 +121,10 @@ std::future<bool> CustomModelViewer::Initialize(PlatformView* platformView) {
     fswapChain_ = fengine_->createSwapChain(&native_window_);
     frenderer_ = fengine_->createRenderer();
 
-    fview_ = fengine_->createView();
     fscene_ = fengine_->createScene();
+    fview_ = fengine_->createView();
 
-    // TODO fview_->setPostProcessingEnabled(false);
-
-    // TODO setupView();
+    setupView();
 
     modelLoader_ = std::make_unique<ModelLoader>(this);
 
@@ -201,10 +200,12 @@ void CustomModelViewer::setupView() {
   ::filament::View::AmbientOcclusionOptions ambientOcclusionOptions{};
   ambientOcclusionOptions.enabled = true;
 
-  // bloom is pretty expensive but adds a fair amount of realism
+#if 0  // TODO evaluate on device
+// bloom is pretty expensive but adds a fair amount of realism
   ::filament::View::BloomOptions bloomOptions{};
   bloomOptions.enabled = true;
   fview_->setBloomOptions(bloomOptions);
+#endif
 
   SPDLOG_TRACE("--CustomModelViewer::setupView");
 }
@@ -247,8 +248,7 @@ void CustomModelViewer::OnFrame(void* data,
                            data);
 
   // Z-Order
-  wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
-  // wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
+  wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
   wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
 
   wl_surface_commit(obj->surface_);
@@ -265,7 +265,6 @@ void CustomModelViewer::setOffset(double left, double top) {
 void CustomModelViewer::resize(double width, double height) {
   fview_->setViewport({left_, top_, static_cast<uint32_t>(width),
                        static_cast<uint32_t>(height)});
-
   cameraManager_->updateCameraOnResize(static_cast<uint32_t>(width),
                                        static_cast<uint32_t>(height));
 }

@@ -16,8 +16,10 @@
 
 #include "model_loader.h"
 
+#include <algorithm> // for max
 #include <sstream>
 
+#include <glm/glm.hpp>
 #include <filament/DebugRegistry.h>
 #include <filament/RenderableManager.h>
 #include <filament/TransformManager.h>
@@ -88,6 +90,24 @@ void ModelLoader::destroyModel() {
   }
 }
 
+void ModelLoader::updateRootTransform(bool autoScaleEnabled) {
+  using namespace filament;
+  using namespace filament::math;
+  using namespace filament::gltfio;
+
+  auto& tcm = engine_->getTransformManager();
+  auto root = tcm.getInstance(asset_->getRoot());
+  mat4f transform;
+
+  if (autoScaleEnabled) {
+    FilamentInstance* instance = asset_->getInstance();
+    Aabb aabb =
+        instance ? instance->getBoundingBox() : asset_->getBoundingBox();
+    transform = fitIntoUnitCube(aabb, 4);
+  }
+  tcm.setTransform(root, transform);
+}
+
 /**
  * Loads a monolithic binary glb and populates the Filament scene.
  */
@@ -101,9 +121,7 @@ void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
   resourceLoader_->asyncBeginLoad(asset_);
   modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
   asset_->releaseSourceData();
-  if (transform) {
-    transformToUnitCube(centerPosition, scale);
-  }
+  transformToUnitCube(centerPosition, scale);
 }
 
 void ModelLoader::loadModelGltf(
@@ -140,42 +158,45 @@ void ModelLoader::loadModelGltf(
   }
 }
 
-filament::math::mat4f inline fitIntoUnitCube(const ::filament::Aabb& bounds,
-                                             float zoffset) {
-  filament::math::float3 minpt = bounds.min;
-  filament::math::float3 maxpt = bounds.max;
+filament::math::mat4f ModelLoader::fitIntoUnitCube(
+    const ::filament::Aabb& bounds,
+    ::filament::math::float3 offset) {
+  using namespace filament;
+  using namespace filament::math;
+  float3 minpt = bounds.min;
+  float3 maxpt = bounds.max;
   float maxExtent;
   maxExtent = std::max(maxpt.x - minpt.x, maxpt.y - minpt.y);
   maxExtent = std::max(maxExtent, maxpt.z - minpt.z);
   float scaleFactor = 2.0f / maxExtent;
-  filament::math::float3 center = (minpt + maxpt) / 2.0f;
-  center.z += zoffset / scaleFactor;
-  return filament::math::mat4f::scaling(filament::math::float3(scaleFactor)) *
-         filament::math::mat4f::translation(-center);
+  float3 center = (minpt + maxpt) / 2.0f;
+  center += offset.z / scaleFactor;
+  return mat4f::scaling(filament::math::float3(scaleFactor)) *
+         mat4f::translation(-center);
 }
 
 void ModelLoader::transformToUnitCube(const Position* centerPoint,
-                                      float scale) {
-  ::filament::float3 centerPosition;
+                                      float modelScale) {
+  using namespace ::filament;
+  using namespace ::filament::gltfio;
+
+  float3 centerPosition{};
   if (!centerPoint) {
     centerPosition = CustomModelViewer::kDefaultObjectPosition;
-  } else {
-    centerPosition = centerPoint->toFloatArray();
   }
-#if 0
-  auto& tm = engine_->getTransformManager();
+  else {
+    centerPosition = { centerPoint->toFloatArray() };
+  }
+
+  TransformManager& tm = engine_->getTransformManager();
+
   auto root = tm.getInstance(asset_->getRoot());
-  ::filament::mat4f transform;
-#if 0
-  if (settings_.viewer.autoScaleEnabled) {
-    auto* instance = asset_->getInstance();
-    ::filament::Aabb aabb =
-        instance ? instance->getBoundingBox() : asset_->getBoundingBox();
-    transform = fitIntoUnitCube(aabb, 4);
-  }
-#endif
+  mat4f transform;
+
+  FilamentInstance* instance = asset_->getInstance();
+  Aabb aabb = instance ? instance->getBoundingBox() : asset_->getBoundingBox();
+  transform = fitIntoUnitCube(aabb, centerPosition);
   tm.setTransform(root, transform);
-#endif
 }
 
 void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {

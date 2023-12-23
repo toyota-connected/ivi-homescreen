@@ -30,6 +30,7 @@ FilamentScene::FilamentScene(PlatformView* platformView,
                              const std::vector<uint8_t>& params,
                              const std::string& flutterAssetsPath) {
   SPDLOG_TRACE("++FilamentScene::FilamentScene");
+  std::cerr << "FilamentScene: " << this << std::endl;
   auto& codec = flutter::StandardMessageCodec::GetInstance();
   const auto decoded = codec.DecodeMessage(params.data(), params.size());
   const auto& creationParams =
@@ -67,7 +68,8 @@ FilamentScene::FilamentScene(PlatformView* platformView,
 }
 
 FilamentScene::~FilamentScene() {
-  SPDLOG_TRACE("FilamentScene::~FilamentScene");
+  SPDLOG_TRACE("++FilamentScene::~FilamentScene");
+  SPDLOG_TRACE("--FilamentScene::~FilamentScene");
 };
 
 }  // namespace plugin_filament_view

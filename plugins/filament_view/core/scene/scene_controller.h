@@ -78,7 +78,9 @@ class SceneController {
     return modelViewer_.get();
   }
 
-  CameraManager* getCameraManager() const { return cameraManager_.get(); }
+  void onTouch(int32_t action, double x, double y);
+
+  [[nodiscard]] CameraManager* getCameraManager() const { return cameraManager_.get(); }
 
  private:
   int32_t id_;

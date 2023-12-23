@@ -10,6 +10,7 @@
 
 #include <flutter_plugin_registrar.h>
 #include "flutter_homescreen.h"
+#include "platform_views/platform_view_listener.h"
 
 #include <string>
 #include <vector>
@@ -33,7 +34,10 @@ FLUTTER_PLUGIN_EXPORT void FilamentViewPluginCApiRegisterWithRegistrar(
     double height,
     const std::vector<uint8_t>& params,
     std::string assetDirectory,
-    FlutterDesktopEngineRef engine);
+    FlutterDesktopEngineRef engine,
+    PlatformViewAddListener add_listener,
+    PlatformViewRemoveListener remove_listener,
+    void* platform_views_context);
 
 #if defined(__cplusplus)
 }  // extern "C"

@@ -4,7 +4,6 @@ add_library(platform_homescreen STATIC
         flutter_desktop_messenger.cc
         platform_handler.cc
         platform_views/platform_views_handler.cc
-        platform_views/platform_views_registry.cc
         platform_views/platform_view_touch.cc
 )
 

@@ -50,7 +50,10 @@ class FilamentViewPlugin : public flutter::Plugin,
                                     double height,
                                     const std::vector<uint8_t>& params,
                                     std::string assetDirectory,
-                                    FlutterDesktopEngineRef engine);
+                                    FlutterDesktopEngineRef engine,
+                                    PlatformViewAddListener addListener,
+                                    PlatformViewRemoveListener removeListener,
+                                    void* platform_view_context);
 
   FilamentViewPlugin(int32_t id,
                      std::string viewType,
@@ -59,7 +62,10 @@ class FilamentViewPlugin : public flutter::Plugin,
                      double height,
                      const std::vector<uint8_t>& params,
                      std::string assetDirectory,
-                     FlutterDesktopEngineState* state);
+                     FlutterDesktopEngineState* state,
+                     PlatformViewAddListener addListener,
+                     PlatformViewRemoveListener removeListener,
+                     void* platform_view_context);
 
   ~FilamentViewPlugin() override;
 
@@ -160,9 +166,20 @@ class FilamentViewPlugin : public flutter::Plugin,
   FilamentViewPlugin& operator=(const FilamentViewPlugin&) = delete;
 
  private:
+  int32_t id_;
+  void* platformViewsContext_;
+  PlatformViewRemoveListener removeListener_;
   const std::string flutterAssetsPath_;
 
   std::unique_ptr<FilamentScene> filamentScene_;
+
+  static void on_resize(double width, double height, void* data);
+  static void on_set_direction(int32_t direction, void* data);
+  static void on_set_offset(double left, double top, void* data);
+  static void on_touch(int32_t action, double x, double y, void* data);
+  static void on_dispose(bool hybrid, void* data);
+
+  static const struct platform_view_listener platform_view_listener_;
 };
 
 }  // namespace plugin_filament_view
