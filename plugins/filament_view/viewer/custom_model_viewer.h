@@ -70,10 +70,6 @@ class CustomModelViewer {
 
   std::future<bool> Initialize(PlatformView* platformView);
 
-  void setCameraManager(CameraManager* cameraManager) {
-    cameraManager_ = cameraManager;
-  };
-
   void setModelState(ModelState modelState);
 
   void setGroundState(SceneState sceneState);
@@ -111,6 +107,8 @@ class CustomModelViewer {
 
   ModelLoader* getModelLoader() const { return modelLoader_.get(); }
 
+  void setCameraManager(CameraManager* cameraManager) { cameraManager_ = cameraManager; }
+
   void setAnimator(filament::gltfio::Animator* animator) {
     fanimator_ = animator;
   }
@@ -133,7 +131,7 @@ class CustomModelViewer {
 
   pthread_t getFilamentApiThreadId() const { return filament_api_thread_id_; }
 
-  std::string getAssetPath() const { return flutterAssetsPath_; }
+  [[nodiscard]] std::string getAssetPath() const { return flutterAssetsPath_; }
 
   void setOffset(double left, double top);
 
@@ -183,6 +181,8 @@ class CustomModelViewer {
 
   ::filament::gltfio::Animator* fanimator_;
 
+  CameraManager* cameraManager_;
+
   ModelState currentModelState_;
   [[maybe_unused]] SceneState currentSkyboxState_;
   [[maybe_unused]] SceneState currentLightState_;
@@ -190,8 +190,6 @@ class CustomModelViewer {
   [[maybe_unused]] ShapeState currentShapesState_;
 
   std::unique_ptr<ModelLoader> modelLoader_;
-
-  CameraManager* cameraManager_{};
 
   static void OnFrame(void* data, wl_callback* callback, uint32_t time);
 

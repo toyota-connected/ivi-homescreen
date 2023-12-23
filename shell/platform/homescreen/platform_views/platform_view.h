@@ -18,6 +18,8 @@
 
 #include <string>
 
+#include "platform_view_listener.h"
+
 class PlatformView {
  public:
   PlatformView(const int32_t id,

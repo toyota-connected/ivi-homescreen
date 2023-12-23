@@ -53,6 +53,8 @@ class ModelLoader {
 
   const ::filament::math::mat4f& getModelTransform();
 
+  void transformToUnitCube(const Position* centerPoint, float scale);
+
   void updateScene();
 
   std::future<Resource<std::string_view>> loadGlbFromAsset(
@@ -107,14 +109,11 @@ class ModelLoader {
       ::filament::gltfio::FilamentAsset* asset,
       const std::function<uint8_t*(std::string asset)> callback);
 
-  /**
-   * Sets up a root transform on the current model to make it fit into a unit
-   * cube.
-   *
-   * @param centerPoint Coordinate of center point of unit cube, defaults to <
-   * 0, 0, -4 >
-   */
-  void transformToUnitCube(const Position* centerPoint, float scale);
+  ::filament::math::mat4f inline fitIntoUnitCube(
+      const ::filament::Aabb& bounds,
+      ::filament::math::float3 offset);
+
+  void updateRootTransform(bool autoScaleEnabled);
 
   /**
    * Removes the transformation that was set up via transformToUnitCube.

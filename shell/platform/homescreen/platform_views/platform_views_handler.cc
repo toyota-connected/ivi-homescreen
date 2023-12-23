@@ -15,17 +15,15 @@
  */
 
 #include "platform_views_handler.h"
+
 #include "platform_view_touch.h"
+
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
 #include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"
 #endif
 #if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
 #include "platform_views/layer_playground/layer_playground.h"
 #endif
-#include "platform_views_registry.h"
-
-#include "shell/logging/logging.h"
-#include "shell/utils.h"
 
 static constexpr char kMethodCreate[] = "create";
 static constexpr char kMethodDispose[] = "dispose";
@@ -117,7 +115,10 @@ void PlatformViewsHandler::HandleMethodCall(
           FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
       FilamentViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, width, height, params,
-          engine_->view_controller->engine->GetAssetDirectory(), engine_);
+          engine_->view_controller->engine->GetAssetDirectory(), engine_,
+          &PlatformViewAddListener,
+          &PlatformViewRemoveListener,
+          this) ;
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -143,7 +144,12 @@ void PlatformViewsHandler::HandleMethodCall(
       }
     }
 
-    PlatformViewsRegistry::GetInstance().RemovePlatformView(id, hybrid);
+    if(listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      callbacks->dispose(hybrid, delegate.second);
+    }
+
     result->Success();
 
   } else if (method_name == kMethodResize) {
@@ -165,8 +171,11 @@ void PlatformViewsHandler::HandleMethodCall(
       }
     }
 
-    PlatformViewsRegistry::GetInstance().GetPlatformView(id)->Resize(width,
-                                                                     height);
+    if(listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      callbacks->resize(width, height, delegate.second);
+    }
 
     const auto res = flutter::EncodableValue(flutter::EncodableMap{
         {flutter::EncodableValue("id"), flutter::EncodableValue(id)},
@@ -187,8 +196,11 @@ void PlatformViewsHandler::HandleMethodCall(
         direction = std::get<int32_t>(it.second);
       }
     }
-    PlatformViewsRegistry::GetInstance().GetPlatformView(id)->SetDirection(
-        direction);
+    if(listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      callbacks->set_direction(direction, delegate.second);
+    }
     result->Success();
   } else if (method_name == kMethodClearFocus) {
     Utils::PrintFlutterEncodableValue("clearFocus", *arguments);
@@ -210,25 +222,47 @@ void PlatformViewsHandler::HandleMethodCall(
         top = std::get<double>(it.second);
       }
     }
-    PlatformViewsRegistry::GetInstance().GetPlatformView(id)->SetOffset(left,
-                                                                        top);
+    if(listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      callbacks->set_offset(left, top, delegate.second);
+    }
     result->Success();
   } else if (method_name == kMethodTouch && !arguments->IsNull()) {
     /// The user touched a platform view within Flutter.
     const auto& params = std::get_if<flutter::EncodableList>(arguments);
     auto touch = PlatformViewTouch(*params);
     SPDLOG_TRACE("PlatformViewTouch id: {}", touch.getId());
-    auto view = PlatformViewsRegistry::GetInstance().GetPlatformView(touch.getId());
-    if (view) {
-      view->OnTouch(touch.getAction(), touch.getX(), touch.getY());
-      result->Success();
+    auto id = touch.getId();
+    if(listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      callbacks->on_touch(touch.getAction(), touch.getX(), touch.getY(), delegate.second);
     }
-    else {
-      result->Error("error", "PlatformView id not registered");
-    }
+    result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
     Utils::PrintFlutterEncodableValue("unhandled", *arguments);
     result->NotImplemented();
+  }
+}
+
+void PlatformViewsHandler::PlatformViewAddListener(
+    void* context,
+    int32_t id,
+    const struct platform_view_listener* listener,
+    void* listener_context) {
+  auto platformView = static_cast<PlatformViewsHandler*>(context);
+  if(platformView->listeners_.find(id) != platformView->listeners_.end()) {
+    platformView->listeners_.erase(id);
+  } else {
+    platformView->listeners_[id] = std::make_pair(listener, listener_context);
+  }
+}
+
+void PlatformViewsHandler::PlatformViewRemoveListener(void* context, int32_t id) {
+  auto platformView = static_cast<PlatformViewsHandler*>(context);
+  if(platformView->listeners_.find(id) != platformView->listeners_.end()) {
+    platformView->listeners_.erase(id);
   }
 }

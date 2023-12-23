@@ -260,10 +260,11 @@ void setDefaultCamera() {
                                    .orbitHomePosition(0, 50.5f, 0) // eye
                                    .targetPosition(0, 0, 0)        // center
                                    .upVector(1.f, 0, 0)            // up
+                                   .zoomSpeed(0.05f)
+                                   .orbitSpeed(0.075f, 0.075f)
+                                   .viewport(static_cast<int>(viewport.width),
+                                             static_cast<int>(viewport.height))
                                    .build(::filament::camutils::Mode::ORBIT);
-
-  gContext.cameraManipulator->setViewport(static_cast<int>(viewport.width),
-                                          static_cast<int>(viewport.height));
 
   filament::math::float3 eye, center, up;
   gContext.cameraManipulator->getLookAt(&eye, &center, &up);
@@ -328,7 +329,7 @@ int main() {
   gContext.scene->addEntity(gContext.light);
 
   /// Build a quad
-  addQuadToScene();
+  //addQuadToScene();
 
   /// Display loop
   volatile uint32_t prev_width = gWidth;
@@ -342,7 +343,7 @@ int main() {
           keep_window_open = false;
           break;
         case SDL_MOUSEBUTTONDOWN:
-          gContext.cameraManipulator->grabBegin(e.button.x, e.button.y, true);
+          gContext.cameraManipulator->grabBegin(e.button.x, e.button.y, false);
           break;
         case SDL_MOUSEMOTION:
           gContext.cameraManipulator->grabUpdate(e.motion.x, e.motion.y);

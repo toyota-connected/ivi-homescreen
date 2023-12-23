@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <map>
+
 #include <flutter/binary_messenger.h>
 #include <flutter/encodable_value.h>
 #include <flutter/method_call.h>
@@ -39,9 +41,18 @@ class PlatformViewsHandler {
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
+  static void PlatformViewAddListener(void* context, int32_t id,
+                               const struct platform_view_listener* listener,
+                               void* listener_context);
+
+  static void PlatformViewRemoveListener(void* context, int32_t id);
+
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
 
   // A reference to the opaque data pointer, if any. Null in headless mode.
   FlutterDesktopEngineRef engine_;
+
+  std::map<int32_t, std::pair<const struct platform_view_listener*, void*>>
+      listeners_;
 };

@@ -69,7 +69,9 @@ void SceneController::setUpViewer(PlatformView* platformView,
                      static_cast<uint32_t>(size.second)});
 
   view->setScene(scene);
-  view->setPostProcessingEnabled(false);
+
+  //TODO this may need to be turned off for target
+  view->setPostProcessingEnabled(true);
 }
 
 void SceneController::setUpGround() {
@@ -82,16 +84,12 @@ void SceneController::setUpGround() {
 }
 
 void SceneController::setUpCamera() {
-  // we own the camera manager
   cameraManager_ = std::make_unique<CameraManager>(modelViewer_.get());
-  // update model viewer
   modelViewer_->setCameraManager(cameraManager_.get());
-
   if (!scene_->camera_) {
     return;
   }
-  auto f = cameraManager_->updateCamera(scene_->camera_.get());
-  f.wait();
+  cameraManager_->updateCamera(scene_->camera_.get());
 }
 
 std::future<void> SceneController::setUpIblProfiler() {
@@ -310,6 +308,12 @@ void SceneController::makeSurfaceViewNotTransparent() {
 
   // TODO surfaceView.setZOrderOnTop(true) // necessary
   // TODO surfaceView.holder.setFormat(PixelFormat.OPAQUE)
+}
+
+void SceneController::onTouch(int32_t action, double x, double y) {
+  if (cameraManager_) {
+    cameraManager_->onAction(action, x, y);
+  }
 }
 
 }  // namespace plugin_filament_view

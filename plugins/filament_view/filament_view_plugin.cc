@@ -38,10 +38,13 @@ void FilamentViewPlugin::RegisterWithRegistrar(
     double height,
     const std::vector<uint8_t>& params,
     std::string assetDirectory,
-    FlutterDesktopEngineRef engine) {
+    FlutterDesktopEngineRef engine,
+    PlatformViewAddListener addListener,
+    PlatformViewRemoveListener removeListener,
+    void* platform_view_context) {
   auto plugin = std::make_unique<FilamentViewPlugin>(
       id, std::move(viewType), direction, width, height, params,
-      std::move(assetDirectory), engine);
+      std::move(assetDirectory), engine, addListener, removeListener, platform_view_context);
 
   FilamentViewApi::SetUp(registrar->messenger(), plugin.get(), id);
   ModelStateChannelApi::SetUp(registrar->messenger(), plugin.get(), id);
@@ -52,45 +55,38 @@ void FilamentViewPlugin::RegisterWithRegistrar(
   registrar->AddPlugin(std::move(plugin));
 }
 
-FilamentViewPlugin::FilamentViewPlugin(int32_t id,
-                                       std::string viewType,
-                                       int32_t direction,
-                                       double width,
-                                       double height,
-                                       const std::vector<uint8_t>& params,
-                                       std::string assetDirectory,
-                                       FlutterDesktopEngineState* state)
+FilamentViewPlugin::FilamentViewPlugin(
+    int32_t id,
+    std::string viewType,
+    int32_t direction,
+    double width,
+    double height,
+    const std::vector<uint8_t>& params,
+    std::string assetDirectory,
+    FlutterDesktopEngineState* state,
+    PlatformViewAddListener addListener,
+    PlatformViewRemoveListener removeListener,
+    void* platform_view_context)
     : PlatformView(id, std::move(viewType), direction, width, height),
+      id_(id),
+      platformViewsContext_(platform_view_context),
+      removeListener_(removeListener),
       flutterAssetsPath_(std::move(assetDirectory)) {
   SPDLOG_TRACE("++FilamentViewPlugin::FilamentViewPlugin");
-  filamentScene_ = std::make_unique<FilamentScene>(this, state, id, params,
-                                                   flutterAssetsPath_);
+  filamentScene_ = std::make_unique<FilamentScene>(this, state, id, params, flutterAssetsPath_);
+  addListener(platformViewsContext_, id, &platform_view_listener_, this);
   SPDLOG_TRACE("--FilamentViewPlugin::FilamentViewPlugin");
 }
 
-FilamentViewPlugin::~FilamentViewPlugin() = default;
+FilamentViewPlugin::~FilamentViewPlugin() {
+  removeListener_(platformViewsContext_, id_);
+};
 
-void FilamentViewPlugin::Resize(double width, double height) {
-  filamentScene_->getSceneController()->getModelViewer()->resize(width, height);
-}
-
-void FilamentViewPlugin::SetDirection(int32_t direction) {
-  direction_ = direction;
-  SPDLOG_TRACE("SetDirection: {}", direction_);
-}
-
-void FilamentViewPlugin::OnTouch(int32_t action, double x, double y) {
-  filamentScene_->getSceneController()->getCameraManager()->onAction(action, x,
-                                                                     y);
-}
-
-void FilamentViewPlugin::SetOffset(double left, double top) {
-  filamentScene_->getSceneController()->getModelViewer()->setOffset(left, top);
-}
-
-void FilamentViewPlugin::Dispose(bool /* hybrid */) {
-  filamentScene_.reset();
-}
+void FilamentViewPlugin::Resize(double width, double height) {}
+void FilamentViewPlugin::SetDirection(int32_t direction) {}
+void FilamentViewPlugin::OnTouch(int32_t action, double x, double y) {}
+void FilamentViewPlugin::SetOffset(double left, double top) {}
+void FilamentViewPlugin::Dispose(bool /* hybrid */) {}
 
 void FilamentViewPlugin::ChangeAnimationByIndex(
     const int32_t index,
@@ -155,5 +151,59 @@ void FilamentViewPlugin::ChangeLightByHdrUrl(
 
 void FilamentViewPlugin::ChangeToDefaultIndirectLight(
     const std::function<void(std::optional<FlutterError> reply)> result) {}
+
+void FilamentViewPlugin::on_resize(double width, double height, void* data) {
+  auto plugin = static_cast<FilamentViewPlugin*>(data);
+  if (plugin && plugin->filamentScene_) {
+    plugin->filamentScene_->getSceneController()->getModelViewer()->resize(
+        width, height);
+  }
+}
+
+void FilamentViewPlugin::on_set_direction(int32_t direction, void* data) {
+  auto plugin = static_cast<FilamentViewPlugin*>(data);
+  if (plugin) {
+    plugin->direction_ = direction;
+  }
+  SPDLOG_TRACE("SetDirection: {}", plugin->direction_);
+}
+
+void FilamentViewPlugin::on_set_offset(double left, double top, void* data) {
+  auto plugin = static_cast<FilamentViewPlugin*>(data);
+  if (plugin && plugin->filamentScene_) {
+    auto sceneController = plugin->filamentScene_->getSceneController();
+    if (sceneController) {
+      sceneController->getModelViewer()->setOffset(left, top);
+    }
+  }
+}
+
+void FilamentViewPlugin::on_touch(int32_t action,
+                                  double x,
+                                  double y,
+                                  void* data) {
+  auto plugin = static_cast<FilamentViewPlugin*>(data);
+  if (plugin && plugin->filamentScene_) {
+    auto sceneController = plugin->filamentScene_->getSceneController();
+    if (sceneController) {
+      sceneController->onTouch(action, x, y);
+    }
+  }
+}
+
+void FilamentViewPlugin::on_dispose(bool hybrid, void* data) {
+  auto plugin = static_cast<FilamentViewPlugin*>(data);
+  if (plugin && plugin->filamentScene_) {
+    plugin->filamentScene_.reset();
+  }
+}
+
+const struct platform_view_listener
+    FilamentViewPlugin::platform_view_listener_ = {
+        .resize = on_resize,
+        .set_direction = on_set_direction,
+        .set_offset = on_set_offset,
+        .on_touch = on_touch,
+        .dispose = on_dispose};
 
 }  // namespace plugin_filament_view
