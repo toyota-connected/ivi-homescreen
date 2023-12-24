@@ -1,17 +1,16 @@
-# Filament View Plugin
+# Filament View
 
-This plugin is used with a AndroidView on the Flutter side
+This plugin is built for use with an AndroidView on the Flutter side.
 
-### Requirements
-* Vulkan is supported by target system
-* Build homescreen with Clag
-  * This is due to the fact Clang is required for Filament.
+## Requirements
 
-_Filament does not build with GCC._
+- **System Compatibility:** The target system must support Vulkan
+- **Compiler:** Clang
+    - Note: Filament requires Clang
 
 ## Building Filament
 
-Development work used the following configuration:
+The development work is done using the following Filament configuration:
 
 ```
 -DFILAMENT_SUPPORTS_WAYLAND=ON

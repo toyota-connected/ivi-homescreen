@@ -1,19 +1,41 @@
-# Platform Views
+# Table of Contents
 
-This handler supports the AndroidView interface. Meaning you can take any Platform View Dart code, change the definition
-to use AndroidView, and you will have a working interface.
+1. [Overview of the Platform Views Handler](#overview-of-the-platform-views-handler)
+2. [Pros of Using AndroidView Interface](#pros-of-using-androidview-interface)
+3. [Backing Implementation Approaches](#backing-implementation-approaches)
+    - [Rendering to a Texture](#rendering-to-a-texture)
+    - [Rendering to a Compositor Sub-Surface](#rendering-to-a-compositor-sub-surface)
+4. [Existing Implementations](#existing-implementations)
 
-Benefits of using this interface:
+## Overview of the Platform Views Handler
 
-* pre-defined interface that is supported in Flutter SDK
-* params are easily augmented in Dart to add for given use case
-* pass touch to another process/library without additional work
+This handler is designed to handle seamless integration with any Dart code in Platform View using the `AndroidView`
+interface.
 
-For a backing implementation there are a number of approaches:
+## Pros of Using AndroidView Interface
 
-* Have a PlatformView implementation render to a Texture
-* Compositor Region support (poke a hole for another process)
-* Compositor sub-surface and manage Z-order
+- The `AndroidView` interface is pre-defined and well-supported within Flutter SDK, reducing compatibility issues.
+- The interface's parameters are adjustable in Dart, enhancing adaptability to different use cases.
+- The support for transfer of touch to another process/library without the requirement of additional code.
 
-The above is already supported today using either an OpenGL texture, or a Compositor Sub-Surface. Using Platform Views
-just re-uses an existing interface.
+## Backing Implementation Approaches
+
+The following approaches can be used for backing implementation in platform views.
+
+### Rendering to a Texture
+
+This approach involves rendering a `PlatformView` implementation to a texture.
+
+### Rendering to a Compositor Sub-Surface
+
+This method involves rendering a `PlatformView` implementation to a compositor sub-surface.
+
+Both approaches can effectively be implemented using either an OpenGL texture or a compositor sub-surface and are
+feasible through the `Platform Views` interface.
+
+## Existing Implementations
+
+There are currently two example plugin implementations that render to a compositor Sub-Surface:
+
+- `LayerPlaygroundView`
+- `FilamentView`
