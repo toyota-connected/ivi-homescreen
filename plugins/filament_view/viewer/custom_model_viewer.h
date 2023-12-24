@@ -41,9 +41,9 @@
 #include "core/scene/scene.h"
 #include "core/shapes/shape.h"
 #include "flutter_desktop_plugin_registrar.h"
-#include "models/state/model_state.h"
-#include "models/state/scene_state.h"
-#include "models/state/shape_state.h"
+#include "core/model/state/model_state.h"
+#include "core/model/state/scene_state.h"
+#include "core/model/state/shape_state.h"
 #include "platform_views/platform_view.h"
 #include "settings.h"
 

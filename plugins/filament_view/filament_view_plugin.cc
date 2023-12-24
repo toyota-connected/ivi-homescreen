@@ -82,12 +82,6 @@ FilamentViewPlugin::~FilamentViewPlugin() {
   removeListener_(platformViewsContext_, id_);
 };
 
-void FilamentViewPlugin::Resize(double width, double height) {}
-void FilamentViewPlugin::SetDirection(int32_t direction) {}
-void FilamentViewPlugin::OnTouch(int32_t action, double x, double y) {}
-void FilamentViewPlugin::SetOffset(double left, double top) {}
-void FilamentViewPlugin::Dispose(bool /* hybrid */) {}
-
 void FilamentViewPlugin::ChangeAnimationByIndex(
     const int32_t index,
     const std::function<void(std::optional<FlutterError> reply)> result) {}

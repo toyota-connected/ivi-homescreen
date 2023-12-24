@@ -69,15 +69,6 @@ class FilamentViewPlugin : public flutter::Plugin,
 
   ~FilamentViewPlugin() override;
 
-  void Resize(double width, double height) override;
-
-  void SetDirection(int32_t direction) override;
-
-  void SetOffset(double left, double top) override;
-
-  void OnTouch(int32_t action, double x, double y) override;
-
-  void Dispose(bool hybrid) override;
 
   void ChangeAnimationByIndex(
       const int32_t index,

@@ -37,8 +37,6 @@ class PlatformView {
 
   virtual ~PlatformView() = default;
 
-  virtual void Resize(double width, double height) = 0;
-
   [[nodiscard]] std::pair<int32_t, int32_t> GetSize() const {
     return {width_, height_};
   }
@@ -52,14 +50,6 @@ class PlatformView {
   std::string GetViewType() { return viewType_; }
 
   [[nodiscard]] int32_t GetDirection() const { return direction_; }
-
-  virtual void SetDirection(int32_t direction) = 0;
-
-  virtual void SetOffset(double left, double top) = 0;
-
-  virtual void OnTouch(int32_t action, double x, double y) = 0;
-
-  virtual void Dispose(bool hybrid) = 0;
 
  private:
   int32_t id_;

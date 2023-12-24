@@ -1,5 +1,5 @@
 /*
-* Copyright 2020-2023 Toyota Connected North America
+ * Copyright 2020-2023 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,34 +14,74 @@
  * limitations under the License.
  */
 
-#include "layer_playground.h"
+#include "layer_playground_view_plugin.h"
 
-#include <EGL/eglext.h>
+#include <flutter/standard_message_codec.h>
 
-#include <wayland-egl-core.h>
-#include <wayland/display.h>
+#include "logging/logging.h"
 
-LayerPlayground::LayerPlayground(const int32_t id,
-                                 std::string viewType,
-                                 const int32_t direction,
-                                 const double width,
-                                 const double height,
-                                 FlutterView* view)
+class FlutterView;
+
+class Display;
+
+namespace plugin_layer_playground_view {
+
+// static
+void LayerPlaygroundViewPlugin::RegisterWithRegistrar(
+    flutter::PluginRegistrar* registrar,
+    int32_t id,
+    std::string viewType,
+    int32_t direction,
+    double width,
+    double height,
+    const std::vector<uint8_t>& params,
+    std::string assetDirectory,
+    FlutterDesktopEngineRef engine,
+    PlatformViewAddListener addListener,
+    PlatformViewRemoveListener removeListener,
+    void* platform_view_context) {
+  auto plugin = std::make_unique<LayerPlaygroundViewPlugin>(
+      id, std::move(viewType), direction, width, height, params,
+      std::move(assetDirectory), engine, addListener, removeListener,
+      platform_view_context);
+
+  registrar->AddPlugin(std::move(plugin));
+}
+
+LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
+    int32_t id,
+    std::string viewType,
+    int32_t direction,
+    double width,
+    double height,
+    const std::vector<uint8_t>& params,
+    std::string assetDirectory,
+    FlutterDesktopEngineState* state,
+    PlatformViewAddListener addListener,
+    PlatformViewRemoveListener removeListener,
+    void* platform_view_context)
     : PlatformView(id, std::move(viewType), direction, width, height),
+      id_(id),
+      platformViewsContext_(platform_view_context),
+      removeListener_(removeListener),
+      flutterAssetsPath_(std::move(assetDirectory)),
       callback_(nullptr) {
-  SPDLOG_TRACE("LayerPlayground: [{}] {}", GetViewType().c_str(), id);
+  SPDLOG_TRACE("++LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
 
-  const auto display = view->GetDisplay();
-  display_ = display->GetDisplay();
-  surface_ = wl_compositor_create_surface(display->GetCompositor());
-  parent_surface_ = view->GetWindow()->GetBaseSurface();
-  subsurface_ = wl_subcompositor_get_subsurface(display->GetSubCompositor(),
-                                                surface_, parent_surface_);
+  /* Setup Wayland subsurface */
+  auto flutter_view = state->view_controller->view;
+  display_ = flutter_view->GetDisplay()->GetDisplay();
+  parent_surface_ = flutter_view->GetWindow()->GetBaseSurface();
+  surface_ =
+      wl_compositor_create_surface(flutter_view->GetDisplay()->GetCompositor());
+  subsurface_ = wl_subcompositor_get_subsurface(
+      flutter_view->GetDisplay()->GetSubCompositor(), surface_,
+      parent_surface_);
 
   egl_window_ = wl_egl_window_create(surface_, width_, height_);
   assert(egl_window_);
 
-  egl_display_ = eglGetDisplay(display->GetDisplay());
+  egl_display_ = eglGetDisplay(display_);
   assert(egl_display_);
 
   InitializeEGL();
@@ -54,61 +94,89 @@ LayerPlayground::LayerPlayground(const int32_t id,
 
   eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
   InitializeScene();
+
+  addListener(platformViewsContext_, id, &platform_view_listener_, this);
+  SPDLOG_TRACE("--LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
 }
 
-LayerPlayground::~LayerPlayground() {
-  SPDLOG_TRACE("~LayerPlayground: [{}] {}", GetViewType().c_str(), GetId());
+LayerPlaygroundViewPlugin::~LayerPlaygroundViewPlugin() {
+  removeListener_(platformViewsContext_, id_);
+};
+
+void LayerPlaygroundViewPlugin::on_resize(double width, double height, void* data) {
+  auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
+  if (plugin) {
+    plugin->width_ = static_cast<int32_t>(width);
+    plugin->height_ = static_cast<int32_t>(height);
+    SPDLOG_TRACE("Resize: {} {}", width, height);
+  }
 }
 
-void LayerPlayground::Resize(const double width, const double height) {
-  width_ = static_cast<int32_t>(width);
-  height_ = static_cast<int32_t>(height);
-  SPDLOG_TRACE("Resize: {} {}", width, height);
+void LayerPlaygroundViewPlugin::on_set_direction(int32_t direction, void* data) {
+  auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
+  if (plugin) {
+    plugin->direction_ = direction;
+    SPDLOG_TRACE("SetDirection: {}", plugin->direction_);
+  }
 }
 
-void LayerPlayground::SetDirection(const int32_t direction) {
-  direction_ = direction;
-  SPDLOG_TRACE("SetDirection: {}", direction_);
-}
-
-void LayerPlayground::SetOffset(const double left, const double top) {
-  left_ = static_cast<int32_t>(left);
-  top_ = static_cast<int32_t>(top);
-  if (subsurface_) {
-    SPDLOG_TRACE("SetOffset: left: {}, top: {}", left_, top_);
-    wl_subsurface_set_position(subsurface_, left_, top_);
-    if (!callback_) {
-      on_frame(this, callback_, 0);
+void LayerPlaygroundViewPlugin::on_set_offset(double left, double top, void* data) {
+  auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
+  if (plugin) {
+    plugin->left_ = static_cast<int32_t>(left);
+    plugin->top_ = static_cast<int32_t>(top);
+    if (plugin->subsurface_) {
+      SPDLOG_TRACE("SetOffset: left: {}, top: {}", plugin->left_, plugin->top_);
+      wl_subsurface_set_position(plugin->subsurface_, plugin->left_, plugin->top_);
+      if (!plugin->callback_) {
+        on_frame(plugin, plugin->callback_, 0);
+      }
     }
   }
 }
 
-void LayerPlayground::Dispose(const bool /* hybrid */) {
-  if (callback_) {
-    wl_callback_destroy(callback_);
-    callback_ = nullptr;
+void LayerPlaygroundViewPlugin::on_touch(int32_t action,
+                                     double x,
+                                     double y,
+                                     void* data) {
+  auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
+}
+
+void LayerPlaygroundViewPlugin::on_dispose(bool hybrid, void* data) {
+  auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
+  if (plugin->callback_) {
+    wl_callback_destroy(plugin->callback_);
+    plugin->callback_ = nullptr;
   }
 
-  if (subsurface_) {
-    wl_subsurface_destroy(subsurface_);
-    subsurface_ = nullptr;
+  if (plugin->subsurface_) {
+    wl_subsurface_destroy(plugin->subsurface_);
+    plugin->subsurface_ = nullptr;
   }
 
-  if (egl_window_) {
-    wl_egl_window_destroy(egl_window_);
-    egl_window_ = nullptr;
+  if (plugin->egl_window_) {
+    wl_egl_window_destroy(plugin->egl_window_);
+    plugin->egl_window_ = nullptr;
   }
 
-  if (surface_) {
-    wl_surface_destroy(surface_);
-    surface_ = nullptr;
+  if (plugin->surface_) {
+    wl_surface_destroy(plugin->surface_);
+    plugin->surface_ = nullptr;
   }
 }
 
-void LayerPlayground::on_frame(void* data,
+const struct platform_view_listener
+    LayerPlaygroundViewPlugin::platform_view_listener_ = {
+        .resize = on_resize,
+        .set_direction = on_set_direction,
+        .set_offset = on_set_offset,
+        .on_touch = on_touch,
+        .dispose = on_dispose};
+
+void LayerPlaygroundViewPlugin::on_frame(void* data,
                                wl_callback* callback,
                                const uint32_t time) {
-  const auto obj = static_cast<LayerPlayground*>(data);
+  const auto obj = static_cast<LayerPlaygroundViewPlugin*>(data);
 
   obj->callback_ = nullptr;
 
@@ -123,7 +191,7 @@ void LayerPlayground::on_frame(void* data,
   wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
 
   obj->callback_ = wl_surface_frame(obj->surface_);
-  wl_callback_add_listener(obj->callback_, &LayerPlayground::frame_listener,
+  wl_callback_add_listener(obj->callback_, &LayerPlaygroundViewPlugin::frame_listener,
                            data);
 
   wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
@@ -131,7 +199,7 @@ void LayerPlayground::on_frame(void* data,
   wl_surface_commit(obj->surface_);
 }
 
-const wl_callback_listener LayerPlayground::frame_listener = {.done = on_frame};
+const wl_callback_listener LayerPlaygroundViewPlugin::frame_listener = {.done = on_frame};
 
 GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
   // Create the shader object
@@ -157,7 +225,7 @@ GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
   return shader;
 }
 
-void LayerPlayground::InitializeEGL() {
+void LayerPlaygroundViewPlugin::InitializeEGL() {
   EGLint major, minor;
   EGLBoolean ret = eglInitialize(egl_display_, &major, &minor);
   assert(ret == EGL_TRUE);
@@ -200,7 +268,7 @@ void LayerPlayground::InitializeEGL() {
   SPDLOG_TRACE("Context={}", egl_context_);
 }
 
-void LayerPlayground::InitializeScene() {
+void LayerPlaygroundViewPlugin::InitializeScene() {
   constexpr GLchar vShaderStr[] =
       "attribute vec4 vPosition; \n"
       "void main() \n"
@@ -247,7 +315,7 @@ void LayerPlayground::InitializeScene() {
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
-void LayerPlayground::DrawFrame(uint32_t /* time */) const {
+void LayerPlaygroundViewPlugin::DrawFrame(uint32_t /* time */) const {
   static constexpr GLfloat vVertices[] = {0.0f, 0.5f, 0.0f,  -0.5f, -0.5f,
                                           0.0f, 0.5f, -0.5f, 0.0f};
 
@@ -266,3 +334,5 @@ void LayerPlayground::DrawFrame(uint32_t /* time */) const {
 
   eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
+
+}  // namespace plugin_layer_playground

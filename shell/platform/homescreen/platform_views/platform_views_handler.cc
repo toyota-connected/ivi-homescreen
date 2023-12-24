@@ -21,8 +21,8 @@
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
 #include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"
 #endif
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
-#include "platform_views/layer_playground/layer_playground.h"
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
+#include "plugins/layer_playground_view/include/layer_playground_view/layer_playground_view_plugin_c_api.h"
 #endif
 
 static constexpr char kMethodCreate[] = "create";
@@ -98,21 +98,22 @@ void PlatformViewsHandler::HandleMethodCall(
         width = std::get<double>(it.second);
       }
     }
-#if 0
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND)
+    auto registrar =
+        FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
+
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
     if (viewType == "@views/simple-box-view-type") {
-      auto platform_view = std::make_unique<LayerPlayground>(
-          id, std::move(viewType), direction, width, height, engine_);
-      PlatformViewsRegistry::GetInstance().AddPlatformView(
-          id, std::move(platform_view));
+      LayerPlaygroundPluginCApiRegisterWithRegistrar(
+        registrar, id, std::move(viewType), direction, width, height, params,
+        engine_->view_controller->engine->GetAssetDirectory(), engine_,
+        &PlatformViewAddListener,
+        &PlatformViewRemoveListener,
+        this) ;
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
-#endif
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
     if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
-      auto registrar =
-          FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
       FilamentViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, width, height, params,
           engine_->view_controller->engine->GetAssetDirectory(), engine_,

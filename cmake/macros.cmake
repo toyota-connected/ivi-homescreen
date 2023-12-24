@@ -20,7 +20,7 @@ macro(ENABLE_TEXTURE texture)
 
     string(TOUPPER ${texture} ucase_texture)
 
-    target_compile_definitions(homescreen PRIVATE -DENABLE_TEXTURE_${ucase_texture})
+    target_compile_definitions(homescreen PRIVATE ENABLE_TEXTURE_${ucase_texture})
 
     target_sources(homescreen PRIVATE textures/${texture}/texture_${texture}.cc)
 
@@ -34,7 +34,7 @@ macro(ENABLE_PLUGIN plugin)
 
     string(TOUPPER ${plugin} ucase_plugin)
 
-    add_compile_definitions(-DENABLE_PLUGIN_${ucase_plugin})
+    add_compile_definitions(ENABLE_PLUGIN_${ucase_plugin})
 
     add_subdirectory(plugins/${plugin})
     # target_sources(homescreen PRIVATE plugins/${plugin}/${plugin}.cc)
