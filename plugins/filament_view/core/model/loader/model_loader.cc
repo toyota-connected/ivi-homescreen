@@ -121,7 +121,8 @@ void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
   resourceLoader_->asyncBeginLoad(asset_);
   modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
   asset_->releaseSourceData();
-  transformToUnitCube(centerPosition, scale);
+  updateRootTransform(false);
+  //transformToUnitCube(centerPosition, scale);
 }
 
 void ModelLoader::loadModelGltf(
@@ -195,7 +196,7 @@ void ModelLoader::transformToUnitCube(const Position* centerPoint,
 
   FilamentInstance* instance = asset_->getInstance();
   Aabb aabb = instance ? instance->getBoundingBox() : asset_->getBoundingBox();
-  transform = fitIntoUnitCube(aabb, centerPosition);
+  //TODO transform = fitIntoUnitCube(aabb, centerPosition);
   tm.setTransform(root, transform);
 }
 

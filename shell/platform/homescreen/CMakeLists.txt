@@ -9,7 +9,7 @@ add_library(platform_homescreen STATIC
 
 target_include_directories(platform_homescreen PUBLIC
         .
-        ./platform_views/layer_playground
+        ../../../plugins/layer_playground
         client_wrapper/include
         public
         ${CMAKE_BINARY_DIR}/shell
@@ -33,14 +33,13 @@ target_link_libraries(platform_homescreen PUBLIC
         spdlog
         wayland-gen
         flutter_common
-        plugin_filament_view
 )
 
-target_compile_definitions(platform_homescreen PUBLIC ENABLE_PLUGIN_FILAMENT_VIEW)
-
-if (BUILD_VIEW_LAYER_PLAYGROUND)
-    target_compile_definitions(platform_homescreen PUBLIC ENABLE_PLUGIN_LAYER_PLAYGROUND)
-    target_sources(platform_homescreen PRIVATE
-            platform_views/layer_playground/layer_playground.cc
-    )
+if (BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW)
+    target_link_libraries(platform_homescreen PUBLIC plugin_layer_playground_view)
 endif ()
+
+if (BUILD_PLUGIN_FILAMENT_VIEW)
+    target_link_libraries(platform_homescreen PUBLIC plugin_filament_view)
+endif ()
+

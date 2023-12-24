@@ -11,7 +11,6 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
-find_package(glm REQUIRED)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE
@@ -120,21 +119,16 @@ add_library(plugin_filament_view STATIC
         ../../shell/curl_client/curl_client.cc
 )
 
-target_compile_definitions(plugin_filament_view PUBLIC ENABLE_PLUGIN_FILAMENT_VIEW)
-
 target_include_directories(plugin_filament_view PUBLIC
         .
         include
 )
-
-# target_link_directories(plugin_filament_view PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 target_link_libraries(plugin_filament_view PUBLIC
         asio
         filament
         flutter_common
         platform_homescreen
-        glm::glm
         PkgConfig::CURL
 )
 

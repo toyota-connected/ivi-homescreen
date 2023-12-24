@@ -170,4 +170,9 @@ if (BUILD_PLUGIN_FILAMENT_VIEW)
     ENABLE_PLUGIN(filament_view)
 endif ()
 
+option(BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW "Include Layer Playground View plugin" OFF)
+if (BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW)
+    ENABLE_PLUGIN(layer_playground_view)
+endif ()
+
 message(STATUS "Plugin Config .......... ${PLUGINS}")
