@@ -23,7 +23,6 @@
 TaskRunner::TaskRunner(std::string name, FlutterEngine& engine)
     : name_(std::move(name)),
       engine_(engine),
-      pthread_self_(pthread_self()),
       io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
@@ -40,7 +39,8 @@ TaskRunner::TaskRunner(std::string name, FlutterEngine& engine)
   });
 
   asio::post(*strand_, [&]() {
-    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self());
+    pthread_self_ = pthread_self();
+    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self_);
   });
 }
 

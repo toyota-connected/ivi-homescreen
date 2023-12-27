@@ -30,14 +30,11 @@ macro(ENABLE_PLUGIN plugin)
 
     message(STATUS "Enabling Plugin: ${plugin}")
 
-    list(APPEND PLUGINS plugin_${plugin})
-
     string(TOUPPER ${plugin} ucase_plugin)
 
     add_compile_definitions(ENABLE_PLUGIN_${ucase_plugin})
 
     add_subdirectory(plugins/${plugin})
-    # target_sources(homescreen PRIVATE plugins/${plugin}/${plugin}.cc)
 
 endmacro(ENABLE_PLUGIN)
 

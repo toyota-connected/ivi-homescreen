@@ -28,7 +28,7 @@ target_link_directories(plugin_firebase_core PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 target_link_libraries(plugin_firebase_core PUBLIC
         firebase_sdk
-        flutter_common
+        flutter
         platform_homescreen
 )
 

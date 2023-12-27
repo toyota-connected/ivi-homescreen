@@ -16,6 +16,7 @@
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
 
+#include "asio/post.hpp"
 #include "view/flutter_view.h"
 
 struct FlutterDesktopEngineState;
@@ -51,8 +52,6 @@ std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter> LoadAotData(
 // Populates |state|'s helper object fields that are common to normal and
 // headless mode.
 //
-// View is optional; if present it will be provided to the created
-// PlatformHandler.
 void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                             FlutterView* view) {
   // Messaging.
@@ -129,42 +128,97 @@ FlutterDesktopWindowRef FlutterDesktopPluginRegistrarGetWindow(
   return controller->view_wrapper.get();
 }
 
+std::future<bool> PostMessengerSendWithReply(
+    FlutterDesktopMessengerRef messenger,
+    const char* channel,
+    const uint8_t* message,
+    const size_t message_size,
+    const FlutterDesktopBinaryReply reply,
+    void* user_data) {
+  const auto promise(std::make_shared<std::promise<bool>>());
+  auto promise_future(promise->get_future());
+  asio::post(*messenger->GetEngine()->platform_task_runner->GetStrandContext(),
+             [&, promise, channel, message, message_size, reply, user_data]() {
+               FlutterPlatformMessageResponseHandle* response_handle = nullptr;
+               if (reply != nullptr && user_data != nullptr) {
+                 const FlutterEngineResult result =
+                     LibFlutterEngine->PlatformMessageCreateResponseHandle(
+                         messenger->GetEngine()->flutter_engine, reply,
+                         user_data, &response_handle);
+                 if (result != kSuccess) {
+                   spdlog::error("Failed to create response handle");
+                   promise->set_value(false);
+                   return;
+                 }
+               }
+
+               const FlutterPlatformMessage platform_message = {
+                   sizeof(FlutterPlatformMessage),
+                   channel,
+                   message,
+                   message_size,
+                   response_handle,
+               };
+
+               const FlutterEngineResult message_result =
+                   LibFlutterEngine->SendPlatformMessage(
+                       messenger->GetEngine()->flutter_engine,
+                       &platform_message);
+
+               if (response_handle != nullptr) {
+                 LibFlutterEngine->PlatformMessageReleaseResponseHandle(
+                     messenger->GetEngine()->flutter_engine, response_handle);
+               }
+
+               promise->set_value(message_result == kSuccess);
+             });
+  return promise_future;
+}
+
 bool FlutterDesktopMessengerSendWithReply(FlutterDesktopMessengerRef messenger,
                                           const char* channel,
                                           const uint8_t* message,
                                           const size_t message_size,
                                           const FlutterDesktopBinaryReply reply,
                                           void* user_data) {
-  FlutterPlatformMessageResponseHandle* response_handle = nullptr;
-  if (reply != nullptr && user_data != nullptr) {
-    const FlutterEngineResult result =
-        LibFlutterEngine->PlatformMessageCreateResponseHandle(
-            messenger->GetEngine()->flutter_engine, reply, user_data,
-            &response_handle);
-    if (result != kSuccess) {
-      spdlog::error("Failed to create response handle");
-      return false;
+  auto task_runner = messenger->GetEngine()->platform_task_runner;
+  if (task_runner->IsThreadEqual(pthread_self())) {
+    FlutterPlatformMessageResponseHandle* response_handle = nullptr;
+    if (reply != nullptr && user_data != nullptr) {
+      const FlutterEngineResult result =
+          LibFlutterEngine->PlatformMessageCreateResponseHandle(
+              messenger->GetEngine()->flutter_engine, reply, user_data,
+              &response_handle);
+      if (result != kSuccess) {
+        spdlog::error("Failed to create response handle");
+        return false;
+      }
     }
+
+    const FlutterPlatformMessage platform_message = {
+        sizeof(FlutterPlatformMessage),
+        channel,
+        message,
+        message_size,
+        response_handle,
+    };
+
+    const FlutterEngineResult message_result =
+        LibFlutterEngine->SendPlatformMessage(
+            messenger->GetEngine()->flutter_engine, &platform_message);
+
+    if (response_handle != nullptr) {
+      LibFlutterEngine->PlatformMessageReleaseResponseHandle(
+          messenger->GetEngine()->flutter_engine, response_handle);
+    }
+
+    return message_result == kSuccess;
+  } else {
+    auto f = PostMessengerSendWithReply(messenger, channel, message,
+                                        message_size, reply, user_data);
+    f.wait();
+    return f.get();
   }
-
-  const FlutterPlatformMessage platform_message = {
-      sizeof(FlutterPlatformMessage),
-      channel,
-      message,
-      message_size,
-      response_handle,
-  };
-
-  const FlutterEngineResult message_result =
-      LibFlutterEngine->SendPlatformMessage(
-          messenger->GetEngine()->flutter_engine, &platform_message);
-
-  if (response_handle != nullptr) {
-    LibFlutterEngine->PlatformMessageReleaseResponseHandle(
-        messenger->GetEngine()->flutter_engine, response_handle);
-  }
-
-  return message_result == kSuccess;
 }
 
 bool FlutterDesktopMessengerSend(FlutterDesktopMessengerRef messenger,

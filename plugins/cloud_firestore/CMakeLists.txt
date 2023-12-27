@@ -30,7 +30,7 @@ target_include_directories(plugin_cloud_firestore PUBLIC include)
 target_link_libraries(plugin_cloud_firestore PUBLIC
         plugin_firebase_core
         firebase_sdk
-        flutter_common
+        flutter
         platform_homescreen
 )
 

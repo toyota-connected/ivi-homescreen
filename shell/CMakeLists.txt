@@ -67,11 +67,6 @@ if (BUILD_PLUGIN_GOOGLE_SIGN_IN OR BUILD_PLUGIN_FILAMENT_VIEW)
     target_sources(homescreen PRIVATE curl_client/curl_client.cc)
 endif ()
 
-if (BUILD_PLUGIN_AUDIO_PLAYERS)
-    target_sources(homescreen PRIVATE ../plugins/audio_players/audio_player.cc)
-    target_sources(homescreen PRIVATE ../plugins/audio_players/audio_players_registry.cc)
-endif ()
-
 target_compile_definitions(homescreen
         PRIVATE
         HAVE_STRCHRNUL
@@ -110,9 +105,8 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 target_link_libraries(homescreen PRIVATE
-        ${PLUGINS}
         spdlog
-        flutter_common
+        flutter
         wayland-gen
         platform_homescreen
         Threads::Threads

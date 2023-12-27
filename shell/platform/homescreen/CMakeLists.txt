@@ -32,7 +32,7 @@ target_link_libraries(platform_homescreen PUBLIC
         asio
         spdlog
         wayland-gen
-        flutter_common
+        flutter
 )
 
 if (BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW)
@@ -43,3 +43,23 @@ if (BUILD_PLUGIN_FILAMENT_VIEW)
     target_link_libraries(platform_homescreen PUBLIC plugin_filament_view)
 endif ()
 
+if (BUILD_AUDIOPLAYERS_LINUX_PLUGIN)
+    target_link_libraries(platform_homescreen PUBLIC audioplayers_linux_plugin)
+endif ()
+
+if (BUILD_PLUGIN_CLOUD_FIRESTORE)
+    target_link_libraries(platform_homescreen PUBLIC plugin_cloud_firestore)
+endif ()
+if (BUILD_PLUGIN_FIREBASE_AUTH)
+    target_link_libraries(platform_homescreen PUBLIC plugin_firebase_auth)
+endif ()
+if (BUILD_PLUGIN_FIREBASE_STORAGE)
+    target_link_libraries(platform_homescreen PUBLIC plugin_firebase_storage)
+endif ()
+if (BUILD_PLUGIN_FIREBASE_CORE)
+    target_link_libraries(platform_homescreen PUBLIC plugin_firebase_core)
+endif ()
+
+if (BUILD_PLUGIN_URL_LAUNCHER)
+    target_link_libraries(platform_homescreen PUBLIC plugin_url_launcher)
+endif ()

@@ -36,6 +36,7 @@
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
+#include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
 
 #include "spdlog/fmt/bundled/chrono.h"
 #include "wayland/display.h"
@@ -120,6 +121,10 @@ void FlutterView::Initialize() {
     spdlog::critical("Failed to Run Engine");
     exit(EXIT_FAILURE);
   }
+
+  // Update for Binary Messenger
+  m_state->engine_state->flutter_engine = m_flutter_engine->GetFlutterEngine();
+  m_state->engine_state->platform_task_runner = m_flutter_engine->GetPlatformTaskRunner();
 
   // Engine events are decoded by surface pointer
   m_wayland_display->SetEngine(m_wayland_window->GetBaseSurface(),
@@ -291,6 +296,10 @@ void FlutterView::SetRegion(
 
 void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
   (void)engine;
+#if defined(ENABLE_PLUGIN_AUDIOPLAYERS_LINUX)
+  AudioPlayersLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
 #if defined(ENABLE_PLUGIN_URL_LAUNCHER)
   UrlLauncherPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));

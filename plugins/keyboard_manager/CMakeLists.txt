@@ -1,3 +1,3 @@
 
 add_library(plugin_keyboard_manager STATIC keyboard_manager.cc keyboard_manager.h)
-target_link_libraries(plugin_keyboard_manager PUBLIC platform_homescreen flutter_common)
+target_link_libraries(plugin_keyboard_manager PUBLIC platform_homescreen flutter)

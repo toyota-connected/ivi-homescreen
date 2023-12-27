@@ -35,7 +35,7 @@ target_link_directories(plugin_firebase_storage PUBLIC ${CMAKE_CURRENT_BINARY_DI
 target_link_libraries(plugin_firebase_storage PUBLIC
         plugin_firebase_core
         firebase_sdk
-        flutter_common
+        flutter
         platform_homescreen
 )
 

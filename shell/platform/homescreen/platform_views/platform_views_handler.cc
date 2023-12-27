@@ -16,7 +16,8 @@
 
 #include "platform_views_handler.h"
 
-#include "platform_view_touch.h"
+#include "shell/platform/homescreen/platform_views/platform_view_listener.h"
+#include "shell/platform/homescreen/platform_views/platform_view_touch.h"
 
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
 #include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"

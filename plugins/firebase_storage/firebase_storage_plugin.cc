@@ -129,11 +129,9 @@ std::string RegisterEventChannel(
 std::string FirebaseStoragePlugin::GetStorageErrorCode(Error storageError) {
   switch (storageError) {
     case firebase::storage::kErrorNone:
-      return "unknown";
     case firebase::storage::kErrorUnknown:
       return "unknown";
     case firebase::storage::kErrorObjectNotFound:
-      return "object-not-found";
     case firebase::storage::kErrorBucketNotFound:
       return "bucket-not-found";
     case firebase::storage::kErrorProjectNotFound:
@@ -161,7 +159,6 @@ std::string FirebaseStoragePlugin::GetStorageErrorCode(Error storageError) {
 std::string FirebaseStoragePlugin::GetStorageErrorMessage(Error storageError) {
   switch (storageError) {
     case firebase::storage::kErrorNone:
-      return "An unknown error occurred";
     case firebase::storage::kErrorUnknown:
       return "An unknown error occurred";
     case firebase::storage::kErrorObjectNotFound:
@@ -552,7 +549,7 @@ class PutDataStreamHandler
   const void* data_;
   size_t buffer_size_;
   Controller* controller_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_{};
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> events_;
 };
 
 class PutFileStreamHandler
@@ -621,7 +618,7 @@ class PutFileStreamHandler
   std::string reference_path_;
   std::string file_path_;
   Controller* controller_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_{};
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> events_;
 };
 
 class GetFileStreamHandler
@@ -691,8 +688,7 @@ class GetFileStreamHandler
   std::string file_path_;
   Controller* controller_;
   std::mutex mtx_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events_ =
-      nullptr;
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> events_;
 };
 
 void FirebaseStoragePlugin::ReferencePutData(

@@ -488,6 +488,10 @@ class Engine {
                                    const char* message,
                                    void* user_data);
 
+  FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const { return m_flutter_engine; }
+
+  TaskRunner* GetPlatformTaskRunner() const { return m_platform_task_runner.get(); }
+
  private:
   size_t m_index;
   bool m_running;
@@ -507,7 +511,7 @@ class Engine {
 
   std::map<int64_t, Texture*> m_texture_registry;
 
-  FlutterEngine m_flutter_engine;
+  FLUTTER_API_SYMBOL(FlutterEngine) m_flutter_engine;
   FlutterProjectArgs m_args;
   std::string m_clipboard_data;
 

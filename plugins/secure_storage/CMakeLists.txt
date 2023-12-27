@@ -1,4 +1,4 @@
 
 pkg_check_modules(SECRET IMPORTED_TARGET REQUIRED libsecret-1)
 add_library(plugin_secure_storage STATIC secure_storage.cc secure_storage.h)
-target_link_libraries(plugin_secure_storage PUBLIC platform_homescreen flutter_common PkgConfig::SECRET)
+target_link_libraries(plugin_secure_storage PUBLIC platform_homescreen flutter PkgConfig::SECRET)
