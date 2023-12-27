@@ -25,7 +25,7 @@ target_compile_definitions(plugin_url_launcher PUBLIC -DENABLE_PLUGIN_URL_LAUNCH
 target_include_directories(plugin_url_launcher PRIVATE include)
 
 target_link_libraries(plugin_url_launcher PUBLIC
-        flutter_common
+        flutter
         platform_homescreen
 )
 

@@ -1,2 +1,2 @@
 add_library(plugin_comp_surf STATIC comp_surf.cc comp_surf.h)
-target_link_libraries(plugin_comp_surf PUBLIC platform_homescreen flutter_common)
+target_link_libraries(plugin_comp_surf PUBLIC platform_homescreen flutter)

@@ -123,8 +123,8 @@ target_link_libraries(firebase_sdk INTERFACE
         ${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/grpc-build/libgrpc.a
         ${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/grpc-build/libgrpc++.a
         ${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/grpc-build/libaddress_sorting.a
-        ${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/boringssl/src/util/ar/testdata/mac/libsample.a
-        ${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/boringssl/src/util/ar/testdata/linux/libsample.a
+        #${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/boringssl/src/util/ar/testdata/mac/libsample.a
+        #${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/boringssl/src/util/ar/testdata/linux/libsample.a
         ${FIREBASE_SDK_LIBDIR}/external/src/firestore-build/external/src/snappy-build/libsnappy.a
         ${FIREBASE_SDK_LIBDIR}/external/src/flatbuffers-build/libflatbuffers.a
         ${FIREBASE_SDK_LIBDIR}/external/src/curl-build/lib/libcurl.a

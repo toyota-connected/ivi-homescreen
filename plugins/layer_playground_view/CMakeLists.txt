@@ -11,7 +11,7 @@ target_include_directories(plugin_layer_playground_view PUBLIC
 )
 
 target_link_libraries(plugin_layer_playground_view PUBLIC
-        flutter_common
+        flutter
         platform_homescreen
 )
 

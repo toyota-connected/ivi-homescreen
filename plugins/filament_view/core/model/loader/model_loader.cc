@@ -122,7 +122,7 @@ void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
   modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
   asset_->releaseSourceData();
   updateRootTransform(false);
-  //transformToUnitCube(centerPosition, scale);
+  transformToUnitCube(centerPosition, scale);
 }
 
 void ModelLoader::loadModelGltf(

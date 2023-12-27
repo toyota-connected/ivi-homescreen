@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include "flutter_desktop_engine_state.h"
+#include "shell/task_runner.h"
 
 struct FlutterDesktopEngineState;
 

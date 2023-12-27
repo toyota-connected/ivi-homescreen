@@ -1,4 +1,4 @@
 
 pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
 add_library(plugin_google_sign_in STATIC google_sign_in.cc google_sign_in.h)
-target_link_libraries(plugin_google_sign_in PUBLIC platform_homescreen flutter_common PkgConfig::CURL)
+target_link_libraries(plugin_google_sign_in PUBLIC platform_homescreen flutter PkgConfig::CURL)

@@ -60,7 +60,7 @@ add_subdirectory(shell/platform/homescreen)
 add_subdirectory(shell)
 
 #print_target_properties(asio)
-#print_target_properties(flutter_common)
+#print_target_properties(flutter)
 #print_target_properties(plugin_url_launcher)
 #print_target_properties(platform_homescreen)
 #print_target_properties(homescreen)

@@ -36,7 +36,7 @@ target_link_directories(plugin_firebase_auth PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(plugin_firebase_auth PUBLIC
         plugin_firebase_core
         firebase_sdk
-        flutter_common
+        flutter
         platform_homescreen
 )
 

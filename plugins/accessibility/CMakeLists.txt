@@ -1,3 +1,3 @@
 
 add_library(plugin_accessibility STATIC accessibility.cc accessibility.h)
-target_link_libraries(plugin_accessibility PUBLIC platform_homescreen flutter_common)
+target_link_libraries(plugin_accessibility PUBLIC platform_homescreen flutter)

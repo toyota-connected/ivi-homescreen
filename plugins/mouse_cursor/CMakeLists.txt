@@ -1,3 +1,3 @@
 
 add_library(plugin_mouse_cursor STATIC mouse_cursor.cc mouse_cursor.h)
-target_link_libraries(plugin_mouse_cursor PUBLIC platform_homescreen flutter_common)
+target_link_libraries(plugin_mouse_cursor PUBLIC platform_homescreen flutter)

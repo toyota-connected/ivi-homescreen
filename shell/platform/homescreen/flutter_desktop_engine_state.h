@@ -1,7 +1,6 @@
 #pragma once
 
-
-#include "libflutter_engine.h"
+#include <asio/io_context_strand.hpp>
 
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/plugin_registrar.h"
 #include "flutter/shell/platform/common/incoming_message_dispatcher.h"
@@ -10,6 +9,8 @@
 #include "flutter_desktop_texture_registrar.h"
 #include "platform/homescreen/platform_handler.h"
 #include "platform/homescreen/platform_views/platform_views_handler.h"
+#include "shell/libflutter_engine.h"
+#include "shell/task_runner.h"
 
 struct FlutterDesktopViewControllerState;
 struct FlutterDesktopMessenger;
@@ -37,8 +38,8 @@ struct FlutterDesktopEngineState {
   // The handle to the Flutter engine instance.
   FLUTTER_API_SYMBOL(FlutterEngine) flutter_engine{};
 
-  // The event loop for the main thread that allows for delayed task execution.
-  // std::unique_ptr<flutter::EventLoop> event_loop;
+  // The platform channel execution thread.
+  TaskRunner* platform_task_runner{};
 
   // The plugin messenger handle given to API clients.
   FlutterDesktopMessengerReferenceOwner messenger = {

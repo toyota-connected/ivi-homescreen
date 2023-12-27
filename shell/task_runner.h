@@ -55,8 +55,8 @@ class TaskRunner {
 
   std::string GetName() { return name_; }
 
-  NODISCARD asio::io_context::strand GetStrandContext() const {
-    return *strand_;
+  NODISCARD asio::io_context::strand* GetStrandContext() const {
+    return strand_.get();
   }
 
  private:

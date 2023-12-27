@@ -127,7 +127,7 @@ target_include_directories(plugin_filament_view PUBLIC
 target_link_libraries(plugin_filament_view PUBLIC
         asio
         filament
-        flutter_common
+        flutter
         platform_homescreen
         PkgConfig::CURL
 )

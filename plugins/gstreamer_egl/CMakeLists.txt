@@ -12,7 +12,7 @@ endif ()
 add_library(plugin_gstreamer_egl STATIC gstreamer_egl.cc gstreamer_egl.h)
 target_link_libraries(plugin_gstreamer_egl PUBLIC
         platform_homescreen
-        flutter_common
+        flutter
         PkgConfig::AVFORMAT
         PkgConfig::GST
         PkgConfig::GST_VIDEO
