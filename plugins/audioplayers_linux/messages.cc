@@ -60,8 +60,6 @@ void AudioPlayersApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                               methodCall,
                                           std::unique_ptr<MethodResult<
                                               EncodableValue>> result) {
-        std::cerr << methodCall.method_name() << std::endl;
-
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
         std::string playerId;
         for (auto& it : *args) {
@@ -70,7 +68,6 @@ void AudioPlayersApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             playerId = std::get<std::string>(it.second);
           }
         }
-        std::cerr << "playerId: [" << playerId << "]" << std::endl;
         if (playerId.empty()) {
           result->Error("LinuxAudioError",
                         "Call missing mandatory parameter playerId.",
@@ -93,9 +90,6 @@ void AudioPlayersApi::SetUp(flutter::BinaryMessenger* binary_messenger,
 
           auto player = AudioplayersLinuxPlugin::GetPlayer(playerId);
           if (!player) {
-            std::cerr << "Player has not yet been created or has already been "
-                         "disposed."
-                      << std::endl;
             result->Error(
                 "LinuxAudioError",
                 "Player has not yet been created or has already been disposed.",
@@ -104,7 +98,6 @@ void AudioPlayersApi::SetUp(flutter::BinaryMessenger* binary_messenger,
           }
 
           const auto& method_name = methodCall.method_name();
-          std::cerr << method_name << std::endl;
           if (method_name == "pause") {
             player->Pause();
           } else if (method_name == "resume") {

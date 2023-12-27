@@ -23,6 +23,8 @@ class AudioPlayer : public flutter::BasicMessageChannel<> {
  public:
   AudioPlayer(const std::string& playerId, BinaryMessenger* messenger);
 
+  ~AudioPlayer();
+
   std::optional<int64_t> GetPosition();
 
   std::optional<int64_t> GetDuration();
@@ -60,10 +62,9 @@ class AudioPlayer : public flutter::BasicMessageChannel<> {
 
   void OnLog(const gchar* message);
 
-  virtual ~AudioPlayer();
-
  private:
   const std::string eventChannelName_;
+  std::unique_ptr<std::thread> gthread_;
 
   // Gst members
   GMainLoop* main_loop_{};
@@ -106,4 +107,6 @@ class AudioPlayer : public flutter::BasicMessageChannel<> {
   void OnPlaybackEnded();
 
   void OnPrepared(bool isPrepared);
+
+  static void main_loop(AudioPlayer* data);
 };

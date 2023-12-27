@@ -45,6 +45,9 @@ AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(
     flutter::BinaryMessenger * messenger)
     : messenger_(messenger) {
   audioPlayers_.clear();
+
+  // GStreamer lib only needs to be initialized once.  Calling it multiple times is fine.
+  gst_init(nullptr, nullptr);
 }
 
 AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() = default;
@@ -60,7 +63,6 @@ AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
 void AudioplayersLinuxPlugin::Create(
     const std::string& player_id,
     std::function<void(std::optional<FlutterError> reply)> result) {
-  std::cerr << "Create: " << player_id << std::endl;
   auto searchPlayer = audioPlayers_.find(player_id);
   if (searchPlayer == audioPlayers_.end()) {
     std::string event_channel = "xyz.luan/audioplayers/events/" + player_id;
