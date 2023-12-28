@@ -632,11 +632,11 @@ void Engine::OnFlutterPlatformMessage(
                    ? nullptr
                    : engine_state->view_controller->view;
 
-#if 0 //TODO
+//#if 0 //TODO
   std::stringstream ss;
   ss << Hexdump(engine_message->message, engine_message->message_size);
   spdlog::info("Channel: \"{}\"\n{}", engine_message->channel, ss.str());
-#endif
+//#endif
 
   engine_state->message_dispatcher->HandleMessage(
       {.struct_size = sizeof(FlutterDesktopMessage),

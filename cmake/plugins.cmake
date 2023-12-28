@@ -165,3 +165,8 @@ option(BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW "Include Layer Playground View plugin"
 if (BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW)
     ENABLE_PLUGIN(layer_playground_view)
 endif ()
+
+option(BUILD_PLUGIN_DESKTOP_WINDOW_LINUX "Includes Desktop Window Linux Plugin" OFF)
+if (BUILD_PLUGIN_DESKTOP_WINDOW_LINUX)
+    ENABLE_PLUGIN(desktop_window_linux)
+endif ()
