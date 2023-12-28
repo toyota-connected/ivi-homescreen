@@ -1,2 +1,0 @@
-add_library(plugin_isolate STATIC isolate.cc isolate.h)
-target_link_libraries(plugin_isolate PUBLIC platform_homescreen flutter)

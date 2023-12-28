@@ -616,26 +616,6 @@ bool Engine::ActivateSystemCursor(const int32_t device,
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
 
-#if ENABLE_PLUGIN_TEXT_INPUT
-MAYBE_UNUSED void Engine::SetTextInput(TextInput* text_input) {
-  m_text_input = text_input;
-}
-
-MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
-  return m_text_input;
-}
-
-#endif
-
-#if ENABLE_PLUGIN_KEY_EVENT
-MAYBE_UNUSED void Engine::SetKeyEvent(KeyEvent* key_event) {
-  m_key_event = key_event;
-}
-MAYBE_UNUSED KeyEvent* Engine::GetKeyEvent() const {
-  return m_key_event;
-}
-#endif
-
 void Engine::OnFlutterPlatformMessage(
     const FlutterPlatformMessage* engine_message,
     void* user_data) {

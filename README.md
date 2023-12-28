@@ -294,10 +294,6 @@ All other parameters get assigned using the following ordering:
 
 `BUILD_PLUGIN_GSTREAMER_EGL` - Include GStreamer Plugin.  Defaults to OFF
 
-`BUILD_PLUGIN_TEXT_INPUT` - Includes Text Input Plugin.  Defaults to ON
-
-`BUILD_PLUGIN_KEY_EVENT` - Includes Key Event Plugin.  Defaults to ON
-
 `BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to ON
 
 `BUILD_PLUGIN_PACKAGE_INFO` - Include PackageInfo Plugin.  Defaults to ON

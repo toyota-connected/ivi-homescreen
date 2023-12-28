@@ -505,13 +505,9 @@ void Display::keyboard_handle_key(void* data,
     }
   }
 
-#if ENABLE_PLUGIN_TEXT_INPUT
   auto text_input = d->m_text_input[d->m_active_surface];
-#endif
-#if ENABLE_PLUGIN_KEY_EVENT
   auto key_event = d->m_key_event[d->m_active_surface];
   std::shared_ptr<DelegateHandleKey> delegate = nullptr;
-#endif
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {

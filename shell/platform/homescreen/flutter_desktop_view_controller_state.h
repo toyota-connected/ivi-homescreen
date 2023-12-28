@@ -1,12 +1,16 @@
 #pragma once
 
 #include "flutter_desktop_view.h"
+#include "keyboard_hook_handler.h"
 
 struct FlutterDesktopEngineState;
 struct FlutterDesktopView;
 
 class Engine;
 class FlutterView;
+namespace flutter {
+class KeyboardHookHandler;
+}
 
 // Struct for storing state within an instance of the View.
 struct FlutterDesktopViewControllerState {
@@ -22,7 +26,6 @@ struct FlutterDesktopViewControllerState {
   // The window handle given to API clients.
   std::unique_ptr<FlutterDesktopView> view_wrapper{};
 
-  // Handlers for keyboard events from Dislay.
-  // std::vector<std::unique_ptr<flutter::KeyboardHookHandler>>
-  // keyboard_hook_handlers;
+  // Handlers for keyboard events from Display.
+  std::vector<std::unique_ptr<flutter::KeyboardHookHandler>> keyboard_hook_handlers;
 };

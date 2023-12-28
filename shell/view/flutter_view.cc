@@ -31,12 +31,14 @@
 #include "compositor_surface.h"
 #endif
 
+#include <platform/homescreen/key_event_handler.h>
+#include <platform/homescreen/text_input_plugin.h>
+#include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
 #include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
-#include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
+#include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
-#include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
 
 #include "spdlog/fmt/bundled/chrono.h"
 #include "wayland/display.h"
@@ -51,14 +53,6 @@ FlutterView::FlutterView(Configuration::Config config,
     : m_wayland_display(display),
       m_config(std::move(config)),
       m_index(index)
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-      ,
-      m_text_input(std::make_shared<TextInput>())
-#endif
-#ifdef ENABLE_PLUGIN_KEY_EVENT
-      ,
-      m_key_event(std::make_shared<KeyEvent>())
-#endif
 {
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
@@ -96,6 +90,15 @@ FlutterView::FlutterView(Configuration::Config config,
 
   SetUpCommonEngineState(m_state->engine_state.get(), this);
 
+  // Set up the keyboard handlers
+  auto internal_plugin_messenger =
+      m_state->engine_state->internal_plugin_registrar->messenger();
+  m_state->keyboard_hook_handlers.push_back(
+      std::make_unique<flutter::KeyEventHandler>(internal_plugin_messenger));
+  m_state->keyboard_hook_handlers.push_back(
+      std::make_unique<flutter::TextInputPlugin>(internal_plugin_messenger));
+  m_wayland_display->SetViewControllerState(m_state->engine_state->view_controller);
+
   RegisterPlugins(m_state->engine_state.get());
 }
 
@@ -124,7 +127,11 @@ void FlutterView::Initialize() {
 
   // Update for Binary Messenger
   m_state->engine_state->flutter_engine = m_flutter_engine->GetFlutterEngine();
-  m_state->engine_state->platform_task_runner = m_flutter_engine->GetPlatformTaskRunner();
+  m_state->engine_state->platform_task_runner =
+      m_flutter_engine->GetPlatformTaskRunner();
+
+  // update view
+  m_state->view = m_state->view_wrapper->view = this;
 
   // Engine events are decoded by surface pointer
   m_wayland_display->SetEngine(m_wayland_window->GetBaseSurface(),
@@ -132,17 +139,6 @@ void FlutterView::Initialize() {
   m_wayland_window->SetEngine(m_flutter_engine);
 
   SPDLOG_DEBUG("({}) Engine running...", m_index);
-
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-  m_text_input->SetEngine(m_flutter_engine);
-  m_wayland_display->SetTextInput(m_wayland_window->GetBaseSurface(),
-                                  m_text_input.get());
-#endif
-#ifdef ENABLE_PLUGIN_KEY_EVENT
-  m_key_event->SetEngine(m_flutter_engine);
-  m_wayland_display->SetKeyEvent(m_wayland_window->GetBaseSurface(),
-                                 m_key_event.get());
-#endif
 
   // init the fps output option.
   m_fps.output = 0;

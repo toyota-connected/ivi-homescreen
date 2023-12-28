@@ -30,8 +30,10 @@
 
 #include "configuration/configuration.h"
 #include "constants.h"
-//TODO #include "plugins/key_event/key_event.h"
-//TODO #include "plugins/text_input/text_input.h"
+#include "platform/homescreen/flutter_desktop_view_controller_state.h"
+#include "platform/homescreen/keyboard_hook_handler.h"
+#include "platform/homescreen/key_event_handler.h"
+#include "platform/homescreen/text_input_plugin.h"
 #include "timer.h"
 
 #if defined(ENABLE_AGL_CLIENT)
@@ -46,6 +48,8 @@
 #endif
 
 class Engine;
+
+struct FlutterDesktopViewControllerState;
 
 class Display {
  public:
@@ -220,6 +224,11 @@ class Display {
    */
   void SetEngine(wl_surface* surface, Engine* engine);
 
+  void SetViewControllerState(
+      FlutterDesktopViewControllerState* view_controller_state) {
+    m_view_controller_state = view_controller_state;
+  }
+
   /**
    * @brief Activate system cursor
    * @param[in] device No use
@@ -232,26 +241,6 @@ class Display {
    */
   NODISCARD bool ActivateSystemCursor(int32_t device,
                                       const std::string& kind) const;
-
-  /**
-   * @brief Set text input
-   * @param[in] surface Image
-   * @param[in] text_input Pointer of TextInput to set
-   * @return void
-   * @relation
-   * wayland
-   */
-//TODO  void SetTextInput(wl_surface* surface, TextInput* text_input);
-
-  /**
-   * @brief Set key event
-   * @param[in] surface Image
-   * @param[in] key_event Pointer of KeyEvent to set
-   * @return void
-   * @relation
-   * wayland
-   */
-//TODO  void SetKeyEvent(wl_surface* surface, KeyEvent* key_event);
 
   /**
    * @brief Get wl_output of a specified index of a view
@@ -302,6 +291,8 @@ class Display {
   wl_surface* m_active_surface{};
   Engine* m_active_engine{};
   Engine* m_touch_engine{};
+
+  struct FlutterDesktopViewControllerState* m_view_controller_state{};
 
   struct wl_seat* m_seat{};
   struct wl_keyboard* m_keyboard{};
@@ -404,10 +395,7 @@ class Display {
   struct xkb_keymap* m_keymap{};
   struct xkb_state* m_xkb_state{};
 
-//TODO  xkb_keysym_t m_keysym_pressed{};
-
-//TODO  std::map<wl_surface*, TextInput*> m_text_input;
-//TODO  std::map<wl_surface*, KeyEvent*> m_key_event;
+  xkb_keysym_t m_keysym_pressed{};
 
   std::mutex m_lock;
   uint32_t m_repeat_code{};

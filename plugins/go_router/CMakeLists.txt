@@ -1,2 +1,0 @@
-add_library(plugin_go_router STATIC go_router.cc go_router.h)
-target_link_libraries(plugin_go_router PUBLIC platform_homescreen flutter)
