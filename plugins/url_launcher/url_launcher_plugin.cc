@@ -49,7 +49,8 @@ ErrorOr<bool> UrlLauncherPlugin::CanLaunchUrl(const std::string& url) {
   }
 
   return (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||
-         (url.rfind("ftp:", 0) == 0) || (url.rfind("file:", 0) == 0);
+         (url.rfind("ftp:", 0) == 0) || (url.rfind("file:", 0) == 0) ||
+         (url.rfind("mailto:", 0) == 0) || (url.rfind("tel:", 0) == 0);
 }
 
 std::optional<FlutterError> UrlLauncherPlugin::LaunchUrl(const std::string& url) {

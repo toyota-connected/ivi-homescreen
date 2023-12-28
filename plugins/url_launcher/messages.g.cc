@@ -18,6 +18,9 @@
 #include <optional>
 #include <string>
 
+#include "logging/logging.h"
+#include "utils.h"
+
 namespace url_launcher_linux {
 using flutter::BasicMessageChannel;
 using flutter::CustomEncodableValue;
@@ -38,44 +41,102 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
           [api](const flutter::MethodCall<EncodableValue>& call,
                 const std::unique_ptr<flutter::MethodResult<EncodableValue>>&
                     result) {
-            const auto args =
-                std::get_if<flutter::EncodableMap>(call.arguments());
-
-            if ("canLaunch" == call.method_name()) {
-              std::string url_arg;
-              const auto it = args->find(flutter::EncodableValue("url"));
-              if (it != args->end() && !it->second.IsNull()) {
-                url_arg = std::get<std::string>(it->second);
-              }
-              if (url_arg.empty()) {
-                result->Error("url_arg unexpectedly null.");
-                return;
-              }
-              const ErrorOr<bool> output = api->CanLaunchUrl(url_arg);
-              if (output.has_error()) {
-                result->Error(output.error().code(), output.error().message());
-                return;
-              }
+            SPDLOG_DEBUG("[url_launcher] {}", call.method_name());
+            if ("closeWebView" == call.method_name()) {
               result->Success(flutter::EncodableValue(true));
+            } else if ("canLaunch" == call.method_name()) {
+              const auto& args =
+                  std::get_if<flutter::EncodableMap>(call.arguments());
+              for (const auto& it : *args) {
+                if (std::holds_alternative<std::string>(it.first) &&
+                    std::holds_alternative<std::string>(it.second)) {
+                  auto key = std::get<std::string>(it.first);
+                  auto value = std::get<std::string>(it.second);
+                  if (key == "url") {
+                    const ErrorOr<bool> output = api->CanLaunchUrl(value);
+                    if (output.has_error()) {
+                      result->Error(output.error().code(),
+                                    output.error().message());
+                      return;
+                    }
+                    result->Success(flutter::EncodableValue(true));
+                  } else {
+                    result->NotImplemented();
+                  }
+                }
+                break;
+              }
             } else if ("launch" == call.method_name()) {
-              std::string url_arg;
-              const auto it = args->find(flutter::EncodableValue("url"));
-              if (it != args->end() && !it->second.IsNull()) {
-                url_arg = std::get<std::string>(it->second);
-              }
-              if (url_arg.empty()) {
-                result->Error("url_arg unexpectedly null.");
-                return;
-              }
-              const std::optional<FlutterError> output =
-                  api->LaunchUrl(url_arg);
-              if (output.has_value()) {
-                result->Success(WrapError(output.value()));
-                return;
+              const auto& arg = *call.arguments();
+              Utils::PrintFlutterEncodableValue("launch", arg);
+              if (std::holds_alternative<std::string>(arg)) {
+                const auto& value = std::get<std::string>(arg);
+                spdlog::debug("[url_launcher] launch: {}", value);
+                const std::optional<FlutterError> output =
+                    api->LaunchUrl(value);
+                if (output.has_value()) {
+                  result->Error(output->code(), output->message(),
+                                output->details());
+                  return;
+                }
+              } else if (std::holds_alternative<EncodableMap>(arg)) {
+                const auto& args = std::get<EncodableMap>(arg);
+                std::string url;
+                bool enableJavaScript{};
+                bool enableDomStorage{};
+                bool universalLinksOnly{};
+                EncodableMap headers{};
+                for (const auto& it : args) {
+                  if (std::holds_alternative<std::string>(it.first) &&
+                      std::holds_alternative<std::string>(it.second)) {
+                    auto key = std::get<std::string>(it.first);
+                    auto value = std::get<std::string>(it.second);
+                    if (key == "url") {
+                      url = value;
+                    }
+                  } else if (std::holds_alternative<std::string>(it.first) &&
+                             std::holds_alternative<bool>(it.second)) {
+                    std::string key = std::get<std::string>(it.first);
+                    if (key == "enableJavaScript") {
+                      enableJavaScript = std::get<bool>(it.second);
+                    } else if (key == "enableDomStorage") {
+                      enableDomStorage = std::get<bool>(it.second);
+                    } else if (key == "universalLinksOnly") {
+                      universalLinksOnly = std::get<bool>(it.second);
+                    } else if (std::holds_alternative<std::string>(it.first) &&
+                               std::holds_alternative<EncodableMap>(
+                                   it.second)) {
+                      key = std::get<std::string>(it.first);
+                      auto map = std::get<EncodableMap>(it.second);
+                      if (key == "headers") {
+                        for (const auto& header : map) {
+                          auto header_key = std::get<std::string>(header.first);
+                          auto header_value =
+                              std::get<std::string>(header.second);
+                          SPDLOG_DEBUG("[url_launcher] {}={}", header_key,
+                                       header_value);
+                        }
+                      } else {
+                        Utils::PrintFlutterEncodableMap(key.c_str(), map);
+                      }
+                    }
+                  }
+                }
+                spdlog::debug(
+                    "[url_launcher] url: {}, enableJavaScript: {}, "
+                    "enableDomStorage: {}, universalLinksOnly: {}",
+                    url, enableJavaScript, enableDomStorage,
+                    universalLinksOnly);
+                const std::optional<FlutterError> output = api->LaunchUrl(url);
+                if (output.has_value()) {
+                  result->Error(output->code(), output->message(),
+                                output->details());
+                  return;
+                }
               }
               result->Success(flutter::EncodableValue(true));
             } else {
-              result->Error("unimplemented");
+              result->NotImplemented();
             }
           });
     }
