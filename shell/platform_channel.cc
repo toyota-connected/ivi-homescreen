@@ -28,9 +28,6 @@
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
-#ifdef ENABLE_PLUGIN_GO_ROUTER
-#include "plugins/go_router/go_router.h"
-#endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "plugins/comp_surf/comp_surf.h"
 #endif
@@ -81,9 +78,6 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
   RegisterCallback(GstreamerEgl::kChannelGstreamerInitialize,
                    &GstreamerEgl::OnInitialize);
-#endif
-#ifdef ENABLE_PLUGIN_GO_ROUTER
-  RegisterCallback(GoRouter::kChannelName, &GoRouter::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
   RegisterCallback(CompositorSurfacePlugin::kChannelName,
