@@ -43,18 +43,6 @@ class FlutterView;
 class Texture;
 struct FlutterDesktopEngineState;
 
-#if ENABLE_PLUGIN_TEXT_INPUT
-
-class TextInput;
-
-#endif
-
-#if ENABLE_PLUGIN_KEY_EVENT
-
-class KeyEvent;
-
-#endif
-
 class Engine {
  public:
   /**
@@ -420,51 +408,6 @@ class Engine {
     const std::filesystem::path p = m_assets_path;
     return absolute(p);
   }
-
-#if ENABLE_PLUGIN_TEXT_INPUT
-  TextInput* m_text_input{};
-
-  /**
-   * @brief Set text input
-   * @param[in] text_input Text input
-   * @return void
-   * @relation
-   * flutter
-   */
-  void SetTextInput(TextInput* text_input);
-
-  /**
-   * @brief Get text input
-   * @return TextInput*
-   * @retval Text input
-   * @relation
-   * flutter
-   */
-  MAYBE_UNUSED NODISCARD TextInput* GetTextInput() const;
-
-#endif
-
-#if ENABLE_PLUGIN_KEY_EVENT
-  KeyEvent* m_key_event{};
-
-  /**
-   * @brief Set key event
-   * @param[in] key_event KeyEvent
-   * @return void
-   * @relation
-   * flutter
-   */
-  void SetKeyEvent(KeyEvent* key_event);
-
-  /**
-   * @brief Get key event
-   * @return KeyEvent*
-   * @retval KeyEvent
-   * @relation
-   * flutter
-   */
-  MAYBE_UNUSED NODISCARD KeyEvent* GetKeyEvent() const;
-#endif
 
   /**
    * @brief Get backend of view

@@ -1,3 +1,0 @@
-
-add_library(plugin_text_input STATIC text_input.cc text_input.h)
-target_link_libraries(plugin_text_input PUBLIC platform_homescreen flutter)

@@ -15,6 +15,7 @@
 #include "flutter_desktop_messenger.h"
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
+#include "shell/platform/homescreen/platform_handler.h"
 
 #include "asio/post.hpp"
 #include "view/flutter_view.h"
@@ -77,9 +78,13 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_handler = std::make_unique<PlatformHandler>(
       state->internal_plugin_registrar->messenger(), view);
 
+  state->desktop_window_handler = std::make_unique<flutter::DesktopWindowHandler>(
+      state->internal_plugin_registrar->messenger(), view);
+
   // Platform Views handler.
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
+
 }
 
 FlutterDesktopEngineRef FlutterDesktopGetEngine(
@@ -277,4 +282,25 @@ bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
       "[FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable] Not "
       "implemented yet.");
   return false;
+}
+
+// Passes character input events to registered handlers.
+void CharCallback(FlutterDesktopViewControllerState* view_state,
+                                const unsigned int code_point) {
+  spdlog::info("CharCallback: {}", code_point);
+  for (const auto& handler : view_state->keyboard_hook_handlers) {
+    handler->CharHook(code_point);
+  }
+}
+
+// Passes raw key events to registered handlers.
+void KeyCallback(FlutterDesktopViewControllerState* view_state,
+                               bool released,
+                               xkb_keysym_t keysym,
+                               uint32_t xkb_scancode,
+                               uint32_t modifiers) {
+  spdlog::debug("KeyCallback: released: {}, keysym: {}, xkb_scancode: {}", released, keysym, xkb_scancode);
+  for (const auto& handler : view_state->keyboard_hook_handlers) {
+    handler->KeyboardHook(released, keysym, xkb_scancode, modifiers);
+  }
 }

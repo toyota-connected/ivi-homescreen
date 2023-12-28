@@ -93,7 +93,7 @@ void AudioplayersLinuxPlugin::Create(
     auto player =
         std::make_unique<AudioPlayer>(std::move(event_channel), messenger_);
     audioPlayers_.insert(
-        std::make_pair(std::move(player_id), std::move(player)));
+        std::make_pair(player_id, std::move(player)));
   }
   result(std::nullopt);
 }

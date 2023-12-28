@@ -27,12 +27,6 @@
 #ifdef ENABLE_TEXTURE_EGL
 #include "textures/egl/texture_egl.h"
 #endif
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-#include "plugins/text_input/text_input.h"
-#endif
-#ifdef ENABLE_PLUGIN_KEY_EVENT
-#include "plugins/key_event/key_event.h"
-#endif
 #ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
 #include "textures/navi_render_egl/texture_navi_render_egl.h"
 #endif
@@ -226,12 +220,6 @@ class FlutterView {
 
 #ifdef ENABLE_TEXTURE_EGL
   std::unique_ptr<TextureEgl> m_texture_egl;
-#endif
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-  std::shared_ptr<TextInput> m_text_input;
-#endif
-#ifdef ENABLE_PLUGIN_KEY_EVENT
-  std::shared_ptr<KeyEvent> m_key_event;
 #endif
 
   struct {

@@ -28,6 +28,12 @@
 #include "engine.h"
 #include "timer.h"
 
+extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
+                        bool released,
+                        xkb_keysym_t keysym,
+                        uint32_t xkb_scancode,
+                        uint32_t modifiers);
+
 Display::Display(bool enable_cursor,
                  const std::string& ignore_wayland_event,
                  std::string cursor_theme_name,
@@ -531,22 +537,8 @@ void Display::keyboard_handle_leave(void* data,
   SPDLOG_TRACE("+ Display::keyboard_handle_leave()");
   auto* d = static_cast<Display*>(data);
 
-  /* The keyboard input focus's leaving
-   * is consider to release all of keys.
-   * So, any procedures for key release events should be done.
-   */
-#if ENABLE_PLUGIN_KEY_EVENT
-  const auto key_event = d->m_key_event[d->m_active_surface];
-  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
-    KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
-                                  d->m_repeat_code, d->m_keysym_pressed,
-                                  nullptr);
-  }
-#endif
-
   d->m_repeat_timer->disarm();
   Display::set_repeat_code(d, XKB_KEY_NoSymbol);
-
   SPDLOG_TRACE("- Display::keyboard_handle_leave()");
 }
 
@@ -606,52 +598,19 @@ void Display::keyboard_handle_key(void* data,
     }
   }
 
-#if ENABLE_PLUGIN_TEXT_INPUT
-  auto text_input = d->m_text_input[d->m_active_surface];
-#endif
-#if ENABLE_PLUGIN_KEY_EVENT
-  const auto key_event = d->m_key_event[d->m_active_surface];
-  std::shared_ptr<DelegateHandleKey> delegate = nullptr;
-#endif
+  KeyCallback(d->m_view_controller_state, state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode, 0);
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
-//TODO      d->m_keysym_pressed = keysym;
+      SPDLOG_DEBUG("xkb_keymap_key_repeats");
+      d->m_keysym_pressed = keysym;
       Display::set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
     } else {
       SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
     }
 
-#if ENABLE_PLUGIN_TEXT_INPUT
-    if (text_input) {
-#endif
-#if ENABLE_PLUGIN_KEY_EVENT && ENABLE_PLUGIN_TEXT_INPUT
-      // The both of TextInput and KeyEvent is enabled.
-      delegate = std::move(
-          TextInput::GetDelegate(text_input, kFlutterKeyEventTypeRepeat,
-                                 d->m_repeat_code, d->m_keysym_pressed));
-#elif !(ENABLE_PLUGIN_KEY_EVENT) && ENABLE_PLUGIN_TEXT_INPUT
-    // Only TextInput is enabled.
-    TextInput::keyboard_handle_key(text_input, keysym, state);
-#endif
-#if ENABLE_PLUGIN_TEXT_INPUT
-    }
-#endif
-
-#if ENABLE_PLUGIN_KEY_EVENT
-    if (key_event) {
-      KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeDown,
-                                    xkb_scancode, keysym, std::move(delegate));
-    }
-#endif
   } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
-#if ENABLE_PLUGIN_KEY_EVENT
-    if (key_event) {
-      KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeUp,
-                                    xkb_scancode, keysym, nullptr);
-    }
-#endif
     if (d->m_repeat_code == xkb_scancode) {
       d->m_repeat_timer->disarm();
       Display::set_repeat_code(d, XKB_KEY_NoSymbol);
@@ -676,9 +635,7 @@ void Display::keyboard_handle_repeat_info(void* data,
                                           int32_t rate,
                                           int32_t delay) {
   const auto d = static_cast<Display*>(data);
-
   d->m_repeat_timer->set_timerspec(rate, delay);
-
   SPDLOG_DEBUG("[keyboard repeat info] rate: {}, delay: {}", rate, delay);
 }
 
@@ -692,44 +649,10 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 };
 
 void Display::keyboard_repeat_func(void* data) {
-#if defined(ENABLE_PLUGIN_TEXT_INPUT) || defined(ENABLE_PLUGIN_KEY_EVENT)
   auto d = static_cast<Display*>(data);
-#else
-  (void)data;
-#endif
-
-#if ENABLE_PLUGIN_TEXT_INPUT
-  auto text_input = d->m_text_input[d->m_active_surface];
-#endif
-#if ENABLE_PLUGIN_KEY_EVENT
-  const auto key_event = d->m_key_event[d->m_active_surface];
-  std::shared_ptr<DelegateHandleKey> delegate = nullptr;
-#endif
-
-#if ENABLE_PLUGIN_TEXT_INPUT
-  if (text_input && d->m_repeat_code != XKB_KEY_NoSymbol) {
-#endif
-#if ENABLE_PLUGIN_KEY_EVENT && ENABLE_PLUGIN_TEXT_INPUT
-    // The both of TextInput and KeyEvent is enabled.
-    delegate = std::move(
-        TextInput::GetDelegate(text_input, kFlutterKeyEventTypeRepeat,
-                               d->m_repeat_code, d->m_keysym_pressed));
-#elif !(ENABLE_PLUGIN_KEY_EVENT) && ENABLE_PLUGIN_TEXT_INPUT
-  // Only TextInput is enabled.
-  TextInput::keyboard_handle_key(text_input, d->m_keysym_pressed,
-                                 WL_KEYBOARD_KEY_STATE_PRESSED);
-#endif
-#if ENABLE_PLUGIN_TEXT_INPUT
+  if (XKB_KEY_NoSymbol != d->m_repeat_code) {
+    KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed, d->m_repeat_code, 0);
   }
-#endif
-
-#if ENABLE_PLUGIN_KEY_EVENT
-  if (key_event && d->m_repeat_code != XKB_KEY_NoSymbol) {
-    KeyEvent::keyboard_handle_key(key_event, kFlutterKeyEventTypeRepeat,
-                                  d->m_repeat_code, d->m_keysym_pressed,
-                                  std::move(delegate));
-  }
-#endif
 }
 
 void Display::touch_handle_down(void* data,
@@ -921,16 +844,6 @@ bool Display::ActivateSystemCursor(const int32_t device,
 
   return true;
 }
-
-#if 0 //TODO
-void Display::SetTextInput(wl_surface* surface, TextInput* text_input) {
-  m_text_input[surface] = text_input;
-}
-
-void Display::SetKeyEvent(wl_surface* surface, KeyEvent* key_event) {
-  m_key_event[surface] = key_event;
-}
-#endif
 
 int32_t Display::GetBufferScale(uint32_t index) const {
   if (index < m_all_outputs.size()) {

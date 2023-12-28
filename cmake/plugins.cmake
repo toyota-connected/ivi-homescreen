@@ -50,17 +50,6 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     endif ()
 endif ()
 
-option(BUILD_PLUGIN_TEXT_INPUT "Includes Text Input Plugin" OFF)
-if (BUILD_PLUGIN_TEXT_INPUT)
-    ENABLE_PLUGIN(text_input)
-endif ()
-
-option(BUILD_PLUGIN_KEY_EVENT "Includes Key Event Plugin" OFF)
-if (BUILD_PLUGIN_KEY_EVENT)
-    ENABLE_PLUGIN(key_event)
-endif ()
-
-
 option(BUILD_PLUGIN_PACKAGE_INFO "Include PackageInfo Plugin" OFF)
 if (BUILD_PLUGIN_PACKAGE_INFO)
     ENABLE_PLUGIN(package_info)

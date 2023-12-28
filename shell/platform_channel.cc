@@ -49,9 +49,6 @@
 #ifdef ENABLE_PLUGIN_DESKTOP_WINDOW
 #include "plugins/desktop_window/desktop_window.h"
 #endif
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-#include "plugins/text_input/text_input.h"
-#endif
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
 #include "plugins/secure_storage/secure_storage.h"
 #endif
@@ -60,9 +57,6 @@
 #endif
 #ifdef ENABLE_PLUGIN_LOGGING
 #include "plugins/logging/logging.h"
-#endif
-#ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
-#include "plugins/keyboard_manager/keyboard_manager.h"
 #endif
 #ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
 #include "plugins/google_sign_in/google_sign_in.h"
@@ -114,9 +108,6 @@ PlatformChannel::PlatformChannel() {
   RegisterCallback(DesktopWindow::kChannelName,
                    &DesktopWindow::OnPlatformMessage);
 #endif
-#ifdef ENABLE_PLUGIN_TEXT_INPUT
-  RegisterCallback(TextInput::kChannelName, &TextInput::OnPlatformMessage);
-#endif
 #ifdef ENABLE_PLUGIN_SECURE_STORAGE
   RegisterCallback(SecureStorage::kChannelName,
                    &SecureStorage::OnPlatformMessage);
@@ -128,10 +119,6 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_LOGGING
   RegisterCallback(LoggingPlugin::kChannelName,
                    &LoggingPlugin::OnPlatformMessage);
-#endif
-#ifdef ENABLE_PLUGIN_KEYBOARD_MANAGER
-  RegisterCallback(KeyboardManager::kChannelName,
-                   &KeyboardManager::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_GOOGLE_SIGN_IN
   RegisterCallback(GoogleSignIn::kChannelName,
