@@ -64,10 +64,10 @@ class AudioPlayer : public flutter::BasicMessageChannel<> {
 
  private:
   const std::string eventChannelName_;
-  std::unique_ptr<std::thread> gthread_;
+  GMainContext* context_;
+  GstState media_state_;
 
   // Gst members
-  GMainLoop* main_loop_{};
   GstElement* playbin_{};
   GstElement* source_{};
   GstElement* panorama_{};
@@ -107,6 +107,4 @@ class AudioPlayer : public flutter::BasicMessageChannel<> {
   void OnPlaybackEnded();
 
   void OnPrepared(bool isPrepared);
-
-  static void main_loop(AudioPlayer* data);
 };

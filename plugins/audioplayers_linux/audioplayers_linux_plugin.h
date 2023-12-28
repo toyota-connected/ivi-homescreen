@@ -123,10 +123,17 @@ class AudioplayersLinuxPlugin final : public flutter::Plugin,
 
  private:
   flutter::BinaryMessenger* messenger_;
+  std::unique_ptr<std::thread> gthread_;
+  GMainLoop* main_loop_;
+  GMainContext* context_;
+
+  bool exit_loop_{};
+  volatile bool is_running_{};
 
   // void Dispose(GObject* object);
 
   // void Init(AudioplayersLinuxPlugin* self);
+  static void main_loop(AudioplayersLinuxPlugin* data);
 };
 
 }  // namespace audioplayers_linux_plugin

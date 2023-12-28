@@ -12,7 +12,8 @@ AudioPlayer::AudioPlayer(const std::string& channelName,
                          BinaryMessenger* messenger)
     : BasicMessageChannel(messenger,
                           channelName,
-                          &flutter::StandardMessageCodec::GetInstance()) {
+                          &flutter::StandardMessageCodec::GetInstance()),
+      media_state_(GST_STATE_VOID_PENDING) {
   SetMessageHandler([&](const EncodableValue& message,
                         const flutter::MessageReply<EncodableValue>& reply) {
     Utils::PrintFlutterEncodableValue("AudioPlayer message", message);
@@ -20,67 +21,44 @@ AudioPlayer::AudioPlayer(const std::string& channelName,
     return;
   });
 
-  gthread_ = std::make_unique<std::thread>(main_loop, this);
-}
+  // Get the calling context.
+  context_ = g_main_context_get_thread_default();
 
-AudioPlayer::~AudioPlayer() {
-  gst_element_set_state(playbin_, GST_STATE_NULL);
-  g_main_loop_quit(main_loop_);
-  g_main_loop_unref(main_loop_);
-  gthread_->join();
-  gthread_.reset();
-}
-
-void AudioPlayer::main_loop(AudioPlayer* data) {
-  GMainContext* context = g_main_context_new();
-  g_main_context_push_thread_default(context);
-
-  data->playbin_ = gst_element_factory_make("playbin", nullptr);
-  if (!data->playbin_) {
+  playbin_ = gst_element_factory_make("playbin", nullptr);
+  if (!playbin_) {
     throw std::runtime_error("Not all elements could be created.");
   }
 
   // Setup stereo balance controller
-  data->panorama_ = gst_element_factory_make("audiopanorama", nullptr);
-  if (data->panorama_) {
-    data->audiobin_ = gst_bin_new(nullptr);
-    data->audiosink_ = gst_element_factory_make("autoaudiosink", nullptr);
+  panorama_ = gst_element_factory_make("audiopanorama", nullptr);
+  if (panorama_) {
+    audiobin_ = gst_bin_new(nullptr);
+    audiosink_ = gst_element_factory_make("autoaudiosink", nullptr);
 
-    gst_bin_add_many(GST_BIN(data->audiobin_), data->panorama_, data->audiosink_, nullptr);
-    gst_element_link(data->panorama_, data->audiosink_);
+    gst_bin_add_many(GST_BIN(audiobin_), panorama_, audiosink_, nullptr);
+    gst_element_link(panorama_, audiosink_);
 
-    GstPad* sinkpad = gst_element_get_static_pad(data->panorama_, "sink");
-    data->panoramaSinkPad_ = gst_ghost_pad_new("sink", sinkpad);
-    gst_element_add_pad(data->audiobin_, data->panoramaSinkPad_);
+    GstPad* sinkpad = gst_element_get_static_pad(panorama_, "sink");
+    panoramaSinkPad_ = gst_ghost_pad_new("sink", sinkpad);
+    gst_element_add_pad(audiobin_, panoramaSinkPad_);
     gst_object_unref(GST_OBJECT(sinkpad));
 
-    g_object_set(G_OBJECT(data->playbin_), "audio-sink", data->audiobin_, nullptr);
-    g_object_set(G_OBJECT(data->panorama_), "method", 1, nullptr);
+    g_object_set(G_OBJECT(playbin_), "audio-sink", audiobin_, nullptr);
+    g_object_set(G_OBJECT(panorama_), "method", 1, nullptr);
   }
 
   // Setup source options
-  g_signal_connect(data->playbin_, "source-setup",
-                   G_CALLBACK(AudioPlayer::SourceSetup), &data->source_);
+  g_signal_connect(playbin_, "source-setup",
+                   G_CALLBACK(AudioPlayer::SourceSetup), &source_);
 
-  data->bus_ = gst_element_get_bus(data->playbin_);
+  bus_ = gst_element_get_bus(playbin_);
 
   // Watch bus messages for one time events
-  // gst_bus_add_watch(bus_, (GstBusFunc)AudioPlayer::OnBusMessage, this);
+  gst_bus_add_watch(bus_, (GstBusFunc)AudioPlayer::OnBusMessage, this);
+}
 
-  GSource* bus_source = gst_bus_create_watch(data->bus_);
-  g_source_set_callback(
-      bus_source, reinterpret_cast<GSourceFunc>(gst_bus_async_signal_func),
-      nullptr, nullptr);
-  g_source_attach(bus_source, context);
-  g_source_unref(bus_source);
-  g_signal_connect(data->bus_, "message", G_CALLBACK(AudioPlayer::OnBusMessage),
-                   data);
-  gst_object_unref(data->bus_);
-
-  data->main_loop_ = g_main_loop_new(context, FALSE);
-  g_main_loop_run(data->main_loop_);
-  g_main_loop_unref(data->main_loop_);
-  data->main_loop_ = nullptr;
+AudioPlayer::~AudioPlayer() {
+  gst_element_set_state(playbin_, GST_STATE_NULL);
 }
 
 void AudioPlayer::SourceSetup(GstElement* /* playbin */,
@@ -96,6 +74,7 @@ void AudioPlayer::SourceSetup(GstElement* /* playbin */,
 void AudioPlayer::SetSourceUrl(const std::string& url) {
   if (url_ != url) {
     url_ = url;
+    // clear source
     gst_element_set_state(playbin_, GST_STATE_NULL);
     isInitialized_ = false;
     isPlaying_ = false;
@@ -214,6 +193,8 @@ void AudioPlayer::OnError(const gchar* code,
 void AudioPlayer::OnMediaStateChange(GstObject* src,
                                      const GstState* old_state,
                                      const GstState* new_state) {
+  media_state_ = *new_state;
+
   if (!playbin_) {
     OnError("LinuxAudioError",
             "Player was already disposed (OnMediaStateChange).", nullptr,
@@ -261,7 +242,9 @@ void AudioPlayer::OnMediaStateChange(GstObject* src,
 }
 
 void AudioPlayer::OnPrepared(bool isPrepared) {
-  gst_element_set_state(playbin_, GST_STATE_PLAYING);
+  if (media_state_ != GST_STATE_PLAYING) {
+    Resume();
+  }
   flutter::EncodableValue value(flutter::EncodableMap{
       {flutter::EncodableValue("event"),
        flutter::EncodableValue("audio.onPrepared")},

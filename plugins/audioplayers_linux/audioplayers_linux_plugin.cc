@@ -25,7 +25,6 @@
 
 #include "messages.h"
 
-
 namespace audioplayers_linux_plugin {
 
 static std::map<std::string, std::unique_ptr<AudioPlayer>> audioPlayers_;
@@ -33,7 +32,8 @@ static std::map<std::string, std::unique_ptr<AudioPlayer>> audioPlayers_;
 // static
 void AudioplayersLinuxPlugin::RegisterWithRegistrar(
     flutter::PluginRegistrar* registrar) {
-  auto plugin = std::make_unique<AudioplayersLinuxPlugin>(registrar->messenger());
+  auto plugin =
+      std::make_unique<AudioplayersLinuxPlugin>(registrar->messenger());
 
   AudioPlayersApi::SetUp(registrar->messenger(), plugin.get());
   AudioPlayersGlobalApi::SetUp(registrar->messenger(), plugin.get());
@@ -42,15 +42,39 @@ void AudioplayersLinuxPlugin::RegisterWithRegistrar(
 }
 
 AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(
-    flutter::BinaryMessenger * messenger)
+    flutter::BinaryMessenger* messenger)
     : messenger_(messenger) {
   audioPlayers_.clear();
 
-  // GStreamer lib only needs to be initialized once.  Calling it multiple times is fine.
+  // GStreamer lib only needs to be initialized once.  Calling it multiple times
+  // is fine.
   gst_init(nullptr, nullptr);
+
+  gthread_ = std::make_unique<std::thread>(main_loop, this);
 }
 
-AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() = default;
+AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() {
+  g_main_loop_quit(main_loop_);
+  g_main_loop_unref(main_loop_);
+  gthread_->join();
+  gthread_.reset();
+}
+
+void AudioplayersLinuxPlugin::main_loop(AudioplayersLinuxPlugin* data) {
+  data->context_ = g_main_context_default();
+
+  data->is_running_ = TRUE;
+  while (data->is_running_) {
+    if (data->exit_loop_) {
+      data->is_running_ = FALSE;
+    }
+
+    g_main_context_iteration(data->context_, TRUE);
+  }
+
+  g_main_loop_quit(data->main_loop_);
+  g_main_loop_unref(data->main_loop_);
+}
 
 AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
   auto searchPlayer = audioPlayers_.find(playerId);
@@ -66,8 +90,10 @@ void AudioplayersLinuxPlugin::Create(
   auto searchPlayer = audioPlayers_.find(player_id);
   if (searchPlayer == audioPlayers_.end()) {
     std::string event_channel = "xyz.luan/audioplayers/events/" + player_id;
-    auto player = std::make_unique<AudioPlayer>(std::move(event_channel), messenger_);
-    audioPlayers_.insert(std::make_pair(std::move(player_id), std::move(player)));
+    auto player =
+        std::make_unique<AudioPlayer>(std::move(event_channel), messenger_);
+    audioPlayers_.insert(
+        std::make_pair(std::move(player_id), std::move(player)));
   }
   result(std::nullopt);
 }
