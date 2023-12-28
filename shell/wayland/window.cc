@@ -31,6 +31,8 @@ WaylandWindow::WaylandWindow(size_t index,
                              double pixel_ratio,
                              uint32_t activation_area_x,
                              uint32_t activation_area_y,
+                             uint32_t activation_area_width,
+                             uint32_t activation_area_height,
                              Backend* backend,
                              uint32_t ivi_surface_id)
     : m_index(index),
@@ -42,7 +44,8 @@ WaylandWindow::WaylandWindow(size_t index,
       m_geometry({width, height}),
       m_window_size({width, height}),
       m_pixel_ratio(pixel_ratio),
-      m_activation_area({activation_area_x, activation_area_y}),
+      m_activation_area({activation_area_x, activation_area_y,
+                         activation_area_width, activation_area_height}),
       m_type(get_window_type(type)),
       m_app_id(std::move(app_id)),
       m_ivi_surface_id(ivi_surface_id),
@@ -98,10 +101,12 @@ WaylandWindow::WaylandWindow(size_t index,
     case WINDOW_BG:
       m_display->AglShellDoBackground(m_base_surface, 0);
       if (m_activation_area.x > 0 && m_activation_area.y > 0)
-        m_display->AglShellDoSetupActivationArea(m_activation_area.x,
-                                                 m_activation_area.y, 0);
+        m_display->AglShellDoSetupActivationArea(
+            m_activation_area.x, m_activation_area.y, m_activation_area.width,
+            m_activation_area.height, 0);
       else
-        m_display->AglShellDoSetupActivationArea(0, 160, 0);
+        m_display->AglShellDoSetupActivationArea(0, 160, m_activation_area.width,
+                                                 m_activation_area.height, 0);
       break;
     case WINDOW_PANEL_TOP:
       m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_TOP, 0);

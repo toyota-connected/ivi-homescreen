@@ -857,16 +857,16 @@ void Display::AglShellDoReady() const {
 
 void Display::AglShellDoSetupActivationArea(uint32_t x,
                                             uint32_t y,
+                                            uint32_t width,
+                                            uint32_t height,
                                             uint32_t index) {
-  uint32_t width = m_all_outputs[index]->width;
-  uint32_t height = m_all_outputs[index]->height - (2 * y);
-
   if (!m_agl.shell)
     return;
 
   if (m_all_outputs[index]->transform == WL_OUTPUT_TRANSFORM_90) {
-    width = m_all_outputs[index]->height;
-    height = m_all_outputs[index]->width - (2 * y);
+    uint32_t tmp_width = width;
+    width = height;
+    height = tmp_width;
   }
 
   SPDLOG_DEBUG("Using custom rectangle [{}x{}+{}x{}] for activation", width,

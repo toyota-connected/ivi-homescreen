@@ -172,6 +172,8 @@ class Display {
    * @return void
    * @param[in] x the x position for the activation rectangle
    * @param[in] y the y position for the activation rectangle
+   * @param[in] width the width position for the activation rectangle
+   * @param[in] height the height position for the activation rectangle
    * @param[index] the output, as a number
    * @relation
    *
@@ -193,7 +195,11 @@ class Display {
    * |			|
    * --------------------
    */
-  void AglShellDoSetupActivationArea(uint32_t x, uint32_t y, uint32_t index);
+  void AglShellDoSetupActivationArea(uint32_t x,
+                                     uint32_t y,
+                                     uint32_t width,
+                                     uint32_t height,
+                                     uint32_t index);
 
   /**
    * @brief Set Engine
