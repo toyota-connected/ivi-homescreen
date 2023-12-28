@@ -14,22 +14,27 @@
  * limitations under the License.
  */
 
-#include "go_router_plugin.h"
+#ifndef FLUTTER_PLUGIN_GO_ROUTER_PLUGIN_C_API_H
+#define FLUTTER_PLUGIN_GO_ROUTER_PLUGIN_C_API_H
 
-#include "messages.h"
+#include <flutter_plugin_registrar.h>
+#include "flutter_homescreen.h"
 
-#include "logging/logging.h"
+#ifdef FLUTTER_PLUGIN_IMPL
+#define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
+#else
+#define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
+#endif
 
-namespace go_router_plugin {
+#if defined(__cplusplus)
+extern "C" {
+#endif
 
-// static
-void GoRouterPlugin::RegisterWithRegistrar(
-    flutter::PluginRegistrar* registrar) {
-  auto plugin = std::make_unique<GoRouterPlugin>();
+FLUTTER_PLUGIN_EXPORT void GoRouterPluginCApiRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrar* registrar);
 
-  GoRouterApi::SetUp(registrar->messenger(), plugin.get());
+#if defined(__cplusplus)
+}  // extern "C"
+#endif
 
-  registrar->AddPlugin(std::move(plugin));
-}
-
-}  // namespace go_router_plugin
+#endif  // FLUTTER_PLUGIN_GO_ROUTER_PLUGIN_C_API_H

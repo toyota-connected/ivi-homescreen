@@ -34,12 +34,13 @@
 #include <platform/homescreen/key_event_handler.h>
 #include <platform/homescreen/text_input_plugin.h>
 #include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
+#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
+#include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
+#include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
 #include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
-#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
-#include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
 
 #include "wayland/display.h"
 #include "wayland/window.h"
@@ -298,6 +299,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
 #endif
 #if defined(ENABLE_PLUGIN_URL_LAUNCHER)
   UrlLauncherPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_GO_ROUTER)
+  GoRouterPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 #if defined(ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX)
