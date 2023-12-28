@@ -69,7 +69,6 @@ class FilamentViewPlugin : public flutter::Plugin,
 
   ~FilamentViewPlugin() override;
 
-
   void ChangeAnimationByIndex(
       const int32_t index,
       const std::function<void(std::optional<FlutterError> reply)> result)

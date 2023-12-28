@@ -37,13 +37,13 @@
 
 #include "core/model/loader/model_loader.h"
 #include "core/model/model.h"
+#include "core/model/state/model_state.h"
+#include "core/model/state/scene_state.h"
+#include "core/model/state/shape_state.h"
 #include "core/scene/camera/camera_manager.h"
 #include "core/scene/scene.h"
 #include "core/shapes/shape.h"
 #include "flutter_desktop_plugin_registrar.h"
-#include "core/model/state/model_state.h"
-#include "core/model/state/scene_state.h"
-#include "core/model/state/shape_state.h"
 #include "platform_views/platform_view.h"
 #include "settings.h"
 
@@ -107,7 +107,9 @@ class CustomModelViewer {
 
   ModelLoader* getModelLoader() const { return modelLoader_.get(); }
 
-  void setCameraManager(CameraManager* cameraManager) { cameraManager_ = cameraManager; }
+  void setCameraManager(CameraManager* cameraManager) {
+    cameraManager_ = cameraManager;
+  }
 
   void setAnimator(filament::gltfio::Animator* animator) {
     fanimator_ = animator;

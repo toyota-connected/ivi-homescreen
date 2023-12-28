@@ -49,7 +49,6 @@ class FilamentScene {
   std::unique_ptr<Model> model_;
   std::unique_ptr<Scene> scene_;
   std::unique_ptr<std::vector<std::unique_ptr<Shape>>> shapes_{};
-
 };
 
 }  // namespace plugin_filament_view

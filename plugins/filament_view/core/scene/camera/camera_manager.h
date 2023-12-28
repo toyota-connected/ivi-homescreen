@@ -24,11 +24,11 @@
 #include <filament/Viewport.h>
 #include <utils/EntityManager.h>
 
+#include "core/include/resource.h"
 #include "core/scene/camera/exposure.h"
 #include "core/scene/camera/lens_projection.h"
 #include "core/scene/camera/projection.h"
 #include "viewer/custom_model_viewer.h"
-#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 

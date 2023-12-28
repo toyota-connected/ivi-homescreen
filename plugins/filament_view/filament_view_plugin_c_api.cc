@@ -39,5 +39,6 @@ void FilamentViewPluginCApiRegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrar>(registrar),
       id, std::move(viewType), direction, width, height, params,
-      std::move(assetDirectory), engine, addListener, removeListener, platform_view_context);
+      std::move(assetDirectory), engine, addListener, removeListener,
+      platform_view_context);
 }

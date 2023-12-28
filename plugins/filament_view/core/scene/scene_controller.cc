@@ -70,7 +70,7 @@ void SceneController::setUpViewer(PlatformView* platformView,
 
   view->setScene(scene);
 
-  //TODO this may need to be turned off for target
+  // TODO this may need to be turned off for target
   view->setPostProcessingEnabled(true);
 }
 

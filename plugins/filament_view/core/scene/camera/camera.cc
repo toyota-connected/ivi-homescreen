@@ -27,7 +27,7 @@ namespace plugin_filament_view {
 
 Camera::Camera(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Camera::Camera");
-  //TODO Utils::PrintFlutterEncodableMap("Camera", params);
+  // TODO Utils::PrintFlutterEncodableMap("Camera", params);
   for (const auto& it : params) {
     if (it.second.IsNull())
       continue;

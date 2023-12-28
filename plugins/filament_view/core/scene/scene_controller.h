@@ -80,7 +80,9 @@ class SceneController {
 
   void onTouch(int32_t action, double x, double y);
 
-  [[nodiscard]] CameraManager* getCameraManager() const { return cameraManager_.get(); }
+  [[nodiscard]] CameraManager* getCameraManager() const {
+    return cameraManager_.get();
+  }
 
  private:
   int32_t id_;

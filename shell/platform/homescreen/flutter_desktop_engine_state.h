@@ -2,6 +2,7 @@
 
 #include <asio/io_context_strand.hpp>
 
+#include "shell/task_runner.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/plugin_registrar.h"
 #include "flutter/shell/platform/common/incoming_message_dispatcher.h"
 #include "flutter_desktop_view_controller_state.h"
@@ -10,7 +11,6 @@
 #include "platform/homescreen/platform_handler.h"
 #include "platform/homescreen/platform_views/platform_views_handler.h"
 #include "shell/libflutter_engine.h"
-#include "shell/task_runner.h"
 
 struct FlutterDesktopViewControllerState;
 struct FlutterDesktopMessenger;

@@ -16,16 +16,16 @@
 
 #include "model_loader.h"
 
-#include <algorithm> // for max
+#include <algorithm>  // for max
 #include <sstream>
 
-#include <glm/glm.hpp>
 #include <filament/DebugRegistry.h>
 #include <filament/RenderableManager.h>
 #include <filament/TransformManager.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
 #include <asio/post.hpp>
+#include <glm/glm.hpp>
 
 #include "materials/uberarchive.h"
 
@@ -184,9 +184,8 @@ void ModelLoader::transformToUnitCube(const Position* centerPoint,
   float3 centerPosition{};
   if (!centerPoint) {
     centerPosition = CustomModelViewer::kDefaultObjectPosition;
-  }
-  else {
-    centerPosition = { centerPoint->toFloatArray() };
+  } else {
+    centerPosition = {centerPoint->toFloatArray()};
   }
 
   TransformManager& tm = engine_->getTransformManager();
@@ -196,7 +195,7 @@ void ModelLoader::transformToUnitCube(const Position* centerPoint,
 
   FilamentInstance* instance = asset_->getInstance();
   Aabb aabb = instance ? instance->getBoundingBox() : asset_->getBoundingBox();
-  //TODO transform = fitIntoUnitCube(aabb, centerPosition);
+  // TODO transform = fitIntoUnitCube(aabb, centerPosition);
   tm.setTransform(root, transform);
 }
 

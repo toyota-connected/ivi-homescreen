@@ -65,9 +65,11 @@ static int OnResize(void* data, SDL_Event* event) {
  * This function returns the native window handle for a given SDL window.
  * The native window handle is specific to the underlying windowing subsystem.
  *
- * @param sdlWindow A pointer to the SDL window for which to retrieve the native window handle.
- * @return A void pointer to the native window handle. The type of the pointer depends on the underlying windowing subsystem.
- *         If the native window handle cannot be determined, nullptr is returned.
+ * @param sdlWindow A pointer to the SDL window for which to retrieve the native
+ * window handle.
+ * @return A void pointer to the native window handle. The type of the pointer
+ * depends on the underlying windowing subsystem. If the native window handle
+ * cannot be determined, nullptr is returned.
  */
 void* getNativeWindow(SDL_Window* sdlWindow) {
   SDL_SysWMinfo wmi;
@@ -232,8 +234,9 @@ void addQuadToScene() {
 /**
  * @brief Set the default camera for the scene.
  *
- * This function creates and configures a default camera for the scene. It sets the camera's exposure parameters,
- * creates a camera manipulator, and sets the camera's viewport, look-at position, projection, and assigns it to the view.
+ * This function creates and configures a default camera for the scene. It sets
+ * the camera's exposure parameters, creates a camera manipulator, and sets the
+ * camera's viewport, look-at position, projection, and assigns it to the view.
  */
 void setDefaultCamera() {
   using namespace filament;
@@ -257,9 +260,9 @@ void setDefaultCamera() {
   gContext.cameraManipulator = CameraManipulator::Builder()
                                    .viewport(static_cast<int>(viewport.width),
                                              static_cast<int>(viewport.height))
-                                   .orbitHomePosition(0, 50.5f, 0) // eye
-                                   .targetPosition(0, 0, 0)        // center
-                                   .upVector(1.f, 0, 0)            // up
+                                   .orbitHomePosition(0, 50.5f, 0)  // eye
+                                   .targetPosition(0, 0, 0)         // center
+                                   .upVector(1.f, 0, 0)             // up
                                    .zoomSpeed(0.05f)
                                    .orbitSpeed(0.075f, 0.075f)
                                    .viewport(static_cast<int>(viewport.width),
@@ -280,8 +283,8 @@ void setDefaultCamera() {
 /**
  * @brief Initializes the SDL video subsystem and creates a window.
  *
- * It creates a SDL window using SDL_CreateWindow function and sets the window flags.
- * The window is resizable and supports Vulkan rendering.
+ * It creates a SDL window using SDL_CreateWindow function and sets the window
+ * flags. The window is resizable and supports Vulkan rendering.
  *
  * @return A pointer to the created SDL window, or nullptr on error.
  */
@@ -329,7 +332,7 @@ int main() {
   gContext.scene->addEntity(gContext.light);
 
   /// Build a quad
-  //addQuadToScene();
+  // addQuadToScene();
 
   /// Display loop
   volatile uint32_t prev_width = gWidth;
