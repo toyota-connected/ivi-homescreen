@@ -3,8 +3,6 @@
 
 #include <flutter/standard_message_codec.h>
 
-#include "utils.h"
-
 #define STR_LINK_TROUBLESHOOTING \
   "https://github.com/bluefireteam/audioplayers/blob/main/troubleshooting.md"
 
@@ -14,9 +12,8 @@ AudioPlayer::AudioPlayer(const std::string& channelName,
                           channelName,
                           &flutter::StandardMessageCodec::GetInstance()),
       media_state_(GST_STATE_VOID_PENDING) {
-  SetMessageHandler([&](const EncodableValue& message,
+  SetMessageHandler([&](const EncodableValue& /* message */,
                         const flutter::MessageReply<EncodableValue>& reply) {
-    Utils::PrintFlutterEncodableValue("AudioPlayer message", message);
     reply(EncodableValue());
     return;
   });
