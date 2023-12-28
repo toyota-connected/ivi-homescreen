@@ -114,23 +114,25 @@ std::future<Resource<std::string_view>> SkyboxManager::setSkyboxFromHdrUrl(
   }
 
   SPDLOG_DEBUG("Skybox downloading HDR Asset: {}", url.c_str());
-  asio::post(modelViewer_->getStrandContext(), [&, promise, url, showSun,
-                                                shouldUpdateLight, intensity] {
-    CurlClient client;
-    client.Init(url, {}, {});
-    auto buffer = client.RetrieveContentAsVector();
-    if (client.GetCode() != CURLE_OK) {
-      modelViewer_->setSkyboxState(SceneState::ERROR);
-      promise->set_value(Resource<std::string_view>::Error("Couldn't load skybox from " + url));
-    }
-    if (!buffer.empty()) {
-      promise->set_value(loadSkyboxFromHdrBuffer(buffer, showSun,
-                                                 shouldUpdateLight, intensity));
-    } else {
-      modelViewer_->setSkyboxState(SceneState::ERROR);
-      promise->set_value(Resource<std::string_view>::Error("Couldn't load HDR file from " + url));
-    }
-  });
+  asio::post(modelViewer_->getStrandContext(),
+             [&, promise, url, showSun, shouldUpdateLight, intensity] {
+               CurlClient client;
+               client.Init(url, {}, {});
+               auto buffer = client.RetrieveContentAsVector();
+               if (client.GetCode() != CURLE_OK) {
+                 modelViewer_->setSkyboxState(SceneState::ERROR);
+                 promise->set_value(Resource<std::string_view>::Error(
+                     "Couldn't load skybox from " + url));
+               }
+               if (!buffer.empty()) {
+                 promise->set_value(loadSkyboxFromHdrBuffer(
+                     buffer, showSun, shouldUpdateLight, intensity));
+               } else {
+                 modelViewer_->setSkyboxState(SceneState::ERROR);
+                 promise->set_value(Resource<std::string_view>::Error(
+                     "Couldn't load HDR file from " + url));
+               }
+             });
   SPDLOG_TRACE("--SkyboxManager::setSkyboxFromHdrUrl");
   return future;
 }

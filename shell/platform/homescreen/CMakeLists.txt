@@ -9,11 +9,11 @@ add_library(platform_homescreen STATIC
 
 target_include_directories(platform_homescreen PUBLIC
         .
-        ../../../plugins/layer_playground
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/shell
         client_wrapper/include
         public
         ${CMAKE_BINARY_DIR}/shell
-        ${CMAKE_SOURCE_DIR}/shell
 )
 
 target_include_directories(platform_homescreen PRIVATE

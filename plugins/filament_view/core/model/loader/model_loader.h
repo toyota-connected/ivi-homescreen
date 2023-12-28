@@ -8,10 +8,10 @@
 #include <gltfio/ResourceLoader.h>
 #include <asio/io_context_strand.hpp>
 
+#include "core/include/resource.h"
 #include "core/model/model.h"
 #include "viewer/custom_model_viewer.h"
 #include "viewer/settings.h"
-#include "core/include/resource.h"
 
 namespace plugin_filament_view {
 
@@ -130,7 +130,6 @@ class ModelLoader {
 
   void setTransform(::filament::mat4f mat);
 
-
   std::vector<char> buffer_;
   void handleFile(
       const std::vector<uint8_t>& buffer,
@@ -139,6 +138,5 @@ class ModelLoader {
       const Position* centerPosition,
       bool isFallback,
       const std::shared_ptr<std::promise<Resource<std::string_view>>>& promise);
-
 };
 }  // namespace plugin_filament_view

@@ -44,7 +44,8 @@ void FilamentViewPlugin::RegisterWithRegistrar(
     void* platform_view_context) {
   auto plugin = std::make_unique<FilamentViewPlugin>(
       id, std::move(viewType), direction, width, height, params,
-      std::move(assetDirectory), engine, addListener, removeListener, platform_view_context);
+      std::move(assetDirectory), engine, addListener, removeListener,
+      platform_view_context);
 
   FilamentViewApi::SetUp(registrar->messenger(), plugin.get(), id);
   ModelStateChannelApi::SetUp(registrar->messenger(), plugin.get(), id);
@@ -73,7 +74,8 @@ FilamentViewPlugin::FilamentViewPlugin(
       removeListener_(removeListener),
       flutterAssetsPath_(std::move(assetDirectory)) {
   SPDLOG_TRACE("++FilamentViewPlugin::FilamentViewPlugin");
-  filamentScene_ = std::make_unique<FilamentScene>(this, state, id, params, flutterAssetsPath_);
+  filamentScene_ = std::make_unique<FilamentScene>(this, state, id, params,
+                                                   flutterAssetsPath_);
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
   SPDLOG_TRACE("--FilamentViewPlugin::FilamentViewPlugin");
 }

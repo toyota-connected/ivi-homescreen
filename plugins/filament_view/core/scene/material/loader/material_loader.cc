@@ -37,7 +37,8 @@ Resource<::filament::Material*> MaterialLoader::loadMaterialFromUrl(
   client.Init(url, {}, {});
   std::vector<uint8_t> buffer = client.RetrieveContentAsVector();
   if (client.GetCode() != CURLE_OK) {
-    return Resource<::filament::Material*>::Error("Failed to load material from " + url);
+    return Resource<::filament::Material*>::Error(
+        "Failed to load material from " + url);
   }
 
   if (!buffer.empty()) {
