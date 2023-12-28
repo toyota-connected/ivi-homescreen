@@ -2,7 +2,6 @@
 add_library(platform_homescreen STATIC
         flutter_desktop.cc
         flutter_desktop_messenger.cc
-        desktop_window_handler.cc
         key_event_handler.cc
         platform_handler.cc
         text_input_plugin.cc
@@ -65,4 +64,8 @@ endif ()
 
 if (BUILD_PLUGIN_URL_LAUNCHER)
     target_link_libraries(platform_homescreen PUBLIC plugin_url_launcher)
+endif ()
+
+if (BUILD_PLUGIN_DESKTOP_WINDOW_LINUX)
+    target_link_libraries(platform_homescreen PUBLIC plugin_desktop_window_linux)
 endif ()

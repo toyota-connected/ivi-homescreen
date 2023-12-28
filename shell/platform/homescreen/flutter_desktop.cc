@@ -78,9 +78,6 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_handler = std::make_unique<PlatformHandler>(
       state->internal_plugin_registrar->messenger(), view);
 
-  state->desktop_window_handler = std::make_unique<flutter::DesktopWindowHandler>(
-      state->internal_plugin_registrar->messenger(), view);
-
   // Platform Views handler.
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
