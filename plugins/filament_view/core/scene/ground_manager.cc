@@ -97,8 +97,9 @@ std::future<Resource<std::string_view>> GroundManager::createGround() {
     auto materialInstanceResult =
         materialManager_->getMaterialInstance(ground_->material_.get());
 
-    // auto modelTransform = modelViewer_->getModelTransform();
 #if 0
+    auto modelTransform = modelViewer_.getModelTransform();
+
     auto center = (ground_->isBelowModel_ && modelTransform != nullptr)
                       ? Position(modelTransform[0][3], modelTransform[1][3], modelTransform[2][3])
                       : ground_->center_position_ != nullptr

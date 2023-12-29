@@ -25,3 +25,14 @@ The development work is done using the following Filament configuration:
 -DFILAMENT_USE_SWIFTSHADER=OFF
 -DBUILD_SHARED_LIBS=OFF
 ```
+
+## Notes
+
+Playx3d-scene needs conversion of assets for running on Vulkan+Linux:
+
+```
+cd filament
+./cmake-build-debug-clang/tools/matc/matc --api vulkan \
+-o <output file path>/flutter_assets/assets/materials/textured_pbr.filamat \
+./samples/materials/groundShadow.mat
+```

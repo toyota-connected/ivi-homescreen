@@ -602,7 +602,7 @@ void Display::keyboard_handle_key(void* data,
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
-      SPDLOG_DEBUG("xkb_keymap_key_repeats");
+      SPDLOG_DEBUG("xkb_keymap_key_repeats: 0x{:x}", xkb_scancode);
       d->m_keysym_pressed = keysym;
       Display::set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
