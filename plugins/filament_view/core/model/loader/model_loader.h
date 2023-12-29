@@ -3,6 +3,7 @@
 
 #include <filament/IndirectLight.h>
 #include <filament/TransformManager.h>
+#include <filament/MaterialInstance.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/ResourceLoader.h>
@@ -83,10 +84,13 @@ class ModelLoader {
       const Position* centerPosition,
       bool isFallback = false);
 
+  void arrangeIntoCircle();
+
  private:
   CustomModelViewer* modelViewer_;
   ::filament::Engine* engine_;
   const asio::io_context::strand& strand_;
+  std::vector<filament::gltfio::FilamentInstance*> instances_;
 
   std::string assetPath_;
   utils::Entity sunlight_;

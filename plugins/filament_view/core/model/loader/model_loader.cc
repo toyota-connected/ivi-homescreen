@@ -108,6 +108,24 @@ void ModelLoader::updateRootTransform(bool autoScaleEnabled) {
   tcm.setTransform(root, transform);
 }
 
+void ModelLoader::arrangeIntoCircle() {
+  using namespace filament;
+  using namespace filament::math;
+  using namespace filament::gltfio;
+
+  auto& tcm = engine_->getTransformManager();
+  auto extent = asset_->getBoundingBox().extent();
+  float max_extent = std::max(std::max(extent.x,  extent.y), extent.z);
+  auto translation = mat4f::translation(float3(max_extent, 0, 0));
+  for (size_t inst = 0; inst < instances_.size(); ++inst) {
+    FilamentInstance* instance = instances_[inst];
+    auto transformRoot = tcm.getInstance(instance->getRoot());
+    float theta = inst * 2.0 * M_PI / instances_.size();
+    auto rotation = mat4f::rotation(theta, float3(0, 0, 1));
+    tcm.setTransform(transformRoot, rotation * translation);
+  }
+}
+
 /**
  * Loads a monolithic binary glb and populates the Filament scene.
  */
@@ -116,13 +134,17 @@ void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
                                float scale,
                                bool transform) {
   destroyModel();
+  //asset_ = assetLoader_->createInstancedAsset(buffer.data(), static_cast<uint32_t>(buffer.size()),
+                                               //instances_.data(), instances_.size());
   asset_ = assetLoader_->createAsset(buffer.data(),
                                      static_cast<uint32_t>(buffer.size()));
-  resourceLoader_->asyncBeginLoad(asset_);
-  modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
-  asset_->releaseSourceData();
-  updateRootTransform(false);
-  transformToUnitCube(centerPosition, scale);
+  if (asset_) {
+    resourceLoader_->asyncBeginLoad(asset_);
+    modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
+    asset_->releaseSourceData();
+    //updateRootTransform(false);
+    //transformToUnitCube(centerPosition, scale);
+  }
 }
 
 void ModelLoader::loadModelGltf(
