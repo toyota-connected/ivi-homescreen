@@ -17,7 +17,7 @@
 add_library(plugin_url_launcher STATIC
         url_launcher_plugin_c_api.cc
         url_launcher_plugin.cc
-        messages.g.cc
+        messages.cc
 )
 
 target_compile_definitions(plugin_url_launcher PUBLIC -DENABLE_PLUGIN_URL_LAUNCHER)

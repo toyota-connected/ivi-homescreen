@@ -6,7 +6,7 @@
 
 #undef _HAS_EXCEPTIONS
 
-#include "messages.g.h"
+#include "messages.h"
 
 #include <flutter/basic_message_channel.h>
 #include <flutter/binary_messenger.h>
