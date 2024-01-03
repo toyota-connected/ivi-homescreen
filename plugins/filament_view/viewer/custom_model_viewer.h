@@ -84,7 +84,6 @@ class CustomModelViewer {
 
   // Disallow copy and assign.
   CustomModelViewer(const CustomModelViewer&) = delete;
-
   CustomModelViewer& operator=(const CustomModelViewer&) = delete;
 
   [[nodiscard]] ::filament::Engine* getFilamentEngine() const {
@@ -105,7 +104,7 @@ class CustomModelViewer {
 
   [[nodiscard]] plugin_filament_view::Scene* getScene() const { return scene_; }
 
-  ModelLoader* getModelLoader() const { return modelLoader_.get(); }
+  [[nodiscard]] ModelLoader* getModelLoader() const { return modelLoader_.get(); }
 
   void setCameraManager(CameraManager* cameraManager) {
     cameraManager_ = cameraManager;
@@ -114,6 +113,8 @@ class CustomModelViewer {
   void setAnimator(filament::gltfio::Animator* animator) {
     fanimator_ = animator;
   }
+
+  std::optional<filament::mat4f> getModelTransform();
 
   [[nodiscard]] const asio::io_context::strand& getStrandContext() const {
     return *strand_;
@@ -129,6 +130,24 @@ class CustomModelViewer {
     initialized_ = true;
     fview_->setVisibleLayers(0x4, 0x4);
     OnFrame(this, nullptr, 0);
+  }
+
+  /**
+   * Sets up a root transform on the current model to make it fit into a unit
+   * cube.
+   *
+   * @param centerPoint Coordinate of center point of unit cube, defaults to <
+   * 0, 0, -4 >
+   */
+  void transformToUnitCube(Position* centerPoint, float scale) {
+    // TODO modelLoader_->transformToUnitCube(centerPoint, scale);
+  }
+
+  /**
+   * Removes the transformation that was set up via transformToUnitCube.
+   */
+  void clearRootTransform() {
+    // TODO modelLoader_->clearRootTransform();
   }
 
   pthread_t getFilamentApiThreadId() const { return filament_api_thread_id_; }

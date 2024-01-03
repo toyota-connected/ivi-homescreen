@@ -34,8 +34,8 @@ Ground::Ground(const std::string& flutter_assets_path,
     if (!done[0] && key == "centerPosition" &&
         std::holds_alternative<flutter::EncodableMap>(it.second)) {
       done[0] = true;
-      center_position_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      center_position_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (!done[1] && key == "normal" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       done[1] = true;

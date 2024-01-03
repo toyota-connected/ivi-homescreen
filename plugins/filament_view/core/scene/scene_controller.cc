@@ -37,12 +37,12 @@ SceneController::SceneController(PlatformView* platformView,
       shapes_(shapes) {
   SPDLOG_TRACE("++SceneController::SceneController");
   setUpViewer(platformView, state);
+  setUpLoadingModel();
   setUpGround();
   setUpCamera();
   setUpSkybox();
   setUpLight();
   setUpIndirectLight();
-  setUpLoadingModel();
   setUpShapes();
 
   modelViewer_->setInitialized();
@@ -262,11 +262,7 @@ Resource<std::string_view> SceneController::loadModel(Model* model) {
           loader->loadGlbFromAsset(glb_model->assetPath_, glb_model->scale_,
                                    glb_model->center_position_);
       f.wait();
-      auto result = f.get();
-      if (result.getData().has_value()) {
-        SPDLOG_DEBUG("{}", result.getData().value());
-      }
-      return result;
+      return f.get();
     } else if (!glb_model->url_.empty()) {
       auto f = loader->loadGlbFromUrl(glb_model->url_, glb_model->scale_,
                                       glb_model->center_position_);

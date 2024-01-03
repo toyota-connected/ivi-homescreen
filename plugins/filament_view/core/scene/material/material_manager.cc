@@ -57,20 +57,17 @@ Resource<::filament::MaterialInstance*> MaterialManager::setupMaterialInstance(
   auto actual = materialResult->getParameters(parameters.data(), count);
   assert(count == actual && actual == parameters.size());
 
-  auto materialInstance =
-      static_cast<MaterialInstance*>(materialResult->createInstance());
+  auto materialInstance = materialResult->createInstance();
 
   for (const auto& param : parameters) {
     if (param.name) {
-      spdlog::info("[Material] name: {}", param.name);
-
-      // materialInstance->setParameter<TextureLoader>(param.name,
-      // textureLoader_.get());
-      materialInstance->setParameter(param, textureLoader_.get());
+      spdlog::info("[Material] name: {}, type: {}", param.name, (int)param.type);
+      //TODO
+      materialInstance->setParameter(param.name, 0.75f);
     }
   }
 
-  return Resource<::filament::MaterialInstance*>::Error("Not implemented yet");
+  return Resource<::filament::MaterialInstance*>::Success(materialInstance);
 }
 
 Resource<::filament::MaterialInstance*> MaterialManager::getMaterialInstance(
