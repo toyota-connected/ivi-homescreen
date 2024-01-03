@@ -18,7 +18,7 @@ set(PROJECT_NAME "audioplayers_linux")
 
 # This value is used when generating builds using this plugin, so it must
 # not be changed
-set(PLUGIN_NAME "${PROJECT_NAME}_plugin")
+set(PLUGIN_NAME "plugin_${PROJECT_NAME}")
 
 add_library(${PLUGIN_NAME} STATIC
         audioplayers_linux_plugin_c_api.cc

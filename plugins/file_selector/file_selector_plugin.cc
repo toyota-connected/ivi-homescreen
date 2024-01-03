@@ -14,60 +14,28 @@
  * limitations under the License.
  */
 
-#include "url_launcher_plugin.h"
+#include "file_selector_plugin.h"
 
-#include "messages.g.h"
+#include "messages.h"
 
 #include <flutter/plugin_registrar.h>
 
 #include <memory>
-#include <sstream>
-#include <string>
 
-#include <sys/wait.h>
-#include <unistd.h>
-
-namespace url_launcher_linux {
+namespace plugin_file_selector {
 
 // static
-void UrlLauncherPlugin::RegisterWithRegistrar(
+void FileSelectorPlugin::RegisterWithRegistrar(
     flutter::PluginRegistrar* registrar) {
-  auto plugin = std::make_unique<UrlLauncherPlugin>();
+  auto plugin = std::make_unique<FileSelectorPlugin>();
 
-  UrlLauncherApi::SetUp(registrar->messenger(), plugin.get());
+  FileSelectorApi::SetUp(registrar->messenger(), plugin.get());
 
   registrar->AddPlugin(std::move(plugin));
 }
 
-UrlLauncherPlugin::UrlLauncherPlugin() = default;
+FileSelectorPlugin::FileSelectorPlugin() = default;
 
-UrlLauncherPlugin::~UrlLauncherPlugin() = default;
+FileSelectorPlugin::~FileSelectorPlugin() = default;
 
-ErrorOr<bool> UrlLauncherPlugin::CanLaunchUrl(const std::string& url) {
-  if (url.find(':') == std::string::npos) {
-    return false;
-  }
-
-  return (url.rfind("https:", 0) == 0) || (url.rfind("http:", 0) == 0) ||
-         (url.rfind("ftp:", 0) == 0) || (url.rfind("file:", 0) == 0) ||
-         (url.rfind("mailto:", 0) == 0) || (url.rfind("tel:", 0) == 0);
-}
-
-std::optional<FlutterError> UrlLauncherPlugin::LaunchUrl(const std::string& url) {
-  const pid_t pid = fork();
-  if (pid == 0) {
-    execl("/usr/bin/xdg-open", "xdg-open", url.c_str(), nullptr);
-    exit(1);
-  }
-  int status = 0;
-  waitpid(pid, &status, 0);
-  if (status != 0) {
-    std::ostringstream error_message;
-    error_message << "Failed to open " << url << ": error " << status;
-    return FlutterError("open_error", error_message.str());
-  }
-
-  return std::nullopt;
-}
-
-}  // namespace url_launcher_linux
+}  // namespace plugin_file_selector

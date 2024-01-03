@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#include "include/url_launcher/url_launcher_plugin_c_api.h"
+#include "include/file_selector/file_selector_plugin_c_api.h"
 
 #include "flutter/plugin_registrar.h"
 
 #include "file_selector_plugin.h"
 
-void UrlLauncherPluginCApiRegisterWithRegistrar(
+void FileSelectorPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
-  url_launcher_linux::UrlLauncherPlugin::RegisterWithRegistrar(
+  plugin_file_selector::FileSelectorPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrar>(registrar));
 }
