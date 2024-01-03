@@ -35,15 +35,28 @@ namespace plugin_filament_view {
 
 class Position {
  public:
-  Position(float x, float y, float z);
+  explicit Position(float x = 0.0f, float y = 0.0f, float z = 0.0f)
+      : x_(x), y_(y), z_(z) {}
 
-  explicit Position(const flutter::EncodableMap& params);
+  static std::unique_ptr<Position> Deserialize(const flutter::EncodableMap& params);
 
-  //[[nodiscard]] float getX() const { return x_; }
-  //[[nodiscard]] float getY() const { return y_; }
-  //[[nodiscard]] float getZ() const { return z_; }
+  // getter methods
+  [[nodiscard]] float getX() const { return x_; }
 
-  ::filament::math::float3 toFloatArray() const { return {x_, y_, z_}; }
+  [[nodiscard]] float getY() const { return y_; }
+
+  [[nodiscard]] float getZ() const { return z_; }
+
+  // setter methods
+  void setX(float newX) { x_ = newX; }
+
+  void setY(float newY) { y_ = newY; }
+
+  void setZ(float newZ) { z_ = newZ; }
+
+  [[nodiscard]] filament::math::float3 toFloatArray() const {
+    return {x_, y_, z_};
+  }
 
   void Print(const char* tag) const;
 
@@ -59,9 +72,7 @@ class Position {
   friend class Light;
 
  private:
-  float x_;
-  float y_;
-  float z_;
+  float x_, y_, z_;
 };
 
 }  // namespace plugin_filament_view

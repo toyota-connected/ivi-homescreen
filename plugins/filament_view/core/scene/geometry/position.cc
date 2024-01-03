@@ -21,27 +21,27 @@
 
 namespace plugin_filament_view {
 
-Position::Position(float x, float y, float z) : x_(x), y_(y), z_(z) {}
-
-Position::Position(const flutter::EncodableMap& params) {
-  SPDLOG_TRACE("++Position::Position");
+std::unique_ptr<Position> Position::Deserialize(const flutter::EncodableMap& params) {
+  SPDLOG_TRACE("++Position::Deserialize");
+  float x, y, z;
   for (auto& it : params) {
     if (it.second.IsNull())
       continue;
 
     auto key = std::get<std::string>(it.first);
     if (key == "x" && std::holds_alternative<double>(it.second)) {
-      x_ = std::get<double>(it.second);
+      x = static_cast<float>(std::get<double>(it.second));
     } else if (key == "y" && std::holds_alternative<double>(it.second)) {
-      y_ = std::get<double>(it.second);
+      y = static_cast<float>(std::get<double>(it.second));
     } else if (key == "z" && std::holds_alternative<double>(it.second)) {
-      z_ = std::get<double>(it.second);
+      z = static_cast<float>(std::get<double>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Direction] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Position::Position");
+  return std::move(std::make_unique<Position>(x, y ,z));
 }
 
 void Position::Print(const char* tag) const {

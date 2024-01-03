@@ -48,8 +48,8 @@ Shape::Shape(const std::string& flutter_assets_path,
       type_ = std::get<int32_t>(it.second);
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      centerPosition_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      centerPosition_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "normal" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       normal_ = std::make_unique<Direction>(

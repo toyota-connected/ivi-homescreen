@@ -44,8 +44,8 @@ Animation::Animation(const std::string& flutter_assets_path,
       asset_path_ = std::get<std::string>(it.second);
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      center_position_ = std::unique_ptr<Position>{std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second))};
+      center_position_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Animation] Unhandled Parameter");
       Utils::PrintFlutterEncodableValue(key.c_str(), it.second);

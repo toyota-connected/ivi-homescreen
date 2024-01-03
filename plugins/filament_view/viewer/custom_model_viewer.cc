@@ -269,4 +269,8 @@ void CustomModelViewer::resize(double width, double height) {
                                        static_cast<uint32_t>(height));
 }
 
+std::optional<filament::mat4f> CustomModelViewer::getModelTransform() {
+  return modelLoader_->getModelTransform();
+}
+
 }  // namespace plugin_filament_view

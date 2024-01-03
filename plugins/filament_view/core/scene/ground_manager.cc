@@ -30,6 +30,7 @@
 #include "logging/logging.h"
 
 #include "materials/uberarchive.h"
+#include "generated/resources/gltf_demo.h"
 
 namespace plugin_filament_view {
 
@@ -97,53 +98,125 @@ std::future<Resource<std::string_view>> GroundManager::createGround() {
     auto materialInstanceResult =
         materialManager_->getMaterialInstance(ground_->material_.get());
 
+    auto modelTransform = modelViewer_->getModelTransform();
+    Position center;
+    if (ground_->isBelowModel_ && modelTransform.has_value()) {
+      center.setX(modelTransform.value()[0][3]);
+      center.setY(modelTransform.value()[1][3]);
+      center.setZ(modelTransform.value()[2][3]);
+    } else {
+      if (ground_->center_position_ == nullptr) {
+        promise->set_value(
+            Resource<std::string_view>::Error("Position must be provided"));
+        return;
+      }
+      center.setX(ground_->center_position_->getX());
+      center.setY(ground_->center_position_->getY());
+      center.setZ(ground_->center_position_->getZ());
+    }
 #if 0
-    auto modelTransform = modelViewer_.getModelTransform();
-
-    auto center = (ground_->isBelowModel_ && modelTransform != nullptr)
-                      ? Position(modelTransform[0][3], modelTransform[1][3], modelTransform[2][3])
-                      : ground_->center_position_ != nullptr
-                            ? ground_->center_position_
-                            : promise->set_value("Position must be provided"); return
+    plane_geometry_ = PlaneGeometry.Builder(
+                                 center = center,
+                                 ground_->getSize(),
+                                 ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
+    delete center;
+    plane_geometry_->setupScene(modelViewer_, materialInstanceResult.data);
 #endif
 
-#if 0  // TODO
+    auto& em = utils::EntityManager::get();
 
-            Position* center;
-            if (ground_->getIsBelowModel()) {
-              center = new Position(modelTransform[0, 3], modelTransform[1, 3], modelTransform[2, 3]);
-            }
-            else {
-              if (!ground_->getCenterPosition().has_value()) {
-                promise->set_value("Position must be provided");
-                return;
-              }
-              center = ground_->getCenterPosition().value();
-            }
+    const static uint32_t indices[] = {
+        0, 1, 2, 2, 3, 0
+    };
 
-            plane_geometry_ = PlaneGeometry.Builder(
-                                         center = center,
-                                         ground_->getSize(),
-                                         ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
-            delete center;
-            plane_geometry_->setupScene(modelViewer_, materialInstanceResult.data);
-#endif
+    Aabb aabb = modelViewer_->getModelLoader()->getAsset()->getBoundingBox();
+    //if (!app.actualSize) {
+      mat4f const transform = fitIntoUnitCube(aabb, 4);
+      aabb = aabb.transform(transform);
+    //}
+
+    float3 planeExtent{10.0f * aabb.extent().x, 0.0f, 10.0f * aabb.extent().z};
+
+    const static float3 vertices[] = {
+        { -planeExtent.x, 0, -planeExtent.z },
+        { -planeExtent.x, 0,  planeExtent.z },
+        {  planeExtent.x, 0,  planeExtent.z },
+        {  planeExtent.x, 0, -planeExtent.z },
+    };
+
+    short4 const tbn = packSnorm16(
+        mat3f::packTangentFrame(
+            mat3f{
+                float3{ 1.0f, 0.0f, 0.0f },
+                float3{ 0.0f, 0.0f, 1.0f },
+                float3{ 0.0f, 1.0f, 0.0f }
+            }
+            ).xyzw);
+
+    const static short4 normals[] { tbn, tbn, tbn, tbn };
+
+    VertexBuffer* vertexBuffer = VertexBuffer::Builder()
+                                     .vertexCount(4)
+                                     .bufferCount(2)
+                                     .attribute(VertexAttribute::POSITION,
+                                                0, VertexBuffer::AttributeType::FLOAT3)
+                                     .attribute(VertexAttribute::TANGENTS,
+                                                1, VertexBuffer::AttributeType::SHORT4)
+                                     .normalized(VertexAttribute::TANGENTS)
+                                     .build(*engine_);
+
+    vertexBuffer->setBufferAt(*engine_, 0, VertexBuffer::BufferDescriptor(
+                                              vertices, vertexBuffer->getVertexCount() * sizeof(vertices[0])));
+    vertexBuffer->setBufferAt(*engine_, 1, VertexBuffer::BufferDescriptor(
+                                              normals, vertexBuffer->getVertexCount() * sizeof(normals[0])));
+
+    IndexBuffer* indexBuffer = IndexBuffer::Builder()
+                                   .indexCount(6)
+                                   .build(*engine_);
+
+    indexBuffer->setBuffer(*engine_, IndexBuffer::BufferDescriptor(
+                                        indices, indexBuffer->getIndexCount() * sizeof(uint32_t)));
+
+    Entity const groundPlane = em.create();
+    RenderableManager::Builder(1)
+        .boundingBox({
+            {}, { planeExtent.x, 1e-4f, planeExtent.z }
+        })
+        .material(0, materialInstanceResult.getData().value())
+        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES,
+                  vertexBuffer, indexBuffer, 0, 6)
+        .culling(false)
+        .receiveShadows(true)
+        .castShadows(false)
+        .build(*engine_, groundPlane);
+
+    modelViewer_->getFilamentScene()->addEntity(groundPlane);
+
+    auto& tcm = engine_->getTransformManager();
+    tcm.setTransform(tcm.getInstance(groundPlane),
+                     mat4f::translation(float3{ 0, aabb.min.y, -4 }));
+
+    auto& rcm = engine_->getRenderableManager();
+    auto instance = rcm.getInstance(groundPlane);
+    rcm.setLayerMask(instance, 0xff, 0x00);
+
     modelViewer_->setGroundState(SceneState::LOADED);
-    promise->set_value(
-        Resource<std::string_view>::Success("Ground created successfully"));
-  });
-  SPDLOG_DEBUG("--GroundManager::createGround");
-  return future;
+
+      promise->set_value(
+          Resource<std::string_view>::Success("Ground created successfully"));
+    });
+    SPDLOG_DEBUG("--GroundManager::createGround");
+    return future;
 }
 
 std::future<Resource<std::string_view>> GroundManager::updateGround(
     Ground* newGround) {
-  return std::future<Resource<std::string_view>>();
+    return std::future<Resource<std::string_view>>();
 }
 
 std::future<Resource<std::string_view>> GroundManager::updateGroundMaterial(
     Material* newMaterial) {
-  return std::future<Resource<std::string_view>>();
+    return std::future<Resource<std::string_view>>();
 }
 
 void GroundManager::Print(const char* tag) {}

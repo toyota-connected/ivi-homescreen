@@ -50,9 +50,14 @@ class ModelLoader {
                          std::string uri)>& callback,
                      bool transform = false);
 
-  ::filament::gltfio::FilamentAsset* getAsset() const { return asset_; };
+  filament::gltfio::FilamentAsset* getAsset() const { return asset_; };
 
-  const ::filament::math::mat4f& getModelTransform();
+  std::optional<::filament::math::mat4f> getModelTransform();
+
+  /**
+     * Removes the transformation that was set up via transformToUnitCube.
+   */
+  void clearRootTransform();
 
   void transformToUnitCube(const Position* centerPoint, float scale);
 
@@ -84,7 +89,7 @@ class ModelLoader {
       const Position* centerPosition,
       bool isFallback = false);
 
-  void arrangeIntoCircle();
+  friend class CustomModelViewer;
 
  private:
   CustomModelViewer* modelViewer_;
@@ -118,11 +123,6 @@ class ModelLoader {
       ::filament::math::float3 offset);
 
   void updateRootTransform(bool autoScaleEnabled);
-
-  /**
-   * Removes the transformation that was set up via transformToUnitCube.
-   */
-  void clearRootTransform();
 
   void populateScene(::filament::gltfio::FilamentAsset* asset);
 

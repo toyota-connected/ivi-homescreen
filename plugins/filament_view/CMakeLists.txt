@@ -87,6 +87,8 @@ target_link_libraries(filament INTERFACE
         ${FILAMENT_BINARY_DIR}/third_party/tinyexr/tnt/libtinyexr.a
         ${FILAMENT_BINARY_DIR}/third_party/libz/tnt/libz.a
 
+        ${FILAMENT_BINARY_DIR}/samples/libgltf-demo-resources.a
+
         Threads::Threads
 )
 

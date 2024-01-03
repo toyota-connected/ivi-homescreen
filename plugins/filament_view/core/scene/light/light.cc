@@ -53,8 +53,8 @@ Light::Light(const flutter::EncodableMap& params) {
       intensity_ = std::get<double>(it.second);
     } else if (key == "position" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      position_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      position_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "direction" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       direction_ = std::make_unique<Direction>(

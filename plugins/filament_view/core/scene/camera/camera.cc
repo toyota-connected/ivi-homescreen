@@ -65,8 +65,8 @@ Camera::Camera(const flutter::EncodableMap& params) {
       }
     } else if (key == "flightStartPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      flightStartPosition_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      flightStartPosition_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "fovDirection" && !it.second.IsNull() &&
                std::holds_alternative<std::string>(it.second)) {
       fovDirection_ = getFovForText(std::get<std::string>(it.second));
@@ -98,8 +98,8 @@ Camera::Camera(const flutter::EncodableMap& params) {
       mode_ = getModeForText(std::get<std::string>(it.second));
     } else if (key == "orbitHomePosition" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      orbitHomePosition_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      orbitHomePosition_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "orbitSpeed" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableList>(it.second)) {
       auto list = std::get<flutter::EncodableList>(it.second);
@@ -123,12 +123,12 @@ Camera::Camera(const flutter::EncodableMap& params) {
       }
     } else if (key == "targetPosition" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      targetPosition_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      targetPosition_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "upVector" && !it.second.IsNull() &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      upVector_ = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      upVector_ =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "zoomSpeed" && !it.second.IsNull() &&
                std::holds_alternative<double>(it.second)) {
       zoomSpeed_ = std::get<double>(it.second);

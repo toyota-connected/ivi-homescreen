@@ -93,8 +93,8 @@ std::unique_ptr<Model> Model::Deserialize(
       assetPath = std::get<std::string>(it.second);
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      centerPosition = std::make_unique<Position>(
-          std::get<flutter::EncodableMap>(it.second));
+      centerPosition =
+          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (key == "fallback" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       fallback = Deserialize(
