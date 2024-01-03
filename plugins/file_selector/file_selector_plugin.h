@@ -20,7 +20,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
 
-#include "messages.h"
+#include "messages.g.h"
 
 namespace url_launcher_linux {
 

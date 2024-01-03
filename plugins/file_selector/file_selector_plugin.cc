@@ -16,7 +16,7 @@
 
 #include "url_launcher_plugin.h"
 
-#include "messages.h"
+#include "messages.g.h"
 
 #include <flutter/plugin_registrar.h>
 
