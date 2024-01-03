@@ -20,27 +20,24 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
 
-#include "messages.g.h"
+#include "messages.h"
 
-namespace url_launcher_linux {
+namespace plugin_file_selector {
 
-class UrlLauncherPlugin final : public flutter::Plugin, public UrlLauncherApi {
+class FileSelectorPlugin final : public flutter::Plugin,
+                                 public FileSelectorApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrar* registrar);
 
-  UrlLauncherPlugin();
+  FileSelectorPlugin();
 
-  ~UrlLauncherPlugin() override;
+  ~FileSelectorPlugin() override;
 
   // Disallow copy and assign.
-  UrlLauncherPlugin(const UrlLauncherPlugin&) = delete;
-  UrlLauncherPlugin& operator=(const UrlLauncherPlugin&) = delete;
-
-  // UrlLauncherApi methods.
-  ErrorOr<bool> CanLaunchUrl(const std::string& url) override;
-  std::optional<FlutterError> LaunchUrl(const std::string& url) override;
+  FileSelectorPlugin(const FileSelectorPlugin&) = delete;
+  FileSelectorPlugin& operator=(const FileSelectorPlugin&) = delete;
 };
 
-}  // namespace url_launcher_linux
+}  // namespace plugin_file_selector
 
 #endif  // FLUTTER_PLUGIN_URL_LAUNCHER_PLUGIN_H

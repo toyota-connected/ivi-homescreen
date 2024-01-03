@@ -122,8 +122,8 @@ if (BUILD_PLUGIN_FILE_SELECTOR)
     ENABLE_PLUGIN(file_selector)
 endif ()
 
-option(BUILD_AUDIOPLAYERS_LINUX_PLUGIN "Include Audioplayers Linux pPlugin" OFF)
-if (BUILD_AUDIOPLAYERS_LINUX_PLUGIN)
+option(BUILD_PLUGIN_AUDIOPLAYERS_LINUX "Include Audioplayers Linux pPlugin" OFF)
+if (BUILD_PLUGIN_AUDIOPLAYERS_LINUX)
     ENABLE_PLUGIN(audioplayers_linux)
 endif ()
 

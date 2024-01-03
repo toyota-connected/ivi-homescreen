@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2023 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef FLUTTER_PLUGIN_URL_LAUNCHER_PLUGIN_C_API_H
-#define FLUTTER_PLUGIN_URL_LAUNCHER_PLUGIN_C_API_H
+#ifndef FLUTTER_PLUGIN_FILE_SELECTOR_PLUGIN_C_API_H
+#define FLUTTER_PLUGIN_FILE_SELECTOR_PLUGIN_C_API_H
 
 #include <flutter_plugin_registrar.h>
 
@@ -29,11 +29,11 @@
 extern "C" {
 #endif
 
-FLUTTER_PLUGIN_EXPORT void UrlLauncherPluginCApiRegisterWithRegistrar(
+FLUTTER_PLUGIN_EXPORT void FileSelectorPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar);
 
 #if defined(__cplusplus)
 }  // extern "C"
 #endif
 
-#endif  // FLUTTER_PLUGIN_URL_LAUNCHER_PLUGIN_C_API_H
+#endif  // FLUTTER_PLUGIN_FILE_SELECTOR_PLUGIN_C_API_H
