@@ -45,26 +45,39 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             if ("closeWebView" == call.method_name()) {
               result->Success(flutter::EncodableValue(true));
             } else if ("canLaunch" == call.method_name()) {
-              const auto& args =
-                  std::get_if<flutter::EncodableMap>(call.arguments());
-              for (const auto& it : *args) {
-                if (std::holds_alternative<std::string>(it.first) &&
-                    std::holds_alternative<std::string>(it.second)) {
-                  auto key = std::get<std::string>(it.first);
-                  auto value = std::get<std::string>(it.second);
-                  if (key == "url") {
-                    const ErrorOr<bool> output = api->CanLaunchUrl(value);
-                    if (output.has_error()) {
-                      result->Error(output.error().code(),
-                                    output.error().message());
-                      return;
-                    }
-                    result->Success(flutter::EncodableValue(true));
-                  } else {
-                    result->NotImplemented();
-                  }
+              if (std::holds_alternative<std::string>(*call.arguments())) {
+                const auto& value = std::get<std::string>(*call.arguments());
+                spdlog::debug("[url_launcher] canLaunch: {}", value);
+                const ErrorOr<bool> output = api->CanLaunchUrl(value);
+                if (output.has_error()) {
+                  result->Error(output.error().code(),
+                                output.error().message());
+                  return;
                 }
-                break;
+                result->Success(flutter::EncodableValue(true));
+              }
+              else if (std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+                const auto& args =
+                    std::get_if<flutter::EncodableMap>(call.arguments());
+                for (const auto& it : *args) {
+                  if (std::holds_alternative<std::string>(it.first) &&
+                      std::holds_alternative<std::string>(it.second)) {
+                    auto key = std::get<std::string>(it.first);
+                    auto value = std::get<std::string>(it.second);
+                    if (key == "url") {
+                      const ErrorOr<bool> output = api->CanLaunchUrl(value);
+                      if (output.has_error()) {
+                        result->Error(output.error().code(),
+                                      output.error().message());
+                        return;
+                      }
+                      result->Success(flutter::EncodableValue(true));
+                    } else {
+                      result->NotImplemented();
+                    }
+                  }
+                  break;
+                }
               }
             } else if ("launch" == call.method_name()) {
               const auto& arg = *call.arguments();
