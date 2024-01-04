@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,13 @@
 
 #include <libsecret/secret.h>
 
-namespace secret {
+namespace plugin_secure_storage {
 
-class FHashTable {
+class HashTable {
   GHashTable* m_hashTable;
 
  public:
-  FHashTable() { m_hashTable = g_hash_table_new(g_str_hash, nullptr); }
+  HashTable() { m_hashTable = g_hash_table_new(g_str_hash, nullptr); }
 
   /**
    * @brief Get GHashTable
@@ -77,7 +77,7 @@ class FHashTable {
     return static_cast<bool>(result);
   }
 
-  ~FHashTable() { g_hash_table_destroy(m_hashTable); }
+  ~HashTable() { g_hash_table_destroy(m_hashTable); }
 };
 
-}  // namespace secret
+}  // namespace plugin_secure_storage

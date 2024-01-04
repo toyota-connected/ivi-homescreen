@@ -87,7 +87,6 @@ target_include_directories(homescreen
         ${GST_VIDEO_INCLUDE_DIRS}
         ${LIBCURL_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
-        ${PLUGIN_SECURE_STORAGE_INCLUDE_DIRS}
         ../third_party/asio-1-28-1/asio/include
 )
 
@@ -115,7 +114,6 @@ target_link_libraries(homescreen PRIVATE
         ${GST_VIDEO_LIBRARIES}
         ${LIBCURL_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
-        ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
 )
 
 target_link_directories(homescreen PRIVATE
