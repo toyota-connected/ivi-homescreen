@@ -35,6 +35,7 @@
 #include <platform/homescreen/text_input_plugin.h>
 #include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
+#include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
 #include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
 #include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
 #include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
@@ -296,6 +297,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
   (void)engine;
 #if defined(ENABLE_PLUGIN_AUDIOPLAYERS_LINUX)
   AudioPlayersLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_SECURE_STORAGE)
+  SecureStoragePluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 #if defined(ENABLE_PLUGIN_FILE_SELECTOR)

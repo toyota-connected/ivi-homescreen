@@ -46,9 +46,6 @@
 #ifdef ENABLE_PLUGIN_DESKTOP_WINDOW
 #include "plugins/desktop_window/desktop_window.h"
 #endif
-#ifdef ENABLE_PLUGIN_SECURE_STORAGE
-#include "plugins/secure_storage/secure_storage.h"
-#endif
 #ifdef ENABLE_PLUGIN_INTEGRATION_TEST
 #include "plugins/integration_test/integration_test.h"
 #endif
@@ -98,10 +95,6 @@ PlatformChannel::PlatformChannel() {
 #ifdef ENABLE_PLUGIN_DESKTOP_WINDOW
   RegisterCallback(DesktopWindow::kChannelName,
                    &DesktopWindow::OnPlatformMessage);
-#endif
-#ifdef ENABLE_PLUGIN_SECURE_STORAGE
-  RegisterCallback(SecureStorage::kChannelName,
-                   &SecureStorage::OnPlatformMessage);
 #endif
 #ifdef ENABLE_PLUGIN_INTEGRATION_TEST
   RegisterCallback(IntegrationTestPlugin::kChannelName,

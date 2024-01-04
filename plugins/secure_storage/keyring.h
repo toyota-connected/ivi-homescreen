@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,39 +16,31 @@
 
 #pragma once
 
+#include <memory>
+
 #include <libsecret/secret.h>
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>
-#include <memory>
-#include "g_hash_table.h"
+
+#include "hash_table.h"
 #include "logging/logging.h"
 
-namespace secret {
+namespace plugin_secure_storage {
 
 class Keyring {
-  FHashTable m_attributes;
-  std::string m_label;
-  SecretSchema m_schema{};
+  HashTable attributes_;
+  std::string label_;
+  SecretSchema schema_{};
 
  public:
-  explicit Keyring(const char* _label = "default") : m_label(_label) {
-    m_schema = {m_label.c_str(),
-                SECRET_SCHEMA_NONE,
-                {
-                    {"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
-                }};
+  explicit Keyring(const char* label = "default") : label_(label) {
+    schema_ = {label_.c_str(),
+               SECRET_SCHEMA_NONE,
+               {
+                   {"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
+               }};
   }
 
-  /**
-   * @brief Add new a key and value to the keyring
-   * @param[in] key A key to add
-   * @param[in] value The value to associate with the key
-   * @return bool
-   * @retval true Normal end
-   * @retval false Abnormal end
-   * @relation
-   * flutter
-   */
   bool addItem(const char* key, const char* value) {
     rapidjson::Document root = readFromKeyring();
     if (root.IsObject() && root.HasMember(key) && root[key].IsString()) {
@@ -60,14 +52,6 @@ class Keyring {
     return this->storeToKeyring(root);
   }
 
-  /**
-   * @brief Get the string associate with a key from keyring
-   * @param[in] key A key to get string
-   * @return std::string
-   * @retval The associated string, or "" if the key is not found
-   * @relation
-   * flutter
-   */
   std::string getItem(const char* key) {
     rapidjson::Document root = readFromKeyring();
     if (root.IsObject() && root.HasMember(key) && root[key].IsString()) {
@@ -76,13 +60,6 @@ class Keyring {
     return "";
   }
 
-  /**
-   * @brief Delete key and value from keyring
-   * @param[in] key A key to delete
-   * @return void
-   * @relation
-   * flutter
-   */
   void deleteItem(const char* key) {
     rapidjson::Document root = readFromKeyring();
     if (root.HasMember(key)) {
@@ -91,29 +68,12 @@ class Keyring {
     this->storeToKeyring(root);
   }
 
-  /**
-   * @brief Empty keyring
-   * @return bool
-   * @retval true Normal end
-   * @retval false Abnormal end
-   * @relation
-   * flutter
-   */
   bool deleteKeyring() {
     rapidjson::Document d;
     d.SetObject();
     return this->storeToKeyring(d);
   }
 
-  /**
-   * @brief Store a password in the secret service
-   * @param[in] d A document for parsing JSON text as DOM
-   * @return bool
-   * @retval true Normal end
-   * @retval false Abnormal end
-   * @relation
-   * flutter
-   */
   bool storeToKeyring(rapidjson::Document& d) {
     std::unique_ptr<GError> err = nullptr;
     GError* errPtr = err.get();
@@ -123,8 +83,8 @@ class Keyring {
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     d.Accept(writer);
 
-    auto res = (bool)secret_password_storev_sync (
-        &m_schema, m_attributes.getGHashTable(), nullptr, m_label.c_str(),
+    auto res = (bool)secret_password_storev_sync(
+        &schema_, attributes_.getGHashTable(), nullptr, label_.c_str(),
         buffer.GetString(), nullptr, &errPtr);
 
     auto result = static_cast<bool>(res);
@@ -136,20 +96,13 @@ class Keyring {
     return result;
   }
 
-  /**
-   * @brief Lookup a password in the secret service
-   * @return rapidjson::Document
-   * @retval A new password string
-   * @relation
-   * flutter
-   */
   rapidjson::Document readFromKeyring() {
     rapidjson::Document d;
     std::unique_ptr<GError> err = nullptr;
     GError* errPtr = err.get();
 
     const gchar* result = secret_password_lookupv_sync(
-        &m_schema, m_attributes.getGHashTable(), nullptr, &errPtr);
+        &schema_, attributes_.getGHashTable(), nullptr, &errPtr);
 
     if (err) {
       throw std::runtime_error(err->message);
@@ -169,4 +122,4 @@ class Keyring {
   }
 };
 
-}  // namespace secret
+}  // namespace plugin_secure_storage
