@@ -20,6 +20,9 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
+pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
+pkg_check_modules(ZLIB IMPORTED_TARGET REQUIRED zlib)
+
 add_executable(homescreen
         app.cc
         configuration/configuration.cc
@@ -27,7 +30,6 @@ add_executable(homescreen
         json_utils.cc
         libflutter_engine.cc
         main.cc
-        platform_channel.cc
         textures/texture.cc
         timer.cc
         view/flutter_view.cc
@@ -63,8 +65,8 @@ if (BUILD_CRASH_HANDLER)
     target_sources(homescreen PRIVATE crash_handler.cc)
 endif ()
 
-if (BUILD_PLUGIN_GOOGLE_SIGN_IN OR BUILD_PLUGIN_FILAMENT_VIEW)
-    target_sources(homescreen PRIVATE curl_client/curl_client.cc)
+if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
+    # target_sources(homescreen PRIVATE curl_client/curl_client.cc)
 endif ()
 
 target_compile_definitions(homescreen
@@ -85,7 +87,6 @@ target_include_directories(homescreen
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
-        ${LIBCURL_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
         ../third_party/asio-1-28-1/asio/include
 )
@@ -107,13 +108,14 @@ target_link_libraries(homescreen PRIVATE
         spdlog
         flutter
         wayland-gen
-        platform_homescreen
         Threads::Threads
+        PkgConfig::CURL
+        PkgConfig::ZLIB
         dl
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}
-        ${LIBCURL_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
+        platform_homescreen
 )
 
 target_link_directories(homescreen PRIVATE

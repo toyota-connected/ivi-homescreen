@@ -24,7 +24,6 @@
 
 #include "constants.h"
 #include "engine.h"
-#include "platform_channel.h"
 #include "textures/texture.h"
 
 #include "hexdump.h"
@@ -659,13 +658,6 @@ void Engine::OnFlutterPlatformMessage(
 void Engine::onLogMessageCallback(const char* /* tag */,
                                   const char* message,
                                   void* user_data) {
-#if defined(ENABLE_DART_VM_LOGGING)
-  const auto engine = static_cast<FlutterDesktopEngineState*>(user_data)
-                          ->view_controller->engine;
-  std::scoped_lock<std::mutex> lock(engine->m_queue_lock);
-  engine->m_vm_queue->emplace(message);
-#else
   (void)message;
   (void)user_data;
-#endif
 }

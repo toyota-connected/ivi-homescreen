@@ -1,12 +1,8 @@
 
 #include "core/scene/material/loader/material_loader.h"
 
-#include <stb_image.h>
-#include <asio/post.hpp>
-
 #include "../../shell/curl_client/curl_client.h"
 #include "core/include/file_utils.h"
-#include "logging/logging.h"
 
 namespace plugin_filament_view {
 MaterialLoader::MaterialLoader(CustomModelViewer* modelViewer,

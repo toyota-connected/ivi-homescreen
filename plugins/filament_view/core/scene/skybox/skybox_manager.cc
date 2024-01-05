@@ -40,6 +40,8 @@ SkyboxManager::SkyboxManager(CustomModelViewer* modelViewer,
   SPDLOG_TRACE("--SkyboxManager::SkyboxManager");
 }
 
+void SkyboxManager::destroySkybox() {}
+
 std::future<void> SkyboxManager::Initialize() {
   const auto promise(std::make_shared<std::promise<void>>());
   auto future(promise->get_future());
@@ -253,7 +255,7 @@ std::future<Resource<std::string_view>> SkyboxManager::setSkyboxFromColor(
 }
 
 Resource<std::string_view> SkyboxManager::loadSkyboxFromHdrFile(
-    const std::string assetPath,
+    const std::string& assetPath,
     bool showSun,
     bool shouldUpdateLight,
     float intensity) {

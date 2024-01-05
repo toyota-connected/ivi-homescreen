@@ -28,9 +28,9 @@ class Direction {
  public:
   Direction(float x, float y, float z) : x_(x), y_(y), z_(z){};
 
-  Direction(const flutter::EncodableMap& params);
+  explicit Direction(const flutter::EncodableMap& params);
 
-  ::filament::math::float3 toFloatArray() { return {x_, y_, z_}; }
+  [[nodiscard]] ::filament::math::float3 toFloatArray() const { return {x_, y_, z_}; }
 
   void Print(const char* tag);
 

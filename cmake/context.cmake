@@ -61,7 +61,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(STATUS "LLVM Root .............. ${LLVM_ROOT}")
     message(STATUS "C++ header path ........ ${LLVM_ROOT}/include/c++/v1/")
 
-    list(APPEND CMAKE_CXX_FLAGS -stdlib=libc++)
+    # list(APPEND CMAKE_CXX_FLAGS " -stdlib=libc++")
     set(CONTEXT_COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++> $<$<COMPILE_LANGUAGE:CXX>:-isystem${LLVM_ROOT}/include/c++/v1/>)
 
     execute_process(
@@ -79,13 +79,15 @@ endif ()
 #
 # Toolchain IPO/LTO support
 #
-cmake_policy(SET CMP0069 NEW)
-include(CheckIPOSupported)
-check_ipo_supported(
-        RESULT IPO_SUPPORT_RESULT
-        OUTPUT IPO_SUPPORT_OUTPUT
-        LANGUAGES C CXX
-)
+if (ENABLE_LTO)
+    cmake_policy(SET CMP0069 NEW)
+    include(CheckIPOSupported)
+    check_ipo_supported(
+            RESULT IPO_SUPPORT_RESULT
+            OUTPUT IPO_SUPPORT_OUTPUT
+            LANGUAGES C CXX
+    )
+endif ()
 if (IPO_SUPPORT_RESULT)
     message(STATUS "IPO .................... supported")
 else ()

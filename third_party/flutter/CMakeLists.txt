@@ -2,7 +2,7 @@
 # Flutter Engine
 #
 
-add_library(flutter STATIC
+add_library(flutter INTERFACE
         shell/platform/common/client_wrapper/core_implementations.cc
         shell/platform/common/client_wrapper/plugin_registrar.cc
         shell/platform/common/client_wrapper/standard_codec.cc
@@ -30,11 +30,11 @@ add_library(flutter STATIC
         fml/unique_fd.cc
 )
 
-target_compile_definitions(flutter PUBLIC RAPIDJSON_HAS_STDSTRING)
+target_compile_definitions(flutter INTERFACE RAPIDJSON_HAS_STDSTRING)
 
-target_compile_options(flutter PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+target_compile_options(flutter INTERFACE ${CONTEXT_COMPILE_OPTIONS})
 
-target_include_directories(flutter PUBLIC
+target_include_directories(flutter INTERFACE
         .
         ..
         third_party
@@ -44,7 +44,7 @@ target_include_directories(flutter PUBLIC
         shell/platform/common/client_wrapper/include/flutter
 )
 
-target_link_libraries(flutter PUBLIC spdlog)
+target_link_libraries(flutter INTERFACE spdlog)
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET flutter PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

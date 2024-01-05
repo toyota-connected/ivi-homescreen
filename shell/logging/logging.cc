@@ -16,6 +16,7 @@
 
 #include "logging.h"
 
+#include "spdlog/spdlog-inl.h"
 #include "spdlog/cfg/env.h"  // support for loading levels from the environment variable
 #if defined(ENABLE_DLT)
 #include "spdlog/sinks/callback_sink.h"

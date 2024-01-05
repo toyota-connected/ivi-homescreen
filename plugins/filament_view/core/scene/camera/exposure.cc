@@ -16,7 +16,6 @@
 
 #include "exposure.h"
 
-#include "core/scene/scene.h"
 #include "logging/logging.h"
 #include "utils.h"
 

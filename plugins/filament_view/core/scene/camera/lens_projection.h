@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
 namespace plugin_filament_view {
@@ -23,7 +25,7 @@ class LensProjection {
  public:
   LensProjection(float cameraFocalLength, float aspect);
 
-  LensProjection(const flutter::EncodableMap& params);
+  explicit LensProjection(const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 

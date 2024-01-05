@@ -153,20 +153,23 @@ const std::vector<uint8_t>& CurlClient::RetrieveContentAsVector(bool verbose) {
   if (mCode != CURLE_OK) {
     spdlog::error("[CurlClient] Failed to set 'CURLOPT_VERBOSE' [{}]\n",
                   mErrorBuffer.get());
-    return {};
+    mVectorBuffer.clear();
+    return mVectorBuffer;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_WRITEFUNCTION, VectorWriter);
   if (mCode != CURLE_OK) {
     spdlog::error("[CurlClient] Failed to set writer [{}]", mErrorBuffer.get());
-    return {};
+    mVectorBuffer.clear();
+    return mVectorBuffer;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_WRITEDATA, &mVectorBuffer);
   if (mCode != CURLE_OK) {
     spdlog::error("[CurlClient] Failed to set write data [{}]",
                   mErrorBuffer.get());
-    return {};
+    mVectorBuffer.clear();
+    return mVectorBuffer;
   }
 
   std::vector<uint8_t>().swap(mVectorBuffer);
@@ -175,7 +178,8 @@ const std::vector<uint8_t>& CurlClient::RetrieveContentAsVector(bool verbose) {
   if (mCode != CURLE_OK) {
     spdlog::error("[CurlClient] Failed to get '{}' [{}]\n", mUrl,
                   mErrorBuffer.get());
-    return {};
+    mVectorBuffer.clear();
+    return mVectorBuffer;
   }
   return mVectorBuffer;
 }

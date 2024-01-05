@@ -16,7 +16,7 @@
 
 #include "texture.h"
 
-#include <filesystem>
+#include <optional>
 
 #include "logging/logging.h"
 #include "utils.h"

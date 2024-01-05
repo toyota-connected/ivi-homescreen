@@ -42,7 +42,7 @@ class Shape {
 
  private:
   int id{};
-  int32_t type_;
+  int32_t type_{};
   /// center position of the shape in the world space.
   std::optional<std::unique_ptr<Position>> centerPosition_;
   /// direction of the shape rotation in the world space

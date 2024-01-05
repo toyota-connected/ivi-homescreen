@@ -16,8 +16,6 @@
 
 #include "shape.h"
 
-#include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
-
 #include "logging/logging.h"
 #include "utils.h"
 

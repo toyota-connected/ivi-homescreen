@@ -1,3 +1,7 @@
+#pragma once
+
+#include <optional>
+#include <vector>
 
 #include <filament/Box.h>
 #include <filament/Engine.h>
@@ -6,6 +10,9 @@
 #include <utils/EntityManager.h>
 
 namespace plugin_filament_view {
+
+class Vertex;
+class Submesh;
 
 /**
  * Geometry parameters for building and updating a Renderable

@@ -102,11 +102,6 @@ if (BUILD_PLUGIN_INTEGRATION_TEST)
     ENABLE_PLUGIN(integration_test)
 endif ()
 
-option(BUILD_PLUGIN_LOGGING "Includes Logging Plugin" ON)
-if (BUILD_PLUGIN_LOGGING)
-    ENABLE_PLUGIN(logging)
-endif ()
-
 option(BUILD_PLUGIN_GOOGLE_SIGN_IN "Include Google Sign In manager" OFF)
 if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
     ENABLE_PLUGIN(google_sign_in)

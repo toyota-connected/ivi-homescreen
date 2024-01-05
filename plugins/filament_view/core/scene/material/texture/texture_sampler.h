@@ -16,13 +16,15 @@
 
 #pragma once
 
+#include <optional>
+
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
 namespace plugin_filament_view {
 
 class TextureSampler {
  public:
-  TextureSampler(const flutter::EncodableMap& params);
+  explicit TextureSampler(const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 
@@ -35,6 +37,6 @@ class TextureSampler {
   std::string min_;
   std::string mag_;
   std::string wrap_;
-  std::optional<double> anisotropy_;
+  std::optional<double> anisotropy_{};
 };
 }  // namespace plugin_filament_view

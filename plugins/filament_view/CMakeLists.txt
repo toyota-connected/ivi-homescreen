@@ -23,10 +23,10 @@ if (NOT EXISTS ${FILAMENT_LINK_LIBRARIES_DIR})
     message(FATAL_ERROR "${FILAMENT_LINK_LIBRARIES_DIR} does not exist")
 endif ()
 
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-find_package(Threads REQUIRED)
-pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
+set(CMAKE_THREAD_PREFER_PTHREAD ON)
+include(FindThreads)
+# pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
+# pkg_check_modules(ZLIB IMPORTED_TARGET REQUIRED zlib)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE ${FILAMENT_INCLUDE_DIR})
@@ -39,7 +39,6 @@ target_link_libraries(filament INTERFACE
         libfilameshio.a
         libgltfio_core.a
         libimage.a
-        libmatdbg.a
         libshaders.a
         libuberarchive.a
         libviewer.a
@@ -54,7 +53,6 @@ target_link_libraries(filament INTERFACE
         libsmol-v.a
         libuberzlib.a
         libvkshaders.a
-        libbluegl.a
         libcivetweb.a
         libtinyexr.a
         libfilaflat.a
@@ -68,6 +66,8 @@ target_link_libraries(filament INTERFACE
         libutils.a
         libzstd.a
 
+        # PkgConfig::CURL
+        # PkgConfig::ZLIB
         Threads::Threads
 )
 
@@ -126,7 +126,6 @@ target_link_libraries(plugin_filament_view PUBLIC
         filament
         flutter
         platform_homescreen
-        PkgConfig::CURL
 )
 
 add_sanitizers(plugin_filament_view)
