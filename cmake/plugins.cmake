@@ -165,3 +165,8 @@ option(BUILD_PLUGIN_DESKTOP_WINDOW_LINUX "Includes Desktop Window Linux Plugin" 
 if (BUILD_PLUGIN_DESKTOP_WINDOW_LINUX)
     ENABLE_PLUGIN(desktop_window_linux)
 endif ()
+
+option(BUILD_PLUGIN_WEBVIEW_FLUTTER "Includes WebView Flutter View Plugin" OFF)
+if (BUILD_PLUGIN_WEBVIEW_FLUTTER)
+    ENABLE_PLUGIN(webview_flutter)
+endif ()

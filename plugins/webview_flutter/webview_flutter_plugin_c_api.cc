@@ -14,16 +14,14 @@
  * limitations under the License.
  */
 
-#include "include/filament_view/filament_view_plugin_c_api.h"
+#include "include/webview_flutter/webview_flutter_plugin_c_api.h"
 
-#include <flutter/plugin_registrar.h>
+#include "flutter/plugin_registrar.h"
 
-#include <utility>
+#include "webview_flutter_plugin.h"
 
-#include "filament_view_plugin.h"
-
-void FilamentViewPluginCApiRegisterWithRegistrar(
-    FlutterDesktopPluginRegistrarRef registrar,
+void WebviewFlutterPluginCApiRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrar* registrar,
     int32_t id,
     std::string viewType,
     int32_t direction,
@@ -34,13 +32,13 @@ void FilamentViewPluginCApiRegisterWithRegistrar(
     const std::vector<uint8_t>& params,
     std::string assetDirectory,
     FlutterDesktopEngineRef engine,
-    PlatformViewAddListener addListener,
-    PlatformViewRemoveListener removeListener,
-    void* platform_view_context) {
-  plugin_filament_view::FilamentViewPlugin::RegisterWithRegistrar(
+    PlatformViewAddListener add_listener,
+    PlatformViewRemoveListener remove_listener,
+    void* platform_views_context) {
+  plugin_webview_flutter::WebviewFlutterPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrar>(registrar),
       id, std::move(viewType), direction, top, left, width, height, params,
-      std::move(assetDirectory), engine, addListener, removeListener,
-      platform_view_context);
+      std::move(assetDirectory), engine, add_listener, remove_listener,
+      platform_views_context);
 }

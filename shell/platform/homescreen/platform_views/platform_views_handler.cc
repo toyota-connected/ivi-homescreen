@@ -25,6 +25,9 @@
 #if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
 #include "plugins/layer_playground_view/include/layer_playground_view/layer_playground_view_plugin_c_api.h"
 #endif
+#if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER)
+#include "plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h"
+#endif
 
 static constexpr char kMethodCreate[] = "create";
 static constexpr char kMethodDispose[] = "dispose";
@@ -73,11 +76,14 @@ void PlatformViewsHandler::HandleMethodCall(
     int32_t id = 0;
     std::string viewType;
     int32_t direction = 0;
+    double top = 0;
+    double left = 0;
     double width = 0;
     double height = 0;
     std::vector<uint8_t> params{};
 
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
+
     for (auto& it : *args) {
       const auto key = std::get<std::string>(it.first);
 
@@ -97,30 +103,41 @@ void PlatformViewsHandler::HandleMethodCall(
       } else if (key == kKeyWidth &&
                  std::holds_alternative<double>(it.second)) {
         width = std::get<double>(it.second);
+      } else if (key == kKeyTop &&
+                 std::holds_alternative<double>(it.second)) {
+        top = std::get<double>(it.second);
+      } else if (key == kKeyLeft &&
+                 std::holds_alternative<double>(it.second)) {
+        left = std::get<double>(it.second);
       }
     }
     auto registrar =
         FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
 
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
-    if (viewType == "@views/simple-box-view-type") {
-      LayerPlaygroundPluginCApiRegisterWithRegistrar(
-        registrar, id, std::move(viewType), direction, width, height, params,
-        engine_->view_controller->engine->GetAssetDirectory(), engine_,
-        &PlatformViewAddListener,
-        &PlatformViewRemoveListener,
-        this) ;
+#if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER)
+    if (viewType == "plugins.flutter.io/webview") {
+      WebviewFlutterPluginCApiRegisterWithRegistrar(
+          registrar, id, std::move(viewType), direction, top, left, width, height, params,
+          engine_->view_controller->engine->GetAssetDirectory(), engine_,
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
-    if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
+        if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
       FilamentViewPluginCApiRegisterWithRegistrar(
-          registrar, id, std::move(viewType), direction, width, height, params,
+          registrar, id, std::move(viewType), direction, top, left, width, height, params,
           engine_->view_controller->engine->GetAssetDirectory(), engine_,
-          &PlatformViewAddListener,
-          &PlatformViewRemoveListener,
-          this) ;
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+      result->Success(flutter::EncodableValue(id));
+    } else
+#endif
+#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
+        if (viewType == "@views/simple-box-view-type") {
+      LayerPlaygroundPluginCApiRegisterWithRegistrar(
+          registrar, id, std::move(viewType), direction, top, left, width, height, params,
+          engine_->view_controller->engine->GetAssetDirectory(), engine_,
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -146,7 +163,7 @@ void PlatformViewsHandler::HandleMethodCall(
       }
     }
 
-    if(listeners_.find(id) != listeners_.end()) {
+    if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
       callbacks->dispose(hybrid, delegate.second);
@@ -173,7 +190,7 @@ void PlatformViewsHandler::HandleMethodCall(
       }
     }
 
-    if(listeners_.find(id) != listeners_.end()) {
+    if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
       callbacks->resize(width, height, delegate.second);
@@ -198,7 +215,7 @@ void PlatformViewsHandler::HandleMethodCall(
         direction = std::get<int32_t>(it.second);
       }
     }
-    if(listeners_.find(id) != listeners_.end()) {
+    if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
       callbacks->set_direction(direction, delegate.second);
@@ -224,7 +241,7 @@ void PlatformViewsHandler::HandleMethodCall(
         top = std::get<double>(it.second);
       }
     }
-    if(listeners_.find(id) != listeners_.end()) {
+    if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
       callbacks->set_offset(left, top, delegate.second);
@@ -236,10 +253,11 @@ void PlatformViewsHandler::HandleMethodCall(
     auto touch = PlatformViewTouch(*params);
     SPDLOG_TRACE("PlatformViewTouch id: {}", touch.getId());
     auto id = touch.getId();
-    if(listeners_.find(id) != listeners_.end()) {
+    if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->on_touch(touch.getAction(), touch.getX(), touch.getY(), delegate.second);
+      callbacks->on_touch(touch.getAction(), touch.getX(), touch.getY(),
+                          delegate.second);
     }
     result->Success();
   } else {
@@ -255,16 +273,17 @@ void PlatformViewsHandler::PlatformViewAddListener(
     const struct platform_view_listener* listener,
     void* listener_context) {
   auto platformView = static_cast<PlatformViewsHandler*>(context);
-  if(platformView->listeners_.find(id) != platformView->listeners_.end()) {
+  if (platformView->listeners_.find(id) != platformView->listeners_.end()) {
     platformView->listeners_.erase(id);
   } else {
     platformView->listeners_[id] = std::make_pair(listener, listener_context);
   }
 }
 
-void PlatformViewsHandler::PlatformViewRemoveListener(void* context, int32_t id) {
+void PlatformViewsHandler::PlatformViewRemoveListener(void* context,
+                                                      int32_t id) {
   auto platformView = static_cast<PlatformViewsHandler*>(context);
-  if(platformView->listeners_.find(id) != platformView->listeners_.end()) {
+  if (platformView->listeners_.find(id) != platformView->listeners_.end()) {
     platformView->listeners_.erase(id);
   }
 }

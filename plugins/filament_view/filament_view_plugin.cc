@@ -34,6 +34,8 @@ void FilamentViewPlugin::RegisterWithRegistrar(
     int32_t id,
     std::string viewType,
     int32_t direction,
+    double top,
+    double left,
     double width,
     double height,
     const std::vector<uint8_t>& params,
@@ -43,7 +45,7 @@ void FilamentViewPlugin::RegisterWithRegistrar(
     PlatformViewRemoveListener removeListener,
     void* platform_view_context) {
   auto plugin = std::make_unique<FilamentViewPlugin>(
-      id, std::move(viewType), direction, width, height, params,
+      id, std::move(viewType), direction, top, left, width, height, params,
       std::move(assetDirectory), engine, addListener, removeListener,
       platform_view_context);
 
@@ -60,6 +62,8 @@ FilamentViewPlugin::FilamentViewPlugin(
     int32_t id,
     std::string viewType,
     int32_t direction,
+    double top,
+    double left,
     double width,
     double height,
     const std::vector<uint8_t>& params,
@@ -68,7 +72,7 @@ FilamentViewPlugin::FilamentViewPlugin(
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context)
-    : PlatformView(id, std::move(viewType), direction, width, height),
+    : PlatformView(id, std::move(viewType), direction, top, left, width, height),
       id_(id),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),

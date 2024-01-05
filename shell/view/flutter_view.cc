@@ -43,6 +43,7 @@
 #include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
+#include <plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h>
 
 #include "wayland/display.h"
 #include "wayland/window.h"
