@@ -25,9 +25,8 @@
 #include <math/mat4.h>
 #include <math/vec3.h>
 #include <asio/post.hpp>
-#include <glm/glm.hpp>
 
-#include "materials/uberarchive.h"
+#include "gltfio/materials/uberarchive.h"
 
 #include "../../shell/curl_client/curl_client.h"
 #include "core/include/file_utils.h"

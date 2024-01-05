@@ -16,11 +16,11 @@
 
 include_guard()
 
-if (NOT EXISTS ${FILAMENT_SRC_DIR})
-    message(FATAL_ERROR "${FILAMENT_SRC_DIR} does not exist")
+if (NOT EXISTS ${FILAMENT_INCLUDE_DIR})
+    message(FATAL_ERROR "${FILAMENT_INCLUDE_DIR} does not exist")
 endif ()
-if (NOT EXISTS ${FILAMENT_BINARY_DIR})
-    message(FATAL_ERROR "${FILAMENT_BINARY_DIR} does not exist")
+if (NOT EXISTS ${FILAMENT_LINK_LIBRARIES_DIR})
+    message(FATAL_ERROR "${FILAMENT_LINK_LIBRARIES_DIR} does not exist")
 endif ()
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -29,65 +29,44 @@ find_package(Threads REQUIRED)
 pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
 
 add_library(filament INTERFACE)
-target_include_directories(filament INTERFACE
-        ${FILAMENT_SRC_DIR}/filament/include
-        ${FILAMENT_SRC_DIR}/filament/backend/include
-        ${FILAMENT_SRC_DIR}/libs/camutils/include
-        ${FILAMENT_SRC_DIR}/libs/filabridge/include
-        ${FILAMENT_SRC_DIR}/libs/filamat/include
-        ${FILAMENT_SRC_DIR}/libs/ibl/include
-        ${FILAMENT_SRC_DIR}/libs/iblprefilter/include
-        ${FILAMENT_SRC_DIR}/libs/image/include
-        ${FILAMENT_SRC_DIR}/libs/imageio/include
-        ${FILAMENT_SRC_DIR}/libs/math/include
-        ${FILAMENT_SRC_DIR}/libs/utils/include
-        ${FILAMENT_SRC_DIR}/libs/gltfio/include
-        ${FILAMENT_SRC_DIR}/libs
-        ${FILAMENT_SRC_DIR}/third_party/stb
-        ${FILAMENT_SRC_DIR}/third_party/libassimp/include
-
-        ${FILAMENT_BINARY_DIR}/libs/gltfio
-        ${FILAMENT_BINARY_DIR}/samples
-)
+target_include_directories(filament INTERFACE ${FILAMENT_INCLUDE_DIR})
+target_link_directories(filament INTERFACE ${FILAMENT_LINK_LIBRARIES_DIR})
 target_link_libraries(filament INTERFACE
-        ${FILAMENT_BINARY_DIR}/libs/bluevk/libbluevk.a
-        ${FILAMENT_BINARY_DIR}/libs/bluegl/libbluegl.a
-        ${FILAMENT_BINARY_DIR}/filament/backend/libbackend.a
-        ${FILAMENT_BINARY_DIR}/filament/backend/libvkshaders.a
-        ${FILAMENT_BINARY_DIR}/third_party/smol-v/tnt/libsmol-v.a
-        ${FILAMENT_BINARY_DIR}/libs/camutils/libcamutils.a
-        ${FILAMENT_BINARY_DIR}/libs/filamat/libfilamat.a
-        ${FILAMENT_BINARY_DIR}/libs/filaflat/libfilaflat.a
-        ${FILAMENT_BINARY_DIR}/libs/filabridge/libfilabridge.a
-        ${FILAMENT_BINARY_DIR}/libs/geometry/libgeometry.a
-        ${FILAMENT_BINARY_DIR}/libs/gltfio/libgltfio.a
-        ${FILAMENT_BINARY_DIR}/libs/gltfio/libgltfio_core.a
-        ${FILAMENT_BINARY_DIR}/libs/gltfio/libuberarchive.a
-        ${FILAMENT_BINARY_DIR}/libs/ibl/libibl.a
-        ${FILAMENT_BINARY_DIR}/libs/iblprefilter/libfilament-iblprefilter.a
-        ${FILAMENT_BINARY_DIR}/libs/image/libimage.a
-        ${FILAMENT_BINARY_DIR}/libs/imageio/libimageio.a
-        ${FILAMENT_BINARY_DIR}/libs/ktxreader/libktxreader.a
-        ${FILAMENT_BINARY_DIR}/libs/matdbg/libmatdbg_combined.a
-        ${FILAMENT_BINARY_DIR}/libs/utils/libutils.a
-        ${FILAMENT_BINARY_DIR}/libs/uberz/libuberzlib.a
-        ${FILAMENT_BINARY_DIR}/libs/viewer/libviewer.a
-        ${FILAMENT_BINARY_DIR}/shaders/libshaders.a
-        ${FILAMENT_BINARY_DIR}/filament/libfilament.a
-        ${FILAMENT_BINARY_DIR}/third_party/meshoptimizer/tnt/libmeshoptimizer.a
-        ${FILAMENT_BINARY_DIR}/third_party/mikktspace/libmikktspace.a
-        ${FILAMENT_BINARY_DIR}/third_party/basisu/tnt/libzstd.a
-        ${FILAMENT_BINARY_DIR}/third_party/draco/tnt/libdracodec.a
-        ${FILAMENT_BINARY_DIR}/third_party/meshoptimizer/tnt/libmeshoptimizer.a
-        ${FILAMENT_BINARY_DIR}/third_party/glslang/tnt/glslang/libglslang.a
-        ${FILAMENT_BINARY_DIR}/third_party/glslang/tnt/SPIRV/libSPIRV.a
-        ${FILAMENT_BINARY_DIR}/tools/matc/libmatlang.a
-
-        ${FILAMENT_BINARY_DIR}/third_party/libpng/tnt/libpng.a
-        ${FILAMENT_BINARY_DIR}/third_party/tinyexr/tnt/libtinyexr.a
-        ${FILAMENT_BINARY_DIR}/third_party/libz/tnt/libz.a
-
-        ${FILAMENT_BINARY_DIR}/samples/libgltf-demo-resources.a
+        libbackend.a
+        libbluevk.a
+        libdracodec.a
+        libfilamat.a
+        libfilameshio.a
+        libgltfio_core.a
+        libimage.a
+        libmatdbg.a
+        libshaders.a
+        libuberarchive.a
+        libviewer.a
+        libbasis_transcoder.a
+        libcamutils.a
+        libfilabridge.a
+        libfilament.a
+        libgeometry.a
+        libibl.a
+        libimageio.a
+        libmeshoptimizer.a
+        libsmol-v.a
+        libuberzlib.a
+        libvkshaders.a
+        libbluegl.a
+        libcivetweb.a
+        libtinyexr.a
+        libfilaflat.a
+        libfilament-iblprefilter.a
+        libgltfio.a
+        libibl-lite.a
+        libktxreader.a
+        libmikktspace.a
+        libpng.a
+        libstb.a
+        libutils.a
+        libzstd.a
 
         Threads::Threads
 )
