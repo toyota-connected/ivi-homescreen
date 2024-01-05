@@ -18,19 +18,13 @@
 
 #include <filament/Engine.h>
 #include <filament/RenderableManager.h>
-#include <filament/Scene.h>
-#include <filament/TransformManager.h>
 #include <filament/View.h>
 #include <math/mat3.h>
 #include <math/norm.h>
 #include <math/vec3.h>
-#include <math/vec4.h>
 #include "asio/post.hpp"
 
 #include "logging/logging.h"
-
-#include "materials/uberarchive.h"
-#include "generated/resources/gltf_demo.h"
 
 namespace plugin_filament_view {
 

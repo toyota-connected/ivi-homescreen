@@ -10,21 +10,38 @@ This plugin is built for use with an AndroidView on the Flutter side.
 
 ## Building Filament
 
-The development work is done using the following Filament configuration:
+Apply the three patches located here:
+https://github.com/jwinarske/meta-vulkan/tree/kirkstone/recipes-graphics/filament/files
+
+Build using these flags:
 
 ```
+-DFILAMENT_SUPPORTS_VULKAN=ON
+-DFILAMENT_ENABLE_LTO=ON
+-DFILAMENT_SUPPORTS_OPENGL=OFF
+-DFILAMENT_USE_EXTERNAL_GLES3=OFF
 -DFILAMENT_SUPPORTS_WAYLAND=ON
 -DFILAMENT_SUPPORTS_X11=OFF
--DFILAMENT_ENABLE_LTO=ON
--DFILAMENT_SUPPORTS_VULKAN=ON
--DFILAMENT_SUPPORTS_OPENGL=ON
--DFILAMENT_USE_EXTERNAL_GLES3=ON
--DFILAMENT_SUPPORTS_EGL_ON_LINUX=ON
+-DFILAMENT_SUPPORTS_EGL_ON_LINUX=OFF
 -DFILAMENT_SKIP_SDL2=ON
 -DFILAMENT_SKIP_SAMPLES=ON
 -DFILAMENT_USE_SWIFTSHADER=OFF
 -DBUILD_SHARED_LIBS=OFF
+-DCMAKE_STAGING_PREFIX=/mnt/raid10/filament/out/debug/usr
 ```
+
+Make the install target to stage the required folders.
+
+    ninja -C . install
+
+Set ivi-homescreen variables to subfolders of the staged install:
+
+    -DFILAMENT_INCLUDE_DIR=/mnt/raid10/filament/out/debug/usr/include
+    -DFILAMENT_LINK_LIBRARIES_DIR=/mnt/raid10/filament/out/debug/usr/lib/x86_64
+
+In above case the staged install is set to:
+
+    /mnt/raid10/filament/out/debug/usr
 
 ## Notes
 
