@@ -139,7 +139,7 @@ endif ()
 #
 # Simple Example
 #
-pkg_check_modules(SDL2 IMPORTED_TARGET REQUIRED sdl2)
+pkg_check_modules(SDL2 IMPORTED_TARGET sdl2)
 if (SDL2_FOUND)
     add_executable(simple test/simple.cc)
     target_link_libraries(simple PUBLIC
