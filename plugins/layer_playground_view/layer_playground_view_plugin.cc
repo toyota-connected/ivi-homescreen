@@ -32,6 +32,8 @@ void LayerPlaygroundViewPlugin::RegisterWithRegistrar(
     int32_t id,
     std::string viewType,
     int32_t direction,
+    double top,
+    double left,
     double width,
     double height,
     const std::vector<uint8_t>& params,
@@ -41,7 +43,7 @@ void LayerPlaygroundViewPlugin::RegisterWithRegistrar(
     PlatformViewRemoveListener removeListener,
     void* platform_view_context) {
   auto plugin = std::make_unique<LayerPlaygroundViewPlugin>(
-      id, std::move(viewType), direction, width, height, params,
+      id, std::move(viewType), direction, top, left, width, height, params,
       std::move(assetDirectory), engine, addListener, removeListener,
       platform_view_context);
 
@@ -52,6 +54,8 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
     int32_t id,
     std::string viewType,
     int32_t direction,
+    double top,
+    double left,
     double width,
     double height,
     const std::vector<uint8_t>& params,
@@ -60,7 +64,7 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context)
-    : PlatformView(id, std::move(viewType), direction, width, height),
+    : PlatformView(id, std::move(viewType), direction, top, left, width, height),
       id_(id),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),
@@ -126,7 +130,7 @@ void LayerPlaygroundViewPlugin::on_set_offset(double left, double top, void* dat
     plugin->left_ = static_cast<int32_t>(left);
     plugin->top_ = static_cast<int32_t>(top);
     if (plugin->subsurface_) {
-      SPDLOG_TRACE("SetOffset: left: {}, top: {}", plugin->left_, plugin->top_);
+      SPDLOG_DEBUG("SetOffset: left: {}, top: {}", plugin->left_, plugin->top_);
       wl_subsurface_set_position(plugin->subsurface_, plugin->left_, plugin->top_);
       if (!plugin->callback_) {
         on_frame(plugin, plugin->callback_, 0);

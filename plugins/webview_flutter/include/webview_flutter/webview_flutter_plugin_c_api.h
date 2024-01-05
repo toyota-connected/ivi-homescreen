@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_C_API_H_
-#define FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_C_API_H_
+#ifndef FLUTTER_PLUGIN_WEBVIEW_FLUTTER_PLUGIN_C_API_H
+#define FLUTTER_PLUGIN_WEBVIEW_FLUTTER_PLUGIN_C_API_H
 
 #include <flutter_plugin_registrar.h>
 #include "flutter_homescreen.h"
@@ -34,7 +34,7 @@
 extern "C" {
 #endif
 
-FLUTTER_PLUGIN_EXPORT void LayerPlaygroundPluginCApiRegisterWithRegistrar(
+FLUTTER_PLUGIN_EXPORT void WebviewFlutterPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar,
     int32_t id,
     std::string viewType,
@@ -54,4 +54,4 @@ FLUTTER_PLUGIN_EXPORT void LayerPlaygroundPluginCApiRegisterWithRegistrar(
 }  // extern "C"
 #endif
 
-#endif  // FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_C_API_H_
+#endif  // FLUTTER_PLUGIN_WEBVIEW_FLUTTER_PLUGIN_C_API_H

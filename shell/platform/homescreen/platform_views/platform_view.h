@@ -25,13 +25,15 @@ class PlatformView {
   PlatformView(const int32_t id,
                std::string viewType,
                const int32_t direction,
+               const double left,
+               const double top,
                const double width,
                const double height)
       : id_(id),
         viewType_(std::move(viewType)),
         direction_(direction),
-        left_(0),
-        top_(0),
+        left_(static_cast<int32_t>(left)),
+        top_(static_cast<int32_t>(top)),
         width_(static_cast<int32_t>(width)),
         height_(static_cast<int32_t>(height)) {}
 

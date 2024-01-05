@@ -30,6 +30,8 @@ FLUTTER_PLUGIN_EXPORT void FilamentViewPluginCApiRegisterWithRegistrar(
     int32_t id,
     std::string viewType,
     int32_t direction,
+    double top,
+    double left,
     double width,
     double height,
     const std::vector<uint8_t>& params,
