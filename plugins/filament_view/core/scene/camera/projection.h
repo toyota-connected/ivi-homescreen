@@ -31,7 +31,7 @@ class CameraManager;
 
 class Projection {
  public:
-  Projection(const flutter::EncodableMap& params);
+  explicit Projection(const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 

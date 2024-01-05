@@ -3,6 +3,8 @@
 
 namespace plugin_filament_view {
 
+class Color;
+
 using Position = ::filament::math::float3;
 using Direction = ::filament::math::float3;
 using Size = ::filament::math::float3;

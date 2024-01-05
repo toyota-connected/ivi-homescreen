@@ -18,8 +18,6 @@
 
 #include <memory>
 
-#include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
-
 #include "logging/logging.h"
 #include "utils.h"
 
@@ -45,8 +43,6 @@ Camera::Camera(const flutter::EncodableMap& params) {
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       lensProjection_ = std::make_unique<LensProjection>(
           std::get<flutter::EncodableMap>(it.second));
-    } else if (key == "farPlane" && std::holds_alternative<double>(it.second)) {
-      farPlane_ = std::get<double>(it.second);
     } else if (key == "flightMaxMoveSpeed" &&
                std::holds_alternative<double>(it.second)) {
       flightMaxMoveSpeed_ = std::get<double>(it.second);

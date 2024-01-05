@@ -24,7 +24,7 @@ namespace plugin_filament_view {
 
 class Size {
  public:
-  Size(const flutter::EncodableMap& params);
+  explicit Size(const flutter::EncodableMap& params);
 
   Size(double x, double y, double z);
 

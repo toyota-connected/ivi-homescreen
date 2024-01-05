@@ -16,7 +16,6 @@
 
 #include "size.h"
 
-#include "core/model/model.h"
 #include "logging/logging.h"
 #include "utils.h"
 

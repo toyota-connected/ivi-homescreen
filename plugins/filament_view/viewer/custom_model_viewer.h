@@ -150,7 +150,7 @@ class CustomModelViewer {
     // TODO modelLoader_->clearRootTransform();
   }
 
-  pthread_t getFilamentApiThreadId() const { return filament_api_thread_id_; }
+  [[nodiscard]] pthread_t getFilamentApiThreadId() const { return filament_api_thread_id_; }
 
   [[nodiscard]] std::string getAssetPath() const { return flutterAssetsPath_; }
 

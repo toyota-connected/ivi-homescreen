@@ -23,7 +23,7 @@ namespace plugin_filament_view {
 
 Light::Light(float colorTemperature,
              float intensity,
-             Direction direction,
+             Direction /* direction */,
              bool castShadows) {
   type_ = ::filament::LightManager::Type::DIRECTIONAL;
   colorTemperature_ = colorTemperature;

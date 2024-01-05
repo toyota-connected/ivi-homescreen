@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include <filament/Engine.h>
 #include <filament/Texture.h>
 #include <image/LinearImage.h>

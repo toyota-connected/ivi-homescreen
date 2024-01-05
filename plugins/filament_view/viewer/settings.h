@@ -30,8 +30,8 @@
 #include <math/vec3.h>
 #include <math/vec4.h>
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 #include <string>
 

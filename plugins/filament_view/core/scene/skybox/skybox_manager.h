@@ -63,7 +63,7 @@ class SkyboxManager {
       bool shouldUpdateLight,
       float intensity);
 
-  Resource<std::string_view> loadSkyboxFromHdrFile(const std::string assetPath,
+  Resource<std::string_view> loadSkyboxFromHdrFile(const std::string& assetPath,
                                                    bool showSun,
                                                    bool shouldUpdateLight,
                                                    float intensity);

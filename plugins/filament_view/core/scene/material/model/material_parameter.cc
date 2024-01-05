@@ -16,6 +16,8 @@
 
 #include "material_parameter.h"
 
+#include <optional>
+
 #include <utility>
 
 #include "logging/logging.h"
@@ -29,7 +31,7 @@ MaterialParameter::MaterialParameter(std::string name,
     : name_(std::move(name)), type_(type), value_(std::move(value)) {}
 
 std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
-    const std::string& flutter_assets_path,
+    const std::string& /* flutter_assets_path */,
     const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++MaterialParameter::Deserialize");
   std::optional<std::string> name;
@@ -69,7 +71,7 @@ std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
   SPDLOG_TRACE("--MaterialParameter::Deserialize");
 }
 
-MaterialParameter::~MaterialParameter() {}
+MaterialParameter::~MaterialParameter() = default;
 
 void MaterialParameter::Print(const char* tag) {
   spdlog::debug("++++++++");

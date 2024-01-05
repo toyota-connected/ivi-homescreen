@@ -78,7 +78,7 @@ class Camera {
   /// Its sent as List of 2 double elements :
   ///     * xscaling  horizontal scaling to be applied after the projection
   ///     matrix.
-  //      * yscaling  vertical scaling to be applied after the projection
+  //      * yscaling vertical scaling to be applied after the projection
   //      matrix.
   std::unique_ptr<std::vector<double>> scaling_;
 

@@ -39,12 +39,9 @@ endif ()
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
 #
-# Enable Dart VM console redirection
+# LTO
 #
-option(ENABLE_DART_VM_LOGGING "Enable Dart VM console redirection" ON)
-if (ENABLE_DART_VM_LOGGING)
-    add_compile_definitions(ENABLE_DART_VM_LOGGING)
-endif ()
+option(ENABLE_LTO "Enable Link Time optimization" OFF)
 
 #
 # DLT

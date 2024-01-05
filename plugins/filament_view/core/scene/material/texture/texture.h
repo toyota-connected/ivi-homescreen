@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
 #include "texture_sampler.h"

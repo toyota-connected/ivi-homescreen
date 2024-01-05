@@ -266,8 +266,6 @@ All other parameters get assigned using the following ordering:
 
 `ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
 
-`ENABLE_DART_VM_LOGGING` - Enable Dart VM Logging.  Defaults to ON
-
 `ENABLE_DLT` - Enable DLT logging.  Defaults to ON
 
 `BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
@@ -315,8 +313,6 @@ All other parameters get assigned using the following ordering:
 `BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
 
 `BUILD_PLUGIN_INTEGRATION_TEST` - Includes Flutter Integration Test Plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_LOGGING` - Includes Logging Plugin.  Defaults to OFF
 
 
 _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_

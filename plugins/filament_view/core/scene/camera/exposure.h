@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "core/scene/camera/camera_manager.h"
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
@@ -25,7 +27,7 @@ class CameraManager;
 
 class Exposure {
  public:
-  Exposure(const flutter::EncodableMap& params);
+  explicit Exposure(const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 

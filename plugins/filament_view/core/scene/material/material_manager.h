@@ -61,7 +61,7 @@ class MaterialManager {
   std::unique_ptr<plugin_filament_view::TextureLoader> textureLoader_;
 
   Resource<::filament::Material*> loadMaterial(Material* material);
-  Resource<::filament::MaterialInstance*> setupMaterialInstance(
+  static Resource<::filament::MaterialInstance*> setupMaterialInstance(
       ::filament::Material* materialResult);
 };
 }  // namespace plugin_filament_view

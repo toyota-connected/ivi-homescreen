@@ -30,12 +30,12 @@ class Position;
 namespace plugin_filament_view {
 class Light {
  public:
-  Light(float colorTemperature = 6'500.0f,
+  explicit Light(float colorTemperature = 6'500.0f,
         float intensity = 100'000.0f,
         Direction direction = {0.0f, -1.0f, 0.0f},
         bool castShadows = true);
 
-  Light(const flutter::EncodableMap& params);
+  explicit Light(const flutter::EncodableMap& params);
 
   void Print(const char* tag);
 

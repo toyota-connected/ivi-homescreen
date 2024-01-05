@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <memory>
 #include <optional>
 
 #include <math/mat3.h>
