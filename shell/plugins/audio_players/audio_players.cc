@@ -19,6 +19,8 @@
 #include <memory>
 #include <vector>
 
+#include <flutter/standard_method_codec.h>
+
 #include "audio_player.h"
 #include "audio_players_registry.h"
 #include "engine.h"
