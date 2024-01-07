@@ -31,8 +31,8 @@
 #include "configuration/configuration.h"
 #include "constants.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
-#include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/key_event_handler.h"
+#include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
 #include "timer.h"
 
@@ -188,6 +188,8 @@ class Display {
    * @return void
    * @param[in] x the x position for the activation rectangle
    * @param[in] y the y position for the activation rectangle
+   * @param[in] width the width position for the activation rectangle
+   * @param[in] height the height position for the activation rectangle
    * @param[in] index the output, as a number
    * @relation
    *
@@ -211,6 +213,8 @@ class Display {
    */
   void AglShellDoSetupActivationArea(uint32_t x,
                                      uint32_t y,
+                                     uint32_t width,
+                                     uint32_t height,
                                      uint32_t index) const;
 #endif
 

@@ -598,7 +598,8 @@ void Display::keyboard_handle_key(void* data,
     }
   }
 
-  KeyCallback(d->m_view_controller_state, state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode, 0);
+  KeyCallback(d->m_view_controller_state,
+              state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode, 0);
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
@@ -651,7 +652,8 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 void Display::keyboard_repeat_func(void* data) {
   auto d = static_cast<Display*>(data);
   if (XKB_KEY_NoSymbol != d->m_repeat_code) {
-    KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed, d->m_repeat_code, 0);
+    KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
+                d->m_repeat_code, 0);
   }
 }
 
@@ -766,16 +768,16 @@ void Display::AglShellDoReady() const {
 
 void Display::AglShellDoSetupActivationArea(uint32_t x,
                                             uint32_t y,
+                                            uint32_t width,
+                                            uint32_t height,
                                             const uint32_t index) const {
-  uint32_t width = m_all_outputs[index]->width;
-  uint32_t height = m_all_outputs[index]->height - (2 * y);
-
   if (!m_agl.shell)
     return;
 
   if (m_all_outputs[index]->transform == WL_OUTPUT_TRANSFORM_90) {
-    width = m_all_outputs[index]->height;
-    height = m_all_outputs[index]->width - (2 * y);
+    uint32_t tmp_width = width;
+    width = height;
+    height = tmp_width;
   }
 
   SPDLOG_DEBUG("Using custom rectangle [{}x{}+{}x{}] for activation", width,
