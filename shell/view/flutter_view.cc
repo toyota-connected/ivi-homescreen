@@ -34,15 +34,15 @@
 #include <platform/homescreen/key_event_handler.h>
 #include <platform/homescreen/text_input_plugin.h>
 #include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
-#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
-#include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
-#include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
-#include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
-#include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
+#include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
+#include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
 #include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
+#include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
+#include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
+#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
 #include <plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h>
 
 #include "wayland/display.h"
@@ -54,10 +54,7 @@ extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
 FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<Display>& display)
-    : m_wayland_display(display),
-      m_config(std::move(config)),
-      m_index(index)
-{
+    : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
 #if defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
@@ -80,6 +77,7 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
       m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
       m_config.view.activation_area_x, m_config.view.activation_area_y,
+      m_config.view.activation_area_width, m_config.view.activation_area_height,
       m_backend.get(), m_config.view.ivi_surface_id);
 
   m_state = std::make_unique<FlutterDesktopViewControllerState>();
@@ -101,7 +99,8 @@ FlutterView::FlutterView(Configuration::Config config,
       std::make_unique<flutter::KeyEventHandler>(internal_plugin_messenger));
   m_state->keyboard_hook_handlers.push_back(
       std::make_unique<flutter::TextInputPlugin>(internal_plugin_messenger));
-  m_wayland_display->SetViewControllerState(m_state->engine_state->view_controller);
+  m_wayland_display->SetViewControllerState(
+      m_state->engine_state->view_controller);
 
   RegisterPlugins(m_state->engine_state.get());
 }

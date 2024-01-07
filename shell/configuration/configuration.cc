@@ -97,9 +97,17 @@ void Configuration::getViewParameters(
 
     instance.view.activation_area_x = static_cast<uint32_t>(val["x"].GetInt());
     instance.view.activation_area_y = static_cast<uint32_t>(val["y"].GetInt());
+    instance.view.activation_area_width =
+        static_cast<uint32_t>(val["width"].GetInt());
+    instance.view.activation_area_height =
+        static_cast<uint32_t>(val["height"].GetInt());
 
     SPDLOG_DEBUG("activation area x {}", instance.view.activation_area_x);
     SPDLOG_DEBUG("activation area y {}", instance.view.activation_area_y);
+    SPDLOG_DEBUG("activation area width {}",
+                 instance.view.activation_area_width);
+    SPDLOG_DEBUG("activation area height {}",
+                 instance.view.activation_area_height);
   }
 }
 

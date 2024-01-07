@@ -44,6 +44,8 @@ class Configuration {
       uint32_t height;
       uint32_t activation_area_x;
       uint32_t activation_area_y;
+      uint32_t activation_area_width;
+      uint32_t activation_area_height;
       bool fullscreen;
       bool fullscreen_set;
       double pixel_ratio;
