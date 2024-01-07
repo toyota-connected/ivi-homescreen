@@ -1,204 +1,361 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="agl_shell">
-  <copyright>
-    Copyright © 2019, 2022 Collabora, Ltd.
+    <copyright>
+        Copyright © 2019, 2022 Collabora, Ltd.
 
-    Permission is hereby granted, free of charge, to any person obtaining a
-    copy of this software and associated documentation files (the "Software"),
-    to deal in the Software without restriction, including without limitation
-    the rights to use, copy, modify, merge, publish, distribute, sublicense,
-    and/or sell copies of the Software, and to permit persons to whom the
-    Software is furnished to do so, subject to the following conditions:
+        Permission is hereby granted, free of charge, to any person obtaining a
+        copy of this software and associated documentation files (the "Software"),
+        to deal in the Software without restriction, including without limitation
+        the rights to use, copy, modify, merge, publish, distribute, sublicense,
+        and/or sell copies of the Software, and to permit persons to whom the
+        Software is furnished to do so, subject to the following conditions:
 
-    The above copyright notice and this permission notice (including the next
-    paragraph) shall be included in all copies or substantial portions of the
-    Software.
+        The above copyright notice and this permission notice (including the next
+        paragraph) shall be included in all copies or substantial portions of the
+        Software.
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
-    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-    DEALINGS IN THE SOFTWARE.
-  </copyright>
-  <interface name="agl_shell" version="4">
-    <description summary="user interface for Automotive Grade Linux platform">
-      Starting with version 2 of the protocol, the client is required to wait
-      for the 'bound_ok' or 'bound_fail' events in order to proceed further.
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+        THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+        FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+        DEALINGS IN THE SOFTWARE.
+    </copyright>
+    <interface name="agl_shell" version="8">
+        <description summary="user interface for Automotive Grade Linux platform">
+            Starting with version 2 of the protocol, the client is required to wait
+            for the 'bound_ok' or 'bound_fail' events in order to proceed further.
 
-      In case the client gets a 'bound_fail' event then it should consider that
-      there's another client already bound to the agl_shell protocol.
-      A client that receives a 'bound_ok' event should consider that there's
-      no other client already bound to the interface and can proceed further.
+            In case the client gets a 'bound_fail' event then it should consider that
+            there's another client already bound to the agl_shell protocol.
+            A client that receives a 'bound_ok' event should consider that there's
+            no other client already bound to the interface and can proceed further.
 
-      If the client uses an older version of the protocol it will receive
-      automatically an error and the compositor will terminate the connection,
-      if there's another client already bound the interface.
+            If the client uses an older version of the protocol it will receive
+            automatically an error and the compositor will terminate the connection,
+            if there's another client already bound the interface.
 
-      If the client receives the 'bound_fail' event and attempts to use the
-      interface further it will receive an error and the compositor will
-      terminate the connection. After the 'bound_fail' event was received the
-      client should call the destructor, which has been added with version 2
-      of the protocol. The client is free to try at a later point in time to
-      see if it will receive the 'bound_ok' event, but there's no explicit way
-      of finding out when that event will be delivered.
-      It is assumed that it can infer that information through other
-      means/other channels.
-    </description>
+            If the client receives the 'bound_fail' event and attempts to use the
+            interface further it will receive an error and the compositor will
+            terminate the connection. After the 'bound_fail' event was received the
+            client should call the destructor, which has been added with version 2
+            of the protocol. The client is free to try at a later point in time to
+            see if it will receive the 'bound_ok' event, but there's no explicit way
+            of finding out when that event will be delivered.
+            It is assumed that it can infer that information through other
+            means/other channels.
+        </description>
 
-    <enum name="error">
-      <entry name="invalid_argument" value="0"/>
-      <entry name="background_exists" value="1"/>
-      <entry name="panel_exists" value="2"/>
-    </enum>
+        <enum name="error">
+            <entry name="invalid_argument" value="0"/>
+            <entry name="background_exists" value="1"/>
+            <entry name="panel_exists" value="2"/>
+        </enum>
 
-    <enum name="edge">
-      <entry name="top" value="0"/>
-      <entry name="bottom" value="1"/>
-      <entry name="left" value="2"/>
-      <entry name="right" value="3"/>
-    </enum>
+        <enum name="edge">
+            <entry name="top" value="0"/>
+            <entry name="bottom" value="1"/>
+            <entry name="left" value="2"/>
+            <entry name="right" value="3"/>
+        </enum>
 
-    <enum name="app_state" since="3">
-      <entry name="started" value="0"/>
-      <entry name="terminated" value="1"/>
-      <entry name="activated" value="2"/>
-      <entry name="deactivated" value="3"/>
-    </enum>
+        <enum name="app_state" since="3">
+            <entry name="started" value="0"/>
+            <entry name="terminated" value="1"/>
+            <entry name="activated" value="2"/>
+            <entry name="deactivated" value="3"/>
+        </enum>
 
-    <request name="ready">
-      <description summary="client is ready to be shown">
-        Tell the server that this client is ready to be shown. The server
-        will delay presentation during start-up until all shell clients are
-        ready to be shown, and will display a black screen instead.
-        This gives the client an opportunity to set up and configure several
-        surfaces into a coherent interface.
+        <request name="ready">
+            <description summary="client is ready to be shown">
+                Tell the server that this client is ready to be shown. The server
+                will delay presentation during start-up until all shell clients are
+                ready to be shown, and will display a black screen instead.
+                This gives the client an opportunity to set up and configure several
+                surfaces into a coherent interface.
 
-        The client that binds to this interface must send this request, otherwise
-        they may stall the compositor unnecessarily.
+                The client that binds to this interface must send this request, otherwise
+                they may stall the compositor unnecessarily.
 
-        If this request is called after the compositor has already finished
-        start-up, no operation is performed.
-      </description>
-    </request>
+                If this request is called after the compositor has already finished
+                start-up, no operation is performed.
+            </description>
+        </request>
 
-    <request name="set_background">
-      <description summary="set surface as output's background">
-        Set the surface to act as the background of an output. After this
-        request, the server will immediately send a configure event with
-        the dimensions the client should use to cover the entire output.
+        <request name="set_background">
+            <description summary="set surface as output's background">
+                Set the surface to act as the background of an output. After this
+                request, the server will immediately send a configure event with
+                the dimensions the client should use to cover the entire output.
 
-        The surface must have a "desktop" surface role, as supported by
-        libweston-desktop.
+                The surface must have a "desktop" surface role, as supported by
+                libweston-desktop.
 
-        Only a single surface may be the background for any output. If a
-        background surface already exists, a protocol error is raised.
-      </description>
-      <arg name="surface" type="object" interface="wl_surface"/>
-      <arg name="output" type="object" interface="wl_output"/>
-    </request>
+                Only a single surface may be the background for any output. If a
+                background surface already exists, a protocol error is raised.
+            </description>
+            <arg name="surface" type="object" interface="wl_surface"/>
+            <arg name="output" type="object" interface="wl_output"/>
+        </request>
 
-    <request name="set_panel">
-      <description summary="set surface as panel">
-        Set the surface to act as a panel of an output. The 'edge' argument
-        says what edge of the output the surface will be anchored to.
-        After this request, the server will send a configure event with the
-        corresponding width/height that the client should use, and 0 for the
-        other dimension. E.g. if the edge is 'top', the width will be the
-        output's width, and the height will be 0.
+        <request name="set_panel">
+            <description summary="set surface as panel">
+                Set the surface to act as a panel of an output. The 'edge' argument
+                says what edge of the output the surface will be anchored to.
+                After this request, the server will send a configure event with the
+                corresponding width/height that the client should use, and 0 for the
+                other dimension. E.g. if the edge is 'top', the width will be the
+                output's width, and the height will be 0.
 
-        The surface must have a "desktop" surface role, as supported by
-        libweston-desktop.
+                The surface must have a "desktop" surface role, as supported by
+                libweston-desktop.
 
-        The compositor will take the panel's window geometry into account when
-        positioning other windows, so the panels are not covered.
+                The compositor will take the panel's window geometry into account when
+                positioning other windows, so the panels are not covered.
 
-        XXX: What happens if e.g. both top and left are used at the same time?
-        Who gets to have the corner?
+                XXX: What happens if e.g. both top and left are used at the same time?
+                Who gets to have the corner?
 
-        Only a single surface may be the panel for an output's edge. If a
-        surface already exists on an edge, a protocol error is raised.
-      </description>
-      <arg name="surface" type="object" interface="wl_surface"/>
-      <arg name="output" type="object" interface="wl_output"/>
-      <arg name="edge" type="uint" enum="edge"/>
-    </request>
+                Only a single surface may be the panel for an output's edge. If a
+                surface already exists on an edge, a protocol error is raised.
+            </description>
+            <arg name="surface" type="object" interface="wl_surface"/>
+            <arg name="output" type="object" interface="wl_output"/>
+            <arg name="edge" type="uint" enum="edge"/>
+        </request>
 
-    <request name="activate_app">
-      <description summary="make client current window">
-        Ask the compositor to make a toplevel to become the current/focused
-        window for window management purposes.
+        <request name="activate_app">
+            <description summary="make client current window">
+                Ask the compositor to make a toplevel to become the current/focused
+                window for window management purposes.
 
-        See xdg_toplevel.set_app_id from the xdg-shell protocol for a
-        description of app_id.
+                See xdg_toplevel.set_app_id from the xdg-shell protocol for a
+                description of app_id.
 
-        If multiple toplevels have the same app_id, the result is unspecified.
+                If multiple toplevels have the same app_id, the result is unspecified.
 
-        XXX: Do we need feedback to say it didn't work? (e.g. client does
-        not exist)
-      </description>
-      <arg name="app_id" type="string"/>
-      <arg name="output" type="object" interface="wl_output"/>
-    </request>
+                XXX: Do we need feedback to say it didn't work? (e.g. client does
+                not exist)
+            </description>
+            <arg name="app_id" type="string"/>
+            <arg name="output" type="object" interface="wl_output"/>
+        </request>
 
-    <event name="bound_ok" since="2">
-     <description summary="event sent if binding was ok">
-        Informs the client that it was able to bind the agl_shell
-        interface succesfully. Clients are required to wait for this
-        event before continuing further.
-     </description>
-    </event>
+        <event name="bound_ok" since="2">
+            <description summary="event sent if binding was ok">
+                Informs the client that it was able to bind the agl_shell
+                interface succesfully. Clients are required to wait for this
+                event before continuing further.
+            </description>
+        </event>
 
-    <event name="bound_fail" since="2">
-      <description summary="event sent if binding was nok">
-        Informs the client that binding to the agl_shell interface was
-        unsuccesfull. Clients are required to wait for this event for
-        continuing further.
-      </description>
-    </event>
+        <event name="bound_fail" since="2">
+            <description summary="event sent if binding was nok">
+                Informs the client that binding to the agl_shell interface was
+                unsuccesfull. Clients are required to wait for this event for
+                continuing further.
+            </description>
+        </event>
 
-    <request name="destroy" type="destructor" since="2">
-      <description summary="destroys the factory object">
-      </description>
-    </request>
+        <request name="destroy" type="destructor" since="2">
+            <description summary="destroys the factory object">
+            </description>
+        </request>
 
-    <event name="app_state" since="3">
-      <description summary="event sent when an application suffered state modification">
-        Informs the client that an application has changed its state to another,
-        specified by the app_state enum. Client can use this event to track
-        current application state. For instance to know when the application has
-        started, or when terminated/stopped.
-      </description>
-      <arg name="app_id" type="string"/>
-      <arg name="state" type="uint" enum="app_state"/>
-    </event>
+        <event name="app_state" since="3">
+            <description summary="event sent when an application suffered state modification">
+                Informs the client that an application has changed its state to another,
+                specified by the app_state enum. Client can use this event to track
+                current application state. For instance to know when the application has
+                started, or when terminated/stopped.
+            </description>
+            <arg name="app_id" type="string"/>
+            <arg name="state" type="uint" enum="app_state"/>
+        </event>
 
-    <request name="set_activate_region" since="4">
-      <description summary="sets a specific region to activate">
-      A hint for the compositor to use a custom area, rather than
-      inferring the activation area. If any panels are used
-      the compositor computes the activation area by subtracting the
-      panels geometry area. If no panels are used then the entire output
-      is being used. This request changes that as to hint the compositor
-      to use the supplied rectangle and ignore any potential panels
-      that might been set-up previously.
+        <request name="set_activate_region" since="4">
+            <description summary="sets a specific region to activate">
+                A hint for the compositor to use a custom area, rather than
+                inferring the activation area. If any panels are used
+                the compositor computes the activation area by subtracting the
+                panels geometry area. If no panels are used then the entire output
+                is being used. This request changes that as to hint the compositor
+                to use the supplied rectangle and ignore any potential panels
+                that might been set-up previously.
 
-      In order for this request to take effect it will need to happen
-      before the 'ready' request in order for the compositor to make use of it.
-      Note that any 'set_panel' request be will not be honored, if this request
-      has been called.
+                In order for this request to take effect it will need to happen
+                before the 'ready' request in order for the compositor to make use of it.
+                Note that any 'set_panel' request be will not be honored, if this request
+                has been called.
 
-      The x and y coordinates use the top-left corner as the origin. The
-      rectangle area shouldn't exceed the output area, while an area smaller
-      than the output, would basically result in showing up the background
-      surface.
-      </description>
-      <arg name="output" type="object" interface="wl_output"/>
-      <arg name="x" type="int" summary="x position of rectangle"/>
-      <arg name="y" type="int" summary="y position of rectangle"/>
-      <arg name="width" type="int" summary="width of rectangle"/>
-      <arg name="height" type="int" summary="height of rectangle"/>
-    </request>
-  </interface>
+                The x and y coordinates use the top-left corner as the origin. The
+                rectangle area shouldn't exceed the output area, while an area smaller
+                than the output, would basically result in showing up the background
+                surface.
+            </description>
+            <arg name="output" type="object" interface="wl_output"/>
+            <arg name="x" type="int" summary="x position of rectangle"/>
+            <arg name="y" type="int" summary="y position of rectangle"/>
+            <arg name="width" type="int" summary="width of rectangle"/>
+            <arg name="height" type="int" summary="height of rectangle"/>
+        </request>
+
+        <request name="deactivate_app" since="5">
+            <description summary="de-activate/hide window identified by app_id">
+                Ask the compositor to hide the toplevel window for window
+                management purposes. Depending on the window role, this request
+                will either display the previously active window (or the background
+                in case there's no previously active surface) or temporarily (or
+                until a 'activate_app' is called upon) hide the surface.
+
+                All the surfaces are identifiable by using the app_id, and no actions
+                are taken in case the app_id is not/was not present.
+                See xdg_toplevel.set_app_id from the xdg-shell protocol for a
+                description of app_id.
+            </description>
+            <arg name="app_id" type="string"/>
+        </request>
+
+        <request name="set_app_float" since="6">
+            <description summary="set the window identified by app_id as float">
+                Makes the application identified by app_id as floating. If the
+                application's window is already mapped, in a maximized, normal state,
+                it would transition to the float state.
+
+                For applications that want to modify their own state, this request
+                must be done before the initial surface commit in order to take effect.
+
+                If the application is already in floating state, this request wouldn't
+                do anything.
+
+                There's no persistence of this request, once the application terminated
+                you'll to issue this request again for that particular app_id.
+
+                The x, and y values would be initial position of the window where the
+                window surface will be placed.
+
+                See xdg_toplevel.set_app_id from the xdg-shell protocol for a
+                description of app_id.
+            </description>
+            <arg name="app_id" type="string"/>
+            <arg name="x" type="int" summary="x position"/>
+            <arg name="y" type="int" summary="y position"/>
+        </request>
+
+        <request name="set_app_normal" since="6">
+            <description summary="set the window identified by app_id as normally started">
+                Returns the application identified by app_id as it was in the normal state.
+                This is useful to come back from other states to the maximized state, the
+                normal state applications are started.
+            </description>
+            <arg name="app_id" type="string"/>
+        </request>
+
+        <request name="set_app_fullscreen" since="7">
+            <description summary="">
+                Makes the application identified by app_id as fullscreen. If the
+                application's window is already mapped, in a maximized, normal state,
+                it would transition to the fullscreen state.
+
+                For applications that want to modify their own state, this request
+                must be done before the initial surface commit in order to take effect.
+
+                If the application is already in fullscreen state, this request wouldn't
+                do anything.
+
+                There's no persistence of this request, once the application terminated
+                you'll to issue this request again for that particular app_id.
+
+                See xdg_toplevel.set_app_id from the xdg-shell protocol for a
+                description of app_id.
+            </description>
+            <arg name="app_id" type="string"/>
+        </request>
+
+        <request name="set_app_output" since="8">
+            <description summary="Assign an application to a particular output">
+                This would allow the compositor to place an application on a particular
+                output, if that output is indeed available. This can happen before
+                application is started which would make the application start on that
+                particular output. If the application is already started it would
+                move the application to that output.
+
+                There's no persistence of this request, once the application terminated
+                you'll need to issue this request again for that particular app_id.
+
+                See xdg_toplevel.set_app_id from the xdg-shell protocol for a
+                description of app_id.
+            </description>
+            <arg name="app_id" type="string"/>
+            <arg name="output" type="object" interface="wl_output"/>
+        </request>
+
+        <event name="app_on_output" since="8">
+            <description summary="Event sent as a reponse to set_app_output">
+                Clients can use this event to be notified when an application
+                wants to be displayed on a certain output. This event is sent in
+                response to the set_app_output request.
+
+                See xdg_toplevel.set_app_id from the xdg-shell protocol for a
+                description of app_id.
+            </description>
+            <arg name="app_id" type="string"/>
+            <arg name="output_name" type="string"/>
+        </event>
+    </interface>
+
+    <interface name="agl_shell_ext" version="1">
+        <description summary="extended user interface for Automotive Grade Linux platform">
+            This interface allows another client bind to the agl_shell interface,
+            while there's another shell client already present.
+
+            The client should first bind to this interface and then inform the
+            compositor with the 'doas_shell_client' request and it wants to bind to
+            the agl_shell interface. The client is still expected, if using a new
+            version of the agl_shell interface, to wait for the 'bound_ok' and
+            'bound_fail' events before issueing any other requests/events.
+
+            Note that this interface has its limitations, and the compositor would
+            still refuse the act for 'set_panel' or 'set_background' requests
+            of the agl_shell interface if there's already a client that used them.
+
+            Any other requests or events should be delievered and handled as it would
+            a client bound to the agl_shell interface.
+        </description>
+
+        <enum name="doas_shell_client_status">
+            <entry name="success" value="0"/>
+            <entry name="failed" value="1"/>
+        </enum>
+
+        <request name="destroy" type="destructor">
+            <description summary="destroys the factory object">
+                Call the destructor once you're ready with agl_shell_ext interface.
+                This would reset the state and would make any requests made
+                on the agl_shell interface be terminated. The client would need
+                to bind again the agl_shell_ext and issue a 'doas_shell_client'
+                request.
+            </description>
+        </request>
+
+        <request name="doas_shell_client">
+            <description summary="Informs the compositor it wants to bind to the
+      agl_shell interface">
+                Prior to binding to agl_shell interface, this request would inform
+                the compositor that it wants to gain access the agl_shell interface.
+                The client is expected to wait for 'doas_shell_client_done' event and
+                check for a successful status before going further with binding to
+                the agl_shell interface.
+            </description>
+        </request>
+
+        <event name="doas_done">
+            <description summary="event sent as a reply to doas_shell_client">
+                The client should check the status event to verify that the
+                compositor was able to handle the request.
+            </description>
+            <arg name="status" type="uint" enum="doas_shell_client_status"/>
+        </event>
+    </interface>
 </protocol>

@@ -230,7 +230,7 @@ void Display::registry_handle_global(void* data,
     if (version >= 2) {
       d->m_agl.shell = static_cast<struct agl_shell*>(
           wl_registry_bind(registry, name, &agl_shell_interface,
-                           std::min(static_cast<uint32_t>(4), version)));
+                           std::min(static_cast<uint32_t>(8), version)));
       agl_shell_add_listener(d->m_agl.shell, &agl_shell_listener, data);
     } else {
       d->m_agl.shell = static_cast<struct agl_shell*>(
@@ -916,23 +916,160 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
   d->m_agl.bound_ok = false;
 }
 
+void Display::addAppToStack(std::string app_id) {
+  if (app_id == "homescreen")
+    return;
+
+  bool found_app = false;
+  for (auto& i : apps_stack) {
+    if (i == app_id) {
+      found_app = true;
+      break;
+    }
+  }
+
+  if (!found_app) {
+    apps_stack.push_back(app_id);
+  } else {
+    // fixme
+  }
+}
+
+int Display::find_output_by_name(std::string output_name) {
+  int index = 0;
+  for (auto& i : m_all_outputs) {
+    if (i->name == output_name) {
+      return index;
+    }
+    index++;
+  }
+
+  return -1;
+}
+
+void Display::activateApp(std::string app_id) {
+  int default_output_index = 0;
+
+  FML_LOG(INFO) << "got app_id " << app_id;
+
+  // search for a pending application which might have a different output
+  auto iter = pending_app_list.begin();
+  bool found_pending_app = false;
+  while (iter != pending_app_list.end()) {
+    auto app_to_search = iter->first;
+    FML_LOG(INFO) << "searching for " << app_to_search;
+
+    if (app_to_search == app_id) {
+      found_pending_app = true;
+      break;
+    }
+
+    iter++;
+  }
+
+  if (found_pending_app) {
+    auto output_name = iter->second;
+    default_output_index = find_output_by_name(output_name);
+
+    FML_LOG(INFO) << "Found app_id " << app_id << " at all";
+
+    if (default_output_index < 0) {
+      // try with remoting-remote-X which is the streaming
+      std::string new_remote_output = "remoting-" + output_name;
+
+      default_output_index = find_output_by_name(new_remote_output);
+      if (default_output_index < 0) {
+        FML_LOG(INFO) << "Not activating app_id " << app_id << " at all";
+        return;
+      }
+    }
+
+    pending_app_list.erase(iter);
+  }
+
+  FML_LOG(INFO) << "Activating app_id " << app_id << " on output "
+                << default_output_index;
+  agl_shell_activate_app(m_agl.shell, app_id.c_str(),
+                         m_all_outputs[default_output_index]->output);
+  wl_display_flush(m_display);
+}
+
+void Display::deactivateApp(std::string app_id) {
+  for (auto& i : apps_stack) {
+    if (i == app_id) {
+      // remove it from apps_stack
+      apps_stack.remove(i);
+      if (!apps_stack.empty())
+        activateApp(apps_stack.back());
+      break;
+    }
+  }
+}
+
+void Display::processAppStatusEvent(const char* app_id,
+                                    const std::string event_type) {
+  if (!m_agl.shell)
+    return;
+
+  if (event_type == "started") {
+    activateApp(std::string(app_id));
+  } else if (event_type == "terminated") {
+    deactivateApp(std::string(app_id));
+  } else if (event_type == "deactivated") {
+    // not handled
+  }
+}
+
+void Display::agl_shell_app_on_output(void* data,
+                                      struct agl_shell* agl_shell,
+                                      const char* app_id,
+                                      const char* output_name) {
+  auto* d = static_cast<Display*>(data);
+
+  FML_LOG(INFO) << "Gove event app_on_out app_id " << app_id << " output name "
+                << output_name;
+
+  // a couple of use-cases, if there is no app_id in the app_list then it
+  // means this is a request to map the application, from the start to a
+  // different output that the default one. We'd get an
+  // AGL_SHELL_APP_STATE_STARTED which will handle activation.
+  //
+  // if there's an app_id then it means we might have gotten an event to
+  // move the application to another output; so we'd need to process it
+  // by explicitly calling processAppStatusEvent() which would ultimately
+  // activate the application on other output. We'd have to pick-up the
+  // last activated window and activate the default output.
+  //
+  // finally if the outputs are identical probably that's an user-error -
+  // but the compositor won't activate it again, so we don't handle that.
+  std::pair new_pending_app =
+      std::pair(std::string(app_id), std::string(output_name));
+  d->pending_app_list.push_back(new_pending_app);
+
+  auto iter = d->apps_stack.begin();
+  while (iter != d->apps_stack.end()) {
+    if (*iter == std::string(app_id)) {
+      FML_LOG(INFO) << "Gove event to move " << app_id << " to another output "
+                    << output_name;
+      d->processAppStatusEvent(app_id, std::string("started"));
+      break;
+    }
+    iter++;
+  }
+}
+
 void Display::agl_shell_app_state(void* data,
                                   struct agl_shell* /* agl_shell */,
                                   const char* app_id,
                                   uint32_t state) {
-  const auto* d = static_cast<Display*>(data);
+  auto* d = static_cast<Display*>(data);
 
   switch (state) {
     case AGL_SHELL_APP_STATE_STARTED:
       FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_STARTED for app_id " << app_id;
 
       if (d->m_agl.shell) {
-        // we always assume the first output advertised by the wl_output
-        // interface
-        constexpr unsigned int default_output_index = 0;
-
-        agl_shell_activate_app(d->m_agl.shell, app_id,
-                               d->m_all_outputs[default_output_index]->output);
+        d->processAppStatusEvent(app_id, std::string("started"));
       }
 
       break;
@@ -943,6 +1080,10 @@ void Display::agl_shell_app_state(void* data,
     case AGL_SHELL_APP_STATE_ACTIVATED:
       FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_ACTIVATED for app_id "
                      << app_id;
+      d->addAppToStack(std::string(app_id));
+      break;
+    case AGL_SHELL_APP_STATE_DEACTIVATED:
+      d->processAppStatusEvent(app_id, std::string("deactivated"));
       break;
     default:
       break;
@@ -953,6 +1094,7 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
     .app_state = agl_shell_app_state,
+    .app_on_output = agl_shell_app_on_output,
 };
 #endif
 
