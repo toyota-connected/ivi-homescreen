@@ -804,12 +804,6 @@ void Display::AglShellDoSetupActivationArea(uint32_t x,
   if (!m_agl.shell)
     return;
 
-  if (m_all_outputs[index]->transform == WL_OUTPUT_TRANSFORM_90) {
-    uint32_t tmp_width = width;
-    width = height;
-    height = tmp_width;
-  }
-
   SPDLOG_DEBUG("Using custom rectangle [{}x{}+{}x{}] for activation", width,
                height, x, y);
 
