@@ -173,10 +173,10 @@ void PigeonFirebaseOptions::set_app_group_id(std::string_view value_arg) {
 EncodableList PigeonFirebaseOptions::ToEncodableList() const {
   EncodableList list;
   list.reserve(14);
-  list.emplace_back(api_key_);
-  list.emplace_back(app_id_);
-  list.emplace_back(messaging_sender_id_);
-  list.emplace_back(project_id_);
+  list.push_back(EncodableValue(api_key_));
+  list.push_back(EncodableValue(app_id_));
+  list.push_back(EncodableValue(messaging_sender_id_));
+  list.push_back(EncodableValue(project_id_));
   list.push_back(auth_domain_ ? EncodableValue(*auth_domain_)
                               : EncodableValue());
   list.push_back(database_u_r_l_ ? EncodableValue(*database_u_r_l_)
@@ -201,7 +201,7 @@ EncodableList PigeonFirebaseOptions::ToEncodableList() const {
   return list;
 }
 
-PigeonFirebaseOptions::PigeonFirebaseOptions() = default;
+PigeonFirebaseOptions::PigeonFirebaseOptions() {}
 
 PigeonFirebaseOptions::PigeonFirebaseOptions(const EncodableList& list) {
   auto& encodable_api_key = list[0];
@@ -318,16 +318,16 @@ void PigeonInitializeResponse::set_plugin_constants(
 EncodableList PigeonInitializeResponse::ToEncodableList() const {
   EncodableList list;
   list.reserve(4);
-  list.emplace_back(name_);
-  list.emplace_back(options_.ToEncodableList());
+  list.push_back(EncodableValue(name_));
+  list.push_back(EncodableValue(options_.ToEncodableList()));
   list.push_back(is_automatic_data_collection_enabled_
                      ? EncodableValue(*is_automatic_data_collection_enabled_)
                      : EncodableValue());
-  list.emplace_back(plugin_constants_);
+  list.push_back(EncodableValue(plugin_constants_));
   return list;
 }
 
-PigeonInitializeResponse::PigeonInitializeResponse() = default;
+PigeonInitializeResponse::PigeonInitializeResponse() {}
 
 PigeonInitializeResponse::PigeonInitializeResponse(const EncodableList& list) {
   auto& encodable_name = list[0];
@@ -353,7 +353,7 @@ PigeonInitializeResponse::PigeonInitializeResponse(const EncodableList& list) {
   }
 }
 
-FirebaseCoreHostApiCodecSerializer::FirebaseCoreHostApiCodecSerializer() = default;
+FirebaseCoreHostApiCodecSerializer::FirebaseCoreHostApiCodecSerializer() {}
 EncodableValue FirebaseCoreHostApiCodecSerializer::ReadValueOfType(
     uint8_t type, flutter::ByteStreamReader* stream) const {
   switch (type) {
@@ -403,7 +403,7 @@ const flutter::StandardMessageCodec& FirebaseCoreHostApi::GetCodec() {
 void FirebaseCoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                 FirebaseCoreHostApi* api) {
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.FirebaseCoreHostApi.initializeApp", &GetCodec());
     if (api != nullptr) {
@@ -437,7 +437,8 @@ void FirebaseCoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(CustomEncodableValue(std::move(output).TakeValue()));
+                    wrapped.push_back(
+                        CustomEncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -449,7 +450,7 @@ void FirebaseCoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.FirebaseCoreHostApi.initializeCore", &GetCodec());
     if (api != nullptr) {
@@ -463,7 +464,8 @@ void FirebaseCoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                   return;
                 }
                 EncodableList wrapped;
-                wrapped.emplace_back(std::move(output).TakeValue());
+                wrapped.push_back(
+                    EncodableValue(std::move(output).TakeValue()));
                 reply(EncodableValue(std::move(wrapped)));
               });
             } catch (const std::exception& exception) {
@@ -475,7 +477,7 @@ void FirebaseCoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.FirebaseCoreHostApi.optionsFromResource",
         &GetCodec());
@@ -491,7 +493,8 @@ void FirebaseCoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(CustomEncodableValue(std::move(output).TakeValue()));
+                    wrapped.push_back(
+                        CustomEncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -526,7 +529,7 @@ const flutter::StandardMessageCodec& FirebaseAppHostApi::GetCodec() {
 void FirebaseAppHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                FirebaseAppHostApi* api) {
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.FirebaseAppHostApi."
         "setAutomaticDataCollectionEnabled",
@@ -558,7 +561,7 @@ void FirebaseAppHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -570,7 +573,7 @@ void FirebaseAppHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.FirebaseAppHostApi."
         "setAutomaticResourceManagementEnabled",
@@ -602,7 +605,7 @@ void FirebaseAppHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -614,7 +617,7 @@ void FirebaseAppHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger, "dev.flutter.pigeon.FirebaseAppHostApi.delete",
         &GetCodec());
     if (api != nullptr) {
@@ -637,7 +640,7 @@ void FirebaseAppHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                               return;
                             }
                             EncodableList wrapped;
-                            wrapped.emplace_back();
+                            wrapped.push_back(EncodableValue());
                             reply(EncodableValue(std::move(wrapped)));
                           });
             } catch (const std::exception& exception) {

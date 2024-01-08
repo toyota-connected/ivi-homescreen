@@ -39,9 +39,9 @@ class FirebaseAuthPlugin : public flutter::Plugin,
   static std::string GetAuthErrorCode(AuthError authError);
   static FlutterError ParseError(const firebase::FutureBase& future);
 
-  static PigeonUserDetails ParseUserDetails(firebase::auth::User user);
+  static PigeonUserDetails ParseUserDetails(const firebase::auth::User user);
   static PigeonAdditionalUserInfo ParseAdditionalUserInfo(
-      const firebase::auth::AdditionalUserInfo& user);
+      const firebase::auth::AdditionalUserInfo user);
   static flutter::EncodableMap ConvertToEncodableMap(
       const std::map<firebase::Variant, firebase::Variant>& originalMap);
   static flutter::EncodableValue ConvertToEncodableValue(

@@ -7,7 +7,7 @@
 
 namespace cloud_firestore_linux {
 
-std::string getPluginVersion() { return "11.5.3"; }
+std::string getPluginVersion() { return "11.6.0"; }
 }  // namespace cloud_firestore_linux
 
 #endif  // PLUGIN_VERSION_CONFIG_H

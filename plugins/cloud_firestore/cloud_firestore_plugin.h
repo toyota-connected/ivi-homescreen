@@ -16,6 +16,8 @@
 
 #include "firebase/app.h"
 #include "firebase/firestore.h"
+#include "firebase/log.h"
+#include "firebase_core/firebase_core_plugin_c_api.h"
 #include "messages.g.h"
 
 namespace cloud_firestore_linux {
@@ -29,7 +31,7 @@ class CloudFirestorePlugin : public flutter::Plugin,
 
   CloudFirestorePlugin();
 
-  ~CloudFirestorePlugin() override;
+  virtual ~CloudFirestorePlugin();
 
   static std::string GetErrorCode(firebase::firestore::Error authError);
 
@@ -43,10 +45,12 @@ class CloudFirestorePlugin : public flutter::Plugin,
 
   // Inherited via FirebaseFirestoreHostApi
   void LoadBundle(
-      const FirestorePigeonFirebaseApp& app, const std::vector<uint8_t>& bundle,
+      const FirestorePigeonFirebaseApp& app,
+      const std::vector<uint8_t>& bundle,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void NamedQueryGet(
-      const FirestorePigeonFirebaseApp& app, const std::string& name,
+      const FirestorePigeonFirebaseApp& app,
+      const std::string& name,
       const PigeonGetOptions& options,
       std::function<void(ErrorOr<PigeonQuerySnapshot> reply)> result) override;
   void ClearPersistence(
@@ -75,7 +79,8 @@ class CloudFirestorePlugin : public flutter::Plugin,
       const FirestorePigeonFirebaseApp& app,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void TransactionCreate(
-      const FirestorePigeonFirebaseApp& app, int64_t timeout,
+      const FirestorePigeonFirebaseApp& app,
+      int64_t timeout,
       int64_t max_attempts,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void TransactionStoreResult(
@@ -83,11 +88,11 @@ class CloudFirestorePlugin : public flutter::Plugin,
       const PigeonTransactionResult& result_type,
       const flutter::EncodableList* commands,
       std::function<void(std::optional<FlutterError> reply)> result) override;
-  void TransactionGet(
-      const FirestorePigeonFirebaseApp& app, const std::string& transaction_id,
-      const std::string& path,
-      std::function<void(ErrorOr<PigeonDocumentSnapshot> reply)> result)
-      override;
+  void TransactionGet(const FirestorePigeonFirebaseApp& app,
+                      const std::string& transaction_id,
+                      const std::string& path,
+                      std::function<void(ErrorOr<PigeonDocumentSnapshot> reply)>
+                          result) override;
   void DocumentReferenceSet(
       const FirestorePigeonFirebaseApp& app,
       const DocumentReferenceRequest& request,
@@ -106,27 +111,36 @@ class CloudFirestorePlugin : public flutter::Plugin,
       const DocumentReferenceRequest& request,
       std::function<void(std::optional<FlutterError> reply)> result) override;
   void QueryGet(
-      const FirestorePigeonFirebaseApp& app, const std::string& path,
-      bool is_collection_group, const PigeonQueryParameters& parameters,
+      const FirestorePigeonFirebaseApp& app,
+      const std::string& path,
+      bool is_collection_group,
+      const PigeonQueryParameters& parameters,
       const PigeonGetOptions& options,
       std::function<void(ErrorOr<PigeonQuerySnapshot> reply)> result) override;
-  void AggregateQueryCount(
-      const FirestorePigeonFirebaseApp& app, const std::string& path,
-      const PigeonQueryParameters& parameters, const AggregateSource& source,
-      bool is_collection_group,
-      std::function<void(ErrorOr<double> reply)> result) override;
-  void WriteBatchCommit(
+  void AggregateQuery(const FirestorePigeonFirebaseApp& app,
+                      const std::string& path,
+                      const PigeonQueryParameters& parameters,
+                      const AggregateSource& source,
+                      const flutter::EncodableList& queries,
+                      bool is_collection_group,
+                      std::function<void(ErrorOr<flutter::EncodableList> reply)>
+                          result) override;
+  virtual void WriteBatchCommit(
       const FirestorePigeonFirebaseApp& app,
       const flutter::EncodableList& writes,
       std::function<void(std::optional<FlutterError> reply)> result) override;
   void QuerySnapshot(
-      const FirestorePigeonFirebaseApp& app, const std::string& path,
-      bool is_collection_group, const PigeonQueryParameters& parameters,
-      const PigeonGetOptions& options, bool include_metadata_changes,
+      const FirestorePigeonFirebaseApp& app,
+      const std::string& path,
+      bool is_collection_group,
+      const PigeonQueryParameters& parameters,
+      const PigeonGetOptions& options,
+      bool include_metadata_changes,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void DocumentReferenceSnapshot(
       const FirestorePigeonFirebaseApp& app,
-      const DocumentReferenceRequest& parameters, bool include_metadata_changes,
+      const DocumentReferenceRequest& parameters,
+      bool include_metadata_changes,
       std::function<void(ErrorOr<std::string> reply)> result) override;
 
   static flutter::BinaryMessenger* messenger_;
