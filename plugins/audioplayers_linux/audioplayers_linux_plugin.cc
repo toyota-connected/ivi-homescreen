@@ -99,98 +99,98 @@ void AudioplayersLinuxPlugin::Create(
 }
 
 void AudioplayersLinuxPlugin::Dispose(
-    const std::string& player_id,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::GetCurrentPosition(
-    const std::string& player_id,
-    std::function<void(ErrorOr<std::optional<int64_t>> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(ErrorOr<std::optional<int64_t>> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::GetDuration(
-    const std::string& player_id,
-    std::function<void(ErrorOr<std::optional<int64_t>> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(ErrorOr<std::optional<int64_t>> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::Pause(
-    const std::string& player_id,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::Release(
-    const std::string& player_id,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::Resume(
-    const std::string& player_id,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::Seek(
-    const std::string& player_id,
-    int64_t position,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    int64_t /* position */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetBalance(
-    const std::string& player_id,
-    double balance,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    double /* balance */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetPlayerMode(
-    const std::string& player_id,
-    const std::string& player_mode,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* player_mode */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetPlaybackRate(
-    const std::string& player_id,
-    double playback_rate,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    double /* playback_rate */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetReleaseMode(
-    const std::string& player_id,
-    const std::string& release_mode,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* release_mode */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetSourceBytes(
-    const std::string& player_id,
-    const std::vector<uint8_t>& bytes,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::vector<uint8_t>& /* bytes */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetSourceUrl(
-    const std::string& player_id,
-    const std::string& url,
-    bool is_local,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* url */,
+    bool /* is_local */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetVolume(
-    const std::string& player_id,
-    double volume,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    double /* volume */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::Stop(
-    const std::string& player_id,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::EmitLog(
-    const std::string& player_id,
-    const std::string& message,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* message */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::EmitError(
-    const std::string& player_id,
-    const std::string& code,
-    const std::string& message,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* code */,
+    const std::string& /* message */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::SetAudioContextGlobal(
-    const std::string& player_id,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::EmitLogGlobal(
-    const std::string& player_id,
-    const std::string& message,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* message */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 void AudioplayersLinuxPlugin::EmitErrorGlobal(
-    const std::string& player_id,
-    const std::string& message,
-    const std::string& code,
-    std::function<void(std::optional<FlutterError> reply)> result) {}
+    const std::string& /* player_id */,
+    const std::string& /* message */,
+    const std::string& /* code */,
+    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
 
 }  // namespace audioplayers_linux_plugin
