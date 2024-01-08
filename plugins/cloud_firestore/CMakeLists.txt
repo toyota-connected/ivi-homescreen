@@ -21,7 +21,7 @@ add_library(plugin_cloud_firestore STATIC
         messages.g.cc
 )
 
-target_compile_definitions(plugin_cloud_firestore PUBLIC -DENABLE_PLUGIN_CLOUD_FIRESTORE)
+target_compile_definitions(plugin_cloud_firestore PUBLIC ENABLE_PLUGIN_CLOUD_FIRESTORE)
 
 target_compile_definitions(plugin_cloud_firestore PRIVATE INTERNAL_EXPERIMENTAL RAPIDJSON_HAS_STDSTRING=1)
 

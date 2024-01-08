@@ -7,7 +7,7 @@
 
 namespace firebase_storage_linux {
 
-std::string getPluginVersion() { return "11.5.3"; }
+std::string getPluginVersion() { return "11.6.0"; }
 }  // namespace firebase_storage_linux
 
 #endif  // PLUGIN_VERSION_CONFIG_H

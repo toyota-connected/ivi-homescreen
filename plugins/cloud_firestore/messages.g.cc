@@ -16,7 +16,6 @@
 #include <map>
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace cloud_firestore_linux {
 using flutter::BasicMessageChannel;
@@ -114,7 +113,7 @@ EncodableList PigeonFirebaseSettings::ToEncodableList() const {
                               : EncodableValue());
   list.push_back(cache_size_bytes_ ? EncodableValue(*cache_size_bytes_)
                                    : EncodableValue());
-  list.emplace_back(ignore_undefined_properties_);
+  list.push_back(EncodableValue(ignore_undefined_properties_));
   return list;
 }
 
@@ -144,12 +143,12 @@ PigeonFirebaseSettings PigeonFirebaseSettings::FromEncodableList(
 // FirestorePigeonFirebaseApp
 
 FirestorePigeonFirebaseApp::FirestorePigeonFirebaseApp(
-    std::string app_name,
-    PigeonFirebaseSettings settings,
-    std::string database_u_r_l)
-    : app_name_(std::move(app_name)),
-      settings_(std::move(settings)),
-      database_u_r_l_(std::move(database_u_r_l)) {}
+    const std::string& app_name,
+    const PigeonFirebaseSettings& settings,
+    const std::string& database_u_r_l)
+    : app_name_(app_name),
+      settings_(settings),
+      database_u_r_l_(database_u_r_l) {}
 
 const std::string& FirestorePigeonFirebaseApp::app_name() const {
   return app_name_;
@@ -180,9 +179,9 @@ void FirestorePigeonFirebaseApp::set_database_u_r_l(
 EncodableList FirestorePigeonFirebaseApp::ToEncodableList() const {
   EncodableList list;
   list.reserve(3);
-  list.emplace_back(app_name_);
-  list.emplace_back(settings_.ToEncodableList());
-  list.emplace_back(database_u_r_l_);
+  list.push_back(EncodableValue(app_name_));
+  list.push_back(EncodableValue(settings_.ToEncodableList()));
+  list.push_back(EncodableValue(database_u_r_l_));
   return list;
 }
 
@@ -220,30 +219,30 @@ void PigeonSnapshotMetadata::set_is_from_cache(bool value_arg) {
 EncodableList PigeonSnapshotMetadata::ToEncodableList() const {
   EncodableList list;
   list.reserve(2);
-  list.emplace_back(has_pending_writes_);
-  list.emplace_back(is_from_cache_);
+  list.push_back(EncodableValue(has_pending_writes_));
+  list.push_back(EncodableValue(is_from_cache_));
   return list;
 }
 
 PigeonSnapshotMetadata PigeonSnapshotMetadata::FromEncodableList(
     const EncodableList& list) {
-  const PigeonSnapshotMetadata decoded(std::get<bool>(list[0]),
-                                       std::get<bool>(list[1]));
+  PigeonSnapshotMetadata decoded(std::get<bool>(list[0]),
+                                 std::get<bool>(list[1]));
   return decoded;
 }
 
 // PigeonDocumentSnapshot
 
 PigeonDocumentSnapshot::PigeonDocumentSnapshot(
-    std::string path,
+    const std::string& path,
     const PigeonSnapshotMetadata& metadata)
-    : path_(std::move(path)), metadata_(metadata) {}
+    : path_(path), metadata_(metadata) {}
 
 PigeonDocumentSnapshot::PigeonDocumentSnapshot(
-    std::string path,
+    const std::string& path,
     const EncodableMap* data,
     const PigeonSnapshotMetadata& metadata)
-    : path_(std::move(path)),
+    : path_(path),
       data_(data ? std::optional<EncodableMap>(*data) : std::nullopt),
       metadata_(metadata) {}
 
@@ -279,9 +278,9 @@ void PigeonDocumentSnapshot::set_metadata(
 EncodableList PigeonDocumentSnapshot::ToEncodableList() const {
   EncodableList list;
   list.reserve(3);
-  list.emplace_back(path_);
+  list.push_back(EncodableValue(path_));
   list.push_back(data_ ? EncodableValue(*data_) : EncodableValue());
-  list.emplace_back(metadata_.ToEncodableList());
+  list.push_back(EncodableValue(metadata_.ToEncodableList()));
   return list;
 }
 
@@ -299,12 +298,13 @@ PigeonDocumentSnapshot PigeonDocumentSnapshot::FromEncodableList(
 
 // PigeonDocumentChange
 
-PigeonDocumentChange::PigeonDocumentChange(const DocumentChangeType& type,
-                                           PigeonDocumentSnapshot document,
-                                           int64_t old_index,
-                                           int64_t new_index)
+PigeonDocumentChange::PigeonDocumentChange(
+    const DocumentChangeType& type,
+    const PigeonDocumentSnapshot& document,
+    int64_t old_index,
+    int64_t new_index)
     : type_(type),
-      document_(std::move(document)),
+      document_(document),
       old_index_(old_index),
       new_index_(new_index) {}
 
@@ -344,30 +344,29 @@ void PigeonDocumentChange::set_new_index(int64_t value_arg) {
 EncodableList PigeonDocumentChange::ToEncodableList() const {
   EncodableList list;
   list.reserve(4);
-  list.emplace_back((int)type_);
-  list.emplace_back(document_.ToEncodableList());
-  list.emplace_back(old_index_);
-  list.emplace_back(new_index_);
+  list.push_back(EncodableValue((int)type_));
+  list.push_back(EncodableValue(document_.ToEncodableList()));
+  list.push_back(EncodableValue(old_index_));
+  list.push_back(EncodableValue(new_index_));
   return list;
 }
 
 PigeonDocumentChange PigeonDocumentChange::FromEncodableList(
     const EncodableList& list) {
-  PigeonDocumentChange decoded(
-      static_cast<DocumentChangeType>(std::get<int32_t>(list[0])),
-      PigeonDocumentSnapshot::FromEncodableList(
-          std::get<EncodableList>(list[1])),
-      list[2].LongValue(), list[3].LongValue());
+  PigeonDocumentChange decoded((DocumentChangeType)(std::get<int32_t>(list[0])),
+                               PigeonDocumentSnapshot::FromEncodableList(
+                                   std::get<EncodableList>(list[1])),
+                               list[2].LongValue(), list[3].LongValue());
   return decoded;
 }
 
 // PigeonQuerySnapshot
 
-PigeonQuerySnapshot::PigeonQuerySnapshot(EncodableList documents,
-                                         EncodableList document_changes,
+PigeonQuerySnapshot::PigeonQuerySnapshot(const EncodableList& documents,
+                                         const EncodableList& document_changes,
                                          const PigeonSnapshotMetadata& metadata)
-    : documents_(std::move(documents)),
-      document_changes_(std::move(document_changes)),
+    : documents_(documents),
+      document_changes_(document_changes),
       metadata_(metadata) {}
 
 const EncodableList& PigeonQuerySnapshot::documents() const {
@@ -398,9 +397,9 @@ void PigeonQuerySnapshot::set_metadata(
 EncodableList PigeonQuerySnapshot::ToEncodableList() const {
   EncodableList list;
   list.reserve(3);
-  list.emplace_back(documents_);
-  list.emplace_back(document_changes_);
-  list.emplace_back(metadata_.ToEncodableList());
+  list.push_back(EncodableValue(documents_));
+  list.push_back(EncodableValue(document_changes_));
+  list.push_back(EncodableValue(metadata_.ToEncodableList()));
   return list;
 }
 
@@ -441,22 +440,22 @@ void PigeonGetOptions::set_server_timestamp_behavior(
 EncodableList PigeonGetOptions::ToEncodableList() const {
   EncodableList list;
   list.reserve(2);
-  list.emplace_back((int)source_);
-  list.emplace_back((int)server_timestamp_behavior_);
+  list.push_back(EncodableValue((int)source_));
+  list.push_back(EncodableValue((int)server_timestamp_behavior_));
   return list;
 }
 
 PigeonGetOptions PigeonGetOptions::FromEncodableList(
     const EncodableList& list) {
-  const PigeonGetOptions decoded(
-      static_cast<Source>(std::get<int32_t>(list[0])),
-      static_cast<ServerTimestampBehavior>(std::get<int32_t>(list[1])));
+  PigeonGetOptions decoded(
+      (Source)(std::get<int32_t>(list[0])),
+      (ServerTimestampBehavior)(std::get<int32_t>(list[1])));
   return decoded;
 }
 
 // PigeonDocumentOption
 
-PigeonDocumentOption::PigeonDocumentOption() = default;
+PigeonDocumentOption::PigeonDocumentOption() {}
 
 PigeonDocumentOption::PigeonDocumentOption(const bool* merge,
                                            const EncodableList* merge_fields)
@@ -516,16 +515,16 @@ PigeonDocumentOption PigeonDocumentOption::FromEncodableList(
 
 PigeonTransactionCommand::PigeonTransactionCommand(
     const PigeonTransactionType& type,
-    std::string path)
-    : type_(type), path_(std::move(path)) {}
+    const std::string& path)
+    : type_(type), path_(path) {}
 
 PigeonTransactionCommand::PigeonTransactionCommand(
     const PigeonTransactionType& type,
-    std::string path,
+    const std::string& path,
     const EncodableMap* data,
     const PigeonDocumentOption* option)
     : type_(type),
-      path_(std::move(path)),
+      path_(path),
       data_(data ? std::optional<EncodableMap>(*data) : std::nullopt),
       option_(option ? std::optional<PigeonDocumentOption>(*option)
                      : std::nullopt) {}
@@ -577,8 +576,8 @@ void PigeonTransactionCommand::set_option(
 EncodableList PigeonTransactionCommand::ToEncodableList() const {
   EncodableList list;
   list.reserve(4);
-  list.emplace_back((int)type_);
-  list.emplace_back(path_);
+  list.push_back(EncodableValue((int)type_));
+  list.push_back(EncodableValue(path_));
   list.push_back(data_ ? EncodableValue(*data_) : EncodableValue());
   list.push_back(option_ ? EncodableValue(option_->ToEncodableList())
                          : EncodableValue());
@@ -588,7 +587,7 @@ EncodableList PigeonTransactionCommand::ToEncodableList() const {
 PigeonTransactionCommand PigeonTransactionCommand::FromEncodableList(
     const EncodableList& list) {
   PigeonTransactionCommand decoded(
-      static_cast<PigeonTransactionType>(std::get<int32_t>(list[0])),
+      (PigeonTransactionType)(std::get<int32_t>(list[0])),
       std::get<std::string>(list[1]));
   auto& encodable_data = list[2];
   if (!encodable_data.IsNull()) {
@@ -604,16 +603,16 @@ PigeonTransactionCommand PigeonTransactionCommand::FromEncodableList(
 
 // DocumentReferenceRequest
 
-DocumentReferenceRequest::DocumentReferenceRequest(std::string path)
-    : path_(std::move(path)) {}
+DocumentReferenceRequest::DocumentReferenceRequest(const std::string& path)
+    : path_(path) {}
 
 DocumentReferenceRequest::DocumentReferenceRequest(
-    std::string path,
+    const std::string& path,
     const EncodableMap* data,
     const PigeonDocumentOption* option,
     const Source* source,
     const ServerTimestampBehavior* server_timestamp_behavior)
-    : path_(std::move(path)),
+    : path_(path),
       data_(data ? std::optional<EncodableMap>(*data) : std::nullopt),
       option_(option ? std::optional<PigeonDocumentOption>(*option)
                      : std::nullopt),
@@ -690,15 +689,14 @@ void DocumentReferenceRequest::set_server_timestamp_behavior(
 EncodableList DocumentReferenceRequest::ToEncodableList() const {
   EncodableList list;
   list.reserve(5);
-  list.emplace_back(path_);
+  list.push_back(EncodableValue(path_));
   list.push_back(data_ ? EncodableValue(*data_) : EncodableValue());
   list.push_back(option_ ? EncodableValue(option_->ToEncodableList())
                          : EncodableValue());
-  list.push_back(source_ ? EncodableValue(static_cast<int>(*source_))
-                         : EncodableValue());
-  list.push_back(server_timestamp_behavior_ ? EncodableValue(static_cast<int>(
-                                                  *server_timestamp_behavior_))
-                                            : EncodableValue());
+  list.push_back(source_ ? EncodableValue((int)(*source_)) : EncodableValue());
+  list.push_back(server_timestamp_behavior_
+                     ? EncodableValue((int)(*server_timestamp_behavior_))
+                     : EncodableValue());
   return list;
 }
 
@@ -716,20 +714,20 @@ DocumentReferenceRequest DocumentReferenceRequest::FromEncodableList(
   }
   auto& encodable_source = list[3];
   if (!encodable_source.IsNull()) {
-    decoded.set_source(
-        static_cast<Source>(std::get<int32_t>(encodable_source)));
+    decoded.set_source((Source)(std::get<int32_t>(encodable_source)));
   }
   auto& encodable_server_timestamp_behavior = list[4];
   if (!encodable_server_timestamp_behavior.IsNull()) {
-    decoded.set_server_timestamp_behavior(static_cast<ServerTimestampBehavior>(
-        std::get<int32_t>(encodable_server_timestamp_behavior)));
+    decoded.set_server_timestamp_behavior(
+        (ServerTimestampBehavior)(std::get<int32_t>(
+            encodable_server_timestamp_behavior)));
   }
   return decoded;
 }
 
 // PigeonQueryParameters
 
-PigeonQueryParameters::PigeonQueryParameters() = default;
+PigeonQueryParameters::PigeonQueryParameters() {}
 
 PigeonQueryParameters::PigeonQueryParameters(const EncodableList* where,
                                              const EncodableList* order_by,
@@ -928,44 +926,157 @@ PigeonQueryParameters PigeonQueryParameters::FromEncodableList(
   return decoded;
 }
 
+// AggregateQuery
+
+AggregateQuery::AggregateQuery(const AggregateType& type) : type_(type) {}
+
+AggregateQuery::AggregateQuery(const AggregateType& type,
+                               const std::string* field)
+    : type_(type),
+      field_(field ? std::optional<std::string>(*field) : std::nullopt) {}
+
+const AggregateType& AggregateQuery::type() const {
+  return type_;
+}
+
+void AggregateQuery::set_type(const AggregateType& value_arg) {
+  type_ = value_arg;
+}
+
+const std::string* AggregateQuery::field() const {
+  return field_ ? &(*field_) : nullptr;
+}
+
+void AggregateQuery::set_field(const std::string_view* value_arg) {
+  field_ = value_arg ? std::optional<std::string>(*value_arg) : std::nullopt;
+}
+
+void AggregateQuery::set_field(std::string_view value_arg) {
+  field_ = value_arg;
+}
+
+EncodableList AggregateQuery::ToEncodableList() const {
+  EncodableList list;
+  list.reserve(2);
+  list.push_back(EncodableValue((int)type_));
+  list.push_back(field_ ? EncodableValue(*field_) : EncodableValue());
+  return list;
+}
+
+AggregateQuery AggregateQuery::FromEncodableList(const EncodableList& list) {
+  AggregateQuery decoded((AggregateType)(std::get<int32_t>(list[0])));
+  auto& encodable_field = list[1];
+  if (!encodable_field.IsNull()) {
+    decoded.set_field(std::get<std::string>(encodable_field));
+  }
+  return decoded;
+}
+
+// AggregateQueryResponse
+
+AggregateQueryResponse::AggregateQueryResponse(const AggregateType& type,
+                                               double value)
+    : type_(type), value_(value) {}
+
+AggregateQueryResponse::AggregateQueryResponse(const AggregateType& type,
+                                               const std::string* field,
+                                               double value)
+    : type_(type),
+      field_(field ? std::optional<std::string>(*field) : std::nullopt),
+      value_(value) {}
+
+const AggregateType& AggregateQueryResponse::type() const {
+  return type_;
+}
+
+void AggregateQueryResponse::set_type(const AggregateType& value_arg) {
+  type_ = value_arg;
+}
+
+const std::string* AggregateQueryResponse::field() const {
+  return field_ ? &(*field_) : nullptr;
+}
+
+void AggregateQueryResponse::set_field(const std::string_view* value_arg) {
+  field_ = value_arg ? std::optional<std::string>(*value_arg) : std::nullopt;
+}
+
+void AggregateQueryResponse::set_field(std::string_view value_arg) {
+  field_ = value_arg;
+}
+
+double AggregateQueryResponse::value() const {
+  return value_;
+}
+
+void AggregateQueryResponse::set_value(double value_arg) {
+  value_ = value_arg;
+}
+
+EncodableList AggregateQueryResponse::ToEncodableList() const {
+  EncodableList list;
+  list.reserve(3);
+  list.push_back(EncodableValue((int)type_));
+  list.push_back(field_ ? EncodableValue(*field_) : EncodableValue());
+  list.push_back(EncodableValue(value_));
+  return list;
+}
+
+AggregateQueryResponse AggregateQueryResponse::FromEncodableList(
+    const EncodableList& list) {
+  AggregateQueryResponse decoded((AggregateType)(std::get<int32_t>(list[0])),
+                                 std::get<double>(list[2]));
+  auto& encodable_field = list[1];
+  if (!encodable_field.IsNull()) {
+    decoded.set_field(std::get<std::string>(encodable_field));
+  }
+  return decoded;
+}
+
 FirebaseFirestoreHostApiCodecSerializer::
-FirebaseFirestoreHostApiCodecSerializer() = default;
+    FirebaseFirestoreHostApiCodecSerializer() {}
 
 EncodableValue FirebaseFirestoreHostApiCodecSerializer::ReadValueOfType(
     uint8_t type,
     flutter::ByteStreamReader* stream) const {
   switch (type) {
     case 128:
-      return CustomEncodableValue(DocumentReferenceRequest::FromEncodableList(
+      return CustomEncodableValue(AggregateQuery::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 129:
-      return CustomEncodableValue(FirestorePigeonFirebaseApp::FromEncodableList(
+      return CustomEncodableValue(AggregateQueryResponse::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 130:
-      return CustomEncodableValue(PigeonDocumentChange::FromEncodableList(
+      return CustomEncodableValue(DocumentReferenceRequest::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 131:
-      return CustomEncodableValue(PigeonDocumentOption::FromEncodableList(
+      return CustomEncodableValue(FirestorePigeonFirebaseApp::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 132:
-      return CustomEncodableValue(PigeonDocumentSnapshot::FromEncodableList(
+      return CustomEncodableValue(PigeonDocumentChange::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 133:
-      return CustomEncodableValue(PigeonFirebaseSettings::FromEncodableList(
+      return CustomEncodableValue(PigeonDocumentOption::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 134:
-      return CustomEncodableValue(PigeonGetOptions::FromEncodableList(
+      return CustomEncodableValue(PigeonDocumentSnapshot::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 135:
-      return CustomEncodableValue(PigeonQueryParameters::FromEncodableList(
+      return CustomEncodableValue(PigeonFirebaseSettings::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 136:
-      return CustomEncodableValue(PigeonQuerySnapshot::FromEncodableList(
+      return CustomEncodableValue(PigeonGetOptions::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 137:
-      return CustomEncodableValue(PigeonSnapshotMetadata::FromEncodableList(
+      return CustomEncodableValue(PigeonQueryParameters::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     case 138:
+      return CustomEncodableValue(PigeonQuerySnapshot::FromEncodableList(
+          std::get<EncodableList>(ReadValue(stream))));
+    case 139:
+      return CustomEncodableValue(PigeonSnapshotMetadata::FromEncodableList(
+          std::get<EncodableList>(ReadValue(stream))));
+    case 140:
       return CustomEncodableValue(PigeonTransactionCommand::FromEncodableList(
           std::get<EncodableList>(ReadValue(stream))));
     default:
@@ -979,8 +1090,24 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
     flutter::ByteStreamWriter* stream) const {
   if (const CustomEncodableValue* custom_value =
           std::get_if<CustomEncodableValue>(&value)) {
-    if (custom_value->type() == typeid(DocumentReferenceRequest)) {
+    if (custom_value->type() == typeid(AggregateQuery)) {
       stream->WriteByte(128);
+      WriteValue(
+          EncodableValue(
+              std::any_cast<AggregateQuery>(*custom_value).ToEncodableList()),
+          stream);
+      return;
+    }
+    if (custom_value->type() == typeid(AggregateQueryResponse)) {
+      stream->WriteByte(129);
+      WriteValue(
+          EncodableValue(std::any_cast<AggregateQueryResponse>(*custom_value)
+                             .ToEncodableList()),
+          stream);
+      return;
+    }
+    if (custom_value->type() == typeid(DocumentReferenceRequest)) {
+      stream->WriteByte(130);
       WriteValue(
           EncodableValue(std::any_cast<DocumentReferenceRequest>(*custom_value)
                              .ToEncodableList()),
@@ -988,7 +1115,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(FirestorePigeonFirebaseApp)) {
-      stream->WriteByte(129);
+      stream->WriteByte(131);
       WriteValue(EncodableValue(
                      std::any_cast<FirestorePigeonFirebaseApp>(*custom_value)
                          .ToEncodableList()),
@@ -996,7 +1123,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonDocumentChange)) {
-      stream->WriteByte(130);
+      stream->WriteByte(132);
       WriteValue(
           EncodableValue(std::any_cast<PigeonDocumentChange>(*custom_value)
                              .ToEncodableList()),
@@ -1004,7 +1131,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonDocumentOption)) {
-      stream->WriteByte(131);
+      stream->WriteByte(133);
       WriteValue(
           EncodableValue(std::any_cast<PigeonDocumentOption>(*custom_value)
                              .ToEncodableList()),
@@ -1012,7 +1139,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonDocumentSnapshot)) {
-      stream->WriteByte(132);
+      stream->WriteByte(134);
       WriteValue(
           EncodableValue(std::any_cast<PigeonDocumentSnapshot>(*custom_value)
                              .ToEncodableList()),
@@ -1020,7 +1147,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonFirebaseSettings)) {
-      stream->WriteByte(133);
+      stream->WriteByte(135);
       WriteValue(
           EncodableValue(std::any_cast<PigeonFirebaseSettings>(*custom_value)
                              .ToEncodableList()),
@@ -1028,7 +1155,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonGetOptions)) {
-      stream->WriteByte(134);
+      stream->WriteByte(136);
       WriteValue(
           EncodableValue(
               std::any_cast<PigeonGetOptions>(*custom_value).ToEncodableList()),
@@ -1036,7 +1163,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonQueryParameters)) {
-      stream->WriteByte(135);
+      stream->WriteByte(137);
       WriteValue(
           EncodableValue(std::any_cast<PigeonQueryParameters>(*custom_value)
                              .ToEncodableList()),
@@ -1044,7 +1171,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonQuerySnapshot)) {
-      stream->WriteByte(136);
+      stream->WriteByte(138);
       WriteValue(
           EncodableValue(std::any_cast<PigeonQuerySnapshot>(*custom_value)
                              .ToEncodableList()),
@@ -1052,7 +1179,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonSnapshotMetadata)) {
-      stream->WriteByte(137);
+      stream->WriteByte(139);
       WriteValue(
           EncodableValue(std::any_cast<PigeonSnapshotMetadata>(*custom_value)
                              .ToEncodableList()),
@@ -1060,7 +1187,7 @@ void FirebaseFirestoreHostApiCodecSerializer::WriteValue(
       return;
     }
     if (custom_value->type() == typeid(PigeonTransactionCommand)) {
-      stream->WriteByte(138);
+      stream->WriteByte(140);
       WriteValue(
           EncodableValue(std::any_cast<PigeonTransactionCommand>(*custom_value)
                              .ToEncodableList()),
@@ -1082,7 +1209,7 @@ const flutter::StandardMessageCodec& FirebaseFirestoreHostApi::GetCodec() {
 void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                      FirebaseFirestoreHostApi* api) {
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.loadBundle",
@@ -1115,7 +1242,8 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
+                    wrapped.push_back(
+                        EncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1127,7 +1255,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.namedQueryGet",
@@ -1167,7 +1295,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(
+                    wrapped.push_back(
                         CustomEncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
@@ -1180,7 +1308,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.clearPersistence",
@@ -1206,7 +1334,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1218,7 +1346,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.disableNetwork",
@@ -1244,7 +1372,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1256,7 +1384,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.enableNetwork",
@@ -1282,7 +1410,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                      return;
                                    }
                                    EncodableList wrapped;
-                                   wrapped.emplace_back();
+                                   wrapped.push_back(EncodableValue());
                                    reply(EncodableValue(std::move(wrapped)));
                                  });
             } catch (const std::exception& exception) {
@@ -1294,7 +1422,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.terminate",
@@ -1320,7 +1448,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                  return;
                                }
                                EncodableList wrapped;
-                               wrapped.emplace_back();
+                               wrapped.push_back(EncodableValue());
                                reply(EncodableValue(std::move(wrapped)));
                              });
             } catch (const std::exception& exception) {
@@ -1332,7 +1460,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.waitForPendingWrites",
@@ -1358,7 +1486,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1370,7 +1498,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.setIndexConfiguration",
@@ -1404,7 +1532,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1416,7 +1544,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.setLoggingEnabled",
@@ -1442,7 +1570,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1454,7 +1582,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.snapshotsInSyncSetup",
@@ -1480,7 +1608,8 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
+                    wrapped.push_back(
+                        EncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1492,7 +1621,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.transactionCreate",
@@ -1532,7 +1661,8 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
+                    wrapped.push_back(
+                        EncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1544,7 +1674,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.transactionStoreResult",
@@ -1567,7 +1697,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 reply(WrapError("result_type_arg unexpectedly null."));
                 return;
               }
-              const auto& result_type_arg =
+              const PigeonTransactionResult& result_type_arg =
                   (PigeonTransactionResult)
                       encodable_result_type_arg.LongValue();
               const auto& encodable_commands_arg = args.at(2);
@@ -1581,7 +1711,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1593,7 +1723,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.transactionGet",
@@ -1633,7 +1763,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(
+                    wrapped.push_back(
                         CustomEncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
@@ -1646,7 +1776,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.documentReferenceSet",
@@ -1681,7 +1811,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1693,7 +1823,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.documentReferenceUpdate",
@@ -1728,7 +1858,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1740,7 +1870,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.documentReferenceGet",
@@ -1775,7 +1905,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(
+                    wrapped.push_back(
                         CustomEncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
@@ -1788,7 +1918,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.documentReferenceDelete",
@@ -1823,7 +1953,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -1835,7 +1965,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.queryGet",
@@ -1890,7 +2020,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(
+                    wrapped.push_back(
                         CustomEncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
@@ -1903,10 +2033,10 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
-        "FirebaseFirestoreHostApi.aggregateQueryCount",
+        "FirebaseFirestoreHostApi.aggregateQuery",
         &GetCodec());
     if (api != nullptr) {
       channel->SetMessageHandler(
@@ -1943,24 +2073,32 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               }
               const AggregateSource& source_arg =
                   (AggregateSource)encodable_source_arg.LongValue();
-              const auto& encodable_is_collection_group_arg = args.at(4);
+              const auto& encodable_queries_arg = args.at(4);
+              if (encodable_queries_arg.IsNull()) {
+                reply(WrapError("queries_arg unexpectedly null."));
+                return;
+              }
+              const auto& queries_arg =
+                  std::get<EncodableList>(encodable_queries_arg);
+              const auto& encodable_is_collection_group_arg = args.at(5);
               if (encodable_is_collection_group_arg.IsNull()) {
                 reply(WrapError("is_collection_group_arg unexpectedly null."));
                 return;
               }
               const auto& is_collection_group_arg =
                   std::get<bool>(encodable_is_collection_group_arg);
-              api->AggregateQueryCount(
-                  app_arg, path_arg, parameters_arg, source_arg,
-                  is_collection_group_arg, [reply](ErrorOr<double>&& output) {
-                    if (output.has_error()) {
-                      reply(WrapError(output.error()));
-                      return;
-                    }
-                    EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
-                    reply(EncodableValue(std::move(wrapped)));
-                  });
+              api->AggregateQuery(app_arg, path_arg, parameters_arg, source_arg,
+                                  queries_arg, is_collection_group_arg,
+                                  [reply](ErrorOr<EncodableList>&& output) {
+                                    if (output.has_error()) {
+                                      reply(WrapError(output.error()));
+                                      return;
+                                    }
+                                    EncodableList wrapped;
+                                    wrapped.push_back(EncodableValue(
+                                        std::move(output).TakeValue()));
+                                    reply(EncodableValue(std::move(wrapped)));
+                                  });
             } catch (const std::exception& exception) {
               reply(WrapError(exception.what()));
             }
@@ -1970,7 +2108,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.writeBatchCommit",
@@ -2004,7 +2142,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back();
+                    wrapped.push_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -2016,7 +2154,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.querySnapshot",
@@ -2080,7 +2218,8 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
+                    wrapped.push_back(
+                        EncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
@@ -2092,7 +2231,7 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    const auto channel = std::make_unique<BasicMessageChannel<>>(
+    auto channel = std::make_unique<BasicMessageChannel<>>(
         binary_messenger,
         "dev.flutter.pigeon.cloud_firestore_platform_interface."
         "FirebaseFirestoreHostApi.documentReferenceSnapshot",
@@ -2135,7 +2274,8 @@ void FirebaseFirestoreHostApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(std::move(output).TakeValue());
+                    wrapped.push_back(
+                        EncodableValue(std::move(output).TakeValue()));
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
