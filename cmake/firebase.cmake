@@ -39,7 +39,7 @@ target_include_directories(firebase_sdk INTERFACE
         ${FIREBASE_CPP_SDK_DIR}/firestore/src/include
         ${FIREBASE_CPP_SDK_DIR}/database/src/include
         ${FIREBASE_CPP_SDK_DIR}/storage/src/include
-        ${FIREBASE_CPP_SDK_DIR}/build/external/src/firestore/Firestore/core/include
+        ${FIREBASE_SDK_LIBDIR}/external/src/firestore/Firestore/core/include
 )
 
 target_link_libraries(firebase_sdk INTERFACE
