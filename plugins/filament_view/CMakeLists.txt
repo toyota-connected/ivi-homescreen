@@ -144,8 +144,8 @@ if (SDL2_FOUND)
     target_link_libraries(simple PUBLIC
             PkgConfig::SDL2
             filament
-            ${FILAMENT_BINARY_DIR}/third_party/spirv-tools/source/opt/libSPIRV-Tools-opt.a
-            ${FILAMENT_BINARY_DIR}/third_party/spirv-cross/tnt/libspirv-cross-msl.a
+            ${FILAMENT_LINK_LIBRARIES_DIR}/../../../../third_party/spirv-tools/source/opt/libSPIRV-Tools-opt.a
+            ${FILAMENT_LINK_LIBRARIES_DIR}/../../../../third_party/spirv-cross/tnt/libspirv-cross-msl.a
     )
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(simple PRIVATE ${CONTEXT_COMPILE_OPTIONS})
