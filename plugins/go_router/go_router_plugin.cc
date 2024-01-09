@@ -18,7 +18,7 @@
 
 #include "messages.h"
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace go_router_plugin {
 

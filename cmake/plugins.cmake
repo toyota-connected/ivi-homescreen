@@ -165,3 +165,5 @@ option(BUILD_PLUGIN_WEBVIEW_FLUTTER "Includes WebView Flutter View Plugin" OFF)
 if (BUILD_PLUGIN_WEBVIEW_FLUTTER)
     ENABLE_PLUGIN(webview_flutter)
 endif ()
+
+ENABLE_PLUGIN(common)

@@ -20,7 +20,7 @@
 #include <asio/post.hpp>
 #include <utility>
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"
 

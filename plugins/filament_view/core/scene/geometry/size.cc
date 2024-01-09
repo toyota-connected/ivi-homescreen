@@ -16,8 +16,7 @@
 
 #include "size.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 Size::Size(const flutter::EncodableMap& params) {
@@ -35,7 +34,7 @@ Size::Size(const flutter::EncodableMap& params) {
       z_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Size] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Size::Size");

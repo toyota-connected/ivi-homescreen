@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Toyota Connected North America
+ * Copyright 2023-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,15 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef PLUGINS_COMMON_JSON_JSON_UTILS_H_
+#define PLUGINS_COMMON_JSON_JSON_UTILS_H_
 
-#include <rapidjson/document.h>
+#include "flutter/third_party/rapidjson/include/rapidjson/document.h"
+
+namespace plugin_common {
 
 class JsonUtils {
  public:
-
   /**
    * @brief Function to get JSON Document from a File
    * @param path pointer to file path
@@ -57,3 +59,7 @@ class JsonUtils {
    */
   static bool AddEmptyKeyToFile(std::string& path, const char* key);
 };
+
+}  // namespace plugin_common
+
+#endif  // PLUGINS_COMMON_JSON_JSON_UTILS_H_

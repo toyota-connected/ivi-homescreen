@@ -17,8 +17,8 @@
 #include "google_sign_in.h"
 
 #include "engine.h"
-#include "json_utils.h"
-#include "logging/logging.h"
+#include "plugins/common/common.h"
+#include "plugins/utils/json/json_utils.h"
 
 rapidjson::Document GoogleSignIn::GetClientSecret() {
   std::string path;

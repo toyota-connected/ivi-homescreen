@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Toyota Connected North America
+ * Copyright 2023-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,13 @@
 #include <filesystem>
 #include <fstream>
 
-#include <rapidjson/filewritestream.h>
-#include <rapidjson/istreamwrapper.h>
-#include <rapidjson/prettywriter.h>
+#include "flutter/third_party/rapidjson/include/rapidjson/filewritestream.h"
+#include "flutter/third_party/rapidjson/include/rapidjson/istreamwrapper.h"
+#include "flutter/third_party/rapidjson/include/rapidjson/prettywriter.h"
 
-#include "logging.h"
+#include "../logging.h"
+
+namespace plugin_common {
 
 rapidjson::Document JsonUtils::GetJsonDocumentFromFile(std::string& path,
                                                        bool missing_is_error) {
@@ -93,3 +95,4 @@ bool JsonUtils::AddEmptyKeyToFile(std::string& path, const char* key) {
   // flush to disk
   return WriteJsonDocumentToFile(path, d);
 }
+}  // namespace plugin_common

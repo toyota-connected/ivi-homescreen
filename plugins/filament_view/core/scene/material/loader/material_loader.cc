@@ -1,8 +1,8 @@
 
 #include "core/scene/material/loader/material_loader.h"
 
-#include "../../shell/curl_client/curl_client.h"
 #include "core/include/file_utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 MaterialLoader::MaterialLoader(CustomModelViewer* modelViewer,
@@ -29,7 +29,7 @@ Resource<::filament::Material*> MaterialLoader::loadMaterialFromAsset(
 
 Resource<::filament::Material*> MaterialLoader::loadMaterialFromUrl(
     const std::string& url) {
-  CurlClient client;
+  plugin_common::CurlClient client;
   client.Init(url, {}, {});
   std::vector<uint8_t> buffer = client.RetrieveContentAsVector();
   if (client.GetCode() != CURLE_OK) {

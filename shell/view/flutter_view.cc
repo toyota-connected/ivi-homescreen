@@ -37,6 +37,7 @@
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
 #include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
 #include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
+#include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
 #include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
@@ -317,6 +318,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
 #endif
 #if defined(ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX)
   DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_GOOGLE_SIGN_IN)
+  GoogleSignInPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 #if defined(ENABLE_PLUGIN_FIREBASE_CORE)

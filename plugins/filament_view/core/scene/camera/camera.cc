@@ -18,8 +18,7 @@
 
 #include <memory>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -130,7 +129,7 @@ Camera::Camera(const flutter::EncodableMap& params) {
       zoomSpeed_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Camera] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Camera::Camera");

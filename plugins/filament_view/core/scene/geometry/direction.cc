@@ -17,8 +17,8 @@
 #include "direction.h"
 
 #include "core/model/model.h"
-#include "logging/logging.h"
-#include "utils.h"
+
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 Direction::Direction(const flutter::EncodableMap& params) {
@@ -36,7 +36,7 @@ Direction::Direction(const flutter::EncodableMap& params) {
       z_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Direction] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Direction::Direction");

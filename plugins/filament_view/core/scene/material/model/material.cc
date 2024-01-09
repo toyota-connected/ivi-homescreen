@@ -18,8 +18,7 @@
 
 #include <filesystem>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -46,7 +45,7 @@ Material::Material(const std::string& flutter_assets_path,
       }
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Material] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Material::Material");

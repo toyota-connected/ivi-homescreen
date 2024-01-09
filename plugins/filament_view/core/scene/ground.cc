@@ -16,8 +16,7 @@
 
 #include "ground.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -57,7 +56,7 @@ Ground::Ground(const std::string& flutter_assets_path,
           flutterAssetsPath_, std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Ground] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Ground::Ground");

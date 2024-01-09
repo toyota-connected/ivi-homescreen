@@ -23,7 +23,7 @@
 #include <rapidjson/writer.h>
 
 #include "hash_table.h"
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_secure_storage {
 

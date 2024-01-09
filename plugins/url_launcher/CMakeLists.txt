@@ -20,7 +20,7 @@ add_library(plugin_url_launcher STATIC
         messages.cc
 )
 
-target_compile_definitions(plugin_url_launcher PUBLIC -DENABLE_PLUGIN_URL_LAUNCHER)
+target_compile_definitions(plugin_url_launcher PUBLIC ENABLE_PLUGIN_URL_LAUNCHER)
 
 target_include_directories(plugin_url_launcher PRIVATE include)
 

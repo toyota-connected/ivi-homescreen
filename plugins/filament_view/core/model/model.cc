@@ -16,8 +16,7 @@
 
 #include "core/model/model.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -117,7 +116,7 @@ std::unique_ptr<Model> Model::Deserialize(
       scene = std::make_unique<Scene>(flutterAssetsPath, it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Model] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
 

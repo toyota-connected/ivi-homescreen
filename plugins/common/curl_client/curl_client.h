@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Toyota Connected North America
+ * Copyright 2023-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef PLUGINS_COMMON_CURL_CLIENT_CURL_CLIENT_H_
+#define PLUGINS_COMMON_CURL_CLIENT_CURL_CLIENT_H_
 
 #include <memory>
 #include <sstream>
@@ -22,7 +23,7 @@
 
 #include <curl/curl.h>
 
-#include <constants.h>
+namespace plugin_common {
 
 class CurlClient {
  public:
@@ -72,7 +73,7 @@ class CurlClient {
    * @relation
    * google_sign_in
    */
-  NODISCARD CURLcode GetCode() const { return mCode; }
+  [[nodiscard]] CURLcode GetCode() const { return mCode; }
 
  private:
   CURL* mConn{};
@@ -115,3 +116,6 @@ class CurlClient {
                           size_t num_mem_block,
                           std::vector<uint8_t>* writerData);
 };
+}  // namespace plugin_common
+
+#endif  // PLUGINS_COMMON_CURL_CLIENT_CURL_CLIENT_H_

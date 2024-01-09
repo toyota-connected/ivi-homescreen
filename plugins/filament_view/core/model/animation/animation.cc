@@ -20,8 +20,7 @@
 
 #include "core/scene/geometry/position.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 Animation::Animation(const std::string& flutter_assets_path,
@@ -48,7 +47,7 @@ Animation::Animation(const std::string& flutter_assets_path,
           Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Animation] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
 }

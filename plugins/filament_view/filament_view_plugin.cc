@@ -19,7 +19,7 @@
 #include <flutter/standard_message_codec.h>
 
 #include "filament_scene.h"
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 #include "messages.g.h"
 
 class FlutterView;

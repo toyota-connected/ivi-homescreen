@@ -18,8 +18,7 @@
 
 #include <optional>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -66,7 +65,7 @@ std::unique_ptr<Texture> Texture::Deserialize(
           std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Texture] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   if (!type.has_value()) {

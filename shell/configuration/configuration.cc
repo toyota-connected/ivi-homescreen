@@ -18,10 +18,8 @@
 #include <filesystem>
 #include <fstream>
 
-#include <flutter/fml/command_line.h>
 #include <rapidjson/document.h>
 #include "constants.h"
-#include "logging.h"
 #include "utils.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {

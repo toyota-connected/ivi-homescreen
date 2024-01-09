@@ -16,8 +16,7 @@
 
 #include "lens_projection.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -41,7 +40,7 @@ LensProjection::LensProjection(const flutter::EncodableMap& params) {
       far_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[LensProjection] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--LensProjection::LensProjection");

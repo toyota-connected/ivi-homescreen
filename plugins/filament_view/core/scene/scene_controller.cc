@@ -19,7 +19,7 @@
 #include <asio/post.hpp>
 #include <utility>
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 

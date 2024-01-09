@@ -22,7 +22,7 @@
 
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 

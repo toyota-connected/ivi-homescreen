@@ -20,14 +20,10 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
-pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
-pkg_check_modules(ZLIB IMPORTED_TARGET REQUIRED zlib)
-
 add_executable(homescreen
         app.cc
         configuration/configuration.cc
         engine.cc
-        json_utils.cc
         libflutter_engine.cc
         main.cc
         textures/texture.cc
@@ -109,8 +105,6 @@ target_link_libraries(homescreen PRIVATE
         flutter
         wayland-gen
         Threads::Threads
-        PkgConfig::CURL
-        PkgConfig::ZLIB
         dl
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}

@@ -66,8 +66,6 @@ target_link_libraries(filament INTERFACE
         libutils.a
         libzstd.a
 
-        # PkgConfig::CURL
-        # PkgConfig::ZLIB
         Threads::Threads
 )
 
@@ -112,8 +110,6 @@ add_library(plugin_filament_view STATIC
         core/shapes/shape.cc
         core/shapes/shape_manager.cc
         viewer/custom_model_viewer.cc
-
-        ../../shell/curl_client/curl_client.cc
 )
 
 target_include_directories(plugin_filament_view PUBLIC
@@ -126,6 +122,7 @@ target_link_libraries(plugin_filament_view PUBLIC
         filament
         flutter
         platform_homescreen
+        plugin_common
 )
 
 add_sanitizers(plugin_filament_view)

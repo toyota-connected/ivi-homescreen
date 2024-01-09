@@ -30,8 +30,7 @@
 
 #include "audioplayers_linux_plugin.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace audioplayers_linux_plugin {
 
@@ -296,7 +295,7 @@ void AudioPlayersGlobalApi::SetUp(flutter::BinaryMessenger* binary_messenger,
       channel->SetMethodCallHandler(
           [api](const flutter::MethodCall<EncodableValue>& call,
                 std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
-            Utils::PrintFlutterEncodableValue("global", *call.arguments());
+            plugin_common::Encodable::PrintFlutterEncodableValue("global", *call.arguments());
           });
     } else {
       channel->SetMethodCallHandler(nullptr);
