@@ -24,7 +24,7 @@
 #include <utility>
 
 #include "core/utils/hdr_loader.h"
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 #include "textures/texture.h"
 
 namespace plugin_filament_view {

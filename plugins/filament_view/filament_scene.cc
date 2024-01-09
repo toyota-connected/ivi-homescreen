@@ -19,8 +19,7 @@
 #include "shell/platform/common/client_wrapper/include/flutter/standard_message_codec.h"
 
 #include "core/scene/scene_controller.h"
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -57,7 +56,7 @@ FilamentScene::FilamentScene(PlatformView* platformView,
       }
     } else {
       spdlog::warn("[FilamentView] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   sceneController_ = std::make_unique<SceneController>(

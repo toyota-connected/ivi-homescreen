@@ -2,8 +2,9 @@
 #include "core/scene/material/loader/texture_loader.h"
 #include <imageio/ImageDecoder.h>
 #include <memory>
-#include "../../shell/curl_client/curl_client.h"
 #include "core/include/file_utils.h"
+#include "plugins/common/common.h"
+
 
 namespace plugin_filament_view {
 
@@ -98,7 +99,7 @@ inline ::filament::backend::TextureFormat internalFormat(
 ::filament::Texture* TextureLoader::loadTextureFromUrl(
     const std::string& url,
     Texture::TextureType type) {
-  CurlClient client;
+  plugin_common::CurlClient client;
   client.Init(url, {}, {});
   std::vector<uint8_t> buffer = client.RetrieveContentAsVector();
   if (client.GetCode() != CURLE_OK) {

@@ -48,8 +48,6 @@ In above case the staged install is set to:
 Playx3d-scene needs conversion of assets for running on Vulkan+Linux:
 
 ```
-cd filament
-./cmake-build-debug-clang/tools/matc/matc --api vulkan \
--o <output file path>/flutter_assets/assets/materials/textured_pbr.filamat \
-./samples/materials/groundShadow.mat
+cd filament/cmake-build-debug-clang
+./tools/matc/matc --api vulkan -o /home/joel/workspace-automation/app/playx-3d-scene/example/build/flutter_assets/assets/materials/textured_pbr.filamat ../samples/materials/groundShadow.mat
 ```

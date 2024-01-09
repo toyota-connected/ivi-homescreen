@@ -16,8 +16,7 @@
 
 #include "projection.h"
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -52,7 +51,7 @@ Projection::Projection(const flutter::EncodableMap& params) {
       fovDirection_ = getFovForText(std::get<std::string>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Projection] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
   SPDLOG_TRACE("--Projection::Projection");

@@ -18,7 +18,7 @@
 
 #include <flutter/standard_message_codec.h>
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 class FlutterView;
 
@@ -75,25 +75,25 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
   /* Setup Wayland subsurface */
   auto flutter_view = state->view_controller->view;
   display_ = flutter_view->GetDisplay()->GetDisplay();
-  parent_surface_ = flutter_view->GetWindow()->GetBaseSurface();
+  egl_display_ = eglGetDisplay(display_);
+  assert(egl_display_);
+
   surface_ =
       wl_compositor_create_surface(flutter_view->GetDisplay()->GetCompositor());
-  subsurface_ = wl_subcompositor_get_subsurface(
-      flutter_view->GetDisplay()->GetSubCompositor(), surface_,
-      parent_surface_);
-
   egl_window_ = wl_egl_window_create(surface_, width_, height_);
   assert(egl_window_);
 
-  egl_display_ = eglGetDisplay(display_);
-  assert(egl_display_);
 
   InitializeEGL();
   egl_surface_ = eglCreateWindowSurface(
       egl_display_, egl_config_, reinterpret_cast<EGLNativeWindowType>(egl_window_), nullptr);
 
-  // Sync
-  //wl_subsurface_set_sync(subsurface_);
+  // Subsurface
+  parent_surface_ = flutter_view->GetWindow()->GetBaseSurface();
+  subsurface_ = wl_subcompositor_get_subsurface(
+      flutter_view->GetDisplay()->GetSubCompositor(), surface_,
+      parent_surface_);
+
   wl_subsurface_set_desync(subsurface_);
 
   eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);

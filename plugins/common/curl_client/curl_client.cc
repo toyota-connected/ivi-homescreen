@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Toyota Connected North America
+ * Copyright 2023-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@
 
 #include "curl_client.h"
 
-#include "logging/logging.h"
+#include "../logging.h"
+
+namespace plugin_common {
 
 CurlClient::CurlClient() : mCode(CURLE_OK) {
   curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -183,3 +185,4 @@ const std::vector<uint8_t>& CurlClient::RetrieveContentAsVector(bool verbose) {
   }
   return mVectorBuffer;
 }
+}  // namespace plugin_common

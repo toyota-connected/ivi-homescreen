@@ -22,7 +22,7 @@
 
 #include <memory>
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_webview_flutter {
 

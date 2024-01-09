@@ -27,8 +27,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 using flutter::EncodableValue;
 using flutter::MessageReply;

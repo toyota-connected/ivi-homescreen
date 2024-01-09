@@ -16,7 +16,7 @@
 
 #include "shape_manager.h"
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 ShapeManager::ShapeManager(CustomModelViewer* modelViewer,

@@ -19,6 +19,8 @@
 #include "shell/platform/homescreen/platform_views/platform_view_listener.h"
 #include "shell/platform/homescreen/platform_views/platform_view_touch.h"
 
+#include "plugins/common/common.h"
+
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
 #include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"
 #endif
@@ -222,7 +224,7 @@ void PlatformViewsHandler::HandleMethodCall(
     }
     result->Success();
   } else if (method_name == kMethodClearFocus) {
-    Utils::PrintFlutterEncodableValue("clearFocus", *arguments);
+    plugin_common::Encodable::PrintFlutterEncodableValue("clearFocus", *arguments);
     result->Success();
   } else if (method_name == kMethodOffset) {
     int32_t id = 0;
@@ -262,7 +264,7 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
-    Utils::PrintFlutterEncodableValue("unhandled", *arguments);
+    plugin_common::Encodable::PrintFlutterEncodableValue("unhandled", *arguments);
     result->NotImplemented();
   }
 }

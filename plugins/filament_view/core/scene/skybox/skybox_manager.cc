@@ -23,8 +23,7 @@
 
 #include "core/include/color.h"
 #include "core/utils/hdr_loader.h"
-#include "curl_client/curl_client.h"
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 SkyboxManager::SkyboxManager(CustomModelViewer* modelViewer,
@@ -118,7 +117,7 @@ std::future<Resource<std::string_view>> SkyboxManager::setSkyboxFromHdrUrl(
   SPDLOG_DEBUG("Skybox downloading HDR Asset: {}", url.c_str());
   asio::post(modelViewer_->getStrandContext(),
              [&, promise, url, showSun, shouldUpdateLight, intensity] {
-               CurlClient client;
+               plugin_common::CurlClient client;
                client.Init(url, {}, {});
                auto buffer = client.RetrieveContentAsVector();
                if (client.GetCode() != CURLE_OK) {
@@ -195,7 +194,7 @@ std::future<Resource<std::string_view>> SkyboxManager::setSkyboxFromKTXUrl(
   }
 
   asio::post(modelViewer_->getStrandContext(), [&, promise, url] {
-    CurlClient client;
+    plugin_common::CurlClient client;
     client.Init(url, {}, {});
     auto buffer = client.RetrieveContentAsVector();
     if (client.GetCode() != CURLE_OK) {

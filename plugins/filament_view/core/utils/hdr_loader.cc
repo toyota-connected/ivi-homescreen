@@ -5,7 +5,7 @@
 
 #include <imageio/ImageDecoder.h>
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 

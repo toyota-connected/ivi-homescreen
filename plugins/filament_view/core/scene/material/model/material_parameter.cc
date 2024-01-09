@@ -20,8 +20,7 @@
 
 #include <utility>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -53,7 +52,7 @@ std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
       value = std::get<flutter::EncodableMap>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[MaterialParameter] Unhandled Parameter");
-      Utils::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
     }
   }
 

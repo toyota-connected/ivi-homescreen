@@ -19,8 +19,7 @@
 #include <optional>
 #include <string>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_file_selector {
 
@@ -107,14 +106,14 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               SPDLOG_DEBUG("cmd: [{}]", oss.str());
 
               char path[PATH_MAX];
-              if (!Utils::ExecuteCommand(oss.str().c_str(), path)) {
+              if (!plugin_common::Command::Execute(oss.str().c_str(), path)) {
                 result->Error("failed", "failed to execute command");
                 return;
               }
               flutter::EncodableList results;
-              auto paths = Utils::split(path, "|");
+              auto paths = plugin_common::StringTools::split(path, "|");
               for (auto p : paths) {
-                results.emplace_back(std::move(Utils::trim(p, "\n")));
+                results.emplace_back(std::move(plugin_common::StringTools::trim(p, "\n")));
               }
               result->Success(flutter::EncodableValue(results));
               return;
@@ -250,15 +249,15 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               SPDLOG_DEBUG("cmd: [{}]", oss.str());
 
               char path[PATH_MAX];
-              if (!Utils::ExecuteCommand(oss.str().c_str(), path)) {
+              if (!plugin_common::Command::Execute(oss.str().c_str(), path)) {
                 result->Error("failed", "failed to execute command");
                 return;
               }
 
               flutter::EncodableList results;
-              auto paths = Utils::split(path, "|");
+              auto paths = plugin_common::StringTools::split(path, "|");
               for (auto p : paths) {
-                results.emplace_back(std::move(Utils::trim(p, "\n")));
+                results.emplace_back(std::move(plugin_common::StringTools::trim(p, "\n")));
               }
               result->Success(flutter::EncodableValue(results));
             } else {

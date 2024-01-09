@@ -16,7 +16,7 @@
 
 #include "core/scene/material/material_manager.h"
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 

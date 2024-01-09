@@ -18,8 +18,7 @@
 #include <optional>
 #include <string>
 
-#include "logging/logging.h"
-#include "utils.h"
+#include "plugins/common/common.h"
 
 namespace url_launcher_linux {
 using flutter::BasicMessageChannel;
@@ -81,7 +80,7 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               }
             } else if ("launch" == call.method_name()) {
               const auto& arg = *call.arguments();
-              Utils::PrintFlutterEncodableValue("launch", arg);
+              plugin_common::Encodable::PrintFlutterEncodableValue("launch", arg);
               if (std::holds_alternative<std::string>(arg)) {
                 const auto& value = std::get<std::string>(arg);
                 spdlog::debug("[url_launcher] launch: {}", value);
@@ -130,7 +129,7 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                        header_value);
                         }
                       } else {
-                        Utils::PrintFlutterEncodableMap(key.c_str(), map);
+                        plugin_common::Encodable::PrintFlutterEncodableMap(key.c_str(), map);
                       }
                     }
                   }

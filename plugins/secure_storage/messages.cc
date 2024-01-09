@@ -18,7 +18,7 @@
 #include <optional>
 #include <string>
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_secure_storage {
 

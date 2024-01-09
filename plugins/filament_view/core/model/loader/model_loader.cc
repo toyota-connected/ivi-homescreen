@@ -28,9 +28,8 @@
 
 #include "gltfio/materials/uberarchive.h"
 
-#include "../../shell/curl_client/curl_client.h"
+#include "plugins/common/common.h"
 #include "core/include/file_utils.h"
-#include "logging/logging.h"
 
 namespace plugin_filament_view {
 
@@ -283,7 +282,7 @@ std::future<Resource<std::string_view>> ModelLoader::loadGlbFromUrl(
   auto promise_future(promise->get_future());
   modelViewer_->setModelState(ModelState::LOADING);
   asio::post(strand_, [&, promise, url, scale, centerPosition, isFallback] {
-    CurlClient client;
+    plugin_common::CurlClient client;
     client.Init(url, {}, {});
     auto buffer = client.RetrieveContentAsVector();
     if (client.GetCode() != CURLE_OK) {

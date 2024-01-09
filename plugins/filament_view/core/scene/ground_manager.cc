@@ -24,7 +24,7 @@
 #include <math/vec3.h>
 #include "asio/post.hpp"
 
-#include "logging/logging.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
