@@ -66,6 +66,7 @@ target_link_libraries(filament INTERFACE
         libutils.a
         libzstd.a
 
+        z
         Threads::Threads
 )
 
