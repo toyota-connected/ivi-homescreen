@@ -13,6 +13,8 @@ target_include_directories(plugin_layer_playground_view PUBLIC
 target_link_libraries(plugin_layer_playground_view PUBLIC
         flutter
         platform_homescreen
+        GLESv2
+        EGL
 )
 
 add_sanitizers(plugin_layer_playground_view)
