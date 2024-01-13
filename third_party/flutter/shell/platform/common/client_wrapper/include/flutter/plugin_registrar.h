@@ -19,7 +19,7 @@ namespace flutter {
 
 class Plugin;
 
-// A object managing the registration of a plugin for various events.
+// An object managing the registration of a plugin for various events.
 //
 // Currently this class has very limited functionality, but is expected to
 // expand over time to more closely match the functionality of
