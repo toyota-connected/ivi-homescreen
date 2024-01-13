@@ -79,5 +79,8 @@ endif ()
 if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
     target_link_libraries(platform_homescreen PUBLIC plugin_google_sign_in)
 endif ()
+if (BUILD_PLUGIN_VIDEO_PLAYER_LINUX)
+    target_link_libraries(platform_homescreen PUBLIC plugin_video_player_linux)
+endif ()
 
 target_link_libraries(platform_homescreen PUBLIC plugin_common)

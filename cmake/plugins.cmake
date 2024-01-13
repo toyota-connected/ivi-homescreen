@@ -166,4 +166,9 @@ if (BUILD_PLUGIN_WEBVIEW_FLUTTER)
     ENABLE_PLUGIN(webview_flutter)
 endif ()
 
+option(BUILD_PLUGIN_VIDEO_PLAYER_LINUX "Include Video Player plugin" OFF)
+if (BUILD_PLUGIN_VIDEO_PLAYER_LINUX)
+    ENABLE_PLUGIN(video_player_linux)
+endif ()
+
 ENABLE_PLUGIN(common)

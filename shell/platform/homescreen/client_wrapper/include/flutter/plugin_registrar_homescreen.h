@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#ifndef SHELL_PLATFORM_HOMESCREEN_CLIENT_WRAPPER_INCLUDE_FLUTTER_PLUGIN_REGISTRAR_HOMESCREEN_H
-#define SHELL_PLATFORM_HOMESCREEN_CLIENT_WRAPPER_INCLUDE_FLUTTER_PLUGIN_REGISTRAR_HOMESCREEN_H
+#ifndef SHELL_PLATFORM_HOMESCREEN_CLIENT_WRAPPER_INCLUDE_FLUTTER_PLUGIN_REGISTRAR_HOMESCREEN_H_
+#define SHELL_PLATFORM_HOMESCREEN_CLIENT_WRAPPER_INCLUDE_FLUTTER_PLUGIN_REGISTRAR_HOMESCREEN_H_
 
 #include <flutter_homescreen.h>
 
-//#include <memory>
-
 #include "plugin_registrar.h"
+
+class FlutterView;
 
 namespace flutter {
 
@@ -33,6 +33,8 @@ class PluginRegistrarDesktop final : public PluginRegistrar {
 
   ~PluginRegistrarDesktop() override { ClearPlugins(); }
 
+  FlutterView* GetView() const { return nullptr; }
+
   // Prevent copying.
   PluginRegistrarDesktop(PluginRegistrarDesktop const&) = delete;
   PluginRegistrarDesktop& operator=(PluginRegistrarDesktop const&) = delete;
@@ -40,4 +42,4 @@ class PluginRegistrarDesktop final : public PluginRegistrar {
 
 }  // namespace flutter
 
-#endif  // SHELL_PLATFORM_HOMESCREEN_CLIENT_WRAPPER_INCLUDE_FLUTTER_PLUGIN_REGISTRAR_HOMESCREEN_H
+#endif  // SHELL_PLATFORM_HOMESCREEN_CLIENT_WRAPPER_INCLUDE_FLUTTER_PLUGIN_REGISTRAR_HOMESCREEN_H_
