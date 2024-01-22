@@ -202,12 +202,15 @@ void Display::registry_handle_global(void* data,
     std::fill_n(oi.get(), 1, output_info_t{});
     oi->global_id = name;
     // be compat with v2 as well
+#if defined(WL_OUTPUT_NAME_SINCE_VERSION) && \
+    defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
     if (version >= WL_OUTPUT_NAME_SINCE_VERSION &&
         version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
       oi->output = static_cast<struct wl_output*>(
           wl_registry_bind(registry, name, &wl_output_interface,
                            std::min(static_cast<uint32_t>(4), version)));
     else
+#endif
       oi->output = static_cast<struct wl_output*>(
           wl_registry_bind(registry, name, &wl_output_interface,
                            std::min(static_cast<uint32_t>(2), version)));
