@@ -12,7 +12,7 @@ done
 
 # calculate test coverage
 lcov -d . -c --rc lcov_branch_coverage=1 -o coverage.info
-lcov -r coverage.info '*/test/*' '*/usr/*' --rc lcov_branch_coverage=1 -o coverage.info
+lcov -r coverage.info '*/test/*' '*/usr/*' '*/third_party/*' --rc lcov_branch_coverage=1 -o coverage.info
 
 # generate html file
 genhtml -o lcovHtml -s --legend --branch-coverage coverage.info
