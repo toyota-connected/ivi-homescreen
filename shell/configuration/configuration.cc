@@ -17,7 +17,6 @@
 
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 
 #include <flutter/fml/command_line.h>
 #include <rapidjson/document.h>
@@ -47,26 +46,23 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
     instance.view.window_type = obj[kWindowTypeKey].GetString();
   }
-  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
+  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsUint()) {
     instance.view.wl_output_index =
-        static_cast<uint32_t>(obj[kOutputIndex].GetInt());
+        static_cast<uint32_t>(obj[kOutputIndex].GetUint());
   }
-  if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
-    instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
+  if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsUint()) {
+    instance.view.width = obj[kWidthKey].GetUint();
   }
-  if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsInt()) {
-    instance.view.height = static_cast<uint32_t>(obj[kHeightKey].GetInt());
+  if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsUint()) {
+    instance.view.height = obj[kHeightKey].GetUint();
   }
-  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
-    instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+  if (obj.HasMember(kPixelRatioKey)) {
+    if (obj[kPixelRatioKey].IsDouble() || obj[kPixelRatioKey].IsInt()) {
+      instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
+    }
   }
-  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
-    instance.view.pixel_ratio =
-        static_cast<double>(obj[kPixelRatioKey].GetInt());
-  }
-  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
-    instance.view.ivi_surface_id =
-        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
+  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsUint()) {
+    instance.view.ivi_surface_id = obj[kIviSurfaceIdKey].GetUint();
   }
   if (obj.HasMember(kAccessibilityFeaturesKey) &&
       obj[kAccessibilityFeaturesKey].IsInt()) {
@@ -85,17 +81,14 @@ void Configuration::getViewParameters(
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
   }
-  if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console =
-        static_cast<uint32_t>(obj[kFpsOutputConsole].GetInt());
+  if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsUint()) {
+    instance.view.fps_output_console = obj[kFpsOutputConsole].GetUint();
   }
-  if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay =
-        static_cast<uint32_t>(obj[kFpsOutputOverlay].GetInt());
+  if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsUint()) {
+    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetUint();
   }
-  if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency =
-        static_cast<uint32_t>(obj[kFpsOutputFrequency].GetInt());
+  if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsUint()) {
+    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetUint();
   }
 
   if (obj.HasMember(kWindowActivationAreaKey)) {
@@ -129,58 +122,8 @@ void Configuration::getGlobalParameters(
   if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
     instance.debug_backend = obj[kDebugBackendKey].GetBool();
   }
-  if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
-    const auto args = obj[kVmArgsKey].GetArray();
-    for (auto const& arg : args) {
-      instance.view.vm_args.emplace_back(arg.GetString());
-    }
-  }
-  if (obj.HasMember(kBundlePathKey) && obj[kBundlePathKey].IsString()) {
-    instance.view.bundle_path = obj[kBundlePathKey].GetString();
-  }
-  if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
-    instance.view.window_type = obj[kWindowTypeKey].GetString();
-  }
-  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsInt()) {
-    instance.view.wl_output_index = obj[kOutputIndex].GetUint();
-  }
-  if (obj.HasMember(kAccessibilityFeaturesKey) &&
-      obj[kAccessibilityFeaturesKey].IsInt()) {
-    instance.view.accessibility_features =
-        MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
-  }
-  if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsInt()) {
-    instance.view.width = static_cast<uint32_t>(obj[kWidthKey].GetInt());
-  }
-  if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsInt()) {
-    instance.view.height = static_cast<uint32_t>(obj[kHeightKey].GetInt());
-  }
-  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsDouble()) {
-    instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
-  }
-  if (obj.HasMember(kPixelRatioKey) && obj[kPixelRatioKey].IsInt()) {
-    instance.view.pixel_ratio =
-        static_cast<double>(obj[kPixelRatioKey].GetInt());
-  }
-  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsInt()) {
-    instance.view.ivi_surface_id =
-        static_cast<uint32_t>(obj[kIviSurfaceIdKey].GetInt());
-  }
-  if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
-    instance.view.fullscreen = obj[kFullscreenKey].GetBool();
-  }
-  if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsInt()) {
-    instance.view.fps_output_console =
-        static_cast<uint32_t>(obj[kFpsOutputConsole].GetInt());
-  }
-  if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsInt()) {
-    instance.view.fps_output_overlay =
-        static_cast<uint32_t>(obj[kFpsOutputOverlay].GetInt());
-  }
-  if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsInt()) {
-    instance.view.fps_output_frequency =
-        static_cast<uint32_t>(obj[kFpsOutputFrequency].GetInt());
-  }
+
+  Configuration::getViewParameters(obj, instance);
 }
 
 void Configuration::getView(rapidjson::Document& doc,
