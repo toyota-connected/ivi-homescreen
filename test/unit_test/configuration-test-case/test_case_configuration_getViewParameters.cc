@@ -26,7 +26,6 @@ TEST(HomescreenConfigurationGetViewParameters, Lv1Normal001) {
       "],"
       "\"accessibility_features\":1,"
       "\"fullscreen\":true,"
-      "\"debug_backend\":true,"
       "\"fps_output_console\":1,"
       "\"fps_output_overlay\":1,"
       "\"fps_output_frequency\":1"
@@ -49,7 +48,6 @@ TEST(HomescreenConfigurationGetViewParameters, Lv1Normal001) {
   EXPECT_EQ("--pause-isolates-on-start", config.view.vm_args[1]);
   EXPECT_EQ(1, config.view.accessibility_features);
   EXPECT_EQ(true, config.view.fullscreen);
-  EXPECT_EQ(true, config.debug_backend);
   EXPECT_EQ(1, config.view.fps_output_console);
   EXPECT_EQ(1, config.view.fps_output_overlay);
   EXPECT_EQ(1, config.view.fps_output_frequency);
@@ -85,7 +83,6 @@ TEST(HomescreenConfigurationGetViewParameters, Lv1Normal002) {
   EXPECT_EQ(true, config.view.vm_args.empty());
   EXPECT_EQ(0, config.view.accessibility_features);
   EXPECT_EQ(false, config.view.fullscreen);
-  EXPECT_EQ(false, config.debug_backend);
   EXPECT_EQ(0, config.view.fps_output_console);
   EXPECT_EQ(0, config.view.fps_output_overlay);
   EXPECT_EQ(0, config.view.fps_output_frequency);
@@ -111,7 +108,6 @@ TEST(HomescreenConfigurationGetViewParameters, Lv1Abnormal001) {
       "\"vm_args\":\"Abnormal\","
       "\"accessibility_features\":1.234,"
       "\"fullscreen\":3,"
-      "\"debug_backend\":3,"
       "\"fps_output_console\":1.234,"
       "\"fps_output_overlay\":1.234,"
       "\"fps_output_frequency\":1.234"
@@ -133,7 +129,6 @@ TEST(HomescreenConfigurationGetViewParameters, Lv1Abnormal001) {
   EXPECT_EQ(true, config.view.vm_args.empty());
   EXPECT_EQ(0, config.view.accessibility_features);
   EXPECT_EQ(false, config.view.fullscreen);
-  EXPECT_EQ(false, config.debug_backend);
   EXPECT_EQ(0, config.view.fps_output_console);
   EXPECT_EQ(0, config.view.fps_output_overlay);
   EXPECT_EQ(0, config.view.fps_output_frequency);

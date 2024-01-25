@@ -5,7 +5,8 @@ set(TESTCASE_CC test_case_configuration.cc;
                 test_case_configuration_getViewParameters.cc;
                 test_case_configuration_getGlobalParameters.cc;
                 test_case_configuration_ConvertCommandlineToConfig.cc;
-                test_case_configuration_getCliOverrides.cc;)
+                test_case_configuration_getCliOverrides.cc;
+                test_case_configuration_PrintConfig.cc;)
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # Basically, the following statements need not be modified
