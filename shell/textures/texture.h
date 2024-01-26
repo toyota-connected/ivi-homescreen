@@ -25,6 +25,7 @@
 #include <flutter/encodable_value.h>
 #include <shell/platform/embedder/embedder.h>
 #include "constants.h"
+#include "utils.h"
 
 class Engine;
 
@@ -129,7 +130,7 @@ class Texture {
    */
   NODISCARD int64_t GetId() const { return m_id; }
 
- protected:
+ PROTECTED:
   Engine* m_flutter_engine;
   bool m_enabled;
   int64_t m_id;
