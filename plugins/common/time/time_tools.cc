@@ -16,6 +16,8 @@
 
 #include "time_tools.h"
 
+#include <ctime>
+
 namespace plugin_common {
 
 int64_t TimeTools::GetEpochTimeInSeconds() {
@@ -24,4 +26,26 @@ int64_t TimeTools::GetEpochTimeInSeconds() {
   const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch);
   return seconds.count();
 }
+
+std::string TimeTools::GetCurrentTimeString() {
+  std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+  auto duration = now.time_since_epoch();
+  auto millis =
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() %
+      1000;
+  time_t tt = std::chrono::system_clock::to_time_t(now);
+  tm local_tm = *localtime(&tt);
+
+  std::string time_start;
+  time_start.resize(80);
+  size_t len =
+      strftime(&time_start[0], time_start.size(), "%Y_%m%d_%H%M%S_", &local_tm);
+  if (len > 0) {
+    time_start.resize(len);
+  }
+
+  // Add milliseconds to make sure the filename is unique
+  return time_start + std::to_string(millis);
+}
+
 }  // namespace plugin_common

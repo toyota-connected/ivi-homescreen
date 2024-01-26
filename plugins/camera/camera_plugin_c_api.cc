@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,27 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef PLUGINS_COMMON_TIME_TIME_TOOLS_H_
-#define PLUGINS_COMMON_TIME_TIME_TOOLS_H_
+#include "include/camera/camera_plugin_c_api.h"
 
-#include <cstdint>
-#include <string>
+#include "flutter/plugin_registrar.h"
 
-namespace plugin_common {
+#include "camera_plugin.h"
 
-class TimeTools {
- public:
-  /**
-   * @brief Get epoch time in seconds
-   * @return current time in epoch seconds
-   * @relation
-   * internal
-   */
-  static int64_t GetEpochTimeInSeconds();
-
-  static std::string GetCurrentTimeString();
-};
-
-}  // namespace plugin_common
-
-#endif  // PLUGINS_COMMON_TIME_TIME_TOOLS_H_
+void CameraPluginCApiRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrarRef registrar) {
+  camera_plugin::CameraPlugin::RegisterWithRegistrar(
+      flutter::PluginRegistrarManager::GetInstance()
+          ->GetRegistrar<flutter::PluginRegistrar>(registrar));
+}

@@ -34,6 +34,7 @@
 #include <platform/homescreen/key_event_handler.h>
 #include <platform/homescreen/text_input_plugin.h>
 #include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
+#include <plugins/camera/include/camera/camera_plugin_c_api.h>
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
 #include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
 #include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
@@ -343,6 +344,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
 #endif
 #if defined(ENABLE_PLUGIN_VIDEO_PLAYER_LINUX)
   VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_CAMERA)
+  CameraPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 }
