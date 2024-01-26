@@ -82,5 +82,8 @@ endif ()
 if (BUILD_PLUGIN_VIDEO_PLAYER_LINUX)
     target_link_libraries(platform_homescreen PUBLIC plugin_video_player_linux)
 endif ()
+if (BUILD_PLUGIN_CAMERA)
+    target_link_libraries(platform_homescreen PUBLIC plugin_camera)
+endif ()
 
 target_link_libraries(platform_homescreen PUBLIC plugin_common)

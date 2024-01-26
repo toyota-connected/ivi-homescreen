@@ -171,4 +171,9 @@ if (BUILD_PLUGIN_VIDEO_PLAYER_LINUX)
     ENABLE_PLUGIN(video_player_linux)
 endif ()
 
+option(BUILD_PLUGIN_CAMERA "Include Camera plugin" OFF)
+if (BUILD_PLUGIN_CAMERA)
+    ENABLE_PLUGIN(camera)
+endif ()
+
 ENABLE_PLUGIN(common)
