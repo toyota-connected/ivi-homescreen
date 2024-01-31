@@ -15,7 +15,7 @@ env:
 jobs:
   build:
     if: ${{ github.server_url != 'https://github.com' && always() }}
-    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    runs-on: [self-hosted, large-runner]
     container:
       image: arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com/ivi-homescreen-dev:latest
       credentials:
