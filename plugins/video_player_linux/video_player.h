@@ -18,6 +18,10 @@
 #include <sstream>
 #include <string>
 
+extern "C" {
+#include <gst/gst.h>
+}
+
 #include "messages.g.h"
 
 #include "shell/view/flutter_view.h"

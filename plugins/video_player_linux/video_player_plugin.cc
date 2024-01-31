@@ -12,6 +12,7 @@
 
 #include "messages.g.h"
 #include "video_player.h"
+#include "plugins/common/glib/main_loop.h"
 
 namespace video_player_linux {
 
@@ -22,7 +23,15 @@ void VideoPlayerPlugin::RegisterWithRegistrar(
   registrar->AddPlugin(std::move(plugin));
 }
 
-VideoPlayerPlugin::VideoPlayerPlugin() = default;
+VideoPlayerPlugin::VideoPlayerPlugin() {
+  // GStreamer lib only needs to be initialized once.  Calling it multiple times
+  // is fine.
+  gst_init(nullptr, nullptr);
+
+  // start the main loop if not already running
+  plugin_common::glib::MainLoop::GetInstance();
+}
+
 VideoPlayerPlugin::~VideoPlayerPlugin() = default;
 
 VideoPlayerPlugin::VideoPlayerPlugin(flutter::PluginRegistrar* registrar)
