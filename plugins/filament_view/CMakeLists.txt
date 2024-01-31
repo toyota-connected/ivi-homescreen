@@ -147,7 +147,7 @@ if (SDL2_FOUND)
     )
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(simple PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-        target_link_options(simple PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
+        target_link_options(simple PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -l:libc++.a -l:libc++abi.a -static-libgcc -lc -lm -v>)
     endif ()
     add_sanitizers(simple)
 
