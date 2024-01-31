@@ -24,6 +24,7 @@
 #include <flutter/plugin_registrar.h>
 
 #include "messages.h"
+#include "plugins/common/glib/main_loop.h"
 
 namespace audioplayers_linux_plugin {
 
@@ -50,31 +51,11 @@ AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(
   // is fine.
   gst_init(nullptr, nullptr);
 
-  gthread_ = std::make_unique<std::thread>(main_loop, this);
+  // start the main loop if not already running
+  plugin_common::glib::MainLoop::GetInstance();
 }
 
-AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() {
-  g_main_loop_quit(main_loop_);
-  g_main_loop_unref(main_loop_);
-  gthread_->join();
-  gthread_.reset();
-}
-
-void AudioplayersLinuxPlugin::main_loop(AudioplayersLinuxPlugin* data) {
-  data->context_ = g_main_context_default();
-
-  data->is_running_ = TRUE;
-  while (data->is_running_) {
-    if (data->exit_loop_) {
-      data->is_running_ = FALSE;
-    }
-
-    g_main_context_iteration(data->context_, TRUE);
-  }
-
-  g_main_loop_quit(data->main_loop_);
-  g_main_loop_unref(data->main_loop_);
-}
+AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() = default;
 
 AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
   auto searchPlayer = audioPlayers_.find(playerId);
