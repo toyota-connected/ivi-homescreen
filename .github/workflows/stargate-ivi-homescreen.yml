@@ -15,7 +15,7 @@ env:
 jobs:
   build:
     if: ${{ github.server_url != 'https://github.com' && always() }}
-    runs-on: [ self-hosted ]
+    runs-on: [self-hosted, large-runner]
     container:
       image: arene-os-services-cockpit-docker-local-private.artifactory-ha.tmc-stargate.com/ivi-homescreen-dev:latest
       credentials:
@@ -24,7 +24,7 @@ jobs:
     steps:
 
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: JFrog CLI
         run: |
