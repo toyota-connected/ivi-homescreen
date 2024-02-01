@@ -87,3 +87,25 @@ void Dlt::LogString(DltLogLevelType log_level, const char* buff) {
     std::cerr.flush();
   }
 }
+
+MAYBE_UNUSED
+void Dlt::LogSizedString(DltLogLevelType log_level, const char* buff, uint16_t length) {
+  if (gContextSet && length == 0) {
+    LogString(log_level, buff);
+  }
+  else if (gContextSet && length) {
+    DltContextData log_local;
+    auto res = LibDlt->UserLogWriteStart(&gContext, &log_local, log_level);
+    if (res == DltReturnValue::True) {
+      (void)LibDlt->UserLogWriteSizedUtf8String(&log_local, buff, length);
+      (void)LibDlt->UserLogWriteFinish(&log_local);
+    }
+
+    if (log_level == DltLogLevelType::LOG_FATAL) {
+      Dlt::Unregister();
+    }
+  } else {
+    std::cerr << buff;
+    std::cerr.flush();
+  }
+}
