@@ -87,6 +87,8 @@ struct LibDltExports {
                                       DltLogLevelType) = nullptr;
   DltReturnValue (*UserLogWriteFinish)(DltContextData*) = nullptr;
   DltReturnValue (*UserLogWriteString)(DltContextData*, const char*) = nullptr;
+  DltReturnValue (*UserLogWriteConstantUtf8String)(DltContextData *, const char *) = nullptr;
+  DltReturnValue (*UserLogWriteSizedUtf8String)(DltContextData *, const char *, uint16_t) = nullptr;
   DltReturnValue (*UserLogWriteInt)(DltContextData*, int) = nullptr;
   DltReturnValue (*UserLogWriteInt8)(DltContextData*, int8_t) = nullptr;
   DltReturnValue (*UserLogWriteInt16)(DltContextData*, int16_t) = nullptr;

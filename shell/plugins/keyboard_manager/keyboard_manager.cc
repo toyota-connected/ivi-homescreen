@@ -18,6 +18,7 @@
 
 #include "engine.h"
 #include "keyboard_manager.h"
+#include "standard_method_codec.h"
 
 void KeyboardManager::OnPlatformMessage(const FlutterPlatformMessage* message,
                                  void* userdata) {

@@ -20,7 +20,6 @@
 #if defined(ENABLE_DLT)
 #include <spdlog/sinks/callback_sink.h>
 #endif
-#include <spdlog/sinks/ringbuffer_sink.h>
 
 #include <constants.h>
 
@@ -32,22 +31,32 @@ Logging::Logging() {
         "primary", [](const spdlog::details::log_msg& msg) {
           switch (msg.level) {
             case SPDLOG_LEVEL_TRACE:
-              Dlt::LogString(DltLogLevelType::LOG_VERBOSE, msg.payload.data());
+              Dlt::LogSizedString(DltLogLevelType::LOG_VERBOSE,
+                                  msg.payload.data(),
+                                  static_cast<uint16_t>(msg.payload.size()));
               break;
             case SPDLOG_LEVEL_DEBUG:
-              Dlt::LogString(DltLogLevelType::LOG_DEBUG, msg.payload.data());
+              Dlt::LogSizedString(DltLogLevelType::LOG_DEBUG,
+                                  msg.payload.data(),
+                                  static_cast<uint16_t>(msg.payload.size()));
               break;
             case SPDLOG_LEVEL_INFO:
-              Dlt::LogString(DltLogLevelType::LOG_INFO, msg.payload.data());
+              Dlt::LogSizedString(DltLogLevelType::LOG_INFO, msg.payload.data(),
+                                  static_cast<uint16_t>(msg.payload.size()));
               break;
             case SPDLOG_LEVEL_WARN:
-              Dlt::LogString(DltLogLevelType::LOG_WARN, msg.payload.data());
+              Dlt::LogSizedString(DltLogLevelType::LOG_WARN, msg.payload.data(),
+                                  static_cast<uint16_t>(msg.payload.size()));
               break;
             case SPDLOG_LEVEL_ERROR:
-              Dlt::LogString(DltLogLevelType::LOG_ERROR, msg.payload.data());
+              Dlt::LogSizedString(DltLogLevelType::LOG_ERROR,
+                                  msg.payload.data(),
+                                  static_cast<uint16_t>(msg.payload.size()));
               break;
             case SPDLOG_LEVEL_CRITICAL:
-              Dlt::LogString(DltLogLevelType::LOG_FATAL, msg.payload.data());
+              Dlt::LogSizedString(DltLogLevelType::LOG_FATAL,
+                                  msg.payload.data(),
+                                  static_cast<uint16_t>(msg.payload.size()));
               break;
             default:
               break;
