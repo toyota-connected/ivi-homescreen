@@ -22,7 +22,6 @@
 
 #include <GLES2/gl2.h>
 
-#include "gl_process_resolver.h"
 #include "logging.h"
 
 Egl::Egl(void* native_display, int buffer_size, bool debug)
@@ -580,17 +579,9 @@ static struct egl_config_attribute egl_config_attributes[] = {
 };
 
 void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
-  std::stringstream ss;
   spdlog::info("OpenGL ES Attributes:");
-  ss << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR) << "\"";
-  spdlog::info(ss.str().c_str());
-  ss.str("");
-  ss.clear();
-  ss << "\tEGL_CLIENT_APIS: \"" << eglQueryString(m_dpy, EGL_CLIENT_APIS)
-     << "\"";
-  spdlog::info(ss.str().c_str());
-  ss.str("");
-  ss.clear();
+  spdlog::info("\tEGL_VENDOR: \"{}\"", eglQueryString(m_dpy, EGL_VENDOR));
+  spdlog::info("\tEGL_CLIENT_APIS: \"{}\"", eglQueryString(m_dpy, EGL_CLIENT_APIS));
   spdlog::info("\tEGL_EXTENSIONS:");
 
   print_extension_list(m_dpy);
@@ -602,6 +593,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
     return;
   }
 
+  std::stringstream ss;
   spdlog::info("EGL framebuffer configurations:");
   for (EGLint i = 0; i < num_config; i++) {
     ss << "\tConfiguration #" << i;

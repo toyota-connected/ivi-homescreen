@@ -45,7 +45,7 @@ Ubuntu packages
 
 Fedora packages
 
-    sudo dnf install dlt-libs-devel dlt-dameon dlt-tools
+    sudo dnf install dlt-libs-devel dlt-daemon dlt-tools
 
 ### Logging with DLT
 
@@ -62,7 +62,7 @@ Start new terminal
 
 You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
 
-If sanitizers are supported by your compiler, the specified targets will be build with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
+If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
 
 # Backend Support
 
@@ -82,7 +82,7 @@ Running Vulkan requires an engine version that supports Vulkan.  Stable does not
 
 # Bundle File Override Logic
 
-If an override file is not present, it gets loaded from default location.
+If an override file is not present, it gets loaded from a default location.
 
 ## Optional override files
 
@@ -114,9 +114,9 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `--c` - Disables the cursor.
 
-`--d` - Outputs backend debug information.  If Vulkan and Validation Layer is available, it will be loaded.
+`--d` - Outputs backend debug information.  If Vulkan and Validation Layer are available, it will be loaded.
 
-`--f` - Sets window to fullscreen.
+`--f` - Sets the window to fullscreen.
 
 `--w={int value}` - Sets View width.  Requires an integer value.
 
