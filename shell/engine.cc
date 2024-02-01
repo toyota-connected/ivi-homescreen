@@ -151,11 +151,7 @@ Engine::Engine(FlutterView* view,
       m_args.aot_data = m_aot_data;
     }
   } else {
-    std::stringstream ss_;
-    ss_ << "(" << m_index << ") Runtime=debug";
-    spdlog::info(ss_.str().c_str());
-    ss_.str("");
-    ss_.clear();
+    spdlog::info("({}) Runtime=debug", m_index);
     std::string kernel_snapshot =
         fml::paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
     if (!fml::IsFile(kernel_snapshot)) {
