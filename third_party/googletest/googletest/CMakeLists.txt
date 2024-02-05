@@ -141,6 +141,23 @@ endif()
 target_link_libraries(gtest_main PUBLIC gtest)
 
 ########################################################################
+
+add_sanitizers(gtest)
+add_sanitizers(gtest_main)
+
+if (IPO_SUPPORT_RESULT)
+  set_property(TARGET gtest PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set_property(TARGET gtest_main PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(gtest PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+  target_compile_options(gtest PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+  target_link_options(gtest PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lgcc -lc -v>)
+  target_link_options(gtest_main PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lgcc -lc -v>)
+endif ()
+
+########################################################################
 #
 # Install rules
 install_project(gtest gtest_main)
