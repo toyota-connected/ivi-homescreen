@@ -18,16 +18,6 @@ include(macros)
 
 set(PLUGINS)
 
-option(BUILD_PLUGIN_ISOLATE "Include Isolate Plugin" OFF)
-if (BUILD_PLUGIN_ISOLATE)
-    ENABLE_PLUGIN(isolate)
-endif ()
-
-option(BUILD_PLUGIN_RESTORATION "Include Restoration Plugin" OFF)
-if (BUILD_PLUGIN_RESTORATION)
-    ENABLE_PLUGIN(restoration)
-endif ()
-
 option(BUILD_PLUGIN_MOUSE_CURSOR "Include Mouse Cursor Plugin" OFF)
 if (BUILD_PLUGIN_MOUSE_CURSOR)
     ENABLE_PLUGIN(mouse_cursor)
@@ -77,19 +67,9 @@ if (BUILD_PLUGIN_GO_ROUTER)
     ENABLE_PLUGIN(go_router)
 endif ()
 
-option(BUILD_PLUGIN_ACCESSIBILITY "Includes Accessibility Plugin" OFF)
-if (BUILD_PLUGIN_ACCESSIBILITY)
-    ENABLE_PLUGIN(accessibility)
-endif ()
-
 option(BUILD_VIEW_LAYER_PLAYGROUND "Layer Playground support" OFF)
 if (BUILD_VIEW_LAYER_PLAYGROUND)
     set(ENABLE_VIEW_LAYER_PLAYGROUND)
-endif ()
-
-option(BUILD_PLUGIN_DESKTOP_WINDOW "Includes Desktop Window Plugin" OFF)
-if (BUILD_PLUGIN_DESKTOP_WINDOW)
-    ENABLE_PLUGIN(desktop_window)
 endif ()
 
 option(BUILD_PLUGIN_SECURE_STORAGE "Includes Flutter Secure Storage" OFF)
