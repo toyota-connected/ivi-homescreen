@@ -11,13 +11,14 @@
 #include <filesystem>
 #include <string>
 
+#include <asio/post.hpp>
+
 #include "flutter_desktop_engine_state.h"
 #include "flutter_desktop_messenger.h"
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "shell/platform/homescreen/platform_handler.h"
 
-#include "asio/post.hpp"
 #include "view/flutter_view.h"
 
 struct FlutterDesktopEngineState;
@@ -82,6 +83,9 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
 
+  // Mouse Cursor handler.
+  state->mouse_cursor_handler = std::make_unique<MouseCursorHandler>(
+      state->internal_plugin_registrar->messenger(), view);
 }
 
 FlutterDesktopEngineRef FlutterDesktopGetEngine(

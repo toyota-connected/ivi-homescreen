@@ -18,7 +18,6 @@
 #include <flutter/shell/platform/common/json_method_codec.h>
 
 #include "engine.h"
-#include "logging.h"
 
 static constexpr char kMethodSetApplicationSwitcherDescription[] =
     "SystemChrome.setApplicationSwitcherDescription";
