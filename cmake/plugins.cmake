@@ -156,4 +156,9 @@ if (BUILD_PLUGIN_CAMERA)
     ENABLE_PLUGIN(camera)
 endif ()
 
+option(BUILD_PLUGIN_PDF "Include PDF plugin" OFF)
+if (BUILD_PLUGIN_PDF)
+    ENABLE_PLUGIN(pdf)
+endif ()
+
 ENABLE_PLUGIN(common)

@@ -85,5 +85,8 @@ endif ()
 if (BUILD_PLUGIN_CAMERA)
     target_link_libraries(platform_homescreen PUBLIC plugin_camera)
 endif ()
+if (BUILD_PLUGIN_PDF)
+    target_link_libraries(platform_homescreen PUBLIC plugin_pdf)
+endif ()
 
 target_link_libraries(platform_homescreen PUBLIC plugin_common)
