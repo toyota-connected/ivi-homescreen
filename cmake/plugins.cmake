@@ -18,11 +18,6 @@ include(macros)
 
 set(PLUGINS)
 
-option(BUILD_PLUGIN_MOUSE_CURSOR "Include Mouse Cursor Plugin" OFF)
-if (BUILD_PLUGIN_MOUSE_CURSOR)
-    ENABLE_PLUGIN(mouse_cursor)
-endif ()
-
 if (BUILD_BACKEND_WAYLAND_EGL)
     option(BUILD_PLUGIN_GSTREAMER_EGL "Include GStreamer Plugin" OFF)
     if (BUILD_PLUGIN_GSTREAMER_EGL)
@@ -159,6 +154,11 @@ endif ()
 option(BUILD_PLUGIN_PDF "Include PDF plugin" OFF)
 if (BUILD_PLUGIN_PDF)
     ENABLE_PLUGIN(pdf)
+endif ()
+
+option(BUILD_PLUGIN_MOUSE_CURSOR "Include Mouse Cursor Plugin" OFF)
+if (BUILD_PLUGIN_MOUSE_CURSOR)
+    ENABLE_PLUGIN(mouse_cursor)
 endif ()
 
 ENABLE_PLUGIN(common)

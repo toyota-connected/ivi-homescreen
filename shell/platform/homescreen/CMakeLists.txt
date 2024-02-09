@@ -88,5 +88,8 @@ endif ()
 if (BUILD_PLUGIN_PDF)
     target_link_libraries(platform_homescreen PUBLIC plugin_pdf)
 endif ()
+if (BUILD_PLUGIN_MOUSE_CURSOR)
+    target_link_libraries(platform_homescreen PUBLIC plugin_mouse_cursor)
+endif ()
 
 target_link_libraries(platform_homescreen PUBLIC plugin_common)

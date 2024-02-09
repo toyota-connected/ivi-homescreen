@@ -43,11 +43,12 @@
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
 #include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
 #include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
+#include "plugins/mouse_cursor/include/mouse_cursor/mouse_cursor_plugin_c_api.h"
+#include "plugins/pdf/include/pdf/pdf_plugin_c_api.h"
 #include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
 #include <plugins/video_player_linux/include/video_player_linux/video_player_plugin_c_api.h>
 #include <plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h>
-#include "plugins/pdf/include/pdf/pdf_plugin_c_api.h"
 
 #include "wayland/display.h"
 #include "wayland/window.h"
@@ -353,6 +354,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
 #endif
 #if defined(ENABLE_PLUGIN_PDF)
   PrintingPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_MOUSE_CURSOR)
+  MouseCursorPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 }
