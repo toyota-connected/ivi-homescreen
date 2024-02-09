@@ -76,10 +76,19 @@ class DesktopWindowLinuxApi {
   DesktopWindowLinuxApi(const DesktopWindowLinuxApi&) = delete;
   DesktopWindowLinuxApi& operator=(const DesktopWindowLinuxApi&) = delete;
   virtual ~DesktopWindowLinuxApi() = default;
-  virtual void SetMinWindowSize(
-      double width,
-      double height,
-      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void getWindowSize(double& width, double& height) = 0;
+  virtual void setWindowSize(double width, double height) = 0;
+  virtual void setMinWindowSize(double width, double height) = 0;
+  virtual void setMaxWindowSize(double width, double height) = 0;
+  virtual void resetMaxWindowSize(double width, double height) = 0;
+  virtual void toggleFullScreen() = 0;
+  virtual void setFullScreen(bool set) = 0;
+  virtual bool getFullScreen() = 0;
+  virtual bool hasBorders() = 0;
+  virtual void setBorders(bool border) = 0;
+  virtual void toggleBorders() = 0;
+  virtual void focus() = 0;
+  virtual void stayOnTop(bool stayOnTop) = 0;
 
   // The codec used by DesktopWindowApi.
   static const flutter::StandardMethodCodec& GetCodec();
@@ -94,5 +103,5 @@ class DesktopWindowLinuxApi {
   DesktopWindowLinuxApi() = default;
 };
 
-}
+}  // namespace desktop_window_linux_plugin
 #endif  // PIGEON_MESSAGES_G_H_
