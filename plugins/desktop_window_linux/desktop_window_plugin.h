@@ -33,14 +33,31 @@ class DesktopWindowLinuxPlugin final : public flutter::Plugin,
 
   ~DesktopWindowLinuxPlugin() override = default;
 
-  void SetMinWindowSize(
-      double width,
-      double height,
-      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void getWindowSize(double& width, double& height) override;
+  void setWindowSize(double width, double height) override;
+  void setMinWindowSize(double width, double height) override;
+  void setMaxWindowSize(double width, double height) override;
+  void resetMaxWindowSize(double width, double height) override;
+  void toggleFullScreen() override;
+  void setFullScreen(bool set) override;
+  bool getFullScreen() override;
+  bool hasBorders() override;
+  void setBorders(bool border) override;
+  void toggleBorders() override;
+  void focus() override;
+  void stayOnTop(bool stayOnTop) override;
 
   // Disallow copy and assign.
   DesktopWindowLinuxPlugin(const DesktopWindowLinuxPlugin&) = delete;
   DesktopWindowLinuxPlugin& operator=(const DesktopWindowLinuxPlugin&) = delete;
+
+ private:
+  std::uint32_t m_width = 1024;
+  std::uint32_t m_height = 768;
+  std::uint32_t m_max_width = 0;
+  std::uint32_t m_max_height = 0;
+  std::uint32_t m_min_width = 0;
+  std::uint32_t m_min_height = 0;
 };
 }  // namespace desktop_window_linux_plugin
 

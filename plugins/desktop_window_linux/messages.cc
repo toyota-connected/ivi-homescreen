@@ -17,6 +17,7 @@
 #undef _HAS_EXCEPTIONS
 
 #include "messages.h"
+#include "plugins/common/tools/encodable.h"
 
 #include <flutter/basic_message_channel.h>
 #include <flutter/binary_messenger.h>
@@ -52,12 +53,18 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
         binary_messenger, "desktop_window", &GetCodec());
     if (api != nullptr) {
       channel->SetMethodCallHandler(
-          [api](const MethodCall<EncodableValue>& methodCall,
-                std::unique_ptr<MethodResult<EncodableValue>> result) {
-            if (methodCall.method_name() == "setMinWindowSize") {
+          [api](const flutter::MethodCall<EncodableValue>& call,
+                const std::unique_ptr<flutter::MethodResult<EncodableValue>>&
+                    result) {
+            if (call.method_name() == "getWindowSize") {
+              double width = 0;
+              double height = 0;
+              api->getWindowSize(width, height);
+              result->Success(EncodableValue(EncodableList{
+                  EncodableValue(width), EncodableValue(height)}));
+            } else if (call.method_name() == "setWindowSize") {
               const auto& args =
-                  std::get_if<EncodableMap>(methodCall.arguments());
-
+                  std::get_if<EncodableMap>(call.arguments());
               double width = 0;
               double height = 0;
               for (auto& it : *args) {
@@ -69,25 +76,126 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                   height = std::get<double>(it.second);
                 }
               }
-
-              try {
-                api->SetMinWindowSize(
-                    width, height,
-                    [result =
-                         result.get()](std::optional<FlutterError>&& output) {
-                      if (output.has_value()) {
-                        result->Error(output->code(), output->message(),
-                                      output->details());
-                        return;
-                      }
-                    });
-              } catch (const std::exception& exception) {
-                result->Error(exception.what());
+              if (width == 0 || height == 0) {
+                result->Error("argument_error", "width or height not provided");
+                return std::nullopt;
               }
-              result->Success();
+              api->setWindowSize(width, height);
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "setMinWindowSize") {
+              const auto& args =
+                  std::get_if<EncodableMap>(call.arguments());
+              double width = 0;
+              double height = 0;
+              for (auto& it : *args) {
+                if ("width" == std::get<std::string>(it.first) &&
+                    std::holds_alternative<double>(it.second)) {
+                  width = std::get<double>(it.second);
+                } else if ("height" == std::get<std::string>(it.first) &&
+                           std::holds_alternative<double>(it.second)) {
+                  height = std::get<double>(it.second);
+                }
+              }
+              if (width == 0 || height == 0) {
+                result->Error("argument_error", "width or height not provided");
+                return std::nullopt;
+              }
+              api->setMinWindowSize(width, height);
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "setMaxWindowSize") {
+              const auto& args =
+                  std::get_if<EncodableMap>(call.arguments());
+              double width = 0;
+              double height = 0;
+              for (auto& it : *args) {
+                if ("width" == std::get<std::string>(it.first) &&
+                    std::holds_alternative<double>(it.second)) {
+                  width = std::get<double>(it.second);
+                } else if ("height" == std::get<std::string>(it.first) &&
+                           std::holds_alternative<double>(it.second)) {
+                  height = std::get<double>(it.second);
+                }
+              }
+              if (width == 0 || height == 0) {
+                result->Error("argument_error", "width or height not provided");
+                return std::nullopt;
+              }
+              api->setMaxWindowSize(width, height);
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "resetMaxWindowSize") {
+              const auto& args =
+                  std::get_if<EncodableMap>(call.arguments());
+              double width = 0;
+              double height = 0;
+              for (auto& it : *args) {
+                if ("width" == std::get<std::string>(it.first) &&
+                    std::holds_alternative<double>(it.second)) {
+                  width = std::get<double>(it.second);
+                } else if ("height" == std::get<std::string>(it.first) &&
+                           std::holds_alternative<double>(it.second)) {
+                  height = std::get<double>(it.second);
+                }
+              }
+              if (width == 0 || height == 0) {
+                result->Error("argument_error", "width or height not provided");
+                return std::nullopt;
+              }
+              api->resetMaxWindowSize(width, height);
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "toggleFullScreen") {
+              plugin_common::Encodable::PrintFlutterEncodableValue("toggleFullScreen", *call.arguments());
+              api->toggleFullScreen();
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "setFullScreen") {
+              const auto& args =
+                  std::get_if<EncodableMap>(call.arguments());
+              bool fullscreen{};
+              for (auto& it : *args) {
+                if ("fullscreen" == std::get<std::string>(it.first) &&
+                    std::holds_alternative<bool>(it.second)) {
+                  fullscreen = std::get<bool>(it.second);
+                }
+              }
+              api->setFullScreen(fullscreen);
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "getFullScreen") {
+              result->Success(EncodableValue(api->getFullScreen()));
+            } else if (call.method_name() == "hasBorders") {
+              result->Success(EncodableValue(api->hasBorders()));
+            } else if (call.method_name() == "setBorders") {
+              const auto& args =
+                  std::get_if<EncodableMap>(call.arguments());
+              bool border{};
+              for (auto& it : *args) {
+                if ("border" == std::get<std::string>(it.first) &&
+                    std::holds_alternative<bool>(it.second)) {
+                  border = std::get<bool>(it.second);
+                }
+              }
+              api->setBorders(border);
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "toggleBorders") {
+              api->toggleBorders();
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "focus") {
+              api->focus();
+              result->Success(EncodableValue(true));
+            } else if (call.method_name() == "stayOnTop") {
+              const auto& args =
+                  std::get_if<EncodableMap>(call.arguments());
+              bool stayOnTop{};
+              for (auto& it : *args) {
+                if ("stayOnTop" == std::get<std::string>(it.first) &&
+                    std::holds_alternative<bool>(it.second)) {
+                  stayOnTop = std::get<bool>(it.second);
+                }
+              }
+              api->stayOnTop(stayOnTop);
+              result->Success(EncodableValue(true));
             } else {
               result->NotImplemented();
             }
+            return std::nullopt;
           });
     } else {
       channel->SetMethodCallHandler(nullptr);
