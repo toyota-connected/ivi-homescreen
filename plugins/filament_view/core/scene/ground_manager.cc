@@ -93,20 +93,20 @@ std::future<Resource<std::string_view>> GroundManager::createGround() {
         materialManager_->getMaterialInstance(ground_->material_.get());
 
     auto modelTransform = modelViewer_->getModelTransform();
-    Position center;
+    ::filament::math::float3 center;
     if (ground_->isBelowModel_ && modelTransform.has_value()) {
-      center.setX(modelTransform.value()[0][3]);
-      center.setY(modelTransform.value()[1][3]);
-      center.setZ(modelTransform.value()[2][3]);
+      center.x = modelTransform.value()[0][3];
+      center.y = modelTransform.value()[1][3];
+      center.z = modelTransform.value()[2][3];
     } else {
       if (ground_->center_position_ == nullptr) {
         promise->set_value(
             Resource<std::string_view>::Error("Position must be provided"));
         return;
       }
-      center.setX(ground_->center_position_->getX());
-      center.setY(ground_->center_position_->getY());
-      center.setZ(ground_->center_position_->getZ());
+      center.x = ground_->center_position_->x;
+      center.y = ground_->center_position_->y;
+      center.z = ground_->center_position_->z;
     }
 #if 0
     plane_geometry_ = PlaneGeometry.Builder(

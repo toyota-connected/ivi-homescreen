@@ -12,15 +12,13 @@ class Geometry;
 
 class Normal;
 
-class Position;
-
 class Size;
 
 namespace plugin_filament_view {
 
 class PlaneGeometry : public Geometry {
  public:
-  PlaneGeometry(Position center, Size size, Direction normal, Geometry geometry)
+  PlaneGeometry(::filament::float3 center, Size size, Direction normal, Geometry geometry)
       : Geometry(geometry.vertexBuffer,
                  geometry.indexBuffer,
                  geometry.boundingBox,
@@ -36,11 +34,9 @@ class PlaneGeometry : public Geometry {
    * @param center Center of the constructed plane
    * @param size  Size of the constructed plane
    */
-  class Builder(Position
-
-                    center = Position(0.0f, 0f, -4f),
-                Size size = Size(2.0f, 2.0f),
-                Direction normal = Direction(0f, 0f, 1f))
+  class Builder(::filament::float3 center = ::filament::float3(0.0f, 0f, -4f),
+                ::filament::float3 size = ::filament::float3(2.0f, 2.0f),
+                ::filament::float3 normal = ::filament::float3(0f, 0f, 1f))
       : Geometry.Builder {
     void build(::filament::Engine * Engine)
         : PlaneGeometry =
@@ -48,8 +44,8 @@ class PlaneGeometry : public Geometry {
   }
 
   void update(::filament::Engine* engine,
-              Direction normal,
-              Position center(this->center),
+              ::filament::math::float3 normal,
+              ::filament::math::float3 center(this->center),
               Size
 
                   size = (this.size)){

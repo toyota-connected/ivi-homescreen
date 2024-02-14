@@ -16,6 +16,7 @@
 
 #include "ground.h"
 
+#include "core/utils/deserialize.h"
 #include "plugins/common/common.h"
 
 namespace plugin_filament_view {
@@ -33,13 +34,13 @@ Ground::Ground(const std::string& flutter_assets_path,
     if (!done[0] && key == "centerPosition" &&
         std::holds_alternative<flutter::EncodableMap>(it.second)) {
       done[0] = true;
-      center_position_ =
-          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
+      center_position_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (!done[1] && key == "normal" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       done[1] = true;
-      normal_ = std::make_unique<Direction>(
-          std::get<flutter::EncodableMap>(it.second));
+      normal_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (!done[2] && key == "isBelowModel" &&
                std::holds_alternative<bool>(it.second)) {
       done[2] = true;
@@ -47,8 +48,8 @@ Ground::Ground(const std::string& flutter_assets_path,
     } else if (!done[3] && key == "size" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       done[3] = true;
-      size_ =
-          std::make_unique<Size>(std::get<flutter::EncodableMap>(it.second));
+      size_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (!done[4] && key == "material" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       done[4] = true;
@@ -56,7 +57,8 @@ Ground::Ground(const std::string& flutter_assets_path,
           flutterAssetsPath_, std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Ground] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--Ground::Ground");
@@ -65,16 +67,20 @@ Ground::Ground(const std::string& flutter_assets_path,
 void Ground::Print(const char* tag) {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Ground)", tag);
+#if 0
   if (center_position_) {
     center_position_->Print("\tcenter_position");
   }
   if (normal_) {
     normal_->Print("\tnormal");
   }
+#endif
   spdlog::debug("\tisBelowModel: {}", isBelowModel_);
+#if 0
   if (size_) {
     size_->Print("\tsize");
   }
+#endif
   if (material_) {
     material_->Print("\tmaterial");
   }

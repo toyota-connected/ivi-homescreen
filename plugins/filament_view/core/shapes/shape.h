@@ -26,8 +26,8 @@ namespace plugin_filament_view {
 class Shape {
  public:
   Shape(int32_t id,
-        Position centerPosition,
-        Direction normal,
+        ::filament::math::float3 centerPosition,
+        ::filament::math::float3 normal,
         Material material);
 
   Shape(const std::string& flutter_assets_path,
@@ -44,9 +44,9 @@ class Shape {
   int id{};
   int32_t type_{};
   /// center position of the shape in the world space.
-  std::optional<std::unique_ptr<Position>> centerPosition_;
+  std::optional<std::unique_ptr<::filament::math::float3>> centerPosition_;
   /// direction of the shape rotation in the world space
-  std::optional<std::unique_ptr<Direction>> normal_;
+  std::optional<std::unique_ptr<::filament::math::float3>> normal_;
   /// material to be used for the shape.
   std::optional<std::unique_ptr<Material>> material_;
 };

@@ -28,8 +28,8 @@
 
 #include "gltfio/materials/uberarchive.h"
 
-#include "plugins/common/common.h"
 #include "core/include/file_utils.h"
+#include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
@@ -110,26 +110,31 @@ void ModelLoader::updateRootTransform(bool autoScaleEnabled) {
  * Loads a monolithic binary glb and populates the Filament scene.
  */
 void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
-                               const Position* centerPosition,
+                               const ::filament::float3* centerPosition,
                                float scale,
                                bool transform) {
   destroyModel();
-  //asset_ = assetLoader_->createInstancedAsset(buffer.data(), static_cast<uint32_t>(buffer.size()),
-                                               //instances_.data(), instances_.size());
-  asset_ = assetLoader_->createAsset(buffer.data(),
-                                     static_cast<uint32_t>(buffer.size()));
+  if (!instances_.empty()) {
+    asset_ = assetLoader_->createInstancedAsset(
+        buffer.data(), static_cast<uint32_t>(buffer.size()), instances_.data(),
+        instances_.size());
+  } else {
+    asset_ = assetLoader_->createAsset(buffer.data(),
+                                       static_cast<uint32_t>(buffer.size()));
+  }
+
   if (asset_) {
     resourceLoader_->asyncBeginLoad(asset_);
     modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
     asset_->releaseSourceData();
-    //updateRootTransform(false);
-    //transformToUnitCube(centerPosition, scale);
+    // updateRootTransform(false);
+    // transformToUnitCube(centerPosition, scale);
   }
 }
 
 void ModelLoader::loadModelGltf(
     const std::vector<uint8_t>& buffer,
-    const Position* centerPosition,
+    const ::filament::float3* centerPosition,
     float scale,
     std::function<const ::filament::backend::BufferDescriptor&(
         std::string uri)>& callback,
@@ -178,16 +183,18 @@ filament::math::mat4f ModelLoader::fitIntoUnitCube(
          mat4f::translation(-center);
 }
 
-void ModelLoader::transformToUnitCube(const Position* centerPoint,
+void ModelLoader::transformToUnitCube(const ::filament::float3* centerPoint,
                                       float modelScale) {
   using namespace ::filament;
   using namespace ::filament::gltfio;
 
-  float3 centerPosition{};
+  std::unique_ptr<::filament::math::float3> centerPosition;
   if (!centerPoint) {
-    centerPosition = CustomModelViewer::kDefaultObjectPosition;
+    centerPosition = std::make_unique<::filament::math::float3>(
+        CustomModelViewer::kDefaultObjectPosition);
   } else {
-    centerPosition = {centerPoint->toFloatArray()};
+    centerPosition = std::make_unique<::filament::math::float3>(
+        centerPoint->x, centerPoint->y, centerPoint->z);
   }
 
   TransformManager& tm = engine_->getTransformManager();
@@ -259,7 +266,7 @@ void ModelLoader::clearRootTransform() {
 std::future<Resource<std::string_view>> ModelLoader::loadGlbFromAsset(
     const std::string& path,
     float scale,
-    const Position* centerPosition,
+    const ::filament::math::float3* centerPosition,
     bool isFallback) {
   const auto promise(
       std::make_shared<std::promise<Resource<std::string_view>>>());
@@ -275,7 +282,7 @@ std::future<Resource<std::string_view>> ModelLoader::loadGlbFromAsset(
 std::future<Resource<std::string_view>> ModelLoader::loadGlbFromUrl(
     const std::string& url,
     float scale,
-    const Position* centerPosition,
+    const ::filament::math::float3* centerPosition,
     bool isFallback) {
   const auto promise(
       std::make_shared<std::promise<Resource<std::string_view>>>());
@@ -299,7 +306,7 @@ void ModelLoader::handleFile(
     const std::vector<uint8_t>& buffer,
     const std::string& fileSource,
     float scale,
-    const Position* centerPosition,
+    const ::filament::math::float3* centerPosition,
     bool isFallback,
     const std::shared_ptr<std::promise<Resource<std::string_view>>>& promise) {
   if (!buffer.empty()) {
@@ -316,12 +323,12 @@ void ModelLoader::handleFile(
 }
 
 std::future<Resource<std::string_view>> ModelLoader::loadGltfFromAsset(
-    const std::string& path,
-    const std::string& pre_path,
-    const std::string& post_path,
-    float scale,
-    const Position* centerPosition,
-    bool isFallback) {
+    const std::string& /* path */,
+    const std::string& /* pre_path */,
+    const std::string& /* post_path */,
+    float /* scale */,
+    const ::filament::math::float3* /* centerPosition */,
+    bool /* isFallback */) {
   const auto promise(
       std::make_shared<std::promise<Resource<std::string_view>>>());
   auto future(promise->get_future());
@@ -330,10 +337,10 @@ std::future<Resource<std::string_view>> ModelLoader::loadGltfFromAsset(
 }
 
 std::future<Resource<std::string_view>> ModelLoader::loadGltfFromUrl(
-    const std::string& url,
-    float scale,
-    const Position* centerPosition,
-    bool isFallback) {
+    const std::string& /* url */,
+    float /* scale */,
+    const ::filament::math::float3* /* centerPosition */,
+    bool /* isFallback */) {
   const auto promise(
       std::make_shared<std::promise<Resource<std::string_view>>>());
   auto future(promise->get_future());

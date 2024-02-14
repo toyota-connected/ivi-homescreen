@@ -23,38 +23,56 @@ namespace plugin_filament_view {
 Projection::Projection(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Projection::Projection");
   for (auto& it : params) {
-    if (it.second.IsNull())
-      continue;
-
     auto key = std::get<std::string>(it.first);
-    if (key == "projection" && std::holds_alternative<std::string>(it.second)) {
-      projection_ = getTypeForText(std::get<std::string>(it.second));
-    } else if (key == "left" && std::holds_alternative<double>(it.second)) {
-      left_ = std::get<double>(it.second);
-    } else if (key == "right" && std::holds_alternative<double>(it.second)) {
-      right_ = std::get<double>(it.second);
-    } else if (key == "bottom" && std::holds_alternative<double>(it.second)) {
-      bottom_ = std::get<double>(it.second);
-    } else if (key == "top" && std::holds_alternative<double>(it.second)) {
-      top_ = std::get<double>(it.second);
-    } else if (key == "near" && std::holds_alternative<double>(it.second)) {
-      near_ = std::get<double>(it.second);
-    } else if (key == "far" && std::holds_alternative<double>(it.second)) {
-      far_ = std::get<double>(it.second);
-    } else if (key == "fovInDegrees" &&
-               std::holds_alternative<double>(it.second)) {
-      fovInDegrees_ = std::get<double>(it.second);
-    } else if (key == "aspect" && std::holds_alternative<double>(it.second)) {
-      aspect_ = std::get<double>(it.second);
-    } else if (key == "direction" && !it.second.IsNull() &&
-               std::holds_alternative<std::string>(it.second)) {
-      fovDirection_ = getFovForText(std::get<std::string>(it.second));
-    } else if (!it.second.IsNull()) {
-      spdlog::debug("[Projection] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+    if (key == "projection") {
+      if (std::holds_alternative<std::string>(it.second)) {
+        projection_ = getTypeForText(std::get<std::string>(it.second));
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
+        projection_ = ::filament::Camera::Projection::ORTHO;
+      }
+    } else if (key == "left") {
+      if (std::holds_alternative<double>(it.second)) {
+        left_ = std::get<double>(it.second);
+      }
+    } else if (key == "right") {
+      if (std::holds_alternative<double>(it.second)) {
+        right_ = std::get<double>(it.second);
+      }
+    } else if (key == "bottom") {
+      if (std::holds_alternative<double>(it.second)) {
+        bottom_ = std::get<double>(it.second);
+      }
+    } else if (key == "top") {
+      if (std::holds_alternative<double>(it.second)) {
+        top_ = std::get<double>(it.second);
+      }
+    } else if (key == "near") {
+      if (std::holds_alternative<double>(it.second)) {
+        near_ = std::get<double>(it.second);
+      }
+    } else if (key == "far") {
+      if (std::holds_alternative<double>(it.second)) {
+        far_ = std::get<double>(it.second);
+      }
+    } else if (key == "fovInDegrees") {
+      if (std::holds_alternative<double>(it.second)) {
+        fovInDegrees_ = std::get<double>(it.second);
+      }
+    } else if (key == "aspect") {
+      if (std::holds_alternative<double>(it.second)) {
+        aspect_ = std::get<double>(it.second);
+      }
+    } else if (key == "direction") {
+      if (std::holds_alternative<std::string>(it.second)) {
+        fovDirection_ = getFovForText(std::get<std::string>(it.second));
+      }
+      else if (std::holds_alternative<std::monostate>(it.second)) {
+        fovDirection_ = ::filament::Camera::Fov::HORIZONTAL;
+      }
     }
   }
   SPDLOG_TRACE("--Projection::Projection");
+  Print("Projection");
 }
 
 void Projection::Print(const char* tag) {

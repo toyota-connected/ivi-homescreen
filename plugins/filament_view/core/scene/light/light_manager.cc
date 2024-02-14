@@ -72,10 +72,10 @@ std::future<Resource<std::string_view>> LightManager::changeLight(
       builder.intensity(light->intensity_.value());
     }
     if (light->position_) {
-      builder.position(light->position_->toFloatArray());
+      builder.position(*light->position_);
     }
     if (light->direction_) {
-      builder.direction(light->direction_->toFloatArray());
+      builder.direction(*light->direction_);
     }
     if (light->castLight_.has_value()) {
       builder.castLight(light->castLight_.value());

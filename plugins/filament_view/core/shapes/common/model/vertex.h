@@ -5,15 +5,13 @@ namespace plugin_filament_view {
 
 class Color;
 
-using Position = ::filament::math::float3;
-using Direction = ::filament::math::float3;
 using Size = ::filament::math::float3;
 using UVCoordinates = ::filament::math::float2;
 using Transform = ::filament::math::mat4;
 
 class Vertex {
-  Vertex(Position position,
-         Direction normal,
+  Vertex(::filament::math::float3 position,
+         ::filament::math::float3 normal,
          UVCoordinates uvCoordinates,
          Color color);
 
@@ -28,8 +26,8 @@ class Vertex {
   }
 
   //  Box(center.toFloatArray(), halfExtent.toFloatArray())
-  ::filament::Box Box(Position center, Size halfExtent) {
-    return ::filament::Box(center.toFloatArray(), halfExtent.toFloatArray());
+  ::filament::Box Box(::filament::math::float3 center, ::filament::math::float3 halfExtent) {
+    return ::filament::Box(center, halfExtent);
   }
 
   var Box.centerPosition : Position get() =

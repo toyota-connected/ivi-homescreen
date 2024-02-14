@@ -35,7 +35,7 @@ class ModelLoader {
    * Loads a monolithic binary glTF and populates the Filament scene.
    */
   void loadModelGlb(const std::vector<uint8_t>& buffer,
-                    const Position* centerPosition,
+                    const ::filament::float3* centerPosition,
                     float scale,
                     bool transformToUnitCube = false);
 
@@ -44,7 +44,7 @@ class ModelLoader {
    * The given callback is triggered for each requested resource.
    */
   void loadModelGltf(const std::vector<uint8_t>& buffer,
-                     const Position* centerPosition,
+                     const ::filament::float3* centerPosition,
                      float scale,
                      std::function<const ::filament::backend::BufferDescriptor&(
                          std::string uri)>& callback,
@@ -59,34 +59,34 @@ class ModelLoader {
    */
   void clearRootTransform();
 
-  void transformToUnitCube(const Position* centerPoint, float scale);
+  void transformToUnitCube(const ::filament::float3* centerPoint, float scale);
 
   void updateScene();
 
   std::future<Resource<std::string_view>> loadGlbFromAsset(
       const std::string& path,
       float scale,
-      const Position* centerPosition,
+      const ::filament::float3* centerPosition,
       bool isFallback = false);
 
   std::future<Resource<std::string_view>> loadGlbFromUrl(
       const std::string& url,
       float scale,
-      const Position* centerPosition,
+      const ::filament::float3* centerPosition,
       bool isFallback = false);
 
-  static std::future<Resource<std::string_view>> loadGltfFromAsset(
+  std::future<Resource<std::string_view>> loadGltfFromAsset(
       const std::string& path,
       const std::string& pre_path,
       const std::string& post_path,
       float scale,
-      const Position* centerPosition,
+      const ::filament::float3* centerPosition,
       bool isFallback = false);
 
-  static std::future<Resource<std::string_view>> loadGltfFromUrl(
+  std::future<Resource<std::string_view>> loadGltfFromUrl(
       const std::string& url,
       float scale,
-      const Position* centerPosition,
+      const ::filament::float3* centerPosition,
       bool isFallback = false);
 
   friend class CustomModelViewer;
@@ -139,7 +139,7 @@ class ModelLoader {
       const std::vector<uint8_t>& buffer,
       const std::string& fileSource,
       float scale,
-      const Position* centerPosition,
+      const ::filament::float3* centerPosition,
       bool isFallback,
       const std::shared_ptr<std::promise<Resource<std::string_view>>>& promise);
 };

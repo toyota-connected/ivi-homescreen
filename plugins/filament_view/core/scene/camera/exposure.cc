@@ -23,26 +23,36 @@ namespace plugin_filament_view {
 Exposure::Exposure(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Exposure::Exposure");
   for (auto& it : params) {
-    if (it.second.IsNull())
-      continue;
-
     auto key = std::get<std::string>(it.first);
-    if (key == "aperture" && std::holds_alternative<double>(it.second)) {
-      aperture_ = std::get<double>(it.second);
-    } else if (key == "sensitivity" &&
-               std::holds_alternative<double>(it.second)) {
-      sensitivity_ = std::get<double>(it.second);
-    } else if (key == "shutterSpeed" &&
-               std::holds_alternative<double>(it.second)) {
-      shutterSpeed_ = std::get<double>(it.second);
-    } else if (key == "exposure" && std::holds_alternative<double>(it.second)) {
-      exposure_ = std::get<double>(it.second);
-    } else if (!it.second.IsNull()) {
-      spdlog::debug("[Exposure] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+    if (key == "aperture") {
+      if (std::holds_alternative<double>(it.second)) {
+        aperture_ = std::get<double>(it.second);
+      }
+      else if (std::holds_alternative<std::monostate>(it.second)) {
+        aperture_ = 16.0f;
+      }
+    } else if (key == "sensitivity") {
+      if (std::holds_alternative<double>(it.second)) {
+        sensitivity_ = std::get<double>(it.second);
+      }
+      else if (std::holds_alternative<std::monostate>(it.second)) {
+        sensitivity_ = 100.0f;
+      }
+    } else if (key == "shutterSpeed") {
+      if (std::holds_alternative<double>(it.second)) {
+        shutterSpeed_ = std::get<double>(it.second);
+      }
+      else if (std::holds_alternative<double>(it.second)) {
+        shutterSpeed_ = 1.0f / 125.0f;
+      }
+    } else if (key == "exposure") {
+      if (std::holds_alternative<double>(it.second)) {
+        exposure_ = std::get<double>(it.second);
+      }
     }
   }
   SPDLOG_TRACE("--Exposure::Exposure");
+  Print("Exposure");
 }
 
 void Exposure::Print(const char* tag) {

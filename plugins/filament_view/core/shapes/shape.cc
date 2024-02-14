@@ -16,13 +16,14 @@
 
 #include "shape.h"
 
+#include "core/utils/deserialize.h"
 #include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
 Shape::Shape(int32_t id,
-             Position centerPosition,
-             Direction normal,
+             ::filament::math::float3 centerPosition,
+             ::filament::math::float3 normal,
              Material material) {
   SPDLOG_TRACE("++Shape::Shape");
 
@@ -45,19 +46,20 @@ Shape::Shape(const std::string& flutter_assets_path,
       type_ = std::get<int32_t>(it.second);
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      centerPosition_ =
-          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
+      centerPosition_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (key == "normal" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      normal_ = std::make_unique<Direction>(
-          std::get<flutter::EncodableMap>(it.second));
+      normal_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (key == "material" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       material_ = std::make_unique<Material>(
           flutter_assets_path, std::get<flutter::EncodableMap>(it.second));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Shape] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--Shape::Shape");
@@ -66,12 +68,14 @@ Shape::Shape(const std::string& flutter_assets_path,
 void Shape::Print(const char* tag) const {
   spdlog::debug("++++++++");
   spdlog::debug("{} (Shape)", tag);
+#if 0
   if (centerPosition_.has_value()) {
     centerPosition_.value()->Print("\tcenterPosition");
   }
   if (normal_.has_value()) {
     normal_.value()->Print("\tnormal");
   }
+#endif
   if (material_.has_value()) {
     material_.value()->Print("\tsize");
   }

@@ -157,9 +157,9 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
 
   if (cameraInfo->targetPosition_) {
     auto tp = cameraInfo->targetPosition_.get();
-    manipulatorBuilder.targetPosition(tp->x_, tp->y_, tp->z_);
-    SPDLOG_DEBUG("[CameraManipulator] targetPosition: {}, {}, {}", tp->x_,
-                 tp->y_, tp->z_);
+    manipulatorBuilder.targetPosition(tp->x, tp->y, tp->z);
+    SPDLOG_DEBUG("[CameraManipulator] targetPosition: {}, {}, {}", tp->x, tp->y,
+                 tp->z);
   } else {
     manipulatorBuilder.targetPosition(kDefaultObjectPosition.x,
                                       kDefaultObjectPosition.y,
@@ -171,9 +171,9 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
 
   if (cameraInfo->upVector_) {
     auto upVector = cameraInfo->upVector_.get();
-    manipulatorBuilder.upVector(upVector->x_, upVector->y_, upVector->z_);
-    SPDLOG_DEBUG("[CameraManipulator] upVector: {}, {}, {}", upVector->x_,
-                 upVector->y_, upVector->z_);
+    manipulatorBuilder.upVector(upVector->x, upVector->y, upVector->z);
+    SPDLOG_DEBUG("[CameraManipulator] upVector: {}, {}, {}", upVector->x,
+                 upVector->y, upVector->z);
   }
   if (cameraInfo->zoomSpeed_.has_value()) {
     manipulatorBuilder.zoomSpeed(cameraInfo->zoomSpeed_.value());
@@ -184,10 +184,10 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
   if (cameraInfo->orbitHomePosition_) {
     auto orbitHomePosition = cameraInfo->orbitHomePosition_.get();
     manipulatorBuilder.orbitHomePosition(
-        orbitHomePosition->x_, orbitHomePosition->y_, orbitHomePosition->z_);
+        orbitHomePosition->x, orbitHomePosition->y, orbitHomePosition->z);
     SPDLOG_DEBUG("[CameraManipulator] orbitHomePosition: {}, {}, {}",
-                 orbitHomePosition->x_, orbitHomePosition->y_,
-                 orbitHomePosition->z_);
+                 orbitHomePosition->x, orbitHomePosition->y,
+                 orbitHomePosition->z);
   }
 
   if (cameraInfo->orbitSpeed_) {
@@ -222,19 +222,17 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
 
   if (cameraInfo->flightStartPosition_) {
     auto flightStartPosition = cameraInfo->flightStartPosition_.get();
-    manipulatorBuilder.flightStartPosition(flightStartPosition->x_,
-                                           flightStartPosition->y_,
-                                           flightStartPosition->z_);
+    manipulatorBuilder.flightStartPosition(flightStartPosition->x,
+                                           flightStartPosition->y,
+                                           flightStartPosition->z);
     SPDLOG_DEBUG("[CameraManipulator] flightStartPosition: {}, {}, {}",
-                 flightStartPosition->x_, flightStartPosition->y_,
-                 flightStartPosition->z_);
+                 flightStartPosition->x, flightStartPosition->y,
+                 flightStartPosition->z);
   }
 
   if (cameraInfo->flightStartOrientation_) {
     auto flightStartOrientation = cameraInfo->flightStartOrientation_.get();
-    // val pitch = it.getOrElse(0) { 0f }
     auto pitch = flightStartOrientation->at(0);  // 0f;
-    // val yaw = it.getOrElse(1) { 0f }
     auto yaw = flightStartOrientation->at(1);  // 0f;
     manipulatorBuilder.flightStartOrientation(pitch, yaw);
     SPDLOG_DEBUG("[CameraManipulator] flightStartOrientation: {}, {}", pitch,
@@ -263,10 +261,10 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
 
   if (cameraInfo->groundPlane_) {
     auto groundPlane = cameraInfo->groundPlane_.get();
-    auto a = groundPlane->at(0);  //{ 0f };
-    auto b = groundPlane->at(1);  //{ 0f };
-    auto c = groundPlane->at(2);  //{ 1f };
-    auto d = groundPlane->at(3);  //{ 0f };
+    auto a = groundPlane->at(0);
+    auto b = groundPlane->at(1);
+    auto c = groundPlane->at(2);
+    auto d = groundPlane->at(3);
     manipulatorBuilder.groundPlane(a, b, c, d);
     SPDLOG_DEBUG("[CameraManipulator] flightMaxMoveSpeed: {}, {}, {}, {}", a, b,
                  c, d);
