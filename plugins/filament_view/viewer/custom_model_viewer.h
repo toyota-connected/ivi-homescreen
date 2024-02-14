@@ -139,7 +139,7 @@ class CustomModelViewer {
    * @param centerPoint Coordinate of center point of unit cube, defaults to <
    * 0, 0, -4 >
    */
-  void transformToUnitCube(Position* centerPoint, float scale) {
+  void transformToUnitCube(::filament::math::float3* /* centerPoint */, float /* scale */) {
     // TODO modelLoader_->transformToUnitCube(centerPoint, scale);
   }
 

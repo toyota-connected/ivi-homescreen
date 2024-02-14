@@ -131,21 +131,17 @@ void SceneController::setUpSkybox() {
             shouldUpdateLight, scene_->indirect_light_->getIntensity());
       }
     } else if (dynamic_cast<KxtSkybox*>(skybox)) {
-#if 0
-                auto kxt_skybox = dynamic_cast<KxtSkybox*>(skybox);
-                if (!kxt_skybox->assetPath_.empty()) {
-                  skyboxManager_->setSkyboxFromKTXAsset(kxt_skybox->assetPath_);
-                } else if (!kxt_skybox->url_.empty()) {
-                  skyboxManager_->setSkyboxFromKTXUrl(kxt_skybox->url_);
-                }
-#endif
+      auto kxt_skybox = dynamic_cast<KxtSkybox*>(skybox);
+      if (!kxt_skybox->assetPath_.empty()) {
+        skyboxManager_->setSkyboxFromKTXAsset(kxt_skybox->assetPath_);
+      } else if (!kxt_skybox->url_.empty()) {
+        skyboxManager_->setSkyboxFromKTXUrl(kxt_skybox->url_);
+      }
     } else if (dynamic_cast<ColorSkybox*>(skybox)) {
-#if 0
-                auto color_skybox = dynamic_cast<ColorSkybox*>(skybox);
-                if (!color_skybox->color_.empty()) {
-                  skyboxManager_->setSkyboxFromColor(color_skybox->color_);
-                }
-#endif
+      auto color_skybox = dynamic_cast<ColorSkybox*>(skybox);
+      if (!color_skybox->color_.empty()) {
+        skyboxManager_->setSkyboxFromColor(color_skybox->color_);
+      }
     }
   }
 }

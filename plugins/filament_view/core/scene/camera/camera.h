@@ -30,8 +30,6 @@ namespace plugin_filament_view {
 
 class Exposure;
 
-class Position;
-
 class Projection;
 
 class Camera {
@@ -93,13 +91,13 @@ class Camera {
   std::unique_ptr<std::vector<double>> shift_;
 
   /// Mode of the camera that operates on.
-  ::filament::camutils::Mode mode_ = ::filament::camutils::Mode::ORBIT;
+  ::filament::camutils::Mode mode_;
 
   /// The world-space position of interest, which defaults to (x:0,y:0,z:-4).
-  std::unique_ptr<Position> targetPosition_;
+  std::unique_ptr<::filament::math::float3> targetPosition_;
 
   /// The orientation for the home position, which defaults to (x:0,y:1,z:0).
-  std::unique_ptr<Position> upVector_;
+  std::unique_ptr<::filament::math::float3> upVector_;
 
   /// The scroll delta multiplier, which defaults to 0.01.
   std::optional<float> zoomSpeed_;
@@ -107,7 +105,7 @@ class Camera {
   // orbit
   /// The initial eye position in world space for ORBIT mode.
   /// This defaults to (x:0,y:0,z:1).
-  std::unique_ptr<Position> orbitHomePosition_;
+  std::unique_ptr<::filament::math::float3> orbitHomePosition_;
 
   /// Sets the multiplier with viewport delta for ORBIT mode.This defaults to
   /// 0.01 List of 2 double :[x,y]
@@ -115,7 +113,7 @@ class Camera {
 
   /// The FOV axis that's held constant when the viewport changes.
   /// This defaults to Vertical.
-  ::filament::camutils::Fov fovDirection_ = ::filament::camutils::Fov::VERTICAL;
+  ::filament::camutils::Fov fovDirection_;
 
   /// The full FOV (not the half-angle) in the degrees.
   /// This defaults to 33.
@@ -133,7 +131,7 @@ class Camera {
 
   /// The initial eye position in world space for FREE_FLIGHT mode.
   /// Defaults to (x:0,y:0,z:0).
-  std::unique_ptr<Position> flightStartPosition_;
+  std::unique_ptr<::filament::math::float3> flightStartPosition_;
 
   /// The initial orientation in pitch and yaw for FREE_FLIGHT mode.
   /// Defaults to [0,0].

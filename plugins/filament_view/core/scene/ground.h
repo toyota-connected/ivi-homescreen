@@ -45,9 +45,9 @@ class Ground {
  private:
   const std::string& flutterAssetsPath_;
 
-  std::unique_ptr<Position> center_position_;
-  std::unique_ptr<Direction> normal_;
-  std::unique_ptr<Size> size_;
+  std::unique_ptr<::filament::math::float3> center_position_;
+  std::unique_ptr<::filament::math::float3> normal_;
+  std::unique_ptr<::filament::math::float3> size_;
   std::unique_ptr<Material> material_;
   bool isBelowModel_;
 };

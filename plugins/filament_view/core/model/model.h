@@ -27,15 +27,13 @@ namespace plugin_filament_view {
 
 class Animation;
 
-class Position;
-
 class Model {
  public:
   Model(std::string assetPath,
         std::string url,
         Model* fallback,
         float scale,
-        Position* centerPosition,
+        ::filament::math::float3* centerPosition,
         Animation* animation);
 
   virtual ~Model() = default;
@@ -46,7 +44,7 @@ class Model {
 
   [[nodiscard]] float GetScale() const { return scale_; }
 
-  [[nodiscard]] Position* GetCenterPosition() const { return center_position_; }
+  [[nodiscard]] ::filament::math::float3* GetCenterPosition() const { return center_position_; }
 
   [[nodiscard]] Model* GetFallback() const { return fallback_; }
 
@@ -62,7 +60,7 @@ class Model {
   std::string url_;
   Model* fallback_;
   float scale_;
-  Position* center_position_;
+  ::filament::math::float3* center_position_;
   Animation* animation_;
 };
 
@@ -72,7 +70,7 @@ class GlbModel final : public Model {
            std::string url,
            Model* fallback,
            float scale,
-           Position* centerPosition,
+           ::filament::math::float3* centerPosition,
            Animation* animation);
 
   ~GlbModel() override = default;
@@ -90,7 +88,7 @@ class GltfModel final : public Model {
             std::string pathPostfix,
             Model* fallback,
             float scale,
-            Position* centerPosition,
+            ::filament::math::float3* centerPosition,
             Animation* animation);
 
   ~GltfModel() override = default;

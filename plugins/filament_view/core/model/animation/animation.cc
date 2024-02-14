@@ -19,6 +19,7 @@
 #include <filesystem>
 
 #include "core/scene/geometry/position.h"
+#include "core/utils/deserialize.h"
 
 #include "plugins/common/common.h"
 
@@ -43,11 +44,12 @@ Animation::Animation(const std::string& flutter_assets_path,
       asset_path_ = std::get<std::string>(it.second);
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      center_position_ =
-          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
+      center_position_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Animation] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
 }
@@ -65,7 +67,7 @@ void Animation::Print(const char* tag) {
   spdlog::debug(
       "\tasset_path {} valid",
       std::filesystem::exists(asset_folder / asset_path_) ? "is" : "is not");
-  center_position_->Print("\tcenterPosition:");
+//TODO  center_position_->Print("\tcenterPosition:");
   spdlog::debug("++++++++");
 }
 

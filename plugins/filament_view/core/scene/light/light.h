@@ -23,17 +23,13 @@
 #include "core/scene/geometry/position.h"
 #include "core/scene/light/light_manager.h"
 
-class Direction;
-
-class Position;
-
 namespace plugin_filament_view {
 class Light {
  public:
   explicit Light(float colorTemperature = 6'500.0f,
-        float intensity = 100'000.0f,
-        Direction direction = {0.0f, -1.0f, 0.0f},
-        bool castShadows = true);
+                 float intensity = 100'000.0f,
+                 ::filament::math::float3 direction = {0.0f, -1.0f, 0.0f},
+                 bool castShadows = true);
 
   explicit Light(const flutter::EncodableMap& params);
 
@@ -46,7 +42,6 @@ class Light {
 
   // Disallow copy and assign.
   Light(const Light&) = delete;
-
   Light& operator=(const Light&) = delete;
 
   friend class LightManager;
@@ -56,8 +51,8 @@ class Light {
   std::optional<std::string> color_;
   std::optional<float> colorTemperature_;
   std::optional<float> intensity_;
-  std::unique_ptr<Position> position_;
-  std::unique_ptr<Direction> direction_;
+  std::unique_ptr<::filament::math::float3> position_;
+  std::unique_ptr<::filament::math::float3> direction_;
   std::optional<bool> castLight_;
   std::optional<bool> castShadows_;
   std::optional<float> falloffRadius_;

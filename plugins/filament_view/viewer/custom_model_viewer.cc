@@ -182,30 +182,22 @@ void CustomModelViewer::setupView() {
   fview_->setRenderQuality(renderQuality);
 
   // dynamic resolution often helps a lot
-  ::filament::View::DynamicResolutionOptions dynamicResolutionOptions{};
-  dynamicResolutionOptions.enabled = true;
-  dynamicResolutionOptions.quality = ::filament::View::QualityLevel::MEDIUM;
-  fview_->setDynamicResolutionOptions(dynamicResolutionOptions);
+  fview_->setDynamicResolutionOptions(
+      {.enabled = true, .quality = ::filament::View::QualityLevel::MEDIUM});
 
   // MSAA is needed with dynamic resolution MEDIUM
-  ::filament::View::MultiSampleAntiAliasingOptions
-      multiSampleAntiAliasingOptions{};
-  multiSampleAntiAliasingOptions.enabled = true;
-  fview_->setMultiSampleAntiAliasingOptions(multiSampleAntiAliasingOptions);
+  fview_->setMultiSampleAntiAliasingOptions({.enabled = true});
 
   // FXAA is pretty economical and helps a lot
   fview_->setAntiAliasing(::filament::View::AntiAliasing::FXAA);
 
   // ambient occlusion is the cheapest effect that adds a lot of quality
-  ::filament::View::AmbientOcclusionOptions ambientOcclusionOptions{};
-  ambientOcclusionOptions.enabled = true;
+  fview_->setAmbientOcclusionOptions({.enabled = true});
 
-#if 0  // TODO evaluate on device
-// bloom is pretty expensive but adds a fair amount of realism
-  ::filament::View::BloomOptions bloomOptions{};
-  bloomOptions.enabled = true;
-  fview_->setBloomOptions(bloomOptions);
-#endif
+  // bloom is pretty expensive but adds a fair amount of realism
+  fview_->setBloomOptions({
+      .enabled = true,
+  });
 
   SPDLOG_TRACE("--CustomModelViewer::setupView");
 }

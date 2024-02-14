@@ -16,18 +16,19 @@
 
 #include "light.h"
 
+#include "core/utils/deserialize.h"
 #include "plugins/common/common.h"
 
 namespace plugin_filament_view {
 
 Light::Light(float colorTemperature,
              float intensity,
-             Direction /* direction */,
+             ::filament::math::float3 direction,
              bool castShadows) {
   type_ = ::filament::LightManager::Type::DIRECTIONAL;
   colorTemperature_ = colorTemperature;
   intensity_ = intensity;
-  // direction_ = direction;
+  direction_ = std::make_unique<::filament::math::float3>(direction);
   castShadows_ = castShadows;
 }
 
@@ -52,12 +53,12 @@ Light::Light(const flutter::EncodableMap& params) {
       intensity_ = std::get<double>(it.second);
     } else if (key == "position" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      position_ =
-          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
+      position_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (key == "direction" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      direction_ = std::make_unique<Direction>(
-          std::get<flutter::EncodableMap>(it.second));
+      direction_ = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (key == "castLight" && std::holds_alternative<bool>(it.second)) {
       castLight_ = std::get<bool>(it.second);
     } else if (key == "castShadows" &&
@@ -83,7 +84,8 @@ Light::Light(const flutter::EncodableMap& params) {
       sunHaloFalloff_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Light] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--Light::Light");
@@ -103,12 +105,14 @@ void Light::Print(const char* tag) {
   if (intensity_.has_value()) {
     spdlog::debug("\tintensity: {}", intensity_.value());
   }
+#if 0
   if (position_) {
     position_->Print("\tposition");
   }
   if (direction_) {
     direction_->Print("\tposition");
   }
+#endif
   if (castLight_.has_value()) {
     spdlog::debug("\tcastLight: {}", castLight_.value());
   }

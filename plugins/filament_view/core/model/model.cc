@@ -16,6 +16,7 @@
 
 #include "core/model/model.h"
 
+#include "core/utils/deserialize.h"
 #include "plugins/common/common.h"
 
 namespace plugin_filament_view {
@@ -24,7 +25,7 @@ Model::Model(std::string assetPath,
              std::string url,
              Model* fallback,
              float scale,
-             Position* centerPosition,
+             ::filament::float3* centerPosition,
              Animation* animation)
     : assetPath_(std::move(assetPath)),
       url_(std::move(url)),
@@ -37,7 +38,7 @@ GlbModel::GlbModel(std::string assetPath,
                    std::string url,
                    Model* fallback,
                    float scale,
-                   Position* centerPosition,
+                   ::filament::math::float3* centerPosition,
                    Animation* animation)
     : Model(std::move(assetPath),
             std::move(url),
@@ -52,7 +53,7 @@ GltfModel::GltfModel(std::string assetPath,
                      std::string pathPostfix,
                      Model* fallback,
                      float scale,
-                     Position* centerPosition,
+                     ::filament::math::float3* centerPosition,
                      Animation* animation)
     : Model(std::move(assetPath),
             std::move(url),
@@ -74,7 +75,7 @@ std::unique_ptr<Model> Model::Deserialize(
   std::optional<std::string> pathPostfix;
   std::optional<std::string> url;
   std::optional<float> scale;
-  std::unique_ptr<Position> centerPosition;
+  std::unique_ptr<::filament::math::float3> centerPosition;
   std::unique_ptr<Scene> scene;
   bool is_glb = false;
 
@@ -92,8 +93,8 @@ std::unique_ptr<Model> Model::Deserialize(
       assetPath = std::get<std::string>(it.second);
     } else if (key == "centerPosition" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
-      centerPosition =
-          Position::Deserialize(std::get<flutter::EncodableMap>(it.second));
+      centerPosition = std::make_unique<::filament::math::float3>(
+          Deserialize::Format3(std::get<flutter::EncodableMap>(it.second)));
     } else if (key == "fallback" &&
                std::holds_alternative<flutter::EncodableMap>(it.second)) {
       fallback = Deserialize(
@@ -116,7 +117,8 @@ std::unique_ptr<Model> Model::Deserialize(
       scene = std::make_unique<Scene>(flutterAssetsPath, it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Model] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
 

@@ -26,39 +26,52 @@ LensProjection::LensProjection(float focalLength, float aspect)
 LensProjection::LensProjection(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++LensProjection::LensProjection");
   for (auto& it : params) {
-    if (it.second.IsNull())
-      continue;
-
     auto key = std::get<std::string>(it.first);
-    if (key == "focalLength" && std::holds_alternative<double>(it.second)) {
-      focalLength_ = std::get<double>(it.second);
-    } else if (key == "aspect" && std::holds_alternative<double>(it.second)) {
-      aspect_ = std::get<double>(it.second);
-    } else if (key == "near" && std::holds_alternative<double>(it.second)) {
-      near_ = std::get<double>(it.second);
-    } else if (key == "far" && std::holds_alternative<double>(it.second)) {
-      far_ = std::get<double>(it.second);
+    if (key == "focalLength") {
+      if (std::holds_alternative<double>(it.second)) {
+        focalLength_ = static_cast<float>(std::get<double>(it.second));
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
+        focalLength_ = 28.0f;
+      }
+    } else if (key == "aspect") {
+      if (std::holds_alternative<double>(it.second)) {
+        aspect_ = std::get<double>(it.second);
+      }
+    } else if (key == "near") {
+      if (std::holds_alternative<double>(it.second)) {
+        near_ = std::get<double>(it.second);
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
+        near_ = 0.05;  // 5 cm
+      }
+    } else if (key == "far") {
+      if (std::holds_alternative<double>(it.second)) {
+        far_ = std::get<double>(it.second);
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
+        far_ = 1000.0;  // 1 km
+      }
     } else if (!it.second.IsNull()) {
       spdlog::debug("[LensProjection] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--LensProjection::LensProjection");
+  Print("LensProjection");
 }
 
 void LensProjection::Print(const char* tag) {
   spdlog::debug("++++++++");
   spdlog::debug("{} (LensProjection)", tag);
-  spdlog::debug("focalLength: {}", focalLength_);
+  spdlog::debug("\tfocalLength: {}", focalLength_);
 
   if (aspect_.has_value()) {
-    spdlog::debug("aspect: {}", aspect_.value());
+    spdlog::debug("\taspect: {}", aspect_.value());
   }
   if (near_.has_value()) {
-    spdlog::debug("near: {}", near_.value());
+    spdlog::debug("\tnear: {}", near_.value());
   }
   if (far_.has_value()) {
-    spdlog::debug("far: {}", far_.value());
+    spdlog::debug("\tfar: {}", far_.value());
   }
   spdlog::debug("++++++++");
 }

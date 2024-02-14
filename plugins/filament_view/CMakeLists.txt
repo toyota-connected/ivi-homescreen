@@ -110,6 +110,7 @@ add_library(plugin_filament_view STATIC
         core/scene/scene.cc
         core/shapes/shape.cc
         core/shapes/shape_manager.cc
+        core/utils/deserialize.cc
         viewer/custom_model_viewer.cc
 )
 

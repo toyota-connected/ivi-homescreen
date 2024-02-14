@@ -23,12 +23,11 @@
 
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
+#include "math/vec3.h"
 #include "core/model/model.h"
 #include "core/scene/geometry/position.h"
 
 namespace plugin_filament_view {
-
-class Position;
 
 class Animation {
  public:
@@ -53,7 +52,7 @@ class Animation {
   std::string name_;
   bool auto_play_;
   std::string asset_path_;
-  std::unique_ptr<Position> center_position_;
+  std::unique_ptr<::filament::math::float3> center_position_;
   const std::string& flutterAssetsPath_;
 };
 
