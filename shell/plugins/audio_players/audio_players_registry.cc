@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 
+#include <flutter/standard_method_codec.h>
 #include <flutter/standard_message_codec.h>
 
 #include "audio_player.h"

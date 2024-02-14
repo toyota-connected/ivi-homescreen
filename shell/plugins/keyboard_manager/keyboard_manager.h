@@ -17,6 +17,7 @@
 #pragma once
 
 #include "flutter/fml/macros.h"
+#include <flutter/standard_method_codec.h>
 
 #include <shell/platform/embedder/embedder.h>
 
