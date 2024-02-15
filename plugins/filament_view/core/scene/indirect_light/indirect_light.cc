@@ -61,7 +61,8 @@ std::unique_ptr<IndirectLight> IndirectLight::Deserialize(
       type = std::get<int32_t>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[IndirectLight] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
 

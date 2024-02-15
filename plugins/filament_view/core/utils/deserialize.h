@@ -11,4 +11,4 @@ class Deserialize {
   Deserialize() = default;
   static ::filament::math::float3 Format3(const flutter::EncodableMap& map);
 };
-}
+}  // namespace plugin_filament_view

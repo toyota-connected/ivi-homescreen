@@ -306,9 +306,12 @@ void SceneController::makeSurfaceViewNotTransparent() {
   // TODO surfaceView.holder.setFormat(PixelFormat.OPAQUE)
 }
 
-void SceneController::onTouch(int32_t action, double x, double y) {
+void SceneController::onTouch(int32_t action,
+                              int32_t point_count,
+                              const size_t point_data_size,
+                              const double* point_data) {
   if (cameraManager_) {
-    cameraManager_->onAction(action, x, y);
+    cameraManager_->onAction(action, point_count, point_data_size, point_data);
   }
 }
 

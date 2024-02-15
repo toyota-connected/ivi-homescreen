@@ -38,7 +38,8 @@ class Position {
   explicit Position(float x = 0.0f, float y = 0.0f, float z = 0.0f)
       : x_(x), y_(y), z_(z) {}
 
-  static std::unique_ptr<Position> Deserialize(const flutter::EncodableMap& params);
+  static std::unique_ptr<Position> Deserialize(
+      const flutter::EncodableMap& params);
 
   // getter methods
   [[nodiscard]] float getX() const { return x_; }

@@ -19,6 +19,7 @@
 #include "asio/post.hpp"
 
 #include "plugins/common/common.h"
+#include "touch_pair.h"
 
 namespace plugin_filament_view {
 CameraManager::CameraManager(CustomModelViewer* modelViewer)
@@ -222,9 +223,8 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
 
   if (cameraInfo->flightStartPosition_) {
     auto flightStartPosition = cameraInfo->flightStartPosition_.get();
-    manipulatorBuilder.flightStartPosition(flightStartPosition->x,
-                                           flightStartPosition->y,
-                                           flightStartPosition->z);
+    manipulatorBuilder.flightStartPosition(
+        flightStartPosition->x, flightStartPosition->y, flightStartPosition->z);
     SPDLOG_DEBUG("[CameraManipulator] flightStartPosition: {}, {}, {}",
                  flightStartPosition->x, flightStartPosition->y,
                  flightStartPosition->z);
@@ -233,7 +233,7 @@ void CameraManager::updateCameraManipulator(Camera* cameraInfo) {
   if (cameraInfo->flightStartOrientation_) {
     auto flightStartOrientation = cameraInfo->flightStartOrientation_.get();
     auto pitch = flightStartOrientation->at(0);  // 0f;
-    auto yaw = flightStartOrientation->at(1);  // 0f;
+    auto yaw = flightStartOrientation->at(1);    // 0f;
     manipulatorBuilder.flightStartOrientation(pitch, yaw);
     SPDLOG_DEBUG("[CameraManipulator] flightStartOrientation: {}, {}", pitch,
                  yaw);
@@ -316,18 +316,103 @@ void CameraManager::destroyCamera() {
   SPDLOG_DEBUG("--CameraManager::destroyCamera");
 }
 
-void CameraManager::onAction(int32_t action, double x, double y) {
+void CameraManager::endGesture() {
+  tentativePanEvents_.clear();
+  tentativeOrbitEvents_.clear();
+  tentativeZoomEvents_.clear();
+  currentGesture_ = Gesture::NONE;
+  cameraManipulator_->grabEnd();
+}
+
+bool CameraManager::isOrbitGesture() {
+  return tentativeOrbitEvents_.size() > kGestureConfidenceCount;
+}
+
+bool CameraManager::isPanGesture() {
+  if (tentativePanEvents_.size() <= kGestureConfidenceCount) {
+    return false;
+  }
+  auto oldest = tentativePanEvents_.front().midpoint();
+  auto newest = tentativePanEvents_.back().midpoint();
+  return distance(oldest, newest) > kPanConfidenceDistance;
+}
+
+bool CameraManager::isZoomGesture() {
+  if (tentativeZoomEvents_.size() <= kGestureConfidenceCount) {
+    return false;
+  }
+  auto oldest = tentativeZoomEvents_.front().separation();
+  auto newest = tentativeZoomEvents_.back().separation();
+  return std::abs(newest - oldest) > kZoomConfidenceDistance;
+}
+
+void CameraManager::onAction(int32_t action,
+                             int32_t point_count,
+                             const size_t point_data_size,
+                             const double* point_data) {
+  auto viewport = modelViewer_->getFilamentView()->getViewport();
+  auto touch =
+      TouchPair(point_count, point_data_size, point_data, viewport.height);
   switch (action) {
-    case 0:
-      cameraManipulator_->grabBegin(static_cast<int>(x), static_cast<int>(y),
-                                    false);
+    case ACTION_MOVE:
+      // CANCEL GESTURE DUE TO UNEXPECTED POINTER COUNT
+
+      if ((point_count != 1 && currentGesture_ == Gesture::ORBIT) ||
+          (point_count != 2 && currentGesture_ == Gesture::PAN) ||
+          (point_count != 2 && currentGesture_ == Gesture::ZOOM)) {
+        endGesture();
+        return;
+      }
+
+      // UPDATE EXISTING GESTURE
+
+      if (currentGesture_ == Gesture::ZOOM) {
+        auto d0 = previousTouch_.separation();
+        auto d1 = touch.separation();
+        cameraManipulator_->scroll(touch.x(), touch.y(),
+                                   (d0 - d1) * kZoomSpeed);
+        previousTouch_ = touch;
+        return;
+      }
+
+      if (currentGesture_ != Gesture::NONE) {
+        cameraManipulator_->grabUpdate(touch.x(), touch.y());
+        return;
+      }
+
+      // DETECT NEW GESTURE
+
+      if (point_count == 1) {
+        tentativeOrbitEvents_.push_back(touch);
+      }
+
+      if (point_count == 2) {
+        tentativePanEvents_.push_back(touch);
+        tentativeZoomEvents_.push_back(touch);
+      }
+
+      if (isOrbitGesture()) {
+        cameraManipulator_->grabBegin(touch.x(), touch.y(), false);
+        currentGesture_ = Gesture::ORBIT;
+        return;
+      }
+
+      if (isZoomGesture()) {
+        currentGesture_ = Gesture::ZOOM;
+        previousTouch_ = touch;
+        return;
+      }
+
+      if (isPanGesture()) {
+        cameraManipulator_->grabBegin(touch.x(), touch.y(), true);
+        currentGesture_ = Gesture::PAN;
+        return;
+      }
       break;
-    case 2:
-      cameraManipulator_->grabUpdate(static_cast<int>(x), static_cast<int>(y));
-      break;
-    case 1:
+    case ACTION_CANCEL:
+    case ACTION_UP:
     default:
-      cameraManipulator_->grabEnd();
+      endGesture();
       break;
   }
 }

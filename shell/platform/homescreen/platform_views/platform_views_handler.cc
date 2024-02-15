@@ -105,11 +105,9 @@ void PlatformViewsHandler::HandleMethodCall(
       } else if (key == kKeyWidth &&
                  std::holds_alternative<double>(it.second)) {
         width = std::get<double>(it.second);
-      } else if (key == kKeyTop &&
-                 std::holds_alternative<double>(it.second)) {
+      } else if (key == kKeyTop && std::holds_alternative<double>(it.second)) {
         top = std::get<double>(it.second);
-      } else if (key == kKeyLeft &&
-                 std::holds_alternative<double>(it.second)) {
+      } else if (key == kKeyLeft && std::holds_alternative<double>(it.second)) {
         left = std::get<double>(it.second);
       }
     }
@@ -119,27 +117,27 @@ void PlatformViewsHandler::HandleMethodCall(
 #if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER)
     if (viewType == "plugins.flutter.io/webview") {
       WebviewFlutterPluginCApiRegisterWithRegistrar(
-          registrar, id, std::move(viewType), direction, top, left, width, height, params,
-          engine_->view_controller->engine->GetAssetDirectory(), engine_,
-          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          registrar, id, std::move(viewType), direction, top, left, width,
+          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
 #if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
         if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
       FilamentViewPluginCApiRegisterWithRegistrar(
-          registrar, id, std::move(viewType), direction, top, left, width, height, params,
-          engine_->view_controller->engine->GetAssetDirectory(), engine_,
-          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          registrar, id, std::move(viewType), direction, top, left, width,
+          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
 #if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
         if (viewType == "@views/simple-box-view-type") {
       LayerPlaygroundPluginCApiRegisterWithRegistrar(
-          registrar, id, std::move(viewType), direction, top, left, width, height, params,
-          engine_->view_controller->engine->GetAssetDirectory(), engine_,
-          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          registrar, id, std::move(viewType), direction, top, left, width,
+          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -224,7 +222,8 @@ void PlatformViewsHandler::HandleMethodCall(
     }
     result->Success();
   } else if (method_name == kMethodClearFocus) {
-    plugin_common::Encodable::PrintFlutterEncodableValue("clearFocus", *arguments);
+    plugin_common::Encodable::PrintFlutterEncodableValue("clearFocus",
+                                                         *arguments);
     result->Success();
   } else if (method_name == kMethodOffset) {
     int32_t id = 0;
@@ -258,13 +257,15 @@ void PlatformViewsHandler::HandleMethodCall(
     if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->on_touch(touch.getAction(), touch.getX(), touch.getY(),
-                          delegate.second);
+      callbacks->on_touch(touch.getAction(), touch.getPointerCount(),
+                          touch.getRawPointerCoords().size(),
+                          touch.getRawPointerCoords().data(), delegate.second);
     }
     result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
-    plugin_common::Encodable::PrintFlutterEncodableValue("unhandled", *arguments);
+    plugin_common::Encodable::PrintFlutterEncodableValue("unhandled",
+                                                         *arguments);
     result->NotImplemented();
   }
 }

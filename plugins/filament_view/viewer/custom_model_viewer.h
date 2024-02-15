@@ -104,7 +104,9 @@ class CustomModelViewer {
 
   [[nodiscard]] plugin_filament_view::Scene* getScene() const { return scene_; }
 
-  [[nodiscard]] ModelLoader* getModelLoader() const { return modelLoader_.get(); }
+  [[nodiscard]] ModelLoader* getModelLoader() const {
+    return modelLoader_.get();
+  }
 
   void setCameraManager(CameraManager* cameraManager) {
     cameraManager_ = cameraManager;
@@ -132,25 +134,9 @@ class CustomModelViewer {
     OnFrame(this, nullptr, 0);
   }
 
-  /**
-   * Sets up a root transform on the current model to make it fit into a unit
-   * cube.
-   *
-   * @param centerPoint Coordinate of center point of unit cube, defaults to <
-   * 0, 0, -4 >
-   */
-  void transformToUnitCube(::filament::math::float3* /* centerPoint */, float /* scale */) {
-    // TODO modelLoader_->transformToUnitCube(centerPoint, scale);
+  [[nodiscard]] pthread_t getFilamentApiThreadId() const {
+    return filament_api_thread_id_;
   }
-
-  /**
-   * Removes the transformation that was set up via transformToUnitCube.
-   */
-  void clearRootTransform() {
-    // TODO modelLoader_->clearRootTransform();
-  }
-
-  [[nodiscard]] pthread_t getFilamentApiThreadId() const { return filament_api_thread_id_; }
 
   [[nodiscard]] std::string getAssetPath() const { return flutterAssetsPath_; }
 

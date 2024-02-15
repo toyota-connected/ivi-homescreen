@@ -119,66 +119,64 @@ std::future<Resource<std::string_view>> GroundManager::createGround() {
 
     auto& em = utils::EntityManager::get();
 
-    const static uint32_t indices[] = {
-        0, 1, 2, 2, 3, 0
-    };
+    const static uint32_t indices[] = {0, 1, 2, 2, 3, 0};
 
     Aabb aabb = modelViewer_->getModelLoader()->getAsset()->getBoundingBox();
-    //if (!app.actualSize) {
-      mat4f const transform = fitIntoUnitCube(aabb, 4);
-      aabb = aabb.transform(transform);
+    // if (!app.actualSize) {
+    mat4f const transform = fitIntoUnitCube(aabb, 4);
+    aabb = aabb.transform(transform);
     //}
 
     float3 planeExtent{10.0f * aabb.extent().x, 0.0f, 10.0f * aabb.extent().z};
 
     const static float3 vertices[] = {
-        { -planeExtent.x, 0, -planeExtent.z },
-        { -planeExtent.x, 0,  planeExtent.z },
-        {  planeExtent.x, 0,  planeExtent.z },
-        {  planeExtent.x, 0, -planeExtent.z },
+        {-planeExtent.x, 0, -planeExtent.z},
+        {-planeExtent.x, 0, planeExtent.z},
+        {planeExtent.x, 0, planeExtent.z},
+        {planeExtent.x, 0, -planeExtent.z},
     };
 
-    short4 const tbn = packSnorm16(
-        mat3f::packTangentFrame(
-            mat3f{
-                float3{ 1.0f, 0.0f, 0.0f },
-                float3{ 0.0f, 0.0f, 1.0f },
-                float3{ 0.0f, 1.0f, 0.0f }
-            }
-            ).xyzw);
+    short4 const tbn =
+        packSnorm16(mat3f::packTangentFrame(mat3f{float3{1.0f, 0.0f, 0.0f},
+                                                  float3{0.0f, 0.0f, 1.0f},
+                                                  float3{0.0f, 1.0f, 0.0f}})
+                        .xyzw);
 
-    const static short4 normals[] { tbn, tbn, tbn, tbn };
+    const static short4 normals[]{tbn, tbn, tbn, tbn};
 
-    VertexBuffer* vertexBuffer = VertexBuffer::Builder()
-                                     .vertexCount(4)
-                                     .bufferCount(2)
-                                     .attribute(VertexAttribute::POSITION,
-                                                0, VertexBuffer::AttributeType::FLOAT3)
-                                     .attribute(VertexAttribute::TANGENTS,
-                                                1, VertexBuffer::AttributeType::SHORT4)
-                                     .normalized(VertexAttribute::TANGENTS)
-                                     .build(*engine_);
+    VertexBuffer* vertexBuffer =
+        VertexBuffer::Builder()
+            .vertexCount(4)
+            .bufferCount(2)
+            .attribute(VertexAttribute::POSITION, 0,
+                       VertexBuffer::AttributeType::FLOAT3)
+            .attribute(VertexAttribute::TANGENTS, 1,
+                       VertexBuffer::AttributeType::SHORT4)
+            .normalized(VertexAttribute::TANGENTS)
+            .build(*engine_);
 
-    vertexBuffer->setBufferAt(*engine_, 0, VertexBuffer::BufferDescriptor(
-                                              vertices, vertexBuffer->getVertexCount() * sizeof(vertices[0])));
-    vertexBuffer->setBufferAt(*engine_, 1, VertexBuffer::BufferDescriptor(
-                                              normals, vertexBuffer->getVertexCount() * sizeof(normals[0])));
+    vertexBuffer->setBufferAt(
+        *engine_, 0,
+        VertexBuffer::BufferDescriptor(
+            vertices, vertexBuffer->getVertexCount() * sizeof(vertices[0])));
+    vertexBuffer->setBufferAt(
+        *engine_, 1,
+        VertexBuffer::BufferDescriptor(
+            normals, vertexBuffer->getVertexCount() * sizeof(normals[0])));
 
-    IndexBuffer* indexBuffer = IndexBuffer::Builder()
-                                   .indexCount(6)
-                                   .build(*engine_);
+    IndexBuffer* indexBuffer =
+        IndexBuffer::Builder().indexCount(6).build(*engine_);
 
     indexBuffer->setBuffer(*engine_, IndexBuffer::BufferDescriptor(
-                                        indices, indexBuffer->getIndexCount() * sizeof(uint32_t)));
+                                         indices, indexBuffer->getIndexCount() *
+                                                      sizeof(uint32_t)));
 
     Entity const groundPlane = em.create();
     RenderableManager::Builder(1)
-        .boundingBox({
-            {}, { planeExtent.x, 1e-4f, planeExtent.z }
-        })
+        .boundingBox({{}, {planeExtent.x, 1e-4f, planeExtent.z}})
         .material(0, materialInstanceResult.getData().value())
-        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES,
-                  vertexBuffer, indexBuffer, 0, 6)
+        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer,
+                  indexBuffer, 0, 6)
         .culling(false)
         .receiveShadows(true)
         .castShadows(false)
@@ -188,7 +186,7 @@ std::future<Resource<std::string_view>> GroundManager::createGround() {
 
     auto& tcm = engine_->getTransformManager();
     tcm.setTransform(tcm.getInstance(groundPlane),
-                     mat4f::translation(float3{ 0, aabb.min.y, -4 }));
+                     mat4f::translation(float3{0, aabb.min.y, -4}));
 
     auto& rcm = engine_->getRenderableManager();
     auto instance = rcm.getInstance(groundPlane);
@@ -196,21 +194,21 @@ std::future<Resource<std::string_view>> GroundManager::createGround() {
 
     modelViewer_->setGroundState(SceneState::LOADED);
 
-      promise->set_value(
-          Resource<std::string_view>::Success("Ground created successfully"));
-    });
-    SPDLOG_DEBUG("--GroundManager::createGround");
-    return future;
+    promise->set_value(
+        Resource<std::string_view>::Success("Ground created successfully"));
+  });
+  SPDLOG_DEBUG("--GroundManager::createGround");
+  return future;
 }
 
 std::future<Resource<std::string_view>> GroundManager::updateGround(
     Ground* newGround) {
-    return std::future<Resource<std::string_view>>();
+  return std::future<Resource<std::string_view>>();
 }
 
 std::future<Resource<std::string_view>> GroundManager::updateGroundMaterial(
     Material* newMaterial) {
-    return std::future<Resource<std::string_view>>();
+  return std::future<Resource<std::string_view>>();
 }
 
 void GroundManager::Print(const char* tag) {}

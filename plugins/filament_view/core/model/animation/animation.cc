@@ -67,7 +67,7 @@ void Animation::Print(const char* tag) {
   spdlog::debug(
       "\tasset_path {} valid",
       std::filesystem::exists(asset_folder / asset_path_) ? "is" : "is not");
-//TODO  center_position_->Print("\tcenterPosition:");
+  // TODO  center_position_->Print("\tcenterPosition:");
   spdlog::debug("++++++++");
 }
 

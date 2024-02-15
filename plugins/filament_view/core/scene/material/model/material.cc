@@ -45,7 +45,8 @@ Material::Material(const std::string& flutter_assets_path,
       }
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Material] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--Material::Material");

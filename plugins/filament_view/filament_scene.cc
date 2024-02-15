@@ -56,7 +56,8 @@ FilamentScene::FilamentScene(PlatformView* platformView,
       }
     } else {
       spdlog::warn("[FilamentView] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   sceneController_ = std::make_unique<SceneController>(

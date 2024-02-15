@@ -170,7 +170,11 @@ class FilamentViewPlugin : public flutter::Plugin,
   static void on_resize(double width, double height, void* data);
   static void on_set_direction(int32_t direction, void* data);
   static void on_set_offset(double left, double top, void* data);
-  static void on_touch(int32_t action, double x, double y, void* data);
+  static void on_touch(int32_t action,
+                       int32_t point_count,
+                       const size_t point_data_size,
+                       const double* point_data,
+                       void* data);
   static void on_dispose(bool hybrid, void* data);
 
   static const struct platform_view_listener platform_view_listener_;

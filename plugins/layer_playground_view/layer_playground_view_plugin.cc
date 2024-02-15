@@ -64,7 +64,13 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context)
-    : PlatformView(id, std::move(viewType), direction, top, left, width, height),
+    : PlatformView(id,
+                   std::move(viewType),
+                   direction,
+                   top,
+                   left,
+                   width,
+                   height),
       id_(id),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),
@@ -83,10 +89,10 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
   egl_window_ = wl_egl_window_create(surface_, width_, height_);
   assert(egl_window_);
 
-
   InitializeEGL();
   egl_surface_ = eglCreateWindowSurface(
-      egl_display_, egl_config_, reinterpret_cast<EGLNativeWindowType>(egl_window_), nullptr);
+      egl_display_, egl_config_,
+      reinterpret_cast<EGLNativeWindowType>(egl_window_), nullptr);
 
   // Subsurface
   parent_surface_ = flutter_view->GetWindow()->GetBaseSurface();
@@ -107,7 +113,9 @@ LayerPlaygroundViewPlugin::~LayerPlaygroundViewPlugin() {
   removeListener_(platformViewsContext_, id_);
 };
 
-void LayerPlaygroundViewPlugin::on_resize(double width, double height, void* data) {
+void LayerPlaygroundViewPlugin::on_resize(double width,
+                                          double height,
+                                          void* data) {
   auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
   if (plugin) {
     plugin->width_ = static_cast<int32_t>(width);
@@ -116,7 +124,8 @@ void LayerPlaygroundViewPlugin::on_resize(double width, double height, void* dat
   }
 }
 
-void LayerPlaygroundViewPlugin::on_set_direction(int32_t direction, void* data) {
+void LayerPlaygroundViewPlugin::on_set_direction(int32_t direction,
+                                                 void* data) {
   auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
   if (plugin) {
     plugin->direction_ = direction;
@@ -124,14 +133,17 @@ void LayerPlaygroundViewPlugin::on_set_direction(int32_t direction, void* data) 
   }
 }
 
-void LayerPlaygroundViewPlugin::on_set_offset(double left, double top, void* data) {
+void LayerPlaygroundViewPlugin::on_set_offset(double left,
+                                              double top,
+                                              void* data) {
   auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
   if (plugin) {
     plugin->left_ = static_cast<int32_t>(left);
     plugin->top_ = static_cast<int32_t>(top);
     if (plugin->subsurface_) {
       SPDLOG_DEBUG("SetOffset: left: {}, top: {}", plugin->left_, plugin->top_);
-      wl_subsurface_set_position(plugin->subsurface_, plugin->left_, plugin->top_);
+      wl_subsurface_set_position(plugin->subsurface_, plugin->left_,
+                                 plugin->top_);
       if (!plugin->callback_) {
         on_frame(plugin, plugin->callback_, 0);
       }
@@ -139,10 +151,11 @@ void LayerPlaygroundViewPlugin::on_set_offset(double left, double top, void* dat
   }
 }
 
-void LayerPlaygroundViewPlugin::on_touch(int32_t action,
-                                     double x,
-                                     double y,
-                                     void* data) {
+void LayerPlaygroundViewPlugin::on_touch(int32_t /* action */,
+                                         int32_t /* point_count */,
+                                         const size_t /* point_data_size */,
+                                         const double* /* point_data */,
+                                         void* data) {
   auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
 }
 
@@ -178,8 +191,8 @@ const struct platform_view_listener
         .dispose = on_dispose};
 
 void LayerPlaygroundViewPlugin::on_frame(void* data,
-                               wl_callback* callback,
-                               const uint32_t time) {
+                                         wl_callback* callback,
+                                         const uint32_t time) {
   const auto obj = static_cast<LayerPlaygroundViewPlugin*>(data);
 
   obj->callback_ = nullptr;
@@ -191,19 +204,20 @@ void LayerPlaygroundViewPlugin::on_frame(void* data,
   obj->DrawFrame(time);
 
   // Z-Order
-  //wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
+  // wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
   wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
 
   obj->callback_ = wl_surface_frame(obj->surface_);
-  wl_callback_add_listener(obj->callback_, &LayerPlaygroundViewPlugin::frame_listener,
-                           data);
+  wl_callback_add_listener(obj->callback_,
+                           &LayerPlaygroundViewPlugin::frame_listener, data);
 
   wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
 
   wl_surface_commit(obj->surface_);
 }
 
-const wl_callback_listener LayerPlaygroundViewPlugin::frame_listener = {.done = on_frame};
+const wl_callback_listener LayerPlaygroundViewPlugin::frame_listener = {
+    .done = on_frame};
 
 GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
   // Create the shader object
@@ -218,7 +232,8 @@ GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
     GLint infoLen = 0;
     glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
     if (infoLen > 1) {
-      auto* infoLog = static_cast<GLchar*>(malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
+      auto* infoLog = static_cast<GLchar*>(
+          malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
       glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
       spdlog::error("Error compiling shader:\n{}\n", infoLog);
       free(infoLog);
@@ -306,7 +321,8 @@ void LayerPlaygroundViewPlugin::InitializeScene() {
     GLint infoLen = 0;
     glGetProgramiv(programObject, GL_INFO_LOG_LENGTH, &infoLen);
     if (infoLen > 1) {
-      auto* infoLog = static_cast<GLchar*>(malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
+      auto* infoLog = static_cast<GLchar*>(
+          malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
       glGetProgramInfoLog(programObject, infoLen, nullptr, infoLog);
       spdlog::error("Error linking program:\n{}\n", infoLog);
       free(infoLog);
@@ -339,4 +355,4 @@ void LayerPlaygroundViewPlugin::DrawFrame(uint32_t /* time */) const {
   eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
 
-}  // namespace plugin_layer_playground
+}  // namespace plugin_layer_playground_view

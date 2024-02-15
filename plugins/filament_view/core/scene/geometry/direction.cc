@@ -36,7 +36,8 @@ Direction::Direction(const flutter::EncodableMap& params) {
       z_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[Direction] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--Direction::Direction");

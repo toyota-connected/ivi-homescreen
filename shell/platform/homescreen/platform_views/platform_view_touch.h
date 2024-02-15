@@ -26,13 +26,19 @@ class PlatformViewTouch {
   explicit PlatformViewTouch(
       const std::vector<flutter::EncodableValue>& params);
 
-  int32_t getId() const { return id_; }
+  [[nodiscard]] int32_t getId() const { return id_; }
 
-  int32_t getAction() const { return action_; }
+  [[nodiscard]] int32_t getAction() const { return action_; }
+
+  [[nodiscard]] int32_t getPointerCount() const { return pointerCount_; }
 
   double getX() { return rawPointerCoords_[7]; }
 
   double getY() { return rawPointerCoords_[8]; }
+
+  [[nodiscard]] const std::vector<double>& getRawPointerCoords() const {
+    return rawPointerCoords_;
+  }
 
   void Print();
 
