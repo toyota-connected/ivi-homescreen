@@ -18,7 +18,10 @@ namespace plugin_filament_view {
 
 class PlaneGeometry : public Geometry {
  public:
-  PlaneGeometry(::filament::float3 center, Size size, Direction normal, Geometry geometry)
+  PlaneGeometry(::filament::float3 center,
+                Size size,
+                Direction normal,
+                Geometry geometry)
       : Geometry(geometry.vertexBuffer,
                  geometry.indexBuffer,
                  geometry.boundingBox,

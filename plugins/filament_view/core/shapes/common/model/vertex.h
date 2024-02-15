@@ -26,7 +26,8 @@ class Vertex {
   }
 
   //  Box(center.toFloatArray(), halfExtent.toFloatArray())
-  ::filament::Box Box(::filament::math::float3 center, ::filament::math::float3 halfExtent) {
+  ::filament::Box Box(::filament::math::float3 center,
+                      ::filament::math::float3 halfExtent) {
     return ::filament::Box(center, halfExtent);
   }
 

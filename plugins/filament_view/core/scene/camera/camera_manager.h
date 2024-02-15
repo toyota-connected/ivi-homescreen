@@ -28,6 +28,7 @@
 #include "core/scene/camera/exposure.h"
 #include "core/scene/camera/lens_projection.h"
 #include "core/scene/camera/projection.h"
+#include "touch_pair.h"
 #include "viewer/custom_model_viewer.h"
 
 namespace plugin_filament_view {
@@ -53,7 +54,10 @@ class CameraManager {
   void destroyCamera();
 
   // Camera control
-  void onAction(int32_t action, double x, double y);
+  void onAction(int32_t action,
+                int32_t point_count,
+                size_t point_data_size,
+                const double* point_data);
 
   float calculateAspectRatio();
 
@@ -88,11 +92,23 @@ class CameraManager {
   static constexpr float kSensitivity = 100.0f;
   static constexpr float kDefaultFocalLength = 28.0f;
 
+  enum class Gesture { NONE, ORBIT, PAN, ZOOM };
+
+  static constexpr int kGestureConfidenceCount = 2;
+  static constexpr int kPanConfidenceDistance = 4;
+  static constexpr int kZoomConfidenceDistance = 10;
+  static constexpr float kZoomSpeed = 1.0f / 10.0f;
+
   static constexpr ::filament::math::float3 kDefaultObjectPosition = {
       0.0f, 0.0f, -4.0f};
   static constexpr ::filament::math::float3 kCameraCenter = {0.0f, 0.0f, 0.0f};
   static constexpr ::filament::math::float3 kCameraUp = {0.0f, 1.0f, 0.0f};
   static constexpr float kCameraDist = 3.0f;
+
+  static constexpr int ACTION_DOWN = 0;
+  static constexpr int ACTION_UP = 1;
+  static constexpr int ACTION_MOVE = 2;
+  static constexpr int ACTION_CANCEL = 3;
 
   // ImVec2: 2D vector used to store positions, sizes etc. [Compile-time
   // configurable type] This is a frequently used type in the API. Consider
@@ -135,5 +151,16 @@ class CameraManager {
   // displayFramebufferScale_. Generally (1,1) on normal display, (2,2) on OSX
   // with Retina display.
   ImVec2 displayFramebufferScale_;
+
+  Gesture currentGesture_ = Gesture::NONE;
+  TouchPair previousTouch_;
+  std::vector<TouchPair> tentativePanEvents_;
+  std::vector<TouchPair> tentativeOrbitEvents_;
+  std::vector<TouchPair> tentativeZoomEvents_;
+
+  void endGesture();
+  bool isOrbitGesture();
+  bool isPanGesture();
+  bool isZoomGesture();
 };
 }  // namespace plugin_filament_view

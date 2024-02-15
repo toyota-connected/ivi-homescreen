@@ -39,7 +39,8 @@ TextureSampler::TextureSampler(const flutter::EncodableMap& params) {
       anisotropy_ = std::get<double>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[TextureSampler] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
   SPDLOG_TRACE("--TextureSampler::TextureSampler");

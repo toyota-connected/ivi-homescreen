@@ -44,7 +44,9 @@ class Model {
 
   [[nodiscard]] float GetScale() const { return scale_; }
 
-  [[nodiscard]] ::filament::math::float3* GetCenterPosition() const { return center_position_; }
+  [[nodiscard]] ::filament::math::float3* GetCenterPosition() const {
+    return center_position_;
+  }
 
   [[nodiscard]] Model* GetFallback() const { return fallback_; }
 

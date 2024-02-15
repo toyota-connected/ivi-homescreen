@@ -30,7 +30,9 @@ class Direction {
 
   explicit Direction(const flutter::EncodableMap& params);
 
-  [[nodiscard]] ::filament::math::float3 toFloatArray() const { return {x_, y_, z_}; }
+  [[nodiscard]] ::filament::math::float3 toFloatArray() const {
+    return {x_, y_, z_};
+  }
 
   void Print(const char* tag);
 

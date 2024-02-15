@@ -78,7 +78,10 @@ class SceneController {
     return modelViewer_.get();
   }
 
-  void onTouch(int32_t action, double x, double y);
+  void onTouch(int32_t action,
+               int32_t point_count,
+               const size_t point_data_size,
+               const double* point_data);
 
   [[nodiscard]] CameraManager* getCameraManager() const {
     return cameraManager_.get();

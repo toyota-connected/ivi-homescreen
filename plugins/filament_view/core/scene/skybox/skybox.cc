@@ -53,7 +53,8 @@ std::unique_ptr<Skybox> Skybox::Deserialize(
       skyboxType = std::get<int32_t>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[SkyBox] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
 

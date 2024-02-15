@@ -52,7 +52,8 @@ std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
       value = std::get<flutter::EncodableMap>(it.second);
     } else if (!it.second.IsNull()) {
       spdlog::debug("[MaterialParameter] Unhandled Parameter");
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), it.second);
+      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(),
+                                                           it.second);
     }
   }
 

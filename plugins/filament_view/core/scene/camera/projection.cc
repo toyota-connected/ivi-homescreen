@@ -65,8 +65,7 @@ Projection::Projection(const flutter::EncodableMap& params) {
     } else if (key == "direction") {
       if (std::holds_alternative<std::string>(it.second)) {
         fovDirection_ = getFovForText(std::get<std::string>(it.second));
-      }
-      else if (std::holds_alternative<std::monostate>(it.second)) {
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
         fovDirection_ = ::filament::Camera::Fov::HORIZONTAL;
       }
     }

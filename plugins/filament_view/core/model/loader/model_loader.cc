@@ -88,47 +88,27 @@ void ModelLoader::destroyModel() {
   }
 }
 
-void ModelLoader::updateRootTransform(bool autoScaleEnabled) {
-  using namespace filament;
-  using namespace filament::math;
-  using namespace filament::gltfio;
-
-  auto& tcm = engine_->getTransformManager();
-  auto root = tcm.getInstance(asset_->getRoot());
-  mat4f transform;
-
-  if (autoScaleEnabled) {
-    FilamentInstance* instance = asset_->getInstance();
-    Aabb aabb =
-        instance ? instance->getBoundingBox() : asset_->getBoundingBox();
-    transform = fitIntoUnitCube(aabb, 4);
-  }
-  tcm.setTransform(root, transform);
-}
-
 /**
  * Loads a monolithic binary glb and populates the Filament scene.
  */
 void ModelLoader::loadModelGlb(const std::vector<uint8_t>& buffer,
                                const ::filament::float3* centerPosition,
                                float scale,
-                               bool transform) {
+                               bool autoScaleEnabled) {
   destroyModel();
-  if (!instances_.empty()) {
-    asset_ = assetLoader_->createInstancedAsset(
-        buffer.data(), static_cast<uint32_t>(buffer.size()), instances_.data(),
-        instances_.size());
-  } else {
-    asset_ = assetLoader_->createAsset(buffer.data(),
-                                       static_cast<uint32_t>(buffer.size()));
+  asset_ = assetLoader_->createAsset(buffer.data(),
+                                     static_cast<uint32_t>(buffer.size()));
+  if (!asset_) {
+    return;
   }
 
-  if (asset_) {
-    resourceLoader_->asyncBeginLoad(asset_);
-    modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
-    asset_->releaseSourceData();
-    // updateRootTransform(false);
-    // transformToUnitCube(centerPosition, scale);
+  resourceLoader_->asyncBeginLoad(asset_);
+  modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
+  asset_->releaseSourceData();
+  if (autoScaleEnabled) {
+    transformToUnitCube(centerPosition, scale);
+  } else {
+    clearRootTransform();
   }
 }
 
@@ -142,70 +122,47 @@ void ModelLoader::loadModelGltf(
   destroyModel();
   asset_ = assetLoader_->createAsset(buffer.data(),
                                      static_cast<uint32_t>(buffer.size()));
-  if (asset_) {
-    auto uri_data = asset_->getResourceUris();
-    auto uris = std::vector<const char*>(
-        uri_data, uri_data + asset_->getResourceUriCount());
-    for (const auto uri : uris) {
-      SPDLOG_DEBUG("resource uri: {}", uri);
+  if (!asset_) {
+    return;
+  }
+
+  auto uri_data = asset_->getResourceUris();
+  auto uris = std::vector<const char*>(
+      uri_data, uri_data + asset_->getResourceUriCount());
+  for (const auto uri : uris) {
+    SPDLOG_DEBUG("resource uri: {}", uri);
 #if 0   // TODO
-                auto resourceBuffer = callback(uri);
-                if (!resourceBuffer) {
-                    this->asset_ = nullptr;
-                    return;
-                }
-                resourceLoader_->addResourceData(uri, resourceBuffer);
+              auto resourceBuffer = callback(uri);
+              if (!resourceBuffer) {
+                  this->asset_ = nullptr;
+                  return;
+              }
+              resourceLoader_->addResourceData(uri, resourceBuffer);
 #endif  // TODO
-    }
-    resourceLoader_->asyncBeginLoad(asset_);
-    modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
-    asset_->releaseSourceData();
-    if (transform) {
-      transformToUnitCube(centerPosition, scale);
-    }
+  }
+  resourceLoader_->asyncBeginLoad(asset_);
+  modelViewer_->setAnimator(asset_->getInstance()->getAnimator());
+  asset_->releaseSourceData();
+  if (transform) {
+    transformToUnitCube(centerPosition, scale);
   }
 }
 
-filament::math::mat4f ModelLoader::fitIntoUnitCube(
-    const ::filament::Aabb& bounds,
-    ::filament::math::float3 offset) {
-  using namespace filament;
-  using namespace filament::math;
-  float3 minpt = bounds.min;
-  float3 maxpt = bounds.max;
-  float maxExtent;
-  maxExtent = std::max(maxpt.x - minpt.x, maxpt.y - minpt.y);
-  maxExtent = std::max(maxExtent, maxpt.z - minpt.z);
-  float scaleFactor = 2.0f / maxExtent;
-  float3 center = (minpt + maxpt) / 2.0f;
-  center += offset.z / scaleFactor;
-  return mat4f::scaling(filament::math::float3(scaleFactor)) *
-         mat4f::translation(-center);
-}
-
-void ModelLoader::transformToUnitCube(const ::filament::float3* centerPoint,
-                                      float modelScale) {
-  using namespace ::filament;
-  using namespace ::filament::gltfio;
-
-  std::unique_ptr<::filament::math::float3> centerPosition;
-  if (!centerPoint) {
-    centerPosition = std::make_unique<::filament::math::float3>(
-        CustomModelViewer::kDefaultObjectPosition);
-  } else {
-    centerPosition = std::make_unique<::filament::math::float3>(
-        centerPoint->x, centerPoint->y, centerPoint->z);
+void ModelLoader::transformToUnitCube(
+    const ::filament::float3* /* centerPoint */,
+    float /* modelScale */) {
+  if (!asset_) {
+    return;
   }
-
-  TransformManager& tm = engine_->getTransformManager();
-
-  auto root = tm.getInstance(asset_->getRoot());
-  mat4f transform;
-
-  FilamentInstance* instance = asset_->getInstance();
-  Aabb aabb = instance ? instance->getBoundingBox() : asset_->getBoundingBox();
-  // TODO transform = fitIntoUnitCube(aabb, centerPosition);
-  tm.setTransform(root, transform);
+  auto aabb = asset_->getBoundingBox();
+  auto center = aabb.center();
+  auto halfExtent = aabb.extent();
+  auto maxExtent = max(halfExtent) * 2;
+  auto scaleFactor = 2.0f / maxExtent;
+  auto transform = ::filament::math::mat4f::scaling(scaleFactor) *
+                   ::filament::math::mat4f::translation(-center);
+  auto& tm = engine_->getTransformManager();
+  tm.setTransform(tm.getInstance(asset_->getRoot()), transform);
 }
 
 void ModelLoader::populateScene(::filament::gltfio::FilamentAsset* asset) {

@@ -60,8 +60,9 @@ Resource<::filament::MaterialInstance*> MaterialManager::setupMaterialInstance(
 
   for (const auto& param : parameters) {
     if (param.name) {
-      spdlog::info("[Material] name: {}, type: {}", param.name, (int)param.type);
-      //TODO
+      spdlog::info("[Material] name: {}, type: {}", param.name,
+                   (int)param.type);
+      // TODO
       materialInstance->setParameter(param.name, 0.75f);
     }
   }

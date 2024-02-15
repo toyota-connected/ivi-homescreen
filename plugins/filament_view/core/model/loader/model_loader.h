@@ -2,8 +2,8 @@
 #pragma once
 
 #include <filament/IndirectLight.h>
-#include <filament/TransformManager.h>
 #include <filament/MaterialInstance.h>
+#include <filament/TransformManager.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/ResourceLoader.h>
@@ -55,7 +55,7 @@ class ModelLoader {
   std::optional<::filament::math::mat4f> getModelTransform();
 
   /**
-     * Removes the transformation that was set up via transformToUnitCube.
+   * Removes the transformation that was set up via transformToUnitCube.
    */
   void clearRootTransform();
 

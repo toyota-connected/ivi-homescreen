@@ -5,7 +5,6 @@
 #include "core/include/file_utils.h"
 #include "plugins/common/common.h"
 
-
 namespace plugin_filament_view {
 
 TextureLoader::TextureLoader(CustomModelViewer* modelViewer,

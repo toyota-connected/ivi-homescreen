@@ -19,8 +19,8 @@
 #include <flutter/standard_message_codec.h>
 
 #include "filament_scene.h"
-#include "plugins/common/common.h"
 #include "messages.g.h"
+#include "plugins/common/common.h"
 
 class FlutterView;
 
@@ -72,7 +72,13 @@ FilamentViewPlugin::FilamentViewPlugin(
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context)
-    : PlatformView(id, std::move(viewType), direction, top, left, width, height),
+    : PlatformView(id,
+                   std::move(viewType),
+                   direction,
+                   top,
+                   left,
+                   width,
+                   height),
       id_(id),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),
@@ -179,19 +185,21 @@ void FilamentViewPlugin::on_set_offset(double left, double top, void* data) {
 }
 
 void FilamentViewPlugin::on_touch(int32_t action,
-                                  double x,
-                                  double y,
+                                  int32_t point_count,
+                                  const size_t point_data_size,
+                                  const double* point_data,
                                   void* data) {
   auto plugin = static_cast<FilamentViewPlugin*>(data);
   if (plugin && plugin->filamentScene_) {
     auto sceneController = plugin->filamentScene_->getSceneController();
     if (sceneController) {
-      sceneController->onTouch(action, x, y);
+      sceneController->onTouch(action, point_count, point_data_size,
+                               point_data);
     }
   }
 }
 
-void FilamentViewPlugin::on_dispose(bool hybrid, void* data) {
+void FilamentViewPlugin::on_dispose(bool /* hybrid */, void* data) {
   auto plugin = static_cast<FilamentViewPlugin*>(data);
   if (plugin && plugin->filamentScene_) {
     plugin->filamentScene_.reset();

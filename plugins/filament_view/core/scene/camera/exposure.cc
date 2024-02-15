@@ -27,22 +27,19 @@ Exposure::Exposure(const flutter::EncodableMap& params) {
     if (key == "aperture") {
       if (std::holds_alternative<double>(it.second)) {
         aperture_ = std::get<double>(it.second);
-      }
-      else if (std::holds_alternative<std::monostate>(it.second)) {
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
         aperture_ = 16.0f;
       }
     } else if (key == "sensitivity") {
       if (std::holds_alternative<double>(it.second)) {
         sensitivity_ = std::get<double>(it.second);
-      }
-      else if (std::holds_alternative<std::monostate>(it.second)) {
+      } else if (std::holds_alternative<std::monostate>(it.second)) {
         sensitivity_ = 100.0f;
       }
     } else if (key == "shutterSpeed") {
       if (std::holds_alternative<double>(it.second)) {
         shutterSpeed_ = std::get<double>(it.second);
-      }
-      else if (std::holds_alternative<double>(it.second)) {
+      } else if (std::holds_alternative<double>(it.second)) {
         shutterSpeed_ = 1.0f / 125.0f;
       }
     } else if (key == "exposure") {
