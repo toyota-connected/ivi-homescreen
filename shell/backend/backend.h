@@ -18,37 +18,19 @@
 
 #include <memory>
 
+#include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
 
 class Engine;
 
-typedef void (*ResizeCallback)(void* /* user_data */,
-                               size_t /* index */,
-                               Engine* /* flutter engine */,
-                               int32_t /* width */,
-                               int32_t /* height */);
-
-typedef void (*CreateSurfaceCallback)(void* /* user_data */,
-                                      size_t /* index */,
-                                      struct wl_surface* /* surface */,
-                                      int32_t /* width */,
-                                      int32_t /* height */);
-
 class Backend {
  public:
-  Backend(void* user_data,
-          ResizeCallback resize_callback,
-          CreateSurfaceCallback create_surface_callback)
-      : m_user_data(user_data),
-        m_resize_callback(resize_callback),
-        m_create_surface_callback(create_surface_callback) {}
-
+  Backend() = default;
   virtual ~Backend() = default;
 
   Backend(const Backend&) = delete;
-
   const Backend& operator=(const Backend&) = delete;
 
   /**
@@ -61,15 +43,10 @@ class Backend {
    * @relation
    * flutter, wayland
    */
-  void Resize(const size_t index,
-              const std::shared_ptr<Engine>& flutter_engine,
-              const int32_t width,
-              const int32_t height) const {
-    if (m_resize_callback) {
-      m_resize_callback(m_user_data, index, flutter_engine.get(), width,
-                        height);
-    }
-  }
+  virtual void Resize(size_t index,
+                      Engine* flutter_engine,
+                      int32_t width,
+                      int32_t height) = 0;
 
   /**
    * @brief Execute the callback function for surface creating
@@ -81,14 +58,14 @@ class Backend {
    * @relation
    * wayland, (flutter)
    */
-  void CreateSurface(const size_t index,
-                     struct wl_surface* surface,
-                     const int32_t width,
-                     const int32_t height) const {
-    if (m_create_surface_callback) {
-      m_create_surface_callback(m_user_data, index, surface, width, height);
-    }
-  }
+  virtual void CreateSurface(size_t index,
+                             struct wl_surface* surface,
+                             int32_t width,
+                             int32_t height) = 0;
+
+  virtual bool TextureMakeCurrent() = 0;
+
+  virtual bool TextureClearCurrent() = 0;
 
   /**
    * @brief Get an empty FlutterRendererConfig
@@ -97,7 +74,7 @@ class Backend {
    * @relation
    * internal
    */
-  virtual FlutterRendererConfig GetRenderConfig() { return {}; }
+  virtual FlutterRendererConfig GetRenderConfig() = 0;
 
   /**
    * @brief Get an empty FlutterCompositor
@@ -106,10 +83,5 @@ class Backend {
    * @relation
    * internal
    */
-  MAYBE_UNUSED virtual FlutterCompositor GetCompositorConfig() { return {}; }
-
- private:
-  void* m_user_data;
-  ResizeCallback m_resize_callback;
-  CreateSurfaceCallback m_create_surface_callback;
+  virtual FlutterCompositor GetCompositorConfig() = 0;
 };

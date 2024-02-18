@@ -19,9 +19,16 @@
 #include <list>
 #include <unordered_map>
 
+#include <wayland-egl.h>
+
 #include "backend/backend.h"
 #include "constants.h"
 #include "egl.h"
+#include "textures/texture.h"
+
+class Backend;
+
+class Engine;
 
 class WaylandEglBackend : public Egl, public Backend {
  public:
@@ -37,7 +44,6 @@ class WaylandEglBackend : public Egl, public Backend {
 
   /**
    * @brief Resize Flutter engine Window size
-   * @param[in] user_data Pointer to User data
    * @param[in] index No use
    * @param[in] engine Pointer to Flutter engine
    * @param[in] width Set window width
@@ -46,15 +52,13 @@ class WaylandEglBackend : public Egl, public Backend {
    * @relation
    * wayland
    */
-  static void Resize(void* user_data,
-                     size_t index,
-                     Engine* engine,
-                     int32_t width,
-                     int32_t height);
+  void Resize(size_t index,
+              Engine* flutter_engine,
+              int32_t width,
+              int32_t height) override;
 
   /**
    * @brief Create EGL surface
-   * @param[in] user_data Pointer to User data
    * @param[in] index No use
    * @param[in] surface Pointer to surface
    * @param[in] width Set surface width
@@ -63,11 +67,14 @@ class WaylandEglBackend : public Egl, public Backend {
    * @relation
    * wayland
    */
-  static void CreateSurface(void* user_data,
-                            size_t index,
-                            wl_surface* surface,
-                            int32_t width,
-                            int32_t height);
+  void CreateSurface(const size_t index,
+                     struct wl_surface* surface,
+                     const int32_t width,
+                     const int32_t height) override;
+
+  bool TextureMakeCurrent() override;
+
+  bool TextureClearCurrent() override;
 
   /**
    * @brief Get FlutterRendererConfig

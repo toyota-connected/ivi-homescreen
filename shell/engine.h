@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include <flutter/encodable_value.h>
-#include <shell/platform/embedder/embedder.h>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -27,11 +25,12 @@
 #include <string>
 #include <vector>
 
+#include <flutter/encodable_value.h>
+#include <shell/platform/embedder/embedder.h>
+
 #include "backend/backend.h"
 #include "constants.h"
 #include "logging/logging.h"
-//#include "plugins/key_event/key_event.h"
-//#include "plugins/text_input/text_input.h"
 #include "task_runner.h"
 #include "flutter_desktop_engine_state.h"
 #include "view/flutter_view.h"
@@ -40,7 +39,6 @@ class App;
 class Backend;
 class WaylandWindow;
 class FlutterView;
-class Texture;
 struct FlutterDesktopEngineState;
 
 class Engine {
@@ -129,87 +127,6 @@ class Engine {
    * flutter
    */
   FlutterEngineResult RunTask();
-
-  /**
-   * @brief Add texture to registry
-   * @param[in] texture_id ID of the texture to add
-   * @param[in] texture Texture to add
-   * @return FlutterEngineResult
-   * @retval The result of adding texture
-   * @relation
-   * flutter
-   */
-  FlutterEngineResult TextureRegistryAdd(int64_t texture_id, Texture* texture);
-
-  /**
-   * @brief Remove texture to registry
-   * @param[in] texture_id ID of the texture to remove
-   * @return FlutterEngineResult
-   * @retval The result of removing texture
-   * @relation
-   * flutter
-   */
-  FlutterEngineResult TextureRegistryRemove(int64_t texture_id);
-
-  /**
-   * @brief Enable texture
-   * @param[in] texture_id ID of the texture to enable
-   * @return FlutterEngineResult
-   * @retval The result of enabling texture
-   * @relation
-   * flutter
-   */
-  FlutterEngineResult TextureEnable(int64_t texture_id);
-
-  /**
-   * @brief Disable texture
-   * @param[in] texture_id ID of the texture to disable
-   * @return FlutterEngineResult
-   * @retval The result of disabling texture
-   * @relation
-   * flutter
-   */
-  FlutterEngineResult TextureDisable(int64_t texture_id);
-
-  /**
-   * @brief Mark that a new texture frame is available
-   * @param[in] engine Running engine instance
-   * @param[in] texture_id ID of the new texture
-   * @return FlutterEngineResult
-   * @retval The result of marking texture
-   * @relation
-   * flutter
-   */
-  static FlutterEngineResult MarkExternalTextureFrameAvailable(
-      const Engine* engine,
-      int64_t texture_id);
-
-  /**
-   * @brief Create texture
-   * @param[in] texture_id passed from Flutter
-   * @param[in] width passed from Flutter
-   * @param[in] height passed from Flutter
-   * @param[in] args passed from Flutter
-   * @return flutter::EncodableValue
-   * @retval The result of create texture
-   * @relation
-   * flutter
-   */
-  flutter::EncodableValue TextureCreate(
-      int64_t texture_id,
-      int32_t width,
-      int32_t height,
-      const std::map<flutter::EncodableValue, flutter::EncodableValue>* args);
-
-  /**
-   * @brief Dispose texture
-   * @param[in] texture_id ID of the texture to dispose
-   * @return FlutterEngineResult
-   * @retval The result of dispose texture
-   * @relation
-   * flutter
-   */
-  FlutterEngineResult TextureDispose(int64_t texture_id);
 
   /**
    * @brief Get persistent cache path
@@ -373,18 +290,6 @@ class Engine {
   void SendPointerEvents();
 
   /**
-   * @brief get texture object
-   * @param[in] texture_id ID of texture
-   * @return Texture*
-   * @retval Pointer to texture object
-   * @relation
-   * flutter
-   */
-  Texture* GetTextureObj(int64_t texture_id) {
-    return m_texture_registry[texture_id];
-  }
-
-  /**
    * @brief Activate system cursor
    * @param[in] device No use
    * @param[in] kind Cursor kind
@@ -451,8 +356,6 @@ class Engine {
   size_t m_prev_width;
   double m_prev_pixel_ratio;
   int32_t m_accessibility_features;
-
-  std::map<int64_t, Texture*> m_texture_registry;
 
   FLUTTER_API_SYMBOL(FlutterEngine) m_flutter_engine;
   FlutterProjectArgs m_args;
