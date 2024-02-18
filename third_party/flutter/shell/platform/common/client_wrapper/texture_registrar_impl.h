@@ -34,6 +34,12 @@ class TextureRegistrarImpl : public TextureRegistrar {
   // |flutter::TextureRegistrar|
   bool UnregisterTexture(int64_t texture_id) override;
 
+  // |flutter::TextureRegistrar|
+  bool TextureMakeCurrent() override;
+
+  // |flutter::TextureRegistrar|
+  bool TextureClearCurrent() override;
+
  private:
   // Handle for interacting with the C API.
   FlutterDesktopTextureRegistrarRef texture_registrar_ref_;

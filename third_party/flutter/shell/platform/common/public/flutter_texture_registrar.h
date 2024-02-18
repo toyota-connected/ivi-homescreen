@@ -37,7 +37,8 @@ typedef enum {
   // https://docs.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiresource-getsharedhandle
   kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle,
   // A |ID3D11Texture2D| (Windows only).
-  kFlutterDesktopGpuSurfaceTypeD3d11Texture2D
+  kFlutterDesktopGpuSurfaceTypeD3d11Texture2D,
+  kFlutterDesktopGpuSurfaceTypeGlTexture2D
 } FlutterDesktopGpuSurfaceType;
 
 // Supported pixel formats.
@@ -179,6 +180,12 @@ FLUTTER_EXPORT bool
 FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
     FlutterDesktopTextureRegistrarRef texture_registrar,
     int64_t texture_id);
+
+FLUTTER_EXPORT bool FlutterDesktopTextureMakeCurrent(
+    FlutterDesktopTextureRegistrarRef texture_registrar);
+
+FLUTTER_EXPORT bool FlutterDesktopTextureClearCurrent(
+    FlutterDesktopTextureRegistrarRef texture_registrar);
 
 #if defined(__cplusplus)
 }  // extern "C"
