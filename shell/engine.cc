@@ -24,8 +24,6 @@
 
 #include "constants.h"
 #include "engine.h"
-#include "textures/texture.h"
-
 #include "hexdump.h"
 #include "utils.h"
 
@@ -288,72 +286,6 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   return kSuccess;
 }
 
-FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
-                                               Texture* texture) {
-  this->m_texture_registry[texture_id] = texture;
-  SPDLOG_DEBUG("({}) Added Texture ({}) to registry", m_index, texture_id);
-  return kSuccess;
-}
-
-MAYBE_UNUSED FlutterEngineResult
-Engine::TextureRegistryRemove(int64_t texture_id) {
-  const auto search =
-      std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
-                   [&texture_id](const std::pair<int64_t, void*>& element) {
-                     return element.first == texture_id;
-                   });
-  if (search != m_texture_registry.end()) {
-    SPDLOG_DEBUG("({}) Removing Texture ({}) from registry {}", m_index,
-                 texture_id, static_cast<void*>(search->second));
-    m_texture_registry.erase(search);
-    spdlog::info("({}) Removed Texture ({}) from registry", m_index,
-                 texture_id);
-
-    return kSuccess;
-  }
-  SPDLOG_DEBUG("({}) Texture Already removed from registry: ({})", m_index,
-               texture_id);
-  return kInvalidArguments;
-}
-
-FlutterEngineResult Engine::TextureEnable(int64_t texture_id) {
-  SPDLOG_DEBUG("({}) Enable Texture ID: {}", m_index, texture_id);
-  return LibFlutterEngine->RegisterExternalTexture(m_flutter_engine,
-                                                   texture_id);
-}
-
-FlutterEngineResult Engine::TextureDisable(int64_t texture_id) {
-  SPDLOG_DEBUG("({}) Disable Texture ID: {}", m_index, texture_id);
-  return LibFlutterEngine->UnregisterExternalTexture(m_flutter_engine,
-                                                     texture_id);
-}
-
-FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
-    const Engine* engine,
-    const int64_t texture_id) {
-  return LibFlutterEngine->MarkExternalTextureFrameAvailable(
-      engine->m_flutter_engine, texture_id);
-}
-
-flutter::EncodableValue Engine::TextureCreate(
-    int64_t texture_id,
-    int32_t width,
-    int32_t height,
-    const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
-  SPDLOG_DEBUG("({}) Engine::TextureCreate: <{}>", m_index, texture_id);
-
-  const auto texture = this->m_texture_registry[texture_id];
-
-  if (texture != nullptr) {
-    return texture->Create(width, height, args);
-  }
-
-  return flutter::EncodableValue(flutter::EncodableMap{
-      {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
-      {flutter::EncodableValue("error"),
-       flutter::EncodableValue("Not found in registry")}});
-}
-
 std::string Engine::GetFilePath(size_t index) {
   auto path = Utils::GetConfigHomePath();
 
@@ -367,22 +299,6 @@ std::string Engine::GetFilePath(size_t index) {
   SPDLOG_DEBUG("({}) PersistentCachePath: {}", index, path);
 
   return path;
-}
-
-FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
-  SPDLOG_DEBUG("({}) OpenGL Texture: dispose ({})", m_index, texture_id);
-
-  const auto search =
-      std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
-                   [&texture_id](const std::pair<int64_t, void*>& element) {
-                     return element.first == texture_id;
-                   });
-  if (search != m_texture_registry.end()) {
-    ((Texture*)search->second)->Dispose(static_cast<uint32_t>(texture_id));
-    SPDLOG_DEBUG("({}) Texture Disposed ({})", m_index, texture_id);
-    return kSuccess;
-  }
-  return kInvalidArguments;
 }
 
 FlutterEngineResult Engine::SendPlatformMessageResponse(

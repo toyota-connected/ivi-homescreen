@@ -71,9 +71,9 @@ void Texture::Dispose(GLuint name) {
 }
 
 void Texture::Enable(GLuint name) {
-  if (m_flutter_engine) {
+#if 0
+    if (m_flutter_engine) {
     m_name.push_back(static_cast<int64_t>(name));
-
     // Add again for assigned EGL texture id
     // EGL assigns Textures starting in low digits
     // Keep values passed to open_gl texture high to prevent collision
@@ -91,13 +91,14 @@ void Texture::Enable(GLuint name) {
     }
     m_enabled = true;
   }
+#endif
 }
 
 void Texture::Disable(GLuint name) {
   assert(m_flutter_engine);
   assert(name);
 
-  m_flutter_engine->TextureDisable(static_cast<int64_t>(name));
+  // TODO  m_flutter_engine->TextureDisable(static_cast<int64_t>(name));
   m_enabled = false;
 
   const auto i = find(m_name.begin(), m_name.end(), name);
@@ -109,13 +110,13 @@ void Texture::Disable(GLuint name) {
 void Texture::SetEngine(Engine* engine) {
   if (engine) {
     m_flutter_engine = engine;
-    engine->TextureRegistryAdd(m_id, this);
+    // TODO    engine->TextureRegistryAdd(m_id, this);
   }
 }
 
 void Texture::FrameReady() const {
   if (m_flutter_engine)
     for (const auto name : m_name) {
-      Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, name);
+      // TODO Engine::MarkExternalTextureFrameAvailable(m_flutter_engine, name);
     }
 }
