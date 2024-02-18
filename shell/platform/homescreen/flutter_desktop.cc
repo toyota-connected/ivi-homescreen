@@ -21,10 +21,18 @@
 
 #include "view/flutter_view.h"
 
+#include "libflutter_engine.h"
+
+#if !defined(GL_RGBA8)
+#define GL_RGBA8                          0x8058
+#endif
+
 struct FlutterDesktopEngineState;
 struct FlutterDesktopView;
 
 static_assert(FLUTTER_ENGINE_VERSION == 1, "Engine version does not match");
+
+std::mutex texture_mutex;
 
 // Attempts to load AOT data from the given path, which must be absolute and
 // non-empty. Logs and returns nullptr on failure.
@@ -258,36 +266,122 @@ FlutterDesktopTextureRegistrarRef FlutterDesktopRegistrarGetTextureRegistrar(
 }
 
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
-    FlutterDesktopTextureRegistrarRef /* texture_registrar */,
-    const FlutterDesktopTextureInfo* /* texture_info */) {
-  SPDLOG_ERROR(
-      "[FlutterDesktopTextureRegistrarRegisterExternalTexture] Not implemented "
-      "yet.");
-  return -1;
+    FlutterDesktopTextureRegistrarRef texture_registrar,
+    const FlutterDesktopTextureInfo* texture_info) {
+  std::scoped_lock<std::mutex> lock(texture_mutex);
+  int64_t result = -1;
+
+  if (texture_info->type == kFlutterDesktopPixelBufferTexture) {
+    spdlog::error("RegisterExternalTexture: Pixel Buffer not implemented.");
+
+  } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
+    auto gpu_surface_texture = texture_info->gpu_surface_config;
+    if (gpu_surface_texture.type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
+      spdlog::error(
+          "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeGlTexture2D "
+          "is only supported at this time");
+      return result;
+    }
+
+    // get the client defined descriptor
+    auto descriptor = gpu_surface_texture.callback(
+        0, 0, texture_info->gpu_surface_config.user_data);
+
+    if (!descriptor->handle) {
+      spdlog::critical(
+          "Descriptor handle is not set.  Assign the address of the texture_id "
+          "variable.");
+      return result;
+    } else if (descriptor->struct_size !=
+               sizeof(FlutterDesktopGpuSurfaceDescriptor)) {
+      spdlog::critical(
+          "Descriptor struct_size is not valid.  Set struct_size to "
+          "sizeof(FlutterDesktopGpuSurfaceTextureConfig)"
+          "is another problem.");
+      return result;
+    }
+
+    GLuint id = *static_cast<GLuint*>(descriptor->handle);
+
+    // check for existing entry
+    for (auto& it : texture_registrar->texture_registry) {
+      if (it.first == id) {
+        it.second.reset();
+        texture_registrar->texture_registry.erase(id);
+        break;
+      }
+    }
+
+    texture_registrar->texture_registry[id] =
+        std::make_unique<GL_TEXTURE_2D_DESC>();
+    auto& val = texture_registrar->texture_registry[id];
+    val->name = static_cast<uint32_t>(id);
+    val->width = static_cast<uint32_t>(descriptor->width);
+    val->height = static_cast<uint32_t>(descriptor->height);
+    val->release_callback = descriptor->release_callback;
+    val->release_context = descriptor->release_context;
+    val->target = GL_TEXTURE_2D;
+    val->format = GL_RGBA8;
+
+    SPDLOG_TRACE("RegisterExternalTexture: {}, {}",
+                 fmt::ptr(texture_registrar->engine->flutter_engine), id);
+    if (kSuccess == LibFlutterEngine->RegisterExternalTexture(
+                        texture_registrar->engine->flutter_engine, id)) {
+      result = id;
+    }
+  }
+  if (result < 0) {
+    spdlog::error("Failed to Register Texture");
+  }
+  return result;
 }
 
 void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
-    FlutterDesktopTextureRegistrarRef /* texture_registrar */,
-    int64_t /* texture_id */,
-    void (* /* callback */)(void* user_data),
-    void* /* user_data */) {
-  SPDLOG_ERROR(
-      "[FlutterDesktopTextureRegistrarUnregisterExternalTexture] Not "
-      "implemented yet.");
+    FlutterDesktopTextureRegistrarRef texture_registrar,
+    int64_t texture_id,
+    void (*callback)(void* user_data),
+    void* user_data) {
+  std::scoped_lock<std::mutex> lock(texture_mutex);
+  LibFlutterEngine->UnregisterExternalTexture(
+      texture_registrar->engine->flutter_engine, texture_id);
+  auto& val = texture_registrar->texture_registry[texture_id];
+  if (val && val->release_callback != nullptr) {
+    val->release_callback(val->release_context);
+  }
+  texture_registrar->texture_registry[texture_id].reset();
+  texture_registrar->texture_registry.erase(texture_id);
+  if (callback != nullptr) {
+    callback(user_data);
+  }
 }
 
 bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
-    FlutterDesktopTextureRegistrarRef /* texture_registrar */,
-    int64_t /* texture_id */) {
-  SPDLOG_ERROR(
-      "[FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable] Not "
-      "implemented yet.");
-  return false;
+    FlutterDesktopTextureRegistrarRef texture_registrar,
+    int64_t texture_id) {
+  SPDLOG_TRACE("MarkExternalTextureFrameAvailable: {}, {}",
+               fmt::ptr(texture_registrar->engine->flutter_engine), texture_id);
+  auto result = LibFlutterEngine->MarkExternalTextureFrameAvailable(
+      texture_registrar->engine->flutter_engine, texture_id);
+  return result == kSuccess;
+}
+
+bool FlutterDesktopTextureMakeCurrent(
+    FlutterDesktopTextureRegistrarRef texture_registrar) {
+  auto backend = texture_registrar->engine->view_controller->view->GetBackend();
+  SPDLOG_TRACE("TextureMakeCurrent: {}", fmt::ptr(backend));
+  return backend->TextureMakeCurrent();
+}
+
+bool FlutterDesktopTextureClearCurrent(
+    FlutterDesktopTextureRegistrarRef texture_registrar) {
+  auto backend = texture_registrar->engine->view_controller->view->GetBackend();
+  SPDLOG_TRACE("TextureClearCurrent: {}", fmt::ptr(backend));
+  return backend->TextureClearCurrent();
 }
 
 // Passes character input events to registered handlers.
 void CharCallback(FlutterDesktopViewControllerState* view_state,
-                                const unsigned int code_point) {
+                  const unsigned int code_point) {
   spdlog::info("CharCallback: {}", code_point);
   for (const auto& handler : view_state->keyboard_hook_handlers) {
     handler->CharHook(code_point);
@@ -296,11 +390,12 @@ void CharCallback(FlutterDesktopViewControllerState* view_state,
 
 // Passes raw key events to registered handlers.
 void KeyCallback(FlutterDesktopViewControllerState* view_state,
-                               bool released,
-                               xkb_keysym_t keysym,
-                               uint32_t xkb_scancode,
-                               uint32_t modifiers) {
-  spdlog::debug("KeyCallback: released: {}, keysym: {}, xkb_scancode: {}", released, keysym, xkb_scancode);
+                 bool released,
+                 xkb_keysym_t keysym,
+                 uint32_t xkb_scancode,
+                 uint32_t modifiers) {
+  spdlog::debug("KeyCallback: released: {}, keysym: {}, xkb_scancode: {}",
+                released, keysym, xkb_scancode);
   for (const auto& handler : view_state->keyboard_hook_handlers) {
     handler->KeyboardHook(released, keysym, xkb_scancode, modifiers);
   }

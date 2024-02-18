@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2023 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 #include "include/video_player_linux/video_player_plugin_c_api.h"
 
-#include "flutter/plugin_registrar.h"
+#include "flutter/plugin_registrar_homescreen.h"
 
 #include "video_player_plugin.h"
 
@@ -24,5 +24,5 @@ void VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   video_player_linux::VideoPlayerPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrar>(registrar));
+          ->GetRegistrar<flutter::PluginRegistrarDesktop>(registrar));
 }

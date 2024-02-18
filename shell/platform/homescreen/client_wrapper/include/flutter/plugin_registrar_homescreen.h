@@ -33,8 +33,6 @@ class PluginRegistrarDesktop final : public PluginRegistrar {
 
   ~PluginRegistrarDesktop() override { ClearPlugins(); }
 
-  FlutterView* GetView() const { return nullptr; }
-
   // Prevent copying.
   PluginRegistrarDesktop(PluginRegistrarDesktop const&) = delete;
   PluginRegistrarDesktop& operator=(PluginRegistrarDesktop const&) = delete;

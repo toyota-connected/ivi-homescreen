@@ -103,6 +103,12 @@ class TextureRegistrar {
   // Unregisters an existing texture object.
   // DEPRECATED: Use UnregisterTexture(texture_id, optional_callback) instead.
   virtual bool UnregisterTexture(int64_t texture_id) = 0;
+
+  // Make texture context current
+  virtual bool TextureMakeCurrent() = 0;
+
+  // Clear current context
+  virtual bool TextureClearCurrent() = 0;
 };
 
 }  // namespace flutter

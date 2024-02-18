@@ -201,9 +201,8 @@ int64_t TextureRegistrarImpl::RegisterTexture(TextureVariant* texture) {
     return -1;
   }
 
-  int64_t texture_id = FlutterDesktopTextureRegistrarRegisterExternalTexture(
+  return FlutterDesktopTextureRegistrarRegisterExternalTexture(
       texture_registrar_ref_, &info);
-  return texture_id;
 }  // namespace flutter
 
 bool TextureRegistrarImpl::MarkTextureFrameAvailable(int64_t texture_id) {
@@ -237,6 +236,14 @@ void TextureRegistrarImpl::UnregisterTexture(int64_t texture_id,
 bool TextureRegistrarImpl::UnregisterTexture(int64_t texture_id) {
   UnregisterTexture(texture_id, nullptr);
   return true;
+}
+
+bool TextureRegistrarImpl::TextureMakeCurrent() {
+  return FlutterDesktopTextureMakeCurrent(texture_registrar_ref_);
+}
+
+bool TextureRegistrarImpl::TextureClearCurrent() {
+  return FlutterDesktopTextureClearCurrent(texture_registrar_ref_);
 }
 
 }  // namespace flutter
