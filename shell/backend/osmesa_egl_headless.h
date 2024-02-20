@@ -7,10 +7,11 @@
 #include "constants.h"
 
 #include <GL/osmesa.h>
+#include "egl_headless.h"
 
-class HeadlessBackend : public Backend {
+class OSMesaBackend : public Egl_headless, public Backend {
  public:
-  HeadlessBackend(uint32_t initial_width, uint32_t initial_height);
+  OSMesaBackend(uint32_t initial_width, uint32_t initial_height, const bool debug_backend, const int buffer_size);
 
   /**
    * @brief Resize Flutter engine Window size

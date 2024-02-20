@@ -57,6 +57,14 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     )
 endif ()
 
+if (BUILD_BACKEND_HEADLESS)
+    target_sources(homescreen PRIVATE
+            backend/osmesa_egl_headless.cc
+            backend/egl_headless.cc
+            backend/osmesa_process_resolver.cc
+    )
+endif ()
+
 if (BUILD_CRASH_HANDLER)
     target_sources(homescreen PRIVATE crash_handler.cc)
 endif ()
