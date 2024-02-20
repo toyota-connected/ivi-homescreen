@@ -86,6 +86,13 @@ if (DEBUG_PLATFORM_MESSAGES)
     add_compile_definitions(DEBUG_PLATFORM_MESSAGES)
 endif ()
 
+option(BUILD_BACKEND_HEADLESS "Build Headless Backend" OFF)
+if (BUILD_BACKEND_HEADLESS)
+    find_package(PkgConfig)
+    pkg_check_modules(OSMESA osmesa REQUIRED)
+    add_compile_definitions(BUILD_BACKEND_HEADLESS)
+endif ()
+
 #
 # Crash Handler
 #
