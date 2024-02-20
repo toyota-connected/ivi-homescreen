@@ -27,7 +27,24 @@
 
 Egl_headless::Egl_headless(int buffer_size, bool debug)
     : m_buffer_size(buffer_size) {
-  m_dpy = EGL_NO_DISPLAY;  /*ME TODO*/      
+  static const int MAX_DEVICES = 4;
+  EGLDeviceEXT eglDevs[MAX_DEVICES];
+  EGLint numDevices;
+
+  PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT =
+    (PFNEGLQUERYDEVICESEXTPROC)
+    eglGetProcAddress("eglQueryDevicesEXT");
+
+  eglQueryDevicesEXT(MAX_DEVICES, eglDevs, &numDevices);
+
+  printf("Detected %d devices\n", numDevices);
+
+  PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
+    (PFNEGLGETPLATFORMDISPLAYEXTPROC)
+    eglGetProcAddress("eglGetPlatformDisplayEXT");
+
+  m_dpy = eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, eglDevs[0], nullptr);
+  assert(m_dpy != EGL_NO_DISPLAY);
 
   EGLBoolean ret = eglInitialize(m_dpy, &m_major, &m_minor);
   assert(ret == EGL_TRUE);
@@ -88,30 +105,6 @@ Egl_headless::Egl_headless(int buffer_size, bool debug)
 #if !defined(NDEBUG)
   EGL_KHR_debug_init(extensions);
 #endif
-
-  /* setup for Damage Region Management */
-  if (HasEGLExtension(extensions, "EGL_EXT_swap_buffers_with_damage")) {
-    SPDLOG_DEBUG("EGL_EXT_swap_buffers_with_damage found");
-    m_pfSwapBufferWithDamage =
-        reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
-            eglGetProcAddress("eglSwapBuffersWithDamageEXT"));
-  } else if (HasEGLExtension(extensions, "EGL_KHR_swap_buffers_with_damage")) {
-    SPDLOG_DEBUG("EGL_KHR_swap_buffers_with_damage found");
-    m_pfSwapBufferWithDamage =
-        reinterpret_cast<PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC>(
-            eglGetProcAddress("eglSwapBuffersWithDamageKHR"));
-  }
-
-  if (HasEGLExtension(extensions, "EGL_KHR_partial_update")) {
-    SPDLOG_DEBUG("EGL_KHR_partial_update found");
-    m_pfSetDamageRegion = reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
-        eglGetProcAddress("eglSetDamageRegionKHR"));
-  }
-
-  m_has_egl_ext_buffer_age = HasEGLExtension(extensions, "EGL_EXT_buffer_age");
-  if (m_has_egl_ext_buffer_age) {
-    SPDLOG_DEBUG("EGL_EXT_buffer_age found");
-  }
 
 #if !defined(NDEBUG)
   SPDLOG_DEBUG("EGL Version: {}", eglQueryString(m_dpy, EGL_VERSION));
