@@ -24,11 +24,13 @@
 
 #include "constants.h"
 #include "engine.h"
-#include "platform_channel.h"
-#include "textures/texture.h"
 
 #include "hexdump.h"
 #include "utils.h"
+
+extern void EngineOnFlutterPlatformMessage(
+    const FlutterPlatformMessage* engine_message,
+    void* user_data);
 
 Engine::Engine(FlutterView* view,
                const size_t index,
@@ -91,18 +93,16 @@ bool Engine::IsRunning() const {
   return m_running;
 }
 
-FlutterEngineResult Engine::Run(pthread_t event_loop_thread_id) {
+FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   SPDLOG_TRACE("({}) +Engine::Run", m_index);
 
   const auto config = m_backend->GetRenderConfig();
   FlutterEngineResult result = LibFlutterEngine->Initialize(
-      FLUTTER_ENGINE_VERSION, &config, &m_args, this, &m_flutter_engine);
+      FLUTTER_ENGINE_VERSION, &config, &m_args, state, &m_flutter_engine);
   if (result != kSuccess) {
     spdlog::error("({}) FlutterEngineRun failed or engine is null", m_index);
     return result;
   }
-
-  m_event_loop_thread = event_loop_thread_id;
 
   result = LibFlutterEngine->RunInitialized(m_flutter_engine);
   if (result == kSuccess) {
@@ -178,70 +178,6 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   return kSuccess;
 }
 
-FlutterEngineResult Engine::TextureRegistryAdd(int64_t texture_id,
-                                               Texture* texture) {
-  this->m_texture_registry[texture_id] = texture;
-  SPDLOG_DEBUG("({}) Added Texture ({}) to registry", m_index, texture_id);
-  return kSuccess;
-}
-
-MAYBE_UNUSED FlutterEngineResult
-Engine::TextureRegistryRemove(int64_t texture_id) {
-  const auto search =
-      std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
-                   [&texture_id](const std::pair<int64_t, void*>& element) {
-                     return element.first == texture_id;
-                   });
-  if (search != m_texture_registry.end()) {
-    SPDLOG_DEBUG("({}) Removing Texture ({}) from registry {}", m_index,
-                 texture_id, static_cast<void*>(search->second));
-    m_texture_registry.erase(search);
-    spdlog::info("({}) Removed Texture ({}) from registry", m_index,
-                 texture_id);
-
-    return kSuccess;
-  }
-  SPDLOG_DEBUG("({}) Texture Already removed from registry: ({})", m_index,
-               texture_id);
-  return kInvalidArguments;
-}
-
-FlutterEngineResult Engine::TextureEnable(int64_t texture_id) {
-  /* Delete implementation */
-  return kSuccess;
-}
-
-FlutterEngineResult Engine::TextureDisable(int64_t texture_id) {
-  /* Delete implementation */
-  return kSuccess;
-}
-
-FlutterEngineResult Engine::MarkExternalTextureFrameAvailable(
-    const Engine* engine,
-    const int64_t texture_id) {
-  /* Delete implementation */
-  return kSuccess;
-}
-
-flutter::EncodableValue Engine::TextureCreate(
-    int64_t texture_id,
-    int32_t width,
-    int32_t height,
-    const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
-  SPDLOG_DEBUG("({}) Engine::TextureCreate: <{}>", m_index, texture_id);
-
-  const auto texture = this->m_texture_registry[texture_id];
-
-  if (texture != nullptr) {
-    return texture->Create(width, height, args);
-  }
-
-  return flutter::EncodableValue(flutter::EncodableMap{
-      {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
-      {flutter::EncodableValue("error"),
-       flutter::EncodableValue("Not found in registry")}});
-}
-
 std::string Engine::GetFilePath(size_t index) {
   auto path = Utils::GetConfigHomePath();
 
@@ -255,22 +191,6 @@ std::string Engine::GetFilePath(size_t index) {
   SPDLOG_DEBUG("({}) PersistentCachePath: {}", index, path);
 
   return path;
-}
-
-FlutterEngineResult Engine::TextureDispose(int64_t texture_id) {
-  SPDLOG_DEBUG("({}) OpenGL Texture: dispose ({})", m_index, texture_id);
-
-  const auto search =
-      std::find_if(m_texture_registry.begin(), m_texture_registry.end(),
-                   [&texture_id](const std::pair<int64_t, void*>& element) {
-                     return element.first == texture_id;
-                   });
-  if (search != m_texture_registry.end()) {
-    ((Texture*)search->second)->Dispose(static_cast<uint32_t>(texture_id));
-    SPDLOG_DEBUG("({}) Texture Disposed ({})", m_index, texture_id);
-    return kSuccess;
-  }
-  return kInvalidArguments;
 }
 
 FlutterEngineResult Engine::SendPlatformMessageResponse(
@@ -498,26 +418,54 @@ FlutterEngineAOTData Engine::LoadAotData(
   return data;
 }
 
-bool Engine::ActivateSystemCursor(const int32_t device, const std::string& kind) const {
+bool Engine::ActivateSystemCursor(const int32_t device,
+                                  const std::string& kind) const {
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
 
-#if ENABLE_PLUGIN_TEXT_INPUT
-MAYBE_UNUSED void Engine::SetTextInput(TextInput* text_input) {
-  m_text_input = text_input;
-}
+void Engine::OnFlutterPlatformMessage(
+    const FlutterPlatformMessage* engine_message,
+    void* user_data) {
+  if (engine_message->struct_size != sizeof(FlutterPlatformMessage)) {
+    spdlog::error("Invalid message size received. Expected: {} but received {}",
+                  sizeof(FlutterPlatformMessage), engine_message->struct_size);
+    return;
+  }
 
-MAYBE_UNUSED TextInput* Engine::GetTextInput() const {
-  return m_text_input;
-}
+  FlutterDesktopEngineState const* engine_state =
+      static_cast<FlutterDesktopEngineState*>(user_data);
 
+  auto* view = engine_state->view_controller == nullptr
+                   ? nullptr
+                   : engine_state->view_controller->view;
+
+#if defined(DEBUG_PLATFORM_MESSAGES)
+  std::stringstream ss;
+  ss << Hexdump(engine_message->message, engine_message->message_size);
+  spdlog::debug("Channel: \"{}\"\n{}", engine_message->channel, ss.str());
 #endif
 
-#if ENABLE_PLUGIN_KEY_EVENT
-MAYBE_UNUSED void Engine::SetKeyEvent(KeyEvent* key_event) {
-  m_key_event = key_event;
+  engine_state->message_dispatcher->HandleMessage(
+      {.struct_size = sizeof(FlutterDesktopMessage),
+       .channel = engine_message->channel,
+       .message = engine_message->message,
+       .message_size = engine_message->message_size,
+       .response_handle = engine_message->response_handle},
+      [view] {
+        if (view) {
+          spdlog::debug("input_block_cb");
+        }
+      },
+      [view] {
+        if (view) {
+          spdlog::debug("input_unblock_cb");
+        }
+      });
 }
-MAYBE_UNUSED KeyEvent* Engine::GetKeyEvent() const {
-  return m_key_event;
+
+void Engine::onLogMessageCallback(const char* /* tag */,
+                                  const char* message,
+                                  void* user_data) {
+  (void)message;
+  (void)user_data;
 }
-#endif

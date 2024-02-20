@@ -4,7 +4,7 @@ set(TESTCASE_NAME "homescreen_app_ut_test_driver")
 set(TESTCASE_CC test_case_app.cc)
 
 # add mock files to target source
-set(TESTCASE_MOCK display.cc; egl.cc; flutter_view.cc;)
+set(TESTCASE_MOCK display.cc; egl.cc; flutter_view.cc; compositor_surface.cc)
 foreach (mock IN LISTS TESTCASE_MOCK)
     list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*/${mock}")
     list(APPEND TYPICAL_TEST_SOURCES ${UNIT_TEST_MOCK_DIR}/${mock})

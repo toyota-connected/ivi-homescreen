@@ -29,23 +29,27 @@ WaylandWindow::WaylandWindow(size_t index,
                              int32_t width,
                              int32_t height,
                              double pixel_ratio,
-                             uint32_t /* activation_area_x */,
-                             uint32_t /* activation_area_y */,
+                             uint32_t activation_area_x,
+                             uint32_t activation_area_y,
+                             uint32_t activation_area_width,
+                             uint32_t activation_area_height,
                              Backend* backend,
-                             uint32_t ivi_surface_id)
+                             const uint32_t ivi_surface_id)
     : m_index(index),
       m_display(std::move(display)),
       m_wl_output(output),
       m_output_index(output_index),
-      m_backend(backend),
       m_flutter_engine(nullptr),
-      m_geometry({width, height}),
-      m_window_size({width, height}),
       m_pixel_ratio(pixel_ratio),
-      m_type(get_window_type(type)),
-      m_app_id(std::move(app_id)),
+      m_backend(backend),
       m_ivi_surface_id(ivi_surface_id),
-      m_fullscreen(fullscreen) {  // disable vsync
+      m_fullscreen(fullscreen),
+      m_geometry({width, height}),
+      m_activation_area({activation_area_x, activation_area_y,
+                         activation_area_width, activation_area_height}),
+      m_window_size({width, height}),
+      m_type(get_window_type(type)),
+      m_app_id(std::move(app_id)) {  // disable vsync
   /* Delete implementation */
 }
 
@@ -55,14 +59,18 @@ WaylandWindow::~WaylandWindow() {
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
   if (m_ivi_surface)
     ivi_surface_destroy(m_ivi_surface);
+#endif
 
+#if defined(ENABLE_XDG_CLIENT)
   if (m_xdg_surface)
     xdg_surface_destroy(m_xdg_surface);
 
   if (m_xdg_toplevel)
     xdg_toplevel_destroy(m_xdg_toplevel);
+#endif
 
   wl_surface_destroy(m_base_surface);
 
@@ -72,11 +80,11 @@ WaylandWindow::~WaylandWindow() {
 void WaylandWindow::handle_base_surface_enter(void* data,
                                               struct wl_surface* /* surface */,
                                               struct wl_output* /* output */) {
-  auto* d = static_cast<WaylandWindow*>(data);
+  auto const* d = static_cast<WaylandWindow*>(data);
 
-  auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
+  const auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
 
-  auto result =
+  const auto result =
       d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
   if (result != kSuccess) {
     spdlog::error("Failed to set Flutter Engine Pixel Ratio");
@@ -94,29 +102,32 @@ const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
     .leave = handle_base_surface_leave,
 };
 
+#if defined(ENABLE_XDG_CLIENT)
 void WaylandWindow::handle_xdg_surface_configure(
     void* data,
     struct xdg_surface* xdg_surface,
     uint32_t serial) {
-  auto* w = reinterpret_cast<WaylandWindow*>(data);
+  auto* w = static_cast<WaylandWindow*>(data);
   xdg_surface_ack_configure(xdg_surface, serial);
   w->m_wait_for_configure = false;
 }
 
 const struct xdg_surface_listener WaylandWindow::xdg_surface_listener = {
     .configure = handle_xdg_surface_configure};
+#endif
 
+#if defined(ENABLE_IVI_SHELL_CLIENT)
 void WaylandWindow::handle_ivi_surface_configure(
     void* data,
     struct ivi_surface* /* ivi_surface */,
     int32_t width,
     int32_t height) {
-  auto* w = reinterpret_cast<WaylandWindow*>(data);
+  auto* w = static_cast<WaylandWindow*>(data);
 
   if (width > 0 && height > 0) {
     if (w->m_fullscreen) {
       SPDLOG_DEBUG("Setting Fullscreen");
-      auto extents = w->m_display->GetVideoModeSize(w->m_output_index);
+      const auto extents = w->m_display->GetVideoModeSize(w->m_output_index);
       width = extents.first;
       height = extents.second;
     }
@@ -136,14 +147,16 @@ void WaylandWindow::handle_ivi_surface_configure(
 
 const struct ivi_surface_listener WaylandWindow::ivi_surface_listener = {
     .configure = handle_ivi_surface_configure};
+#endif
 
+#if defined(ENABLE_XDG_CLIENT)
 void WaylandWindow::handle_toplevel_configure(
     void* data,
     struct xdg_toplevel* /* toplevel */,
     int32_t width,
     int32_t height,
     struct wl_array* states) {
-  auto* w = reinterpret_cast<WaylandWindow*>(data);
+  auto* w = static_cast<WaylandWindow*>(data);
 
   w->m_fullscreen = false;
   w->m_maximized = false;
@@ -181,14 +194,14 @@ void WaylandWindow::handle_toplevel_configure(
     w->m_geometry.height = w->m_window_size.height;
   }
 
-  w->m_backend->Resize(w->m_index, w->m_flutter_engine, w->m_geometry.width,
+  w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(), w->m_geometry.width,
                        w->m_geometry.height);
 }
 
 void WaylandWindow::handle_toplevel_close(
     void* data,
     struct xdg_toplevel* /* xdg_toplevel */) {
-  auto* w = reinterpret_cast<WaylandWindow*>(data);
+  auto* w = static_cast<WaylandWindow*>(data);
   w->m_running = false;
 }
 
@@ -196,6 +209,7 @@ const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
     handle_toplevel_configure,
     handle_toplevel_close,
 };
+#endif
 
 const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
     {on_frame_base_surface};
@@ -203,7 +217,7 @@ const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
 void WaylandWindow::on_frame_base_surface(void* data,
                                           struct wl_callback* callback,
                                           uint32_t /* time */) {
-  auto* window = reinterpret_cast<WaylandWindow*>(data);
+  auto* window = static_cast<WaylandWindow*>(data);
 
   if (callback)
     wl_callback_destroy(callback);
@@ -219,7 +233,7 @@ void WaylandWindow::on_frame_base_surface(void* data,
 }
 
 uint32_t WaylandWindow::GetFpsCounter() {
-  uint32_t fps_counter = m_fps_counter;
+  const uint32_t fps_counter = m_fps_counter;
   m_fps_counter = 0;
 
   return fps_counter;
@@ -240,7 +254,7 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
       spdlog::error("Failed to set Flutter Engine Window Size");
     }
 
-    auto buffer_scale = m_display->GetBufferScale(m_output_index);
+    const auto buffer_scale = m_display->GetBufferScale(m_output_index);
 
     result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
     if (result != kSuccess) {
