@@ -89,6 +89,9 @@ target_include_directories(homescreen
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
+    if (BUILD_BACKEND_HEADLESS)
+        target_link_libraries(homescreen PRIVATE OSMesa)
+    endif ()
 endif ()
 if (BUILD_PLUGIN_COMP_SURF)
     target_link_libraries(homescreen PRIVATE EGL)
