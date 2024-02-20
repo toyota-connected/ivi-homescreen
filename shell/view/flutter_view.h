@@ -43,7 +43,9 @@ class Backend;
 class PlatformHandler;
 class PlatformChannel;
 class WaylandWindow;
-#if defined(BUILD_BACKEND_WAYLAND_EGL)
+#if defined(BUILD_BACKEND_HEADLESS)
+class OSMesaBackend;
+#elif defined(BUILD_BACKEND_WAYLAND_EGL)
 class WaylandEglBackend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
 class WaylandVulkanBackend;
@@ -204,7 +206,9 @@ class FlutterView {
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:
-#if defined(BUILD_BACKEND_WAYLAND_EGL)
+#if defined(BUILD_BACKEND_HEADLESS)
+  std::shared_ptr<OSMesaBackend> m_backend;
+#elif defined(BUILD_BACKEND_WAYLAND_EGL)
   std::shared_ptr<WaylandEglBackend> m_backend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
   std::shared_ptr<WaylandVulkanBackend> m_backend;
