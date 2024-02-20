@@ -18,7 +18,7 @@
 #include <utility>
 
 #if defined(BUILD_BACKEND_HEADLESS)
-#include "backend/osmesa_egl_headless.h"
+#include "backend/headless.h"
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
 #include "backend/wayland_egl.h"
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
@@ -62,7 +62,7 @@ FlutterView::FlutterView(Configuration::Config config,
                          const std::shared_ptr<Display>& display)
     : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
 #if defined(BUILD_BACKEND_HEADLESS)
-  m_backend = std::make_shared<OSMesaBackend>(m_config.view.width,
+  m_backend = std::make_shared<HeadlessBackend>(m_config.view.width,
                                                 m_config.view.height, m_config.debug_backend, kEglBufferSize);
 #if defined(ENABLE_TEXTURE_EGL)
   TextureEgl::GetInstance().SetView(this);

@@ -59,8 +59,8 @@ endif ()
 
 if (BUILD_BACKEND_HEADLESS)
     target_sources(homescreen PRIVATE
-            backend/osmesa_egl_headless.cc
-            backend/egl_headless.cc
+            backend/headless.cc
+            backend/osmesa.cc
             backend/osmesa_process_resolver.cc
     )
 endif ()
