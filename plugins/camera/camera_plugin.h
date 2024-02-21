@@ -32,9 +32,9 @@ namespace camera_plugin {
 
 class CameraPlugin final : public flutter::Plugin, public CameraApi {
  public:
-  static void RegisterWithRegistrar(flutter::PluginRegistrar* registrar);
+  static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
 
-  CameraPlugin(flutter::TextureRegistrar* texture_registrar,
+  CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                flutter::BinaryMessenger* messenger);
 
   ~CameraPlugin() override;
@@ -53,25 +53,70 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void startVideoRecording(
       const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) override;
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void pauseVideoRecording(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void resumeVideoRecording(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
   void stopVideoRecording(
       const flutter::EncodableMap& args,
       std::function<void(ErrorOr<std::string> reply)> result) override;
-  void pausePreview(
-      const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) override;
+  void pausePreview(const flutter::EncodableMap& args,
+                    std::function<void(ErrorOr<double> reply)> result) override;
   void resumePreview(
       const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) override;
-  void dispose(const flutter::EncodableMap& args,
-               std::function<void(ErrorOr<std::string> reply)> result) override;
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void lockCaptureOrientation(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<std::string>)> result) override;
+  void unlockCaptureOrientation(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<std::string>)> result) override;
+  void setFlashMode(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void setFocusMode(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void setExposureMode(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void getExposureOffsetStepSize(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void setExposurePoint(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void setFocusPoint(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+  void setExposureOffset(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void getMinExposureOffset(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void getMaxExposureOffset(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void getMaxZoomLevel(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void getMinZoomLevel(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) override;
+  void dispose(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
 
   // Disallow copy and assign.
   CameraPlugin(const CameraPlugin&) = delete;
   CameraPlugin& operator=(const CameraPlugin&) = delete;
 
  private:
-  flutter::TextureRegistrar* texture_registrar_;
+  flutter::PluginRegistrarDesktop* registrar_{};
   flutter::BinaryMessenger* messenger_;
   std::map<std::string,
            std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>>

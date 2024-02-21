@@ -16,11 +16,15 @@
 #ifndef FLUTTER_PLUGIN_CAMERA_CONTEXT_H_
 #define FLUTTER_PLUGIN_CAMERA_CONTEXT_H_
 
+#include <flutter/basic_message_channel.h>
+#include <flutter/event_channel.h>
 #include <shell/platform/embedder/embedder.h>
 
 #include <libcamera/libcamera.h>
 
 #include "engine.h"
+
+namespace camera_plugin {
 
 class CameraContext : public flutter::Plugin {
  public:
@@ -43,20 +47,38 @@ class CameraContext : public flutter::Plugin {
 
   void setCamera(std::shared_ptr<libcamera::Camera> camera);
 
-  void Initialize(flutter::TextureRegistrar* texture_registrar,
-                  flutter::BinaryMessenger* messenger,
-                  int64_t camera_id,
-                  const std::string& image_format_group);
+  std::string Initialize(flutter::PluginRegistrar* plugin_registrar,
+                         int64_t camera_id,
+                         const std::string& image_format_group);
 
   const std::string& getCameraId() { return mCamera->id(); }
 
   CAM_STATE_T getCameraState() { return mCameraState; }
 
+  static std::optional<std::string> GetFilePathForPicture();
+
+  static std::optional<std::string> GetFilePathForVideo();
+
+  static std::string takePicture();
+
+  void startVideoRecording(bool enableStream);
+  void pauseVideoRecording();
+  void resumeVideoRecording();
+  std::string stopVideoRecording();
+
  private:
-  flutter::BinaryMessenger* messenger_{};
   flutter::TextureRegistrar* texture_registrar_{};
+  std::unique_ptr<flutter::MethodChannel<>> camera_channel_;
+  int64_t camera_id_ = -1;
   CAM_STATE_T mCameraState;
-  static constexpr char kEventPrefix[] = "flutter.io/cameraPlugin/camera";
+
+  // The internal Flutter event channel instance.
+  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
+      event_channel_;
+
+  // The internal Flutter event sink instance, used to send events to the Dart
+  // side.
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
 
   std::string mCameraName;
   std::string mResolutionPreset;
@@ -66,6 +88,29 @@ class CameraContext : public flutter::Plugin {
   bool mEnableAudio;
   std::string mImageFormatGroup;
   std::shared_ptr<libcamera::Camera> mCamera{};
-};
 
+  struct preview {
+    bool is_initialized{};
+
+    // The internal Flutter event channel instance.
+    flutter::EventChannel<flutter::EncodableValue>* event_channel_;
+
+    // The internal Flutter event sink instance, used to send events to the Dart
+    // side.
+    std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink;
+
+    GLuint textureId{};
+    GLuint framebuffer{};
+    GLuint program;
+    GLsizei width, height;
+    GLuint vertex_arr_id_{};
+
+    // The Surface Descriptor sent to Flutter when a texture frame is available.
+    std::unique_ptr<flutter::GpuSurfaceTexture> gpu_surface_texture;
+    FlutterDesktopGpuSurfaceDescriptor descriptor{};
+  } mPreview;
+
+  flutter::MethodChannel<>* GetMethodChannel();
+};
+}  // namespace camera_plugin
 #endif  // FLUTTER_PLUGIN_CAMERA_CONTEXT_H_
