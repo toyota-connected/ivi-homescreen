@@ -11,6 +11,7 @@ foreach (mock IN LISTS TESTCASE_MOCK)
 endforeach ()
 
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
+list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_BACKEND_HEADLESS")
 
 # Basically, the following statements need not be modified
 add_executable(

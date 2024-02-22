@@ -689,14 +689,9 @@ const struct wl_touch_listener Display::touch_listener = {
     .cancel = touch_handle_cancel,
 };
 
-int Display::PollEvents() const {
-  while (wl_display_prepare_read(m_display) != 0) {
-    wl_display_dispatch_pending(m_display);
-  }
-  wl_display_flush(m_display);
-
-  wl_display_read_events(m_display);
-  return wl_display_dispatch_pending(m_display);
+int Display::PollEvents() const{
+  /* Delete implementation */
+  return 1;
 }
 
 #if defined(ENABLE_AGL_CLIENT)

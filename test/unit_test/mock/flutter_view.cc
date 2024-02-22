@@ -30,6 +30,25 @@
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "view/compositor_surface.h"
 #endif
+
+#include <platform/homescreen/key_event_handler.h>
+#include <platform/homescreen/text_input_plugin.h>
+#include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
+#include <plugins/camera/include/camera/camera_plugin_c_api.h>
+#include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
+#include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
+#include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
+#include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
+#include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
+#include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
+#include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
+#include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
+#include "plugins/pdf/include/pdf/pdf_plugin_c_api.h"
+#include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
+#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
+#include <plugins/video_player_linux/include/video_player_linux/video_player_plugin_c_api.h>
+#include <plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h>
+
 #include "wayland/display.h"
 #include "wayland/window.h"
 
@@ -93,7 +112,7 @@ size_t FlutterView::CreateSurface(void* h_module,
                                   int height,
                                   int32_t x,
                                   int32_t y) {
-  auto tStart = std::chrono::steady_clock::now();
+  const auto tStart = std::chrono::steady_clock::now();
 
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
@@ -102,8 +121,9 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   m_comp_surf[index]->InitializePlugin();
 
-  auto tEnd = std::chrono::steady_clock::now();
-  auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+  const auto tEnd = std::chrono::steady_clock::now();
+  const auto tDiff =
+      std::chrono::duration<double, std::milli>(tEnd - tStart).count();
   spdlog::info("comp surf init: {}", static_cast<float>(tDiff));
 
   return static_cast<size_t>(index);
@@ -160,3 +180,63 @@ void FlutterView::SetRegion(
   wl_region_destroy(base_region);
 }
 #endif
+
+void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
+  (void)engine;
+#if defined(ENABLE_PLUGIN_AUDIOPLAYERS_LINUX)
+  AudioPlayersLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_SECURE_STORAGE)
+  SecureStoragePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FILE_SELECTOR)
+  FileSelectorPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_URL_LAUNCHER)
+  UrlLauncherPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_GO_ROUTER)
+  GoRouterPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX)
+  DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_GOOGLE_SIGN_IN)
+  GoogleSignInPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FIREBASE_CORE)
+  FirebaseCorePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FIREBASE_STORAGE)
+  FirebaseStoragePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_FIREBASE_AUTH)
+  FirebaseAuthPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_CLOUD_FIRESTORE)
+  CloudFirestorePluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_VIDEO_PLAYER_LINUX)
+  VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_CAMERA)
+  CameraPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if defined(ENABLE_PLUGIN_PDF)
+  PrintingPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+}

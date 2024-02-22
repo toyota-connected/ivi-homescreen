@@ -63,7 +63,7 @@ add_subdirectory(shell)
 #print_target_properties(flutter)
 #print_target_properties(plugin_url_launcher)
 #print_target_properties(platform_homescreen)
-#print_target_properties(homescreen)
+print_target_properties(homescreen)
 
 
 add_subdirectory(docs)

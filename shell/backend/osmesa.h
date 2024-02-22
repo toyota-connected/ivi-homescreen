@@ -48,6 +48,8 @@ class OSMesaHeadless {
    * wayland
    */
   bool MakeCurrent();
+  bool MakeResourceCurrent();
+  bool MakeTextureCurrent();
 
   void Finish();
 
@@ -68,6 +70,8 @@ class OSMesaHeadless {
 
  private:
   OSMesaContext m_context{};
+  OSMesaContext m_resource_context{};
+  OSMesaContext m_texture_context{};
   int32_t m_height{};
   int32_t m_width{};
 };

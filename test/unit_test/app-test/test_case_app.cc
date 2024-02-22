@@ -11,13 +11,15 @@ Test Summary：Test Loop without window_type
 
 TEST(HomescreenAppLoop, Lv1Normal001) {
   struct Configuration::Config config {};
-  config.view.bundle_path = "/home/root/";
+  config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
 
   // call target function
   std::vector<struct Configuration::Config> configs =
       Configuration::ParseConfig(config);
 
-  App app(configs);
+  Configuration::PrintConfig(config);
+
+  const App app(configs);
   int ret = app.Loop();
 
   // ret value is set at mock Display::PollEvents()

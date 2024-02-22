@@ -35,66 +35,56 @@ Egl::~Egl() {
 }
 
 bool Egl::MakeCurrent() {
-  auto res = eglMakeCurrent(m_dpy, m_egl_surface, m_egl_surface, m_context);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      spdlog::critical("Make current failed: {}", egl_error);
-      assert(false);
-    }
+  SPDLOG_TRACE("+MakeCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != m_context) {
+    eglMakeCurrent(m_dpy, m_egl_surface, m_egl_surface, m_context);
+    SPDLOG_TRACE("EGL Context={}", eglGetCurrentContext());
+    assert(m_context == eglGetCurrentContext());
   }
+  SPDLOG_TRACE("-MakeCurrent()");
   return true;
 }
 
 bool Egl::ClearCurrent() {
-  auto res =
-      eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      spdlog::critical("Clear current failed: {}", egl_error);
-      assert(false);
-    }
+  SPDLOG_TRACE("+ClearCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != EGL_NO_CONTEXT) {
+    eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    SPDLOG_TRACE("EGL Context={}, thread_id=0x{:x}", eglGetCurrentContext(),
+                 pthread_self());
   }
+  SPDLOG_TRACE("-ClearCurrent()");
   return true;
 }
 
 bool Egl::SwapBuffers() {
-  auto res = eglSwapBuffers(m_dpy, m_egl_surface);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      spdlog::critical("SwapBuffers failed: {}", egl_error);
-      assert(false);
-    }
-  }
+  SPDLOG_TRACE("+SwapBuffers(): thread_id=0x{:x}", pthread_self());
+  eglSwapBuffers(m_dpy, m_egl_surface);
+  SPDLOG_TRACE("-SwapBuffers()");
   return true;
 }
 
 bool Egl::MakeResourceCurrent() {
-  auto res =
-      eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_resource_context);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      spdlog::critical("MakeResourceCurrent failed: {}", egl_error);
-      assert(false);
-    }
+  SPDLOG_TRACE("+MakeResourceCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != m_context) {
+    eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_resource_context);
+    SPDLOG_TRACE("EGL Context={}, thread_id=0x{:x}", eglGetCurrentContext(),
+                 pthread_self());
+    assert(m_resource_context == eglGetCurrentContext());
   }
+  SPDLOG_TRACE("-MakeResourceCurrent()");
   return true;
 }
 
 bool Egl::MakeTextureCurrent() {
-  auto res =
-      eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_texture_context);
-  if (res != EGL_TRUE) {
-    EGLint egl_error = eglGetError();
-    if (egl_error != EGL_SUCCESS) {
-      spdlog::critical("MakeTextureCurrent failed: {}", egl_error);
-      assert(false);
-    }
+  SPDLOG_TRACE("+MakeTextureCurrent(), thread_id=0x{:x}", pthread_self());
+  if (eglGetCurrentContext() != m_texture_context) {
+    eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, m_texture_context);
+    SPDLOG_TRACE("EGL Context={}, thread_id=0x{:x}", eglGetCurrentContext(),
+                 pthread_self());
+    assert(m_texture_context == eglGetCurrentContext());
   }
-  return false;
+  SPDLOG_TRACE("-MakeTextureCurrent()");
+  return true;
 }
 
 bool Egl::HasEGLExtension(const char* extensions, const char* name) {
@@ -448,17 +438,9 @@ static struct egl_config_attribute egl_config_attributes[] = {
 };
 
 void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
-  std::stringstream ss;
   spdlog::info("OpenGL ES Attributes:");
-  ss << "\tEGL_VENDOR: \"" << eglQueryString(m_dpy, EGL_VENDOR) << "\"";
-  spdlog::info(ss.str().c_str());
-  ss.str("");
-  ss.clear();
-  ss << "\tEGL_CLIENT_APIS: \"" << eglQueryString(m_dpy, EGL_CLIENT_APIS)
-     << "\"";
-  spdlog::info(ss.str().c_str());
-  ss.str("");
-  ss.clear();
+  spdlog::info("\tEGL_VENDOR: \"{}\"", eglQueryString(m_dpy, EGL_VENDOR));
+  spdlog::info("\tEGL_CLIENT_APIS: \"{}\"", eglQueryString(m_dpy, EGL_CLIENT_APIS));
   spdlog::info("\tEGL_EXTENSIONS:");
 
   print_extension_list(m_dpy);
@@ -470,6 +452,7 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
     return;
   }
 
+  std::stringstream ss;
   spdlog::info("EGL framebuffer configurations:");
   for (EGLint i = 0; i < num_config; i++) {
     ss << "\tConfiguration #" << i;

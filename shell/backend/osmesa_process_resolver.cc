@@ -16,6 +16,7 @@
 
 #include "osmesa_process_resolver.h"
 
+#include <EGL/egl.h>
 #include <GL/osmesa.h>
 #include <dlfcn.h>
 
@@ -23,7 +24,7 @@
 
 #include "logging.h"
 
-std::shared_ptr<OSMesaProcessResolver> GlProcessResolver::sInstance = nullptr;
+std::shared_ptr<OSMesaProcessResolver> GlProcessResolver_Headless::sInstance = nullptr;
 
 OSMesaProcessResolver::~OSMesaProcessResolver() {
   for (auto const& item : m_handles) {
@@ -35,7 +36,7 @@ int OSMesaProcessResolver::GetHandle(const std::string& lib, void** out_handle) 
   const auto handle = dlopen(lib.c_str(), RTLD_LAZY | RTLD_LOCAL);
 #if !defined(NDEBUG)
   if (handle) {
-    SPDLOG_DEBUG("dlopen: {}", lib);
+    spdlog::debug("dlopen: {}", lib);
   }
 #endif
 
@@ -52,10 +53,12 @@ void OSMesaProcessResolver::Initialize() {
   void* handle;
   const std::vector<std::string> libs(kGlSoNames,
                                       kGlSoNames + std::size(kGlSoNames));
+  spdlog::trace("** OSMesaGetProcAddress Init");
   for (const auto& name : libs) {
     GetHandle(name, &handle);
     if (handle) {
       m_handles.push_back(handle);
+      spdlog::trace("{}: Library found", name[0]);
     } else {
       spdlog::critical("{}: Library not found", name[0]);
       assert(false);
@@ -69,24 +72,26 @@ void* OSMesaProcessResolver::process_resolver(const char* name) const {
     return nullptr;
   }
 
+  spdlog::trace("** OSMesaGetProcAddress({})", name);
+
   void* address;
 
   for (auto& handle : m_handles) {
     address = dlsym(handle, name);
     if (address) {
-      SPDLOG_TRACE("{}", name);
+      spdlog::trace("{}", name);
       return address;
     }
   }
 
-  SPDLOG_TRACE("** OSMesaGetProcAddress({})", name);
+  spdlog::trace("** OSMesaGetProcAddress({})", name);
 
   address = reinterpret_cast<void*>(OSMesaGetProcAddress(name));
   if (address) {
     return address;
   }
 
-  spdlog::error("gl_proc_resolver: could not resolve symbol \"{}\"", name);
+  spdlog::error("osmesa_proc_resolver: could not resolve symbol \"{}\"", name);
 
   return nullptr;
 }

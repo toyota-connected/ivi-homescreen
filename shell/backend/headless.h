@@ -8,6 +8,10 @@
 
 #include "osmesa.h"
 
+class Backend;
+
+class Engine;
+
 class HeadlessBackend : public OSMesaHeadless, public Backend {
  public:
   HeadlessBackend(uint32_t initial_width, uint32_t initial_height, const bool debug_backend, const int buffer_size);
@@ -23,11 +27,10 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * @relation
    * wayland
    */
-  static void Resize(void* user_data,
-              size_t index,
-              Engine* engine,
-              int32_t width,
-              int32_t height);
+  void Resize(size_t index,
+                      Engine* flutter_engine,
+                      int32_t width,
+                      int32_t height) override;
 
   /**
    * @brief Create EGL surface
@@ -40,11 +43,14 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * @relation
    * wayland
    */
-  static void CreateSurface(void* user_data,
-                            size_t index,
-                            wl_surface* surface,
-                            int32_t width,
-                            int32_t height);
+  void CreateSurface(const size_t index,
+                     struct wl_surface* surface,
+                     const int32_t width,
+                     const int32_t height) override;
+
+  bool TextureMakeCurrent() override;
+
+  bool TextureClearCurrent() override;
 
   /**
    * @brief Get FlutterRendererConfig
@@ -63,6 +69,9 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * wayland
    */
   FlutterCompositor GetCompositorConfig() override;
+
+  GLubyte* getHeadlessBuffer();
+
 
  private:
   uint32_t m_prev_width, m_width;
