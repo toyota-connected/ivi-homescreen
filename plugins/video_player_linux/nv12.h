@@ -150,6 +150,7 @@ class Shader {
     glDeleteBuffers(1, &coord_buffer_);
     glDeleteBuffers(1, &vertex_buffer_);
     glDeleteVertexArrays(1, &vertex_arr_id_);
+    glDeleteProgram(program);
     glDeleteTextures(1, &textureId);
     glDeleteTextures(2, &innerTexture[0]);
     glDeleteFramebuffers(1, &framebuffer);
