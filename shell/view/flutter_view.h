@@ -24,12 +24,6 @@
 #include "platform/homescreen/client_wrapper/include/flutter/plugin_registrar_homescreen.h"
 #include "wayland/window.h"
 
-#ifdef ENABLE_TEXTURE_EGL
-#include "textures/egl/texture_egl.h"
-#endif
-#ifdef ENABLE_TEXTURE_NAVI_RENDER_EGL
-#include "textures/navi_render_egl/texture_navi_render_egl.h"
-#endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
 #endif
@@ -50,9 +44,6 @@ class WaylandVulkanBackend;
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
-#endif
-#ifdef ENABLE_TEXTURE_EGL
-class TextureEgl;
 #endif
 
 class FlutterView {
@@ -217,10 +208,6 @@ class FlutterView {
   size_t m_index;
 
   std::unique_ptr<FlutterDesktopViewControllerState> m_state;
-
-#ifdef ENABLE_TEXTURE_EGL
-  std::unique_ptr<TextureEgl> m_texture_egl;
-#endif
 
   struct {
     uint8_t output;

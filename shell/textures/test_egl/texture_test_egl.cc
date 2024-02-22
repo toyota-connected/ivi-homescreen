@@ -19,18 +19,19 @@
 #include <chrono>
 
 #include "backend/wayland_egl.h"
-#include "textures/texture.h"
+//TODO #include "textures/texture.h"
 #include "view/flutter_view.h"
 
 constexpr int64_t kTestTextureObjectId = 5150;
 
 TextureTestEgl::TextureTestEgl(FlutterView* view)
-    : Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8, Create, Dispose),
+    : //TODO Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8, Create, Dispose),
       m_egl_backend(reinterpret_cast<WaylandEglBackend*>(view->GetBackend())),
       m_initialized(false) {}
 
 TextureTestEgl::~TextureTestEgl() = default;
 
+#if 0 //TODO
 flutter::EncodableValue TextureTestEgl::Create(
     void* userdata,
     const std::map<flutter::EncodableValue, flutter::EncodableValue>* args) {
@@ -56,7 +57,7 @@ flutter::EncodableValue TextureTestEgl::Create(
   obj->m_egl_backend->ClearCurrent();
 
   obj->m_initialized = true;
-  obj->Enable(textureId);
+  //TODO   obj->Enable(textureId);
 
   return flutter::EncodableValue(flutter::EncodableMap{
       {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
@@ -73,19 +74,20 @@ flutter::EncodableValue TextureTestEgl::Create(
       {flutter::EncodableValue("GL_textureId"),
        flutter::EncodableValue(static_cast<int64_t>(textureId))}});
 }
+#endif //TODO
 
 void TextureTestEgl::Dispose(void* userdata, GLuint name) {
   auto* obj = (TextureTestEgl*)userdata;
-  obj->Disable(name);
+  //TODO   obj->Disable(name);
 }
 
 void TextureTestEgl::Draw(void* userdata) {
   auto* obj = (TextureTestEgl*)userdata;
 
-  if (!obj->m_draw_next)
-    return;
+  //TODO   if (!obj->m_draw_next)
+  //TODO     return;
 
-  obj->m_draw_next = false;
+  //TODO   obj->m_draw_next = false;
 
-  obj->FrameReady();
+  //TODO   obj->FrameReady();
 }

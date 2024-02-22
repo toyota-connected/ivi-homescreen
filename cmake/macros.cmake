@@ -22,8 +22,6 @@ macro(ENABLE_TEXTURE texture)
 
     target_compile_definitions(homescreen PRIVATE ENABLE_TEXTURE_${ucase_texture})
 
-    target_sources(homescreen PRIVATE textures/${texture}/texture_${texture}.cc)
-
 endmacro(ENABLE_TEXTURE)
 
 macro(ENABLE_PLUGIN plugin)

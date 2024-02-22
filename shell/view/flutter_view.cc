@@ -63,9 +63,6 @@ FlutterView::FlutterView(Configuration::Config config,
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
       m_config.debug_backend, kEglBufferSize);
-#if defined(ENABLE_TEXTURE_EGL)
-  TextureEgl::GetInstance().SetView(this);
-#endif
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
   m_backend = std::make_shared<WaylandVulkanBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
@@ -176,11 +173,6 @@ void FlutterView::Initialize() {
 
 void FlutterView::RunTasks() {
   m_flutter_engine->RunTask();
-
-#ifdef ENABLE_TEXTURE_EGL
-  TextureEgl::GetInstance().Draw();
-  TextureEgl::GetInstance().RunTask();
-#endif
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
   for (auto const& surface : m_comp_surf) {

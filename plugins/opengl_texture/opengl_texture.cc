@@ -18,8 +18,6 @@
 
 #include "engine.h"
 
-#include "textures/egl/texture_egl.h"
-
 void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
                                       void* userdata) {
   const auto engine = static_cast<Engine*>(userdata);
@@ -57,12 +55,14 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
         result = codec.EncodeErrorEnvelope(
             "argument_error", "textureId, width and height must be non-zero");
       } else {
+#if 0
         // cast size to that what Wayland uses
         const auto value = TextureEgl::GetInstance().Create(
             engine, textureId, static_cast<int32_t>(width),
             static_cast<int32_t>(height), args);
 
         result = codec.EncodeSuccessEnvelope(&value);
+#endif
       }
     } else {
       result = codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
@@ -78,7 +78,7 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
         textureId = encodedValue.LongValue();
       }
 
-      engine->TextureDispose(textureId);
+      //TODO engine->TextureDispose(textureId);
 
       result = codec.EncodeSuccessEnvelope();
     } else {
