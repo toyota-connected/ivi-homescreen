@@ -28,7 +28,7 @@ class TouchPair {
         count_(0){};
 
   TouchPair(int32_t pointer_count,
-            const size_t point_data_size,
+            const size_t /* point_data_size */,
             const double* point_data,
             uint32_t height) {
     if (pointer_count >= 1) {

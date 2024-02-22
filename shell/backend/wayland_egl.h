@@ -24,7 +24,6 @@
 #include "backend/backend.h"
 #include "constants.h"
 #include "egl.h"
-#include "textures/texture.h"
 
 class Backend;
 

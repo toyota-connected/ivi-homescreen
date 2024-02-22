@@ -288,7 +288,7 @@ class Display {
    * @relation
    * agl_shell
    */
-  void deactivateApp(std::string app_id);
+  void deactivateApp(const std::string& app_id);
   /**
    * @brief activate/show the application pointed by app_id
    * @param[in] app_id the app_id
