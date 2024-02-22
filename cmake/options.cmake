@@ -89,7 +89,7 @@ endif ()
 option(BUILD_BACKEND_HEADLESS "Build Headless Backend" OFF)
 if (BUILD_BACKEND_HEADLESS)
     find_package(PkgConfig)
-    pkg_check_modules(OSMESA osmesa REQUIRED)
+    pkg_check_modules(OSMESA osmesa glesv2 egl REQUIRED)
     add_compile_definitions(BUILD_BACKEND_HEADLESS)
 endif ()
 

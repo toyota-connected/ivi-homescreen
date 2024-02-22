@@ -27,6 +27,20 @@
 
 OSMesaHeadless::OSMesaHeadless() {
   m_context = OSMesaCreateContextExt(OSMESA_RGBA, 16, 0, 0, NULL);
+  assert(m_context);
+  spdlog::trace("Context Created");
+
+  m_resource_context =
+      OSMesaCreateContextExt(OSMESA_RGBA, 16, 0, 0, m_context);
+  assert(m_resource_context);
+  spdlog::trace("Resource Context Created");
+
+  m_texture_context =
+      OSMesaCreateContextExt(OSMESA_RGBA, 16, 0, 0, m_context);
+  assert(m_texture_context);
+  spdlog::trace("Texture Context Created");
+
+  MakeCurrent();
 }
 
 OSMesaHeadless::~OSMesaHeadless() {
@@ -34,16 +48,30 @@ OSMesaHeadless::~OSMesaHeadless() {
 }
 
 bool OSMesaHeadless::MakeCurrent() {
-  SPDLOG_TRACE("+MakeCurrent(), thread_id=0x{:x}", pthread_self());
+  spdlog::trace("+MakeCurrent(), thread_id=0x{:x}", pthread_self());
   OSMesaMakeCurrent( m_context, m_buf, GL_UNSIGNED_BYTE, m_width, m_height );
-  SPDLOG_TRACE("-MakeCurrent()");
+  spdlog::trace("-MakeCurrent()");
   return true;
 }
 
 bool OSMesaHeadless::ClearCurrent() {
-  SPDLOG_TRACE("+ClearCurrent(), thread_id=0x{:x}", pthread_self());
+  spdlog::trace("+ClearCurrent(), thread_id=0x{:x}", pthread_self());
   OSMesaMakeCurrent( nullptr, nullptr, GL_UNSIGNED_BYTE, m_width, m_height );
-  SPDLOG_TRACE("-ClearCurrent()");
+  spdlog::trace("-ClearCurrent()");
+  return true;
+}
+
+bool OSMesaHeadless::MakeResourceCurrent() {
+  spdlog::trace("+MakeResourceCurrent(), thread_id=0x{:x}", pthread_self());
+  OSMesaMakeCurrent( m_resource_context, m_buf, GL_UNSIGNED_BYTE, m_width, m_height );
+  spdlog::trace("-MakeResourceCurrent()");
+  return true;
+}
+
+bool OSMesaHeadless::MakeTextureCurrent() {
+  spdlog::trace("+MakeTextureCurrent(), thread_id=0x{:x}", pthread_self());
+  OSMesaMakeCurrent( m_texture_context, m_buf, GL_UNSIGNED_BYTE, m_width, m_height );
+  spdlog::trace("-MakeTextureCurrent()");
   return true;
 }
 

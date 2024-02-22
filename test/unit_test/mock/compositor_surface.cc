@@ -126,8 +126,8 @@ void CompositorSurface::StopFrames() {
 
 void CompositorSurface::on_frame(void* data,
                                  struct wl_callback* callback,
-                                 uint32_t time) {
-  auto obj = reinterpret_cast<CompositorSurface*>(data);
+                                 const uint32_t time) {
+  const auto obj = static_cast<CompositorSurface*>(data);
 
   obj->m_callback = nullptr;
 

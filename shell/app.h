@@ -43,6 +43,10 @@ class App {
    */
   NODISCARD int Loop() const;
 
+  NODISCARD FlutterView* GetFlutterView(int i) const {
+    return reinterpret_cast<FlutterView*>(m_views[i].get());
+  }
+
  private:
   std::shared_ptr<Display> m_wayland_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;

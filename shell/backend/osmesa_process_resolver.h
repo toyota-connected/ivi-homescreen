@@ -62,11 +62,11 @@ class OSMesaProcessResolver {
   std::vector<void*> m_handles;
 };
 
-class GlProcessResolver {
+class GlProcessResolver_Headless {
  public:
-  GlProcessResolver(GlProcessResolver& other) = delete;
+  GlProcessResolver_Headless(GlProcessResolver_Headless& other) = delete;
 
-  void operator=(const GlProcessResolver&) = delete;
+  void operator=(const GlProcessResolver_Headless&) = delete;
 
   /**
    * @brief Get instance of OSMesaProcessResolver class

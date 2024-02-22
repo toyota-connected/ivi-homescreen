@@ -62,6 +62,7 @@ if (BUILD_BACKEND_HEADLESS)
             backend/headless.cc
             backend/osmesa.cc
             backend/osmesa_process_resolver.cc
+            backend/gl_process_resolver.cc
     )
 endif ()
 
@@ -97,9 +98,9 @@ target_include_directories(homescreen
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
-    if (BUILD_BACKEND_HEADLESS)
-        target_link_libraries(homescreen PRIVATE OSMesa)
-    endif ()
+endif ()
+if (BUILD_BACKEND_HEADLESS)
+    target_link_libraries(homescreen PRIVATE OSMesa EGL GLESv2)
 endif ()
 if (BUILD_PLUGIN_COMP_SURF)
     target_link_libraries(homescreen PRIVATE EGL)

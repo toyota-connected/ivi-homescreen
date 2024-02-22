@@ -1,14 +1,12 @@
 # test-case specific settings
 # when creating new test-case, you need to change here
-set(TESTCASE_NAME "homescreen_configuration_ut_test_driver")
-set(TESTCASE_CC test_case_configuration.cc;
-                test_case_configuration_getViewParameters.cc;
-                test_case_configuration_getGlobalParameters.cc;
-                test_case_configuration_ConvertCommandlineToConfig.cc;
-                test_case_configuration_getCliOverrides.cc;
-                test_case_configuration_PrintConfig.cc;)
+set(TESTCASE_NAME "homescreen_app_headless_ut_test_driver")
+set(TESTCASE_CC test_case_app_headless.cc)
+
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_BACKEND_HEADLESS")
+list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_BACKEND_WAYLAND_EGL")
+list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_EGL_ENABLE_TRANSPARENCY")
+list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_BACKEND_WAYLAND_VULKAN")
 
 # Basically, the following statements need not be modified
 add_executable(
@@ -32,7 +30,6 @@ target_compile_definitions(
         ${TESTCASE_NAME}
         PRIVATE
         ${TYPICAL_TEST_DEFINITIONS}
-        SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 target_include_directories(
