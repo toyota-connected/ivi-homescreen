@@ -12,7 +12,7 @@ HeadlessBackend::HeadlessBackend(uint32_t initial_width,
                               uint32_t initial_height,
                               const bool debug_backend,
                               const int buffer_size)
-    : OSMesaHeadless(),
+    : OSMesaHeadless(initial_width, initial_height),
       Backend(),
       m_prev_width(initial_width),
       m_prev_height(initial_height) {}
@@ -64,6 +64,14 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
                            state->view_controller->engine->GetBackend())
                     ->ClearCurrent();
               },
+              .present = [](void* userdata) -> bool {
+                const auto state =
+                    static_cast<FlutterDesktopEngineState*>(userdata);
+                auto* b = reinterpret_cast<HeadlessBackend*>(
+                    state->view_controller->engine->GetBackend());
+                b->Finish();
+                return true;
+              },
               .fbo_callback = [](void*) -> uint32_t {
                 return 0;  // FBO0
               },
@@ -77,7 +85,7 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
               .fbo_reset_after_present = false,
               .gl_proc_resolver = [](void* /* userdata */,
                                  const char* name) -> void* {
-                return GlProcessResolver/*_Headless*/::GetInstance().process_resolver(name);
+                return GlProcessResolver_Headless::GetInstance().process_resolver(name);
               },
               .gl_external_texture_frame_callback =
                   [](void* userdata, const int64_t texture_id, const size_t width,
@@ -104,14 +112,6 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
                 };
                 target->visible_width = width;
                 target->visible_width = height;
-                return true;
-              },
-              .present = [](void* userdata) -> bool {
-                const auto state =
-                    static_cast<FlutterDesktopEngineState*>(userdata);
-                auto* b = reinterpret_cast<HeadlessBackend*>(
-                    state->view_controller->engine->GetBackend());
-                b->Finish();
                 return true;
               },
           }};

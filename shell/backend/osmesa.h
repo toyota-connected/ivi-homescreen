@@ -25,7 +25,7 @@
 
 class OSMesaHeadless {
  public:
-  OSMesaHeadless();
+  OSMesaHeadless(int32_t initial_width, int32_t initial_height);
 
   ~OSMesaHeadless();
 
