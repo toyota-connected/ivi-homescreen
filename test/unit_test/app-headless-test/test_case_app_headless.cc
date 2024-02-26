@@ -66,28 +66,6 @@ void utils_write_targa(GLubyte* buf, const char *filename, int width, int height
   }
 }
 
-
-TEST(HomescreenGlProcessResolver_Headless, Lv1Normal001) {
-  // static const int MAX_DEVICES = 4;
-  // EGLDeviceEXT eglDevs[MAX_DEVICES];
-  // EGLint numDevices;
-
-  auto gl_process = GlProcessResolver_Headless::GetInstance();
-  PFNGLGETSTRINGPROC process_resolver = (PFNGLGETSTRINGPROC)gl_process.process_resolver("glGetString");
-  // auto gl_process = GlProcessResolver::GetInstance();
-  // PFNGLGETSTRINGPROC process_resolver = (PFNGLGETSTRINGPROC)gl_process.process_resolver("glGetString");
-
-  // PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT =
-  //     (PFNEGLQUERYDEVICESEXTPROC)gl_process.process_resolver("eglQueryDevicesEXT");
-
-  // eglQueryDevicesEXT(MAX_DEVICES, eglDevs, &numDevices);
-
-  // printf("Detected %d devices\n", numDevices);
-
-  printf("\nGL_VERSION: %s\n\n", process_resolver(GL_VERSION));
-  EXPECT_TRUE(process_resolver != NULL);
-}
-
 TEST(HomescreenAppHeadless, Lv1Normal001) {
   struct Configuration::Config config {};
   config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
@@ -103,7 +81,7 @@ TEST(HomescreenAppHeadless, Lv1Normal001) {
   std::this_thread::sleep_for(30s);
 
   auto headlessBackend = reinterpret_cast<HeadlessBackend*>(app.GetFlutterView(0)->GetBackend());
-  utils_write_targa(headlessBackend->getHeadlessBuffer(), "testimage.tga", 800, 800);
+  utils_write_targa(headlessBackend->getHeadlessBuffer(), "testimage.tga", 1920, 720);
 
   // ret value is set at mock Display::PollEvents()
   EXPECT_EQ(1, ret);
