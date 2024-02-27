@@ -69,7 +69,8 @@ void utils_write_targa(GLubyte* buf, const char *filename, int width, int height
 TEST(HomescreenAppHeadless, Lv1Normal001) {
   struct Configuration::Config config {};
   config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
-
+  config.json_configuration_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen/default_config.json";
+  
   // call target function
   std::vector<struct Configuration::Config> configs =
       Configuration::ParseConfig(config);
@@ -78,33 +79,16 @@ TEST(HomescreenAppHeadless, Lv1Normal001) {
   int ret = app.Loop();
 
   using namespace std::chrono_literals;
-  std::this_thread::sleep_for(30s);
+  std::this_thread::sleep_for(2s);
 
-  auto headlessBackend = reinterpret_cast<HeadlessBackend*>(app.GetFlutterView(0)->GetBackend());
-  utils_write_targa(headlessBackend->getHeadlessBuffer(), "testimage.tga", 1920, 720);
+  // run the application until failure or queue empty
+  do {
+    ret = app.Loop();
+  } while (ret > 0);
+
+  utils_write_targa(app.getViewRenderBuf(0), "HomescreenAppHeadless_Lv1Normal001_Test.tga", configs[0].view.width, configs[0].view.height);
 
   // ret value is set at mock Display::PollEvents()
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(0, ret);
 }
 
-/****************************************************************
-Test Case Name.Test Name： HomescreenAppLoop_Lv1Normal001
-Use Case Name: Initialization
-Test Summary：Test Loop with window_type BG
-***************************************************************/
-
-// TEST(HomescreenAppLoop, Lv1Normal002) {
-//   struct Configuration::Config config {};
-//   config.view.bundle_path = "/home/root/";
-//   config.view.window_type = "BG";
-
-//   // call target function
-//   std::vector<struct Configuration::Config> configs =
-//       Configuration::ParseConfig(config);
-
-//   App app(configs);
-//   int ret = app.Loop();
-
-//   // ret value is set at mock Display::PollEvents()
-//   EXPECT_EQ(1, ret);
-// }
