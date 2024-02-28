@@ -3,7 +3,6 @@
 #include "engine.h"
 #include "osmesa.h"
 #include "osmesa_process_resolver.h"
-#include "gl_process_resolver.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 
 struct FlutterDesktopEngineState;
