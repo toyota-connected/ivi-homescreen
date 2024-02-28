@@ -3,6 +3,8 @@
 #include "app.h"
 #include "configuration/configuration.h"
 
+static constexpr char kBundlePath[] = TEST_APP_BUNDLE_PATH;
+
 /****************************************************************
 Test Case Name.Test Name： HomescreenAppLoop_Lv1Normal001
 Use Case Name: Initialization
@@ -11,7 +13,7 @@ Test Summary：Test Loop without window_type
 
 TEST(HomescreenAppLoop, Lv1Normal001) {
   struct Configuration::Config config {};
-  config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
+  config.view.bundle_path = kBundlePath;
 
   // call target function
   std::vector<struct Configuration::Config> configs =
@@ -34,7 +36,7 @@ Test Summary：Test Loop with window_type BG
 
 TEST(HomescreenAppLoop, Lv1Normal002) {
   struct Configuration::Config config {};
-  config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
+  config.view.bundle_path = kBundlePath;
   config.view.window_type = "BG";
 
   // call target function
