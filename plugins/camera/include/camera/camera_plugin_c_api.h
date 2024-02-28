@@ -17,8 +17,7 @@
 #ifndef FLUTTER_PLUGIN_CAMERA_PLUGIN_C_API_H_
 #define FLUTTER_PLUGIN_CAMERA_PLUGIN_C_API_H_
 
-#include <flutter_plugin_registrar.h>
-#include "flutter_homescreen.h"
+#include "flutter_desktop_plugin_registrar.h"
 
 #ifdef FLUTTER_PLUGIN_IMPL
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))

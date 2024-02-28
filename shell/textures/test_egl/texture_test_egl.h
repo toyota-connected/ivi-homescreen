@@ -23,7 +23,8 @@
 #endif
 
 #include "flutter/fml/macros.h"
-#include "textures/texture.h"
+#include <flutter/encodable_value.h>
+//TODO #include "textures/texture.h"
 
 class App;
 
@@ -35,7 +36,7 @@ class FlutterView;
 
 class WaylandEglBackend;
 
-class TextureTestEgl : public Texture {
+class TextureTestEgl { //TODO : public Texture {
  public:
   explicit TextureTestEgl(FlutterView* view);
 

@@ -89,19 +89,64 @@ class CameraApi {
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void startVideoRecording(
       const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) = 0;
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void pauseVideoRecording(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void resumeVideoRecording(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void stopVideoRecording(
       const flutter::EncodableMap& args,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void pausePreview(
       const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) = 0;
+      std::function<void(ErrorOr<double> reply)> result) = 0;
   virtual void resumePreview(
       const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) = 0;
+      std::function<void(ErrorOr<double> reply)> result) = 0;
+  virtual void lockCaptureOrientation(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<std::string>)> result) = 0;
+  virtual void unlockCaptureOrientation(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<std::string>)> result) = 0;
+  virtual void setFocusMode(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void setFlashMode(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void setExposureMode(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void setExposurePoint(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void setFocusPoint(
+      const flutter::EncodableMap& args,
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  virtual void setExposureOffset(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) = 0;
+  virtual void getExposureOffsetStepSize(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) = 0;
+  virtual void getMinExposureOffset(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) = 0;
+  virtual void getMaxExposureOffset(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) = 0;
+  virtual void getMaxZoomLevel(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) = 0;
+  virtual void getMinZoomLevel(
+      const flutter::EncodableMap& args,
+      std::function<void(ErrorOr<double> reply)> result) = 0;
   virtual void dispose(
       const flutter::EncodableMap& args,
-      std::function<void(ErrorOr<std::string> reply)> result) = 0;
+      std::function<void(std::optional<FlutterError> reply)> result) = 0;
 
   // The codec used by CameraApi.
   static const flutter::StandardMethodCodec& GetCodec();

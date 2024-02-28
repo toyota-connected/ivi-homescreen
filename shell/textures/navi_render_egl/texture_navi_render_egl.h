@@ -5,9 +5,10 @@
 #include <string>
 
 #include <GLES3/gl32.h>
+#include <flutter/encodable_value.h>
 
-#include "../texture.h"
 #include "render_api.h"
+
 #if defined(BUILD_TEXTURE_NAVI_EGL_ROUTING)
 #include "routing_api.h"
 #endif
@@ -20,7 +21,7 @@ class FlutterView;
 
 class WaylandEglBackend;
 
-class TextureNaviRender : public Texture {
+class TextureNaviRender { //TODO  : public Texture
  public:
   explicit TextureNaviRender(const FlutterView* view);
 
@@ -69,6 +70,8 @@ class TextureNaviRender : public Texture {
   GLuint m_texture_id{};
   GLuint m_rbo{};
   int m_interface_version{};
+
+  GLsizei m_width, m_height;
 
   static std::map<std::string, std::string> m_styles;
 
