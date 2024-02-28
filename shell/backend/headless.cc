@@ -113,11 +113,11 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
 }
 
 bool HeadlessBackend::TextureMakeCurrent() {
-  return 0;
+  return MakeTextureCurrent();
 }
 
 bool HeadlessBackend::TextureClearCurrent() {
-  return 0;
+  return ClearCurrent();
 }
 
 FlutterCompositor HeadlessBackend::GetCompositorConfig() {
