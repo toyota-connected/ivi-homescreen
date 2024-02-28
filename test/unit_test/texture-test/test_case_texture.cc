@@ -5,6 +5,7 @@
 #include "wayland/display.h"
 #include "textures/texture.h"
 
+static constexpr char kBundlePath[] = TEST_APP_BUNDLE_PATH;
 static constexpr char kSourceRoot[] = SOURCE_ROOT_DIR;
 constexpr int64_t kTestTextureObjectId = 5150;
 const std::string kCallCreateCb = "Call Create Callback";
@@ -18,7 +19,7 @@ bool callDisposeCallback = false;
 FlutterView* createFlutterViewInstance() {
   // setup parameter
   struct Configuration::Config config {};
-  config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
+  config.view.bundle_path = kBundlePath;
   config.view.wl_output_index = 1;
   auto configs = Configuration::ParseConfig(config);
 
@@ -35,7 +36,7 @@ Engine* createEngineInstance() {
   FlutterView* view = createFlutterViewInstance();
   std::vector<const char*> vm_args_c;
 
-  Engine *engine = new Engine(view, 1, vm_args_c, "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen", 1);
+  Engine *engine = new Engine(view, 1, vm_args_c, kBundlePath, 1);
   return engine;
 }
 

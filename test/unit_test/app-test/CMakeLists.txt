@@ -32,6 +32,7 @@ target_compile_definitions(
         ${TESTCASE_NAME}
         PRIVATE
         ${TYPICAL_TEST_DEFINITIONS}
+        TEST_APP_BUNDLE_PATH="${UNIT_TEST_APP_BUNDLE}"
 )
 
 target_include_directories(

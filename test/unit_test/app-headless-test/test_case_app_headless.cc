@@ -20,6 +20,8 @@
 #include <GL/osmesa.h>
 #include <GLES2/gl2.h>
 
+static constexpr char kBundlePath[] = TEST_APP_BUNDLE_PATH;
+
 /****************************************************************
 Test Case Name.Test Name： HomescreenAppLoop_Lv1Normal001
 Use Case Name: Initialization
@@ -68,8 +70,8 @@ void utils_write_targa(GLubyte* buf, const char *filename, int width, int height
 
 TEST(HomescreenAppHeadless, Lv1Normal001) {
   struct Configuration::Config config {};
-  config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
-  config.json_configuration_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen/default_config.json";
+  config.view.bundle_path = kBundlePath;
+  config.json_configuration_path = config.view.bundle_path + "/default_config.json";
 
   // call target function
   std::vector<struct Configuration::Config> configs =
