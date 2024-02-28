@@ -1,18 +1,18 @@
 /*
-* Copyright 2020-2024 Toyota Connected North America
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*      http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright 2020-2024 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "video_player.h"
 
@@ -216,7 +216,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
   auto obj = static_cast<VideoPlayer*>(user_data);
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
-      obj->OnMediaError(msg);
+      VideoPlayer::OnMediaError(msg);
       gst_object_unref(bus);
       return FALSE;
     case GST_MESSAGE_EOS: {
@@ -297,11 +297,11 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
         if (!obj->is_buffering_ && obj->target_state_ == GST_STATE_PLAYING) {
           // we were not buffering but PLAYING, PAUSE the pipeline
           //          gst_element_set_state(obj->playbin_, GST_STATE_PAUSED);
-          //}
-          // if (!obj->is_buffering_) {
+        }
+        // if (!obj->is_buffering_) {
           obj->is_buffering_ = true;
           obj->SetBuffering(obj->is_buffering_);
-        }
+        //}
       }
       break;
     }
@@ -462,8 +462,7 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
   }
 }
 
-void VideoPlayer::Init(flutter::BinaryMessenger* messenger,
-                       flutter::TextureRegistrar* /* texture_registry */) {
+void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
   if (is_initialized_) {
     return;
   }
@@ -549,15 +548,6 @@ void VideoPlayer::OnMediaStateChange(GstState new_state) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
                    m_texture_id);
     }
-  }
-}
-
-void VideoPlayer::OnMediaInitialized() {
-  // Start playback.
-  SeekTo(0);
-  if (!is_initialized_) {
-    is_initialized_ = true;
-    SendInitialized();
   }
 }
 

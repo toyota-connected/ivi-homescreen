@@ -30,6 +30,10 @@ class Backend;
 
 class Engine;
 
+class Backend;
+
+class Engine;
+
 class WaylandEglBackend : public Egl, public Backend {
  public:
   // Maximum damage history - for triple buffering we need to store damage for

@@ -25,7 +25,6 @@
 
 #include "core/utils/hdr_loader.h"
 #include "plugins/common/common.h"
-#include "textures/texture.h"
 
 namespace plugin_filament_view {
 IndirectLightManager::IndirectLightManager(CustomModelViewer* modelViewer,

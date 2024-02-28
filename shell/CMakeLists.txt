@@ -26,7 +26,6 @@ add_executable(homescreen
         engine.cc
         libflutter_engine.cc
         main.cc
-        textures/texture.cc
         timer.cc
         view/flutter_view.cc
         wayland/display.cc

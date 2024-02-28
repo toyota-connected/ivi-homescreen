@@ -987,11 +987,11 @@ void Display::activateApp(std::string app_id) {
   FML_LOG(INFO) << "Activating app_id " << app_id << " on output "
                 << default_output_index;
   agl_shell_activate_app(m_agl.shell, app_id.c_str(),
-                         m_all_outputs[default_output_index]->output);
+                         m_all_outputs[static_cast<size_t>(default_output_index)]->output);
   wl_display_flush(m_display);
 }
 
-void Display::deactivateApp(std::string app_id) {
+void Display::deactivateApp(const std::string& app_id) {
   for (auto& i : apps_stack) {
     if (i == app_id) {
       // remove it from apps_stack
@@ -1018,7 +1018,7 @@ void Display::processAppStatusEvent(const char* app_id,
 }
 
 void Display::agl_shell_app_on_output(void* data,
-                                      struct agl_shell* agl_shell,
+                                      struct agl_shell* /* agl_shell */,
                                       const char* app_id,
                                       const char* output_name) {
   auto* d = static_cast<Display*>(data);

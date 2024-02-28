@@ -117,7 +117,7 @@ void ModelLoader::loadModelGltf(
     const ::filament::float3* centerPosition,
     float scale,
     std::function<const ::filament::backend::BufferDescriptor&(
-        std::string uri)>& callback,
+        std::string uri)>& /* callback */,
     bool transform) {
   destroyModel();
   asset_ = assetLoader_->createAsset(buffer.data(),
