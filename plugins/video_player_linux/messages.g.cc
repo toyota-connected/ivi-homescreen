@@ -23,7 +23,7 @@ using flutter::EncodableList;
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 
-FlutterError CreateConnectionError(const std::string channel_name) {
+FlutterError CreateConnectionError(const std::string& channel_name) {
   return FlutterError(
       "channel-error",
       "Unable to establish connection on channel: '" + channel_name + "'.",
