@@ -29,8 +29,6 @@ target_include_directories(platform_homescreen PRIVATE
 
 target_compile_definitions(platform_homescreen PUBLIC
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
-        EGL_NO_X11
-        MESA_EGL_NO_X11_HEADERS
 )
 
 target_link_libraries(platform_homescreen PUBLIC

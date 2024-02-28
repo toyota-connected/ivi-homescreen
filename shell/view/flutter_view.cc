@@ -66,9 +66,6 @@ FlutterView::FlutterView(Configuration::Config config,
   m_backend = std::make_shared<HeadlessBackend>
       (m_config.view.width, m_config.view.height, 
       m_config.debug_backend, kEglBufferSize);
-#if defined(ENABLE_TEXTURE_EGL)
-  TextureEgl::GetInstance().SetView(this);
-#endif
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
