@@ -2,11 +2,8 @@
 # when creating new test-case, you need to change here
 set(TESTCASE_NAME "homescreen_utils_ut_test_driver")
 set(TESTCASE_CC test_case_utils.cc)
-# set(TESTCASE_MOCK timer.cc)
-# list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*${TESTCASE_MOCK}")
-# list(APPEND TYPICAL_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/mock/${TESTCASE_MOCK})
+
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_BACKEND_HEADLESS")
 
 # Basically, the following statements need not be modified
 add_executable(

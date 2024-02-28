@@ -70,7 +70,7 @@ TEST(HomescreenAppHeadless, Lv1Normal001) {
   struct Configuration::Config config {};
   config.view.bundle_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen";
   config.json_configuration_path = "/home/tcna/dev/workspace-automation/app/gallery/.desktop-homescreen/default_config.json";
-  
+
   // call target function
   std::vector<struct Configuration::Config> configs =
       Configuration::ParseConfig(config);
@@ -88,7 +88,6 @@ TEST(HomescreenAppHeadless, Lv1Normal001) {
 
   utils_write_targa(app.getViewRenderBuf(0), "HomescreenAppHeadless_Lv1Normal001_Test.tga", configs[0].view.width, configs[0].view.height);
 
-  // ret value is set at mock Display::PollEvents()
   EXPECT_EQ(0, ret);
 }
 

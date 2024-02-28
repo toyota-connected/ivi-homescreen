@@ -24,10 +24,19 @@
 
 #include "osmesa_process_resolver.h"
 #include "logging.h"
+#include "constants.h"
 
 OSMesaHeadless::OSMesaHeadless(int32_t initial_width, int32_t initial_height)
     : m_width(initial_width),
       m_height(initial_height) {
+
+  if(initial_width == 0) {
+    m_width = kDefaultViewWidth;
+  }
+  if(initial_height == 0) {
+    m_height = kDefaultViewHeight;
+  }
+
   m_context = OSMesaCreateContextExt(OSMESA_RGBA, 16, 0, 0, NULL);
   assert(m_context);
   spdlog::trace("Context Created");

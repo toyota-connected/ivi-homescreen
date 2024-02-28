@@ -40,11 +40,7 @@ void HeadlessBackend::Resize(size_t /* index */,
 void HeadlessBackend::CreateSurface(size_t /* index */,
                                       wl_surface* /*surface*/,
                                       int32_t width,
-                                      int32_t height) {
-  m_width = width;
-  m_height = height;
-  m_buf = create_osmesa_buffer(m_width, m_height);
-}
+                                      int32_t height) {}
 
 FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
   return {.type = kOpenGL,
