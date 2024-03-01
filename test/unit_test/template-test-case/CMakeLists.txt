@@ -3,13 +3,6 @@
 set(TESTCASE_NAME "templateTest")
 set(TESTCASE_CC test_case.cc)
 
-# add mock files to target source
-set(TESTCASE_MOCK engine.cc)
-foreach (mock IN LISTS TESTCASE_MOCK)
-    list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*/${mock}")
-    list(APPEND TYPICAL_TEST_SOURCES ${UNIT_TEST_MOCK_DIR}/${mock})
-endforeach ()
-
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # Basically, the following statements need not be modified

@@ -86,6 +86,13 @@ if (DEBUG_PLATFORM_MESSAGES)
     add_compile_definitions(DEBUG_PLATFORM_MESSAGES)
 endif ()
 
+option(BUILD_BACKEND_HEADLESS "Build Headless Backend" OFF)
+if (BUILD_BACKEND_HEADLESS)
+    find_package(PkgConfig)
+    pkg_check_modules(OSMESA osmesa glesv2 egl REQUIRED)
+    add_compile_definitions(BUILD_BACKEND_HEADLESS)
+endif ()
+
 #
 # Crash Handler
 #
@@ -119,6 +126,8 @@ MESSAGE(STATUS "Build Documentation .... ${BUILD_DOCS}")
 #
 option(BUILD_UNIT_TESTS "Build Unit Tests" OFF)
 MESSAGE(STATUS "Build Unit Tests ....... ${BUILD_UNIT_TESTS}")
+option(UNIT_TEST_SAVE_GOLDENS "Generate Golden Images" OFF)
+MESSAGE(STATUS "Generate Golden Images.. ${UNIT_TEST_SAVE_GOLDENS}")
 
 #
 # Sanitizers

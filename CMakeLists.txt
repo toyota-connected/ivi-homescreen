@@ -68,9 +68,20 @@ add_subdirectory(shell)
 
 add_subdirectory(docs)
 
+#
+# Unit Tests
+#
 if (BUILD_UNIT_TESTS)
+    if (NOT DEFINED UNIT_TEST_APP_BUNDLE)
+        set(UNIT_TEST_APP_BUNDLE "/home/root")
+    endif ()
+    if (UNIT_TEST_SAVE_GOLDENS)
+        add_compile_definitions(SAVE_IMAGE_FOR_COMPARISON)
+    endif ()
     enable_testing()
     add_subdirectory(test)
+    install(DIRECTORY DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/test/unit_test/test_images_golden)
+    install(DIRECTORY DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/test/unit_test/test_images)
 endif ()
 
 if (NOT CMAKE_CROSSCOMPILING)

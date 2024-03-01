@@ -9,6 +9,7 @@ add_executable(
         ${TESTCASE_NAME}
         ${TYPICAL_TEST_SOURCES}
         ${TESTCASE_CC}
+        ${PROJECT_SOURCE_DIR}/shell/backend/gl_process_resolver.cc
 )
 
 add_sanitizers(${TESTCASE_NAME})

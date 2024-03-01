@@ -1,14 +1,10 @@
 # test-case specific settings
 # when creating new test-case, you need to change here
-set(TESTCASE_NAME "homescreen_app_ut_test_driver")
-set(TESTCASE_CC test_case_app.cc)
+set(TESTCASE_NAME "homescreen_app_headless_ut_test_driver")
+set(TESTCASE_CC test_case_app_headless.cc)
 
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_FILE_SELECTOR")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_GO_ROUTER")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX")
-
+list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_EGL_ENABLE_TRANSPARENCY")
 
 # Basically, the following statements need not be modified
 add_executable(
