@@ -36,16 +36,8 @@ add_executable(homescreen
 
 include(textures)
 
-if (ENABLE_DLT)
-    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
-endif ()
-
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
-endif ()
-
-if (BUILD_PLUGIN_COMP_SURF)
-    target_sources(homescreen PRIVATE view/compositor_surface.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
@@ -62,6 +54,14 @@ if (BUILD_BACKEND_HEADLESS)
             backend/osmesa.cc
             backend/osmesa_process_resolver.cc
     )
+endif ()
+
+if (ENABLE_DLT)
+    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+endif ()
+
+if (BUILD_PLUGIN_COMP_SURF)
+    target_sources(homescreen PRIVATE view/compositor_surface.cc)
 endif ()
 
 if (BUILD_CRASH_HANDLER)

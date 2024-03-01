@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2022 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #include "osmesa_process_resolver.h"
 
 #include <EGL/egl.h>
-#include <GL/osmesa.h>
+#include "backend/headless.h"
 #include <dlfcn.h>
 
 #include <cassert>

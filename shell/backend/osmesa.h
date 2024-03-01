@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2022 Toyota Connected North America
+ * Copyright 2021-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ class OSMesaHeadless {
   void free_buffer();
 
  protected:
-  GLubyte* m_buf{};
+  uint8_t* m_buf{};
 
  private:
   OSMesaContext m_context{};

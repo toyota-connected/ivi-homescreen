@@ -9,7 +9,7 @@ FlutterView* createFlutterViewInstance() {
   // setup parameter
   struct Configuration::Config config {};
   config.view.bundle_path = "/home/root/";
-  config.view.wl_output_index = 1;
+  config.view.wl_output_index = 0;
   auto configs = Configuration::ParseConfig(config);
 
   auto wayland_display = std::make_shared<Display>(false, "", "", configs);

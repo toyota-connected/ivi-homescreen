@@ -28,7 +28,6 @@ target_compile_definitions(
         PRIVATE
         ${TYPICAL_TEST_DEFINITIONS}
         SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-        TEST_APP_BUNDLE_PATH="${UNIT_TEST_APP_BUNDLE}"
 )
 
 target_include_directories(

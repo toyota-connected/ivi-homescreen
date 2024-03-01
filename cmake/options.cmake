@@ -126,6 +126,8 @@ MESSAGE(STATUS "Build Documentation .... ${BUILD_DOCS}")
 #
 option(BUILD_UNIT_TESTS "Build Unit Tests" OFF)
 MESSAGE(STATUS "Build Unit Tests ....... ${BUILD_UNIT_TESTS}")
+option(UNIT_TEST_SAVE_GOLDENS "Generate Golden Images" OFF)
+MESSAGE(STATUS "Generate Golden Images.. ${UNIT_TEST_SAVE_GOLDENS}")
 
 #
 # Sanitizers
