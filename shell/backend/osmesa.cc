@@ -22,7 +22,6 @@
 
 #include <GLES2/gl2.h>
 
-#include "osmesa_process_resolver.h"
 #include "logging.h"
 #include "constants.h"
 
