@@ -19,6 +19,10 @@
 #include <EGL/egl.h>
 #include <dlfcn.h>
 
+#if(BUILD_BACKEND_HEADLESS)
+#include "backend/headless.h"
+#endif
+
 #include <cassert>
 
 #include "logging.h"
@@ -78,7 +82,16 @@ void* EglProcessResolver::process_resolver(const char* name) const {
       return address;
     }
   }
+#if(BUILD_BACKEND_HEADLESS)
+  spdlog::trace("** OSMesaGetProcAddress({})", name);
 
+  address = reinterpret_cast<void*>(OSMesaGetProcAddress(name));
+  if (address) {
+    return address;
+  }
+
+  spdlog::error("osmesa_proc_resolver: could not resolve symbol \"{}\"", name);
+#else
   SPDLOG_TRACE("** eglGetProcAddress({})", name);
 
   address = reinterpret_cast<void*>(eglGetProcAddress(name));
@@ -87,6 +100,6 @@ void* EglProcessResolver::process_resolver(const char* name) const {
   }
 
   spdlog::error("gl_proc_resolver: could not resolve symbol \"{}\"", name);
-
+#endif
   return nullptr;
 }

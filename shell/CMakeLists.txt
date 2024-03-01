@@ -52,7 +52,7 @@ if (BUILD_BACKEND_HEADLESS)
     target_sources(homescreen PRIVATE
             backend/headless.cc
             backend/osmesa.cc
-            backend/osmesa_process_resolver.cc
+            backend/gl_process_resolver.cc
     )
 endif ()
 

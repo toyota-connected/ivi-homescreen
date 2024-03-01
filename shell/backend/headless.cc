@@ -18,7 +18,7 @@
 #include "logging.h"
 #include "engine.h"
 #include "osmesa.h"
-#include "osmesa_process_resolver.h"
+#include "gl_process_resolver.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 
 struct FlutterDesktopEngineState;
@@ -96,7 +96,7 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
               .fbo_reset_after_present = false,
               .gl_proc_resolver = [](void* /* userdata */,
                                  const char* name) -> void* {
-                return GlProcessResolver_Headless::GetInstance().process_resolver(name);
+                return GlProcessResolver::GetInstance().process_resolver(name);
               },
               .gl_external_texture_frame_callback =
                   [](void* userdata, const int64_t texture_id, const size_t width,
