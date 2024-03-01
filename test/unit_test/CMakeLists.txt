@@ -5,6 +5,7 @@
 get_target_property(TYPICAL_TEST_SOURCES homescreen SOURCES)
 list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*main\.cc")
 list(TRANSFORM TYPICAL_TEST_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/shell/)
+list(APPEND TYPICAL_TEST_SOURCES ${PROJECT_SOURCE_DIR}/test/unit_test/unit_test_utils/unit_test_utils.cc)
 
 # If TYPICAL_TEST_DEFINITIONS is set to the same as the homescreen build, it will change depending on the cmake arguments.
 # When tweaking TYPICAL_TEST_DEFINITIONS in CMakeLists.txt for each test case, it is better to always set TYPICAL_TEST_DEFINITIONS the same.
@@ -47,8 +48,17 @@ list(APPEND TYPICAL_TEST_DEFINITIONS ASIO_NO_DEPRECATED)
 
 list(APPEND TYPICAL_TEST_DEFINITIONS UNIT_TEST)
 
+list(APPEND TYPICAL_TEST_DEFINITIONS TEST_APP_BUNDLE_PATH="${UNIT_TEST_APP_BUNDLE}")
+list(APPEND TYPICAL_TEST_DEFINITIONS GOLDEN_IMAGE_PATH="${CMAKE_BINARY_DIR}/test/unit_test/test_images_golden/")
+list(APPEND TYPICAL_TEST_DEFINITIONS TEST_IMAGE_PATH="${CMAKE_BINARY_DIR}/test/unit_test/test_images/")
+
+include (TestBigEndian)
+TEST_BIG_ENDIAN(IS_BIG_ENDIAN)
+list(APPEND TYPICAL_TEST_DEFINITIONS IS_ARCH_BIG_ENDIAN=${IS_BIG_ENDIAN})
+
 get_target_property(TYPICAL_TEST_INC_DIRS homescreen INCLUDE_DIRECTORIES)
 list(APPEND TYPICAL_TEST_INC_DIRS ${CMAKE_BINARY_DIR}/shell)
+list(APPEND TYPICAL_TEST_INC_DIRS ${PROJECT_SOURCE_DIR}/test/unit_test/unit_test_utils)
 get_target_property(TYPICAL_TEST_LINK_LIBS homescreen LINK_LIBRARIES)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)

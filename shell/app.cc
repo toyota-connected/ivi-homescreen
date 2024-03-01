@@ -24,7 +24,6 @@
 
 
 #if defined(BUILD_BACKEND_HEADLESS)
-#include "GL/osmesa.h"
 #include "backend/headless.h"
 #endif
 

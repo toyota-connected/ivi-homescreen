@@ -19,7 +19,6 @@
 
 #if defined(BUILD_BACKEND_HEADLESS)
 #include "backend/headless.h"
-#include <GL/osmesa.h>
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
 #include "backend/wayland_egl.h"
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)

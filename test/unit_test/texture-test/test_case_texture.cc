@@ -182,7 +182,7 @@ TEST(HomescreenTextureDispose, Lv1Normal002) {
 }
 
 
-#if 0
+#if 0 // TODO ME: Update tests for new Texture implementation
 /****************************************************************
 Test Case Name.Test Name： HomescreenTextureEnable_Lv1Normal001
 Use Case Name: Set OpenGL texture
