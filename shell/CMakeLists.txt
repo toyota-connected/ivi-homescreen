@@ -36,16 +36,8 @@ add_executable(homescreen
 
 include(textures)
 
-if (ENABLE_DLT)
-    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
-endif ()
-
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
-endif ()
-
-if (BUILD_PLUGIN_COMP_SURF)
-    target_sources(homescreen PRIVATE view/compositor_surface.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
@@ -54,6 +46,22 @@ if (BUILD_BACKEND_WAYLAND_EGL)
             backend/egl.cc
             backend/gl_process_resolver.cc
     )
+endif ()
+
+if (BUILD_BACKEND_HEADLESS)
+    target_sources(homescreen PRIVATE
+            backend/headless.cc
+            backend/osmesa.cc
+            backend/gl_process_resolver.cc
+    )
+endif ()
+
+if (ENABLE_DLT)
+    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+endif ()
+
+if (BUILD_PLUGIN_COMP_SURF)
+    target_sources(homescreen PRIVATE view/compositor_surface.cc)
 endif ()
 
 if (BUILD_CRASH_HANDLER)
@@ -88,6 +96,9 @@ target_include_directories(homescreen
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(homescreen PRIVATE EGL GLESv2)
+endif ()
+if (BUILD_BACKEND_HEADLESS)
+    target_link_libraries(homescreen PRIVATE OSMesa EGL GLESv2)
 endif ()
 if (BUILD_PLUGIN_COMP_SURF)
     target_link_libraries(homescreen PRIVATE EGL)

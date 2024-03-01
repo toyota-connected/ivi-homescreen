@@ -22,6 +22,11 @@
 #include "view/flutter_view.h"
 #include "wayland/display.h"
 
+
+#if defined(BUILD_BACKEND_HEADLESS)
+#include "backend/headless.h"
+#endif
+
 App::App(const std::vector<Configuration::Config>& configs)
     : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
                                                   configs[0].wayland_event_mask,
@@ -91,3 +96,11 @@ int App::Loop() const {
 
   return ret;
 }
+
+#if defined(BUILD_BACKEND_HEADLESS)
+
+GLubyte* App::getViewRenderBuf(int i) {
+  return reinterpret_cast<HeadlessBackend*>(m_views[i]->GetBackend())->getHeadlessBuffer();
+}
+
+#endif

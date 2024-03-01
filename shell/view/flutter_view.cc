@@ -17,7 +17,9 @@
 #include <memory>
 #include <utility>
 
-#if defined(BUILD_BACKEND_WAYLAND_EGL)
+#if defined(BUILD_BACKEND_HEADLESS)
+#include "backend/headless.h"
+#elif defined(BUILD_BACKEND_WAYLAND_EGL)
 #include "backend/wayland_egl.h"
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
 #include "backend/wayland_vulkan.h"
@@ -59,7 +61,11 @@ FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<Display>& display)
     : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
-#if defined(BUILD_BACKEND_WAYLAND_EGL)
+#if defined(BUILD_BACKEND_HEADLESS)
+  m_backend = std::make_shared<HeadlessBackend>
+      (m_config.view.width, m_config.view.height, 
+      m_config.debug_backend, kEglBufferSize);
+#elif defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
       m_config.debug_backend, kEglBufferSize);

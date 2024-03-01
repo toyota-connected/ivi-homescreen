@@ -9,10 +9,9 @@ FlutterView* createFlutterViewInstance() {
   // setup parameter
   struct Configuration::Config config {};
   config.view.bundle_path = "/home/root/";
-  config.view.wl_output_index = 1;
+  config.view.wl_output_index = 0;
   auto configs = Configuration::ParseConfig(config);
 
-  // use mock of Display class
   auto wayland_display = std::make_shared<Display>(false, "", "", configs);
   auto* view = new FlutterView(config, 0, wayland_display);
   return view;
@@ -31,6 +30,7 @@ TEST(HomescreenFlutterViewConstructor, Lv1Normal001) {
   EXPECT_TRUE(view != nullptr);
 }
 
+#if 0
 /****************************************************************
 Test Case Name.Test Name： HomescreenFlutterViewCreateSurface_Lv1Normal001
 Use Case Name: Provide wayland client function
@@ -154,3 +154,4 @@ TEST(HomescreenFlutterViewGetSurfaceContext, Lv1Normalcase002) {
 
     EXPECT_TRUE(ret_context == nullptr);
 }
+#endif

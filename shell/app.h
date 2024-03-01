@@ -43,6 +43,10 @@ class App {
    */
   NODISCARD int Loop() const;
 
+#if defined(BUILD_BACKEND_HEADLESS)
+  uint8_t* getViewRenderBuf(int i);
+#endif
+
  private:
   std::shared_ptr<Display> m_wayland_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;
