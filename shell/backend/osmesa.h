@@ -18,8 +18,8 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <shell/platform/embedder/embedder.h>
 #include <GL/osmesa.h>
+#include <shell/platform/embedder/embedder.h>
 
 #include "constants.h"
 
@@ -37,7 +37,7 @@ class OSMesaHeadless {
    * @relation
    * wayland
    */
-  bool ClearCurrent();
+  [[nodiscard]] bool ClearCurrent() const;
 
   /**
    * @brief Attach an EGL rendering context to EGL surface
@@ -51,9 +51,7 @@ class OSMesaHeadless {
   bool MakeResourceCurrent();
   bool MakeTextureCurrent();
 
-  void Finish();
-
-  
+  static void Finish();
 
   /**
    * @brief Create a GLUbyte buffer to bind to an OSMesa Context
@@ -62,7 +60,7 @@ class OSMesaHeadless {
    * @return GLubyte*
    * @retval GLUbyte buffer
    */
-  GLubyte* create_osmesa_buffer(int32_t width, int32_t height);
+  static GLubyte* create_osmesa_buffer(int32_t width, int32_t height);
   void free_buffer();
 
  protected:

@@ -555,7 +555,8 @@ static struct egl_config_attribute egl_config_attributes[] = {
     {
         .id = EGL_RENDERABLE_TYPE,
         .name = "EGL_RENDERABLE_TYPE",
-        .cardinality = -static_cast<int32_t>(COUNT_OF(egl_enum_renderable_type)),
+        .cardinality =
+            -static_cast<int32_t>(COUNT_OF(egl_enum_renderable_type)),
         .values = egl_enum_renderable_type,
     },
     {
@@ -581,7 +582,8 @@ static struct egl_config_attribute egl_config_attributes[] = {
 void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
   spdlog::info("OpenGL ES Attributes:");
   spdlog::info("\tEGL_VENDOR: \"{}\"", eglQueryString(m_dpy, EGL_VENDOR));
-  spdlog::info("\tEGL_CLIENT_APIS: \"{}\"", eglQueryString(m_dpy, EGL_CLIENT_APIS));
+  spdlog::info("\tEGL_CLIENT_APIS: \"{}\"",
+               eglQueryString(m_dpy, EGL_CLIENT_APIS));
   spdlog::info("\tEGL_EXTENSIONS:");
 
   print_extension_list(m_dpy);
@@ -611,7 +613,8 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
       } else if (attribute.cardinality > 0) {
         /* Enumeration */
         bool known_value = false;
-        for (size_t k = 0; k < static_cast<size_t>(attribute.cardinality); k++) {
+        for (size_t k = 0; k < static_cast<size_t>(attribute.cardinality);
+             k++) {
           if (attribute.values[k].id == value) {
             ss << "\t\t" << attribute.name << ": " << attribute.values[k].name;
             spdlog::info(ss.str().c_str());
@@ -636,7 +639,8 @@ void Egl::ReportGlesAttributes(EGLConfig* configs, EGLint count) {
           ss.str("");
           ss.clear();
         } else {
-          for (size_t k = 0; k < static_cast<size_t>(-attribute.cardinality); k++) {
+          for (size_t k = 0; k < static_cast<size_t>(-attribute.cardinality);
+               k++) {
             if (attribute.values[k].id & value) {
               value &= ~attribute.values[k].id;
               if (value != 0) {
@@ -758,6 +762,7 @@ EGLSurface Egl::create_egl_surface(void* native_window,
   if (create_platform_window)
     return create_platform_window(m_dpy, m_config, native_window, attrib_list);
 
-  return eglCreateWindowSurface(
-      m_dpy, m_config, static_cast<EGLNativeWindowType>(native_window), attrib_list);
+  return eglCreateWindowSurface(m_dpy, m_config,
+                                static_cast<EGLNativeWindowType>(native_window),
+                                attrib_list);
 }

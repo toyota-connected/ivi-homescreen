@@ -19,10 +19,6 @@
 #include <EGL/egl.h>
 #include <dlfcn.h>
 
-#if(BUILD_BACKEND_HEADLESS)
-#include "backend/headless.h"
-#endif
-
 #include <cassert>
 
 #include "logging.h"
@@ -31,7 +27,7 @@ std::shared_ptr<EglProcessResolver> GlProcessResolver::sInstance = nullptr;
 
 EglProcessResolver::~EglProcessResolver() {
   for (auto const& item : m_handles) {
-    dlclose(item);
+    dlclose(item.first);
   }
 }
 
@@ -59,7 +55,7 @@ void EglProcessResolver::Initialize() {
   for (const auto& name : libs) {
     GetHandle(name, &handle);
     if (handle) {
-      m_handles.push_back(handle);
+      m_handles.emplace_back(handle, name);
     } else {
       spdlog::critical("{}: Library not found", name[0]);
       assert(false);
@@ -76,30 +72,19 @@ void* EglProcessResolver::process_resolver(const char* name) const {
   void* address;
 
   for (auto& handle : m_handles) {
-    address = dlsym(handle, name);
+    address = dlsym(handle.first, name);
     if (address) {
-      SPDLOG_TRACE("{}", name);
+      SPDLOG_TRACE("{} : {}", name, handle.second);
       return address;
     }
   }
-#if(BUILD_BACKEND_HEADLESS)
-  spdlog::trace("** OSMesaGetProcAddress({})", name);
-
-  address = reinterpret_cast<void*>(OSMesaGetProcAddress(name));
-  if (address) {
-    return address;
-  }
-
-  spdlog::error("osmesa_proc_resolver: could not resolve symbol \"{}\"", name);
-#else
-  SPDLOG_TRACE("** eglGetProcAddress({})", name);
-
+  SPDLOG_TRACE("** process_resolver({})", name);
   address = reinterpret_cast<void*>(eglGetProcAddress(name));
+
   if (address) {
     return address;
   }
 
-  spdlog::error("gl_proc_resolver: could not resolve symbol \"{}\"", name);
-#endif
+  spdlog::error("process_resolver: could not resolve symbol \"{}\"", name);
   return nullptr;
 }

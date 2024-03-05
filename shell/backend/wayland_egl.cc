@@ -83,15 +83,13 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
             if (it == std::end(texture_registry))
               return false;
             auto& target = texture_registry[texture_id];
-            *texture_out = {
-                .target = target->target,
-                .name = target->name,
-                .format = target->format,
-                .user_data = target->release_context,
-                .destruction_callback = target->release_callback,
-                .width = target->width,
-                .height = target->height
-            };
+            *texture_out = {.target = target->target,
+                            .name = target->name,
+                            .format = target->format,
+                            .user_data = target->release_context,
+                            .destruction_callback = target->release_callback,
+                            .width = target->width,
+                            .height = target->height};
             target->visible_width = width;
             target->visible_width = height;
             return true;

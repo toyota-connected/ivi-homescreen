@@ -31,7 +31,10 @@ class Engine;
 
 class HeadlessBackend : public OSMesaHeadless, public Backend {
  public:
-  HeadlessBackend(uint32_t initial_width, uint32_t initial_height, const bool debug_backend, const int buffer_size);
+  HeadlessBackend(uint32_t initial_width,
+                  uint32_t initial_height,
+                  bool debug_backend,
+                  int buffer_size);
 
   /**
    * @brief Resize Flutter engine Window size
@@ -45,9 +48,9 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * wayland
    */
   void Resize(size_t index,
-                      Engine* flutter_engine,
-                      int32_t width,
-                      int32_t height) override;
+              Engine* flutter_engine,
+              int32_t width,
+              int32_t height) override;
 
   /**
    * @brief Create EGL surface
@@ -60,10 +63,10 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * @relation
    * wayland
    */
-  void CreateSurface(const size_t index,
+  void CreateSurface(size_t index,
                      struct wl_surface* surface,
-                     const int32_t width,
-                     const int32_t height) override;
+                     int32_t width,
+                     int32_t height) override;
 
   bool TextureMakeCurrent() override;
 
@@ -88,7 +91,6 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
   FlutterCompositor GetCompositorConfig() override;
 
   GLubyte* getHeadlessBuffer();
-
 
  private:
   uint32_t m_prev_width, m_width;
