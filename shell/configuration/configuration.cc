@@ -281,16 +281,19 @@ void Configuration::PrintConfig(const Config& config) {
     spdlog::info("Application Id: .......... {}", config.app_id);
   }
   if (!config.json_configuration_path.empty()) {
-    spdlog::info("JSON Configuration: ...... {}", config.json_configuration_path);
+    spdlog::info("JSON Configuration: ...... {}",
+                 config.json_configuration_path);
   }
   if (!config.cursor_theme.empty()) {
     spdlog::info("Cursor Theme: ............ {}", config.cursor_theme);
   }
-  spdlog::info("Disable Cursor: .......... {}", (config.disable_cursor ? "true" : "false"));
+  spdlog::info("Disable Cursor: .......... {}",
+               (config.disable_cursor ? "true" : "false"));
   if (!config.wayland_event_mask.empty()) {
     spdlog::info("Wayland Event Mask: ...... {}", config.wayland_event_mask);
   }
-  spdlog::info("Debug Backend: ........... {}", (config.debug_backend ? "true" : "false"));
+  spdlog::info("Debug Backend: ........... {}",
+               (config.debug_backend ? "true" : "false"));
   spdlog::info("********");
   spdlog::info("* View *");
   spdlog::info("********");
@@ -303,15 +306,18 @@ void Configuration::PrintConfig(const Config& config) {
   spdlog::info("Bundle Path: .............. {}", config.view.bundle_path);
   spdlog::info("Window Type: .............. {}", config.view.window_type);
   spdlog::info("Output Index: ............. {}", config.view.wl_output_index);
-  spdlog::info("Size: ..................... {} x {}", config.view.width, config.view.height);
+  spdlog::info("Size: ..................... {} x {}", config.view.width,
+               config.view.height);
   if (config.view.pixel_ratio != kDefaultPixelRatio) {
     spdlog::info("Pixel Ratio: .............. {}", config.view.pixel_ratio);
   }
   if (config.view.ivi_surface_id > 0) {
     spdlog::info("IVI Surface ID: ........... {}", config.view.ivi_surface_id);
   }
-  spdlog::info("Fullscreen: ............... {}", (config.view.fullscreen ? "true" : "false"));
-  spdlog::info("Accessibility Features: ... {}", config.view.accessibility_features);
+  spdlog::info("Fullscreen: ............... {}",
+               (config.view.fullscreen ? "true" : "false"));
+  spdlog::info("Accessibility Features: ... {}",
+               config.view.accessibility_features);
 }
 
 Configuration::Config Configuration::ConfigFromArgcArgv(

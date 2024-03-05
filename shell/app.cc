@@ -22,7 +22,6 @@
 #include "view/flutter_view.h"
 #include "wayland/display.h"
 
-
 #if defined(BUILD_BACKEND_HEADLESS)
 #include "backend/headless.h"
 #endif
@@ -100,7 +99,8 @@ int App::Loop() const {
 #if defined(BUILD_BACKEND_HEADLESS)
 
 GLubyte* App::getViewRenderBuf(int i) {
-  return reinterpret_cast<HeadlessBackend*>(m_views[i]->GetBackend())->getHeadlessBuffer();
+  return reinterpret_cast<HeadlessBackend*>(m_views[i]->GetBackend())
+      ->getHeadlessBuffer();
 }
 
 #endif

@@ -39,8 +39,7 @@ void cloud_firestore_linux::FirestoreCodec::WriteValue(
     const flutter::EncodableValue& value,
     flutter::ByteStreamWriter* stream) const {
   if (std::holds_alternative<CustomEncodableValue>(value)) {
-    const auto& custom_value =
-        std::get<CustomEncodableValue>(value);
+    const auto& custom_value = std::get<CustomEncodableValue>(value);
     if (custom_value.type() == typeid(Timestamp)) {
       const Timestamp& timestamp = std::any_cast<Timestamp>(custom_value);
       stream->WriteByte(DATA_TYPE_TIMESTAMP);
@@ -50,10 +49,10 @@ void cloud_firestore_linux::FirestoreCodec::WriteValue(
       const GeoPoint& geopoint = std::any_cast<GeoPoint>(custom_value);
       stream->WriteByte(DATA_TYPE_GEO_POINT);
       stream->WriteAlignment(8);
-      DoubleToBytes converterLatitude = { 0.0 };
+      DoubleToBytes converterLatitude = {0.0};
       converterLatitude.value = geopoint.latitude();
       stream->WriteBytes(converterLatitude.bytes, 8);
-      DoubleToBytes converterLongitude = { 0.0 };
+      DoubleToBytes converterLongitude = {0.0};
       converterLongitude.value = geopoint.longitude();
       stream->WriteBytes(converterLongitude.bytes, 8);
     } else if (custom_value.type() == typeid(DocumentReference)) {
@@ -63,9 +62,12 @@ void cloud_firestore_linux::FirestoreCodec::WriteValue(
       const Firestore* firestore = reference.firestore();
       std::string appName = firestore->app()->name();
       std::string databaseUrl = "(default)";
-      flutter::StandardCodecSerializer::WriteValue(flutter::EncodableValue(appName), stream);
-      flutter::StandardCodecSerializer::WriteValue(flutter::EncodableValue(reference.path()), stream);
-      flutter::StandardCodecSerializer::WriteValue(flutter::EncodableValue(databaseUrl), stream);
+      flutter::StandardCodecSerializer::WriteValue(
+          flutter::EncodableValue(appName), stream);
+      flutter::StandardCodecSerializer::WriteValue(
+          flutter::EncodableValue(reference.path()), stream);
+      flutter::StandardCodecSerializer::WriteValue(
+          flutter::EncodableValue(databaseUrl), stream);
     } else if (custom_value.type() ==
                typeid(double)) {  // Assuming Double is standard C++ double
       const double& myDouble = std::any_cast<double>(custom_value);

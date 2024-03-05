@@ -21,7 +21,7 @@ class FlutterView;
 
 class WaylandEglBackend;
 
-class TextureNaviRender { //TODO  : public Texture
+class TextureNaviRender {  // TODO  : public Texture
  public:
   explicit TextureNaviRender(const FlutterView* view);
 

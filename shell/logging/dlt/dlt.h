@@ -16,11 +16,11 @@
 
 #pragma once
 
-#include "libdlt.h"
 #include "flutter/fml/macros.h"
-#include "spdlog/spdlog.h"
+#include "libdlt.h"
 #include "spdlog/sinks/callback_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
+#include "spdlog/spdlog.h"
 
 class Dlt {
  public:
@@ -62,7 +62,8 @@ class Dlt {
   static void LogString(DltLogLevelType log_level, const char* buff);
 
   /**
-   * @brief Convert a specified string to DLT log string specifying a buffer length.
+   * @brief Convert a specified string to DLT log string specifying a buffer
+   * length.
    * @param[in] log_level DLT log level.
    * @param[in] buff String to be converted.
    * @param[in] length length of buffer.
@@ -70,7 +71,9 @@ class Dlt {
    * @relation
    * dlt
    */
-  static void LogSizedString(DltLogLevelType log_level, const char* buff, uint16_t length);
+  static void LogSizedString(DltLogLevelType log_level,
+                             const char* buff,
+                             uint16_t length);
 
  private:
   FML_DISALLOW_COPY_AND_ASSIGN(Dlt);

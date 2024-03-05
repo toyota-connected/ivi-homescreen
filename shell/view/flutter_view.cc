@@ -45,7 +45,7 @@
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
 #include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
 #include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
-#include "plugins/pdf/include/pdf/pdf_plugin_c_api.h"
+#include <plugins/pdf/include/pdf/pdf_plugin_c_api.h>
 #include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
 #include <plugins/video_player_linux/include/video_player_linux/video_player_plugin_c_api.h>
@@ -62,9 +62,9 @@ FlutterView::FlutterView(Configuration::Config config,
                          const std::shared_ptr<Display>& display)
     : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
 #if defined(BUILD_BACKEND_HEADLESS)
-  m_backend = std::make_shared<HeadlessBackend>
-      (m_config.view.width, m_config.view.height, 
-      m_config.debug_backend, kEglBufferSize);
+  m_backend = std::make_shared<HeadlessBackend>(
+      m_config.view.width, m_config.view.height, m_config.debug_backend,
+      kEglBufferSize);
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,

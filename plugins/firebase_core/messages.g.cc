@@ -26,12 +26,16 @@ using flutter::EncodableValue;
 
 // PigeonFirebaseOptions
 
-const std::string& PigeonFirebaseOptions::api_key() const { return api_key_; }
+const std::string& PigeonFirebaseOptions::api_key() const {
+  return api_key_;
+}
 void PigeonFirebaseOptions::set_api_key(std::string_view value_arg) {
   api_key_ = value_arg;
 }
 
-const std::string& PigeonFirebaseOptions::app_id() const { return app_id_; }
+const std::string& PigeonFirebaseOptions::app_id() const {
+  return app_id_;
+}
 void PigeonFirebaseOptions::set_app_id(std::string_view value_arg) {
   app_id_ = value_arg;
 }
@@ -278,7 +282,9 @@ PigeonFirebaseOptions::PigeonFirebaseOptions(const EncodableList& list) {
 
 // PigeonInitializeResponse
 
-const std::string& PigeonInitializeResponse::name() const { return name_; }
+const std::string& PigeonInitializeResponse::name() const {
+  return name_;
+}
 void PigeonInitializeResponse::set_name(std::string_view value_arg) {
   name_ = value_arg;
 }
@@ -355,7 +361,8 @@ PigeonInitializeResponse::PigeonInitializeResponse(const EncodableList& list) {
 
 FirebaseCoreHostApiCodecSerializer::FirebaseCoreHostApiCodecSerializer() {}
 EncodableValue FirebaseCoreHostApiCodecSerializer::ReadValueOfType(
-    uint8_t type, flutter::ByteStreamReader* stream) const {
+    uint8_t type,
+    flutter::ByteStreamReader* stream) const {
   switch (type) {
     case 128:
       return CustomEncodableValue(
@@ -369,7 +376,8 @@ EncodableValue FirebaseCoreHostApiCodecSerializer::ReadValueOfType(
 }
 
 void FirebaseCoreHostApiCodecSerializer::WriteValue(
-    const EncodableValue& value, flutter::ByteStreamWriter* stream) const {
+    const EncodableValue& value,
+    flutter::ByteStreamWriter* stream) const {
   if (const CustomEncodableValue* custom_value =
           std::get_if<CustomEncodableValue>(&value)) {
     if (custom_value->type() == typeid(PigeonFirebaseOptions)) {

@@ -24,7 +24,7 @@
 #include "libflutter_engine.h"
 
 #if !defined(GL_RGBA8)
-#define GL_RGBA8                          0x8058
+#define GL_RGBA8 0x8058
 #endif
 
 struct FlutterDesktopEngineState;

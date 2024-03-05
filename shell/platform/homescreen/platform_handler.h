@@ -35,8 +35,7 @@ class PlatformHandler {
   // Called when a method is called on |channel_|;
   void HandleMethodCall(
       const flutter::MethodCall<rapidjson::Document>& method_call,
-      std::unique_ptr<flutter::MethodResult<rapidjson::Document>> result)
-      const;
+      std::unique_ptr<flutter::MethodResult<rapidjson::Document>> result) const;
 
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<rapidjson::Document>> channel_;

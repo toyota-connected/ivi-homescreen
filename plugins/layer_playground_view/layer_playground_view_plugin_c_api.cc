@@ -37,9 +37,11 @@ void LayerPlaygroundPluginCApiRegisterWithRegistrar(
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context) {
-  plugin_layer_playground_view::LayerPlaygroundViewPlugin::RegisterWithRegistrar(
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrar>(registrar),
-      id, std::move(viewType), direction, top, left, width, height, params,
-      std::move(assetDirectory), engine, addListener, removeListener, platform_view_context);
+  plugin_layer_playground_view::LayerPlaygroundViewPlugin::
+      RegisterWithRegistrar(
+          flutter::PluginRegistrarManager::GetInstance()
+              ->GetRegistrar<flutter::PluginRegistrar>(registrar),
+          id, std::move(viewType), direction, top, left, width, height, params,
+          std::move(assetDirectory), engine, addListener, removeListener,
+          platform_view_context);
 }

@@ -78,11 +78,11 @@ class GoogleSignInApi {
   GoogleSignInApi& operator=(const GoogleSignInApi&) = delete;
   virtual ~GoogleSignInApi() = default;
   virtual void Init(const std::vector<std::string>& requestedScopes,
-               std::string hostedDomain,
-               std::string signInOption,
-               std::string clientId,
-               std::string serverClientId,
-               bool forceCodeForRefreshToken) = 0;
+                    std::string hostedDomain,
+                    std::string signInOption,
+                    std::string clientId,
+                    std::string serverClientId,
+                    bool forceCodeForRefreshToken) = 0;
   virtual flutter::EncodableValue GetUserData() = 0;
   virtual flutter::EncodableValue GetTokens(const std::string& email,
                                             bool shouldRecoverAuth) = 0;

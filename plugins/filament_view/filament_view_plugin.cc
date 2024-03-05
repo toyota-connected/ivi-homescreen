@@ -96,67 +96,84 @@ FilamentViewPlugin::~FilamentViewPlugin() {
 
 void FilamentViewPlugin::ChangeAnimationByIndex(
     const int32_t /* index */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeAnimationByName(
     std::string /* name */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::GetAnimationNames(
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::GetAnimationCount(
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::GetCurrentAnimationIndex(
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::GetAnimationNameByIndex(
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeSkyboxByAsset(
     std::string /* path */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeSkyboxByUrl(
     std::string /* url */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeSkyboxByHdrAsset(
     std::string /* path */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeSkyboxByHdrUrl(
     std::string /* url */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeSkyboxColor(
     std::string /* color */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeToTransparentSkybox(
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeLightByKtxAsset(
     std::string /* path */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeLightByKtxUrl(
     std::string /* url */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeLightByIndirectLight(
     std::string /* path */,
     double /* intensity */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeLightByHdrUrl(
     std::string /* path */,
     double /* intensity */,
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::ChangeToDefaultIndirectLight(
-    const std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+    const std::function<void(std::optional<FlutterError> reply)> /* result */) {
+}
 
 void FilamentViewPlugin::on_resize(double width, double height, void* data) {
   auto plugin = static_cast<FilamentViewPlugin*>(data);

@@ -28,5 +28,6 @@ struct FlutterDesktopTextureRegistrar {
 
   std::mutex texture_mutex;
 
-  std::unordered_map<int64_t, std::unique_ptr<GL_TEXTURE_2D_DESC>> texture_registry;
+  std::unordered_map<int64_t, std::unique_ptr<GL_TEXTURE_2D_DESC>>
+      texture_registry;
 };

@@ -47,7 +47,8 @@ class FirestoreCodec : public flutter::StandardCodecSerializer {
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 }  // namespace cloud_firestore_linux
 

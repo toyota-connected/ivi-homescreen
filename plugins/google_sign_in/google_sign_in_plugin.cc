@@ -585,7 +585,6 @@ flutter::EncodableValue GoogleSignInPlugin::GetUserData() {
 flutter::EncodableValue GoogleSignInPlugin::GetTokens(
     const std::string& /* email */,
     bool /* shouldRecoverAuth */) {
-
   auto credentials_doc = GetClientCredentials();
   if (CredentialsJsonPopulated(credentials_doc)) {
     const auto o = credentials_doc.GetObject();

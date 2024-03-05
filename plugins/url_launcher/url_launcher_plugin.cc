@@ -53,7 +53,8 @@ ErrorOr<bool> UrlLauncherPlugin::CanLaunchUrl(const std::string& url) {
          (url.rfind("mailto:", 0) == 0) || (url.rfind("tel:", 0) == 0);
 }
 
-std::optional<FlutterError> UrlLauncherPlugin::LaunchUrl(const std::string& url) {
+std::optional<FlutterError> UrlLauncherPlugin::LaunchUrl(
+    const std::string& url) {
   const pid_t pid = fork();
   if (pid == 0) {
     execl("/usr/bin/xdg-open", "xdg-open", url.c_str(), nullptr);

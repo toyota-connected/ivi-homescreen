@@ -1,5 +1,5 @@
 /*
-* Copyright 2020-2023 Toyota Connected North America
+ * Copyright 2020-2023 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ extern "C" {
 #endif
 
 FLUTTER_PLUGIN_EXPORT void DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
-   FlutterDesktopPluginRegistrar* registrar);
+    FlutterDesktopPluginRegistrar* registrar);
 
 #if defined(__cplusplus)
 }  // extern "C"

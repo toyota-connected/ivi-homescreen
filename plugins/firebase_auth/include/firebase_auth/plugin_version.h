@@ -7,7 +7,9 @@
 
 namespace firebase_auth_linux {
 
-std::string getPluginVersion() { return "11.6.0"; }
+std::string getPluginVersion() {
+  return "11.6.0";
+}
 }  // namespace firebase_auth_linux
 
 #endif  // PLUGIN_VERSION_CONFIG_H

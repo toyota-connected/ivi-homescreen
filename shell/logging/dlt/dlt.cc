@@ -89,11 +89,12 @@ void Dlt::LogString(DltLogLevelType log_level, const char* buff) {
 }
 
 MAYBE_UNUSED
-void Dlt::LogSizedString(DltLogLevelType log_level, const char* buff, uint16_t length) {
+void Dlt::LogSizedString(DltLogLevelType log_level,
+                         const char* buff,
+                         uint16_t length) {
   if (gContextSet && length == 0) {
     LogString(log_level, buff);
-  }
-  else if (gContextSet && length) {
+  } else if (gContextSet && length) {
     DltContextData log_local;
     auto res = LibDlt->UserLogWriteStart(&gContext, &log_local, log_level);
     if (res == DltReturnValue::True) {

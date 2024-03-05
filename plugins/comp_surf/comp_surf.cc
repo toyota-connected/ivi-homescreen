@@ -22,7 +22,8 @@
 void CompositorSurfacePlugin::OnPlatformMessage(
     const FlutterPlatformMessage* message,
     void* userdata) {
-  const auto engine = static_cast<FlutterDesktopViewControllerState*>(userdata)->engine;
+  const auto engine =
+      static_cast<FlutterDesktopViewControllerState*>(userdata)->engine;
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   std::unique_ptr<std::vector<uint8_t>> result =
       codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");

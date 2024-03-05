@@ -22,9 +22,9 @@
 #define GL_RGBA8 0x8058
 #endif
 
-#include "flutter/fml/macros.h"
 #include <flutter/encodable_value.h>
-//TODO #include "textures/texture.h"
+#include "flutter/fml/macros.h"
+// TODO #include "textures/texture.h"
 
 class App;
 
@@ -36,7 +36,7 @@ class FlutterView;
 
 class WaylandEglBackend;
 
-class TextureTestEgl { //TODO : public Texture {
+class TextureTestEgl {  // TODO : public Texture {
  public:
   explicit TextureTestEgl(FlutterView* view);
 
