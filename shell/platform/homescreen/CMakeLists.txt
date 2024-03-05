@@ -3,6 +3,7 @@ add_library(platform_homescreen STATIC
         flutter_desktop.cc
         flutter_desktop_messenger.cc
         key_event_handler.cc
+        logging_handler.cc
         mouse_cursor_handler.cc
         platform_handler.cc
         text_input_plugin.cc

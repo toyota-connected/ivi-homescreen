@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Toyota Connected North America
+ * Copyright 2020-2024 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,37 +16,29 @@
 
 #pragma once
 
-#include <mutex>
-
-#include <flutter/standard_method_codec.h>
-#include <shell/platform/embedder/embedder.h>
-
-#include "../shell/logging/logging.h"
+#include <binary_messenger.h>
+#include <method_call.h>
+#include <method_channel.h>
+#include <method_result.h>
 
 class FlutterView;
 
-class LoggingPlugin {
+class LoggingHandler {
  public:
-  static constexpr char kChannelName[] = "logging";
-  static constexpr char kMethodGetLoggingCallbackFptr[] =
-      "get_logging_callback_fptr";
-
-  typedef void (*LoggerFunction)(int level,
-                                 const char* context,
-                                 const char* message);
-
-  /**
-   * @brief Handle a platform message from the Flutter engine.
-   * @param[in] message The message from the Flutter engine.
-   * @param[in] userdata The user data.
-   * @return void
-   * @relation
-   * flutter
-   */
-  static void OnPlatformMessage(const FlutterPlatformMessage* message,
-                                void* userdata);
+ public:
+  explicit LoggingHandler(flutter::BinaryMessenger* messenger,
+                          FlutterView* view);
 
  private:
+  // Called when a method is called on |channel_|;
+  void HandleMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
+      const;
+
+  // The MethodChannel used for communication with the Flutter engine.
+  std::unique_ptr<flutter::MethodChannel<>> channel_;
+
   /**
    * @brief Callback that writes to log.
    * @param[in] level Severity Value.

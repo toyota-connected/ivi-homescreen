@@ -7,6 +7,7 @@
 #include "flutter_desktop_plugin_registrar.h"
 #include "flutter_desktop_texture_registrar.h"
 #include "flutter_desktop_view_controller_state.h"
+#include "platform/homescreen/logging_handler.h"
 #include "platform/homescreen/mouse_cursor_handler.h"
 #include "platform/homescreen/platform_handler.h"
 #include "platform/homescreen/platform_views/platform_views_handler.h"
@@ -64,6 +65,8 @@ struct FlutterDesktopEngineState {
   std::unique_ptr<PlatformViewsHandler> platform_views_handler{};
 
   std::unique_ptr<MouseCursorHandler> mouse_cursor_handler{};
+
+  std::unique_ptr<LoggingHandler> logging_handler{};
 
   // The controller associated with this engine instance, if any.
   // This will always be null for a headless engine.

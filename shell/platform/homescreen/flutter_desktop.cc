@@ -17,7 +17,6 @@
 #include "flutter_desktop_messenger.h"
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
-#include "shell/platform/homescreen/platform_handler.h"
 
 #include "view/flutter_view.h"
 
@@ -93,6 +92,10 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
 
   // Mouse Cursor handler.
   state->mouse_cursor_handler = std::make_unique<MouseCursorHandler>(
+      state->internal_plugin_registrar->messenger(), view);
+
+  // Logging handler.
+  state->logging_handler = std::make_unique<LoggingHandler>(
       state->internal_plugin_registrar->messenger(), view);
 }
 
