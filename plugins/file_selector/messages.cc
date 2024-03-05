@@ -33,7 +33,7 @@ static constexpr char kArgAcceptedTypeGroups[] = "acceptedTypeGroups";
 
 static constexpr char kArgTypeGroupLabel[] = "label";
 static constexpr char kArgTypeGroupExtensions[] = "extensions";
-//TODO static constexpr char kArgTypeGroupMime[] = "mimeTypes";
+// TODO static constexpr char kArgTypeGroupMime[] = "mimeTypes";
 static constexpr char kArgMultiple[] = "multiple";
 static constexpr char kArgSuggestedName[] = "suggestedName";
 
@@ -54,8 +54,8 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     if (api != nullptr) {
       channel->SetMethodCallHandler(
           [](const flutter::MethodCall<EncodableValue>& call,
-                const std::unique_ptr<flutter::MethodResult<EncodableValue>>&
-                    result) {
+             const std::unique_ptr<flutter::MethodResult<EncodableValue>>&
+                 result) {
             SPDLOG_DEBUG("[file_selector] {}", call.method_name());
             if (call.method_name() == kGetDirectoryPath) {
               SPDLOG_DEBUG("[file_selector] getDirectoryPath:");
@@ -113,7 +113,8 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               flutter::EncodableList results;
               auto paths = plugin_common::StringTools::split(path, "|");
               for (auto p : paths) {
-                results.emplace_back(std::move(plugin_common::StringTools::trim(p, "\n")));
+                results.emplace_back(
+                    std::move(plugin_common::StringTools::trim(p, "\n")));
               }
               result->Success(flutter::EncodableValue(results));
               return;
@@ -257,7 +258,8 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               flutter::EncodableList results;
               auto paths = plugin_common::StringTools::split(path, "|");
               for (auto p : paths) {
-                results.emplace_back(std::move(plugin_common::StringTools::trim(p, "\n")));
+                results.emplace_back(
+                    std::move(plugin_common::StringTools::trim(p, "\n")));
               }
               result->Success(flutter::EncodableValue(results));
             } else {

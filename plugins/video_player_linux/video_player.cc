@@ -299,8 +299,8 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
           //          gst_element_set_state(obj->playbin_, GST_STATE_PAUSED);
         }
         // if (!obj->is_buffering_) {
-          obj->is_buffering_ = true;
-          obj->SetBuffering(obj->is_buffering_);
+        obj->is_buffering_ = true;
+        obj->SetBuffering(obj->is_buffering_);
         //}
       }
       break;

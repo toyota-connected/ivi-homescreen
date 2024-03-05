@@ -3113,7 +3113,7 @@ EncodableValue FirebaseAuthHostApi::WrapError(const FlutterError& error) {
 }
 
 FirebaseAuthUserHostApiCodecSerializer::
-FirebaseAuthUserHostApiCodecSerializer() = default;
+    FirebaseAuthUserHostApiCodecSerializer() = default;
 
 EncodableValue FirebaseAuthUserHostApiCodecSerializer::ReadValueOfType(
     uint8_t type,
@@ -4289,7 +4289,7 @@ EncodableValue MultiFactorUserHostApi::WrapError(const FlutterError& error) {
 }
 
 MultiFactoResolverHostApiCodecSerializer::
-MultiFactoResolverHostApiCodecSerializer() = default;
+    MultiFactoResolverHostApiCodecSerializer() = default;
 
 EncodableValue MultiFactoResolverHostApiCodecSerializer::ReadValueOfType(
     uint8_t type,

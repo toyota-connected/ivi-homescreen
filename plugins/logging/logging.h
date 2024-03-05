@@ -56,7 +56,5 @@ class LoggingPlugin {
    * @relation
    * flutter
    */
-  static void OnLogMessage(int level,
-                               const char* context,
-                               const char* message);
+  static void OnLogMessage(int level, const char* context, const char* message);
 };

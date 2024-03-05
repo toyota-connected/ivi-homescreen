@@ -986,8 +986,9 @@ void Display::activateApp(std::string app_id) {
 
   FML_LOG(INFO) << "Activating app_id " << app_id << " on output "
                 << default_output_index;
-  agl_shell_activate_app(m_agl.shell, app_id.c_str(),
-                         m_all_outputs[static_cast<size_t>(default_output_index)]->output);
+  agl_shell_activate_app(
+      m_agl.shell, app_id.c_str(),
+      m_all_outputs[static_cast<size_t>(default_output_index)]->output);
   wl_display_flush(m_display);
 }
 

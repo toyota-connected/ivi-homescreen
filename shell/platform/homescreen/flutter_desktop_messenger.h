@@ -47,7 +47,7 @@ struct FlutterDesktopMessenger {
   FlutterDesktopMessenger& operator=(const FlutterDesktopMessenger& value) =
       delete;
 
-private:
+ private:
   // The engine that backs this messenger.
   FlutterDesktopEngineState* engine_{};
   std::atomic<int32_t> ref_count_ = 0;

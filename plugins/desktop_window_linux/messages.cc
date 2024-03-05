@@ -63,8 +63,7 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               result->Success(EncodableValue(EncodableList{
                   EncodableValue(width), EncodableValue(height)}));
             } else if (call.method_name() == "setWindowSize") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               double width = 0;
               double height = 0;
               for (auto& it : *args) {
@@ -83,8 +82,7 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               api->setWindowSize(width, height);
               result->Success(EncodableValue(true));
             } else if (call.method_name() == "setMinWindowSize") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               double width = 0;
               double height = 0;
               for (auto& it : *args) {
@@ -103,8 +101,7 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               api->setMinWindowSize(width, height);
               result->Success(EncodableValue(true));
             } else if (call.method_name() == "setMaxWindowSize") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               double width = 0;
               double height = 0;
               for (auto& it : *args) {
@@ -123,8 +120,7 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               api->setMaxWindowSize(width, height);
               result->Success(EncodableValue(true));
             } else if (call.method_name() == "resetMaxWindowSize") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               double width = 0;
               double height = 0;
               for (auto& it : *args) {
@@ -143,12 +139,12 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               api->resetMaxWindowSize(width, height);
               result->Success(EncodableValue(true));
             } else if (call.method_name() == "toggleFullScreen") {
-              plugin_common::Encodable::PrintFlutterEncodableValue("toggleFullScreen", *call.arguments());
+              plugin_common::Encodable::PrintFlutterEncodableValue(
+                  "toggleFullScreen", *call.arguments());
               api->toggleFullScreen();
               result->Success(EncodableValue(true));
             } else if (call.method_name() == "setFullScreen") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               bool fullscreen{};
               for (auto& it : *args) {
                 if ("fullscreen" == std::get<std::string>(it.first) &&
@@ -163,8 +159,7 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             } else if (call.method_name() == "hasBorders") {
               result->Success(EncodableValue(api->hasBorders()));
             } else if (call.method_name() == "setBorders") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               bool border{};
               for (auto& it : *args) {
                 if ("border" == std::get<std::string>(it.first) &&
@@ -181,8 +176,7 @@ void DesktopWindowLinuxApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               api->focus();
               result->Success(EncodableValue(true));
             } else if (call.method_name() == "stayOnTop") {
-              const auto& args =
-                  std::get_if<EncodableMap>(call.arguments());
+              const auto& args = std::get_if<EncodableMap>(call.arguments());
               bool stayOnTop{};
               for (auto& it : *args) {
                 if ("stayOnTop" == std::get<std::string>(it.first) &&

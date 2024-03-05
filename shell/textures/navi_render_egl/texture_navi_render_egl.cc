@@ -20,7 +20,8 @@ constexpr char kNaviRenderSoName[] = "libnav_render.so";
 std::mutex g_gl_mutex;
 
 TextureNaviRender::TextureNaviRender(const FlutterView* view)
-    : // TODO Texture(kMapProviderTextureId, GL_TEXTURE_2D, GL_RGBA8, Create, Dispose),
+    :  // TODO Texture(kMapProviderTextureId, GL_TEXTURE_2D, GL_RGBA8, Create,
+       // Dispose),
       m_egl_backend(reinterpret_cast<WaylandEglBackend*>(view->GetBackend())),
       m_h_module(nullptr) {}
 
@@ -62,7 +63,7 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   std::string asset_path;
   if (map_flutter_assets) {
-    //TODO asset_path = obj->m_flutter_engine->GetAssetDirectory();
+    // TODO asset_path = obj->m_flutter_engine->GetAssetDirectory();
   } else {
     it = args->find(flutter::EncodableValue("asset_path"));
     if (it != args->end() && !it->second.IsNull()) {
@@ -113,7 +114,8 @@ flutter::EncodableValue TextureNaviRender::Create(
     }
   }
 
-  SPDLOG_DEBUG("Initializing Navigation Texture ({} x {})", obj->m_width, obj->m_height);
+  SPDLOG_DEBUG("Initializing Navigation Texture ({} x {})", obj->m_width,
+               obj->m_height);
 
   std::lock_guard<std::mutex> guard(g_gl_mutex);
 
@@ -129,7 +131,8 @@ flutter::EncodableValue TextureNaviRender::Create(
   /// Output Texture
   glGenTextures(1, &obj->m_texture_id);
   glBindTexture(GL_TEXTURE_2D, obj->m_texture_id);
-  //TODO glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, obj->m_width, obj->m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  // TODO glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, obj->m_width, obj->m_height,
+  // 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -138,7 +141,8 @@ flutter::EncodableValue TextureNaviRender::Create(
 
   glGenRenderbuffers(1, &obj->m_rbo);
   glBindRenderbuffer(GL_RENDERBUFFER, obj->m_rbo);
-  //TODO glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, obj->m_width, obj->m_height);
+  // TODO glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+  // obj->m_width, obj->m_height);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
                             GL_RENDERBUFFER, obj->m_rbo);
 
@@ -152,7 +156,8 @@ flutter::EncodableValue TextureNaviRender::Create(
   NAV_RENDER_API_CONTEXT_T* context = nullptr;
   if (obj->m_interface_version < 2) {
     context = obj->m_render_api.initialize(
-        access_token.c_str(), 640, 480, asset_path.c_str(), //TODO obj->m_width, obj->m_height
+        access_token.c_str(), 640, 480,
+        asset_path.c_str(),  // TODO obj->m_width, obj->m_height
         cache_folder.c_str(), misc_folder.c_str());
   } else if (obj->m_interface_version == 2) {
     NavRenderConfig nav_render_init = {
@@ -160,8 +165,8 @@ flutter::EncodableValue TextureNaviRender::Create(
         .context = obj->m_egl_backend->GetTextureContext(),
         .framebufferId = obj->m_fbo,
         .access_token = access_token.c_str(),
-//TODO        .width = obj->m_width,
-//TODO        .height = obj->m_height,
+        // TODO        .width = obj->m_width,
+        // TODO        .height = obj->m_height,
         .asset_path = asset_path.c_str(),
         .cache_folder = cache_folder.c_str(),
         .misc_folder = misc_folder.c_str(),
@@ -214,7 +219,7 @@ flutter::EncodableValue TextureNaviRender::Create(
   glFinish();
   obj->m_egl_backend->ClearCurrent();
 
-//TODO  obj->Enable(obj->m_texture_id);
+  // TODO  obj->Enable(obj->m_texture_id);
 
   obj->m_run_enable = true;
 
@@ -222,8 +227,10 @@ flutter::EncodableValue TextureNaviRender::Create(
       {flutter::EncodableValue("result"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("textureId"),
        flutter::EncodableValue(static_cast<int64_t>(obj->m_texture_id))},
-      {flutter::EncodableValue("width"), flutter::EncodableValue(obj->m_width)}, {flutter::EncodableValue("height"),
-       flutter::EncodableValue(obj->m_height)}, {flutter::EncodableValue("render_ctx"),
+      {flutter::EncodableValue("width"), flutter::EncodableValue(obj->m_width)},
+      {flutter::EncodableValue("height"),
+       flutter::EncodableValue(obj->m_height)},
+      {flutter::EncodableValue("render_ctx"),
        flutter::EncodableValue(reinterpret_cast<int64_t>(context))}});
 }
 
@@ -232,7 +239,7 @@ void TextureNaviRender::Dispose(void* userdata, GLuint /* name */) {
   const auto context = obj->m_render_api.ctx[obj->m_texture_id];
   obj->m_run_enable = false;
   obj->m_render_api.de_initialize(context);
-//TODO  obj->Disable(name);
+  // TODO  obj->Disable(name);
   std::lock_guard<std::mutex> guard(g_gl_mutex);
   glDeleteTextures(1, &obj->m_texture_id);
   glDeleteRenderbuffers(1, &obj->m_rbo);
@@ -273,8 +280,8 @@ void TextureNaviRender::Draw(void* userdata) {
 
       obj->m_egl_backend->ClearCurrent();
     }
-//TODO    obj->m_draw_next = false;
-    //TODO obj->FrameReady();
+    // TODO    obj->m_draw_next = false;
+    // TODO obj->FrameReady();
   }
 }
 

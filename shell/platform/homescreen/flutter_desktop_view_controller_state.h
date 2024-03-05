@@ -18,7 +18,7 @@ struct FlutterDesktopViewControllerState {
   FlutterView* view{};
 
   // Engine Class reference
-  Engine *engine{};
+  Engine* engine{};
 
   // The state associated with the engine.
   std::unique_ptr<FlutterDesktopEngineState> engine_state{};
@@ -27,5 +27,6 @@ struct FlutterDesktopViewControllerState {
   std::unique_ptr<FlutterDesktopView> view_wrapper{};
 
   // Handlers for keyboard events from Display.
-  std::vector<std::unique_ptr<flutter::KeyboardHookHandler>> keyboard_hook_handlers;
+  std::vector<std::unique_ptr<flutter::KeyboardHookHandler>>
+      keyboard_hook_handlers;
 };

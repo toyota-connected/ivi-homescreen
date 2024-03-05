@@ -2,16 +2,16 @@
 
 #include <asio/io_context_strand.hpp>
 
-#include "shell/task_runner.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/plugin_registrar.h"
 #include "flutter/shell/platform/common/incoming_message_dispatcher.h"
-#include "flutter_desktop_view_controller_state.h"
 #include "flutter_desktop_plugin_registrar.h"
 #include "flutter_desktop_texture_registrar.h"
+#include "flutter_desktop_view_controller_state.h"
+#include "platform/homescreen/mouse_cursor_handler.h"
 #include "platform/homescreen/platform_handler.h"
 #include "platform/homescreen/platform_views/platform_views_handler.h"
-#include "platform/homescreen/mouse_cursor_handler.h"
 #include "shell/libflutter_engine.h"
+#include "shell/task_runner.h"
 
 struct FlutterDesktopViewControllerState;
 struct FlutterDesktopMessenger;
@@ -44,7 +44,7 @@ struct FlutterDesktopEngineState {
 
   // The plugin messenger handle given to API clients.
   FlutterDesktopMessengerReferenceOwner messenger = {
-    nullptr, [](FlutterDesktopMessengerRef /* ref */) {}};
+      nullptr, [](FlutterDesktopMessengerRef /* ref */) {}};
 
   // Message dispatch manager for messages from the Flutter engine.
   std::unique_ptr<flutter::IncomingMessageDispatcher> message_dispatcher;

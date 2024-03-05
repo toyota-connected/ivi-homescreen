@@ -24,7 +24,8 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   std::unique_ptr<std::vector<uint8_t>> result =
       codec.EncodeErrorEnvelope("argument_error", "Invalid Arguments");
-  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
   const auto method = obj->method_name();
 
@@ -78,7 +79,7 @@ void OpenGlTexture::OnPlatformMessage(const FlutterPlatformMessage* message,
         textureId = encodedValue.LongValue();
       }
 
-      //TODO engine->TextureDispose(textureId);
+      // TODO engine->TextureDispose(textureId);
 
       result = codec.EncodeSuccessEnvelope();
     } else {

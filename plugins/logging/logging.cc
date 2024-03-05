@@ -53,13 +53,15 @@ void LoggingPlugin::OnPlatformMessage(const FlutterPlatformMessage* message,
   auto& codec = flutter::StandardMethodCodec::GetInstance();
   std::unique_ptr<std::vector<uint8_t>> result =
       codec.EncodeErrorEnvelope("unhandled_method", "Unhandled Method");
-  const auto obj = codec.DecodeMethodCall(message->message, message->message_size);
+  const auto obj =
+      codec.DecodeMethodCall(message->message, message->message_size);
 
   const auto method = obj->method_name();
 
   /* Get Logging Callback Function Pointer */
   if (method == kMethodGetLoggingCallbackFptr) {
-    const flutter::EncodableValue value(reinterpret_cast<int64_t>(&OnLogMessage));
+    const flutter::EncodableValue value(
+        reinterpret_cast<int64_t>(&OnLogMessage));
     result = codec.EncodeSuccessEnvelope(&value);
   }
 

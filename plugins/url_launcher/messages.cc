@@ -54,8 +54,8 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                   return;
                 }
                 result->Success(flutter::EncodableValue(true));
-              }
-              else if (std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+              } else if (std::holds_alternative<flutter::EncodableMap>(
+                             *call.arguments())) {
                 const auto& args =
                     std::get_if<flutter::EncodableMap>(call.arguments());
                 for (const auto& it : *args) {
@@ -80,7 +80,8 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               }
             } else if ("launch" == call.method_name()) {
               const auto& arg = *call.arguments();
-              plugin_common::Encodable::PrintFlutterEncodableValue("launch", arg);
+              plugin_common::Encodable::PrintFlutterEncodableValue("launch",
+                                                                   arg);
               if (std::holds_alternative<std::string>(arg)) {
                 const auto& value = std::get<std::string>(arg);
                 spdlog::debug("[url_launcher] launch: {}", value);
@@ -129,7 +130,8 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                                        header_value);
                         }
                       } else {
-                        plugin_common::Encodable::PrintFlutterEncodableMap(key.c_str(), map);
+                        plugin_common::Encodable::PrintFlutterEncodableMap(
+                            key.c_str(), map);
                       }
                     }
                   }

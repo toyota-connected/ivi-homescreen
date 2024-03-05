@@ -44,8 +44,8 @@ class dlt_sink final : public base_sink<Mutex> {
     std::vector<std::string> ret;
     ret.reserve(n_items);
     for (size_t i = (items_available - n_items); i < items_available; i++) {
-      //memory_buf_t formatted;
-      //base_sink<Mutex>::formatter_->format(q_.at(i), formatted);
+      // memory_buf_t formatted;
+      // base_sink<Mutex>::formatter_->format(q_.at(i), formatted);
       ret.push_back(SPDLOG_BUF_TO_STRING(q_.at(i)));
     }
     return ret;

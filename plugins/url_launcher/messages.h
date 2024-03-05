@@ -17,17 +17,19 @@
 
 namespace url_launcher_linux {
 
-
 // Generated class from Pigeon.
 
 class FlutterError {
  public:
-  explicit FlutterError(std::string  code)
-    : code_(std::move(code)) {}
-  explicit FlutterError(std::string  code, std::string  message)
-    : code_(std::move(code)), message_(std::move(message)) {}
-  explicit FlutterError(std::string  code, std::string  message, flutter::EncodableValue  details)
-    : code_(std::move(code)), message_(std::move(message)), details_(std::move(details)) {}
+  explicit FlutterError(std::string code) : code_(std::move(code)) {}
+  explicit FlutterError(std::string code, std::string message)
+      : code_(std::move(code)), message_(std::move(message)) {}
+  explicit FlutterError(std::string code,
+                        std::string message,
+                        flutter::EncodableValue details)
+      : code_(std::move(code)),
+        message_(std::move(message)),
+        details_(std::move(details)) {}
 
   const std::string& code() const { return code_; }
   const std::string& message() const { return message_; }
@@ -39,7 +41,8 @@ class FlutterError {
   flutter::EncodableValue details_;
 };
 
-template<class T> class ErrorOr {
+template <class T>
+class ErrorOr {
  public:
   ErrorOr(const T& rhs) : v_(rhs) {}
   ErrorOr(const T&& rhs) : v_(std::move(rhs)) {}
@@ -58,7 +61,8 @@ template<class T> class ErrorOr {
   std::variant<T, FlutterError> v_;
 };
 
-// Generated interface from Pigeon that represents a handler of messages from Flutter.
+// Generated interface from Pigeon that represents a handler of messages from
+// Flutter.
 class UrlLauncherApi {
  public:
   UrlLauncherApi(const UrlLauncherApi&) = delete;
@@ -69,16 +73,15 @@ class UrlLauncherApi {
 
   // The codec used by UrlLauncherApi.
   static const flutter::StandardMessageCodec& GetCodec();
-  // Sets up an instance of `UrlLauncherApi` to handle messages through the `binary_messenger`.
-  static void SetUp(
-    flutter::BinaryMessenger* binary_messenger,
-    UrlLauncherApi* api);
+  // Sets up an instance of `UrlLauncherApi` to handle messages through the
+  // `binary_messenger`.
+  static void SetUp(flutter::BinaryMessenger* binary_messenger,
+                    UrlLauncherApi* api);
   static flutter::EncodableValue WrapError(std::string_view error_message);
   static flutter::EncodableValue WrapError(const FlutterError& error);
 
  protected:
   UrlLauncherApi() = default;
-
 };
 }  // namespace url_launcher_linux
 #endif  // PIGEON_MESSAGES_G_H_

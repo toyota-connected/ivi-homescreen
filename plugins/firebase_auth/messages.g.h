@@ -21,12 +21,15 @@ namespace firebase_auth_linux {
 
 class FlutterError {
  public:
-  explicit FlutterError(std::string  code) : code_(std::move(code)) {}
-  explicit FlutterError(std::string  code, std::string  message)
+  explicit FlutterError(std::string code) : code_(std::move(code)) {}
+  explicit FlutterError(std::string code, std::string message)
       : code_(std::move(code)), message_(std::move(message)) {}
-  explicit FlutterError(std::string  code, std::string  message,
-                        flutter::EncodableValue  details)
-      : code_(std::move(code)), message_(std::move(message)), details_(std::move(details)) {}
+  explicit FlutterError(std::string code,
+                        std::string message,
+                        flutter::EncodableValue details)
+      : code_(std::move(code)),
+        message_(std::move(message)),
+        details_(std::move(details)) {}
 
   const std::string& code() const { return code_; }
   const std::string& message() const { return message_; }
@@ -87,7 +90,7 @@ enum class ActionCodeInfoOperation {
 class PigeonMultiFactorSession {
  public:
   // Constructs an object setting all fields.
-  explicit PigeonMultiFactorSession(std::string  id);
+  explicit PigeonMultiFactorSession(std::string id);
 
   const std::string& id() const;
   void set_id(std::string_view value_arg);
@@ -117,8 +120,8 @@ class PigeonMultiFactorSession {
 class PigeonPhoneMultiFactorAssertion {
  public:
   // Constructs an object setting all fields.
-  explicit PigeonPhoneMultiFactorAssertion(
-      std::string  verification_id, std::string  verification_code);
+  explicit PigeonPhoneMultiFactorAssertion(std::string verification_id,
+                                           std::string verification_code);
 
   const std::string& verification_id() const;
   void set_verification_id(std::string_view value_arg);
@@ -152,14 +155,13 @@ class PigeonPhoneMultiFactorAssertion {
 class PigeonMultiFactorInfo {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit PigeonMultiFactorInfo(double enrollment_timestamp,
-                                 std::string  uid);
+  explicit PigeonMultiFactorInfo(double enrollment_timestamp, std::string uid);
 
   // Constructs an object setting all fields.
   explicit PigeonMultiFactorInfo(const std::string* display_name,
                                  double enrollment_timestamp,
                                  const std::string* factor_id,
-                                 std::string  uid,
+                                 std::string uid,
                                  const std::string* phone_number);
 
   const std::string* display_name() const;
@@ -209,10 +211,10 @@ class PigeonMultiFactorInfo {
 class AuthPigeonFirebaseApp {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit AuthPigeonFirebaseApp(std::string  app_name);
+  explicit AuthPigeonFirebaseApp(std::string app_name);
 
   // Constructs an object setting all fields.
-  explicit AuthPigeonFirebaseApp(std::string  app_name,
+  explicit AuthPigeonFirebaseApp(std::string app_name,
                                  const std::string* tenant_id);
 
   const std::string& app_name() const;
@@ -290,7 +292,7 @@ class PigeonActionCodeInfo {
  public:
   // Constructs an object setting all fields.
   explicit PigeonActionCodeInfo(const ActionCodeInfoOperation& operation,
-                                PigeonActionCodeInfoData  data);
+                                PigeonActionCodeInfoData data);
 
   const ActionCodeInfoOperation& operation() const;
   void set_operation(const ActionCodeInfoOperation& value_arg);
@@ -382,13 +384,13 @@ class PigeonAdditionalUserInfo {
 class PigeonAuthCredential {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit PigeonAuthCredential(std::string  provider_id,
-                                std::string  sign_in_method,
+  explicit PigeonAuthCredential(std::string provider_id,
+                                std::string sign_in_method,
                                 int64_t native_id);
 
   // Constructs an object setting all fields.
-  explicit PigeonAuthCredential(std::string  provider_id,
-                                std::string  sign_in_method,
+  explicit PigeonAuthCredential(std::string provider_id,
+                                std::string sign_in_method,
                                 int64_t native_id,
                                 const std::string* access_token);
 
@@ -434,17 +436,23 @@ class PigeonAuthCredential {
 class PigeonUserInfo {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit PigeonUserInfo(std::string  uid, bool is_anonymous,
+  explicit PigeonUserInfo(std::string uid,
+                          bool is_anonymous,
                           bool is_email_verified);
 
   // Constructs an object setting all fields.
-  explicit PigeonUserInfo(
-      std::string  uid, const std::string* email,
-      const std::string* display_name, const std::string* photo_url,
-      const std::string* phone_number, bool is_anonymous,
-      bool is_email_verified, const std::string* provider_id,
-      const std::string* tenant_id, const std::string* refresh_token,
-      const int64_t* creation_timestamp, const int64_t* last_sign_in_timestamp);
+  explicit PigeonUserInfo(std::string uid,
+                          const std::string* email,
+                          const std::string* display_name,
+                          const std::string* photo_url,
+                          const std::string* phone_number,
+                          bool is_anonymous,
+                          bool is_email_verified,
+                          const std::string* provider_id,
+                          const std::string* tenant_id,
+                          const std::string* refresh_token,
+                          const int64_t* creation_timestamp,
+                          const int64_t* last_sign_in_timestamp);
 
   const std::string& uid() const;
   void set_uid(std::string_view value_arg);
@@ -527,8 +535,8 @@ class PigeonUserInfo {
 class PigeonUserDetails {
  public:
   // Constructs an object setting all fields.
-  explicit PigeonUserDetails(PigeonUserInfo  user_info,
-                             flutter::EncodableList  provider_data);
+  explicit PigeonUserDetails(PigeonUserInfo user_info,
+                             flutter::EncodableList provider_data);
 
   const PigeonUserInfo& user_info() const;
   void set_user_info(const PigeonUserInfo& value_arg);
@@ -610,12 +618,12 @@ class PigeonUserCredential {
 class PigeonActionCodeSettings {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit PigeonActionCodeSettings(std::string  url,
+  explicit PigeonActionCodeSettings(std::string url,
                                     bool handle_code_in_app,
                                     bool android_install_app);
 
   // Constructs an object setting all fields.
-  explicit PigeonActionCodeSettings(std::string  url,
+  explicit PigeonActionCodeSettings(std::string url,
                                     const std::string* dynamic_link_domain,
                                     bool handle_code_in_app,
                                     const std::string* i_o_s_bundle_id,
@@ -685,8 +693,10 @@ class PigeonFirebaseAuthSettings {
   // Constructs an object setting all fields.
   explicit PigeonFirebaseAuthSettings(
       bool app_verification_disabled_for_testing,
-      const std::string* user_access_group, const std::string* phone_number,
-      const std::string* sms_code, const bool* force_recaptcha_flow);
+      const std::string* user_access_group,
+      const std::string* phone_number,
+      const std::string* sms_code,
+      const bool* force_recaptcha_flow);
 
   bool app_verification_disabled_for_testing() const;
   void set_app_verification_disabled_for_testing(bool value_arg);
@@ -736,10 +746,10 @@ class PigeonFirebaseAuthSettings {
 class PigeonSignInProvider {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit PigeonSignInProvider(std::string  provider_id);
+  explicit PigeonSignInProvider(std::string provider_id);
 
   // Constructs an object setting all fields.
-  explicit PigeonSignInProvider(std::string  provider_id,
+  explicit PigeonSignInProvider(std::string provider_id,
                                 const flutter::EncodableList* scopes,
                                 const flutter::EncodableMap* custom_parameters);
 
@@ -785,7 +795,8 @@ class PigeonVerifyPhoneNumberRequest {
 
   // Constructs an object setting all fields.
   explicit PigeonVerifyPhoneNumberRequest(
-      const std::string* phone_number, int64_t timeout,
+      const std::string* phone_number,
+      int64_t timeout,
       const int64_t* force_resending_token,
       const std::string* auto_retrieved_sms_code_for_testing,
       const std::string* multi_factor_info_id,
@@ -920,7 +931,8 @@ class PigeonUserProfile {
   // Constructs an object setting all fields.
   explicit PigeonUserProfile(const std::string* display_name,
                              const std::string* photo_url,
-                             bool display_name_changed, bool photo_url_changed);
+                             bool display_name_changed,
+                             bool photo_url_changed);
 
   const std::string* display_name() const;
   void set_display_name(const std::string_view* value_arg);
@@ -964,14 +976,14 @@ class PigeonUserProfile {
 class PigeonTotpSecret {
  public:
   // Constructs an object setting all non-nullable fields.
-  explicit PigeonTotpSecret(std::string  secret_key);
+  explicit PigeonTotpSecret(std::string secret_key);
 
   // Constructs an object setting all fields.
   explicit PigeonTotpSecret(const int64_t* code_interval_seconds,
                             const int64_t* code_length,
                             const int64_t* enrollment_completion_deadline,
                             const std::string* hashing_algorithm,
-                            std::string  secret_key);
+                            std::string secret_key);
 
   const int64_t* code_interval_seconds() const;
   void set_code_interval_seconds(const int64_t* value_arg);
@@ -1030,7 +1042,8 @@ class FirebaseAuthHostApiCodecSerializer
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 
 // Generated interface from Pigeon that represents a handler of messages from
@@ -1047,37 +1060,47 @@ class FirebaseAuthHostApi {
       const AuthPigeonFirebaseApp& app,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void UseEmulator(
-      const AuthPigeonFirebaseApp& app, const std::string& host, int64_t port,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& host,
+      int64_t port,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void ApplyActionCode(
-      const AuthPigeonFirebaseApp& app, const std::string& code,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& code,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void CheckActionCode(
-      const AuthPigeonFirebaseApp& app, const std::string& code,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& code,
       std::function<void(ErrorOr<PigeonActionCodeInfo> reply)> result) = 0;
   virtual void ConfirmPasswordReset(
-      const AuthPigeonFirebaseApp& app, const std::string& code,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& code,
       const std::string& new_password,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void CreateUserWithEmailAndPassword(
-      const AuthPigeonFirebaseApp& app, const std::string& email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& email,
       const std::string& password,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void SignInAnonymously(
       const AuthPigeonFirebaseApp& app,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void SignInWithCredential(
-      const AuthPigeonFirebaseApp& app, const flutter::EncodableMap& input,
+      const AuthPigeonFirebaseApp& app,
+      const flutter::EncodableMap& input,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void SignInWithCustomToken(
-      const AuthPigeonFirebaseApp& app, const std::string& token,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& token,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void SignInWithEmailAndPassword(
-      const AuthPigeonFirebaseApp& app, const std::string& email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& email,
       const std::string& password,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void SignInWithEmailLink(
-      const AuthPigeonFirebaseApp& app, const std::string& email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& email,
       const std::string& email_link,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void SignInWithProvider(
@@ -1088,32 +1111,38 @@ class FirebaseAuthHostApi {
       const AuthPigeonFirebaseApp& app,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void FetchSignInMethodsForEmail(
-      const AuthPigeonFirebaseApp& app, const std::string& email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& email,
       std::function<void(ErrorOr<flutter::EncodableList> reply)> result) = 0;
   virtual void SendPasswordResetEmail(
-      const AuthPigeonFirebaseApp& app, const std::string& email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& email,
       const PigeonActionCodeSettings* action_code_settings,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void SendSignInLinkToEmail(
-      const AuthPigeonFirebaseApp& app, const std::string& email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& email,
       const PigeonActionCodeSettings& action_code_settings,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void SetLanguageCode(
-      const AuthPigeonFirebaseApp& app, const std::string* language_code,
+      const AuthPigeonFirebaseApp& app,
+      const std::string* language_code,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void SetSettings(
       const AuthPigeonFirebaseApp& app,
       const PigeonFirebaseAuthSettings& settings,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void VerifyPasswordResetCode(
-      const AuthPigeonFirebaseApp& app, const std::string& code,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& code,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void VerifyPhoneNumber(
       const AuthPigeonFirebaseApp& app,
       const PigeonVerifyPhoneNumberRequest& request,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void RevokeTokenWithAuthorizationCode(
-      const AuthPigeonFirebaseApp& app, const std::string& authorization_code,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& authorization_code,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
 
   // The codec used by FirebaseAuthHostApi.
@@ -1142,7 +1171,8 @@ class FirebaseAuthUserHostApiCodecSerializer
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 
 // Generated interface from Pigeon that represents a handler of messages from
@@ -1156,17 +1186,20 @@ class FirebaseAuthUserHostApi {
       const AuthPigeonFirebaseApp& app,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void GetIdToken(
-      const AuthPigeonFirebaseApp& app, bool force_refresh,
+      const AuthPigeonFirebaseApp& app,
+      bool force_refresh,
       std::function<void(ErrorOr<PigeonIdTokenResult> reply)> result) = 0;
   virtual void LinkWithCredential(
-      const AuthPigeonFirebaseApp& app, const flutter::EncodableMap& input,
+      const AuthPigeonFirebaseApp& app,
+      const flutter::EncodableMap& input,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void LinkWithProvider(
       const AuthPigeonFirebaseApp& app,
       const PigeonSignInProvider& sign_in_provider,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void ReauthenticateWithCredential(
-      const AuthPigeonFirebaseApp& app, const flutter::EncodableMap& input,
+      const AuthPigeonFirebaseApp& app,
+      const flutter::EncodableMap& input,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void ReauthenticateWithProvider(
       const AuthPigeonFirebaseApp& app,
@@ -1180,22 +1213,28 @@ class FirebaseAuthUserHostApi {
       const PigeonActionCodeSettings* action_code_settings,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void Unlink(
-      const AuthPigeonFirebaseApp& app, const std::string& provider_id,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& provider_id,
       std::function<void(ErrorOr<PigeonUserCredential> reply)> result) = 0;
   virtual void UpdateEmail(
-      const AuthPigeonFirebaseApp& app, const std::string& new_email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& new_email,
       std::function<void(ErrorOr<PigeonUserDetails> reply)> result) = 0;
   virtual void UpdatePassword(
-      const AuthPigeonFirebaseApp& app, const std::string& new_password,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& new_password,
       std::function<void(ErrorOr<PigeonUserDetails> reply)> result) = 0;
   virtual void UpdatePhoneNumber(
-      const AuthPigeonFirebaseApp& app, const flutter::EncodableMap& input,
+      const AuthPigeonFirebaseApp& app,
+      const flutter::EncodableMap& input,
       std::function<void(ErrorOr<PigeonUserDetails> reply)> result) = 0;
   virtual void UpdateProfile(
-      const AuthPigeonFirebaseApp& app, const PigeonUserProfile& profile,
+      const AuthPigeonFirebaseApp& app,
+      const PigeonUserProfile& profile,
       std::function<void(ErrorOr<PigeonUserDetails> reply)> result) = 0;
   virtual void VerifyBeforeUpdateEmail(
-      const AuthPigeonFirebaseApp& app, const std::string& new_email,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& new_email,
       const PigeonActionCodeSettings* action_code_settings,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
 
@@ -1225,7 +1264,8 @@ class MultiFactorUserHostApiCodecSerializer
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 
 // Generated interface from Pigeon that represents a handler of messages from
@@ -1241,14 +1281,16 @@ class MultiFactorUserHostApi {
       const std::string* display_name,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void EnrollTotp(
-      const AuthPigeonFirebaseApp& app, const std::string& assertion_id,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& assertion_id,
       const std::string* display_name,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void GetSession(
       const AuthPigeonFirebaseApp& app,
       std::function<void(ErrorOr<PigeonMultiFactorSession> reply)> result) = 0;
   virtual void Unenroll(
-      const AuthPigeonFirebaseApp& app, const std::string& factor_uid,
+      const AuthPigeonFirebaseApp& app,
+      const std::string& factor_uid,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
   virtual void GetEnrolledFactors(
       const AuthPigeonFirebaseApp& app,
@@ -1280,7 +1322,8 @@ class MultiFactoResolverHostApiCodecSerializer
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 
 // Generated interface from Pigeon that represents a handler of messages from
@@ -1323,7 +1366,8 @@ class MultiFactorTotpHostApiCodecSerializer
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 
 // Generated interface from Pigeon that represents a handler of messages from
@@ -1337,10 +1381,12 @@ class MultiFactorTotpHostApi {
       const std::string& session_id,
       std::function<void(ErrorOr<PigeonTotpSecret> reply)> result) = 0;
   virtual void GetAssertionForEnrollment(
-      const std::string& secret_key, const std::string& one_time_password,
+      const std::string& secret_key,
+      const std::string& one_time_password,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void GetAssertionForSignIn(
-      const std::string& enrollment_id, const std::string& one_time_password,
+      const std::string& enrollment_id,
+      const std::string& one_time_password,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
 
   // The codec used by MultiFactorTotpHostApi.
@@ -1364,11 +1410,13 @@ class MultiFactorTotpSecretHostApi {
       delete;
   virtual ~MultiFactorTotpSecretHostApi() = default;
   virtual void GenerateQrCodeUrl(
-      const std::string& secret_key, const std::string* account_name,
+      const std::string& secret_key,
+      const std::string* account_name,
       const std::string* issuer,
       std::function<void(ErrorOr<std::string> reply)> result) = 0;
   virtual void OpenInOtpApp(
-      const std::string& secret_key, const std::string& qr_code_url,
+      const std::string& secret_key,
+      const std::string& qr_code_url,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
 
   // The codec used by MultiFactorTotpSecretHostApi.
@@ -1397,7 +1445,8 @@ class GenerateInterfacesCodecSerializer
 
  protected:
   flutter::EncodableValue ReadValueOfType(
-      uint8_t type, flutter::ByteStreamReader* stream) const override;
+      uint8_t type,
+      flutter::ByteStreamReader* stream) const override;
 };
 
 // Only used to generate the object interface that are use outside of the Pigeon

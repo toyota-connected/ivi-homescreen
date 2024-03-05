@@ -41,9 +41,11 @@ class PlatformViewsHandler {
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
-  static void PlatformViewAddListener(void* context, int32_t id,
-                               const struct platform_view_listener* listener,
-                               void* listener_context);
+  static void PlatformViewAddListener(
+      void* context,
+      int32_t id,
+      const struct platform_view_listener* listener,
+      void* listener_context);
 
   static void PlatformViewRemoveListener(void* context, int32_t id);
 

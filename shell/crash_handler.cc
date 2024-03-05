@@ -7,7 +7,6 @@
 
 #include "sentry.h"
 
-
 void* invalid_mem = (void*)1;
 
 void CrashHandler::CrashHandler::trigger_crash() {

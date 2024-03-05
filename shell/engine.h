@@ -30,9 +30,9 @@
 
 #include "backend/backend.h"
 #include "constants.h"
+#include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
 #include "task_runner.h"
-#include "flutter_desktop_engine_state.h"
 #include "view/flutter_view.h"
 
 class App;
@@ -336,9 +336,13 @@ class Engine {
                                    const char* message,
                                    void* user_data);
 
-  FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const { return m_flutter_engine; }
+  FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const {
+    return m_flutter_engine;
+  }
 
-  TaskRunner* GetPlatformTaskRunner() const { return m_platform_task_runner.get(); }
+  TaskRunner* GetPlatformTaskRunner() const {
+    return m_platform_task_runner.get();
+  }
 
  private:
   size_t m_index;

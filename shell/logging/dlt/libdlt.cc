@@ -35,8 +35,10 @@ LibDltExports::LibDltExports(void* lib) {
     GetFuncAddress(lib, "dlt_user_log_write_int16", &UserLogWriteInt16);
     GetFuncAddress(lib, "dlt_user_log_write_int32", &UserLogWriteInt32);
     GetFuncAddress(lib, "dlt_user_log_write_int64", &UserLogWriteInt64);
-    GetFuncAddress(lib, "dlt_user_log_write_constant_utf8_string", &UserLogWriteConstantUtf8String);
-    GetFuncAddress(lib, "dlt_user_log_write_sized_utf8_string", &UserLogWriteSizedUtf8String);
+    GetFuncAddress(lib, "dlt_user_log_write_constant_utf8_string",
+                   &UserLogWriteConstantUtf8String);
+    GetFuncAddress(lib, "dlt_user_log_write_sized_utf8_string",
+                   &UserLogWriteSizedUtf8String);
   }
 }
 

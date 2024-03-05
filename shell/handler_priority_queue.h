@@ -54,7 +54,9 @@ class handler_priority_queue : public asio::execution_context {
     executor(handler_priority_queue& q, uint64_t t)
         : context_(q), timestamp_(t) {}
 
-    NODISCARD handler_priority_queue& context() const noexcept { return context_; }
+    NODISCARD handler_priority_queue& context() const noexcept {
+      return context_;
+    }
 
     template <typename Function, typename Allocator>
     void dispatch(Function f, const Allocator&) const {
