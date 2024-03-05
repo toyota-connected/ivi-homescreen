@@ -107,7 +107,6 @@ if (BUILD_PLUGIN_CLOUD_FIRESTORE OR BUILD_PLUGIN_FIREBASE_AUTH OR BUILD_PLUGIN_F
     include(firebase)
 endif ()
 
-
 option(BUILD_PLUGIN_FILAMENT_VIEW "Include Filament View plugin" OFF)
 if (BUILD_PLUGIN_FILAMENT_VIEW)
     ENABLE_PLUGIN(filament_view)
