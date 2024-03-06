@@ -30,6 +30,9 @@
 #if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER)
 #include "plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h"
 #endif
+#if defined(ENABLE_PLUGIN_NAV_RENDER_VIEW)
+#include "plugins/nav_render_view/include/nav_render_view/nav_render_view_plugin_c_api.h"
+#endif
 
 static constexpr char kMethodCreate[] = "create";
 static constexpr char kMethodDispose[] = "dispose";
@@ -135,6 +138,15 @@ void PlatformViewsHandler::HandleMethodCall(
 #if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
         if (viewType == "@views/simple-box-view-type") {
       LayerPlaygroundPluginCApiRegisterWithRegistrar(
+          registrar, id, std::move(viewType), direction, top, left, width,
+          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+      result->Success(flutter::EncodableValue(id));
+    } else
+#endif
+#if defined(ENABLE_PLUGIN_NAV_RENDER_VIEW)
+        if (viewType == "views/nav-render-view") {
+      NavRenderViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
           height, params, engine_->view_controller->engine->GetAssetDirectory(),
           engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);

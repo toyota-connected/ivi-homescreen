@@ -34,8 +34,6 @@ add_executable(homescreen
         task_runner.cc
 )
 
-include(textures)
-
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
 endif ()

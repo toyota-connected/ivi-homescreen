@@ -20,6 +20,7 @@
 #include "curl_client/curl_client.h"
 #include "json/json_utils.h"
 #include "logging.h"
+#include "shared_library/shared_library.h"
 #include "string/string_tools.h"
 #include "time/time_tools.h"
 #include "tools/command.h"
