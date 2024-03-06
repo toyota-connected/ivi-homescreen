@@ -1,3 +1,0 @@
-
-add_library(plugin_opengl_texture STATIC opengl_texture.cc opengl_texture.h)
-target_link_libraries(plugin_opengl_texture PUBLIC platform_homescreen flutter)
