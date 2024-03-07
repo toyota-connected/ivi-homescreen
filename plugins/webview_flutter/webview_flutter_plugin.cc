@@ -67,7 +67,7 @@ WebviewFlutterPlugin::WebviewFlutterPlugin(
     double left,
     double width,
     double height,
-    const std::vector<uint8_t>& params,
+    const std::vector<uint8_t>& /* params */,
     std::string assetDirectory,
     FlutterDesktopEngineState* state,
     PlatformViewAddListener addListener,
@@ -128,258 +128,264 @@ std::optional<FlutterError> WebviewFlutterPlugin::DeleteAllData(
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::LoadData(
-    int64_t instance_id,
-    const std::string& data,
-    const std::string* mime_type,
-    const std::string* encoding) {
+    int64_t /* instance_id */,
+    const std::string& /* data */,
+    const std::string* /* mime_type */,
+    const std::string* /* encoding */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::LoadDataWithBaseUrl(
-    int64_t instance_id,
-    const std::string* base_url,
-    const std::string& data,
-    const std::string* mime_type,
-    const std::string* encoding,
-    const std::string* history_url) {
+    int64_t /* instance_id */,
+    const std::string* /* base_url */,
+    const std::string& /* data */,
+    const std::string* /* mime_type */,
+    const std::string* /* encoding */,
+    const std::string* /* history_url */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::LoadUrl(
-    int64_t instance_id,
-    const std::string& url,
-    const flutter::EncodableMap& headers) {
+    int64_t /* instance_id */,
+    const std::string& /* url */,
+    const flutter::EncodableMap& /* headers */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::PostUrl(
-    int64_t instance_id,
-    const std::string& url,
-    const std::vector<uint8_t>& data) {
+    int64_t /* instance_id */,
+    const std::string& /* url */,
+    const std::vector<uint8_t>& /* data */) {
   return std::nullopt;
 }
 
 ErrorOr<std::optional<std::string>> WebviewFlutterPlugin::GetUrl(
-    int64_t instance_id) {
+    int64_t /* instance_id */) {
   return {std::nullopt};
 }
 
-ErrorOr<bool> WebviewFlutterPlugin::CanGoBack(int64_t instance_id) {
+ErrorOr<bool> WebviewFlutterPlugin::CanGoBack(int64_t /* instance_id */) {
   return {true};
 }
 
-ErrorOr<bool> WebviewFlutterPlugin::CanGoForward(int64_t instance_id) {
+ErrorOr<bool> WebviewFlutterPlugin::CanGoForward(int64_t /* instance_id */) {
   return {true};
 }
 
-std::optional<FlutterError> WebviewFlutterPlugin::GoBack(int64_t instance_id) {
+std::optional<FlutterError> WebviewFlutterPlugin::GoBack(
+    int64_t /* instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::GoForward(
-    int64_t instance_id) {
+    int64_t /* instance_id */) {
   return std::nullopt;
 }
 
-std::optional<FlutterError> WebviewFlutterPlugin::Reload(int64_t instance_id) {
+std::optional<FlutterError> WebviewFlutterPlugin::Reload(
+    int64_t /* instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::ClearCache(
-    int64_t instance_id,
-    bool include_disk_files) {
+    int64_t /* instance_id */,
+    bool /* include_disk_files */) {
   return std::nullopt;
 }
 
 void WebviewFlutterPlugin::EvaluateJavascript(
-    int64_t instance_id,
-    const std::string& javascript_string,
-    std::function<void(ErrorOr<std::optional<std::string>> reply)> result) {}
+    int64_t /* instance_id */,
+    const std::string& /* javascript_string */,
+    std::function<
+        void(ErrorOr<std::optional<std::string>> reply)> /* result */) {}
 
 std::optional<FlutterError> WebviewFlutterPlugin::Create(
-    int64_t instance_id,
-    const std::string& channel_name) {
+    int64_t /* instance_id */,
+    const std::string& /* channel_name */) {
   return std::nullopt;
 }
 
 ErrorOr<std::optional<std::string>> WebviewFlutterPlugin::GetTitle(
-    int64_t instance_id) {
+    int64_t /* instance_id */) {
   return {std::nullopt};
 }
-std::optional<FlutterError> WebviewFlutterPlugin::ScrollTo(int64_t instance_id,
-                                                           int64_t x,
-                                                           int64_t y) {
+std::optional<FlutterError> WebviewFlutterPlugin::ScrollTo(
+    int64_t /* instance_id */,
+    int64_t /* x */,
+    int64_t /* y */) {
   return std::nullopt;
 }
 
-std::optional<FlutterError> WebviewFlutterPlugin::ScrollBy(int64_t instance_id,
-                                                           int64_t x,
-                                                           int64_t y) {
+std::optional<FlutterError> WebviewFlutterPlugin::ScrollBy(
+    int64_t /* instance_id */,
+    int64_t /* x */,
+    int64_t /* y */) {
   return std::nullopt;
 }
 
-ErrorOr<int64_t> WebviewFlutterPlugin::GetScrollX(int64_t instance_id) {
+ErrorOr<int64_t> WebviewFlutterPlugin::GetScrollX(int64_t /* instance_id */) {
   return {0};
 }
 
-ErrorOr<int64_t> WebviewFlutterPlugin::GetScrollY(int64_t instance_id) {
+ErrorOr<int64_t> WebviewFlutterPlugin::GetScrollY(int64_t /* instance_id */) {
   return {0};
 }
 
 ErrorOr<WebViewPoint> WebviewFlutterPlugin::GetScrollPosition(
-    int64_t instance_id) {
+    int64_t /* instance_id */) {
   return {WebViewPoint{0, 0}};
 }
 
 std::optional<FlutterError>
-WebviewFlutterPlugin::SetWebContentsDebuggingEnabled(bool enabled) {
+WebviewFlutterPlugin::SetWebContentsDebuggingEnabled(bool /* enabled */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetWebViewClient(
-    int64_t instance_id,
-    int64_t web_view_client_instance_id) {
+    int64_t /* instance_id */,
+    int64_t /* web_view_client_instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::AddJavaScriptChannel(
-    int64_t instance_id,
-    int64_t java_script_channel_instance_id) {
+    int64_t /* instance_id */,
+    int64_t /* java_script_channel_instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::RemoveJavaScriptChannel(
-    int64_t instance_id,
-    int64_t java_script_channel_instance_id) {
+    int64_t /* instance_id */,
+    int64_t /* java_script_channel_instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetDownloadListener(
-    int64_t instance_id,
-    const int64_t* listener_instance_id) {
+    int64_t /* instance_id */,
+    const int64_t* /* listener_instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetWebChromeClient(
-    int64_t instance_id,
-    const int64_t* client_instance_id) {
+    int64_t /* instance_id */,
+    const int64_t* /* client_instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetBackgroundColor(
-    int64_t instance_id,
-    int64_t color) {
+    int64_t /* instance_id */,
+    int64_t /* color */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::Create(
-    int64_t instance_id,
-    int64_t web_view_instance_id) {
+    int64_t /* instance_id */,
+    int64_t /* web_view_instance_id */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetDomStorageEnabled(
-    int64_t instance_id,
-    bool flag) {
+    int64_t /* instance_id */,
+    bool /* flag */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError>
 WebviewFlutterPlugin::SetJavaScriptCanOpenWindowsAutomatically(
-    int64_t instance_id,
-    bool flag) {
+    int64_t /* instance_id */,
+    bool /* flag */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetSupportMultipleWindows(
-    int64_t instance_id,
-    bool support) {
+    int64_t /* instance_id */,
+    bool /* support */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetJavaScriptEnabled(
-    int64_t instance_id,
-    bool flag) {
+    int64_t /* instance_id */,
+    bool /* flag */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetUserAgentString(
-    int64_t instance_id,
-    const std::string* user_agent_string) {
+    int64_t /* instance_id */,
+    const std::string* /* user_agent_string */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError>
-WebviewFlutterPlugin::SetMediaPlaybackRequiresUserGesture(int64_t instance_id,
-                                                          bool require) {
+WebviewFlutterPlugin::SetMediaPlaybackRequiresUserGesture(
+    int64_t /* instance_id */,
+    bool /* require */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetSupportZoom(
-    int64_t instance_id,
-    bool support) {
+    int64_t /* instance_id */,
+    bool /* support */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetLoadWithOverviewMode(
-    int64_t instance_id,
-    bool overview) {
+    int64_t /* instance_id */,
+    bool /* overview */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetUseWideViewPort(
-    int64_t instance_id,
-    bool use) {
+    int64_t /* instance_id */,
+    bool /* use */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetDisplayZoomControls(
-    int64_t instance_id,
-    bool enabled) {
+    int64_t /* instance_id */,
+    bool /* enabled */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetBuiltInZoomControls(
-    int64_t instance_id,
-    bool enabled) {
+    int64_t /* instance_id */,
+    bool /* enabled */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetAllowFileAccess(
-    int64_t instance_id,
-    bool enabled) {
+    int64_t /* instance_id */,
+    bool /* enabled */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError> WebviewFlutterPlugin::SetTextZoom(
-    int64_t instance_id,
-    int64_t text_zoom) {
+    int64_t /* instance_id */,
+    int64_t /* text_zoom */) {
   return std::nullopt;
 }
 
 ErrorOr<std::string> WebviewFlutterPlugin::GetUserAgentString(
-    int64_t instance_id) {
+    int64_t /* instance_id */) {
   return {""};
 }
 
 std::optional<FlutterError>
 WebviewFlutterPlugin::SetSynchronousReturnValueForOnShowFileChooser(
-    int64_t instance_id,
-    bool value) {
+    int64_t /* instance_id */,
+    bool /* value */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError>
 WebviewFlutterPlugin::SetSynchronousReturnValueForOnConsoleMessage(
-    int64_t instance_id,
-    bool value) {
+    int64_t /* instance_id */,
+    bool /* value */) {
   return std::nullopt;
 }
 
 std::optional<FlutterError>
 WebviewFlutterPlugin::SetSynchronousReturnValueForShouldOverrideUrlLoading(
-    int64_t instance_id,
-    bool value) {
+    int64_t /* instance_id */,
+    bool /* value */) {
   return std::nullopt;
 }
 
@@ -420,8 +426,8 @@ void WebviewFlutterPlugin::on_touch(int32_t /* action */,
                                     int32_t /* point_count */,
                                     const size_t /* point_data_size */,
                                     const double* /* point_data */,
-                                    void* data) {
-  auto plugin = static_cast<WebviewFlutterPlugin*>(data);
+                                    void* /* data */) {
+  // auto plugin = static_cast<WebviewFlutterPlugin*>(data);
 }
 
 void WebviewFlutterPlugin::on_dispose(bool /* hybrid */, void* data) {
@@ -452,7 +458,7 @@ const struct platform_view_listener
 
 void WebviewFlutterPlugin::on_frame(void* data,
                                     wl_callback* callback,
-                                    const uint32_t time) {
+                                    const uint32_t /* time */) {
   const auto obj = static_cast<WebviewFlutterPlugin*>(data);
 
   obj->callback_ = nullptr;
