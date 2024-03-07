@@ -22,11 +22,6 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     option(BUILD_PLUGIN_GSTREAMER_EGL "Include GStreamer Plugin" OFF)
 endif ()
 
-option(BUILD_PLUGIN_PACKAGE_INFO "Include PackageInfo Plugin" OFF)
-if (BUILD_PLUGIN_PACKAGE_INFO)
-    ENABLE_PLUGIN(package_info)
-endif ()
-
 option(BUILD_PLUGIN_COMP_SURF "Include Compositor Surface Plugin" OFF)
 if (BUILD_PLUGIN_COMP_SURF)
     ENABLE_PLUGIN(comp_surf)

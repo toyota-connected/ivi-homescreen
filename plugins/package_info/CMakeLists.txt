@@ -1,3 +1,0 @@
-
-add_library(plugin_package_info STATIC package_info.cc package_info.h)
-target_link_libraries(plugin_package_info PUBLIC platform_homescreen flutter)
