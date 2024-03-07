@@ -53,7 +53,7 @@ void NavRenderViewApi::SetUp(flutter::BinaryMessenger* binary_messenger,
         binary_messenger, "nav_render_view", &GetCodec());
     if (api != nullptr) {
       channel->SetMethodCallHandler(
-          [api](const flutter::MethodCall<>& call,
+          [](const flutter::MethodCall<>& /* call */,
                 std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                     result) { result->NotImplemented(); });
     } else {

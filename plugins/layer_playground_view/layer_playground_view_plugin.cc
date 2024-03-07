@@ -58,7 +58,7 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
     double left,
     double width,
     double height,
-    const std::vector<uint8_t>& params,
+    const std::vector<uint8_t>& /* params */,
     std::string assetDirectory,
     FlutterDesktopEngineState* state,
     PlatformViewAddListener addListener,
@@ -155,11 +155,11 @@ void LayerPlaygroundViewPlugin::on_touch(int32_t /* action */,
                                          int32_t /* point_count */,
                                          const size_t /* point_data_size */,
                                          const double* /* point_data */,
-                                         void* data) {
-  auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
+                                         void* /* data */) {
+  //auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
 }
 
-void LayerPlaygroundViewPlugin::on_dispose(bool hybrid, void* data) {
+void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */, void* data) {
   auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
   if (plugin->callback_) {
     wl_callback_destroy(plugin->callback_);

@@ -235,7 +235,7 @@ std::string CameraContext::takePicture() {
   return {};
 }
 
-void CameraContext::startVideoRecording(bool enableStream) {
+void CameraContext::startVideoRecording(bool /* enableStream */) {
   SPDLOG_DEBUG("[camera_plugin] startVideoRecording");
 }
 
