@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <filesystem>
 #include <utility>
 #include <vector>
 
 #include <dlfcn.h>
 #include <cassert>
-
-#include <flutter/fml/file.h>
-#include <flutter/fml/paths.h>
 
 #include "constants.h"
 #include "engine.h"
@@ -73,16 +71,17 @@ Engine::Engine(FlutterView* view,
   ///
   /// libflutter_engine.so loading
   ///
-  std::string engine_file_path;
   if (bundle_path.empty()) {
     spdlog::critical("Specify bundle folder using --b= option");
     exit(EXIT_FAILURE);
   }
 
   // override path
-  engine_file_path = fml::paths::JoinPaths({bundle_path, kBundleEngine});
-  if (fml::IsFile(engine_file_path)) {
-    SPDLOG_DEBUG("({}) libflutter_engine.so: {}", m_index, engine_file_path);
+  std::filesystem::path engine_file_path(bundle_path);
+  engine_file_path /= kBundleEngine;
+  if (std::filesystem::exists(engine_file_path)) {
+    SPDLOG_DEBUG("({}) libflutter_engine.so: {}", m_index,
+                 engine_file_path.c_str());
   } else {
     engine_file_path = kSystemEngine;
   }
@@ -95,22 +94,27 @@ Engine::Engine(FlutterView* view,
   ///
   /// flutter_assets folder
   ///
-  m_assets_path = fml::paths::JoinPaths({bundle_path, kBundleFlutterAssets});
-  SPDLOG_DEBUG("({}) flutter_assets: {}", m_index, m_assets_path);
+
+  m_assets_path = bundle_path;
+  m_assets_path /= kBundleFlutterAssets;
+  SPDLOG_DEBUG("({}) flutter_assets: {}", m_index, m_assets_path.c_str());
   m_args.assets_path = m_assets_path.c_str();
 
   ///
   /// icudtl.dat file
   ///
-  m_icu_data_path = fml::paths::JoinPaths({bundle_path, kBundleIcudtl});
-  if (!fml::IsFile(m_icu_data_path)) {
-    m_icu_data_path = fml::paths::JoinPaths({kPathPrefix, kSystemIcudtl});
+  m_icu_data_path = bundle_path;
+  m_icu_data_path /= kBundleIcudtl;
+  if (!exists(m_icu_data_path)) {
+    m_icu_data_path = kPathPrefix;
+    m_icu_data_path /= kSystemIcudtl;
   }
-  if (!fml::IsFile(m_icu_data_path)) {
-    spdlog::critical("({}) {} is not present.", m_index, m_icu_data_path);
+  if (!exists(m_icu_data_path)) {
+    spdlog::critical("({}) {} is not present.", m_index,
+                     m_icu_data_path.c_str());
     assert(false);
   }
-  SPDLOG_DEBUG("({}) icudtl.dat: {}", m_index, m_icu_data_path);
+  SPDLOG_DEBUG("({}) icudtl.dat: {}", m_index, m_icu_data_path.c_str());
   m_args.icu_data_path = m_icu_data_path.c_str();
 
   ///
@@ -118,17 +122,17 @@ Engine::Engine(FlutterView* view,
   ///
   if (LibFlutterEngine->RunsAOTCompiledDartCode()) {
     m_args.aot_data = nullptr;
-    m_aot_data = LoadAotData(fml::paths::JoinPaths({bundle_path, kBundleAot}));
+    m_aot_data = LoadAotData(bundle_path);
     if (m_aot_data) {
       m_args.aot_data = m_aot_data;
     }
   } else {
     spdlog::info("({}) Runtime=debug", m_index);
-    std::string kernel_snapshot =
-        fml::paths::JoinPaths({m_assets_path, "kernel_blob.bin"});
-    if (!fml::IsFile(kernel_snapshot)) {
+    std::filesystem::path kernel_snapshot = m_assets_path;
+    kernel_snapshot /= "kernel_blob.bin";
+    if (!exists(kernel_snapshot)) {
       spdlog::critical("({}) {} missing Flutter Kernel\0", m_index,
-                       kernel_snapshot);
+                       kernel_snapshot.c_str());
       exit(EXIT_FAILURE);
     }
   }
@@ -504,9 +508,10 @@ void Engine::SendPointerEvents() {
   }
 }
 
-FlutterEngineAOTData Engine::LoadAotData(
-    const std::string& aot_data_path) const {
-  if (!fml::IsFile(aot_data_path)) {
+FlutterEngineAOTData Engine::LoadAotData(const std::string& bundle_path) const {
+  std::filesystem::path aot_data_path(bundle_path);
+  aot_data_path /= kBundleAot;
+  if (!exists(aot_data_path)) {
     SPDLOG_DEBUG("({}) AOT file not present", m_index);
     return nullptr;
   }
@@ -520,7 +525,7 @@ FlutterEngineAOTData Engine::LoadAotData(
   FlutterEngineAOTData data;
   if (kSuccess != LibFlutterEngine->CreateAOTData(&source, &data)) {
     spdlog::critical("({}) Failed to load AOT data from: {}", m_index,
-                     aot_data_path);
+                     aot_data_path.c_str());
     return nullptr;
   }
   return data;

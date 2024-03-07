@@ -3,8 +3,6 @@
 
 #include <filesystem>
 
-#include <flutter/fml/paths.h>
-
 #include <dlfcn.h>
 
 #include <EGL/eglext.h>
@@ -164,11 +162,12 @@ invalid:
 }
 
 std::string CompositorSurface::GetFilePath(const char* folder) {
-  auto path = fml::paths::JoinPaths({Utils::GetConfigHomePath(), folder});
+  std::filesystem::path path(Utils::GetConfigHomePath());
+  path /= folder;
 
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {
-      spdlog::critical("GetCachePath create_directories failed: {}", path);
+      spdlog::critical("GetCachePath create_directories failed: {}", path.c_str());
       exit(EXIT_FAILURE);
     }
   }
