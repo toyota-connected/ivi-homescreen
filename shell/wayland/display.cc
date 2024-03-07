@@ -117,8 +117,10 @@ Display::~Display() {
   if (m_cursor_surface)
     wl_surface_destroy(m_cursor_surface);
 
+#if defined(ENABLE_XDG_CLIENT)
   if (m_xdg_wm_base)
     xdg_wm_base_destroy(m_xdg_wm_base);
+#endif
 
   wl_registry_destroy(m_registry);
   wl_display_flush(m_display);
@@ -127,6 +129,7 @@ Display::~Display() {
   SPDLOG_TRACE("- ~Display()");
 }
 
+#if defined(ENABLE_XDG_CLIENT)
 /**
  * @brief Respond to a ping event with a pong request
  * @param[in] data No use
@@ -145,6 +148,7 @@ static void xdg_wm_base_ping(void* /* data */,
 static constexpr struct xdg_wm_base_listener xdg_wm_base_listener = {
     .ping = xdg_wm_base_ping,
 };
+#endif
 
 void Display::registry_handle_global(void* data,
                                      struct wl_registry* registry,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+#include <unordered_map>
 #include <GLES2/gl2.h>
 
 struct FlutterDesktopEngineState;
