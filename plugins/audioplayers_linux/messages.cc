@@ -293,8 +293,8 @@ void AudioPlayersGlobalApi::SetUp(flutter::BinaryMessenger* binary_messenger,
         binary_messenger, "xyz.luan/audioplayers.global", &GetCodec());
     if (api != nullptr) {
       channel->SetMethodCallHandler(
-          [api](const flutter::MethodCall<EncodableValue>& call,
-                std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+          [](const flutter::MethodCall<EncodableValue>& call,
+                std::unique_ptr<flutter::MethodResult<EncodableValue>> /* result */) {
             plugin_common::Encodable::PrintFlutterEncodableValue(
                 "global", *call.arguments());
           });
