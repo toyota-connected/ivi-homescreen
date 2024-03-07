@@ -17,6 +17,7 @@
 #include "time_tools.h"
 
 #include <ctime>
+#include <chrono>
 
 namespace plugin_common {
 

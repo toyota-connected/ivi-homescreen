@@ -18,7 +18,7 @@
 
 #include "engine.h"
 #include "hexdump.h"
-#include "logging.h"
+#include <plugins/common/common.h>
 
 void PackageInfo::OnPlatformMessage(const FlutterPlatformMessage* message,
                                     void* userdata) {

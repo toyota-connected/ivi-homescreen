@@ -233,7 +233,7 @@ void WaylandWindow::handle_ivi_surface_configure(
     w->m_geometry.height = height;
   }
 
-  w->m_backend->Resize(w->m_index, w->m_flutter_engine, w->m_geometry.width,
+  w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(), w->m_geometry.width,
                        w->m_geometry.height);
 
   w->m_wait_for_configure = false;
