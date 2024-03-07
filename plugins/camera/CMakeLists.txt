@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-pkg_check_modules(CAMERA REQUIRED libcamera)
+pkg_check_modules(CAMERA IMPORTED_TARGET REQUIRED libcamera)
 include(FindJPEG)
 
 add_library(plugin_camera STATIC
@@ -26,7 +26,6 @@ add_library(plugin_camera STATIC
 
 target_include_directories(plugin_camera PUBLIC
         include
-        ${CAMERA_INCLUDE_DIRS}
         ${JPEG_INCLUDE_DIRS}
 )
 
@@ -34,7 +33,7 @@ target_link_libraries(plugin_camera PUBLIC
         flutter
         platform_homescreen
         plugin_common
-        ${CAMERA_LINK_LIBRARIES}
+        PkgConfig::CAMERA
         ${JPEG_LIBRARIES}
 )
 
