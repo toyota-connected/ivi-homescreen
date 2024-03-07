@@ -10,8 +10,23 @@ The Camera Plugin can currently handle `availableCameras`, `create`, and `initia
 
 The following aspects are still under development:
 
-- Building out the texture registrar: We're still figuring out how to best implement this part of the plugin.
 - Session and FrameSink classes: These classes need to be created to handle different parts of the camera's operation.
+
+## Build libcamera
+
+### Clang
+
+    git clone https://git.libcamera.org/libcamera/libcamera.git
+    cd libcamera
+    CC=/usr/bin/clang CXX=/usr/bin/clang++ CXX_FLAGS=-stdlib=libc++ LDFLAGS=-stdlib=libc++ meson build -D lc-compliance=false
+    ninja -C build install -j `nproc`
+
+### GCC
+
+    git clone https://git.libcamera.org/libcamera/libcamera.git
+    cd libcamera
+    meson build
+    ninja -C build install -j `nproc`
 
 ## libcamera logging output
 
