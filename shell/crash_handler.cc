@@ -1,6 +1,5 @@
 #include "crash_handler.h"
 
-#include "fml/paths.h"
 #include "utils.h"
 
 #include <cstring>
@@ -17,7 +16,8 @@ CrashHandler::CrashHandler() {
   sentry_options_t* options = sentry_options_new();
   sentry_options_set_dsn(options, kCrashHandlerDsn);
   auto home_path = Utils::GetConfigHomePath();
-  auto db_path = fml::paths::JoinPaths({home_path, ".sentry"});
+  std::filesystem::path db_path(home_path);
+  db_path /= ".sentry";
   sentry_options_set_database_path(options, db_path.c_str());
   sentry_options_set_release(options, kCrashHandlerRelease);
   sentry_options_set_symbolize_stacktraces(options, true);

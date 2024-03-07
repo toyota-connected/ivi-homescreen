@@ -352,10 +352,10 @@ class Engine {
   std::shared_ptr<WaylandWindow> m_egl_window;
   FlutterView* m_view;
 
-  std::string m_assets_path;
-  std::string m_icu_data_path;
-  std::string m_aot_path;
-  std::string m_cache_path;
+  std::filesystem::path m_assets_path;
+  std::filesystem::path m_icu_data_path;
+  std::filesystem::path m_aot_path;
+  std::filesystem::path m_cache_path;
   size_t m_prev_height;
   size_t m_prev_width;
   double m_prev_pixel_ratio;
@@ -383,7 +383,7 @@ class Engine {
    * flutter
    */
   MAYBE_UNUSED NODISCARD FlutterEngineAOTData
-  LoadAotData(const std::string& aot_data_path) const;
+  LoadAotData(const std::string& bundle_path) const;
 
   /**
    * @brief Setup Locales

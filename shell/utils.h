@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
 #include <functional>
 #include <locale>
 
@@ -14,7 +15,6 @@
 #include <flutter/encodable_value.h>
 
 #include "constants.h"
-#include "fml/paths.h"
 #include "logging/logging.h"
 
 /* switch private and public declarations */
@@ -91,8 +91,8 @@ class Utils {
         tmp = pw->pw_dir;
     }
 
-    const auto path = fml::paths::JoinPaths({tmp, kXdgApplicationDir});
-
+    std::filesystem::path path(tmp);
+    path /= kXdgApplicationDir;
     home_dir = strdup(path.c_str());
 
     return home_dir;
@@ -112,8 +112,9 @@ class Utils {
     if (config_env && *config_env) {
       auto config_env_raw = std::string(config_env);
       auto clean = trim(config_env_raw, "\"");
-      const auto path =
-          fml::paths::JoinPaths({clean, kXdgConfigDir, kApplicationName});
+      std::filesystem::path path(clean);
+      path /= kXdgConfigDir;
+      path /= kApplicationName;
       config_home_dir = strdup(path.c_str());
     } else {
       config_home_dir = GetHomePath();
