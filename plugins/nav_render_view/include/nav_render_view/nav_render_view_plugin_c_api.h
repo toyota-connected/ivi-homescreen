@@ -50,6 +50,9 @@ FLUTTER_PLUGIN_EXPORT void NavRenderViewPluginCApiRegisterWithRegistrar(
     PlatformViewRemoveListener remove_listener,
     void* platform_views_context);
 
+FLUTTER_PLUGIN_EXPORT void NavRenderViewPluginTextureCApiRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrar* registrar);
+
 #if defined(__cplusplus)
 }  // extern "C"
 #endif
