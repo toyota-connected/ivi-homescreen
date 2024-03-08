@@ -16,9 +16,9 @@
 
 add_library(plugin_nav_render_view STATIC
         nav_render_view_plugin_c_api.cc
-        nav_render_view_plugin.cc
+        nav_render_surface.cc
+        nav_render_texture.cc
         libnav_render.cc
-        messages.cc
 )
 
 target_include_directories(plugin_nav_render_view PRIVATE include)
@@ -27,9 +27,3 @@ target_link_libraries(plugin_nav_render_view PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_nav_render_view)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_nav_render_view PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

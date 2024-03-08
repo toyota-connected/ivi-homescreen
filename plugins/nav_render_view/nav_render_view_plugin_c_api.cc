@@ -16,9 +16,10 @@
 
 #include "include/nav_render_view/nav_render_view_plugin_c_api.h"
 
-#include "flutter/plugin_registrar.h"
+#include <flutter/plugin_registrar.h>
 
-#include "nav_render_view_plugin.h"
+#include "nav_render_surface.h"
+#include "nav_render_texture.h"
 
 void NavRenderViewPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar,
@@ -35,10 +36,17 @@ void NavRenderViewPluginCApiRegisterWithRegistrar(
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context) {
-  nav_render_view_plugin::NavRenderViewPlugin::RegisterWithRegistrar(
+  nav_render_view_plugin::NavRenderSurface::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrar>(registrar),
       id, std::move(viewType), direction, top, left, width, height, params,
       std::move(assetDirectory), engine, addListener, removeListener,
       platform_view_context);
+}
+
+void NavRenderViewPluginTextureCApiRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrar* registrar) {
+  nav_render_view_plugin::NavRenderTexture::RegisterWithRegistrar(
+      flutter::PluginRegistrarManager::GetInstance()
+          ->GetRegistrar<flutter::PluginRegistrar>(registrar));
 }
