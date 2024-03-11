@@ -26,9 +26,3 @@ target_link_libraries(plugin_go_router PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_go_router)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_go_router PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

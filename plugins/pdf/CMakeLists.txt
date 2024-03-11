@@ -47,9 +47,3 @@ target_link_libraries(plugin_pdf PUBLIC
         plugin_common
         pdfium
 )
-
-add_sanitizers(plugin_pdf)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_pdf PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

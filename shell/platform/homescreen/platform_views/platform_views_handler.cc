@@ -21,18 +21,10 @@
 
 #include "plugins/common/common.h"
 
-#if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
 #include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"
-#endif
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
 #include "plugins/layer_playground_view/include/layer_playground_view/layer_playground_view_plugin_c_api.h"
-#endif
-#if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER)
-#include "plugins/webview_flutter/include/webview_flutter/webview_flutter_plugin_c_api.h"
-#endif
-#if defined(ENABLE_PLUGIN_NAV_RENDER_VIEW)
+#include "plugins/webview_flutter_view/include/webview_flutter_view/webview_flutter_view_plugin_c_api.h"
 #include "plugins/nav_render_view/include/nav_render_view/nav_render_view_plugin_c_api.h"
-#endif
 
 static constexpr char kMethodCreate[] = "create";
 static constexpr char kMethodDispose[] = "dispose";
@@ -117,7 +109,7 @@ void PlatformViewsHandler::HandleMethodCall(
     auto registrar =
         FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
 
-#if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER)
+#if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW)
     if (viewType == "plugins.flutter.io/webview") {
       WebviewFlutterPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
@@ -154,11 +146,15 @@ void PlatformViewsHandler::HandleMethodCall(
     } else
 #endif
     {
+      (void)registrar;
       (void)id;
       (void)direction;
+      (void)top;
+      (void)left;
       (void)width;
       (void)height;
       (void)params;
+      spdlog::error("Platform View type not registered: {}", viewType);
       result->NotImplemented();
     }
   } else if (method_name == kMethodDispose) {

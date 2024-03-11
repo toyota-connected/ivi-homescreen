@@ -22,9 +22,3 @@ target_link_libraries(plugin_layer_playground_view PUBLIC
         GLESv2
         EGL
 )
-
-add_sanitizers(plugin_layer_playground_view)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_layer_playground_view PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

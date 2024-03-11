@@ -51,7 +51,7 @@ include(utils)
 include(wayland)
 
 add_subdirectory(third_party)
-include(plugins)
+add_subdirectory(plugins)
 add_subdirectory(shell/platform/homescreen)
 
 #

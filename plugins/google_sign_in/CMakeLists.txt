@@ -27,9 +27,3 @@ target_link_libraries(plugin_google_sign_in PUBLIC
         platform_homescreen
         plugin_common
 )
-
-add_sanitizers(plugin_google_sign_in)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_google_sign_in PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

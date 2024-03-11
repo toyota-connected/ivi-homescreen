@@ -127,13 +127,6 @@ target_link_libraries(plugin_filament_view PUBLIC
         plugin_common
 )
 
-add_sanitizers(plugin_filament_view)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_filament_view PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
-
-
 #
 # Simple Example
 #

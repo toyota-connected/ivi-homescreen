@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "webview_flutter_plugin.h"
+#include "webview_flutter_view_plugin.h"
 
 #include "messages.g.h"
 

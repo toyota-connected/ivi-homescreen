@@ -20,7 +20,7 @@ add_library(plugin_firebase_storage STATIC
         messages.g.cc
 )
 
-target_compile_definitions(plugin_firebase_storage PUBLIC ENABLE_PLUGIN_FIRESTORE_STORAGE)
+target_compile_definitions(plugin_firebase_storage PUBLIC ENABLE_PLUGIN_FIRESTORE_STORAGE GLOBAL)
 
 target_compile_definitions(plugin_firebase_storage PRIVATE
         INTERNAL_EXPERIMENTAL
@@ -38,9 +38,3 @@ target_link_libraries(plugin_firebase_storage PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_firebase_storage)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_firebase_storage PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

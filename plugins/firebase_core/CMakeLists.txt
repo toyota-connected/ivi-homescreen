@@ -33,9 +33,3 @@ target_link_libraries(plugin_firebase_core PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_firebase_core)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_firebase_core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
