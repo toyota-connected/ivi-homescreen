@@ -33,9 +33,3 @@ target_link_libraries(plugin_cloud_firestore PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_cloud_firestore)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_cloud_firestore PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

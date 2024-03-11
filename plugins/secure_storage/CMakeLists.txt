@@ -31,9 +31,3 @@ target_link_libraries(plugin_secure_storage PUBLIC
         platform_homescreen
         PkgConfig::SECRET
 )
-
-add_sanitizers(plugin_secure_storage)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_secure_storage PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

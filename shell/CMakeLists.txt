@@ -1,5 +1,5 @@
 #
-# Copyright 2020 Toyota Connected North America
+# Copyright 2020-2024 Toyota Connected North America
 # @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -58,16 +58,8 @@ if (ENABLE_DLT)
     target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
 
-if (BUILD_PLUGIN_COMP_SURF)
-    target_sources(homescreen PRIVATE view/compositor_surface.cc)
-endif ()
-
 if (BUILD_CRASH_HANDLER)
     target_sources(homescreen PRIVATE crash_handler.cc)
-endif ()
-
-if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
-    # target_sources(homescreen PRIVATE curl_client/curl_client.cc)
 endif ()
 
 target_compile_definitions(homescreen
@@ -97,9 +89,6 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 if (BUILD_BACKEND_HEADLESS)
     target_link_libraries(homescreen PRIVATE PkgConfig::OSMESA)
-endif ()
-if (BUILD_PLUGIN_COMP_SURF)
-    target_link_libraries(homescreen PRIVATE EGL)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(homescreen PRIVATE bluevk)

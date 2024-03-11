@@ -54,7 +54,7 @@ void GoRouterApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             binary_messenger, "flutter/navigation", &GetCodec());
     if (api != nullptr) {
       channel->SetMethodCallHandler(
-          [api](const flutter::MethodCall<rapidjson::Document>& call,
+          [](const flutter::MethodCall<rapidjson::Document>& call,
                 std::unique_ptr<flutter::MethodResult<rapidjson::Document>>
                     result) {
             const auto& method = call.method_name();

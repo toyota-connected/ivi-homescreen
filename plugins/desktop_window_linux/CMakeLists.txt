@@ -26,9 +26,3 @@ target_link_libraries(plugin_desktop_window_linux PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_desktop_window_linux)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_desktop_window_linux PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

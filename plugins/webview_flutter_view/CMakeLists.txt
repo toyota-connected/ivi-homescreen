@@ -15,12 +15,12 @@
 #
 
 add_library(plugin_webview_flutter_view STATIC
-        webview_flutter_plugin_c_api.cc
-        webview_flutter_plugin.cc
+        webview_flutter_view_plugin_c_api.cc
+        webview_flutter_view_plugin.cc
         messages.g.cc
 )
 
-target_compile_definitions(plugin_webview_flutter_view PUBLIC ENABLE_PLUGIN_WEBVIEW_FLUTTER)
+target_compile_definitions(plugin_webview_flutter_view PUBLIC ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW)
 
 target_include_directories(plugin_webview_flutter_view PRIVATE include)
 
@@ -28,9 +28,3 @@ target_link_libraries(plugin_webview_flutter_view PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_webview_flutter_view)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_webview_flutter_view PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

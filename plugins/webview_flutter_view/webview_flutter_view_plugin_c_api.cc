@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include "include/webview_flutter/webview_flutter_plugin_c_api.h"
+#include "include/webview_flutter_view/webview_flutter_view_plugin_c_api.h"
 
 #include "flutter/plugin_registrar.h"
 
-#include "webview_flutter_plugin.h"
+#include "webview_flutter_view_plugin.h"
 
 void WebviewFlutterPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar,

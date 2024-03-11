@@ -39,9 +39,3 @@ target_link_libraries(plugin_firebase_auth PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_firebase_auth)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_firebase_auth PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

@@ -40,9 +40,3 @@ target_link_libraries(plugin_camera PUBLIC
 if (JPEG_FOUND)
     target_compile_definitions(plugin_camera PUBLIC ENABLE_JPEG)
 endif ()
-
-add_sanitizers(plugin_camera)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_camera PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()

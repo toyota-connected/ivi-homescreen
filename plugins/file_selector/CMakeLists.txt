@@ -28,9 +28,3 @@ target_link_libraries(plugin_file_selector PUBLIC
         flutter
         platform_homescreen
 )
-
-add_sanitizers(plugin_file_selector)
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET plugin_file_selector PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
