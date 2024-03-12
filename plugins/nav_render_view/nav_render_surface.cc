@@ -105,6 +105,10 @@ NavRenderSurface::NavRenderSurface(int32_t id,
     }
   }
 
+  if (map_flutter_assets) {
+    asset_path = assetDirectory;
+  }
+
   /* Setup Wayland subsurface */
   display_ = view_->GetDisplay()->GetDisplay();
   egl_display_ = eglGetDisplay(display_);
@@ -138,9 +142,11 @@ NavRenderSurface::NavRenderSurface(int32_t id,
                   LibNavRender->GetInterfaceVersion());
   }
 
-  NavRenderConfig config{};
-  // TODO
-  auto context = LibNavRender->Initialize2(&config);
+  if (interface_version == 2) {
+    NavRenderConfig config{};
+    // TODO
+    auto context = LibNavRender->Initialize2(&config);
+  }
 
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
 

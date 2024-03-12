@@ -28,6 +28,11 @@ FLUTTER_EXPORT FlutterDesktopMessengerRef
 FlutterDesktopPluginRegistrarGetMessenger(
     FlutterDesktopPluginRegistrarRef registrar);
 
+// Returns the flutter asset folder used by the flutter engine.
+//
+FLUTTER_EXPORT const char* FlutterDesktopPluginRegistrarGetFlutterAssetFolder(
+    FlutterDesktopPluginRegistrarRef registrar);
+
 // Returns the texture registrar associated with this registrar.
 FLUTTER_EXPORT FlutterDesktopTextureRegistrarRef
 FlutterDesktopRegistrarGetTextureRegistrar(

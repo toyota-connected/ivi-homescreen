@@ -93,9 +93,12 @@ FlutterView::FlutterView(Configuration::Config config,
   m_state->view_wrapper->view = this;
 
   m_state->engine_state = std::make_unique<FlutterDesktopEngineState>();
-  // is set after engine is initialized
-  // m_state->engine = m_flutter_engine.get();
   m_state->engine_state->view_controller = m_state.get();
+
+  // Set the flutter assets folder
+  std::filesystem::path path = m_config.view.bundle_path;
+  path /= kBundleFlutterAssets;
+  m_state->engine_state->flutter_asset_directory = path.generic_string();
 
   SetUpCommonEngineState(m_state->engine_state.get(), this);
 

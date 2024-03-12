@@ -22,6 +22,9 @@ PluginRegistrar::PluginRegistrar(FlutterDesktopPluginRegistrarRef registrar)
       FlutterDesktopRegistrarGetTextureRegistrar(registrar_);
   texture_registrar_ =
       std::make_unique<TextureRegistrarImpl>(texture_registrar);
+
+  flutter_asset_folder_ =
+      FlutterDesktopPluginRegistrarGetFlutterAssetFolder(registrar_);
 }
 
 PluginRegistrar::~PluginRegistrar() {

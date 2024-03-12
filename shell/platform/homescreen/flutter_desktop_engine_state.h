@@ -74,4 +74,7 @@ struct FlutterDesktopEngineState {
 
   // AOT data for this engine instance, if applicable.
   UniqueAotDataPtr aot_data = nullptr;
+
+  // Flutter Asset Folder
+  std::string flutter_asset_directory;
 };

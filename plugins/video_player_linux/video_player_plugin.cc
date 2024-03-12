@@ -77,12 +77,8 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
     if (asset->c_str()[0] == '/') {
       path /= asset->c_str();
     } else {
-      // TODO get asset folder
-      path /=
-          "/home/joel/test/packages/packages/video_player/video_player_linux/"
-          "example/.desktop-homescreen";
-
-      path /= "data/flutter_assets";
+      path = registrar_->flutter_asset_folder();
+      SPDLOG_DEBUG("path: [{}]", registrar_->flutter_asset_folder());
       path /= asset->c_str();
     }
     if (!exists(path)) {

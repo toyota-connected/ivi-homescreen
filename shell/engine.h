@@ -303,18 +303,6 @@ class Engine {
                                       const std::string& kind) const;
 
   /**
-   * @brief Get asset directory path
-   * @return std::string
-   * @retval Path of the asset directory
-   * @relation
-   * flutter
-   */
-  NODISCARD std::string GetAssetDirectory() const {
-    const std::filesystem::path p = m_assets_path;
-    return absolute(p);
-  }
-
-  /**
    * @brief Get backend of view
    * @return Backend*
    * @retval Backend pointer

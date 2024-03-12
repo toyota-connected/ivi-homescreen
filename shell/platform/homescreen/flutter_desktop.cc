@@ -124,6 +124,11 @@ FlutterDesktopMessengerRef FlutterDesktopPluginRegistrarGetMessenger(
   return registrar->engine->messenger.get();
 }
 
+const char* FlutterDesktopPluginRegistrarGetFlutterAssetFolder(
+    FlutterDesktopPluginRegistrarRef registrar) {
+  return registrar->engine->flutter_asset_directory.c_str();
+}
+
 void FlutterDesktopPluginRegistrarSetDestructionHandler(
     FlutterDesktopPluginRegistrarRef registrar,
     FlutterDesktopOnPluginRegistrarDestroyed callback) {
