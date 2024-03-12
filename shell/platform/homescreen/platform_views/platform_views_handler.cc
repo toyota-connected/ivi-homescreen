@@ -113,7 +113,7 @@ void PlatformViewsHandler::HandleMethodCall(
     if (viewType == "plugins.flutter.io/webview") {
       WebviewFlutterPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          height, params, engine_->flutter_asset_directory,
           engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
@@ -122,7 +122,7 @@ void PlatformViewsHandler::HandleMethodCall(
         if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
       FilamentViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          height, params, engine_->flutter_asset_directory,
           engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
@@ -131,7 +131,7 @@ void PlatformViewsHandler::HandleMethodCall(
         if (viewType == "@views/simple-box-view-type") {
       LayerPlaygroundPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          height, params, engine_->flutter_asset_directory,
           engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
@@ -140,7 +140,7 @@ void PlatformViewsHandler::HandleMethodCall(
         if (viewType == "views/nav-render-view") {
       NavRenderViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->view_controller->engine->GetAssetDirectory(),
+          height, params, engine_->flutter_asset_directory,
           engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else

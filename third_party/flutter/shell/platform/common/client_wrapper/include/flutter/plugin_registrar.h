@@ -46,6 +46,9 @@ class PluginRegistrar {
   // buffer.
   TextureRegistrar* texture_registrar() { return texture_registrar_.get(); }
 
+  // Returns the flutter asset folder.
+  const char* flutter_asset_folder() { return flutter_asset_folder_.c_str(); }
+
   // Takes ownership of |plugin|.
   //
   // Plugins are not required to call this method if they have other lifetime
@@ -71,6 +74,8 @@ class PluginRegistrar {
 
   // Plugins registered for ownership.
   std::set<std::unique_ptr<Plugin>> plugins_;
+
+  std::string flutter_asset_folder_;
 };
 
 // A plugin that can be registered for ownership by a PluginRegistrar.

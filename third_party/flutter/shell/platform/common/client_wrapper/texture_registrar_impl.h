@@ -15,7 +15,7 @@ class TextureRegistrarImpl : public TextureRegistrar {
  public:
   explicit TextureRegistrarImpl(
       FlutterDesktopTextureRegistrarRef texture_registrar_ref);
-  virtual ~TextureRegistrarImpl();
+  ~TextureRegistrarImpl() override;
 
   // Prevent copying.
   TextureRegistrarImpl(TextureRegistrarImpl const&) = delete;
