@@ -26,14 +26,21 @@ constexpr char kNaviRenderSoName[] = "libnav_render.so";
 
 LibNavRenderExports::LibNavRenderExports(void* lib) {
   if (lib != nullptr) {
-    GetFuncAddress(lib, "nav_render_version", &GetInterfaceVersion);
-    GetFuncAddress(lib, "nav_render_initialize", &Initialize);
-    GetFuncAddress(lib, "nav_render_initialize2", &Initialize2);
-    GetFuncAddress(lib, "nav_render_de_initialize", &DeInitialize);
-    GetFuncAddress(lib, "nav_render_run_task", &RunTask);
-    GetFuncAddress(lib, "nav_render_render", &Render);
-    GetFuncAddress(lib, "nav_render_render2", &Render2);
-    GetFuncAddress(lib, "nav_render_resize", &Resize);
+    GetFuncAddress(lib, "nav_render_version", &TextureGetInterfaceVersion);
+    GetFuncAddress(lib, "nav_render_initialize", &TextureInitialize);
+    GetFuncAddress(lib, "nav_render_initialize2", &TextureInitialize2);
+    GetFuncAddress(lib, "nav_render_de_initialize", &TextureDeInitialize);
+    GetFuncAddress(lib, "nav_render_run_task", &TextureRunTask);
+    GetFuncAddress(lib, "nav_render_render", &TextureRender);
+    GetFuncAddress(lib, "nav_render_render2", &TextureRender2);
+    GetFuncAddress(lib, "nav_render_resize", &TextureResize);
+
+    GetFuncAddress(lib, "comp_surf_version", &SurfaceGetInterfaceVersion);
+    GetFuncAddress(lib, "comp_surf_initialize", &SurfaceInitialize);
+    GetFuncAddress(lib, "comp_surf_de_initialize", &SurfaceDeInitialize);
+    GetFuncAddress(lib, "comp_surf_run_task", &SurfaceRunTask);
+    GetFuncAddress(lib, "comp_surf_draw_frame", &SurfaceDrawFrame);
+    GetFuncAddress(lib, "comp_surf_resize", &SurfaceResize);
   }
 }
 
@@ -46,8 +53,8 @@ LibNavRenderExports* LibNavRender::loadExports() {
     void* lib;
 
     if (GetProcAddress(RTLD_DEFAULT,
-                       "nav_render_initialize2"))  // Search the global scope
-                                                   // for pre-loaded library.
+                       "comp_surf_initialize"))  // Search the global scope
+                                                 // for pre-loaded library.
     {
       lib = RTLD_DEFAULT;
     } else {
@@ -57,7 +64,7 @@ LibNavRenderExports* LibNavRender::loadExports() {
     return LibNavRenderExports(lib);
   }();
 
-  return exports.Initialize2 ? &exports : nullptr;
+  return exports.SurfaceInitialize ? &exports : nullptr;
 }
 
 class LibNavRender LibNavRender;

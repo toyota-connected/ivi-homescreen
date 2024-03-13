@@ -12,9 +12,9 @@ void NavRenderTexture::RegisterWithRegistrar(
   if (!LibNavRender::IsPresent()) {
     spdlog::error("[NavRenderViewPlugin] libnav_render.so missing");
   }
-  if (kExpectedRenderApiVersion != LibNavRender->GetInterfaceVersion()) {
+  if (LibNavRender::kExpectedTextureApiVersion != LibNavRender->TextureGetInterfaceVersion()) {
     spdlog::error("[NavRenderViewPlugin] unexpected interface version: {}",
-                  LibNavRender->GetInterfaceVersion());
+                  LibNavRender->TextureGetInterfaceVersion());
   }
 
   auto plugin = std::make_unique<NavRenderTexture>(registrar);
@@ -113,7 +113,7 @@ ErrorOr<flutter::EncodableMap> NavRenderTexture::Create(
   config.pfn_gl_loader = nullptr;
   config.native_window = nullptr;
 
-  auto ctx = LibNavRender->Initialize2(&config);
+  auto ctx = LibNavRender->TextureInitialize2(&config);
 
   return flutter::EncodableMap{};
 }

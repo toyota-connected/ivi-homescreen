@@ -5,10 +5,10 @@
 
 #include "flutter_desktop_engine_state.h"
 #include "flutter_homescreen.h"
+#include "libnav_render.h"
 #include "platform_views/platform_view.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"
-#include "libnav_render.h"
 
 class Display;
 
@@ -53,6 +53,15 @@ class NavRenderSurface : public PlatformView, public flutter::Plugin {
   NavRenderSurface& operator=(const NavRenderSurface&) = delete;
 
  private:
+  struct NATIVE_WINDOW {
+    struct wl_display* wl_display;
+    struct wl_surface* wl_surface;
+    EGLDisplay egl_display;
+    struct wl_egl_window* egl_window;
+    uint32_t width;
+    uint32_t height;
+  };
+
   int32_t id_;
   FlutterView* view_;
   int32_t left_{};
@@ -60,31 +69,26 @@ class NavRenderSurface : public PlatformView, public flutter::Plugin {
   int32_t width_{};
   int32_t height_{};
 
-//  nav_render_Context nav_render_context_;
+  nav_render_Context* context_{};
+  volatile bool dispose_pending_{};
 
+  NATIVE_WINDOW native_window_{};
   wl_display* display_;
   wl_surface* surface_;
+  EGLDisplay egl_display_;
+  wl_egl_window* egl_window_;
+
   wl_surface* parent_surface_;
   wl_callback* callback_;
   wl_subsurface* subsurface_;
-
-  EGLDisplay egl_display_;
-  wl_egl_window* egl_window_;
-  int buffer_size_ = 32;
-  EGLContext egl_context_{};
-  EGLConfig egl_config_{};
-  GLuint programObject_{};
-  EGLSurface egl_surface_{};
 
   void* platformViewsContext_;
   PlatformViewRemoveListener removeListener_;
   const std::string flutterAssetsPath_;
 
-  void InitializeEGL();
+  void DrawFrame();
 
-  void InitializeScene();
-
-  void DrawFrame(uint32_t time) const;
+  void Dispose();
 
   void Resize(int32_t width, int32_t height);
 
