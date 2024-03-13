@@ -16,6 +16,7 @@
 #include "configuration.h"
 
 #include <filesystem>
+#include <sstream>
 #include <fstream>
 
 #include <rapidjson/document.h>
