@@ -1,8 +1,9 @@
-# Navigation Render View Plugin
+# Navigation TextureRender View Plugin
 
 Two modes are supported:
 * AndroidView
   * view name `views/nav-render-view`
+  * view_type
   * Implemented as a Wayland Compositor Sub Surface
   
 * platform channel

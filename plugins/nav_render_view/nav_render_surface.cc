@@ -10,8 +10,6 @@
 
 namespace nav_render_view_plugin {
 
-static constexpr int kExpectedRenderApiVersion = 0x00010002;
-
 // static
 void NavRenderSurface::RegisterWithRegistrar(
     flutter::PluginRegistrar* registrar,
@@ -57,6 +55,8 @@ NavRenderSurface::NavRenderSurface(int32_t id,
                    height),
       id_(id),
       view_(state->view_controller->view),
+      width_(static_cast<int>(width)),
+      height_(static_cast<int>(height)),
       callback_(nullptr),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),
@@ -73,7 +73,6 @@ NavRenderSurface::NavRenderSurface(int32_t id,
   std::string asset_path;
   std::string cache_folder;
   std::string misc_folder;
-  int interface_version = 0;
 
   for (const auto& it : *creationParams) {
     auto key = std::get<std::string>(it.first);
@@ -98,10 +97,6 @@ NavRenderSurface::NavRenderSurface(int32_t id,
       if (std::holds_alternative<std::string>(it.second)) {
         misc_folder = std::get<std::string>(it.second);
       }
-    } else if (key == "intf_ver") {
-      if (std::holds_alternative<int>(it.second)) {
-        interface_version = std::get<int>(it.second);
-      }
     }
   }
 
@@ -109,22 +104,44 @@ NavRenderSurface::NavRenderSurface(int32_t id,
     asset_path = assetDirectory;
   }
 
-  /* Setup Wayland subsurface */
-  display_ = view_->GetDisplay()->GetDisplay();
-  egl_display_ = eglGetDisplay(display_);
-  assert(egl_display_);
+  if (!LibNavRender::IsPresent()) {
+    spdlog::error("[NavRenderViewPlugin] libnav_render.so missing");
+    return;
+  }
+  if (LibNavRender::kExpectedSurfaceApiVersion !=
+      LibNavRender->SurfaceGetInterfaceVersion()) {
+    spdlog::error("[NavRenderViewPlugin] unexpected interface version: {}",
+                  LibNavRender->SurfaceGetInterfaceVersion());
+    return;
+  }
 
+  /// Setup Native Window pointers
+  display_ = view_->GetDisplay()->GetDisplay();
   auto compositor = view_->GetDisplay()->GetCompositor();
   surface_ = wl_compositor_create_surface(compositor);
+
+  egl_display_ = eglGetDisplay(display_);
+  assert(egl_display_);
   egl_window_ = wl_egl_window_create(surface_, width_, height_);
   assert(egl_window_);
 
-  InitializeEGL();
-  egl_surface_ = eglCreateWindowSurface(
-      egl_display_, egl_config_,
-      reinterpret_cast<EGLNativeWindowType>(egl_window_), nullptr);
+  native_window_ = {
+      .wl_display = display_,
+      .wl_surface = surface_,
+      .egl_display = egl_display_,
+      .egl_window = egl_window_,
+      .width = static_cast<uint32_t>(width_),
+      .height = static_cast<uint32_t>(height_),
+  };
 
-  // Subsurface
+  context_ = LibNavRender->SurfaceInitialize(
+      access_token.c_str(), static_cast<int>(width), static_cast<int>(height),
+      &native_window_, asset_path.c_str(), cache_folder.c_str(),
+      misc_folder.c_str());
+  assert(context_);
+  SPDLOG_DEBUG("Context: {}", fmt::ptr(context_));
+
+  // Sub Surface
   auto sub_compositor = view_->GetDisplay()->GetSubCompositor();
   parent_surface_ = view_->GetWindow()->GetBaseSurface();
   subsurface_ = wl_subcompositor_get_subsurface(sub_compositor, surface_,
@@ -132,101 +149,18 @@ NavRenderSurface::NavRenderSurface(int32_t id,
 
   wl_subsurface_set_desync(subsurface_);
 
-  eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
-
-  if (!LibNavRender::IsPresent()) {
-    spdlog::error("[NavRenderViewPlugin] libnav_render.so missing");
-  }
-  if (kExpectedRenderApiVersion != LibNavRender->GetInterfaceVersion()) {
-    spdlog::error("[NavRenderViewPlugin] unexpected interface version: {}",
-                  LibNavRender->GetInterfaceVersion());
-  }
-
-  if (interface_version == 2) {
-    NavRenderConfig config{};
-    // TODO
-    auto context = LibNavRender->Initialize2(&config);
-  }
-
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
-
   SPDLOG_TRACE("--NavRenderSurface::NavRenderSurface");
 }
 
 NavRenderSurface::~NavRenderSurface() {
   SPDLOG_TRACE("++NavRenderSurface::~NavRenderSurface");
-  if (callback_) {
-    wl_callback_destroy(callback_);
-    callback_ = nullptr;
-  }
-
-  if (subsurface_) {
-    wl_subsurface_destroy(subsurface_);
-    subsurface_ = nullptr;
-  }
-
-  if (egl_window_) {
-    wl_egl_window_destroy(egl_window_);
-    egl_window_ = nullptr;
-  }
-
-  if (surface_) {
-    wl_surface_destroy(surface_);
-    surface_ = nullptr;
-  }
-  removeListener_(platformViewsContext_, id_);
   SPDLOG_TRACE("--NavRenderSurface::~NavRenderSurface");
-}
-
-void NavRenderSurface::InitializeEGL() {
-  SPDLOG_TRACE("++NavRenderSurface::InitializeEGL");
-  EGLint major, minor;
-  EGLBoolean ret = eglInitialize(egl_display_, &major, &minor);
-  assert(ret == EGL_TRUE);
-
-  ret = eglBindAPI(EGL_OPENGL_ES_API);
-  assert(ret == EGL_TRUE);
-
-  EGLint count;
-  eglGetConfigs(egl_display_, nullptr, 0, &count);
-  assert(count);
-  SPDLOG_TRACE("[NavRenderView] EGL has {} configs", count);
-
-  auto* configs = static_cast<EGLConfig*>(
-      calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
-  assert(configs);
-
-  EGLint n;
-  ret = eglChooseConfig(egl_display_, kEglConfigAttribs.data(), configs, count,
-                        &n);
-  assert(ret && n >= 1);
-
-  EGLint size;
-  for (EGLint i = 0; i < n; i++) {
-    eglGetConfigAttrib(egl_display_, configs[i], EGL_BUFFER_SIZE, &size);
-    SPDLOG_TRACE("[NavRenderView] Buffer size for config {} is {}", i, size);
-    if (buffer_size_ <= size) {
-      memcpy(&egl_config_, &configs[i], sizeof(EGLConfig));
-      break;
-    }
-  }
-  free(configs);
-  if (egl_config_ == nullptr) {
-    SPDLOG_CRITICAL("[NavRenderView] did not find config with buffer size {}",
-                    buffer_size_);
-    assert(false);
-  }
-
-  egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT,
-                                  kEglContextAttribs.data());
-  assert(egl_context_);
-  SPDLOG_TRACE("[NavRenderView] Context={}", egl_context_);
-  SPDLOG_TRACE("--NavRenderSurface::InitializeEGL");
 }
 
 void NavRenderSurface::on_frame(void* data,
                                 wl_callback* callback,
-                                const uint32_t time) {
+                                const uint32_t /* time */) {
   const auto obj = static_cast<NavRenderSurface*>(data);
 
   obj->callback_ = nullptr;
@@ -235,10 +169,13 @@ void NavRenderSurface::on_frame(void* data,
     wl_callback_destroy(callback);
   }
 
-  obj->DrawFrame(time);
+  obj->DrawFrame();
+
+  if (obj->subsurface_ == nullptr)
+    return;
 
   // Z-Order
-  // wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
+  /// Place below or we miss mouse/touch
   wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
 
   obj->callback_ = wl_surface_frame(obj->surface_);
@@ -259,15 +196,44 @@ void NavRenderSurface::Resize(int32_t width, int32_t height) {
   height_ = height;
 }
 
-void NavRenderSurface::DrawFrame(uint32_t /* time */) const {
-  if (eglGetCurrentContext() != egl_context_) {
-    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+void NavRenderSurface::Dispose() {
+
+  LibNavRender->SurfaceDeInitialize(context_);
+  context_ = nullptr;
+
+  if (callback_) {
+    wl_callback_destroy(callback_);
+    callback_ = nullptr;
   }
 
-  glViewport(0, 0, width_, height_);
+  if (subsurface_) {
+    wl_subsurface_destroy(subsurface_);
+    subsurface_ = nullptr;
+  }
 
-  eglSwapBuffers(egl_display_, egl_surface_);
-  eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  if (egl_window_) {
+    wl_egl_window_destroy(egl_window_);
+    egl_window_ = nullptr;
+  }
+
+  if (surface_) {
+    wl_surface_destroy(surface_);
+    surface_ = nullptr;
+  }
+  removeListener_(platformViewsContext_, id_);
+}
+
+void NavRenderSurface::DrawFrame() {
+  if (!context_)
+    return;
+
+  if (dispose_pending_) {
+    dispose_pending_ = false;
+    Dispose();
+    return;
+  }
+
+  LibNavRender->SurfaceDrawFrame(context_);
 }
 
 void NavRenderSurface::SetOffset(int32_t left, int32_t top) {
@@ -314,11 +280,14 @@ void NavRenderSurface::on_touch(int32_t action,
   if (!data) {
     return;
   }
-  // auto plugin = static_cast<NavRenderSurface*>(data);
+  //auto plugin = static_cast<NavRenderSurface*>(data);
 }
 
 void NavRenderSurface::on_dispose(bool /* hybrid */, void* data) {
-  // LibNavRender->DeInitialize(nav_render_context_);
+  auto obj = static_cast<NavRenderSurface*>(data);
+
+  /// Dispose on the next frame callback
+  obj->dispose_pending_ = true;
 }
 
 const struct platform_view_listener NavRenderSurface::platform_view_listener_ =

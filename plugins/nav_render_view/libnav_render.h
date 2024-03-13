@@ -50,23 +50,40 @@ struct LibNavRenderExports {
   LibNavRenderExports() = default;
   explicit LibNavRenderExports(void* lib);
 
-  uint32_t (*GetInterfaceVersion)() = nullptr;
-  nav_render_Context* (*Initialize)(const char* accessToken,
+  uint32_t (*TextureGetInterfaceVersion)() = nullptr;
+  nav_render_Context* (*TextureInitialize)(const char* accessToken,
                                     int width,
                                     int height,
                                     const char* assetsPath,
                                     const char* cachePath,
                                     const char* miscPath) = nullptr;
-  nav_render_Context* (*Initialize2)(NavRenderConfig* config) = nullptr;
-  void (*DeInitialize)(nav_render_Context* ctx) = nullptr;
-  void (*RunTask)(nav_render_Context* ctx) = nullptr;
-  void (*Render)(nav_render_Context* ctx, uint32_t framebufferId) = nullptr;
-  void (*Render2)(nav_render_Context* ctx) = nullptr;
-  void (*Resize)(nav_render_Context* ctx, int width, int height) = nullptr;
+  nav_render_Context* (*TextureInitialize2)(NavRenderConfig* config) = nullptr;
+  void (*TextureDeInitialize)(nav_render_Context* ctx) = nullptr;
+  void (*TextureRunTask)(nav_render_Context* ctx) = nullptr;
+  void (*TextureRender)(nav_render_Context* ctx, uint32_t framebufferId) = nullptr;
+  void (*TextureRender2)(nav_render_Context* ctx) = nullptr;
+  void (*TextureResize)(nav_render_Context* ctx, int width, int height) = nullptr;
+
+
+  uint32_t (*SurfaceGetInterfaceVersion)() = nullptr;
+  nav_render_Context* (*SurfaceInitialize)(const char* accessToken,
+                                           int width,
+                                           int height,
+                                           const void* nativeWindow,
+                                           const char* assetsPath,
+                                           const char* cachePath,
+                                           const char* miscPath) = nullptr;
+  void (*SurfaceDeInitialize)(nav_render_Context* ctx) = nullptr;
+  void (*SurfaceRunTask)(nav_render_Context* ctx) = nullptr;
+  void (*SurfaceDrawFrame)(nav_render_Context* ctx) = nullptr;
+  void (*SurfaceResize)(nav_render_Context* ctx, int width, int height) = nullptr;
 };
 
 class LibNavRender {
  public:
+  static constexpr uint32_t kExpectedSurfaceApiVersion = 0x00010000;
+  static constexpr uint32_t kExpectedTextureApiVersion = 0x00010002;
+
   static bool IsPresent() { return loadExports() != nullptr; }
 
   LibNavRenderExports* operator->();
