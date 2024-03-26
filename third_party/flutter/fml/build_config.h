@@ -90,6 +90,16 @@
 #define FML_ARCH_CPU_ARM64 1
 #define FML_ARCH_CPU_64_BITS 1
 #define FML_ARCH_CPU_LITTLE_ENDIAN 1
+#elif defined(__riscv)
+#define FML_ARCH_CPU_RISC_FAMILY 1
+#if (__riscv_xlen == 32)
+#define FML_ARCH_CPU_RISCV32 1
+#define FML_ARCH_CPU_32_BITS 1
+#elif (__riscv_xlen == 64)
+#define FML_ARCH_CPU_RISCV64 1
+#define FML_ARCH_CPU_64_BITS 1
+#endif
+#define FML_ARCH_CPU_LITTLE_ENDIAN 1
 #elif defined(__pnacl__)
 #define FML_ARCH_CPU_32_BITS 1
 #define FML_ARCH_CPU_LITTLE_ENDIAN 1
