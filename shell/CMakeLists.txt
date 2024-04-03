@@ -22,7 +22,7 @@ include(FindThreads)
 
 include(wayland)
 
-add_executable(homescreen
+add_executable(${PROJECT_NAME}
         app.cc
         configuration/configuration.cc
         engine.cc
@@ -43,19 +43,19 @@ include(plugins)
 include(textures)
 
 if (ENABLE_DLT)
-    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+    target_sources(${PROJECT_NAME} PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
+    target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan.cc)
 endif ()
 
 if (BUILD_PLUGIN_COMP_SURF)
-    target_sources(homescreen PRIVATE view/compositor_surface.cc)
+    target_sources(${PROJECT_NAME} PRIVATE view/compositor_surface.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_sources(homescreen PRIVATE
+    target_sources(${PROJECT_NAME} PRIVATE
             backend/wayland_egl.cc
             backend/egl.cc
             backend/gl_process_resolver.cc
@@ -63,37 +63,37 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 
 if (BUILD_CRASH_HANDLER)
-    target_sources(homescreen PRIVATE crash_handler.cc)
+    target_sources(${PROJECT_NAME} PRIVATE crash_handler.cc)
 endif ()
 
 if (BUILD_PLUGIN_GOOGLE_SIGN_IN)
-    target_sources(homescreen PRIVATE curl_client/curl_client.cc)
+    target_sources(${PROJECT_NAME} PRIVATE curl_client/curl_client.cc)
 endif ()
 
 if (BUILD_PLUGIN_AUDIO_PLAYERS)
-    target_sources(homescreen PRIVATE plugins/audio_players/audio_player.cc)
-    target_sources(homescreen PRIVATE plugins/audio_players/audio_players_registry.cc)
+    target_sources(${PROJECT_NAME} PRIVATE plugins/audio_players/audio_player.cc)
+    target_sources(${PROJECT_NAME} PRIVATE plugins/audio_players/audio_players_registry.cc)
 endif ()
 
 if (BUILD_PLUGIN_PLATFORM_VIEWS OR BUILD_PLUGIN_LAYER_PLAYGROUND)
-    target_sources(homescreen PRIVATE
+    target_sources(${PROJECT_NAME} PRIVATE
             plugins/platform_views/platform_view.cc
             plugins/platform_views/platform_views_registry.cc
     )
 endif ()
 
 if (BUILD_PLUGIN_FIREBASE_CORE)
-    target_sources(homescreen PRIVATE
+    target_sources(${PROJECT_NAME} PRIVATE
             plugins/firebase_core/firebase_core_plugin.cpp
             plugins/firebase_core/firebase_core_plugin_c_api.cpp
             plugins/firebase_core/firebase_core.cc
     )
-    target_include_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_INCLUDE_DIRS})
-    target_link_directories(homescreen PRIVATE ${FIREBASE_PLUGIN_LIB_DIRS})
-    target_link_libraries(homescreen PRIVATE firebase_app flatbuffers z)
+    target_include_directories(${PROJECT_NAME} PRIVATE ${FIREBASE_PLUGIN_INCLUDE_DIRS})
+    target_link_directories(${PROJECT_NAME} PRIVATE ${FIREBASE_PLUGIN_LIB_DIRS})
+    target_link_libraries(${PROJECT_NAME} PRIVATE firebase_app flatbuffers z)
 endif ()
 
-target_compile_definitions(homescreen
+target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         HAVE_STRCHRNUL
         EGL_NO_X11
@@ -101,6 +101,7 @@ target_compile_definitions(homescreen
         LINUX
         HAVE_MEMFD_CREATE
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
+        EXE_OUTPUT_NAME="${EXE_OUTPUT_NAME}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
         ASIO_STANDALONE
@@ -109,8 +110,11 @@ target_compile_definitions(homescreen
         ASIO_DISABLE_HANDLER_TYPE_REQUIREMENTS
         ASIO_NO_DEPRECATED
 )
+set_target_properties(${PROJECT_NAME}
+        PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
+)
 
-target_include_directories(homescreen
+target_include_directories(${PROJECT_NAME}
         PRIVATE
         ..
         logging
@@ -125,19 +129,19 @@ target_include_directories(homescreen
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_link_libraries(homescreen PRIVATE EGL GLESv2)
+    target_link_libraries(${PROJECT_NAME} PRIVATE EGL GLESv2)
 endif ()
 if (BUILD_PLUGIN_COMP_SURF)
-    target_link_libraries(homescreen PRIVATE EGL)
+    target_link_libraries(${PROJECT_NAME} PRIVATE EGL)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_link_libraries(homescreen PRIVATE bluevk)
+    target_link_libraries(${PROJECT_NAME} PRIVATE bluevk)
 endif ()
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE sentry::sentry PkgConfig::UNWIND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry PkgConfig::UNWIND)
 endif ()
 
-target_link_libraries(homescreen PRIVATE
+target_link_libraries(${PROJECT_NAME} PRIVATE
         flutter
         wayland-gen
         Threads::Threads
@@ -149,19 +153,19 @@ target_link_libraries(homescreen PRIVATE
         ${PLUGIN_SECURE_STORAGE_LINK_LIBRARIES}
 )
 
-target_link_directories(homescreen PRIVATE
+target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}
 )
 
-add_sanitizers(homescreen)
+add_sanitizers(${PROJECT_NAME})
 
 if (IPO_SUPPORT_RESULT)
-    set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(homescreen PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
+    target_compile_options(${PROJECT_NAME} PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+    target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lc -lm -v>)
 endif ()
 
-install(TARGETS homescreen DESTINATION bin)
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)

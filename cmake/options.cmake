@@ -146,3 +146,11 @@ MESSAGE(STATUS "Build Unit Tests ....... ${BUILD_UNIT_TESTS}")
 # Sanitizers
 #
 find_package(Sanitizers)
+
+#
+# Executable Name
+#
+if(NOT EXE_OUTPUT_NAME)
+    set(EXE_OUTPUT_NAME "homescreen")
+endif ()
+add_definitions("-DEXE_OUTPUT_NAME=\"${EXE_OUTPUT_NAME}\"")

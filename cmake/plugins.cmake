@@ -113,7 +113,7 @@ endif ()
 
 option(BUILD_PLUGIN_LAYER_PLAYGROUND "Layer Playground support" OFF)
 if (BUILD_PLUGIN_LAYER_PLAYGROUND)
-    target_compile_definitions(homescreen PRIVATE ENABLE_PLUGIN_LAYER_PLAYGROUND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_PLUGIN_LAYER_PLAYGROUND)
     set(ENABLE_PLUGIN_LAYER_PLAYGROUND ON)
 endif ()
 
