@@ -1,5 +1,6 @@
 # PDF
 
+This plugin is used with the pub.dev package `pdf`
 https://pub.dev/packages/pdf
 
 # PDFium Desktop Build
@@ -12,3 +13,7 @@ add depot_tools to your PATH
     ninja -C out/Release -j `nproc`
     cd out/Release
     export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
+
+## Functional Test Case
+
+https://github.com/DavBfr/dart_pdf/tree/master/demo

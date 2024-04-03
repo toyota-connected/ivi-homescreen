@@ -1,7 +1,6 @@
 # file_selector
 
-Supports Flutter Packages - File Selector
-
+This plugin is used with the pub.dev package `file_selector`
 https://pub.dev/packages/file_selector
 
 ### Notes
@@ -9,6 +8,6 @@ https://pub.dev/packages/file_selector
 * Depends on zenity being present on system
 * mimeTypes is not currently supported
 
-Tested against:
+## Functional Test Case
+
 https://github.com/flutter/packages/tree/main/packages/file_selector/file_selector/example
-commit c9fec61b6cdea5dc912575337e336c86dc32af8c

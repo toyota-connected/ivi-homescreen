@@ -1,6 +1,8 @@
 # URL Launcher
 
-## Generate CPP wrapper
+This plugin is used with the pub.dev package `url_launcher`
+https://pub.dev/packages/url_launcher
 
-    git clone https://github.com/flutter/packages
-    cd packages/url_launcher/url_launcher_linux
+## Functional Test Case
+
+https://github.com/flutter/packages/tree/main/packages/url_launcher/url_launcher/example
