@@ -133,3 +133,11 @@ MESSAGE(STATUS "Generate Golden Images.. ${UNIT_TEST_SAVE_GOLDENS}")
 # Sanitizers
 #
 find_package(Sanitizers)
+
+#
+# Executable Name
+#
+if(NOT EXE_OUTPUT_NAME)
+    set(EXE_OUTPUT_NAME "homescreen")
+endif ()
+add_definitions("-DEXE_OUTPUT_NAME=\"${EXE_OUTPUT_NAME}\"")

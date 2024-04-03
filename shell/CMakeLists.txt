@@ -20,7 +20,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
-add_executable(homescreen
+add_executable(${PROJECT_NAME}
         app.cc
         configuration/configuration.cc
         engine.cc
@@ -33,13 +33,17 @@ add_executable(homescreen
         logging/logging.cc
         task_runner.cc
 )
+set_target_properties(${PROJECT_NAME}
+    PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
+)
+
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_sources(homescreen PRIVATE backend/wayland_vulkan.cc)
+    target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_sources(homescreen PRIVATE
+    target_sources(${PROJECT_NAME} PRIVATE
             backend/wayland_egl.cc
             backend/egl.cc
             backend/gl_process_resolver.cc
@@ -47,7 +51,7 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 
 if (BUILD_BACKEND_HEADLESS)
-    target_sources(homescreen PRIVATE
+    target_sources(${PROJECT_NAME} PRIVATE
             backend/headless.cc
             backend/osmesa.cc
             backend/gl_process_resolver.cc
@@ -55,25 +59,26 @@ if (BUILD_BACKEND_HEADLESS)
 endif ()
 
 if (ENABLE_DLT)
-    target_sources(homescreen PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
+    target_sources(${PROJECT_NAME} PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
 
 if (BUILD_CRASH_HANDLER)
-    target_sources(homescreen PRIVATE crash_handler.cc)
+    target_sources(${PROJECT_NAME} PRIVATE crash_handler.cc)
 endif ()
 
-target_compile_definitions(homescreen
+target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         HAVE_STRCHRNUL
         EGL_NO_X11
         MESA_EGL_NO_X11_HEADERS
         HAVE_MEMFD_CREATE
         PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
+        EXE_OUTPUT_NAME="${EXE_OUTPUT_NAME}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
 )
 
-target_include_directories(homescreen
+target_include_directories(${PROJECT_NAME}
         PRIVATE
         ..
         logging
@@ -85,19 +90,19 @@ target_include_directories(homescreen
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_link_libraries(homescreen PRIVATE EGL GLESv2)
+    target_link_libraries(${PROJECT_NAME} PRIVATE EGL GLESv2)
 endif ()
 if (BUILD_BACKEND_HEADLESS)
-    target_link_libraries(homescreen PRIVATE PkgConfig::OSMESA)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::OSMESA)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_link_libraries(homescreen PRIVATE bluevk)
+    target_link_libraries(${PROJECT_NAME} PRIVATE bluevk)
 endif ()
 if (BUILD_CRASH_HANDLER)
-    target_link_libraries(homescreen PRIVATE sentry::sentry PkgConfig::UNWIND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry PkgConfig::UNWIND)
 endif ()
 
-target_link_libraries(homescreen PRIVATE
+target_link_libraries(${PROJECT_NAME} PRIVATE
         spdlog
         flutter
         wayland-gen
@@ -109,19 +114,19 @@ target_link_libraries(homescreen PRIVATE
         platform_homescreen
 )
 
-target_link_directories(homescreen PRIVATE
+target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}
 )
 
-add_sanitizers(homescreen)
+add_sanitizers(${PROJECT_NAME})
 
 if (IPO_SUPPORT_RESULT)
-    set_property(TARGET homescreen PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(homescreen PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    target_link_options(homescreen PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -l:libc++.a -l:libc++abi.a -static-libgcc -lc -lm -v>)
+    target_compile_options(${PROJECT_NAME} PRIVATE ${CONTEXT_COMPILE_OPTIONS})
+    target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -l:libc++.a -l:libc++abi.a -static-libgcc -lc -lm -v>)
 endif ()
 
-install(TARGETS homescreen DESTINATION bin)
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)
