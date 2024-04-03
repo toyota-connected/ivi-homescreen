@@ -1,6 +1,6 @@
-# webview_flutter
+# webview_flutter [WIP]
 
-Chromium Embedded Framework (CEF)
+Implementation is targeting the Chromium Embedded Framework (CEF)
 
 ## Generate messages.g.h and messages.g.cc
 
