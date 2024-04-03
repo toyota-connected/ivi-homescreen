@@ -1,6 +1,6 @@
 # Google Sign In
 
-This static plugin is to support this pub.dev package:
+This plugin is used with the pub.dev package `google_sign_in`
 https://pub.dev/packages/google_sign_in
 
 # Configuration
@@ -23,6 +23,6 @@ Google Cloud Console https://console.cloud.google.com
    to value of key auth_code in GOOGLE_API_OAUTH2_CLIENT_CREDENTIALS.
 3. Re-Run the project
 
-Tested with Flutter project:
+## Functional Test Case
+
 https://github.com/flutter/packages/tree/main/packages/google_sign_in/google_sign_in/example
-Commit: d92cdf0a63858857452ea945d344a65d7a0029e3
