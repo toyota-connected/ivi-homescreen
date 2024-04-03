@@ -1,4 +1,7 @@
-# Camera Plugin Development
+# Camera Plugin [WIP]
+
+This plugin is used with the pub.dev package `camera`
+https://pub.dev/packages/camera
 
 This file contains the development plan for the Camera Plugin project.
 
@@ -30,11 +33,10 @@ The following aspects are still under development:
 
 ## libcamera logging output
 
-To set logging to show only errors:
+To minimize libcamera logs to only errors use
 
     export LIBCAMERA_LOG_LEVELS=*:ERROR
 
-## Flutter Example
+## Functional Test Case
 
-You can refer to this **[Flutter Example](https://github.com/flutter/packages/tree/main/packages/camera/camera/example)
-** for more detailed usage of camera plugin.
+https://github.com/flutter/packages/tree/main/packages/camera/camera/example
