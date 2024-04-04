@@ -174,18 +174,17 @@ std::future<bool> PostMessengerSendWithReply(
                  }
                }
 
-               const FlutterPlatformMessage platform_message = {
-                   sizeof(FlutterPlatformMessage),
-                   channel,
-                   message,
-                   message_size,
-                   response_handle,
-               };
+               auto platform_message = std::make_unique<FlutterPlatformMessage>();
+               platform_message->struct_size = sizeof(FlutterPlatformMessage);
+               platform_message->channel = channel;
+               platform_message->message = message;
+               platform_message->message_size = message_size;
+               platform_message->response_handle = response_handle;
 
                const FlutterEngineResult message_result =
                    LibFlutterEngine->SendPlatformMessage(
                        messenger->GetEngine()->flutter_engine,
-                       &platform_message);
+                       platform_message.release());
 
                if (response_handle != nullptr) {
                  LibFlutterEngine->PlatformMessageReleaseResponseHandle(
