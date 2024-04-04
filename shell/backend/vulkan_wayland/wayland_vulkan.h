@@ -19,9 +19,9 @@
 #include <cstdint>
 #include <vector>
 
-#include <shell/platform/embedder/embedder.h>
 #include "backend/backend.h"
 #include "bluevk/BlueVK.h"
+#include "third_party/flutter/shell/platform/embedder/embedder.h"
 
 class WaylandVulkanBackend : public Backend {
  public:
