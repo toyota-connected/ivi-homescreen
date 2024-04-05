@@ -110,6 +110,16 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   if (instance_ != nullptr) {
     d.vkDestroyInstance(instance_, nullptr);
   }
+  if (!enabled_instance_extensions_.empty()) {
+    for (auto it : enabled_instance_extensions_) {
+      free((void*)it);
+    }
+  }
+  if (!enabled_layer_extensions_.empty()) {
+    for (auto it : enabled_layer_extensions_) {
+      free((void*)it);
+    }
+  }
 }
 
 void WaylandVulkanBackend::createInstance() {
@@ -121,23 +131,23 @@ void WaylandVulkanBackend::createInstance() {
     if (enable_validation_layers_) {
       if (strcmp(l.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) ==
           0) {
-        enabled_instance_extensions_.push_back(l.extensionName);
+        enabled_instance_extensions_.push_back(strdup(l.extensionName));
       }
       if (strcmp(l.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
         debugUtilsSupported_ = true;
-        enabled_instance_extensions_.push_back(l.extensionName);
+        enabled_instance_extensions_.push_back(strdup(l.extensionName));
       }
       if (strcmp(l.extensionName, VK_EXT_DEBUG_REPORT_EXTENSION_NAME) == 0) {
-        enabled_instance_extensions_.push_back(l.extensionName);
+        enabled_instance_extensions_.push_back(strdup(l.extensionName));
       }
     }
     if (strcmp(l.extensionName, VK_KHR_SURFACE_EXTENSION_NAME) == 0) {
       surfaceSupported_ = true;
-      enabled_instance_extensions_.push_back(l.extensionName);
+      enabled_instance_extensions_.push_back(strdup(l.extensionName));
     }
     if (strcmp(l.extensionName, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME) == 0) {
       waylandSurfaceSupported_ = true;
-      enabled_instance_extensions_.push_back(l.extensionName);
+      enabled_instance_extensions_.push_back(strdup(l.extensionName));
     }
   }
 
