@@ -18,11 +18,13 @@
 #include <utility>
 
 #if defined(BUILD_BACKEND_HEADLESS)
-#include "backend/headless.h"
+#include "backend/headless/headless.h"
+#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+#include "backend/wayland_drm/wayland_drm.h"
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
-#include "backend/wayland_egl.h"
+#include "backend/wayland_egl/wayland_egl.h"
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
-#include "backend/wayland_vulkan.h"
+#include "backend/wayland_vulkan/wayland_vulkan.h"
 #endif
 #include "configuration/configuration.h"
 #include "engine.h"
@@ -65,6 +67,10 @@ FlutterView::FlutterView(Configuration::Config config,
   m_backend = std::make_shared<HeadlessBackend>(
       m_config.view.width, m_config.view.height, m_config.debug_backend,
       kEglBufferSize);
+#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+  m_backend = std::make_shared<WaylandDrmBackend>(
+      display->GetDisplay(), m_config.view.width, m_config.view.height,
+      m_config.debug_backend, kEglBufferSize);
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,

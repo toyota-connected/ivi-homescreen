@@ -39,6 +39,8 @@ class PlatformChannel;
 class WaylandWindow;
 #if defined(BUILD_BACKEND_HEADLESS)
 class HeadlessBackend;
+#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+class WaylandDrmBackend;
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
 class WaylandEglBackend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
@@ -199,6 +201,8 @@ class FlutterView {
  private:
 #if defined(BUILD_BACKEND_HEADLESS)
   std::shared_ptr<HeadlessBackend> m_backend;
+#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+  std::shared_ptr<WaylandDrmBackend> m_backend;
 #elif defined(BUILD_BACKEND_WAYLAND_EGL)
   std::shared_ptr<WaylandEglBackend> m_backend;
 #elif defined(BUILD_BACKEND_WAYLAND_VULKAN)

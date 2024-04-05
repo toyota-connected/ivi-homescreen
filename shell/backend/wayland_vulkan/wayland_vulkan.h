@@ -19,8 +19,15 @@
 #include <cstdint>
 #include <vector>
 
+// Use vulkan.hpp's convenient proc table and resolver.
+#define VULKAN_HPP_NO_EXCEPTIONS 1
+#define VK_USE_PLATFORM_WAYLAND_KHR 1
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+#include "vulkan/vulkan.hpp"
+
+#include <vulkan/vulkan_wayland.h>
+
 #include "backend/backend.h"
-#include "bluevk/BlueVK.h"
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 
 class WaylandVulkanBackend : public Backend {
@@ -43,11 +50,10 @@ class WaylandVulkanBackend : public Backend {
    * @relation
    * wayland
    */
-  MAYBE_UNUSED static void Resize(void* user_data,
-                                  size_t index,
-                                  Engine* engine,
-                                  int32_t width,
-                                  int32_t height);
+  void Resize(size_t index,
+              Engine* engine,
+              int32_t width,
+              int32_t height) override;
 
   /**
    * @brief Create Vulkan surface
@@ -60,11 +66,10 @@ class WaylandVulkanBackend : public Backend {
    * @relation
    * wayland
    */
-  MAYBE_UNUSED static void CreateSurface(void* user_data,
-                                         size_t index,
-                                         wl_surface* surface,
-                                         int32_t width,
-                                         int32_t height);
+  void CreateSurface(size_t index,
+                     wl_surface* surface,
+                     int32_t width,
+                     int32_t height) override;
 
   /**
    * @brief Get FlutterRendererConfig
@@ -84,50 +89,46 @@ class WaylandVulkanBackend : public Backend {
    */
   FlutterCompositor GetCompositorConfig() override;
 
+  bool TextureMakeCurrent() override;
+
+  bool TextureClearCurrent() override;
+
  private:
   static constexpr VkPresentModeKHR kPreferredPresentMode =
       VK_PRESENT_MODE_FIFO_KHR;
 
-  struct {
-    std::vector<const char*> enabled_instance_extensions;
-    std::vector<const char*> enabled_device_extensions;
-    std::vector<const char*> enabled_layer_extensions;
-    VkInstance instance{};
-    VkSurfaceKHR surface{VK_NULL_HANDLE};
+  std::vector<const char*> enabled_instance_extensions_{};
+  std::vector<const char*> enabled_device_extensions_{};
+  std::vector<const char*> enabled_layer_extensions_{};
+  VkInstance instance_{};
+  VkSurfaceKHR surface_{};
 
-    VkPhysicalDevice physical_device{};
-    VkPhysicalDeviceFeatures physical_device_features{};
-    VkPhysicalDeviceMemoryProperties physical_device_memory_properties{};
-    VkDevice device{};
-    uint32_t queue_family_index{};
-    VkQueue queue{};
+  VkPhysicalDevice physical_device_{};
+  VkPhysicalDeviceFeatures physical_device_features_{};
+  VkPhysicalDeviceMemoryProperties physical_device_memory_properties_{};
+  VkDevice device_{};
+  uint32_t queue_family_index_{};
+  VkQueue queue_{};
 
-    bool validationFeaturesSupported = false;
-    bool debugUtilsSupported = false;
-    bool debugReportExtensionSupported = false;
-    bool debugMarkersSupported{false};
-    bool portabilitySubsetSupported{false};
-    bool maintenanceSupported[3]{false};
+  bool debugUtilsSupported_{};
+  bool enable_validation_layers_;
+  bool surfaceSupported_{};
+  bool waylandSurfaceSupported_{};
 
-    VkCommandPool swapchain_command_pool{};
-    std::vector<VkCommandBuffer> present_transition_buffers;
+  VkSurfaceFormatKHR surface_format_{};
+  VkSwapchainKHR swapchain_{};
+  VkCommandPool swapchain_command_pool_{};
+  std::vector<VkImage> swapchain_images_;
+  std::vector<VkCommandBuffer> present_transition_buffers_;
+  VkSemaphore present_transition_semaphore_{};
+  VkFence image_ready_fence_{};
+  uint32_t last_image_index_{};
 
-    VkFence image_ready_fence{};
-    VkSemaphore present_transition_semaphore{};
-
-    VkSurfaceFormatKHR surface_format{};
-    VkSwapchainKHR swapchain{};
-    std::vector<VkImage> swapchain_images;
-    uint32_t last_image_index{};
-
-    bool resize_pending = false;
-  } state_;
+  bool resize_pending_;
 
   struct wl_display* wl_display_;
   uint32_t width_;
   uint32_t height_;
-  bool enable_validation_layers_;
-  bool resize_pending_;
 
   /**
    * @brief Create Vulkan instance
@@ -170,25 +171,6 @@ class WaylandVulkanBackend : public Backend {
    * wayland
    */
   bool InitializeSwapchain();
-
-  /**
-   * @brief Get Vulkan layer properties
-   * @return std::vector<VkLayerProperties>
-   * @retval Vulkan Layer Properties
-   * @relation
-   * wayland
-   */
-  static std::vector<VkLayerProperties> enumerateInstanceLayerProperties();
-
-  /**
-   * @brief Get Vulkan extension properties
-   * @return std::vector<VkExtensionProperties>
-   * @retval Vulkan Extension Properties
-   * @relation
-   * wayland
-   */
-  static std::vector<VkExtensionProperties>
-  enumerateInstanceExtensionProperties();
 
   /**
    * @brief Callback to get the next Vulkan image
