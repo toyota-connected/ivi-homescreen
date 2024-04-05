@@ -28,6 +28,7 @@
 #include <string>
 
 #include "plugins/common/common.h"
+#include "rapidjson/writer.h"
 
 namespace go_router_plugin {
 
@@ -59,37 +60,55 @@ void GoRouterApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                     result) {
             const auto& method = call.method_name();
             const auto args = call.arguments();
+            rapidjson::StringBuffer buffer;
+            buffer.Clear();
+            rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+            args->Accept(writer);
+            spdlog::debug("[go_router] {}", buffer.GetString());
+
             if (method == "selectSingleEntryHistory") {
-              spdlog::debug("selectSingleEntryHistory");
+              spdlog::debug("[go_router] selectSingleEntryHistory");
             } else if (method == "selectMultiEntryHistory") {
-              spdlog::debug("selectMultiEntryHistory");
+              spdlog::debug("[go_router] selectMultiEntryHistory");
             } else if (method == "routeInformationUpdated") {
+              spdlog::debug("[go_router] routeInformationUpdated");
               std::string uri;
               if (args->HasMember("uri") && (*args)["uri"].IsString()) {
                 uri = (*args)["uri"].GetString();
-              }
-              std::string location;
-              if (args->HasMember("location") &&
-                  (*args)["location"].IsString()) {
-                location = (*args)["location"].GetString();
+                spdlog::debug("\turi: {}", uri);
               }
               bool replace{};
               if (args->HasMember("replace") && (*args)["replace"].IsBool()) {
                 replace = (*args)["replace"].GetBool();
+                spdlog::debug("\treplace: {}", replace);
               }
-
-              if (!location.empty()) {
-                spdlog::info(
-                    "[go_router] Route Information Updated"
-                    "\n\tlocation: {} \n\treplace: {}");
-              } else {
-                spdlog::info(
-                    "[go_router] Route Information Updated"
-                    "\n\turi: {} \n\treplace: {}",
-                    uri, replace);
-              }
+              std::string codec;
+              std::string encoded;
               if (args->HasMember("state") && (*args)["state"].IsObject()) {
-                spdlog::info("[go_router] State Object Valid");
+                auto state = (*args)["state"].GetObject();
+
+                std::string location;
+                if (state.HasMember("location") &&
+                    state["location"].IsString()) {
+                  location = state["location"].GetString();
+                  spdlog::debug("\tlocation: {}", location);
+                }
+                if (state.HasMember("state") && state["state"].IsObject()) {
+                  auto state1 = state["state"].GetObject();
+
+                  if (state1.HasMember("codec") && state1["codec"].IsString()) {
+                    codec = state1["codec"].GetString();
+                    spdlog::debug("\tstate::codec: {}", codec);
+                  }
+                  if (state1.HasMember("encoded") &&
+                      state1["encoded"].IsString()) {
+                    encoded = state1["encoded"].GetString();
+                    spdlog::debug("\tstate::encoded: {}", encoded);
+                  }
+                }
+                if (args->HasMember("imperativeMatches") && (*args)["imperativeMatches"].IsArray()) {
+                  auto val = (*args)["imperativeMatches"].GetArray();
+                }
               }
             } else if (method == "SystemNavigator.pop") {
               spdlog::debug("SystemNavigator.pop");
