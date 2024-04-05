@@ -230,8 +230,6 @@ void PlatformViewsHandler::HandleMethodCall(
     }
     result->Success();
   } else if (method_name == kMethodClearFocus) {
-    plugin_common::Encodable::PrintFlutterEncodableValue("clearFocus",
-                                                         *arguments);
     result->Success();
   } else if (method_name == kMethodOffset) {
     int32_t id = 0;
@@ -272,8 +270,6 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
-    plugin_common::Encodable::PrintFlutterEncodableValue("unhandled",
-                                                         *arguments);
     result->NotImplemented();
   }
 }
