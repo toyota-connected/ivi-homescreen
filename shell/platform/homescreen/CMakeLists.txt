@@ -35,7 +35,10 @@ target_compile_definitions(platform_homescreen PUBLIC
 target_link_libraries(platform_homescreen PUBLIC
         asio
         flutter
-        plugins
         spdlog
         wayland-gen
 )
+
+if (NOT DISABLE_PLUGINS)
+    target_link_libraries(platform_homescreen PUBLIC plugins)
+endif ()
