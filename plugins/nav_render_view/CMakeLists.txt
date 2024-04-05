@@ -26,4 +26,5 @@ target_include_directories(plugin_nav_render_view PRIVATE include)
 target_link_libraries(plugin_nav_render_view PUBLIC
         flutter
         platform_homescreen
+        EGL
 )
