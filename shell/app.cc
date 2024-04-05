@@ -23,7 +23,7 @@
 #include "wayland/display.h"
 
 #if defined(BUILD_BACKEND_HEADLESS)
-#include "backend/headless.h"
+#include "backend/headless/headless.h"
 #endif
 
 App::App(const std::vector<Configuration::Config>& configs)
