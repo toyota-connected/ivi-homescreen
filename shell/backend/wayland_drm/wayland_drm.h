@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2024 Toyota Connected North America
+ * Copyright 2021-2022 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,24 +17,20 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
-#include <GL/osmesa.h>
+#include "backend/backend.h"
+#include "third_party/flutter/shell/platform/embedder/embedder.h"
 
-#include "../backend.h"
-#include "constants.h"
-
-#include "osmesa.h"
-
-class Backend;
-
-class Engine;
-
-class HeadlessBackend : public OSMesaHeadless, public Backend {
+class WaylandDrmBackend : public Backend {
  public:
-  HeadlessBackend(uint32_t initial_width,
-                  uint32_t initial_height,
-                  bool debug_backend,
-                  int buffer_size);
+  WaylandDrmBackend(struct wl_display* display,
+                    uint32_t initial_width,
+                    uint32_t initial_height,
+                    bool debug_backend,
+                    int buffer_size);
+
+  ~WaylandDrmBackend() override;
 
   /**
    * @brief Resize Flutter engine Window size
@@ -48,12 +44,12 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * wayland
    */
   void Resize(size_t index,
-              Engine* flutter_engine,
+              Engine* engine,
               int32_t width,
               int32_t height) override;
 
   /**
-   * @brief Create EGL surface
+   * @brief Create Vulkan surface
    * @param[in] user_data Pointer to User data
    * @param[in] index No use
    * @param[in] surface Pointer to surface
@@ -64,13 +60,9 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * wayland
    */
   void CreateSurface(size_t index,
-                     struct wl_surface* surface,
+                     wl_surface* surface,
                      int32_t width,
                      int32_t height) override;
-
-  bool TextureMakeCurrent() override;
-
-  bool TextureClearCurrent() override;
 
   /**
    * @brief Get FlutterRendererConfig
@@ -90,9 +82,11 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    */
   FlutterCompositor GetCompositorConfig() override;
 
-  GLubyte* getHeadlessBuffer();
+  bool TextureMakeCurrent() override;
+
+  bool TextureClearCurrent() override;
 
  private:
-  uint32_t m_prev_width, m_width;
-  uint32_t m_prev_height, m_height;
+  uint32_t m_initial_width;
+  uint32_t m_initial_height;
 };

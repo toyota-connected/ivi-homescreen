@@ -38,22 +38,26 @@ set_target_properties(${PROJECT_NAME}
 )
 
 
+if (BUILD_BACKEND_WAYLAND_DRM)
+    target_sources(${PROJECT_NAME} PRIVATE backend/wayland_drm/wayland_drm.cc)
+endif ()
+
 if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan.cc)
+    target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan/wayland_vulkan.cc)
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
-            backend/wayland_egl.cc
-            backend/egl.cc
+            backend/wayland_egl/wayland_egl.cc
+            backend/wayland_egl/egl.cc
             backend/gl_process_resolver.cc
     )
 endif ()
 
 if (BUILD_BACKEND_HEADLESS)
     target_sources(${PROJECT_NAME} PRIVATE
-            backend/headless.cc
-            backend/osmesa.cc
+            backend/headless/headless.cc
+            backend/headless/osmesa.cc
             backend/gl_process_resolver.cc
     )
 endif ()
@@ -94,9 +98,6 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 if (BUILD_BACKEND_HEADLESS)
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::OSMESA)
-endif ()
-if (BUILD_BACKEND_WAYLAND_VULKAN)
-    target_link_libraries(${PROJECT_NAME} PRIVATE bluevk)
 endif ()
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry PkgConfig::UNWIND)
