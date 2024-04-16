@@ -35,9 +35,9 @@ jobs:
       - name: Wiz IaC Scan
         uses: Innersource/wizcli-wrapper@v1
         with:
-          skip_iac_scan: true
+          skip_iac_scan: "skip"
           docker_scan_filename: "${{ matrix.dockerfile }}"
-          skip_docker_build: true
+          skip_docker_build: "skip"
   wiz-iac-scan-default:
     needs: set-matrix
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
@@ -49,5 +49,5 @@ jobs:
         uses: Innersource/wizcli-wrapper@v1
         with:
           iac_scan_path: "."
-          skip_docker_scan: true
+          skip_docker_scan: "skip"
 
