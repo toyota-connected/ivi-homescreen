@@ -1,4 +1,6 @@
+---
 name: IaC Misconfigurations scan
+
 on: [push]
 
 permissions:
@@ -37,7 +39,6 @@ jobs:
         with:
           skip_iac_scan: "skip"
           docker_scan_filename: "${{ matrix.dockerfile }}"
-          skip_docker_build: "skip"
   wiz-iac-scan-default:
     needs: set-matrix
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
