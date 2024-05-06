@@ -18,6 +18,7 @@
 #define PLUGINS_COMMON_TOOLS_COMMAND_H_
 
 #include <linux/limits.h>
+#include <string>
 
 namespace plugin_common {
 
@@ -29,7 +30,7 @@ class Command {
    * @relation
    * internal
    */
-  static bool Execute(const char* cmd, char (&result)[PATH_MAX]);
+  static bool Execute(const char *cmd, std::string &result);
 };
 
 }  // namespace plugin_common
