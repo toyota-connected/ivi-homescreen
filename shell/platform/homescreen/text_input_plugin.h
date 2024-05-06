@@ -12,6 +12,8 @@
 #include "flutter/shell/platform/common/text_input_model.h"
 #include "shell/platform/homescreen/keyboard_hook_handler.h"
 
+#include "rapidjson/rapidjson.h"
+
 #include "rapidjson/document.h"
 
 namespace flutter {
