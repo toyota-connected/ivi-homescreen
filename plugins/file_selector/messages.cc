@@ -105,7 +105,7 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
 
               SPDLOG_DEBUG("cmd: [{}]", oss.str());
 
-              char path[PATH_MAX];
+              std::string path;
               if (!plugin_common::Command::Execute(oss.str().c_str(), path)) {
                 result->Error("failed", "failed to execute command");
                 return;
@@ -249,7 +249,7 @@ void FileSelectorApi::SetUp(flutter::BinaryMessenger* binary_messenger,
 
               SPDLOG_DEBUG("cmd: [{}]", oss.str());
 
-              char path[PATH_MAX];
+              std::string path;
               if (!plugin_common::Command::Execute(oss.str().c_str(), path)) {
                 result->Error("failed", "failed to execute command");
                 return;
