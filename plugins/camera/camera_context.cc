@@ -202,11 +202,10 @@ std::string CameraContext::Initialize(
 std::optional<std::string> CameraContext::GetFilePathForPicture() {
   std::ostringstream oss;
   oss << "xdg-user-dir PICTURES";
-  char result[PATH_MAX];
-  if (!Command::Execute(oss.str().c_str(), result)) {
+  std::string picture_path;
+  if (!Command::Execute(oss.str().c_str(), picture_path)) {
     return std::nullopt;
   }
-  std::string picture_path = result;
   std::filesystem::path path(StringTools::trim(picture_path, "\n"));
   path /= "PhotoCapture_" + TimeTools::GetCurrentTimeString() + "." +
           kPictureCaptureExtension;
@@ -216,11 +215,10 @@ std::optional<std::string> CameraContext::GetFilePathForPicture() {
 std::optional<std::string> CameraContext::GetFilePathForVideo() {
   std::ostringstream oss;
   oss << "xdg-user-dir VIDEOS";
-  char result[PATH_MAX];
-  if (!Command::Execute(oss.str().c_str(), result)) {
+  std::string video_path;
+  if (!Command::Execute(oss.str().c_str(), video_path)) {
     return std::nullopt;
   }
-  std::string video_path = result;
   std::filesystem::path path(StringTools::trim(video_path, "\n"));
   path /= "VideoCapture_" + TimeTools::GetCurrentTimeString() + "." +
           kVideoCaptureExtension;
