@@ -19,9 +19,9 @@
 #include <filesystem>
 #include <fstream>
 
-#include "flutter/third_party/rapidjson/include/rapidjson/filewritestream.h"
-#include "flutter/third_party/rapidjson/include/rapidjson/istreamwrapper.h"
-#include "flutter/third_party/rapidjson/include/rapidjson/prettywriter.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/istreamwrapper.h"
+#include "rapidjson/prettywriter.h"
 
 #include "../logging.h"
 

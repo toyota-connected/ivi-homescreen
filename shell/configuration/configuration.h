@@ -17,9 +17,13 @@
 #include <string>
 #include <vector>
 
-#include <flutter/fml/command_line.h>
-#include "flutter/fml/macros.h"
+#include "rapidjson/rapidjson.h"
+
 #include "rapidjson/document.h"
+
+#include "flutter/fml/command_line.h"
+#include "flutter/fml/macros.h"
+
 #include "utils.h"
 
 class Configuration {

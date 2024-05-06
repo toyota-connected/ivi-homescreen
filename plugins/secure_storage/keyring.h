@@ -19,8 +19,11 @@
 #include <memory>
 
 #include <libsecret/secret.h>
-#include <rapidjson/document.h>
-#include <rapidjson/writer.h>
+
+#include "rapidjson/rapidjson.h"
+
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
 
 #include "hash_table.h"
 #include "plugins/common/common.h"

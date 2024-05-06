@@ -124,10 +124,9 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
 
 void WaylandVulkanBackend::createInstance() {
   auto instance_extensions = vk::enumerateInstanceExtensionProperties();
-  SPDLOG_DEBUG("Vulkan Instance Extensions:");
+  spdlog::debug("Vulkan Instance Extensions:");
   for (const auto& l : instance_extensions.value) {
-    SPDLOG_DEBUG("\t[{}] {}, specVersion: {}", std::strlen(l.extensionName),
-                 l.extensionName, l.specVersion);
+    spdlog::debug("\t{}, version: {}", l.extensionName.data(), l.specVersion);
     if (enable_validation_layers_) {
       if (strcmp(l.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) ==
           0) {
@@ -184,9 +183,9 @@ void WaylandVulkanBackend::createInstance() {
       "VK_LAYER_KHRONOS_validation";
 
   auto available_layers = vk::enumerateInstanceLayerProperties();
-  SPDLOG_DEBUG("Vulkan Instance Layers:");
+  spdlog::debug("Vulkan Instance Layers:");
   for (const auto& l : available_layers.value) {
-    SPDLOG_DEBUG("\t{} - {}", l.layerName, l.description);
+    spdlog::debug("\t{} - {}", l.layerName.data(), l.description.data());
     if (enable_validation_layers_ &&
         strcmp(l.layerName, VK_LAYER_KHRONOS_VALIDATION_NAME) == 0) {
       enabled_layer_extensions_.push_back(VK_LAYER_KHRONOS_VALIDATION_NAME);
