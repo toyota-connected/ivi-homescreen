@@ -16,10 +16,9 @@
 #include "configuration.h"
 
 #include <filesystem>
-#include <sstream>
 #include <fstream>
+#include <sstream>
 
-#include <rapidjson/document.h>
 #include "constants.h"
 #include "utils.h"
 
@@ -91,8 +90,7 @@ void Configuration::getViewParameters(
   }
 
   if (obj.HasMember(kWindowActivationAreaKey)) {
-    const rapidjson::GenericValue val =
-        obj[kWindowActivationAreaKey].GetObject();
+    const auto val = obj[kWindowActivationAreaKey].GetObject();
 
     instance.view.activation_area_x = static_cast<uint32_t>(val["x"].GetInt());
     instance.view.activation_area_y = static_cast<uint32_t>(val["y"].GetInt());

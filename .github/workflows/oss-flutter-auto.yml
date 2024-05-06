@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
         with:
-          ref: agl
+          submodules: 'true'
 
       - name: Install packages
         run: |
@@ -38,6 +38,7 @@ jobs:
           mkdir -p ${{github.workspace}}/build/release-egl
           cmake \
             -B ${{github.workspace}}/build/release-egl \
+            -D EXE_OUTPUT_NAME=flutter-auto \
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
@@ -46,6 +47,7 @@ jobs:
           mkdir -p ${{github.workspace}}/build/debug-egl
           cmake \
             -B ${{github.workspace}}/build/debug-egl \
+            -D EXE_OUTPUT_NAME=flutter-auto \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-egl/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
@@ -115,7 +117,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
         with:
-          ref: agl
+          submodules: 'true'
 
       - name: Install packages
         run: |
@@ -131,19 +133,23 @@ jobs:
           mkdir -p ${{github.workspace}}/build/release-vulkan
           cmake \
             -B ${{github.workspace}}/build/release-vulkan \
+            -D EXE_OUTPUT_NAME=flutter-auto \
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-release/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
+            -D BUILD_BACKEND_WAYLAND_VULKAN=ON \
             -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON
           mkdir -p ${{github.workspace}}/build/debug
           cmake \
             -B ${{github.workspace}}/build/debug-vulkan \
+            -D EXE_OUTPUT_NAME=flutter-auto \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-debug/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
+            -D BUILD_BACKEND_WAYLAND_VULKAN=ON \
             -D BUILD_PLUGIN_COMP_SURF=ON \
             -D BUILD_PLUGIN_SECURE_STORAGE=ON \
             -D CMAKE_VERBOSE_MAKEFILE=ON

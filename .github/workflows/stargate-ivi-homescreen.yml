@@ -25,6 +25,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
       - name: JFrog CLI
         run: |
@@ -40,8 +42,6 @@ jobs:
       - name: Configure CMake
         working-directory: ${{github.workspace}}
         run: |
-          export CC=/usr/lib/llvm-12/bin/clang
-          export CXX=/usr/lib/llvm-12/bin/clang++
           mkdir -p build/release
           cmake \
             -B build/release \

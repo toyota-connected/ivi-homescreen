@@ -7,6 +7,8 @@
 
 #include <memory>
 
+#include "rapidjson/rapidjson.h"
+
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/basic_message_channel.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/binary_messenger.h"
 #include "rapidjson/document.h"

@@ -17,6 +17,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
       - name: find-docker-files
         id: set-matrix
         run: |
@@ -33,6 +36,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
       - name: Wiz IaC Scan
         uses: Innersource/wizcli-wrapper@v1
@@ -45,6 +50,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
       - name: Wiz IaC Scan
         uses: Innersource/wizcli-wrapper@v1
