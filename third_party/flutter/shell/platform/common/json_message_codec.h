@@ -5,7 +5,9 @@
 #ifndef FLUTTER_SHELL_PLATFORM_COMMON_JSON_MESSAGE_CODEC_H_
 #define FLUTTER_SHELL_PLATFORM_COMMON_JSON_MESSAGE_CODEC_H_
 
-#include <rapidjson/document.h>
+#include "rapidjson/rapidjson.h"
+
+#include "rapidjson/document.h"
 
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/message_codec.h"
 

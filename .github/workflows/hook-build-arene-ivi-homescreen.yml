@@ -43,6 +43,7 @@ jobs:
       - name: Checkout repository of arene-ivi-misc-integ-integrator
         uses: actions/checkout@v3.0.2
         with:
+          submodules: 'true'
           repository: arene-os-services-cockpit-tmc-wa/arene-ivi-misc-integ-integrator
           path: workdir/arene-ivi-misc-integ-integrator
           token: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}

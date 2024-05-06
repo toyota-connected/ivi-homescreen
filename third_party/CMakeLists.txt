@@ -2,18 +2,32 @@
 #
 # ASIO
 #
-add_subdirectory(asio-1-28-1)
+add_library(asio INTERFACE)
+target_include_directories(asio INTERFACE asio/asio/include)
+target_compile_definitions(asio INTERFACE
+        ASIO_STANDALONE
+        ASIO_HEADER_ONLY
+        ASIO_NO_TYPEID
+        ASIO_DISABLE_HANDLER_TYPE_REQUIREMENTS
+        ASIO_NO_DEPRECATED
+)
 
 #
 # Speedlog
 #
 set(SPDLOG_NO_EXCEPTIONS ON)
 set(SPDLOG_NO_THREAD_ID ON)
-# set(SPDLOG_BUILD_PIC ON)
+set(SPDLOG_BUILD_PIC ON)
 set(SPDLOG_SANITIZE_ADDRESS ${SANITIZE_ADDRESS})
 add_library(spdlog INTERFACE)
-target_include_directories(spdlog INTERFACE spdlog-1.12.0/include)
-#add_subdirectory(spdlog-1.12.0)
+target_include_directories(spdlog INTERFACE spdlog/include)
+
+#
+# RapidJson
+#
+add_library(rapidjson INTERFACE)
+target_compile_definitions(rapidjson INTERFACE -DRAPIDJSON_HAS_STDSTRING)
+target_include_directories(rapidjson INTERFACE rapidjson/include)
 
 #
 # Flutter Common library
@@ -61,7 +75,10 @@ target_include_directories(flutter PUBLIC
         flutter/shell/platform/common/client_wrapper/include/flutter
 )
 
-target_link_libraries(flutter PUBLIC spdlog)
+target_link_libraries(flutter PUBLIC
+        rapidjson
+        spdlog
+)
 
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET flutter PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

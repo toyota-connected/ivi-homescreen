@@ -16,13 +16,16 @@
 
 #pragma once
 
+#include <string>
+
 #include <binary_messenger.h>
 #include <method_call.h>
 #include <method_channel.h>
 #include <method_result.h>
-#include <rapidjson/document.h>
 
-#include <string>
+#include "rapidjson/rapidjson.h"
+
+#include "rapidjson/document.h"
 
 class FlutterView;
 

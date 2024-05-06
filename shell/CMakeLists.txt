@@ -90,7 +90,6 @@ target_include_directories(${PROJECT_NAME}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}
         ${AVFORMAT_INCLUDE_DIRS}
-        ../third_party/asio-1-28-1/asio/include
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
@@ -104,10 +103,11 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-        spdlog
+        asio
         flutter
-        wayland-gen
+        spdlog
         Threads::Threads
+        wayland-gen
         dl
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}

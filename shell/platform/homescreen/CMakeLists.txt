@@ -35,6 +35,7 @@ target_compile_definitions(platform_homescreen PUBLIC
 target_link_libraries(platform_homescreen PUBLIC
         asio
         flutter
+        rapidjson
         spdlog
         wayland-gen
 )

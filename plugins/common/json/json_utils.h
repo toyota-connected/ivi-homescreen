@@ -17,7 +17,9 @@
 #ifndef PLUGINS_COMMON_JSON_JSON_UTILS_H_
 #define PLUGINS_COMMON_JSON_JSON_UTILS_H_
 
-#include "flutter/third_party/rapidjson/include/rapidjson/document.h"
+#include "rapidjson/rapidjson.h"
+
+#include "rapidjson/document.h"
 
 namespace plugin_common {
 
