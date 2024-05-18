@@ -1,9 +1,5 @@
 
-pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
-pkg_check_modules(GLIB IMPORTED_TARGET REQUIRED glib-2.0)
-
 add_library(plugin_common STATIC
-        curl_client/curl_client.cc
         json/json_utils.cc
         glib/main_loop.cc
         time/time_tools.cc
@@ -11,17 +7,31 @@ add_library(plugin_common STATIC
         tools/encodable.cc
         tools/command.cc
 )
-
 target_include_directories(plugin_common PRIVATE .)
-
-target_link_libraries(plugin_common PUBLIC
-        flutter
-        PkgConfig::CURL
-        PkgConfig::GLIB
-)
-
+target_link_libraries(plugin_common PUBLIC flutter)
 add_sanitizers(plugin_common)
-
 if (IPO_SUPPORT_RESULT)
     set_property(TARGET plugin_common PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
+
+pkg_check_modules(CURL IMPORTED_TARGET libcurl)
+if (CURL_FOUND)
+    add_library(plugin_common_curl STATIC curl_client/curl_client.cc)
+    target_include_directories(plugin_common_curl PRIVATE .)
+    target_link_libraries(plugin_common_curl PUBLIC PkgConfig::CURL)
+    add_sanitizers(plugin_common_curl)
+    if (IPO_SUPPORT_RESULT)
+        set_property(TARGET plugin_common_curl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif ()
+endif ()
+
+pkg_check_modules(GLIB IMPORTED_TARGET glib-2.0)
+if (GLIB_FOUND)
+    add_library(plugin_common_glib STATIC glib/main_loop.cc)
+    target_include_directories(plugin_common_glib PRIVATE .)
+    target_link_libraries(plugin_common_glib PUBLIC PkgConfig::GLIB)
+    add_sanitizers(plugin_common_glib)
+    if (IPO_SUPPORT_RESULT)
+        set_property(TARGET plugin_common_glib PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif ()
 endif ()

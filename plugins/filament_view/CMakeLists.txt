@@ -125,6 +125,7 @@ target_link_libraries(plugin_filament_view PUBLIC
         flutter
         platform_homescreen
         plugin_common
+        plugin_common_curl
 )
 
 #
