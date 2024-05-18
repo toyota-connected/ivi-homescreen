@@ -26,4 +26,5 @@ target_link_libraries(plugin_google_sign_in PUBLIC
         flutter
         platform_homescreen
         plugin_common
+        plugin_common_curl
 )
