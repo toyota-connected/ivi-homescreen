@@ -36,4 +36,4 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen flutter PkgConfig::GST)
+target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen plugin_common_glib flutter PkgConfig::GST)
