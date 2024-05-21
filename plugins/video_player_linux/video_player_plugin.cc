@@ -48,7 +48,7 @@ VideoPlayerPlugin::VideoPlayerPlugin(flutter::PluginRegistrarDesktop* registrar)
   gst_init(nullptr, nullptr);
 
   // start the main loop if not already running
-  plugin_common::glib::MainLoop::GetInstance();
+  plugin_common_glib::MainLoop::GetInstance();
 
   // supress libavformat logging
   av_log_set_callback([](void* /* avcl */, int /* level */,
