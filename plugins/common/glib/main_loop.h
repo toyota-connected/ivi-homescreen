@@ -21,10 +21,10 @@
 #include <thread>
 
 extern "C" {
-#include <glib.h>
-}
+#include <glib-2.0/glib.h>
+};
 
-namespace plugin_common::glib {
+namespace plugin_common_glib {
 
 class MainLoop {
  public:
@@ -54,6 +54,6 @@ class MainLoop {
   static void main_loop(MainLoop* data);
 };
 
-}  // namespace plugin_common::glib
+}  // namespace plugin_common_glib
 
 #endif  // PLUGINS_COMMON_GLIB_MAIN_LOOP_H_

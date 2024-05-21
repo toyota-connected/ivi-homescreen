@@ -52,7 +52,7 @@ AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(
   gst_init(nullptr, nullptr);
 
   // start the main loop if not already running
-  plugin_common::glib::MainLoop::GetInstance();
+  plugin_common_glib::MainLoop::GetInstance();
 }
 
 AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() = default;

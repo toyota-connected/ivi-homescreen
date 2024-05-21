@@ -31,9 +31,9 @@ target_compile_features(${PLUGIN_NAME} PRIVATE cxx_std_17)
 
 # System-level dependencies.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0>=1.4 glib-2.0 gstreamer-video-1.0 libavformat libavutil)
+pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0>=1.4 gstreamer-video-1.0 libavformat libavutil)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen plugin_common_glib flutter PkgConfig::GST)
+target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen flutter PkgConfig::GST plugin_common_glib)
