@@ -62,7 +62,7 @@ add_library(plugins INTERFACE)
 
 # Plugins
 
-ENABLE_PLUGIN(common)
+add_subdirectory(common)
 
 PLUGIN_OPTION(audioplayers_linux "Include Audioplayers Linux plugin" OFF)
 

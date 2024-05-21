@@ -17,13 +17,16 @@
 #ifndef PLUGINS_COMMON_CURL_CLIENT_CURL_CLIENT_H_
 #define PLUGINS_COMMON_CURL_CLIENT_CURL_CLIENT_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <sstream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <curl/curl.h>
 
-namespace plugin_common {
+namespace plugin_common_curl {
 
 class CurlClient {
  public:
@@ -75,6 +78,10 @@ class CurlClient {
    */
   [[nodiscard]] CURLcode GetCode() const { return mCode; }
 
+  // Prevent copying.
+  CurlClient(CurlClient const&) = delete;
+  CurlClient& operator=(CurlClient const&) = delete;
+
  private:
   CURL* mConn{};
   CURLcode mCode;
@@ -116,6 +123,6 @@ class CurlClient {
                           size_t num_mem_block,
                           std::vector<uint8_t>* writerData);
 };
-}  // namespace plugin_common
+}  // namespace plugin_common_curl
 
 #endif  // PLUGINS_COMMON_CURL_CLIENT_CURL_CLIENT_H_

@@ -16,9 +16,18 @@
 
 #include "curl_client.h"
 
-#include "../logging.h"
+#include <curl/curl.h>
+#include <curl/easy.h>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+#include <string>
 
-namespace plugin_common {
+#include "../common/logging.h"
+
+namespace plugin_common_curl {
 
 CurlClient::CurlClient() : mCode(CURLE_OK) {
   curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -80,7 +89,7 @@ bool CurlClient::Init(
   if (!url_form.empty()) {
     mPostFields.clear();
     int count = 0;
-    for (auto& item : url_form) {
+    for (const auto& item : url_form) {
       if (count) {
         mPostFields += "&";
       }
@@ -95,7 +104,7 @@ bool CurlClient::Init(
 
   if (!headers.empty()) {
     struct curl_slist* curl_headers{};
-    for (auto& header : headers) {
+    for (const auto& header : headers) {
       spdlog::trace("[CurlClient] Header: {}", header);
       curl_headers = curl_slist_append(curl_headers, header.c_str());
     }
@@ -185,4 +194,4 @@ const std::vector<uint8_t>& CurlClient::RetrieveContentAsVector(bool verbose) {
   }
   return mVectorBuffer;
 }
-}  // namespace plugin_common
+}  // namespace plugin_common_curl

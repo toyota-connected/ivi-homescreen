@@ -1,7 +1,6 @@
 
 add_library(plugin_common STATIC
         json/json_utils.cc
-        glib/main_loop.cc
         time/time_tools.cc
         string/string_tools.cc
         tools/encodable.cc
@@ -18,7 +17,7 @@ pkg_check_modules(CURL IMPORTED_TARGET libcurl)
 if (CURL_FOUND)
     add_library(plugin_common_curl STATIC curl_client/curl_client.cc)
     target_include_directories(plugin_common_curl PRIVATE .)
-    target_link_libraries(plugin_common_curl PUBLIC PkgConfig::CURL)
+    target_link_libraries(plugin_common_curl PUBLIC PkgConfig::CURL spdlog)
     add_sanitizers(plugin_common_curl)
     if (IPO_SUPPORT_RESULT)
         set_property(TARGET plugin_common_curl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
