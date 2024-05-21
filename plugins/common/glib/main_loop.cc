@@ -16,11 +16,11 @@
 
 #include "main_loop.h"
 
-namespace plugin_common::glib {
 
-MainLoop::MainLoop() {
-  gthread_ = std::make_unique<std::thread>(main_loop, this);
-}
+namespace plugin_common_glib {
+
+MainLoop::MainLoop()
+    : gthread_(std::make_unique<std::thread>(main_loop, this)) {}
 
 MainLoop::~MainLoop() = default;
 
@@ -45,4 +45,4 @@ void MainLoop::main_loop(MainLoop* data) {
   g_main_loop_unref(data->main_loop_);
 }
 
-}  // namespace plugin_common::glib
+}  // namespace plugin_common_glib
