@@ -1,5 +1,7 @@
 
 add_library(plugin_common STATIC
+        ${PROJECT_BINARY_DIR}/config.h
+        curl_client/curl_client.cc
         json/json_utils.cc
         time/time_tools.cc
         string/string_tools.cc

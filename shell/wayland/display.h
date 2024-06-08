@@ -30,21 +30,21 @@
 #include <cassert>
 
 #include "configuration/configuration.h"
-#include "constants.h"
+#include "config.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
 #include "timer.h"
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
 #include "agl-shell-client-protocol.h"
 #endif
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
 #include "ivi-application-client-protocol.h"
 #include "ivi-wm-client-protocol.h"
 #endif
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
 #include "xdg-shell-client-protocol.h"
 #endif
 
@@ -110,7 +110,7 @@ class Display {
    * @relation
    * wayland
    */
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
   NODISCARD xdg_wm_base* GetXdgWmBase() const {
     assert(m_xdg_wm_base);
     return m_xdg_wm_base;
@@ -124,7 +124,7 @@ class Display {
    * @relation
    * ivi-shell
    */
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
   NODISCARD ivi_application* GetIviApplication() const {
     return m_ivi_shell.application;
   }
@@ -151,7 +151,7 @@ class Display {
    */
   NODISCARD int PollEvents() const;
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
   /**
    * @brief AglShell: Do background
    * @param[in] surface Image

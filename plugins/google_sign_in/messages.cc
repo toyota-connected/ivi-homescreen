@@ -80,8 +80,8 @@ void GoogleSignInApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             if (method == kMethodInit) {
               SPDLOG_DEBUG("[google_sign_in] <init>");
 
-              const auto args = std::get_if<EncodableMap>(*call.arguments());
-              if (args->IsNull()) {
+              const auto args = std::get<EncodableMap>(*call.arguments());
+              if (args.empty()) {
                 result->Error("invalid_arguments", "");
                 return;
               }
@@ -93,7 +93,7 @@ void GoogleSignInApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               std::string serverClientId;
               bool forceCodeForRefreshToken{};
 
-              for (auto& it : *args) {
+              for (auto& it : args) {
                 const auto key = std::get<std::string>(it.first);
                 if (key == kMethodArgSignInOption && !it.second.IsNull()) {
                   signInOption.assign(std::get<std::string>(it.second));
@@ -132,14 +132,14 @@ void GoogleSignInApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               result->Success(api->GetUserData());
             } else if (method == kMethodGetTokens) {
               SPDLOG_DEBUG("[google_sign_in] <getTokens>");
-              const auto args = std::get_if<EncodableMap>(*call.arguments());
-              if (args->IsNull()) {
+              const auto args = std::get<EncodableMap>(*call.arguments());
+              if (args.empty()) {
                 result->Error("invalid_arguments", "");
                 return;
               }
               std::string email;
               bool shouldRecoverAuth{};
-              for (auto& it : *args) {
+              for (auto& it : args) {
                 const auto key = std::get<std::string>(it.first);
                 if (key == kMethodResponseKeyEmail && !it.second.IsNull()) {
                   email.assign(std::get<std::string>(it.second));

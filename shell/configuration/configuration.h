@@ -93,9 +93,8 @@ class Configuration {
 
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
 
-  PRIVATE :
-
-      static constexpr char kViewKey[] = "view";
+ private:
+  static constexpr char kViewKey[] = "view";
   static constexpr char kBundlePathKey[] = "bundle_path";
   static constexpr char kWindowTypeKey[] = "window_type";
   static constexpr char kOutputIndex[] = "output_index";

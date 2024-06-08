@@ -17,9 +17,13 @@
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+include_directories(${PROJECT_BINARY_DIR})
+
 macro(ENABLE_PLUGIN plugin)
 
     string(TOUPPER ${plugin} ucase_plugin)
+
+    set(ENABLE_PLUGIN_${ucase_plugin} ON)
 
     if (${plugin} MATCHES ".*_view")
         message(STATUS "View: ${plugin}")
@@ -51,6 +55,8 @@ macro(PLUGIN_OPTION plugin description default)
     string(TOUPPER ${plugin} ucase_plugin)
 
     option(BUILD_PLUGIN_${ucase_plugin} ${description} ${default})
+
+    set(ENABLE_PLUGIN_${ucase_plugin} OFF)
     if (BUILD_PLUGIN_${ucase_plugin})
         ENABLE_PLUGIN(${plugin})
     endif ()
@@ -108,4 +114,10 @@ PLUGIN_OPTION(layer_playground_view "Include Layer Playground View plugin" OFF)
 
 PLUGIN_OPTION(nav_render_view "Include Navigation Render View plugin" OFF)
 
-PLUGIN_OPTION(webview_flutter_view "Includes WebView Flutter View Plugin" OFF)
+PLUGIN_OPTION(webview_flutter_view "Includes WebView View Plugin" OFF)
+
+
+#
+# Configuration File
+#
+configure_file(plugins_config.h.in ${PROJECT_BINARY_DIR}/plugins_config.h)

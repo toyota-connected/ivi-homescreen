@@ -60,7 +60,7 @@ WaylandWindow::WaylandWindow(size_t index,
   wl_callback_add_listener(m_base_frame_callback,
                            &m_base_surface_frame_listener, this);
 
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
   auto ivi_application = m_display->GetIviApplication();
   if (ivi_application) {
     if (m_ivi_surface_id == 0) {
@@ -98,7 +98,7 @@ WaylandWindow::WaylandWindow(size_t index,
 
   wl_surface_commit(m_base_surface);
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
   switch (m_type) {
     case WINDOW_NORMAL:
       break;
@@ -153,12 +153,12 @@ WaylandWindow::~WaylandWindow() {
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
 
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
   if (m_ivi_surface)
     ivi_surface_destroy(m_ivi_surface);
 #endif
 
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
   if (m_xdg_surface)
     xdg_surface_destroy(m_xdg_surface);
 
@@ -196,7 +196,7 @@ const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
     .leave = handle_base_surface_leave,
 };
 
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
 void WaylandWindow::handle_xdg_surface_configure(
     void* data,
     struct xdg_surface* xdg_surface,
@@ -210,7 +210,7 @@ const struct xdg_surface_listener WaylandWindow::xdg_surface_listener = {
     .configure = handle_xdg_surface_configure};
 #endif
 
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
 void WaylandWindow::handle_ivi_surface_configure(
     void* data,
     struct ivi_surface* /* ivi_surface */,
@@ -243,7 +243,7 @@ const struct ivi_surface_listener WaylandWindow::ivi_surface_listener = {
     .configure = handle_ivi_surface_configure};
 #endif
 
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
 void WaylandWindow::handle_toplevel_configure(
     void* data,
     struct xdg_toplevel* /* toplevel */,

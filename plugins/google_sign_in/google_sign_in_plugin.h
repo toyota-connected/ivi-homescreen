@@ -178,7 +178,7 @@ class GoogleSignInPlugin final : public flutter::Plugin,
    * google_sign_in
    */
   flutter::EncodableValue GetTokens(const std::string& email,
-                                    bool shouldRecoverAuth);
+                                    bool shouldRecoverAuth) override;
 
   // Disallow copy and assign.
   GoogleSignInPlugin(const GoogleSignInPlugin&) = delete;

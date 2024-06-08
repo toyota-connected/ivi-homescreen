@@ -29,8 +29,6 @@ add_library(plugin_pdf STATIC
         messages.cc
 )
 
-target_compile_definitions(plugin_pdf PUBLIC ENABLE_PLUGIN_PDF)
-
 target_include_directories(plugin_pdf PRIVATE
         include
         ${PDFIUM_INCLUDE_DIR}

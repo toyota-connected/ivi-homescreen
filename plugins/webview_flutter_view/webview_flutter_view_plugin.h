@@ -217,9 +217,9 @@ class WebviewFlutterPlugin final : public flutter::Plugin,
   WebviewFlutterPlugin& operator=(const WebviewFlutterPlugin&) = delete;
 
  private:
-  int32_t id_;
+  MAYBE_UNUSED int32_t id_;
   void* platformViewsContext_;
-  PlatformViewRemoveListener removeListener_;
+  MAYBE_UNUSED PlatformViewRemoveListener removeListener_;
   const std::string flutterAssetsPath_;
 
   wl_display* display_;

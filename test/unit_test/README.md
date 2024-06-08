@@ -32,7 +32,7 @@ build$ firefox lcovHtml/index.html
 
 # Writing tests
 ## Headless Backend
-Testing requires BUILD_BACKEND_HEADLESS compile option, which uses OSMesa to render to an offscren buffer.  This buffer can then be written to a file for comparison to a known-good result.
+Testing requires BUILD_BACKEND_HEADLESS_EGL compile option, which uses OSMesa to render to an offscreen buffer.  This buffer can then be written to a file for comparison to a known-good result.
 
 ## Flutter App 
 For unit tests that generate/compare images, a flutter app bundle must be provided via the UNIT_TEST_APP_BUNDLE option.  
