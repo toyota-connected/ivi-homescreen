@@ -21,8 +21,9 @@
 
 #include <wayland-egl.h>
 
+#include "config.h"
+
 #include "backend/backend.h"
-#include "constants.h"
 #include "egl.h"
 
 class Backend;

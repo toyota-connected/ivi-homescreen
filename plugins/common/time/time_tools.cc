@@ -16,19 +16,19 @@
 
 #include "time_tools.h"
 
-#include <ctime>
 #include <chrono>
+#include <ctime>
 
-namespace plugin_common {
+namespace plugin_common::TimeTools {
 
-int64_t TimeTools::GetEpochTimeInSeconds() {
+int64_t GetEpochTimeInSeconds() {
   const auto now = std::chrono::system_clock::now();
   const auto epoch = now.time_since_epoch();
   const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch);
   return seconds.count();
 }
 
-std::string TimeTools::GetCurrentTimeString() {
+std::string GetCurrentTimeString() {
   std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
   auto duration = now.time_since_epoch();
   auto millis =
@@ -49,4 +49,4 @@ std::string TimeTools::GetCurrentTimeString() {
   return time_start + std::to_string(millis);
 }
 
-}  // namespace plugin_common
+}  // namespace plugin_common::TimeTools

@@ -15,14 +15,14 @@
 
 #include "app.h"
 
-#include <sstream>
 #include <thread>
 
-#include "constants.h"
+#include "config.h"
+
 #include "view/flutter_view.h"
 #include "wayland/display.h"
 
-#if defined(BUILD_BACKEND_HEADLESS)
+#if BUILD_BACKEND_HEADLESS
 #include "backend/headless/headless.h"
 #endif
 
@@ -32,7 +32,7 @@ App::App(const std::vector<Configuration::Config>& configs)
                                                   configs[0].cursor_theme,
                                                   configs)) {
   SPDLOG_DEBUG("+App::App");
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
   bool found_view_with_bg = false;
 #endif
 
@@ -44,7 +44,7 @@ App::App(const std::vector<Configuration::Config>& configs)
     m_views.emplace_back(std::move(view));
     index++;
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
         WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
@@ -52,7 +52,7 @@ App::App(const std::vector<Configuration::Config>& configs)
 #endif
   }
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
@@ -96,7 +96,7 @@ int App::Loop() const {
   return ret;
 }
 
-#if defined(BUILD_BACKEND_HEADLESS)
+#if BUILD_BACKEND_HEADLESS
 
 GLubyte* App::getViewRenderBuf(int i) {
   return reinterpret_cast<HeadlessBackend*>(m_views[i]->GetBackend())

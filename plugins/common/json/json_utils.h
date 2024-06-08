@@ -17,51 +17,53 @@
 #ifndef PLUGINS_COMMON_JSON_JSON_UTILS_H_
 #define PLUGINS_COMMON_JSON_JSON_UTILS_H_
 
+#include "config.h"
+
 #include "rapidjson/rapidjson.h"
 
 #include "rapidjson/document.h"
 
-namespace plugin_common {
+namespace plugin_common::JsonUtils {
 
-class JsonUtils {
- public:
-  /**
-   * @brief Function to get JSON Document from a File
-   * @param path pointer to file path
-   * @param missing_is_error print errors if file is not found
-   * @return rapidjson::Document
-   * @retval Returns credential object. empty object if failed
-   * @relation
-   * google_sign_in
-   */
-  static rapidjson::Document GetJsonDocumentFromFile(
-      std::string& path,
-      bool missing_is_error = false);
+/**
+ * @brief Function to get JSON Document from a File
+ * @param path pointer to file path
+ * @param missing_is_error print errors if file is not found
+ * @return rapidjson::Document
+ * @retval Returns credential object. empty object if failed
+ * @relation
+ * google_sign_in
+ */
+MAYBE_UNUSED
+static rapidjson::Document GetJsonDocumentFromFile(
+    std::string& path,
+    bool missing_is_error = false);
 
-  /**
-   * @brief Function to write JSON Document to File
-   * @param path pointer to file path
-   * @param doc rapidjson::Document to write to file
-   * @return bool
-   * @retval Returns true if successful, false otherwise
-   * @relation
-   * google_sign_in
-   */
-  static bool WriteJsonDocumentToFile(std::string& path,
-                                      const rapidjson::Document& doc);
+/**
+ * @brief Function to write JSON Document to File
+ * @param path pointer to file path
+ * @param doc rapidjson::Document to write to file
+ * @return bool
+ * @retval Returns true if successful, false otherwise
+ * @relation
+ * google_sign_in
+ */
+MAYBE_UNUSED
+static bool WriteJsonDocumentToFile(std::string& path,
+                                    const rapidjson::Document& doc);
 
-  /**
-   * @brief Function to add empty key to file
-   * @param path pointer to file path
-   * @param key value of key to write
-   * @return bool
-   * @retval Returns true if successful, false otherwise
-   * @relation
-   * google_sign_in
-   */
-  static bool AddEmptyKeyToFile(std::string& path, const char* key);
-};
+/**
+ * @brief Function to add empty key to file
+ * @param path pointer to file path
+ * @param key value of key to write
+ * @return bool
+ * @retval Returns true if successful, false otherwise
+ * @relation
+ * google_sign_in
+ */
+MAYBE_UNUSED
+static bool AddEmptyKeyToFile(std::string& path, const char* key);
 
-}  // namespace plugin_common
+}  // namespace plugin_common::JsonUtils
 
 #endif  // PLUGINS_COMMON_JSON_JSON_UTILS_H_

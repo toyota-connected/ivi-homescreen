@@ -25,10 +25,10 @@
 
 #include "../logging.h"
 
-namespace plugin_common {
+namespace plugin_common::JsonUtils {
 
-rapidjson::Document JsonUtils::GetJsonDocumentFromFile(std::string& path,
-                                                       bool missing_is_error) {
+rapidjson::Document GetJsonDocumentFromFile(std::string& path,
+                                            bool missing_is_error) {
   rapidjson::Document d{};
   if (std::filesystem::exists(path)) {
     std::ifstream ifs{path};
@@ -50,8 +50,8 @@ rapidjson::Document JsonUtils::GetJsonDocumentFromFile(std::string& path,
   return std::move(d);
 }
 
-bool JsonUtils::WriteJsonDocumentToFile(std::string& path,
-                                        const rapidjson::Document& doc) {
+bool WriteJsonDocumentToFile(std::string& path,
+                             const rapidjson::Document& doc) {
   if (path.empty()) {
     spdlog::error("Missing File Path: {}", path);
     return false;
@@ -80,7 +80,7 @@ bool JsonUtils::WriteJsonDocumentToFile(std::string& path,
   return true;
 }
 
-bool JsonUtils::AddEmptyKeyToFile(std::string& path, const char* key) {
+bool AddEmptyKeyToFile(std::string& path, const char* key) {
   auto d = JsonUtils::GetJsonDocumentFromFile(path, false);
   auto& allocator = d.GetAllocator();
   auto obj = d.GetObject();
@@ -95,4 +95,4 @@ bool JsonUtils::AddEmptyKeyToFile(std::string& path, const char* key) {
   // flush to disk
   return WriteJsonDocumentToFile(path, d);
 }
-}  // namespace plugin_common
+}  // namespace plugin_common::JsonUtils

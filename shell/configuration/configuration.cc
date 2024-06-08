@@ -19,7 +19,9 @@
 #include <fstream>
 #include <sstream>
 
-#include "constants.h"
+#include "config.h"
+
+#include <rapidjson/document.h>
 #include "utils.h"
 
 rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {

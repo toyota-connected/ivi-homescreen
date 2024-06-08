@@ -14,7 +14,7 @@
 
 #include <flutter/encodable_value.h>
 
-#include "constants.h"
+#include "config.h"
 #include "logging/logging.h"
 
 /* switch private and public declarations */

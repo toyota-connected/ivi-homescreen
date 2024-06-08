@@ -16,10 +16,10 @@
 
 #include "string_tools.h"
 
-namespace plugin_common {
+namespace plugin_common::StringTools {
 
-std::vector<std::string> StringTools::split(std::string str,
-                                            const std::string& token) {
+[[maybe_unused]]
+std::vector<std::string> split(std::string str, const std::string& token) {
   std::vector<std::string> result;
   while (!str.empty()) {
     const auto index = str.find(token);
@@ -36,4 +36,4 @@ std::vector<std::string> StringTools::split(std::string str,
   return result;
 }
 
-}  // namespace plugin_common
+}  // namespace plugin_common::StringTools

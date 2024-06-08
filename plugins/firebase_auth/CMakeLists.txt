@@ -23,8 +23,6 @@ add_library(plugin_firebase_auth STATIC
         messages.g.cc
 )
 
-target_compile_definitions(plugin_firebase_auth PUBLIC ENABLE_PLUGIN_FIRESTORE_AUTH)
-
 target_compile_definitions(plugin_firebase_auth PRIVATE INTERNAL_EXPERIMENTAL)
 
 target_include_directories(plugin_firebase_auth PUBLIC

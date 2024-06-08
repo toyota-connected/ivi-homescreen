@@ -20,21 +20,22 @@
 #include <cstdint>
 #include <string>
 
-namespace plugin_common {
+#include "config.h"
 
-class TimeTools {
- public:
-  /**
-   * @brief Get epoch time in seconds
-   * @return current time in epoch seconds
-   * @relation
-   * internal
-   */
-  static int64_t GetEpochTimeInSeconds();
+namespace plugin_common::TimeTools {
 
-  static std::string GetCurrentTimeString();
-};
+/**
+ * @brief Get epoch time in seconds
+ * @return current time in epoch seconds
+ * @relation
+ * internal
+ */
+MAYBE_UNUSED
+int64_t GetEpochTimeInSeconds();
 
-}  // namespace plugin_common
+MAYBE_UNUSED
+std::string GetCurrentTimeString();
+
+}  // namespace plugin_common::TimeTools
 
 #endif  // PLUGINS_COMMON_TIME_TIME_TOOLS_H_

@@ -10,9 +10,8 @@ execute_process(
 
 if (GIT_BRANCH)
     message(STATUS "GIT Branch ............. ${GIT_BRANCH}")
-    add_definitions("-DGIT_BRANCH=\"${GIT_BRANCH}\"")
 else ()
-    add_definitions("-DGIT_BRANCH=\"unkown\"")
+    set(GIT_BRANCH "unknown")
 endif ()
 
 #
@@ -27,9 +26,8 @@ execute_process(
 
 if (GIT_COMMIT_HASH)
     message(STATUS "GIT Hash ............... ${GIT_COMMIT_HASH}")
-    add_definitions("-DGIT_HASH=\"${GIT_COMMIT_HASH}\"")
 else ()
-    add_definitions("-DGIT_HASH=\"unknown\"")
+    set(GIT_COMMIT_HASH "unknown")
 endif ()
 
 #

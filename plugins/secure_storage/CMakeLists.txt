@@ -22,8 +22,6 @@ add_library(plugin_secure_storage STATIC
         messages.cc
 )
 
-target_compile_definitions(plugin_secure_storage PUBLIC ENABLE_PLUGIN_SECURE_STORAGE)
-
 target_include_directories(plugin_secure_storage PRIVATE include)
 
 target_link_libraries(plugin_secure_storage PUBLIC

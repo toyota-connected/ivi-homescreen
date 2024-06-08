@@ -20,7 +20,7 @@
 #include <EGL/eglext.h>
 #include <shell/platform/embedder/embedder.h>
 
-#include "constants.h"
+#include "config.h"
 
 class Egl {
  public:

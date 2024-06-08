@@ -21,7 +21,7 @@
 #include <GL/osmesa.h>
 #include <shell/platform/embedder/embedder.h>
 
-#include "constants.h"
+#include "config.h"
 
 class OSMesaHeadless {
  public:

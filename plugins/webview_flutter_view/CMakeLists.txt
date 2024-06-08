@@ -20,8 +20,6 @@ add_library(plugin_webview_flutter_view STATIC
         messages.g.cc
 )
 
-target_compile_definitions(plugin_webview_flutter_view PUBLIC ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW)
-
 target_include_directories(plugin_webview_flutter_view PRIVATE include)
 
 target_link_libraries(plugin_webview_flutter_view PUBLIC
