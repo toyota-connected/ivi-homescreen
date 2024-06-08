@@ -47,51 +47,28 @@ option(ENABLE_LTO "Enable Link Time optimization" OFF)
 # DLT
 #
 option(ENABLE_DLT "Enable DLT logging" ON)
-if (ENABLE_DLT)
-    add_compile_definitions(ENABLE_DLT)
-endif ()
 
 #
 # backend selection
 #
 option(BUILD_BACKEND_WAYLAND_EGL "Build Backend for EGL" ON)
 if (BUILD_BACKEND_WAYLAND_EGL)
-    add_compile_definitions(BUILD_BACKEND_WAYLAND_EGL)
     option(BUILD_EGL_TRANSPARENCY "Build with EGL Transparency Enabled" ON)
-    if (BUILD_EGL_TRANSPARENCY)
-        add_compile_definitions(BUILD_EGL_ENABLE_TRANSPARENCY)
-    endif ()
     option(BUILD_EGL_ENABLE_3D "Build with EGL Stencil, Depth, and Stencil config Enabled" ON)
-    if (BUILD_EGL_ENABLE_3D)
-        add_compile_definitions(BUILD_EGL_ENABLE_3D)
-    endif ()
     option(BUILD_EGL_ENABLE_MULTISAMPLE "Build with EGL Sample set to 4" OFF)
-    if (BUILD_EGL_ENABLE_MULTISAMPLE)
-        add_compile_definitions(BUILD_EGL_ENABLE_MULTISAMPLE)
-    endif ()
 else ()
     option(BUILD_BACKEND_WAYLAND_VULKAN "Build Backend for Vulkan" ON)
-    if (BUILD_BACKEND_WAYLAND_VULKAN)
-        add_compile_definitions(BUILD_BACKEND_WAYLAND_VULKAN)
-    endif ()
 endif ()
 
 option(BUILD_BACKEND_WAYLAND_DRM "Build Backend Wayland DRM" OFF)
-if (BUILD_BACKEND_WAYLAND_DRM)
-    add_compile_definitions(BUILD_BACKEND_WAYLAND_DRM)
-endif ()
 
-option(BUILD_BACKEND_HEADLESS "Build Headless Backend" OFF)
-if (BUILD_BACKEND_HEADLESS)
+option(BUILD_BACKEND_HEADLESS_EGL "Build Headless EGL Backend" OFF)
+if (BUILD_BACKEND_HEADLESS_EGL)
     find_package(PkgConfig)
     pkg_check_modules(OSMESA osmesa glesv2 egl IMPORTED_TARGET REQUIRED)
-    add_compile_definitions(BUILD_BACKEND_HEADLESS)
 endif ()
 
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
-if (DEBUG_PLATFORM_MESSAGES)
-    add_compile_definitions(DEBUG_PLATFORM_MESSAGES)
-endif ()
 
 #
 # Crash Handler
@@ -105,14 +82,6 @@ if (BUILD_CRASH_HANDLER)
     find_package(sentry REQUIRED)
     find_package(PkgConfig)
     pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)
-    add_compile_definitions(
-            BUILD_CRASH_HANDLER
-            "CRASH_HANDLER_DSN=\"${CRASH_HANDLER_DSN}\""
-            "CRASH_HANDLER_RELEASE=\"${PROJECT_NAME}@${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}\"")
-else ()
-    add_compile_definitions(
-            "CRASH_HANDLER_DSN=\"\""
-            "CRASH_HANDLER_RELEASE=\"\"")
 endif ()
 
 #
@@ -140,4 +109,3 @@ find_package(Sanitizers)
 if(NOT EXE_OUTPUT_NAME)
     set(EXE_OUTPUT_NAME "homescreen")
 endif ()
-add_definitions("-DEXE_OUTPUT_NAME=\"${EXE_OUTPUT_NAME}\"")

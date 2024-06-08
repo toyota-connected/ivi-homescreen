@@ -29,7 +29,7 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
-#include "constants.h"
+#include "config.h"
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
 #include "task_runner.h"

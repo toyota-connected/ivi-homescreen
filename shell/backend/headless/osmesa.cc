@@ -20,7 +20,6 @@
 
 #include <GLES2/gl2.h>
 
-#include "constants.h"
 #include "logging.h"
 
 OSMesaHeadless::OSMesaHeadless(int32_t initial_width, int32_t initial_height)

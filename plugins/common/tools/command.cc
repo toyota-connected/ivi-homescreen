@@ -18,10 +18,10 @@
 
 #include "../common.h"
 
-namespace plugin_common {
+namespace plugin_common::Command {
 
-bool Command::Execute(const char *cmd, std::string &result) {
-  auto fp = popen(cmd, "r");
+bool Execute(const char *cmd, std::string &result) {
+  const auto fp = popen(cmd, "r");
   if (!fp) {
     spdlog::error("[ExecuteCommand] Failed to Execute Command: ({}) {}", errno,
                   strerror(errno));
@@ -48,4 +48,4 @@ bool Command::Execute(const char *cmd, std::string &result) {
   return true;
 }
 
-}  // namespace plugin_common
+}  // namespace plugin_common::Command

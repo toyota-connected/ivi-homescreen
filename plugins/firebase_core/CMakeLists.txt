@@ -20,8 +20,6 @@ add_library(plugin_firebase_core STATIC
         messages.g.cc
 )
 
-target_compile_definitions(plugin_firebase_core PUBLIC ENABLE_PLUGIN_FIREBASE_CORE)
-
 target_compile_definitions(plugin_firebase_core PRIVATE INTERNAL_EXPERIMENTAL)
 
 target_include_directories(plugin_firebase_core PUBLIC . include)

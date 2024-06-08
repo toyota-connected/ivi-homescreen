@@ -20,9 +20,9 @@
 
 #include <GL/osmesa.h>
 
-#include "../backend.h"
-#include "constants.h"
+#include "config.h"
 
+#include "../backend.h"
 #include "osmesa.h"
 
 class Backend;

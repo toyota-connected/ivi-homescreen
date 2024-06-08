@@ -18,15 +18,14 @@
 
 #include "spdlog/cfg/env.h"  // support for loading levels from the environment variable
 #include "spdlog/spdlog-inl.h"
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
 #include "spdlog/sinks/callback_sink.h"
 #endif
 #include "spdlog/sinks/ringbuffer_sink.h"
 
-#include <constants.h>
 
 Logging::Logging() {
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   if (Dlt::IsSupported()) {
     Dlt::Register();
     m_logger = spdlog::callback_logger_mt(
@@ -72,7 +71,7 @@ Logging::Logging() {
     m_logger = std::make_shared<spdlog::logger>("primary", m_console_sink);
     spdlog::set_default_logger(m_logger);
     spdlog::set_pattern("[%H:%M:%S.%f] [%L] %v");
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   }
 #endif
 
@@ -82,7 +81,7 @@ Logging::Logging() {
 }
 
 Logging::~Logging() {
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   if (Dlt::IsSupported()) {
     // switch logger to console, since we are unregistering DLT
     m_logger.reset();

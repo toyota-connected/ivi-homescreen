@@ -18,15 +18,24 @@
 
 #include <memory>
 
+#include "config.h"
+
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
 
-#include "constants.h"
 
 class Engine;
 
 class Backend {
  public:
+  enum Type {
+    Headless,
+    WaylandEgl,
+    WaylandVulkan,
+    WaylandLeasedDrm,
+    DrmKms,
+  };
+
   Backend() = default;
   virtual ~Backend() = default;
 

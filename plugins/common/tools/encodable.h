@@ -17,39 +17,41 @@
 #ifndef PLUGINS_COMMON_TOOLS_ENCODABLE_VALUES_H_
 #define PLUGINS_COMMON_TOOLS_ENCODABLE_VALUES_H_
 
+#include "config.h"
+
 #include <flutter/encodable_value.h>
 
-namespace plugin_common {
+namespace plugin_common::Encodable {
 
-class Encodable {
- public:
-  /**
-   * @brief Prints flutter::EncodableMap
-   * @return void
-   * @relation
-   * internal
-   */
-  static void PrintFlutterEncodableMap(const char* name,
-                                       const flutter::EncodableMap& args);
+/**
+ * @brief Prints flutter::EncodableMap
+ * @return void
+ * @relation
+ * internal
+ */
+MAYBE_UNUSED
+void PrintFlutterEncodableMap(const char* name,
+                              const flutter::EncodableMap& args);
 
-  /**
-   * @brief Prints flutter::EncodableList
-   * @return void
-   * @relation
-   * internal
-   */
-  static void PrintFlutterEncodableList(const char* name,
-                                        const flutter::EncodableList& list);
+/**
+ * @brief Prints flutter::EncodableList
+ * @return void
+ * @relation
+ * internal
+ */
+MAYBE_UNUSED
+void PrintFlutterEncodableList(const char* name,
+                               const flutter::EncodableList& list);
 
-  /**
-   * @brief Prints flutter::EncodableValue
-   * @return void
-   * @relation
-   * internal
-   */
-  static void PrintFlutterEncodableValue(const char* key,
-                                         const flutter::EncodableValue& it);
-};
-}  // namespace plugin_common
+/**
+ * @brief Prints flutter::EncodableValue
+ * @return void
+ * @relation
+ * internal
+ */
+MAYBE_UNUSED
+void PrintFlutterEncodableValue(const char* key,
+                                const flutter::EncodableValue& it);
+}  // namespace plugin_common::Encodable
 
 #endif  // PLUGINS_COMMON_TOOLS_ENCODABLE_VALUES_H_

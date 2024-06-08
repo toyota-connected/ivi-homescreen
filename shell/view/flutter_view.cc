@@ -17,13 +17,13 @@
 #include <memory>
 #include <utility>
 
-#if defined(BUILD_BACKEND_HEADLESS)
+#if BUILD_BACKEND_HEADLESS
 #include "backend/headless/headless.h"
-#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+#elif BUILD_BACKEND_WAYLAND_DRM
 #include "backend/wayland_drm/wayland_drm.h"
-#elif defined(BUILD_BACKEND_WAYLAND_EGL)
+#elif BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
-#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
+#elif BUILD_BACKEND_WAYLAND_VULKAN
 #include "backend/wayland_vulkan/wayland_vulkan.h"
 #endif
 #include "configuration/configuration.h"
@@ -63,19 +63,19 @@ FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<Display>& display)
     : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
-#if defined(BUILD_BACKEND_HEADLESS)
+#if BUILD_BACKEND_HEADLESS
   m_backend = std::make_shared<HeadlessBackend>(
       m_config.view.width, m_config.view.height, m_config.debug_backend,
       kEglBufferSize);
-#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+#elif BUILD_BACKEND_WAYLAND_DRM
   m_backend = std::make_shared<WaylandDrmBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
       m_config.debug_backend, kEglBufferSize);
-#elif defined(BUILD_BACKEND_WAYLAND_EGL)
+#elif BUILD_BACKEND_WAYLAND_EGL
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
       m_config.debug_backend, kEglBufferSize);
-#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
+#elif BUILD_BACKEND_WAYLAND_VULKAN
   m_backend = std::make_shared<WaylandVulkanBackend>(
       display->GetDisplay(), m_config.view.width, m_config.view.height,
       m_config.debug_backend);
@@ -306,59 +306,59 @@ void FlutterView::SetRegion(
 
 void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
   (void)engine;
-#if defined(ENABLE_PLUGIN_AUDIOPLAYERS_LINUX)
+#if ENABLE_PLUGIN_AUDIOPLAYERS_LINUX
   AudioPlayersLinuxPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_SECURE_STORAGE)
+#if ENABLE_PLUGIN_SECURE_STORAGE
   SecureStoragePluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_FILE_SELECTOR)
+#if ENABLE_PLUGIN_FILE_SELECTOR
   FileSelectorPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_URL_LAUNCHER)
+#if ENABLE_PLUGIN_URL_LAUNCHER
   UrlLauncherPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_GO_ROUTER)
+#if ENABLE_PLUGIN_GO_ROUTER
   GoRouterPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX)
+#if ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX
   DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_GOOGLE_SIGN_IN)
+#if ENABLE_PLUGIN_GOOGLE_SIGN_IN
   GoogleSignInPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_FIREBASE_CORE)
+#if ENABLE_PLUGIN_FIREBASE_CORE
   FirebaseCorePluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_FIREBASE_STORAGE)
+#if ENABLE_PLUGIN_FIREBASE_STORAGE
   FirebaseStoragePluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_FIREBASE_AUTH)
+#if ENABLE_PLUGIN_FIREBASE_AUTH
   FirebaseAuthPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_CLOUD_FIRESTORE)
+#if ENABLE_PLUGIN_CLOUD_FIRESTORE
   CloudFirestorePluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_VIDEO_PLAYER_LINUX)
+#if ENABLE_PLUGIN_VIDEO_PLAYER_LINUX
   VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_CAMERA)
+#if ENABLE_PLUGIN_CAMERA
   CameraPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
-#if defined(ENABLE_PLUGIN_PDF)
+#if ENABLE_PLUGIN_PDF
   PrintingPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif

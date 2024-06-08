@@ -24,7 +24,8 @@
 #include <cstring>
 #include <utility>
 
-#include "constants.h"
+#include "config.h"
+
 #include "engine.h"
 #include "timer.h"
 
@@ -92,12 +93,12 @@ Display::~Display() {
   if (m_shm)
     wl_shm_destroy(m_shm);
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
   if (m_agl.shell)
     agl_shell_destroy(m_agl.shell);
 #endif
 
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
   if (m_ivi_shell.application)
     ivi_application_destroy(m_ivi_shell.application);
 
@@ -117,7 +118,7 @@ Display::~Display() {
   if (m_cursor_surface)
     wl_surface_destroy(m_cursor_surface);
 
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
   if (m_xdg_wm_base)
     xdg_wm_base_destroy(m_xdg_wm_base);
 #endif
@@ -129,7 +130,7 @@ Display::~Display() {
   SPDLOG_TRACE("- ~Display()");
 }
 
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
 /**
  * @brief Respond to a ping event with a pong request
  * @param[in] data No use
@@ -180,7 +181,7 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
   }
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
   else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
     d->m_xdg_wm_base = static_cast<struct xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface,
@@ -231,7 +232,7 @@ void Display::registry_handle_global(void* data,
         std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
     d->m_repeat_timer->set_timerspec(40, 400);
   }
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
   else if (strcmp(interface, agl_shell_interface.name) == 0 &&
            d->m_agl.bind_to_agl_shell) {
     if (version >= 2) {
@@ -248,7 +249,7 @@ void Display::registry_handle_global(void* data,
     spdlog::info("Wayland: agl_shell version: {}", version);
   }
 #endif
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
   else if (strcmp(interface, ivi_application_interface.name) == 0) {
     d->m_ivi_shell.application = static_cast<struct ivi_application*>(
         wl_registry_bind(registry, name, &ivi_application_interface, 1));
@@ -779,7 +780,7 @@ int Display::PollEvents() const {
   return wl_display_dispatch_pending(m_display);
 }
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
 void Display::AglShellDoBackground(struct wl_surface* surface,
                                    const size_t index) const {
   if (m_agl.shell) {
@@ -902,7 +903,7 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   return {0, 0};
 }
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
   (void)shell;
   auto* d = static_cast<Display*>(data);
@@ -1100,7 +1101,7 @@ const struct agl_shell_listener Display::agl_shell_listener = {
 };
 #endif
 
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
 void Display::ivi_wm_surface_visibility(void* /* data */,
                                         struct ivi_wm* /* ivi_wm */,
                                         uint32_t surface_id,

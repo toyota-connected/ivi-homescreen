@@ -20,8 +20,6 @@ add_library(plugin_firebase_storage STATIC
         messages.g.cc
 )
 
-target_compile_definitions(plugin_firebase_storage PUBLIC ENABLE_PLUGIN_FIRESTORE_STORAGE GLOBAL)
-
 target_compile_definitions(plugin_firebase_storage PRIVATE
         INTERNAL_EXPERIMENTAL
 )
