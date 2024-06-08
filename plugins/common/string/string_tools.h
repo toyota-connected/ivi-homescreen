@@ -20,54 +20,57 @@
 #include <string>
 #include <vector>
 
-namespace plugin_common {
+#include "config.h"
 
-class StringTools {
- public:
-  /**
-   * @brief Split string by token
-   * @return std::vector<std::string>
-   * @relation
-   * internal
-   */
-  static std::vector<std::string> split(std::string str,
-                                        const std::string& token);
+namespace plugin_common::StringTools {
 
-  /**
-   * @brief trim from end of string (right)
-   * @return std::string&
-   * @retval String that has specified characters trimmed from right.
-   * @relation
-   * flutter
-   */
-  inline static std::string& rtrim(std::string& s, const char* t) {
-    s.erase(s.find_last_not_of(t) + 1);
-    return s;
-  }
+/**
+ * @brief Split string by token
+ * @return std::vector<std::string>
+ * @relation
+ * internal
+ */
+MAYBE_UNUSED
+std::vector<std::string> split(std::string str,
+                                      const std::string& token);
 
-  /**
-   * @brief trim from beginning of string (left)
-   * @return std::string&
-   * @retval String that has specified characters trimmed from left.
-   * @relation
-   * flutter
-   */
-  inline static std::string& ltrim(std::string& s, const char* t) {
-    s.erase(0, s.find_first_not_of(t));
-    return s;
-  }
+/**
+ * @brief trim from end of string (right)
+ * @return std::string&
+ * @retval String that has specified characters trimmed from right.
+ * @relation
+ * flutter
+ */
+MAYBE_UNUSED
+inline std::string& rtrim(std::string& s, const char* t) {
+  s.erase(s.find_last_not_of(t) + 1);
+  return s;
+}
 
-  /**
-   * @brief trim from both ends of string (right then left)
-   * @return std::string&
-   * @retval String that has specified characters trimmed from right and left.
-   * @relation
-   * flutter
-   */
-  inline static std::string& trim(std::string& s, const char* t) {
-    return ltrim(rtrim(s, t), t);
-  };
+/**
+ * @brief trim from beginning of string (left)
+ * @return std::string&
+ * @retval String that has specified characters trimmed from left.
+ * @relation
+ * flutter
+ */
+MAYBE_UNUSED
+inline std::string& ltrim(std::string& s, const char* t) {
+  s.erase(0, s.find_first_not_of(t));
+  return s;
+}
+
+/**
+ * @brief trim from both ends of string (right then left)
+ * @return std::string&
+ * @retval String that has specified characters trimmed from right and left.
+ * @relation
+ * flutter
+ */
+MAYBE_UNUSED
+inline std::string& trim(std::string& s, const char* t) {
+  return ltrim(rtrim(s, t), t);
 };
-}  // namespace plugin_common
+}  // namespace plugin_common::StringTools
 
 #endif  // PLUGINS_COMMON_STRING_STRING_TOOLS_H_

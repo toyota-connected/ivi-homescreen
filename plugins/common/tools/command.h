@@ -20,19 +20,19 @@
 #include <linux/limits.h>
 #include <string>
 
-namespace plugin_common {
+#include "config.h"
 
-class Command {
- public:
-  /**
-   * @brief Execute Command and return result
-   * @return bool
-   * @relation
-   * internal
-   */
-  static bool Execute(const char *cmd, std::string &result);
-};
+namespace plugin_common::Command {
 
-}  // namespace plugin_common
+/**
+ * @brief Execute Command and return result
+ * @return bool
+ * @relation
+ * internal
+ */
+MAYBE_UNUSED
+bool Execute(const char* cmd, char (&result)[PATH_MAX]);
+
+}  // namespace plugin_common::Command
 
 #endif  // PLUGINS_COMMON_TOOLS_COMMAND_H_

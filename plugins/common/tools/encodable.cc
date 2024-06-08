@@ -18,10 +18,10 @@
 
 #include "../common.h"
 
-namespace plugin_common {
+namespace plugin_common::Encodable {
 
-void Encodable::PrintFlutterEncodableMap(const char* name,
-                                         const flutter::EncodableMap& args) {
+void PrintFlutterEncodableMap(const char* name,
+                              const flutter::EncodableMap& args) {
   spdlog::warn("[{}]", name);
   for (auto& it : args) {
     auto key = std::get<std::string>(it.first);
@@ -29,16 +29,16 @@ void Encodable::PrintFlutterEncodableMap(const char* name,
   }
 }
 
-void Encodable::PrintFlutterEncodableList(const char* name,
-                                          const flutter::EncodableList& list) {
+void PrintFlutterEncodableList(const char* name,
+                               const flutter::EncodableList& list) {
   spdlog::warn("[EncodableList]");
   for (auto& it : list) {
     PrintFlutterEncodableValue(name, it);
   }
 }
 
-void Encodable::PrintFlutterEncodableValue(const char* key,
-                                           const flutter::EncodableValue& it) {
+void PrintFlutterEncodableValue(const char* key,
+                                const flutter::EncodableValue& it) {
   if (std::holds_alternative<std::monostate>(it)) {
     spdlog::warn("\t{}: []", key);
   } else if (std::holds_alternative<bool>(it)) {
@@ -99,4 +99,4 @@ void Encodable::PrintFlutterEncodableValue(const char* key,
     assert(false);
   }
 }
-}  // namespace plugin_common
+}  // namespace plugin_common::Encodable
