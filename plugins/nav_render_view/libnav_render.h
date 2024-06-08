@@ -38,7 +38,7 @@ typedef struct {
   LoggerFunction pfn_log;
   GlLoaderFunction pfn_gl_loader;
   const void* native_window;
-#if defined(HEADLESS_BACKEND)
+#if HEADLESS_BACKEND_EGL
   void* contextHeadless;
   unsigned char* buffer;
 #endif

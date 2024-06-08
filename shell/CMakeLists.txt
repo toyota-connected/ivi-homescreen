@@ -34,7 +34,7 @@ add_executable(${PROJECT_NAME}
         task_runner.cc
 )
 set_target_properties(${PROJECT_NAME}
-    PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
+        PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
 )
 
 
@@ -54,7 +54,7 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     )
 endif ()
 
-if (BUILD_BACKEND_HEADLESS)
+if (BUILD_BACKEND_HEADLESS_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/headless/headless.cc
             backend/headless/osmesa.cc
@@ -76,8 +76,6 @@ target_compile_definitions(${PROJECT_NAME}
         EGL_NO_X11
         MESA_EGL_NO_X11_HEADERS
         HAVE_MEMFD_CREATE
-        PATH_PREFIX="${CMAKE_INSTALL_PREFIX}"
-        EXE_OUTPUT_NAME="${EXE_OUTPUT_NAME}"
         WL_EGL_PLATFORM
         FILAMENT_SUPPORTS_WAYLAND
 )
@@ -95,7 +93,7 @@ target_include_directories(${PROJECT_NAME}
 if (BUILD_BACKEND_WAYLAND_EGL)
     target_link_libraries(${PROJECT_NAME} PRIVATE EGL GLESv2)
 endif ()
-if (BUILD_BACKEND_HEADLESS)
+if (BUILD_BACKEND_HEADLESS_EGL)
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::OSMESA)
 endif ()
 if (BUILD_CRASH_HANDLER)

@@ -22,16 +22,15 @@
 #include <cassert>
 
 #include "backend/backend.h"
-#include "constants.h"
 
-#if defined(ENABLE_AGL_CLIENT)
+#if ENABLE_AGL_CLIENT
 #include "agl-shell-client-protocol.h"
 #endif
-#if defined(ENABLE_IVI_SHELL_CLIENT)
+#if ENABLE_IVI_SHELL_CLIENT
 #include "ivi-application-client-protocol.h"
 #include "ivi-wm-client-protocol.h"
 #endif
-#if defined(ENABLE_XDG_CLIENT)
+#if ENABLE_XDG_CLIENT
 #include "xdg-shell-client-protocol.h"
 #endif
 

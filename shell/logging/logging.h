@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "config.h"
+
 #if !defined(NDEBUG)
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 #else
@@ -24,7 +26,7 @@
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"
 
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
 #include "dlt/dlt.h"
 #endif
 

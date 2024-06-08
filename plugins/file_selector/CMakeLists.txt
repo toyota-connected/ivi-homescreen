@@ -20,8 +20,6 @@ add_library(plugin_file_selector STATIC
         messages.cc
 )
 
-target_compile_definitions(plugin_file_selector PUBLIC ENABLE_PLUGIN_FILE_SELECTOR)
-
 target_include_directories(plugin_file_selector PRIVATE include)
 
 target_link_libraries(plugin_file_selector PUBLIC

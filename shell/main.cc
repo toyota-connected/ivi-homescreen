@@ -16,11 +16,13 @@
 #include <csignal>
 #include <cstdlib>
 
+#include "config.h"
+
 #include "app.h"
 #include "configuration/configuration.h"
 #include "logging/logging.h"
 
-#if defined(BUILD_CRASH_HANDLER)
+#if BUILD_CRASH_HANDLER
 #include "crash_handler.h"
 #endif
 
@@ -52,7 +54,7 @@ void SignalHandler(int /* signal */) {
  * wayland, flutter
  */
 int main(int argc, char** argv) {
-#if defined(BUILD_CRASH_HANDLER)
+#if BUILD_CRASH_HANDLER
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
@@ -87,7 +89,7 @@ int main(int argc, char** argv) {
 
   gLogger.reset();
 
-#if defined(BUILD_CRASH_HANDLER)
+#if BUILD_CRASH_HANDLER
   (void)crash_handler.release();
 #endif
 

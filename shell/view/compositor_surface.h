@@ -9,7 +9,7 @@
 #include <wayland-client.h>
 
 #include "compositor_surface_api.h"
-#include "constants.h"
+#include "config.h"
 
 class Display;
 

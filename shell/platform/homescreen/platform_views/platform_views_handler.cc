@@ -109,7 +109,7 @@ void PlatformViewsHandler::HandleMethodCall(
     auto registrar =
         FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
 
-#if defined(ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW)
+#if ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW
     if (viewType == "plugins.flutter.io/webview") {
       WebviewFlutterPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
@@ -118,7 +118,7 @@ void PlatformViewsHandler::HandleMethodCall(
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
-#if defined(ENABLE_PLUGIN_FILAMENT_VIEW)
+#if ENABLE_PLUGIN_FILAMENT_VIEW
         if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
       FilamentViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
@@ -127,7 +127,7 @@ void PlatformViewsHandler::HandleMethodCall(
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
-#if defined(ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW)
+#if ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW
         if (viewType == "@views/simple-box-view-type") {
       LayerPlaygroundPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
@@ -136,7 +136,7 @@ void PlatformViewsHandler::HandleMethodCall(
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
-#if defined(ENABLE_PLUGIN_NAV_RENDER_VIEW)
+#if ENABLE_PLUGIN_NAV_RENDER_VIEW
         if (viewType == "views/nav-render-view") {
       NavRenderViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,

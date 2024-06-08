@@ -20,7 +20,7 @@
 #include <dlfcn.h>
 #include <cassert>
 
-#include "constants.h"
+#include "config.h"
 #include "engine.h"
 #include "hexdump.h"
 #include "utils.h"
@@ -450,9 +450,9 @@ void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
   m_pointer_events.emplace_back(
       FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
                           .phase = phase,
-#if defined(ENV64BIT)
+#if ENV64BIT
                           .timestamp = timestamp,
-#elif defined(ENV32BIT)
+#elif ENV32BIT
                           .timestamp =
                               static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
@@ -479,9 +479,9 @@ void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
   m_pointer_events.emplace_back(
       FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
                           .phase = phase,
-#if defined(ENV64BIT)
+#if ENV64BIT
                           .timestamp = timestamp,
-#elif defined(ENV32BIT)
+#elif ENV32BIT
                           .timestamp =
                               static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
 #endif
@@ -552,7 +552,7 @@ void Engine::OnFlutterPlatformMessage(
                    ? nullptr
                    : engine_state->view_controller->view;
 
-#if defined(DEBUG_PLATFORM_MESSAGES)
+#if DEBUG_PLATFORM_MESSAGES
   std::stringstream ss;
   ss << Hexdump(engine_message->message, engine_message->message_size);
   spdlog::debug("Channel: \"{}\"\n{}", engine_message->channel, ss.str());

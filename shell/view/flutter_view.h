@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include "config.h"
+
 #include <map>
 #include <memory>
 
@@ -37,13 +39,13 @@ class Backend;
 class PlatformHandler;
 class PlatformChannel;
 class WaylandWindow;
-#if defined(BUILD_BACKEND_HEADLESS)
+#if BUILD_BACKEND_HEADLESS
 class HeadlessBackend;
-#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+#elif BUILD_BACKEND_WAYLAND_DRM
 class WaylandDrmBackend;
-#elif defined(BUILD_BACKEND_WAYLAND_EGL)
+#elif BUILD_BACKEND_WAYLAND_EGL
 class WaylandEglBackend;
-#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
+#elif BUILD_BACKEND_WAYLAND_VULKAN
 class WaylandVulkanBackend;
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
@@ -199,13 +201,13 @@ class FlutterView {
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:
-#if defined(BUILD_BACKEND_HEADLESS)
+#if BUILD_BACKEND_HEADLESS
   std::shared_ptr<HeadlessBackend> m_backend;
-#elif defined(BUILD_BACKEND_WAYLAND_DRM)
+#elif BUILD_BACKEND_WAYLAND_DRM
   std::shared_ptr<WaylandDrmBackend> m_backend;
-#elif defined(BUILD_BACKEND_WAYLAND_EGL)
+#elif BUILD_BACKEND_WAYLAND_EGL
   std::shared_ptr<WaylandEglBackend> m_backend;
-#elif defined(BUILD_BACKEND_WAYLAND_VULKAN)
+#elif BUILD_BACKEND_WAYLAND_VULKAN
   std::shared_ptr<WaylandVulkanBackend> m_backend;
 #endif
   std::shared_ptr<Display> m_wayland_display;
