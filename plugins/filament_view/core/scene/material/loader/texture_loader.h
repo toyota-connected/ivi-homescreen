@@ -43,7 +43,7 @@ class TextureLoader {
                                              Texture::TextureType type,
                                              const std::string& name);
 
-  ::filament::Texture* loadTextureFromUrl(const std::string& url,
+  ::filament::Texture* loadTextureFromUrl(std::string url,
                                           Texture::TextureType type);
 };
 }  // namespace plugin_filament_view

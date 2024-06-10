@@ -70,7 +70,7 @@ class ModelLoader {
       bool isFallback = false);
 
   std::future<Resource<std::string_view>> loadGlbFromUrl(
-      const std::string& url,
+      std::string url,
       float scale,
       const ::filament::float3* centerPosition,
       bool isFallback = false);

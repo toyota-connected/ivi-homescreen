@@ -29,7 +29,7 @@ include(FindThreads)
 # pkg_check_modules(ZLIB IMPORTED_TARGET REQUIRED zlib)
 
 add_library(filament INTERFACE)
-target_include_directories(filament INTERFACE ${FILAMENT_INCLUDE_DIR})
+target_include_directories(filament INTERFACE ${FILAMENT_INCLUDE_DIR} ${FILAMENT_INCLUDE_DIR}/filament)
 target_link_directories(filament INTERFACE ${FILAMENT_LINK_LIBRARIES_DIR})
 target_link_libraries(filament INTERFACE
         libbackend.a
