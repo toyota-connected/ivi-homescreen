@@ -145,7 +145,7 @@ rapidjson::Document GoogleSignInPlugin::SwapAuthCodeForToken(
     return std::move(doc);
   }
 
-  plugin_common::CurlClient client;
+  plugin_common_curl::CurlClient client;
   std::vector<std::string> headers{};
   std::vector<std::pair<std::string, std::string>> url_form;
   url_form.emplace_back(std::move(std::make_pair(kKeyCode, auth_code)));
@@ -231,7 +231,7 @@ rapidjson::Document GoogleSignInPlugin::RefreshToken(
     return std::move(doc);
   }
 
-  plugin_common::CurlClient client;
+  plugin_common_curl::CurlClient client;
   std::vector<std::string> headers{};
   std::vector<std::pair<std::string, std::string>> url_form;
   url_form.emplace_back(
@@ -468,7 +468,7 @@ flutter::EncodableValue GoogleSignInPlugin::GetUserData() {
     std::vector<std::string> headers{"Content-Type: application/json",
                                      std::move(auth_header)};
     std::vector<std::pair<std::string, std::string>> url_form{};
-    plugin_common::CurlClient client;
+    plugin_common_curl::CurlClient client;
     std::string url = kPeopleUrl;
     client.Init(url, headers, url_form);
     auto response = client.RetrieveContentAsString();
