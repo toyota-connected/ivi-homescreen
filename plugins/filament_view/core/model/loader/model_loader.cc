@@ -237,7 +237,7 @@ std::future<Resource<std::string_view>> ModelLoader::loadGlbFromAsset(
 }
 
 std::future<Resource<std::string_view>> ModelLoader::loadGlbFromUrl(
-    const std::string& url,
+    std::string url,
     float scale,
     const ::filament::math::float3* centerPosition,
     bool isFallback) {
@@ -245,9 +245,10 @@ std::future<Resource<std::string_view>> ModelLoader::loadGlbFromUrl(
       std::make_shared<std::promise<Resource<std::string_view>>>());
   auto promise_future(promise->get_future());
   modelViewer_->setModelState(ModelState::LOADING);
-  asio::post(strand_, [&, promise, url, scale, centerPosition, isFallback] {
-    plugin_common::CurlClient client;
-    client.Init(url, {}, {});
+  asio::post(strand_, [&, promise, url = std::move(url), scale, centerPosition,
+                       isFallback] {
+    plugin_common_curl::CurlClient client;
+    // TODO client.Init(url);
     auto buffer = client.RetrieveContentAsVector();
     if (client.GetCode() != CURLE_OK) {
       modelViewer_->setModelState(ModelState::ERROR);

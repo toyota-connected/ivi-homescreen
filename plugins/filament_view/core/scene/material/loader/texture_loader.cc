@@ -96,9 +96,9 @@ inline ::filament::backend::TextureFormat internalFormat(
 }
 
 ::filament::Texture* TextureLoader::loadTextureFromUrl(
-    const std::string& url,
+    std::string url,
     Texture::TextureType type) {
-  plugin_common::CurlClient client;
+  plugin_common_curl::CurlClient client;
   client.Init(url, {}, {});
   std::vector<uint8_t> buffer = client.RetrieveContentAsVector();
   if (client.GetCode() != CURLE_OK) {
