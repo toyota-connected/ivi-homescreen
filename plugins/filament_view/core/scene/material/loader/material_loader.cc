@@ -29,8 +29,8 @@ Resource<::filament::Material*> MaterialLoader::loadMaterialFromAsset(
 
 Resource<::filament::Material*> MaterialLoader::loadMaterialFromUrl(
     const std::string& url) {
-  plugin_common::CurlClient client;
-  client.Init(url, {}, {});
+  plugin_common_curl::CurlClient client;
+  // TODO client.Init(url);
   std::vector<uint8_t> buffer = client.RetrieveContentAsVector();
   if (client.GetCode() != CURLE_OK) {
     return Resource<::filament::Material*>::Error(
