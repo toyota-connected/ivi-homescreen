@@ -117,7 +117,7 @@ std::future<Resource<std::string_view>> SkyboxManager::setSkyboxFromHdrUrl(
   SPDLOG_DEBUG("Skybox downloading HDR Asset: {}", url.c_str());
   asio::post(modelViewer_->getStrandContext(),
              [&, promise, url, showSun, shouldUpdateLight, intensity] {
-               plugin_common::CurlClient client;
+               plugin_common_curl::CurlClient client;
                client.Init(url, {}, {});
                auto buffer = client.RetrieveContentAsVector();
                if (client.GetCode() != CURLE_OK) {
@@ -194,7 +194,7 @@ std::future<Resource<std::string_view>> SkyboxManager::setSkyboxFromKTXUrl(
   }
 
   asio::post(modelViewer_->getStrandContext(), [&, promise, url] {
-    plugin_common::CurlClient client;
+    plugin_common_curl::CurlClient client;
     client.Init(url, {}, {});
     auto buffer = client.RetrieveContentAsVector();
     if (client.GetCode() != CURLE_OK) {
