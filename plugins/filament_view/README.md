@@ -8,10 +8,17 @@ This plugin is built for use with an AndroidView on the Flutter side.
 - **Compiler:** Clang
     - Note: Filament requires Clang
 
+## Cloning Filament
+
+git clone https://github.com/google/filament -b release
+git checkout v1.52.3
+
 ## Building Filament
 
-Apply the three patches located here:
-https://github.com/jwinarske/meta-vulkan/tree/kirkstone/recipes-graphics/filament/files
+Apply patches found here:
+https://github.com/meta-flutter/workspace-automation/tree/filament-dev/patches/filament
+
+_Note: If building for desktop do not apply last patch_
 
 Build using these flags:
 
@@ -37,8 +44,8 @@ Make the install target to stage the required folders.
 
 Set ivi-homescreen variables to subfolders of the staged install:
 
-    -DFILAMENT_INCLUDE_DIR=/mnt/raid10/filament/out/debug/usr/include
-    -DFILAMENT_LINK_LIBRARIES_DIR=/mnt/raid10/filament/out/debug/usr/lib/x86_64
+    -DFILAMENT_INCLUDE_DIR=/mnt/raid10/filament/out/debug/include
+    -DFILAMENT_LINK_LIBRARIES_DIR=/mnt/raid10/filament/out/debug/lib/x86_64
 
 In above case the staged install is set to:
 
