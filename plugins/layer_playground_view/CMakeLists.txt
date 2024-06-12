@@ -1,5 +1,7 @@
 include_guard()
 
+pkg_check_modules(WAYLAND_EGL REQUIRED IMPORTED_TARGET wayland-egl)
+
 add_library(plugin_layer_playground_view STATIC
         layer_playground_view_plugin.cc
         layer_playground_view_plugin_c_api.cc
@@ -19,6 +21,7 @@ target_include_directories(plugin_layer_playground_view PUBLIC
 target_link_libraries(plugin_layer_playground_view PUBLIC
         flutter
         platform_homescreen
+        PkgConfig::WAYLAND_EGL
         GLESv2
         EGL
 )

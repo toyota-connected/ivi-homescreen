@@ -14,6 +14,8 @@
 # limitations under the License.
 #
 
+pkg_check_modules(WAYLAND_EGL REQUIRED IMPORTED_TARGET wayland-egl)
+
 add_library(plugin_nav_render_view STATIC
         nav_render_view_plugin_c_api.cc
         nav_render_surface.cc
@@ -26,5 +28,6 @@ target_include_directories(plugin_nav_render_view PRIVATE include ${PROJECT_BINA
 target_link_libraries(plugin_nav_render_view PUBLIC
         flutter
         platform_homescreen
+        PkgConfig::WAYLAND_EGL
         EGL
 )
