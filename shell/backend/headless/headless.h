@@ -20,7 +20,7 @@
 
 #include <GL/osmesa.h>
 
-#include "config.h"
+#include "config/common.h"
 
 #include "../backend.h"
 #include "osmesa.h"

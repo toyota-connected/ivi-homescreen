@@ -24,7 +24,7 @@
 #include <cstring>
 #include <utility>
 
-#include "config.h"
+#include "config/common.h"
 
 #include "engine.h"
 #include "timer.h"

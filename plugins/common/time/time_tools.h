@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <string>
 
-#include "config.h"
+#include "config/common.h"
 
 namespace plugin_common::TimeTools {
 

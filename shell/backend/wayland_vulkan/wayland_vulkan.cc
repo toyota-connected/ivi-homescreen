@@ -21,7 +21,7 @@
 #include <optional>
 #include <queue>
 
-#include "config.h"
+#include "config/common.h"
 #include "engine.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE

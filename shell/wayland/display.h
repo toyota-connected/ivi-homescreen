@@ -30,7 +30,7 @@
 #include <cassert>
 
 #include "configuration/configuration.h"
-#include "config.h"
+#include "config/common.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"

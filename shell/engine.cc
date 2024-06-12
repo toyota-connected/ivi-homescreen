@@ -20,7 +20,7 @@
 #include <dlfcn.h>
 #include <cassert>
 
-#include "config.h"
+#include "config/common.h"
 #include "engine.h"
 #include "hexdump.h"
 #include "utils.h"

@@ -87,6 +87,17 @@ endif ()
 add_sanitizers(flutter)
 
 #
+# waypp
+#
+if (BUILD_BACKEND_WAYLAND_EGL)
+    set(ENABLE_EGL ON)
+else ()
+    set(ENABLE_EGL OFF)
+endif ()
+set(BUILD_EXAMPLES OFF)
+add_subdirectory(waypp)
+
+#
 # Google Test
 #
 if (BUILD_UNIT_TESTS)
