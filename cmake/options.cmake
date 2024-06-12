@@ -87,7 +87,7 @@ endif ()
 #
 # Docs
 #
-option(BUILD_DOCS "Build documentation" ON)
+option(BUILD_DOCS "Build documentation" OFF)
 MESSAGE(STATUS "Build Documentation .... ${BUILD_DOCS}")
 
 #
