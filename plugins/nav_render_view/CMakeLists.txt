@@ -21,7 +21,7 @@ add_library(plugin_nav_render_view STATIC
         libnav_render.cc
 )
 
-target_include_directories(plugin_nav_render_view PRIVATE include)
+target_include_directories(plugin_nav_render_view PRIVATE include ${PROJECT_BINARY_DIR})
 
 target_link_libraries(plugin_nav_render_view PUBLIC
         flutter

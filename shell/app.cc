@@ -17,7 +17,7 @@
 
 #include <thread>
 
-#include "config.h"
+#include "config/common.h"
 
 #include "view/flutter_view.h"
 #include "wayland/display.h"

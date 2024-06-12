@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef PLUGINS_CONFIG_H_
-#define PLUGINS_CONFIG_H_
+#ifndef CONFIG_PLUGINS_H_
+#define CONFIG_PLUGINS_H_
 
 #cmakedefine01 ENABLE_PLUGIN_COMMON
 
@@ -40,4 +40,4 @@
 #cmakedefine01 ENABLE_PLUGIN_NAV_RENDER_VIEW
 #cmakedefine01 ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW
 
-#endif //PLUGINS_CONFIG_H_
+#endif //CONFIG_PLUGINS_H_

@@ -18,7 +18,7 @@
 
 #include <memory>
 
-#include "config.h"
+#include "config/common.h"
 
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>

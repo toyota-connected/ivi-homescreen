@@ -84,6 +84,7 @@ target_include_directories(${PROJECT_NAME}
         PRIVATE
         ..
         logging
+        ${PROJECT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GST_INCLUDE_DIRS}
         ${GST_VIDEO_INCLUDE_DIRS}

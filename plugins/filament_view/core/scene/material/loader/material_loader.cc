@@ -2,7 +2,7 @@
 #include "core/scene/material/loader/material_loader.h"
 
 #include "core/include/file_utils.h"
-#include "plugins/common/common.h"
+#include "plugins/common/curl_client/curl_client.h"
 
 namespace plugin_filament_view {
 MaterialLoader::MaterialLoader(CustomModelViewer* modelViewer,

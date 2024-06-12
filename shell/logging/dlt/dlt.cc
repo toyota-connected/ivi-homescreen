@@ -19,7 +19,7 @@
 #include <cstring>
 #include <iostream>
 
-#include "config.h"
+#include "config/common.h"
 
 static DltContext gContext{};
 static bool gContextSet = false;

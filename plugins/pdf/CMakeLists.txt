@@ -32,7 +32,6 @@ add_library(plugin_pdf STATIC
 target_include_directories(plugin_pdf PRIVATE
         include
         ${PDFIUM_INCLUDE_DIR}
-
 )
 
 target_link_directories(plugin_pdf PUBLIC

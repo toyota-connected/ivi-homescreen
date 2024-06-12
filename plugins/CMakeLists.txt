@@ -17,7 +17,7 @@
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
-include_directories(${PROJECT_BINARY_DIR})
+include_directories(${PROJECT_BINARY_DIR}/config)
 
 macro(ENABLE_PLUGIN plugin)
 
@@ -120,4 +120,4 @@ PLUGIN_OPTION(webview_flutter_view "Includes WebView View Plugin" OFF)
 #
 # Configuration File
 #
-configure_file(plugins_config.h.in ${PROJECT_BINARY_DIR}/plugins_config.h)
+configure_file(config_plugins.h.in ${PROJECT_BINARY_DIR}/config/plugins.h)

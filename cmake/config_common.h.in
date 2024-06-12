@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef CONFIG_H_
-#define CONFIG_H_
+#ifndef CONFIG_COMMON_H_
+#define CONFIG_COMMON_H_
 
 #include <EGL/egl.h>
 #include <array>
@@ -48,7 +48,7 @@ static constexpr char kCrashHandlerRelease[] = "@PROJECT_NAME@@@PROJECT_VERSION_
 #cmakedefine01 ENABLE_DLT
 #cmakedefine01 DISABLE_PLUGINS
 #if !DISABLE_PLUGINS
-#include "plugins_config.h"
+#include "config/plugins.h"
 #endif
 
 #cmakedefine01 BUILD_DOCS
@@ -184,4 +184,4 @@ constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
 #cmakedefine01 ENV32BIT
 #cmakedefine01 ENV64BIT
 
-#endif //CONFIG_H_
+#endif //CONFIG_COMMON_H_

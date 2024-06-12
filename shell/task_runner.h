@@ -25,7 +25,7 @@
 
 #include "flutter/shell/platform/embedder/embedder.h"
 
-#include "config.h"
+#include "config/common.h"
 #include "handler_priority_queue.h"
 
 class TaskRunner {

@@ -45,13 +45,11 @@ message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 include(compiler)
 include(utils)
 
-configure_file(cmake/config.h.in ${PROJECT_BINARY_DIR}/config.h)
+configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
 #
 # libraries
 #
-include(wayland)
-
 add_subdirectory(third_party)
 if (NOT DISABLE_PLUGINS)
     add_subdirectory(plugins)
