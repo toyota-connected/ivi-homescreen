@@ -25,8 +25,6 @@ endif ()
 
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
-# pkg_check_modules(CURL IMPORTED_TARGET REQUIRED libcurl)
-# pkg_check_modules(ZLIB IMPORTED_TARGET REQUIRED zlib)
 
 add_library(filament INTERFACE)
 target_include_directories(filament INTERFACE ${FILAMENT_INCLUDE_DIR} ${FILAMENT_INCLUDE_DIR}/filament)
@@ -65,6 +63,7 @@ target_link_libraries(filament INTERFACE
         libstb.a
         libutils.a
         libzstd.a
+        # libmatdbg.a # required for linking with debug libs
 
         z
         Threads::Threads

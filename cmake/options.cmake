@@ -46,7 +46,7 @@ option(ENABLE_LTO "Enable Link Time optimization" OFF)
 #
 # DLT
 #
-option(ENABLE_DLT "Enable DLT logging" ON)
+option(ENABLE_DLT "Enable DLT logging" OFF)
 
 #
 # backend selection
