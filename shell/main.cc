@@ -16,7 +16,7 @@
 #include <csignal>
 #include <cstdlib>
 
-#include "config.h"
+#include "config/common.h"
 
 #include "app.h"
 #include "configuration/configuration.h"

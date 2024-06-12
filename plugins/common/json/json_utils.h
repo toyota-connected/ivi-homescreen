@@ -17,7 +17,7 @@
 #ifndef PLUGINS_COMMON_JSON_JSON_UTILS_H_
 #define PLUGINS_COMMON_JSON_JSON_UTILS_H_
 
-#include "config.h"
+#include "config/common.h"
 
 #include "rapidjson/rapidjson.h"
 
@@ -34,8 +34,7 @@ namespace plugin_common::JsonUtils {
  * @relation
  * google_sign_in
  */
-MAYBE_UNUSED
-static rapidjson::Document GetJsonDocumentFromFile(
+rapidjson::Document GetJsonDocumentFromFile(
     std::string& path,
     bool missing_is_error = false);
 
@@ -48,8 +47,7 @@ static rapidjson::Document GetJsonDocumentFromFile(
  * @relation
  * google_sign_in
  */
-MAYBE_UNUSED
-static bool WriteJsonDocumentToFile(std::string& path,
+bool WriteJsonDocumentToFile(std::string& path,
                                     const rapidjson::Document& doc);
 
 /**
@@ -61,8 +59,7 @@ static bool WriteJsonDocumentToFile(std::string& path,
  * @relation
  * google_sign_in
  */
-MAYBE_UNUSED
-static bool AddEmptyKeyToFile(std::string& path, const char* key);
+bool AddEmptyKeyToFile(std::string& path, const char* key);
 
 }  // namespace plugin_common::JsonUtils
 

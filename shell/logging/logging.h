@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "config.h"
+#include "config/common.h"
 
 #if !defined(NDEBUG)
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
