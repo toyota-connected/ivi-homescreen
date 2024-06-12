@@ -99,7 +99,7 @@ SDL_Window* createWindow() {
   const uint32_t windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN |
                                SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
   SDL_Window* win =
-      SDL_CreateWindow("Hello Filament!", 100, 100, 600, 400, windowFlags);
+      SDL_CreateWindow("Hello Filament!", 0, 0, 800, 600, windowFlags);
   if (win == nullptr) {
     std::cout << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
     SDL_Quit();
@@ -332,7 +332,7 @@ int main() {
   gContext.scene->addEntity(gContext.light);
 
   /// Build a quad
-  // addQuadToScene();
+  addQuadToScene();
 
   /// Display loop
   volatile uint32_t prev_width = gWidth;
