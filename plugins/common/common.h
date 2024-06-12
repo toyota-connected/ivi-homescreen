@@ -17,7 +17,6 @@
 #ifndef FLUTTER_PLUGIN_COMMON_COMMON_H_
 #define FLUTTER_PLUGIN_COMMON_COMMON_H_
 
-#include "curl_client/curl_client.h"
 #include "json/json_utils.h"
 #include "logging.h"
 #include "shared_library/shared_library.h"

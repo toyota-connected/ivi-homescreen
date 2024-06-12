@@ -1,6 +1,5 @@
 
 add_library(platform_homescreen STATIC
-        ${PROJECT_BINARY_DIR}/config.h
         flutter_desktop.cc
         flutter_desktop_messenger.cc
         key_event_handler.cc

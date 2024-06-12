@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include "config.h"
+#include "config/common.h"
 
 namespace plugin_common::StringTools {
 
@@ -30,9 +30,7 @@ namespace plugin_common::StringTools {
  * @relation
  * internal
  */
-MAYBE_UNUSED
-std::vector<std::string> split(std::string str,
-                                      const std::string& token);
+std::vector<std::string> split(std::string str, const std::string& token);
 
 /**
  * @brief trim from end of string (right)
@@ -41,7 +39,6 @@ std::vector<std::string> split(std::string str,
  * @relation
  * flutter
  */
-MAYBE_UNUSED
 inline std::string& rtrim(std::string& s, const char* t) {
   s.erase(s.find_last_not_of(t) + 1);
   return s;
@@ -54,7 +51,6 @@ inline std::string& rtrim(std::string& s, const char* t) {
  * @relation
  * flutter
  */
-MAYBE_UNUSED
 inline std::string& ltrim(std::string& s, const char* t) {
   s.erase(0, s.find_first_not_of(t));
   return s;
@@ -67,7 +63,6 @@ inline std::string& ltrim(std::string& s, const char* t) {
  * @relation
  * flutter
  */
-MAYBE_UNUSED
 inline std::string& trim(std::string& s, const char* t) {
   return ltrim(rtrim(s, t), t);
 };

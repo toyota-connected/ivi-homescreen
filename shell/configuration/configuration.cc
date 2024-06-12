@@ -19,7 +19,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "config.h"
+#include "config/common.h"
 
 #include <rapidjson/document.h>
 #include "utils.h"

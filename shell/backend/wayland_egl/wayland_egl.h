@@ -21,7 +21,7 @@
 
 #include <wayland-egl.h>
 
-#include "config.h"
+#include "config/common.h"
 
 #include "backend/backend.h"
 #include "egl.h"

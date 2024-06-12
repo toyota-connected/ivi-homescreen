@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include "config.h"
+#include "config/common.h"
 
 #include <map>
 #include <memory>

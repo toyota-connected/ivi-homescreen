@@ -17,7 +17,7 @@
 #ifndef PLUGINS_COMMON_TOOLS_ENCODABLE_VALUES_H_
 #define PLUGINS_COMMON_TOOLS_ENCODABLE_VALUES_H_
 
-#include "config.h"
+#include "config/common.h"
 
 #include <flutter/encodable_value.h>
 
