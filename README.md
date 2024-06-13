@@ -1,22 +1,32 @@
 # ivi-homescreen
 
+Flutter Linux CPP Embedder
 
-IVI Homescreen for Wayland
-
-* Strongly Typed (C++)
-* Lightweight
-* Source runs on Desktop and Yocto Linux
+## Highlights
+* Desktop Plugin Registry
+  * Flutter Pigeon CPP compatible
+  * Plugins modeled after Window CPP
+  * Plugins enabled/disabled via CMake
+  * Firestore compatible
+* Desktop Texture Registry
+  * Camera first party compatible
+  * Video Player first party compatible
+* Platform View Framework
+  * compatible with AndroidView widget
+* Backend Support
+  * EGL
+  * Vulkan (first Flutter embedder to support this)
+  * Wayland Leased DRM (coming soon)
+  * DRM/KMS (coming soon)
+* Same source code runs on Desktop and embedded Linux image
   * Ubuntu 18+
   * Fedora 33+
-  * Yocto Dunfell+
-* Platform Channels enabled/disabled via CMake
-* OpenGL Texture Framework
-* Compositor Sub-surface/Region support
-* Vulkan / EGL backend support
+  * Yocto Dunfell/Kirkstone/Scarthgap
+
 
 # Logging
 
-Logging supports the following levels
+Logging level support
 * trace
 * debug
 * info
@@ -262,58 +272,77 @@ All other parameters get assigned using the following ordering:
 
 `ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
 
-`ENABLE_AGL_CLIENT` - Enable AGL Client.  Defaults to OFF
+`ENABLE_AGL_SHELL_CLIENT` - Enable AGL Client.  Defaults to OFF
 
 `ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
 
-`ENABLE_DLT` - Enable DLT logging.  Defaults to ON
+`ENABLE_DRM_LEASE_CLIENT` - Enable drm lease Client.  Defaults to OFF
+
+`ENABLE_LTO` - Enable Link Time Optimization.  Defaults to OFF
+
+`ENABLE_DLT` - Enable DLT logging.  Defaults to OFF
 
 `BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
 
 `BUILD_EGL_TRANSPARENCY` - Build with EGL Transparency Enabled.  Defaults to ON
 
-`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backend for Vulkan.  Defaults to ON
+`BUILD_EGL_ENABLE_3D` - Build with EGL Stencil, Depth, and Stencil config Enabled.  Defaults to ON
 
-`BUILD_BACKEND_WAYLAND_DRM` - Build Backend Wayland DRM.  Defaults to OFF
+`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4.  Defaults to ON
 
-`BUILD_TEXTURE_EGL` - Include EGL Textures.  Defaults to ON
+`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan.  Defaults to OFF
 
-`BUILD_TEXTURE_TEST_EGL` - Includes Test Texture.  Defaults to OFF
+`BUILD_BACKEND_HEADLESS_EGL` - Build Headless backend for EGL (OSMesa).  Defaults to OFF
 
-`BUILD_TEXTURE_NAVI_RENDER_EGL` - Includes Navi Texture.  Defaults to ON
+`DEBUG_PLATFORM_MESSAGES` - Dump Platform Channel Messages.  Defaults to OFF
 
-`BUILD_PLUGIN_ISOLATE` - Include Isolate Plugin.  Defaults to ON
+`BUILD_CRASH_HANDLER` - Build Sentry IO Crash Handler Support.  Defaults to OFF
 
-`BUILD_PLUGIN_RESTORATION` - Include Restoration Plugin.  Defaults to ON
+`BUILD_DOCS` - Builds Docs.  Defaults to OFF
 
-`BUILD_PLUGIN_PLATFORM` - Include Platform Plugin.  Defaults to ON
+`BUILD_UNIT_TESTS` - Build Unit Tests.  Defaults to OFF
 
-`BUILD_PLUGIN_MOUSE_CURSOR` - Include Mouse Cursor Plugin.  Defaults to ON
+`UNIT_TEST_SAVE_GOLDENS` - Update test goldens.  Defaults to OFF
 
-`BUILD_PLUGIN_GSTREAMER_EGL` - Include GStreamer Plugin.  Defaults to OFF
+`EXE_OUTPUT_NAME` - Set executable output name.  Defaults to `homescreen`
 
-`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to ON
+`DISABLE_PLUGINS` - Disables all plugins located in the plugins folder.  Defaults to OFF
 
-`BUILD_PLUGIN_PACKAGE_INFO` - Include PackageInfo Plugin.  Defaults to ON
+`BUILD_PLUGIN_AUDIOPLAYERS_LINUX` - Include Audioplayers Linux plugin.  Defaults to OFF
 
-`BUILD_PLUGIN_COMP_SURF` - Include Compositor Surface Plugin.  Defaults to ON
+`BUILD_PLUGIN_CAMERA` - Include Camera plugin.  Defaults to OFF
 
-`BUILD_PLUGIN_COMP_REGION` - Include Compositor Region Plugin.  Defaults to ON
+`BUILD_PLUGIN_CLOUD_FIRESTORE` - Plugin Cloud Firestore.  Defaults to OFF
 
-`BUILD_PLUGIN_OPENGL_TEXTURE` - Includes OpenGL Texture Plugin.  Defaults to ON 
+`BUILD_PLUGIN_DESKTOP_WINDOW_LINUX` - Includes Desktop Window Linux Plugin.  Defaults to OFF
 
-`BUILD_PLUGIN_NAVIGATION` - Includes Navigation Plugin.  Defaults to ON
+`BUILD_PLUGIN_FILE_SELECTOR` - Include File Selector plugin.  Defaults to OFF
 
-`BUILD_PLUGIN_ACCESSIBILITY` - Includes Accessibility Plugin.  Defaults to ON
+`BUILD_PLUGIN_FIREBASE_AUTH` - Plugin Firebase Auth.  Defaults to OFF
 
-`BUILD_PLUGIN_PLATFORM_VIEW` - Includes PlatformView Plugin.  Defaults to OFF
+`BUILD_PLUGIN_FIREBASE_STORAGE` - Plugin Firebase Storage.  Defaults to OFF
 
-`BUILD_PLUGIN_DESKTOP_WINDOW` - Includes Desktop Window Plugin.  Defaults to ON
+`BUILD_PLUGIN_GO_ROUTER` - Includes Go Router Plugin.  Defaults to ON
+
+`BUILD_PLUGIN_GOOGLE_SIGN_IN` - Include Google Sign In manager.  Defaults to OFF
+
+`BUILD_PLUGIN_INTEGRATION_TEST` - Included Flutter Integration Test support.  Defaults to OFF
+
+`BUILD_PLUGIN_PDF` - Include PDF plugin.  Defaults to OFF
 
 `BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
 
-`BUILD_PLUGIN_INTEGRATION_TEST` - Includes Flutter Integration Test Plugin.  Defaults to OFF
+`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to OFF
 
+`BUILD_PLUGIN_VIDEO_PLAYER_LINUX` - Include Video Player plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_FILAMENT_VIEW` - Include Filament View plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW` - Include Layer Playground View plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_NAV_RENDER_VIEW` - Include Navigation Render View plugin.  Defaults to OFF
+
+`BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW` - Includes WebView View Plugin.  Defaults to OFF
 
 _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
@@ -373,8 +402,8 @@ Defaults to Wayland, no need to do anything special
 
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
-    sudo ./llvm.sh 12
-    sudo apt-get install -y libc++-12-dev libc++abi-12-dev libunwind-dev
+    sudo ./llvm.sh 14
+    sudo apt-get install -y libc++-14-dev libc++abi-14-dev libunwind-dev
 
 ## CI Example
 
@@ -386,45 +415,51 @@ Defaults to Wayland, no need to do anything special
     sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
 
 # Flutter Application
-## Build
 
-Confirm flutter/bin is in the path using: `flutter doctor -v`
+## Running an app
 
-    cd ~/development/my_flutter_app
-    flutter channel beta
-    flutter upgrade
-    flutter config --enable-linux-desktop
-    flutter create .
-    flutter build bundle
+Release Bundle Folder layout
+```
+.desktop-homescreen/
+├── data
+│ ├── flutter_assets
+│ │   └── ... 
+│ └── icudtl.dat
+├── default_config.json (optional)
+└── lib
+    ├── libapp.so
+    └── libflutter_engine.so
+```
 
-## Install
+Running the bundle above would be
+```
+homescreen --b=`pwd`/.desktop-homescreen --w=1024 --h=768
+```
 
-loading path for application is: `/usr/local/share/homescreen/bundle`
+## workspace-automation provides a flutter workspace setup tool
 
-This is used to leverage symlinks.  Such as:
+https://github.com/meta-flutter/workspace-automation
 
-    cd /usr/local/share/homescreen
-    sudo rm -rf bundle
-    sudo ln -sf ~/development/my_flutter_app/build/ bundle
+Example usage to run gallery application on Linux desktop
 
-Or
+Run once
+```
+git clone https://github.com/meta-flutter/workspace-automation
+cd workspace_automation
+sudo ./flutter_workspace.py
+```
 
-    sudo mkdir -p /usr/local/share/homescreen/my_flutter_app/
-    sudo cp -r build/* /usr/local/share/homescreen/my_flutter_app/
-    sudo ln -sf /usr/local/share/homescreen/my_flutter_app/ bundle
+Run for each development session, or new terminal window opened
+```
+source ./setup_env.sh
+cd app/gallery
+flutter run -d desktop-homescreen
+```
 
-## Running on desktop
+flutter_workspace.py installs runtime packages, patches source files, compiles projects, etc.
 
-Copy a current icudtl.dat to /usr/local/share/flutter
-Copy libflutter_engine.so to `/usr/local/lib` or use LD_LIBRARY_PATH to point downloaded engine for build:
+_Note: `sudo` is required to install runtime packages_
 
-    cd <homescreen build>
-    export LD_LIBRARY_PATH=`pwd`:$LD_LIBRARY_PATH
-    homescreen
-
-## Debug
-
-Setup custom devices to control ivi-homescreen via debugger. 
 
 # CMAKE dependency paths
 
@@ -464,6 +499,10 @@ ivi-homescreen build
     LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
 
 # Yocto recipes
+
+## Scarthgap
+
+    https://github.com/meta-flutter/meta-flutter/tree/scarthgap/recipes-graphics/toyota
 
 ## Kirkstone
 

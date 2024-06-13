@@ -19,20 +19,11 @@
 #include <memory>
 #include <string>
 
+#include <wayland-protocols.h>
 #include <cassert>
 
 #include "backend/backend.h"
 
-#if ENABLE_AGL_CLIENT
-#include "agl-shell-client-protocol.h"
-#endif
-#if ENABLE_IVI_SHELL_CLIENT
-#include "ivi-application-client-protocol.h"
-#include "ivi-wm-client-protocol.h"
-#endif
-#if ENABLE_XDG_CLIENT
-#include "xdg-shell-client-protocol.h"
-#endif
 
 // workaround for Wayland macro not compiling in C++
 #define WL_ARRAY_FOR_EACH(pos, array, type)                             \
