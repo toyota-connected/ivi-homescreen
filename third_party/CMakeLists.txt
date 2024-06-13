@@ -94,8 +94,14 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 else ()
     set(ENABLE_EGL OFF)
 endif ()
-set(BUILD_EXAMPLES OFF)
 add_subdirectory(waypp)
+
+#
+# libliftoff
+#
+if (BUILD_BACKEND_DRM OR BUILD_BACKEND_WAYLAND_LEASED_DRM)
+    add_subdirectory(libliftoff-0.6.0-dev)
+endif ()
 
 #
 # Google Test
