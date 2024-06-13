@@ -60,6 +60,15 @@ else ()
     option(BUILD_BACKEND_WAYLAND_VULKAN "Build Backend for Vulkan" ON)
 endif ()
 
+#
+# DRM
+#
+option(BUILD_BACKEND_DRM "Build DRM backend" OFF)
+option(BUILD_BACKEND_WAYLAND_LEASED_DRM "Build Wayland Leased DRM backend" OFF)
+
+#
+# Headless
+#
 option(BUILD_BACKEND_HEADLESS_EGL "Build Headless EGL Backend" OFF)
 if (BUILD_BACKEND_HEADLESS_EGL)
     find_package(PkgConfig)
