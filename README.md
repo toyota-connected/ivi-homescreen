@@ -12,7 +12,7 @@ Flutter Linux CPP Embedder
   * Camera first party compatible
   * Video Player first party compatible
 * Platform View Framework
-  * compatible with AndroidView widget
+  * AndroidView widget compatible
 * Backend Support
   * EGL
   * Vulkan (first Flutter embedder to support this)
