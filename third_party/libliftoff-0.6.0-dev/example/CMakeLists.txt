@@ -1,12 +1,28 @@
 
 add_executable(simple common.c simple.c)
 target_link_libraries(simple PRIVATE liftoff)
+add_sanitizers(simple)
+if (IPO_SUPPORT_RESULT)
+    set_property(TARGET simple PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
 
 add_executable(compositor common.c compositor.c)
 target_link_libraries(compositor PRIVATE liftoff)
+add_sanitizers(compositor)
+if (IPO_SUPPORT_RESULT)
+    set_property(TARGET compositor PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
 
 add_executable(dynamic common.c dynamic.c)
 target_link_libraries(dynamic PRIVATE liftoff)
+add_sanitizers(dynamic)
+if (IPO_SUPPORT_RESULT)
+    set_property(TARGET dynamic PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
 
 add_executable(multi-output common.c multi-output.c)
 target_link_libraries(multi-output PRIVATE liftoff)
+add_sanitizers(multi-output)
+if (IPO_SUPPORT_RESULT)
+    set_property(TARGET multi-output PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif ()
