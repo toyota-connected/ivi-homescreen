@@ -27,26 +27,16 @@
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
+#include <wayland-protocols.h>
 #include <cassert>
 
-#include "configuration/configuration.h"
 #include "config/common.h"
+#include "configuration/configuration.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
 #include "timer.h"
-
-#if ENABLE_AGL_CLIENT
-#include "agl-shell-client-protocol.h"
-#endif
-#if ENABLE_IVI_SHELL_CLIENT
-#include "ivi-application-client-protocol.h"
-#include "ivi-wm-client-protocol.h"
-#endif
-#if ENABLE_XDG_CLIENT
-#include "xdg-shell-client-protocol.h"
-#endif
 
 class Engine;
 
@@ -151,7 +141,7 @@ class Display {
    */
   NODISCARD int PollEvents() const;
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
   /**
    * @brief AglShell: Do background
    * @param[in] surface Image
