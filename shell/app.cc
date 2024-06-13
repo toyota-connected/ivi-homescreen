@@ -32,7 +32,7 @@ App::App(const std::vector<Configuration::Config>& configs)
                                                   configs[0].cursor_theme,
                                                   configs)) {
   SPDLOG_DEBUG("+App::App");
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
   bool found_view_with_bg = false;
 #endif
 
@@ -44,7 +44,7 @@ App::App(const std::vector<Configuration::Config>& configs)
     m_views.emplace_back(std::move(view));
     index++;
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
         WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
@@ -52,7 +52,7 @@ App::App(const std::vector<Configuration::Config>& configs)
 #endif
   }
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)

@@ -93,7 +93,7 @@ Display::~Display() {
   if (m_shm)
     wl_shm_destroy(m_shm);
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
   if (m_agl.shell)
     agl_shell_destroy(m_agl.shell);
 #endif
@@ -232,7 +232,7 @@ void Display::registry_handle_global(void* data,
         std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
     d->m_repeat_timer->set_timerspec(40, 400);
   }
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
   else if (strcmp(interface, agl_shell_interface.name) == 0 &&
            d->m_agl.bind_to_agl_shell) {
     if (version >= 2) {
@@ -780,7 +780,7 @@ int Display::PollEvents() const {
   return wl_display_dispatch_pending(m_display);
 }
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
 void Display::AglShellDoBackground(struct wl_surface* surface,
                                    const size_t index) const {
   if (m_agl.shell) {
@@ -903,7 +903,7 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   return {0, 0};
 }
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
   (void)shell;
   auto* d = static_cast<Display*>(data);

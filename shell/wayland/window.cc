@@ -98,7 +98,7 @@ WaylandWindow::WaylandWindow(size_t index,
 
   wl_surface_commit(m_base_surface);
 
-#if ENABLE_AGL_CLIENT
+#if ENABLE_AGL_SHELL_CLIENT
   switch (m_type) {
     case WINDOW_NORMAL:
       break;
