@@ -7,7 +7,7 @@ Flutter Linux CPP Embedder
   * Flutter Pigeon CPP compatible
   * Plugins modeled after Window CPP
   * Plugins enabled/disabled via CMake
-  * Firestore compatible
+  * Firestore first party compatible
 * Desktop Texture Registry
   * Camera first party compatible
   * Video Player first party compatible

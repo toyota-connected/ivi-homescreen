@@ -81,7 +81,7 @@ Display::Display(bool enable_cursor,
   }
 
   if (!m_agl.shell && m_agl.bind_to_agl_shell) {
-    spdlog::info("agl_shell extension not present");
+    spdlog::debug("agl_shell extension not present");
   }
 
   SPDLOG_TRACE("- Display()");
@@ -246,19 +246,19 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(1), version)));
     }
     d->m_agl.version = version;
-    spdlog::info("Wayland: agl_shell version: {}", version);
+    spdlog::debug("Wayland: agl_shell version: {}", version);
   }
 #endif
 #if ENABLE_IVI_SHELL_CLIENT
   else if (strcmp(interface, ivi_application_interface.name) == 0) {
     d->m_ivi_shell.application = static_cast<struct ivi_application*>(
         wl_registry_bind(registry, name, &ivi_application_interface, 1));
-    spdlog::info("Wayland: ivi_application version: {}", version);
+    spdlog::debug("Wayland: ivi_application version: {}", version);
   } else if (strcmp(interface, ivi_wm_interface.name) == 0) {
     d->m_ivi_shell.ivi_wm = static_cast<struct ivi_wm*>(
         wl_registry_bind(registry, name, &ivi_wm_interface, 1));
     ivi_wm_add_listener(d->m_ivi_shell.ivi_wm, &ivi_wm_listener, data);
-    spdlog::info("Wayland: ivi_wm version: {}", version);
+    spdlog::debug("Wayland: ivi_wm version: {}", version);
   }
 #endif
 }
@@ -365,7 +365,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.pointer) {
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.wl_pointer) {
-      spdlog::info("Pointer Present");
+      spdlog::debug("Pointer Present");
       d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
       wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
     } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) &&
@@ -377,7 +377,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.keyboard) {
     if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
-      spdlog::info("Keyboard Present");
+      spdlog::debug("Keyboard Present");
       d->m_keyboard = wl_seat_get_keyboard(seat);
       wl_keyboard_add_listener(d->m_keyboard, &keyboard_listener, d);
     } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard) {
@@ -388,7 +388,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.touch) {
     if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
-      spdlog::info("Touch Present");
+      spdlog::debug("Touch Present");
       d->m_touch.touch = wl_seat_get_touch(seat);
       wl_touch_set_user_data(d->m_touch.touch, d);
       wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
@@ -625,13 +625,13 @@ void Display::keyboard_handle_key(void* data,
     const int res =
         xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &key_symbols);
     if (res == 0) {
-      spdlog::info("xkb_scancode has no key symbols: 0x{:x}", xkb_scancode);
+      spdlog::debug("xkb_scancode has no key symbols: 0x{:x}", xkb_scancode);
       keysym = XKB_KEY_NoSymbol;
     } else {
       // only use the first symbol until the use case for two is clarified
       keysym = key_symbols[0];
       for (int i = 0; i < res; i++) {
-        spdlog::info("xkb keysym: 0x{:x}", key_symbols[i]);
+        spdlog::debug("xkb keysym: 0x{:x}", key_symbols[i]);
       }
     }
   }
@@ -952,14 +952,14 @@ int Display::find_output_by_name(std::string output_name) {
 void Display::activateApp(std::string app_id) {
   int default_output_index = 0;
 
-  FML_LOG(INFO) << "got app_id " << app_id;
+  spdlog::debug("got app_id {}", app_id);
 
   // search for a pending application which might have a different output
   auto iter = pending_app_list.begin();
   bool found_pending_app = false;
   while (iter != pending_app_list.end()) {
     auto app_to_search = iter->first;
-    FML_LOG(INFO) << "searching for " << app_to_search;
+    spdlog::debug("searching for {}", app_to_search);
 
     if (app_to_search == app_id) {
       found_pending_app = true;
@@ -973,7 +973,7 @@ void Display::activateApp(std::string app_id) {
     auto output_name = iter->second;
     default_output_index = find_output_by_name(output_name);
 
-    FML_LOG(INFO) << "Found app_id " << app_id << " at all";
+    spdlog::debug("Found app_id {} at all", app_id);
 
     if (default_output_index < 0) {
       // try with remoting-remote-X which is the streaming
@@ -981,7 +981,7 @@ void Display::activateApp(std::string app_id) {
 
       default_output_index = find_output_by_name(new_remote_output);
       if (default_output_index < 0) {
-        FML_LOG(INFO) << "Not activating app_id " << app_id << " at all";
+        spdlog::debug("Not activating app_id {} at all", app_id);
         return;
       }
     }
@@ -989,8 +989,8 @@ void Display::activateApp(std::string app_id) {
     pending_app_list.erase(iter);
   }
 
-  FML_LOG(INFO) << "Activating app_id " << app_id << " on output "
-                << default_output_index;
+  spdlog::debug("Activating app_id {} on output {}", app_id,
+                default_output_index);
   agl_shell_activate_app(
       m_agl.shell, app_id.c_str(),
       m_all_outputs[static_cast<size_t>(default_output_index)]->output);
@@ -1029,8 +1029,8 @@ void Display::agl_shell_app_on_output(void* data,
                                       const char* output_name) {
   auto* d = static_cast<Display*>(data);
 
-  FML_LOG(INFO) << "Gove event app_on_out app_id " << app_id << " output name "
-                << output_name;
+  spdlog::debug("Gove event app_on_out app_id {} output name {}", app_id,
+                output_name);
 
   // a couple of use-cases, if there is no app_id in the app_list then it
   // means this is a request to map the application, from the start to a
@@ -1052,8 +1052,8 @@ void Display::agl_shell_app_on_output(void* data,
   auto iter = d->apps_stack.begin();
   while (iter != d->apps_stack.end()) {
     if (*iter == std::string(app_id)) {
-      FML_LOG(INFO) << "Gove event to move " << app_id << " to another output "
-                    << output_name;
+      spdlog::debug("Gove event to move {} to another output {}", app_id,
+                    output_name);
       d->processAppStatusEvent(app_id, std::string("started"));
       break;
     }
@@ -1069,7 +1069,7 @@ void Display::agl_shell_app_state(void* data,
 
   switch (state) {
     case AGL_SHELL_APP_STATE_STARTED:
-      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_STARTED for app_id " << app_id;
+      spdlog::debug("Got AGL_SHELL_APP_STATE_STARTED for app_id {}", app_id);
 
       if (d->m_agl.shell) {
         d->processAppStatusEvent(app_id, std::string("started"));
@@ -1077,12 +1077,10 @@ void Display::agl_shell_app_state(void* data,
 
       break;
     case AGL_SHELL_APP_STATE_TERMINATED:
-      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_TERMINATED for app_id "
-                     << app_id;
+      spdlog::debug("Got AGL_SHELL_APP_STATE_TERMINATED for app_id {}", app_id);
       break;
     case AGL_SHELL_APP_STATE_ACTIVATED:
-      FML_DLOG(INFO) << "Got AGL_SHELL_APP_STATE_ACTIVATED for app_id "
-                     << app_id;
+      spdlog::debug("Got AGL_SHELL_APP_STATE_ACTIVATED for app_id {}", app_id);
       d->addAppToStack(std::string(app_id));
       break;
     case AGL_SHELL_APP_STATE_DEACTIVATED:
@@ -1097,7 +1095,7 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
     .app_state = agl_shell_app_state,
-//TODO .app_on_output = agl_shell_app_on_output,
+    // TODO .app_on_output = agl_shell_app_on_output,
 };
 #endif
 

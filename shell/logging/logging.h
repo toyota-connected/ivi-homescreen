@@ -30,10 +30,84 @@
 #include "dlt/dlt.h"
 #endif
 
+#include "spdlog/cfg/env.h"  // support for loading levels from the environment variable
+#include "spdlog/spdlog-inl.h"
+#if ENABLE_DLT
+#include "spdlog/sinks/callback_sink.h"
+#endif
+#include "spdlog/sinks/ringbuffer_sink.h"
+
 class Logging {
  public:
-  Logging();
-  ~Logging();
+  Logging() {
+#if ENABLE_DLT
+    if (Dlt::IsSupported()) {
+      Dlt::Register();
+      m_logger = spdlog::callback_logger_mt(
+          "primary", [](const spdlog::details::log_msg& msg) {
+            switch (msg.level) {
+              case SPDLOG_LEVEL_TRACE:
+                Dlt::LogSizedString(DltLogLevelType::LOG_VERBOSE,
+                                    msg.payload.data(),
+                                    static_cast<uint16_t>(msg.payload.size()));
+                break;
+              case SPDLOG_LEVEL_DEBUG:
+                Dlt::LogSizedString(DltLogLevelType::LOG_DEBUG,
+                                    msg.payload.data(),
+                                    static_cast<uint16_t>(msg.payload.size()));
+                break;
+              case SPDLOG_LEVEL_INFO:
+                Dlt::LogSizedString(DltLogLevelType::LOG_INFO, msg.payload.data(),
+                                    static_cast<uint16_t>(msg.payload.size()));
+                break;
+              case SPDLOG_LEVEL_WARN:
+                Dlt::LogSizedString(DltLogLevelType::LOG_WARN, msg.payload.data(),
+                                    static_cast<uint16_t>(msg.payload.size()));
+                break;
+              case SPDLOG_LEVEL_ERROR:
+                Dlt::LogSizedString(DltLogLevelType::LOG_ERROR,
+                                    msg.payload.data(),
+                                    static_cast<uint16_t>(msg.payload.size()));
+                break;
+              case SPDLOG_LEVEL_CRITICAL:
+                Dlt::LogSizedString(DltLogLevelType::LOG_FATAL,
+                                    msg.payload.data(),
+                                    static_cast<uint16_t>(msg.payload.size()));
+                break;
+              default:
+                break;
+            }
+          });
+      spdlog::set_default_logger(m_logger);
+      spdlog::set_pattern("%v");
+    } else {
+#endif
+      m_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+      m_logger = std::make_shared<spdlog::logger>("primary", m_console_sink);
+      spdlog::set_default_logger(m_logger);
+      spdlog::set_pattern("[%H:%M:%S.%f] [%L] %v");
+#if ENABLE_DLT
+    }
+#endif
+
+    spdlog::flush_on(spdlog::level::err);
+    spdlog::flush_every(std::chrono::seconds(kLogFlushInterval));
+    spdlog::cfg::load_env_levels();
+  }
+
+  ~Logging() {
+#if ENABLE_DLT
+    if (Dlt::IsSupported()) {
+      // switch logger to console, since we are unregistering DLT
+      m_logger.reset();
+      m_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+      m_logger = std::make_shared<spdlog::logger>("post-dlt", m_console_sink);
+      spdlog::register_logger(m_logger);
+
+      Dlt::Unregister();
+    }
+#endif
+  }
 
  private:
   std::shared_ptr<spdlog::logger> m_logger{};
@@ -41,3 +115,14 @@ class Logging {
       spdlog::sinks::ansicolor_stdout_sink<spdlog::details::console_mutex>>
       m_console_sink;
 };
+
+#define DLOG_DEBUG SPDLOG_DEBUG
+#define DLOG_TRACE SPDLOG_TRACE
+#define DLOG_CRITICAL SPDLOG_CRITICAL
+
+#define LOG_INFO spdlog::info
+#define LOG_DEBUG spdlog::debug
+#define LOG_WARN spdlog::warn
+#define LOG_ERROR spdlog::error
+#define LOG_TRACE spdlog::trace
+#define LOG_CRITICAL spdlog::critical
