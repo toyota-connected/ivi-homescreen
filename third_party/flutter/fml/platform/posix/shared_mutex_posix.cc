@@ -4,8 +4,6 @@
 
 #include "flutter/fml/platform/posix/shared_mutex_posix.h"
 
-#include "flutter/fml/logging.h"
-
 namespace fml {
 
 SharedMutex* SharedMutex::Create() {
@@ -13,7 +11,7 @@ SharedMutex* SharedMutex::Create() {
 }
 
 SharedMutexPosix::SharedMutexPosix() {
-  FML_CHECK(pthread_rwlock_init(&rwlock_, nullptr) == 0);
+  pthread_rwlock_init(&rwlock_, nullptr);
 }
 
 void SharedMutexPosix::Lock() {

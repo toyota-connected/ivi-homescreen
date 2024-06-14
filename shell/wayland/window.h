@@ -19,7 +19,7 @@
 #include <memory>
 #include <string>
 
-#include <wayland-protocols.h>
+#include <waypp/waypp.h>
 #include <cassert>
 
 #include "backend/backend.h"

@@ -30,17 +30,12 @@ add_executable(${PROJECT_NAME}
         view/flutter_view.cc
         wayland/display.cc
         wayland/window.cc
-        logging/logging.cc
         task_runner.cc
 )
 set_target_properties(${PROJECT_NAME}
         PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
 )
 
-
-if (BUILD_BACKEND_WAYLAND_DRM)
-    target_sources(${PROJECT_NAME} PRIVATE backend/wayland_drm/wayland_drm.cc)
-endif ()
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan/wayland_vulkan.cc)

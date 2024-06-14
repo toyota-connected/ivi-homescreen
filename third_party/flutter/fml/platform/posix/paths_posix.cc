@@ -8,8 +8,6 @@
 
 #include <climits>
 
-#include "flutter/fml/logging.h"
-
 namespace fml {
 namespace paths {
 
@@ -20,7 +18,7 @@ constexpr size_t kFileURLPrefixLength = sizeof(kFileURLPrefix) - 1;
 
 std::string GetCurrentDirectory() {
   char buffer[PATH_MAX];
-  FML_CHECK(getcwd(buffer, sizeof(buffer)));
+  getcwd(buffer, sizeof(buffer));
   return std::string(buffer);
 }
 

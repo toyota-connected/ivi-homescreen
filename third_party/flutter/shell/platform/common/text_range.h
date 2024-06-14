@@ -7,8 +7,6 @@
 
 #include <algorithm>
 
-#include "flutter/fml/logging.h"
-
 namespace flutter {
 
 // A directional range of text.
@@ -65,10 +63,7 @@ class TextRange {
   // The position of a collapsed range.
   //
   // Asserts that the range is of length 0.
-  size_t position() const {
-    FML_DCHECK(base_ == extent_);
-    return extent_;
-  }
+  size_t position() const { return extent_; }
 
   // The length of the range.
   size_t length() const { return end() - start(); }
