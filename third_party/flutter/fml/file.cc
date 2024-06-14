@@ -4,7 +4,6 @@
 
 #include "flutter/fml/file.h"
 
-#include "flutter/fml/logging.h"
 #include "flutter/fml/unique_fd.h"
 
 #include "spdlog/spdlog.h"
@@ -15,8 +14,6 @@ static fml::UniqueFD CreateDirectory(const fml::UniqueFD& base_directory,
                                      const std::vector<std::string>& components,
                                      FilePermission permission,
                                      size_t index) {
-  FML_DCHECK(index <= components.size());
-
   const char* file_path = components[index].c_str();
 
   auto directory = OpenDirectory(base_directory, file_path, true, permission);

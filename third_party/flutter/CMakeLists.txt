@@ -22,9 +22,6 @@ add_library(flutter INTERFACE
 
         fml/command_line.cc
         fml/file.cc
-        fml/log_settings.cc
-        fml/log_settings_state.cc
-        fml/logging.cc
         fml/paths.cc
         fml/string_conversion.cc
         fml/unique_fd.cc

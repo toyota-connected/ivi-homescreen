@@ -53,9 +53,6 @@ add_library(flutter STATIC
 
         flutter/fml/command_line.cc
         flutter/fml/file.cc
-        flutter/fml/log_settings.cc
-        flutter/fml/log_settings_state.cc
-        flutter/fml/logging.cc
         flutter/fml/paths.cc
         flutter/fml/string_conversion.cc
         flutter/fml/unique_fd.cc
@@ -94,6 +91,7 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 else ()
     set(ENABLE_EGL OFF)
 endif ()
+set(LOGGING_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/shell;${CMAKE_BINARY_DIR})
 add_subdirectory(waypp)
 
 #
