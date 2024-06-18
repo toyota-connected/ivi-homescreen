@@ -76,6 +76,7 @@ add_compile_options(
 )
 
 add_compile_definitions(
+        EGL_NO_X11
         $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
 )
 
