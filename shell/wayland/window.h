@@ -155,9 +155,9 @@ class WaylandWindow {
   uint32_t m_ivi_surface_id;
   bool m_fullscreen{};
   bool m_maximized{};
-  MAYBE_UNUSED bool m_resize{};
-  MAYBE_UNUSED bool m_activated{};
-  MAYBE_UNUSED bool m_running{};
+  bool m_resize{};
+  bool m_activated{};
+  bool m_running{};
   struct {
     int32_t width;
     int32_t height;

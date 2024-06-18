@@ -309,7 +309,7 @@ class Display {
    * @relation
    * agl_shell
    */
-  void processAppStatusEvent(const char* app_id, const std::string event_type);
+  void processAppStatusEvent(const char* app_id, std::string event_type);
 
  private:
   std::shared_ptr<Engine> m_flutter_engine;
@@ -368,20 +368,20 @@ class Display {
     uint32_t global_id;
     unsigned width;
     unsigned height;
-    MAYBE_UNUSED unsigned physical_width;
-    MAYBE_UNUSED unsigned physical_height;
-    MAYBE_UNUSED int refresh_rate;
+    unsigned physical_width;
+    unsigned physical_height;
+    int refresh_rate;
     int32_t scale;
-    MAYBE_UNUSED bool done;
+    bool done;
     int transform;
     std::string name;
     std::string desc;
   } output_info_t;
 
   struct pointer_event {
-    MAYBE_UNUSED uint32_t event_mask;
+    uint32_t event_mask;
     double surface_x, surface_y;
-    MAYBE_UNUSED uint32_t button;
+    uint32_t button;
     uint32_t state;
     uint32_t time;
     uint32_t serial;
@@ -390,7 +390,7 @@ class Display {
       double value;
       int32_t discrete;
     } axes[2];
-    MAYBE_UNUSED uint32_t axis_source;
+    uint32_t axis_source;
   };
 
   struct pointer {
@@ -405,15 +405,15 @@ class Display {
   struct touch_point {
     bool valid;
     int32_t id;
-    MAYBE_UNUSED uint32_t event_mask;
-    MAYBE_UNUSED wl_fixed_t surface_x;
+    uint32_t event_mask;
+    wl_fixed_t surface_x;
     wl_fixed_t surface_y;
     wl_fixed_t major, minor;
-    MAYBE_UNUSED wl_fixed_t orientation;
+    wl_fixed_t orientation;
   };
 
   struct touch_event {
-    MAYBE_UNUSED uint32_t event_mask;
+    uint32_t event_mask;
     uint32_t time;
     uint32_t serial;
   };
