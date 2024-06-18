@@ -24,7 +24,6 @@
 #include <flutter/method_call.h>
 #include <flutter/method_channel.h>
 
-#include <optional>
 #include <string>
 
 #include "plugins/common/common.h"
@@ -50,14 +49,14 @@ const flutter::JsonMethodCodec& GoRouterApi::GetCodec() {
 void GoRouterApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                         GoRouterApi* api) {
   {
-    auto channel =
+    auto const channel =
         std::make_unique<flutter::MethodChannel<rapidjson::Document>>(
             binary_messenger, "flutter/navigation", &GetCodec());
     if (api != nullptr) {
       channel->SetMethodCallHandler(
           [](const flutter::MethodCall<rapidjson::Document>& call,
-                std::unique_ptr<flutter::MethodResult<rapidjson::Document>>
-                    result) {
+             std::unique_ptr<flutter::MethodResult<rapidjson::Document>>
+                 result) {
             const auto& method = call.method_name();
             const auto args = call.arguments();
             rapidjson::StringBuffer buffer;
@@ -84,39 +83,41 @@ void GoRouterApi::SetUp(flutter::BinaryMessenger* binary_messenger,
               }
               std::string codec;
               std::string encoded;
+              std::string location;
               if (args->HasMember("state") && (*args)["state"].IsObject()) {
                 auto state = (*args)["state"].GetObject();
 
-                std::string location;
                 if (state.HasMember("location") &&
                     state["location"].IsString()) {
                   location = state["location"].GetString();
-                  spdlog::debug("\tlocation: {}", location);
                 }
                 if (state.HasMember("state") && state["state"].IsObject()) {
-                  auto state1 = state["state"].GetObject();
+                  auto const state1 = state["state"].GetObject();
 
                   if (state1.HasMember("codec") && state1["codec"].IsString()) {
                     codec = state1["codec"].GetString();
-                    spdlog::debug("\tstate::codec: {}", codec);
                   }
                   if (state1.HasMember("encoded") &&
                       state1["encoded"].IsString()) {
                     encoded = state1["encoded"].GetString();
-                    spdlog::debug("\tstate::encoded: {}", encoded);
                   }
                 }
-                if (args->HasMember("imperativeMatches") && (*args)["imperativeMatches"].IsArray()) {
+                if (args->HasMember("imperativeMatches") &&
+                    (*args)["imperativeMatches"].IsArray()) {
                   auto val = (*args)["imperativeMatches"].GetArray();
                 }
               }
+              spdlog::debug("\tlocation: [{}]", location);
+              spdlog::debug("\tstate::codec: [{}]", codec);
+              spdlog::debug("\tstate::encoded: [{}]", encoded);
             } else if (method == "SystemNavigator.pop") {
               spdlog::debug("SystemNavigator.pop");
             } else {
               result->NotImplemented();
               return;
             }
-            return result->Success();
+            result->Success();
+            return;
           });
     } else {
       channel->SetMethodCallHandler(nullptr);
