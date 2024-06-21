@@ -121,7 +121,11 @@ endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(${PROJECT_NAME} PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -l:libc++.a -l:libc++abi.a -static-libgcc -lc -lm -v>)
+    if (ENABLE_CLANG_STATIC_LINK)
+        target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -l:libc++.a -l:libc++abi.a -static-libgcc -lc -lm -v>)
+    else ()
+        target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lgcc -lc -lm -v>)
+    endif ()
 endif ()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
