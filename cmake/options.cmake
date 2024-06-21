@@ -92,6 +92,11 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 #
+# Static linking
+#
+option(ENABLE_CLANG_STATIC_LINK "Link libc++, libc++abi, and gcc as static libs when building with clang" OFF)
+
+#
 # Docs
 #
 option(BUILD_DOCS "Build documentation" OFF)

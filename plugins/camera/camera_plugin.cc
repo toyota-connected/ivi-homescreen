@@ -180,9 +180,9 @@ void CameraPlugin::create(
       enableAudio, g_camera_manager->get(cameraName));
   g_cameras.emplace_back(std::move(camera));
 
-  result(flutter::EncodableMap(
-      {{flutter::EncodableValue(std::string("cameraId")),
-        flutter::EncodableValue(static_cast<int64_t>(g_cameras.size()))}}));
+  auto map = flutter::EncodableMap();
+  map[flutter::EncodableValue("cameraId")] = static_cast<int64_t>(g_cameras.size());
+  result(ErrorOr(map));
 }
 
 void CameraPlugin::initialize(
