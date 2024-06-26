@@ -31,6 +31,7 @@ target_include_directories(platform_homescreen PRIVATE
 target_link_libraries(platform_homescreen PUBLIC
         asio
         flutter
+        plugin_common
         rapidjson
         spdlog
         wayland-gen
