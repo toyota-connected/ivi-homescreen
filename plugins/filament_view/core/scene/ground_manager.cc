@@ -64,151 +64,191 @@ mat4f inline fitIntoUnitCube(const Aabb& bounds, float zoffset) {
   return mat4f::scaling(float3(scaleFactor)) * mat4f::translation(-center);
 }
 
-std::future<Resource<std::string_view>> GroundManager::createGround() {
-  SPDLOG_DEBUG("++GroundManager::createGround");
-  const auto promise(
-      std::make_shared<std::promise<Resource<std::string_view>>>());
-  auto future(promise->get_future());
+std::future<Resource<std::string_view>> GroundManager::createGround() const {
+  SPDLOG_TRACE("++GroundManager::createGround");
+  try {
+    const auto promise =
+        std::make_shared<std::promise<Resource<std::string_view>>>();
+    auto future = promise->get_future();
 
-  modelViewer_->setGroundState(SceneState::LOADING);
+    modelViewer_->setGroundState(SceneState::LOADING);
 
-  if (!ground_) {
-    modelViewer_->setGroundState(SceneState::ERROR);
-    promise->set_value(
-        Resource<std::string_view>::Error("Ground must be provided"));
-    SPDLOG_DEBUG("--GroundManager::createGround");
-    return future;
-  }
-
-  if (!ground_->size_) {
-    modelViewer_->setGroundState(SceneState::ERROR);
-    promise->set_value(
-        Resource<std::string_view>::Error("Size must be provided"));
-    SPDLOG_DEBUG("--GroundManager::createGround");
-    return future;
-  }
-
-  asio::post(modelViewer_->getStrandContext(), [&, promise] {
-    auto materialInstanceResult =
-        materialManager_->getMaterialInstance(ground_->material_.get());
-
-    auto modelTransform = modelViewer_->getModelTransform();
-    ::filament::math::float3 center;
-    if (ground_->isBelowModel_ && modelTransform.has_value()) {
-      center.x = modelTransform.value()[0][3];
-      center.y = modelTransform.value()[1][3];
-      center.z = modelTransform.value()[2][3];
-    } else {
-      if (ground_->center_position_ == nullptr) {
-        promise->set_value(
-            Resource<std::string_view>::Error("Position must be provided"));
-        return;
-      }
-      center.x = ground_->center_position_->x;
-      center.y = ground_->center_position_->y;
-      center.z = ground_->center_position_->z;
+    if (!ground_) {
+      spdlog::error("[flinament_view] Ground is not provided");
+      modelViewer_->setGroundState(SceneState::ERROR);
+      promise->set_value(
+          Resource<std::string_view>::Error("Ground must be provided"));
+      SPDLOG_TRACE("--GroundManager::createGround");
+      return future;
     }
-#if 0
-    plane_geometry_ = PlaneGeometry.Builder(
-                                 center = center,
-                                 ground_->getSize(),
-                                 ground_->getNormal().has_value() ? ground_->getNormal().value() : Direction(y = 1f)).build(engine_);
-    delete center;
-    plane_geometry_->setupScene(modelViewer_, materialInstanceResult.data);
-#endif
 
-    auto& em = utils::EntityManager::get();
+    if (!ground_->size_) {
+      spdlog::error("[flinament_view] Ground size is not provided");
+      modelViewer_->setGroundState(SceneState::ERROR);
+      promise->set_value(
+          Resource<std::string_view>::Error("Size must be provided"));
+      SPDLOG_TRACE("--GroundManager::createGround");
+      return future;
+    }
 
-    const static uint32_t indices[] = {0, 1, 2, 2, 3, 0};
+    post(modelViewer_->getStrandContext(), [&, promise] {
+      try {
+        auto materialInstanceResult =
+            materialManager_->getMaterialInstance(ground_->material_.get());
+        auto modelTransform = modelViewer_->getModelTransform();
+        float3 center;
 
-    Aabb aabb = modelViewer_->getModelLoader()->getAsset()->getBoundingBox();
-    // if (!app.actualSize) {
-    mat4f const transform = fitIntoUnitCube(aabb, 4);
-    aabb = aabb.transform(transform);
-    //}
+        if (ground_->isBelowModel_ && modelTransform.has_value()) {
+          center.x = modelTransform.value()[0][3];
+          center.y = modelTransform.value()[1][3];
+          center.z = modelTransform.value()[2][3];
+        } else {
+          if (ground_->center_position_ == nullptr) {
+            spdlog::warn(
+                "[filament_view] Center position is not provided, setting to "
+                "default (0,0,0)");
+            ground_->center_position_ =
+                std::make_unique<::filament::math::float3>(0.0f, 0.0f, 0.0f);
+          }
+          center.x = ground_->center_position_->x;
+          center.y = ground_->center_position_->y;
+          center.z = ground_->center_position_->z;
+        }
 
-    float3 planeExtent{10.0f * aabb.extent().x, 0.0f, 10.0f * aabb.extent().z};
+        // Rest of the function logic...
 
-    const static float3 vertices[] = {
-        {-planeExtent.x, 0, -planeExtent.z},
-        {-planeExtent.x, 0, planeExtent.z},
-        {planeExtent.x, 0, planeExtent.z},
-        {planeExtent.x, 0, -planeExtent.z},
-    };
+        // Example of another potential failure point wrapped in try-catch
+        try {
+          auto& em = utils::EntityManager::get();
+          const static uint32_t indices[] = {0, 1, 2, 2, 3, 0};
 
-    short4 const tbn =
-        packSnorm16(mat3f::packTangentFrame(mat3f{float3{1.0f, 0.0f, 0.0f},
-                                                  float3{0.0f, 0.0f, 1.0f},
-                                                  float3{0.0f, 1.0f, 0.0f}})
-                        .xyzw);
+          Aabb aabb =
+              modelViewer_->getModelLoader()->getAsset()->getBoundingBox();
+          mat4f const transform = fitIntoUnitCube(aabb, 4);
+          aabb = aabb.transform(transform);
 
-    const static short4 normals[]{tbn, tbn, tbn, tbn};
+          float3 planeExtent{10.0f * aabb.extent().x, 0.0f,
+                             10.0f * aabb.extent().z};
 
-    VertexBuffer* vertexBuffer =
-        VertexBuffer::Builder()
-            .vertexCount(4)
-            .bufferCount(2)
-            .attribute(VertexAttribute::POSITION, 0,
-                       VertexBuffer::AttributeType::FLOAT3)
-            .attribute(VertexAttribute::TANGENTS, 1,
-                       VertexBuffer::AttributeType::SHORT4)
-            .normalized(VertexAttribute::TANGENTS)
-            .build(*engine_);
+          const static float3 vertices[] = {
+              {-planeExtent.x, 0, -planeExtent.z},
+              {-planeExtent.x, 0, planeExtent.z},
+              {planeExtent.x, 0, planeExtent.z},
+              {planeExtent.x, 0, -planeExtent.z},
+          };
 
-    vertexBuffer->setBufferAt(
-        *engine_, 0,
-        VertexBuffer::BufferDescriptor(
-            vertices, vertexBuffer->getVertexCount() * sizeof(vertices[0])));
-    vertexBuffer->setBufferAt(
-        *engine_, 1,
-        VertexBuffer::BufferDescriptor(
-            normals, vertexBuffer->getVertexCount() * sizeof(normals[0])));
+          short4 const tbn = packSnorm16(
+              mat3f::packTangentFrame(mat3f{float3{1.0f, 0.0f, 0.0f},
+                                            float3{0.0f, 0.0f, 1.0f},
+                                            float3{0.0f, 1.0f, 0.0f}})
+                  .xyzw);
 
-    IndexBuffer* indexBuffer =
-        IndexBuffer::Builder().indexCount(6).build(*engine_);
+          const static short4 normals[]{tbn, tbn, tbn, tbn};
 
-    indexBuffer->setBuffer(*engine_, IndexBuffer::BufferDescriptor(
-                                         indices, indexBuffer->getIndexCount() *
-                                                      sizeof(uint32_t)));
+          VertexBuffer* vertexBuffer =
+              VertexBuffer::Builder()
+                  .vertexCount(4)
+                  .bufferCount(2)
+                  .attribute(VertexAttribute::POSITION, 0,
+                             VertexBuffer::AttributeType::FLOAT3)
+                  .attribute(VertexAttribute::TANGENTS, 1,
+                             VertexBuffer::AttributeType::SHORT4)
+                  .normalized(VertexAttribute::TANGENTS)
+                  .build(*engine_);
 
-    Entity const groundPlane = em.create();
-    RenderableManager::Builder(1)
-        .boundingBox({{}, {planeExtent.x, 1e-4f, planeExtent.z}})
-        .material(0, materialInstanceResult.getData().value())
-        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, vertexBuffer,
-                  indexBuffer, 0, 6)
-        .culling(false)
-        .receiveShadows(true)
-        .castShadows(false)
-        .build(*engine_, groundPlane);
+          vertexBuffer->setBufferAt(
+              *engine_, 0,
+              VertexBuffer::BufferDescriptor(
+                  vertices,
+                  vertexBuffer->getVertexCount() * sizeof(vertices[0])));
+          vertexBuffer->setBufferAt(
+              *engine_, 1,
+              VertexBuffer::BufferDescriptor(
+                  normals,
+                  vertexBuffer->getVertexCount() * sizeof(normals[0])));
 
-    modelViewer_->getFilamentScene()->addEntity(groundPlane);
+          IndexBuffer* indexBuffer =
+              IndexBuffer::Builder().indexCount(6).build(*engine_);
 
-    auto& tcm = engine_->getTransformManager();
-    tcm.setTransform(tcm.getInstance(groundPlane),
-                     mat4f::translation(float3{0, aabb.min.y, -4}));
+          indexBuffer->setBuffer(
+              *engine_,
+              IndexBuffer::BufferDescriptor(
+                  indices, indexBuffer->getIndexCount() * sizeof(uint32_t)));
 
-    auto& rcm = engine_->getRenderableManager();
-    auto instance = rcm.getInstance(groundPlane);
-    rcm.setLayerMask(instance, 0xff, 0x00);
+          Entity const groundPlane = em.create();
+          RenderableManager::Builder(1)
+              .boundingBox({{}, {planeExtent.x, 1e-4f, planeExtent.z}})
+              .material(0, materialInstanceResult.getData().value())
+              .geometry(0, RenderableManager::PrimitiveType::TRIANGLES,
+                        vertexBuffer, indexBuffer, 0, 6)
+              .culling(false)
+              .receiveShadows(true)
+              .castShadows(false)
+              .build(*engine_, groundPlane);
 
-    modelViewer_->setGroundState(SceneState::LOADED);
+          modelViewer_->getFilamentScene()->addEntity(groundPlane);
 
-    promise->set_value(
-        Resource<std::string_view>::Success("Ground created successfully"));
-  });
-  SPDLOG_DEBUG("--GroundManager::createGround");
-  return future;
+          auto& tcm = engine_->getTransformManager();
+          tcm.setTransform(tcm.getInstance(groundPlane),
+                           mat4f::translation(float3{0, aabb.min.y, -4}));
+
+          auto& rcm = engine_->getRenderableManager();
+          auto instance = rcm.getInstance(groundPlane);
+          rcm.setLayerMask(instance, 0xff, 0x00);
+
+          modelViewer_->setGroundState(SceneState::LOADED);
+          promise->set_value(Resource<std::string_view>::Success(
+              "Ground created successfully"));
+        } catch (const std::exception& e) {
+          spdlog::error(
+              "[filament_view] Exception caught during ground creation: {}",
+              e.what());
+          modelViewer_->setGroundState(SceneState::ERROR);
+          promise->set_value(Resource<std::string_view>::Error(e.what()));
+        } catch (...) {
+          spdlog::error(
+              "[filament_view] Unknown exception caught during ground "
+              "creation");
+          modelViewer_->setGroundState(SceneState::ERROR);
+          promise->set_value(Resource<std::string_view>::Error(
+              "Unknown error during ground creation"));
+        }
+      } catch (const std::exception& e) {
+        spdlog::error("[filament_view] Exception caught: {}", e.what());
+        modelViewer_->setGroundState(SceneState::ERROR);
+        promise->set_value(Resource<std::string_view>::Error(e.what()));
+      } catch (...) {
+        spdlog::error("[filament_view] Unknown exception caught");
+        modelViewer_->setGroundState(SceneState::ERROR);
+        promise->set_value(Resource<std::string_view>::Error("Unknown error"));
+      }
+    });
+
+    SPDLOG_TRACE("--GroundManager::createGround");
+    return future;
+  } catch (const std::exception& e) {
+    spdlog::error("[filament_view] Exception caught: {}", e.what());
+    modelViewer_->setGroundState(SceneState::ERROR);
+    std::promise<Resource<std::string_view>> promise;
+    promise.set_value(Resource<std::string_view>::Error(e.what()));
+    return promise.get_future();
+  } catch (...) {
+    spdlog::error("[filament_view] Unknown exception caught");
+    modelViewer_->setGroundState(SceneState::ERROR);
+    std::promise<Resource<std::string_view>> promise;
+    promise.set_value(Resource<std::string_view>::Error("Unknown error"));
+    return promise.get_future();
+  }
 }
 
 std::future<Resource<std::string_view>> GroundManager::updateGround(
-    Ground* newGround) {
-  return std::future<Resource<std::string_view>>();
+    Ground* /* newGround */) {
+  return {};
 }
 
 std::future<Resource<std::string_view>> GroundManager::updateGroundMaterial(
-    Material* newMaterial) {
-  return std::future<Resource<std::string_view>>();
+    Material* /* newMaterial */) {
+  return {};
 }
 
 void GroundManager::Print(const char* tag) {}
