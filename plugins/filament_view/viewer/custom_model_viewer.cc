@@ -240,7 +240,7 @@ void CustomModelViewer::OnFrame(void* data,
                            data);
 
   // Z-Order
-  wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
+  wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
   wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
 
   wl_surface_commit(obj->surface_);
