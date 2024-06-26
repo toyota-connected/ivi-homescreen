@@ -117,6 +117,14 @@ void PlatformViewsHandler::HandleMethodCall(
                                                              *arguments);
       }
     }
+
+    if (width == 0 || height == 0) {
+      spdlog::critical(
+          "[platform_views_handler] UiKitView is not supported.  Change to "
+          "AndroidView or PlatformView");
+      exit(EXIT_FAILURE);
+    }
+
     auto registrar =
         FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
 
