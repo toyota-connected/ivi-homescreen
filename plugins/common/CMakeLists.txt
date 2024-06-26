@@ -7,6 +7,7 @@ add_library(plugin_common STATIC
         tools/command.cc
 )
 target_include_directories(plugin_common PUBLIC . ${PROJECT_BINARY_DIR})
+target_compile_definitions(plugin_common PUBLIC EGL_NO_X11)
 target_link_libraries(plugin_common PUBLIC flutter)
 add_sanitizers(plugin_common)
 if (IPO_SUPPORT_RESULT)
