@@ -390,10 +390,8 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
-    if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(method_name.c_str(),
-                                                           *arguments);
-    }
+    plugin_common::Encodable::PrintFlutterEncodableValue(method_name.c_str(),
+                                                         *arguments);
     result->NotImplemented();
   }
 }
