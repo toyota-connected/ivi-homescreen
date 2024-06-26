@@ -23,8 +23,8 @@
 
 #include "plugins/filament_view/include/filament_view/filament_view_plugin_c_api.h"
 #include "plugins/layer_playground_view/include/layer_playground_view/layer_playground_view_plugin_c_api.h"
-#include "plugins/webview_flutter_view/include/webview_flutter_view/webview_flutter_view_plugin_c_api.h"
 #include "plugins/nav_render_view/include/nav_render_view/nav_render_view_plugin_c_api.h"
+#include "plugins/webview_flutter_view/include/webview_flutter_view/webview_flutter_view_plugin_c_api.h"
 
 static constexpr char kMethodCreate[] = "create";
 static constexpr char kMethodDispose[] = "dispose";
@@ -33,6 +33,8 @@ static constexpr char kMethodSetDirection[] = "setDirection";
 static constexpr char kMethodClearFocus[] = "clearFocus";
 static constexpr char kMethodOffset[] = "offset";
 static constexpr char kMethodTouch[] = "touch";
+static constexpr char kMethodAcceptGesture[] = "acceptGesture";
+static constexpr char kMethodRejectGesture[] = "rejectGesture";
 
 static constexpr char kKeyId[] = "id";
 static constexpr char kKeyViewType[] = "viewType";
@@ -43,6 +45,8 @@ static constexpr char kKeyParams[] = "params";
 static constexpr char kKeyTop[] = "top";
 static constexpr char kKeyLeft[] = "left";
 static constexpr char kKeyHybrid[] = "hybrid";
+
+static constexpr bool kPlatformViewDebug = false;
 
 PlatformViewsHandler::PlatformViewsHandler(flutter::BinaryMessenger* messenger,
                                            FlutterDesktopEngineRef engine)
@@ -78,6 +82,10 @@ void PlatformViewsHandler::HandleMethodCall(
     double width = 0;
     double height = 0;
     std::vector<uint8_t> params{};
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodCreate,
+                                                           *arguments);
+    }
 
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
 
@@ -104,8 +112,19 @@ void PlatformViewsHandler::HandleMethodCall(
         top = std::get<double>(it.second);
       } else if (key == kKeyLeft && std::holds_alternative<double>(it.second)) {
         left = std::get<double>(it.second);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(kMethodCreate,
+                                                             *arguments);
       }
     }
+
+    if (width == 0 || height == 0) {
+      spdlog::critical(
+          "[platform_views_handler] UiKitView is not supported.  Change to "
+          "AndroidView or PlatformView");
+      exit(EXIT_FAILURE);
+    }
+
     auto registrar =
         FlutterDesktopGetPluginRegistrar(engine_, viewType.c_str());
 
@@ -113,8 +132,8 @@ void PlatformViewsHandler::HandleMethodCall(
     if (viewType == "plugins.flutter.io/webview") {
       WebviewFlutterPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->flutter_asset_directory,
-          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          height, params, engine_->flutter_asset_directory, engine_,
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -122,8 +141,8 @@ void PlatformViewsHandler::HandleMethodCall(
         if (viewType == "io.sourcya.playx.3d.scene.channel_3d_scene") {
       FilamentViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->flutter_asset_directory,
-          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          height, params, engine_->flutter_asset_directory, engine_,
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -131,8 +150,8 @@ void PlatformViewsHandler::HandleMethodCall(
         if (viewType == "@views/simple-box-view-type") {
       LayerPlaygroundPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->flutter_asset_directory,
-          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          height, params, engine_->flutter_asset_directory, engine_,
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -140,8 +159,8 @@ void PlatformViewsHandler::HandleMethodCall(
         if (viewType == "views/nav-render-view") {
       NavRenderViewPluginCApiRegisterWithRegistrar(
           registrar, id, std::move(viewType), direction, top, left, width,
-          height, params, engine_->flutter_asset_directory,
-          engine_, &PlatformViewAddListener, &PlatformViewRemoveListener, this);
+          height, params, engine_->flutter_asset_directory, engine_,
+          &PlatformViewAddListener, &PlatformViewRemoveListener, this);
       result->Success(flutter::EncodableValue(id));
     } else
 #endif
@@ -160,26 +179,42 @@ void PlatformViewsHandler::HandleMethodCall(
   } else if (method_name == kMethodDispose) {
     int32_t id = 0;
     bool hybrid{};
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodDispose,
+                                                           *arguments);
+    }
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
-    for (auto& it : *args) {
-      if (kKeyId == std::get<std::string>(it.first) &&
-          std::holds_alternative<int32_t>(it.second)) {
-        id = std::get<int32_t>(it.second);
-      } else if (kKeyHybrid == std::get<std::string>(it.first) &&
-                 std::holds_alternative<bool>(it.second)) {
-        hybrid = std::get<bool>(it.second);
+    if (args != nullptr) {
+      for (auto& it : *args) {
+        if (kKeyId == std::get<std::string>(it.first) &&
+            std::holds_alternative<int32_t>(it.second)) {
+          id = std::get<int32_t>(it.second);
+        } else if (kKeyHybrid == std::get<std::string>(it.first) &&
+                   std::holds_alternative<bool>(it.second)) {
+          hybrid = std::get<bool>(it.second);
+        } else {
+          plugin_common::Encodable::PrintFlutterEncodableValue(kMethodDispose,
+                                                               *arguments);
+        }
       }
     }
 
     if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->dispose(hybrid, delegate.second);
+      if (callbacks->dispose) {
+        callbacks->dispose(hybrid, delegate.second);
+      }
     }
 
     result->Success();
 
   } else if (method_name == kMethodResize) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodResize,
+                                                           *arguments);
+    }
+
     int32_t id = 0;
     double width = 0;
     double height = 0;
@@ -195,13 +230,18 @@ void PlatformViewsHandler::HandleMethodCall(
       } else if (kKeyHeight == std::get<std::string>(it.first) &&
                  std::holds_alternative<double>(it.second)) {
         height = std::get<double>(it.second);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(kMethodResize,
+                                                             *arguments);
       }
     }
 
     if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->resize(width, height, delegate.second);
+      if (callbacks->resize) {
+        callbacks->resize(width, height, delegate.second);
+      }
     }
 
     const auto res = flutter::EncodableValue(flutter::EncodableMap{
@@ -211,6 +251,11 @@ void PlatformViewsHandler::HandleMethodCall(
     });
     result->Success(res);
   } else if (method_name == kMethodSetDirection) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodSetDirection,
+                                                           *arguments);
+    }
+
     int32_t id = 0;
     int32_t direction = 0;
     const auto args = std::get_if<flutter::EncodableMap>(arguments);
@@ -221,17 +266,30 @@ void PlatformViewsHandler::HandleMethodCall(
       } else if (kKeyDirection == std::get<std::string>(it.first) &&
                  std::holds_alternative<int32_t>(it.second)) {
         direction = std::get<int32_t>(it.second);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(
+            kMethodSetDirection, *arguments);
       }
     }
     if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->set_direction(direction, delegate.second);
+      if (callbacks->set_direction) {
+        callbacks->set_direction(direction, delegate.second);
+      }
     }
     result->Success();
   } else if (method_name == kMethodClearFocus) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodClearFocus,
+                                                           *arguments);
+    }
     result->Success();
   } else if (method_name == kMethodOffset) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodOffset,
+                                                           *arguments);
+    }
     int32_t id = 0;
     double left = 0;
     double top = 0;
@@ -246,15 +304,25 @@ void PlatformViewsHandler::HandleMethodCall(
       } else if (kKeyTop == std::get<std::string>(it.first) &&
                  std::holds_alternative<double>(it.second)) {
         top = std::get<double>(it.second);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(kMethodOffset,
+                                                             *arguments);
       }
     }
     if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->set_offset(left, top, delegate.second);
+      if (callbacks->set_offset) {
+        callbacks->set_offset(left, top, delegate.second);
+      }
     }
     result->Success();
   } else if (method_name == kMethodTouch && !arguments->IsNull()) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodTouch,
+                                                           *arguments);
+    }
+
     /// The user touched a platform view within Flutter.
     const auto& params = std::get_if<flutter::EncodableList>(arguments);
     auto touch = PlatformViewTouch(*params);
@@ -263,13 +331,67 @@ void PlatformViewsHandler::HandleMethodCall(
     if (listeners_.find(id) != listeners_.end()) {
       auto delegate = listeners_[id];
       auto callbacks = delegate.first;
-      callbacks->on_touch(touch.getAction(), touch.getPointerCount(),
-                          touch.getRawPointerCoords().size(),
-                          touch.getRawPointerCoords().data(), delegate.second);
+      if (callbacks->on_touch) {
+        callbacks->on_touch(touch.getAction(), touch.getPointerCount(),
+                            touch.getRawPointerCoords().size(),
+                            touch.getRawPointerCoords().data(),
+                            delegate.second);
+      }
+    }
+    result->Success();
+  } else if (method_name == kMethodAcceptGesture && !arguments->IsNull()) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodAcceptGesture,
+                                                           *arguments);
+    }
+
+    int32_t id = 0;
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
+    for (auto& it : *args) {
+      if (kKeyId == std::get<std::string>(it.first) &&
+          std::holds_alternative<int32_t>(it.second)) {
+        id = std::get<int32_t>(it.second);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(
+            kMethodAcceptGesture, *arguments);
+      }
+    }
+    if (listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      if (callbacks->accept_gesture) {
+        callbacks->accept_gesture(id);
+      }
+    }
+    result->Success();
+  } else if (method_name == kMethodRejectGesture && !arguments->IsNull()) {
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodRejectGesture,
+                                                           *arguments);
+    }
+    int32_t id = 0;
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
+    for (auto& it : *args) {
+      if (kKeyId == std::get<std::string>(it.first) &&
+          std::holds_alternative<int32_t>(it.second)) {
+        id = std::get<int32_t>(it.second);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(
+            kMethodRejectGesture, *arguments);
+      }
+    }
+    if (listeners_.find(id) != listeners_.end()) {
+      auto delegate = listeners_[id];
+      auto callbacks = delegate.first;
+      if (callbacks->reject_gesture) {
+        callbacks->reject_gesture(id);
+      }
     }
     result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
+    plugin_common::Encodable::PrintFlutterEncodableValue(method_name.c_str(),
+                                                         *arguments);
     result->NotImplemented();
   }
 }
