@@ -19,14 +19,8 @@
 #include "ground.h"
 
 #include <filament/IndexBuffer.h>
-#include <filament/Material.h>
-#include <filament/VertexBuffer.h>
 
 #include "core/include/resource.h"
-#include "core/scene/ground.h"
-#include "core/scene/material/loader/material_loader.h"
-#include "core/scene/material/loader/texture_loader.h"
-#include "core/scene/material/material_manager.h"
 #include "core/scene/material/model/material.h"
 #include "viewer/custom_model_viewer.h"
 
@@ -46,13 +40,13 @@ class GroundManager {
                 MaterialManager* material_manager,
                 Ground* ground);
 
-  std::future<Resource<std::string_view>> createGround();
+  [[nodiscard]] std::future<Resource<std::string_view>> createGround() const;
 
-  std::future<Resource<std::string_view>> updateGround(
-      plugin_filament_view::Ground* newGround);
+  static std::future<Resource<std::string_view>> updateGround(
+      Ground* newGround);
 
-  std::future<Resource<std::string_view>> updateGroundMaterial(
-      plugin_filament_view::Material* newMaterial);
+  static std::future<Resource<std::string_view>> updateGroundMaterial(
+      Material* newMaterial);
 
   void Print(const char* tag);
 
