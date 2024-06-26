@@ -23,6 +23,7 @@ extern "C" {
 
 struct platform_view_listener {
   void (*resize)(double width, double height, void* data);
+  /// Sets the layout direction for the Android view.
   void (*set_direction)(int32_t direction, void* data);
   void (*set_offset)(double left, double top, void* data);
   void (*on_touch)(int32_t action,
@@ -31,6 +32,14 @@ struct platform_view_listener {
                    const double* pointer_data,
                    void* data);
   void (*dispose)(bool hybrid, void* data);
+  /// When a touch sequence is happening on the embedded UIView all touch events are delayed.
+  /// Calling this method releases the delayed events to the embedded UIView and makes it consume
+  /// any following touch events for the pointers involved in the active gesture.
+  void (*accept_gesture)(int32_t id);
+  /// When a touch sequence is happening on the embedded UIView all touch events are delayed.
+  /// Calling this method drops the buffered touch events and prevents any future touch events for
+  /// the pointers that are part of the active touch sequence from arriving to the embedded view.
+  void (*reject_gesture)(int32_t id);
 };
 
 typedef void (*PlatformViewAddListener)(
