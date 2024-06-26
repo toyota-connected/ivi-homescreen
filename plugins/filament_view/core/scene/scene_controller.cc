@@ -203,6 +203,10 @@ void SceneController::setUpIndirectLight() {
 void SceneController::setUpAnimation(std::optional<Animation*> animation) {
   if (animation.has_value()) {
     auto a = animation.value();
+
+    if (a == nullptr)
+      return;
+
     if (a->GetAutoPlay()) {
       if (a->GetIndex().has_value()) {
         currentAnimationIndex_ = a->GetIndex();
