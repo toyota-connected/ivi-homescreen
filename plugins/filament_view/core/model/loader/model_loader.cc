@@ -22,6 +22,8 @@
 #include <filament/DebugRegistry.h>
 #include <filament/RenderableManager.h>
 #include <filament/TransformManager.h>
+#include <gltfio/ResourceLoader.h>
+#include <gltfio/TextureProvider.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
 #include <asio/post.hpp>
@@ -60,6 +62,9 @@ ModelLoader::ModelLoader(CustomModelViewer* modelViewer)
   resourceConfiguration.engine = engine_;
   resourceConfiguration.normalizeSkinningWeights = true;
   resourceLoader_ = new ResourceLoader(resourceConfiguration);
+  auto decoder = filament::gltfio::createStbProvider(engine_);
+  resourceLoader_->addTextureProvider("image/png", decoder);
+  resourceLoader_->addTextureProvider("image/jpeg", decoder);
 
   assetPath_ = modelViewer->getAssetPath();
   SPDLOG_TRACE("--ModelLoader::ModelLoader");
