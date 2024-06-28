@@ -1095,7 +1095,7 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
     .app_state = agl_shell_app_state,
-    // TODO .app_on_output = agl_shell_app_on_output,
+    .app_on_output = agl_shell_app_on_output,
 };
 #endif
 
