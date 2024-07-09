@@ -99,7 +99,7 @@ endif ()
 target_link_libraries(${PROJECT_NAME} PRIVATE
         asio
         flutter
-        spdlog
+        cxxopts::cxxopts
         Threads::Threads
         wayland-gen
         dl
