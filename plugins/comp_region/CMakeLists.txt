@@ -1,2 +1,0 @@
-add_library(plugin_comp_region STATIC comp_region.cc comp_region.h)
-target_link_libraries(plugin_comp_region PUBLIC platform_homescreen flutter)
