@@ -13,16 +13,9 @@ add_library(flutter INTERFACE
         shell/platform/common/text_editing_delta.cc
         shell/platform/common/text_input_model.cc
 
-        fml/platform/linux/paths_linux.cc
-
-        fml/platform/posix/file_posix.cc
-        fml/platform/posix/paths_posix.cc
         fml/platform/posix/posix_wrappers_posix.cc
         fml/platform/posix/shared_mutex_posix.cc
 
-        fml/command_line.cc
-        fml/file.cc
-        fml/paths.cc
         fml/string_conversion.cc
         fml/unique_fd.cc
 )

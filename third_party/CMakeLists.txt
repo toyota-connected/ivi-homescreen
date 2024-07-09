@@ -30,6 +30,11 @@ target_compile_definitions(rapidjson INTERFACE -DRAPIDJSON_HAS_STDSTRING)
 target_include_directories(rapidjson INTERFACE rapidjson/include)
 
 #
+# cxxopts
+#
+add_subdirectory(cxxopts)
+
+#
 # Flutter Common library
 #
 

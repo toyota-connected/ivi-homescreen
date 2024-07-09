@@ -21,7 +21,7 @@
 
 #include "rapidjson/document.h"
 
-#include "flutter/fml/command_line.h"
+#include "cxxopts/include/cxxopts.hpp"
 #include "flutter/fml/macros.h"
 
 #include "utils.h"
@@ -69,7 +69,7 @@ class Configuration {
    * internal
    */
   static std::vector<struct Configuration::Config> ParseConfig(
-      struct Configuration::Config& config);
+      const Config& config);
 
   /**
    * @brief Print the contents of the configuration to the log
@@ -89,7 +89,7 @@ class Configuration {
    * @relation
    * internal
    */
-  static Config ConfigFromArgcArgv(int argc, const char* const* argv);
+  static Config ParseArgcArgv(int argc, const char* const* argv);
 
   FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
 
@@ -193,16 +193,4 @@ class Configuration {
    * 0b1111111 is the maximum value of accessibility_features.
    */
   static int32_t MaskAccessibilityFeatures(int32_t accessibility_features);
-
-  /**
-   * @brief Convert fml::CommandLine file to Config file
-   * @param[in,out] cl Commandline file
-   * @param[in,out] config Config file
-   * @return int
-   * @retval success(0) ot failure(1)
-   * @relation
-   * internal
-   */
-  static int ConvertCommandlineToConfig(const fml::CommandLine& cl,
-                                        Config& config);
 };

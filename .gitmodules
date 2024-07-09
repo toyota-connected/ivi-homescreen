@@ -16,3 +16,6 @@
 [submodule "third_party/waypp"]
 	path = third_party/waypp
 	url = https://github.com/jwinarske/waypp.git
+[submodule "third_party/tomplusplus"]
+	path = third_party/tomplusplus
+	url = https://github.com/marzer/tomlplusplus.git

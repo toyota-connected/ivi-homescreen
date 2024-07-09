@@ -120,25 +120,25 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 # Command Line Options
 
-`--a={int value}` - Sets the Engine's initial state of Accessibility Feature support.  Requires an integer value.
+`-a {int value}` - Sets the Engine's initial state of Accessibility Feature support.  Requires an integer value.
 
-`--c` - Disables the cursor.
+`-disable-cursor` - Disables the cursor.
 
-`--d` - Outputs backend debug information.  If Vulkan and Validation Layer are available, it will be loaded.
+`-d` - Outputs backend debug information.  If Vulkan and Validation Layer are available, it will be loaded.
 
-`--f` - Sets the window to fullscreen.
+`-f` - Sets the window to fullscreen.
 
-`--w={int value}` - Sets View width.  Requires an integer value.
+`-w {int value}` - Sets View width.  Requires an integer value.
 
-`--h={int value}` - Sets View height.  Requires an integer value.
+`-h {int value}` - Sets View height.  Requires an integer value.
 
-`--i={int value}` - Sets ivi-shell surface ID.  Requires an integer value.
+`-i {int value}` - Sets ivi-shell surface ID.  Requires an integer value.
 
-`--p={int value}` - Sets Pixel Ratio.  Requires a double value.
+`-p {int value}` - Sets Pixel Ratio.  Requires a double value.
 
-`--t={String}` - Sets cursor theme to load.  e.g. --t=DMZ-White
+`-t {String}` - Sets cursor theme to load.  e.g. -t DMZ-White
 
-`--b={path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
+`-b {path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
 ```
   Flutter Application (bundle folder)
     data/flutter_assets
@@ -146,8 +146,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
     lib/libapp.so
     lib/libflutter_engine.so (optional - overrides system path)
 ```
-* `--j=` - Sets the JSON configuration file.
-* `--wayland-event-mask` - Sets events to ignore. e.g. --wayland-event-mask=pointer-axis, or --wayland-event-mask="pointer-axis, touch"
+* `-j` - Sets the JSON configuration file.
+* `-wayland-event-mask` - Sets events to ignore. e.g. -wayland-event-mask pointer-axis, or --wayland-event-mask="pointer-axis, touch"
 
   * Available parameters are:
       pointer, pointer-axis, pointer-buttons, pointer-motion, keyboard, touch
@@ -195,14 +195,14 @@ it will create borderless windows in no particular position.
 
 `fps_output_frequency` - Optional for FPS.  Changing value controls the update interval.
 
-Minimum definition when using `--j=`
+Minimum definition when using `-j`
 ```
 {"view":{}}
 ```
 
 If you used this minimum definition, invocation would look something like this
 ```
-homescreen --j=/tmp/min_cfg.json --b={bundle path} --h={view height} --w={view width}
+homescreen -j /tmp/min_cfg.json -b {bundle path} -h {view height} -w {view width}
 ``` 
 
 ### JSON Configuration Example 1
@@ -255,7 +255,7 @@ Loads Single View
    }
 }
 
-homescreen --j=/tmp/bg_dbg.json
+homescreen -j /tmp/bg_dbg.json
 ```
 
 ### Parameter loading order
