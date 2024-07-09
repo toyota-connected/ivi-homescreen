@@ -8,3 +8,5 @@ cmake-build-*
 cmake-aarch64-debug
 
 docs/html/
+
+plugins/

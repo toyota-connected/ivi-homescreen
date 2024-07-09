@@ -49,6 +49,23 @@ option(ENABLE_LTO "Enable Link Time optimization" OFF)
 option(ENABLE_DLT "Enable DLT logging" OFF)
 
 #
+# Plugin Override
+#
+option(DISABLE_PLUGINS "Disable Plugins" OFF)
+
+if (NOT PLUGIN_DIR)
+    set(PLUGIN_DIR ${CMAKE_SOURCE_DIR}/plugins)
+endif ()
+
+if (NOT DISABLE_PLUGINS AND EXISTS ${PLUGIN_DIR})
+    MESSAGE(STATUS "Plugins ................ Enabled")
+    set(ENABLE_PLUGINS ON)
+elseif (DISABLE_PLUGINS OR NOT EXISTS ${PLUGIN_DIR})
+    MESSAGE(STATUS "Plugins ................ Disabled")
+    set(ENABLE_PLUGINS OFF)
+endif ()
+
+#
 # backend selection
 #
 option(BUILD_BACKEND_WAYLAND_EGL "Build Backend for EGL" ON)

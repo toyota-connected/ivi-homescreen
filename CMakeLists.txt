@@ -51,7 +51,7 @@ configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 # libraries
 #
 add_subdirectory(third_party)
-if (NOT DISABLE_PLUGINS)
+if (ENABLE_PLUGINS)
     add_subdirectory(plugins)
 endif ()
 
