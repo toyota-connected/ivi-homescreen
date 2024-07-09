@@ -37,6 +37,7 @@
 
 #include <platform/homescreen/key_event_handler.h>
 #include <platform/homescreen/text_input_plugin.h>
+#if !DISABLE_PLUGINS
 #include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
 #include <plugins/camera/include/camera/camera_plugin_c_api.h>
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
@@ -52,6 +53,7 @@
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
 #include <plugins/video_player_linux/include/video_player_linux/video_player_plugin_c_api.h>
 #include <plugins/webview_flutter_view/include/webview_flutter_view/webview_flutter_view_plugin_c_api.h>
+#endif
 
 #include "wayland/display.h"
 #include "wayland/window.h"
