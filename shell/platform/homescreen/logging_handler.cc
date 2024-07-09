@@ -18,7 +18,7 @@
 
 #include <flutter/standard_method_codec.h>
 
-#include <plugins/common/common.h>
+#include "logging/logging.h"
 
 LoggingHandler::LoggingHandler(flutter::BinaryMessenger* messenger,
                                FlutterView* /* view */)

@@ -26,7 +26,14 @@ Flutter Linux CPP Embedder
   * Yocto Dunfell/Kirkstone/Scarthgap
 
 
-# Logging
+## Plugins
+ivi-homescreen plugins are located at https://github.com/toyota-connected/plugins
+
+There are two ways to reference this repo:
+1. Clone plugins repo to root of ivi-homescreen folder
+2. Set PLUGIN_DIR to repo path.  -DPLUGIN_DIR=<my path>
+
+## Logging
 
 Logging level support
 * trace

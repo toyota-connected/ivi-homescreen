@@ -86,9 +86,11 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_handler = std::make_unique<PlatformHandler>(
       state->internal_plugin_registrar->messenger(), view);
 
+#if !DISABLE_PLUGINS
   // Platform Views handler.
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
+#endif
 
   // Mouse Cursor handler.
   state->mouse_cursor_handler = std::make_unique<MouseCursorHandler>(
