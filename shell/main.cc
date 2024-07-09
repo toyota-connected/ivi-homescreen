@@ -53,18 +53,17 @@ void SignalHandler(int /* signal */) {
  * @relation
  * wayland, flutter
  */
-int main(int argc, char** argv) {
+int main(const int argc, char** argv) {
 #if BUILD_CRASH_HANDLER
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
   gLogger = std::make_unique<Logging>();
 
-  auto config = Configuration::ConfigFromArgcArgv(argc, argv);
+  const auto config = Configuration::ParseArgcArgv(argc, argv);
 
-  auto vm_arg_count = config.view.vm_args.size();
-  if (vm_arg_count) {
-    SPDLOG_DEBUG("VM Arg Count: {}", vm_arg_count);
+  if (!config.view.vm_args.empty()) {
+    SPDLOG_DEBUG("VM Arg Count: {}", config.view.vm_args.size());
     for (auto const& arg : config.view.vm_args) {
       (void)arg;
       SPDLOG_DEBUG(arg);
