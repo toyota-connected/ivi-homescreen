@@ -2,6 +2,8 @@
 
 Flutter Linux CPP Embedder
 
+### Discord Server https://discord.gg/V5uWD9fvws
+
 ## Highlights
 * Desktop Plugin Registry
   * Flutter Pigeon CPP compatible
