@@ -278,80 +278,45 @@ All other parameters get assigned using the following ordering:
 3. Command Line parameters (Overrides View and Global parameters)
 
 # CMake Build flags
-
-`ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
-
-`ENABLE_AGL_SHELL_CLIENT` - Enable AGL Client.  Defaults to OFF
-
-`ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
-
-`ENABLE_DRM_LEASE_CLIENT` - Enable drm lease Client.  Defaults to OFF
-
-`ENABLE_LTO` - Enable Link Time Optimization.  Defaults to OFF
-
-`ENABLE_DLT` - Enable DLT logging.  Defaults to OFF
-
-`BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
-
-`BUILD_EGL_TRANSPARENCY` - Build with EGL Transparency Enabled.  Defaults to ON
-
-`BUILD_EGL_ENABLE_3D` - Build with EGL Stencil, Depth, and Stencil config Enabled.  Defaults to ON
-
-`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4.  Defaults to ON
-
-`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan.  Defaults to OFF
-
-`BUILD_BACKEND_HEADLESS_EGL` - Build Headless backend for EGL (OSMesa).  Defaults to OFF
-
-`DEBUG_PLATFORM_MESSAGES` - Dump Platform Channel Messages.  Defaults to OFF
-
-`BUILD_CRASH_HANDLER` - Build Sentry IO Crash Handler Support.  Defaults to OFF
-
-`BUILD_DOCS` - Builds Docs.  Defaults to OFF
-
-`BUILD_UNIT_TESTS` - Build Unit Tests.  Defaults to OFF
-
-`UNIT_TEST_SAVE_GOLDENS` - Update test goldens.  Defaults to OFF
-
-`EXE_OUTPUT_NAME` - Set executable output name.  Defaults to `homescreen`
-
-`DISABLE_PLUGINS` - Disables all plugins located in the plugins folder.  Defaults to OFF
-
-`BUILD_PLUGIN_AUDIOPLAYERS_LINUX` - Include Audioplayers Linux plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_CAMERA` - Include Camera plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_CLOUD_FIRESTORE` - Plugin Cloud Firestore.  Defaults to OFF
-
-`BUILD_PLUGIN_DESKTOP_WINDOW_LINUX` - Includes Desktop Window Linux Plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_FILE_SELECTOR` - Include File Selector plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_FIREBASE_AUTH` - Plugin Firebase Auth.  Defaults to OFF
-
-`BUILD_PLUGIN_FIREBASE_STORAGE` - Plugin Firebase Storage.  Defaults to OFF
-
-`BUILD_PLUGIN_GO_ROUTER` - Includes Go Router Plugin.  Defaults to ON
-
-`BUILD_PLUGIN_GOOGLE_SIGN_IN` - Include Google Sign In manager.  Defaults to OFF
-
-`BUILD_PLUGIN_INTEGRATION_TEST` - Included Flutter Integration Test support.  Defaults to OFF
-
-`BUILD_PLUGIN_PDF` - Include PDF plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
-
-`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_VIDEO_PLAYER_LINUX` - Include Video Player plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_FILAMENT_VIEW` - Include Filament View plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW` - Include Layer Playground View plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_NAV_RENDER_VIEW` - Include Navigation Render View plugin.  Defaults to OFF
-
-`BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW` - Includes WebView View Plugin.  Defaults to OFF
+| **Flag**                                | **Default Value** | **Description**                                                                 |
+|-----------------------------------------|-------------------|---------------------------------------------------------------------------------|
+| `ENABLE_XDG_CLIENT`                     | ON                | Enable XDG Client.                                                             |
+| `ENABLE_AGL_SHELL_CLIENT`               | OFF               | Enable AGL Client.                                                             |
+| `ENABLE_IVI_SHELL_CLIENT`               | OFF               | Enable ivi-shell Client.                                                       |
+| `ENABLE_DRM_LEASE_CLIENT`               | OFF               | Enable drm lease Client.                                                       |
+| `ENABLE_LTO`                            | OFF               | Enable Link Time Optimization.                                                 |
+| `ENABLE_DLT`                            | OFF               | Enable DLT logging.                                                            |
+| `BUILD_BACKEND_WAYLAND_EGL`             | ON                | Build Backend for EGL.                                                         |
+| `BUILD_EGL_TRANSPARENCY`                | ON                | Build with EGL Transparency Enabled.                                           |
+| `BUILD_EGL_ENABLE_3D`                   | ON                | Build with EGL Stencil, Depth, and Stencil config Enabled.                     |
+| `BUILD_EGL_ENABLE_MULTISAMPLE`          | ON                | Build with EGL Sample set to 4.                                                |
+| `BUILD_BACKEND_WAYLAND_VULKAN`          | OFF               | Build Backed for Vulkan.                                                       |
+| `BUILD_BACKEND_HEADLESS_EGL`            | OFF               | Build Headless backend for EGL (OSMesa).                                       |
+| `DEBUG_PLATFORM_MESSAGES`               | OFF               | Dump Platform Channel Messages.                                                |
+| `BUILD_CRASH_HANDLER`                   | OFF               | Build Sentry IO Crash Handler Support.                                         |
+| `BUILD_DOCS`                            | OFF               | Builds Docs.                                                                   |
+| `BUILD_UNIT_TESTS`                      | OFF               | Build Unit Tests.                                                              |
+| `UNIT_TEST_SAVE_GOLDENS`                | OFF               | Update test goldens.                                                           |
+| `EXE_OUTPUT_NAME`                       | `homescreen`      | Set executable output name.                                                    |
+| `DISABLE_PLUGINS`                       | OFF               | Disables all plugins located in the plugins folder.                            |
+| `BUILD_PLUGIN_AUDIOPLAYERS_LINUX`       | OFF               | Include Audioplayers Linux plugin.                                             |
+| `BUILD_PLUGIN_CAMERA`                   | OFF               | Include Camera plugin.                                                         |
+| `BUILD_PLUGIN_CLOUD_FIRESTORE`          | OFF               | Plugin Cloud Firestore.                                                        |
+| `BUILD_PLUGIN_DESKTOP_WINDOW_LINUX`     | OFF               | Includes Desktop Window Linux Plugin.                                          |
+| `BUILD_PLUGIN_FILE_SELECTOR`            | OFF               | Include File Selector plugin.                                                  |
+| `BUILD_PLUGIN_FIREBASE_AUTH`            | OFF               | Plugin Firebase Auth.                                                          |
+| `BUILD_PLUGIN_FIREBASE_STORAGE`         | OFF               | Plugin Firebase Storage.                                                       |
+| `BUILD_PLUGIN_GO_ROUTER`                | ON                | Includes Go Router Plugin.                                                     |
+| `BUILD_PLUGIN_GOOGLE_SIGN_IN`           | OFF               | Include Google Sign In manager.                                                |
+| `BUILD_PLUGIN_INTEGRATION_TEST`         | OFF               | Included Flutter Integration Test support.                                     |
+| `BUILD_PLUGIN_PDF`                      | OFF               | Include PDF plugin.                                                            |
+| `BUILD_PLUGIN_SECURE_STORAGE`           | OFF               | Includes Flutter Secure Storage.                                               |
+| `BUILD_PLUGIN_URL_LAUNCHER`             | OFF               | Includes URL Launcher Plugin.                                                  |
+| `BUILD_PLUGIN_VIDEO_PLAYER_LINUX`       | OFF               | Include Video Player plugin.                                                   |
+| `BUILD_PLUGIN_FILAMENT_VIEW`            | OFF               | Include Filament View plugin.                                                  |
+| `BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW`    | OFF               | Include Layer Playground View plugin.                                          |
+| `BUILD_PLUGIN_NAV_RENDER_VIEW`          | OFF               | Include Navigation Render View plugin.                                         |
+| `BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW`     | OFF               | Includes WebView View Plugin.                                                  |
 
 _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
