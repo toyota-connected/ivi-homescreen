@@ -16,146 +16,123 @@
 #include "configuration.h"
 
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 
 #include "config/common.h"
-
-#include <rapidjson/document.h>
+#include "cxxopts/include/cxxopts.hpp"
 #include "utils.h"
 
-rapidjson::SizeType Configuration::getViewCount(rapidjson::Document& doc) {
-  if (!doc.HasMember(kViewKey)) {
-    spdlog::critical("JSON Configuration requires a \"view\" object");
+void Configuration::get_parameters(toml::table* tbl, Config& instance) {
+  if (tbl->at_path("global.app_id").is_string()) {
+    instance.app_id = tbl->at_path("global.app_id").as_string()->value_or("");
+  }
+  if (tbl->at_path("global.cursor_theme").is_string()) {
+    instance.cursor_theme =
+        tbl->at_path("global.cursor_theme").as_string()->value_or("");
+  }
+  if (tbl->at_path("global.disable_cursor").is_boolean()) {
+    instance.disable_cursor =
+        tbl->at_path("global.disable_cursor").value<bool>().value();
+  }
+  if (tbl->at_path("global.wayland_event_mask").is_string()) {
+    instance.wayland_event_mask =
+        tbl->at_path("global.wayland_event_mask").as_string()->value_or("");
+  }
+  if (tbl->at_path("global.debug_backend").is_boolean()) {
+    instance.debug_backend =
+        tbl->at_path("global.debug_backend").value<bool>().value();
+  }
+
+  if (tbl->at_path("view.window_type").is_string()) {
+    instance.view.window_type =
+        tbl->at_path("view.window_type").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.output_index").is_integer()) {
+    instance.view.wl_output_index =
+        tbl->at_path("view.output_index").value<uint32_t>().value();
+  }
+  if (tbl->at_path("view.width").is_integer()) {
+    instance.view.width = tbl->at_path("view.width").value<uint32_t>().value();
+  }
+  if (tbl->at_path("view.height").is_integer()) {
+    instance.view.height =
+        tbl->at_path("view.height").value<uint32_t>().value();
+  }
+  if (tbl->at_path("view.pixel_ratio").is_floating_point()) {
+    instance.view.pixel_ratio =
+        tbl->at_path("view.pixel_ratio").value<double>().value();
+  }
+  if (tbl->at_path("view.ivi_surface_id").is_integer()) {
+    instance.view.ivi_surface_id =
+        tbl->at_path("view.ivi_surface_id").value<uint32_t>().value();
+  }
+  if (tbl->at_path("view.accessibility_features").is_integer()) {
+    instance.view.accessibility_features =
+        tbl->at_path("view.accessibility_features").value<int32_t>().value();
+  }
+  if (tbl->at_path("view.vm_args").is_array()) {
+    const auto vm_args = tbl->at_path("view.vm_args").as_array();
+    for (auto& arg : *vm_args) {
+      instance.view.vm_args.emplace_back(arg.as_string()->value_or(""));
+    }
+  }
+  if (tbl->at_path("view.fullscreen").is_boolean()) {
+    instance.view.fullscreen =
+        tbl->at_path("view.fullscreen").value<bool>().value();
+  }
+  if (tbl->at_path("view.fps_output_console").is_integer()) {
+    instance.view.fps_output_console =
+        tbl->at_path("view.fps_output_console").value<uint32_t>().value();
+  }
+  if (tbl->at_path("view.fps_output_overlay").is_integer()) {
+    instance.view.fps_output_overlay =
+        tbl->at_path("view.fps_output_overlay").value<uint32_t>().value();
+  }
+  if (tbl->at_path("view.fps_output_frequency").is_integer()) {
+    instance.view.fps_output_frequency =
+        tbl->at_path("view.fps_output_frequency").value<uint32_t>().value();
+  }
+
+  if (tbl->at_path("window_activation_area.x").is_integer()) {
+    instance.view.activation_area_x =
+        tbl->at_path("window_activation_area.x").value<uint32_t>().value();
+  }
+  if (tbl->at_path("window_activation_area.y").is_integer()) {
+    instance.view.activation_area_y =
+        tbl->at_path("window_activation_area.y").value<uint32_t>().value();
+  }
+  if (tbl->at_path("window_activation_area.width").is_integer()) {
+    instance.view.activation_area_width =
+        tbl->at_path("window_activation_area.width").value<uint32_t>().value();
+  }
+  if (tbl->at_path("window_activation_area.height").is_integer()) {
+    instance.view.activation_area_height =
+        tbl->at_path("window_activation_area.height").value<uint32_t>().value();
+  }
+}
+
+void Configuration::get_toml_config(const char* config_toml_path,
+                                    Config& instance) {
+  if (!std::filesystem::exists(config_toml_path)) {
+    return;
+  }
+
+  auto result = toml::parse_file(config_toml_path);
+  if (!result) {
+    spdlog::error("TOML parsing failed: {}", config_toml_path);
     exit(EXIT_FAILURE);
   }
 
-  if (doc[kViewKey].IsArray()) {
-    return doc[kViewKey].GetArray().Capacity();
-  }
-
-  return 1;
+  auto tbl = result.table();
+  get_parameters(&tbl, instance);
 }
 
-void Configuration::getViewParameters(
-    const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
-    Config& instance) {
-  if (obj.HasMember(kBundlePathKey) && obj[kBundlePathKey].IsString()) {
-    instance.view.bundle_path = obj[kBundlePathKey].GetString();
-  }
-  if (obj.HasMember(kWindowTypeKey) && obj[kWindowTypeKey].IsString()) {
-    instance.view.window_type = obj[kWindowTypeKey].GetString();
-  }
-  if (obj.HasMember(kOutputIndex) && obj[kOutputIndex].IsUint()) {
-    instance.view.wl_output_index =
-        static_cast<uint32_t>(obj[kOutputIndex].GetUint());
-  }
-  if (obj.HasMember(kWidthKey) && obj[kWidthKey].IsUint()) {
-    instance.view.width = obj[kWidthKey].GetUint();
-  }
-  if (obj.HasMember(kHeightKey) && obj[kHeightKey].IsUint()) {
-    instance.view.height = obj[kHeightKey].GetUint();
-  }
-  if (obj.HasMember(kPixelRatioKey)) {
-    if (obj[kPixelRatioKey].IsDouble() || obj[kPixelRatioKey].IsInt()) {
-      instance.view.pixel_ratio = obj[kPixelRatioKey].GetDouble();
-    }
-  }
-  if (obj.HasMember(kIviSurfaceIdKey) && obj[kIviSurfaceIdKey].IsUint()) {
-    instance.view.ivi_surface_id = obj[kIviSurfaceIdKey].GetUint();
-  }
-  if (obj.HasMember(kAccessibilityFeaturesKey) &&
-      obj[kAccessibilityFeaturesKey].IsInt()) {
-    instance.view.accessibility_features =
-        MaskAccessibilityFeatures(obj[kAccessibilityFeaturesKey].GetInt());
-  }
-  if (obj.HasMember(kVmArgsKey) && obj[kVmArgsKey].IsArray()) {
-    const auto args = obj[kVmArgsKey].GetArray();
-    for (auto const& arg : args) {
-      instance.view.vm_args.emplace_back(arg.GetString());
-    }
-  }
-  if (obj.HasMember(kFullscreenKey) && obj[kFullscreenKey].IsBool()) {
-    instance.view.fullscreen = obj[kFullscreenKey].GetBool();
-  }
-  if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
-    instance.debug_backend = obj[kDebugBackendKey].GetBool();
-  }
-  if (obj.HasMember(kFpsOutputConsole) && obj[kFpsOutputConsole].IsUint()) {
-    instance.view.fps_output_console = obj[kFpsOutputConsole].GetUint();
-  }
-  if (obj.HasMember(kFpsOutputOverlay) && obj[kFpsOutputOverlay].IsUint()) {
-    instance.view.fps_output_overlay = obj[kFpsOutputOverlay].GetUint();
-  }
-  if (obj.HasMember(kFpsOutputFrequency) && obj[kFpsOutputFrequency].IsUint()) {
-    instance.view.fps_output_frequency = obj[kFpsOutputFrequency].GetUint();
-  }
+void Configuration::get_cli_override(const std::string& bundle_path,
+                                     Config& instance,
+                                     const Config& cli) {
+  instance.view.bundle_path = bundle_path;
 
-  if (obj.HasMember(kWindowActivationAreaKey)) {
-    const auto val = obj[kWindowActivationAreaKey].GetObject();
-
-    instance.view.activation_area_x = static_cast<uint32_t>(val["x"].GetInt());
-    instance.view.activation_area_y = static_cast<uint32_t>(val["y"].GetInt());
-    instance.view.activation_area_width =
-        static_cast<uint32_t>(val["width"].GetInt());
-    instance.view.activation_area_height =
-        static_cast<uint32_t>(val["height"].GetInt());
-
-    SPDLOG_DEBUG("activation area x {}", instance.view.activation_area_x);
-    SPDLOG_DEBUG("activation area y {}", instance.view.activation_area_y);
-    SPDLOG_DEBUG("activation area width {}",
-                 instance.view.activation_area_width);
-    SPDLOG_DEBUG("activation area height {}",
-                 instance.view.activation_area_height);
-  }
-}
-
-void Configuration::getGlobalParameters(
-    const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
-    Config& instance) {
-  if (obj.HasMember(kAppIdKey) && obj[kAppIdKey].IsString()) {
-    instance.app_id = obj[kAppIdKey].GetString();
-  }
-  if (obj.HasMember(kCursorThemeKey) && obj[kCursorThemeKey].IsString()) {
-    instance.cursor_theme = obj[kCursorThemeKey].GetString();
-  }
-  if (obj.HasMember(kDisableCursorKey) && obj[kDisableCursorKey].IsBool()) {
-    instance.disable_cursor = obj[kDisableCursorKey].GetBool();
-  }
-  if (obj.HasMember(kWaylandEventMaskKey) &&
-      obj[kWaylandEventMaskKey].IsString()) {
-    instance.wayland_event_mask = obj[kWaylandEventMaskKey].GetString();
-  }
-  if (obj.HasMember(kDebugBackendKey) && obj[kDebugBackendKey].IsBool()) {
-    instance.debug_backend = obj[kDebugBackendKey].GetBool();
-  }
-
-  Configuration::getViewParameters(obj, instance);
-}
-
-void Configuration::getView(rapidjson::Document& doc,
-                            int index,
-                            Config& instance) {
-  if (doc[kViewKey].IsArray()) {
-    const auto arr = doc[kViewKey].GetArray();
-    if (index > arr.Capacity())
-      assert(false);
-
-    getViewParameters(arr[static_cast<rapidjson::SizeType>(index)].GetObject(),
-                      instance);
-    getGlobalParameters(doc.GetObject(), instance);
-  } else {
-    getViewParameters(doc[kViewKey].GetObject(), instance);
-    getGlobalParameters(doc.GetObject(), instance);
-  }
-}
-
-void Configuration::getCliOverrides(Config& instance, const Config& cli) {
   if (!cli.app_id.empty()) {
     instance.app_id = cli.app_id;
-  }
-  if (!cli.json_configuration_path.empty()) {
-    instance.json_configuration_path = cli.json_configuration_path;
   }
   if (!cli.cursor_theme.empty()) {
     instance.cursor_theme = cli.cursor_theme;
@@ -174,9 +151,6 @@ void Configuration::getCliOverrides(Config& instance, const Config& cli) {
       instance.view.vm_args.emplace_back(arg);
     }
   }
-  if (!cli.view.bundle_path.empty()) {
-    instance.view.bundle_path = cli.view.bundle_path;
-  }
   if (!cli.view.window_type.empty()) {
     instance.view.window_type = cli.view.window_type;
   }
@@ -185,7 +159,7 @@ void Configuration::getCliOverrides(Config& instance, const Config& cli) {
   }
   if (cli.view.accessibility_features > 0) {
     instance.view.accessibility_features =
-        MaskAccessibilityFeatures(cli.view.accessibility_features);
+        mask_accessibility_features(cli.view.accessibility_features);
   }
   if (cli.view.width > 0) {
     instance.view.width = cli.view.width;
@@ -205,36 +179,24 @@ void Configuration::getCliOverrides(Config& instance, const Config& cli) {
   }
 }
 
-std::vector<Configuration::Config> Configuration::ParseConfig(
-    const Config& config) {
-  rapidjson::Document doc;
-  rapidjson::SizeType view_count = 1;
-  if (!config.json_configuration_path.empty()) {
-    doc = getJsonDocument(config.json_configuration_path);
-    if (!doc.IsObject()) {
-      spdlog::critical("Invalid JSON Configuration file");
-      exit(EXIT_FAILURE);
-    }
+std::vector<Configuration::Config> Configuration::parse_config(
+    const Config& cli_config) {
+  const auto view_count = cli_config.bundle_paths.size();
 
-    view_count = getViewCount(doc);
-  }
-
-  SPDLOG_DEBUG("View Count: {}", view_count);
   std::vector<Config> res;
   res.reserve(view_count);
-  for (int i = 0; i < view_count; i++) {
+
+  int i = 0;
+  for (const auto& bundle_path : cli_config.bundle_paths) {
     Config cfg{};
-    if (doc.IsObject()) {
-      getView(doc, i, cfg);
-    }
-    getCliOverrides(cfg, config);
 
-    if (cfg.view.window_type.empty())
+    const auto config_toml_path =
+        std::string(bundle_path) + "/" + kViewConfigToml;
+    get_toml_config(config_toml_path.c_str(), cfg);
+    get_cli_override(bundle_path, cfg, cli_config);
+
+    if (cfg.view.window_type.empty()) {
       cfg.view.window_type = "NORMAL";
-
-    if (cfg.view.bundle_path.empty()) {
-      spdlog::critical("A bundle path must be specified");
-      exit(EXIT_FAILURE);
     }
     if (cfg.view.width == 0) {
       cfg.view.width = kDefaultViewWidth;
@@ -250,26 +212,11 @@ std::vector<Configuration::Config> Configuration::ParseConfig(
     }
 
     res.emplace_back(cfg);
+    i++;
   }
   assert(res.capacity() == view_count);
 
-  return res;
-}
-
-rapidjson::Document Configuration::getJsonDocument(
-    const std::string& filename) {
-  std::ifstream json_file(filename);
-  if (!json_file.is_open()) {
-    spdlog::critical("Unable to open file {}", filename);
-    exit(EXIT_FAILURE);
-  }
-
-  std::stringstream contents;
-  contents << json_file.rdbuf();
-
-  rapidjson::Document doc;
-  doc.Parse(contents.str().c_str());
-  return doc;
+  return std::move(res);
 }
 
 void Configuration::PrintConfig(const Config& config) {
@@ -321,8 +268,9 @@ void Configuration::PrintConfig(const Config& config) {
                config.view.accessibility_features);
 }
 
-Configuration::Config Configuration::ParseArgcArgv(const int argc,
-                                                   const char* const* argv) {
+std::vector<Configuration::Config> Configuration::ParseArgcArgv(
+    const int argc,
+    const char* const* argv) {
   Config config{};
 
   try {
@@ -336,7 +284,7 @@ Configuration::Config Configuration::ParseArgcArgv(const int argc,
         .allow_unrecognised_options()
         .add_options()("help", "Print help")(
             "b,bundle", "Path to a bundle directory (required)",
-            cxxopts::value<std::string>(config.view.bundle_path))(
+            cxxopts::value<std::vector<std::string>>(config.bundle_paths))(
             "j,json-config", "Path to a json configuration file",
             cxxopts::value<std::string>(config.json_configuration_path))(
             "a,accessibility-flags", "Accessibility feature flag(s)",
@@ -371,21 +319,16 @@ Configuration::Config Configuration::ParseArgcArgv(const int argc,
       exit(EXIT_SUCCESS);
     }
 
-    if (config.view.bundle_path.empty() ||
-        !std::filesystem::is_directory(config.view.bundle_path)) {
+    if (config.bundle_paths.empty()) {
       spdlog::critical(
-          "-b (Bundle Path) option requires a directory path "
-          "argument (e.g. "
-          "-b /usr/share/gallery)");
-      exit(EXIT_FAILURE);
+          "-b (Bundle Path) option requires at least one directory path "
+          "argument (e.g. -b /usr/share/gallery)");
     }
-
-    if (!config.json_configuration_path.empty() &&
-        !std::filesystem::exists(config.json_configuration_path)) {
-      spdlog::critical(
-          "-j option requires an argument (e.g. "
-          "-j /tmp/cfg-dbg.json)");
-      exit(EXIT_FAILURE);
+    for (const auto& path : config.bundle_paths) {
+      if (!std::filesystem::is_directory(path)) {
+        spdlog::critical("Bundle path is not a directory: {}", path);
+        exit(EXIT_FAILURE);
+      }
     }
 
     if (result.count("accessibility-flags")) {
@@ -413,7 +356,7 @@ Configuration::Config Configuration::ParseArgcArgv(const int argc,
         exit(EXIT_FAILURE);
       }
       config.view.accessibility_features =
-          MaskAccessibilityFeatures(config.view.accessibility_features);
+          mask_accessibility_features(config.view.accessibility_features);
     }
 
     if (result.count("event-mask")) {
@@ -490,10 +433,16 @@ Configuration::Config Configuration::ParseArgcArgv(const int argc,
     exit(EXIT_FAILURE);
   }
 
-  return std::move(config);
+  auto configs = parse_config(config);
+
+  for (auto const& c : configs) {
+    PrintConfig(c);
+  }
+
+  return std::move(configs);
 }
 
-int32_t Configuration::MaskAccessibilityFeatures(
+int32_t Configuration::mask_accessibility_features(
     int32_t accessibility_features) {
   accessibility_features &= 0b1111111;
   return accessibility_features;

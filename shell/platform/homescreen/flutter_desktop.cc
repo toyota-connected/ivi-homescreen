@@ -86,7 +86,7 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_handler = std::make_unique<PlatformHandler>(
       state->internal_plugin_registrar->messenger(), view);
 
-#if !DISABLE_PLUGINS
+#if ENABLE_PLUGINS
   // Platform Views handler.
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
