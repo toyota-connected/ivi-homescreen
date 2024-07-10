@@ -94,6 +94,7 @@ constexpr char kDefaultLocaleCountryCode[] = "US";
 constexpr char kDefaultLocaleScriptCode[] = "";
 
 // Bundle folder paths
+constexpr char kViewConfigToml[] = "config.toml";
 constexpr char kBundleFlutterAssets[] = "data/flutter_assets";
 constexpr char kBundleAot[] = "lib/libapp.so";
 // Bundle folder override paths
