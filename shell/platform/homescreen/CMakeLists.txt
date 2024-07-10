@@ -34,7 +34,7 @@ target_link_libraries(platform_homescreen PUBLIC
         wayland-gen
 )
 
-if (NOT DISABLE_PLUGINS)
+if (ENABLE_PLUGINS)
 
     if (POLICY CMP0076)
         cmake_policy(SET CMP0076 NEW)

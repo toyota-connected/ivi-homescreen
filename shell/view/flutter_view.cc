@@ -37,7 +37,7 @@
 
 #include <platform/homescreen/key_event_handler.h>
 #include <platform/homescreen/text_input_plugin.h>
-#if !DISABLE_PLUGINS
+#if ENABLE_PLUGINS
 #include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
 #include <plugins/camera/include/camera/camera_plugin_c_api.h>
 #include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
