@@ -35,6 +35,11 @@ target_include_directories(rapidjson INTERFACE rapidjson/include)
 add_subdirectory(cxxopts)
 
 #
+# tomlplusplus
+#
+add_subdirectory(tomlplusplus)
+
+#
 # Flutter Common library
 #
 
