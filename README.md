@@ -129,6 +129,21 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 # Command Line Options
 
+`help` - Prints all command line options and exits
+
+`-b {path to bundle folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
+```
+  Flutter Application (bundle folder)
+    data/flutter_assets
+    data/icudtl.dat (optional - overrides system path)
+    lib/libapp.so
+    lib/libflutter_engine.so (optional - overrides system path)
+```
+  If there are multiple references to this option, it will associate a new view per bundle.  This example will open two windows sized 1280x1024 both running the Gallery app:
+```
+homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -w 1280 -h 1024
+```
+
 `-a {int value}` - Sets the Engine's initial state of Accessibility Feature support.  Requires an integer value.
 
 `-disable-cursor` - Disables the cursor.
@@ -147,15 +162,6 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `-t {String}` - Sets cursor theme to load.  e.g. -t DMZ-White
 
-`-b {path to folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
-```
-  Flutter Application (bundle folder)
-    data/flutter_assets
-    data/icudtl.dat (optional - overrides system path)
-    lib/libapp.so
-    lib/libflutter_engine.so (optional - overrides system path)
-```
-* `-j` - Sets the JSON configuration file.
 * `-wayland-event-mask` - Sets events to ignore. e.g. -wayland-event-mask pointer-axis, or --wayland-event-mask="pointer-axis, touch"
 
   * Available parameters are:
@@ -163,9 +169,9 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 * Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
 
-### JSON Configuration keys
+### View Configuration keys
 
-#### Global
+#### Global - `[global]`
 
 `app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
 
@@ -177,11 +183,11 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `wayland_event_mask` - See command line option --wayland-event-mask
 
-#### View Specific
+`debug_backed` - Prints out debug information relevant to the backend
 
-`view` - Minimum required.  Can be single object or array.
+#### View Specific - `[view]`
 
-`bundle_path` - sets the Bundle Path.
+`vm_args` - Array of strings which get passed to the VM instance as command line arguments.
 
 `window_type` - Currently used for AGL Compositor Window Types.  If not running on AGL compositor,
 it will create borderless windows in no particular position.
@@ -190,9 +196,11 @@ it will create borderless windows in no particular position.
 
 `height` - sets View height.  Requires an integer value.
 
-`accessibility_features` - Bitmask of Engine Accessibility Features.  Requires an integer.  See flutter_embedder.h for valid values.
+`output_index` - select logical index of Wayland output to display on
 
-`vm_args` - Array of strings which get passed to the VM instance as command line arguments.
+`pixel_ratio` - sets the pixel ratio for Flutter engine instance
+
+`accessibility_features` - Bitmask of Engine Accessibility Features.  Requires an integer.  See flutter_embedder.h for valid values.
 
 `fullscreen` - Sets window to fullscreen.
 
@@ -204,67 +212,53 @@ it will create borderless windows in no particular position.
 
 `fps_output_frequency` - Optional for FPS.  Changing value controls the update interval.
 
-Minimum definition when using `-j`
+
+#### AGL Shell `[window_activation_area]`
+
+`x` - x position of activation area
+
+`y` - y position of activation area
+
+`width` - width of activation area
+
+`height` - height of activation area
+
+
+### config.toml
+
+* Locate config.toml file in the root of your bundle folder
+* Comments work
+* Any combination of values can be defined.
+* Any empty file is valid
+
+#### config.toml sample
 ```
-{"view":{}}
-```
+[global]
+app_id = 'gallery'                 # Application name
+cursor_theme = 'Coolbeans'         # Cursor theme used to load cursor icons from
+disable_cursor = true              # used to disable cursor
+wayland_event_mask = 'keyboard'    # mask the keyboard event
+debug_backend = false              # do not print backend debug info
 
-If you used this minimum definition, invocation would look something like this
-```
-homescreen -j /tmp/min_cfg.json -b {bundle path} -h {view height} -w {view width}
-``` 
+[view]
+width = 1920
+height = 1080
+vm_args = ['--enable-asserts', '--verbose-logging']  # pass parameters to the Dart VM
+window_type = 'NORMAL'                               # set window type to Normal
+output_index = 2                                     # use second logical occuring wayland output
+pixel_ratio = 4.5                                    # set flutter engine pixel ratio
+ivi_surface_id = 5002                                # set ivi-shell surface id
+accessibility_features = 52                          # set flutter engine accessibility feature flags
+fullscreen = false                                   # do not start in fullscreen
+fps_output_console = 1
+fps_output_overlay = 1
+fps_output_frequency = 3
 
-### JSON Configuration Example 1
-
-Loads Two Views
-1. Gallery app to a 1920x1280 Background window, passing two arguments to the Dart VM
-2. Video player to Left Panel sized 320x240 with all accessibility features enabled.
-```
-/tmp/bg_left_rel.json
-
-{
-   "view":[
-      {
-         "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
-         "vm_args":["--enable-asserts", "--pause-isolates-on-start"],
-         "window_type":"BG",
-         "width":1920,
-         "height":1280
-      },
-      {
-         "bundle_path":"/home/joel/development/plugins/packages/video_player/video_player/example/.homescreen/x86/release",
-         "window_type":"PANEL_LEFT",
-         "width":320,
-         "height":240,
-         "accessibility_features":31
-      }
-   ]
-}
-
-homescreen --j=/tmp/bg_left_rel.json
-```
-
-### JSON Configuration Example 2
-
-Loads Single View
-1. Fullscreen Gallery app, cursor disabled, backend debug enabled, passing `vm_args` values to the Dart VM
-```
-/tmp/bg_dbg.json
-
-{
-   "disable_cursor":true,
-   "debug_backend":true,
-   "accessibility_features":31,
-   "view":{
-      "bundle_path":"/home/joel/development/gallery/.homescreen/x86/release",
-      "vm_args":["--no-serve-devtools"],
-      "width":1920,
-      "height":1280,
-      "fullscreen":true
-   }
-}
-
-homescreen -j /tmp/bg_dbg.json
+[window_activation_area]
+x = 10        # x location
+y = 10        # y location
+width = 1024
+height = 768
 ```
 
 ### Parameter loading order
@@ -273,9 +267,9 @@ together; JSON view + JSON global + CLI args.
 
 All other parameters get assigned using the following ordering:
 
-1. JSON Configuration View object parameters
-2. JSON Configuration Global (non-view) parameters
-3. Command Line parameters (Overrides View and Global parameters)
+1. TOML Configuration View parameters
+2. TOML Configuration Global (non-view) parameters
+3. Command Line parameters (Overrides anything set in TOML file)
 
 # CMake Build flags
 

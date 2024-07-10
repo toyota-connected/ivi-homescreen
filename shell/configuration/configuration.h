@@ -17,12 +17,8 @@
 #include <string>
 #include <vector>
 
-#include "rapidjson/rapidjson.h"
-
-#include "rapidjson/document.h"
-
-#include "cxxopts/include/cxxopts.hpp"
-#include "flutter/fml/macros.h"
+#define TOML_EXCEPTIONS 0
+#include <tomlplusplus/toml.hpp>
 
 #include "utils.h"
 
@@ -37,10 +33,11 @@ class Configuration {
     std::string wayland_event_mask;
     bool debug_backend;
     bool debug_backend_set;
+    std::vector<std::string> bundle_paths;
 
     struct {
-      std::vector<std::string> vm_args;
       std::string bundle_path;
+      std::vector<std::string> vm_args;
       std::string window_type;
       uint32_t wl_output_index;
       int32_t accessibility_features;
@@ -61,15 +58,15 @@ class Configuration {
   };
 
   /**
-   * @brief Parse config file and generate View config
-   * @param[in] config Config file
-   * @return std::vector<Configuration::Config>
-   * @retval View config
+   * @brief config file generate from argc and argv
+   * @param[in] argc argument count
+   * @param[in] argv argument vector
+   * @return Config
+   * @retval generated config object
    * @relation
    * internal
    */
-  static std::vector<struct Configuration::Config> ParseConfig(
-      const Config& config);
+  static std::vector<Config> ParseArgcArgv(int argc, const char* const* argv);
 
   /**
    * @brief Print the contents of the configuration to the log
@@ -80,105 +77,52 @@ class Configuration {
    */
   static void PrintConfig(const Config& config);
 
-  /**
-   * @brief config file generate from argc and argv
-   * @param[in] argc argument count
-   * @param[in] argv argument vector
-   * @return Config
-   * @retval generated config object
-   * @relation
-   * internal
-   */
-  static Config ParseArgcArgv(int argc, const char* const* argv);
-
-  FML_DISALLOW_COPY_AND_ASSIGN(Configuration);
+  Configuration(const Configuration&) = delete;
+  Configuration& operator=(const Configuration&) = delete;
 
  private:
-  static constexpr char kViewKey[] = "view";
-  static constexpr char kBundlePathKey[] = "bundle_path";
-  static constexpr char kWindowTypeKey[] = "window_type";
-  static constexpr char kOutputIndex[] = "output_index";
-  static constexpr char kWindowActivationAreaKey[] = "window_activation_area";
-  static constexpr char kWidthKey[] = "width";
-  static constexpr char kHeightKey[] = "height";
-  static constexpr char kPixelRatioKey[] = "pixel_ratio";
-  static constexpr char kIviSurfaceIdKey[] = "ivi_surface_id";
-  static constexpr char kAccessibilityFeaturesKey[] = "accessibility_features";
-  static constexpr char kVmArgsKey[] = "vm_args";
-  static constexpr char kFullscreenKey[] = "fullscreen";
-  static constexpr char kAppIdKey[] = "app_id";
-  static constexpr char kCursorThemeKey[] = "cursor_theme";
-  static constexpr char kWaylandEventMaskKey[] = "wayland_event_mask";
-  static constexpr char kDisableCursorKey[] = "disable_cursor";
-  static constexpr char kDebugBackendKey[] = "debug_backend";
-  static constexpr char kFpsOutputConsole[] = "fps_output_console";
-  static constexpr char kFpsOutputOverlay[] = "fps_output_overlay";
-  static constexpr char kFpsOutputFrequency[] = "fps_output_frequency";
-
   /**
-   * @brief Parse a Json Document string into DOM
-   * @param[in] filename Json Document path
-   * @return rapidjson::Document
-   * @retval Document Object
+   * @brief Parse config file and generate View config
+   * @param[in] cli_config Config file
+   * @return std::vector<Configuration::Config>
+   * @retval View config
    * @relation
    * internal
    */
-  static rapidjson::Document getJsonDocument(const std::string& filename);
+  static std::vector<Config> parse_config(const Config& cli_config);
 
   /**
-   * @brief Get View counts
-   * @param[in] doc Document Object
-   * @return rapidjson::SizeType
-   * @retval Number of element counts
-   * @relation
-   * internal
-   */
-  static rapidjson::SizeType getViewCount(rapidjson::Document& doc);
-
-  /**
-   * @brief Get View parameters set to View config
-   * @param[in] obj Conifg parameters
-   * @param[in,out] instance View config
+   * @brief Get parameters from TOML configuration file
+   * @param[in] tbl TOML table
+   * @param[in,out] instance config
    * @return void
    * @relation
    * internal
    */
-  static void getViewParameters(
-      const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
-      Config& instance);
-
-  /**
-   * @brief Get Global parameters set to View config
-   * @param[in] obj Conifg parameters
-   * @param[in,out] instance View confige
-   * @return void
-   * @relation
-   * internal
-   */
-  static void getGlobalParameters(
-      const rapidjson::GenericValue<rapidjson::UTF8<>>::Object& obj,
-      Config& instance);
+  static void get_parameters(toml::table* tbl, Config& instance);
 
   /**
    * @brief Get Doc parameters set to View config
-   * @param[in] doc Document Object
-   * @param[in] index 0 ~ View counts-1
+   * @param[in] config_toml_path path of config.toml file
    * @param[in,out] instance View config
    * @return void
    * @relation
    * internal
    */
-  static void getView(rapidjson::Document& doc, int index, Config& instance);
+  static void get_toml_config(const char* config_toml_path, Config& instance);
 
   /**
    * @brief Get Cli config overrides to View config
+   * @param[in] bundle_path bundle_path
    * @param[in,out] instance View config
    * @param[in] cli Cli config
    * @return void
    * @relation
    * internal
    */
-  static void getCliOverrides(Config& instance, const Config& cli);
+  static void get_cli_override(const std::string& bundle_path,
+                               Config& instance,
+                               const Config& cli);
 
   /**
    * @brief mask the accessibility_features
@@ -192,5 +136,5 @@ class Configuration {
    * in third_party/flutter/shell/platform/embedder/embedder.h.
    * 0b1111111 is the maximum value of accessibility_features.
    */
-  static int32_t MaskAccessibilityFeatures(int32_t accessibility_features);
+  static int32_t mask_accessibility_features(int32_t accessibility_features);
 };
