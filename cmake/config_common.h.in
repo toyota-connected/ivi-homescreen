@@ -46,8 +46,8 @@ static constexpr char kCrashHandlerRelease[] = "@PROJECT_NAME@@@PROJECT_VERSION_
 
 #cmakedefine01 ENABLE_LTO
 #cmakedefine01 ENABLE_DLT
-#cmakedefine01 DISABLE_PLUGINS
-#if !DISABLE_PLUGINS
+#cmakedefine01 ENABLE_PLUGINS
+#if ENABLE_PLUGINS
 #include "config/plugins.h"
 #endif
 
