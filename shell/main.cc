@@ -32,7 +32,6 @@ std::unique_ptr<Logging> gLogger;
 
 /**
  * @brief Signal handler
- * @param[in] signal No use
  * @return void
  * @relation
  * internal
@@ -60,20 +59,7 @@ int main(const int argc, char** argv) {
 
   gLogger = std::make_unique<Logging>();
 
-  const auto config = Configuration::ParseArgcArgv(argc, argv);
-
-  if (!config.view.vm_args.empty()) {
-    SPDLOG_DEBUG("VM Arg Count: {}", config.view.vm_args.size());
-    for (auto const& arg : config.view.vm_args) {
-      (void)arg;
-      SPDLOG_DEBUG(arg);
-    }
-  }
-
-  const auto configs = Configuration::ParseConfig(config);
-  for (auto const& c : configs) {
-    Configuration::PrintConfig(c);
-  }
+  const auto configs = Configuration::ParseArgcArgv(argc, argv);
   assert(!configs.empty());
 
   const App app(configs);
