@@ -10,3 +10,4 @@ cmake-aarch64-debug
 docs/html/
 
 plugins/
+ivi-homescreen-plugins/
