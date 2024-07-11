@@ -26,31 +26,27 @@ class Configuration {
  public:
   struct Config {
     std::string app_id;
-    std::string json_configuration_path;
     std::string cursor_theme;
-    bool disable_cursor;
-    bool disable_cursor_set;
+    std::optional<bool> disable_cursor;
     std::string wayland_event_mask;
-    bool debug_backend;
-    bool debug_backend_set;
+    std::optional<bool> debug_backend;
     std::vector<std::string> bundle_paths;
 
     struct {
       std::string bundle_path;
       std::vector<std::string> vm_args;
       std::string window_type;
-      uint32_t wl_output_index;
-      int32_t accessibility_features;
-      uint32_t width;
-      uint32_t height;
+      std::optional<uint32_t> wl_output_index;
+      std::optional<int32_t> accessibility_features;
+      std::optional<uint32_t> width;
+      std::optional<uint32_t> height;
       uint32_t activation_area_x;
       uint32_t activation_area_y;
       uint32_t activation_area_width;
       uint32_t activation_area_height;
-      bool fullscreen;
-      bool fullscreen_set;
-      double pixel_ratio;
-      uint32_t ivi_surface_id;
+      std::optional<bool> fullscreen;
+      std::optional<double> pixel_ratio;
+      std::optional<uint32_t> ivi_surface_id;
       uint32_t fps_output_console;
       uint32_t fps_output_overlay;
       uint32_t fps_output_frequency;
