@@ -39,7 +39,7 @@ class Backend;
 class PlatformHandler;
 class PlatformChannel;
 class WaylandWindow;
-#if BUILD_BACKEND_HEADLESS
+#if BUILD_BACKEND_HEADLESS_EGL
 class HeadlessBackend;
 #elif BUILD_BACKEND_WAYLAND_DRM
 class WaylandDrmBackend;
@@ -201,7 +201,7 @@ class FlutterView {
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:
-#if BUILD_BACKEND_HEADLESS
+#if BUILD_BACKEND_HEADLESS_EGL
   std::shared_ptr<HeadlessBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_DRM
   std::shared_ptr<WaylandDrmBackend> m_backend;

@@ -43,7 +43,7 @@ class App {
    */
   NODISCARD int Loop() const;
 
-#if BUILD_BACKEND_HEADLESS
+#if BUILD_BACKEND_HEADLESS_EGL
   uint8_t* getViewRenderBuf(int i);
 #endif
 
