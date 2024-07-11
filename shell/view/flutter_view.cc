@@ -17,7 +17,7 @@
 #include <memory>
 #include <utility>
 
-#if BUILD_BACKEND_HEADLESS
+#if BUILD_BACKEND_HEADLESS_EGL
 #include "backend/headless/headless.h"
 #elif BUILD_BACKEND_WAYLAND_DRM
 #include "backend/wayland_drm/wayland_drm.h"
@@ -65,35 +65,41 @@ FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<Display>& display)
     : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
-#if BUILD_BACKEND_HEADLESS
+#if BUILD_BACKEND_HEADLESS_EGL
   m_backend = std::make_shared<HeadlessBackend>(
-      m_config.view.width, m_config.view.height, m_config.debug_backend,
-      kEglBufferSize);
+      m_config.view.width.value_or(kDefaultViewWidth),
+      m_config.view.height.value_or(kDefaultViewHeight),
+      m_config.debug_backend.value_or(false), kEglBufferSize);
 #elif BUILD_BACKEND_WAYLAND_DRM
   m_backend = std::make_shared<WaylandDrmBackend>(
-      display->GetDisplay(), m_config.view.width, m_config.view.height,
-      m_config.debug_backend, kEglBufferSize);
+      display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+      m_config.view.height.value_or(kDefaultViewHeight),
+      m_config.debug_backend.value_or(false), kEglBufferSize);
 #elif BUILD_BACKEND_WAYLAND_EGL
   m_backend = std::make_shared<WaylandEglBackend>(
-      display->GetDisplay(), m_config.view.width, m_config.view.height,
-      m_config.debug_backend, kEglBufferSize);
+      display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+      m_config.view.height.value_or(kDefaultViewHeight),
+      m_config.debug_backend.value_or(false), kEglBufferSize);
 #elif BUILD_BACKEND_WAYLAND_VULKAN
   m_backend = std::make_shared<WaylandVulkanBackend>(
-      display->GetDisplay(), m_config.view.width, m_config.view.height,
-      m_config.debug_backend);
+      display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+      m_config.view.height.value_or(kDefaultViewHeight),
+      m_config.debug_backend.value_or(false));
 #endif
 
-  SPDLOG_DEBUG("Width: {}, Height: {}", m_config.view.width,
-               m_config.view.height);
+  SPDLOG_DEBUG("Width: {}, Height: {}", m_config.view.width.value(),
+               m_config.view.height.value());
 
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
-      m_wayland_display->GetWlOutput(m_config.view.wl_output_index),
-      m_config.view.wl_output_index, m_config.app_id, m_config.view.fullscreen,
-      m_config.view.width, m_config.view.height, m_config.view.pixel_ratio,
+      m_wayland_display->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
+      m_config.view.wl_output_index.value_or(0), m_config.app_id,
+      m_config.view.fullscreen.value_or(false), m_config.view.width.value(),
+      m_config.view.height.value(),
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_config.view.activation_area_width, m_config.view.activation_area_height,
-      m_backend.get(), m_config.view.ivi_surface_id);
+      m_backend.get(), m_config.view.ivi_surface_id.value_or(0));
 
   m_state = std::make_unique<FlutterDesktopViewControllerState>();
   m_state->view = this;
@@ -135,7 +141,7 @@ void FlutterView::Initialize() {
 
   m_flutter_engine = std::make_shared<Engine>(
       this, m_index, m_command_line_args_c, m_config.view.bundle_path,
-      m_config.view.accessibility_features);
+      m_config.view.accessibility_features.value_or(0));
 
   m_state->engine = m_flutter_engine.get();
 
