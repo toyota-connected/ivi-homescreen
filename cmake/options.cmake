@@ -54,7 +54,7 @@ option(ENABLE_DLT "Enable DLT logging" OFF)
 option(DISABLE_PLUGINS "Disable Plugins" OFF)
 
 if (NOT PLUGINS_DIR)
-    set(PLUGINS_DIR ${CMAKE_SOURCE_DIR}/plugins)
+    set(PLUGINS_DIR ${CMAKE_SOURCE_DIR}/ivi-homescreen-plugins)
 endif ()
 
 if (NOT DISABLE_PLUGINS AND EXISTS ${PLUGINS_DIR})
