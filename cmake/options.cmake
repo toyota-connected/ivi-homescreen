@@ -53,14 +53,14 @@ option(ENABLE_DLT "Enable DLT logging" OFF)
 #
 option(DISABLE_PLUGINS "Disable Plugins" OFF)
 
-if (NOT PLUGIN_DIR)
-    set(PLUGIN_DIR ${CMAKE_SOURCE_DIR}/plugins)
+if (NOT PLUGINS_DIR)
+    set(PLUGINS_DIR ${CMAKE_SOURCE_DIR}/plugins)
 endif ()
 
-if (NOT DISABLE_PLUGINS AND EXISTS ${PLUGIN_DIR})
+if (NOT DISABLE_PLUGINS AND EXISTS ${PLUGINS_DIR})
     MESSAGE(STATUS "Plugins ................ Enabled")
     set(ENABLE_PLUGINS ON)
-elseif (DISABLE_PLUGINS OR NOT EXISTS ${PLUGIN_DIR})
+elseif (DISABLE_PLUGINS OR NOT EXISTS ${PLUGINS_DIR})
     MESSAGE(STATUS "Plugins ................ Disabled")
     set(ENABLE_PLUGINS OFF)
 endif ()

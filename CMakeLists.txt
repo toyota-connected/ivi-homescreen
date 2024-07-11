@@ -52,7 +52,12 @@ configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 #
 add_subdirectory(third_party)
 if (ENABLE_PLUGINS)
-    add_subdirectory(plugins)
+    add_subdirectory(${PLUGINS_DIR})
+    foreach (EXT_PLUGINS_DIR ${EXT_PLUGINS_DIRS})
+        if (EXISTS ${EXT_PLUGINS_DIR})
+            add_subdirectory(${EXT_PLUGINS_DIR})
+        endif ()
+    endforeach ()
 endif ()
 
 add_subdirectory(shell/platform/homescreen)
