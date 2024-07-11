@@ -27,7 +27,7 @@ Flutter Linux CPP Embedder
 
 
 ## Plugins
-ivi-homescreen plugins are located at https://github.com/toyota-connected/ivi-homesceen-plugins
+ivi-homescreen plugins are located at https://github.com/toyota-connected/ivi-homescreen-plugins
 
 There are two ways to reference this repo:
 1. Clone plugins repo to root of ivi-homescreen folder
