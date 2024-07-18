@@ -23,6 +23,10 @@
 
 #include "logging.h"
 
+#if BUILD_BACKEND_HEADLESS_EGL
+#include <GL/osmesa.h>
+#endif
+
 std::shared_ptr<EglProcessResolver> GlProcessResolver::sInstance = nullptr;
 
 EglProcessResolver::~EglProcessResolver() {
@@ -78,8 +82,13 @@ void* EglProcessResolver::process_resolver(const char* name) const {
       return address;
     }
   }
-  SPDLOG_TRACE("** process_resolver({})", name);
+#if BUILD_BACKEND_HEADLESS_EGL
+  SPDLOG_TRACE("** OSMesaGetProcAddress({})", name);
+  address = reinterpret_cast<void*>(OSMesaGetProcAddress(name));
+#else
+  SPDLOG_TRACE("** eglGetProcAddress({})", name);
   address = reinterpret_cast<void*>(eglGetProcAddress(name));
+#endif
 
   if (address) {
     return address;

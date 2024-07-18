@@ -4,13 +4,18 @@
 #include "view/flutter_view.h"
 #include "view/compositor_surface_api.h"
 #include "wayland/display.h"
+#include "unit_test_utils.h"
 
 FlutterView* createFlutterViewInstance() {
-  // setup parameter
-  struct Configuration::Config config {};
-  config.view.bundle_path = "/home/root/";
-  config.view.wl_output_index = 0;
-  auto configs = Configuration::ParseConfig(config);
+  int argc = 3;
+  const char* argv[3] = {"homescreen",
+                         "-b",kBundlePath};
+  char** argv_p = reinterpret_cast<char**>(&argv);
+
+  // call target function
+  const auto configs = Configuration::ParseArgcArgv(argc, argv_p);
+
+  Configuration::Config config = configs.back();
 
   auto wayland_display = std::make_shared<Display>(false, "", "", configs);
   auto* view = new FlutterView(config, 0, wayland_display);

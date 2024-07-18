@@ -3,9 +3,6 @@
 set(TESTCASE_NAME "homescreen_app_headless_ut_test_driver")
 set(TESTCASE_CC test_case_app_headless.cc)
 
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "BUILD_EGL_ENABLE_TRANSPARENCY")
-
 # Basically, the following statements need not be modified
 add_executable(
         ${TESTCASE_NAME}
