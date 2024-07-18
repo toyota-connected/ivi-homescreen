@@ -12,13 +12,15 @@ Test Summary：Test Loop without window_type
 ***************************************************************/
 
 TEST(HomescreenAppLoop, Lv1Normal001) {
-  struct Configuration::Config config {};
-  config.view.bundle_path = kBundlePath;
+  int argc = 3;
+  const char* argv[3] = {"homescreen",
+                         "-b",kBundlePath};
+  char** argv_p = reinterpret_cast<char**>(&argv);
 
   // call target function
-  std::vector<struct Configuration::Config> configs =
-      Configuration::ParseConfig(config);
+  const auto configs = Configuration::ParseArgcArgv(argc, argv_p);
 
+  Configuration::Config config = configs.back();
   Configuration::PrintConfig(config);
 
   const App app(configs);
@@ -35,13 +37,17 @@ Test Summary：Test Loop with window_type BG
 ***************************************************************/
 
 TEST(HomescreenAppLoop, Lv1Normal002) {
-  struct Configuration::Config config {};
-  config.view.bundle_path = kBundlePath;
-  config.view.window_type = "BG";
+  int argc = 5;
+  const char* argv[5] = {"homescreen",
+                         "-b",kBundlePath,
+                         "--window-type","BG"};
+  char** argv_p = reinterpret_cast<char**>(&argv);
 
   // call target function
-  std::vector<struct Configuration::Config> configs =
-      Configuration::ParseConfig(config);
+  const auto configs = Configuration::ParseArgcArgv(argc, argv_p);
+
+  Configuration::Config config = configs.back();
+  Configuration::PrintConfig(config);
 
   App app(configs);
   int ret = app.Loop();

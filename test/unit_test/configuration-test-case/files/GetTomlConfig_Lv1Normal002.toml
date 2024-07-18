@@ -1,0 +1,8 @@
+[global]
+app_id = 'gallery'
+cursor_theme = 'Coolbeans'
+disable_cursor = true
+wayland_event_mask = 'keyboard'
+debug_backend = false
+
+[view]
