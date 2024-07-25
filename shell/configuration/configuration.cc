@@ -296,28 +296,28 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             "a,accessibility-flags", "Accessibility feature flag(s)",
             cxxopts::value<std::string>(accessibility_feature_flag_str))(
             "c,disable-cursor", "Disable cursor",
-            cxxopts::value<bool>(*config.disable_cursor))(
+            cxxopts::value<bool>())(
             "d,debug-backend", "Debug backend",
-            cxxopts::value<bool>(*config.debug_backend))(
+            cxxopts::value<bool>())(
             "f,fullscreen", "Full screen",
-            cxxopts::value<bool>(*config.view.fullscreen))(
-            "w,width", "Width", cxxopts::value<uint32_t>(*config.view.width))(
+            cxxopts::value<bool>())(
+            "w,width", "Width", cxxopts::value<uint32_t>())(
             "h,height", "Height",
-            cxxopts::value<uint32_t>(*config.view.height))(
+            cxxopts::value<uint32_t>())(
             "p,pixel-ratio", "Pixel Ratio",
-            cxxopts::value<double>(*config.view.pixel_ratio))(
+            cxxopts::value<double>())(
             "t,cursor-theme", "Cursor Theme Name",
             cxxopts::value<std::string>(config.cursor_theme))(
             "window-type", "AGL window type (only applies to AGL-compositor)",
             cxxopts::value<std::string>(config.view.window_type))(
             "o,output-index", "Wayland output index",
-            cxxopts::value<uint32_t>(*config.view.wl_output_index))(
+            cxxopts::value<uint32_t>())(
             "xdg-shell-app-id", "XDG shell app id",
             cxxopts::value<std::string>(config.app_id))(
             "event-mask", "Wayland Events to mask",
             cxxopts::value<std::string>(config.wayland_event_mask))(
             "ivi-surface-id", "IVI Surface ID",
-            cxxopts::value<uint32_t>(*config.view.ivi_surface_id));
+            cxxopts::value<uint32_t>());
 
     const auto result = allocated->parse(argc, argv);
 
@@ -405,6 +405,29 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         spdlog::critical("-p option (Pixel Ratio) requires a non-zero value");
         exit(EXIT_FAILURE);
       }
+      config.view.pixel_ratio = result["pixel-ratio"].as<double>();
+    }
+
+    if (result.count("disable-cursor")) {
+      config.disable_cursor = result["disable-cursor"].as<bool>();
+    }
+    if (result.count("debug-backend")) {
+      config.debug_backend = result["debug-backend"].as<bool>();
+    }
+    if (result.count("fullscreen")) {
+      config.view.fullscreen = result["fullscreen"].as<bool>();
+    }
+    if (result.count("width")) {
+      config.view.width = result["width"].as<uint32_t>();
+    }
+    if (result.count("height")) {
+      config.view.height = result["height"].as<uint32_t>();
+    }
+    if (result.count("output-index")) {
+      config.view.wl_output_index = result["output-index"].as<uint32_t>();
+    }
+    if (result.count("ivi-surface-id")) {
+      config.view.ivi_surface_id = result["ivi-surface-id"].as<uint32_t>();
     }
 
     config.view.vm_args.reserve(result.unmatched().size());
