@@ -8,6 +8,7 @@ enum {
 };
 
 static constexpr char kBundlePath[] = TEST_APP_BUNDLE_PATH;
+static std::string kBundlePathStr = TEST_APP_BUNDLE_PATH;
 static constexpr char kGoldenImagePath[] = GOLDEN_IMAGE_PATH;
 static constexpr char kTestImagePath[] = TEST_IMAGE_PATH;
 

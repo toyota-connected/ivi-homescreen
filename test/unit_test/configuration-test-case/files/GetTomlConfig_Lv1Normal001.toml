@@ -1,0 +1,26 @@
+[global]
+app_id = 'gallery'
+cursor_theme = 'Coolbeans'
+disable_cursor = true
+wayland_event_mask = 'keyboard'
+debug_backend = false
+
+[view]
+window_type = 'NORMAL'
+output_index = 2
+width = 1920
+height = 1080
+pixel_ratio = 4.5
+ivi_surface_id = 5002
+accessibility_features = 52
+vm_args = ['--enable-asserts', '--verbose-logging']
+fullscreen = false
+fps_output_console = 1
+fps_output_overlay = 1
+fps_output_frequency = 3
+
+[window_activation_area]
+x = 10        # x location
+y = 10        # y location
+width = 1024
+height = 768

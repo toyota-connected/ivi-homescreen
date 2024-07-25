@@ -21,9 +21,14 @@
 
 class EglProcessResolver {
  public:
+#if BUILD_BACKEND_HEADLESS_EGL
+  static constexpr char kGlSoNames[3UL][15UL] = {{"libOSMesa.so.8"},
+                                                 {"libGLESv2.so.2"},
+                                                 {"libEGL.so.1"}};
+#else
   static constexpr char kGlSoNames[2UL][15UL] = {{"libGLESv2.so.2"},
                                                  {"libEGL.so.1"}};
-
+#endif
   ~EglProcessResolver();
 
   /**

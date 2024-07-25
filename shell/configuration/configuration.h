@@ -76,7 +76,7 @@ class Configuration {
   Configuration(const Configuration&) = delete;
   Configuration& operator=(const Configuration&) = delete;
 
- private:
+ PRIVATE:
   /**
    * @brief Parse config file and generate View config
    * @param[in] cli_config Config file
