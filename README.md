@@ -54,7 +54,7 @@ To set logging to debug use
 
     SPDLOG_LEVEL=debug
 
-# DLT logging
+### DLT logging
 
 To test DLT logging on desktop use the following
 
@@ -77,13 +77,13 @@ Start new terminal
 
     dlt-receive -a localhost
 
-# Sanitizer Support
+## Sanitizer Support
 
 You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
 
 If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
 
-# Backend Support
+## Backend Support
 
 ### EGL Backend
 This is the default build configuration.  To manually build EGL Backend use
@@ -99,13 +99,13 @@ To build Vulkan Backend use
 
 Running Vulkan requires an engine version that supports Vulkan.  Stable does not yet support Vulkan.
 
-# Bundle File Override Logic
+## Bundle File Override Logic
 
 If an override file is not present, it gets loaded from a default location.
 
-## Optional override files
+### Optional override files
 
-### icudtl.dat
+#### icudtl.dat
 
 Bundle Override
 
@@ -119,7 +119,7 @@ Desktop Default
 
     /usr/local/share/flutter/icudtl.dat
 
-### libflutter_engine.so
+#### libflutter_engine.so
 
 Bundle Override
 
@@ -127,7 +127,7 @@ Bundle Override
 
 Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
 
-# Command Line Options
+## Command Line Options
 
 `help` - Prints all command line options and exits
 
@@ -169,9 +169,9 @@ homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOM
 
 * Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
 
-### View Configuration keys
+## View Configuration keys
 
-#### Global - `[global]`
+### Global - `[global]`
 
 `app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
 
@@ -185,7 +185,7 @@ homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOM
 
 `debug_backed` - Prints out debug information relevant to the backend
 
-#### View Specific - `[view]`
+### View Specific - `[view]`
 
 `vm_args` - Array of strings which get passed to the VM instance as command line arguments.
 
@@ -213,7 +213,7 @@ it will create borderless windows in no particular position.
 `fps_output_frequency` - Optional for FPS.  Changing value controls the update interval.
 
 
-#### AGL Shell `[window_activation_area]`
+### AGL Shell `[window_activation_area]`
 
 `x` - x position of activation area
 
@@ -224,14 +224,14 @@ it will create borderless windows in no particular position.
 `height` - height of activation area
 
 
-### config.toml
+## config.toml
 
 * Locate config.toml file in the root of your bundle folder
 * Comments work
 * Any combination of values can be defined.
 * Any empty file is valid
 
-#### config.toml sample
+### config.toml sample
 ```
 [global]
 app_id = 'gallery'                 # Application name
@@ -261,7 +261,7 @@ width = 1024
 height = 768
 ```
 
-### Parameter loading order
+## Parameter loading order
 Only VM Command Line arguments are additive.  Meaning all instances of VM command line references will get added
 together; JSON view + JSON global + CLI args.
 
@@ -271,7 +271,7 @@ All other parameters get assigned using the following ordering:
 2. TOML Configuration Global (non-view) parameters
 3. Command Line parameters (Overrides anything set in TOML file)
 
-# CMake Build flags
+## CMake Build flags
 
 `ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
 
@@ -349,9 +349,9 @@ All other parameters get assigned using the following ordering:
 
 _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
-# x86_64 Desktop development notes
+## x86_64 Desktop development notes
 
-## NVidia GL errors
+### NVidia GL errors
 
 Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
 This should resolve it:
@@ -372,9 +372,9 @@ Enter password and login
 
 Defaults to Wayland, no need to do anything special
 
-# Build steps
+## Build steps
 
-## Required Packages
+### Required Packages
 
     sudo add-apt-repository ppa:kisak/kisak-mesa
     sudo apt-get update -y
@@ -382,26 +382,26 @@ Defaults to Wayland, no need to do anything special
     mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
     libxkbcommon-dev
 
-## Optional Packages
+### Optional Packages
 
     # To build doxygen documentation
     sudo apt-get -y install doxygen
 
-## GCC/libstdc++ Build
+### GCC/libstdc++ Build
 
     git clone https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
     cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
 
-## Clang/libc++ Build
+### Clang/libc++ Build
 
     git clone https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
     CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
 
-### Clang Toolchain Setup
+#### Clang Toolchain Setup
 
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
@@ -417,9 +417,9 @@ Defaults to Wayland, no need to do anything special
     make package -j
     sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
 
-# Flutter Application
+## Flutter Application
 
-## Running an app
+### Running an app
 
 Release Bundle Folder layout
 ```
@@ -464,14 +464,14 @@ flutter_workspace.py installs runtime packages, patches source files, compiles p
 _Note: `sudo` is required to install runtime packages_
 
 
-# CMAKE dependency paths
+## CMAKE dependency paths
 
 Path prefix used to determine required files is determined at build.
 
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
-# Crash Handler
+## Crash Handler
 
 Sentry-native support is available for Crash Handling.  This pushes a mini-dump to the cloud for triage and tracking.
 
@@ -501,16 +501,16 @@ ivi-homescreen build
     make -j
     LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
 
-# Yocto recipes
+## Yocto recipes
 
-## Scarthgap
+### Scarthgap
 
     https://github.com/meta-flutter/meta-flutter/tree/scarthgap/recipes-graphics/toyota
 
-## Kirkstone
+### Kirkstone
 
     https://github.com/meta-flutter/meta-flutter/tree/kirkstone/recipes-graphics/toyota
 
-## Dunfell
+### Dunfell
 
     https://github.com/meta-flutter/meta-flutter/tree/dunfell/recipes-graphics/toyota
