@@ -2,6 +2,8 @@
 
 Flutter Linux CPP Embedder
 
+[![Documentation Status](https://readthedocs.org/projects/ivi-homescreen/badge/?version=latest)](https://ivi-homescreen.readthedocs.io/en/latest/?badge=latest)
+
 ### Discord Server https://discord.gg/V5uWD9fvws
 
 ## Highlights
