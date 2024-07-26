@@ -7,7 +7,10 @@ needsbuild
 cmake-build-*
 cmake-aarch64-debug
 
-docs/html/
+docs/doxygen/html/
+docs/doxygen/xml/
+docs/sphinx/*
+
 
 plugins/
 ivi-homescreen-plugins/
