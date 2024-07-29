@@ -37,16 +37,13 @@ struct LibFlutterEngineExports {
       PlatformMessageCreateResponseHandle = nullptr;
   FlutterEnginePlatformMessageReleaseResponseHandleFnPtr
       PlatformMessageReleaseResponseHandle = nullptr;
-  FlutterEngineSendPlatformMessageResponseFnPtr SendPlatformMessageResponse =
-      nullptr;
+  FlutterEngineSendPlatformMessageResponseFnPtr SendPlatformMessageResponse = nullptr;
   FlutterEngineRegisterExternalTextureFnPtr RegisterExternalTexture = nullptr;
-  FlutterEngineUnregisterExternalTextureFnPtr UnregisterExternalTexture =
-      nullptr;
+  FlutterEngineUnregisterExternalTextureFnPtr UnregisterExternalTexture = nullptr;
   FlutterEngineMarkExternalTextureFrameAvailableFnPtr
       MarkExternalTextureFrameAvailable = nullptr;
   FlutterEngineUpdateSemanticsEnabledFnPtr UpdateSemanticsEnabled = nullptr;
-  FlutterEngineUpdateAccessibilityFeaturesFnPtr UpdateAccessibilityFeatures =
-      nullptr;
+  FlutterEngineUpdateAccessibilityFeaturesFnPtr UpdateAccessibilityFeatures = nullptr;
   FlutterEngineDispatchSemanticsActionFnPtr DispatchSemanticsAction = nullptr;
   FlutterEngineOnVsyncFnPtr OnVsync = nullptr;
   FlutterEngineReloadSystemFontsFnPtr ReloadSystemFonts = nullptr;
