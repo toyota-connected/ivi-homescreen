@@ -2,7 +2,7 @@
 #
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
-import subprocess, os
+import os
 
 # Check if we're running on Read the Docs' servers
 read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
@@ -10,7 +10,6 @@ read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
 breathe_projects = {}
 
 if read_the_docs_build:
-    subprocess.call('doxygen ../doxygen/Doxyfile', shell=True)
     breathe_projects['ivi-homescreen'] = '../doxygen/xml'
 
 # -- Project information -----------------------------------------------------

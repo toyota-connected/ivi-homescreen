@@ -4,6 +4,10 @@ build:
   os: "ubuntu-22.04"
   tools:
     python: "3.10"
+  jobs:
+    pre_build:
+        - doxygen docs/doxygen/Doxyfile
+        - python3 docs/source/generate_modules_docs.py docs/doxygen/xml
 
 python:
   install:
