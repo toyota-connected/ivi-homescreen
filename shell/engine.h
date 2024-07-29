@@ -359,9 +359,6 @@ class Engine {
 
   FlutterEngineAOTData m_aot_data;
 
-  std::mutex m_queue_lock{};
-  std::shared_ptr<std::queue<std::string>> m_vm_queue{};
-
   /**
    * @brief Load AOT data
    * @param[in] aot_data_path Path to AOT data
