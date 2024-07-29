@@ -27,6 +27,7 @@ LibFlutterEngineExports::LibFlutterEngineExports(void* lib) {
     GetFuncAddress(lib, "FlutterEngineCreateAOTData", &CreateAOTData);
     GetFuncAddress(lib, "FlutterEngineCollectAOTData", &CollectAOTData);
     GetFuncAddress(lib, "FlutterEngineRun", &Run);
+    GetFuncAddress(lib, "FlutterEngineShutdown", &Shutdown);
     GetFuncAddress(lib, "FlutterEngineInitialize", &Initialize);
     GetFuncAddress(lib, "FlutterEngineDeinitialize", &Deinitialize);
     GetFuncAddress(lib, "FlutterEngineRunInitialized", &RunInitialized);

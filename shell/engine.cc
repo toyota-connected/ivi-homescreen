@@ -62,8 +62,6 @@ Engine::Engine(FlutterView* view,
   m_platform_task_runner =
       std::make_shared<TaskRunner>("Platform", m_flutter_engine);
 
-  m_vm_queue = std::make_shared<std::queue<std::string>>();
-
   // Touch events
   m_pointer_events.clear();
   m_pointer_events.reserve(kMaxPointerEvent);
@@ -173,22 +171,11 @@ Engine::~Engine() {
     }
   }
   m_platform_task_runner.reset();
-  m_vm_queue.reset();
 }
 
 FlutterEngineResult Engine::RunTask() {
   if (!m_flutter_engine) {
     return kSuccess;
-  }
-
-  if (!m_vm_queue->empty()) {
-    std::scoped_lock<std::mutex> lock(m_queue_lock);
-    for (int i = 0; i < kVmLogChunkMax; i++) {
-      spdlog::info(m_vm_queue->front());
-      m_vm_queue->pop();
-      if (m_vm_queue->empty())
-        break;
-    }
   }
 
   return kSuccess;
@@ -576,9 +563,8 @@ void Engine::OnFlutterPlatformMessage(
       });
 }
 
-void Engine::onLogMessageCallback(const char* /* tag */,
+void Engine::onLogMessageCallback(const char* tag,
                                   const char* message,
-                                  void* user_data) {
-  (void)message;
-  (void)user_data;
+                                  void* /* user_data */) {
+  spdlog::debug("[{}] {}", tag, message);
 }
