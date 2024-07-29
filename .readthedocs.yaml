@@ -8,6 +8,7 @@ build:
     pre_build:
         - doxygen docs/doxygen/Doxyfile
         - python3 docs/source/generate_module_docs.py docs/doxygen/xml
+        - mv modules.rst docs/source
 
 python:
   install:
