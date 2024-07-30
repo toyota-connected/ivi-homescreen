@@ -29,7 +29,7 @@ if (BUILD_DOCS)
   if(PYTHON_FOUND)
     add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/docs/source/modules.rst
                         DEPENDS ${DOXYGEN_INDEX_FILE}
-                        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_module_docs.py ${CMAKE_CURRENT_BINARY_DIR}/doxygen/xml
+                        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/source/generate_module_docs.py ${CMAKE_CURRENT_BINARY_DIR}/doxygen/xml
                         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/docs/source
                         COMMENT "Generating modules.rst"
                         VERBATIM)
