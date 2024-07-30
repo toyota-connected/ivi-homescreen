@@ -7,8 +7,7 @@ build:
   jobs:
     pre_build:
         - cd docs/doxygen && doxygen Doxyfile
-        - cd ../source && python3 generate_module_docs.py ../doxygen/xml
-        - cd ../..  # Just in case next build step doesn't set working directory
+        - cd docs/source && python3 generate_module_docs.py ../doxygen/xml
 
 python:
   install:
