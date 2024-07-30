@@ -87,15 +87,15 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.debug_backend.value_or(false));
 #endif
 
-  SPDLOG_DEBUG("Width: {}, Height: {}", m_config.view.width.value(),
-               m_config.view.height.value());
+  SPDLOG_DEBUG("Width: {}, Height: {}", m_config.view.width.value_or(kDefaultViewWidth),
+               m_config.view.height.value_or(kDefaultViewWidth));
 
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
       m_wayland_display->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
       m_config.view.wl_output_index.value_or(0), m_config.app_id,
-      m_config.view.fullscreen.value_or(false), m_config.view.width.value(),
-      m_config.view.height.value(),
+      m_config.view.fullscreen.value_or(false), m_config.view.width.value_or(kDefaultViewWidth),
+      m_config.view.height.value_or(kDefaultViewWidth),
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_config.view.activation_area_width, m_config.view.activation_area_height,
