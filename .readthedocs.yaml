@@ -6,9 +6,9 @@ build:
     python: "3.10"
   jobs:
     pre_build:
-        - doxygen docs/doxygen/Doxyfile
-        - python3 docs/source/generate_module_docs.py docs/doxygen/xml
-        - mv modules.rst docs/source
+        - cd docs/doxygen && doxygen Doxyfile
+        - cd ../source && python3 generate_module_docs.py ../doxygen/xml
+        - cd ../..  # Just in case next build step doesn't set working directory
 
 python:
   install:
