@@ -221,7 +221,8 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   return result;
 }
 
-FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
+FlutterEngineResult Engine::SetWindowSize(const size_t height,
+                                          const size_t width) {
   if (!m_running) {
     return kInternalInconsistency;
   }
@@ -234,11 +235,18 @@ FlutterEngineResult Engine::SetWindowSize(size_t height, size_t width) {
       .struct_size = sizeof(FlutterWindowMetricsEvent),
       .width = width,
       .height = height,
-      .pixel_ratio = m_prev_pixel_ratio};
+      .pixel_ratio = m_prev_pixel_ratio,
+      .left = 0,
+      .top = 0,
+      .physical_view_inset_top = 0,
+      .physical_view_inset_right = 0,
+      .physical_view_inset_bottom = 0,
+      .physical_view_inset_left = 0,
+      .display_id = 0,  // TODO display index
+      .view_id = static_cast<int64_t>(m_index)};
 
-  const auto result =
-      LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
-  if (result != kSuccess) {
+  if (LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme) !=
+      kSuccess) {
     spdlog::critical("({}) Failed send initial window size to flutter",
                      m_index);
     assert(false);
@@ -262,7 +270,15 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
       .struct_size = sizeof(FlutterWindowMetricsEvent),
       .width = m_prev_width,
       .height = m_prev_height,
-      .pixel_ratio = pixel_ratio};
+      .pixel_ratio = pixel_ratio,
+      .left = 0,
+      .top = 0,
+      .physical_view_inset_top = 0,
+      .physical_view_inset_right = 0,
+      .physical_view_inset_bottom = 0,
+      .physical_view_inset_left = 0,
+      .display_id = 0,  // TODO display index
+      .view_id = static_cast<int64_t>(m_index)};
 
   const auto result =
       LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);

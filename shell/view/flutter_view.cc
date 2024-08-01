@@ -87,14 +87,16 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.debug_backend.value_or(false));
 #endif
 
-  SPDLOG_DEBUG("Width: {}, Height: {}", m_config.view.width.value_or(kDefaultViewWidth),
+  SPDLOG_DEBUG("Width: {}, Height: {}",
+               m_config.view.width.value_or(kDefaultViewWidth),
                m_config.view.height.value_or(kDefaultViewWidth));
 
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, display, m_config.view.window_type,
       m_wayland_display->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
       m_config.view.wl_output_index.value_or(0), m_config.app_id,
-      m_config.view.fullscreen.value_or(false), m_config.view.width.value_or(kDefaultViewWidth),
+      m_config.view.fullscreen.value_or(false),
+      m_config.view.width.value_or(kDefaultViewWidth),
       m_config.view.height.value_or(kDefaultViewWidth),
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
       m_config.view.activation_area_x, m_config.view.activation_area_y,
@@ -151,6 +153,20 @@ void FlutterView::Initialize() {
     spdlog::critical("Failed to Run Engine");
     exit(EXIT_FAILURE);
   }
+
+  // notify display update
+  FlutterEngineDisplay display{};
+  display.struct_size = sizeof(FlutterEngineDisplay);
+  display.display_id = 1;
+  display.single_display = true;
+  display.refresh_rate = m_wayland_display->GetRefreshRate(m_index);
+  auto [width, height] = m_wayland_window->GetSize();
+  display.width = width;
+  display.height = height;
+  display.device_pixel_ratio = m_flutter_engine->GetPixelRatio();
+  LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
+                                        kFlutterEngineDisplaysUpdateTypeStartup,
+                                        &display, 1);
 
   // Update for Binary Messenger
   m_state->engine_state->flutter_engine = m_flutter_engine->GetFlutterEngine();
