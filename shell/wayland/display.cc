@@ -884,12 +884,10 @@ int32_t Display::GetBufferScale(uint32_t index) const {
     if (m_buffer_scale_enable) {
       if (m_all_outputs[index]->scale == 0) {
         return 1;
-      } else {
-        return m_all_outputs[index]->scale;
       }
-    } else {
-      return static_cast<int32_t>(kDefaultBufferScale);
+      return m_all_outputs[index]->scale;
     }
+    return static_cast<int32_t>(kDefaultBufferScale);
   }
   SPDLOG_DEBUG("GetBufferScale: Invalid output index: {}", index);
   return static_cast<int32_t>(kDefaultBufferScale);
@@ -901,6 +899,14 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   }
   SPDLOG_DEBUG("GetVideoModeSize: Invalid output index: {}", index);
   return {0, 0};
+}
+
+int Display::GetRefreshRate(uint32_t index) const {
+  if (index < m_all_outputs.size()) {
+    return m_all_outputs[index]->refresh_rate;
+  }
+  SPDLOG_DEBUG("GetRefreshRate: Invalid output index: {}", index);
+  return 0;
 }
 
 #if ENABLE_AGL_SHELL_CLIENT
