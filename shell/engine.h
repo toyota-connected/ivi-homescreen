@@ -101,6 +101,15 @@ class Engine {
   FlutterEngineResult SetPixelRatio(double pixel_ratio);
 
   /**
+   * @brief Get pixel ratio of flutter
+   * @return pixel ratio
+   * @retval The result of the previous set pixel ratio
+   * @relation
+   * flutter
+   */
+  NODISCARD double GetPixelRatio() const { return m_prev_pixel_ratio; };
+
+  /**
    * @brief Shutsdown Flutter Engine Instance
    * @return FlutterEngineResult
    * @retval The result of shutting down the engine

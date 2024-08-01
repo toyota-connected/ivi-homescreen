@@ -273,6 +273,16 @@ class Display {
   NODISCARD std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index) const;
 
   /**
+   * @brief Get refresh rate of a specified index of a view
+   * @param[in] index Index of a view
+   * @return int
+   * @retval Video Refresh Rate
+   * @relation
+   * wayland
+   */
+  NODISCARD int GetRefreshRate(uint32_t index) const;
+
+  /**
    * @brief deactivate/hide the application pointed by app_id
    * @param[in] app_id the app_id
    * @relation
