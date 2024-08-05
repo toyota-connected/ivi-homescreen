@@ -34,7 +34,7 @@ const auto& d = vk::defaultDispatchLoaderDynamic;
 
 #define CHECK_VK_RESULT(x)                                 \
   do {                                                     \
-    vk::resultCheck(static_cast<vk::Result>(x), LOCATION); \
+    vk::detail::resultCheck(static_cast<vk::Result>(x), LOCATION); \
   } while (0)
 
 WaylandVulkanBackend::WaylandVulkanBackend(struct wl_display* display,
