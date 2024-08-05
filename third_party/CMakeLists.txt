@@ -40,6 +40,11 @@ add_subdirectory(cxxopts)
 add_subdirectory(tomlplusplus)
 
 #
+# Vulkan-Headers
+#
+add_subdirectory(Vulkan-Headers)
+
+#
 # Flutter Common library
 #
 
