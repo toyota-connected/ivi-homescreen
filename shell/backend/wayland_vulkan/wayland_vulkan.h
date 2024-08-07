@@ -30,9 +30,9 @@
 #include "backend/backend.h"
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 
-class WaylandVulkanBackend : public Backend {
+class WaylandVulkanBackend final : public Backend {
  public:
-  WaylandVulkanBackend(struct wl_display* display,
+  WaylandVulkanBackend(wl_display* display,
                        uint32_t width,
                        uint32_t height,
                        bool enable_validation_layers);
@@ -41,7 +41,6 @@ class WaylandVulkanBackend : public Backend {
 
   /**
    * @brief Resize Flutter engine Window size
-   * @param[in] user_data Pointer to User data
    * @param[in] index No use
    * @param[in] engine Pointer to Flutter engine
    * @param[in] width Set window width
@@ -57,7 +56,6 @@ class WaylandVulkanBackend : public Backend {
 
   /**
    * @brief Create Vulkan surface
-   * @param[in] user_data Pointer to User data
    * @param[in] index No use
    * @param[in] surface Pointer to surface
    * @param[in] width Set surface width
@@ -126,7 +124,7 @@ class WaylandVulkanBackend : public Backend {
 
   bool resize_pending_;
 
-  struct wl_display* wl_display_;
+  wl_display* wl_display_;
   uint32_t width_;
   uint32_t height_;
 
