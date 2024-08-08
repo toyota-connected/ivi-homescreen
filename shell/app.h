@@ -21,12 +21,13 @@
 
 #include "configuration/configuration.h"
 #include "view/flutter_view.h"
+#include "watchdog.h"
 
 class Display;
 
 class WaylandWindow;
 
-class App {
+class App final {
  public:
   explicit App(const std::vector<Configuration::Config>& configs);
 
@@ -50,4 +51,5 @@ class App {
  private:
   std::shared_ptr<Display> m_wayland_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;
+  std::unique_ptr<Watchdog> m_watch_dog;
 };
