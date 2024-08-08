@@ -28,6 +28,7 @@ add_executable(${PROJECT_NAME}
         main.cc
         timer.cc
         view/flutter_view.cc
+        watchdog.cc
         wayland/display.cc
         wayland/window.cc
         task_runner.cc
@@ -98,6 +99,10 @@ endif ()
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry PkgConfig::UNWIND)
 endif ()
+if (BUILD_SYSTEMD_WATCHDOG)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::libsystemd)
+endif ()
+
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         asio
