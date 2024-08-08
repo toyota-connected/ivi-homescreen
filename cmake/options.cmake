@@ -109,6 +109,19 @@ if (BUILD_CRASH_HANDLER)
 endif ()
 
 #
+# watchdog
+#
+option(BUILD_WATCHDOG "Build Watchdog" ON)
+if (BUILD_WATCHDOG)
+    option(BUILD_SYSTEMD_WATCHDOG "Build systemd Watchdog" OFF)
+    if (BUILD_SYSTEMD_WATCHDOG)
+        find_package(PkgConfig)
+        pkg_check_modules(libsystemd REQUIRED IMPORTED_TARGET libsystemd)
+        add_compile_definitions(BUILD_SYSTEMD_WATCHDOG)
+    endif ()
+endif ()
+
+#
 # Static linking
 #
 option(ENABLE_CLANG_STATIC_LINK "Link libc++, libc++abi, and gcc as static libs when building with clang" OFF)
@@ -135,6 +148,6 @@ find_package(Sanitizers)
 #
 # Executable Name
 #
-if(NOT EXE_OUTPUT_NAME)
+if (NOT EXE_OUTPUT_NAME)
     set(EXE_OUTPUT_NAME "homescreen")
 endif ()
