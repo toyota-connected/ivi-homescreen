@@ -59,7 +59,9 @@ App::App(const std::vector<Configuration::Config>& configs)
     m_wayland_display->AglShellDoReady();
 #endif
 
+#if BUILD_WATCHDOG
   m_watch_dog = std::make_unique<Watchdog>();
+#endif
 
   SPDLOG_DEBUG("-App::App");
 }
@@ -88,7 +90,9 @@ int App::Loop() const {
   const auto sleep_time = 16 - elapsed;
 
   if (sleep_time > 0) {
+#if BUILD_WATCHDOG
     m_watch_dog->pet();
+#endif
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
   }
 

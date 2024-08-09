@@ -59,8 +59,8 @@ void Watchdog::start() {
 #endif
         break;
       }
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(1));  // idle until next check
+      std::this_thread::sleep_for(std::chrono::milliseconds(
+          kDefaultSleepTime));  // idle until next check
     }
   });
   pet();  // _reset the watchdog deadline to now + interval at the start
