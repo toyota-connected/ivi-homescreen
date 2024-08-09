@@ -26,7 +26,8 @@
  */
 class Watchdog {
  public:
-  static constexpr uint64_t kDefaultTimeout = 1'000'000;
+  static constexpr uint64_t kDefaultTimeout = 5'000'000;
+  static constexpr uint64_t kDefaultSleepTime = 250;
 
   /**
    * @brief Default constructor for the Watchdog class.

@@ -111,7 +111,7 @@ endif ()
 #
 # watchdog
 #
-option(BUILD_WATCHDOG "Build Watchdog" ON)
+option(BUILD_WATCHDOG "Build Watchdog" OFF)
 if (BUILD_WATCHDOG)
     option(BUILD_SYSTEMD_WATCHDOG "Build systemd Watchdog" OFF)
     if (BUILD_SYSTEMD_WATCHDOG)
