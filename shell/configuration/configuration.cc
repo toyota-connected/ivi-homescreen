@@ -185,7 +185,6 @@ std::vector<Configuration::Config> Configuration::parse_config(
   std::vector<Config> res;
   res.reserve(view_count);
 
-  int i = 0;
   for (const auto& bundle_path : cli_config.bundle_paths) {
     Config cfg{};
 
@@ -211,7 +210,6 @@ std::vector<Configuration::Config> Configuration::parse_config(
     }
 
     res.emplace_back(cfg);
-    i++;
   }
   assert(res.capacity() == view_count);
 
