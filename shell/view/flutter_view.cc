@@ -159,10 +159,10 @@ void FlutterView::Initialize() {
   display.struct_size = sizeof(FlutterEngineDisplay);
   display.display_id = 1;
   display.single_display = true;
-  display.refresh_rate = m_wayland_display->GetRefreshRate(m_index);
+  display.refresh_rate = m_wayland_display->GetRefreshRate(static_cast<uint32_t>(m_index));
   auto [width, height] = m_wayland_window->GetSize();
-  display.width = width;
-  display.height = height;
+  display.width = static_cast<size_t>(width);
+  display.height = static_cast<size_t>(height);
   display.device_pixel_ratio = m_flutter_engine->GetPixelRatio();
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
