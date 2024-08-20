@@ -90,6 +90,9 @@ class Logging {
     }
 #endif
 
+#ifndef NDEBUG
+    m_logger->set_level(spdlog::level::debug);
+#endif
     spdlog::flush_on(spdlog::level::err);
     spdlog::flush_every(std::chrono::seconds(kLogFlushInterval));
     spdlog::cfg::load_env_levels();
