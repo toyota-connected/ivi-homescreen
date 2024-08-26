@@ -2,7 +2,7 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [ 'main', 'agl' ]
+    branches: [ 'v2.0' ]
   pull_request:
     # The branches below must be a subset of the branches above
     branches: [ 'main' ]
@@ -28,14 +28,14 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: 'true'
 
     - name: Install packages
       run: |
         echo ${{ github.server_url }}
-        sudo apt-get -y install \
+        sudo apt-get -y install ninja-build \
         libwayland-dev wayland-protocols libxkbcommon-dev \
         mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
         cmake --version
@@ -43,7 +43,7 @@ jobs:
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v2
+      uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
         # If you wish to specify custom queries, you can do so here or in a config file.
@@ -56,7 +56,7 @@ jobs:
     - name: Configure
       run: |
         mkdir -p ${{github.workspace}}/build/release
-        cmake \
+        cmake -GNinja \
           -B ${{github.workspace}}/build/release \
           -D CMAKE_BUILD_TYPE=Release \
           -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
@@ -66,10 +66,10 @@ jobs:
       working-directory: ${{github.workspace}}/build/release
       run: |
         rm -rf _packages || true
-        make package
-        ls -la _packages
+        ninja -C . ivi-homescreen
+        ls -la shell/homescreen
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v2
+      uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
