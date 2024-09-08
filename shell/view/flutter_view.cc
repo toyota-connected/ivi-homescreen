@@ -49,6 +49,7 @@
 #include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
 #include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
 #include <plugins/pdf/include/pdf/pdf_plugin_c_api.h>
+#include <plugins/rive_text/include/rive_text/rive_text_plugin_c_api.h>
 #include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
 #include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
 #include <plugins/video_player_linux/include/video_player_linux/video_player_plugin_c_api.h>
@@ -159,7 +160,8 @@ void FlutterView::Initialize() {
   display.struct_size = sizeof(FlutterEngineDisplay);
   display.display_id = 1;
   display.single_display = true;
-  display.refresh_rate = m_wayland_display->GetRefreshRate(static_cast<uint32_t>(m_index));
+  display.refresh_rate =
+      m_wayland_display->GetRefreshRate(static_cast<uint32_t>(m_index));
   auto [width, height] = m_wayland_window->GetSize();
   display.width = static_cast<size_t>(width);
   display.height = static_cast<size_t>(height);
@@ -384,6 +386,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
 #endif
 #if ENABLE_PLUGIN_PDF
   PrintingPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if ENABLE_PLUGIN_RIVE_TEXT
+  RiveTextPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 }
