@@ -392,4 +392,8 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
   RiveTextPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
+#if ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW
+  WebviewFlutterPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
 }
