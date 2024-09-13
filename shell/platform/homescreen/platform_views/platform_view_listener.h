@@ -32,21 +32,22 @@ struct platform_view_listener {
                    const double* pointer_data,
                    void* data);
   void (*dispose)(bool hybrid, void* data);
-  /// When a touch sequence is happening on the embedded UIView all touch events are delayed.
-  /// Calling this method releases the delayed events to the embedded UIView and makes it consume
-  /// any following touch events for the pointers involved in the active gesture.
+  /// When a touch sequence is happening on the embedded UIView all touch events
+  /// are delayed. Calling this method releases the delayed events to the
+  /// embedded UIView and makes it consume any following touch events for the
+  /// pointers involved in the active gesture.
   void (*accept_gesture)(int32_t id);
-  /// When a touch sequence is happening on the embedded UIView all touch events are delayed.
-  /// Calling this method drops the buffered touch events and prevents any future touch events for
-  /// the pointers that are part of the active touch sequence from arriving to the embedded view.
+  /// When a touch sequence is happening on the embedded UIView all touch events
+  /// are delayed. Calling this method drops the buffered touch events and
+  /// prevents any future touch events for the pointers that are part of the
+  /// active touch sequence from arriving to the embedded view.
   void (*reject_gesture)(int32_t id);
 };
 
-typedef void (*PlatformViewAddListener)(
-    void* context,
-    int32_t id,
-    const struct platform_view_listener* listener,
-    void* listener_context);
+typedef void (*PlatformViewAddListener)(void* context,
+                                        int32_t id,
+                                        const platform_view_listener* listener,
+                                        void* listener_context);
 
 typedef void (*PlatformViewRemoveListener)(void* context, int32_t id);
 
