@@ -161,40 +161,40 @@ std::future<bool> PostMessengerSendWithReply(
     void* user_data) {
   const auto promise(std::make_shared<std::promise<bool>>());
   auto promise_future(promise->get_future());
-  asio::post(*messenger->GetEngine()->platform_task_runner->GetStrandContext(),
-             [&, promise, channel, message, message_size, reply, user_data]() {
-               FlutterPlatformMessageResponseHandle* response_handle = nullptr;
-               if (reply != nullptr && user_data != nullptr) {
-                 const FlutterEngineResult result =
-                     LibFlutterEngine->PlatformMessageCreateResponseHandle(
-                         messenger->GetEngine()->flutter_engine, reply,
-                         user_data, &response_handle);
-                 if (result != kSuccess) {
-                   spdlog::error("Failed to create response handle");
-                   promise->set_value(false);
-                   return;
-                 }
-               }
+  post(*messenger->GetEngine()->platform_task_runner->GetStrandContext(),
+       [&, promise, channel, message, message_size, reply, user_data]() {
+         FlutterPlatformMessageResponseHandle* response_handle = nullptr;
+         if (reply != nullptr && user_data != nullptr) {
+           const FlutterEngineResult result =
+               LibFlutterEngine->PlatformMessageCreateResponseHandle(
+                   messenger->GetEngine()->flutter_engine, reply, user_data,
+                   &response_handle);
+           if (result != kSuccess) {
+             spdlog::error("Failed to create response handle");
+             promise->set_value(false);
+             return;
+           }
+         }
 
-               auto platform_message = std::make_unique<FlutterPlatformMessage>();
-               platform_message->struct_size = sizeof(FlutterPlatformMessage);
-               platform_message->channel = channel;
-               platform_message->message = message;
-               platform_message->message_size = message_size;
-               platform_message->response_handle = response_handle;
+         auto platform_message = std::make_unique<FlutterPlatformMessage>();
+         platform_message->struct_size = sizeof(FlutterPlatformMessage);
+         platform_message->channel = channel;
+         platform_message->message = message;
+         platform_message->message_size = message_size;
+         platform_message->response_handle = response_handle;
 
-               const FlutterEngineResult message_result =
-                   LibFlutterEngine->SendPlatformMessage(
-                       messenger->GetEngine()->flutter_engine,
-                       platform_message.release());
+         const FlutterEngineResult message_result =
+             LibFlutterEngine->SendPlatformMessage(
+                 messenger->GetEngine()->flutter_engine,
+                 platform_message.release());
 
-               if (response_handle != nullptr) {
-                 LibFlutterEngine->PlatformMessageReleaseResponseHandle(
-                     messenger->GetEngine()->flutter_engine, response_handle);
-               }
+         if (response_handle != nullptr) {
+           LibFlutterEngine->PlatformMessageReleaseResponseHandle(
+               messenger->GetEngine()->flutter_engine, response_handle);
+         }
 
-               promise->set_value(message_result == kSuccess);
-             });
+         promise->set_value(message_result == kSuccess);
+       });
   return promise_future;
 }
 
@@ -236,12 +236,12 @@ bool FlutterDesktopMessengerSendWithReply(FlutterDesktopMessengerRef messenger,
     }
 
     return message_result == kSuccess;
-  } else {
-    auto f = PostMessengerSendWithReply(messenger, channel, message,
-                                        message_size, reply, user_data);
-    f.wait();
-    return f.get();
   }
+
+  auto f = PostMessengerSendWithReply(messenger, channel, message, message_size,
+                                      reply, user_data);
+  f.wait();
+  return f.get();
 }
 
 bool FlutterDesktopMessengerSend(FlutterDesktopMessengerRef messenger,
@@ -277,15 +277,16 @@ FlutterDesktopTextureRegistrarRef FlutterDesktopRegistrarGetTextureRegistrar(
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     FlutterDesktopTextureRegistrarRef texture_registrar,
     const FlutterDesktopTextureInfo* texture_info) {
-  std::scoped_lock<std::mutex> lock(texture_mutex);
+  std::scoped_lock lock(texture_mutex);
   int64_t result = -1;
 
   if (texture_info->type == kFlutterDesktopPixelBufferTexture) {
     spdlog::error("RegisterExternalTexture: Pixel Buffer not implemented.");
 
   } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
-    auto gpu_surface_texture = texture_info->gpu_surface_config;
-    if (gpu_surface_texture.type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
+    auto [struct_size, type, callback, user_data] =
+        texture_info->gpu_surface_config;
+    if (type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
       spdlog::error(
           "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeGlTexture2D "
           "is only supported at this time");
@@ -293,16 +294,16 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     }
 
     // get the client defined descriptor
-    auto descriptor = gpu_surface_texture.callback(
-        0, 0, texture_info->gpu_surface_config.user_data);
+    const auto descriptor =
+        callback(0, 0, texture_info->gpu_surface_config.user_data);
 
     if (!descriptor->handle) {
       spdlog::critical(
           "Descriptor handle is not set.  Assign the address of the texture_id "
           "variable.");
       return result;
-    } else if (descriptor->struct_size !=
-               sizeof(FlutterDesktopGpuSurfaceDescriptor)) {
+    }
+    if (descriptor->struct_size != sizeof(FlutterDesktopGpuSurfaceDescriptor)) {
       spdlog::critical(
           "Descriptor struct_size is not valid.  Set struct_size to "
           "sizeof(FlutterDesktopGpuSurfaceTextureConfig)"
@@ -313,9 +314,9 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     GLuint id = *static_cast<GLuint*>(descriptor->handle);
 
     // check for existing entry
-    for (auto& it : texture_registrar->texture_registry) {
-      if (it.first == id) {
-        it.second.reset();
+    for (auto& [fst, snd] : texture_registrar->texture_registry) {
+      if (fst == id) {
+        snd.reset();
         texture_registrar->texture_registry.erase(id);
         break;
       }
@@ -323,7 +324,7 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
 
     texture_registrar->texture_registry[id] =
         std::make_unique<GL_TEXTURE_2D_DESC>();
-    auto& val = texture_registrar->texture_registry[id];
+    const auto& val = texture_registrar->texture_registry[id];
     val->name = static_cast<uint32_t>(id);
     val->width = static_cast<uint32_t>(descriptor->width);
     val->height = static_cast<uint32_t>(descriptor->height);
@@ -347,14 +348,14 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
 
 void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     FlutterDesktopTextureRegistrarRef texture_registrar,
-    int64_t texture_id,
+    const int64_t texture_id,
     void (*callback)(void* user_data),
     void* user_data) {
   std::scoped_lock<std::mutex> lock(texture_mutex);
   LibFlutterEngine->UnregisterExternalTexture(
       texture_registrar->engine->flutter_engine, texture_id);
-  auto& val = texture_registrar->texture_registry[texture_id];
-  if (val && val->release_callback != nullptr) {
+  if (const auto& val = texture_registrar->texture_registry[texture_id];
+      val && val->release_callback != nullptr) {
     val->release_callback(val->release_context);
   }
   texture_registrar->texture_registry[texture_id].reset();
@@ -369,21 +370,23 @@ bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
     int64_t texture_id) {
   SPDLOG_TRACE("MarkExternalTextureFrameAvailable: {}, {}",
                fmt::ptr(texture_registrar->engine->flutter_engine), texture_id);
-  auto result = LibFlutterEngine->MarkExternalTextureFrameAvailable(
+  const auto result = LibFlutterEngine->MarkExternalTextureFrameAvailable(
       texture_registrar->engine->flutter_engine, texture_id);
   return result == kSuccess;
 }
 
 bool FlutterDesktopTextureMakeCurrent(
     FlutterDesktopTextureRegistrarRef texture_registrar) {
-  auto backend = texture_registrar->engine->view_controller->view->GetBackend();
+  const auto backend =
+      texture_registrar->engine->view_controller->view->GetBackend();
   SPDLOG_TRACE("TextureMakeCurrent: {}", fmt::ptr(backend));
   return backend->TextureMakeCurrent();
 }
 
 bool FlutterDesktopTextureClearCurrent(
     FlutterDesktopTextureRegistrarRef texture_registrar) {
-  auto backend = texture_registrar->engine->view_controller->view->GetBackend();
+  const auto backend =
+      texture_registrar->engine->view_controller->view->GetBackend();
   SPDLOG_TRACE("TextureClearCurrent: {}", fmt::ptr(backend));
   return backend->TextureClearCurrent();
 }
@@ -402,7 +405,7 @@ void KeyCallback(FlutterDesktopViewControllerState* view_state,
                  bool released,
                  xkb_keysym_t keysym,
                  uint32_t xkb_scancode,
-                 uint32_t modifiers) {
+                 const uint32_t modifiers) {
   spdlog::debug("KeyCallback: released: {}, keysym: {}, xkb_scancode: {}",
                 released, keysym, xkb_scancode);
   for (const auto& handler : view_state->keyboard_hook_handlers) {

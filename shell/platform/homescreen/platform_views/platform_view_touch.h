@@ -32,9 +32,9 @@ class PlatformViewTouch {
 
   [[nodiscard]] int32_t getPointerCount() const { return pointerCount_; }
 
-  double getX() { return rawPointerCoords_[7]; }
+  [[nodiscard]] double getX() const { return rawPointerCoords_[7]; }
 
-  double getY() { return rawPointerCoords_[8]; }
+  [[nodiscard]] double getY() const { return rawPointerCoords_[8]; }
 
   [[nodiscard]] const std::vector<double>& getRawPointerCoords() const {
     return rawPointerCoords_;
