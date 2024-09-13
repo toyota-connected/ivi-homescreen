@@ -288,7 +288,7 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
     assert(false);
   }
 
-  SPDLOG_DEBUG("({}) SetWindowSize: width={}, height={}, pixel_ratio={}",
+  SPDLOG_TRACE("({}) SetWindowSize: width={}, height={}, pixel_ratio={}",
                m_index, m_prev_width, m_prev_height, pixel_ratio);
   return kSuccess;
 }

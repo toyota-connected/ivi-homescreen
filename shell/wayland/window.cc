@@ -188,7 +188,7 @@ void WaylandWindow::handle_base_surface_enter(void* data,
 void WaylandWindow::handle_base_surface_leave(void* /* data */,
                                               struct wl_surface* /* surface */,
                                               struct wl_output* /* output */) {
-  SPDLOG_DEBUG("Leaving output");
+  SPDLOG_TRACE("Leaving output");
 }
 
 const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
