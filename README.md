@@ -416,6 +416,7 @@ Defaults to Wayland, no need to do anything special
 
 ## Debian Package
 
+    sudo apt install rpm
     make package -j
     sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
 
