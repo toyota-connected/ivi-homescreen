@@ -391,14 +391,14 @@ Defaults to Wayland, no need to do anything special
 
 ### GCC/libstdc++ Build
 
-    git clone https://github.com/toyota-connected-na/ivi-homescreen.git
+    git clone --recurse-submodules -j8 https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
     cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
 
 ### Clang/libc++ Build
 
-    git clone https://github.com/toyota-connected-na/ivi-homescreen.git
+    git clone --recurse-submodules -j8 https://github.com/toyota-connected-na/ivi-homescreen.git
     mkdir build && cd build
     CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
     make install -j
@@ -416,6 +416,7 @@ Defaults to Wayland, no need to do anything special
 
 ## Debian Package
 
+    sudo apt install rpm
     make package -j
     sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
 
