@@ -21,7 +21,7 @@
 
 #include "plugins/common/common.h"
 
-#include "plugins/filament_view/include/filament_view_plugin_c_api.h"
+#include "plugins/filament_view/filament_view_plugin_c_api.h"
 #include "plugins/layer_playground_view/include/layer_playground_view/layer_playground_view_plugin_c_api.h"
 #include "plugins/nav_render_view/include/nav_render_view/nav_render_view_plugin_c_api.h"
 #include "plugins/webview_flutter_view/include/webview_flutter_view/webview_flutter_view_plugin_c_api.h"
