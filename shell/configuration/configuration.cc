@@ -293,17 +293,12 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::vector<std::string>>(config.bundle_paths))(
             "a,accessibility-flags", "Accessibility feature flag(s)",
             cxxopts::value<std::string>(accessibility_feature_flag_str))(
-            "c,disable-cursor", "Disable cursor",
-            cxxopts::value<bool>())(
-            "d,debug-backend", "Debug backend",
-            cxxopts::value<bool>())(
-            "f,fullscreen", "Full screen",
-            cxxopts::value<bool>())(
+            "c,disable-cursor", "Disable cursor", cxxopts::value<bool>())(
+            "d,debug-backend", "Debug backend", cxxopts::value<bool>())(
+            "f,fullscreen", "Full screen", cxxopts::value<bool>())(
             "w,width", "Width", cxxopts::value<uint32_t>())(
-            "h,height", "Height",
-            cxxopts::value<uint32_t>())(
-            "p,pixel-ratio", "Pixel Ratio",
-            cxxopts::value<double>())(
+            "h,height", "Height", cxxopts::value<uint32_t>())(
+            "p,pixel-ratio", "Pixel Ratio", cxxopts::value<double>())(
             "t,cursor-theme", "Cursor Theme Name",
             cxxopts::value<std::string>(config.cursor_theme))(
             "window-type", "AGL window type (only applies to AGL-compositor)",
@@ -314,8 +309,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.app_id))(
             "event-mask", "Wayland Events to mask",
             cxxopts::value<std::string>(config.wayland_event_mask))(
-            "ivi-surface-id", "IVI Surface ID",
-            cxxopts::value<uint32_t>());
+            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>());
 
     const auto result = allocated->parse(argc, argv);
 

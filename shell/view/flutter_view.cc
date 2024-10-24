@@ -46,6 +46,7 @@
 #include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
 #include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
 #include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
+#include <plugins/flatpak/include/flatpak/flatpak_plugin_c_api.h>
 #include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
 #include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
 #include <plugins/pdf/include/pdf/pdf_plugin_c_api.h>
@@ -394,6 +395,10 @@ void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
 #endif
 #if ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW
   WebviewFlutterPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if ENABLE_PLUGIN_FLATPAK
+  FlatpakPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
 }

@@ -1,8 +1,8 @@
 #pragma once
 
+#include <GLES2/gl2.h>
 #include <mutex>
 #include <unordered_map>
-#include <GLES2/gl2.h>
 
 struct FlutterDesktopEngineState;
 

@@ -47,9 +47,9 @@ class EventTimer {
   static int evfd;
 
   int m_timerfd;
-  struct itimerspec m_timerspec {};
+  struct itimerspec m_timerspec{};
 
-  struct timer_task m_task {};
+  struct timer_task m_task{};
   evtimer_cb m_callback;
   void* m_callback_data;
 
