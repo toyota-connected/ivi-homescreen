@@ -167,7 +167,8 @@ std::string CompositorSurface::GetFilePath(const char* folder) {
 
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {
-      spdlog::critical("GetCachePath create_directories failed: {}", path.c_str());
+      spdlog::critical("GetCachePath create_directories failed: {}",
+                       path.c_str());
       exit(EXIT_FAILURE);
     }
   }

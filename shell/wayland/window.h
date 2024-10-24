@@ -24,7 +24,6 @@
 
 #include "backend/backend.h"
 
-
 // workaround for Wayland macro not compiling in C++
 #define WL_ARRAY_FOR_EACH(pos, array, type)                             \
   for (pos = (type)(array)->data;                                       \

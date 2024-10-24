@@ -23,7 +23,6 @@
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
 
-
 class Engine;
 
 class Backend {
