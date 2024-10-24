@@ -106,7 +106,8 @@ int App::Loop() const {
 #if BUILD_BACKEND_HEADLESS_EGL
 
 GLubyte* App::getViewRenderBuf(int i) {
-  return reinterpret_cast<HeadlessBackend*>(m_views[i]->GetBackend())
+  return reinterpret_cast<HeadlessBackend*>(
+             m_views[static_cast<unsigned long>(i)]->GetBackend())
       ->getHeadlessBuffer();
 }
 
