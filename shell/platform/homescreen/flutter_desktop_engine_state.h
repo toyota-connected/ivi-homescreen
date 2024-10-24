@@ -38,7 +38,7 @@ using UniqueAotDataPtr = std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>;
 // Struct for storing state of a Flutter engine instance.
 struct FlutterDesktopEngineState {
   // The handle to the Flutter engine instance.
-  FLUTTER_API_SYMBOL(FlutterEngine) flutter_engine{};
+  FLUTTER_API_SYMBOL(FlutterEngine) flutter_engine {};
 
   // The platform channel execution thread.
   TaskRunner* platform_task_runner{};

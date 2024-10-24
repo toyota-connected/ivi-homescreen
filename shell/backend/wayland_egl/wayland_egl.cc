@@ -18,9 +18,9 @@
 
 #include <wayland-egl.h>
 
+#include "../gl_process_resolver.h"
 #include "egl.h"
 #include "engine.h"
-#include "../gl_process_resolver.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 
 struct FlutterDesktopEngineState;

@@ -57,11 +57,13 @@ class Logging {
                                     static_cast<uint16_t>(msg.payload.size()));
                 break;
               case SPDLOG_LEVEL_INFO:
-                Dlt::LogSizedString(DltLogLevelType::LOG_INFO, msg.payload.data(),
+                Dlt::LogSizedString(DltLogLevelType::LOG_INFO,
+                                    msg.payload.data(),
                                     static_cast<uint16_t>(msg.payload.size()));
                 break;
               case SPDLOG_LEVEL_WARN:
-                Dlt::LogSizedString(DltLogLevelType::LOG_WARN, msg.payload.data(),
+                Dlt::LogSizedString(DltLogLevelType::LOG_WARN,
+                                    msg.payload.data(),
                                     static_cast<uint16_t>(msg.payload.size()));
                 break;
               case SPDLOG_LEVEL_ERROR:

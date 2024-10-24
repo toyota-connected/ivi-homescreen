@@ -129,7 +129,7 @@ void EventTimer::disarm() const {
 }
 
 void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
-  struct epoll_event ep {};
+  struct epoll_event ep{};
 
   if (evfd < 0) {
     spdlog::critical("Unexpected call _watch_fd(). Ignored.");
