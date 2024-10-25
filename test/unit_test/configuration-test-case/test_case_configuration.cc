@@ -61,7 +61,7 @@ TEST(HomescreenConfigurationParseArgcArgv, Lv1Normal001) {
                          "--window-type","NORMAL",
                          "-o","1",
                          "--xdg-shell-app-id","homescreen",
-                         "--event-mask", "pointer-axis",
+                         "--wayland-event-mask", "pointer-axis",
                          "--ivi-surface-id", "1"};
   char** argv_p = reinterpret_cast<char**>(&argv);
 
