@@ -164,7 +164,7 @@ homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOM
 
 `-t {String}` - Sets cursor theme to load.  e.g. -t DMZ-White
 
-* `-wayland-event-mask` - Sets events to ignore. e.g. -wayland-event-mask pointer-axis, or --wayland-event-mask="pointer-axis, touch"
+* `--wayland-event-mask` - Sets events to ignore. e.g. --wayland-event-mask pointer-axis, or --wayland-event-mask="pointer-axis, touch"
 
   * Available parameters are:
       pointer, pointer-axis, pointer-buttons, pointer-motion, keyboard, touch
