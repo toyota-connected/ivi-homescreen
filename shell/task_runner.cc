@@ -50,7 +50,7 @@ TaskRunner::~TaskRunner() {
   spdlog::debug("[0x{:x}] {} ~Task Runner", pthread_self(), name_);
 }
 
-void TaskRunner::QueueFlutterTask(MAYBE_UNUSED size_t index,
+void TaskRunner::QueueFlutterTask([[maybe_unused]] size_t index,
                                   uint64_t target_time,
                                   FlutterTask task,
                                   void* /* context */) {

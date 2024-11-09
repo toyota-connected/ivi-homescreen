@@ -31,11 +31,11 @@
  * @relation
  * internal
  */
-inline void* GetProcAddress(void* library, const char* name) {
+inline void* ShellGetProcAddress(void* library, const char* name) {
   void* symbol = dlsym(library, name);
 
   if (!symbol && library != RTLD_DEFAULT) {
-    std::cerr << "GetProcAddress: " << name << " not found!" << std::endl;
+    spdlog::error("ShellGetProcAddress: {} not found!", name);
     const char* reason = dlerror();
     (void)reason;
   }
@@ -53,13 +53,13 @@ inline void* GetProcAddress(void* library, const char* name) {
  * internal
  */
 template <typename FunctionPointer>
-inline void GetFuncAddress(void* library,
-                           const char* function_name,
-                           FunctionPointer* out) {
+void ShellGetFuncAddress(void* library,
+                         const char* function_name,
+                         FunctionPointer* out) {
   auto symbol = dlsym(library, function_name);
   if (!symbol) {
     const char* reason = dlerror();
-    spdlog::debug("GetFuncAddress: {} - {}", function_name, reason);
+    spdlog::debug("ShellGetFuncAddress: {} - {}", function_name, reason);
   }
   *out = reinterpret_cast<FunctionPointer>(symbol);
 }

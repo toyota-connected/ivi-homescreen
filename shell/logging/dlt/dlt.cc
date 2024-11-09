@@ -69,7 +69,7 @@ bool Dlt::Unregister() {
   return true;
 }
 
-MAYBE_UNUSED
+[[maybe_unused]]
 void Dlt::LogString(DltLogLevelType log_level, const char* buff) {
   if (gContextSet) {
     DltContextData log_local;
@@ -88,7 +88,7 @@ void Dlt::LogString(DltLogLevelType log_level, const char* buff) {
   }
 }
 
-MAYBE_UNUSED
+[[maybe_unused]]
 void Dlt::LogSizedString(DltLogLevelType log_level,
                          const char* buff,
                          uint16_t length) {

@@ -51,17 +51,20 @@ configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 # libraries
 #
 add_subdirectory(third_party)
+
+add_subdirectory(shell/platform/homescreen)
+
+#
+# plugins
+#
 if (ENABLE_PLUGINS)
-    add_subdirectory(${PLUGINS_DIR}/plugins ${PROJECT_BINARY_DIR}/plugins)
-    include_directories(${PLUGINS_DIR})
+    add_subdirectory(${PLUGINS_DIR} ${PROJECT_BINARY_DIR}/plugins)
     foreach (EXT_PLUGINS_DIR ${EXT_PLUGINS_DIRS})
         if (EXISTS ${EXT_PLUGINS_DIR})
             add_subdirectory(${EXT_PLUGINS_DIR} ${PROJECT_BINARY_DIR}/ext_plugins)
         endif ()
     endforeach ()
 endif ()
-
-add_subdirectory(shell/platform/homescreen)
 
 #
 # executable

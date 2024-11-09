@@ -67,7 +67,7 @@ class Engine {
 
   const Engine& operator=(const Engine&) = delete;
 
-  MAYBE_UNUSED NODISCARD size_t GetIndex() const { return m_index; }
+  [[maybe_unused]] [[nodiscard]] size_t GetIndex() const { return m_index; }
 
   /**
    * @brief Run flutter engine
@@ -107,7 +107,7 @@ class Engine {
    * @relation
    * flutter
    */
-  NODISCARD double GetPixelRatio() const { return m_prev_pixel_ratio; };
+  [[nodiscard]] double GetPixelRatio() const { return m_prev_pixel_ratio; };
 
   /**
    * @brief Shutsdown Flutter Engine Instance
@@ -116,7 +116,7 @@ class Engine {
    * @relation
    * flutter
    */
-  NODISCARD FlutterEngineResult Shutdown() const;
+  [[nodiscard]] FlutterEngineResult Shutdown() const;
 
   /**
    * @brief Check if engine is running
@@ -126,7 +126,7 @@ class Engine {
    * @relation
    * internal
    */
-  MAYBE_UNUSED NODISCARD bool IsRunning() const;
+  [[maybe_unused]] [[nodiscard]] bool IsRunning() const;
 
   /**
    * @brief Run flutter tasks
@@ -220,7 +220,7 @@ class Engine {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED int32_t GetAccessibilityFeatures() const {
+  [[maybe_unused]] int32_t GetAccessibilityFeatures() const {
     return m_accessibility_features;
   }
 
@@ -232,7 +232,7 @@ class Engine {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED FlutterEngineResult UpdateAccessibilityFeatures(int32_t value);
+  [[maybe_unused]] FlutterEngineResult UpdateAccessibilityFeatures(int32_t value);
 
   /**
    * @brief Update locales
@@ -242,7 +242,7 @@ class Engine {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED FlutterEngineResult
+  [[maybe_unused]] FlutterEngineResult
   UpdateLocales(std::vector<FlutterLocale> locales);
 
   /**
@@ -252,7 +252,7 @@ class Engine {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED std::string GetClipboardData() { return m_clipboard_data; };
+  [[maybe_unused]] std::string GetClipboardData() { return m_clipboard_data; };
 
   /**
    * @brief Coalesce mouse event
@@ -308,7 +308,7 @@ class Engine {
    * @relation
    * wayland
    */
-  NODISCARD bool ActivateSystemCursor(int32_t device,
+  [[nodiscard]] bool ActivateSystemCursor(int32_t device,
                                       const std::string& kind) const;
 
   /**
@@ -318,9 +318,9 @@ class Engine {
    * @relation
    * wayland, flutter
    */
-  NODISCARD Backend* GetBackend() const { return m_backend; }
+  [[nodiscard]] Backend* GetBackend() const { return m_backend; }
 
-  NODISCARD FlutterView* GetView() const { return m_view; }
+  [[nodiscard]] FlutterView* GetView() const { return m_view; }
 
   static FlutterDesktopMessage ConvertToDesktopMessage(
       const FlutterPlatformMessage& engine_message);
@@ -333,11 +333,11 @@ class Engine {
                                    const char* message,
                                    void* user_data);
 
-  FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const {
+  [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const {
     return m_flutter_engine;
   }
 
-  TaskRunner* GetPlatformTaskRunner() const {
+  [[nodiscard]] TaskRunner* GetPlatformTaskRunner() const {
     return m_platform_task_runner.get();
   }
 
@@ -376,7 +376,7 @@ class Engine {
    * @relation
    * flutter
    */
-  MAYBE_UNUSED NODISCARD FlutterEngineAOTData
+  [[maybe_unused]] [[nodiscard]] FlutterEngineAOTData
   LoadAotData(const std::string& bundle_path) const;
 
   /**

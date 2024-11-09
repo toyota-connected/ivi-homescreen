@@ -36,7 +36,7 @@ class TaskRunner {
 
   static pthread_t GetThreadId() { return pthread_self(); };
 
-  NODISCARD bool IsThreadEqual(const pthread_t threadid) const {
+  [[nodiscard]] bool IsThreadEqual(const pthread_t threadid) const {
     return pthread_equal(threadid, pthread_self_) != 0;
   };
 
@@ -50,12 +50,12 @@ class TaskRunner {
       std::unique_ptr<std::vector<uint8_t>> message,
       FlutterPlatformMessageResponseHandle* handle = nullptr) const;
 
-  NODISCARD std::future<FlutterEngineResult> QueueUpdateLocales(
+  [[nodiscard]] std::future<FlutterEngineResult> QueueUpdateLocales(
       std::vector<const FlutterLocale*> locales) const;
 
   std::string GetName() { return name_; }
 
-  NODISCARD asio::io_context::strand* GetStrandContext() const {
+  [[nodiscard]] asio::io_context::strand* GetStrandContext() const {
     return strand_.get();
   }
 

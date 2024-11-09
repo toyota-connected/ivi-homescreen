@@ -18,10 +18,6 @@
 
 #include <cstdint>
 
-#include <GL/osmesa.h>
-
-#include "config/common.h"
-
 #include "../backend.h"
 #include "osmesa.h"
 
@@ -29,7 +25,7 @@ class Backend;
 
 class Engine;
 
-class HeadlessBackend : public OSMesaHeadless, public Backend {
+class HeadlessBackend final : public OSMesaHeadless, public Backend {
  public:
   HeadlessBackend(uint32_t initial_width,
                   uint32_t initial_height,
@@ -38,9 +34,8 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
 
   /**
    * @brief Resize Flutter engine Window size
-   * @param[in] user_data Pointer to User data
    * @param[in] index No use
-   * @param[in] engine Pointer to Flutter engine
+   * @param[in] flutter_engine Pointer to Flutter engine
    * @param[in] width Set window width
    * @param[in] height Set window height
    * @return void
@@ -54,7 +49,6 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
 
   /**
    * @brief Create EGL surface
-   * @param[in] user_data Pointer to User data
    * @param[in] index No use
    * @param[in] surface Pointer to surface
    * @param[in] width Set surface width
@@ -64,7 +58,7 @@ class HeadlessBackend : public OSMesaHeadless, public Backend {
    * wayland
    */
   void CreateSurface(size_t index,
-                     struct wl_surface* surface,
+                     wl_surface* surface,
                      int32_t width,
                      int32_t height) override;
 

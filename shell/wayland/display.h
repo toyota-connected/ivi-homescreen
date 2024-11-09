@@ -64,7 +64,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD wl_compositor* GetCompositor() const {
+  [[nodiscard]] wl_compositor* GetCompositor() const {
     assert(m_compositor);
     return m_compositor;
   };
@@ -76,7 +76,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD wl_subcompositor* GetSubCompositor() const {
+  [[nodiscard]] wl_subcompositor* GetSubCompositor() const {
     assert(m_subcompositor);
     return m_subcompositor;
   };
@@ -88,7 +88,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD wl_display* GetDisplay() const {
+  [[nodiscard]] wl_display* GetDisplay() const {
     assert(m_display);
     return m_display;
   }
@@ -101,7 +101,7 @@ class Display {
    * wayland
    */
 #if ENABLE_XDG_CLIENT
-  NODISCARD xdg_wm_base* GetXdgWmBase() const {
+  [[nodiscard]] xdg_wm_base* GetXdgWmBase() const {
     assert(m_xdg_wm_base);
     return m_xdg_wm_base;
   }
@@ -127,7 +127,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD wl_shm* GetShm() const {
+  [[nodiscard]] wl_shm* GetShm() const {
     assert(m_shm);
     return m_shm;
   }
@@ -139,7 +139,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD int PollEvents() const;
+  [[nodiscard]] int PollEvents() const;
 
 #if ENABLE_AGL_SHELL_CLIENT
   /**
@@ -234,8 +234,8 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD bool ActivateSystemCursor(int32_t device,
-                                      const std::string& kind) const;
+  [[nodiscard]] bool ActivateSystemCursor(int32_t device,
+                                          const std::string& kind) const;
 
   /**
    * @brief Get wl_output of a specified index of a view
@@ -245,7 +245,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD wl_output* GetWlOutput(const uint32_t index) const {
+  [[nodiscard]] wl_output* GetWlOutput(const uint32_t index) const {
     if (index <= m_all_outputs.size()) {
       return m_all_outputs[index]->output;
     }
@@ -260,7 +260,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD int32_t GetBufferScale(uint32_t index) const;
+  [[nodiscard]] int32_t GetBufferScale(uint32_t index) const;
 
   /**
    * @brief Get a video mode size of a specified index of a view
@@ -270,7 +270,8 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD std::pair<int32_t, int32_t> GetVideoModeSize(uint32_t index) const;
+  [[nodiscard]] std::pair<int32_t, int32_t> GetVideoModeSize(
+      uint32_t index) const;
 
   /**
    * @brief Get refresh rate of a specified index of a view
@@ -280,7 +281,7 @@ class Display {
    * @relation
    * wayland
    */
-  NODISCARD int GetRefreshRate(uint32_t index) const;
+  [[nodiscard]] int GetRefreshRate(uint32_t index) const;
 
   /**
    * @brief deactivate/hide the application pointed by app_id

@@ -16,15 +16,14 @@
 
 #include "config/common.h"
 
-#include <map>
 #include <memory>
 
 #include "configuration/configuration.h"
 #include "flutter/fml/macros.h"
-#include "flutter/shell/platform/common/incoming_message_dispatcher.h"
 #include "flutter_desktop_view_controller_state.h"
-#include "platform/homescreen/client_wrapper/include/flutter/plugin_registrar_homescreen.h"
 #include "wayland/window.h"
+
+#include <flutter_homescreen.h>
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
@@ -91,7 +90,7 @@ class FlutterView {
    * @relation
    * wayland, flutter
    */
-  NODISCARD Backend* GetBackend() const {
+  [[nodiscard]] Backend* GetBackend() const {
     return reinterpret_cast<Backend*>(m_backend.get());
   }
 
@@ -102,7 +101,7 @@ class FlutterView {
    * @relation
    * internal
    */
-  NODISCARD uint64_t GetIndex() const { return m_index; }
+  [[nodiscard]] uint64_t GetIndex() const { return m_index; }
 
   /**
    * @brief Get pointer to Display object
@@ -110,7 +109,7 @@ class FlutterView {
    * @relation
    * internal
    */
-  NODISCARD Display* GetDisplay() const { return m_wayland_display.get(); }
+  [[nodiscard]] Display* GetDisplay() const { return m_wayland_display.get(); }
 
   /**
    * @brief Draw FPS to calc and output
