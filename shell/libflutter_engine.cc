@@ -24,61 +24,64 @@
 
 LibFlutterEngineExports::LibFlutterEngineExports(void* lib) {
   if (lib != nullptr) {
-    GetFuncAddress(lib, "FlutterEngineCreateAOTData", &CreateAOTData);
-    GetFuncAddress(lib, "FlutterEngineCollectAOTData", &CollectAOTData);
-    GetFuncAddress(lib, "FlutterEngineRun", &Run);
-    GetFuncAddress(lib, "FlutterEngineShutdown", &Shutdown);
-    GetFuncAddress(lib, "FlutterEngineInitialize", &Initialize);
-    GetFuncAddress(lib, "FlutterEngineDeinitialize", &Deinitialize);
-    GetFuncAddress(lib, "FlutterEngineRunInitialized", &RunInitialized);
-    GetFuncAddress(lib, "FlutterEngineSendWindowMetricsEvent",
-                   &SendWindowMetricsEvent);
-    GetFuncAddress(lib, "FlutterEngineSendPointerEvent", &SendPointerEvent);
-    GetFuncAddress(lib, "FlutterEngineSendKeyEvent", &SendKeyEvent);
-    GetFuncAddress(lib, "FlutterEngineSendPlatformMessage",
-                   &SendPlatformMessage);
-    GetFuncAddress(lib, "FlutterPlatformMessageCreateResponseHandle",
-                   &PlatformMessageCreateResponseHandle);
-    GetFuncAddress(lib, "FlutterPlatformMessageReleaseResponseHandle",
-                   &PlatformMessageReleaseResponseHandle);
-    GetFuncAddress(lib, "FlutterEngineSendPlatformMessageResponse",
-                   &SendPlatformMessageResponse);
-    GetFuncAddress(lib, "FlutterEngineRegisterExternalTexture",
-                   &RegisterExternalTexture);
-    GetFuncAddress(lib, "FlutterEngineUnregisterExternalTexture",
-                   &UnregisterExternalTexture);
-    GetFuncAddress(lib, "FlutterEngineMarkExternalTextureFrameAvailable",
-                   &MarkExternalTextureFrameAvailable);
-    GetFuncAddress(lib, "FlutterEngineUpdateSemanticsEnabled",
-                   &UpdateSemanticsEnabled);
-    GetFuncAddress(lib, "FlutterEngineUpdateAccessibilityFeatures",
-                   &UpdateAccessibilityFeatures);
-    GetFuncAddress(lib, "FlutterEngineDispatchSemanticsAction",
-                   &DispatchSemanticsAction);
-    GetFuncAddress(lib, "FlutterEngineOnVsync", &OnVsync);
-    GetFuncAddress(lib, "FlutterEngineReloadSystemFonts", &ReloadSystemFonts);
-    GetFuncAddress(lib, "FlutterEngineTraceEventDurationBegin",
-                   &TraceEventDurationBegin);
-    GetFuncAddress(lib, "FlutterEngineTraceEventDurationEnd",
-                   &TraceEventDurationEnd);
-    GetFuncAddress(lib, "FlutterEngineTraceEventInstant", &TraceEventInstant);
-    GetFuncAddress(lib, "FlutterEnginePostRenderThreadTask",
-                   &PostRenderThreadTask);
-    GetFuncAddress(lib, "FlutterEngineGetCurrentTime", &GetCurrentTime);
-    GetFuncAddress(lib, "FlutterEngineRunTask", &RunTask);
-    GetFuncAddress(lib, "FlutterEngineUpdateLocales", &UpdateLocales);
-    GetFuncAddress(lib, "FlutterEngineRunsAOTCompiledDartCode",
-                   &RunsAOTCompiledDartCode);
-    GetFuncAddress(lib, "FlutterEnginePostDartObject", &PostDartObject);
-    GetFuncAddress(lib, "FlutterEngineNotifyLowMemoryWarning",
-                   &NotifyLowMemoryWarning);
-    GetFuncAddress(lib, "FlutterEnginePostCallbackOnAllNativeThreads",
-                   &PostCallbackOnAllNativeThreads);
-    GetFuncAddress(lib, "FlutterEngineNotifyDisplayUpdate",
-                   &NotifyDisplayUpdate);
-    GetFuncAddress(lib, "FlutterEngineScheduleFrame", &ScheduleFrame);
-    GetFuncAddress(lib, "FlutterEngineSetNextFrameCallback",
-                   &SetNextFrameCallback);
+    ShellGetFuncAddress(lib, "FlutterEngineCreateAOTData", &CreateAOTData);
+    ShellGetFuncAddress(lib, "FlutterEngineCollectAOTData", &CollectAOTData);
+    ShellGetFuncAddress(lib, "FlutterEngineRun", &Run);
+    ShellGetFuncAddress(lib, "FlutterEngineShutdown", &Shutdown);
+    ShellGetFuncAddress(lib, "FlutterEngineInitialize", &Initialize);
+    ShellGetFuncAddress(lib, "FlutterEngineDeinitialize", &Deinitialize);
+    ShellGetFuncAddress(lib, "FlutterEngineRunInitialized", &RunInitialized);
+    ShellGetFuncAddress(lib, "FlutterEngineSendWindowMetricsEvent",
+                        &SendWindowMetricsEvent);
+    ShellGetFuncAddress(lib, "FlutterEngineSendPointerEvent",
+                        &SendPointerEvent);
+    ShellGetFuncAddress(lib, "FlutterEngineSendKeyEvent", &SendKeyEvent);
+    ShellGetFuncAddress(lib, "FlutterEngineSendPlatformMessage",
+                        &SendPlatformMessage);
+    ShellGetFuncAddress(lib, "FlutterPlatformMessageCreateResponseHandle",
+                        &PlatformMessageCreateResponseHandle);
+    ShellGetFuncAddress(lib, "FlutterPlatformMessageReleaseResponseHandle",
+                        &PlatformMessageReleaseResponseHandle);
+    ShellGetFuncAddress(lib, "FlutterEngineSendPlatformMessageResponse",
+                        &SendPlatformMessageResponse);
+    ShellGetFuncAddress(lib, "FlutterEngineRegisterExternalTexture",
+                        &RegisterExternalTexture);
+    ShellGetFuncAddress(lib, "FlutterEngineUnregisterExternalTexture",
+                        &UnregisterExternalTexture);
+    ShellGetFuncAddress(lib, "FlutterEngineMarkExternalTextureFrameAvailable",
+                        &MarkExternalTextureFrameAvailable);
+    ShellGetFuncAddress(lib, "FlutterEngineUpdateSemanticsEnabled",
+                        &UpdateSemanticsEnabled);
+    ShellGetFuncAddress(lib, "FlutterEngineUpdateAccessibilityFeatures",
+                        &UpdateAccessibilityFeatures);
+    ShellGetFuncAddress(lib, "FlutterEngineDispatchSemanticsAction",
+                        &DispatchSemanticsAction);
+    ShellGetFuncAddress(lib, "FlutterEngineOnVsync", &OnVsync);
+    ShellGetFuncAddress(lib, "FlutterEngineReloadSystemFonts",
+                        &ReloadSystemFonts);
+    ShellGetFuncAddress(lib, "FlutterEngineTraceEventDurationBegin",
+                        &TraceEventDurationBegin);
+    ShellGetFuncAddress(lib, "FlutterEngineTraceEventDurationEnd",
+                        &TraceEventDurationEnd);
+    ShellGetFuncAddress(lib, "FlutterEngineTraceEventInstant",
+                        &TraceEventInstant);
+    ShellGetFuncAddress(lib, "FlutterEnginePostRenderThreadTask",
+                        &PostRenderThreadTask);
+    ShellGetFuncAddress(lib, "FlutterEngineGetCurrentTime", &GetCurrentTime);
+    ShellGetFuncAddress(lib, "FlutterEngineRunTask", &RunTask);
+    ShellGetFuncAddress(lib, "FlutterEngineUpdateLocales", &UpdateLocales);
+    ShellGetFuncAddress(lib, "FlutterEngineRunsAOTCompiledDartCode",
+                        &RunsAOTCompiledDartCode);
+    ShellGetFuncAddress(lib, "FlutterEnginePostDartObject", &PostDartObject);
+    ShellGetFuncAddress(lib, "FlutterEngineNotifyLowMemoryWarning",
+                        &NotifyLowMemoryWarning);
+    ShellGetFuncAddress(lib, "FlutterEnginePostCallbackOnAllNativeThreads",
+                        &PostCallbackOnAllNativeThreads);
+    ShellGetFuncAddress(lib, "FlutterEngineNotifyDisplayUpdate",
+                        &NotifyDisplayUpdate);
+    ShellGetFuncAddress(lib, "FlutterEngineScheduleFrame", &ScheduleFrame);
+    ShellGetFuncAddress(lib, "FlutterEngineSetNextFrameCallback",
+                        &SetNextFrameCallback);
   }
 }
 
@@ -91,9 +94,9 @@ LibFlutterEngineExports* LibFlutterEngine::loadExports(
   static LibFlutterEngineExports exports = [&] {
     void* lib;
 
-    if (GetProcAddress(RTLD_DEFAULT,
-                       "Initialize"))  // Search the global scope
-                                       // for pre-loaded library.
+    if (ShellGetProcAddress(RTLD_DEFAULT,
+                            "Initialize"))  // Search the global scope
+                                            // for pre-loaded library.
     {
       lib = RTLD_DEFAULT;
     } else {

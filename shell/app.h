@@ -42,7 +42,7 @@ class App final {
    * @relation
    * wayland, flutter
    */
-  NODISCARD int Loop() const;
+  [[nodiscard]] int Loop() const;
 
 #if BUILD_BACKEND_HEADLESS_EGL
   uint8_t* getViewRenderBuf(int i);

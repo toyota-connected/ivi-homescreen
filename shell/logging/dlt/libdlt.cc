@@ -50,7 +50,7 @@ LibDltExports* LibDlt::loadExports() {
   static LibDltExports exports = [] {
     void* lib;
 
-    if (GetProcAddress(RTLD_DEFAULT,
+    if (ShellGetProcAddress(RTLD_DEFAULT,
                        "dlt_user_log_write_start"))  // Search the global scope
                                                      // for pre-loaded library.
     {
