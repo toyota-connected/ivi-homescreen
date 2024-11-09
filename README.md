@@ -391,16 +391,36 @@ Defaults to Wayland, no need to do anything special
 
 ### GCC/libstdc++ Build
 
-    git clone https://github.com/toyota-connected-na/ivi-homescreen.git
+Without plugins
+
+    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
     mkdir build && cd build
-    cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    make install -j
+
+With plugins
+
+    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
+    git clone https://github.com/toyota-connected/ivi-homescreen-plugins.git
+    mkdir build && cd build
+    cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DPLUGINS_DIR=`pwd`/ivi-homescreen-plugins
     make install -j
 
 ### Clang/libc++ Build
 
-    git clone https://github.com/toyota-connected-na/ivi-homescreen.git
+Without plugins
+
+    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
     mkdir build && cd build
-    CC=/usr/lib/llvm-12/bin/clang CXX=/usr/lib/llvm-12/bin/clang++ cmake .. -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+    make install -j
+
+With plugins
+
+    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
+    git clone https://github.com/toyota-connected/ivi-homescreen-plugins.git
+    mkdir build && cd build
+    CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DPLUGINS_DIR=`pwd`/ivi-homescreen-plugins
     make install -j
 
 #### Clang Toolchain Setup
