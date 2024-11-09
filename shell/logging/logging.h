@@ -19,9 +19,13 @@
 #include "config/common.h"
 
 #if !defined(NDEBUG)
+#ifndef SPDLOG_ACTIVE_LEVEL
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+#endif
 #else
+#ifndef SPDLOG_ACTIVE_LEVEL
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_OFF
+#endif
 #endif
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"

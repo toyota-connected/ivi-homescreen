@@ -26,6 +26,9 @@
 #elif BUILD_BACKEND_WAYLAND_VULKAN
 #include "backend/wayland_vulkan/wayland_vulkan.h"
 #endif
+#include <key_event_handler.h>
+#include <text_input_plugin.h>
+
 #include "configuration/configuration.h"
 #include "engine.h"
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
@@ -35,26 +38,8 @@
 #include "compositor_surface.h"
 #endif
 
-#include <platform/homescreen/key_event_handler.h>
-#include <platform/homescreen/text_input_plugin.h>
 #if ENABLE_PLUGINS
-#include <plugins/audioplayers_linux/include/audioplayers_linux/audioplayers_linux_plugin_c_api.h>
-#include <plugins/camera/include/camera/camera_plugin_c_api.h>
-#include <plugins/cloud_firestore/include/cloud_firestore/cloud_firestore_plugin_c_api.h>
-#include <plugins/desktop_window_linux/include/desktop_window_linux/desktop_window_linux_plugin_c_api.h>
-#include <plugins/file_selector/include/file_selector/file_selector_plugin_c_api.h>
-#include <plugins/firebase_auth/include/firebase_auth/firebase_auth_plugin_c_api.h>
-#include <plugins/firebase_core/include/firebase_core/firebase_core_plugin_c_api.h>
-#include <plugins/firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h>
-#include <plugins/flatpak/include/flatpak/flatpak_plugin_c_api.h>
-#include <plugins/go_router/include/go_router/go_router_plugin_c_api.h>
-#include <plugins/google_sign_in/include/google_sign_in/google_sign_in_plugin_c_api.h>
-#include <plugins/pdf/include/pdf/pdf_plugin_c_api.h>
-#include <plugins/rive_text/include/rive_text/rive_text_plugin_c_api.h>
-#include <plugins/secure_storage/include/secure_storage/secure_storage_plugin_c_api.h>
-#include <plugins/url_launcher/include/url_launcher/url_launcher_plugin_c_api.h>
-#include <plugins/video_player_linux/include/video_player_linux/video_player_plugin_c_api.h>
-#include <plugins/webview_flutter_view/include/webview_flutter_view/webview_flutter_view_plugin_c_api.h>
+extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
 #include "wayland/display.h"
@@ -130,7 +115,9 @@ FlutterView::FlutterView(Configuration::Config config,
   m_wayland_display->SetViewControllerState(
       m_state->engine_state->view_controller);
 
-  RegisterPlugins(m_state->engine_state.get());
+#if ENABLE_PLUGINS
+  PluginsApiRegisterPlugins(m_state->engine_state.get());
+#endif
 }
 
 FlutterView::~FlutterView() = default;
@@ -229,7 +216,7 @@ void FlutterView::RunTasks() {
 }
 
 // calc and output the FPS
-void FlutterView::DrawFps(long long end_time) {
+void FlutterView::DrawFps(const long long end_time) {
   if (0 < m_fps.output) {
     m_fps.counter++;
 
@@ -330,75 +317,3 @@ void FlutterView::SetRegion(
   wl_region_destroy(base_region);
 }
 #endif
-
-void FlutterView::RegisterPlugins(FlutterDesktopEngineRef engine) {
-  (void)engine;
-#if ENABLE_PLUGIN_AUDIOPLAYERS_LINUX
-  AudioPlayersLinuxPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_SECURE_STORAGE
-  SecureStoragePluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_FILE_SELECTOR
-  FileSelectorPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_URL_LAUNCHER
-  UrlLauncherPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_GO_ROUTER
-  GoRouterPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_DESKTOP_WINDOW_LINUX
-  DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_GOOGLE_SIGN_IN
-  GoogleSignInPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_FIREBASE_CORE
-  FirebaseCorePluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_FIREBASE_STORAGE
-  FirebaseStoragePluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_FIREBASE_AUTH
-  FirebaseAuthPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_CLOUD_FIRESTORE
-  CloudFirestorePluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_VIDEO_PLAYER_LINUX
-  VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_CAMERA
-  CameraPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_PDF
-  PrintingPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_RIVE_TEXT
-  RiveTextPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_WEBVIEW_FLUTTER_VIEW
-  WebviewFlutterPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-#if ENABLE_PLUGIN_FLATPAK
-  FlatpakPluginCApiRegisterWithRegistrar(
-      FlutterDesktopGetPluginRegistrar(engine, ""));
-#endif
-}

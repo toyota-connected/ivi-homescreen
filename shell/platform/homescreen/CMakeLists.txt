@@ -22,7 +22,6 @@ target_include_directories(platform_homescreen PRIVATE
         ../..
         ../../..
         ../../logging
-        ../../../plugins
         platform_views
 )
 
@@ -45,8 +44,11 @@ if (ENABLE_PLUGINS)
             platform_views/platform_view_touch.cc
     )
 
+    target_include_directories(platform_homescreen PUBLIC
+            ${PLUGINS_DIR}
+    )
+
     target_link_libraries(platform_homescreen PUBLIC
-            plugin_common
             plugins
     )
 

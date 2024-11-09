@@ -21,12 +21,24 @@
 #include <array>
 
 
+#ifndef BUILD_BACKEND_WAYLAND_EGL
 #cmakedefine01 BUILD_BACKEND_WAYLAND_EGL
+#endif
+#ifndef BUILD_BACKEND_WAYLAND_VULKAN
 #cmakedefine01 BUILD_BACKEND_WAYLAND_VULKAN
+#endif
+#ifndef BUILD_BACKEND_WAYLAND_DRM_LEASED
 #cmakedefine01 BUILD_BACKEND_WAYLAND_DRM_LEASED
+#endif
+#ifndef BUILD_BACKEND_DRM_KMS_EGL
 #cmakedefine01 BUILD_BACKEND_DRM_KMS_EGL
+#endif
+#ifndef BUILD_BACKEND_DRM_KMS_VULKAN
 #cmakedefine01 BUILD_BACKEND_DRM_KMS_VULKAN
+#endif
+#ifndef BUILD_BACKEND_HEADLESS_EGL
 #cmakedefine01 BUILD_BACKEND_HEADLESS_EGL
+#endif
 
 #cmakedefine01 BUILD_EGL_TRANSPARENCY
 #cmakedefine01 BUILD_EGL_ENABLE_3D
@@ -43,9 +55,6 @@ static constexpr char kCrashHandlerRelease[] = "@PROJECT_NAME@@@PROJECT_VERSION_
 #cmakedefine01 ENABLE_LTO
 #cmakedefine01 ENABLE_DLT
 #cmakedefine01 ENABLE_PLUGINS
-#if ENABLE_PLUGINS
-#include "config/plugins.h"
-#endif
 
 #cmakedefine01 BUILD_DOCS
 #cmakedefine01 BUILD_UNIT_TESTS
@@ -159,24 +168,6 @@ static constexpr std::array<EGLint, 27> kEglConfigAttribs = {{
 // default allocator by passing in a null pointer, and we highlight the argument
 // by using the VKALLOC constant.
 constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
-
-#if defined(__GNUC__)
-#ifndef MAYBE_UNUSED
-#define MAYBE_UNUSED [[maybe_unused]]
-#endif
-#ifndef NODISCARD
-#define NODISCARD [[nodiscard]]
-#endif
-#endif
-
-#if defined(__clang__)
-#ifndef MAYBE_UNUSED
-#define MAYBE_UNUSED [[maybe_unused]]
-#endif
-#ifndef NODISCARD
-#define NODISCARD [[nodiscard]]
-#endif
-#endif
 
 #cmakedefine01 ENV32BIT
 #cmakedefine01 ENV64BIT

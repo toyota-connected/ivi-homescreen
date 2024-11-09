@@ -17,7 +17,6 @@
 #pragma once
 
 #include <flutter/encodable_value.h>
-#include <shell/platform/embedder/embedder.h>
 
 #include "engine.h"
 

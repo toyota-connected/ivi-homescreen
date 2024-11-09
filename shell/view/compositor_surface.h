@@ -66,7 +66,7 @@ class CompositorSurface {
    * @relation
    * internal
    */
-  NODISCARD void* GetContext() const { return m_context; }
+  [[nodiscard]] void* GetContext() const { return m_context; }
 
   /**
    * @brief run a plugin context task

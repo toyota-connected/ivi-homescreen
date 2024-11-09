@@ -16,12 +16,7 @@
 
 #pragma once
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
 #include <GL/osmesa.h>
-#include <shell/platform/embedder/embedder.h>
-
-#include "config/common.h"
 
 class OSMesaHeadless {
  public:

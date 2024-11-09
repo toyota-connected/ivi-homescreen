@@ -99,7 +99,7 @@ class Egl {
    * @relation
    * EGL
    */
-  NODISCARD PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() const {
+  [[nodiscard]] PFNEGLSETDAMAGEREGIONKHRPROC GetSetDamageRegion() const {
     return m_pfSetDamageRegion;
   }
 
@@ -111,7 +111,7 @@ class Egl {
    * @relation
    * EGL
    */
-  NODISCARD PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
+  [[nodiscard]] PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
   GetSwapBuffersWithDamage() const {
     return m_pfSwapBufferWithDamage;
   }
@@ -123,7 +123,7 @@ class Egl {
    * @relation
    * EGL
    */
-  NODISCARD bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
+  [[nodiscard]] bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
 
   /**
    * @brief Auxiliary function used to transform a FlutterRect into the format
@@ -134,11 +134,11 @@ class Egl {
    * @relation
    * EGL
    */
-  NODISCARD std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
+  [[nodiscard]] std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
 
-  NODISCARD EGLDisplay GetDisplay() { return m_dpy; }
+  [[nodiscard]] EGLDisplay GetDisplay() const { return m_dpy; }
 
-  NODISCARD EGLContext GetTextureContext() { return m_texture_context; }
+  [[nodiscard]] EGLContext GetTextureContext() const { return m_texture_context; }
 
  protected:
   EGLSurface m_egl_surface{};

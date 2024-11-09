@@ -406,7 +406,7 @@ bool Engine::SendPlatformMessage(const char* channel,
   return result == kSuccess;
 }
 
-MAYBE_UNUSED FlutterEngineResult
+[[maybe_unused]] FlutterEngineResult
 Engine::UpdateAccessibilityFeatures(int32_t value) {
   m_accessibility_features = value;
   return LibFlutterEngine->UpdateAccessibilityFeatures(
