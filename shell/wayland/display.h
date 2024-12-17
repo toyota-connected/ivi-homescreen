@@ -141,6 +141,22 @@ class Display {
    */
   [[nodiscard]] int PollEvents() const;
 
+  /**
+   * @brief Start wayland event thread
+   * @return void
+   * @relation
+   * wayland
+   */
+  void StartEvents();
+
+  /**
+   * @brief Stop wayland event thread
+   * @return void
+   * @relation
+   * wayland
+   */
+  void StopEvents();
+
 #if ENABLE_AGL_SHELL_CLIENT
   /**
    * @brief AglShell: Do background
@@ -323,6 +339,9 @@ class Display {
   void processAppStatusEvent(const char* app_id, std::string event_type);
 
  private:
+  std::thread event_thread_;
+  std::atomic<bool> stop_events_flag_;
+  std::atomic<bool> event_thread_active_;
   std::shared_ptr<Engine> m_flutter_engine;
 
   struct wl_display* m_display{};
@@ -506,7 +525,7 @@ class Display {
                                             struct wl_registry* reg,
                                             uint32_t id);
 
-  static const struct wl_output_listener output_listener;
+  static const wl_output_listener output_listener;
 
   /**
    * @brief Set physical_width and physical_height
@@ -617,7 +636,7 @@ class Display {
    */
   static void shm_format(void* data, struct wl_shm* wl_shm, uint32_t format);
 
-  static const struct wl_seat_listener seat_listener;
+  static const wl_seat_listener seat_listener;
 
   /**
    * @brief Set SEAT according to capabilities
@@ -800,7 +819,7 @@ class Display {
                                            uint32_t axis,
                                            int32_t discrete);
 
-  static const struct wl_pointer_listener pointer_listener;
+  static const wl_pointer_listener pointer_listener;
 
   /**
    * @brief Set keymap
@@ -906,7 +925,7 @@ class Display {
                                           int32_t rate,
                                           int32_t delay);
 
-  static const struct wl_keyboard_listener keyboard_listener;
+  static const wl_keyboard_listener keyboard_listener;
 
   /**
    * @brief a callback for key repeat behavior
@@ -997,7 +1016,7 @@ class Display {
    */
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
 
-  static const struct wl_touch_listener touch_listener;
+  static const wl_touch_listener touch_listener;
 
   /**
    * @brief AGL bound ok
