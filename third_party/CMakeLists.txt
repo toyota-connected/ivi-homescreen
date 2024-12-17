@@ -38,6 +38,7 @@ add_subdirectory(cxxopts)
 # tomlplusplus
 #
 add_subdirectory(tomlplusplus)
+target_compile_options(tomlplusplus_tomlplusplus INTERFACE -Wno-conversion)
 
 #
 # Vulkan-Headers
