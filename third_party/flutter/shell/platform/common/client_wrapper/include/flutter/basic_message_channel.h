@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <string>
+#include <utility>
 
 #include "binary_messenger.h"
 #include "message_codec.h"
@@ -37,9 +38,9 @@ class BasicMessageChannel {
   // Creates an instance that sends and receives method calls on the channel
   // named |name|, encoded with |codec| and dispatched via |messenger|.
   BasicMessageChannel(BinaryMessenger* messenger,
-                      const std::string& name,
+                      std::string  name,
                       const MessageCodec<T>* codec)
-      : messenger_(messenger), name_(name), codec_(codec) {}
+      : messenger_(messenger), name_(std::move(name)), codec_(codec) {}
 
   ~BasicMessageChannel() = default;
 
@@ -49,16 +50,16 @@ class BasicMessageChannel {
 
   // Sends a message to the Flutter engine on this channel.
   void Send(const T& message) {
-    std::unique_ptr<std::vector<uint8_t>> raw_message =
+    const std::unique_ptr<std::vector<uint8_t>> raw_message =
         codec_->EncodeMessage(message);
     messenger_->Send(name_, raw_message->data(), raw_message->size());
   }
 
   // Sends a message to the Flutter engine on this channel expecting a reply.
   void Send(const T& message, BinaryReply reply) {
-    std::unique_ptr<std::vector<uint8_t>> raw_message =
+    const std::unique_ptr<std::vector<uint8_t>> raw_message =
         codec_->EncodeMessage(message);
-    messenger_->Send(name_, raw_message->data(), raw_message->size(), reply);
+    messenger_->Send(name_, raw_message->data(), raw_message->size(), std::move(reply));
   }
 
   // Registers a handler that should be called any time a message is
@@ -77,7 +78,7 @@ class BasicMessageChannel {
     BinaryMessageHandler binary_handler = [handler, codec, channel_name](
                                               const uint8_t* binary_message,
                                               const size_t binary_message_size,
-                                              BinaryReply binary_reply) {
+                                              const BinaryReply& binary_reply) {
       // Use this channel's codec to decode the message and build a reply
       // handler.
       std::unique_ptr<T> message =

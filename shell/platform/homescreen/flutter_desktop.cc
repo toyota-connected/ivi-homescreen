@@ -161,14 +161,15 @@ std::future<bool> PostMessengerSendWithReply(
     void* user_data) {
   const auto promise(std::make_shared<std::promise<bool>>());
   auto promise_future(promise->get_future());
+  const auto flutter_engine = messenger->GetEngine()->flutter_engine;
   post(*messenger->GetEngine()->platform_task_runner->GetStrandContext(),
-       [&, promise, channel, message, message_size, reply, user_data]() {
+       [flutter_engine, promise, channel, message, message_size, reply,
+        user_data]() {
          FlutterPlatformMessageResponseHandle* response_handle = nullptr;
          if (reply != nullptr && user_data != nullptr) {
            const FlutterEngineResult result =
                LibFlutterEngine->PlatformMessageCreateResponseHandle(
-                   messenger->GetEngine()->flutter_engine, reply, user_data,
-                   &response_handle);
+                   flutter_engine, reply, user_data, &response_handle);
            if (result != kSuccess) {
              spdlog::error("Failed to create response handle");
              promise->set_value(false);
@@ -184,13 +185,12 @@ std::future<bool> PostMessengerSendWithReply(
          platform_message->response_handle = response_handle;
 
          const FlutterEngineResult message_result =
-             LibFlutterEngine->SendPlatformMessage(
-                 messenger->GetEngine()->flutter_engine,
-                 platform_message.release());
+             LibFlutterEngine->SendPlatformMessage(flutter_engine,
+                                                   platform_message.release());
 
          if (response_handle != nullptr) {
            LibFlutterEngine->PlatformMessageReleaseResponseHandle(
-               messenger->GetEngine()->flutter_engine, response_handle);
+               flutter_engine, response_handle);
          }
 
          promise->set_value(message_result == kSuccess);
@@ -204,8 +204,8 @@ bool FlutterDesktopMessengerSendWithReply(FlutterDesktopMessengerRef messenger,
                                           const size_t message_size,
                                           const FlutterDesktopBinaryReply reply,
                                           void* user_data) {
-  auto task_runner = messenger->GetEngine()->platform_task_runner;
-  if (task_runner->IsThreadEqual(pthread_self())) {
+  if (const auto task_runner = messenger->GetEngine()->platform_task_runner;
+      task_runner->IsThreadEqual(pthread_self())) {
     FlutterPlatformMessageResponseHandle* response_handle = nullptr;
     if (reply != nullptr && user_data != nullptr) {
       const FlutterEngineResult result =
