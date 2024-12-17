@@ -30,6 +30,7 @@ class WaylandWindow;
 class App final {
  public:
   explicit App(const std::vector<Configuration::Config>& configs);
+  ~App();
 
   App(const App&) = delete;
 

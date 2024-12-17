@@ -35,11 +35,13 @@ extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
                         uint32_t xkb_scancode,
                         uint32_t modifiers);
 
-Display::Display(bool enable_cursor,
+Display::Display(const bool enable_cursor,
                  const std::string& ignore_wayland_event,
                  std::string cursor_theme_name,
                  const std::vector<Configuration::Config>& configs)
-    : m_enable_cursor(enable_cursor),
+    : stop_events_flag_(false),
+      event_thread_active_(false),
+      m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)),
       m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)) {
   SPDLOG_TRACE("+ Display()");
@@ -146,7 +148,7 @@ static void xdg_wm_base_ping(void* /* data */,
   xdg_wm_base_pong(xdg_wm_base, serial);
 }
 
-static constexpr struct xdg_wm_base_listener xdg_wm_base_listener = {
+static constexpr xdg_wm_base_listener xdg_wm_base_listener = {
     .ping = xdg_wm_base_ping,
 };
 #endif
@@ -162,7 +164,7 @@ void Display::registry_handle_global(void* data,
 
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
     if (version >= 3) {
-      d->m_compositor = static_cast<struct wl_compositor*>(
+      d->m_compositor = static_cast<wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
                            std::min(static_cast<uint32_t>(3), version)));
       SPDLOG_DEBUG("\tBuffer Scale Enabled");
@@ -171,26 +173,26 @@ void Display::registry_handle_global(void* data,
         d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
       }
     } else {
-      d->m_compositor = static_cast<struct wl_compositor*>(
+      d->m_compositor = static_cast<wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
                            std::min(static_cast<uint32_t>(2), version)));
     }
     d->m_base_surface = wl_compositor_create_surface(d->m_compositor);
   } else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
-    d->m_subcompositor = static_cast<struct wl_subcompositor*>(
+    d->m_subcompositor = static_cast<wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
   }
 #if ENABLE_XDG_CLIENT
   else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
-    d->m_xdg_wm_base = static_cast<struct xdg_wm_base*>(
+    d->m_xdg_wm_base = static_cast<xdg_wm_base*>(
         wl_registry_bind(registry, name, &xdg_wm_base_interface,
                          std::min(static_cast<uint32_t>(3), version)));
     xdg_wm_base_add_listener(d->m_xdg_wm_base, &xdg_wm_base_listener, d);
   }
 #endif
   else if (strcmp(interface, wl_shm_interface.name) == 0) {
-    d->m_shm = static_cast<struct wl_shm*>(
+    d->m_shm = static_cast<wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface,
                          std::min(static_cast<uint32_t>(1), version)));
     wl_shm_add_listener(d->m_shm, &shm_listener, d);
@@ -211,12 +213,12 @@ void Display::registry_handle_global(void* data,
     defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
     if (version >= WL_OUTPUT_NAME_SINCE_VERSION &&
         version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
-      oi->output = static_cast<struct wl_output*>(
+      oi->output = static_cast<wl_output*>(
           wl_registry_bind(registry, name, &wl_output_interface,
                            std::min(static_cast<uint32_t>(4), version)));
     else
 #endif
-      oi->output = static_cast<struct wl_output*>(
+      oi->output = static_cast<wl_output*>(
           wl_registry_bind(registry, name, &wl_output_interface,
                            std::min(static_cast<uint32_t>(2), version)));
     wl_output_add_listener(oi->output, &output_listener, oi.get());
@@ -267,7 +269,7 @@ void Display::registry_handle_global_remove(void* /* data */,
                                             struct wl_registry* /* reg */,
                                             uint32_t /* id */) {}
 
-const struct wl_registry_listener Display::registry_listener = {
+const wl_registry_listener Display::registry_listener = {
     registry_handle_global,
     registry_handle_global_remove,
 };
@@ -339,16 +341,15 @@ void Display::display_handle_desc(void* data,
   oi->desc = std::string(desc);
 }
 
-const struct wl_output_listener Display::output_listener = {
-    display_handle_geometry,
-    display_handle_mode,
-    display_handle_done,
-    display_handle_scale
+const wl_output_listener Display::output_listener = {display_handle_geometry,
+                                                     display_handle_mode,
+                                                     display_handle_done,
+                                                     display_handle_scale
 #if defined(WL_OUTPUT_NAME_SINCE_VERSION) && \
     defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
-    ,
-    display_handle_name,
-    display_handle_desc
+                                                     ,
+                                                     display_handle_name,
+                                                     display_handle_desc
 #endif
 };
 
@@ -356,7 +357,7 @@ void Display::shm_format(void* /* data */,
                          struct wl_shm* /* wl_shm */,
                          uint32_t /* format */) {}
 
-const struct wl_shm_listener Display::shm_listener = {shm_format};
+const wl_shm_listener Display::shm_listener = {shm_format};
 
 void Display::seat_handle_capabilities(void* data,
                                        struct wl_seat* seat,
@@ -406,7 +407,7 @@ void Display::seat_handle_name(void* /* data */,
   SPDLOG_DEBUG("Seat: {}", name);
 }
 
-const struct wl_seat_listener Display::seat_listener = {
+const wl_seat_listener Display::seat_listener = {
     .capabilities = seat_handle_capabilities,
     .name = seat_handle_name,
 };
@@ -431,9 +432,8 @@ void Display::pointer_handle_enter(void* data,
 
   if (d->m_active_engine) {
     d->m_active_engine->CoalesceMouseEvent(
-        kFlutterPointerSignalKindNone, FlutterPointerPhase::kAdd,
-        d->m_pointer.event.surface_x, d->m_pointer.event.surface_y, 0.0, 0.0,
-        d->m_pointer.buttons);
+        kFlutterPointerSignalKindNone, kAdd, d->m_pointer.event.surface_x,
+        d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
   }
 }
 
@@ -447,8 +447,8 @@ void Display::pointer_handle_leave(void* data,
 
   if (d->m_active_engine) {
     d->m_active_engine->CoalesceMouseEvent(kFlutterPointerSignalKindNone,
-                                           FlutterPointerPhase::kRemove, 0.0,
-                                           0.0, 0.0, 0.0, d->m_pointer.buttons);
+                                           kRemove, 0.0, 0.0, 0.0, 0.0,
+                                           d->m_pointer.buttons);
   }
 }
 
@@ -512,8 +512,8 @@ void Display::pointer_handle_axis(void* data,
                                   uint32_t time,
                                   uint32_t axis,
                                   wl_fixed_t value) {
-  auto* d = static_cast<Display*>(data);
-  if (!d->m_wayland_event_mask.pointer_axis) {
+  if (auto* d = static_cast<Display*>(data);
+      !d->m_wayland_event_mask.pointer_axis) {
     d->m_pointer.event.time = time;
     d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
 
@@ -544,7 +544,7 @@ void Display::pointer_handle_axis_discrete(void* /* data */,
                                            uint32_t /* axis */,
                                            int32_t /* discrete */) {}
 
-const struct wl_pointer_listener Display::pointer_listener = {
+const wl_pointer_listener Display::pointer_listener = {
     .enter = pointer_handle_enter,
     .leave = pointer_handle_leave,
     .motion = pointer_handle_motion,
@@ -576,7 +576,7 @@ void Display::keyboard_handle_leave(void* data,
   auto* d = static_cast<Display*>(data);
 
   d->m_repeat_timer->disarm();
-  Display::set_repeat_code(d, XKB_KEY_NoSymbol);
+  set_repeat_code(d, XKB_KEY_NoSymbol);
   SPDLOG_TRACE("- Display::keyboard_handle_leave()");
 }
 
@@ -586,7 +586,7 @@ void Display::keyboard_handle_keymap(void* data,
                                      int fd,
                                      uint32_t size) {
   auto* d = static_cast<Display*>(data);
-  char* keymap_string =
+  const auto keymap_string =
       static_cast<char*>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
   xkb_keymap_unref(d->m_keymap);
   d->m_keymap = xkb_keymap_new_from_string(d->m_xkb_context, keymap_string,
@@ -643,7 +643,7 @@ void Display::keyboard_handle_key(void* data,
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
       SPDLOG_DEBUG("xkb_keymap_key_repeats: 0x{:x}", xkb_scancode);
       d->m_keysym_pressed = keysym;
-      Display::set_repeat_code(d, xkb_scancode);
+      set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
     } else {
       SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
@@ -652,7 +652,7 @@ void Display::keyboard_handle_key(void* data,
   } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
     if (d->m_repeat_code == xkb_scancode) {
       d->m_repeat_timer->disarm();
-      Display::set_repeat_code(d, XKB_KEY_NoSymbol);
+      set_repeat_code(d, XKB_KEY_NoSymbol);
     }
   }
 }
@@ -678,7 +678,7 @@ void Display::keyboard_handle_repeat_info(void* data,
   SPDLOG_DEBUG("[keyboard repeat info] rate: {}, delay: {}", rate, delay);
 }
 
-const struct wl_keyboard_listener Display::keyboard_listener = {
+const wl_keyboard_listener Display::keyboard_listener = {
     .keymap = keyboard_handle_keymap,
     .enter = keyboard_handle_enter,
     .leave = keyboard_handle_leave,
@@ -688,8 +688,8 @@ const struct wl_keyboard_listener Display::keyboard_listener = {
 };
 
 void Display::keyboard_repeat_func(void* data) {
-  auto d = static_cast<Display*>(data);
-  if (XKB_KEY_NoSymbol != d->m_repeat_code) {
+  if (auto d = static_cast<Display*>(data);
+      XKB_KEY_NoSymbol != d->m_repeat_code) {
     KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
                 d->m_repeat_code, 0);
   }
@@ -726,7 +726,7 @@ void Display::touch_handle_up(void* data,
 
   if (d->m_touch_engine) {
     d->m_touch_engine->CoalesceTouchEvent(
-        FlutterPointerPhase::kUp, wl_fixed_to_double(d->m_touch.surface_x[id]),
+        kUp, wl_fixed_to_double(d->m_touch.surface_x[id]),
         wl_fixed_to_double(d->m_touch.surface_y[id]), id);
   }
 }
@@ -753,8 +753,7 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   const auto* d = static_cast<Display*>(data);
   if (d->m_touch_engine) {
     SPDLOG_DEBUG("touch_handle_cancel");
-    d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kCancel,
-                                          d->m_pointer.event.surface_x,
+    d->m_touch_engine->CoalesceTouchEvent(kCancel, d->m_pointer.event.surface_x,
                                           d->m_pointer.event.surface_y, 0);
   }
 }
@@ -762,7 +761,7 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
 void Display::touch_handle_frame(void* /* data */,
                                  struct wl_touch* /* wl_touch */) {}
 
-const struct wl_touch_listener Display::touch_listener = {
+const wl_touch_listener Display::touch_listener = {
     .down = touch_handle_down,
     .up = touch_handle_up,
     .motion = touch_handle_motion,
@@ -778,6 +777,34 @@ int Display::PollEvents() const {
 
   wl_display_read_events(m_display);
   return wl_display_dispatch_pending(m_display);
+}
+
+void Display::StartEvents() {
+  if (event_thread_active_)
+    return;
+
+  event_thread_ = std::thread([this] {
+    event_thread_active_ = true;
+    while (!stop_events_flag_) {
+      const int count = wl_display_dispatch(m_display);
+      if (count == -1) {
+        spdlog::error("Wayland Dispatch Error: {}", strerror(errno));
+        break;
+      }
+      SPDLOG_TRACE("Wayland Event Count: {}", count);
+    }
+    event_thread_active_ = false;
+  });
+}
+
+void Display::StopEvents() {
+  if (!event_thread_active_)
+    return;
+
+  stop_events_flag_ = true;
+  if (event_thread_.joinable()) {
+    event_thread_.join();
+  }
 }
 
 #if ENABLE_AGL_SHELL_CLIENT

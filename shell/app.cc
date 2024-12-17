@@ -63,7 +63,13 @@ App::App(const std::vector<Configuration::Config>& configs)
   m_watch_dog = std::make_unique<Watchdog>();
 #endif
 
+  m_wayland_display->StartEvents();
+
   SPDLOG_DEBUG("-App::App");
+}
+
+App::~App() {
+  m_wayland_display->StopEvents();
 }
 
 int App::Loop() const {
@@ -72,14 +78,12 @@ int App::Loop() const {
           std::chrono::steady_clock::now().time_since_epoch())
           .count();
 
-  const auto ret = m_wayland_display->PollEvents();
-
   for (auto const& view : m_views) {
     view->RunTasks();
   }
 
   if (m_wayland_display->m_repeat_timer)
-    m_wayland_display->m_repeat_timer->wait_event();
+    EventTimer::wait_event();
 
   const auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now().time_since_epoch())
@@ -87,9 +91,7 @@ int App::Loop() const {
 
   const auto elapsed = end_time - start_time;
 
-  const auto sleep_time = 16 - elapsed;
-
-  if (sleep_time > 0) {
+  if (const auto sleep_time = 16 - elapsed; sleep_time > 0) {
 #if BUILD_WATCHDOG
     m_watch_dog->pet();
 #endif
@@ -100,7 +102,7 @@ int App::Loop() const {
     i->DrawFps(end_time);
   }
 
-  return ret;
+  return 0;
 }
 
 #if BUILD_BACKEND_HEADLESS_EGL
