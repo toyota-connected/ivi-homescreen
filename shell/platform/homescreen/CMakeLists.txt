@@ -31,6 +31,7 @@ target_link_libraries(platform_homescreen PUBLIC
         rapidjson
         spdlog
         wayland-gen
+        tomlplusplus::tomlplusplus
 )
 
 if (ENABLE_PLUGINS)

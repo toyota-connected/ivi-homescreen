@@ -108,7 +108,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         asio
         flutter
         cxxopts::cxxopts
-        tomlplusplus::tomlplusplus
         Threads::Threads
         wayland-gen
         dl
