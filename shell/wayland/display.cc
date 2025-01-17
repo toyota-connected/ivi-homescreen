@@ -761,12 +761,14 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
 void Display::touch_handle_frame(void* /* data */,
                                  struct wl_touch* /* wl_touch */) {}
 
-const wl_touch_listener Display::touch_listener = {
+constexpr wl_touch_listener Display::touch_listener = {
     .down = touch_handle_down,
     .up = touch_handle_up,
     .motion = touch_handle_motion,
     .frame = touch_handle_frame,
     .cancel = touch_handle_cancel,
+    .shape = nullptr,
+    .orientation = nullptr,
 };
 
 int Display::PollEvents() const {

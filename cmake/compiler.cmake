@@ -61,7 +61,11 @@ add_compile_options(
         -Wswitch-bool
         -Wformat
         -Wformat-security
+        -Wall
+        -Wextra
         -Wconversion
+        -Wsign-conversion
+        -Werror
         -Wcast-align
         #-Wcast-qual
         $<$<COMPILE_LANGUAGE:CXX>:-Wunused-parameter>

@@ -44,19 +44,17 @@ Engine::Engine(FlutterView* view,
       m_prev_width(0),
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
-      m_flutter_engine(nullptr),
-      m_args({
-          .struct_size = sizeof(FlutterProjectArgs),
-          .assets_path{},
-          .icu_data_path{},
-          .command_line_argc = static_cast<int>(vm_args_c.size()),
-          .command_line_argv = vm_args_c.data(),
-          .platform_message_callback = OnFlutterPlatformMessage,
-          .persistent_cache_path = m_cache_path.c_str(),
-          .is_persistent_cache_read_only = false,
-          .log_message_callback = onLogMessageCallback,
-      }) {
+      m_flutter_engine(nullptr) {
   SPDLOG_TRACE("({}) +Engine::Engine", m_index);
+
+  m_args = {};
+  m_args.struct_size = sizeof(FlutterProjectArgs);
+  m_args.command_line_argc = static_cast<int>(vm_args_c.size());
+  m_args.command_line_argv = vm_args_c.data();
+  m_args.platform_message_callback = OnFlutterPlatformMessage;
+  m_args.persistent_cache_path = m_cache_path.c_str();
+  m_args.is_persistent_cache_read_only = false;
+  m_args.log_message_callback = onLogMessageCallback;
 
   /// Task Runner
   m_platform_task_runner =
@@ -136,26 +134,27 @@ Engine::Engine(FlutterView* view,
   }
 
   /// Configure task runner interop
-  m_platform_task_runner_description = {
-      .struct_size = sizeof(FlutterTaskRunnerDescription),
-      .user_data = this,
-      .runs_task_on_current_thread_callback = [](void* context) -> bool {
-        const auto engine = static_cast<Engine*>(context);
-        return engine->m_platform_task_runner->IsThreadEqual(pthread_self());
-      },
-      .post_task_callback = [](const FlutterTask task,
-                               const uint64_t target_time,
-                               void* context) -> void {
-        const auto engine = static_cast<Engine*>(context);
-        engine->m_platform_task_runner->QueueFlutterTask(
-            engine->m_index, target_time, task, context);
-      },
+  m_platform_task_runner_description = {};
+  m_platform_task_runner_description.struct_size =
+      sizeof(FlutterTaskRunnerDescription);
+  m_platform_task_runner_description.user_data = this;
+  m_platform_task_runner_description.runs_task_on_current_thread_callback =
+      [](void* context) -> bool {
+    const auto engine = static_cast<Engine*>(context);
+    return engine->m_platform_task_runner->IsThreadEqual(pthread_self());
+  };
+  m_platform_task_runner_description.post_task_callback =
+      [](const FlutterTask task, const uint64_t target_time,
+         void* context) -> void {
+    const auto engine = static_cast<Engine*>(context);
+    engine->m_platform_task_runner->QueueFlutterTask(
+        engine->m_index, target_time, task, context);
   };
 
-  m_custom_task_runners = {
-      .struct_size = sizeof(FlutterCustomTaskRunners),
-      .platform_task_runner = &m_platform_task_runner_description,
-  };
+  m_custom_task_runners = {};
+  m_custom_task_runners.struct_size = sizeof(FlutterCustomTaskRunners);
+  m_custom_task_runners.platform_task_runner =
+      &m_platform_task_runner_description;
 
   m_args.custom_task_runners = &m_custom_task_runners;
 
@@ -377,7 +376,7 @@ bool Engine::SendPlatformMessage(const char* channel,
                                  const FlutterDataCallback reply,
                                  void* userdata) const {
   if (!m_running) {
-    return kInternalInconsistency;
+    return false;
   }
   FlutterPlatformMessageResponseHandle* handle;
   LibFlutterEngine->PlatformMessageCreateResponseHandle(m_flutter_engine, reply,
@@ -406,8 +405,8 @@ bool Engine::SendPlatformMessage(const char* channel,
   return result == kSuccess;
 }
 
-[[maybe_unused]] FlutterEngineResult
-Engine::UpdateAccessibilityFeatures(int32_t value) {
+[[maybe_unused]] FlutterEngineResult Engine::UpdateAccessibilityFeatures(
+    int32_t value) {
   m_accessibility_features = value;
   return LibFlutterEngine->UpdateAccessibilityFeatures(
       m_flutter_engine, static_cast<FlutterAccessibilityFeature>(value));
@@ -441,65 +440,69 @@ void Engine::SetUpLocales() const {
   }
 }
 
-void Engine::CoalesceMouseEvent(FlutterPointerSignalKind signal,
-                                FlutterPointerPhase phase,
-                                double x,
-                                double y,
-                                double scroll_delta_x,
-                                double scroll_delta_y,
-                                int64_t buttons) {
+void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
+                                const FlutterPointerPhase phase,
+                                const double x,
+                                const double y,
+                                const double scroll_delta_x,
+                                const double scroll_delta_y,
+                                const int64_t buttons) {
   auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  m_pointer_events.emplace_back(
-      FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
-                          .phase = phase,
+
+  FlutterPointerEvent e{};
+  e.struct_size = sizeof(FlutterPointerEvent);
+  e.phase = phase;
 #if ENV64BIT
-                          .timestamp = timestamp,
+  e.timestamp = timestamp;
 #elif ENV32BIT
-                          .timestamp =
-                              static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
+  e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-                          .x = x,
-                          .y = y,
-                          .device = 0,
-                          .signal_kind = signal,
-                          .scroll_delta_x = scroll_delta_x,
-                          .scroll_delta_y = scroll_delta_y,
-                          .device_kind = kFlutterPointerDeviceKindMouse,
-                          .buttons = buttons,
-                          .pan_x = 0,
-                          .pan_y = 0,
-                          .scale = 0,
-                          .rotation = 0});
+  e.x = x;
+  e.y = y;
+  e.device = 0;
+  e.signal_kind = signal;
+  e.scroll_delta_x = scroll_delta_x;
+  e.scroll_delta_y = scroll_delta_y;
+  e.device_kind = kFlutterPointerDeviceKindMouse;
+  e.buttons = buttons;
+  e.pan_x = 0;
+  e.pan_y = 0;
+  e.scale = 0;
+  e.rotation = 0;
+
+  m_pointer_events.emplace_back(e);
 }
 
-void Engine::CoalesceTouchEvent(FlutterPointerPhase phase,
-                                double x,
-                                double y,
-                                int32_t device) {
+void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
+                                const double x,
+                                const double y,
+                                const int32_t device) {
   auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
-  m_pointer_events.emplace_back(
-      FlutterPointerEvent{.struct_size = sizeof(FlutterPointerEvent),
-                          .phase = phase,
+
+  FlutterPointerEvent e{};
+  e.struct_size = sizeof(FlutterPointerEvent);
+  e.phase = phase;
 #if ENV64BIT
-                          .timestamp = timestamp,
+  e.timestamp = timestamp;
 #elif ENV32BIT
-                          .timestamp =
-                              static_cast<size_t>(timestamp & 0xFFFFFFFFULL),
+  e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-                          .x = x,
-                          .y = y,
-                          .device = device,
-                          .signal_kind = kFlutterPointerSignalKindNone,
-                          .scroll_delta_x = 0.0,
-                          .scroll_delta_y = 0.0,
-                          .device_kind = kFlutterPointerDeviceKindTouch,
-                          .buttons = 0,
-                          .pan_x = 0,
-                          .pan_y = 0,
-                          .scale = 0,
-                          .rotation = 0});
+  e.x = x;
+  e.y = y;
+  e.device = device;
+  e.signal_kind = kFlutterPointerSignalKindNone;
+  e.scroll_delta_x = 0.0;
+  e.scroll_delta_y = 0.0;
+  e.device_kind = kFlutterPointerDeviceKindTouch;
+  e.buttons = 0;
+  e.pan_x = 0;
+  e.pan_y = 0;
+  e.scale = 0;
+  e.rotation = 0;
+
+  m_pointer_events.emplace_back(e);
 }
 
 void Engine::SendPointerEvents() {

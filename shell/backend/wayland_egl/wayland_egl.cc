@@ -36,168 +36,166 @@ WaylandEglBackend::WaylandEglBackend(struct wl_display* display,
       m_initial_height(initial_height) {}
 
 FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
-  return {
-      .type = kOpenGL,
-      .open_gl = {
-          .struct_size = sizeof(FlutterOpenGLRendererConfig),
-          .make_current = [](void* user_data) -> bool {
-            const auto state =
-                static_cast<FlutterDesktopEngineState*>(user_data);
-            return reinterpret_cast<WaylandEglBackend*>(
-                       state->view_controller->engine->GetBackend())
-                ->MakeCurrent();
-          },
-          .clear_current = [](void* userdata) -> bool {
-            const auto state =
-                static_cast<FlutterDesktopEngineState*>(userdata);
-            return reinterpret_cast<WaylandEglBackend*>(
-                       state->view_controller->engine->GetBackend())
-                ->ClearCurrent();
-          },
-          .fbo_callback = [](void*) -> uint32_t {
-            return 0;  // FBO0
-          },
-          .make_resource_current = [](void* userdata) -> bool {
-            const auto state =
-                static_cast<FlutterDesktopEngineState*>(userdata);
-            return reinterpret_cast<WaylandEglBackend*>(
-                       state->view_controller->engine->GetBackend())
-                ->MakeResourceCurrent();
-          },
-          .fbo_reset_after_present = false,
-          .gl_proc_resolver = [](void* /* userdata */,
-                                 const char* name) -> void* {
-            return GlProcessResolver::GetInstance().process_resolver(name);
-          },
-          .gl_external_texture_frame_callback =
-              [](void* userdata, const int64_t texture_id, const size_t width,
-                 const size_t height,
-                 FlutterOpenGLTexture* texture_out) -> bool {
-            const auto state =
-                static_cast<FlutterDesktopEngineState*>(userdata);
-            auto& texture_registry = state->texture_registrar->texture_registry;
-            auto it = std::find_if(
-                std::begin(texture_registry), std::end(texture_registry),
-                [&texture_id](auto&& p) { return p.first == texture_id; });
-            // texture not found in registry
-            if (it == std::end(texture_registry))
-              return false;
-            auto& target = texture_registry[texture_id];
-            *texture_out = {.target = target->target,
-                            .name = target->name,
-                            .format = target->format,
-                            .user_data = target->release_context,
-                            .destruction_callback = target->release_callback,
-                            .width = target->width,
-                            .height = target->height};
-            target->visible_width = width;
-            target->visible_width = height;
-            return true;
-          },
-          .present_with_info = [](void* userdata,
-                                  const FlutterPresentInfo* info) -> bool {
-            const auto state =
-                static_cast<FlutterDesktopEngineState*>(userdata);
-            auto* b = reinterpret_cast<WaylandEglBackend*>(
-                state->view_controller->engine->GetBackend());
+  FlutterRendererConfig config{};
+  config.type = kOpenGL;
+  config.open_gl.struct_size = sizeof(FlutterOpenGLRendererConfig);
+  config.open_gl.make_current = [](void* user_data) -> bool {
+    const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+    return reinterpret_cast<WaylandEglBackend*>(
+               state->view_controller->engine->GetBackend())
+        ->MakeCurrent();
+  };
 
-            // Full swap if FlutterPresentInfo is invalid
-            if (info->struct_size != sizeof(FlutterPresentInfo)) {
-              return b->SwapBuffers();
-            }
+  config.open_gl.clear_current = [](void* user_data) -> bool {
+    const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+    return reinterpret_cast<WaylandEglBackend*>(
+               state->view_controller->engine->GetBackend())
+        ->ClearCurrent();
+  };
 
-            // Free the existing damage that was allocated to this frame.
-            if (b->m_existing_damage_map[info->fbo_id] != nullptr) {
-              free(b->m_existing_damage_map[info->fbo_id]);
-              b->m_existing_damage_map[info->fbo_id] = nullptr;
-            }
+  config.open_gl.fbo_callback = [](void* /* user_data */) -> uint32_t {
+    return 0;  // FBO0
+  };
 
-            if (b->GetSetDamageRegion()) {
-              // Set the buffer damage as the damage region.
-              auto buffer_rects = b->RectToInts(info->buffer_damage.damage[0]);
-              b->GetSetDamageRegion()(b->GetDisplay(), b->m_egl_surface,
-                                      buffer_rects.data(), 1);
-            }
+  config.open_gl.make_resource_current = [](void* user_data) -> bool {
+    const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+    return reinterpret_cast<WaylandEglBackend*>(
+               state->view_controller->engine->GetBackend())
+        ->MakeResourceCurrent();
+  };
 
-            // Add frame damage to damage history
-            b->m_damage_history.push_back(info->frame_damage.damage[0]);
-            if (b->m_damage_history.size() > kMaxHistorySize) {
-              b->m_damage_history.pop_front();
-            }
+  config.open_gl.fbo_reset_after_present = false;
 
-            if (b->GetSwapBuffersWithDamage()) {
-              // Swap buffers with frame damage.
-              const auto frame_rects =
-                  b->RectToInts(info->frame_damage.damage[0]);
-              return b->GetSwapBuffersWithDamage()(
-                  b->GetDisplay(), b->m_egl_surface,
-                  const_cast<int*>(frame_rects.data()), 1);
-            } else {
-              // If the required extensions for partial repaint were not
-              // provided, do full repaint.
-              return b->SwapBuffers();
-            }
-          },
-          .populate_existing_damage =
-              [](void* userdata, const intptr_t fbo_id,
-                 FlutterDamage* existing_damage) -> void {
-            const auto state =
-                static_cast<FlutterDesktopEngineState*>(userdata);
-            auto* b = reinterpret_cast<WaylandEglBackend*>(
-                state->view_controller->engine->GetBackend());
-            // Given the FBO age, create existing damage region by joining
-            // all frame damages since FBO was last used
-            EGLint age;
-            if (b->HasExtBufferAge()) {
-              eglQuerySurface(b->GetDisplay(), b->m_egl_surface,
-                              EGL_BUFFER_AGE_EXT, &age);
-            } else {
-              age = 4;  // Virtually no driver should have a swap chain
-                        // length > 4.
-            }
+  config.open_gl.gl_proc_resolver = [](void* /* userdata */,
+                                       const char* name) -> void* {
+    return GlProcessResolver::GetInstance().process_resolver(name);
+  };
 
-            existing_damage->num_rects = 1;
+  config.open_gl.gl_external_texture_frame_callback =
+      [](void* userdata, const int64_t texture_id, const size_t width,
+         const size_t height, FlutterOpenGLTexture* texture_out) -> bool {
+    const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
+    auto& texture_registry = state->texture_registrar->texture_registry;
+    const auto it =
+        std::find_if(std::begin(texture_registry), std::end(texture_registry),
+                     [&texture_id](auto&& p) { return p.first == texture_id; });
+    // texture not found in registry
+    if (it == std::end(texture_registry))
+      return false;
+    const auto& target = texture_registry[texture_id];
+    *texture_out = {.target = target->target,
+                    .name = target->name,
+                    .format = target->format,
+                    .user_data = target->release_context,
+                    .destruction_callback = target->release_callback,
+                    .width = target->width,
+                    .height = target->height};
+    target->visible_width = width;
+    target->visible_width = height;
+    return true;
+  };
 
-            // Allocate the array of rectangles for the existing damage.
-            b->m_existing_damage_map[fbo_id] = static_cast<FlutterRect*>(
-                malloc(sizeof(FlutterRect) * existing_damage->num_rects));
-            b->m_existing_damage_map[fbo_id][0] =
-                FlutterRect{0, 0, static_cast<double>(b->m_initial_width),
-                            static_cast<double>(b->m_initial_height)};
-            existing_damage->damage = b->m_existing_damage_map[fbo_id];
+  config.open_gl.present_with_info =
+      [](void* userdata, const FlutterPresentInfo* info) -> bool {
+    const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
+    auto* b = reinterpret_cast<WaylandEglBackend*>(
+        state->view_controller->engine->GetBackend());
 
-            if (age > 1) {
-              --age;
-              // join up to (age - 1) last rects from damage history
-              for (auto i = b->m_damage_history.rbegin();
-                   i != b->m_damage_history.rend() && age > 0; ++i, --age) {
-                if (i == b->m_damage_history.rbegin()) {
-                  if (i != b->m_damage_history.rend()) {
-                    existing_damage->damage[0] = {i->left, i->top, i->right,
-                                                  i->bottom};
-                  }
-                } else {
-                  JoinFlutterRect(&(existing_damage->damage[0]), *i);
-                }
-              }
-            }
-          },
-      }};
+    // Full swap if FlutterPresentInfo is invalid
+    if (info->struct_size != sizeof(FlutterPresentInfo)) {
+      return b->SwapBuffers();
+    }
+
+    // Free the existing damage that was allocated to this frame.
+    if (b->m_existing_damage_map[info->fbo_id] != nullptr) {
+      free(b->m_existing_damage_map[info->fbo_id]);
+      b->m_existing_damage_map[info->fbo_id] = nullptr;
+    }
+
+    if (b->GetSetDamageRegion()) {
+      // Set the buffer damage as the damage region.
+      auto buffer_rects = b->RectToInts(info->buffer_damage.damage[0]);
+      b->GetSetDamageRegion()(b->GetDisplay(), b->m_egl_surface,
+                              buffer_rects.data(), 1);
+    }
+
+    // Add frame damage to damage history
+    b->m_damage_history.push_back(info->frame_damage.damage[0]);
+    if (b->m_damage_history.size() > kMaxHistorySize) {
+      b->m_damage_history.pop_front();
+    }
+
+    if (b->GetSwapBuffersWithDamage()) {
+      // Swap buffers with frame damage.
+      const auto frame_rects = b->RectToInts(info->frame_damage.damage[0]);
+      return b->GetSwapBuffersWithDamage()(b->GetDisplay(), b->m_egl_surface,
+                                           const_cast<int*>(frame_rects.data()),
+                                           1);
+    } else {
+      // If the required extensions for partial repaint were not
+      // provided, do full repaint.
+      return b->SwapBuffers();
+    }
+  };
+
+  config.open_gl.populate_existing_damage =
+      [](void* userdata, const intptr_t fbo_id,
+         FlutterDamage* existing_damage) -> void {
+    const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
+    auto* b = reinterpret_cast<WaylandEglBackend*>(
+        state->view_controller->engine->GetBackend());
+    // Given the FBO age, create existing damage region by joining
+    // all frame damages since FBO was last used
+    EGLint age;
+    if (b->HasExtBufferAge()) {
+      eglQuerySurface(b->GetDisplay(), b->m_egl_surface, EGL_BUFFER_AGE_EXT,
+                      &age);
+    } else {
+      age = 4;  // Virtually no driver should have a swap chain
+                // length > 4.
+    }
+
+    existing_damage->num_rects = 1;
+
+    // Allocate the array of rectangles for the existing damage.
+    b->m_existing_damage_map[fbo_id] = static_cast<FlutterRect*>(
+        malloc(sizeof(FlutterRect) * existing_damage->num_rects));
+    b->m_existing_damage_map[fbo_id][0] =
+        FlutterRect{0, 0, static_cast<double>(b->m_initial_width),
+                    static_cast<double>(b->m_initial_height)};
+    existing_damage->damage = b->m_existing_damage_map[fbo_id];
+
+    if (age > 1) {
+      --age;
+      // join up to (age - 1) last rects from damage history
+      for (auto i = b->m_damage_history.rbegin();
+           i != b->m_damage_history.rend() && age > 0; ++i, --age) {
+        if (i == b->m_damage_history.rbegin()) {
+          if (i != b->m_damage_history.rend()) {
+            existing_damage->damage[0] = {i->left, i->top, i->right, i->bottom};
+          }
+        } else {
+          JoinFlutterRect(&(existing_damage->damage[0]), *i);
+        }
+      }
+    }
+  };
+
+  return config;
 }
 
 FlutterCompositor WaylandEglBackend::GetCompositorConfig() {
-  return {.struct_size = sizeof(FlutterCompositor),
-          .user_data = this,
-          .create_backing_store_callback = nullptr,
-          .collect_backing_store_callback = nullptr,
-          .present_layers_callback = nullptr,
-          .avoid_backing_store_cache = true};
+  FlutterCompositor compositor{};
+  compositor.struct_size = sizeof(FlutterCompositor);
+  compositor.user_data = this;
+  compositor.avoid_backing_store_cache = true;
+  return compositor;
 }
 
 void WaylandEglBackend::Resize(size_t /* index */,
                                Engine* flutter_engine,
-                               int32_t width,
-                               int32_t height) {
+                               const int32_t width,
+                               const int32_t height) {
   if (m_egl_window) {
     if (flutter_engine) {
       const auto result = flutter_engine->SetWindowSize(

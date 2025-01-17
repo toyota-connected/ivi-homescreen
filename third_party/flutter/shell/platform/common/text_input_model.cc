@@ -151,7 +151,8 @@ bool TextInputModel::Backspace() {
   size_t position = selection_.position();
   if (position != editable_range().start()) {
     int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
-    text_.erase(position - static_cast<size_t>(count), static_cast<size_t>(count));
+    text_.erase(position - static_cast<size_t>(count),
+                static_cast<size_t>(count));
     selection_ = TextRange(position - static_cast<size_t>(count));
     if (composing_) {
       composing_range_.set_end(composing_range_.end() -
@@ -180,9 +181,10 @@ bool TextInputModel::Delete() {
   return false;
 }
 
-bool TextInputModel::DeleteSurrounding(int offset_from_cursor, int count) {
-  size_t max_pos = editable_range().end();
-  size_t start = selection_.extent();
+bool TextInputModel::DeleteSurrounding(const int offset_from_cursor,
+                                       int count) {
+  const auto max_pos = editable_range().end();
+  auto start = selection_.extent();
   if (offset_from_cursor < 0) {
     for (int i = 0; i < -offset_from_cursor; i++) {
       // If requested start is before the available text then reduce the
@@ -191,17 +193,17 @@ bool TextInputModel::DeleteSurrounding(int offset_from_cursor, int count) {
         count = i;
         break;
       }
-      start -= IsTrailingSurrogate(text_.at(start - 1)) ? 2 : 1;
+      start -= IsTrailingSurrogate(text_.at(start - 1)) ? 2UL : 1UL;
     }
   } else {
     for (int i = 0; i < offset_from_cursor && start != max_pos; i++) {
-      start += IsLeadingSurrogate(text_.at(start)) ? 2 : 1;
+      start += IsLeadingSurrogate(text_.at(start)) ? 2UL : 1UL;
     }
   }
 
   auto end = start;
   for (int i = 0; i < count && end != max_pos; i++) {
-    end += IsLeadingSurrogate(text_.at(start)) ? 2 : 1;
+    end += IsLeadingSurrogate(text_.at(start)) ? 2UL : 1UL;
   }
 
   if (start == end) {
@@ -231,7 +233,7 @@ bool TextInputModel::MoveCursorToBeginning() {
 }
 
 bool TextInputModel::MoveCursorToEnd() {
-  size_t max_pos = editable_range().end();
+  const size_t max_pos = editable_range().end();
   if (selection_.collapsed() && selection_.position() == max_pos) {
     return false;
   }
@@ -240,7 +242,7 @@ bool TextInputModel::MoveCursorToEnd() {
 }
 
 bool TextInputModel::SelectToBeginning() {
-  size_t min_pos = editable_range().start();
+  const size_t min_pos = editable_range().start();
   if (selection_.collapsed() && selection_.position() == min_pos) {
     return false;
   }
@@ -249,7 +251,7 @@ bool TextInputModel::SelectToBeginning() {
 }
 
 bool TextInputModel::SelectToEnd() {
-  size_t max_pos = editable_range().end();
+  const size_t max_pos = editable_range().end();
   if (selection_.collapsed() && selection_.position() == max_pos) {
     return false;
   }
@@ -264,9 +266,9 @@ bool TextInputModel::MoveCursorForward() {
     return true;
   }
   // Otherwise, move the cursor forward.
-  size_t position = selection_.position();
-  if (position != editable_range().end()) {
-    int count = IsLeadingSurrogate(text_.at(position)) ? 2 : 1;
+  if (const size_t position = selection_.position();
+      position != editable_range().end()) {
+    const int count = IsLeadingSurrogate(text_.at(position)) ? 2 : 1;
     selection_ = TextRange(position + static_cast<size_t>(count));
     return true;
   }
@@ -280,9 +282,9 @@ bool TextInputModel::MoveCursorBack() {
     return true;
   }
   // Otherwise, move the cursor backward.
-  size_t position = selection_.position();
-  if (position != editable_range().start()) {
-    int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
+  if (const size_t position = selection_.position();
+      position != editable_range().start()) {
+    const int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
     selection_ = TextRange(position - static_cast<size_t>(count));
     return true;
   }
@@ -296,7 +298,7 @@ std::string TextInputModel::GetText() const {
 int TextInputModel::GetCursorOffset() const {
   // Measure the length of the current text up to the selection extent.
   // There is probably a much more efficient way of doing this.
-  auto leading_text = text_.substr(0, selection_.extent());
+  const auto leading_text = text_.substr(0, selection_.extent());
   return static_cast<int>(fml::Utf16ToUtf8(leading_text).size());
 }
 
