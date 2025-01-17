@@ -39,7 +39,7 @@ Engine::Engine(FlutterView* view,
       m_backend(view->GetBackend()),
       m_egl_window(view->GetWindow()),
       m_view(view),
-      m_cache_path(std::move(GetFilePath(index))),
+      m_cache_path(GetFilePath(index)),
       m_prev_height(0),
       m_prev_width(0),
       m_prev_pixel_ratio(1.0),
@@ -47,7 +47,6 @@ Engine::Engine(FlutterView* view,
       m_flutter_engine(nullptr) {
   SPDLOG_TRACE("({}) +Engine::Engine", m_index);
 
-  m_args = {};
   m_args.struct_size = sizeof(FlutterProjectArgs);
   m_args.command_line_argc = static_cast<int>(vm_args_c.size());
   m_args.command_line_argv = vm_args_c.data();

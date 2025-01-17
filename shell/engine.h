@@ -20,8 +20,6 @@
 #include <filesystem>
 #include <map>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <vector>
 
@@ -29,7 +27,6 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
-#include "config/common.h"
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
 #include "task_runner.h"
@@ -71,7 +68,7 @@ class Engine {
 
   /**
    * @brief Run flutter engine
-   * @param[in] FlutterDesktopEngineState pointer to struct of engine state
+   * @param[in] state pointer to struct of engine state
    * @return FlutterEngineResult
    * @retval The result of the run Flutter engine
    * @relation
@@ -220,7 +217,7 @@ class Engine {
    * @relation
    * flutter
    */
-  [[maybe_unused]] int32_t GetAccessibilityFeatures() const {
+  [[maybe_unused]] [[nodiscard]] int32_t GetAccessibilityFeatures() const {
     return m_accessibility_features;
   }
 
@@ -232,7 +229,8 @@ class Engine {
    * @relation
    * flutter
    */
-  [[maybe_unused]] FlutterEngineResult UpdateAccessibilityFeatures(int32_t value);
+  [[maybe_unused]] FlutterEngineResult UpdateAccessibilityFeatures(
+      int32_t value);
 
   /**
    * @brief Update locales
@@ -242,8 +240,8 @@ class Engine {
    * @relation
    * flutter
    */
-  [[maybe_unused]] FlutterEngineResult
-  UpdateLocales(std::vector<FlutterLocale> locales);
+  [[maybe_unused]] FlutterEngineResult UpdateLocales(
+      std::vector<FlutterLocale> locales);
 
   /**
    * @brief Get clipboard data
@@ -309,7 +307,7 @@ class Engine {
    * wayland
    */
   [[nodiscard]] bool ActivateSystemCursor(int32_t device,
-                                      const std::string& kind) const;
+                                          const std::string& kind) const;
 
   /**
    * @brief Get backend of view
@@ -359,7 +357,7 @@ class Engine {
   int32_t m_accessibility_features;
 
   FLUTTER_API_SYMBOL(FlutterEngine) m_flutter_engine;
-  FlutterProjectArgs m_args;
+  FlutterProjectArgs m_args{};
   std::string m_clipboard_data;
 
   std::shared_ptr<TaskRunner> m_platform_task_runner;
@@ -370,14 +368,14 @@ class Engine {
 
   /**
    * @brief Load AOT data
-   * @param[in] aot_data_path Path to AOT data
+   * @param bundle_path Path to bundle
    * @return FlutterEngineAOTData
    * @retval Loaded AOT data
    * @relation
    * flutter
    */
-  [[maybe_unused]] [[nodiscard]] FlutterEngineAOTData
-  LoadAotData(const std::string& bundle_path) const;
+  [[maybe_unused]] [[nodiscard]] FlutterEngineAOTData LoadAotData(
+      const std::string& bundle_path) const;
 
   /**
    * @brief Setup Locales
