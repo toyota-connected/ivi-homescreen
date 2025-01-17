@@ -20,28 +20,53 @@ std::locale::id std::codecvt<char16_t, char, _Mbstatet>::id;
 
 namespace fml {
 
-using Utf16StringConverter =
-    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t>;
-
-std::string Join(const std::vector<std::string>& vec, const char* delim) {
+std::string Join(const std::vector<std::string>& vec, const char* delimiter) {
   std::stringstream res;
   for (size_t i = 0; i < vec.size(); ++i) {
     res << vec[i];
     if (i < vec.size() - 1) {
-      res << delim;
+      res << delimiter;
     }
   }
   return res.str();
 }
 
-std::string Utf16ToUtf8(const std::u16string_view string) {
-  Utf16StringConverter converter;
-  return converter.to_bytes(string.data());
+std::string Utf16ToUtf8(const std::u16string_view& string) {
+  std::string result;
+  result.reserve(string.size() * 2);  // Reserve enough space for the conversion
+  for (const char16_t ch : string) {
+    if (ch <= 0x7F) {
+      result.push_back(static_cast<char>(ch));
+    } else if (ch <= 0x7FF) {
+      result.push_back(static_cast<char>(0xC0 | (ch >> 6)));
+      result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
+    } else {
+      result.push_back(static_cast<char>(0xE0 | (ch >> 12)));
+      result.push_back(static_cast<char>(0x80 | ((ch >> 6) & 0x3F)));
+      result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
+    }
+  }
+  return result;
 }
 
-std::u16string Utf8ToUtf16(const std::string_view string) {
-  Utf16StringConverter converter;
-  return converter.from_bytes(string.data());
+std::u16string Utf8ToUtf16(const std::string_view& string) {
+  std::u16string result;
+  result.reserve(string.size());  // Reserve enough space for the conversion
+  for (size_t i = 0; i < string.size(); ++i) {
+    char16_t ch = 0;
+    if ((string[i] & 0x80) == 0) {
+      ch = static_cast<char16_t>(string[i]);
+    } else if ((string[i] & 0xE0) == 0xC0) {
+      ch = static_cast<char16_t>((string[i] & 0x1F) << 6);
+      ch = ch | static_cast<char16_t>(string[++i] & 0x3F);
+    } else if ((string[i] & 0xF0) == 0xE0) {
+      ch = static_cast<char16_t>((string[i] & 0x0F) << 12);
+      ch = ch | static_cast<char16_t>((string[++i] & 0x3F) << 6);
+      ch = ch | static_cast<char16_t>(string[++i] & 0x3F);
+    }
+    result.push_back(ch);
+  }
+  return result;
 }
 
 }  // namespace fml
