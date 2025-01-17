@@ -311,6 +311,9 @@ const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
 #if defined(XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION)
     .configure_bounds = nullptr,
 #endif
+#if defined(XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION)
+    .wm_capabilities = nullptr,
+#endif
 };
 #endif
 
