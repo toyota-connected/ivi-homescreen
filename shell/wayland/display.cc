@@ -767,8 +767,12 @@ constexpr wl_touch_listener Display::touch_listener = {
     .motion = touch_handle_motion,
     .frame = touch_handle_frame,
     .cancel = touch_handle_cancel,
+#if defined(WL_TOUCH_SHAPE_SINCE_VERSION)
     .shape = nullptr,
+#endif
+#if defined(WL_TOUCH_ORIENTATION_SINCE_VERSION)
     .orientation = nullptr,
+#endif
 };
 
 int Display::PollEvents() const {
