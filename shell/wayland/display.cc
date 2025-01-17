@@ -554,6 +554,12 @@ const wl_pointer_listener Display::pointer_listener = {
     .axis_source = pointer_handle_axis_source,
     .axis_stop = pointer_handle_axis_stop,
     .axis_discrete = pointer_handle_axis_discrete,
+#if defined(WL_POINTER_AXIS_VALUE120_SINCE_VERSION)
+    .axis_value120 = nullptr,
+#endif
+#if defined(WL_POINTER_AXIS_RELATIVE_DIRECTION_SINCE_VERSION)
+    .axis_relative_direction = nullptr,
+#endif
 };
 
 void Display::keyboard_handle_enter(void* data,
