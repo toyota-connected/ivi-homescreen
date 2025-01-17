@@ -194,6 +194,12 @@ void WaylandWindow::handle_base_surface_leave(void* /* data */,
 const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
     .enter = handle_base_surface_enter,
     .leave = handle_base_surface_leave,
+#if WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION
+    .preferred_buffer_scale = nullptr,
+#endif
+#if WL_SURFACE_PREFERRED_BUFFER_TRANSFORM_SINCE_VERSION
+    .preferred_buffer_transform = nullptr,
+#endif
 };
 
 #if ENABLE_XDG_CLIENT
