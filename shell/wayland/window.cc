@@ -306,13 +306,18 @@ void WaylandWindow::handle_toplevel_close(
 }
 
 const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
-    handle_toplevel_configure,
-    handle_toplevel_close,
+    .configure = handle_toplevel_configure,
+    .close = handle_toplevel_close,
+#if defined(XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION)
+    .configure_bounds = nullptr,
+#endif
 };
 #endif
 
 const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
-    {on_frame_base_surface};
+    {
+        .done = on_frame_base_surface,
+};
 
 void WaylandWindow::on_frame_base_surface(void* data,
                                           struct wl_callback* callback,
