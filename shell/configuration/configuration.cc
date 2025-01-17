@@ -213,7 +213,7 @@ std::vector<Configuration::Config> Configuration::parse_config(
   }
   assert(res.capacity() == view_count);
 
-  return std::move(res);
+  return res;
 }
 
 void Configuration::PrintConfig(const Config& config) {
@@ -451,7 +451,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     PrintConfig(c);
   }
 
-  return std::move(configs);
+  return configs;
 }
 
 int32_t Configuration::mask_accessibility_features(

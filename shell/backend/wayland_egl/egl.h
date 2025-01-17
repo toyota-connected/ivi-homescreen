@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <shell/platform/embedder/embedder.h>
@@ -36,7 +38,7 @@ class Egl {
    * @relation
    * wayland
    */
-  bool ClearCurrent();
+  bool ClearCurrent() const;
 
   /**
    * @brief Attach an EGL rendering context to EGL surface
@@ -46,7 +48,7 @@ class Egl {
    * @relation
    * wayland
    */
-  bool MakeCurrent();
+  bool MakeCurrent() const;
 
   /**
    * @brief Post EGL surface color buffer to a native window
@@ -56,7 +58,7 @@ class Egl {
    * @relation
    * wayland
    */
-  bool SwapBuffers();
+  bool SwapBuffers() const;
 
   /**
    * @brief Attach an EGL rendering context to EGL surface by specifying
@@ -67,7 +69,7 @@ class Egl {
    * @relation
    * wayland
    */
-  bool MakeResourceCurrent();
+  bool MakeResourceCurrent() const;
 
   /**
    * @brief Attach an EGL rendering context to EGL surface by specifying Texture
@@ -78,7 +80,7 @@ class Egl {
    * @relation
    * wayland
    */
-  bool MakeTextureCurrent();
+  bool MakeTextureCurrent() const;
 
   /**
    * @brief Create a new EGL window surface
@@ -89,7 +91,8 @@ class Egl {
    * @relation
    * wayland
    */
-  EGLSurface create_egl_surface(void* native_window, const EGLint* attrib_list);
+  EGLSurface create_egl_surface(void* native_window,
+                                const EGLint* attrib_list) const;
 
   /**
    * @brief Function that returns a function pointer to
@@ -111,8 +114,8 @@ class Egl {
    * @relation
    * EGL
    */
-  [[nodiscard]] PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC
-  GetSwapBuffersWithDamage() const {
+  [[nodiscard]] PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC GetSwapBuffersWithDamage()
+      const {
     return m_pfSwapBufferWithDamage;
   }
 
@@ -123,7 +126,9 @@ class Egl {
    * @relation
    * EGL
    */
-  [[nodiscard]] bool HasExtBufferAge() const { return m_has_egl_ext_buffer_age; }
+  [[nodiscard]] bool HasExtBufferAge() const {
+    return m_has_egl_ext_buffer_age;
+  }
 
   /**
    * @brief Auxiliary function used to transform a FlutterRect into the format
@@ -134,11 +139,13 @@ class Egl {
    * @relation
    * EGL
    */
-  [[nodiscard]] std::array<EGLint, 4> RectToInts(FlutterRect rect) const;
+  [[nodiscard]] std::array<EGLint, 4> RectToInts(const FlutterRect& rect) const;
 
   [[nodiscard]] EGLDisplay GetDisplay() const { return m_dpy; }
 
-  [[nodiscard]] EGLContext GetTextureContext() const { return m_texture_context; }
+  [[nodiscard]] EGLContext GetTextureContext() const {
+    return m_texture_context;
+  }
 
  protected:
   EGLSurface m_egl_surface{};
@@ -186,13 +193,11 @@ class Egl {
   /**
    * @brief Report the contents of EGL attributes and frame buffer
    * configurations
-   * @param[in] configs EGL Config
-   * @param[in] count Count of configs
    * @return void
    * @relation
    * wayland
    */
-  void ReportGlesAttributes(EGLConfig* configs, EGLint count);
+  void ReportGlesAttributes() const;
 
   /**
    * @brief Debug callback function to output error details
@@ -229,5 +234,9 @@ class Egl {
    * @relation
    * internal
    */
-  static void print_extension_list(EGLDisplay dpy);
+  static void print_extension_list(const EGLDisplay& dpy);
+
+
+  bool GetConfig(const EGLint* attrib_list,
+                 std::vector<EGLConfig>& configs);
 };

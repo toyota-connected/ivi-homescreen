@@ -45,10 +45,9 @@ class ByteBufferStreamReader : public ByteStreamReader {
   }
 
   // |ByteStreamReader|
-  void ReadAlignment(uint8_t alignment) override {
-    auto mod = static_cast<uint8_t>(location_ % alignment);
-    if (mod) {
-      location_ += alignment - mod;
+  void ReadAlignment(const uint8_t alignment) override {
+    if (const auto mod = static_cast<uint8_t>(location_ % alignment)) {
+      location_ += static_cast<size_t>(alignment - mod);
     }
   }
 
