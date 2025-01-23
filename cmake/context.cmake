@@ -59,6 +59,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(STATUS "LLVM Root .............. ${LLVM_ROOT}")
     message(STATUS "C++ header path ........ ${LLVM_ROOT}/include/c++/v1/")
 
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++> $<$<COMPILE_LANGUAGE:CXX>:-isystem${LLVM_ROOT}/include/c++/v1/>)
     set(CONTEXT_COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++> $<$<COMPILE_LANGUAGE:CXX>:-isystem${LLVM_ROOT}/include/c++/v1/>)
 
     execute_process(
