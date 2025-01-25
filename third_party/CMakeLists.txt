@@ -43,7 +43,8 @@ target_compile_options(tomlplusplus_tomlplusplus INTERFACE -Wno-conversion)
 #
 # Vulkan-Headers
 #
-add_subdirectory(Vulkan-Headers)
+add_library(vulkan_headers INTERFACE)
+target_include_directories(vulkan_headers INTERFACE Vulkan-Headers/include/vulkan)
 
 #
 # Flutter Common library

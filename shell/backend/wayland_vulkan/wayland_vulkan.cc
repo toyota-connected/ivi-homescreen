@@ -26,7 +26,7 @@
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
-const auto& d = vk::defaultDispatchLoaderDynamic;
+const auto& d = vk::detail::defaultDispatchLoaderDynamic;
 
 #define S1(x) #x
 #define S2(x) S1(x)
@@ -75,12 +75,15 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
-  return {.struct_size = sizeof(FlutterCompositor),
-          .user_data = this,
-          .create_backing_store_callback = nullptr,   // CreateBackingStore,
-          .collect_backing_store_callback = nullptr,  // CollectBackingStore,
-          .present_layers_callback = nullptr,         // PresentLayers,
-          .avoid_backing_store_cache = true};
+  return {
+      .struct_size = sizeof(FlutterCompositor),
+      .user_data = this,
+      .create_backing_store_callback = nullptr,   // CreateBackingStore,
+      .collect_backing_store_callback = nullptr,  // CollectBackingStore,
+      .present_layers_callback = nullptr,         // PresentLayers,
+      .avoid_backing_store_cache = true,
+      .present_view_callback = nullptr,
+  };
 }
 
 WaylandVulkanBackend::~WaylandVulkanBackend() {
@@ -772,17 +775,17 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
 }
 
 void WaylandVulkanBackend::Resize(size_t /* index */,
-                                  Engine* flutter_engine,
+                                  Engine* engine,
                                   const int32_t width,
                                   const int32_t height) {
-  if (width_ != width || height_ != height) {
+  if (width_ != static_cast<uint32_t>(width) ||
+      height_ != static_cast<uint32_t>(height)) {
     resize_pending_ = true;
     width_ = static_cast<uint32_t>(width);
     height_ = static_cast<uint32_t>(height);
-    if (flutter_engine) {
-      if (flutter_engine->SetWindowSize(static_cast<size_t>(height),
-                                        static_cast<size_t>(width)) !=
-          kSuccess) {
+    if (engine) {
+      if (engine->SetWindowSize(static_cast<size_t>(height),
+                                static_cast<size_t>(width)) != kSuccess) {
         spdlog::error("Failed to set Flutter Engine Window Size");
       }
     }
