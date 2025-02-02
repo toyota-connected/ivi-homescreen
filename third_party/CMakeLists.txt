@@ -32,6 +32,7 @@ target_include_directories(rapidjson INTERFACE rapidjson/include)
 #
 # cxxopts
 #
+set(CXXOPTS_CXX_STANDARD ${CMAKE_CXX_STANDARD})
 add_subdirectory(cxxopts)
 
 #

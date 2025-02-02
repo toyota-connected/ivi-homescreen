@@ -84,7 +84,7 @@ class HeadlessBackend final : public OSMesaHeadless, public Backend {
    */
   FlutterCompositor GetCompositorConfig() override;
 
-  GLubyte* getHeadlessBuffer();
+  GLubyte* getHeadlessBuffer() const;
 
  private:
   uint32_t m_prev_width, m_width;

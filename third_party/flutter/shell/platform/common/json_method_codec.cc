@@ -40,8 +40,8 @@ const JsonMethodCodec& JsonMethodCodec::GetInstance() {
 
 std::unique_ptr<MethodCall<rapidjson::Document>>
 JsonMethodCodec::DecodeMethodCallInternal(const uint8_t* message,
-                                          size_t message_size) const {
-  std::unique_ptr<rapidjson::Document> json_message =
+                                          const size_t message_size) const {
+  const std::unique_ptr<rapidjson::Document> json_message =
       JsonMessageCodec::GetInstance().DecodeMessage(message, message_size);
   if (!json_message) {
     return nullptr;
@@ -55,7 +55,7 @@ JsonMethodCodec::DecodeMethodCallInternal(const uint8_t* message,
     return nullptr;
   }
   std::string method_name(method_name_iter->value.GetString());
-  auto arguments_iter = json_message->FindMember(kMessageArgumentsKey);
+  const auto arguments_iter = json_message->FindMember(kMessageArgumentsKey);
   std::unique_ptr<rapidjson::Document> arguments;
   if (arguments_iter != json_message->MemberEnd()) {
     arguments = ExtractElement(json_message.get(), &(arguments_iter->value));
@@ -105,7 +105,8 @@ JsonMethodCodec::EncodeErrorEnvelopeInternal(
   rapidjson::Document envelope(rapidjson::kArrayType);
   auto& allocator = envelope.GetAllocator();
   envelope.PushBack(rapidjson::Value(error_code.c_str(), allocator), allocator);
-  envelope.PushBack(rapidjson::Value(error_message.c_str(), allocator), allocator);
+  envelope.PushBack(rapidjson::Value(error_message.c_str(), allocator),
+                    allocator);
   rapidjson::Value details_value;
   if (error_details) {
     details_value.CopyFrom(*error_details, allocator);
@@ -117,7 +118,7 @@ JsonMethodCodec::EncodeErrorEnvelopeInternal(
 
 bool JsonMethodCodec::DecodeAndProcessResponseEnvelopeInternal(
     const uint8_t* response,
-    size_t response_size,
+    const size_t response_size,
     MethodResult<rapidjson::Document>* result) const {
   std::unique_ptr<rapidjson::Document> json_response =
       JsonMessageCodec::GetInstance().DecodeMessage(response, response_size);
@@ -129,7 +130,7 @@ bool JsonMethodCodec::DecodeAndProcessResponseEnvelopeInternal(
   }
   switch (json_response->Size()) {
     case 1: {
-      std::unique_ptr<rapidjson::Document> value =
+      const std::unique_ptr<rapidjson::Document> value =
           ExtractElement(json_response.get(), &((*json_response)[0]));
       if (value->IsNull()) {
         result->Success();
@@ -139,9 +140,9 @@ bool JsonMethodCodec::DecodeAndProcessResponseEnvelopeInternal(
       return true;
     }
     case 3: {
-      std::string code = (*json_response)[0].GetString();
-      std::string message = (*json_response)[1].GetString();
-      std::unique_ptr<rapidjson::Document> details =
+      const std::string code = (*json_response)[0].GetString();
+      const std::string message = (*json_response)[1].GetString();
+      const std::unique_ptr<rapidjson::Document> details =
           ExtractElement(json_response.get(), &((*json_response)[2]));
       if (details->IsNull()) {
         result->Error(code, message);

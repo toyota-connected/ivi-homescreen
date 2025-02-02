@@ -53,7 +53,7 @@ class MethodChannel {
                     std::unique_ptr<T> arguments,
                     std::unique_ptr<MethodResult<T>> result = nullptr) {
     MethodCall<T> method_call(method, std::move(arguments));
-    std::unique_ptr<std::vector<uint8_t>> message =
+    const std::unique_ptr<std::vector<uint8_t>> message =
         codec_->EncodeMethodCall(method_call);
     if (!result) {
       messenger_->Send(name_, message->data(), message->size(), nullptr);

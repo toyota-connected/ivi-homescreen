@@ -13,15 +13,6 @@ add_executable(
 
 add_sanitizers(${TESTCASE_NAME})
 
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET ${TESTCASE_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
-
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(${TESTCASE_NAME} PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    target_link_options(${TESTCASE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lgcc -lc -lm -v>)
-endif ()
-
 target_compile_definitions(
         ${TESTCASE_NAME}
         PRIVATE
@@ -39,6 +30,7 @@ target_link_libraries(
         PRIVATE
         gtest_main
         ${TYPICAL_TEST_LINK_LIBS}
+        toolchain::toolchain
 )
 
 add_test(

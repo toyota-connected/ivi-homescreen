@@ -22,8 +22,9 @@
 
 #include "logging.h"
 
-OSMesaHeadless::OSMesaHeadless(int32_t initial_width, int32_t initial_height)
-    : m_width(initial_width), m_height(initial_height) {
+OSMesaHeadless::OSMesaHeadless(const int32_t initial_width,
+                               const int32_t initial_height)
+    : m_height(initial_height), m_width(initial_width) {
   if (initial_width == 0) {
     m_width = kDefaultViewWidth;
   }
@@ -44,16 +45,17 @@ OSMesaHeadless::OSMesaHeadless(int32_t initial_width, int32_t initial_height)
   spdlog::trace("Texture Context Created");
 
   m_buf = create_osmesa_buffer(m_width, m_height);
-  MakeCurrent();
+
+  (void)MakeCurrent();
 }
 
 OSMesaHeadless::~OSMesaHeadless() {
   OSMesaDestroyContext(m_context);
 }
 
-bool OSMesaHeadless::MakeCurrent() {
+bool OSMesaHeadless::MakeCurrent() const {
   spdlog::trace("+MakeCurrent(), thread_id=0x{:x}", pthread_self());
-  bool ret =
+  const bool ret =
       OSMesaMakeCurrent(m_context, m_buf, GL_UNSIGNED_BYTE, m_width, m_height);
   assert(ret);
   spdlog::trace("-MakeCurrent()");
@@ -62,26 +64,26 @@ bool OSMesaHeadless::MakeCurrent() {
 
 bool OSMesaHeadless::ClearCurrent() const {
   spdlog::trace("+ClearCurrent(), thread_id=0x{:x}", pthread_self());
-  bool ret =
+  const bool ret =
       OSMesaMakeCurrent(nullptr, nullptr, GL_UNSIGNED_BYTE, m_width, m_height);
   assert(ret);
   spdlog::trace("-ClearCurrent()");
   return true;
 }
 
-bool OSMesaHeadless::MakeResourceCurrent() {
+bool OSMesaHeadless::MakeResourceCurrent() const {
   spdlog::trace("+MakeResourceCurrent(), thread_id=0x{:x}", pthread_self());
-  bool ret = OSMesaMakeCurrent(m_resource_context, m_buf, GL_UNSIGNED_BYTE,
-                               m_width, m_height);
+  const bool ret = OSMesaMakeCurrent(m_resource_context, m_buf,
+                                     GL_UNSIGNED_BYTE, m_width, m_height);
   assert(ret);
   spdlog::trace("-MakeResourceCurrent()");
   return true;
 }
 
-bool OSMesaHeadless::MakeTextureCurrent() {
+bool OSMesaHeadless::MakeTextureCurrent() const {
   spdlog::trace("+MakeTextureCurrent(), thread_id=0x{:x}", pthread_self());
-  bool ret = OSMesaMakeCurrent(m_texture_context, m_buf, GL_UNSIGNED_BYTE,
-                               m_width, m_height);
+  const bool ret = OSMesaMakeCurrent(m_texture_context, m_buf, GL_UNSIGNED_BYTE,
+                                     m_width, m_height);
   assert(ret);
   spdlog::trace("-MakeTextureCurrent()");
   return true;
@@ -91,11 +93,12 @@ void OSMesaHeadless::Finish() {
   glFinish();
 }
 
-GLubyte* OSMesaHeadless::create_osmesa_buffer(int32_t width, int32_t height) {
-  return (GLubyte*)malloc(static_cast<unsigned long>(height * width * 4) *
-                          sizeof(GLubyte));
+GLubyte* OSMesaHeadless::create_osmesa_buffer(const int32_t width,
+                                              const int32_t height) {
+  return static_cast<GLubyte*>(
+      malloc(static_cast<unsigned long>(height * width * 4) * sizeof(GLubyte)));
 }
 
-void OSMesaHeadless::free_buffer() {
+void OSMesaHeadless::free_buffer() const {
   free(m_buf);
 }

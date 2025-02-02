@@ -108,7 +108,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         asio
         flutter
         cxxopts::cxxopts
-        Threads::Threads
         wayland-gen
         dl
         ${GST_LIBRARIES}
@@ -117,23 +116,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         platform_homescreen
 )
 
+if (NOT LLVM_ENABLE_THREADS)
+    target_link_libraries(${PROJECT_NAME} PUBLIC Threads::Threads)
+endif ()
+
 target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}
 )
 
 add_sanitizers(${PROJECT_NAME})
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET ${PROJECT_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
-
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(${PROJECT_NAME} PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    if (ENABLE_CLANG_STATIC_LINK)
-        target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -fuse-ld=lld -l:libc++.a -l:libc++abi.a -static-libgcc -lc -lm -v>)
-    else ()
-        target_link_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++ -fuse-ld=lld -lc++ -lc++abi -lgcc -lc -lm -v>)
-    endif ()
-endif ()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

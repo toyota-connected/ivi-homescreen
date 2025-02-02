@@ -28,14 +28,14 @@ class MessageCodec {
   // decoded by this codec.
   std::unique_ptr<T> DecodeMessage(const uint8_t* binary_message,
                                    const size_t message_size) const {
-    return std::move(DecodeMessageInternal(binary_message, message_size));
+    return DecodeMessageInternal(binary_message, message_size);
   }
 
   // Returns the message encoded in |binary_message|, or nullptr if it cannot be
   // decoded by this codec.
   std::unique_ptr<T> DecodeMessage(
       const std::vector<uint8_t>& binary_message) const {
-    size_t size = binary_message.size();
+    const size_t size = binary_message.size();
     const uint8_t* data = size > 0 ? &binary_message[0] : nullptr;
     return std::move(DecodeMessageInternal(data, size));
   }
@@ -43,14 +43,14 @@ class MessageCodec {
   // Returns a binary encoding of the given |message|, or nullptr if the
   // message cannot be serialized by this codec.
   std::unique_ptr<std::vector<uint8_t>> EncodeMessage(const T& message) const {
-    return std::move(EncodeMessageInternal(message));
+    return EncodeMessageInternal(message);
   }
 
  protected:
   // Implementation of the public interface, to be provided by subclasses.
   virtual std::unique_ptr<T> DecodeMessageInternal(
       const uint8_t* binary_message,
-      const size_t message_size) const = 0;
+      size_t message_size) const = 0;
 
   // Implementation of the public interface, to be provided by subclasses.
   virtual std::unique_ptr<std::vector<uint8_t>> EncodeMessageInternal(

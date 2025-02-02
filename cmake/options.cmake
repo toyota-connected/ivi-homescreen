@@ -124,7 +124,7 @@ endif ()
 #
 # Static linking
 #
-option(ENABLE_CLANG_STATIC_LINK "Link libc++, libc++abi, and gcc as static libs when building with clang" OFF)
+option(ENABLE_STATIC_LINK "Link stdlib with static libs" OFF)
 
 #
 # Docs

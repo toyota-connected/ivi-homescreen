@@ -34,7 +34,7 @@ project(ivi-homescreen
         LANGUAGES CXX C
 )
 
-include(context)
+include(git)
 include(options)
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
@@ -43,7 +43,6 @@ message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
-include(utils)
 
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 

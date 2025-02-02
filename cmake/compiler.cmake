@@ -1,5 +1,5 @@
 #
-# Copyright 2023 Toyota Connected North America
+# Copyright 2023-2025 Toyota Connected North America
 # @copyright Copyright (c) 2022 Woven Alpha, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,7 +44,7 @@ endfunction(COMPILER_FLAGS_APPEND)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
-# set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
@@ -88,9 +88,6 @@ COMPILER_FLAGS_APPEND(RELEASE " -fno-omit-frame-pointer" "-f(no-)?omit-frame-poi
 COMPILER_FLAGS_APPEND(RELEASE " -Wformat=2" "-Wformat(=[0-9]+)?")
 COMPILER_FLAGS_APPEND(RELEASE " -D_FORTIFY_SOURCE=2" "-D_FORTIFY_SOURCE(=[0-9]+)?")
 
-# pigeon requires it
-string(APPEND CMAKE_CXX_FLAGS " -frtti")
-
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,--build-id=sha1")
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " -Wl,--no-undefined")
@@ -115,3 +112,35 @@ message(STATUS "CC ..................... ${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_
 message(STATUS "CXX .................... ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER_ARG1}")
 message(STATUS "CFLAGS ................. ${CMAKE_C_FLAGS}")
 message(STATUS "CXXFLAGS ............... ${CMAKE_CXX_FLAGS}")
+
+#
+# Check for IPO support
+#
+if (ENABLE_LTO)
+    cmake_policy(SET CMP0069 NEW)
+    include(CheckIPOSupported)
+    check_ipo_supported(
+            RESULT IPO_SUPPORT_RESULT
+            OUTPUT IPO_SUPPORT_OUTPUT
+            LANGUAGES C CXX
+    )
+    if (IPO_SUPPORT_RESULT)
+        message(STATUS "IPO .................... supported")
+    else ()
+        message(STATUS "IPO .................... not supported: ${IPO_SUPPORT_OUTPUT}")
+    endif ()
+endif ()
+
+#
+# Compiler specific settings
+#
+message(STATUS "CMAKE_CXX_COMPILER_ID .. ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    include(compiler_clang)
+endif ()
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    include(compiler_gnu)
+endif ()

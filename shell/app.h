@@ -46,7 +46,7 @@ class App final {
   [[nodiscard]] int Loop() const;
 
 #if BUILD_BACKEND_HEADLESS_EGL
-  uint8_t* getViewRenderBuf(int i);
+  uint8_t* getViewRenderBuf(int i) const;
 #endif
 
  private:

@@ -38,10 +38,10 @@ class ReplyManager {
 };
 }  // namespace internal
 
-// Implemention of MethodResult that sends a response to the Flutter engine
+// Implementation of MethodResult that sends a response to the Flutter engine
 // exactly once, encoded using a given codec.
 template <typename T>
-class EngineMethodResult : public MethodResult<T> {
+class EngineMethodResult final : public MethodResult<T> {
  public:
   // Creates a result object that will send results to |reply_handler|, encoded
   // using |codec|. The |codec| pointer must remain valid for as long as this
@@ -51,12 +51,12 @@ class EngineMethodResult : public MethodResult<T> {
             std::make_unique<internal::ReplyManager>(std::move(reply_handler))),
         codec_(codec) {}
 
-  ~EngineMethodResult() = default;
+  ~EngineMethodResult() override = default;
 
  protected:
   // |flutter::MethodResult|
   void SuccessInternal(const T* result) override {
-    std::unique_ptr<std::vector<uint8_t>> data =
+    const std::unique_ptr<std::vector<uint8_t>> data =
         codec_->EncodeSuccessEnvelope(result);
     reply_manager_->SendResponseData(data.get());
   }
@@ -65,7 +65,7 @@ class EngineMethodResult : public MethodResult<T> {
   void ErrorInternal(const std::string& error_code,
                      const std::string& error_message,
                      const T* error_details) override {
-    std::unique_ptr<std::vector<uint8_t>> data =
+    const std::unique_ptr<std::vector<uint8_t>> data =
         codec_->EncodeErrorEnvelope(error_code, error_message, error_details);
     reply_manager_->SendResponseData(data.get());
   }
