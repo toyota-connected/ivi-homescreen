@@ -4,40 +4,43 @@ Flutter Linux CPP Embedder
 
 [![Documentation Status](https://readthedocs.org/projects/ivi-homescreen/badge/?version=latest)](https://ivi-homescreen.readthedocs.io/en/latest/?badge=latest)
 
-### Discord Server https://discord.gg/V5uWD9fvws
+#### Discord Server https://discord.gg/V5uWD9fvws
 
 ## Highlights
-* Desktop Plugin Registry
-  * Flutter Pigeon CPP compatible
-  * Plugins modeled after Window CPP
-  * Plugins enabled/disabled via CMake
-  * Firestore first party compatible
-* Desktop Texture Registry
-  * Camera first party compatible
-  * Video Player first party compatible
-* Platform View Framework
-  * AndroidView widget compatible
-* Backend Support
-  * EGL
-  * Vulkan (first Flutter embedder to support this)
-  * Wayland Leased DRM (coming soon)
-  * DRM/KMS (coming soon)
-* Same source code runs on Desktop and embedded Linux image
-  * Ubuntu 18+
-  * Fedora 33+
-  * Yocto Dunfell/Kirkstone/Scarthgap
 
+* Desktop Plugin Registry
+    * Flutter Pigeon CPP compatible
+    * Plugins modeled after Window CPP
+    * Plugins enabled/disabled via CMake
+    * Firestore first party compatible
+* Desktop Texture Registry
+    * Camera first party compatible
+    * Video Player first party compatible
+* Platform View Framework
+    * AndroidView widget compatible
+* Backend Support
+    * EGL
+    * Vulkan (first Flutter embedder to support this)
+    * Wayland Leased DRM (coming soon)
+    * DRM/KMS (coming soon)
+* Same source code runs on Desktop and embedded Linux image
+    * Ubuntu 18+
+    * Fedora 33+
+    * Yocto Dunfell/Kirkstone/Scarthgap
 
 ## Plugins
+
 ivi-homescreen plugins are located at https://github.com/toyota-connected/ivi-homescreen-plugins
 
 There are two ways to reference this repo:
+
 1. Clone plugins repo to root of ivi-homescreen folder
-2. Set PLUGIN_DIR to repo path.  -DPLUGIN_DIR=<my path>
+2. Set PLUGIN_DIR to repo path. -DPLUGIN_DIR=<my path>
 
 ## Logging
 
 Logging level support
+
 * trace
 * debug
 * info
@@ -75,31 +78,39 @@ Start new terminal
     dlt-daemon
 
 #### View DLT log output in a terminal
+
 Start new terminal
 
     dlt-receive -a localhost
 
 ## Sanitizer Support
 
-You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
+You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in
+your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
 
-If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will simply just be ignored.
+If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your
+compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will
+simply just be ignored.
 
 ## Backend Support
 
 ### EGL Backend
-This is the default build configuration.  To manually build EGL Backend use
+
+This is the default build configuration. To manually build EGL Backend use
+
 ```
 -DBUILD_BACKEND_WAYLAND_EGL=ON -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
 ```
 
 ### Vulkan Backend
+
 To build Vulkan Backend use
+
 ```
 -DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON
 ```
 
-Running Vulkan requires an engine version that supports Vulkan.  Stable does not yet support Vulkan.
+Running Vulkan requires an engine version that supports Vulkan. Stable does not yet support Vulkan.
 
 ## Bundle File Override Logic
 
@@ -133,7 +144,8 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
 
 `help` - Prints all command line options and exits
 
-`-b {path to bundle folder}` - Sets the Bundle Path.  A bundle path expects the following folder structure:
+`-b {path to bundle folder}` - Sets the Bundle Path. A bundle path expects the following folder structure:
+
 ```
   Flutter Application (bundle folder)
     data/flutter_assets
@@ -141,32 +153,36 @@ Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libr
     lib/libapp.so
     lib/libflutter_engine.so (optional - overrides system path)
 ```
-  If there are multiple references to this option, it will associate a new view per bundle.  This example will open two windows sized 1280x1024 both running the Gallery app:
+
+If there are multiple references to this option, it will associate a new view per bundle. This example will open two
+windows sized 1280x1024 both running the Gallery app:
+
 ```
 homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -w 1280 -h 1024
 ```
 
-`-a {int value}` - Sets the Engine's initial state of Accessibility Feature support.  Requires an integer value.
+`-a {int value}` - Sets the Engine's initial state of Accessibility Feature support. Requires an integer value.
 
 `-disable-cursor` - Disables the cursor.
 
-`-d` - Outputs backend debug information.  If Vulkan and Validation Layer are available, it will be loaded.
+`-d` - Outputs backend debug information. If Vulkan and Validation Layer are available, it will be loaded.
 
 `-f` - Sets the window to fullscreen.
 
-`-w {int value}` - Sets View width.  Requires an integer value.
+`-w {int value}` - Sets View width. Requires an integer value.
 
-`-h {int value}` - Sets View height.  Requires an integer value.
+`-h {int value}` - Sets View height. Requires an integer value.
 
-`-i {int value}` - Sets ivi-shell surface ID.  Requires an integer value.
+`-i {int value}` - Sets ivi-shell surface ID. Requires an integer value.
 
-`-p {int value}` - Sets Pixel Ratio.  Requires a double value.
+`-p {int value}` - Sets Pixel Ratio. Requires a double value.
 
-`-t {String}` - Sets cursor theme to load.  e.g. -t DMZ-White
+`-t {String}` - Sets cursor theme to load. e.g. -t DMZ-White
 
-* `--wayland-event-mask` - Sets events to ignore. e.g. --wayland-event-mask pointer-axis, or --wayland-event-mask="pointer-axis, touch"
+* `--wayland-event-mask` - Sets events to ignore. e.g. --wayland-event-mask pointer-axis, or --wayland-event-mask="
+  pointer-axis, touch"
 
-  * Available parameters are:
+    * Available parameters are:
       pointer, pointer-axis, pointer-buttons, pointer-motion, keyboard, touch
 
 * Dart VM arguments - any additional command line arguments not handled get directly passed to the Dart VM instance.
@@ -175,11 +191,11 @@ homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOM
 
 ### Global - `[global]`
 
-`app_id` - Sets Application ID.  Currently only the primary index app_id value is used.
+`app_id` - Sets Application ID. Currently only the primary index app_id value is used.
 
-`cursor_theme` - Sets cursor theme to use.  This only applies to command line, and global parameter options.
+`cursor_theme` - Sets cursor theme to use. This only applies to command line, and global parameter options.
 
-`disable_cursor` - Disables the cursor.  This only applies to command line, and global parameter options.
+`disable_cursor` - Disables the cursor. This only applies to command line, and global parameter options.
 
 `debug_backend` - Enables Backend Debug logic.
 
@@ -191,18 +207,19 @@ homescreen -b $HOME/workspace-automation/app/gallery/.desktop-homescreen -b $HOM
 
 `vm_args` - Array of strings which get passed to the VM instance as command line arguments.
 
-`window_type` - Currently used for AGL Compositor Window Types.  If not running on AGL compositor,
+`window_type` - Currently used for AGL Compositor Window Types. If not running on AGL compositor,
 it will create borderless windows in no particular position.
 
-`width` - sets View width.  Requires an integer value.
+`width` - sets View width. Requires an integer value.
 
-`height` - sets View height.  Requires an integer value.
+`height` - sets View height. Requires an integer value.
 
 `output_index` - select logical index of Wayland output to display on
 
 `pixel_ratio` - sets the pixel ratio for Flutter engine instance
 
-`accessibility_features` - Bitmask of Engine Accessibility Features.  Requires an integer.  See flutter_embedder.h for valid values.
+`accessibility_features` - Bitmask of Engine Accessibility Features. Requires an integer. See flutter_embedder.h for
+valid values.
 
 `fullscreen` - Sets window to fullscreen.
 
@@ -212,8 +229,7 @@ it will create borderless windows in no particular position.
 
 `fps_output_overlay` - If `"fps_output_console"=1` and `"fps_output_overlay"=1` the screen overlay is enabled.
 
-`fps_output_frequency` - Optional for FPS.  Changing value controls the update interval.
-
+`fps_output_frequency` - Optional for FPS. Changing value controls the update interval.
 
 ### AGL Shell `[window_activation_area]`
 
@@ -225,7 +241,6 @@ it will create borderless windows in no particular position.
 
 `height` - height of activation area
 
-
 ## config.toml
 
 * Locate config.toml file in the root of your bundle folder
@@ -234,6 +249,7 @@ it will create borderless windows in no particular position.
 * Any empty file is valid
 
 ### config.toml sample
+
 ```
 [global]
 app_id = 'gallery'                 # Application name
@@ -264,7 +280,8 @@ height = 768
 ```
 
 ## Parameter loading order
-Only VM Command Line arguments are additive.  Meaning all instances of VM command line references will get added
+
+Only VM Command Line arguments are additive. Meaning all instances of VM command line references will get added
 together; JSON view + JSON global + CLI args.
 
 All other parameters get assigned using the following ordering:
@@ -275,79 +292,79 @@ All other parameters get assigned using the following ordering:
 
 ## CMake Build flags
 
-`ENABLE_XDG_CLIENT` - Enable XDG Client.  Defaults to ON
+`ENABLE_XDG_CLIENT` - Enable XDG Client. Defaults to ON
 
-`ENABLE_AGL_SHELL_CLIENT` - Enable AGL Client.  Defaults to OFF
+`ENABLE_AGL_SHELL_CLIENT` - Enable AGL Client. Defaults to OFF
 
-`ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client.  Defaults to OFF
+`ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client. Defaults to OFF
 
-`ENABLE_DRM_LEASE_CLIENT` - Enable drm lease Client.  Defaults to OFF
+`ENABLE_DRM_LEASE_CLIENT` - Enable drm lease Client. Defaults to OFF
 
-`ENABLE_LTO` - Enable Link Time Optimization.  Defaults to OFF
+`ENABLE_LTO` - Enable Link Time Optimization. Defaults to OFF
 
-`ENABLE_DLT` - Enable DLT logging.  Defaults to OFF
+`ENABLE_DLT` - Enable DLT logging. Defaults to OFF
 
-`BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL.  Defaults to ON
+`BUILD_BACKEND_WAYLAND_EGL` - Build Backend for EGL. Defaults to ON
 
-`BUILD_EGL_TRANSPARENCY` - Build with EGL Transparency Enabled.  Defaults to ON
+`BUILD_EGL_TRANSPARENCY` - Build with EGL Transparency Enabled. Defaults to ON
 
-`BUILD_EGL_ENABLE_3D` - Build with EGL Stencil, Depth, and Stencil config Enabled.  Defaults to ON
+`BUILD_EGL_ENABLE_3D` - Build with EGL Stencil, Depth, and Stencil config Enabled. Defaults to ON
 
-`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4.  Defaults to ON
+`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4. Defaults to ON
 
-`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan.  Defaults to OFF
+`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan. Defaults to OFF
 
-`BUILD_BACKEND_HEADLESS_EGL` - Build Headless backend for EGL (OSMesa).  Defaults to OFF
+`BUILD_BACKEND_HEADLESS_EGL` - Build Headless backend for EGL (OSMesa). Defaults to OFF
 
-`DEBUG_PLATFORM_MESSAGES` - Dump Platform Channel Messages.  Defaults to OFF
+`DEBUG_PLATFORM_MESSAGES` - Dump Platform Channel Messages. Defaults to OFF
 
-`BUILD_CRASH_HANDLER` - Build Sentry IO Crash Handler Support.  Defaults to OFF
+`BUILD_CRASH_HANDLER` - Build Sentry IO Crash Handler Support. Defaults to OFF
 
-`BUILD_DOCS` - Builds Docs.  Defaults to OFF
+`BUILD_DOCS` - Builds Docs. Defaults to OFF
 
-`BUILD_UNIT_TESTS` - Build Unit Tests.  Defaults to OFF
+`BUILD_UNIT_TESTS` - Build Unit Tests. Defaults to OFF
 
-`UNIT_TEST_SAVE_GOLDENS` - Update test goldens.  Defaults to OFF
+`UNIT_TEST_SAVE_GOLDENS` - Update test goldens. Defaults to OFF
 
-`EXE_OUTPUT_NAME` - Set executable output name.  Defaults to `homescreen`
+`EXE_OUTPUT_NAME` - Set executable output name. Defaults to `homescreen`
 
-`DISABLE_PLUGINS` - Disables all plugins located in the plugins folder.  Defaults to OFF
+`DISABLE_PLUGINS` - Disables all plugins located in the plugins folder. Defaults to OFF
 
-`BUILD_PLUGIN_AUDIOPLAYERS_LINUX` - Include Audioplayers Linux plugin.  Defaults to OFF
+`BUILD_PLUGIN_AUDIOPLAYERS_LINUX` - Include Audioplayers Linux plugin. Defaults to OFF
 
-`BUILD_PLUGIN_CAMERA` - Include Camera plugin.  Defaults to OFF
+`BUILD_PLUGIN_CAMERA` - Include Camera plugin. Defaults to OFF
 
-`BUILD_PLUGIN_CLOUD_FIRESTORE` - Plugin Cloud Firestore.  Defaults to OFF
+`BUILD_PLUGIN_CLOUD_FIRESTORE` - Plugin Cloud Firestore. Defaults to OFF
 
-`BUILD_PLUGIN_DESKTOP_WINDOW_LINUX` - Includes Desktop Window Linux Plugin.  Defaults to OFF
+`BUILD_PLUGIN_DESKTOP_WINDOW_LINUX` - Includes Desktop Window Linux Plugin. Defaults to OFF
 
-`BUILD_PLUGIN_FILE_SELECTOR` - Include File Selector plugin.  Defaults to OFF
+`BUILD_PLUGIN_FILE_SELECTOR` - Include File Selector plugin. Defaults to OFF
 
-`BUILD_PLUGIN_FIREBASE_AUTH` - Plugin Firebase Auth.  Defaults to OFF
+`BUILD_PLUGIN_FIREBASE_AUTH` - Plugin Firebase Auth. Defaults to OFF
 
-`BUILD_PLUGIN_FIREBASE_STORAGE` - Plugin Firebase Storage.  Defaults to OFF
+`BUILD_PLUGIN_FIREBASE_STORAGE` - Plugin Firebase Storage. Defaults to OFF
 
-`BUILD_PLUGIN_GO_ROUTER` - Includes Go Router Plugin.  Defaults to ON
+`BUILD_PLUGIN_GO_ROUTER` - Includes Go Router Plugin. Defaults to ON
 
-`BUILD_PLUGIN_GOOGLE_SIGN_IN` - Include Google Sign In manager.  Defaults to OFF
+`BUILD_PLUGIN_GOOGLE_SIGN_IN` - Include Google Sign In manager. Defaults to OFF
 
-`BUILD_PLUGIN_INTEGRATION_TEST` - Included Flutter Integration Test support.  Defaults to OFF
+`BUILD_PLUGIN_INTEGRATION_TEST` - Included Flutter Integration Test support. Defaults to OFF
 
-`BUILD_PLUGIN_PDF` - Include PDF plugin.  Defaults to OFF
+`BUILD_PLUGIN_PDF` - Include PDF plugin. Defaults to OFF
 
-`BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage.  Defaults to OFF
+`BUILD_PLUGIN_SECURE_STORAGE` - Includes Flutter Secure Storage. Defaults to OFF
 
-`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin.  Defaults to OFF
+`BUILD_PLUGIN_URL_LAUNCHER` - Includes URL Launcher Plugin. Defaults to OFF
 
-`BUILD_PLUGIN_VIDEO_PLAYER_LINUX` - Include Video Player plugin.  Defaults to OFF
+`BUILD_PLUGIN_VIDEO_PLAYER_LINUX` - Include Video Player plugin. Defaults to OFF
 
-`BUILD_PLUGIN_FILAMENT_VIEW` - Include Filament View plugin.  Defaults to OFF
+`BUILD_PLUGIN_FILAMENT_VIEW` - Include Filament View plugin. Defaults to OFF
 
-`BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW` - Include Layer Playground View plugin.  Defaults to OFF
+`BUILD_PLUGIN_LAYER_PLAYGROUND_VIEW` - Include Layer Playground View plugin. Defaults to OFF
 
-`BUILD_PLUGIN_NAV_RENDER_VIEW` - Include Navigation Render View plugin.  Defaults to OFF
+`BUILD_PLUGIN_NAV_RENDER_VIEW` - Include Navigation Render View plugin. Defaults to OFF
 
-`BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW` - Includes WebView View Plugin.  Defaults to OFF
+`BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW` - Includes WebView View Plugin. Defaults to OFF
 
 _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
@@ -357,6 +374,7 @@ _**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
 
 Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
 This should resolve it:
+
 ```
 export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
 ```
@@ -444,6 +462,7 @@ With plugins
 ### Running an app
 
 Release Bundle Folder layout
+
 ```
 .desktop-homescreen/
 ├── data
@@ -457,6 +476,7 @@ Release Bundle Folder layout
 ```
 
 Running the bundle above would be
+
 ```
 homescreen --b=`pwd`/.desktop-homescreen --w=1024 --h=768
 ```
@@ -468,6 +488,7 @@ https://github.com/meta-flutter/workspace-automation
 Example usage to run gallery application on Linux desktop
 
 Run once
+
 ```
 git clone https://github.com/meta-flutter/workspace-automation
 cd workspace_automation
@@ -475,6 +496,7 @@ sudo ./flutter_workspace.py
 ```
 
 Run for each development session, or new terminal window opened
+
 ```
 source ./setup_env.sh
 cd app/gallery
@@ -485,7 +507,6 @@ flutter_workspace.py installs runtime packages, patches source files, compiles p
 
 _Note: `sudo` is required to install runtime packages_
 
-
 ## CMAKE dependency paths
 
 Path prefix used to determine required files is determined at build.
@@ -495,7 +516,7 @@ For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
 ## Crash Handler
 
-Sentry-native support is available for Crash Handling.  This pushes a mini-dump to the cloud for triage and tracking.
+Sentry-native support is available for Crash Handling. This pushes a mini-dump to the cloud for triage and tracking.
 
 To create user account and get DNS See https://sentry.io/welcome/
 

@@ -39,8 +39,6 @@ target_link_libraries(flutter PUBLIC
         spdlog
 )
 
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET flutter PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
+target_link_libraries(flutter PUBLIC toolchain::toolchain)
 
 add_sanitizers(flutter)

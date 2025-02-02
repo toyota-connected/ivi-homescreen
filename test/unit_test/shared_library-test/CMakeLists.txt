@@ -4,6 +4,9 @@ set(TESTCASE_NAME "homescreen_shared_library_ut_test_driver")
 set(TESTCASE_CC test_case_shared_library.cc)
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+
 # Basically, the following statements need not be modified
 add_executable(
         ${TESTCASE_NAME}
@@ -12,15 +15,6 @@ add_executable(
 )
 
 add_sanitizers(${TESTCASE_NAME})
-
-if (IPO_SUPPORT_RESULT)
-    set_property(TARGET ${TESTCASE_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-endif ()
-
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(${TESTCASE_NAME} PRIVATE ${CONTEXT_COMPILE_OPTIONS})
-    target_link_options(${TESTCASE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fuse-ld=lld -lc++ -lc++abi -lgcc -lc -lm -v>)
-endif ()
 
 target_compile_definitions(
         ${TESTCASE_NAME}
@@ -31,8 +25,6 @@ target_compile_definitions(
 target_include_directories(
         ${TESTCASE_NAME}
         PRIVATE
-        /usr/include/glib-2.0
-        /usr/lib/x86_64-linux-gnu/glib-2.0/include
         ${TYPICAL_TEST_INC_DIRS}
 )
 
@@ -41,6 +33,8 @@ target_link_libraries(
         PRIVATE
         gtest_main
         ${TYPICAL_TEST_LINK_LIBS}
+        PkgConfig::GIO
+        toolchain::toolchain
 )
 
 add_test(

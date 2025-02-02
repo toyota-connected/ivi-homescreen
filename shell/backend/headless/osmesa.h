@@ -42,9 +42,9 @@ class OSMesaHeadless {
    * @relation
    * wayland
    */
-  bool MakeCurrent();
-  bool MakeResourceCurrent();
-  bool MakeTextureCurrent();
+  bool MakeCurrent() const;
+  bool MakeResourceCurrent() const;
+  bool MakeTextureCurrent() const;
 
   static void Finish();
 
@@ -56,7 +56,7 @@ class OSMesaHeadless {
    * @retval GLUbyte buffer
    */
   static GLubyte* create_osmesa_buffer(int32_t width, int32_t height);
-  void free_buffer();
+  void free_buffer() const;
 
  protected:
   uint8_t* m_buf{};
