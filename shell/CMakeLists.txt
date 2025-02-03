@@ -116,10 +116,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         platform_homescreen
 )
 
-if (NOT LLVM_ENABLE_THREADS)
-    target_link_libraries(${PROJECT_NAME} PUBLIC Threads::Threads)
-endif ()
-
 target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}
 )
