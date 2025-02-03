@@ -132,10 +132,10 @@ if (ENABLE_LTO)
 endif ()
 
 #
-# Compiler specific settings
+# Toolchain target
 #
-message(STATUS "CMAKE_CXX_COMPILER_ID .. ${CMAKE_CXX_COMPILER_ID}")
-message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "Compiler ............... ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "Compiler Version ....... ${CMAKE_CXX_COMPILER_VERSION}")
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     include(compiler_clang)
@@ -144,3 +144,10 @@ endif ()
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     include(compiler_gnu)
 endif ()
+
+#
+# Threads
+#
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(toolchain INTERFACE Threads::Threads)
