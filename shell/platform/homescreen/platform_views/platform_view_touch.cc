@@ -18,28 +18,70 @@
 
 PlatformViewTouch::PlatformViewTouch(
     const std::vector<flutter::EncodableValue>& params) {
-  id_ = std::get<int32_t>(params[0]);
-  downTime_ = std::get<int32_t>(params[1]);
-  eventTime_ = std::get<int32_t>(params[2]);
-  action_ = std::get<int32_t>(params[3]);
-  pointerCount_ = std::get<int32_t>(params[4]);
-  const auto l1 = std::get<flutter::EncodableList>(params[5]);
-  for (const auto& it_ : std::get<flutter::EncodableList>(l1[0])) {
-    rawPointerPropertiesList_.emplace_back(std::get<int32_t>(it_));
+#if DEBUG_PLATFORM_VIEW_TOUCH_PARAMS
+  for (const auto& it : params) {
+    plugin_common::Encodable::PrintFlutterEncodableValue("PlatformViewTouch",
+                                                          it);
   }
-  const auto l2 = std::get<flutter::EncodableList>(params[6]);
-  for (const auto& it_ : std::get<flutter::EncodableList>(l2[0])) {
-    rawPointerCoords_.emplace_back(std::get<double>(it_));
+#endif
+  if (std::holds_alternative<int32_t>(params[0])) {
+    id_ = std::get<int32_t>(params[0]);
   }
-  metaState_ = std::get<int32_t>(params[7]);
-  buttonState_ = std::get<int32_t>(params[8]);
-  xPrecision_ = std::get<double>(params[9]);
-  yPrecision_ = std::get<double>(params[10]);
-  deviceId_ = std::get<int32_t>(params[11]);
-  edgeFlags_ = std::get<int32_t>(params[12]);
-  source_ = std::get<int32_t>(params[13]);
-  flags_ = std::get<int32_t>(params[14]);
-  motionEventId_ = std::get<int32_t>(params[15]);
+  if (std::holds_alternative<int64_t>(params[1])) {
+    downTime_ = std::get<int64_t>(params[1]);
+  }
+  if (std::holds_alternative<int64_t>(params[2])) {
+    eventTime_ = std::get<int64_t>(params[2]);
+  }
+  if (std::holds_alternative<int32_t>(params[3])) {
+    action_ = std::get<int32_t>(params[3]);
+  }
+  if (std::holds_alternative<int32_t>(params[4])) {
+    pointerCount_ = std::get<int32_t>(params[4]);
+  }
+  if (std::holds_alternative<flutter::EncodableList>(params[5])) {
+    if (const auto l1 = std::get<flutter::EncodableList>(params[5]);
+        std::holds_alternative<flutter::EncodableList>(l1[0])) {
+      for (const auto& it_ : std::get<flutter::EncodableList>(l1[0])) {
+        rawPointerPropertiesList_.emplace_back(std::get<int32_t>(it_));
+      }
+    }
+  }
+  if (std::holds_alternative<flutter::EncodableList>(params[6])) {
+    if (const auto l2 = std::get<flutter::EncodableList>(params[6]);
+        std::holds_alternative<flutter::EncodableList>(l2[0])) {
+      for (const auto& it_ : std::get<flutter::EncodableList>(l2[0])) {
+        rawPointerCoords_.emplace_back(std::get<double>(it_));
+      }
+    }
+  }
+  if (std::holds_alternative<int32_t>(params[7])) {
+    metaState_ = std::get<int32_t>(params[7]);
+  }
+  if (std::holds_alternative<int32_t>(params[8])) {
+    buttonState_ = std::get<int32_t>(params[8]);
+  }
+  if (std::holds_alternative<double>(params[9])) {
+    xPrecision_ = std::get<double>(params[9]);
+  }
+  if (std::holds_alternative<double>(params[10])) {
+    yPrecision_ = std::get<double>(params[10]);
+  }
+  if (std::holds_alternative<int32_t>(params[11])) {
+    deviceId_ = std::get<int32_t>(params[11]);
+  }
+  if (std::holds_alternative<int32_t>(params[12])) {
+    edgeFlags_ = std::get<int32_t>(params[12]);
+  }
+  if (std::holds_alternative<int32_t>(params[13])) {
+    source_ = std::get<int32_t>(params[13]);
+  }
+  if (std::holds_alternative<int32_t>(params[14])) {
+    flags_ = std::get<int32_t>(params[14]);
+  }
+  if (std::holds_alternative<int32_t>(params[15])) {
+    motionEventId_ = std::get<int32_t>(params[15]);
+  }
 }
 
 void PlatformViewTouch::Print() {

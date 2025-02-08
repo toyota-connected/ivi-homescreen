@@ -45,8 +45,8 @@ class PlatformViewTouch {
   /// The ID of the platform view as seen by the Flutter side.
   int32_t id_;
   /// The amount of time that the touch has been pressed.
-  int32_t downTime_;
-  int32_t eventTime_;
+  int64_t downTime_;
+  int64_t eventTime_;
   int32_t action_;
   /// The number of pointers (e.g, fingers) involved in the touch event.
   int32_t pointerCount_;
