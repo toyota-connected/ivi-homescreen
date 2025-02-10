@@ -14,14 +14,91 @@ jobs:
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
     outputs:
       dockerfiles: ${{ steps.set-matrix.outputs.dockerfiles }}
+      composefiles: ${{ steps.set-matrix.outputs.composefiles }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: find-docker-files
         id: set-matrix
         run: |
+          # ex) ["./xxx/Dockerfile","./yyy/Dockerfile"]
           dockerfiles=$(find . -name "Dockerfile" | jq --raw-input --slurp -c 'split("\n") | map(select(. != ""))')
-          echo "dockerfiles=${dockerfiles}" >> $GITHUB_OUTPUT
+          # ex) ./docker-compose.yml \n ./hoge/docker-compose.yml
+          compose_list=$(find . -name "docker-compose.yml")
+
+          # Use docker compose build when comopse YML files are found
+          if [ "${compose_list}" != '' ]; then
+              echo "INFO: detected docker-compose.yml"
+
+              docker_entries=()
+              for file in ${compose_list}; do
+                SERVICES=$(docker compose -f "$file" config --services --quiet)
+                for SERVICE in $SERVICES; do
+                  docker_entries+=("{\"compose_yml\":\"$file\", \"service\":\"$SERVICE\"}")
+                done
+              done
+
+              # ex) [{"compose_yml":"./docker-compose.yml","service":service0},{"compose_yml":"./hoge/docker-compose.yml","service":service1},...]
+              docker_entries_fmt=$(echo "${docker_entries[@]}" | jq -c -s .)
+              echo "composefiles=${docker_entries_fmt}" >> $GITHUB_OUTPUT
+              echo "${docker_entries_fmt}"
+          elif [ "${dockerfiles}" != '[]' ]; then
+              echo "dockerfiles=${dockerfiles}" >> $GITHUB_OUTPUT
+              echo "INFO: Dockerfile = ${dockerfiles}"
+          fi
+
+  wiz-iac-scan-docker-compose:
+    needs: [set-matrix]
+    runs-on: [self-hosted, default-k8s-runner-linux-x64]
+    if: ${{ needs.set-matrix.outputs.composefiles != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        composefile: ${{ fromJson(needs.set-matrix.outputs.composefiles) }}
+    steps:
+      - name: Generate netrc for Github
+        uses: arene-os/arene-os-actions/generate-netrc@v1.27.1
+        with:
+          file-name: $HOME/.netrc
+          host-name: github.tmc-stargate.com
+          login: ${{ secrets.TMCSTARGATE_GITHUB_USER }}
+          password: ${{ secrets.TMCSTARGATE_GITHUB_TOKEN }}
+      - name: Generate netrc for Artifactory SaaS
+        uses: arene-os/arene-os-actions/generate-netrc@v1.27.1
+        with:
+          file-name: $HOME/.netrc
+          host-name: artifactory.stargate.toyota
+          login: ${{ secrets.STARGATE_ARTIFACTORY_USERNAME }}
+          password: ${{ secrets.STARGATE_ARTIFACTORY_TOKEN }}
+          append: true
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: docker compose local build
+        id: compose
+        run: |
+          envfile="$(dirname "${{ matrix.composefile.compose_yml }}")/.env"
+          if [ ! -e ${envfile} ]; then
+            # build without .env
+            envfile="/dev/null"
+          fi
+          echo "INFO: envfile path = ${envfile}"
+
+          composefile="${{ matrix.composefile.compose_yml }}"
+          service="${{ matrix.composefile.service }}"
+          echo "INFO: service = ${service} composefile = ${composefile}"
+          
+          docker compose --env-file "${envfile}" -f "${composefile}" build "${service}"
+          echo "INFO: docker compose local build done."
+          docker_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -v "action-slack-notify")
+          echo "INFO: docker image = ${docker_image}"
+          echo "DOCKER_IMAGE=${docker_image}" >> $GITHUB_OUTPUT
+      - name: wiz-iac-scan-docker-compose
+        uses: Innersource/wizcli-wrapper@v1
+        with:
+          skip_iac_scan: "skip"
+          skip_docker_build: "skip"
+          wiz_docker_image_name: "${{ steps.compose.outputs.DOCKER_IMAGE }}"
+
   wiz-iac-scan-docker:
     needs: set-matrix
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
@@ -32,23 +109,21 @@ jobs:
         dockerfile: ${{ fromJson(needs.set-matrix.outputs.dockerfiles) }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v4
       - name: Wiz IaC Scan
         uses: Innersource/wizcli-wrapper@v1
         with:
           skip_iac_scan: "skip"
           docker_scan_filename: "${{ matrix.dockerfile }}"
+
   wiz-iac-scan-default:
     needs: set-matrix
     runs-on: [self-hosted, default-k8s-runner-linux-x64]
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v4
       - name: Wiz IaC Scan
         uses: Innersource/wizcli-wrapper@v1
         with:
           iac_scan_path: "."
           skip_docker_scan: "skip"
-
