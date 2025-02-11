@@ -50,10 +50,13 @@ Engine::Engine(FlutterView* view,
   m_args.struct_size = sizeof(FlutterProjectArgs);
   m_args.command_line_argc = static_cast<int>(vm_args_c.size());
   m_args.command_line_argv = vm_args_c.data();
+  m_args.dart_entrypoint_argc = static_cast<int>(vm_args_c.size());
+  m_args.dart_entrypoint_argv = vm_args_c.data();
   m_args.platform_message_callback = OnFlutterPlatformMessage;
   m_args.persistent_cache_path = m_cache_path.c_str();
   m_args.is_persistent_cache_read_only = false;
   m_args.log_message_callback = onLogMessageCallback;
+  m_args.log_tag = "flutter";
 
   /// Task Runner
   m_platform_task_runner =
@@ -584,5 +587,5 @@ void Engine::OnFlutterPlatformMessage(
 void Engine::onLogMessageCallback(const char* tag,
                                   const char* message,
                                   void* /* user_data */) {
-  spdlog::debug("[{}] {}", tag, message);
+  spdlog::info("{}: {}", tag, message);
 }
