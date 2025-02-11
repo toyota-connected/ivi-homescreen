@@ -119,23 +119,24 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
                               buffer_rects.data(), 1);
     }
 
-    // Add frame damage to damage history
-    b->m_damage_history.push_back(info->frame_damage.damage[0]);
-    if (b->m_damage_history.size() > kMaxHistorySize) {
-      b->m_damage_history.pop_front();
-    }
+    if (info->frame_damage.damage) {
+      // Add frame damage to damage history
+      b->m_damage_history.push_back(info->frame_damage.damage[0]);
+      if (b->m_damage_history.size() > kMaxHistorySize) {
+        b->m_damage_history.pop_front();
+      }
 
-    if (b->GetSwapBuffersWithDamage()) {
-      // Swap buffers with frame damage.
-      const auto frame_rects = b->RectToInts(info->frame_damage.damage[0]);
-      return b->GetSwapBuffersWithDamage()(b->GetDisplay(), b->m_egl_surface,
-                                           const_cast<int*>(frame_rects.data()),
-                                           1);
-    } else {
-      // If the required extensions for partial repaint were not
-      // provided, do full repaint.
-      return b->SwapBuffers();
+      if (b->GetSwapBuffersWithDamage()) {
+        // Swap buffers with frame damage.
+        const auto frame_rects = b->RectToInts(info->frame_damage.damage[0]);
+        return b->GetSwapBuffersWithDamage()(
+            b->GetDisplay(), b->m_egl_surface,
+            const_cast<int*>(frame_rects.data()), 1);
+      }
     }
+    // If the required extensions for partial repaint were not
+    // provided, do full repaint.
+    return b->SwapBuffers();
   };
 
   config.open_gl.populate_existing_damage =
