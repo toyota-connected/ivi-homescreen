@@ -1140,7 +1140,9 @@ const struct agl_shell_listener Display::agl_shell_listener = {
     .bound_ok = agl_shell_bound_ok,
     .bound_fail = agl_shell_bound_fail,
     .app_state = agl_shell_app_state,
+#if AGL_SHELL_APP_ON_OUTPUT_SINCE_VERSION
     .app_on_output = agl_shell_app_on_output,
+#endif
 };
 #endif
 

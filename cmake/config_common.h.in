@@ -47,7 +47,10 @@
 #cmakedefine01 BUILD_CRASH_HANDLER
 #if BUILD_CRASH_HANDLER
 static constexpr char kCrashHandlerDsn[] = "@CRASH_HANDLER_DSN@";
-static constexpr char kCrashHandlerRelease[] = "@PROJECT_NAME@@@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@";
+static constexpr char kCrashHandlerRelease[] = "@PROJECT_NAME@@@BUILD_VER@_@BUILD_NUMBER@_dev";
+static constexpr char kCrashpadBinaryPath[] = "@CRASHPAD_BINARY_DIR@/crashpad_handler";
+static constexpr char kCrashpadAttachments[] = "@CRASH_HANDLER_ATTACHMENTS@";
+static constexpr char kCrashpadTags[] = "@CRASH_HANDLER_TAGS@";
 #endif
 
 #cmakedefine01 DEBUG_PLATFORM_MESSAGES
