@@ -1,6 +1,7 @@
 #pragma once
 
-#include "fml/macros.h"
+#include <string>
+#include "sentry.h"
 
 class CrashHandler {
  public:
@@ -9,6 +10,10 @@ class CrashHandler {
   ~CrashHandler();
 
   static void trigger_crash();
+  static const char* get_dsn();
+  static void set_sentry_attachments(sentry_options_t* options); 
+  static void set_sentry_tags();
 
-  FML_DISALLOW_COPY_AND_ASSIGN(CrashHandler);
+  CrashHandler(const CrashHandler&) = delete;
+  CrashHandler& operator=(const CrashHandler&) = delete;
 };

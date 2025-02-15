@@ -520,10 +520,22 @@ Sentry-native support is available for Crash Handling. This pushes a mini-dump t
 
 To create user account and get DNS See https://sentry.io/welcome/
 
-Required CMake Variables
+CMake Variables
 
     -DBUILD_CRASH_HANDLER=ON
-    -DCRASH_HANDLER_DSN="dsn from your account"
+    -DCRASH_HANDLER_DSN="dsn from your account.  If not defined, can be set at runtime via environment variable"
+    -DSENTRY_NATIVE_LIBDIR="directory where sentry native is installed, will look in CMAKE_INSTALL_PREFIX directory if not defined"
+    -DCRASHPAD_BINARY_DIR="directory where crashpad_handler executable is installed, will look in CMAKE_INSTALL_PREFIX directory if not defined"
+    -DCRASH_HANDLER_ATTACHMENTS="paths to files you'd like to attach to coredump reports, separated by commas (,)"
+    -DCRASH_HANDLER_TAGS="tags to accompany Sentry coredump report in the style of "TAG_NAME=tagvalue", multiple tags can be defined separated by commas (,)"
+
+Optional Environment Variables
+
+    SENTRY_DSN -- Overrides CMake CRASH_HANDLER_DSN value
+    SENTRY_ATTACHMENTS -- Additional file attachments to add to Sentry crash reports (Appended to those defined in CRASH_HANDLER_ATTACHMENTS), multiple files can be defined, separated by commas (,)
+    SENTRY_TAGS -- Additional tags to accompany Sentry crash reports (Appended to those defined in CRASH_HANDLER_TAGS), multiple tags can be defined, separated by commas (,)
+
+To resolve crash dump stack trace, debug binaries and symbols need to be uploaded to Sentry via sentry-cli tool: https://docs.sentry.io/cli/installation/
 
 Required source repo:  https://github.com/getsentry/sentry-native
 

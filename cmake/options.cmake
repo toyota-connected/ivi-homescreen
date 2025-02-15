@@ -15,6 +15,8 @@
 # limitations under the License.
 #
 
+include_guard()
+
 # repo tags
 
 if (NOT CMAKE_APPS_MODULE_TAG)
@@ -99,13 +101,46 @@ option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
 #
 option(BUILD_CRASH_HANDLER "Build Crash Handler" OFF)
 if (BUILD_CRASH_HANDLER)
-    if (NOT EXISTS ${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake)
-        message(FATAL_ERROR "${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake does not exist")
+    if (SENTRY_NATIVE_LIBDIR)
+        if (NOT EXISTS ${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake)
+            message(FATAL_ERROR "${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake does not exist")
+        else ()
+            message(STATUS "Found libsentry at specified directory: ${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake")
+            set(sentry_DIR ${SENTRY_NATIVE_LIBDIR}/cmake/sentry)
+        endif ()
+    else ()
+        if (EXISTS ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake)
+            message(STATUS "Found sentry at default location: ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake")
+            set(sentry_DIR {CMAKE_INSTALL_PREFIX}/lib/cmake/sentry)
+        else ()
+            message(FATAL_ERROR "Sentry could not be found at ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake, please set SENTRY_NATIVE_LIBDIR")
+        endif()
     endif ()
-    set(sentry_DIR ${SENTRY_NATIVE_LIBDIR}/cmake/sentry)
+
+    
+    if (CRASHPAD_BINARY_DIR)
+        if (NOT EXISTS ${CRASHPAD_BINARY_DIR}/crashpad_handler)
+            message(FATAL_ERROR "${CRASHPAD_BINARY_DIR}/crashpad_handler does not exist")
+        else()
+            message(STATUS "Using crashpad_handler at specified directory: ${CRASHPAD_BINARY_DIR}")
+        endif()
+    else ()
+        if (EXISTS ${CMAKE_INSTALL_PREFIX}/bin/crashpad_handler)
+            message(STATUS "Defaulting to system crashpad_handler at ${CMAKE_INSTALL_PREFIX}")
+            set(CRASHPAD_BINARY_DIR ${CMAKE_INSTALL_PREFIX}/bin)
+        else ()
+            message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
+        endif()
+    endif()
+
+    if (NOT CRASH_HANDLER_DSN)
+        message(STATUS "Sentry DSN not set, use environment variable SENTRY_DSN to direct coredumps")
+    endif ()
+    
     find_package(sentry REQUIRED)
     find_package(PkgConfig)
     pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)
+    string(TIMESTAMP BUILD_VER "%y%m%d")
 endif ()
 
 #
