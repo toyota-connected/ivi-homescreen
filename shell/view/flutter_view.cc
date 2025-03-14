@@ -172,32 +172,6 @@ void FlutterView::Initialize() {
   m_wayland_window->SetEngine(m_flutter_engine);
 
   SPDLOG_DEBUG("({}) Engine running...", m_index);
-
-  // init the fps output option.
-  m_fps.output = 0;
-  m_fps.period = 1;
-  m_fps.counter = 0;
-
-  if (m_config.view.fps_output_console) {
-    m_fps.output |= 0x01;
-  }
-  if (m_config.view.fps_output_overlay) {
-    m_fps.output |= 0x02;
-  }
-  if (m_config.view.fps_output_frequency) {
-    m_fps.period = m_config.view.fps_output_frequency;
-  }
-
-  if (0 < m_fps.output) {
-    if (0 >= m_fps.period) {
-      m_fps.period = 1;
-    }
-
-    m_fps.period *= (1000 / 16);
-    m_fps.pre_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                         std::chrono::steady_clock::now().time_since_epoch())
-                         .count();
-  }
 }
 
 void FlutterView::RunTasks() {
@@ -212,28 +186,6 @@ void FlutterView::RunTasks() {
   m_pointer_events++;
   if (m_pointer_events % kPointerEventModulus == 0) {
     m_flutter_engine->SendPointerEvents();
-  }
-}
-
-// calc and output the FPS
-void FlutterView::DrawFps(const long long end_time) {
-  if (0 < m_fps.output) {
-    m_fps.counter++;
-
-    if (m_fps.period <= m_fps.counter) {
-      auto fps_loop = (m_fps.counter * 1000) / (end_time - m_fps.pre_time);
-      auto fps_redraw = (m_wayland_window->GetFpsCounter() * 1000) /
-                        (end_time - m_fps.pre_time);
-
-      m_fps.counter = 0;
-      m_fps.pre_time = end_time;
-
-      if (0 < (m_fps.output & 0x01)) {
-        if (0 < (m_fps.output & 0x01)) {
-          spdlog::info("({}) FPS = {} {}", m_index, fps_loop, fps_redraw);
-        }
-      }
-    }
   }
 }
 

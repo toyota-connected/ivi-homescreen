@@ -83,15 +83,6 @@ class WaylandWindow {
   void SetEngine(const std::shared_ptr<Engine>& engine);
 
   /**
-   * @brief Get Fps Counter
-   * @return uint32_t
-   * @retval Frames Per Second counter.
-   * @relation
-   * wayland
-   */
-  uint32_t GetFpsCounter();
-
-  /**
    * @brief activate a system cursor
    * @param[in] device Device
    * @param[in] kind Kind of a cursor
@@ -102,7 +93,7 @@ class WaylandWindow {
    * platform
    */
   [[nodiscard]] bool ActivateSystemCursor(int32_t device,
-                                      const std::string& kind) const;
+                                          const std::string& kind) const;
 
   /**
    * @brief Get Base Surface
@@ -111,9 +102,7 @@ class WaylandWindow {
    * @relation
    * wayland
    */
-  wl_surface* GetBaseSurface() { return m_base_surface; }
-
-  uint32_t m_fps_counter{};
+  [[nodiscard]] wl_surface* GetBaseSurface() const { return m_base_surface; }
 
   /**
    * @brief Get window_type

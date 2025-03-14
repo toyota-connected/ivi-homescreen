@@ -79,18 +79,6 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
     instance.view.fullscreen =
         tbl->at_path("view.fullscreen").value<bool>().value();
   }
-  if (tbl->at_path("view.fps_output_console").is_integer()) {
-    instance.view.fps_output_console =
-        tbl->at_path("view.fps_output_console").value<uint32_t>().value();
-  }
-  if (tbl->at_path("view.fps_output_overlay").is_integer()) {
-    instance.view.fps_output_overlay =
-        tbl->at_path("view.fps_output_overlay").value<uint32_t>().value();
-  }
-  if (tbl->at_path("view.fps_output_frequency").is_integer()) {
-    instance.view.fps_output_frequency =
-        tbl->at_path("view.fps_output_frequency").value<uint32_t>().value();
-  }
 
   if (tbl->at_path("window_activation_area.x").is_integer()) {
     instance.view.activation_area_x =

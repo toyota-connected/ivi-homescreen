@@ -47,9 +47,6 @@ class Configuration {
       std::optional<bool> fullscreen;
       std::optional<double> pixel_ratio;
       std::optional<uint32_t> ivi_surface_id;
-      uint32_t fps_output_console;
-      uint32_t fps_output_overlay;
-      uint32_t fps_output_frequency;
     } view;
   };
 

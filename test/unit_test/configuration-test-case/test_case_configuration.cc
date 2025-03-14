@@ -137,9 +137,6 @@ TEST(HomescreenConfigurationGetTomlConfig, Lv1Normal001) {
   EXPECT_EQ(2, config.view.vm_args.size());
   EXPECT_EQ("--enable-asserts", config.view.vm_args[0]);
   EXPECT_EQ("--verbose-logging", config.view.vm_args[1]);
-  EXPECT_EQ(1, config.view.fps_output_console);
-  EXPECT_EQ(1, config.view.fps_output_overlay);
-  EXPECT_EQ(3, config.view.fps_output_frequency);
   EXPECT_EQ(10, config.view.activation_area_x);
   EXPECT_EQ(10, config.view.activation_area_y);
   EXPECT_EQ(1024, config.view.activation_area_width);
@@ -179,9 +176,6 @@ TEST(HomescreenConfigurationGetTomlConfig, Lv1Normal002) {
   EXPECT_EQ(0, config.view.accessibility_features.value_or(0));
   EXPECT_EQ(false, config.view.fullscreen.value_or(false));
   EXPECT_EQ(0, config.view.vm_args.size());
-  EXPECT_EQ(0, config.view.fps_output_console);
-  EXPECT_EQ(0, config.view.fps_output_overlay);
-  EXPECT_EQ(0, config.view.fps_output_frequency);
   EXPECT_EQ(0, config.view.activation_area_x);
   EXPECT_EQ(0, config.view.activation_area_y);
   EXPECT_EQ(0, config.view.activation_area_width);

@@ -98,10 +98,6 @@ int App::Loop() const {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
   }
 
-  for (auto const& i : m_views) {
-    i->DrawFps(end_time);
-  }
-
   return 0;
 }
 
