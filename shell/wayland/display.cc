@@ -872,7 +872,7 @@ bool Display::ActivateSystemCursor(const int32_t device,
   (void)device;
   if (!m_enable_cursor) {
     wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial,
-                          m_cursor_surface, 0, 0);
+                          nullptr, 0, 0);
     wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
     wl_surface_commit(m_cursor_surface);
     return true;
