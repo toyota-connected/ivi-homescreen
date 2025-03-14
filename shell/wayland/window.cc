@@ -19,20 +19,20 @@
 #include "display.h"
 #include "engine.h"
 
-WaylandWindow::WaylandWindow(size_t index,
+WaylandWindow::WaylandWindow(const size_t index,
                              std::shared_ptr<Display> display,
                              const std::string& type,
                              wl_output* output,
-                             uint32_t output_index,
+                             const uint32_t output_index,
                              std::string app_id,
-                             bool fullscreen,
-                             int32_t width,
-                             int32_t height,
-                             double pixel_ratio,
-                             uint32_t activation_area_x,
-                             uint32_t activation_area_y,
-                             uint32_t activation_area_width,
-                             uint32_t activation_area_height,
+                             const bool fullscreen,
+                             const int32_t width,
+                             const int32_t height,
+                             const double pixel_ratio,
+                             const uint32_t activation_area_x,
+                             const uint32_t activation_area_y,
+                             const uint32_t activation_area_width,
+                             const uint32_t activation_area_height,
                              Backend* backend,
                              const uint32_t ivi_surface_id)
     : m_index(index),
@@ -52,13 +52,8 @@ WaylandWindow::WaylandWindow(size_t index,
       m_app_id(std::move(app_id)) {  // disable vsync
   SPDLOG_TRACE("({}) + WaylandWindow()", m_index);
 
-  m_fps_counter = 0;
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
   wl_surface_add_listener(m_base_surface, &m_base_surface_listener, this);
-
-  m_base_frame_callback = wl_surface_frame(m_base_surface);
-  wl_callback_add_listener(m_base_frame_callback,
-                           &m_base_surface_frame_listener, this);
 
 #if ENABLE_IVI_SHELL_CLIENT
   auto ivi_application = m_display->GetIviApplication();
@@ -278,6 +273,7 @@ void WaylandWindow::handle_toplevel_configure(
       case XDG_TOPLEVEL_STATE_ACTIVATED:
         w->m_activated = true;
         break;
+      default:;
     }
   }
 
@@ -317,36 +313,6 @@ const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
 };
 #endif
 
-const struct wl_callback_listener WaylandWindow::m_base_surface_frame_listener =
-    {
-        .done = on_frame_base_surface,
-};
-
-void WaylandWindow::on_frame_base_surface(void* data,
-                                          struct wl_callback* callback,
-                                          uint32_t /* time */) {
-  auto* window = static_cast<WaylandWindow*>(data);
-
-  if (callback)
-    wl_callback_destroy(callback);
-
-  window->m_base_frame_callback = wl_surface_frame(window->m_base_surface);
-  wl_callback_add_listener(window->m_base_frame_callback,
-                           &m_base_surface_frame_listener, window);
-
-  window->m_fps_counter++;
-  window->m_fps_counter++;
-
-  wl_surface_commit(window->m_base_surface);
-}
-
-uint32_t WaylandWindow::GetFpsCounter() {
-  const uint32_t fps_counter = m_fps_counter;
-  m_fps_counter = 0;
-
-  return fps_counter;
-}
-
 bool WaylandWindow::ActivateSystemCursor(int32_t device,
                                          const std::string& kind) const {
   return m_display->ActivateSystemCursor(device, kind);
@@ -375,15 +341,20 @@ WaylandWindow::window_type WaylandWindow::get_window_type(
     const std::string& type) {
   if (type == "NORMAL") {
     return WINDOW_NORMAL;
-  } else if (type == "BG") {
+  }
+  if (type == "BG") {
     return WINDOW_BG;
-  } else if (type == "PANEL_TOP") {
+  }
+  if (type == "PANEL_TOP") {
     return WINDOW_PANEL_TOP;
-  } else if (type == "PANEL_BOTTOM") {
+  }
+  if (type == "PANEL_BOTTOM") {
     return WINDOW_PANEL_BOTTOM;
-  } else if (type == "PANEL_LEFT") {
+  }
+  if (type == "PANEL_LEFT") {
     return WINDOW_PANEL_LEFT;
-  } else if (type == "PANEL_RIGHT") {
+  }
+  if (type == "PANEL_RIGHT") {
     return WINDOW_PANEL_RIGHT;
   }
   return WINDOW_NORMAL;

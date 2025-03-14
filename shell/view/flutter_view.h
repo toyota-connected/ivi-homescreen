@@ -111,15 +111,6 @@ class FlutterView {
    */
   [[nodiscard]] Display* GetDisplay() const { return m_wayland_display.get(); }
 
-  /**
-   * @brief Draw FPS to calc and output
-   * @param[in] end_time End time
-   * @return void
-   * @relation
-   * wayland, flutter
-   */
-  void DrawFps(long long end_time);
-
 #ifdef ENABLE_PLUGIN_COMP_SURF
   /**
    * @brief Create a surface ofr a compositor surface plugin
@@ -217,13 +208,6 @@ class FlutterView {
   size_t m_index;
 
   std::unique_ptr<FlutterDesktopViewControllerState> m_state;
-
-  struct {
-    uint8_t output;
-    uint32_t period;
-    uint32_t counter;
-    long long pre_time;
-  } m_fps{};
 
   uint64_t m_pointer_events{};
 

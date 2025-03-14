@@ -83,30 +83,6 @@ TEST(HomescreenFlutterViewDisposeSurface, Lv1Normalcase001) {
 }
 
 /****************************************************************
-Test Case Name.Test Name： HomescreenFlutterViewGetSurfaceContext_Lv1Normal002
-Use Case Name: Provide wayland client function
-Test Summary：Test the function of DrawFps
-***************************************************************/
-TEST(HomescreenFlutterViewDrawFps, Lv1Normalcase001) {
-    FlutterView* view = createFlutterViewInstance();
-
-    int h_module = 0;
-    view->CreateSurface(
-        &h_module, "", "", "",
-        CompositorSurface::PARAM_SURFACE_T::egl,
-        CompositorSurface::PARAM_Z_ORDER_T::above,
-        CompositorSurface::PARAM_SYNC_T::sync,
-        kDefaultViewWidth,
-        kDefaultViewHeight,
-        0,
-        0
-    );
-
-    // call target function with invalid index
-    view->DrawFps(1);
-}
-
-/****************************************************************
 Test Case Name.Test Name： HomescreenFlutterViewGetSurfaceContext_Lv1Normal001
 Use Case Name: Provide wayland client function
 Test Summary：Test the function of GetSurfaceContext

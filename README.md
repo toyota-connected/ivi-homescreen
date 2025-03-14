@@ -225,12 +225,6 @@ valid values.
 
 `ivi_surface_id` - Sets ivi-shell surface ID.
 
-`fps_output_console` - Setting to `1` FPS count is output to stdout.
-
-`fps_output_overlay` - If `"fps_output_console"=1` and `"fps_output_overlay"=1` the screen overlay is enabled.
-
-`fps_output_frequency` - Optional for FPS. Changing value controls the update interval.
-
 ### AGL Shell `[window_activation_area]`
 
 `x` - x position of activation area
@@ -268,9 +262,6 @@ pixel_ratio = 4.5                                    # set flutter engine pixel 
 ivi_surface_id = 5002                                # set ivi-shell surface id
 accessibility_features = 52                          # set flutter engine accessibility feature flags
 fullscreen = false                                   # do not start in fullscreen
-fps_output_console = 1
-fps_output_overlay = 1
-fps_output_frequency = 3
 
 [window_activation_area]
 x = 10        # x location
