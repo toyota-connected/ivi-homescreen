@@ -86,7 +86,7 @@ jobs:
           composefile="${{ matrix.composefile.compose_yml }}"
           service="${{ matrix.composefile.service }}"
           echo "INFO: service = ${service} composefile = ${composefile}"
-          
+
           docker compose --env-file "${envfile}" -f "${composefile}" build "${service}"
           echo "INFO: docker compose local build done."
           docker_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -v "action-slack-notify")
