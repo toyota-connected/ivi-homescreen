@@ -88,7 +88,9 @@ target_include_directories(${PROJECT_NAME}
 )
 
 if (BUILD_BACKEND_WAYLAND_EGL)
-    target_link_libraries(${PROJECT_NAME} PRIVATE EGL GLESv2)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(EGL egl glesv2 IMPORTED_TARGET REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::EGL)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers)
