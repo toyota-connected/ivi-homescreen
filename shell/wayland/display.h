@@ -115,7 +115,7 @@ class Display {
    * ivi-shell
    */
 #if ENABLE_IVI_SHELL_CLIENT
-  NODISCARD ivi_application* GetIviApplication() const {
+  [[nodiscard]] ivi_application* GetIviApplication() const {
     return m_ivi_shell.application;
   }
 #endif
