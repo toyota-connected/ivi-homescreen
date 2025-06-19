@@ -19,9 +19,6 @@
 #include <memory>
 #include <string>
 
-#include <waypp/waypp.h>
-#include <cassert>
-
 #include "backend/backend.h"
 
 // workaround for Wayland macro not compiling in C++

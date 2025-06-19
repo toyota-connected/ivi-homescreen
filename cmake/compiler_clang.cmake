@@ -71,7 +71,7 @@ add_library(toolchain::toolchain ALIAS toolchain)
 
 target_compile_definitions(toolchain INTERFACE "${LLVM_DEFINITIONS}")
 
-if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
     message(STATUS "stdlib ................. libc++")
     set(STDLIB libc++)
 else ()

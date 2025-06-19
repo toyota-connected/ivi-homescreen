@@ -27,7 +27,6 @@
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
-#include <waypp/waypp.h>
 #include <cassert>
 
 #include "config/common.h"

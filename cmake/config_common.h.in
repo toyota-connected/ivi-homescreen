@@ -17,9 +17,11 @@
 #ifndef CONFIG_COMMON_H_
 #define CONFIG_COMMON_H_
 
-#include <EGL/egl.h>
 #include <array>
 
+#include <EGL/egl.h>
+
+#include <waypp/waypp.h>
 
 #ifndef BUILD_BACKEND_WAYLAND_EGL
 #cmakedefine01 BUILD_BACKEND_WAYLAND_EGL
