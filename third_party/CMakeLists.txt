@@ -81,7 +81,7 @@ if (BUILD_UNIT_TESTS)
     if (TOOLCHAIN_COMPILE_OPTIONS)
         target_compile_options(gtest PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
     endif ()
-    set_target_properties(gtest PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated-copy")
+    target_compile_options(gmock PRIVATE -Wno-error=deprecated-copy)
 
     target_compile_options(gtest_main PRIVATE -include cstdint)
     get_target_property(TOOLCHAIN_COMPILE_OPTIONS toolchain INTERFACE_COMPILE_OPTIONS)
@@ -89,6 +89,6 @@ if (BUILD_UNIT_TESTS)
         target_compile_options(gtest_main PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
     endif ()
 
-    set_target_properties(gmock PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated-copy")
+    target_compile_options(gmock PRIVATE -Wno-error=deprecated-copy)
 
 endif ()
