@@ -32,6 +32,10 @@ target_link_libraries(
         toolchain::toolchain
 )
 
+if (BUILD_BACKEND_WAYLAND_EGL)
+    target_link_libraries(${TESTCASE_NAME} PRIVATE PkgConfig::EGL)
+endif ()
+
 add_test(
         NAME ${TESTCASE_NAME}
         COMMAND ${TESTCASE_NAME}
