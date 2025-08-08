@@ -31,6 +31,7 @@
 #include "logging/logging.h"
 #include "task_runner.h"
 #include "view/flutter_view.h"
+#include "shell/accessibility/accessibility_tree.h"
 
 class App;
 class Backend;
@@ -330,6 +331,10 @@ class Engine {
   static void onLogMessageCallback(const char* tag,
                                    const char* message,
                                    void* user_data);
+
+  static void onSemanticsUpdateCallback(
+      const FlutterSemanticsUpdate2* /* semantics update */,
+      void* /* user data*/);
 
   [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const {
     return m_flutter_engine;

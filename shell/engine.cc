@@ -56,6 +56,7 @@ Engine::Engine(FlutterView* view,
   m_args.persistent_cache_path = m_cache_path.c_str();
   m_args.is_persistent_cache_read_only = false;
   m_args.log_message_callback = onLogMessageCallback;
+  m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
   m_args.log_tag = "flutter";
 
   /// Task Runner
@@ -217,6 +218,9 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   LibFlutterEngine->UpdateAccessibilityFeatures(
       m_flutter_engine,
       static_cast<FlutterAccessibilityFeature>(m_accessibility_features));
+
+  // Enable Semantics
+  LibFlutterEngine->UpdateSemanticsEnabled(m_flutter_engine, true);
 
   SPDLOG_TRACE("({}) -Engine::Run", m_index);
   return result;
@@ -588,4 +592,18 @@ void Engine::onLogMessageCallback(const char* tag,
                                   const char* message,
                                   void* /* user_data */) {
   spdlog::info("{}: {}", tag, message);
+}
+
+void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
+                                       void* user_data) {
+  FlutterDesktopEngineState const* engine_state =
+      static_cast<FlutterDesktopEngineState*>(user_data);
+
+  auto* accessibility_tree = engine_state->accessibility_tree;
+  spdlog::debug(
+      "[onSemanticsUpdateCallback] struct_size: {}, node_count: {} "
+      "custom_action_count: {}",
+      update->struct_size, update->node_count, update->custom_action_count);
+
+  accessibility_tree->HandleFlutterUpdate(update);
 }

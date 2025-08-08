@@ -32,6 +32,7 @@ add_executable(${PROJECT_NAME}
         wayland/display.cc
         wayland/window.cc
         task_runner.cc
+        accessibility/accessibility_tree.cc
 )
 set_target_properties(${PROJECT_NAME}
         PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
@@ -80,6 +81,7 @@ target_include_directories(${PROJECT_NAME}
         PRIVATE
         ..
         logging
+        accessibility
         ${PROJECT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${GST_INCLUDE_DIRS}
@@ -104,7 +106,6 @@ endif ()
 if (BUILD_SYSTEMD_WATCHDOG)
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::libsystemd)
 endif ()
-
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         asio

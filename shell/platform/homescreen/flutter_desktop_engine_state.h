@@ -68,6 +68,8 @@ struct FlutterDesktopEngineState {
 
   std::unique_ptr<LoggingHandler> logging_handler{};
 
+  AccessibilityTree* accessibility_tree = nullptr;
+
   // The controller associated with this engine instance, if any.
   // This will always be null for a headless engine.
   FlutterDesktopViewControllerState* view_controller = nullptr;
