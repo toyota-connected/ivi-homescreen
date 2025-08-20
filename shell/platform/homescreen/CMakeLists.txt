@@ -34,6 +34,17 @@ target_link_libraries(platform_homescreen PUBLIC
         tomlplusplus::tomlplusplus
 )
 
+find_package(ACCESSKIT QUIET)
+if (ACCESSKIT_FOUND)
+    target_include_directories(platform_homescreen PUBLIC
+            ${ACCESSKIT_INCLUDE_DIRS}
+    )
+    target_link_libraries(platform_homescreen PUBLIC accesskit)
+    target_compile_definitions(platform_homescreen PUBLIC
+            ENABLE_ACCESSKIT
+    )
+endif ()
+
 if (ENABLE_PLUGINS)
 
     if (POLICY CMP0076)

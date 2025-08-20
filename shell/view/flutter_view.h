@@ -22,6 +22,7 @@
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "wayland/window.h"
+#include "shell/accessibility/accessibility_tree.h"
 
 #include <flutter_homescreen.h>
 
@@ -203,6 +204,7 @@ class FlutterView {
   std::shared_ptr<Display> m_wayland_display;
   std::shared_ptr<WaylandWindow> m_wayland_window;
   std::shared_ptr<Engine> m_flutter_engine;
+  std::shared_ptr<AccessibilityTree> m_accessibility_tree;
   const Configuration::Config m_config;
   std::shared_ptr<PlatformChannel> m_platform_channel;
   size_t m_index;
