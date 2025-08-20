@@ -38,8 +38,13 @@ add_subdirectory(cxxopts)
 #
 # tomlplusplus
 #
-add_subdirectory(tomlplusplus)
-target_compile_options(tomlplusplus_tomlplusplus INTERFACE -Wno-conversion)
+add_library(tomlplusplus_tomlplusplus INTERFACE)
+add_library(tomlplusplus::tomlplusplus ALIAS tomlplusplus_tomlplusplus)
+target_compile_options(tomlplusplus_tomlplusplus INTERFACE
+        -isystem${CMAKE_CURRENT_SOURCE_DIR}/tomlplusplus/include
+        -Wno-deprecated-literal-operator
+        -Wno-conversion
+)
 
 #
 # Vulkan-Headers
