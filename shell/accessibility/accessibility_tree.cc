@@ -84,10 +84,13 @@ void AccessibilityTree::HandleFlutterUpdate(
         }
       }
       SetTreeBuilt(true);
-      std::filesystem::path base_path = Utils::GetConfigHomePath();
-      base_path /= "accessibility";
-      base_path /= "semantic_tree_init.json";
-      DumpTree(base_path.c_str());
+      std::filesystem::path path = Utils::GetConfigHomePath();
+      path /= "accessibility";
+      if (!std::filesystem::exists(path)) {
+        std::filesystem::create_directories(path);
+      }
+      path /= "semantic_tree_init.json";
+      DumpTree(path.c_str());
 #if ENABLE_ACCESSKIT
       Init_AccessKit();
 #endif
