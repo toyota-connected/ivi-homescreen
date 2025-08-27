@@ -946,6 +946,14 @@ double Display::GetRefreshRate(uint32_t index) const {
   return 0;
 }
 
+double Display::GetMaxRefreshRate() const {
+  double max_refresh_rate = 0;
+  for (const auto& output : m_all_outputs) {
+    max_refresh_rate = std::max(max_refresh_rate, output->refresh_rate);
+  }
+  return max_refresh_rate;
+}
+
 #if ENABLE_AGL_SHELL_CLIENT
 void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
   (void)shell;

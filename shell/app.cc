@@ -91,11 +91,12 @@ int App::Loop() const {
 
   const auto elapsed = end_time - start_time;
 
-  if (const auto sleep_time = 16 - elapsed; sleep_time > 0) {
+  const auto frame_time = 1000.0 / m_wayland_display->GetMaxRefreshRate();
+  if (const auto sleep_time = frame_time - elapsed; sleep_time > 0) {
 #if BUILD_WATCHDOG
     m_watch_dog->pet();
 #endif
-    std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
+    std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(sleep_time));
   }
 
   return 0;

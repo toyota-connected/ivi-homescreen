@@ -299,6 +299,15 @@ class Display {
   [[nodiscard]] double GetRefreshRate(uint32_t index) const;
 
   /**
+   * @brief Get max refresh rate of all available views
+   * @return double
+   * @retval Video Refresh Rate in Hz
+   * @relation
+   * wayland
+   */
+  [[nodiscard]] double GetMaxRefreshRate() const;
+
+  /**
    * @brief deactivate/hide the application pointed by app_id
    * @param[in] app_id the app_id
    * @relation
