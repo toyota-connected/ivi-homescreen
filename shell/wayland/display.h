@@ -291,12 +291,21 @@ class Display {
   /**
    * @brief Get refresh rate of a specified index of a view
    * @param[in] index Index of a view
-   * @return int
-   * @retval Video Refresh Rate
+   * @return double
+   * @retval Video Refresh Rate in Hz
    * @relation
    * wayland
    */
-  [[nodiscard]] int GetRefreshRate(uint32_t index) const;
+  [[nodiscard]] double GetRefreshRate(uint32_t index) const;
+
+  /**
+   * @brief Get max refresh rate of all available views
+   * @return double
+   * @retval Video Refresh Rate in Hz
+   * @relation
+   * wayland
+   */
+  [[nodiscard]] double GetMaxRefreshRate() const;
 
   /**
    * @brief deactivate/hide the application pointed by app_id
@@ -399,7 +408,7 @@ class Display {
     unsigned height;
     unsigned physical_width;
     unsigned physical_height;
-    int refresh_rate;
+    double refresh_rate;
     int32_t scale;
     bool done;
     int transform;

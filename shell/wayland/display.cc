@@ -304,12 +304,10 @@ void Display::display_handle_mode(void* data,
   if ((flags & WL_OUTPUT_MODE_CURRENT) == WL_OUTPUT_MODE_CURRENT) {
     oi->height = static_cast<unsigned int>(height);
     oi->width = static_cast<unsigned int>(width);
-    oi->refresh_rate = refresh;
+    oi->refresh_rate = refresh / 1000.0;
   }
 
-  SPDLOG_DEBUG(
-      "Video mode: {} x {} @ {} Hz", width, height,
-      (refresh > 1000 ? refresh / 1000.0 : static_cast<double>(refresh)));
+  SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height, refresh / 1000.0);
 }
 
 void Display::display_handle_scale(void* data,
@@ -940,12 +938,20 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   return {0, 0};
 }
 
-int Display::GetRefreshRate(uint32_t index) const {
+double Display::GetRefreshRate(uint32_t index) const {
   if (index < m_all_outputs.size()) {
     return m_all_outputs[index]->refresh_rate;
   }
   SPDLOG_DEBUG("GetRefreshRate: Invalid output index: {}", index);
   return 0;
+}
+
+double Display::GetMaxRefreshRate() const {
+  double max_refresh_rate = 0;
+  for (const auto& output : m_all_outputs) {
+    max_refresh_rate = std::max(max_refresh_rate, output->refresh_rate);
+  }
+  return max_refresh_rate;
 }
 
 #if ENABLE_AGL_SHELL_CLIENT
