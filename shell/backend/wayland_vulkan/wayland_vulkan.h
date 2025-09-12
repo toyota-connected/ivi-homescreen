@@ -168,7 +168,7 @@ class WaylandVulkanBackend final : public Backend {
    * @relation
    * wayland
    */
-  bool InitializeSwapchain();
+  bool InitializeSwapChain();
 
   /**
    * @brief Callback to get the next Vulkan image
@@ -217,7 +217,7 @@ class WaylandVulkanBackend final : public Backend {
    * @brief Callback to VK_EXT_debug_utils
    * @param[in] severity Bitmask of VkDebugUtilsMessageSeverityFlagBitsEXT
    * @param[in] types No use
-   * @param[in] cbdata Structure specifying parameters returned to the callback
+   * @param[in] cb_data Structure specifying parameters returned to the callback
    * @param[in] pUserData No use
    * @return VkBool32
    * @retval VK_FALSE Abnormal end
@@ -229,7 +229,7 @@ class WaylandVulkanBackend final : public Backend {
       VKAPI_CALL
       debugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                          VkDebugUtilsMessageTypeFlagsEXT types,
-                         const VkDebugUtilsMessengerCallbackDataEXT* cbdata,
+                         const VkDebugUtilsMessengerCallbackDataEXT* cb_data,
                          void* pUserData);
 
   /**

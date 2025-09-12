@@ -126,8 +126,12 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
 }
 
 void WaylandVulkanBackend::createInstance() {
+  debugUtilsSupported_ = false;
+  surfaceSupported_ = false;
+  waylandSurfaceSupported_ = false;
   auto instance_extensions = vk::enumerateInstanceExtensionProperties();
   spdlog::debug("Vulkan Instance Extensions:");
+
   for (const auto& l : instance_extensions.value) {
     spdlog::debug("\t{}, version: {}", l.extensionName.data(), l.specVersion);
     if (enable_validation_layers_) {
@@ -188,10 +192,10 @@ void WaylandVulkanBackend::createInstance() {
     constexpr VkBool32 setting_validate_sync = VK_TRUE;
     constexpr VkBool32 setting_thread_safety = VK_TRUE;
     const char* setting_debug_action[] = {"VK_DBG_LAYER_ACTION_LOG_MSG"};
-    const char* setting_report_flags[] = {"info", "warn", "perf", "error",
-                                          "debug"};
+    const char* setting_report_flags[] = {"error", "warn", "info", "perf",
+                                          "verbose"};
     constexpr VkBool32 setting_enable_message_limit = VK_TRUE;
-    constexpr int32_t setting_duplicate_message_limit = 3;
+    constexpr uint32_t setting_duplicate_message_limit = 3;
 
     const VkLayerSettingEXT settings[] = {
         {layer_name, "validate_core", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
@@ -207,12 +211,16 @@ void WaylandVulkanBackend::createInstance() {
          setting_report_flags},
         {layer_name, "enable_message_limit", VK_LAYER_SETTING_TYPE_BOOL32_EXT,
          1, &setting_enable_message_limit},
-        {layer_name, "duplicate_message_limit", VK_LAYER_SETTING_TYPE_INT32_EXT,
-         1, &setting_duplicate_message_limit}};
+        {layer_name, "duplicate_message_limit",
+         VK_LAYER_SETTING_TYPE_UINT32_EXT, 1, &setting_duplicate_message_limit},
+    };
 
-    const VkLayerSettingsCreateInfoEXT layer_settings_create_info = {
-        VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT, nullptr,
-        static_cast<uint32_t>(std::size(settings)), settings};
+    VkLayerSettingsCreateInfoEXT layer_settings_create_info{};
+    layer_settings_create_info.sType =
+        VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT;
+    layer_settings_create_info.settingCount =
+        static_cast<uint32_t>(std::size(settings));
+    layer_settings_create_info.pSettings = settings;
 
     info.pNext = &layer_settings_create_info;
   }
@@ -220,24 +228,29 @@ void WaylandVulkanBackend::createInstance() {
   constexpr char VK_LAYER_KHRONOS_VALIDATION_NAME[] =
       "VK_LAYER_KHRONOS_validation";
 
-  auto available_layers = vk::enumerateInstanceLayerProperties();
-  spdlog::debug("Vulkan Instance Layers:");
-  for (const auto& l : available_layers.value) {
-    spdlog::debug("\t{} - {}", l.layerName.data(), l.description.data());
-    if (enable_validation_layers_ &&
-        strcmp(l.layerName, VK_LAYER_KHRONOS_VALIDATION_NAME) == 0) {
-      enabled_layer_extensions_.push_back(VK_LAYER_KHRONOS_VALIDATION_NAME);
-      break;
+  const auto available_layers = vk::enumerateInstanceLayerProperties();
+  if (!available_layers.value.empty()) {
+    spdlog::debug("Vulkan Instance Layers:");
+    for (const auto& l : available_layers.value) {
+      spdlog::debug("\t{} - {}", l.layerName.data(), l.description.data());
+      if (enable_validation_layers_ &&
+          strcmp(l.layerName, VK_LAYER_KHRONOS_VALIDATION_NAME) == 0) {
+        enabled_layer_extensions_.push_back(VK_LAYER_KHRONOS_VALIDATION_NAME);
+        break;
+      }
     }
   }
 
-  ss.clear();
-  ss.str("");
-  ss << "Enabling " << enabled_layer_extensions_.size() << " layer extensions:";
-  for (const auto& layer : enabled_layer_extensions_) {
-    ss << "\n\t" << layer;
+  if (!enabled_layer_extensions_.empty()) {
+    ss.clear();
+    ss.str("");
+    ss << "Enabling " << enabled_layer_extensions_.size()
+       << " layer extensions:";
+    for (const auto& layer : enabled_layer_extensions_) {
+      ss << "\n\t" << layer;
+    }
+    spdlog::info(ss.str());
   }
-  spdlog::info(ss.str());
 
   info.enabledLayerCount =
       static_cast<uint32_t>(enabled_layer_extensions_.size());
@@ -340,32 +353,30 @@ void WaylandVulkanBackend::findPhysicalDevice() {
         physical_device, nullptr, &extension_count,
         available_extensions.data()));
 
-    bool supports_swapchain = false;
-    for (const auto& available_extension : available_extensions) {
-      if (strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                 available_extension.extensionName) == 0) {
-        supports_swapchain = true;
+    bool supports_swap_chain = false;
+    for (const auto& [extensionName, specVersion] : available_extensions) {
+      if (strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME, extensionName) == 0) {
+        supports_swap_chain = true;
         supported_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
       }
       // The spec requires VK_KHR_portability_subset be enabled whenever it's
       // available on a device. It's present on compatibility ICDs like
       // MoltenVK.
-      else if (strcmp("VK_KHR_portability_subset",
-                      available_extension.extensionName) == 0) {
+      else if (strcmp("VK_KHR_portability_subset", extensionName) == 0) {
         supported_extensions.push_back("VK_KHR_portability_subset");
       }
       // Prefer GPUs that support VK_KHR_get_memory_requirements2.
       else if (strcmp(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
-                      available_extension.extensionName) == 0) {
+                      extensionName) == 0) {
         score += 1 << 29;
         supported_extensions.push_back(
             VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
       }
     }
 
-    // Skip physical devices that don't have swapchain support.
-    if (!supports_swapchain) {
-      SPDLOG_DEBUG("  - Skipping due to lack of swapchain support.");
+    // Skip physical devices that don't have swap chain support.
+    if (!supports_swap_chain) {
+      SPDLOG_DEBUG("  - Skipping due to lack of swap chain support.");
       continue;
     }
 
@@ -455,7 +466,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
   d.vkGetDeviceQueue(device_, queue_family_index_, 0, &queue_);
 }
 
-bool WaylandVulkanBackend::InitializeSwapchain() {
+bool WaylandVulkanBackend::InitializeSwapChain() {
   if (resize_pending_) {
     resize_pending_ = false;
     d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
@@ -554,7 +565,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   }
 
   // --------------------------------------------------------------------------
-  // Create the swapchain.
+  // Create the swap chain.
   // --------------------------------------------------------------------------
   VkSwapchainCreateInfoKHR info{};
   info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -581,7 +592,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
   }
 
   // --------------------------------------------------------------------------
-  // Fetch swapchain images
+  // Fetch swap chain images
   // --------------------------------------------------------------------------
 
   uint32_t image_count;
@@ -619,7 +630,7 @@ bool WaylandVulkanBackend::InitializeSwapchain() {
     // Filament Engine hands back the image after writing to it
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = 0;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -673,20 +684,20 @@ VKAPI_ATTR VkBool32
 VKAPI_ATTR VkBool32 VKAPI_CALL WaylandVulkanBackend::debugUtilsCallback(
     const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     const VkDebugUtilsMessageTypeFlagsEXT /* types */,
-    const VkDebugUtilsMessengerCallbackDataEXT* cbdata,
+    const VkDebugUtilsMessengerCallbackDataEXT* cb_data,
     void* /* pUserData */) {
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
-    spdlog::info("Vulkan Dbg: ({}) {}", cbdata->pMessageIdName,
-                 cbdata->pMessage);
+    spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
+                 cb_data->pMessage);
   } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-    spdlog::info("Vulkan Dbg: ({}) {}", cbdata->pMessageIdName,
-                 cbdata->pMessage);
+    spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
+                 cb_data->pMessage);
   } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-    spdlog::info("Vulkan Dbg: ({}) {}", cbdata->pMessageIdName,
-                 cbdata->pMessage);
+    spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
+                 cb_data->pMessage);
   } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    spdlog::error("Vulkan Dbg: ({}) {}", cbdata->pMessageIdName,
-                  cbdata->pMessage);
+    spdlog::error("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
+                  cb_data->pMessage);
   }
   return VK_TRUE;
 }
@@ -699,23 +710,17 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
         "GetNextImageCallback: frame_info->struct_size != "
         "sizeof(FlutterFrameInfo)");
   }
-  // If the framebuffer has been resized, discard the swapchain and create
-  // a new one.
-
-  const auto state = reinterpret_cast<FlutterDesktopEngineState*>(user_data);
+  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
   const auto b = reinterpret_cast<WaylandVulkanBackend*>(
       state->view_controller->view->GetBackend());
   if (b->resize_pending_) {
-    b->InitializeSwapchain();
+    b->InitializeSwapChain();
   }
 
   CHECK_VK_RESULT(d.vkAcquireNextImageKHR(
       b->device_, b->swapchain_, 1'000'000'000,  // timeout (ns) 1000ms
       nullptr, b->image_ready_fence_, &b->last_image_index_));
 
-  // Flutter Engine expects the image to be available for transitioning and
-  // attaching immediately, and so we need to force a host sync here before
-  // returning.
   CHECK_VK_RESULT(d.vkWaitForFences(b->device_, 1, &b->image_ready_fence_, true,
                                     UINT64_MAX));
   CHECK_VK_RESULT(d.vkResetFences(b->device_, 1, &b->image_ready_fence_));
@@ -724,7 +729,7 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
       .struct_size = sizeof(FlutterVulkanImage),
       .image = reinterpret_cast<uint64_t>(
           b->swapchain_images_[b->last_image_index_]),
-      .format = b->surface_format_.format,
+      .format = static_cast<uint32_t>(b->surface_format_.format),
   };
 }
 
@@ -734,11 +739,14 @@ bool WaylandVulkanBackend::PresentCallback(
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
   const auto b = reinterpret_cast<WaylandVulkanBackend*>(
       state->view_controller->view->GetBackend());
-  constexpr VkPipelineStageFlags stage_flags =
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+  // Ensure the layout transition happens after the render pass in the same
+  // command buffer Record vkCmdPipelineBarrier at the end of your render pass
+  // command buffer
+
+  // Submit the command buffer and signal the semaphore
   VkSubmitInfo submit_info{};
   submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submit_info.pWaitDstStageMask = &stage_flags;
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers =
       &b->present_transition_buffers_[b->last_image_index_];
@@ -746,6 +754,7 @@ bool WaylandVulkanBackend::PresentCallback(
   submit_info.pSignalSemaphores = &b->present_transition_semaphore_;
   d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
 
+  // Wait on the signaled semaphore in vkQueuePresentKHR
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
@@ -755,10 +764,10 @@ bool WaylandVulkanBackend::PresentCallback(
   present_info.pImageIndices = &b->last_image_index_;
   const VkResult result = d.vkQueuePresentKHR(b->queue_, &present_info);
 
-  // If the swapchain is no longer compatible with the surface, discard the
-  // swapchain and create a new one.
+  // If the swap chain is no longer compatible with the surface, discard the
+  // swap chain and create a new one.
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
-    b->InitializeSwapchain();
+    b->InitializeSwapChain();
   }
   d.vkQueueWaitIdle(b->queue_);
 
@@ -834,8 +843,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   pool_info.queueFamilyIndex = queue_family_index_;
   d.vkCreateCommandPool(device_, &pool_info, nullptr, &swapchain_command_pool_);
 
-  if (!InitializeSwapchain()) {
-    spdlog::critical("Failed to create swapchain.");
+  if (!InitializeSwapChain()) {
+    spdlog::critical("Failed to create swap chain.");
     exit(EXIT_FAILURE);
   }
 }
@@ -852,7 +861,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
     FlutterBackingStore* /* backing_store_out */,
     void* /* user_data */) {
   SPDLOG_DEBUG("CreateBackingStore");
-#if 0
+#if 0  /// TODO
     auto surface_size = SkISize::Make(config->size.width, config->size.height);
     TestVulkanImage* test_image = new TestVulkanImage(
         std::move(test_vulkan_context_->CreateImage(surface_size).value()));
