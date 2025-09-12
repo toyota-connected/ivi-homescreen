@@ -578,12 +578,12 @@ void Engine::OnFlutterPlatformMessage(
        .response_handle = engine_message->response_handle},
       [view] {
         if (view) {
-          spdlog::debug("input_block_cb");
+          SPDLOG_TRACE("input_block_cb");
         }
       },
       [view] {
         if (view) {
-          spdlog::debug("input_unblock_cb");
+          SPDLOG_TRACE("input_unblock_cb");
         }
       });
 }
@@ -600,7 +600,7 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
       static_cast<FlutterDesktopEngineState*>(user_data);
 
   auto* accessibility_tree = engine_state->accessibility_tree;
-  spdlog::debug(
+  SPDLOG_TRACE(
       "[onSemanticsUpdateCallback] struct_size: {}, node_count: {} "
       "custom_action_count: {}",
       update->struct_size, update->node_count, update->custom_action_count);

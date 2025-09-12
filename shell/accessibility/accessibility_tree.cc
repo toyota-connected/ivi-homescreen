@@ -123,7 +123,7 @@ AccessibilityNode* AccessibilityTree::GetNode(
 
   auto new_node = new AccessibilityNode(fl_node);
   nodes.emplace_back(new_node);
-  spdlog::debug(
+  SPDLOG_TRACE(
       "New AccessibilityNode created with ID: {}, number of nodes: {}",
       new_node->GetId(), nodes.size());
   return nodes.back();
