@@ -303,8 +303,10 @@ std::string Engine::GetFilePath(size_t index) {
 
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {
-      spdlog::critical("({}) create_directories failed: {}", index, path);
-      exit(EXIT_FAILURE);
+      if (!std::filesystem::is_directory(path)) {
+        spdlog::critical("({}) create_directories failed: {}", index, path);
+        exit(EXIT_FAILURE);
+      }
     }
   }
 
