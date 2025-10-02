@@ -106,6 +106,7 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
   }
 
   if (HasEGLExtension(extensions, "EGL_KHR_partial_update")) {
+#if 0 //Disable partial update for now, as it seems to cause issues with some drivers
     SPDLOG_DEBUG("EGL_KHR_partial_update found");
     m_pfSetDamageRegion = reinterpret_cast<PFNEGLSETDAMAGEREGIONKHRPROC>(
         eglGetProcAddress("eglSetDamageRegionKHR"));
@@ -113,6 +114,7 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
       spdlog::error("Failed to get eglSetDamageRegionKHR function");
       return;
     }
+#endif
   }
 
   m_has_egl_ext_buffer_age = HasEGLExtension(extensions, "EGL_EXT_buffer_age");
