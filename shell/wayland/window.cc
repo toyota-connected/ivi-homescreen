@@ -35,22 +35,25 @@ WaylandWindow::WaylandWindow(const size_t index,
                              const uint32_t activation_area_width,
                              const uint32_t activation_area_height,
                              Backend* backend,
-                             const uint32_t ivi_surface_id)
-    : m_index(index),
-      m_display(std::move(display)),
-      m_wl_output(output),
-      m_output_index(output_index),
-      m_flutter_engine(nullptr),
-      m_pixel_ratio(pixel_ratio),
-      m_backend(backend),
-      m_ivi_surface_id(ivi_surface_id),
-      m_fullscreen(fullscreen),
-      m_geometry({width, height}),
-      m_activation_area({activation_area_x, activation_area_y,
-                         activation_area_width, activation_area_height}),
-      m_window_size({width, height}),
-      m_type(get_window_type(type)),
-      m_app_id(std::move(app_id)) {  // disable vsync
+                             const uint32_t ivi_surface_id,
+                             FlutterView* view)
+  : m_index(index),
+    m_display(std::move(display)),
+    m_wl_output(output),
+    m_output_index(output_index),
+    m_flutter_engine(nullptr),
+    m_pixel_ratio(pixel_ratio),
+    m_view(view),
+    m_backend(backend),
+    m_ivi_surface_id(ivi_surface_id),
+    m_fullscreen(fullscreen),
+    m_geometry({width, height}),
+    m_activation_area({activation_area_x, activation_area_y,
+                       activation_area_width, activation_area_height}),
+    m_window_size({width, height}),
+    m_type(get_window_type(type)),
+    m_app_id(std::move(app_id)) {
+  // disable vsync
   SPDLOG_TRACE("({}) + WaylandWindow()", m_index);
 
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
@@ -187,6 +190,10 @@ void WaylandWindow::handle_base_surface_enter(void* data,
       d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
   if (result != kSuccess) {
     spdlog::error("Failed to set Flutter Engine Pixel Ratio");
+  } else {
+    if (d->m_view) {
+      d->m_view->UpdateDisplayMetadata();
+    }
   }
 }
 
@@ -283,7 +290,7 @@ void WaylandWindow::handle_toplevel_configure(
       case XDG_TOPLEVEL_STATE_ACTIVATED:
         w->m_activated = true;
         break;
-      default:;
+      default: ;
     }
   }
 
@@ -294,7 +301,6 @@ void WaylandWindow::handle_toplevel_configure(
     }
     w->m_geometry.width = width;
     w->m_geometry.height = height;
-
   } else if (!w->m_fullscreen && !w->m_maximized) {
     // (0,0) configure = "client picks size". Downsize the client request
     // to fit the compositor's hint (configure_bounds if known, else the

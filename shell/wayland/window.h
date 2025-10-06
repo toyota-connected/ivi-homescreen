@@ -33,12 +33,16 @@ class Display;
 
 class Engine;
 
-class WaylandWindow {
- public:
+class FlutterView;
+
+class WaylandWindow
+{
+public:
   // a normal surface role is a regular application; a window_bg, window_panel
   // are part of the client shell UI for AGL; for window_panel only the height
   // has any meaning, while window_bg will literally be the entire output
-  enum window_type {
+  enum window_type
+  {
     WINDOW_NORMAL,
     WINDOW_BG,
     WINDOW_PANEL_TOP,
@@ -62,7 +66,8 @@ class WaylandWindow {
                 uint32_t activation_area_width,
                 uint32_t activation_area_height,
                 Backend* backend,
-                uint32_t ivi_surface_id);
+                uint32_t ivi_surface_id,
+                FlutterView* view = nullptr);
 
   ~WaylandWindow();
 
@@ -122,7 +127,8 @@ class WaylandWindow {
    * @relation
    * wayland
    */
-  std::pair<int32_t, int32_t> GetSize() {
+  std::pair<int32_t, int32_t> GetSize()
+  {
     return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
   }
 
@@ -140,6 +146,7 @@ class WaylandWindow {
   uint32_t m_output_index;
   std::shared_ptr<Engine> m_flutter_engine;
   double m_pixel_ratio;
+  FlutterView* m_view;
   struct wl_surface* m_base_surface{};
   std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
@@ -150,17 +157,23 @@ class WaylandWindow {
   bool m_resize{};
   bool m_activated{};
   bool m_running{};
-  struct {
+
+  struct
+  {
     int32_t width;
     int32_t height;
   } m_geometry;
-  struct {
+
+  struct
+  {
     uint32_t x;
     uint32_t y;
     uint32_t width;
     uint32_t height;
   } m_activation_area;
-  struct {
+
+  struct
+  {
     int32_t width;
     int32_t height;
   } m_window_size{};
