@@ -57,13 +57,49 @@ add_subdirectory(shell/platform/homescreen)
 # plugins
 #
 if (ENABLE_PLUGINS)
-    add_subdirectory(${PLUGINS_DIR} ${PROJECT_BINARY_DIR}/plugins)
+    # (allow plugin libraries to access INTERFACE 'plugins' target)
+    if(POLICY CMP0079)
+        cmake_policy(SET CMP0079 NEW)
+    endif(POLICY CMP0079)
+
+    add_library(plugins INTERFACE)
+
+    set(PLUGIN_LIB_INDEX 0)
+    add_subdirectory(${PLUGINS_DIR} "${PROJECT_BINARY_DIR}/plugin_lib_${PLUGIN_LIB_INDEX}")
+    MATH(EXPR PLUGIN_LIB_INDEX "${PLUGIN_LIB_INDEX} + 1")
+
+    # EXT_PLUGINS_DIRS is a semicolon-separated string list of external plugin directories
+
+    message(STATUS "External plugins list: ${EXT_PLUGINS_DIRS}")
     foreach (EXT_PLUGINS_DIR ${EXT_PLUGINS_DIRS})
         if (EXISTS ${EXT_PLUGINS_DIR})
-            add_subdirectory(${EXT_PLUGINS_DIR} ${PROJECT_BINARY_DIR}/ext_plugins)
+            message(STATUS "Loading external plugins from: ${EXT_PLUGINS_DIR}")
+            add_subdirectory(${EXT_PLUGINS_DIR} "${PROJECT_BINARY_DIR}/plugin_lib_${PLUGIN_LIB_INDEX}")
+            MATH(EXPR PLUGIN_LIB_INDEX "${PLUGIN_LIB_INDEX} + 1")
+        else ()
+            message(STATUS "External plugins directory not found: ${EXT_PLUGINS_DIR}")
         endif ()
     endforeach ()
 endif ()
+
+message(STATUS "Enabled plugin libraries: ${PLUGIN_LIBRARY_LIST}")
+
+# Setup plugin_registrant.cc.in
+# make sure PLUGIN_LIB_ARRAY doesn't end with a comma
+string (REGEX REPLACE ",\n$" "\n" PLUGIN_LIB_ARRAY "${PLUGIN_LIB_ARRAY}")
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/shell/platform/homescreen/plugin_registrant.cc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/shell/platform/homescreen/plugin_registrant.cc
+    @ONLY
+)
+
+# include generated plugin_registrant.cc
+target_sources(platform_homescreen PUBLIC
+        ${CMAKE_CURRENT_BINARY_DIR}/shell/platform/homescreen/plugin_registrant.cc
+)
+
+
 
 #
 # executable

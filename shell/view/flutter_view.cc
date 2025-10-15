@@ -39,7 +39,7 @@
 #endif
 
 #if ENABLE_PLUGINS
-extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
+#include "../platform/homescreen/plugin_registrant.h"
 #endif
 
 #include "wayland/display.h"

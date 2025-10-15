@@ -24,10 +24,6 @@
 #include "flutter_messenger.h"
 #include "flutter_plugin_registrar.h"
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
 // Opaque reference to a Flutter window controller.
 typedef struct FlutterDesktopViewControllerState*
     FlutterDesktopWindowControllerRef;
@@ -58,9 +54,5 @@ FlutterDesktopGetEngine(FlutterDesktopWindowControllerRef controller);
 FLUTTER_EXPORT FlutterDesktopPluginRegistrarRef
 FlutterDesktopGetPluginRegistrar(FlutterDesktopEngineRef engine,
                                  const char* plugin_name);
-
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
 
 #endif  // SHELL_PLATFORM_HOMESCREEN_PUBLIC_FLUTTER_HOMESCREEN_H

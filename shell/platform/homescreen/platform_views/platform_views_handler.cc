@@ -16,11 +16,10 @@
 
 #include "platform_views_handler.h"
 
-#include <generated_plugin_registrant.h>
+#include "../plugin_registrant.h"
 
-#include <tools/encodable.h>
+#include <common/tools/encodable.h>
 
-#include "config/plugins.h"
 #include "platform_view_touch.h"
 
 static constexpr char kMethodCreate[] = "create";
@@ -69,7 +68,7 @@ void PlatformViewsHandler::HandleMethodCall(
   }
 
   if (method_name == kMethodCreate) {
-    PluginsAoiPlatformViewCreate(engine_, engine_->flutter_asset_directory,
+    PluginsApiPlatformViewCreate(engine_, engine_->flutter_asset_directory,
                                  arguments, &PlatformViewAddListener,
                                  &PlatformViewRemoveListener, this,
                                  std::move(result));
