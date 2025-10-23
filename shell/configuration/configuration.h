@@ -73,17 +73,16 @@ class Configuration {
   Configuration(const Configuration&) = delete;
   Configuration& operator=(const Configuration&) = delete;
 
-  PRIVATE :
-      /**
-       * @brief Parse config file and generate View config
-       * @param[in] cli_config Config file
-       * @return std::vector<Configuration::Config>
-       * @retval View config
-       * @relation
-       * internal
-       */
-      static std::vector<Config>
-      parse_config(const Config& cli_config);
+ private:
+  /**
+   * @brief Parse config file and generate View config
+   * @param[in] cli_config Config file
+   * @return std::vector<Configuration::Config>
+   * @retval View config
+   * @relation
+   * internal
+   */
+  static std::vector<Config> parse_config(const Config& cli_config);
 
   /**
    * @brief Get parameters from TOML configuration file
