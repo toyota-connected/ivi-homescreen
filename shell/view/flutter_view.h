@@ -21,8 +21,8 @@
 #include "configuration/configuration.h"
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
-#include "wayland/window.h"
 #include "shell/accessibility/accessibility_tree.h"
+#include "wayland/window.h"
 
 #include <flutter_homescreen.h>
 

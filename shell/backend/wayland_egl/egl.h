@@ -236,7 +236,5 @@ class Egl {
    */
   static void print_extension_list(const EGLDisplay& dpy);
 
-
-  bool GetConfig(const EGLint* attrib_list,
-                 std::vector<EGLConfig>& configs);
+  bool GetConfig(const EGLint* attrib_list, std::vector<EGLConfig>& configs);
 };

@@ -56,12 +56,11 @@ void CrashHandler::set_sentry_tags() {
   std::string tag;
   while (getline(ss, tag, ',')) {
     size_t del = tag.find("=", 0);
-    std::string tag_name = tag.substr(0,del);
+    std::string tag_name = tag.substr(0, del);
     size_t tag_val_size = tag.size() - tag_name.size() - 1;
-    std::string tag_val = tag.substr(del+1, tag_val_size);
+    std::string tag_val = tag.substr(del + 1, tag_val_size);
     sentry_set_tag(tag_name.c_str(), tag_val.c_str());
   }
-
 }
 
 CrashHandler::CrashHandler() {
@@ -76,8 +75,7 @@ CrashHandler::CrashHandler() {
   const auto release_env = getenv("SENTRY_RELEASE");
   if (release_env && *release_env) {
     sentry_options_set_release(options, release_env);
-  }
-  else {
+  } else {
     sentry_options_set_release(options, kCrashHandlerRelease);
   }
 
