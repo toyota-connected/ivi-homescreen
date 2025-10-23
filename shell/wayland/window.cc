@@ -100,7 +100,7 @@ WaylandWindow::WaylandWindow(const size_t index,
     case WINDOW_BG:
       m_display->AglShellDoBackground(m_base_surface, 0);
       if (m_activation_area.x || m_activation_area.y ||
-	  m_activation_area.width || m_activation_area.height)
+          m_activation_area.width || m_activation_area.height)
         m_display->AglShellDoSetupActivationArea(
             m_activation_area.x, m_activation_area.y, m_activation_area.width,
             m_activation_area.height, 0);

@@ -21,7 +21,7 @@ PlatformViewTouch::PlatformViewTouch(
 #if DEBUG_PLATFORM_VIEW_TOUCH_PARAMS
   for (const auto& it : params) {
     plugin_common::Encodable::PrintFlutterEncodableValue("PlatformViewTouch",
-                                                          it);
+                                                         it);
   }
 #endif
   if (std::holds_alternative<int32_t>(params[0])) {

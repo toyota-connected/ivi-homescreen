@@ -96,7 +96,8 @@ int App::Loop() const {
 #if BUILD_WATCHDOG
     m_watch_dog->pet();
 #endif
-    std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(sleep_time));
+    std::this_thread::sleep_for(
+        std::chrono::duration<double, std::milli>(sleep_time));
   }
 
   return 0;

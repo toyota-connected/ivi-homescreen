@@ -29,9 +29,9 @@
 #include "backend/backend.h"
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
+#include "shell/accessibility/accessibility_tree.h"
 #include "task_runner.h"
 #include "view/flutter_view.h"
-#include "shell/accessibility/accessibility_tree.h"
 
 class App;
 class Backend;
