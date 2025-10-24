@@ -18,7 +18,7 @@
 
 #include "../plugin_registrant.h"
 
-#include <common/tools/encodable.h>
+#include "../platform_tools/encodable.h"
 
 #include "platform_view_touch.h"
 
@@ -76,7 +76,7 @@ void PlatformViewsHandler::HandleMethodCall(
     int32_t id = 0;
     bool hybrid{};
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodDispose,
+      PrintFlutterEncodableValue(kMethodDispose,
                                                            *arguments);
     }
     if (const auto args = std::get_if<flutter::EncodableMap>(arguments);
@@ -89,7 +89,7 @@ void PlatformViewsHandler::HandleMethodCall(
                    std::holds_alternative<bool>(snd)) {
           hybrid = std::get<bool>(snd);
         } else {
-          plugin_common::Encodable::PrintFlutterEncodableValue(kMethodDispose,
+          PrintFlutterEncodableValue(kMethodDispose,
                                                                *arguments);
         }
       }
@@ -106,7 +106,7 @@ void PlatformViewsHandler::HandleMethodCall(
 
   } else if (method_name == kMethodResize) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodResize,
+      PrintFlutterEncodableValue(kMethodResize,
                                                            *arguments);
     }
 
@@ -126,7 +126,7 @@ void PlatformViewsHandler::HandleMethodCall(
                  std::holds_alternative<double>(snd)) {
         height = std::get<double>(snd);
       } else {
-        plugin_common::Encodable::PrintFlutterEncodableValue(kMethodResize,
+        PrintFlutterEncodableValue(kMethodResize,
                                                              *arguments);
       }
     }
@@ -146,7 +146,7 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success(res);
   } else if (method_name == kMethodSetDirection) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodSetDirection,
+      PrintFlutterEncodableValue(kMethodSetDirection,
                                                            *arguments);
     }
 
@@ -161,7 +161,7 @@ void PlatformViewsHandler::HandleMethodCall(
                  std::holds_alternative<int32_t>(snd)) {
         direction = std::get<int32_t>(snd);
       } else {
-        plugin_common::Encodable::PrintFlutterEncodableValue(
+        PrintFlutterEncodableValue(
             kMethodSetDirection, *arguments);
       }
     }
@@ -174,13 +174,13 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else if (method_name == kMethodClearFocus) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodClearFocus,
+      PrintFlutterEncodableValue(kMethodClearFocus,
                                                            *arguments);
     }
     result->Success();
   } else if (method_name == kMethodOffset) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodOffset,
+      PrintFlutterEncodableValue(kMethodOffset,
                                                            *arguments);
     }
     int32_t id = 0;
@@ -198,7 +198,7 @@ void PlatformViewsHandler::HandleMethodCall(
                  std::holds_alternative<double>(snd)) {
         top = std::get<double>(snd);
       } else {
-        plugin_common::Encodable::PrintFlutterEncodableValue(kMethodOffset,
+        PrintFlutterEncodableValue(kMethodOffset,
                                                              *arguments);
       }
     }
@@ -211,7 +211,7 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else if (method_name == kMethodTouch && !arguments->IsNull()) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodTouch,
+      PrintFlutterEncodableValue(kMethodTouch,
                                                            *arguments);
     }
 
@@ -231,7 +231,7 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else if (method_name == kMethodAcceptGesture && !arguments->IsNull()) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodAcceptGesture,
+      PrintFlutterEncodableValue(kMethodAcceptGesture,
                                                            *arguments);
     }
 
@@ -242,7 +242,7 @@ void PlatformViewsHandler::HandleMethodCall(
           std::holds_alternative<int32_t>(snd)) {
         id = std::get<int32_t>(snd);
       } else {
-        plugin_common::Encodable::PrintFlutterEncodableValue(
+        PrintFlutterEncodableValue(
             kMethodAcceptGesture, *arguments);
       }
     }
@@ -255,7 +255,7 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else if (method_name == kMethodRejectGesture && !arguments->IsNull()) {
     if (kPlatformViewDebug) {
-      plugin_common::Encodable::PrintFlutterEncodableValue(kMethodRejectGesture,
+      PrintFlutterEncodableValue(kMethodRejectGesture,
                                                            *arguments);
     }
     int32_t id = 0;
@@ -265,7 +265,7 @@ void PlatformViewsHandler::HandleMethodCall(
           std::holds_alternative<int32_t>(snd)) {
         id = std::get<int32_t>(snd);
       } else {
-        plugin_common::Encodable::PrintFlutterEncodableValue(
+        PrintFlutterEncodableValue(
             kMethodRejectGesture, *arguments);
       }
     }
@@ -278,7 +278,7 @@ void PlatformViewsHandler::HandleMethodCall(
     result->Success();
   } else {
     spdlog::error("[PlatformViews] method {} is unhandled", method_name);
-    plugin_common::Encodable::PrintFlutterEncodableValue(method_name.c_str(),
+    PrintFlutterEncodableValue(method_name.c_str(),
                                                          *arguments);
     result->NotImplemented();
   }

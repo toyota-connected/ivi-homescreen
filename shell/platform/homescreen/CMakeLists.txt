@@ -7,6 +7,7 @@ add_library(platform_homescreen STATIC
         mouse_cursor_handler.cc
         platform_handler.cc
         text_input_plugin.cc
+        platform_tools/encodable.cc
 )
 
 target_include_directories(platform_homescreen PUBLIC
@@ -22,6 +23,7 @@ target_include_directories(platform_homescreen PRIVATE
         ../..
         ../../..
         ../../logging
+        platform_tools
         platform_views
 )
 

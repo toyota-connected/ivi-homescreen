@@ -19,9 +19,9 @@
 @PLUGIN_LIB_HEADERS@
 
 #include "./public/flutter_homescreen.h"
+#include "./platform_tools/encodable.h"
 
 #include "spdlog/spdlog.h"
-#include "common/tools/encodable.h"
 
 static constexpr char kKeyId[] = "id";
 static constexpr char kKeyViewType[] = "viewType";
@@ -70,7 +70,7 @@ void PluginsApiPlatformViewCreate(
   double height = 0;
   std::vector<uint8_t> params{};
   if (kPlatformViewDebug) {
-    plugin_common::Encodable::PrintFlutterEncodableValue(
+    PrintFlutterEncodableValue(
         "PluginsApiPlatformViewCreate", *arguments);
   }
 
@@ -97,7 +97,7 @@ void PluginsApiPlatformViewCreate(
     } else if (key == kKeyLeft && std::holds_alternative<double>(snd)) {
       left = std::get<double>(snd);
     } else {
-      plugin_common::Encodable::PrintFlutterEncodableValue(
+      PrintFlutterEncodableValue(
           "PluginsApiPlatformViewCreate unknown", *arguments);
     }
   }
