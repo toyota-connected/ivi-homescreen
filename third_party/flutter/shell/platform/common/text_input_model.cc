@@ -150,7 +150,7 @@ bool TextInputModel::Backspace() {
   // There is no selection. Delete the preceding codepoint.
   size_t position = selection_.position();
   if (position != editable_range().start()) {
-    int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
+    int count = IsTrailingSurrogate(static_cast<char32_t>(text_.at(position - 1))) ? 2 : 1;
     text_.erase(position - static_cast<size_t>(count),
                 static_cast<size_t>(count));
     selection_ = TextRange(position - static_cast<size_t>(count));
@@ -170,7 +170,7 @@ bool TextInputModel::Delete() {
   // There is no selection. Delete the preceding codepoint.
   size_t position = selection_.position();
   if (position < editable_range().end()) {
-    int count = IsLeadingSurrogate(text_.at(position)) ? 2 : 1;
+    int count = IsLeadingSurrogate(static_cast<char32_t>(text_.at(position))) ? 2 : 1;
     text_.erase(position, static_cast<size_t>(count));
     if (composing_) {
       composing_range_.set_end(composing_range_.end() -
@@ -193,17 +193,17 @@ bool TextInputModel::DeleteSurrounding(const int offset_from_cursor,
         count = i;
         break;
       }
-      start -= IsTrailingSurrogate(text_.at(start - 1)) ? 2UL : 1UL;
+      start -= IsTrailingSurrogate(static_cast<char32_t>(text_.at(start - 1))) ? 2UL : 1UL;
     }
   } else {
     for (int i = 0; i < offset_from_cursor && start != max_pos; i++) {
-      start += IsLeadingSurrogate(text_.at(start)) ? 2UL : 1UL;
+      start += IsLeadingSurrogate(static_cast<char32_t>(text_.at(start))) ? 2UL : 1UL;
     }
   }
 
   auto end = start;
   for (int i = 0; i < count && end != max_pos; i++) {
-    end += IsLeadingSurrogate(text_.at(start)) ? 2UL : 1UL;
+    end += IsLeadingSurrogate(static_cast<char32_t>(text_.at(start))) ? 2UL : 1UL;
   }
 
   if (start == end) {
@@ -268,7 +268,7 @@ bool TextInputModel::MoveCursorForward() {
   // Otherwise, move the cursor forward.
   if (const size_t position = selection_.position();
       position != editable_range().end()) {
-    const int count = IsLeadingSurrogate(text_.at(position)) ? 2 : 1;
+    const int count = IsLeadingSurrogate(static_cast<char32_t>(text_.at(position))) ? 2 : 1;
     selection_ = TextRange(position + static_cast<size_t>(count));
     return true;
   }
@@ -284,7 +284,7 @@ bool TextInputModel::MoveCursorBack() {
   // Otherwise, move the cursor backward.
   if (const size_t position = selection_.position();
       position != editable_range().start()) {
-    const int count = IsTrailingSurrogate(text_.at(position - 1)) ? 2 : 1;
+    const int count = IsTrailingSurrogate(static_cast<char32_t>(text_.at(position - 1))) ? 2 : 1;
     selection_ = TextRange(position - static_cast<size_t>(count));
     return true;
   }
