@@ -16,28 +16,25 @@
 
 #pragma once
 
-#include <memory>
+#include <string>
 #include <vector>
 
 class EglProcessResolver {
  public:
 #if BUILD_BACKEND_HEADLESS_EGL
   static constexpr char kGlSoNames[3UL][15UL] = {{"libOSMesa.so.8"},
-                                                 {"libGLESv2.so.2"},
-                                                 {"libEGL.so.1"}};
+                                                   {"libGLESv2.so.2"},
+                                                   {"libEGL.so.1"}};
 #else
   static constexpr char kGlSoNames[2UL][15UL] = {{"libGLESv2.so.2"},
-                                                 {"libEGL.so.1"}};
+                                                   {"libEGL.so.1"}};
 #endif
   ~EglProcessResolver();
 
-  /**
-   * @brief Initialize
-   * @return void
-   * @relation
-   * internal
-   */
-  void Initialize();
+  EglProcessResolver(const EglProcessResolver&) = delete;
+  EglProcessResolver& operator=(const EglProcessResolver&) = delete;
+  EglProcessResolver(EglProcessResolver&&) = delete;
+  EglProcessResolver& operator=(EglProcessResolver&&) = delete;
 
   /**
    * @brief Get DLL handle
@@ -62,6 +59,8 @@ class EglProcessResolver {
   void* process_resolver(const char* name) const;
 
  private:
+  friend class GlProcessResolver;
+  EglProcessResolver();
   std::vector<std::pair<void*, std::string>> m_handles;
 };
 
@@ -79,13 +78,7 @@ class GlProcessResolver {
    * internal
    */
   static EglProcessResolver& GetInstance() {
-    if (!sInstance) {
-      sInstance = std::make_shared<EglProcessResolver>();
-      sInstance->Initialize();
-    }
-    return *sInstance;
+    static EglProcessResolver instance;
+    return instance;
   }
-
- protected:
-  static std::shared_ptr<EglProcessResolver> sInstance;
 };

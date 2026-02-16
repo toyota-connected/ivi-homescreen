@@ -27,8 +27,6 @@
 #include <GL/osmesa.h>
 #endif
 
-std::shared_ptr<EglProcessResolver> GlProcessResolver::sInstance = nullptr;
-
 EglProcessResolver::~EglProcessResolver() {
   for (auto const& item : m_handles) {
     dlclose(item.first);
@@ -52,7 +50,7 @@ int EglProcessResolver::GetHandle(const std::string& lib, void** out_handle) {
   return 1;
 }
 
-void EglProcessResolver::Initialize() {
+EglProcessResolver::EglProcessResolver() {
   void* handle;
   const std::vector<std::string> libs(kGlSoNames,
                                       kGlSoNames + std::size(kGlSoNames));
