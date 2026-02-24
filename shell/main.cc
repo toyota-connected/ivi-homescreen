@@ -39,7 +39,6 @@ std::unique_ptr<Logging> gLogger;
 void SignalHandler(int /* signal */) {
   SPDLOG_INFO("Ctl+C");
   running = false;
-  exit(0);
 }
 
 /**
