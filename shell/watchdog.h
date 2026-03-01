@@ -39,6 +39,17 @@ class Watchdog {
   explicit Watchdog();
 
   /**
+   * @brief Constructs a Watchdog with a custom timeout interval.
+   *
+   * This constructor allows specifying a custom interval instead of using
+   * the default or systemd-provided value.  Useful for testing with short
+   * timeouts.
+   *
+   * @param interval The timeout interval in microseconds.
+   */
+  explicit Watchdog(std::chrono::microseconds interval);
+
+  /**
    * @brief Destructor for the Watchdog class
    *
    * The destructor for the Watchdog class. It stops the watchdog timer, if it

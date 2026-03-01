@@ -34,6 +34,11 @@ Watchdog::Watchdog()
   spdlog::debug("Watchdog interval set for {} uS", interval_.count());
 }
 
+Watchdog::Watchdog(std::chrono::microseconds interval)
+    : interval_(interval), stop_flag_(false) {
+  spdlog::debug("Watchdog interval set for {} uS", interval_.count());
+}
+
 Watchdog::~Watchdog() {
   if (watchdog_thread_.joinable()) {
     stop();
