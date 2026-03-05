@@ -7,6 +7,8 @@ add_library(platform_homescreen STATIC
         mouse_cursor_handler.cc
         platform_handler.cc
         text_input_plugin.cc
+        # public utils
+        public/tools/command.cc
 )
 
 target_include_directories(platform_homescreen PUBLIC
