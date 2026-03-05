@@ -16,7 +16,7 @@
 
 #include "command.h"
 
-#include "../logging.h"
+#include "tools/logging.h"
 
 namespace plugin_common::Command {
 
