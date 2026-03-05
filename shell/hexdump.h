@@ -18,7 +18,7 @@
 
 #include <cctype>
 #include <iomanip>
-#include <ostream>
+#include <sstream>
 
 class IosFlagSaver {
  public:
