@@ -9,6 +9,7 @@ add_library(platform_homescreen STATIC
         text_input_plugin.cc
         # public utils
         public/tools/command.cc
+        public/tools/encodable.cc
 )
 
 target_include_directories(platform_homescreen PUBLIC
