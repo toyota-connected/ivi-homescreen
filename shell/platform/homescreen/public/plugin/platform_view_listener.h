@@ -17,6 +17,8 @@
 #ifndef FLUTTER_PLUGIN_PLATFORM_VIEW_INTERFACE_H_
 #define FLUTTER_PLUGIN_PLATFORM_VIEW_INTERFACE_H_
 
+#include <cstdint>
+
 #if defined(__cplusplus)
 extern "C" {
 #endif

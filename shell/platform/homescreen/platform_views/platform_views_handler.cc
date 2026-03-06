@@ -69,7 +69,7 @@ void PlatformViewsHandler::HandleMethodCall(
   }
 
   if (method_name == kMethodCreate) {
-    PluginsAoiPlatformViewCreate(engine_, engine_->flutter_asset_directory,
+    PluginsApiPlatformViewCreate(engine_, engine_->flutter_asset_directory,
                                  arguments, &PlatformViewAddListener,
                                  &PlatformViewRemoveListener, this,
                                  std::move(result));

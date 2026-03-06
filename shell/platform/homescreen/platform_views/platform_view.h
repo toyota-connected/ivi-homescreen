@@ -18,7 +18,7 @@
 
 #include <string>
 
-#include "platform_view_listener.h"
+#include "plugin/platform_view_listener.h"
 
 class PlatformView {
  public:
