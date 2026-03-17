@@ -169,6 +169,9 @@ FlutterView::FlutterView(Configuration::Config config,
         spdlog::info("Loading plugin: {}", plugin_name);
 
         // Get registration handle
+        // TODO(kerberjg): refactor before merge:
+        // - add version handling
+        // - load without path (and update LD_LIBRARY_PATH accordingly)
         std::string plugin_path =
             m_config.view.bundle_path + "/lib" + plugin_name + ".so";
         void* lib_handle = dlopen(plugin_path.c_str(), RTLD_NOW | RTLD_LOCAL);
