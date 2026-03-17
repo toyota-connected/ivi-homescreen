@@ -29,18 +29,30 @@ void FlutterPluginRegister(FlutterDesktopEngineRef engine);
 typedef void (*FlutterPluginRegisterCallback)(FlutterDesktopEngineRef engine);
 
 void FlutterPluginPlatformViewCreate(
+    const int32_t id,
+    const std::string viewType,
+    const int32_t direction,
+    const double top,
+    const double left,
+    const double width,
+    const double height,
+    const std::vector<uint8_t>& params,
+    std::string assetDirectory,
     FlutterDesktopEngineRef engine,
-    const std::string& flutter_asset_directory,
-    const flutter::EncodableValue* arguments,
-    PlatformViewAddListener addListener,
-    PlatformViewRemoveListener removeListener,
-    void* platform_view_context,
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
-typedef void (*FlutterPluginPlatformViewCreateRef)(
+    const PlatformViewAddListener add_listener,
+    const PlatformViewRemoveListener remove_listener,
+    void* platform_views_context);
+typedef void (*FlutterPluginPlatformViewCreateCallback)(
+    const int32_t id,
+    const std::string viewType,
+    const int32_t direction,
+    const double top,
+    const double left,
+    const double width,
+    const double height,
+    const std::vector<uint8_t>& params,
+    std::string assetDirectory,
     FlutterDesktopEngineRef engine,
-    const std::string& flutter_asset_directory,
-    const flutter::EncodableValue* arguments,
-    PlatformViewAddListener addListener,
-    PlatformViewRemoveListener removeListener,
-    void* platform_view_context,
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+    const PlatformViewAddListener add_listener,
+    const PlatformViewRemoveListener remove_listener,
+    void* platform_views_context);

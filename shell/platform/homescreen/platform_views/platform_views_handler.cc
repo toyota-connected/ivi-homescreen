@@ -34,9 +34,11 @@ static constexpr char kMethodAcceptGesture[] = "acceptGesture";
 static constexpr char kMethodRejectGesture[] = "rejectGesture";
 
 static constexpr char kKeyId[] = "id";
+static constexpr char kKeyViewType[] = "viewType";
 static constexpr char kKeyDirection[] = "direction";
 static constexpr char kKeyWidth[] = "width";
 static constexpr char kKeyHeight[] = "height";
+static constexpr char kKeyParams[] = "params";
 static constexpr char kKeyTop[] = "top";
 static constexpr char kKeyLeft[] = "left";
 static constexpr char kKeyHybrid[] = "hybrid";
@@ -50,11 +52,24 @@ PlatformViewsHandler::PlatformViewsHandler(flutter::BinaryMessenger* messenger,
               messenger,
               "flutter/platform_views",
               &flutter::StandardMethodCodec::GetInstance())),
-      engine_(engine) {
+      engine_(engine),
+      create_callbacks_({}) {
   channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) { HandleMethodCall(call, std::move(result)); });
+}
+
+void PlatformViewsHandler::RegisterPlatformView(
+    const char* view_type,
+    FlutterPluginPlatformViewCreateCallback create_callback) {
+  // check if the view type is already registered
+  if (create_callbacks_.find(view_type) != create_callbacks_.end()) {
+    throw std::runtime_error(
+        fmt::format("View type {} is already registered", view_type));
+  }
+
+  create_callbacks_[view_type] = create_callback;
 }
 
 void PlatformViewsHandler::HandleMethodCall(
@@ -69,10 +84,80 @@ void PlatformViewsHandler::HandleMethodCall(
   }
 
   if (method_name == kMethodCreate) {
-    PluginsApiPlatformViewCreate(engine_, engine_->flutter_asset_directory,
-                                 arguments, &PlatformViewAddListener,
-                                 &PlatformViewRemoveListener, this,
-                                 std::move(result));
+    // look up the create callback for the view type
+    int32_t id = 0;
+    std::string viewType;
+    int32_t direction = 0;
+    double top = 0;
+    double left = 0;
+    double width = 0;
+    double height = 0;
+    std::vector<uint8_t> params{};
+
+    if (kPlatformViewDebug) {
+      plugin_common::Encodable::PrintFlutterEncodableValue(
+          "PluginsApiPlatformViewCreate", *arguments);
+    }
+
+    // get args
+    const auto args = std::get_if<flutter::EncodableMap>(arguments);
+    for (const auto& [fst, snd] : *args) {
+      if (const auto key = std::get<std::string>(fst);
+          key == kKeyDirection && std::holds_alternative<int32_t>(snd)) {
+        direction = std::get<int32_t>(snd);
+      } else if (key == kKeyHeight && std::holds_alternative<double>(snd)) {
+        height = std::get<double>(snd);
+      } else if (key == kKeyId && std::holds_alternative<int32_t>(snd)) {
+        id = std::get<int32_t>(snd);
+      } else if (key == kKeyParams &&
+                 std::holds_alternative<std::vector<uint8_t>>(snd)) {
+        params = std::get<std::vector<uint8_t>>(snd);
+      } else if (key == kKeyViewType &&
+                 std::holds_alternative<std::string>(snd)) {
+        viewType.assign(std::get<std::string>(snd));
+      } else if (key == kKeyWidth && std::holds_alternative<double>(snd)) {
+        width = std::get<double>(snd);
+      } else if (key == kKeyTop && std::holds_alternative<double>(snd)) {
+        top = std::get<double>(snd);
+      } else if (key == kKeyLeft && std::holds_alternative<double>(snd)) {
+        left = std::get<double>(snd);
+      } else {
+        plugin_common::Encodable::PrintFlutterEncodableValue(
+            "PluginsApiPlatformViewCreate unknown", *arguments);
+      }
+    }
+
+    if (width == 0 || height == 0) {
+      spdlog::critical(
+          "[platform_views_handler] UiKitView is not supported.  Change to "
+          "AndroidView or PlatformView");
+      result->Error(
+          "invalid_view_size",
+          "UiKitView is not supported.  Change to AndroidView or PlatformView");
+      return;
+    }
+
+    // get the create callback for the view type
+    auto callback = create_callbacks_.find(viewType);
+    if (callback == create_callbacks_.end()) {
+      spdlog::critical("No create callback registered for view type {}",
+                       viewType);
+      result->Error(
+          "invalid_view_type",
+          fmt::format("No create callback registered for view type {}",
+                      viewType));
+      return;
+    }
+
+    // call platformviewcreate
+    FlutterPluginPlatformViewCreateCallback create_view = callback->second;
+    create_view(                                                     //
+        id, viewType,                                                //
+        direction, top, left, width, height,                         //
+        params, engine_->flutter_asset_directory, engine_,           //
+        &PlatformViewAddListener, &PlatformViewRemoveListener, this  //
+    );
+
   } else if (method_name == kMethodDispose) {
     int32_t id = 0;
     bool hybrid{};

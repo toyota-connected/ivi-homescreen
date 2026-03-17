@@ -24,9 +24,10 @@
 #include <flutter/method_channel.h>
 #include <flutter/method_result.h>
 
-#include "flutter_homescreen.h"
-
 #include <flutter/standard_method_codec.h>
+
+#include "flutter_homescreen.h"
+#include "plugin/homescreen_plugin.h"
 
 class FlutterView;
 
@@ -34,6 +35,23 @@ class PlatformViewsHandler {
  public:
   explicit PlatformViewsHandler(flutter::BinaryMessenger* messenger,
                                 FlutterDesktopEngineRef engine);
+
+  /**
+   * @brief Register a platform view create callback
+   * @details This should be called by plugins (inside their
+   * RegisterWithRegistrar function) to register a callback for creating
+   * platform views. When a platform view is created on the Flutter side, the
+   * corresponding callback will be called with the provided arguments.
+   *
+   * @param[in] view_type The view type to register the callback for
+   * @param[in] create_callback The callback to register
+   * @return void
+   * @relation
+   * internal, plugin
+   */
+  void RegisterPlatformView(
+      const char* view_type,
+      FlutterPluginPlatformViewCreateCallback create_callback);
 
  private:
   // Called when a method is called on |channel_|;
@@ -54,6 +72,9 @@ class PlatformViewsHandler {
 
   // A reference to the opaque data pointer, if any. Null in headless mode.
   FlutterDesktopEngineRef engine_;
+
+  std::map<std::string, FlutterPluginPlatformViewCreateCallback>
+      create_callbacks_;
 
   std::map<int32_t, std::pair<const struct platform_view_listener*, void*>>
       listeners_;
