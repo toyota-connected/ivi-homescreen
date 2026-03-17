@@ -12,7 +12,166 @@ on:
     - cron:  '0 0 * * *'
 
 jobs:
-  ivi-homescreen:
+  format:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: 'true'
+          persist-credentials: false
+
+      # TODO: Cache clang18 installation
+      - name: Install clang-format-18
+        run: |
+          # Disable man-db (massive speed-up!)
+          sudo apt-get remove --purge man-db -yq
+          # Install LLVM apt repo key
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          # Add LLVM apt repo
+          RELEASE_NAME=$(lsb_release -sc 2> /dev/null || echo "noble")
+          echo "deb http://apt.llvm.org/${RELEASE_NAME}/ llvm-toolchain-${RELEASE_NAME}-18 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          # Update and install dependencies
+          sudo apt-get update -yq
+          sudo apt-get install -yq clang-format-18
+
+      - name: find
+        run: |
+          find "./" -type d -name third_party -prune -false -o -name '*.cc' -o -name '*.hpp' -o -name '*.h' > clang-format-files
+          echo "Formatting files:"
+          cat clang-format-files
+
+      - name: clang-format
+        run: |
+          which clang-format-18
+          clang-format-18 --version
+          clang-format-18 -n --Werror --files=clang-format-files 2> clang-format-results.txt
+
+      - name: results
+        if: always()
+        run: |
+          cat clang-format-results.txt
+
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: clang-format-results
+          path: "${{ github.workspace }}/clang-format-*"
+
+  tidy:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: 'true'
+          persist-credentials: false
+      - name: install
+        run: |
+          # Disable man-db (massive speed-up!)
+          sudo apt-get remove --purge man-db -yq
+
+          # Purge old LLVM
+          sudo apt-get purge llvm* -yq
+
+          # Install LLVM apt repo key
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          # Add LLVM apt repo
+          RELEASE_NAME=$(lsb_release -sc 2> /dev/null || echo "noble")
+          echo "deb http://apt.llvm.org/${RELEASE_NAME}/ llvm-toolchain-${RELEASE_NAME}-18 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+
+          # Update and install dependencies
+          sudo apt-get update -yq
+          sudo apt-get install -yq \
+            ninja-build \
+            libwayland-dev wayland-protocols libxkbcommon-dev \
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+            clang-18 clang-tidy-18 llvm-18 lldb-18 lld-18 libc++-18-dev libc++abi-18-dev libc++1-18 libc++abi1-18 \
+            libunwind-18 libunwind-18-dev libglib2.0-dev
+          
+          # HACK: fix libunwind-18-dev not providing a proper pkg-config file
+          #  - see https://github.com/llvm/llvm-project/issues/53458
+          #  - Create a minimal pkg-config file that points to libunwind-18:
+          sudo tee /usr/lib/pkgconfig/libunwind.pc <<'EOF'
+          prefix=/usr
+          exec_prefix=${prefix}
+          libdir=/usr/lib/x86_64-linux-gnu
+          includedir=/usr/include/libunwind
+
+          Name: libunwind
+          Description: libunwind
+          Version: 1.6.2
+          Libs: -lunwind
+          Cflags: -I${includedir}
+          EOF
+
+          pkg-config --modversion libunwind
+          pkg-config --cflags libunwind
+          
+      - name: Configure
+        shell: bash
+        run: |
+          mkdir -p ${{github.workspace}}/build
+
+          CC=/usr/bin/clang-18 CXX=/usr/bin/clang++-18 cmake -GNinja \
+            -S ${{github.workspace}}/ \
+            -B ${{github.workspace}}/build \
+            -D LLVM_CONFIG=/usr/bin/llvm-config-18 \
+            -D ENABLE_STATIC_LINK=ON \
+            -D ENABLE_LTO=ON \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D CMAKE_VERBOSE_MAKEFILE=ON \
+            -D ENABLE_DLT=OFF \
+            -D BUILD_CRASH_HANDLER=OFF \
+            \
+            -D DEBUG_PLATFORM_MESSAGES=OFF \
+            \
+            -D BUILD_WATCHDOG=OFF \
+            -D BUILD_SYSTEMD_WATCHDOG=OFF \
+            -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
+          
+      # NOTE: for some reason doesn't tidy correctly if waypp files are not generated
+      - name: Build waypp
+        working-directory: ${{github.workspace}}/build
+        run: |
+          ninja waypp
+
+      - name: clang-tidy
+        run: |
+          export FILE_LIST=$(find "./" -type d -name third_party -prune -false -o -name '*.cc' -o -name '*.hpp' -o -name '*.h')
+          echo $FILE_LIST
+          run-clang-tidy \
+            -warnings-as-errors='*,-bugprone-macro-parentheses' \
+            -export-fixes=tidy-results-suggested-fixes.txt \
+            -p ${{github.workspace}}/build \
+            $FILE_LIST \
+            2>/dev/null \
+            | tee tidy-results-log.txt
+
+          # If tidy-results-suggested-fixes.txt contains "Error: " at least once, make the step fail
+          set -e
+          ! grep -q "Level: Error" tidy-results-suggested-fixes.txt
+
+      - name: Show results
+        if: always()
+        run: |
+          cat tidy-results-log.txt
+          cat tidy-results-suggested-fixes.txt
+
+      - name: Publish Report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: clang-tidy-results
+          path:  ${{github.workspace}}/tidy-results-*
+
+  build:
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && always() }}
     runs-on: ubuntu-22.04
     steps:
