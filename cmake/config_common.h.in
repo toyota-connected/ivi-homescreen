@@ -107,6 +107,7 @@ constexpr char kDefaultLocaleScriptCode[] = "";
 constexpr char kViewConfigToml[] = "config.toml";
 constexpr char kBundleFlutterAssets[] = "data/flutter_assets";
 constexpr char kBundleAot[] = "lib/libapp.so";
+constexpr char kPluginConfig[] = "data/.flutter-plugins-dependencies";
 // Bundle folder override paths
 constexpr char kBundleIcudtl[] = "data/icudtl.dat";
 constexpr char kBundleEngine[] = "lib/libflutter_engine.so";
@@ -192,4 +193,4 @@ constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
 #cmakedefine01 ENV32BIT
 #cmakedefine01 ENV64BIT
 
-#endif //CONFIG_COMMON_H_
+#endif  // CONFIG_COMMON_H_

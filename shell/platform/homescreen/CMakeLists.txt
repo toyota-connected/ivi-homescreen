@@ -12,6 +12,9 @@ add_library(platform_homescreen STATIC
         public/tools/encodable.cc
 )
 
+# make platform_homescreen PIC/platform independent to avoid issues when linked into shared libraries
+set_target_properties(platform_homescreen PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(platform_homescreen PUBLIC
         .
         ${CMAKE_SOURCE_DIR}

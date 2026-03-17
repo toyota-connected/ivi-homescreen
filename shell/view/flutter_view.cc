@@ -31,6 +31,8 @@
 
 #include "configuration/configuration.h"
 #include "engine.h"
+
+// TODO(kerberjg): these need to go
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
@@ -39,6 +41,10 @@
 #endif
 
 #if ENABLE_PLUGINS
+#include "public/plugin/homescreen_plugin.h"
+#include "public/tools/shared_library.h"
+
+// NOTE: this is for static plugins
 extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
@@ -115,7 +121,89 @@ FlutterView::FlutterView(Configuration::Config config,
   m_wayland_display->SetViewControllerState(
       m_state->engine_state->view_controller);
 
+  /*
+   * Load & Register plugins
+   */
 #if ENABLE_PLUGINS
+  //
+  //  DYNAMIC PLUGINS LOAD HERE!!!
+  //
+
+  // Get list of plugins to load from
+  // `.desktop-homescreen/.flutter-plugins-dependencies` (JSON)
+  std::ifstream plugin_config_file(m_config.view.bundle_path + "/" +
+                                   kPluginConfig);
+
+  if (plugin_config_file.is_open()) {
+    std::stringstream buffer;
+    buffer << plugin_config_file.rdbuf();
+    plugin_config_file.close();
+
+    rapidjson::Document doc;
+    doc.Parse(buffer.str().c_str());
+
+    if (                                     //
+        doc.IsObject()                       //
+        && doc.HasMember("dependencyGraph")  //
+        && doc["dependencyGraph"].IsArray()  //
+    ) {
+      // List plugins
+      std::vector<std::string> dynamic_plugins;
+      for (const auto& dep : doc["dependencyGraph"].GetArray()) {
+        if (dep.IsObject() && dep.HasMember("name")) {
+          std::string plugin_name = dep["name"].GetString();
+          dynamic_plugins.push_back(plugin_name);
+        } else {
+          spdlog::error(  //
+              "Plugin config file is not in expected format: "
+              "each dependency must be an object with a 'name' field. "
+              "Skipping plugin entry."  //
+          );
+        }
+      }
+
+      // Load plugins
+      FlutterDesktopEngineRef engine_ref = m_state->engine_state.get();
+
+      for (const auto& plugin_name : dynamic_plugins) {
+        spdlog::info("Loading plugin: {}", plugin_name);
+
+        // Get registration handle
+        std::string plugin_path =
+            m_config.view.bundle_path + "/lib" + plugin_name + ".so";
+        void* lib_handle = dlopen(plugin_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (!lib_handle) {
+          spdlog::error("Failed to load plugin {}: {}", plugin_name, dlerror());
+        } else {
+          spdlog::info("Successfully loaded plugin: {}", plugin_name);
+        }
+
+        FlutterPluginRegisterCallback register_func;
+
+        PluginGetFuncAddress<FlutterPluginRegisterCallback>(
+            lib_handle, "FlutterPluginRegister", &register_func  //
+        );
+
+        // Register plugin with engine
+        if (register_func) {
+          register_func(engine_ref);
+          spdlog::info("Successfully registered plugin: {}", plugin_name);
+        } else {
+          spdlog::error(
+              "Failed to find registration function for plugin {}: {}",
+              plugin_name, dlerror()  //
+          );
+        }
+      }
+    }
+  } else {
+    spdlog::warn(
+        "No plugin config file found at {}. No dynamic plugins will be loaded.",
+        m_config.view.bundle_path + "/" + kPluginConfig  //
+    );
+  }
+
+  // Register static plugins
   PluginsApiRegisterPlugins(m_state->engine_state.get());
 #endif
 }
