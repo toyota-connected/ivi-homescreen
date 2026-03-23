@@ -48,6 +48,7 @@ jobs:
           ls -la _packages
 
       - name: Publish Debug Artifact TGZ
+        if: ${{ github.event_name == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: homescreen-dbg.Linux.tar.gz.zip
@@ -55,6 +56,7 @@ jobs:
             build/debug/_packages/homescreen-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
+        if: ${{ github.event_name == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: homescreen-dbg.amd64.deb.zip
@@ -62,6 +64,7 @@ jobs:
             build/debug/_packages/homescreen-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
+        if: ${{ github.event_name == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: homescreen-dbg.x86_64.rpm.zip
@@ -93,6 +96,7 @@ jobs:
           ldd shell/homescreen
 
       - name: Publish Release Artifact TGZ
+        if: ${{ github.event_name == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: homescreen.Linux.tar.gz.zip
@@ -100,6 +104,7 @@ jobs:
             build/release/_packages/homescreen-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
+        if: ${{ github.event_name == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: homescreen.amd64.deb.zip
@@ -107,6 +112,7 @@ jobs:
             build/release/_packages/homescreen_*_amd64.deb
 
       - name: Publish Release Artifact RPM
+        if: ${{ github.event_name == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: homescreen.x86_64.rpm.zip
