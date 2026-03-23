@@ -51,21 +51,24 @@ option(ENABLE_LTO "Enable Link Time optimization" OFF)
 option(ENABLE_DLT "Enable DLT logging" OFF)
 
 #
-# Plugin Override
+# Static Plugin Dirs
 #
-option(DISABLE_PLUGINS "Disable Plugins" OFF)
+set(STATIC_PLUGIN_DIRS "" CACHE STRING "Semicolon-separated list of absolute plugin source directory paths")
 
-if (NOT PLUGINS_DIR)
-    set(PLUGINS_DIR ${CMAKE_SOURCE_DIR}/ivi-homescreen-plugins)
+if (STATIC_PLUGIN_DIRS)
+    MESSAGE(STATUS "Static Plugins ......... ${STATIC_PLUGIN_DIRS}")
+else ()
+    MESSAGE(STATUS "Static Plugins ......... None")
 endif ()
 
-if (NOT DISABLE_PLUGINS AND EXISTS ${PLUGINS_DIR})
-    MESSAGE(STATUS "Plugins ................ Enabled")
-    set(ENABLE_PLUGINS ON)
-elseif (DISABLE_PLUGINS OR NOT EXISTS ${PLUGINS_DIR})
-    MESSAGE(STATUS "Plugins ................ Disabled")
-    set(ENABLE_PLUGINS OFF)
-endif ()
+# Conditional plugin dir groups: each *_LOAD flag (ON/OFF) gates whether the
+# corresponding *_PLUGIN_DIRS paths are appended to STATIC_PLUGIN_DIRS.
+foreach(_grp FIREBASE RIVE CAMERA CAMERA_PIPEWIRE PDF WEBRTC WEBVIEW NAV_RENDER)
+    if(${_grp}_LOAD AND ${_grp}_PLUGIN_DIRS)
+        list(APPEND STATIC_PLUGIN_DIRS ${${_grp}_PLUGIN_DIRS})
+        MESSAGE(STATUS "${_grp} plugins .......... Enabled")
+    endif()
+endforeach()
 
 #
 # backend selection

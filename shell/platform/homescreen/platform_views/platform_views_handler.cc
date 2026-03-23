@@ -19,8 +19,8 @@
 #include <generated_plugin_registrant.h>
 
 #include <tools/encodable.h>
+#include <tools/logging.h>
 
-#include "config/plugins.h"
 #include "platform_view_touch.h"
 
 static constexpr char kMethodCreate[] = "create";

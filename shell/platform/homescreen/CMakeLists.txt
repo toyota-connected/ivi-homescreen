@@ -51,7 +51,7 @@ if (ACCESSKIT_FOUND)
     )
 endif ()
 
-if (ENABLE_PLUGINS)
+if (STATIC_PLUGIN_DIRS)
 
     if (POLICY CMP0076)
         cmake_policy(SET CMP0076 NEW)
@@ -60,10 +60,6 @@ if (ENABLE_PLUGINS)
     target_sources(platform_homescreen PUBLIC
             platform_views/platform_views_handler.cc
             platform_views/platform_view_touch.cc
-    )
-
-    target_include_directories(platform_homescreen PUBLIC
-            ${PLUGINS_DIR}
     )
 
     target_link_libraries(platform_homescreen PUBLIC

@@ -1,0 +1,9 @@
+/* Auto-generated — do not edit */
+#include "generated_plugin_registrant.h"
+#include "flutter_homescreen.h"
+
+@PLUGIN_INCLUDES@
+
+void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine) {
+  (void)engine;
+@PLUGIN_REGISTRATIONS@}

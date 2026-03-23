@@ -56,14 +56,60 @@ add_subdirectory(shell/platform/homescreen)
 #
 # plugins
 #
-if (ENABLE_PLUGINS)
-    add_subdirectory(${PLUGINS_DIR} ${PROJECT_BINARY_DIR}/plugins)
-    foreach (EXT_PLUGINS_DIR ${EXT_PLUGINS_DIRS})
-        if (EXISTS ${EXT_PLUGINS_DIR})
-            add_subdirectory(${EXT_PLUGINS_DIR} ${PROJECT_BINARY_DIR}/ext_plugins)
-        endif ()
-    endforeach ()
-endif ()
+if (STATIC_PLUGIN_DIRS)
+    set(PLUGIN_INCLUDES "")
+    set(PLUGIN_REGISTRATIONS "")
+
+    add_library(plugins STATIC ${PROJECT_BINARY_DIR}/generated_plugin_registrant.cc)
+    target_include_directories(plugins PUBLIC ${CMAKE_SOURCE_DIR}/shell ${PROJECT_BINARY_DIR} ${CMAKE_BINARY_DIR})
+    target_link_libraries(plugins PUBLIC rapidjson spdlog flutter)
+
+    foreach(plugin_dir IN LISTS STATIC_PLUGIN_DIRS)
+        get_filename_component(plugin_name ${plugin_dir} NAME)
+        # Read the plugin's metadata
+        include(${plugin_dir}/plugin.cmake)
+        # print the plugin's metadata for debugging
+        message(STATUS "Configuring plugin ... ${PLUGIN}")
+        message(STATUS "  name ............... ${PLUGIN_NAME}")
+        #message(STATUS "  version ............ ${PLUGIN_VERSION}")
+        message(STATUS "  description ........ ${PLUGIN_DESCRIPTION}")
+        message(STATUS "  header ............. ${PLUGIN_HEADER}")
+        message(STATUS "  register endpoint .. ${PLUGIN_REGISTER_ENDPOINT}")
+
+        # Set enable flags
+        set(ENABLE_${PLUGIN_NAME_CAMEL_CASE} ON)
+
+        # Build the plugin
+        add_subdirectory(${plugin_dir} ${PROJECT_BINARY_DIR}/plugins/${plugin_name})
+        add_sanitizers(plugin_${plugin_name})
+        if (IPO_SUPPORT_RESULT)
+            set_property(TARGET plugin_${plugin_name} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        endif()
+        target_link_libraries(plugins PUBLIC plugin_${plugin_name})
+
+        # Accumulate for registrant
+        string(APPEND PLUGIN_INCLUDES "#include \"${PLUGIN_HEADER}\"\n")
+        string(APPEND PLUGIN_REGISTRATIONS
+            "  ${PLUGIN_REGISTER_ENDPOINT}(FlutterDesktopGetPluginRegistrar(engine, \"\"));\n")
+    endforeach()
+
+    # Clear variables set by plugin.cmake
+    unset(PLUGIN_NAME)
+    unset(PLUGIN_FULL_NAME)
+    unset(PLUGIN_DESCRIPTION)
+    unset(PLUGIN_VERSION)
+    unset(undescore_fname)
+    unset(camelcase_fname)
+    unset(lcase_name)
+    unset(PLUGIN_HEADER)
+    unset(PLUGIN_REGISTER_ENDPOINT)
+
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/shell/generated_plugin_registrant.cc.in
+        ${PROJECT_BINARY_DIR}/generated_plugin_registrant.cc
+        @ONLY
+    )
+endif()
 
 #
 # executable
