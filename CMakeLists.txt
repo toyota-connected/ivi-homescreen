@@ -89,8 +89,14 @@ if (STATIC_PLUGIN_DIRS)
 
         # Accumulate for registrant
         string(APPEND PLUGIN_INCLUDES "#include \"${PLUGIN_HEADER}\"\n")
-        string(APPEND PLUGIN_REGISTRATIONS
-            "  ${PLUGIN_REGISTER_ENDPOINT}(FlutterDesktopGetPluginRegistrar(engine, \"\"));\n")
+
+        # (check if PLUGIN_REGISTER_ENDPOINT is defined to avoid appending empty registration calls for plugins that don't specify an endpoint)
+        if (DEFINED PLUGIN_REGISTER_ENDPOINT)
+            string(APPEND PLUGIN_REGISTRATIONS
+                "  ${PLUGIN_REGISTER_ENDPOINT}(FlutterDesktopGetPluginRegistrar(engine, \"\"));\n")
+        else()
+            message(WARNING "PLUGIN_REGISTER_ENDPOINT not defined for plugin ${PLUGIN_NAME}, skipping registration call in generated_plugin_registrant.cc")
+        endif()
     endforeach()
 
     # Clear variables set by plugin.cmake
