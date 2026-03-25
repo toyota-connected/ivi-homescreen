@@ -30,7 +30,7 @@
 #include "compositor_surface.h"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_REGION
-#include "plugins/comp_region/comp_region.h"
+#include "comp_region.h"
 #endif
 
 class Display;

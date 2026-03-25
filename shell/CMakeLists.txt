@@ -34,6 +34,21 @@ add_executable(${PROJECT_NAME}
         task_runner.cc
         accessibility/accessibility_tree.cc
 )
+
+if (ENABLE_PLUGIN_COMP_SURF)
+    add_executable(${PROJECT_NAME}
+            view/comp_surf.cc
+            view/comp_surf.h
+    )
+endif ()
+
+if (ENABLE_PLUGIN_COMP_REGION)
+    add_executable(${PROJECT_NAME}
+            view/comp_region.cc
+            view/comp_region.h
+    )
+endif ()
+
 set_target_properties(${PROJECT_NAME}
         PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
 )
