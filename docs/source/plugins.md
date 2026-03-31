@@ -1,7 +1,14 @@
-# Dynamic Plugins
+# Plugins
 
-Differently from the vanilla Flutter (Linux) embedder, `ivi-homescreen` does not bundle plugins at compile time.
-Instead, it provides an ABI for plugins to be loaded as dynamic libraries at runtime.
+## Static plugins
+Static plugins are linked directly into the `ivi-homescreen` binary at build time, and are registered with the Flutter engine through the standard static plugin registration mechanism.
+
+To include a static plugin in your `ivi-homescreen` build, when building the binary pass a semicolon-separated list of plugin source directories to the `STATIC_PLUGIN_DIRS` when building the `homescreen` binary, and the build system will take care of building and linking the plugins into the binary.
+
+The plugins however will be only initialized at runtime if the given app calls for them (i.e. if they are included in the `pubspec.yaml` dependencies and thus in the generated `.plugins` file), otherwise they will be left uninitialized and won't consume any runtime resources.
+
+## Dynamic plugin loading
+Differently from the vanilla Flutter (Linux) embedder, `ivi-homescreen` additionally provides an ABI for plugins to be loaded as dynamic libraries at runtime.
 
 This enables the following use cases:
 - **Verifiable binaries**: Both `ivi-homescreen` and the plugins can be built and signed independently inside of trusted build pipelines with full transparency and audit trail.
