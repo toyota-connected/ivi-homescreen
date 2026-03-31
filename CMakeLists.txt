@@ -62,6 +62,21 @@ if (STATIC_PLUGIN_DIRS)
     set(ENABLE_PLUGINS ON)
 endif()
 
+macro(CLEAR_PLUGIN_VARIABLES)
+    unset(PLUGIN_NAME)
+    unset(PLUGIN_FULL_NAME)
+    unset(PLUGIN_DESCRIPTION)
+    unset(PLUGIN_VERSION)
+    unset(undescore_fname)
+    unset(camelcase_fname)
+    unset(lcase_name)
+    unset(PLUGIN_HEADER)
+    unset(PLUGIN_REGISTER_ENDPOINT)
+endmacro()
+
+# STATIC_PLUGIN_DIRS
+#   List of plugin source paths to build and include as static libraries
+#   linked directly into the `homescreen` binary.
 if (STATIC_PLUGIN_DIRS)
     set(PLUGIN_INCLUDES "")
     set(PLUGIN_REGISTRATIONS "")
@@ -79,6 +94,7 @@ if (STATIC_PLUGIN_DIRS)
         message(STATUS "  name ............... ${PLUGIN_NAME}")
         #message(STATUS "  version ............ ${PLUGIN_VERSION}")
         message(STATUS "  description ........ ${PLUGIN_DESCRIPTION}")
+        message(STATUS "  link mode .......... static")
         message(STATUS "  header ............. ${PLUGIN_HEADER}")
         message(STATUS "  register endpoint .. ${PLUGIN_REGISTER_ENDPOINT}")
 
@@ -106,21 +122,47 @@ if (STATIC_PLUGIN_DIRS)
     endforeach()
 
     # Clear variables set by plugin.cmake
-    unset(PLUGIN_NAME)
-    unset(PLUGIN_FULL_NAME)
-    unset(PLUGIN_DESCRIPTION)
-    unset(PLUGIN_VERSION)
-    unset(undescore_fname)
-    unset(camelcase_fname)
-    unset(lcase_name)
-    unset(PLUGIN_HEADER)
-    unset(PLUGIN_REGISTER_ENDPOINT)
+    CLEAR_PLUGIN_VARIABLES()
 
     configure_file(
         ${CMAKE_SOURCE_DIR}/shell/generated_plugin_registrant.cc.in
         ${PROJECT_BINARY_DIR}/generated_plugin_registrant.cc
         @ONLY
     )
+endif()
+
+# DYNAMIC_PLUGIN_DIRS
+#   List of plugin source paths to build as shared libraries.
+#   Builds these plugins as (independent targets) shared libraries
+#   and makes sure to provide the necessary variables (include dir)
+#   for the plugin to link against `platform_homescreen` and `flutter`.
+if (DYNAMIC_PLUGIN_DIRS)
+    # include plugin.cmake to get metadata and use add_custom_target to build each plugin as a shared library
+    foreach(plugin_dir IN LISTS DYNAMIC_PLUGIN_DIRS)
+        include(${plugin_dir}/plugin.cmake)
+        set (plugin_target plugin_${PLUGIN_NAME})
+        # print the plugin's metadata for debugging
+        message(STATUS "Configuring plugin ... ${PLUGIN}")
+        message(STATUS "  name ............... ${PLUGIN_NAME}")
+        #message(STATUS "  version ............ ${PLUGIN_VERSION}")
+        message(STATUS "  description ........ ${PLUGIN_DESCRIPTION}")
+        message(STATUS "  link mode .......... dynamic")
+        message(STATUS "  target ............. ${plugin_target}")
+
+        # Build the plugin as a shared library
+        add_custom_command(
+            OUTPUT ${plugin_target}
+            COMMAND ${CMAKE_COMMAND} --target ${plugin_target}
+            --build ${CMAKE_BINARY_DIR}
+            -DIVI_HOMESCREEN_INCLUDE_DIR=${CMAKE_SOURCE_DIR}/shell/platform/homescreen
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Building plugin ${PLUGIN_NAME} as shared library"
+        )
+    endforeach()
+
+    # Clear variables set by plugin.cmake
+    CLEAR_PLUGIN_VARIABLES()
+
 endif()
 
 #

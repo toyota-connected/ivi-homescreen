@@ -51,8 +51,8 @@ if (ACCESSKIT_FOUND)
     )
 endif ()
 
-if (STATIC_PLUGIN_DIRS)
-
+# plugins
+if (STATIC_PLUGIN_DIRS OR DYNAMIC_PLUGIN_DIRS)
     if (POLICY CMP0076)
         cmake_policy(SET CMP0076 NEW)
     endif (POLICY CMP0076)
@@ -65,5 +65,4 @@ if (STATIC_PLUGIN_DIRS)
     target_link_libraries(platform_homescreen PUBLIC
             plugins
     )
-
 endif ()
