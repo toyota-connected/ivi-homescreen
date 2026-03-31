@@ -56,6 +56,12 @@ add_subdirectory(shell/platform/homescreen)
 #
 # plugins
 #
+
+if (STATIC_PLUGIN_DIRS)
+    message (STATUS "Plugins enabled!")
+    set(ENABLE_PLUGINS ON)
+endif()
+
 if (STATIC_PLUGIN_DIRS)
     set(PLUGIN_INCLUDES "")
     set(PLUGIN_REGISTRATIONS "")
