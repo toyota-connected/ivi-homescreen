@@ -44,6 +44,14 @@ message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
 
+# (this needs to be here or the config_common.h won't template correctly)
+if (STATIC_PLUGIN_DIRS OR DYNAMIC_PLUGIN_DIRS)
+    message (STATUS "Plugins enabled!")
+    set(ENABLE_PLUGINS ON)
+else()
+    message (STATUS "No plugins enabled :c")
+endif()
+
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
 #
@@ -56,11 +64,6 @@ add_subdirectory(shell/platform/homescreen)
 #
 # plugins
 #
-
-if (STATIC_PLUGIN_DIRS)
-    message (STATUS "Plugins enabled!")
-    set(ENABLE_PLUGINS ON)
-endif()
 
 macro(CLEAR_PLUGIN_VARIABLES)
     unset(PLUGIN_NAME)
@@ -78,36 +81,48 @@ endmacro()
 #   List of plugin source paths to build and include as static libraries
 #   linked directly into the `homescreen` binary.
 if (STATIC_PLUGIN_DIRS)
+    message(STATUS "Static plugins: ${STATIC_PLUGIN_DIRS}")
+
     set(PLUGIN_INCLUDES "")
     set(PLUGIN_REGISTRATIONS "")
 
+    find_package(PkgConfig REQUIRED)
+
     add_library(plugins STATIC ${PROJECT_BINARY_DIR}/generated_plugin_registrant.cc)
-    target_include_directories(plugins PUBLIC ${CMAKE_SOURCE_DIR}/shell ${PROJECT_BINARY_DIR} ${CMAKE_BINARY_DIR})
+    target_include_directories(plugins PUBLIC
+        ${CMAKE_SOURCE_DIR}/shell
+        ${CMAKE_SOURCE_DIR}/shell/platform/homescreen/public
+        ${PROJECT_BINARY_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
     target_link_libraries(plugins PUBLIC rapidjson spdlog flutter)
 
     foreach(plugin_dir IN LISTS STATIC_PLUGIN_DIRS)
         get_filename_component(plugin_name ${plugin_dir} NAME)
         # Read the plugin's metadata
         include(${plugin_dir}/plugin.cmake)
+
         # print the plugin's metadata for debugging
         message(STATUS "Configuring plugin ... ${PLUGIN}")
         message(STATUS "  name ............... ${PLUGIN_NAME}")
         #message(STATUS "  version ............ ${PLUGIN_VERSION}")
         message(STATUS "  description ........ ${PLUGIN_DESCRIPTION}")
         message(STATUS "  link mode .......... static")
+        message(STATUS "  target ............. ${PLUGIN_TARGET_NAME}")
         message(STATUS "  header ............. ${PLUGIN_HEADER}")
         message(STATUS "  register endpoint .. ${PLUGIN_REGISTER_ENDPOINT}")
 
         # Set enable flags
-        set(ENABLE_${PLUGIN_NAME_CAMEL_CASE} ON)
+        string(TOUPPER ${PLUGIN_NAME} PLUGIN_NAME_UPPER)
+        set(ENABLE_${PLUGIN_NAME_UPPER} ON)
 
         # Build the plugin
-        add_subdirectory(${plugin_dir} ${PROJECT_BINARY_DIR}/plugins/${plugin_name})
-        add_sanitizers(plugin_${plugin_name})
+        add_subdirectory(${plugin_dir} ${PROJECT_BINARY_DIR}/plugins/${PLUGIN_NAME})
+        add_sanitizers(${PLUGIN_TARGET_NAME})
         if (IPO_SUPPORT_RESULT)
-            set_property(TARGET plugin_${plugin_name} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_property(TARGET ${PLUGIN_TARGET_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         endif()
-        target_link_libraries(plugins PUBLIC plugin_${plugin_name})
+        target_link_libraries(plugins PUBLIC ${PLUGIN_TARGET_NAME})
 
         # Accumulate for registrant
         string(APPEND PLUGIN_INCLUDES "#include \"${PLUGIN_HEADER}\"\n")
@@ -137,22 +152,26 @@ endif()
 #   and makes sure to provide the necessary variables (include dir)
 #   for the plugin to link against `platform_homescreen` and `flutter`.
 if (DYNAMIC_PLUGIN_DIRS)
+    message(STATUS "Dynamic plugins: ${DYNAMIC_PLUGIN_DIRS}")
+
+    set(BUILD_SHARED_PLUGIN ON)
+
     # include plugin.cmake to get metadata and use add_custom_target to build each plugin as a shared library
     foreach(plugin_dir IN LISTS DYNAMIC_PLUGIN_DIRS)
         include(${plugin_dir}/plugin.cmake)
-        set (plugin_target plugin_${PLUGIN_NAME})
+
         # print the plugin's metadata for debugging
         message(STATUS "Configuring plugin ... ${PLUGIN}")
         message(STATUS "  name ............... ${PLUGIN_NAME}")
         #message(STATUS "  version ............ ${PLUGIN_VERSION}")
         message(STATUS "  description ........ ${PLUGIN_DESCRIPTION}")
         message(STATUS "  link mode .......... dynamic")
-        message(STATUS "  target ............. ${plugin_target}")
+        message(STATUS "  target ............. ${PLUGIN_TARGET_NAME}")
 
         # Build the plugin as a shared library
         add_custom_command(
-            OUTPUT ${plugin_target}
-            COMMAND ${CMAKE_COMMAND} --target ${plugin_target}
+            OUTPUT ${PLUGIN_TARGET_NAME}
+            COMMAND ${CMAKE_COMMAND} --target ${PLUGIN_TARGET_NAME}
             --build ${CMAKE_BINARY_DIR}
             -DIVI_HOMESCREEN_INCLUDE_DIR=${CMAKE_SOURCE_DIR}/shell/platform/homescreen
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

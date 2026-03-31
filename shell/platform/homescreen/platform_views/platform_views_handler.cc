@@ -138,6 +138,7 @@ void PlatformViewsHandler::HandleMethodCall(
     }
 
     // get the create callback for the view type
+    // TODO(kerberjg): this should be thread-safe, add locks
     auto callback = create_callbacks_.find(viewType);
     if (callback == create_callbacks_.end()) {
       spdlog::critical("No create callback registered for view type {}",
