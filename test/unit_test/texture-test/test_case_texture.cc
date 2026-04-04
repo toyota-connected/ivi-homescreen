@@ -1,16 +1,18 @@
-#include "gtest/gtest.h"
-#include "utils.h"
 #include "engine.h"
+#include "gtest/gtest.h"
+#include "textures/texture.h"
+#include "utils.h"
 #include "view/flutter_view.h"
 #include "wayland/display.h"
-#include "textures/texture.h"
 
 static constexpr char kBundlePath[] = TEST_APP_BUNDLE_PATH;
 static constexpr char kSourceRoot[] = SOURCE_ROOT_DIR;
 constexpr int64_t kTestTextureObjectId = 5150;
 const std::string kCallCreateCb = "Call Create Callback";
-const flutter::EncodableValue kFlutterTestKey = flutter::EncodableValue("Test Key");
-const flutter::EncodableValue kFlutterTestVal = flutter::EncodableValue("Test Val");
+const flutter::EncodableValue kFlutterTestKey =
+    flutter::EncodableValue("Test Key");
+const flutter::EncodableValue kFlutterTestVal =
+    flutter::EncodableValue("Test Val");
 bool callDisposeCallback = false;
 
 /**
@@ -36,7 +38,7 @@ Engine* createEngineInstance() {
   FlutterView* view = createFlutterViewInstance();
   std::vector<const char*> vm_args_c;
 
-  Engine *engine = new Engine(view, 1, vm_args_c, kBundlePath, 1);
+  Engine* engine = new Engine(view, 1, vm_args_c, kBundlePath, 1);
   return engine;
 }
 
@@ -44,7 +46,7 @@ Engine* createEngineInstance() {
  * @brief Callback function to registered instead of Texture::Create
  */
 flutter::EncodableValue create_callback(void* userdata,
-    const flutter::EncodableMap* args) {
+                                        const flutter::EncodableMap* args) {
   // check object Texture-ID
   auto* obj = reinterpret_cast<Texture*>(userdata);
   int64_t texture_id = obj->GetId();
@@ -78,8 +80,8 @@ Test Summary: Check that the value set in the constructor can be retrieved
 ***************************************************************/
 TEST(HomescreenTextureGetFlutterOpenGLTexture, Lv1Normal001) {
   // setup parameter
-  Texture *texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D,
-      GL_RGBA8, nullptr, nullptr);
+  Texture* texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8,
+                                 nullptr, nullptr);
   ASSERT_TRUE(texture != nullptr);
 
   // call target function
@@ -98,20 +100,19 @@ Test Summary: Dont set callback and check default encodable value
 ***************************************************************/
 TEST(HomescreenTextureCreate, Lv1Normal001) {
   // setup parameter
-  Texture *texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D,
-      GL_RGBA8, nullptr, nullptr);
+  Texture* texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8,
+                                 nullptr, nullptr);
   ASSERT_TRUE(texture != nullptr);
 
   // call target function
   flutter::EncodableValue create = texture->Create(100, 200, nullptr);
 
   // confirm to create instance
-  flutter::EncodableValue expect_val = flutter::EncodableValue(
-    flutter::EncodableMap{
-      {flutter::EncodableValue("result"),
-       flutter::EncodableValue(-1)},
-      {flutter::EncodableValue("error"),
-       flutter::EncodableValue("Create callback not set")}});
+  flutter::EncodableValue expect_val =
+      flutter::EncodableValue(flutter::EncodableMap{
+          {flutter::EncodableValue("result"), flutter::EncodableValue(-1)},
+          {flutter::EncodableValue("error"),
+           flutter::EncodableValue("Create callback not set")}});
   EXPECT_TRUE(expect_val == create);
 }
 
@@ -122,12 +123,12 @@ Test Summary: set create callback and check if the callback is called
 ***************************************************************/
 TEST(HomescreenTextureCreate, Lv1Normal002) {
   // setup parameter
-  Texture *texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D,
-      GL_RGBA8, create_callback, nullptr);
+  Texture* texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8,
+                                 create_callback, nullptr);
   ASSERT_TRUE(texture != nullptr);
 
-  flutter::EncodableMap test_args = flutter::EncodableMap{
-        {kFlutterTestKey, kFlutterTestVal}};
+  flutter::EncodableMap test_args =
+      flutter::EncodableMap{{kFlutterTestKey, kFlutterTestVal}};
 
   // call target function
   flutter::EncodableValue create = texture->Create(100, 200, &test_args);
@@ -144,13 +145,13 @@ Test Summary: set dispose callback and check if the callback is called
 ***************************************************************/
 TEST(HomescreenTextureDispose, Lv1Normal001) {
   // setup parameter
-  Texture *texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D,
-      GL_RGBA8, nullptr, dispose_callback);
+  Texture* texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8,
+                                 nullptr, dispose_callback);
   ASSERT_TRUE(texture != nullptr);
   callDisposeCallback = false;
 
-  flutter::EncodableMap test_args = flutter::EncodableMap{
-        {kFlutterTestKey, kFlutterTestVal}};
+  flutter::EncodableMap test_args =
+      flutter::EncodableMap{{kFlutterTestKey, kFlutterTestVal}};
 
   // call target function
   texture->Dispose(kTestTextureObjectId);
@@ -166,13 +167,13 @@ Test Summary: Dont set dispose callback and check if the callback is not called
 ***************************************************************/
 TEST(HomescreenTextureDispose, Lv1Normal002) {
   // setup parameter
-  Texture *texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D,
-      GL_RGBA8, nullptr, nullptr);
+  Texture* texture = new Texture(kTestTextureObjectId, GL_TEXTURE_2D, GL_RGBA8,
+                                 nullptr, nullptr);
   ASSERT_TRUE(texture != nullptr);
   callDisposeCallback = false;
 
-  flutter::EncodableMap test_args = flutter::EncodableMap{
-        {kFlutterTestKey, kFlutterTestVal}};
+  flutter::EncodableMap test_args =
+      flutter::EncodableMap{{kFlutterTestKey, kFlutterTestVal}};
 
   // call target function
   texture->Dispose(kTestTextureObjectId);
@@ -181,8 +182,7 @@ TEST(HomescreenTextureDispose, Lv1Normal002) {
   EXPECT_FALSE(callDisposeCallback);
 }
 
-
-#if 0 // TODO ME: Update tests for new Texture implementation
+#if 0  // TODO ME: Update tests for new Texture implementation
 /****************************************************************
 Test Case Name.Test Name： HomescreenTextureEnable_Lv1Normal001
 Use Case Name: Set OpenGL texture
