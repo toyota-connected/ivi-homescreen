@@ -63,6 +63,11 @@ if (ENABLE_DLT)
     target_sources(${PROJECT_NAME} PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
 
+# Attach the new IHS logging mux (header + DLT bridge when ENABLE_DLT is on).
+# Safe to call unconditionally: under ENABLE_DLT=OFF the helper only adds the
+# logger.hpp include path and the macros expand to ((void)0).
+ihs_target_add_logging(${PROJECT_NAME})
+
 if (BUILD_CRASH_HANDLER)
     target_sources(${PROJECT_NAME} PRIVATE crash_handler.cc)
 endif ()

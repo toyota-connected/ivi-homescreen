@@ -23,6 +23,7 @@
 #include "config/common.h"
 #include "engine.h"
 #include "hexdump.h"
+#include "logging/logger.hpp"
 #include "utils.h"
 
 extern void EngineOnFlutterPlatformMessage(
@@ -594,6 +595,29 @@ void Engine::onLogMessageCallback(const char* tag,
                                   const char* message,
                                   void* /* user_data */) {
   spdlog::info("{}: {}", tag, message);
+
+#if defined(ENABLE_DLT)
+  // Route the Flutter engine's message to the DLT bridge under a dedicated
+  // context. The context is built on first call and cached for the process
+  // lifetime by DltBridge.
+  static IhsLogContext kEngineCtx("FLTR", "Flutter engine");
+  if (kEngineCtx.is_valid()) {
+    char buf[256];
+    const int n =
+        std::snprintf(buf, sizeof(buf), "%s: %s",
+                      tag ? tag : "", message ? message : "");
+    if (n > 0) {
+      ihs::dlt::DltBridge::instance().log(
+          kEngineCtx.impl(),
+          ihs::dlt::LogLevel::Info,
+          std::string_view{buf,
+                           static_cast<std::size_t>(
+                               n < static_cast<int>(sizeof(buf))
+                                   ? n
+                                   : static_cast<int>(sizeof(buf)) - 1)});
+    }
+  }
+#endif
 }
 
 void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,

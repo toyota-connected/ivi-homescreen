@@ -20,6 +20,7 @@
 
 #include "app.h"
 #include "configuration/configuration.h"
+#include "logging/logger.hpp"
 #include "logging/logging.h"
 
 #if BUILD_CRASH_HANDLER
@@ -38,6 +39,7 @@ std::unique_ptr<Logging> gLogger;
  */
 void SignalHandler(int /* signal */) {
   SPDLOG_INFO("Ctl+C");
+  IHS_LOGGING_FLUSH();
   running = false;
   exit(0);
 }
@@ -58,6 +60,7 @@ int main(const int argc, char** argv) {
 #endif
 
   gLogger = std::make_unique<Logging>();
+  IHS_LOGGING_START("IHSC", "ivi-homescreen Flutter runtime");
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
   assert(!configs.empty());
@@ -72,6 +75,8 @@ int main(const int argc, char** argv) {
     ret = app.Loop();
   }
 
+  IHS_LOGGING_FLUSH();
+  IHS_LOGGING_STOP();
   gLogger.reset();
 
 #if BUILD_CRASH_HANDLER

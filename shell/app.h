@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "configuration/configuration.h"
+#include "logging/logger.hpp"
 #include "view/flutter_view.h"
 #include "watchdog.h"
 
@@ -53,4 +54,7 @@ class App final {
   std::shared_ptr<Display> m_wayland_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;
   std::unique_ptr<Watchdog> m_watch_dog;
+#if defined(ENABLE_DLT)
+  std::unique_ptr<IhsFlushWatchdog> m_ihs_flush_watchdog;
+#endif
 };
