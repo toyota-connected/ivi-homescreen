@@ -1,0 +1,134 @@
+---
+name: ihs-logging-compat-matrix
+
+# Build + runtime-smoke the DLT bridge across the C++17 / C++20 / C++23
+# toolchains called out in INTEGRATION_PLAN.md §8. Runs the standalone
+# compat-matrix harness under shell/logging/tests/compat-matrix so it does
+# not pull in the homescreen binary's Wayland / Flutter / third_party
+# dependency chain — the job only needs a C++ toolchain and libdl.
+
+on:
+  pull_request:
+    paths:
+      - 'cmake/cxx_compat.cmake'
+      - 'cmake/logging_helpers.cmake'
+      - 'shell/logging/**'
+      - '.github/workflows/ihs-logging-compat-matrix.yml'
+  push:
+    branches:
+      - v2.0
+      - 'jw/dlt-refactor'
+    paths:
+      - 'cmake/cxx_compat.cmake'
+      - 'cmake/logging_helpers.cmake'
+      - 'shell/logging/**'
+      - '.github/workflows/ihs-logging-compat-matrix.yml'
+  workflow_dispatch:
+
+jobs:
+  compat-matrix:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── C++17 floor — exercises every polyfill in compat.hpp
+          #    (jthread, expected, format_to snprintf path, flat_map=map).
+          #    Clang-12 ships in Ubuntu 22.04 (jammy) main repo.
+          - name: "Clang-12 C++17 DLT"
+            runner:    ubuntu-22.04
+            clang_ver: 12
+            cxx_std:   17
+            enable_dlt: ON
+
+          # ── C++20 — std::format / std::jthread native; expected/flat_map
+          #    still polyfilled. Clang-14 is the default on Ubuntu 22.04.
+          - name: "Clang-14 C++20 DLT"
+            runner:    ubuntu-22.04
+            clang_ver: 14
+            cxx_std:   20
+            enable_dlt: ON
+
+          # ── C++23 — every IHS_HAS_* flag expected ON. Clang-17 ships in
+          #    Ubuntu 24.04 (noble) main repo.
+          - name: "Clang-17 C++23 DLT"
+            runner:    ubuntu-24.04
+            clang_ver: 17
+            cxx_std:   23
+            enable_dlt: ON
+
+          # ── ENABLE_DLT=OFF sanity: the top-level shell/logging/CMakeLists
+          #    early-returns, so only the compat_smoke stub-macro path is
+          #    exercised. Catches include-path / macro regressions in the
+          #    spdlog-only build.
+          - name: "Clang-17 C++23 spdlog-only"
+            runner:    ubuntu-24.04
+            clang_ver: 17
+            cxx_std:   23
+            enable_dlt: OFF
+
+    name: ${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Clang ${{ matrix.clang_ver }}
+        run: |
+          set -eux
+          sudo apt-get update
+          # All matrix entries pin a runner image whose stock apt repos
+          # carry the required Clang version, so no apt.llvm.org dance.
+          sudo apt-get install -y \
+              clang-${{ matrix.clang_ver }} \
+              libc++-${{ matrix.clang_ver }}-dev \
+              libc++abi-${{ matrix.clang_ver }}-dev \
+              cmake ninja-build
+          clang-${{ matrix.clang_ver }} --version
+          clang++-${{ matrix.clang_ver }} --version
+
+      - name: Configure
+        run: |
+          set -eux
+          cmake -GNinja \
+            -S shell/logging/tests/compat-matrix \
+            -B build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }} \
+            -DCMAKE_C_COMPILER=clang-${{ matrix.clang_ver }} \
+            -DCMAKE_CXX_COMPILER=clang++-${{ matrix.clang_ver }} \
+            -DCMAKE_CXX_STANDARD=${{ matrix.cxx_std }} \
+            -DENABLE_DLT=${{ matrix.enable_dlt }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_VERBOSE_MAKEFILE=ON
+
+      - name: Dump detected feature flags
+        working-directory: build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }}
+        run: |
+          set -eux
+          # Emits one line per IHS_HAS_* probe from the CMakeCache.
+          grep -E '^IHS_HAS_' CMakeCache.txt || true
+
+      - name: Build
+        run: |
+          set -eux
+          cmake --build \
+            build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }} \
+            -j$(nproc)
+
+      - name: Run compat_smoke
+        if: matrix.enable_dlt == 'ON'
+        working-directory: build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }}
+        run: |
+          set -eux
+          # libihs_logging_dlt.so lives in the subproject build dir.
+          LD_LIBRARY_PATH="$PWD/shell_logging:${LD_LIBRARY_PATH:-}" \
+              ./compat_smoke
+
+      - name: ctest (no-op when ENABLE_DLT=OFF)
+        if: matrix.enable_dlt == 'ON'
+        working-directory: build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }}
+        run: |
+          set -eux
+          LD_LIBRARY_PATH="$PWD/shell_logging:${LD_LIBRARY_PATH:-}" \
+              ctest --output-on-failure

@@ -204,7 +204,7 @@ App::App(const std::vector<Configuration::Config>& configs) {
   }
 #endif
 
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   // Belt-and-braces periodic flush of the DLT bridge. The worker already
   // drains on its own schedule; this guarantees forward progress during
   // stalls where a producer thread falls silent mid-burst.

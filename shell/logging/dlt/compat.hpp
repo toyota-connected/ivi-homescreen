@@ -173,8 +173,9 @@
    public:
        stop_source()
            : flag_(std::make_shared<std::atomic<bool>>(false)) {}
-       void     request_stop() noexcept {
-           flag_->store(true, std::memory_order_release);
+       void request_stop() noexcept {
+           // flag_ may be null after this source has been moved from.
+           if (flag_) flag_->store(true, std::memory_order_release);
        }
        stop_token get_token() const noexcept {
            return stop_token{flag_};
@@ -182,6 +183,44 @@
    private:
        std::shared_ptr<std::atomic<bool>> flag_;
    };
+
+   // Erased holder used by the jthread polyfill below. The std::thread is
+   // constructed with a free-function pointer (run_holder) plus a
+   // shared_ptr<HolderBase>; no closure type is ever passed to std::thread.
+   //
+   // Why this matters: libstdc++14 + Clang-17 + -std=c++23 has a
+   // non-SFINAE-friendly tuple check inside std::thread's ctor that fires
+   // on closure types. Wrapping the user callable in a virtual call behind
+   // a function pointer keeps std::thread's _Invoker tuple holding only
+   // (function-pointer, shared_ptr) — neither of which is a lambda.
+   namespace detail {
+       struct JThreadHolderBase {
+           stop_token tok;
+           virtual ~JThreadHolderBase() = default;
+           virtual void run() = 0;
+       };
+
+       template<class F, class Tup>
+       struct JThreadHolder final : JThreadHolderBase {
+           F   func;
+           Tup args;
+           JThreadHolder(F f, Tup a, stop_token t)
+               : func(std::move(f)), args(std::move(a)) { tok = std::move(t); }
+           void run() override {
+               std::apply(
+                   [&](auto&&... a) {
+                       func(std::move(tok),
+                            std::forward<decltype(a)>(a)...);
+                   },
+                   std::move(args));
+           }
+       };
+
+       inline void run_jthread_holder(
+           std::shared_ptr<JThreadHolderBase> holder) {
+           holder->run();
+       }
+   } // namespace detail
 
    // jthread polyfill: thread that receives a stop_token as first argument
    // and whose destructor automatically requests stop + joins.
@@ -191,16 +230,21 @@
 
        template<class F, class... Args>
        explicit jthread(F&& f, Args&&... args) {
-           auto token = source_.get_token();
+           using FDecay = typename std::decay<F>::type;
+           using TupT   = std::tuple<typename std::decay<Args>::type...>;
+           using HolderT = detail::JThreadHolder<FDecay, TupT>;
+
+           auto holder = std::make_shared<HolderT>(
+               std::forward<F>(f),
+               TupT(std::forward<Args>(args)...),
+               source_.get_token());
+
+           // Pass a free function pointer + shared_ptr (both non-closure
+           // types) to std::thread, sidestepping the libstdc++14 lambda
+           // ctor SFINAE bug.
            thread_ = std::thread(
-               [func  = std::forward<F>(f),
-                tok   = std::move(token),
-                targs = std::make_tuple(std::forward<Args>(args)...)]() mutable {
-                   std::apply([&](auto&&... a) {
-                       func(std::move(tok),
-                            std::forward<decltype(a)>(a)...);
-                   }, std::move(targs));
-               });
+               &detail::run_jthread_holder,
+               std::shared_ptr<detail::JThreadHolderBase>(holder));
        }
 
        ~jthread() {

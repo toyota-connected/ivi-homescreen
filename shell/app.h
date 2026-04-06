@@ -19,7 +19,7 @@
 #include <EGL/egl.h>
 #include <memory>
 
-#include "config/common.h"
+#include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 #include "configuration/configuration.h"
 #include "logging/logger.hpp"
 #include "view/flutter_view.h"
@@ -95,7 +95,7 @@ class App final {
   asio::executor_work_guard<asio::io_context::executor_type> primary_work_{
       asio::make_work_guard(primary_ioc_)};
 
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   // Declared last so it destructs first: the periodic DLT-bridge flush stops
   // before the displays/reactor tear down and before the process-global bridge
   // is stopped at IHS_LOGGING_STOP.

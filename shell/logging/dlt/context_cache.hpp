@@ -11,6 +11,13 @@
 #include <string_view>
 #include <vector>
 
+// Note: ihs::flat_map is intentionally not used here. libstdc++14 has a
+// non-SFINAE-friendly std::tuple<__convertible_from_tuple_like> path that
+// trips on any std::map<std::string, T> insert under Clang-17 / -std=c++23.
+// The cache is bounded at kMaxContexts (256) and only searched on the
+// (rare) first acquire per call site, so a linear scan over entries_ is
+// both portable and fast enough.
+
 namespace ihs::dlt {
 
 enum class ContextError {
@@ -39,7 +46,6 @@ public:
 private:
     LibDltLoader&                                loader_;
     std::mutex                                   mu_;
-    ihs::flat_map<std::string, std::uint32_t>    id_to_handle_;
     std::vector<std::unique_ptr<ContextEntry>>   entries_;
 };
 
