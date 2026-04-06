@@ -9,6 +9,12 @@ include(CMakePushCheckState)
 function(ihs_check_cxx_feature VAR SOURCE)
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS}")
+    if(CMAKE_CXX_STANDARD)
+        # check_cxx_source_compiles does not honor CMAKE_CXX_STANDARD; pass
+        # the -std= flag explicitly so the probe reflects the real build.
+        set(CMAKE_REQUIRED_FLAGS
+            "${CMAKE_REQUIRED_FLAGS} -std=c++${CMAKE_CXX_STANDARD}")
+    endif()
     check_cxx_source_compiles("${SOURCE}" ${VAR})
     cmake_pop_check_state()
     set(${VAR} "${${VAR}}" PARENT_SCOPE)

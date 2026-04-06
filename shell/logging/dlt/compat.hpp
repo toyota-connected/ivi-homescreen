@@ -31,6 +31,12 @@
 #  include <expected>
    namespace ihs { template<class T, class E> using expected    = std::expected<T,E>; }
    namespace ihs { template<class E>          using unexpected  = std::unexpected<E>; }
+   namespace ihs {
+   template<class T, class E>
+   inline expected<T,E> unexpect(E err) {
+       return std::unexpected<E>(std::move(err));
+   }
+   } // namespace ihs
 #else
 #  include <variant>
 #  include <stdexcept>
@@ -69,6 +75,11 @@
 
    template<class E>
    struct unexpected { E value; };
+
+   template<class T, class E>
+   inline expected<T,E> unexpect(E err) {
+       return expected<T,E>::make_error(std::move(err));
+   }
 
    } // namespace ihs
 #endif
