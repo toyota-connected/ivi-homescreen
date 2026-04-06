@@ -52,7 +52,7 @@ if (ACCESSKIT_FOUND)
 endif ()
 
 # plugins
-if (STATIC_PLUGIN_DIRS OR DYNAMIC_PLUGIN_DIRS)
+if (ENABLE_PLUGINS)
     if (POLICY CMP0076)
         cmake_policy(SET CMP0076 NEW)
     endif (POLICY CMP0076)

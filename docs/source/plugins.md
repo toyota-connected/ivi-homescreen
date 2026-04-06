@@ -3,7 +3,11 @@
 ## Static plugins
 Static plugins are linked directly into the `ivi-homescreen` binary at build time, and are registered with the Flutter engine through the standard static plugin registration mechanism.
 
-To include a static plugin in your `ivi-homescreen` build, when building the binary pass a semicolon-separated list of plugin source directories to the `STATIC_PLUGIN_DIRS` when building the `homescreen` binary, and the build system will take care of building and linking the plugins into the binary.
+To include a static plugin in your `ivi-homescreen` build, pass a semicolon-separated list of absolute plugin source directory paths to `HOMESCREEN_PLUGINS_STATIC` when configuring the `homescreen` binary, and the build system will take care of building and linking the plugins into the binary. Dynamic plugins use `HOMESCREEN_PLUGINS_DYNAMIC` analogously.
+
+Out-of-tree plugin repositories (for example [`ivi-homescreen-plugins-example`](https://github.com/toyota-connected/ivi-homescreen-plugins-example)) can be added without re-listing the in-tree set by appending their plugin directory paths to `HOMESCREEN_EXTERNAL_PLUGINS_STATIC` or `HOMESCREEN_EXTERNAL_PLUGINS_DYNAMIC`. Each external plugin directory must contain a `plugin.cmake` defining `PLUGIN_NAME`, `PLUGIN_TARGET_NAME`, `PLUGIN_HEADER`, and `PLUGIN_REGISTER_ENDPOINT` — the same contract used by in-tree plugins.
+
+The legacy variable names `STATIC_PLUGIN_DIRS` and `DYNAMIC_PLUGIN_DIRS` are still accepted but emit a deprecation warning and will be removed in a future release.
 
 The plugins however will be only initialized at runtime if the given app calls for them (i.e. if they are included in the `pubspec.yaml` dependencies and thus in the generated `.plugins` file), otherwise they will be left uninitialized and won't consume any runtime resources.
 

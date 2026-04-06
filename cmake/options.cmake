@@ -51,21 +51,35 @@ option(ENABLE_LTO "Enable Link Time optimization" OFF)
 option(ENABLE_DLT "Enable DLT logging" OFF)
 
 #
-# Static Plugin Dirs
+# Plugin source directory lists
 #
-set(STATIC_PLUGIN_DIRS "" CACHE STRING "Semicolon-separated list of absolute plugin source directory paths")
+# In-tree plugin dirs (set by the workspace or CI to point at the
+# checked-out ivi-homescreen-plugins paths). Absolute paths only.
+set(HOMESCREEN_PLUGINS_STATIC  "" CACHE STRING
+    "Semicolon-separated absolute paths of in-tree plugin source dirs to link statically into homescreen")
+set(HOMESCREEN_PLUGINS_DYNAMIC "" CACHE STRING
+    "Semicolon-separated absolute paths of in-tree plugin source dirs to build as shared libraries")
 
-if (STATIC_PLUGIN_DIRS)
-    MESSAGE(STATUS "Static Plugins ......... ${STATIC_PLUGIN_DIRS}")
+# Out-of-tree plugin dirs (e.g. ivi-homescreen-plugins-example or any
+# downstream private plugin repo). Concatenated onto the in-tree lists
+# at configure time so workspace orchestration can add external plugins
+# without re-listing the in-tree set.
+set(HOMESCREEN_EXTERNAL_PLUGINS_STATIC  "" CACHE STRING
+    "Additional out-of-tree static plugin source dirs (absolute paths)")
+set(HOMESCREEN_EXTERNAL_PLUGINS_DYNAMIC "" CACHE STRING
+    "Additional out-of-tree dynamic plugin source dirs (absolute paths)")
+
+if (HOMESCREEN_PLUGINS_STATIC OR HOMESCREEN_EXTERNAL_PLUGINS_STATIC)
+    MESSAGE(STATUS "Static Plugins ......... ${HOMESCREEN_PLUGINS_STATIC} ${HOMESCREEN_EXTERNAL_PLUGINS_STATIC}")
 else ()
     MESSAGE(STATUS "Static Plugins ......... None")
 endif ()
 
 # Conditional plugin dir groups: each *_LOAD flag (ON/OFF) gates whether the
-# corresponding *_PLUGIN_DIRS paths are appended to STATIC_PLUGIN_DIRS.
+# corresponding *_PLUGIN_DIRS paths are appended to HOMESCREEN_PLUGINS_STATIC.
 foreach(_grp FIREBASE RIVE CAMERA CAMERA_PIPEWIRE PDF WEBRTC WEBVIEW NAV_RENDER)
     if(${_grp}_LOAD AND ${_grp}_PLUGIN_DIRS)
-        list(APPEND STATIC_PLUGIN_DIRS ${${_grp}_PLUGIN_DIRS})
+        list(APPEND HOMESCREEN_PLUGINS_STATIC ${${_grp}_PLUGIN_DIRS})
         MESSAGE(STATUS "${_grp} plugins .......... Enabled")
     endif()
 endforeach()
