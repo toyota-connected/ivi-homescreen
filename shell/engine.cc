@@ -852,7 +852,7 @@ void Engine::onLogMessageCallback(const char* tag,
                                   void* /* user_data */) {
   spdlog::info("{}: {}", tag, message);
 
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   // Route the Flutter engine's message to the DLT bridge under a dedicated
   // context. The context is built on first call and cached for the process
   // lifetime by DltBridge.

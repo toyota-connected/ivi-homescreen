@@ -15,6 +15,11 @@ function(ihs_check_cxx_feature VAR SOURCE)
         set(CMAKE_REQUIRED_FLAGS
             "${CMAKE_REQUIRED_FLAGS} -std=c++${CMAKE_CXX_STANDARD}")
     endif()
+    # std::jthread (and a handful of other facilities) need pthread linkage
+    # under libstdc++; without it the probe link step fails even though the
+    # header parses cleanly.
+    set(CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES};-pthread")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -pthread")
     check_cxx_source_compiles("${SOURCE}" ${VAR})
     cmake_pop_check_state()
     set(${VAR} "${${VAR}}" PARENT_SCOPE)
@@ -29,7 +34,12 @@ int main() { return std::format("{}", 42).size() > 0 ? 0 : 1; }
 
 ihs_check_cxx_feature(IHS_HAS_STD_JTHREAD [=[
 #include <thread>
-int main() { std::jthread t([]{}); return 0; }
+// Note: pass a free function pointer rather than a lambda. libstdc++14
+// + Clang-17 + -std=c++23 has a non-SFINAE-friendly tuple check inside
+// std::thread's ctor that fires on closure types and would mis-fail this
+// probe. A function pointer sidesteps it.
+static void ihs_probe_thread_body() {}
+int main() { std::jthread t(ihs_probe_thread_body); return 0; }
 ]=])
 
 ihs_check_cxx_feature(IHS_HAS_FORMAT_TO_N [=[
