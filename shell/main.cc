@@ -23,6 +23,7 @@
 #include "app.h"
 #include "backend/register_backends.h"
 #include "configuration/configuration.h"
+#include "logging/logger.hpp"
 #include "logging/logging.h"
 #include "main_loop_waker.h"
 
@@ -74,6 +75,8 @@ void InstallShutdownHandlers() {
  */
 int main(const int argc, char** argv) {
   gLogger = std::make_unique<Logging>();
+  IHS_LOGGING_START("IHSC", "ivi-homescreen Flutter runtime");
+
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
   assert(!configs.empty());
 
@@ -164,6 +167,8 @@ int main(const int argc, char** argv) {
   const int ret = app.Run();
   (void)ret;
 
+  IHS_LOGGING_FLUSH();
+  IHS_LOGGING_STOP();
   gLogger.reset();
 
 #if BUILD_CRASH_HANDLER

@@ -96,6 +96,8 @@ if (ENABLE_DLT)
     add_subdirectory(shell/logging)
 endif ()
 
+include(logging_helpers)
+
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
 #

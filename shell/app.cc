@@ -204,9 +204,18 @@ App::App(const std::vector<Configuration::Config>& configs) {
   }
 #endif
 
+#if defined(ENABLE_DLT)
+  // Belt-and-braces periodic flush of the DLT bridge. The worker already
+  // drains on its own schedule; this guarantees forward progress during
+  // stalls where a producer thread falls silent mid-burst.
+  m_ihs_flush_watchdog = std::make_unique<IhsFlushWatchdog>(
+      std::chrono::milliseconds(100));
+#endif
+
   for (const auto& display : m_displays) {
     display->StartEvents();
   }
+
 
   SPDLOG_DEBUG("-App::App");
 }
