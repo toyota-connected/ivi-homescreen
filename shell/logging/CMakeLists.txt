@@ -28,14 +28,15 @@ target_include_directories(ihs_logging
 ihs_apply_cxx_compat(ihs_logging)
 
 target_compile_definitions(ihs_logging PUBLIC ENABLE_DLT=1)
-target_link_libraries(ihs_logging PRIVATE ${CMAKE_DL_LIBS})
 
-target_compile_options(ihs_logging PRIVATE
-    -Wall -Wextra -fvisibility=hidden
-)
+find_package(Threads REQUIRED)
+target_link_libraries(ihs_logging PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
+target_compile_options(ihs_logging PRIVATE -Wall -Wextra)
+
+# Note: the bridge's C++ entry points (DltBridge, ContextCache, etc.) are
+# consumed directly by the homescreen binary, so we keep default symbol
+# visibility. The extern "C" ffi_shim surface is already public.
 set_target_properties(ihs_logging PROPERTIES
-    OUTPUT_NAME               ihs_logging_dlt
-    CXX_VISIBILITY_PRESET     hidden
-    VISIBILITY_INLINES_HIDDEN ON
+    OUTPUT_NAME ihs_logging_dlt
 )

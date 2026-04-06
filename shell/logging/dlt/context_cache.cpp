@@ -9,10 +9,13 @@ ihs::expected<std::uint32_t, ContextError>
 ContextCache::ensure(std::string_view ctx_id, std::string_view description) {
     std::lock_guard<std::mutex> lock(mu_);
 
-    const std::string key(ctx_id);
-    auto it = id_to_handle_.find(key);
-    if (it != id_to_handle_.end()) {
-        return it->second;
+    // Linear scan: kMaxContexts is small (256) and ensure() is only called
+    // on first use of a logging call site, so this stays well off the hot
+    // path. See the note in context_cache.hpp for why we don't use std::map.
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+        if (entries_[i]->id == ctx_id) {
+            return static_cast<std::uint32_t>(i);
+        }
     }
 
     if (entries_.size() >= kMaxContexts) {
@@ -26,7 +29,7 @@ ContextCache::ensure(std::string_view ctx_id, std::string_view description) {
     }
 
     auto entry         = std::make_unique<ContextEntry>();
-    entry->id          = key;
+    entry->id          = std::string(ctx_id);
     entry->description = std::string(description);
 
     if (!loader_.register_context(&entry->dlt_ctx,
@@ -38,7 +41,6 @@ ContextCache::ensure(std::string_view ctx_id, std::string_view description) {
 
     const auto index = static_cast<std::uint32_t>(entries_.size());
     entries_.push_back(std::move(entry));
-    id_to_handle_[key] = index;
     return index;
 }
 

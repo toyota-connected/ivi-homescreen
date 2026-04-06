@@ -4,7 +4,7 @@
 // include-safe everywhere; main.cc integration lands in Phase 3.
 #pragma once
 
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
 
 #  include "dlt/bridge.hpp"
 #  include "dlt/compat.hpp"
@@ -47,7 +47,11 @@ public:
     explicit IhsFlushWatchdog(
         std::chrono::milliseconds interval = std::chrono::milliseconds(100))
         : interval_(interval) {
-        thread_ = std::thread([this] { run(); });
+        // Pass a member function pointer + this rather than a closure.
+        // libstdc++14 + Clang-17 + -std=c++23 has a non-SFINAE-friendly
+        // tuple check inside std::thread's ctor that fires on lambda
+        // arguments; using std::invoke via a member-fn-ptr sidesteps it.
+        thread_ = std::thread(&IhsFlushWatchdog::run, this);
     }
 
     ~IhsFlushWatchdog() { stop(); }
@@ -102,7 +106,7 @@ private:
 #  define IHS_LOG_DEBUG(ctx_, ...) IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Debug,   __VA_ARGS__)
 #  define IHS_LOG_TRACE(ctx_, ...) IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Verbose, __VA_ARGS__)
 
-#else // !ENABLE_DLT
+#else // !ENABLE_DLT (ENABLE_DLT undefined or defined to 0)
 
 // spdlog backend placeholder — left unwired until Phase 3. The macros expand
 // to nothing so existing sources can opt into the mux header incrementally.

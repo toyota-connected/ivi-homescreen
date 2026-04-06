@@ -63,7 +63,7 @@ App::App(const std::vector<Configuration::Config>& configs)
   m_watch_dog = std::make_unique<Watchdog>();
 #endif
 
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   // Belt-and-braces periodic flush of the DLT bridge. The worker already
   // drains on its own schedule; this guarantees forward progress during
   // stalls where a producer thread falls silent mid-burst.

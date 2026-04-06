@@ -19,6 +19,7 @@
 #include <EGL/egl.h>
 #include <memory>
 
+#include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 #include "configuration/configuration.h"
 #include "logging/logger.hpp"
 #include "view/flutter_view.h"
@@ -54,7 +55,7 @@ class App final {
   std::shared_ptr<Display> m_wayland_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;
   std::unique_ptr<Watchdog> m_watch_dog;
-#if defined(ENABLE_DLT)
+#if ENABLE_DLT
   std::unique_ptr<IhsFlushWatchdog> m_ihs_flush_watchdog;
 #endif
 };
