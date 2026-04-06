@@ -45,6 +45,10 @@ message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 include(compiler)
 include(cxx_compat)
 
+if(ENABLE_DLT)
+    add_subdirectory(shell/logging)
+endif()
+
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
 #
