@@ -63,6 +63,7 @@ message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
+include(cxx_compat)
 
 # drm_kms.cmake must run after compiler.cmake so the `toolchain` INTERFACE
 # library (which carries -stdlib=libc++ on clang builds) exists when we
