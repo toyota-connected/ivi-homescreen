@@ -93,6 +93,8 @@ class WaylandEglBackend : public Egl, public Backend {
 
   bool TextureClearCurrent() override;
 
+  bool GetEglContext(BackendEglContext* out) const override;
+
   /**
    * @brief Get FlutterRendererConfig
    * @return FlutterRendererConfig
