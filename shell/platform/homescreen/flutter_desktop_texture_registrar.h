@@ -1,8 +1,12 @@
 #pragma once
 
 #include <GLES2/gl2.h>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#include <flutter_texture_registrar.h>
+#include <shell/platform/embedder/embedder.h>
 
 struct FlutterDesktopEngineState;
 
@@ -21,6 +25,13 @@ struct GL_TEXTURE_2D_DESC {
   size_t visible_height;
   void (*release_callback)(void* release_context);
   void* release_context;
+
+  // Pixel-buffer mode. When |pixel_buffer_callback| is non-null the embedder
+  // owns the GL texture named by |name| (lazy-allocated on first upload from
+  // the raster thread); for GPU-surface mode the plugin owns the GL texture
+  // and this pair stays null.
+  FlutterDesktopPixelBufferTextureCallback pixel_buffer_callback;
+  void* pixel_buffer_user_data;
 };
 
 // State associated with the texture registrar.
@@ -33,3 +44,17 @@ struct FlutterDesktopTextureRegistrar {
   std::unordered_map<int64_t, std::unique_ptr<GL_TEXTURE_2D_DESC>>
       texture_registry;
 };
+
+// Resolve a registered external texture for the Flutter engine's
+// |gl_external_texture_frame_callback|. For pixel-buffer textures this
+// invokes the plugin callback, lazily allocates the embedder-owned GL
+// texture, and uploads the pixel data. For GPU-surface textures it returns
+// the plugin-owned GL texture unchanged. Must be called with the raster GL
+// context current. Returns false if |texture_id| is not registered or the
+// plugin callback produced no frame.
+bool PopulateExternalGlTextureFrame(
+    FlutterDesktopTextureRegistrar* texture_registrar,
+    int64_t texture_id,
+    size_t width,
+    size_t height,
+    FlutterOpenGLTexture* texture_out);

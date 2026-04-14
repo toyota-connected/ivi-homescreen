@@ -8,6 +8,7 @@
 #include "flutter_homescreen.h"
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <string>
 
@@ -18,6 +19,7 @@
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
 
+#include "backend/backend.h"
 #include "view/flutter_view.h"
 
 #include "libflutter_engine.h"
@@ -274,6 +276,34 @@ FlutterDesktopTextureRegistrarRef FlutterDesktopRegistrarGetTextureRegistrar(
   return registrar->engine->texture_registrar.get();
 }
 
+bool FlutterDesktopPluginRegistrarGetEglContext(
+    FlutterDesktopPluginRegistrarRef registrar,
+    FlutterDesktopEglContext* out) {
+  if (!out) {
+    return false;
+  }
+  out->display = nullptr;
+  out->config = nullptr;
+  out->share_context = nullptr;
+  if (!registrar || !registrar->engine ||
+      !registrar->engine->view_controller ||
+      !registrar->engine->view_controller->view) {
+    return false;
+  }
+  auto* backend = registrar->engine->view_controller->view->GetBackend();
+  if (!backend) {
+    return false;
+  }
+  BackendEglContext ctx{};
+  if (!backend->GetEglContext(&ctx)) {
+    return false;
+  }
+  out->display = ctx.display;
+  out->config = ctx.config;
+  out->share_context = ctx.share_context;
+  return true;
+}
+
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     FlutterDesktopTextureRegistrarRef texture_registrar,
     const FlutterDesktopTextureInfo* texture_info) {
@@ -281,8 +311,42 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
   int64_t result = -1;
 
   if (texture_info->type == kFlutterDesktopPixelBufferTexture) {
-    spdlog::error("RegisterExternalTexture: Pixel Buffer not implemented.");
+    const auto& pb_config = texture_info->pixel_buffer_config;
+    if (!pb_config.callback) {
+      spdlog::error(
+          "RegisterExternalTexture: pixel_buffer_config.callback is null");
+      return result;
+    }
 
+    // Pixel-buffer texture ids live in a disjoint range from GPU-surface
+    // ids (which reuse the plugin-owned GLuint name, at most 32 bits), so
+    // they can never collide in the registry.
+    static std::atomic<int64_t> next_pixel_buffer_id{1LL << 48};
+    const int64_t id = next_pixel_buffer_id.fetch_add(1);
+
+    auto desc = std::make_unique<GL_TEXTURE_2D_DESC>();
+    desc->target = 0;
+    desc->name = 0;
+    desc->format = 0;
+    desc->width = 0;
+    desc->height = 0;
+    desc->visible_width = 0;
+    desc->visible_height = 0;
+    desc->release_callback = nullptr;
+    desc->release_context = nullptr;
+    desc->pixel_buffer_callback = pb_config.callback;
+    desc->pixel_buffer_user_data = pb_config.user_data;
+
+    texture_registrar->texture_registry[id] = std::move(desc);
+
+    SPDLOG_TRACE("RegisterExternalTexture (pixel-buffer): {}, {}",
+                 fmt::ptr(texture_registrar->engine->flutter_engine), id);
+    if (kSuccess == LibFlutterEngine->RegisterExternalTexture(
+                        texture_registrar->engine->flutter_engine, id)) {
+      result = id;
+    } else {
+      texture_registrar->texture_registry.erase(id);
+    }
   } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
     auto [struct_size, type, callback, user_data] =
         texture_info->gpu_surface_config;
@@ -354,9 +418,21 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
   std::scoped_lock<std::mutex> lock(texture_mutex);
   LibFlutterEngine->UnregisterExternalTexture(
       texture_registrar->engine->flutter_engine, texture_id);
-  if (const auto& val = texture_registrar->texture_registry[texture_id];
-      val && val->release_callback != nullptr) {
-    val->release_callback(val->release_context);
+  if (const auto& val = texture_registrar->texture_registry[texture_id]; val) {
+    // Pixel-buffer textures: the embedder owns the GL texture, so free it
+    // under a currently-made texture context.
+    if (val->pixel_buffer_callback && val->name != 0) {
+      auto* backend =
+          texture_registrar->engine->view_controller->view->GetBackend();
+      if (backend->TextureMakeCurrent()) {
+        GLuint name = val->name;
+        glDeleteTextures(1, &name);
+        backend->TextureClearCurrent();
+      }
+    }
+    if (val->release_callback != nullptr) {
+      val->release_callback(val->release_context);
+    }
   }
   texture_registrar->texture_registry[texture_id].reset();
   texture_registrar->texture_registry.erase(texture_id);

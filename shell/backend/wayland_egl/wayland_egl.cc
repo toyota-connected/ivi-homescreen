@@ -23,6 +23,7 @@
 #include "engine.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 
 #if BUILD_COMPOSITOR
 #include <GLES2/gl2.h>
@@ -80,24 +81,9 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
       [](void* userdata, const int64_t texture_id, const size_t width,
          const size_t height, FlutterOpenGLTexture* texture_out) -> bool {
     const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
-    auto& texture_registry = state->texture_registrar->texture_registry;
-    const auto it =
-        std::find_if(std::begin(texture_registry), std::end(texture_registry),
-                     [&texture_id](auto&& p) { return p.first == texture_id; });
-    // texture not found in registry
-    if (it == std::end(texture_registry))
-      return false;
-    const auto& target = texture_registry[texture_id];
-    *texture_out = {.target = target->target,
-                    .name = target->name,
-                    .format = target->format,
-                    .user_data = target->release_context,
-                    .destruction_callback = target->release_callback,
-                    .width = target->width,
-                    .height = target->height};
-    target->visible_width = width;
-    target->visible_width = height;
-    return true;
+    return PopulateExternalGlTextureFrame(state->texture_registrar.get(),
+                                          texture_id, width, height,
+                                          texture_out);
   };
 
   config.open_gl.present_with_info =
@@ -319,6 +305,20 @@ bool WaylandEglBackend::TextureMakeCurrent() {
 
 bool WaylandEglBackend::TextureClearCurrent() {
   return ClearCurrent();
+}
+
+bool WaylandEglBackend::GetEglContext(BackendEglContext* out) const {
+  if (!out) {
+    return false;
+  }
+  out->display = GetDisplay();
+  out->config = GetConfig();
+  // |m_texture_context| is created with the main render context as its
+  // share_context, so a plugin context created with this as its own
+  // share_context transitively shares GL objects with Flutter's raster
+  // context.
+  out->share_context = GetTextureContext();
+  return out->display != EGL_NO_DISPLAY && out->share_context != EGL_NO_CONTEXT;
 }
 
 void WaylandEglBackend::JoinFlutterRect(FlutterRect* rect,

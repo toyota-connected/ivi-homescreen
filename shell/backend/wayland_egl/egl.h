@@ -143,6 +143,8 @@ class Egl {
 
   [[nodiscard]] EGLDisplay GetDisplay() const { return m_dpy; }
 
+  [[nodiscard]] EGLConfig GetConfig() const { return m_config; }
+
   [[nodiscard]] EGLContext GetTextureContext() const {
     return m_texture_context;
   }
