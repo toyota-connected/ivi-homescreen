@@ -18,6 +18,7 @@
 #include "engine.h"
 #include "osmesa.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 
 struct FlutterDesktopEngineState;
 
@@ -102,27 +103,9 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
                      FlutterOpenGLTexture* texture_out) -> bool {
                 const auto state =
                     static_cast<FlutterDesktopEngineState*>(userdata);
-                auto& texture_registry =
-                    state->texture_registrar->texture_registry;
-                const auto it = std::find_if(
-                    std::begin(texture_registry), std::end(texture_registry),
-                    [&texture_id](auto&& p) { return p.first == texture_id; });
-                // texture not found in registry
-                if (it == std::end(texture_registry))
-                  return false;
-                const auto& target = texture_registry[texture_id];
-                *texture_out = {
-                    .target = target->target,
-                    .name = target->name,
-                    .format = target->format,
-                    .user_data = target->release_context,
-                    .destruction_callback = target->release_callback,
-                    .width = target->width,
-                    .height = target->height,
-                };
-                target->visible_width = width;
-                target->visible_width = height;
-                return true;
+                return PopulateExternalGlTextureFrame(
+                    state->texture_registrar.get(), texture_id, width, height,
+                    texture_out);
               },
               .fbo_with_frame_info_callback = nullptr,
               .present_with_info = nullptr,

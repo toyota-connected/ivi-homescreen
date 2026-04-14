@@ -29,6 +29,18 @@
 
 class Engine;
 
+// Carries an EGL context handle set that lets a plugin create its own EGL
+// context sharing GL objects with the embedder's raster context. All handles
+// are |void*| so the public embedder header can avoid a hard EGL include;
+// callers cast them back to the matching EGL types.
+struct BackendEglContext {
+  void* display;         // EGLDisplay
+  void* config;          // EGLConfig
+  void* share_context;   // EGLContext suitable as share_context for a
+                         // plugin-owned context that uploads GL objects
+                         // visible on the raster thread.
+};
+
 class Backend {
  public:
   enum Type {
@@ -78,6 +90,15 @@ class Backend {
   virtual bool TextureMakeCurrent() = 0;
 
   virtual bool TextureClearCurrent() = 0;
+
+  /**
+   * @brief Fill |out| with EGL handles usable as a |share_context| for a
+   *        plugin-created EGL context. Only EGL-based backends override this;
+   *        the default returns false.
+   */
+  virtual bool GetEglContext(BackendEglContext* /* out */) const {
+    return false;
+  }
 
   /**
    * @brief Get an empty FlutterRendererConfig
