@@ -33,6 +33,10 @@
 #include "plugins/comp_region/comp_region.h"
 #endif
 
+#if BUILD_COMPOSITOR
+#include "view/compositor_surface_interface.h"
+#endif
+
 class Display;
 class Engine;
 class Backend;
@@ -187,6 +191,31 @@ class FlutterView {
   void SetRegion(
       const std::string& type,
       const std::vector<CompositorRegionPlugin::REGION_T>& regions) const;
+#endif
+
+#if BUILD_COMPOSITOR
+  /**
+   * @brief Register a plugin-provided @c ICompositorSurface for a
+   * platform-view identifier. Forwards to the active backend's compositor.
+   *
+   * Called by plugins that implement a platform view and want to render
+   * into a backing store under the compositor API. Must be paired with
+   * @c UnregisterCompositorSurface. Passing a null @p surface unregisters.
+   */
+  void RegisterCompositorSurface(FlutterPlatformViewIdentifier id,
+                                 std::shared_ptr<ICompositorSurface> surface);
+
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id);
+
+  /**
+   * @brief Notify a registered surface of a size change.
+   *
+   * Invoked by @c PlatformViewsHandler when the Dart widget resizes.
+   * No-op when @p id is not registered.
+   */
+  void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                               int32_t width,
+                               int32_t height);
 #endif
 
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
