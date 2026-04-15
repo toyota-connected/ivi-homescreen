@@ -105,11 +105,7 @@ jobs:
         run: ninja -C ${{github.workspace}}/build
 
       - name: clang-tidy
-        run: |
-          find shell -type f \( -name '*.cc' -o -name '*.cpp' \) \
-            -not -path 'shell/platform/homescreen/client_wrapper/*' \
-            -not -path 'shell/platform/homescreen/public/*' \
-            | xargs clang-tidy-19 -p ${{github.workspace}}/build --warnings-as-errors='*'
+        run: scripts/clang_tidy.sh ${{github.workspace}}/build
 
       - name: clang-format
         run: scripts/format.sh --check

@@ -16,6 +16,8 @@
 
 #include "platform_view_touch.h"
 
+#include "logging/logging.h"
+
 PlatformViewTouch::PlatformViewTouch(
     const std::vector<flutter::EncodableValue>& params) {
 #if DEBUG_PLATFORM_VIEW_TOUCH_PARAMS

@@ -969,7 +969,7 @@ void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
   d->m_agl.bound_ok = false;
 }
 
-void Display::addAppToStack(std::string app_id) {
+void Display::addAppToStack(const std::string& app_id) {
   if (app_id == "homescreen")
     return;
 
@@ -988,7 +988,7 @@ void Display::addAppToStack(std::string app_id) {
   }
 }
 
-int Display::find_output_by_name(std::string output_name) {
+int Display::find_output_by_name(const std::string& output_name) {
   int index = 0;
   for (auto& i : m_all_outputs) {
     if (i->name == output_name) {
@@ -1061,7 +1061,7 @@ void Display::deactivateApp(const std::string& app_id) {
 }
 
 void Display::processAppStatusEvent(const char* app_id,
-                                    const std::string event_type) {
+                                    const std::string& event_type) {
   if (!m_agl.shell)
     return;
 
@@ -1096,9 +1096,8 @@ void Display::agl_shell_app_on_output(void* data,
   //
   // finally if the outputs are identical probably that's an user-error -
   // but the compositor won't activate it again, so we don't handle that.
-  std::pair new_pending_app =
-      std::pair(std::string(app_id), std::string(output_name));
-  d->pending_app_list.push_back(new_pending_app);
+  d->pending_app_list.emplace_back(std::string(app_id),
+                                   std::string(output_name));
 
   auto iter = d->apps_stack.begin();
   while (iter != d->apps_stack.end()) {
