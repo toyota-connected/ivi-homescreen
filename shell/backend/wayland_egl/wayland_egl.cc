@@ -546,6 +546,16 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
       CompositeLayer(layer->backing_store, dx, dy, dw, dh);
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
+      const auto composed = MutationStack::Compose(layer->platform_view);
+      if (composed.NeedsPluginComposite()) {
+        spdlog::debug(
+            "EGL compositor: platform view {} has non-trivial mutations "
+            "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); "
+            "plugin OnPresent must apply them.",
+            layer->platform_view->identifier, composed.opacity,
+            composed.has_rounded_clip, composed.has_perspective,
+            composed.IsAxisAligned());
+      }
       const auto it = m_compositor_surfaces.find(layer->platform_view->identifier);
       if (it != m_compositor_surfaces.end() && it->second) {
         ok = it->second->OnPresent(layer) && ok;

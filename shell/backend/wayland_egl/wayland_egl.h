@@ -34,6 +34,7 @@
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 #include "view/compositor_surface_interface.h"
+#include "view/mutation_stack.h"
 #include "view/present_layer_sequencer.h"
 #endif
 

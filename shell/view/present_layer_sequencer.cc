@@ -21,10 +21,14 @@
 PresentLayerSequencer::PresentLayerSequencer()
     : placer_([](wl_subsurface* subsurface, wl_surface* sibling) {
         wl_subsurface_place_above(subsurface, sibling);
+      }),
+      positioner_([](wl_subsurface* subsurface, int32_t x, int32_t y) {
+        wl_subsurface_set_position(subsurface, x, y);
       }) {}
 
-PresentLayerSequencer::PresentLayerSequencer(Placer placer)
-    : placer_(std::move(placer)) {}
+PresentLayerSequencer::PresentLayerSequencer(Placer placer,
+                                             Positioner positioner)
+    : placer_(std::move(placer)), positioner_(std::move(positioner)) {}
 
 void PresentLayerSequencer::RegisterSubsurface(
     FlutterPlatformViewIdentifier id,
@@ -71,6 +75,12 @@ void PresentLayerSequencer::Present(const FlutterLayer** layers,
 
     if (sibling_surface && placer_) {
       placer_(e.subsurface, sibling_surface);
+    }
+    if (positioner_) {
+      // layer->offset is in physical pixels; pass through as parent-local.
+      // Buffer-scale conversion lives in plugin code if needed.
+      positioner_(e.subsurface, static_cast<int32_t>(layer->offset.x),
+                  static_cast<int32_t>(layer->offset.y));
     }
 
     sibling_surface = e.surface;
