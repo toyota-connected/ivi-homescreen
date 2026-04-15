@@ -363,6 +363,9 @@ class Engine {
 
   FLUTTER_API_SYMBOL(FlutterEngine) m_flutter_engine;
   FlutterProjectArgs m_args{};
+  // Compositor config must outlive FlutterEngineInitialize — the engine
+  // retains a pointer to it via m_args.compositor.
+  FlutterCompositor m_compositor{};
   std::string m_clipboard_data;
 
   std::shared_ptr<TaskRunner> m_platform_task_runner;

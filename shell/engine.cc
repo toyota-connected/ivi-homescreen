@@ -198,6 +198,11 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   SPDLOG_TRACE("({}) +Engine::Run", m_index);
 
   const auto config = m_backend->GetRenderConfig();
+  m_compositor = m_backend->GetCompositorConfig();
+  if (m_compositor.present_layers_callback != nullptr ||
+      m_compositor.create_backing_store_callback != nullptr) {
+    m_args.compositor = &m_compositor;
+  }
   FlutterEngineResult result = LibFlutterEngine->Initialize(
       FLUTTER_ENGINE_VERSION, &config, &m_args, state, &m_flutter_engine);
   if (result != kSuccess) {

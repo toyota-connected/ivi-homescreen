@@ -31,9 +31,11 @@ constexpr GLenum kDrawFramebuffer = 0x8CA9;
 constexpr char kVertSrc[] =
     "attribute vec2 a_pos;\n"
     "attribute vec2 a_uv;\n"
+    "uniform float u_uv_y_scale;\n"
+    "uniform float u_uv_y_offset;\n"
     "varying vec2 v_uv;\n"
     "void main() {\n"
-    "  v_uv = a_uv;\n"
+    "  v_uv = vec2(a_uv.x, a_uv.y * u_uv_y_scale + u_uv_y_offset);\n"
     "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
     "}\n";
 
@@ -119,6 +121,8 @@ bool GlCompositor::EnsureQuad() {
   attr_pos_ = glGetAttribLocation(program_, "a_pos");
   attr_uv_ = glGetAttribLocation(program_, "a_uv");
   uni_tex_ = glGetUniformLocation(program_, "u_tex");
+  uni_uv_y_scale_ = glGetUniformLocation(program_, "u_uv_y_scale");
+  uni_uv_y_offset_ = glGetUniformLocation(program_, "u_uv_y_offset");
 
   // Fullscreen triangle strip in NDC: (x, y, u, v) per vertex.
   constexpr std::array<GLfloat, 16> verts = {{
@@ -150,7 +154,9 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
                                     GLint dst_x,
                                     GLint dst_y,
                                     GLsizei dst_w,
-                                    GLsizei dst_h) {
+                                    GLsizei dst_h,
+                                    bool blend,
+                                    bool flip_y) {
   if (!EnsureQuad()) {
     return;
   }
@@ -158,7 +164,13 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   // Snapshot minimal state: we don't implement full state save/restore,
   // but we set everything we rely on so the engine's next render isn't
   // surprised. Flutter resets its own GL state on entry.
-  glDisable(GL_BLEND);
+  if (blend) {
+    // Flutter / Skia backing stores are premultiplied alpha.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  } else {
+    glDisable(GL_BLEND);
+  }
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_STENCIL_TEST);
   glDisable(GL_SCISSOR_TEST);
@@ -171,6 +183,12 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   glBindTexture(GL_TEXTURE_2D, src_color_tex);
   if (uni_tex_ >= 0) {
     glUniform1i(uni_tex_, 0);
+  }
+  if (uni_uv_y_scale_ >= 0) {
+    glUniform1f(uni_uv_y_scale_, flip_y ? -1.0f : 1.0f);
+  }
+  if (uni_uv_y_offset_ >= 0) {
+    glUniform1f(uni_uv_y_offset_, flip_y ? 1.0f : 0.0f);
   }
 
   glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -210,14 +228,22 @@ void GlCompositor::CompositeToDefault(GLuint src_fbo,
                                       GLint dst_x,
                                       GLint dst_y,
                                       GLsizei dst_w,
-                                      GLsizei dst_h) {
-  if (caps_ && caps_->has_blit_framebuffer && caps_->blit_framebuffer) {
+                                      GLsizei dst_h,
+                                      bool blend,
+                                      bool flip_y) {
+  // Blit can't alpha-blend, so overlay layers must take the quad path.
+  // glBlitFramebuffer flips vertically when dstY1 < dstY0; we use that for
+  // GL-native-origin sources that need to land top-down.
+  if (!blend && caps_ && caps_->has_blit_framebuffer &&
+      caps_->blit_framebuffer) {
     glBindFramebuffer(kReadFramebuffer, src_fbo);
     glBindFramebuffer(kDrawFramebuffer, 0);
-    caps_->blit_framebuffer(0, 0, src_w, src_h, dst_x, dst_y, dst_x + dst_w,
-                            dst_y + dst_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    const GLint dst_y0 = flip_y ? dst_y + dst_h : dst_y;
+    const GLint dst_y1 = flip_y ? dst_y : dst_y + dst_h;
+    caps_->blit_framebuffer(0, 0, src_w, src_h, dst_x, dst_y0, dst_x + dst_w,
+                            dst_y1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return;
   }
-  CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h);
+  CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend, flip_y);
 }

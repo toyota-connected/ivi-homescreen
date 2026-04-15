@@ -51,6 +51,13 @@ class GlCompositor {
    * @param dst_x,dst_y     Destination origin on the default framebuffer,
    *                        in OpenGL coordinates (origin bottom-left).
    * @param dst_w,dst_h     Destination dimensions in pixels.
+   * @param blend           When true, force the quad path with premultiplied
+   *                        alpha blending so transparent pixels preserve the
+   *                        underlying framebuffer content. Required for
+   *                        overlay layers stacked on top of other layers.
+   * @param flip_y          When true, flip the source vertically. Use for
+   *                        textures drawn in GL-native (bottom-left) origin
+   *                        that need to land in Flutter's top-down layout.
    */
   void CompositeToDefault(GLuint src_fbo,
                           GLuint src_color_tex,
@@ -59,7 +66,9 @@ class GlCompositor {
                           GLint dst_x,
                           GLint dst_y,
                           GLsizei dst_w,
-                          GLsizei dst_h);
+                          GLsizei dst_h,
+                          bool blend = false,
+                          bool flip_y = false);
 
  private:
   const GlCaps* caps_;
@@ -77,5 +86,10 @@ class GlCompositor {
                         GLint dst_x,
                         GLint dst_y,
                         GLsizei dst_w,
-                        GLsizei dst_h);
+                        GLsizei dst_h,
+                        bool blend,
+                        bool flip_y);
+
+  GLint uni_uv_y_scale_{-1};
+  GLint uni_uv_y_offset_{-1};
 };

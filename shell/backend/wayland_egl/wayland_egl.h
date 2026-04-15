@@ -203,11 +203,17 @@ class WaylandEglBackend : public Egl, public Backend {
 
   /// Composite a single layer's backing store onto FBO 0 at the given
   /// pixel rect. Handles both FBO and texture subtypes.
+  ///
+  /// When @p blend is true, the composite alpha-blends with premultiplied
+  /// alpha so transparent pixels preserve underlying framebuffer content —
+  /// required for overlay layers stacked on top of platform views or other
+  /// backing stores.
   void CompositeLayer(const FlutterBackingStore* store,
                       GLint dst_x,
                       GLint dst_y,
                       GLsizei dst_w,
-                      GLsizei dst_h);
+                      GLsizei dst_h,
+                      bool blend = false);
 
   /// True when the requested size equals the view's root dimensions.
   /// Used to pick FBO vs texture subtype at create time.
