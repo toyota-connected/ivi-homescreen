@@ -3,7 +3,11 @@ include_guard()
 cmake_policy(SET CMP0075 NEW)
 
 if (NOT LLVM_CONFIG)
-    find_program(LLVM_CONFIG "llvm-config" DOC "Path to llvm-config" REQUIRED)
+    string(REGEX MATCH "^[0-9]+" _clang_major "${CMAKE_CXX_COMPILER_VERSION}")
+    find_program(LLVM_CONFIG
+            NAMES "llvm-config-${_clang_major}" "llvm-config"
+            DOC "Path to llvm-config"
+            REQUIRED)
 endif ()
 
 execute_process(
