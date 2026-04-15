@@ -53,6 +53,10 @@ class WaylandEglBackend : public Egl, public Backend {
                     bool debug_backend,
                     int buffer_size = kEglBufferSize);
 
+#if BUILD_COMPOSITOR
+  ~WaylandEglBackend() override;
+#endif
+
   /**
    * @brief Resize Flutter engine Window size
    * @param[in] index No use
@@ -155,6 +159,7 @@ class WaylandEglBackend : public Egl, public Backend {
   bool m_gl_caps_probed{false};
   std::unique_ptr<GlCompositor> m_gl_compositor;
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
+  BackingStorePool<EglTextureBackingStore> m_texture_pool;
   PresentLayerSequencer m_sequencer;
   std::unordered_map<FlutterPlatformViewIdentifier,
                      std::shared_ptr<ICompositorSurface>>
@@ -166,6 +171,14 @@ class WaylandEglBackend : public Egl, public Backend {
   std::unordered_map<EglFboBackingStore*,
                      std::shared_ptr<EglFboBackingStore>>
       m_alive_stores_;
+  std::unordered_map<EglTextureBackingStore*,
+                     std::shared_ptr<EglTextureBackingStore>>
+      m_alive_texture_stores_;
+
+  // One-per-backend scratch FBO used to wrap texture-subtype backing
+  // stores just before compositing so the blit path in GlCompositor
+  // works uniformly. Created lazily.
+  GLuint m_texture_blit_fbo_{0};
 
   /// Lazily probe GL caps and instantiate @c GlCompositor. Must be called
   /// with the EGL context current.
@@ -178,5 +191,20 @@ class WaylandEglBackend : public Egl, public Backend {
 
   /// Blit backing FBO into FBO 0 (window) and swap.
   bool BlitBackingStoreToWindow(const FlutterBackingStore* store);
+
+  /// Composite a single layer's backing store onto FBO 0 at the given
+  /// pixel rect. Handles both FBO and texture subtypes.
+  void CompositeLayer(const FlutterBackingStore* store,
+                      GLint dst_x,
+                      GLint dst_y,
+                      GLsizei dst_w,
+                      GLsizei dst_h);
+
+  /// True when the requested size equals the view's root dimensions.
+  /// Used to pick FBO vs texture subtype at create time.
+  [[nodiscard]] bool IsRootSize(int32_t width, int32_t height) const {
+    return width == static_cast<int32_t>(m_initial_width) &&
+           height == static_cast<int32_t>(m_initial_height);
+  }
 #endif
 };
