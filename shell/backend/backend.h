@@ -23,6 +23,10 @@
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
 
+#if BUILD_COMPOSITOR
+#include "view/compositor_surface_interface.h"
+#endif
+
 class Engine;
 
 class Backend {
@@ -92,4 +96,28 @@ class Backend {
    * internal
    */
   virtual FlutterCompositor GetCompositorConfig() = 0;
+
+#if BUILD_COMPOSITOR
+  /**
+   * @brief Register a platform-view compositor surface.
+   *
+   * Default is a no-op; only compositor-capable backends override. Must be
+   * paired with @c UnregisterCompositorSurface.
+   */
+  virtual void RegisterCompositorSurface(
+      FlutterPlatformViewIdentifier /*id*/,
+      std::shared_ptr<ICompositorSurface> /*surface*/) {}
+
+  virtual void UnregisterCompositorSurface(
+      FlutterPlatformViewIdentifier /*id*/) {}
+
+  /**
+   * @brief Notify a registered surface that its Dart-side widget resized.
+   *
+   * Looks up the identifier; no-op if unregistered.
+   */
+  virtual void ResizeCompositorSurface(FlutterPlatformViewIdentifier /*id*/,
+                                       int32_t /*width*/,
+                                       int32_t /*height*/) {}
+#endif
 };

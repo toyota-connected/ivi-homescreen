@@ -107,9 +107,13 @@ class WaylandVulkanBackend final : public Backend {
   /// thread; must be paired with @c UnregisterCompositorSurface.
   void RegisterCompositorSurface(
       FlutterPlatformViewIdentifier id,
-      std::shared_ptr<ICompositorSurface> surface);
+      std::shared_ptr<ICompositorSurface> surface) override;
 
-  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id);
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id) override;
+
+  void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                               int32_t width,
+                               int32_t height) override;
 
   [[nodiscard]] bool HasDmaBufExport() const { return dma_buf_export_ok_; }
 #endif
