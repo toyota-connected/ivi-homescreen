@@ -1,9 +1,9 @@
 #include <stdlib.h>
 #include "gtest/gtest.h"
 
+#include <configuration/configuration.h>
 #include <flutter/fml/command_line.h>
 #include <rapidjson/document.h>
-#include <configuration/configuration.h>
 
 /****************************************************************
 Test Case Name.Test Name： HomescreenConfigurationGetCliOverrides_Lv1Normal001
@@ -13,8 +13,8 @@ Test Summary：Test getCliOverrides with all normal parameters
 
 TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal001) {
   // set test parameters
-  struct Configuration::Config input_cfg {};
-  struct Configuration::Config config {};
+  struct Configuration::Config input_cfg{};
+  struct Configuration::Config config{};
 
   input_cfg.app_id = "homescreen";
   input_cfg.bundle_paths.emplace_back("files");
@@ -54,7 +54,7 @@ TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal001) {
   EXPECT_EQ(1, config.view.pixel_ratio);
   EXPECT_EQ(1, config.view.ivi_surface_id);
   EXPECT_EQ(true, config.view.fullscreen);
-  EXPECT_EQ(1,1);
+  EXPECT_EQ(1, 1);
 }
 /****************************************************************
 Test Case Name.Test Name： HomescreenConfigurationGetCliOverrides_Lv1Normal002
@@ -64,8 +64,8 @@ Test Summary：Test getCliOverrides with blank parameter
 
 TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal002) {
   // set test parameters
-  struct Configuration::Config input_cfg {};
-  struct Configuration::Config config {};
+  struct Configuration::Config input_cfg{};
+  struct Configuration::Config config{};
 
   // call target function
   Configuration::get_cli_override("/home", config, input_cfg);
@@ -83,8 +83,10 @@ TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal002) {
   EXPECT_EQ("", config.view.window_type);
   EXPECT_EQ(0, config.view.wl_output_index.value_or(0));
   EXPECT_EQ(kDefaultViewWidth, config.view.width.value_or(kDefaultViewWidth));
-  EXPECT_EQ(kDefaultViewHeight, config.view.height.value_or(kDefaultViewHeight));
-  EXPECT_EQ(kDefaultPixelRatio, config.view.pixel_ratio.value_or(kDefaultPixelRatio));
+  EXPECT_EQ(kDefaultViewHeight,
+            config.view.height.value_or(kDefaultViewHeight));
+  EXPECT_EQ(kDefaultPixelRatio,
+            config.view.pixel_ratio.value_or(kDefaultPixelRatio));
   EXPECT_EQ(0, config.view.ivi_surface_id.value_or(0));
   EXPECT_EQ(0, config.view.accessibility_features.value_or(0));
   EXPECT_EQ(false, config.view.fullscreen.value_or(false));
@@ -98,8 +100,8 @@ Test Summary：Test getCliOverrides with some params already true
 
 TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal003) {
   // set test parameters
-  struct Configuration::Config input_cfg {};
-  struct Configuration::Config config {};
+  struct Configuration::Config input_cfg{};
+  struct Configuration::Config config{};
 
   input_cfg.app_id = "homescreen";
   input_cfg.disable_cursor = true;

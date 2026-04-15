@@ -70,8 +70,9 @@ comp_surf_Context* comp_surf_initialize(const char* accessToken,
                                         const char* cachePath,
                                         const char* miscPath) {
   auto* ctx = new comp_surf_Context;
-  ctx->context = std::make_unique<CompSurfContext>(
-      accessToken, width, height, nativeWindow, assetsPath, cachePath, miscPath);
+  ctx->context = std::make_unique<CompSurfContext>(accessToken, width, height,
+                                                   nativeWindow, assetsPath,
+                                                   cachePath, miscPath);
   return ctx;
 }
 

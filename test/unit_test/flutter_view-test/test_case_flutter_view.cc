@@ -1,15 +1,14 @@
 #include <stdexcept>
 #include "gtest/gtest.h"
-#include "utils.h"
-#include "view/flutter_view.h"
-#include "view/compositor_surface_api.h"
-#include "wayland/display.h"
 #include "unit_test_utils.h"
+#include "utils.h"
+#include "view/compositor_surface_api.h"
+#include "view/flutter_view.h"
+#include "wayland/display.h"
 
 FlutterView* createFlutterViewInstance() {
   int argc = 3;
-  const char* argv[3] = {"homescreen",
-                         "-b",kBundlePath};
+  const char* argv[3] = {"homescreen", "-b", kBundlePath};
   char** argv_p = reinterpret_cast<char**>(&argv);
 
   // call target function

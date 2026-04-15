@@ -107,7 +107,7 @@ TEST(HomescreenUntimerArm, Lv1Normal001) {
   timer.arm();
 
   // check timerspec is set
-  struct itimerspec timerspec {};
+  struct itimerspec timerspec{};
   const int ret_gettime = timerfd_gettime(timer.m_timerfd, &timerspec);
 
   EXPECT_EQ(0, ret_gettime);
@@ -135,7 +135,7 @@ TEST(HomescreenUntimerDisarm, Lv1Normal001) {
   timer.disarm();
 
   // check timerspec is all zero
-  struct itimerspec timerspec {};
+  struct itimerspec timerspec{};
   const int ret_gettime = timerfd_gettime(timer.m_timerfd, &timerspec);
 
   EXPECT_EQ(0, ret_gettime);
