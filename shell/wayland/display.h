@@ -327,7 +327,7 @@ class Display {
    * @relation
    * agl_shell
    */
-  void addAppToStack(std::string app_id);
+  void addAppToStack(const std::string& app_id);
   /**
    * @brief Helper to retrieve the output using its output_name
    * @param[in] output_name a std::string representing the output
@@ -335,7 +335,7 @@ class Display {
    * @relation
    * agl_sell
    */
-  int find_output_by_name(std::string output_name);
+  int find_output_by_name(const std::string& output_name);
   /**
    * @brief helper to process the application status
    * @param[in] app_id an array of char
@@ -344,7 +344,7 @@ class Display {
    * @relation
    * agl_shell
    */
-  void processAppStatusEvent(const char* app_id, std::string event_type);
+  void processAppStatusEvent(const char* app_id, const std::string& event_type);
 
  private:
   std::thread event_thread_;
@@ -592,7 +592,7 @@ class Display {
    */
   static void display_handle_scale(void* data,
                                    struct wl_output* wl_output,
-                                   int scale);
+                                   int32_t factor);
 
   /**
    * @brief Turn ON the completion flag

@@ -92,7 +92,8 @@ int App::Loop() const {
   const auto elapsed = end_time - start_time;
 
   const auto frame_time = 1000.0 / m_wayland_display->GetMaxRefreshRate();
-  if (const auto sleep_time = frame_time - elapsed; sleep_time > 0) {
+  if (const auto sleep_time = frame_time - static_cast<double>(elapsed);
+      sleep_time > 0) {
 #if BUILD_WATCHDOG
     m_watch_dog->pet();
 #endif
