@@ -30,10 +30,9 @@ PresentLayerSequencer::PresentLayerSequencer(Placer placer,
                                              Positioner positioner)
     : placer_(std::move(placer)), positioner_(std::move(positioner)) {}
 
-void PresentLayerSequencer::RegisterSubsurface(
-    FlutterPlatformViewIdentifier id,
-    wl_subsurface* subsurface,
-    wl_surface* surface) {
+void PresentLayerSequencer::RegisterSubsurface(FlutterPlatformViewIdentifier id,
+                                               wl_subsurface* subsurface,
+                                               wl_surface* surface) {
   subsurface_map_[id] = Entry{subsurface, surface};
 }
 
@@ -53,8 +52,7 @@ void PresentLayerSequencer::Present(const FlutterLayer** layers,
 
   for (size_t i = 0; i < count; ++i) {
     const FlutterLayer* layer = layers[i];
-    if (!layer ||
-        layer->type != kFlutterLayerContentTypePlatformView ||
+    if (!layer || layer->type != kFlutterLayerContentTypePlatformView ||
         !layer->platform_view) {
       continue;
     }

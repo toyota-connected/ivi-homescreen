@@ -57,9 +57,8 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
                                        const GlCaps* caps)
     : width_(width), height_(height) {
   const ColorFormat color = PickColorFormat(caps);
-  const bool msaa_ok =
-      caps && caps->has_multisampled_renderbuffer &&
-      caps->renderbuffer_storage_multisample != nullptr;
+  const bool msaa_ok = caps && caps->has_multisampled_renderbuffer &&
+                       caps->renderbuffer_storage_multisample != nullptr;
 
   glGenFramebuffers(1, &framebuffer_);
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
@@ -79,9 +78,8 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
     // the resolve target and gets blitted/composited during presentation.
     glGenRenderbuffers(1, &color_rb_msaa_);
     glBindRenderbuffer(GL_RENDERBUFFER, color_rb_msaa_);
-    caps->renderbuffer_storage_multisample(GL_RENDERBUFFER, kMsaaSamples,
-                                           color.internal_format, width_,
-                                           height_);
+    caps->renderbuffer_storage_multisample(
+        GL_RENDERBUFFER, kMsaaSamples, color.internal_format, width_, height_);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                               GL_RENDERBUFFER, color_rb_msaa_);
   } else {
@@ -124,8 +122,8 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
   const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
     spdlog::error(
-        "EglFboBackingStore: framebuffer incomplete (0x{:x}) for {}x{}",
-        status, width_, height_);
+        "EglFboBackingStore: framebuffer incomplete (0x{:x}) for {}x{}", status,
+        width_, height_);
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);

@@ -76,8 +76,7 @@ class RecordingBackend : public Backend {
       std::shared_ptr<ICompositorSurface> surface) override {
     registered.emplace_back(id, std::move(surface));
   }
-  void UnregisterCompositorSurface(
-      FlutterPlatformViewIdentifier id) override {
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id) override {
     unregistered.push_back(id);
   }
   void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
@@ -130,8 +129,7 @@ TEST(CompositorRegistry, ResizeRoutesThroughBaseClassPointer) {
 TEST(CompositorRegistry, DefaultBackendImplementationsAreNoops) {
   class MinimalBackend : public Backend {
     void Resize(size_t, Engine*, int32_t, int32_t) override {}
-    void CreateSurface(size_t, struct wl_surface*, int32_t, int32_t) override {
-    }
+    void CreateSurface(size_t, struct wl_surface*, int32_t, int32_t) override {}
     bool TextureMakeCurrent() override { return true; }
     bool TextureClearCurrent() override { return true; }
     FlutterRendererConfig GetRenderConfig() override { return {}; }

@@ -125,9 +125,7 @@ class BackingStorePool {
   };
 
   mutable std::mutex mu_;
-  std::unordered_multimap<Key,
-                          std::shared_ptr<BackingStore>,
-                          PairHash>
+  std::unordered_multimap<Key, std::shared_ptr<BackingStore>, PairHash>
       free_list_;
   size_t capacity_{0};
 };
