@@ -34,11 +34,11 @@ class Engine;
 // are |void*| so the public embedder header can avoid a hard EGL include;
 // callers cast them back to the matching EGL types.
 struct BackendEglContext {
-  void* display;         // EGLDisplay
-  void* config;          // EGLConfig
-  void* share_context;   // EGLContext suitable as share_context for a
-                         // plugin-owned context that uploads GL objects
-                         // visible on the raster thread.
+  void* display;        // EGLDisplay
+  void* config;         // EGLConfig
+  void* share_context;  // EGLContext suitable as share_context for a
+                        // plugin-owned context that uploads GL objects
+                        // visible on the raster thread.
 };
 
 class Backend {

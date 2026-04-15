@@ -81,9 +81,8 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
       [](void* userdata, const int64_t texture_id, const size_t width,
          const size_t height, FlutterOpenGLTexture* texture_out) -> bool {
     const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
-    return PopulateExternalGlTextureFrame(state->texture_registrar.get(),
-                                          texture_id, width, height,
-                                          texture_out);
+    return PopulateExternalGlTextureFrame(
+        state->texture_registrar.get(), texture_id, width, height, texture_out);
   };
 
   config.open_gl.present_with_info =
