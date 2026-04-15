@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include <shell/platform/embedder/embedder.h>
 
 /**
@@ -66,4 +68,31 @@ class ICompositorSurface {
    * @brief Optional resize notification. Default is a no-op.
    */
   virtual void OnResize(int32_t /*width*/, int32_t /*height*/) {}
+
+  /**
+   * @brief OpenGL texture name this plugin renders into.
+   *
+   * Platform-view plugins on the EGL backend expose their final image
+   * via a @c GL_TEXTURE_2D. The compositor composites it onto the scene
+   * at the layer's @c offset / @c size during @c PresentLayers. Returning
+   * 0 (default) means the plugin handles its own presentation and the
+   * compositor performs no compositing for this layer.
+   *
+   * The texture must be valid in the engine's GL context — i.e., created
+   * with that context current (typical pattern: lazy-init in @c OnPresent).
+   *
+   * Vulkan platform-view sharing is a follow-up; @c VkImage exposure will
+   * land alongside the matching backend wiring.
+   */
+  [[nodiscard]] virtual uint32_t GetGlTextureName() const { return 0; }
+
+  /**
+   * @brief Width of the GL texture returned by @c GetGlTextureName.
+   */
+  [[nodiscard]] virtual int32_t GetGlTextureWidth() const { return 0; }
+
+  /**
+   * @brief Height of the GL texture returned by @c GetGlTextureName.
+   */
+  [[nodiscard]] virtual int32_t GetGlTextureHeight() const { return 0; }
 };
