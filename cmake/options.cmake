@@ -87,6 +87,14 @@ endif ()
 option(BUILD_COMPOSITOR "Enable FlutterCompositor backing store API" OFF)
 
 #
+# Export Vulkan backing-store memory as a DMA-BUF fd so plugins can import
+# it zero-copy. Requires VK_KHR_external_memory_fd at runtime; silently
+# falls back to a non-exportable allocation if unavailable.
+#
+option(BUILD_COMPOSITOR_DMABUF_EXPORT
+       "Export Vulkan backing stores as DMA-BUF for zero-copy plugins" OFF)
+
+#
 # DRM
 #
 option(BUILD_BACKEND_DRM "Build DRM backend" OFF)

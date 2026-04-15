@@ -23,6 +23,7 @@
 
 #include "config/common.h"
 #include "engine.h"
+#include "logging.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -75,15 +76,27 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
+#if BUILD_COMPOSITOR
   return {
       .struct_size = sizeof(FlutterCompositor),
       .user_data = this,
-      .create_backing_store_callback = nullptr,   // CreateBackingStore,
-      .collect_backing_store_callback = nullptr,  // CollectBackingStore,
-      .present_layers_callback = nullptr,         // PresentLayers,
+      .create_backing_store_callback = CreateBackingStore,
+      .collect_backing_store_callback = CollectBackingStore,
+      .present_layers_callback = PresentLayers,
+      .avoid_backing_store_cache = false,
+      .present_view_callback = nullptr,
+  };
+#else
+  return {
+      .struct_size = sizeof(FlutterCompositor),
+      .user_data = this,
+      .create_backing_store_callback = nullptr,
+      .collect_backing_store_callback = nullptr,
+      .present_layers_callback = nullptr,
       .avoid_backing_store_cache = true,
       .present_view_callback = nullptr,
   };
+#endif
 }
 
 WaylandVulkanBackend::~WaylandVulkanBackend() {
@@ -850,16 +863,34 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 }
 
 bool WaylandVulkanBackend::CollectBackingStore(
-    const FlutterBackingStore* /* renderer */,
-    void* /* user_data */) {
+    const FlutterBackingStore* store,
+    void* user_data) {
+#if BUILD_COMPOSITOR
+  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
+      state->view_controller->view->GetBackend());
+  return b->CollectBackingStoreImpl(store);
+#else
+  (void)store;
+  (void)user_data;
   SPDLOG_DEBUG("CollectBackingStore");
   return false;
+#endif
 }
 
 bool WaylandVulkanBackend::CreateBackingStore(
-    const FlutterBackingStoreConfig* /* config */,
-    FlutterBackingStore* /* backing_store_out */,
-    void* /* user_data */) {
+    const FlutterBackingStoreConfig* config,
+    FlutterBackingStore* backing_store_out,
+    void* user_data) {
+#if BUILD_COMPOSITOR
+  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
+      state->view_controller->view->GetBackend());
+  return b->CreateBackingStoreImpl(config, backing_store_out);
+#else
+  (void)config;
+  (void)backing_store_out;
+  (void)user_data;
   SPDLOG_DEBUG("CreateBackingStore");
 #if 0  /// TODO
     auto surface_size = SkISize::Make(config->size.width, config->size.height);
@@ -932,13 +963,24 @@ bool WaylandVulkanBackend::CreateBackingStore(
     return true;
 #endif
   return false;
+#endif  // BUILD_COMPOSITOR
 }
 
-bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** /* layers */,
-                                         size_t /* layers_count */,
-                                         void* /* user_data */) {
+bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
+                                         size_t layers_count,
+                                         void* user_data) {
+#if BUILD_COMPOSITOR
+  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
+      state->view_controller->view->GetBackend());
+  return b->PresentLayersImpl(layers, layers_count);
+#else
+  (void)layers;
+  (void)layers_count;
+  (void)user_data;
   SPDLOG_DEBUG("PresentLayers");
   return false;
+#endif
 }
 
 bool WaylandVulkanBackend::TextureMakeCurrent() {
@@ -948,3 +990,312 @@ bool WaylandVulkanBackend::TextureMakeCurrent() {
 bool WaylandVulkanBackend::TextureClearCurrent() {
   return true;
 }
+
+#if BUILD_COMPOSITOR
+
+namespace {
+struct VulkanStoreBaton {
+  WaylandVulkanBackend* backend;
+  VulkanBackingStore* store;
+};
+}  // namespace
+
+void WaylandVulkanBackend::RegisterCompositorSurface(
+    FlutterPlatformViewIdentifier id,
+    std::shared_ptr<ICompositorSurface> surface) {
+  m_compositor_surfaces[id] = std::move(surface);
+}
+
+void WaylandVulkanBackend::UnregisterCompositorSurface(
+    FlutterPlatformViewIdentifier id) {
+  m_compositor_surfaces.erase(id);
+}
+
+bool WaylandVulkanBackend::CreateBackingStoreImpl(
+    const FlutterBackingStoreConfig* config,
+    FlutterBackingStore* store_out) {
+  const int32_t w = static_cast<int32_t>(config->size.width);
+  const int32_t h = static_cast<int32_t>(config->size.height);
+
+  const bool want_dma_buf = BUILD_COMPOSITOR_DMABUF_EXPORT != 0;
+  auto store = m_store_pool.Acquire(w, h, device_, physical_device_,
+                                    want_dma_buf);
+  if (!store->IsValid()) {
+    spdlog::error("WaylandVulkanBackend: failed to create backing store");
+    return false;
+  }
+  // Record whether export succeeded at least once (for introspection).
+  if (store->has_dma_buf()) {
+    dma_buf_export_ok_ = true;
+  }
+
+  // Engine renders with the image in COLOR_ATTACHMENT_OPTIMAL; transition
+  // UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL before handing it over.
+  if (store->Layout() == VK_IMAGE_LAYOUT_UNDEFINED) {
+    TransitionLayout(store->Image(), VK_IMAGE_LAYOUT_UNDEFINED,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    store->SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  }
+
+  auto* baton = new VulkanStoreBaton{this, store.get()};
+
+  store_out->struct_size = sizeof(FlutterBackingStore);
+  store_out->type = kFlutterBackingStoreTypeVulkan;
+  store_out->user_data = baton;
+  store_out->vulkan.struct_size = sizeof(FlutterVulkanBackingStore);
+  store_out->vulkan.image = store->engine_image();
+  store_out->vulkan.user_data = baton;
+  store_out->vulkan.destruction_callback = [](void*) {
+    // Store ownership lives in m_alive_stores; Collect does the cleanup.
+  };
+
+  VulkanBackingStore* key = store.get();
+  m_alive_stores[key] = std::move(store);
+  return true;
+}
+
+bool WaylandVulkanBackend::CollectBackingStoreImpl(
+    const FlutterBackingStore* store) {
+  auto* baton = static_cast<VulkanStoreBaton*>(store->user_data);
+  if (!baton) {
+    return false;
+  }
+  const auto it = m_alive_stores.find(baton->store);
+  if (it != m_alive_stores.end()) {
+    m_store_pool.Release(std::move(it->second));
+    m_alive_stores.erase(it);
+  }
+  delete baton;
+  return true;
+}
+
+void WaylandVulkanBackend::TransitionLayout(
+    VkImage image,
+    VkImageLayout from,
+    VkImageLayout to,
+    VkPipelineStageFlags src_stage,
+    VkPipelineStageFlags dst_stage) const {
+  VkCommandBufferAllocateInfo alloc{};
+  alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  alloc.commandPool = swapchain_command_pool_;
+  alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  alloc.commandBufferCount = 1;
+  VkCommandBuffer cmd{};
+  if (d.vkAllocateCommandBuffers(device_, &alloc, &cmd) != VK_SUCCESS) {
+    spdlog::error("TransitionLayout: vkAllocateCommandBuffers failed");
+    return;
+  }
+
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  d.vkBeginCommandBuffer(cmd, &begin);
+
+  VkImageMemoryBarrier barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout = from;
+  barrier.newLayout = to;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = image;
+  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.layerCount = 1;
+  barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                          VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
+                          VK_ACCESS_TRANSFER_READ_BIT |
+                          VK_ACCESS_TRANSFER_WRITE_BIT;
+
+  d.vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
+                         1, &barrier);
+  d.vkEndCommandBuffer(cmd);
+
+  VkSubmitInfo submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &cmd;
+  d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+  d.vkQueueWaitIdle(queue_);
+  d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
+}
+
+void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
+                                                VulkanBackingStore& src,
+                                                VkImage dst,
+                                                int32_t dst_x,
+                                                int32_t dst_y,
+                                                int32_t dst_w,
+                                                int32_t dst_h) const {
+  // Transition source -> TRANSFER_SRC_OPTIMAL.
+  VkImageMemoryBarrier src_to_xfer{};
+  src_to_xfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  src_to_xfer.oldLayout = src.Layout();
+  src_to_xfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  src_to_xfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  src_to_xfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  src_to_xfer.image = src.Image();
+  src_to_xfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  src_to_xfer.subresourceRange.levelCount = 1;
+  src_to_xfer.subresourceRange.layerCount = 1;
+  src_to_xfer.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  src_to_xfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &src_to_xfer);
+
+  VkImageBlit region{};
+  region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.srcOffsets[0] = {0, 0, 0};
+  region.srcOffsets[1] = {src.Width(), src.Height(), 1};
+  region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.dstOffsets[0] = {dst_x, dst_y, 0};
+  region.dstOffsets[1] = {dst_x + dst_w, dst_y + dst_h, 1};
+  d.vkCmdBlitImage(cmd, src.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                   VK_FILTER_LINEAR);
+
+  // Transition source back to COLOR_ATTACHMENT_OPTIMAL for the next frame.
+  VkImageMemoryBarrier xfer_to_color = src_to_xfer;
+  xfer_to_color.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  xfer_to_color.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  xfer_to_color.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  xfer_to_color.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &xfer_to_color);
+  src.SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+}
+
+bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
+                                             size_t count) {
+  if (resize_pending_) {
+    InitializeSwapChain();
+  }
+
+  uint32_t image_index = 0;
+  CHECK_VK_RESULT(d.vkAcquireNextImageKHR(
+      device_, swapchain_, 1'000'000'000, VK_NULL_HANDLE, image_ready_fence_,
+      &image_index));
+  CHECK_VK_RESULT(
+      d.vkWaitForFences(device_, 1, &image_ready_fence_, true, UINT64_MAX));
+  CHECK_VK_RESULT(d.vkResetFences(device_, 1, &image_ready_fence_));
+  last_image_index_ = image_index;
+
+  VkImage dst = swapchain_images_[image_index];
+
+  // Allocate a one-shot command buffer for this frame's composite.
+  VkCommandBufferAllocateInfo alloc{};
+  alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  alloc.commandPool = swapchain_command_pool_;
+  alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  alloc.commandBufferCount = 1;
+  VkCommandBuffer cmd{};
+  CHECK_VK_RESULT(d.vkAllocateCommandBuffers(device_, &alloc, &cmd));
+
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  d.vkBeginCommandBuffer(cmd, &begin);
+
+  // Transition swapchain image UNDEFINED/PRESENT_SRC -> TRANSFER_DST_OPTIMAL.
+  VkImageMemoryBarrier to_dst{};
+  to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_dst.image = dst;
+  to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  to_dst.subresourceRange.levelCount = 1;
+  to_dst.subresourceRange.layerCount = 1;
+  to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &to_dst);
+
+  // Sequence platform-view subsurface Z-order for this frame.
+  m_sequencer.Present(layers, count, nullptr, nullptr,
+                      [](FlutterPlatformViewIdentifier id) {
+                        spdlog::warn(
+                            "Vulkan compositor: platform view {} has no "
+                            "registered subsurface",
+                            id);
+                      });
+
+  bool ok = true;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (!layer) {
+      continue;
+    }
+    if (layer->type == kFlutterLayerContentTypeBackingStore &&
+        layer->backing_store) {
+      auto* baton =
+          static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
+      if (!baton || !baton->store) {
+        continue;
+      }
+      const auto dx = static_cast<int32_t>(layer->offset.x);
+      const auto dy = static_cast<int32_t>(layer->offset.y);
+      const auto dw = static_cast<int32_t>(layer->size.width);
+      const auto dh = static_cast<int32_t>(layer->size.height);
+      BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
+    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+               layer->platform_view) {
+      const auto it =
+          m_compositor_surfaces.find(layer->platform_view->identifier);
+      if (it != m_compositor_surfaces.end() && it->second) {
+        ok = it->second->OnPresent(layer) && ok;
+      }
+    }
+  }
+
+  // Transition swapchain image -> PRESENT_SRC_KHR.
+  VkImageMemoryBarrier to_present{};
+  to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_present.image = dst;
+  to_present.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  to_present.subresourceRange.levelCount = 1;
+  to_present.subresourceRange.layerCount = 1;
+  to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &to_present);
+
+  d.vkEndCommandBuffer(cmd);
+
+  VkSubmitInfo submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &cmd;
+  submit.signalSemaphoreCount = 1;
+  submit.pSignalSemaphores = &present_transition_semaphore_;
+  d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+
+  VkPresentInfoKHR present_info{};
+  present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+  present_info.waitSemaphoreCount = 1;
+  present_info.pWaitSemaphores = &present_transition_semaphore_;
+  present_info.swapchainCount = 1;
+  present_info.pSwapchains = &swapchain_;
+  present_info.pImageIndices = &image_index;
+  const VkResult result = d.vkQueuePresentKHR(queue_, &present_info);
+  if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+    resize_pending_ = true;
+  }
+
+  d.vkQueueWaitIdle(queue_);
+  d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
+
+  return ok;
+}
+
+#endif  // BUILD_COMPOSITOR
