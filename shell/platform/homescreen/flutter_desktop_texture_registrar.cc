@@ -6,6 +6,8 @@
 
 #include <GLES2/gl2.h>
 
+#include <limits>
+
 #if !defined(GL_RGBA8)
 #define GL_RGBA8 0x8058
 #endif
@@ -16,6 +18,12 @@ bool PopulateExternalGlTextureFrame(
     size_t width,
     size_t height,
     FlutterOpenGLTexture* texture_out) {
+  // Hold the registrar mutex for the whole call: it protects the registry
+  // map against concurrent Register/Unregister, and keeps |desc| alive while
+  // we mutate its cached GL state. The plugin pixel-buffer callback runs
+  // under the lock, so plugins must not re-enter the registrar from inside
+  // it.
+  std::scoped_lock<std::mutex> lock(texture_registrar->texture_mutex);
   auto& registry = texture_registrar->texture_registry;
   const auto it = registry.find(texture_id);
   if (it == registry.end() || !it->second) {
@@ -39,9 +47,17 @@ bool PopulateExternalGlTextureFrame(
 
   // Pixel-buffer path: invoke the plugin callback, upload into an
   // embedder-owned GL texture that is allocated lazily on first frame.
-  const FlutterDesktopPixelBuffer* pb = desc->pixel_buffer_callback(
-      width, height, desc->pixel_buffer_user_data);
+  const FlutterDesktopPixelBuffer* pb =
+      desc->pixel_buffer_callback(width, height, desc->pixel_buffer_user_data);
   if (!pb || !pb->buffer || pb->width == 0 || pb->height == 0) {
+    return false;
+  }
+  // Reject sizes that would not round-trip through GLsizei/uint32_t. A
+  // plugin supplying an over-sized dimension is either buggy or hostile;
+  // truncating would desync |desc|'s cached dims from the actual upload.
+  constexpr auto kMaxDim =
+      static_cast<size_t>(std::numeric_limits<GLsizei>::max());
+  if (pb->width > kMaxDim || pb->height > kMaxDim) {
     return false;
   }
 

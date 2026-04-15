@@ -33,8 +33,6 @@ struct FlutterDesktopView;
 
 static_assert(FLUTTER_ENGINE_VERSION == 1, "Engine version does not match");
 
-std::mutex texture_mutex;
-
 // Attempts to load AOT data from the given path, which must be absolute and
 // non-empty. Logs and returns nullptr on failure.
 std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter> LoadAotData(
@@ -285,8 +283,7 @@ bool FlutterDesktopPluginRegistrarGetEglContext(
   out->display = nullptr;
   out->config = nullptr;
   out->share_context = nullptr;
-  if (!registrar || !registrar->engine ||
-      !registrar->engine->view_controller ||
+  if (!registrar || !registrar->engine || !registrar->engine->view_controller ||
       !registrar->engine->view_controller->view) {
     return false;
   }
@@ -307,7 +304,7 @@ bool FlutterDesktopPluginRegistrarGetEglContext(
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     FlutterDesktopTextureRegistrarRef texture_registrar,
     const FlutterDesktopTextureInfo* texture_info) {
-  std::scoped_lock lock(texture_mutex);
+  std::scoped_lock lock(texture_registrar->texture_mutex);
   int64_t result = -1;
 
   if (texture_info->type == kFlutterDesktopPixelBufferTexture) {
@@ -415,27 +412,45 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     const int64_t texture_id,
     void (*callback)(void* user_data),
     void* user_data) {
-  std::scoped_lock<std::mutex> lock(texture_mutex);
-  LibFlutterEngine->UnregisterExternalTexture(
-      texture_registrar->engine->flutter_engine, texture_id);
-  if (const auto& val = texture_registrar->texture_registry[texture_id]; val) {
-    // Pixel-buffer textures: the embedder owns the GL texture, so free it
-    // under a currently-made texture context.
-    if (val->pixel_buffer_callback && val->name != 0) {
-      auto* backend =
-          texture_registrar->engine->view_controller->view->GetBackend();
-      if (backend->TextureMakeCurrent()) {
-        GLuint name = val->name;
-        glDeleteTextures(1, &name);
-        backend->TextureClearCurrent();
-      }
-    }
-    if (val->release_callback != nullptr) {
-      val->release_callback(val->release_context);
+  std::unique_ptr<GL_TEXTURE_2D_DESC> removed;
+  {
+    std::scoped_lock<std::mutex> lock(texture_registrar->texture_mutex);
+    LibFlutterEngine->UnregisterExternalTexture(
+        texture_registrar->engine->flutter_engine, texture_id);
+    if (const auto it = texture_registrar->texture_registry.find(texture_id);
+        it != texture_registrar->texture_registry.end()) {
+      removed = std::move(it->second);
+      texture_registrar->texture_registry.erase(it);
     }
   }
-  texture_registrar->texture_registry[texture_id].reset();
-  texture_registrar->texture_registry.erase(texture_id);
+
+  if (removed) {
+    // Pixel-buffer textures: the embedder owns the GL texture, so free it
+    // under a currently-made texture context. Guard the full backend chain
+    // in case the engine is mid-teardown.
+    if (removed->pixel_buffer_callback && removed->name != 0) {
+      Backend* backend = nullptr;
+      if (texture_registrar->engine &&
+          texture_registrar->engine->view_controller &&
+          texture_registrar->engine->view_controller->view) {
+        backend =
+            texture_registrar->engine->view_controller->view->GetBackend();
+      }
+      if (backend && backend->TextureMakeCurrent()) {
+        GLuint name = removed->name;
+        glDeleteTextures(1, &name);
+        backend->TextureClearCurrent();
+      } else {
+        spdlog::warn(
+            "UnregisterExternalTexture: backend texture context unavailable; "
+            "GL texture {} leaked",
+            removed->name);
+      }
+    }
+    if (removed->release_callback != nullptr) {
+      removed->release_callback(removed->release_context);
+    }
+  }
   if (callback != nullptr) {
     callback(user_data);
   }
