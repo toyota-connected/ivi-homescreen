@@ -520,7 +520,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
   // General path: Wayland subsurface Z-order is reconciled by the sequencer;
   // each Flutter layer is blitted onto the window, each platform view is
   // dispatched to its registered ICompositorSurface.
-  m_sequencer.Present(layers, count, nullptr, nullptr,
+  m_sequencer.Present(layers, count, nullptr,
                       [](FlutterPlatformViewIdentifier id) {
                         spdlog::warn(
                             "EGL compositor: platform view {} has no "

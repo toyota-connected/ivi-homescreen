@@ -23,7 +23,6 @@
 
 #include <shell/platform/embedder/embedder.h>
 
-struct wl_compositor;
 struct wl_subsurface;
 struct wl_surface;
 
@@ -79,7 +78,6 @@ class PresentLayerSequencer {
    *
    * @param layers      Ordered layer array from the engine.
    * @param count       Number of layers.
-   * @param compositor  Unused today; reserved for future surface allocation.
    * @param root_surface Root @c wl_surface used as the reference for the
    *                    first platform-view layer.
    * @param on_missing  Optional callback invoked when a layer references a
@@ -87,7 +85,6 @@ class PresentLayerSequencer {
    */
   void Present(const FlutterLayer** layers,
                size_t count,
-               wl_compositor* compositor,
                wl_surface* root_surface,
                const MissingHandler& on_missing = {});
 
