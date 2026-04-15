@@ -50,8 +50,15 @@ class PresentLayerSequencer {
   using Placer =
       std::function<void(wl_subsurface* subsurface, wl_surface* sibling)>;
 
+  /**
+   * @brief Hook invoked to position @p subsurface in parent-local pixels.
+   * Defaults to @c wl_subsurface_set_position. Tests replace it with a probe.
+   */
+  using Positioner =
+      std::function<void(wl_subsurface* subsurface, int32_t x, int32_t y)>;
+
   PresentLayerSequencer();
-  explicit PresentLayerSequencer(Placer placer);
+  PresentLayerSequencer(Placer placer, Positioner positioner);
 
   PresentLayerSequencer(const PresentLayerSequencer&) = delete;
   PresentLayerSequencer& operator=(const PresentLayerSequencer&) = delete;
@@ -111,4 +118,5 @@ class PresentLayerSequencer {
   std::unordered_map<FlutterPlatformViewIdentifier, Entry> subsurface_map_;
   std::vector<FlutterPlatformViewIdentifier> last_order_;
   Placer placer_;
+  Positioner positioner_;
 };

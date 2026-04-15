@@ -38,6 +38,7 @@
 #include "backend/backing_store_pool.h"
 #include "backend/wayland_vulkan/vulkan_backing_store.h"
 #include "view/compositor_surface_interface.h"
+#include "view/mutation_stack.h"
 #include "view/present_layer_sequencer.h"
 #endif
 
