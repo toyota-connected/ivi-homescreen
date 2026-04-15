@@ -28,6 +28,7 @@ add_executable(${PROJECT_NAME}
         main.cc
         timer.cc
         view/flutter_view.cc
+        view/present_layer_sequencer.cc
         watchdog.cc
         wayland/display.cc
         wayland/window.cc
