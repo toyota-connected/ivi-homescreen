@@ -18,7 +18,7 @@ Test Summary：Test ParseConfig for default value
 ***************************************************************/
 
 TEST(HomescreenConfigurationParseConfig, Lv1Normal001) {
-  struct Configuration::Config config {};
+  struct Configuration::Config config{};
   config.bundle_paths.emplace_back(kUnitTestAppBundle);
 
   // call target function
@@ -125,7 +125,7 @@ TEST(HomescreenConfigurationGetTomlConfig, Lv1Normal001) {
   EXPECT_EQ(true, config.disable_cursor.value_or(false));
   EXPECT_EQ("keyboard", config.wayland_event_mask);
   EXPECT_EQ(false, config.debug_backend.value_or(false));
-  
+
   EXPECT_EQ("NORMAL", config.view.window_type);
   EXPECT_EQ(2, config.view.wl_output_index.value_or(0));
   EXPECT_EQ(1920, config.view.width.value_or(kDefaultViewWidth));
@@ -163,7 +163,7 @@ TEST(HomescreenConfigurationGetTomlConfig, Lv1Normal002) {
   EXPECT_EQ(true, config.disable_cursor.value_or(false));
   EXPECT_EQ("keyboard", config.wayland_event_mask);
   EXPECT_EQ(false, config.debug_backend.value_or(false));
-  
+
   EXPECT_EQ("", config.view.bundle_path);
   EXPECT_EQ("", config.view.window_type);
   EXPECT_EQ(0, config.view.wl_output_index.value_or(0));
@@ -181,4 +181,3 @@ TEST(HomescreenConfigurationGetTomlConfig, Lv1Normal002) {
   EXPECT_EQ(0, config.view.activation_area_width);
   EXPECT_EQ(0, config.view.activation_area_height);
 }
-
