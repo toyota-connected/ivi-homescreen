@@ -46,6 +46,8 @@
 #cmakedefine01 BUILD_EGL_ENABLE_3D
 #cmakedefine01 BUILD_EGL_ENABLE_MULTISAMPLE
 
+#cmakedefine01 BUILD_COMPOSITOR
+
 #cmakedefine01 BUILD_CRASH_HANDLER
 #if BUILD_CRASH_HANDLER
 static constexpr char kCrashHandlerDsn[] = "@CRASH_HANDLER_DSN@";
