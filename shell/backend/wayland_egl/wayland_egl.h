@@ -26,6 +26,15 @@
 #include "backend/backend.h"
 #include "egl.h"
 
+#if BUILD_COMPOSITOR
+#include <memory>
+
+#include "backend/backing_store_pool.h"
+#include "backend/wayland_egl/egl_backing_store.h"
+#include "view/compositor_surface_interface.h"
+#include "view/present_layer_sequencer.h"
+#endif
+
 class Backend;
 
 class Engine;
@@ -99,6 +108,20 @@ class WaylandEglBackend : public Egl, public Backend {
     m_initial_height = static_cast<uint32_t>(_height);
   }
 
+#if BUILD_COMPOSITOR
+  /**
+   * @brief Register a platform-view surface for composition.
+   *
+   * Called by @c FlutterView in response to the @c flutter/platform_views
+   * create message. Must be paired with @c UnregisterCompositorSurface.
+   */
+  void RegisterCompositorSurface(
+      FlutterPlatformViewIdentifier id,
+      std::shared_ptr<ICompositorSurface> surface);
+
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id);
+#endif
+
  private:
   struct wl_egl_window* m_egl_window{};
   uint32_t m_initial_width;
@@ -120,4 +143,27 @@ class WaylandEglBackend : public Egl, public Backend {
    */
   static void JoinFlutterRect(FlutterRect* rect,
                               const FlutterRect& additional_rect);
+
+#if BUILD_COMPOSITOR
+  BackingStorePool<EglFboBackingStore> m_fbo_pool;
+  PresentLayerSequencer m_sequencer;
+  std::unordered_map<FlutterPlatformViewIdentifier,
+                     std::shared_ptr<ICompositorSurface>>
+      m_compositor_surfaces;
+
+  // Holds shared ownership of backing stores while the engine has them
+  // checked out. Keyed by raw pointer — the engine's @c user_data baton
+  // refers back to this map for Collect.
+  std::unordered_map<EglFboBackingStore*,
+                     std::shared_ptr<EglFboBackingStore>>
+      m_alive_stores_;
+
+  bool CreateBackingStore(const FlutterBackingStoreConfig* config,
+                          FlutterBackingStore* store_out);
+  bool CollectBackingStore(const FlutterBackingStore* store);
+  bool PresentLayers(const FlutterLayer** layers, size_t count);
+
+  /// Blit backing FBO into FBO 0 (window) and swap.
+  bool BlitBackingStoreToWindow(const FlutterBackingStore* store);
+#endif
 };
