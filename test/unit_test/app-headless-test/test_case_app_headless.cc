@@ -12,8 +12,6 @@
 #include "logging.h"
 #include "unit_test_utils.h"
 
-
-
 /****************************************************************
 Test Case Name.Test Name： HomescreenAppHeadless_Lv1Normal001
 Use Case Name: Initialization
@@ -58,4 +56,3 @@ TEST(HomescreenAppHeadless, Lv1Normal001) {
   EXPECT_EQ(images_are_equal, 1);
 #endif
 }
-
