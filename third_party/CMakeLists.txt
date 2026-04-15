@@ -86,6 +86,12 @@ if (BUILD_UNIT_TESTS)
     if (TOOLCHAIN_COMPILE_OPTIONS)
         target_compile_options(gtest PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
     endif ()
+    # GCC 15 promotes a signed-conversion warning inside googletest itself
+    # (gtest.cc: kSize template parameter). Demote to a warning for
+    # third_party only — the project's own Werror settings stay intact.
+    target_compile_options(gtest PRIVATE
+            -Wno-error=sign-conversion
+            -Wno-error=conversion)
     target_compile_options(gmock PRIVATE -Wno-error=deprecated-copy)
 
     target_compile_options(gtest_main PRIVATE -include cstdint)
@@ -93,6 +99,9 @@ if (BUILD_UNIT_TESTS)
     if (TOOLCHAIN_COMPILE_OPTIONS)
         target_compile_options(gtest_main PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
     endif ()
+    target_compile_options(gtest_main PRIVATE
+            -Wno-error=sign-conversion
+            -Wno-error=conversion)
 
     target_compile_options(gmock PRIVATE -Wno-error=deprecated-copy)
 
