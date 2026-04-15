@@ -76,7 +76,7 @@ TEST(PresentLayerSequencer, SingleBackingStoreLayerProducesEmptyOrder) {
   FlutterLayer bs = MakeBackingStoreLayer();
   const FlutterLayer* layers[] = {&bs};
 
-  seq.Present(layers, 1, nullptr, nullptr);
+  seq.Present(layers, 1, nullptr);
   EXPECT_TRUE(seq.LastOrder().empty());
 }
 
@@ -89,7 +89,7 @@ TEST(PresentLayerSequencer, UnregisteredPlatformViewInvokesMissingHandler) {
   const FlutterLayer* layers[] = {&pvl};
 
   std::vector<FlutterPlatformViewIdentifier> missed;
-  seq.Present(layers, 1, nullptr, nullptr,
+  seq.Present(layers, 1, nullptr,
               [&](FlutterPlatformViewIdentifier id) { missed.push_back(id); });
 
   ASSERT_EQ(missed.size(), 1u);
@@ -111,7 +111,7 @@ TEST(PresentLayerSequencer, RegisteredPlatformViewRecordedInOrder) {
   const FlutterLayer* layers[] = {&pvl};
 
   // Pass nullptr root_surface to avoid calling into wl_subsurface_place_above.
-  seq.Present(layers, 1, nullptr, nullptr);
+  seq.Present(layers, 1, nullptr);
   ASSERT_EQ(seq.LastOrder().size(), 1u);
   EXPECT_EQ(seq.LastOrder()[0], 11);
 }
@@ -135,7 +135,7 @@ TEST(PresentLayerSequencer, MultiLayerOrderReflectsInputOrder) {
   FlutterLayer l2 = MakePlatformViewLayer(&pv2);
   const FlutterLayer* layers[] = {&bs, &l1, &l2};
 
-  seq.Present(layers, 3, nullptr, nullptr);
+  seq.Present(layers, 3, nullptr);
   ASSERT_EQ(seq.LastOrder().size(), 2u);
   EXPECT_EQ(seq.LastOrder()[0], 1);
   EXPECT_EQ(seq.LastOrder()[1], 2);
@@ -160,7 +160,7 @@ TEST(PresentLayerSequencer, PlacerCalledWithSiblingChain) {
   FlutterLayer l2 = MakePlatformViewLayer(&pv2);
   const FlutterLayer* layers[] = {&l1, &l2};
 
-  seq.Present(layers, 2, nullptr, reinterpret_cast<wl_surface*>(&root));
+  seq.Present(layers, 2, reinterpret_cast<wl_surface*>(&root));
   ASSERT_EQ(calls.size(), 2u);
   EXPECT_EQ(calls[0].subsurface, reinterpret_cast<wl_subsurface*>(&s1));
   EXPECT_EQ(calls[0].sibling, reinterpret_cast<wl_surface*>(&root));
