@@ -1,4 +1,4 @@
-name: lint
+name: ci
 
 on:
   pull_request:
@@ -8,10 +8,40 @@ on:
   workflow_dispatch:
 
 jobs:
-  clang-tidy:
+  build:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
-    name: clang-tidy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            version: '12'
+            cc: gcc-12
+            cxx: g++-12
+            extra_pkgs: g++-12
+          - compiler: gcc
+            version: '13'
+            cc: gcc-13
+            cxx: g++-13
+            extra_pkgs: g++-13
+          - compiler: gcc
+            version: '14'
+            cc: gcc-14
+            cxx: g++-14
+            extra_pkgs: g++-14
+          - compiler: clang
+            version: '19'
+            cc: clang-19
+            cxx: clang++-19
+            extra_pkgs: clang-19 llvm-19
+          - compiler: clang
+            version: '20'
+            cc: clang-20
+            cxx: clang++-20
+            extra_pkgs: clang-20 llvm-20
+
+    name: ${{ matrix.compiler }}-${{ matrix.version }}
     permissions:
       contents: read
 
@@ -24,7 +54,40 @@ jobs:
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev clang-19 clang-tidy-19
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev ${{ matrix.extra_pkgs }}
+          version: 1.0
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Build
+        run: ninja -C ${{github.workspace}}/build
+
+  lint:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    name: lint
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev clang-19 clang-tidy-19 clang-format-19 llvm-19
           version: 1.0
 
       - name: Configure
@@ -47,23 +110,6 @@ jobs:
             -not -path 'shell/platform/homescreen/client_wrapper/*' \
             -not -path 'shell/platform/homescreen/public/*' \
             | xargs clang-tidy-19 -p ${{github.workspace}}/build --warnings-as-errors='*'
-
-  clang-format:
-    if: ${{ github.server_url == 'https://github.com' }}
-    runs-on: ubuntu-24.04
-    name: clang-format
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: clang-format-19
-          version: 1.0
 
       - name: clang-format
         run: |
