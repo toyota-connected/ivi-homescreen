@@ -1,0 +1,74 @@
+name: lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [v2.0]
+  workflow_dispatch:
+
+jobs:
+  clang-tidy:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    name: clang-tidy
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev clang-19 clang-tidy-19
+          version: 1.0
+
+      - name: Configure
+        env:
+          CC: clang-19
+          CXX: clang++-19
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Build (generate compile_commands.json)
+        run: ninja -C ${{github.workspace}}/build
+
+      - name: clang-tidy
+        run: |
+          find shell -type f \( -name '*.cc' -o -name '*.cpp' \) \
+            -not -path 'shell/platform/homescreen/client_wrapper/*' \
+            -not -path 'shell/platform/homescreen/public/*' \
+            | xargs clang-tidy-19 -p ${{github.workspace}}/build --warnings-as-errors='*'
+
+  clang-format:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    name: clang-format
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: clang-format-19
+          version: 1.0
+
+      - name: clang-format
+        run: |
+          find shell test \( -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+            -not -path 'shell/platform/homescreen/client_wrapper/*' \
+            -not -path 'shell/platform/homescreen/public/*' \
+            -print0 \
+            | xargs -0 clang-format-19 --dry-run --Werror
