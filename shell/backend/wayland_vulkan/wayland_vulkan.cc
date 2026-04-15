@@ -1227,7 +1227,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                          nullptr, 1, &to_dst);
 
   // Sequence platform-view subsurface Z-order for this frame.
-  m_sequencer.Present(layers, count, nullptr, nullptr,
+  m_sequencer.Present(layers, count, nullptr,
                       [](FlutterPlatformViewIdentifier id) {
                         spdlog::warn(
                             "Vulkan compositor: platform view {} has no "

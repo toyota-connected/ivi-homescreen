@@ -40,7 +40,6 @@ void PresentLayerSequencer::UnregisterSubsurface(
 
 void PresentLayerSequencer::Present(const FlutterLayer** layers,
                                     size_t count,
-                                    wl_compositor* /*compositor*/,
                                     wl_surface* root_surface,
                                     const MissingHandler& on_missing) {
   std::vector<FlutterPlatformViewIdentifier> desired;
