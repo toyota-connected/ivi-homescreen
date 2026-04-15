@@ -32,6 +32,12 @@ struct PlaceCall {
   wl_surface* sibling;
 };
 
+struct PositionCall {
+  wl_subsurface* subsurface;
+  int32_t x;
+  int32_t y;
+};
+
 FlutterLayer MakeBackingStoreLayer() {
   FlutterLayer l{};
   l.struct_size = sizeof(FlutterLayer);
@@ -57,10 +63,19 @@ PresentLayerSequencer::Placer NoopPlacer(std::vector<PlaceCall>* log) {
     }
   };
 }
+
+PresentLayerSequencer::Positioner NoopPositioner(
+    std::vector<PositionCall>* log) {
+  return [log](wl_subsurface* subsurface, int32_t x, int32_t y) {
+    if (log) {
+      log->push_back({subsurface, x, y});
+    }
+  };
+}
 }  // namespace
 
 TEST(PresentLayerSequencer, RegisterAndUnregister) {
-  PresentLayerSequencer seq(NoopPlacer(nullptr));
+  PresentLayerSequencer seq(NoopPlacer(nullptr), NoopPositioner(nullptr));
   FakeSubsurface s;
   FakeSurface sur;
   seq.RegisterSubsurface(42, reinterpret_cast<wl_subsurface*>(&s),
@@ -72,7 +87,7 @@ TEST(PresentLayerSequencer, RegisterAndUnregister) {
 }
 
 TEST(PresentLayerSequencer, SingleBackingStoreLayerProducesEmptyOrder) {
-  PresentLayerSequencer seq(NoopPlacer(nullptr));
+  PresentLayerSequencer seq(NoopPlacer(nullptr), NoopPositioner(nullptr));
   FlutterLayer bs = MakeBackingStoreLayer();
   const FlutterLayer* layers[] = {&bs};
 
@@ -81,7 +96,7 @@ TEST(PresentLayerSequencer, SingleBackingStoreLayerProducesEmptyOrder) {
 }
 
 TEST(PresentLayerSequencer, UnregisteredPlatformViewInvokesMissingHandler) {
-  PresentLayerSequencer seq(NoopPlacer(nullptr));
+  PresentLayerSequencer seq(NoopPlacer(nullptr), NoopPositioner(nullptr));
   FlutterPlatformView pv{};
   pv.struct_size = sizeof(FlutterPlatformView);
   pv.identifier = 7;
@@ -98,7 +113,7 @@ TEST(PresentLayerSequencer, UnregisteredPlatformViewInvokesMissingHandler) {
 }
 
 TEST(PresentLayerSequencer, RegisteredPlatformViewRecordedInOrder) {
-  PresentLayerSequencer seq(NoopPlacer(nullptr));
+  PresentLayerSequencer seq(NoopPlacer(nullptr), NoopPositioner(nullptr));
   FakeSubsurface sub;
   FakeSurface sur;
   seq.RegisterSubsurface(11, reinterpret_cast<wl_subsurface*>(&sub),
@@ -117,7 +132,7 @@ TEST(PresentLayerSequencer, RegisteredPlatformViewRecordedInOrder) {
 }
 
 TEST(PresentLayerSequencer, MultiLayerOrderReflectsInputOrder) {
-  PresentLayerSequencer seq(NoopPlacer(nullptr));
+  PresentLayerSequencer seq(NoopPlacer(nullptr), NoopPositioner(nullptr));
   FakeSubsurface s1, s2;
   FakeSurface sur1, sur2;
   seq.RegisterSubsurface(1, reinterpret_cast<wl_subsurface*>(&s1),
@@ -143,7 +158,7 @@ TEST(PresentLayerSequencer, MultiLayerOrderReflectsInputOrder) {
 
 TEST(PresentLayerSequencer, PlacerCalledWithSiblingChain) {
   std::vector<PlaceCall> calls;
-  PresentLayerSequencer seq(NoopPlacer(&calls));
+  PresentLayerSequencer seq(NoopPlacer(&calls), NoopPositioner(nullptr));
   FakeSubsurface s1, s2;
   FakeSurface sur1, sur2, root;
   seq.RegisterSubsurface(1, reinterpret_cast<wl_subsurface*>(&s1),
@@ -166,4 +181,35 @@ TEST(PresentLayerSequencer, PlacerCalledWithSiblingChain) {
   EXPECT_EQ(calls[0].sibling, reinterpret_cast<wl_surface*>(&root));
   EXPECT_EQ(calls[1].subsurface, reinterpret_cast<wl_subsurface*>(&s2));
   EXPECT_EQ(calls[1].sibling, reinterpret_cast<wl_surface*>(&sur1));
+}
+
+TEST(PresentLayerSequencer, PositionerCalledWithLayerOffset) {
+  std::vector<PositionCall> calls;
+  PresentLayerSequencer seq(NoopPlacer(nullptr), NoopPositioner(&calls));
+  FakeSubsurface s1, s2;
+  FakeSurface sur1, sur2;
+  seq.RegisterSubsurface(1, reinterpret_cast<wl_subsurface*>(&s1),
+                         reinterpret_cast<wl_surface*>(&sur1));
+  seq.RegisterSubsurface(2, reinterpret_cast<wl_subsurface*>(&s2),
+                         reinterpret_cast<wl_surface*>(&sur2));
+
+  FlutterPlatformView pv1{}, pv2{};
+  pv1.struct_size = sizeof(FlutterPlatformView);
+  pv1.identifier = 1;
+  pv2.struct_size = sizeof(FlutterPlatformView);
+  pv2.identifier = 2;
+  FlutterLayer l1 = MakePlatformViewLayer(&pv1);
+  l1.offset = {.x = 100.0, .y = 200.0};
+  FlutterLayer l2 = MakePlatformViewLayer(&pv2);
+  l2.offset = {.x = 300.0, .y = 400.0};
+  const FlutterLayer* layers[] = {&l1, &l2};
+
+  seq.Present(layers, 2, nullptr);
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[0].subsurface, reinterpret_cast<wl_subsurface*>(&s1));
+  EXPECT_EQ(calls[0].x, 100);
+  EXPECT_EQ(calls[0].y, 200);
+  EXPECT_EQ(calls[1].subsurface, reinterpret_cast<wl_subsurface*>(&s2));
+  EXPECT_EQ(calls[1].x, 300);
+  EXPECT_EQ(calls[1].y, 400);
 }
