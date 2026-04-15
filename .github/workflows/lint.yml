@@ -54,7 +54,7 @@ jobs:
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev ${{ matrix.extra_pkgs }}
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev ${{ matrix.extra_pkgs }}
           version: 1.0
 
       - name: Configure
@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev clang-19 clang-tidy-19 clang-format-19 llvm-19
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev clang-19 clang-tidy-19 clang-format-19 llvm-19
           version: 1.0
 
       - name: Configure
@@ -112,9 +112,4 @@ jobs:
             | xargs clang-tidy-19 -p ${{github.workspace}}/build --warnings-as-errors='*'
 
       - name: clang-format
-        run: |
-          find shell test \( -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
-            -not -path 'shell/platform/homescreen/client_wrapper/*' \
-            -not -path 'shell/platform/homescreen/public/*' \
-            -print0 \
-            | xargs -0 clang-format-19 --dry-run --Werror
+        run: scripts/format.sh --check
