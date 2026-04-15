@@ -30,6 +30,12 @@ list(APPEND TYPICAL_TEST_DEFINITIONS ASIO_NO_DEPRECATED)
 
 list(APPEND TYPICAL_TEST_DEFINITIONS UNIT_TEST)
 
+if (BUILD_COMPOSITOR)
+    list(APPEND TYPICAL_TEST_DEFINITIONS BUILD_COMPOSITOR=1)
+else ()
+    list(APPEND TYPICAL_TEST_DEFINITIONS BUILD_COMPOSITOR=0)
+endif ()
+
 list(APPEND TYPICAL_TEST_DEFINITIONS TEST_APP_BUNDLE_PATH="${UNIT_TEST_APP_BUNDLE}")
 list(APPEND TYPICAL_TEST_DEFINITIONS GOLDEN_IMAGE_PATH="${CMAKE_BINARY_DIR}/test/unit_test/test_images_golden/")
 list(APPEND TYPICAL_TEST_DEFINITIONS TEST_IMAGE_PATH="${CMAKE_BINARY_DIR}/test/unit_test/test_images/")
@@ -64,4 +70,5 @@ add_subdirectory(gl_process_resolver-test)
 add_subdirectory(shared_library-test)
 add_subdirectory(backing_store_pool-test)
 add_subdirectory(present_layer_sequencer-test)
+add_subdirectory(compositor_registry-test)
 #add_subdirectory(texture-test)
