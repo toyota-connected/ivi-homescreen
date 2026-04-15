@@ -80,6 +80,13 @@ else ()
 endif ()
 
 #
+# FlutterCompositor backing-store API. When OFF (default), the backend uses
+# single-surface rendering. When ON, platform-view layer interleaving is
+# enabled via the compositor callbacks.
+#
+option(BUILD_COMPOSITOR "Enable FlutterCompositor backing store API" OFF)
+
+#
 # DRM
 #
 option(BUILD_BACKEND_DRM "Build DRM backend" OFF)
