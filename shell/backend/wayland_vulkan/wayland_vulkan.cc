@@ -101,6 +101,9 @@ FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
 
 WaylandVulkanBackend::~WaylandVulkanBackend() {
   if (device_ != nullptr) {
+#if BUILD_COMPOSITOR
+    CompositorPipeliningCleanup();
+#endif
     if (swapchain_command_pool_ != nullptr) {
       d.vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
     }
@@ -665,6 +668,10 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     CHECK_VK_RESULT(d.vkEndCommandBuffer(buffer));
   }
 
+#if BUILD_COMPOSITOR
+  CompositorPipeliningInit();
+#endif
+
   return true;
 }
 
@@ -1184,27 +1191,30 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   if (resize_pending_) {
     InitializeSwapChain();
   }
+  if (m_compositor_slots_.empty()) {
+    CompositorPipeliningInit();
+  }
+
+  // Pick the slot for this frame and wait until its previous use has
+  // completed on the GPU. This is the only CPU/GPU sync — the queue is
+  // never asked to idle.
+  FrameSlot& slot =
+      m_compositor_slots_[m_compositor_current_frame_ %
+                          m_compositor_slots_.size()];
+  CHECK_VK_RESULT(
+      d.vkWaitForFences(device_, 1, &slot.in_flight, VK_TRUE, UINT64_MAX));
+  CHECK_VK_RESULT(d.vkResetFences(device_, 1, &slot.in_flight));
 
   uint32_t image_index = 0;
   CHECK_VK_RESULT(d.vkAcquireNextImageKHR(
-      device_, swapchain_, 1'000'000'000, VK_NULL_HANDLE, image_ready_fence_,
+      device_, swapchain_, 1'000'000'000, slot.image_available, VK_NULL_HANDLE,
       &image_index));
-  CHECK_VK_RESULT(
-      d.vkWaitForFences(device_, 1, &image_ready_fence_, true, UINT64_MAX));
-  CHECK_VK_RESULT(d.vkResetFences(device_, 1, &image_ready_fence_));
   last_image_index_ = image_index;
 
   VkImage dst = swapchain_images_[image_index];
 
-  // Allocate a one-shot command buffer for this frame's composite.
-  VkCommandBufferAllocateInfo alloc{};
-  alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  alloc.commandPool = swapchain_command_pool_;
-  alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  alloc.commandBufferCount = 1;
-  VkCommandBuffer cmd{};
-  CHECK_VK_RESULT(d.vkAllocateCommandBuffers(device_, &alloc, &cmd));
-
+  VkCommandBuffer cmd = slot.cmd_buffer;
+  d.vkResetCommandBuffer(cmd, 0);
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1292,18 +1302,26 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
 
   d.vkEndCommandBuffer(cmd);
 
+  // Submit waits on image_available (signaled when the swapchain image is
+  // presentable), signals render_finished and the slot's in_flight fence.
+  // No vkQueueWaitIdle — the next frame's slot wait is the only sync point.
+  const VkPipelineStageFlags wait_stage =
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.waitSemaphoreCount = 1;
+  submit.pWaitSemaphores = &slot.image_available;
+  submit.pWaitDstStageMask = &wait_stage;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
   submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &present_transition_semaphore_;
-  d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+  submit.pSignalSemaphores = &slot.render_finished;
+  d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
 
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
-  present_info.pWaitSemaphores = &present_transition_semaphore_;
+  present_info.pWaitSemaphores = &slot.render_finished;
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &swapchain_;
   present_info.pImageIndices = &image_index;
@@ -1312,10 +1330,87 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
     resize_pending_ = true;
   }
 
-  d.vkQueueWaitIdle(queue_);
-  d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
-
+  ++m_compositor_current_frame_;
   return ok;
+}
+
+void WaylandVulkanBackend::CompositorPipeliningInit() {
+  CompositorPipeliningCleanup();
+
+  if (swapchain_images_.empty()) {
+    return;
+  }
+
+  VkCommandPoolCreateInfo pool_info{};
+  pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  pool_info.queueFamilyIndex = queue_family_index_;
+  if (d.vkCreateCommandPool(device_, &pool_info, nullptr,
+                            &m_compositor_cmd_pool_) != VK_SUCCESS) {
+    spdlog::error("Vulkan compositor: failed to create cmd pool");
+    return;
+  }
+
+  const auto slot_count = swapchain_images_.size();
+  m_compositor_slots_.resize(slot_count);
+
+  VkCommandBufferAllocateInfo cb_alloc{};
+  cb_alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  cb_alloc.commandPool = m_compositor_cmd_pool_;
+  cb_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cb_alloc.commandBufferCount = static_cast<uint32_t>(slot_count);
+  std::vector<VkCommandBuffer> cmds(slot_count);
+  CHECK_VK_RESULT(d.vkAllocateCommandBuffers(device_, &cb_alloc, cmds.data()));
+
+  // Fences start signaled so the first wait in PresentLayersImpl returns
+  // immediately for every slot.
+  VkFenceCreateInfo fence_info{};
+  fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+  VkSemaphoreCreateInfo sem_info{};
+  sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+  for (size_t i = 0; i < slot_count; ++i) {
+    auto& s = m_compositor_slots_[i];
+    s.cmd_buffer = cmds[i];
+    CHECK_VK_RESULT(
+        d.vkCreateFence(device_, &fence_info, nullptr, &s.in_flight));
+    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr,
+                                        &s.image_available));
+    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr,
+                                        &s.render_finished));
+  }
+  m_compositor_current_frame_ = 0;
+}
+
+void WaylandVulkanBackend::CompositorPipeliningCleanup() {
+  if (device_ == VK_NULL_HANDLE) {
+    return;
+  }
+  // Make sure no slot's resources are still in flight before tearing them
+  // down. Cheap: only fires at swapchain recreation or backend shutdown.
+  if (!m_compositor_slots_.empty()) {
+    d.vkDeviceWaitIdle(device_);
+  }
+  for (auto& s : m_compositor_slots_) {
+    if (s.image_available) {
+      d.vkDestroySemaphore(device_, s.image_available, nullptr);
+    }
+    if (s.render_finished) {
+      d.vkDestroySemaphore(device_, s.render_finished, nullptr);
+    }
+    if (s.in_flight) {
+      d.vkDestroyFence(device_, s.in_flight, nullptr);
+    }
+    s = {};
+  }
+  m_compositor_slots_.clear();
+  if (m_compositor_cmd_pool_ != VK_NULL_HANDLE) {
+    d.vkDestroyCommandPool(device_, m_compositor_cmd_pool_, nullptr);
+    m_compositor_cmd_pool_ = VK_NULL_HANDLE;
+  }
+  m_compositor_current_frame_ = 0;
 }
 
 #endif  // BUILD_COMPOSITOR

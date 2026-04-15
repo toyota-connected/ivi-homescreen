@@ -366,5 +366,29 @@ class WaylandVulkanBackend final : public Backend {
                             int32_t dst_y,
                             int32_t dst_w,
                             int32_t dst_h) const;
+
+  /// Per-frame pipelining state for compositor mode. We keep one slot per
+  /// swapchain image; the slot owns its command buffer and the sync
+  /// primitives that gate its reuse. The CPU only waits when about to
+  /// reuse a slot — never on the queue at large.
+  struct FrameSlot {
+    VkCommandBuffer cmd_buffer{VK_NULL_HANDLE};
+    VkFence in_flight{VK_NULL_HANDLE};
+    VkSemaphore image_available{VK_NULL_HANDLE};
+    VkSemaphore render_finished{VK_NULL_HANDLE};
+  };
+
+  // Dedicated pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT so
+  // each slot's cmd buffer can be re-recorded each frame without resetting
+  // the whole pool.
+  VkCommandPool m_compositor_cmd_pool_{VK_NULL_HANDLE};
+  std::vector<FrameSlot> m_compositor_slots_;
+  size_t m_compositor_current_frame_{0};
+
+  /// Allocate the per-slot pool, command buffers, fences, and semaphores.
+  /// Idempotent — releases prior state first, so safe to call again after
+  /// swapchain recreation.
+  void CompositorPipeliningInit();
+  void CompositorPipeliningCleanup();
 #endif
 };
