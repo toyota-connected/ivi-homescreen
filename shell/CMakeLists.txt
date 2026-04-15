@@ -53,6 +53,8 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     if (BUILD_COMPOSITOR)
         target_sources(${PROJECT_NAME} PRIVATE
                 backend/wayland_egl/egl_backing_store.cc
+                backend/wayland_egl/gl_caps.cc
+                backend/wayland_egl/gl_compositor.cc
         )
     endif ()
 endif ()

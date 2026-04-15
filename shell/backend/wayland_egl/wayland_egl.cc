@@ -25,8 +25,7 @@
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 
 #if BUILD_COMPOSITOR
-// glBlitFramebuffer is core in GLES3; compositor mode requires GLES3 drivers.
-#include <GLES3/gl3.h>
+#include <GLES2/gl2.h>
 #endif
 
 struct FlutterDesktopEngineState;
@@ -342,24 +341,39 @@ struct FramebufferBaton {
 };
 }  // namespace
 
+void WaylandEglBackend::EnsureGlCapsProbed() {
+  if (m_gl_caps_probed) {
+    return;
+  }
+  m_gl_caps.Probe();
+  m_gl_compositor = std::make_unique<GlCompositor>(&m_gl_caps);
+  m_gl_caps_probed = true;
+}
+
 bool WaylandEglBackend::CreateBackingStore(
     const FlutterBackingStoreConfig* config,
     FlutterBackingStore* store_out) {
+  EnsureGlCapsProbed();
+
   const int32_t w = static_cast<int32_t>(config->size.width);
   const int32_t h = static_cast<int32_t>(config->size.height);
 
-  auto store = m_fbo_pool.Acquire(w, h);
+  auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps);
   auto* baton = new FramebufferBaton{this, store.get()};
 
   store_out->struct_size = sizeof(FlutterBackingStore);
   store_out->type = kFlutterBackingStoreTypeOpenGL;
   store_out->user_data = baton;
   store_out->open_gl.type = kFlutterOpenGLTargetTypeFramebuffer;
-  store_out->open_gl.framebuffer.target =
+  // The engine uses this field as the color attachment's internal format.
+  // Prefer sized formats when the runtime advertises OES_rgb8_rgba8 or ES3;
+  // fall back to unsized otherwise.
 #if BUILD_EGL_TRANSPARENCY
-      GL_RGBA8;
+  store_out->open_gl.framebuffer.target =
+      m_gl_caps.has_rgb8_rgba8 ? GL_RGBA8_OES : GL_RGBA;
 #else
-      GL_RGB8;
+  store_out->open_gl.framebuffer.target =
+      m_gl_caps.has_rgb8_rgba8 ? GL_RGB8_OES : GL_RGB;
 #endif
   store_out->open_gl.framebuffer.name = store->Framebuffer();
   store_out->open_gl.framebuffer.user_data = baton;
@@ -396,14 +410,12 @@ bool WaylandEglBackend::BlitBackingStoreToWindow(
     return false;
   }
   EglFboBackingStore* fbo = baton->store;
-
-  // Blit FBO → default framebuffer (FBO 0 is the window surface).
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo->Framebuffer());
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   const GLsizei w = fbo->Width();
   const GLsizei h = fbo->Height();
-  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  EnsureGlCapsProbed();
+  m_gl_compositor->CompositeToDefault(fbo->Framebuffer(), fbo->ColorTexture(),
+                                      w, h, 0, 0, w, h);
 
   return SwapBuffers();
 }
@@ -436,23 +448,22 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     }
     if (layer->type == kFlutterLayerContentTypeBackingStore &&
         layer->backing_store) {
-      // For multi-layer: blit each backing store into FBO 0 at its layer
-      // offset. Current pass blits the full store; clipping/offset support
-      // lands with platform-view plugin integration in Phase 4.
+      // For multi-layer: composite each backing store onto FBO 0 at its
+      // layer offset. Clipping and mutation handling arrives with plugin
+      // integration in Phase 4.
       auto* baton =
           static_cast<FramebufferBaton*>(layer->backing_store->user_data);
       if (!baton || !baton->store) {
         continue;
       }
       EglFboBackingStore* fbo = baton->store;
-      glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo->Framebuffer());
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-      const auto sx = static_cast<GLint>(layer->offset.x);
-      const auto sy = static_cast<GLint>(layer->offset.y);
-      const auto sw = static_cast<GLsizei>(layer->size.width);
-      const auto sh = static_cast<GLsizei>(layer->size.height);
-      glBlitFramebuffer(0, 0, fbo->Width(), fbo->Height(), sx, sy, sx + sw,
-                        sy + sh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+      const auto dx = static_cast<GLint>(layer->offset.x);
+      const auto dy = static_cast<GLint>(layer->offset.y);
+      const auto dw = static_cast<GLsizei>(layer->size.width);
+      const auto dh = static_cast<GLsizei>(layer->size.height);
+      m_gl_compositor->CompositeToDefault(fbo->Framebuffer(),
+                                          fbo->ColorTexture(), fbo->Width(),
+                                          fbo->Height(), dx, dy, dw, dh);
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto it = m_compositor_surfaces.find(layer->platform_view->identifier);
