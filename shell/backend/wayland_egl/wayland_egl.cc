@@ -447,7 +447,8 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
                                        GLint dst_x,
                                        GLint dst_y,
                                        GLsizei dst_w,
-                                       GLsizei dst_h) {
+                                       GLsizei dst_h,
+                                       bool blend) {
   auto* baton = static_cast<StoreBaton*>(store->user_data);
   if (!baton) {
     spdlog::error("WaylandEglBackend: present layer missing baton");
@@ -460,7 +461,7 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
     auto* fbo = baton->fbo_store;
     m_gl_compositor->CompositeToDefault(fbo->Framebuffer(), fbo->ColorTexture(),
                                         fbo->Width(), fbo->Height(), dst_x,
-                                        dst_y, dst_w, dst_h);
+                                        dst_y, dst_w, dst_h, blend);
     return;
   }
 
@@ -469,7 +470,7 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
   // a scratch FBO and use the blit path, or (b) use the quad path directly.
   // Favour the blit path when available since it's a fixed-function copy.
   auto* tex = baton->tex_store;
-  if (m_gl_caps.has_blit_framebuffer) {
+  if (!blend && m_gl_caps.has_blit_framebuffer) {
     if (!m_texture_blit_fbo_) {
       glGenFramebuffers(1, &m_texture_blit_fbo_);
     }
@@ -478,14 +479,15 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
                            tex->Texture(), 0);
     m_gl_compositor->CompositeToDefault(m_texture_blit_fbo_, tex->Texture(),
                                         tex->Width(), tex->Height(), dst_x,
-                                        dst_y, dst_w, dst_h);
+                                        dst_y, dst_w, dst_h, blend);
     // Leave the attachment in place — rebinding before next composite is
     // cheaper than detaching every frame.
   } else {
-    // Quad path doesn't need an FBO; pass 0.
+    // Quad path doesn't need a scratch FBO; pass 0. This is the only path
+    // that supports alpha blending.
     m_gl_compositor->CompositeToDefault(0, tex->Texture(), tex->Width(),
                                         tex->Height(), dst_x, dst_y, dst_w,
-                                        dst_h);
+                                        dst_h, blend);
   }
 }
 
@@ -525,21 +527,27 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                       });
 
   bool ok = true;
+  // Engine emits layers bottom-to-top. The first composited layer lands on
+  // the window backbuffer with an opaque copy; every subsequent layer is an
+  // overlay whose transparent pixels must preserve what's underneath, so it
+  // has to alpha-blend rather than overwrite. Without this, a Flutter
+  // overlay backing store (mostly alpha-0 around platform view cutouts)
+  // paints black over the platform view textures we just drew.
+  bool composited_any = false;
   for (size_t i = 0; i < count; ++i) {
     const FlutterLayer* layer = layers[i];
     if (!layer) {
       continue;
     }
+    const bool blend = composited_any;
     if (layer->type == kFlutterLayerContentTypeBackingStore &&
         layer->backing_store) {
-      // For multi-layer: composite each backing store onto FBO 0 at its
-      // layer offset. Clipping and mutation handling arrives with plugin
-      // integration in Phase 4.
       const auto dx = static_cast<GLint>(layer->offset.x);
       const auto dy = static_cast<GLint>(layer->offset.y);
       const auto dw = static_cast<GLsizei>(layer->size.width);
       const auto dh = static_cast<GLsizei>(layer->size.height);
-      CompositeLayer(layer->backing_store, dx, dy, dw, dh);
+      CompositeLayer(layer->backing_store, dx, dy, dw, dh, blend);
+      composited_any = true;
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
@@ -575,10 +583,17 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
           const auto sw = surface.GetGlTextureWidth();
           const auto sh = surface.GetGlTextureHeight();
           const auto dx = static_cast<GLint>(layer->offset.x);
-          const auto dy = static_cast<GLint>(layer->offset.y);
           const auto dw = static_cast<GLsizei>(layer->size.width);
           const auto dh = static_cast<GLsizei>(layer->size.height);
-          if (m_gl_caps.has_blit_framebuffer) {
+          // layer->offset.y is Flutter top-left-origin; the default GL
+          // framebuffer is bottom-left-origin. Convert so the plugin texture
+          // lands where Flutter's overlay markers are drawn.
+          const auto dy = static_cast<GLint>(m_initial_height) -
+                          static_cast<GLint>(layer->offset.y) - dh;
+          // Plugin textures are drawn in GL-native (bottom-left origin) and
+          // must be vertically flipped to match Flutter's top-down layout.
+          constexpr bool kFlipY = true;
+          if (!blend && m_gl_caps.has_blit_framebuffer) {
             if (!m_texture_blit_fbo_) {
               glGenFramebuffers(1, &m_texture_blit_fbo_);
             }
@@ -586,10 +601,13 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                    GL_TEXTURE_2D, tex, 0);
             m_gl_compositor->CompositeToDefault(m_texture_blit_fbo_, tex, sw,
-                                                sh, dx, dy, dw, dh);
+                                                sh, dx, dy, dw, dh, blend,
+                                                kFlipY);
           } else {
-            m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh);
+            m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh,
+                                                blend, kFlipY);
           }
+          composited_any = true;
         }
       }
     }
