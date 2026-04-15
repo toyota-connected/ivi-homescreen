@@ -17,6 +17,7 @@
 #pragma once
 
 #include "./platform_view_listener.h"
+#include "flutter_plugin_registrar.h"
 
 #include <flutter/encodable_value.h>
 #include <flutter/method_result.h>
@@ -24,9 +25,10 @@
 #include <memory>
 
 typedef struct FlutterDesktopEngineState* FlutterDesktopEngineRef;
+typedef void (*FlutterPluginRegisterCallback)(
+    FlutterDesktopPluginRegistrar* registrar);
 
 void FlutterPluginRegister(FlutterDesktopEngineRef engine);
-typedef void (*FlutterPluginRegisterCallback)(FlutterDesktopEngineRef engine);
 
 void FlutterPluginPlatformViewCreate(
     const int32_t id,

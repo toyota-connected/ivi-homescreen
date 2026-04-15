@@ -26,6 +26,10 @@
 
 #include <flutter_homescreen.h>
 
+#ifdef ENABLE_PLUGINS
+#include "plugin/homescreen_plugin.h"
+#endif
+
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
 #endif
@@ -111,6 +115,30 @@ class FlutterView {
    * internal
    */
   [[nodiscard]] Display* GetDisplay() const { return m_wayland_display.get(); }
+
+#ifdef ENABLE_PLUGINS
+ private:
+  /**
+   * @brief Register plugins
+   * @param[in] engine Pointer to Flutter engine
+   * @return void
+   * @relation
+   * plugin, flutter
+   */
+  void RegisterPlugins();
+
+  /**
+   * @brief Load dynamic plugin
+   * @param[in] plugin_name Name of a plugin
+   * @return FlutterPluginRegisterCallback plugin registration hook
+   * @relation
+   * plugin, flutter
+   */
+  FlutterPluginRegisterCallback LoadDynamicPlugin(
+      const std::string& plugin_name);
+
+ public:
+#endif
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
   /**

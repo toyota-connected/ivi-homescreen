@@ -41,11 +41,12 @@
 #endif
 
 #if ENABLE_PLUGINS
+#include <generated_plugin_registrant.h>
 #include "public/plugin/homescreen_plugin.h"
 #include "public/tools/shared_library.h"
 
 // NOTE: this is for static plugins
-extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
+extern void GetStaticFlutterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
 #include "wayland/display.h"
@@ -125,89 +126,7 @@ FlutterView::FlutterView(Configuration::Config config,
    * Load & Register plugins
    */
 #if ENABLE_PLUGINS
-  //
-  //  DYNAMIC PLUGINS LOAD HERE!!!
-  //
-
-  // Get list of plugins to load from
-  // `.desktop-homescreen/.flutter-plugins-dependencies` (JSON)
-  std::ifstream plugin_config_file(m_config.view.bundle_path + "/" +
-                                   kPluginConfig);
-
-  if (plugin_config_file.is_open()) {
-    std::stringstream buffer;
-    buffer << plugin_config_file.rdbuf();
-    plugin_config_file.close();
-
-    rapidjson::Document doc;
-    doc.Parse(buffer.str().c_str());
-
-    if (                                     //
-        doc.IsObject()                       //
-        && doc.HasMember("dependencyGraph")  //
-        && doc["dependencyGraph"].IsArray()  //
-    ) {
-      // List plugins
-      std::vector<std::string> dynamic_plugins;
-      for (const auto& dep : doc["dependencyGraph"].GetArray()) {
-        if (dep.IsObject() && dep.HasMember("name")) {
-          std::string plugin_name = dep["name"].GetString();
-          dynamic_plugins.push_back(plugin_name);
-        } else {
-          spdlog::error(  //
-              "Plugin config file is not in expected format: "
-              "each dependency must be an object with a 'name' field. "
-              "Skipping plugin entry."  //
-          );
-        }
-      }
-
-      // Load plugins
-      FlutterDesktopEngineRef engine_ref = m_state->engine_state.get();
-
-      for (const auto& plugin_name : dynamic_plugins) {
-        spdlog::info("Loading plugin: {}", plugin_name);
-
-        // Get registration handle
-        // TODO(kerberjg): refactor before merge:
-        // - add version handling
-        // - load without path (and update LD_LIBRARY_PATH accordingly)
-        std::string plugin_path =
-            m_config.view.bundle_path + "/lib" + plugin_name + ".so";
-        void* lib_handle = dlopen(plugin_path.c_str(), RTLD_NOW | RTLD_LOCAL);
-        if (!lib_handle) {
-          spdlog::error("Failed to load plugin {}: {}", plugin_name, dlerror());
-        } else {
-          spdlog::info("Successfully loaded plugin: {}", plugin_name);
-        }
-
-        FlutterPluginRegisterCallback register_func;
-
-        PluginGetFuncAddress<FlutterPluginRegisterCallback>(
-            lib_handle, "FlutterPluginRegister", &register_func  //
-        );
-
-        // Register plugin with engine
-        if (register_func) {
-          register_func(engine_ref);
-          spdlog::info("Successfully registered plugin: {}", plugin_name);
-        } else {
-          spdlog::error(
-              "Failed to find registration function for plugin {}: {}",
-              plugin_name, dlerror()  //
-          );
-        }
-      }
-    }
-  } else {
-    spdlog::warn(
-        "No plugin config file found at {}. No dynamic plugins will be loaded.",
-        m_config.view.bundle_path + "/" + kPluginConfig  //
-    );
-  }
-
-  // Register static plugins
-  PluginsApiRegisterPlugins(m_state->engine_state.get());
+  RegisterPlugins();
 #endif
 }
 
@@ -283,6 +202,159 @@ void FlutterView::RunTasks() {
     m_flutter_engine->SendPointerEvents();
   }
 }
+
+/*
+ * Plugin system
+ */
+
+#if ENABLE_PLUGINS
+void FlutterView::RegisterPlugins() {
+  auto engine = m_state->engine_state.get();
+  auto registrar = engine->plugin_registrar.get();
+
+  const bool static_first = true;  // TODO: get from app args
+  std::map<std::string, FlutterPluginRegisterCallback> static_plugin_handles;
+
+  // Get list of plugins to load from
+  // `.desktop-homescreen/.flutter-plugins-dependencies` (JSON)
+  std::ifstream plugin_config_file(m_config.view.bundle_path + "/" +
+                                   kPluginConfig);
+
+  if (!plugin_config_file.is_open()) {
+    spdlog::warn(
+        "Plugin config file not found at {}. No dynamic plugins will be "
+        "loaded.",
+        m_config.view.bundle_path + "/" + kPluginConfig  //
+    );
+    return;
+  }
+
+  // Get list of plugins to load for given app
+  std::vector<std::string> plugins_to_load;
+  {
+    std::stringstream buffer;
+    buffer << plugin_config_file.rdbuf();
+    plugin_config_file.close();
+
+    rapidjson::Document doc;
+    doc.Parse(buffer.str().c_str());
+
+    if (                                     //
+        doc.IsObject()                       //
+        && doc.HasMember("dependencyGraph")  //
+        && doc["dependencyGraph"].IsArray()  //
+    ) {
+      // List plugins
+      for (const auto& dep : doc["dependencyGraph"].GetArray()) {
+        if (dep.IsObject() && dep.HasMember("name")) {
+          std::string plugin_name = dep["name"].GetString();
+          plugins_to_load.push_back(plugin_name);
+        } else {
+          spdlog::error(  //
+              "Plugin config file is not in expected format: "
+              "each dependency must be an object with a 'name' field. "
+              "Skipping plugin entry."  //
+          );
+        }
+      }
+    }
+  }
+
+  // debug: print plugins to load
+  spdlog::debug("Plugins to load:");
+  for (const auto& plugin_name : plugins_to_load) {
+    spdlog::debug("  {}", plugin_name);
+  }
+
+  // Get list of available static plugins
+  std::map<const char*, FlutterPluginRegisterCallback>
+      available_static_plugins = GetStaticFlutterPlugins();
+
+  // debug: print available static plugins
+  spdlog::debug("Available static plugins:");
+  for (const auto& [plugin_name, _] : available_static_plugins) {
+    spdlog::debug("  {}", plugin_name);
+  }
+
+  for (const auto& plugin_name : plugins_to_load) {
+    spdlog::debug("Loading plugin: {}", plugin_name);
+    FlutterPluginRegisterCallback register_func = nullptr;
+
+    if (static_first) {
+      // Try to find static plugin first
+      auto it = available_static_plugins.find(plugin_name.c_str());
+      if (it != available_static_plugins.end()) {
+        register_func = it->second;
+        spdlog::debug("...Found static plugin!");
+      } else {
+        // ...then try dynamic
+        spdlog::debug("...Static plugin not found, loading dynamically... ");
+        register_func = LoadDynamicPlugin(plugin_name);
+      }
+    } else {
+      // Try to find dynamic plugin first
+      register_func = LoadDynamicPlugin(plugin_name);
+      if (!register_func) {
+        spdlog::debug("...Dynamic plugin not found, trying static... ");
+        // ...then try static
+        auto it = available_static_plugins.find(plugin_name.c_str());
+        if (it != available_static_plugins.end()) {
+          register_func = it->second;
+          spdlog::debug("...Found static plugin!");
+        }
+      }
+    }
+
+    // Load plugin!
+    if (register_func) {
+      try {
+        register_func(registrar);
+        spdlog::info("...Successfully registered!");
+      } catch (const std::exception& e) {
+        spdlog::error("...Failed to register plugin:\n\n{}", e.what());
+      }
+    } else {
+      spdlog::error("...Failed to find plugin! :(");
+    }
+  }
+}
+
+FlutterPluginRegisterCallback FlutterView::LoadDynamicPlugin(
+    const std::string& plugin_name  //
+) {
+  // Get registration handle
+  // TODO(kerberjg): refactor before merge:
+  // - add version handling
+  // - load without path (and update LD_LIBRARY_PATH accordingly)
+  std::string plugin_path =
+      m_config.view.bundle_path + "/lib" + plugin_name + ".so";
+  void* lib_handle = dlopen(plugin_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!lib_handle) {
+    spdlog::error("Failed to load plugin {}: {}", plugin_name, dlerror());
+  } else {
+    spdlog::info("Successfully loaded plugin: {}", plugin_name);
+  }
+
+  FlutterPluginRegisterCallback register_func;
+
+  PluginGetFuncAddress<FlutterPluginRegisterCallback>(
+      lib_handle, "FlutterPluginRegister", &register_func  //
+  );
+
+  // Verify and return handle
+  if (register_func) {
+    return register_func;
+    spdlog::info("Successfully registered plugin: {}", plugin_name);
+  } else {
+    spdlog::error("Failed to find registration function for plugin {}: {}",
+                  plugin_name, dlerror()  //
+    );
+
+    return nullptr;
+  }
+}
+
+#endif
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
 size_t FlutterView::CreateSurface(void* h_module,

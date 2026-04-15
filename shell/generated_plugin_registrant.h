@@ -18,13 +18,12 @@
 #define GENERATED_PLUGIN_REGISTRANT_H_
 #include <encodable_value.h>
 
+#include "plugin/homescreen_plugin.h"
 #include "plugin/platform_view_listener.h"
 
 #include <method_result.h>
 #include <memory>
 
-typedef struct FlutterDesktopEngineState* FlutterDesktopEngineRef;
-
-void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
+std::map<const char*, FlutterPluginRegisterCallback> GetStaticFlutterPlugins();
 
 #endif  // GENERATED_PLUGIN_REGISTRANT_H_

@@ -4,6 +4,10 @@
 
 @PLUGIN_INCLUDES@
 
-void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine) {
-  (void)engine;
-@PLUGIN_REGISTRATIONS@}
+std::map<const char*, FlutterPluginRegisterCallback> GetStaticFlutterPlugins() {
+  std::map<const char*, FlutterPluginRegisterCallback> static_plugins{};
+
+@PLUGIN_REGISTRATIONS@
+
+  return static_plugins;
+}
