@@ -40,8 +40,7 @@ struct wl_surface;
  */
 class PresentLayerSequencer {
  public:
-  using MissingHandler =
-      std::function<void(FlutterPlatformViewIdentifier id)>;
+  using MissingHandler = std::function<void(FlutterPlatformViewIdentifier id)>;
 
   /**
    * @brief Hook invoked to raise @p subsurface immediately above @p sibling.

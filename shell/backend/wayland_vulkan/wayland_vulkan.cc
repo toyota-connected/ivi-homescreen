@@ -869,9 +869,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   }
 }
 
-bool WaylandVulkanBackend::CollectBackingStore(
-    const FlutterBackingStore* store,
-    void* user_data) {
+bool WaylandVulkanBackend::CollectBackingStore(const FlutterBackingStore* store,
+                                               void* user_data) {
 #if BUILD_COMPOSITOR
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
   auto* b = reinterpret_cast<WaylandVulkanBackend*>(
@@ -1010,11 +1009,13 @@ struct VulkanStoreBaton {
 void WaylandVulkanBackend::RegisterCompositorSurface(
     FlutterPlatformViewIdentifier id,
     std::shared_ptr<ICompositorSurface> surface) {
+  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces[id] = std::move(surface);
 }
 
 void WaylandVulkanBackend::UnregisterCompositorSurface(
     FlutterPlatformViewIdentifier id) {
+  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces.erase(id);
 }
 
@@ -1022,9 +1023,17 @@ void WaylandVulkanBackend::ResizeCompositorSurface(
     FlutterPlatformViewIdentifier id,
     int32_t width,
     int32_t height) {
-  const auto it = m_compositor_surfaces.find(id);
-  if (it != m_compositor_surfaces.end() && it->second) {
-    it->second->OnResize(width, height);
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+    const auto it = m_compositor_surfaces.find(id);
+    if (it == m_compositor_surfaces.end()) {
+      return;
+    }
+    surface = it->second;
+  }
+  if (surface) {
+    surface->OnResize(width, height);
   }
 }
 
@@ -1035,8 +1044,8 @@ bool WaylandVulkanBackend::CreateBackingStoreImpl(
   const int32_t h = static_cast<int32_t>(config->size.height);
 
   const bool want_dma_buf = BUILD_COMPOSITOR_DMABUF_EXPORT != 0;
-  auto store = m_store_pool.Acquire(w, h, device_, physical_device_,
-                                    want_dma_buf);
+  auto store =
+      m_store_pool.Acquire(w, h, device_, physical_device_, want_dma_buf);
   if (!store->IsValid()) {
     spdlog::error("WaylandVulkanBackend: failed to create backing store");
     return false;
@@ -1120,8 +1129,8 @@ void WaylandVulkanBackend::TransitionLayout(
   barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.layerCount = 1;
-  barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                          VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.srcAccessMask =
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
                           VK_ACCESS_TRANSFER_READ_BIT |
                           VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1198,17 +1207,16 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Pick the slot for this frame and wait until its previous use has
   // completed on the GPU. This is the only CPU/GPU sync — the queue is
   // never asked to idle.
-  FrameSlot& slot =
-      m_compositor_slots_[m_compositor_current_frame_ %
-                          m_compositor_slots_.size()];
+  const FrameSlot& slot = m_compositor_slots_[m_compositor_current_frame_ %
+                                              m_compositor_slots_.size()];
   CHECK_VK_RESULT(
       d.vkWaitForFences(device_, 1, &slot.in_flight, VK_TRUE, UINT64_MAX));
   CHECK_VK_RESULT(d.vkResetFences(device_, 1, &slot.in_flight));
 
   uint32_t image_index = 0;
-  CHECK_VK_RESULT(d.vkAcquireNextImageKHR(
-      device_, swapchain_, 1'000'000'000, slot.image_available, VK_NULL_HANDLE,
-      &image_index));
+  CHECK_VK_RESULT(d.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000,
+                                          slot.image_available, VK_NULL_HANDLE,
+                                          &image_index));
   last_image_index_ = image_index;
 
   VkImage dst = swapchain_images_[image_index];
@@ -1275,10 +1283,17 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
             composed.has_rounded_clip, composed.has_perspective,
             composed.IsAxisAligned());
       }
-      const auto it =
-          m_compositor_surfaces.find(layer->platform_view->identifier);
-      if (it != m_compositor_surfaces.end() && it->second) {
-        ok = it->second->OnPresent(layer) && ok;
+      std::shared_ptr<ICompositorSurface> surface;
+      {
+        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+        const auto it =
+            m_compositor_surfaces.find(layer->platform_view->identifier);
+        if (it != m_compositor_surfaces.end()) {
+          surface = it->second;
+        }
+      }
+      if (surface) {
+        ok = surface->OnPresent(layer) && ok;
       }
     }
   }
@@ -1376,10 +1391,10 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
     s.cmd_buffer = cmds[i];
     CHECK_VK_RESULT(
         d.vkCreateFence(device_, &fence_info, nullptr, &s.in_flight));
-    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr,
-                                        &s.image_available));
-    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr,
-                                        &s.render_finished));
+    CHECK_VK_RESULT(
+        d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.image_available));
+    CHECK_VK_RESULT(
+        d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.render_finished));
   }
   m_compositor_current_frame_ = 0;
 }

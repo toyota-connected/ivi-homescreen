@@ -369,8 +369,7 @@ bool WaylandEglBackend::CreateBackingStore(
   const GLenum color_internal =
       m_gl_caps.has_rgb8_rgba8 ? GL_RGBA8_OES : GL_RGBA;
 #else
-  const GLenum color_internal =
-      m_gl_caps.has_rgb8_rgba8 ? GL_RGB8_OES : GL_RGB;
+  const GLenum color_internal = m_gl_caps.has_rgb8_rgba8 ? GL_RGB8_OES : GL_RGB;
 #endif
 
   store_out->struct_size = sizeof(FlutterBackingStore);
@@ -498,9 +497,8 @@ bool WaylandEglBackend::BlitBackingStoreToWindow(
     spdlog::error("WaylandEglBackend: present layer missing baton");
     return false;
   }
-  const GLsizei w = (baton->kind == StoreKind::Fbo)
-                        ? baton->fbo_store->Width()
-                        : baton->tex_store->Width();
+  const GLsizei w = (baton->kind == StoreKind::Fbo) ? baton->fbo_store->Width()
+                                                    : baton->tex_store->Width();
   const GLsizei h = (baton->kind == StoreKind::Fbo)
                         ? baton->fbo_store->Height()
                         : baton->tex_store->Height();
@@ -511,8 +509,7 @@ bool WaylandEglBackend::BlitBackingStoreToWindow(
 bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                       size_t count) {
   // Fast path: a single Flutter-rendered layer, no platform views.
-  if (count == 1 &&
-      layers[0]->type == kFlutterLayerContentTypeBackingStore &&
+  if (count == 1 && layers[0]->type == kFlutterLayerContentTypeBackingStore &&
       layers[0]->backing_store) {
     return BlitBackingStoreToWindow(layers[0]->backing_store);
   }
@@ -556,10 +553,20 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
             composed.has_rounded_clip, composed.has_perspective,
             composed.IsAxisAligned());
       }
-      const auto it =
-          m_compositor_surfaces.find(layer->platform_view->identifier);
-      if (it != m_compositor_surfaces.end() && it->second) {
-        auto& surface = *it->second;
+      // Snapshot the shared_ptr under the lock, drop the lock before the
+      // OnPresent callback. Holding the mutex across plugin GL work would
+      // serialise register/unregister with rendering.
+      std::shared_ptr<ICompositorSurface> surface_sp;
+      {
+        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+        const auto it =
+            m_compositor_surfaces.find(layer->platform_view->identifier);
+        if (it != m_compositor_surfaces.end()) {
+          surface_sp = it->second;
+        }
+      }
+      if (surface_sp) {
+        auto& surface = *surface_sp;
         ok = surface.OnPresent(layer) && ok;
         // If the plugin exposed a GL texture, composite it onto FBO 0 at
         // the layer's pixel rect. Plugins that handle their own
@@ -582,8 +589,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
             m_gl_compositor->CompositeToDefault(m_texture_blit_fbo_, tex, sw,
                                                 sh, dx, dy, dw, dh);
           } else {
-            m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw,
-                                                dh);
+            m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh);
           }
         }
       }
@@ -597,11 +603,13 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
 void WaylandEglBackend::RegisterCompositorSurface(
     FlutterPlatformViewIdentifier id,
     std::shared_ptr<ICompositorSurface> surface) {
+  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces[id] = std::move(surface);
 }
 
 void WaylandEglBackend::UnregisterCompositorSurface(
     FlutterPlatformViewIdentifier id) {
+  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces.erase(id);
 }
 
@@ -609,9 +617,20 @@ void WaylandEglBackend::ResizeCompositorSurface(
     FlutterPlatformViewIdentifier id,
     int32_t width,
     int32_t height) {
-  const auto it = m_compositor_surfaces.find(id);
-  if (it != m_compositor_surfaces.end() && it->second) {
-    it->second->OnResize(width, height);
+  // Snapshot the shared_ptr under the lock, drop the lock before calling
+  // OnResize — the callback may re-enter (e.g., post a render task) and
+  // should not hold the registry mutex.
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+    const auto it = m_compositor_surfaces.find(id);
+    if (it == m_compositor_surfaces.end()) {
+      return;
+    }
+    surface = it->second;
+  }
+  if (surface) {
+    surface->OnResize(width, height);
   }
 }
 

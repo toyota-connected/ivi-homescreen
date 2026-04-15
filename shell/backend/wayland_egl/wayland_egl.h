@@ -28,6 +28,7 @@
 
 #if BUILD_COMPOSITOR
 #include <memory>
+#include <mutex>
 
 #include "backend/backing_store_pool.h"
 #include "backend/wayland_egl/egl_backing_store.h"
@@ -162,6 +163,12 @@ class WaylandEglBackend : public Egl, public Backend {
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
   BackingStorePool<EglTextureBackingStore> m_texture_pool;
   PresentLayerSequencer m_sequencer;
+  // Register/Unregister fire on the platform thread via FlutterView;
+  // PresentLayers reads the map on the rasterizer thread. The mutex is
+  // held only across map lookups — never across the OnPresent call
+  // itself. We snapshot a shared_ptr copy under the lock before dropping
+  // it, so OnPresent runs lock-free on a per-frame-stable pointer.
+  mutable std::mutex m_compositor_surfaces_mu_;
   std::unordered_map<FlutterPlatformViewIdentifier,
                      std::shared_ptr<ICompositorSurface>>
       m_compositor_surfaces;
@@ -169,8 +176,7 @@ class WaylandEglBackend : public Egl, public Backend {
   // Holds shared ownership of backing stores while the engine has them
   // checked out. Keyed by raw pointer — the engine's @c user_data baton
   // refers back to this map for Collect.
-  std::unordered_map<EglFboBackingStore*,
-                     std::shared_ptr<EglFboBackingStore>>
+  std::unordered_map<EglFboBackingStore*, std::shared_ptr<EglFboBackingStore>>
       m_alive_stores_;
   std::unordered_map<EglTextureBackingStore*,
                      std::shared_ptr<EglTextureBackingStore>>

@@ -33,6 +33,7 @@
 
 #if BUILD_COMPOSITOR
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 #include "backend/backing_store_pool.h"
@@ -335,13 +336,16 @@ class WaylandVulkanBackend final : public Backend {
 
   BackingStorePool<VulkanBackingStore> m_store_pool;
   PresentLayerSequencer m_sequencer;
+  // See the matching comment in WaylandEglBackend — Register/Unregister
+  // fire on the platform thread, PresentLayers reads on the rasterizer
+  // thread. Held only across map access; plugin callbacks run lock-free.
+  mutable std::mutex m_compositor_surfaces_mu_;
   std::unordered_map<FlutterPlatformViewIdentifier,
                      std::shared_ptr<ICompositorSurface>>
       m_compositor_surfaces;
 
   // Keeps shared ownership while the engine holds the store.
-  std::unordered_map<VulkanBackingStore*,
-                     std::shared_ptr<VulkanBackingStore>>
+  std::unordered_map<VulkanBackingStore*, std::shared_ptr<VulkanBackingStore>>
       m_alive_stores;
 
   bool CreateBackingStoreImpl(const FlutterBackingStoreConfig* config,
