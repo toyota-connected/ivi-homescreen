@@ -332,12 +332,17 @@ void WaylandEglBackend::JoinFlutterRect(FlutterRect* rect,
 #if BUILD_COMPOSITOR
 
 namespace {
-// user_data slot for FlutterOpenGLFramebuffer. We stash the backing store
-// raw pointer here; collect_backing_store_callback looks it up to return
-// the store to the pool.
-struct FramebufferBaton {
+// user_data slot for the FlutterOpenGLBackingStore union. `kind` tags which
+// pool owns the raw pointer so collect_backing_store_callback can return it.
+enum class StoreKind : uint8_t { Fbo, Texture };
+
+struct StoreBaton {
   WaylandEglBackend* backend;
-  EglFboBackingStore* store;
+  StoreKind kind;
+  union {
+    EglFboBackingStore* fbo_store;
+    EglTextureBackingStore* tex_store;
+  };
 };
 }  // namespace
 
@@ -358,65 +363,148 @@ bool WaylandEglBackend::CreateBackingStore(
   const int32_t w = static_cast<int32_t>(config->size.width);
   const int32_t h = static_cast<int32_t>(config->size.height);
 
-  auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps);
-  auto* baton = new FramebufferBaton{this, store.get()};
+  // Sized internal format preference — ES3 / OES_rgb8_rgba8 → sized, else
+  // unsized. Same rule the backing store itself uses internally.
+#if BUILD_EGL_TRANSPARENCY
+  const GLenum color_internal =
+      m_gl_caps.has_rgb8_rgba8 ? GL_RGBA8_OES : GL_RGBA;
+#else
+  const GLenum color_internal =
+      m_gl_caps.has_rgb8_rgba8 ? GL_RGB8_OES : GL_RGB;
+#endif
 
   store_out->struct_size = sizeof(FlutterBackingStore);
   store_out->type = kFlutterBackingStoreTypeOpenGL;
-  store_out->user_data = baton;
-  store_out->open_gl.type = kFlutterOpenGLTargetTypeFramebuffer;
-  // The engine uses this field as the color attachment's internal format.
-  // Prefer sized formats when the runtime advertises OES_rgb8_rgba8 or ES3;
-  // fall back to unsized otherwise.
-#if BUILD_EGL_TRANSPARENCY
-  store_out->open_gl.framebuffer.target =
-      m_gl_caps.has_rgb8_rgba8 ? GL_RGBA8_OES : GL_RGBA;
-#else
-  store_out->open_gl.framebuffer.target =
-      m_gl_caps.has_rgb8_rgba8 ? GL_RGB8_OES : GL_RGB;
-#endif
-  store_out->open_gl.framebuffer.name = store->Framebuffer();
-  store_out->open_gl.framebuffer.user_data = baton;
-  store_out->open_gl.framebuffer.destruction_callback = [](void*) {
-    // No-op here; store lifetime is managed by CollectBackingStore below.
-  };
 
-  // Stash shared ownership until Collect is called. Keying by the raw pointer
-  // lets Collect recover the store from user_data without another baton.
-  EglFboBackingStore* key = store.get();
-  m_alive_stores_[key] = std::move(store);
+  // Stack-position heuristic: a store request whose dimensions match the
+  // view's root size is the root Flutter layer — use an FBO we manage. Any
+  // smaller request is an overlay; we hand the engine a bare texture and let
+  // it wrap its own private FBO around it (saves us allocating depth/stencil
+  // for overlays that typically don't need it, and the texture name is
+  // directly sampleable by plugins that want to effect the overlay).
+  if (IsRootSize(w, h)) {
+    auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps);
+    auto* baton = new StoreBaton{this, StoreKind::Fbo, {}};
+    baton->fbo_store = store.get();
+
+    store_out->user_data = baton;
+    store_out->open_gl.type = kFlutterOpenGLTargetTypeFramebuffer;
+    store_out->open_gl.framebuffer.target = color_internal;
+    store_out->open_gl.framebuffer.name = store->Framebuffer();
+    store_out->open_gl.framebuffer.user_data = baton;
+    store_out->open_gl.framebuffer.destruction_callback = [](void*) {};
+
+    EglFboBackingStore* key = store.get();
+    m_alive_stores_[key] = std::move(store);
+    return true;
+  }
+
+  auto store = m_texture_pool.Acquire(w, h, &m_gl_caps);
+  auto* baton = new StoreBaton{this, StoreKind::Texture, {}};
+  baton->tex_store = store.get();
+
+  store_out->user_data = baton;
+  store_out->open_gl.type = kFlutterOpenGLTargetTypeTexture;
+  store_out->open_gl.texture.target = GL_TEXTURE_2D;
+  store_out->open_gl.texture.name = store->Texture();
+  store_out->open_gl.texture.format = color_internal;
+  store_out->open_gl.texture.user_data = baton;
+  store_out->open_gl.texture.destruction_callback = [](void*) {};
+  store_out->open_gl.texture.width = static_cast<size_t>(w);
+  store_out->open_gl.texture.height = static_cast<size_t>(h);
+
+  EglTextureBackingStore* key = store.get();
+  m_alive_texture_stores_[key] = std::move(store);
   return true;
 }
 
 bool WaylandEglBackend::CollectBackingStore(const FlutterBackingStore* store) {
-  auto* baton = static_cast<FramebufferBaton*>(store->user_data);
+  auto* baton = static_cast<StoreBaton*>(store->user_data);
   if (!baton) {
     return false;
   }
-  const auto it = m_alive_stores_.find(baton->store);
-  if (it != m_alive_stores_.end()) {
-    m_fbo_pool.Release(std::move(it->second));
-    m_alive_stores_.erase(it);
+  switch (baton->kind) {
+    case StoreKind::Fbo: {
+      const auto it = m_alive_stores_.find(baton->fbo_store);
+      if (it != m_alive_stores_.end()) {
+        m_fbo_pool.Release(std::move(it->second));
+        m_alive_stores_.erase(it);
+      }
+      break;
+    }
+    case StoreKind::Texture: {
+      const auto it = m_alive_texture_stores_.find(baton->tex_store);
+      if (it != m_alive_texture_stores_.end()) {
+        m_texture_pool.Release(std::move(it->second));
+        m_alive_texture_stores_.erase(it);
+      }
+      break;
+    }
   }
   delete baton;
   return true;
 }
 
+void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
+                                       GLint dst_x,
+                                       GLint dst_y,
+                                       GLsizei dst_w,
+                                       GLsizei dst_h) {
+  auto* baton = static_cast<StoreBaton*>(store->user_data);
+  if (!baton) {
+    spdlog::error("WaylandEglBackend: present layer missing baton");
+    return;
+  }
+
+  EnsureGlCapsProbed();
+
+  if (baton->kind == StoreKind::Fbo) {
+    auto* fbo = baton->fbo_store;
+    m_gl_compositor->CompositeToDefault(fbo->Framebuffer(), fbo->ColorTexture(),
+                                        fbo->Width(), fbo->Height(), dst_x,
+                                        dst_y, dst_w, dst_h);
+    return;
+  }
+
+  // Texture subtype: the engine wrapped our texture in its own private FBO
+  // during rendering. For the compositor we either (a) attach the texture to
+  // a scratch FBO and use the blit path, or (b) use the quad path directly.
+  // Favour the blit path when available since it's a fixed-function copy.
+  auto* tex = baton->tex_store;
+  if (m_gl_caps.has_blit_framebuffer) {
+    if (!m_texture_blit_fbo_) {
+      glGenFramebuffers(1, &m_texture_blit_fbo_);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, m_texture_blit_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           tex->Texture(), 0);
+    m_gl_compositor->CompositeToDefault(m_texture_blit_fbo_, tex->Texture(),
+                                        tex->Width(), tex->Height(), dst_x,
+                                        dst_y, dst_w, dst_h);
+    // Leave the attachment in place — rebinding before next composite is
+    // cheaper than detaching every frame.
+  } else {
+    // Quad path doesn't need an FBO; pass 0.
+    m_gl_compositor->CompositeToDefault(0, tex->Texture(), tex->Width(),
+                                        tex->Height(), dst_x, dst_y, dst_w,
+                                        dst_h);
+  }
+}
+
 bool WaylandEglBackend::BlitBackingStoreToWindow(
     const FlutterBackingStore* store) {
-  auto* baton = static_cast<FramebufferBaton*>(store->user_data);
-  if (!baton || !baton->store) {
+  auto* baton = static_cast<StoreBaton*>(store->user_data);
+  if (!baton) {
     spdlog::error("WaylandEglBackend: present layer missing baton");
     return false;
   }
-  EglFboBackingStore* fbo = baton->store;
-  const GLsizei w = fbo->Width();
-  const GLsizei h = fbo->Height();
-
-  EnsureGlCapsProbed();
-  m_gl_compositor->CompositeToDefault(fbo->Framebuffer(), fbo->ColorTexture(),
-                                      w, h, 0, 0, w, h);
-
+  const GLsizei w = (baton->kind == StoreKind::Fbo)
+                        ? baton->fbo_store->Width()
+                        : baton->tex_store->Width();
+  const GLsizei h = (baton->kind == StoreKind::Fbo)
+                        ? baton->fbo_store->Height()
+                        : baton->tex_store->Height();
+  CompositeLayer(store, 0, 0, w, h);
   return SwapBuffers();
 }
 
@@ -451,19 +539,11 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
       // For multi-layer: composite each backing store onto FBO 0 at its
       // layer offset. Clipping and mutation handling arrives with plugin
       // integration in Phase 4.
-      auto* baton =
-          static_cast<FramebufferBaton*>(layer->backing_store->user_data);
-      if (!baton || !baton->store) {
-        continue;
-      }
-      EglFboBackingStore* fbo = baton->store;
       const auto dx = static_cast<GLint>(layer->offset.x);
       const auto dy = static_cast<GLint>(layer->offset.y);
       const auto dw = static_cast<GLsizei>(layer->size.width);
       const auto dh = static_cast<GLsizei>(layer->size.height);
-      m_gl_compositor->CompositeToDefault(fbo->Framebuffer(),
-                                          fbo->ColorTexture(), fbo->Width(),
-                                          fbo->Height(), dx, dy, dw, dh);
+      CompositeLayer(layer->backing_store, dx, dy, dw, dh);
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto it = m_compositor_surfaces.find(layer->platform_view->identifier);
@@ -495,6 +575,15 @@ void WaylandEglBackend::ResizeCompositorSurface(
   const auto it = m_compositor_surfaces.find(id);
   if (it != m_compositor_surfaces.end() && it->second) {
     it->second->OnResize(width, height);
+  }
+}
+
+WaylandEglBackend::~WaylandEglBackend() {
+  // Pools flush themselves; the scratch blit FBO needs explicit cleanup
+  // while the EGL context from the base class is still current.
+  if (m_texture_blit_fbo_) {
+    glDeleteFramebuffers(1, &m_texture_blit_fbo_);
+    m_texture_blit_fbo_ = 0;
   }
 }
 
