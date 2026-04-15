@@ -42,6 +42,11 @@ set_target_properties(${PROJECT_NAME}
 
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE backend/wayland_vulkan/wayland_vulkan.cc)
+    if (BUILD_COMPOSITOR)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/wayland_vulkan/vulkan_backing_store.cc
+        )
+    endif ()
 endif ()
 
 if (BUILD_BACKEND_WAYLAND_EGL)

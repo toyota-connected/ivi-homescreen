@@ -28,7 +28,18 @@
 #include "vulkan/vulkan_wayland.h"
 
 #include "backend/backend.h"
+#include "config/common.h"
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
+
+#if BUILD_COMPOSITOR
+#include <memory>
+#include <unordered_map>
+
+#include "backend/backing_store_pool.h"
+#include "backend/wayland_vulkan/vulkan_backing_store.h"
+#include "view/compositor_surface_interface.h"
+#include "view/present_layer_sequencer.h"
+#endif
 
 class WaylandVulkanBackend final : public Backend {
  public:
@@ -90,6 +101,18 @@ class WaylandVulkanBackend final : public Backend {
   bool TextureMakeCurrent() override;
 
   bool TextureClearCurrent() override;
+
+#if BUILD_COMPOSITOR
+  /// Register a platform-view compositor surface. Called from the platform
+  /// thread; must be paired with @c UnregisterCompositorSurface.
+  void RegisterCompositorSurface(
+      FlutterPlatformViewIdentifier id,
+      std::shared_ptr<ICompositorSurface> surface);
+
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id);
+
+  [[nodiscard]] bool HasDmaBufExport() const { return dma_buf_export_ok_; }
+#endif
 
  private:
   static constexpr VkPresentModeKHR kPreferredPresentMode =
@@ -301,4 +324,42 @@ class WaylandVulkanBackend final : public Backend {
   static bool PresentLayers(const FlutterLayer** layers,
                             size_t layers_count,
                             void* user_data);
+
+#if BUILD_COMPOSITOR
+  bool dma_buf_export_ok_{false};
+
+  BackingStorePool<VulkanBackingStore> m_store_pool;
+  PresentLayerSequencer m_sequencer;
+  std::unordered_map<FlutterPlatformViewIdentifier,
+                     std::shared_ptr<ICompositorSurface>>
+      m_compositor_surfaces;
+
+  // Keeps shared ownership while the engine holds the store.
+  std::unordered_map<VulkanBackingStore*,
+                     std::shared_ptr<VulkanBackingStore>>
+      m_alive_stores;
+
+  bool CreateBackingStoreImpl(const FlutterBackingStoreConfig* config,
+                              FlutterBackingStore* store_out);
+  bool CollectBackingStoreImpl(const FlutterBackingStore* store);
+  bool PresentLayersImpl(const FlutterLayer** layers, size_t count);
+
+  /// Record + submit a layout transition on a one-shot command buffer.
+  void TransitionLayout(VkImage image,
+                        VkImageLayout from,
+                        VkImageLayout to,
+                        VkPipelineStageFlags src_stage,
+                        VkPipelineStageFlags dst_stage) const;
+
+  /// Blit @p src onto the given swapchain image, then transition the
+  /// swapchain image into PRESENT_SRC_KHR. The command buffer is submitted
+  /// and waited on the queue.
+  void BlitStoreToSwapchain(VkCommandBuffer cmd,
+                            VulkanBackingStore& src,
+                            VkImage dst,
+                            int32_t dst_x,
+                            int32_t dst_y,
+                            int32_t dst_w,
+                            int32_t dst_h) const;
+#endif
 };
