@@ -37,7 +37,7 @@ std::optional<uint32_t> FindMemoryType(VkPhysicalDevice gpu,
   VkPhysicalDeviceMemoryProperties props{};
   Dispatch().vkGetPhysicalDeviceMemoryProperties(gpu, &props);
   for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
-    if ((type_bits & (1u << i)) &&
+    if ((type_bits & (1U << i)) &&
         (props.memoryTypes[i].propertyFlags & required) == required) {
       return i;
     }
@@ -69,10 +69,9 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
   image_info.arrayLayers = 1;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-  image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                     VK_IMAGE_USAGE_SAMPLED_BIT;
+  image_info.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   if (export_dma_buf) {

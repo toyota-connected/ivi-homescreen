@@ -53,10 +53,9 @@ struct ComposedMutation {
   // Intersection of all clip_rect mutations, in composed coordinates.
   // Starts as "unbounded" sentinel; @c has_clip flags whether it was
   // ever narrowed.
-  FlutterRect clip_rect{-std::numeric_limits<double>::max(),
-                        -std::numeric_limits<double>::max(),
-                        std::numeric_limits<double>::max(),
-                        std::numeric_limits<double>::max()};
+  FlutterRect clip_rect{
+      -std::numeric_limits<double>::max(), -std::numeric_limits<double>::max(),
+      std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
   bool has_clip{false};
 
   bool has_rounded_clip{false};

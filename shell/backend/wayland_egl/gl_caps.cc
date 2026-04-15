@@ -29,7 +29,7 @@ bool ExtensionSupported(const char* extensions, const char* name) {
     return false;
   }
   const size_t name_len = std::strlen(name);
-  std::string_view sv(extensions);
+  const std::string_view sv(extensions);
   size_t pos = 0;
   while ((pos = sv.find(name, pos)) != std::string_view::npos) {
     const bool left_ok = (pos == 0) || (sv[pos - 1] == ' ');
@@ -50,8 +50,7 @@ void* Resolve(const char* name) {
 }  // namespace
 
 void GlCaps::Probe() {
-  const char* version =
-      reinterpret_cast<const char*>(glGetString(GL_VERSION));
+  const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
   if (version) {
     // "OpenGL ES N.M ..." — skip leading prefix if present.
     const char* p = version;
@@ -81,28 +80,26 @@ void GlCaps::Probe() {
   }
   is_es3 = (context_major >= 3);
 
-  const char* exts =
-      reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+  const char* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
 
-  has_rgb8_rgba8 =
-      is_es3 || ExtensionSupported(exts, "GL_OES_rgb8_rgba8");
+  has_rgb8_rgba8 = is_es3 || ExtensionSupported(exts, "GL_OES_rgb8_rgba8");
   has_packed_depth_stencil =
       is_es3 || ExtensionSupported(exts, "GL_OES_packed_depth_stencil");
 
   // Resolve blit_framebuffer.
   blit_framebuffer = nullptr;
   if (is_es3) {
-    blit_framebuffer = reinterpret_cast<BlitFramebufferFn>(
-        Resolve("glBlitFramebuffer"));
+    blit_framebuffer =
+        reinterpret_cast<BlitFramebufferFn>(Resolve("glBlitFramebuffer"));
   }
   if (!blit_framebuffer && ExtensionSupported(exts, "GL_NV_framebuffer_blit")) {
-    blit_framebuffer = reinterpret_cast<BlitFramebufferFn>(
-        Resolve("glBlitFramebufferNV"));
+    blit_framebuffer =
+        reinterpret_cast<BlitFramebufferFn>(Resolve("glBlitFramebufferNV"));
   }
   if (!blit_framebuffer &&
       ExtensionSupported(exts, "GL_ANGLE_framebuffer_blit")) {
-    blit_framebuffer = reinterpret_cast<BlitFramebufferFn>(
-        Resolve("glBlitFramebufferANGLE"));
+    blit_framebuffer =
+        reinterpret_cast<BlitFramebufferFn>(Resolve("glBlitFramebufferANGLE"));
   }
   has_blit_framebuffer = (blit_framebuffer != nullptr);
 
@@ -125,11 +122,10 @@ void GlCaps::Probe() {
         reinterpret_cast<RenderbufferStorageMultisampleFn>(
             Resolve("glRenderbufferStorageMultisampleNV"));
   }
-  has_multisampled_renderbuffer =
-      (renderbuffer_storage_multisample != nullptr);
+  has_multisampled_renderbuffer = (renderbuffer_storage_multisample != nullptr);
 
-  spdlog::debug(
-      "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={}",
-      context_major, context_minor, has_rgb8_rgba8, has_packed_depth_stencil,
-      has_blit_framebuffer, has_multisampled_renderbuffer);
+  spdlog::debug("GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={}",
+                context_major, context_minor, has_rgb8_rgba8,
+                has_packed_depth_stencil, has_blit_framebuffer,
+                has_multisampled_renderbuffer);
 }

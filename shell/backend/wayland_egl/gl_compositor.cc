@@ -87,8 +87,10 @@ bool GlCompositor::EnsureQuad() {
   const GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
   const GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFragSrc);
   if (!vs || !fs) {
-    if (vs) glDeleteShader(vs);
-    if (fs) glDeleteShader(fs);
+    if (vs)
+      glDeleteShader(vs);
+    if (fs)
+      glDeleteShader(fs);
     return false;
   }
 
@@ -120,10 +122,22 @@ bool GlCompositor::EnsureQuad() {
 
   // Fullscreen triangle strip in NDC: (x, y, u, v) per vertex.
   constexpr std::array<GLfloat, 16> verts = {{
-      -1.f, -1.f, 0.f, 0.f,
-       1.f, -1.f, 1.f, 0.f,
-      -1.f,  1.f, 0.f, 1.f,
-       1.f,  1.f, 1.f, 1.f,
+      -1.f,
+      -1.f,
+      0.f,
+      0.f,
+      1.f,
+      -1.f,
+      1.f,
+      0.f,
+      -1.f,
+      1.f,
+      0.f,
+      1.f,
+      1.f,
+      1.f,
+      1.f,
+      1.f,
   }};
   glGenBuffers(1, &vbo_);
   glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -167,10 +181,13 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   }
   if (attr_uv_ >= 0) {
     glEnableVertexAttribArray(static_cast<GLuint>(attr_uv_));
-    glVertexAttribPointer(
-        static_cast<GLuint>(attr_uv_), 2, GL_FLOAT, GL_FALSE,
-        4 * sizeof(GLfloat),
-        reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+    // glVertexAttribPointer takes the buffer offset as a void* by historic
+    // GL convention — there's no arithmetic on the pointer. Suppress the
+    // "integer to pointer cast" lint.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    glVertexAttribPointer(static_cast<GLuint>(attr_uv_), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(GLfloat),
+                          reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
   }
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);

@@ -69,8 +69,8 @@ TEST(CompositorHeadlessGolden, SingleLayerFastPathParity) {
                   "golden. Re-run with the option off to compare.";
 #else
   utils_write_targa(app.getViewRenderBuf(0), test_filename, width, height);
-  const int images_are_equal = utils_images_are_equal(
-      test_filename, golden_filename, width, height);
+  const int images_are_equal =
+      utils_images_are_equal(test_filename, golden_filename, width, height);
   EXPECT_EQ(images_are_equal, 1)
       << "Compositor single-layer output diverged from baseline. "
          "If the divergence is intentional, regenerate the golden with "
