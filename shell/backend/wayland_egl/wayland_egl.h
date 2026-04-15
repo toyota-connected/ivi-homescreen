@@ -31,6 +31,8 @@
 
 #include "backend/backing_store_pool.h"
 #include "backend/wayland_egl/egl_backing_store.h"
+#include "backend/wayland_egl/gl_caps.h"
+#include "backend/wayland_egl/gl_compositor.h"
 #include "view/compositor_surface_interface.h"
 #include "view/present_layer_sequencer.h"
 #endif
@@ -145,6 +147,9 @@ class WaylandEglBackend : public Egl, public Backend {
                               const FlutterRect& additional_rect);
 
 #if BUILD_COMPOSITOR
+  GlCaps m_gl_caps;
+  bool m_gl_caps_probed{false};
+  std::unique_ptr<GlCompositor> m_gl_compositor;
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
   PresentLayerSequencer m_sequencer;
   std::unordered_map<FlutterPlatformViewIdentifier,
@@ -157,6 +162,10 @@ class WaylandEglBackend : public Egl, public Backend {
   std::unordered_map<EglFboBackingStore*,
                      std::shared_ptr<EglFboBackingStore>>
       m_alive_stores_;
+
+  /// Lazily probe GL caps and instantiate @c GlCompositor. Must be called
+  /// with the EGL context current.
+  void EnsureGlCapsProbed();
 
   bool CreateBackingStore(const FlutterBackingStoreConfig* config,
                           FlutterBackingStore* store_out);

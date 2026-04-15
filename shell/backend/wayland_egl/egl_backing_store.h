@@ -20,24 +20,33 @@
 
 #include <GLES2/gl2.h>
 
+struct GlCaps;
+
 /**
  * @brief FBO-backed EGL backing store.
  *
- * The engine renders into @c framebuffer and the compositor blits the
- * attached @c color_texture to the window or a subsurface during
- * @c PresentLayers. Constructed on the rasterizer thread with the EGL
- * context current; destructor deletes GL objects (also on rasterizer
- * thread — call @c BackingStorePool::Flush while the context is still
- * current).
+ * The engine renders into @c framebuffer and the compositor blits (or
+ * quad-shader-composites) the attached @c color_texture to the window or a
+ * subsurface during @c PresentLayers. Constructed on the rasterizer thread
+ * with the EGL context current; destructor deletes GL objects (also on the
+ * rasterizer thread — call @c BackingStorePool::Flush while the context is
+ * still current).
  *
- * When @c BUILD_EGL_ENABLE_3D is set the FBO gets a depth/stencil
- * renderbuffer; when @c BUILD_EGL_ENABLE_MULTISAMPLE is set the color
- * attachment is allocated as a multisample renderbuffer plus a resolve
- * texture.
+ * Format choices adapt to the runtime GL version via @c GlCaps:
+ *   - Color attachment uses sized formats (GL_RGBA8 / GL_RGB8 / _OES) when
+ *     available, else falls back to unsized GL_RGBA / GL_RGB with
+ *     GL_UNSIGNED_BYTE, which is ES2 core.
+ *   - Depth/stencil uses packed GL_DEPTH24_STENCIL8_OES when the extension
+ *     or ES3 is present; otherwise a plain GL_DEPTH_COMPONENT16 renderbuffer
+ *     is used and stencil is dropped.
+ *   - MSAA is skipped entirely when no multisample-renderbuffer path is
+ *     advertised.
+ *
+ * The caps pointer must outlive this object (the backend owns the caps).
  */
 class EglFboBackingStore {
  public:
-  EglFboBackingStore(int32_t width, int32_t height);
+  EglFboBackingStore(int32_t width, int32_t height, const GlCaps* caps);
   ~EglFboBackingStore();
 
   EglFboBackingStore(const EglFboBackingStore&) = delete;
@@ -60,13 +69,12 @@ class EglFboBackingStore {
 /**
  * @brief Texture-backed EGL backing store for sampleable output.
  *
- * Layout matches @c EglFboBackingStore but the engine is pointed at the
- * color texture instead of the framebuffer. Useful for overlay layers that
- * plugins want to sample (e.g., blur pass).
+ * Plain GL_TEXTURE_2D with RGBA storage. Used for overlay layers that
+ * plugins want to sample.
  */
 class EglTextureBackingStore {
  public:
-  EglTextureBackingStore(int32_t width, int32_t height);
+  EglTextureBackingStore(int32_t width, int32_t height, const GlCaps* caps);
   ~EglTextureBackingStore();
 
   EglTextureBackingStore(const EglTextureBackingStore&) = delete;
