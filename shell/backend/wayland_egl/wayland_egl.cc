@@ -556,9 +556,36 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
             composed.has_rounded_clip, composed.has_perspective,
             composed.IsAxisAligned());
       }
-      const auto it = m_compositor_surfaces.find(layer->platform_view->identifier);
+      const auto it =
+          m_compositor_surfaces.find(layer->platform_view->identifier);
       if (it != m_compositor_surfaces.end() && it->second) {
-        ok = it->second->OnPresent(layer) && ok;
+        auto& surface = *it->second;
+        ok = surface.OnPresent(layer) && ok;
+        // If the plugin exposed a GL texture, composite it onto FBO 0 at
+        // the layer's pixel rect. Plugins that handle their own
+        // presentation (legacy wl_subsurface path, etc.) return 0 here.
+        if (const auto tex = surface.GetGlTextureName(); tex != 0) {
+          EnsureGlCapsProbed();
+          const auto sw = surface.GetGlTextureWidth();
+          const auto sh = surface.GetGlTextureHeight();
+          const auto dx = static_cast<GLint>(layer->offset.x);
+          const auto dy = static_cast<GLint>(layer->offset.y);
+          const auto dw = static_cast<GLsizei>(layer->size.width);
+          const auto dh = static_cast<GLsizei>(layer->size.height);
+          if (m_gl_caps.has_blit_framebuffer) {
+            if (!m_texture_blit_fbo_) {
+              glGenFramebuffers(1, &m_texture_blit_fbo_);
+            }
+            glBindFramebuffer(GL_FRAMEBUFFER, m_texture_blit_fbo_);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D, tex, 0);
+            m_gl_compositor->CompositeToDefault(m_texture_blit_fbo_, tex, sw,
+                                                sh, dx, dy, dw, dh);
+          } else {
+            m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw,
+                                                dh);
+          }
+        }
       }
     }
   }
