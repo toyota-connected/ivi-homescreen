@@ -31,10 +31,9 @@ class LoggingHandler {
 
  private:
   // Called when a method is called on |channel_|;
-  void HandleMethodCall(
+  static void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
-      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
-      const;
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<>> channel_;
