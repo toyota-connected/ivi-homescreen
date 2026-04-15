@@ -34,12 +34,12 @@ jobs:
             version: '19'
             cc: clang-19
             cxx: clang++-19
-            extra_pkgs: clang-19 llvm-19
+            extra_pkgs: clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
           - compiler: clang
             version: '20'
             cc: clang-20
             cxx: clang++-20
-            extra_pkgs: clang-20 llvm-20
+            extra_pkgs: clang-20 llvm-20 lld-20 libc++-20-dev libc++abi-20-dev
 
     name: ${{ matrix.compiler }}-${{ matrix.version }}
     permissions:
@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev clang-19 clang-tidy-19 clang-format-19 llvm-19
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
           version: 1.0
 
       - name: Configure
