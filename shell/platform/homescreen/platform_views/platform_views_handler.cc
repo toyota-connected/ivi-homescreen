@@ -23,6 +23,12 @@
 #include "config/plugins.h"
 #include "platform_view_touch.h"
 
+#if BUILD_COMPOSITOR
+#include "flutter_desktop_engine_state.h"
+#include "flutter_desktop_view_controller_state.h"
+#include "view/flutter_view.h"
+#endif
+
 static constexpr char kMethodCreate[] = "create";
 static constexpr char kMethodDispose[] = "dispose";
 static constexpr char kMethodResize[] = "resize";
@@ -103,6 +109,15 @@ void PlatformViewsHandler::HandleMethodCall(
       }
     }
 
+#if BUILD_COMPOSITOR
+    // Safety net: ensure the compositor surface is unregistered even if the
+    // plugin forgot. The view may be null in headless contexts.
+    if (engine_ && engine_->view_controller &&
+        engine_->view_controller->view) {
+      engine_->view_controller->view->UnregisterCompositorSurface(id);
+    }
+#endif
+
     result->Success();
 
   } else if (method_name == kMethodResize) {
@@ -138,6 +153,14 @@ void PlatformViewsHandler::HandleMethodCall(
         callbacks->resize(width, height, snd);
       }
     }
+
+#if BUILD_COMPOSITOR
+    if (engine_ && engine_->view_controller &&
+        engine_->view_controller->view) {
+      engine_->view_controller->view->ResizeCompositorSurface(
+          id, static_cast<int32_t>(width), static_cast<int32_t>(height));
+    }
+#endif
 
     const auto res = flutter::EncodableValue(flutter::EncodableMap{
         {flutter::EncodableValue("id"), flutter::EncodableValue(id)},

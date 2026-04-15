@@ -488,4 +488,14 @@ void WaylandEglBackend::UnregisterCompositorSurface(
   m_compositor_surfaces.erase(id);
 }
 
+void WaylandEglBackend::ResizeCompositorSurface(
+    FlutterPlatformViewIdentifier id,
+    int32_t width,
+    int32_t height) {
+  const auto it = m_compositor_surfaces.find(id);
+  if (it != m_compositor_surfaces.end() && it->second) {
+    it->second->OnResize(width, height);
+  }
+}
+
 #endif  // BUILD_COMPOSITOR

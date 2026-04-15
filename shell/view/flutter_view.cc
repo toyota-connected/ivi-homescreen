@@ -273,3 +273,35 @@ void FlutterView::SetRegion(
   wl_region_destroy(base_region);
 }
 #endif
+
+#if BUILD_COMPOSITOR
+void FlutterView::RegisterCompositorSurface(
+    FlutterPlatformViewIdentifier id,
+    std::shared_ptr<ICompositorSurface> surface) {
+  if (!m_backend) {
+    return;
+  }
+  if (surface) {
+    m_backend->RegisterCompositorSurface(id, std::move(surface));
+  } else {
+    m_backend->UnregisterCompositorSurface(id);
+  }
+}
+
+void FlutterView::UnregisterCompositorSurface(
+    FlutterPlatformViewIdentifier id) {
+  if (!m_backend) {
+    return;
+  }
+  m_backend->UnregisterCompositorSurface(id);
+}
+
+void FlutterView::ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                                          int32_t width,
+                                          int32_t height) {
+  if (!m_backend) {
+    return;
+  }
+  m_backend->ResizeCompositorSurface(id, width, height);
+}
+#endif

@@ -1011,6 +1011,16 @@ void WaylandVulkanBackend::UnregisterCompositorSurface(
   m_compositor_surfaces.erase(id);
 }
 
+void WaylandVulkanBackend::ResizeCompositorSurface(
+    FlutterPlatformViewIdentifier id,
+    int32_t width,
+    int32_t height) {
+  const auto it = m_compositor_surfaces.find(id);
+  if (it != m_compositor_surfaces.end() && it->second) {
+    it->second->OnResize(width, height);
+  }
+}
+
 bool WaylandVulkanBackend::CreateBackingStoreImpl(
     const FlutterBackingStoreConfig* config,
     FlutterBackingStore* store_out) {

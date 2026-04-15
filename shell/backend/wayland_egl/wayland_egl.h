@@ -119,9 +119,13 @@ class WaylandEglBackend : public Egl, public Backend {
    */
   void RegisterCompositorSurface(
       FlutterPlatformViewIdentifier id,
-      std::shared_ptr<ICompositorSurface> surface);
+      std::shared_ptr<ICompositorSurface> surface) override;
 
-  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id);
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id) override;
+
+  void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                               int32_t width,
+                               int32_t height) override;
 #endif
 
  private:
