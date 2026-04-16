@@ -97,8 +97,10 @@ option(BUILD_COMPOSITOR_DMABUF_EXPORT
 #
 # DRM
 #
-option(BUILD_BACKEND_DRM "Build DRM backend" OFF)
 option(BUILD_BACKEND_WAYLAND_LEASED_DRM "Build Wayland Leased DRM backend" OFF)
+option(BUILD_BACKEND_DRM_KMS_EGL
+        "Build DRM/KMS EGL backend (mutually exclusive with EGL and Vulkan backends)"
+        OFF)
 
 #
 # Headless

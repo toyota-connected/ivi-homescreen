@@ -47,6 +47,7 @@ class Configuration {
       std::optional<bool> fullscreen;
       std::optional<double> pixel_ratio;
       std::optional<uint32_t> ivi_surface_id;
+      std::optional<std::string> drm_device;
     } view;
   };
 

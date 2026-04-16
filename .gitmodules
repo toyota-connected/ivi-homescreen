@@ -22,3 +22,6 @@
 [submodule "third_party/Vulkan-Headers"]
 	path = third_party/Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "third_party/drm-cxx"]
+	path = third_party/drm-cxx
+	url = https://github.com/jwinarske/drm-cxx.git

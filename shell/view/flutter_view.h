@@ -45,8 +45,8 @@ class PlatformChannel;
 class WaylandWindow;
 #if BUILD_BACKEND_HEADLESS_EGL
 class HeadlessBackend;
-#elif BUILD_BACKEND_WAYLAND_DRM
-class WaylandDrmBackend;
+#elif BUILD_BACKEND_DRM_KMS_EGL
+class DrmBackend;
 #elif BUILD_BACKEND_WAYLAND_EGL
 class WaylandEglBackend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN
@@ -223,8 +223,8 @@ class FlutterView {
  private:
 #if BUILD_BACKEND_HEADLESS_EGL
   std::shared_ptr<HeadlessBackend> m_backend;
-#elif BUILD_BACKEND_WAYLAND_DRM
-  std::shared_ptr<WaylandDrmBackend> m_backend;
+#elif BUILD_BACKEND_DRM_KMS_EGL
+  std::shared_ptr<DrmBackend> m_backend{};
 #elif BUILD_BACKEND_WAYLAND_EGL
   std::shared_ptr<WaylandEglBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN

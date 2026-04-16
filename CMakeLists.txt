@@ -37,6 +37,15 @@ project(ivi-homescreen
 include(git)
 include(options)
 
+if (BUILD_BACKEND_DRM_KMS_EGL)
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_DRM_KMS_EGL is mutually exclusive with "
+                "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN")
+    endif ()
+    include(drm_kms)
+endif ()
+
 message(STATUS "Project ................ ${PROJECT_NAME}")
 message(STATUS "Version ................ ${PROJECT_VERSION}")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
