@@ -43,6 +43,8 @@ struct DrmConfig {
 };
 
 class DrmBackend : public Backend {
+  friend class DrmCompositor;
+
  public:
   static std::unique_ptr<DrmBackend> Create(const DrmConfig& cfg);
   ~DrmBackend() override;

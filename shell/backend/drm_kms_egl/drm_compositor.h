@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 #include <EGL/egl.h>
@@ -26,6 +27,10 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <gbm.h>
+
+#include <drm-cxx/planes/allocator.hpp>
+#include <drm-cxx/planes/output.hpp>
+#include <drm-cxx/planes/plane_registry.hpp>
 
 #include <shell/platform/embedder/embedder.h>
 
@@ -35,30 +40,27 @@
 class DrmBackend;
 class ICompositorSurface;
 
-// GBM-backed backing store. Flutter renders into the GL FBO; the BO can
-// be scanned out directly on a KMS plane via drm_fb_id, or composited
-// into a composition buffer via GL when hardware planes are exhausted.
 struct GbmBackingStore {
   gbm_bo* bo = nullptr;
   EGLImageKHR egl_image = EGL_NO_IMAGE_KHR;
   GLuint fbo = 0;
-  GLuint color_tex = 0;        // GL_TEXTURE_2D backed by the EGL image
+  GLuint color_tex = 0;
   GLuint depth_stencil_rb = 0;
   uint32_t drm_fb_id = 0;
   uint32_t width = 0;
   uint32_t height = 0;
 };
 
-// FlutterCompositor callbacks for the DRM/KMS backend.
+// FlutterCompositor for the DRM/KMS backend with hardware-plane overlay
+// support.
 //
-// Each Flutter-rendered layer is a GBM BO wrapped in an EGL image + GL FBO.
-// The BO is simultaneously scanout-capable (KMS framebuffer) and renderable
-// (GL FBO via EGLImageTargetTexture2DOES).
+// Each Flutter-rendered layer is a GBM BO that can be scanned out directly
+// on a KMS plane (via drm_fb_id) or composited into a composition buffer
+// via GL when hardware planes are exhausted.
 //
-// PresentLayers currently composites all layers into the primary framebuffer
-// via GL, then hands off to DrmBackend::Present for the page flip. The
-// plane-allocator path (step 3) will replace this with direct per-layer
-// plane assignment for layers the hardware can scan out.
+// PresentLayers builds a drm::planes::Output, runs the Allocator to assign
+// layers to planes, GL-composites any overflow into a double-buffered
+// composition GBM BO, and atomic-commits the result.
 class DrmCompositor {
  public:
   explicit DrmCompositor(DrmBackend* backend);
@@ -86,21 +88,39 @@ class DrmCompositor {
   };
 
   bool InitEglExtensions();
+  bool InitPlaneAllocator();
+  bool InitCompositionBuffers();
   void EnsureGlCapsProbed();
   void DestroyGbmStore(GbmBackingStore& store);
+  bool CreateGbmStore(GbmBackingStore& store, uint32_t w, uint32_t h,
+                      uint32_t format);
   uint32_t ImportBoAsFb(gbm_bo* bo);
 
-  void CompositeBackingStore(const GbmBackingStore* store,
+  void CompositeLayerIntoFbo(GLuint target_fbo,
+                             GLuint src_tex,
+                             GLsizei src_w,
+                             GLsizei src_h,
                              GLint dst_x,
                              GLint dst_y,
                              GLsizei dst_w,
                              GLsizei dst_h,
                              bool blend);
-  void CompositePlatformView(const FlutterLayer* layer, bool blend);
+
+  bool WaitForPendingFlip();
+  static void PageFlipHandler(int fd,
+                              unsigned int sequence,
+                              unsigned int tv_sec,
+                              unsigned int tv_usec,
+                              void* user_data);
+
+  // GL fallback: composites all layers into FBO 0 and calls
+  // DrmBackend::Present(). Used when the plane allocator isn't
+  // available or when all layers need composition anyway.
+  bool PresentViaGlFallback(const FlutterLayer** layers, size_t count);
 
   DrmBackend* backend_;
 
-  // EGL image extension pointers (resolved once).
+  // EGL image extensions.
   PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ = nullptr;
   PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ = nullptr;
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES_ = nullptr;
@@ -117,4 +137,20 @@ class DrmCompositor {
       surfaces_;
 
   GLuint texture_blit_fbo_{0};
+
+  // Plane allocation.
+  std::optional<drm::planes::PlaneRegistry> plane_registry_;
+  std::unique_ptr<drm::planes::Allocator> allocator_;
+  drm::planes::Layer comp_layer_;  // composition layer descriptor
+  bool planes_available_{false};
+
+  // Double-buffered composition buffer for layers that overflow HW planes.
+  static constexpr int kNumCompBufs = 2;
+  GbmBackingStore comp_bufs_[kNumCompBufs];
+  int comp_idx_{0};
+  bool comp_bufs_valid_{false};
+
+  // Atomic-commit flip state (compositor owns its own flip lifecycle
+  // when using the plane-allocator path).
+  bool flip_pending_{false};
 };
