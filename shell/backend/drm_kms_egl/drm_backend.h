@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -70,6 +71,12 @@ class DrmBackend : public Backend {
   bool MakeResourceCurrent();
   bool Present();
 
+  // Called from the engine's vsync_callback (engine-managed thread).
+  // The baton is returned to the engine via FlutterEngineOnVsync when
+  // the next page-flip-complete event fires.
+  void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                     intptr_t baton);
+
   [[nodiscard]] uint32_t width() const { return mode_.hdisplay; }
   [[nodiscard]] uint32_t height() const { return mode_.vdisplay; }
   [[nodiscard]] EGLDisplay egl_display() const { return egl_display_; }
@@ -118,6 +125,12 @@ class DrmBackend : public Backend {
   EGLSurface egl_surface_ = EGL_NO_SURFACE;
 
   bool mode_set_ = false;
+
+  // VSync baton delivery. The engine's vsync_callback stores a baton here
+  // (from an engine-managed thread); the PageFlipHandler consumes it
+  // (from the rasterizer thread) and calls OnVsync.
+  std::atomic<intptr_t> vsync_baton_{0};
+  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> vsync_engine_{nullptr};
 
 #if BUILD_COMPOSITOR
   // Compositor lives as a member so its destructor runs while the EGL
