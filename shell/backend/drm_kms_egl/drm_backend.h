@@ -67,6 +67,12 @@ class DrmBackend : public Backend {
   bool InitEgl();
   bool SetInitialMode();
   uint32_t AddFb(gbm_bo* bo);
+  bool WaitForPendingFlip();
+  static void PageFlipHandler(int fd,
+                              unsigned int sequence,
+                              unsigned int tv_sec,
+                              unsigned int tv_usec,
+                              void* user_data);
 
   DrmConfig cfg_;
 
@@ -78,11 +84,16 @@ class DrmBackend : public Backend {
   drmModeModeInfo mode_{};
   drmModeCrtc* saved_crtc_ = nullptr;
 
-  // GBM
+  // GBM. `current_bo_`/`current_fb_` scan out right now. `pending_bo_`/
+  // `pending_fb_` were handed to the kernel via drmModePageFlip and are
+  // released when the page-flip-complete event arrives.
   gbm_device* gbm_device_ = nullptr;
   gbm_surface* gbm_surface_ = nullptr;
   gbm_bo* current_bo_ = nullptr;
   uint32_t current_fb_ = 0;
+  gbm_bo* pending_bo_ = nullptr;
+  uint32_t pending_fb_ = 0;
+  bool flip_pending_ = false;
 
   // EGL
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
