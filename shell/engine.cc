@@ -25,6 +25,11 @@
 #include "hexdump.h"
 #include "utils.h"
 
+#if BUILD_BACKEND_DRM_KMS_EGL
+#include "backend/drm_kms_egl/drm_backend.h"
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#endif
+
 extern void EngineOnFlutterPlatformMessage(
     const FlutterPlatformMessage* engine_message,
     void* user_data);
@@ -58,6 +63,18 @@ Engine::Engine(FlutterView* view,
   m_args.log_message_callback = onLogMessageCallback;
   m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
   m_args.log_tag = "flutter";
+
+#if BUILD_BACKEND_DRM_KMS_EGL
+  m_args.vsync_callback = [](void* user_data, intptr_t baton) {
+    const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
+    if (!state || !state->view_controller || !state->view_controller->engine) {
+      return;
+    }
+    auto* engine = state->view_controller->engine;
+    auto* backend = reinterpret_cast<DrmBackend*>(engine->GetBackend());
+    backend->SetVsyncBaton(engine->GetFlutterEngine(), baton);
+  };
+#endif
 
   /// Task Runner
   m_platform_task_runner =

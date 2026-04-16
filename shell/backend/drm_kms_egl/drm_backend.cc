@@ -480,6 +480,12 @@ bool DrmBackend::TextureClearCurrent() {
                         EGL_NO_CONTEXT) == EGL_TRUE;
 }
 
+void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                               intptr_t baton) {
+  vsync_engine_.store(engine, std::memory_order_relaxed);
+  vsync_baton_.store(baton, std::memory_order_release);
+}
+
 void DrmBackend::PageFlipHandler(int /*fd*/,
                                  unsigned int /*sequence*/,
                                  unsigned int /*tv_sec*/,
@@ -499,6 +505,23 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
   self->pending_bo_ = nullptr;
   self->pending_fb_ = 0;
   self->flip_pending_ = false;
+
+  // Return the vsync baton to the engine if one is pending. This tells
+  // Flutter's scheduler "the display just vblanked — start the next
+  // frame now, targeting the subsequent vblank."
+  const intptr_t baton =
+      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+  if (baton != 0) {
+    auto engine = self->vsync_engine_.load(std::memory_order_relaxed);
+    if (engine) {
+      const uint64_t now = LibFlutterEngine->GetCurrentTime();
+      const uint64_t period_ns =
+          self->mode_.vrefresh > 0
+              ? 1000000000ULL / static_cast<uint64_t>(self->mode_.vrefresh)
+              : 16666667ULL;
+      LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+    }
+  }
 }
 
 bool DrmBackend::WaitForPendingFlip() {
