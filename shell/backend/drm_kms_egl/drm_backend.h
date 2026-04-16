@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <EGL/egl.h>
@@ -25,6 +26,8 @@
 #include <gbm.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+
+#include <drm-cxx/core/device.hpp>
 
 #include <shell/platform/embedder/embedder.h>
 
@@ -71,15 +74,19 @@ class DrmBackend : public Backend {
   bool MakeResourceCurrent();
   bool Present();
 
-  // Called from the engine's vsync_callback (engine-managed thread).
-  // The baton is returned to the engine via FlutterEngineOnVsync when
-  // the next page-flip-complete event fires.
   void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                      intptr_t baton);
 
+  [[nodiscard]] const drm::Device& device() const { return *drm_dev_; }
+  [[nodiscard]] int drm_fd() const { return drm_dev_->fd(); }
+  [[nodiscard]] uint32_t connector_id() const { return connector_id_; }
+  [[nodiscard]] uint32_t crtc_id() const { return crtc_id_; }
+  [[nodiscard]] uint32_t crtc_index() const { return crtc_index_; }
   [[nodiscard]] uint32_t width() const { return mode_.hdisplay; }
   [[nodiscard]] uint32_t height() const { return mode_.vdisplay; }
+  [[nodiscard]] uint32_t vrefresh() const { return mode_.vrefresh; }
   [[nodiscard]] EGLDisplay egl_display() const { return egl_display_; }
+  [[nodiscard]] gbm_device* gbm() const { return gbm_device_; }
 
  private:
   explicit DrmBackend(DrmConfig cfg);
@@ -97,17 +104,15 @@ class DrmBackend : public Backend {
 
   DrmConfig cfg_;
 
-  // DRM
-  int drm_fd_ = -1;
+  // DRM — drm::Device is RAII (closes fd on destruction).
+  std::optional<drm::Device> drm_dev_;
   uint32_t connector_id_ = 0;
   uint32_t crtc_id_ = 0;
   uint32_t crtc_index_ = 0;
   drmModeModeInfo mode_{};
   drmModeCrtc* saved_crtc_ = nullptr;
 
-  // GBM. `current_bo_`/`current_fb_` scan out right now. `pending_bo_`/
-  // `pending_fb_` were handed to the kernel via drmModePageFlip and are
-  // released when the page-flip-complete event arrives.
+  // GBM
   gbm_device* gbm_device_ = nullptr;
   gbm_surface* gbm_surface_ = nullptr;
   gbm_bo* current_bo_ = nullptr;
@@ -126,16 +131,10 @@ class DrmBackend : public Backend {
 
   bool mode_set_ = false;
 
-  // VSync baton delivery. The engine's vsync_callback stores a baton here
-  // (from an engine-managed thread); the PageFlipHandler consumes it
-  // (from the rasterizer thread) and calls OnVsync.
   std::atomic<intptr_t> vsync_baton_{0};
   std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> vsync_engine_{nullptr};
 
 #if BUILD_COMPOSITOR
-  // Compositor lives as a member so its destructor runs while the EGL
-  // context is still current (DrmBackend::~DrmBackend resets it before
-  // tearing EGL down).
   std::unique_ptr<DrmCompositor> compositor_;
 #endif
 };
