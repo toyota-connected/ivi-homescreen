@@ -62,11 +62,11 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.height.value_or(kDefaultViewHeight),
       m_config.debug_backend.value_or(false), kEglBufferSize);
 #elif BUILD_BACKEND_DRM_KMS_EGL
-  m_backend = DrmBackend::Create(
-      {m_config.view.drm_device.value_or("/dev/dri/card0"),
-       m_config.view.width.value_or(kDefaultViewWidth),
-       m_config.view.height.value_or(kDefaultViewHeight),
-       m_config.debug_backend.value_or(false)});
+  m_backend =
+      DrmBackend::Create({m_config.view.drm_device.value_or("/dev/dri/card0"),
+                          m_config.view.width.value_or(kDefaultViewWidth),
+                          m_config.view.height.value_or(kDefaultViewHeight),
+                          m_config.debug_backend.value_or(false)});
 #elif BUILD_BACKEND_WAYLAND_EGL
   {
     auto* wl = dynamic_cast<Display*>(display.get());
@@ -280,7 +280,8 @@ void FlutterView::ClearRegion(const std::string& type) const {
 void FlutterView::SetRegion(
     const std::string& type,
     const std::vector<CompositorRegionPlugin::REGION_T>& regions) const {
-  const auto compositor = dynamic_cast<Display*>(m_display.get())->GetCompositor();
+  const auto compositor =
+      dynamic_cast<Display*>(m_display.get())->GetCompositor();
   const auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
