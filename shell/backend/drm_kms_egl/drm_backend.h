@@ -64,8 +64,7 @@ class DrmBackend : public Backend {
   void RegisterCompositorSurface(
       FlutterPlatformViewIdentifier id,
       std::shared_ptr<ICompositorSurface> surface) override;
-  void UnregisterCompositorSurface(
-      FlutterPlatformViewIdentifier id) override;
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id) override;
   void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
                                int32_t width,
                                int32_t height) override;
@@ -76,8 +75,7 @@ class DrmBackend : public Backend {
   bool MakeResourceCurrent();
   bool Present();
 
-  void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                     intptr_t baton);
+  void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
 
   [[nodiscard]] const drm::Device& device() const { return *drm_dev_; }
   [[nodiscard]] int drm_fd() const { return drm_dev_->fd(); }

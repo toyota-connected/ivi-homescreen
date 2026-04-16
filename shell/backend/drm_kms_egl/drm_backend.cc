@@ -42,18 +42,26 @@ namespace {
 constexpr uint32_t kGbmSurfaceFormat = GBM_FORMAT_XRGB8888;
 
 constexpr std::array<EGLint, 15> kDrmEglConfigAttribs = {{
-    EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-    EGL_RED_SIZE, 8,
-    EGL_GREEN_SIZE, 8,
-    EGL_BLUE_SIZE, 8,
-    EGL_ALPHA_SIZE, 0,
-    EGL_DEPTH_SIZE, 24,
+    EGL_SURFACE_TYPE,
+    EGL_WINDOW_BIT,
+    EGL_RENDERABLE_TYPE,
+    EGL_OPENGL_ES2_BIT,
+    EGL_RED_SIZE,
+    8,
+    EGL_GREEN_SIZE,
+    8,
+    EGL_BLUE_SIZE,
+    8,
+    EGL_ALPHA_SIZE,
+    0,
+    EGL_DEPTH_SIZE,
+    24,
     EGL_NONE,
 }};
 
 constexpr std::array<EGLint, 3> kEsContextAttribs = {{
-    EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_CONTEXT_CLIENT_VERSION,
+    2,
     EGL_NONE,
 }};
 
@@ -146,7 +154,8 @@ bool DrmBackend::InitDrm() {
   }
   drm_dev_.emplace(std::move(*dev));
 
-  if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0) {
+  if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) !=
+      0) {
     spdlog::warn("[DrmBackend] DRM_CLIENT_CAP_UNIVERSAL_PLANES unsupported");
   }
   if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
@@ -251,9 +260,9 @@ bool DrmBackend::InitGbm() {
     return false;
   }
 
-  gbm_surface_ = gbm_surface_create(
-      gbm_device_, mode_.hdisplay, mode_.vdisplay, kGbmSurfaceFormat,
-      GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+  gbm_surface_ = gbm_surface_create(gbm_device_, mode_.hdisplay, mode_.vdisplay,
+                                    kGbmSurfaceFormat,
+                                    GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
   if (!gbm_surface_) {
     spdlog::error("[DrmBackend] gbm_surface_create failed");
     return false;
@@ -262,15 +271,14 @@ bool DrmBackend::InitGbm() {
 }
 
 bool DrmBackend::InitEgl() {
-  auto get_platform_display =
-      reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-          eglGetProcAddress("eglGetPlatformDisplayEXT"));
+  auto get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+      eglGetProcAddress("eglGetPlatformDisplayEXT"));
   if (get_platform_display) {
     egl_display_ =
         get_platform_display(EGL_PLATFORM_GBM_KHR, gbm_device_, nullptr);
   } else {
-    egl_display_ = eglGetDisplay(reinterpret_cast<EGLNativeDisplayType>(
-        gbm_device_));
+    egl_display_ =
+        eglGetDisplay(reinterpret_cast<EGLNativeDisplayType>(gbm_device_));
   }
   if (egl_display_ == EGL_NO_DISPLAY) {
     spdlog::error("[DrmBackend] eglGetPlatformDisplay failed");
@@ -370,11 +378,11 @@ bool DrmBackend::InitEgl() {
   using Score = std::tuple<EGLint, EGLint, EGLint, EGLint, EGLint>;
   auto score = [&](EGLint i) -> Score {
     return {
-        attr(configs[i], EGL_SAMPLES),                              // 1
-        attr(configs[i], EGL_CONFIG_CAVEAT) == EGL_NONE ? 0 : 1,    // 2
+        attr(configs[i], EGL_SAMPLES),                                    // 1
+        attr(configs[i], EGL_CONFIG_CAVEAT) == EGL_NONE ? 0 : 1,          // 2
         abs_diff(attr(configs[i], EGL_ALPHA_SIZE), kPreferredAlpha),      // 3
         abs_diff(attr(configs[i], EGL_STENCIL_SIZE), kPreferredStencil),  // 4
-        attr(configs[i], EGL_DEPTH_SIZE),                           // 5
+        attr(configs[i], EGL_DEPTH_SIZE),                                 // 5
     };
   };
 
@@ -431,8 +439,8 @@ uint32_t DrmBackend::AddFb(gbm_bo* bo) {
   const uint32_t stride = gbm_bo_get_stride(bo);
   const uint32_t handle = gbm_bo_get_handle(bo).u32;
   uint32_t fb_id = 0;
-  if (drmModeAddFB(drm_dev_->fd(), width, height, 24, 32, stride, handle, &fb_id) !=
-      0) {
+  if (drmModeAddFB(drm_dev_->fd(), width, height, 24, 32, stride, handle,
+                   &fb_id) != 0) {
     spdlog::error("[DrmBackend] drmModeAddFB: {}", std::strerror(errno));
     return 0;
   }
@@ -443,8 +451,8 @@ bool DrmBackend::SetInitialMode() {
   if (!current_bo_ || current_fb_ == 0) {
     return false;
   }
-  if (drmModeSetCrtc(drm_dev_->fd(), crtc_id_, current_fb_, 0, 0, &connector_id_, 1,
-                     &mode_) != 0) {
+  if (drmModeSetCrtc(drm_dev_->fd(), crtc_id_, current_fb_, 0, 0,
+                     &connector_id_, 1, &mode_) != 0) {
     spdlog::error("[DrmBackend] drmModeSetCrtc: {}", std::strerror(errno));
     return false;
   }
@@ -484,8 +492,7 @@ void DrmBackend::RecordFlipComplete() {
   const uint64_t now = LibFlutterEngine->GetCurrentTime();
 
   if (flip_submit_ns_ != 0) {
-    const double latency_ms =
-        static_cast<double>(now - flip_submit_ns_) / 1e6;
+    const double latency_ms = static_cast<double>(now - flip_submit_ns_) / 1e6;
     SPDLOG_DEBUG("[DrmBackend] flip latency: {:.2f} ms", latency_ms);
     flip_submit_ns_ = 0;
   }
@@ -611,8 +618,8 @@ bool DrmBackend::Present() {
   if (cfg_.debug_backend) {
     flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
-  if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb, DRM_MODE_PAGE_FLIP_EVENT,
-                      this) != 0) {
+  if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
+                      DRM_MODE_PAGE_FLIP_EVENT, this) != 0) {
     spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
     drmModeRmFB(drm_dev_->fd(), next_fb);
     gbm_surface_release_buffer(gbm_surface_, next_bo);
@@ -703,8 +710,7 @@ void DrmBackend::RegisterCompositorSurface(
   }
 }
 
-void DrmBackend::UnregisterCompositorSurface(
-    FlutterPlatformViewIdentifier id) {
+void DrmBackend::UnregisterCompositorSurface(FlutterPlatformViewIdentifier id) {
   if (compositor_) {
     compositor_->UnregisterSurface(id);
   }
