@@ -113,14 +113,26 @@ jobs:
           ninja -C ${{github.workspace}}/build
 
       - name: Load vkms
+        id: vkms
         run: |
-          sudo modprobe vkms
-          # Verify the module loaded and a card appeared.
-          lsmod | grep vkms
-          ls /sys/class/drm/card*-Virtual-* 2>/dev/null \
-            || (echo "vkms loaded but no Virtual connector found" && exit 1)
+          # The Azure CI kernel often strips vkms. Try loading it; if
+          # unavailable, install linux-modules-extra as a fallback.
+          if ! sudo modprobe vkms 2>/dev/null; then
+            echo "vkms not in $(uname -r); trying linux-modules-extra"
+            sudo apt-get -y install "linux-modules-extra-$(uname -r)" || true
+            sudo modprobe vkms 2>/dev/null || true
+          fi
+          if lsmod | grep -q vkms; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            ls /sys/class/drm/card*-Virtual-* 2>/dev/null \
+              || (echo "vkms loaded but no Virtual connector" && exit 1)
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::vkms module unavailable on $(uname -r); skipping smoke test"
+          fi
 
       - name: Harness pre-flight (--check)
+        if: steps.vkms.outputs.available == 'true'
         run: |
           test/drm_kms_vkms.sh --check
 
@@ -129,6 +141,7 @@ jobs:
       # When a CI-ready bundle is available, uncomment the step below.
       #
       # - name: Full vkms smoke test
+      #   if: steps.vkms.outputs.available == 'true'
       #   env:
       #     HOMESCREEN: ${{github.workspace}}/build/shell/homescreen
       #     BUNDLE: /path/to/ci/bundle/.desktop-homescreen
