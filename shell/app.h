@@ -23,7 +23,7 @@
 #include "view/flutter_view.h"
 #include "watchdog.h"
 
-class Display;
+class IDisplay;
 
 class WaylandWindow;
 
@@ -50,7 +50,7 @@ class App final {
 #endif
 
  private:
-  std::shared_ptr<Display> m_wayland_display;
+  std::shared_ptr<IDisplay> m_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;
   std::unique_ptr<Watchdog> m_watch_dog;
 };

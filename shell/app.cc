@@ -19,18 +19,42 @@
 
 #include "config/common.h"
 
+#include "timer.h"
 #include "view/flutter_view.h"
+
 #include "wayland/display.h"
+#if BUILD_BACKEND_DRM_KMS_EGL
+#include "display/drm_display.h"
+#endif
 
 #if BUILD_BACKEND_HEADLESS_EGL
 #include "backend/headless/headless.h"
 #endif
 
+namespace {
+
+std::shared_ptr<IDisplay> MakeDisplay(
+    const std::vector<Configuration::Config>& configs) {
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // DRM/KMS does not have a compositor-level display concept. The refresh
+  // rate and mode are owned by the backend; the DrmDisplay stub answers
+  // queries the shell issues (metrics, cursor activation, event loop) with
+  // safe defaults. Backend-side hooks can refine the refresh rate later.
+  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
+  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
+                                      static_cast<int32_t>(h), 60.0);
+#else
+  return std::make_shared<Display>(!configs[0].disable_cursor,
+                                   configs[0].wayland_event_mask,
+                                   configs[0].cursor_theme, configs);
+#endif
+}
+
+}  // namespace
+
 App::App(const std::vector<Configuration::Config>& configs)
-    : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
-                                                  configs[0].wayland_event_mask,
-                                                  configs[0].cursor_theme,
-                                                  configs)) {
+    : m_display(MakeDisplay(configs)) {
   SPDLOG_DEBUG("+App::App");
 #if ENABLE_AGL_SHELL_CLIENT
   bool found_view_with_bg = false;
@@ -39,7 +63,7 @@ App::App(const std::vector<Configuration::Config>& configs)
   size_t index = 0;
   m_views.reserve(configs.size());
   for (auto const& cfg : configs) {
-    auto view = std::make_unique<FlutterView>(cfg, index, m_wayland_display);
+    auto view = std::make_unique<FlutterView>(cfg, index, m_display);
     view->Initialize();
     m_views.emplace_back(std::move(view));
     index++;
@@ -56,20 +80,20 @@ App::App(const std::vector<Configuration::Config>& configs)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
-    m_wayland_display->AglShellDoReady();
+    static_cast<Display*>(m_display.get())->AglShellDoReady();
 #endif
 
 #if BUILD_WATCHDOG
   m_watch_dog = std::make_unique<Watchdog>();
 #endif
 
-  m_wayland_display->StartEvents();
+  m_display->StartEvents();
 
   SPDLOG_DEBUG("-App::App");
 }
 
 App::~App() {
-  m_wayland_display->StopEvents();
+  m_display->StopEvents();
 }
 
 int App::Loop() const {
@@ -82,7 +106,7 @@ int App::Loop() const {
     view->RunTasks();
   }
 
-  if (m_wayland_display->m_repeat_timer)
+  if (m_display->HasRepeatTimer())
     EventTimer::wait_event();
 
   const auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -91,7 +115,7 @@ int App::Loop() const {
 
   const auto elapsed = end_time - start_time;
 
-  const auto frame_time = 1000.0 / m_wayland_display->GetMaxRefreshRate();
+  const auto frame_time = 1000.0 / m_display->GetMaxRefreshRate();
   if (const auto sleep_time = frame_time - static_cast<double>(elapsed);
       sleep_time > 0) {
 #if BUILD_WATCHDOG

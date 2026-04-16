@@ -44,16 +44,18 @@
 extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
+#if !BUILD_BACKEND_DRM_KMS_EGL
 #include "wayland/display.h"
 #include "wayland/window.h"
+#endif
 
 extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                                    FlutterView* view);
 
 FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
-                         const std::shared_ptr<Display>& display)
-    : m_wayland_display(display), m_config(std::move(config)), m_index(index) {
+                         const std::shared_ptr<IDisplay>& display)
+    : m_display(display), m_config(std::move(config)), m_index(index) {
 #if BUILD_BACKEND_HEADLESS_EGL
   m_backend = std::make_shared<HeadlessBackend>(
       m_config.view.width.value_or(kDefaultViewWidth),
@@ -61,28 +63,37 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.debug_backend.value_or(false), kEglBufferSize);
 #elif BUILD_BACKEND_DRM_KMS_EGL
   m_backend = DrmBackend::Create(
-    {m_config.view.drm_device.value_or("/dev/dri/card0"),
-                m_config.view.width.value_or(kDefaultViewWidth),
-                m_config.view.height.value_or(kDefaultViewHeight)});
+      {m_config.view.drm_device.value_or("/dev/dri/card0"),
+       m_config.view.width.value_or(kDefaultViewWidth),
+       m_config.view.height.value_or(kDefaultViewHeight)});
 #elif BUILD_BACKEND_WAYLAND_EGL
-  m_backend = std::make_shared<WaylandEglBackend>(
-      display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewHeight),
-      m_config.debug_backend.value_or(false), kEglBufferSize);
+  {
+    auto* wl = static_cast<Display*>(display.get());
+    m_backend = std::make_shared<WaylandEglBackend>(
+        wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+        m_config.view.height.value_or(kDefaultViewHeight),
+        m_config.debug_backend.value_or(false), kEglBufferSize);
+  }
 #elif BUILD_BACKEND_WAYLAND_VULKAN
-  m_backend = std::make_shared<WaylandVulkanBackend>(
-      display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewHeight),
-      m_config.debug_backend.value_or(false));
+  {
+    auto* wl = static_cast<Display*>(display.get());
+    m_backend = std::make_shared<WaylandVulkanBackend>(
+        wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+        m_config.view.height.value_or(kDefaultViewHeight),
+        m_config.debug_backend.value_or(false));
+  }
 #endif
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
                m_config.view.width.value_or(kDefaultViewWidth),
                m_config.view.height.value_or(kDefaultViewWidth));
 
+#if !BUILD_BACKEND_DRM_KMS_EGL
+  auto* wl = static_cast<Display*>(display.get());
   m_wayland_window = std::make_shared<WaylandWindow>(
-      m_index, display, m_config.view.window_type,
-      m_wayland_display->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
+      m_index, std::static_pointer_cast<Display>(display),
+      m_config.view.window_type,
+      wl->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
       m_config.view.wl_output_index.value_or(0), m_config.app_id,
       m_config.view.fullscreen.value_or(false),
       m_config.view.width.value_or(kDefaultViewWidth),
@@ -91,6 +102,7 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_config.view.activation_area_width, m_config.view.activation_area_height,
       m_backend.get(), m_config.view.ivi_surface_id.value_or(0));
+#endif
 
   m_state = std::make_unique<FlutterDesktopViewControllerState>();
   m_state->view = this;
@@ -114,8 +126,7 @@ FlutterView::FlutterView(Configuration::Config config,
       std::make_unique<flutter::KeyEventHandler>(internal_plugin_messenger));
   m_state->keyboard_hook_handlers.push_back(
       std::make_unique<flutter::TextInputPlugin>(internal_plugin_messenger));
-  m_wayland_display->SetViewControllerState(
-      m_state->engine_state->view_controller);
+  m_display->SetViewControllerState(m_state->engine_state->view_controller);
 
 #if ENABLE_PLUGINS
   PluginsApiRegisterPlugins(m_state->engine_state.get());
@@ -123,6 +134,12 @@ FlutterView::FlutterView(Configuration::Config config,
 }
 
 FlutterView::~FlutterView() = default;
+
+#if !BUILD_BACKEND_DRM_KMS_EGL
+Display* FlutterView::GetDisplay() const {
+  return static_cast<Display*>(m_display.get());
+}
+#endif
 
 void FlutterView::Initialize() {
   std::vector<const char*> m_command_line_args_c;
@@ -155,8 +172,13 @@ void FlutterView::Initialize() {
   display.display_id = 1;
   display.single_display = true;
   display.refresh_rate =
-      m_wayland_display->GetRefreshRate(static_cast<uint32_t>(m_index));
+      m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
+#if BUILD_BACKEND_DRM_KMS_EGL
+  auto [width, height] =
+      m_display->GetVideoModeSize(static_cast<uint32_t>(m_index));
+#else
   auto [width, height] = m_wayland_window->GetSize();
+#endif
   display.width = static_cast<size_t>(width);
   display.height = static_cast<size_t>(height);
   display.device_pixel_ratio = m_flutter_engine->GetPixelRatio();
@@ -172,10 +194,12 @@ void FlutterView::Initialize() {
   // update view
   m_state->view = m_state->view_wrapper->view = this;
 
+#if !BUILD_BACKEND_DRM_KMS_EGL
   // Engine events are decoded by surface pointer
-  m_wayland_display->SetEngine(m_wayland_window->GetBaseSurface(),
-                               m_flutter_engine.get());
+  static_cast<Display*>(m_display.get())
+      ->SetEngine(m_wayland_window->GetBaseSurface(), m_flutter_engine.get());
   m_wayland_window->SetEngine(m_flutter_engine);
+#endif
 
   SPDLOG_DEBUG("({}) Engine running...", m_index);
 }
@@ -211,8 +235,9 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
-      index, m_wayland_display, m_wayland_window, h_module, assets_path,
-      cache_folder, misc_folder, type, z_order, sync, width, height, x, y);
+      index, std::static_pointer_cast<Display>(m_display), m_wayland_window,
+      h_module, assets_path, cache_folder, misc_folder, type, z_order, sync,
+      width, height, x, y);
 
   m_comp_surf[index]->InitializePlugin();
 
@@ -254,7 +279,7 @@ void FlutterView::ClearRegion(const std::string& type) const {
 void FlutterView::SetRegion(
     const std::string& type,
     const std::vector<CompositorRegionPlugin::REGION_T>& regions) const {
-  const auto compositor = m_wayland_display->GetCompositor();
+  const auto compositor = static_cast<Display*>(m_display.get())->GetCompositor();
   const auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {

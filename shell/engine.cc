@@ -552,6 +552,9 @@ FlutterEngineAOTData Engine::LoadAotData(const std::string& bundle_path) const {
 
 bool Engine::ActivateSystemCursor(const int32_t device,
                                   const std::string& kind) const {
+  if (!m_egl_window) {
+    return true;
+  }
   return m_egl_window->ActivateSystemCursor(device, kind);
 }
 
