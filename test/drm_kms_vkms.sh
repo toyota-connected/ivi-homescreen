@@ -118,7 +118,9 @@ ensure_vkms_loaded() {
 
 ensure_bundle_copy() {
     local dst="$1"
-    cp -r "$BUNDLE"/. "$dst/"
+    # -L dereferences symlinks so relative symlinks (e.g., flutter_assets
+    # → ../../build/flutter_assets) resolve to real files in the copy.
+    cp -rL "$BUNDLE"/. "$dst/"
     [[ -f "$dst/config.toml" ]] || die "bundle has no config.toml"
 }
 
