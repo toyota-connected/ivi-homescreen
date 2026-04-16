@@ -65,7 +65,8 @@ FlutterView::FlutterView(Configuration::Config config,
   m_backend = DrmBackend::Create(
       {m_config.view.drm_device.value_or("/dev/dri/card0"),
        m_config.view.width.value_or(kDefaultViewWidth),
-       m_config.view.height.value_or(kDefaultViewHeight)});
+       m_config.view.height.value_or(kDefaultViewHeight),
+       m_config.debug_backend.value_or(false)});
 #elif BUILD_BACKEND_WAYLAND_EGL
   {
     auto* wl = static_cast<Display*>(display.get());
