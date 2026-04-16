@@ -19,11 +19,15 @@
 #include <memory>
 #include <string>
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <gbm.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
-
-class DrmCompositor;
 
 struct DrmConfig {
   std::string drm_device;
@@ -39,27 +43,54 @@ class DrmBackend : public Backend {
   DrmBackend(const DrmBackend&) = delete;
   DrmBackend& operator=(const DrmBackend&) = delete;
 
+  void Resize(size_t index, Engine* engine, int32_t w, int32_t h) override;
+  void CreateSurface(size_t, struct wl_surface*, int32_t, int32_t) override {}
+  bool TextureMakeCurrent() override;
+  bool TextureClearCurrent() override;
+  FlutterRendererConfig GetRenderConfig() override;
+  FlutterCompositor GetCompositorConfig() override;
+  bool GetEglContext(BackendEglContext* out) const override;
+
   bool MakeCurrent();
   bool ClearCurrent();
+  bool MakeResourceCurrent();
   bool Present();
-  uint32_t FboCallback(const FlutterFrameInfo* info);
-  void* ProcResolver(const char* name);
 
-  FlutterCompositor MakeCompositor();
-
-  [[nodiscard]] uint32_t width() const { return cfg_.width; }
-  [[nodiscard]] uint32_t height() const { return cfg_.height; }
-
-  void Resize(size_t /* index */, Engine* /* engine */, int32_t /* w */, int32_t /* h */) override {};
-  void CreateSurface(size_t, struct wl_surface*, int32_t, int32_t) override {}
-  bool TextureMakeCurrent() override { return false; }
-  bool TextureClearCurrent() override { return false; }
-  FlutterRendererConfig GetRenderConfig() override { return {}; }
-  FlutterCompositor GetCompositorConfig() override { return {}; }
-  bool GetEglContext(BackendEglContext* /* out */) const override { return false; }
+  [[nodiscard]] uint32_t width() const { return mode_.hdisplay; }
+  [[nodiscard]] uint32_t height() const { return mode_.vdisplay; }
+  [[nodiscard]] EGLDisplay egl_display() const { return egl_display_; }
 
  private:
-  explicit DrmBackend(DrmConfig  cfg);
+  explicit DrmBackend(DrmConfig cfg);
+  bool InitDrm();
+  bool InitGbm();
+  bool InitEgl();
+  bool SetInitialMode();
+  uint32_t AddFb(gbm_bo* bo);
 
   DrmConfig cfg_;
+
+  // DRM
+  int drm_fd_ = -1;
+  uint32_t connector_id_ = 0;
+  uint32_t crtc_id_ = 0;
+  uint32_t crtc_index_ = 0;
+  drmModeModeInfo mode_{};
+  drmModeCrtc* saved_crtc_ = nullptr;
+
+  // GBM
+  gbm_device* gbm_device_ = nullptr;
+  gbm_surface* gbm_surface_ = nullptr;
+  gbm_bo* current_bo_ = nullptr;
+  uint32_t current_fb_ = 0;
+
+  // EGL
+  EGLDisplay egl_display_ = EGL_NO_DISPLAY;
+  EGLConfig egl_config_ = nullptr;
+  EGLContext egl_context_ = EGL_NO_CONTEXT;
+  EGLContext egl_resource_context_ = EGL_NO_CONTEXT;
+  EGLContext egl_texture_context_ = EGL_NO_CONTEXT;
+  EGLSurface egl_surface_ = EGL_NO_SURFACE;
+
+  bool mode_set_ = false;
 };

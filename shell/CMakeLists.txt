@@ -76,6 +76,7 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_egl/drm_backend.cc
             backend/drm_kms_egl/drm_compositor.cc
+            backend/gl_process_resolver.cc
             input/drm_seat.cc
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE
