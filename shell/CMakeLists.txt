@@ -81,10 +81,10 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             input/drm_seat.cc
     )
     if (BUILD_COMPOSITOR)
-        # The GL compositor helpers live under wayland_egl/ but are
-        # backend-agnostic. Share the TUs rather than forking copies.
+        # gl_caps and gl_compositor live under wayland_egl/ but are
+        # backend-agnostic GL helpers. Share the TUs rather than forking.
+        # egl_backing_store is NOT needed — the DRM path uses GbmBackingStore.
         target_sources(${PROJECT_NAME} PRIVATE
-                backend/wayland_egl/egl_backing_store.cc
                 backend/wayland_egl/gl_caps.cc
                 backend/wayland_egl/gl_compositor.cc
         )
