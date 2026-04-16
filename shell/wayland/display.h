@@ -254,8 +254,9 @@ class Display : public IDisplay {
    * @relation
    * wayland
    */
-  [[nodiscard]] bool ActivateSystemCursor(int32_t device,
-                                          const std::string& kind) const override;
+  [[nodiscard]] bool ActivateSystemCursor(
+      int32_t device,
+      const std::string& kind) const override;
 
   /**
    * @brief Get wl_output of a specified index of a view

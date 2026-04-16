@@ -92,7 +92,9 @@ class DrmCompositor {
   bool InitCompositionBuffers();
   void EnsureGlCapsProbed();
   void DestroyGbmStore(GbmBackingStore& store);
-  bool CreateGbmStore(GbmBackingStore& store, uint32_t w, uint32_t h,
+  bool CreateGbmStore(GbmBackingStore& store,
+                      uint32_t w,
+                      uint32_t h,
                       uint32_t format);
   uint32_t ImportBoAsFb(gbm_bo* bo);
 

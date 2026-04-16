@@ -22,9 +22,9 @@
 #include <cstring>
 #include <utility>
 
-#include <drm-cxx/modeset/atomic.hpp>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include <drm-cxx/modeset/atomic.hpp>
 
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "libflutter_engine.h"
@@ -89,7 +89,7 @@ bool DrmCompositor::InitPlaneAllocator() {
                available.size(), backend_->crtc_id());
 
   allocator_ = std::make_unique<drm::planes::Allocator>(backend_->device(),
-                                                         *plane_registry_);
+                                                        *plane_registry_);
   return true;
 }
 
@@ -126,8 +126,10 @@ void DrmCompositor::EnsureGlCapsProbed() {
 
 // ─── GBM store create / destroy ──────────────────────────────────────────
 
-bool DrmCompositor::CreateGbmStore(GbmBackingStore& store, uint32_t w,
-                                   uint32_t h, uint32_t format) {
+bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
+                                   uint32_t w,
+                                   uint32_t h,
+                                   uint32_t format) {
   store.width = w;
   store.height = h;
   store.bo = gbm_bo_create(backend_->gbm(), w, h, format,
@@ -201,8 +203,8 @@ uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) {
   uint32_t pitches[4] = {gbm_bo_get_stride(bo), 0, 0, 0};
   uint32_t offsets[4] = {0, 0, 0, 0};
   uint32_t fb_id = 0;
-  if (drmModeAddFB2(backend_->drm_fd(), w, h, format, handles, pitches,
-                    offsets, &fb_id, 0) != 0) {
+  if (drmModeAddFB2(backend_->drm_fd(), w, h, format, handles, pitches, offsets,
+                    &fb_id, 0) != 0) {
     spdlog::error("[DrmCompositor] drmModeAddFB2: {}", std::strerror(errno));
     return 0;
   }
@@ -238,7 +240,8 @@ void DrmCompositor::DestroyGbmStore(GbmBackingStore& s) {
 
 // ─── Page-flip synchronisation ───────────────────────────────────────────
 
-void DrmCompositor::PageFlipHandler(int /*fd*/, unsigned int /*seq*/,
+void DrmCompositor::PageFlipHandler(int /*fd*/,
+                                    unsigned int /*seq*/,
                                     unsigned int /*tv_sec*/,
                                     unsigned int /*tv_usec*/,
                                     void* user_data) {
@@ -276,10 +279,14 @@ bool DrmCompositor::WaitForPendingFlip() {
 
 // ─── GL compositing helpers ──────────────────────────────────────────────
 
-void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo, GLuint src_tex,
-                                          GLsizei src_w, GLsizei src_h,
-                                          GLint dst_x, GLint dst_y,
-                                          GLsizei dst_w, GLsizei dst_h,
+void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
+                                          GLuint src_tex,
+                                          GLsizei src_w,
+                                          GLsizei src_h,
+                                          GLint dst_x,
+                                          GLint dst_y,
+                                          GLsizei dst_w,
+                                          GLsizei dst_h,
                                           bool blend) {
   glBindFramebuffer(GL_FRAMEBUFFER, target_fbo);
   gl_compositor_->CompositeToDefault(0, src_tex, src_w, src_h, dst_x, dst_y,
@@ -366,8 +373,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
   // Deliver the vsync baton now that the flip landed.
   {
-    const intptr_t baton = backend_->vsync_baton_.exchange(
-        0, std::memory_order_acq_rel);
+    const intptr_t baton =
+        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       auto engine = backend_->vsync_engine_.load(std::memory_order_relaxed);
       if (engine) {
@@ -413,8 +420,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     }
 
     if (store && store->drm_fb_id != 0) {
-      drm_layer
-          .set_property("FB_ID", store->drm_fb_id)
+      drm_layer.set_property("FB_ID", store->drm_fb_id)
           .set_property("CRTC_ID", backend_->crtc_id())
           .set_property("CRTC_X", static_cast<uint64_t>(fl->offset.x))
           .set_property("CRTC_Y", static_cast<uint64_t>(fl->offset.y))
@@ -422,10 +428,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
           .set_property("CRTC_H", static_cast<uint64_t>(fl->size.height))
           .set_property("SRC_X", 0)
           .set_property("SRC_Y", 0)
-          .set_property("SRC_W",
-                        static_cast<uint64_t>(store->width) << 16)
-          .set_property("SRC_H",
-                        static_cast<uint64_t>(store->height) << 16)
+          .set_property("SRC_W", static_cast<uint64_t>(store->width) << 16)
+          .set_property("SRC_H", static_cast<uint64_t>(store->height) << 16)
           .set_property("zpos", static_cast<uint64_t>(i));
     } else {
       // Platform view or store without a KMS FB — must be composited.
@@ -437,8 +441,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
   // Composition layer covers the full display on the primary plane.
   auto& comp = comp_bufs_[comp_idx_];
-  comp_layer_
-      .set_property("FB_ID", comp.drm_fb_id)
+  comp_layer_.set_property("FB_ID", comp.drm_fb_id)
       .set_property("CRTC_ID", backend_->crtc_id())
       .set_property("CRTC_X", 0)
       .set_property("CRTC_Y", 0)
@@ -481,8 +484,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     const bool blend = any_composited;
     if (fl.store) {
       CompositeLayerIntoFbo(
-          comp.fbo, fl.store->color_tex,
-          static_cast<GLsizei>(fl.store->width),
+          comp.fbo, fl.store->color_tex, static_cast<GLsizei>(fl.store->width),
           static_cast<GLsizei>(fl.store->height),
           static_cast<GLint>(fl.flutter->offset.x),
           static_cast<GLint>(fl.flutter->offset.y),
@@ -502,13 +504,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       if (surface_sp) {
         surface_sp->OnPresent(fl.flutter);
         if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
-          CompositeLayerIntoFbo(
-              comp.fbo, tex, surface_sp->GetGlTextureWidth(),
-              surface_sp->GetGlTextureHeight(),
-              static_cast<GLint>(fl.flutter->offset.x),
-              static_cast<GLint>(fl.flutter->offset.y),
-              static_cast<GLsizei>(fl.flutter->size.width),
-              static_cast<GLsizei>(fl.flutter->size.height), blend);
+          CompositeLayerIntoFbo(comp.fbo, tex, surface_sp->GetGlTextureWidth(),
+                                surface_sp->GetGlTextureHeight(),
+                                static_cast<GLint>(fl.flutter->offset.x),
+                                static_cast<GLint>(fl.flutter->offset.y),
+                                static_cast<GLsizei>(fl.flutter->size.width),
+                                static_cast<GLsizei>(fl.flutter->size.height),
+                                blend);
           any_composited = true;
         }
       }
@@ -521,10 +523,10 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // ── Atomic commit ──
 
   drm::AtomicRequest commit_req(backend_->device());
-  auto commit_result = allocator_->apply(
-      output, commit_req,
-      DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK |
-          DRM_MODE_ATOMIC_ALLOW_MODESET);
+  auto commit_result =
+      allocator_->apply(output, commit_req,
+                        DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK |
+                            DRM_MODE_ATOMIC_ALLOW_MODESET);
   if (!commit_result) {
     spdlog::warn("[DrmCompositor] atomic commit: {}; falling back to GL",
                  commit_result.error().message());
@@ -534,10 +536,10 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   if (backend_->cfg_.debug_backend) {
     backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
-  auto commit_ok = commit_req.commit(
-      DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK |
-          DRM_MODE_ATOMIC_ALLOW_MODESET,
-      this);
+  auto commit_ok =
+      commit_req.commit(DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK |
+                            DRM_MODE_ATOMIC_ALLOW_MODESET,
+                        this);
   if (!commit_ok) {
     spdlog::warn("[DrmCompositor] commit: {}", commit_ok.error().message());
     return PresentViaGlFallback(layers, layer_count);
@@ -609,8 +611,8 @@ void DrmCompositor::UnregisterSurface(FlutterPlatformViewIdentifier id) {
 }
 
 void DrmCompositor::ResizeSurface(FlutterPlatformViewIdentifier id,
-                                   int32_t width,
-                                   int32_t height) {
+                                  int32_t width,
+                                  int32_t height) {
   std::shared_ptr<ICompositorSurface> surface_sp;
   {
     std::lock_guard<std::mutex> lock(surfaces_mu_);

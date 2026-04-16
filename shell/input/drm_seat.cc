@@ -191,10 +191,10 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
     return;
   }
 
-  pointer_x_ = std::clamp(pointer_x_ + ev.dx, 0.0,
-                          static_cast<double>(viewport_w_ - 1));
-  pointer_y_ = std::clamp(pointer_y_ + ev.dy, 0.0,
-                          static_cast<double>(viewport_h_ - 1));
+  pointer_x_ =
+      std::clamp(pointer_x_ + ev.dx, 0.0, static_cast<double>(viewport_w_ - 1));
+  pointer_y_ =
+      std::clamp(pointer_y_ + ev.dy, 0.0, static_cast<double>(viewport_h_ - 1));
 
   FlutterPointerEvent pe[2];
   size_t count = 0;
