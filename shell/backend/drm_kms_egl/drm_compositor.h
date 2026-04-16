@@ -21,29 +21,44 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <gbm.h>
 
 #include <shell/platform/embedder/embedder.h>
 
-#include "backend/wayland_egl/egl_backing_store.h"
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 
 class DrmBackend;
 class ICompositorSurface;
 
+// GBM-backed backing store. Flutter renders into the GL FBO; the BO can
+// be scanned out directly on a KMS plane via drm_fb_id, or composited
+// into a composition buffer via GL when hardware planes are exhausted.
+struct GbmBackingStore {
+  gbm_bo* bo = nullptr;
+  EGLImageKHR egl_image = EGL_NO_IMAGE_KHR;
+  GLuint fbo = 0;
+  GLuint color_tex = 0;        // GL_TEXTURE_2D backed by the EGL image
+  GLuint depth_stencil_rb = 0;
+  uint32_t drm_fb_id = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+};
+
 // FlutterCompositor callbacks for the DRM/KMS backend.
 //
-// Each Flutter-rendered layer is a DIY FBO (EglFboBackingStore); on
-// PresentLayers the compositor clears the default framebuffer, composites
-// every layer (backing store or registered platform-view texture) in
-// engine order, then hands off to DrmBackend::Present which performs the
-// eglSwapBuffers / gbm_surface_lock / drmModePageFlip sequence.
+// Each Flutter-rendered layer is a GBM BO wrapped in an EGL image + GL FBO.
+// The BO is simultaneously scanout-capable (KMS framebuffer) and renderable
+// (GL FBO via EGLImageTargetTexture2DOES).
 //
-// This implementation composites everything into the primary framebuffer;
-// DRM overlay planes are not used. Swapping each layer onto its own KMS
-// plane via drm-cxx's Allocator is a follow-up optimisation that does not
-// change the FlutterCompositor contract.
+// PresentLayers currently composites all layers into the primary framebuffer
+// via GL, then hands off to DrmBackend::Present for the page flip. The
+// plane-allocator path (step 3) will replace this with direct per-layer
+// plane assignment for layers the hardware can scan out.
 class DrmCompositor {
  public:
   explicit DrmCompositor(DrmBackend* backend);
@@ -57,10 +72,6 @@ class DrmCompositor {
   bool CollectBackingStore(const FlutterBackingStore* store);
   bool PresentLayers(const FlutterLayer** layers, size_t layer_count);
 
-  // Platform-view surface registry. Register/Unregister fire on the
-  // platform thread via FlutterView; PresentLayers reads on the rasterizer
-  // thread. surfaces_mu_ covers only the map — the mutex is never held
-  // across OnPresent().
   void RegisterSurface(FlutterPlatformViewIdentifier id,
                        std::shared_ptr<ICompositorSurface> surface);
   void UnregisterSurface(FlutterPlatformViewIdentifier id);
@@ -71,11 +82,15 @@ class DrmCompositor {
  private:
   struct StoreBaton {
     DrmCompositor* owner;
-    EglFboBackingStore* store;
+    GbmBackingStore* store;
   };
 
+  bool InitEglExtensions();
   void EnsureGlCapsProbed();
-  void CompositeBackingStore(const FlutterBackingStore* store,
+  void DestroyGbmStore(GbmBackingStore& store);
+  uint32_t ImportBoAsFb(gbm_bo* bo);
+
+  void CompositeBackingStore(const GbmBackingStore* store,
                              GLint dst_x,
                              GLint dst_y,
                              GLsizei dst_w,
@@ -83,26 +98,23 @@ class DrmCompositor {
                              bool blend);
   void CompositePlatformView(const FlutterLayer* layer, bool blend);
 
-  DrmBackend* backend_;  // not owned
+  DrmBackend* backend_;
 
-  // GL helpers are lazy-initialised on the rasterizer thread with the
-  // engine's context current (first CreateBackingStore / PresentLayers).
+  // EGL image extension pointers (resolved once).
+  PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ = nullptr;
+  PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ = nullptr;
+  PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES_ = nullptr;
+
   GlCaps gl_caps_{};
   bool gl_caps_probed_{false};
   std::unique_ptr<GlCompositor> gl_compositor_;
 
-  // Live backing stores keyed on the StoreBaton pointer we hand to the
-  // engine. CreateBackingStore / CollectBackingStore are both on the
-  // rasterizer thread, so no lock is needed here.
-  std::unordered_map<StoreBaton*, std::unique_ptr<EglFboBackingStore>> stores_;
+  std::unordered_map<StoreBaton*, std::unique_ptr<GbmBackingStore>> stores_;
 
   mutable std::mutex surfaces_mu_;
   std::unordered_map<FlutterPlatformViewIdentifier,
                      std::shared_ptr<ICompositorSurface>>
       surfaces_;
 
-  // Scratch FBO for compositing a platform-view texture via
-  // glBlitFramebuffer when the opaque fast path is available. Lazily
-  // created; lifetime tied to this object's GL context.
   GLuint texture_blit_fbo_{0};
 };
