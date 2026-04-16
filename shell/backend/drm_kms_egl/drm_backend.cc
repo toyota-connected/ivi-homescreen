@@ -477,6 +477,32 @@ bool DrmBackend::TextureClearCurrent() {
                         EGL_NO_CONTEXT) == EGL_TRUE;
 }
 
+void DrmBackend::RecordFlipComplete() {
+  if (!cfg_.debug_backend) {
+    return;
+  }
+  const uint64_t now = LibFlutterEngine->GetCurrentTime();
+
+  if (flip_submit_ns_ != 0) {
+    const double latency_ms =
+        static_cast<double>(now - flip_submit_ns_) / 1e6;
+    SPDLOG_DEBUG("[DrmBackend] flip latency: {:.2f} ms", latency_ms);
+    flip_submit_ns_ = 0;
+  }
+
+  ++frame_count_;
+  if (fps_epoch_ns_ == 0) {
+    fps_epoch_ns_ = now;
+  }
+  const double elapsed_s = static_cast<double>(now - fps_epoch_ns_) / 1e9;
+  if (elapsed_s >= 1.0) {
+    spdlog::info("[DrmBackend] FPS: {:.1f} ({} frames / {:.2f}s)",
+                 frame_count_ / elapsed_s, frame_count_, elapsed_s);
+    frame_count_ = 0;
+    fps_epoch_ns_ = now;
+  }
+}
+
 void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                                intptr_t baton) {
   vsync_engine_.store(engine, std::memory_order_relaxed);
@@ -502,6 +528,7 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
   self->pending_bo_ = nullptr;
   self->pending_fb_ = 0;
   self->flip_pending_ = false;
+  self->RecordFlipComplete();
 
   // Return the vsync baton to the engine if one is pending. This tells
   // Flutter's scheduler "the display just vblanked — start the next
@@ -581,6 +608,9 @@ bool DrmBackend::Present() {
     return SetInitialMode();
   }
 
+  if (cfg_.debug_backend) {
+    flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
+  }
   if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb, DRM_MODE_PAGE_FLIP_EVENT,
                       this) != 0) {
     spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
