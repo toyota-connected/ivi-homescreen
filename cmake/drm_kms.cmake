@@ -31,4 +31,16 @@ set(DRM_CXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(DRM_CXX_INSTALL        OFF CACHE BOOL "" FORCE)
 set(DRM_CXX_VULKAN         OFF CACHE BOOL "" FORCE)
 
+# CMP0079 NEW lets us attach link libraries to a target created in a
+# different directory (drm-cxx's own CMakeLists, processed below).
+cmake_policy(SET CMP0079 NEW)
+
 add_subdirectory(${_drm_cxx_src} ${CMAKE_BINARY_DIR}/third_party/drm-cxx EXCLUDE_FROM_ALL)
+
+# drm-cxx is built as a sub-project and doesn't automatically inherit the
+# `toolchain` INTERFACE library that applies `-stdlib=libc++` on clang
+# builds. Without this, drm-cxx compiles against libstdc++ and the main
+# ivi-homescreen binary (libc++) fails to link its STL symbols.
+if (TARGET toolchain)
+    target_link_libraries(drm-cxx PRIVATE toolchain::toolchain)
+endif ()

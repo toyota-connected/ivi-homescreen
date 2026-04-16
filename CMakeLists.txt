@@ -43,7 +43,6 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
                 "BUILD_BACKEND_DRM_KMS_EGL is mutually exclusive with "
                 "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN")
     endif ()
-    include(drm_kms)
 endif ()
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
@@ -52,6 +51,14 @@ message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
+
+# drm_kms.cmake must run after compiler.cmake so the `toolchain` INTERFACE
+# library (which carries -stdlib=libc++ on clang builds) exists when we
+# add_subdirectory(drm-cxx). Otherwise drm-cxx compiles against libstdc++
+# and link fails with mixed ABI symbols.
+if (BUILD_BACKEND_DRM_KMS_EGL)
+    include(drm_kms)
+endif ()
 
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 

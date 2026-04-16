@@ -16,5 +16,32 @@
 
 #include "display/drm_display.h"
 
+#include "input/drm_seat.h"
+
 DrmDisplay::DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz)
-    : width_(width), height_(height), refresh_rate_hz_(refresh_rate_hz) {}
+    : width_(width),
+      height_(height),
+      refresh_rate_hz_(refresh_rate_hz),
+      seat_(std::make_unique<homescreen::DrmSeat>(width, height)) {}
+
+DrmDisplay::~DrmDisplay() = default;
+
+void DrmDisplay::StartEvents() {
+  if (seat_) {
+    seat_->Start();
+  }
+}
+
+void DrmDisplay::StopEvents() {
+  if (seat_) {
+    seat_->Stop();
+  }
+}
+
+void DrmDisplay::SetViewControllerState(
+    FlutterDesktopViewControllerState* state) {
+  view_controller_state_ = state;
+  if (seat_) {
+    seat_->SetViewControllerState(state);
+  }
+}

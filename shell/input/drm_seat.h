@@ -16,20 +16,58 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <thread>
+
+#include <drm-cxx/input/seat.hpp>
+
 #include <shell/platform/embedder/embedder.h>
+
+#include "input/iseat.h"
 
 namespace homescreen {
 
-class DrmSeat {
+// libinput-backed seat. Pumps drm::input::Seat events on a dedicated thread
+// and translates them into FlutterPointerEvent / FlutterKeyEvent. Events
+// received before the Flutter engine is up are dropped (the state pointer
+// resolves to a null engine handle in that window).
+class DrmSeat final : public ISeat {
  public:
-  DrmSeat();
-  ~DrmSeat();
+  DrmSeat(int32_t viewport_width, int32_t viewport_height);
+  ~DrmSeat() override;
 
-  DrmSeat(const DrmSeat&) = delete;
-  DrmSeat& operator=(const DrmSeat&) = delete;
+  bool Start() override;
+  void Stop() override;
+  void SetViewControllerState(
+      FlutterDesktopViewControllerState* state) override;
 
-  bool Start();
-  void Stop();
+ private:
+  void DispatchLoop();
+  void HandleEvent(const drm::input::InputEvent& ev);
+  void HandleKeyboard(const drm::input::KeyboardEvent& ev);
+  void HandlePointerMotion(const drm::input::PointerMotionEvent& ev);
+  void HandlePointerButton(const drm::input::PointerButtonEvent& ev);
+  void HandlePointerAxis(const drm::input::PointerAxisEvent& ev);
+  void HandleTouch(const drm::input::TouchEvent& ev);
+
+  [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) CurrentEngine() const;
+
+  const int32_t viewport_w_;
+  const int32_t viewport_h_;
+
+  std::atomic<FlutterDesktopViewControllerState*> state_{nullptr};
+
+  std::unique_ptr<drm::input::Seat> seat_;
+  std::thread thread_;
+  std::atomic<bool> stop_{false};
+
+  // Accessed only from the dispatch thread.
+  double pointer_x_ = 0.0;
+  double pointer_y_ = 0.0;
+  int64_t button_mask_ = 0;
+  bool pointer_added_ = false;
 };
 
 }  // namespace homescreen
