@@ -16,9 +16,7 @@
 
 #include "backend/drm_kms_egl/drm_backend.h"
 
-#include <fcntl.h>
 #include <poll.h>
-#include <unistd.h>
 
 #include <array>
 #include <cerrno>
@@ -111,21 +109,21 @@ DrmBackend::~DrmBackend() {
     eglTerminate(egl_display_);
   }
 
-  if (drm_fd_ >= 0 && saved_crtc_) {
-    drmModeSetCrtc(drm_fd_, saved_crtc_->crtc_id, saved_crtc_->buffer_id,
+  if (drm_dev_ && saved_crtc_) {
+    drmModeSetCrtc(drm_dev_->fd(), saved_crtc_->crtc_id, saved_crtc_->buffer_id,
                    saved_crtc_->x, saved_crtc_->y, &connector_id_, 1,
                    &saved_crtc_->mode);
     drmModeFreeCrtc(saved_crtc_);
   }
 
-  if (pending_fb_ != 0) {
-    drmModeRmFB(drm_fd_, pending_fb_);
+  if (drm_dev_ && pending_fb_ != 0) {
+    drmModeRmFB(drm_dev_->fd(), pending_fb_);
   }
   if (pending_bo_) {
     gbm_surface_release_buffer(gbm_surface_, pending_bo_);
   }
-  if (current_fb_ != 0) {
-    drmModeRmFB(drm_fd_, current_fb_);
+  if (drm_dev_ && current_fb_ != 0) {
+    drmModeRmFB(drm_dev_->fd(), current_fb_);
   }
   if (current_bo_) {
     gbm_surface_release_buffer(gbm_surface_, current_bo_);
@@ -136,27 +134,26 @@ DrmBackend::~DrmBackend() {
   if (gbm_device_) {
     gbm_device_destroy(gbm_device_);
   }
-  if (drm_fd_ >= 0) {
-    close(drm_fd_);
-  }
+  // drm_dev_ destructor closes the fd automatically.
 }
 
 bool DrmBackend::InitDrm() {
-  drm_fd_ = open(cfg_.drm_device.c_str(), O_RDWR | O_CLOEXEC);
-  if (drm_fd_ < 0) {
+  auto dev = drm::Device::open(cfg_.drm_device);
+  if (!dev) {
     spdlog::error("[DrmBackend] open({}): {}", cfg_.drm_device,
-                  std::strerror(errno));
+                  dev.error().message());
     return false;
   }
+  drm_dev_.emplace(std::move(*dev));
 
-  if (drmSetClientCap(drm_fd_, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0) {
+  if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0) {
     spdlog::warn("[DrmBackend] DRM_CLIENT_CAP_UNIVERSAL_PLANES unsupported");
   }
-  if (drmSetClientCap(drm_fd_, DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
+  if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
     spdlog::warn("[DrmBackend] DRM_CLIENT_CAP_ATOMIC unsupported");
   }
 
-  drmModeRes* res = drmModeGetResources(drm_fd_);
+  drmModeRes* res = drmModeGetResources(drm_dev_->fd());
   if (!res) {
     spdlog::error("[DrmBackend] drmModeGetResources failed: {}",
                   std::strerror(errno));
@@ -165,7 +162,7 @@ bool DrmBackend::InitDrm() {
 
   drmModeConnector* connector = nullptr;
   for (int i = 0; i < res->count_connectors; ++i) {
-    connector = drmModeGetConnector(drm_fd_, res->connectors[i]);
+    connector = drmModeGetConnector(drm_dev_->fd(), res->connectors[i]);
     if (connector && connector->connection == DRM_MODE_CONNECTED &&
         connector->count_modes > 0) {
       break;
@@ -197,14 +194,14 @@ bool DrmBackend::InitDrm() {
 
   drmModeEncoder* enc = nullptr;
   if (connector->encoder_id) {
-    enc = drmModeGetEncoder(drm_fd_, connector->encoder_id);
+    enc = drmModeGetEncoder(drm_dev_->fd(), connector->encoder_id);
   }
   if (enc && enc->crtc_id) {
     crtc_id_ = enc->crtc_id;
   } else {
     for (int e = 0; e < connector->count_encoders && !crtc_id_; ++e) {
       drmModeEncoder* candidate =
-          drmModeGetEncoder(drm_fd_, connector->encoders[e]);
+          drmModeGetEncoder(drm_dev_->fd(), connector->encoders[e]);
       if (!candidate) {
         continue;
       }
@@ -236,7 +233,7 @@ bool DrmBackend::InitDrm() {
     return false;
   }
 
-  saved_crtc_ = drmModeGetCrtc(drm_fd_, crtc_id_);
+  saved_crtc_ = drmModeGetCrtc(drm_dev_->fd(), crtc_id_);
 
   spdlog::info("[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz",
                connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay,
@@ -248,7 +245,7 @@ bool DrmBackend::InitDrm() {
 }
 
 bool DrmBackend::InitGbm() {
-  gbm_device_ = gbm_create_device(drm_fd_);
+  gbm_device_ = gbm_create_device(drm_dev_->fd());
   if (!gbm_device_) {
     spdlog::error("[DrmBackend] gbm_create_device failed");
     return false;
@@ -434,7 +431,7 @@ uint32_t DrmBackend::AddFb(gbm_bo* bo) {
   const uint32_t stride = gbm_bo_get_stride(bo);
   const uint32_t handle = gbm_bo_get_handle(bo).u32;
   uint32_t fb_id = 0;
-  if (drmModeAddFB(drm_fd_, width, height, 24, 32, stride, handle, &fb_id) !=
+  if (drmModeAddFB(drm_dev_->fd(), width, height, 24, 32, stride, handle, &fb_id) !=
       0) {
     spdlog::error("[DrmBackend] drmModeAddFB: {}", std::strerror(errno));
     return 0;
@@ -446,7 +443,7 @@ bool DrmBackend::SetInitialMode() {
   if (!current_bo_ || current_fb_ == 0) {
     return false;
   }
-  if (drmModeSetCrtc(drm_fd_, crtc_id_, current_fb_, 0, 0, &connector_id_, 1,
+  if (drmModeSetCrtc(drm_dev_->fd(), crtc_id_, current_fb_, 0, 0, &connector_id_, 1,
                      &mode_) != 0) {
     spdlog::error("[DrmBackend] drmModeSetCrtc: {}", std::strerror(errno));
     return false;
@@ -495,7 +492,7 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
   // The page flip just promoted pending → scanout. What was scanned out
   // before is now safe to release.
   if (self->current_fb_ != 0) {
-    drmModeRmFB(self->drm_fd_, self->current_fb_);
+    drmModeRmFB(self->drm_dev_->fd(), self->current_fb_);
   }
   if (self->current_bo_) {
     gbm_surface_release_buffer(self->gbm_surface_, self->current_bo_);
@@ -525,7 +522,7 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
 }
 
 bool DrmBackend::WaitForPendingFlip() {
-  if (!flip_pending_ || drm_fd_ < 0) {
+  if (!flip_pending_ || !drm_dev_) {
     return true;
   }
 
@@ -535,7 +532,7 @@ bool DrmBackend::WaitForPendingFlip() {
 
   while (flip_pending_) {
     pollfd pfd{};
-    pfd.fd = drm_fd_;
+    pfd.fd = drm_dev_->fd();
     pfd.events = POLLIN;
     const int r = poll(&pfd, 1, -1);
     if (r < 0) {
@@ -546,7 +543,7 @@ bool DrmBackend::WaitForPendingFlip() {
       return false;
     }
     if (pfd.revents & POLLIN) {
-      drmHandleEvent(drm_fd_, &ctx);
+      drmHandleEvent(drm_dev_->fd(), &ctx);
     }
   }
   return true;
@@ -584,10 +581,10 @@ bool DrmBackend::Present() {
     return SetInitialMode();
   }
 
-  if (drmModePageFlip(drm_fd_, crtc_id_, next_fb, DRM_MODE_PAGE_FLIP_EVENT,
+  if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb, DRM_MODE_PAGE_FLIP_EVENT,
                       this) != 0) {
     spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
-    drmModeRmFB(drm_fd_, next_fb);
+    drmModeRmFB(drm_dev_->fd(), next_fb);
     gbm_surface_release_buffer(gbm_surface_, next_bo);
     return false;
   }
