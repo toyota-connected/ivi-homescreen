@@ -69,7 +69,7 @@ FlutterView::FlutterView(Configuration::Config config,
        m_config.debug_backend.value_or(false)});
 #elif BUILD_BACKEND_WAYLAND_EGL
   {
-    auto* wl = static_cast<Display*>(display.get());
+    auto* wl = dynamic_cast<Display*>(display.get());
     m_backend = std::make_shared<WaylandEglBackend>(
         wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
         m_config.view.height.value_or(kDefaultViewHeight),
@@ -77,7 +77,7 @@ FlutterView::FlutterView(Configuration::Config config,
   }
 #elif BUILD_BACKEND_WAYLAND_VULKAN
   {
-    auto* wl = static_cast<Display*>(display.get());
+    auto* wl = dynamic_cast<Display*>(display.get());
     m_backend = std::make_shared<WaylandVulkanBackend>(
         wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
         m_config.view.height.value_or(kDefaultViewHeight),
@@ -90,9 +90,9 @@ FlutterView::FlutterView(Configuration::Config config,
                m_config.view.height.value_or(kDefaultViewWidth));
 
 #if !BUILD_BACKEND_DRM_KMS_EGL
-  auto* wl = static_cast<Display*>(display.get());
+  auto* wl = dynamic_cast<Display*>(display.get());
   m_wayland_window = std::make_shared<WaylandWindow>(
-      m_index, std::static_pointer_cast<Display>(display),
+      m_index, std::dynamic_pointer_cast<Display>(display),
       m_config.view.window_type,
       wl->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
       m_config.view.wl_output_index.value_or(0), m_config.app_id,
@@ -138,7 +138,7 @@ FlutterView::~FlutterView() = default;
 
 #if !BUILD_BACKEND_DRM_KMS_EGL
 Display* FlutterView::GetDisplay() const {
-  return static_cast<Display*>(m_display.get());
+  return dynamic_cast<Display*>(m_display.get());
 }
 #endif
 
@@ -197,7 +197,7 @@ void FlutterView::Initialize() {
 
 #if !BUILD_BACKEND_DRM_KMS_EGL
   // Engine events are decoded by surface pointer
-  static_cast<Display*>(m_display.get())
+  dynamic_cast<Display*>(m_display.get())
       ->SetEngine(m_wayland_window->GetBaseSurface(), m_flutter_engine.get());
   m_wayland_window->SetEngine(m_flutter_engine);
 #endif
@@ -236,7 +236,7 @@ size_t FlutterView::CreateSurface(void* h_module,
 
   auto index = static_cast<int64_t>(m_comp_surf.size());
   m_comp_surf[index] = std::make_unique<CompositorSurface>(
-      index, std::static_pointer_cast<Display>(m_display), m_wayland_window,
+      index, std::dynamic_pointer_cast<Display>(m_display), m_wayland_window,
       h_module, assets_path, cache_folder, misc_folder, type, z_order, sync,
       width, height, x, y);
 
@@ -280,7 +280,7 @@ void FlutterView::ClearRegion(const std::string& type) const {
 void FlutterView::SetRegion(
     const std::string& type,
     const std::vector<CompositorRegionPlugin::REGION_T>& regions) const {
-  const auto compositor = static_cast<Display*>(m_display.get())->GetCompositor();
+  const auto compositor = dynamic_cast<Display*>(m_display.get())->GetCompositor();
   const auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
