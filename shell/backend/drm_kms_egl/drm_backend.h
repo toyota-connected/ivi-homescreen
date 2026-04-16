@@ -29,6 +29,8 @@
 
 #include "backend/backend.h"
 
+class DrmCompositor;
+
 struct DrmConfig {
   std::string drm_device;
   uint32_t width;
@@ -50,6 +52,17 @@ class DrmBackend : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
   bool GetEglContext(BackendEglContext* out) const override;
+
+#if BUILD_COMPOSITOR
+  void RegisterCompositorSurface(
+      FlutterPlatformViewIdentifier id,
+      std::shared_ptr<ICompositorSurface> surface) override;
+  void UnregisterCompositorSurface(
+      FlutterPlatformViewIdentifier id) override;
+  void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                               int32_t width,
+                               int32_t height) override;
+#endif
 
   bool MakeCurrent();
   bool ClearCurrent();
@@ -104,4 +117,11 @@ class DrmBackend : public Backend {
   EGLSurface egl_surface_ = EGL_NO_SURFACE;
 
   bool mode_set_ = false;
+
+#if BUILD_COMPOSITOR
+  // Compositor lives as a member so its destructor runs while the EGL
+  // context is still current (DrmBackend::~DrmBackend resets it before
+  // tearing EGL down).
+  std::unique_ptr<DrmCompositor> compositor_;
+#endif
 };

@@ -80,6 +80,15 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             display/drm_display.cc
             input/drm_seat.cc
     )
+    if (BUILD_COMPOSITOR)
+        # The GL compositor helpers live under wayland_egl/ but are
+        # backend-agnostic. Share the TUs rather than forking copies.
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/wayland_egl/egl_backing_store.cc
+                backend/wayland_egl/gl_caps.cc
+                backend/wayland_egl/gl_compositor.cc
+        )
+    endif ()
     target_link_libraries(${PROJECT_NAME} PRIVATE
             drm-cxx::drm-cxx
             PkgConfig::DRM
