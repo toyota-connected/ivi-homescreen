@@ -136,6 +136,14 @@ class DrmBackend : public Backend {
   std::atomic<intptr_t> vsync_baton_{0};
   std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> vsync_engine_{nullptr};
 
+  // Frame stats — only active when cfg_.debug_backend is set. Accessed
+  // from the rasterizer thread only (Present / PageFlipHandler), so no
+  // atomics.
+  uint64_t flip_submit_ns_{0};
+  uint32_t frame_count_{0};
+  uint64_t fps_epoch_ns_{0};
+  void RecordFlipComplete();
+
 #if BUILD_COMPOSITOR
   std::unique_ptr<DrmCompositor> compositor_;
 #endif
