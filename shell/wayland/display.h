@@ -31,6 +31,7 @@
 
 #include "config/common.h"
 #include "configuration/configuration.h"
+#include "display/idisplay.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
@@ -41,20 +42,24 @@ class Engine;
 
 struct FlutterDesktopViewControllerState;
 
-class Display {
+class Display : public IDisplay {
  public:
   explicit Display(bool enable_cursor,
                    const std::string& ignore_wayland_event,
                    std::string cursor_theme_name,
                    const std::vector<Configuration::Config>& configs);
 
-  ~Display();
+  ~Display() override;
 
   Display(const Display&) = delete;
 
   const Display& operator=(const Display&) = delete;
 
   std::shared_ptr<EventTimer> m_repeat_timer{};
+
+  [[nodiscard]] bool HasRepeatTimer() const override {
+    return static_cast<bool>(m_repeat_timer);
+  }
 
   /**
    * @brief Get compositor
@@ -138,7 +143,7 @@ class Display {
    * @relation
    * wayland
    */
-  [[nodiscard]] int PollEvents() const;
+  [[nodiscard]] int PollEvents() const override;
 
   /**
    * @brief Start wayland event thread
@@ -146,7 +151,7 @@ class Display {
    * @relation
    * wayland
    */
-  void StartEvents();
+  void StartEvents() override;
 
   /**
    * @brief Stop wayland event thread
@@ -154,7 +159,7 @@ class Display {
    * @relation
    * wayland
    */
-  void StopEvents();
+  void StopEvents() override;
 
 #if ENABLE_AGL_SHELL_CLIENT
   /**
@@ -235,7 +240,7 @@ class Display {
   void SetEngine(wl_surface* surface, Engine* engine);
 
   void SetViewControllerState(
-      FlutterDesktopViewControllerState* view_controller_state) {
+      FlutterDesktopViewControllerState* view_controller_state) override {
     m_view_controller_state = view_controller_state;
   }
 
@@ -250,7 +255,7 @@ class Display {
    * wayland
    */
   [[nodiscard]] bool ActivateSystemCursor(int32_t device,
-                                          const std::string& kind) const;
+                                          const std::string& kind) const override;
 
   /**
    * @brief Get wl_output of a specified index of a view
@@ -275,7 +280,7 @@ class Display {
    * @relation
    * wayland
    */
-  [[nodiscard]] int32_t GetBufferScale(uint32_t index) const;
+  [[nodiscard]] int32_t GetBufferScale(uint32_t index) const override;
 
   /**
    * @brief Get a video mode size of a specified index of a view
@@ -286,7 +291,7 @@ class Display {
    * wayland
    */
   [[nodiscard]] std::pair<int32_t, int32_t> GetVideoModeSize(
-      uint32_t index) const;
+      uint32_t index) const override;
 
   /**
    * @brief Get refresh rate of a specified index of a view
@@ -296,7 +301,7 @@ class Display {
    * @relation
    * wayland
    */
-  [[nodiscard]] double GetRefreshRate(uint32_t index) const;
+  [[nodiscard]] double GetRefreshRate(uint32_t index) const override;
 
   /**
    * @brief Get max refresh rate of all available views
@@ -305,7 +310,7 @@ class Display {
    * @relation
    * wayland
    */
-  [[nodiscard]] double GetMaxRefreshRate() const;
+  [[nodiscard]] double GetMaxRefreshRate() const override;
 
   /**
    * @brief deactivate/hide the application pointed by app_id

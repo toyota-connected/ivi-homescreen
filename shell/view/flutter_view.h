@@ -19,6 +19,7 @@
 #include <memory>
 
 #include "configuration/configuration.h"
+#include "display/idisplay.h"
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "shell/accessibility/accessibility_tree.h"
@@ -37,6 +38,7 @@
 #include "view/compositor_surface_interface.h"
 #endif
 
+class IDisplay;
 class Display;
 class Engine;
 class Backend;
@@ -60,7 +62,7 @@ class FlutterView {
  public:
   FlutterView(Configuration::Config config,
               size_t index,
-              const std::shared_ptr<Display>& display);
+              const std::shared_ptr<IDisplay>& display);
   ~FlutterView();
 
   /**
@@ -114,7 +116,9 @@ class FlutterView {
    * @relation
    * internal
    */
-  [[nodiscard]] Display* GetDisplay() const { return m_wayland_display.get(); }
+#if !BUILD_BACKEND_DRM_KMS_EGL
+  [[nodiscard]] Display* GetDisplay() const;
+#endif
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
   /**
@@ -230,7 +234,7 @@ class FlutterView {
 #elif BUILD_BACKEND_WAYLAND_VULKAN
   std::shared_ptr<WaylandVulkanBackend> m_backend;
 #endif
-  std::shared_ptr<Display> m_wayland_display;
+  std::shared_ptr<IDisplay> m_display;
   std::shared_ptr<WaylandWindow> m_wayland_window;
   std::shared_ptr<Engine> m_flutter_engine;
   std::shared_ptr<AccessibilityTree> m_accessibility_tree;
