@@ -80,7 +80,7 @@ App::App(const std::vector<Configuration::Config>& configs)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
-    static_cast<Display*>(m_display.get())->AglShellDoReady();
+    dynamic_cast<Display*>(m_display.get())->AglShellDoReady();
 #endif
 
 #if BUILD_WATCHDOG
