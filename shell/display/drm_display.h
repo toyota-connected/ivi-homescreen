@@ -16,21 +16,22 @@
 
 #pragma once
 
+#include <memory>
+
 #include "display/idisplay.h"
+#include "input/iseat.h"
 
 class DrmDisplay final : public IDisplay {
  public:
   DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz);
-  ~DrmDisplay() override = default;
+  ~DrmDisplay() override;
 
-  void StartEvents() override {}
-  void StopEvents() override {}
+  void StartEvents() override;
+  void StopEvents() override;
   [[nodiscard]] int PollEvents() const override { return 0; }
 
   void SetViewControllerState(
-      FlutterDesktopViewControllerState* state) override {
-    view_controller_state_ = state;
-  }
+      FlutterDesktopViewControllerState* state) override;
 
   [[nodiscard]] double GetRefreshRate(uint32_t /*index*/) const override {
     return refresh_rate_hz_;
@@ -59,4 +60,9 @@ class DrmDisplay final : public IDisplay {
   int32_t height_;
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
+
+  // Input source. Defaults to a libinput-backed DrmSeat; the polymorphism
+  // is there so a Wayland-client + DRM-rendering configuration can swap in
+  // a WaylandSeat without changing this class.
+  std::unique_ptr<homescreen::ISeat> seat_;
 };
