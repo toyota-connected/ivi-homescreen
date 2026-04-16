@@ -23,7 +23,9 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/gl_process_resolver.h"
@@ -36,6 +38,10 @@
 #endif
 
 namespace {
+
+// The GBM surface format. Every scanout BO we allocate uses this, and the
+// EGL config we pick must advertise the same EGL_NATIVE_VISUAL_ID.
+constexpr uint32_t kGbmSurfaceFormat = GBM_FORMAT_XRGB8888;
 
 constexpr std::array<EGLint, 15> kDrmEglConfigAttribs = {{
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -249,7 +255,7 @@ bool DrmBackend::InitGbm() {
   }
 
   gbm_surface_ = gbm_surface_create(
-      gbm_device_, mode_.hdisplay, mode_.vdisplay, GBM_FORMAT_XRGB8888,
+      gbm_device_, mode_.hdisplay, mode_.vdisplay, kGbmSurfaceFormat,
       GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
   if (!gbm_surface_) {
     spdlog::error("[DrmBackend] gbm_surface_create failed");
@@ -287,12 +293,116 @@ bool DrmBackend::InitEgl() {
     return false;
   }
 
-  EGLint n = 0;
-  if (!eglChooseConfig(egl_display_, kDrmEglConfigAttribs.data(), &egl_config_,
-                       1, &n) ||
-      n < 1) {
-    spdlog::error("[DrmBackend] eglChooseConfig failed");
+  // eglChooseConfig returns any config whose bit-sizes cover the request —
+  // it does not constrain EGL_NATIVE_VISUAL_ID, so the first hit often has
+  // a visual that doesn't match the GBM surface and eglCreateWindowSurface
+  // fails with EGL_BAD_MATCH. Enumerate all candidates and pick one whose
+  // native visual matches the GBM format we used for the surface.
+  EGLint num_configs = 0;
+  if (!eglChooseConfig(egl_display_, kDrmEglConfigAttribs.data(), nullptr, 0,
+                       &num_configs) ||
+      num_configs < 1) {
+    spdlog::error("[DrmBackend] eglChooseConfig (count) failed: 0x{:x}",
+                  eglGetError());
     return false;
+  }
+  std::vector<EGLConfig> configs(static_cast<size_t>(num_configs));
+  if (!eglChooseConfig(egl_display_, kDrmEglConfigAttribs.data(),
+                       configs.data(), num_configs, &num_configs)) {
+    spdlog::error("[DrmBackend] eglChooseConfig (fill) failed: 0x{:x}",
+                  eglGetError());
+    return false;
+  }
+
+  auto attr = [this](EGLConfig c, EGLint id) -> EGLint {
+    EGLint v = 0;
+    eglGetConfigAttrib(egl_display_, c, id, &v);
+    return v;
+  };
+
+  if (cfg_.debug_backend) {
+    spdlog::info("[DrmBackend] {} candidate EGL configs", num_configs);
+    for (EGLint i = 0; i < num_configs; ++i) {
+      spdlog::info(
+          "[DrmBackend]   [{}] visual=0x{:08x} R{}G{}B{}A{} depth={} "
+          "stencil={} samples={} caveat=0x{:x} renderable=0x{:x} "
+          "surface=0x{:x} conformant=0x{:x}",
+          i, static_cast<unsigned>(attr(configs[i], EGL_NATIVE_VISUAL_ID)),
+          attr(configs[i], EGL_RED_SIZE), attr(configs[i], EGL_GREEN_SIZE),
+          attr(configs[i], EGL_BLUE_SIZE), attr(configs[i], EGL_ALPHA_SIZE),
+          attr(configs[i], EGL_DEPTH_SIZE), attr(configs[i], EGL_STENCIL_SIZE),
+          attr(configs[i], EGL_SAMPLES),
+          static_cast<unsigned>(attr(configs[i], EGL_CONFIG_CAVEAT)),
+          static_cast<unsigned>(attr(configs[i], EGL_RENDERABLE_TYPE)),
+          static_cast<unsigned>(attr(configs[i], EGL_SURFACE_TYPE)),
+          static_cast<unsigned>(attr(configs[i], EGL_CONFORMANT)));
+    }
+  }
+
+  // Pick the best config among those whose native visual matches the GBM
+  // surface format. The "best" depends on what the main window surface is
+  // actually used for:
+  //
+  //   Compositor ON  (BUILD_COMPOSITOR=1)
+  //     Flutter renders every layer into an EglFboBackingStore that owns
+  //     its own depth+stencil; the main surface only composites textured
+  //     quads into FBO 0. It does not depth-test or stencil, so we prefer
+  //     the thinnest window surface: stencil=0, smallest depth.
+  //
+  //   Compositor OFF
+  //     Flutter renders directly into the default framebuffer and needs
+  //     stencil for clip-path operations. Prefer stencil=8 on the main
+  //     surface.
+  //
+  // MSAA is never desirable for scanout (the kernel only reads single-
+  // sample pixels, so any MSAA work is resolved and thrown away), and
+  // caveat=EGL_NONE is always preferred over slow/non-conformant flags.
+#if BUILD_COMPOSITOR
+  constexpr EGLint kPreferredStencil = 0;
+#else
+  constexpr EGLint kPreferredStencil = 8;
+#endif
+  constexpr EGLint kPreferredAlpha = 0;  // matches kGbmSurfaceFormat (XRGB)
+
+  auto abs_diff = [](EGLint a, EGLint b) -> EGLint {
+    return a > b ? a - b : b - a;
+  };
+
+  // Lower tuple = better. std::tuple's lexicographic operator< gives us
+  // strict priority ordering without nested branches.
+  using Score = std::tuple<EGLint, EGLint, EGLint, EGLint, EGLint>;
+  auto score = [&](EGLint i) -> Score {
+    return {
+        attr(configs[i], EGL_SAMPLES),                              // 1
+        attr(configs[i], EGL_CONFIG_CAVEAT) == EGL_NONE ? 0 : 1,    // 2
+        abs_diff(attr(configs[i], EGL_ALPHA_SIZE), kPreferredAlpha),      // 3
+        abs_diff(attr(configs[i], EGL_STENCIL_SIZE), kPreferredStencil),  // 4
+        attr(configs[i], EGL_DEPTH_SIZE),                           // 5
+    };
+  };
+
+  egl_config_ = nullptr;
+  EGLint best_idx = -1;
+  for (EGLint i = 0; i < num_configs; ++i) {
+    if (attr(configs[i], EGL_NATIVE_VISUAL_ID) !=
+        static_cast<EGLint>(kGbmSurfaceFormat)) {
+      continue;
+    }
+    if (best_idx < 0 || score(i) < score(best_idx)) {
+      best_idx = i;
+    }
+  }
+  if (best_idx < 0) {
+    spdlog::error(
+        "[DrmBackend] no EGL config matches GBM format 0x{:x} (checked {} "
+        "configs)",
+        kGbmSurfaceFormat, num_configs);
+    return false;
+  }
+  egl_config_ = configs[static_cast<size_t>(best_idx)];
+  if (cfg_.debug_backend) {
+    spdlog::info("[DrmBackend] selected config [{}] (compositor={})", best_idx,
+                 BUILD_COMPOSITOR ? "on" : "off");
   }
 
   egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT,
