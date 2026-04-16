@@ -35,6 +35,7 @@ struct DrmConfig {
   std::string drm_device;
   uint32_t width;
   uint32_t height;
+  bool debug_backend{false};
 };
 
 class DrmBackend : public Backend {
