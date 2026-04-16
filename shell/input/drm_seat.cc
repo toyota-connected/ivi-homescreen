@@ -26,6 +26,7 @@
 #include <variant>
 
 #include "engine.h"
+#include "input/key_mapping.h"
 #include "libflutter_engine.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
@@ -175,11 +176,8 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   ke.struct_size = sizeof(FlutterKeyEvent);
   ke.timestamp = static_cast<double>(FlutterTimestampMicros());
   ke.type = ev.pressed ? kFlutterKeyEventTypeDown : kFlutterKeyEventTypeUp;
-  // Linux evdev codes aren't USB HID codes; passing them preserves
-  // uniqueness per physical key but not the framework's expected mapping.
-  // Adopt Flutter's evdev→HID table when it starts to matter.
-  ke.physical = ev.key;
-  ke.logical = ev.sym;
+  ke.physical = keys::EvdevToPhysical(ev.key);
+  ke.logical = keys::DeriveLogicalKey(ev.utf8, ev.sym);
   ke.character = ev.utf8[0] ? ev.utf8 : nullptr;
   ke.synthesized = false;
   ke.device_type = kFlutterKeyEventDeviceTypeKeyboard;
