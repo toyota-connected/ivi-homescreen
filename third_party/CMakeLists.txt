@@ -69,13 +69,6 @@ set(LOGGING_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/shell;${CMAKE_BINARY_DIR})
 add_subdirectory(waypp)
 
 #
-# libliftoff
-#
-if (BUILD_BACKEND_DRM OR BUILD_BACKEND_WAYLAND_LEASED_DRM)
-    add_subdirectory(libliftoff-0.6.0-dev)
-endif ()
-
-#
 # Google Test
 #
 if (BUILD_UNIT_TESTS)

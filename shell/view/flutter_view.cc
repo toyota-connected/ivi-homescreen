@@ -17,10 +17,12 @@
 #include <memory>
 #include <utility>
 
+#include "app.h"
+
 #if BUILD_BACKEND_HEADLESS_EGL
 #include "backend/headless/headless.h"
-#elif BUILD_BACKEND_WAYLAND_DRM
-#include "backend/wayland_drm/wayland_drm.h"
+#elif BUILD_BACKEND_DRM_KMS_EGL
+#include "backend/drm_kms_egl/drm_backend.h"
 #elif BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
 #elif BUILD_BACKEND_WAYLAND_VULKAN
@@ -57,11 +59,11 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.width.value_or(kDefaultViewWidth),
       m_config.view.height.value_or(kDefaultViewHeight),
       m_config.debug_backend.value_or(false), kEglBufferSize);
-#elif BUILD_BACKEND_WAYLAND_DRM
-  m_backend = std::make_shared<WaylandDrmBackend>(
-      display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewHeight),
-      m_config.debug_backend.value_or(false), kEglBufferSize);
+#elif BUILD_BACKEND_DRM_KMS_EGL
+  m_backend = DrmBackend::Create(
+    {m_config.view.drm_device.value_or("/dev/dri/card0"),
+                m_config.view.width.value_or(kDefaultViewWidth),
+                m_config.view.height.value_or(kDefaultViewHeight)});
 #elif BUILD_BACKEND_WAYLAND_EGL
   m_backend = std::make_shared<WaylandEglBackend>(
       display->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
