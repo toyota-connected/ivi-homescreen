@@ -25,10 +25,15 @@
 #include <cstring>
 #include <utility>
 
+#include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+
+#if BUILD_COMPOSITOR
+#include "view/compositor_surface_interface.h"
+#endif
 
 namespace {
 
@@ -61,6 +66,9 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg) {
   if (!backend->InitDrm() || !backend->InitGbm() || !backend->InitEgl()) {
     return nullptr;
   }
+#if BUILD_COMPOSITOR
+  backend->compositor_ = std::make_unique<DrmCompositor>(backend.get());
+#endif
   return backend;
 }
 
@@ -70,6 +78,14 @@ DrmBackend::~DrmBackend() {
   // Let any in-flight page flip land so we don't free a BO still being
   // scanned out.
   WaitForPendingFlip();
+
+#if BUILD_COMPOSITOR
+  // Release compositor GL resources while the context is still current.
+  if (egl_display_ != EGL_NO_DISPLAY && egl_context_ != EGL_NO_CONTEXT) {
+    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+  }
+  compositor_.reset();
+#endif
 
   if (egl_display_ != EGL_NO_DISPLAY) {
     eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
@@ -491,9 +507,57 @@ FlutterCompositor DrmBackend::GetCompositorConfig() {
   FlutterCompositor compositor{};
   compositor.struct_size = sizeof(FlutterCompositor);
   compositor.user_data = this;
+
+#if BUILD_COMPOSITOR
+  // The engine reuses backing stores across frames when sizes match;
+  // allow caching since our EglFboBackingStore is identity-keyed.
+  compositor.avoid_backing_store_cache = false;
+  compositor.create_backing_store_callback =
+      [](const FlutterBackingStoreConfig* config, FlutterBackingStore* out,
+         void* user_data) -> bool {
+    return static_cast<DrmBackend*>(user_data)->compositor_->CreateBackingStore(
+        config, out);
+  };
+  compositor.collect_backing_store_callback =
+      [](const FlutterBackingStore* store, void* user_data) -> bool {
+    return static_cast<DrmBackend*>(user_data)
+        ->compositor_->CollectBackingStore(store);
+  };
+  compositor.present_layers_callback =
+      [](const FlutterLayer** layers, size_t count, void* user_data) -> bool {
+    return static_cast<DrmBackend*>(user_data)->compositor_->PresentLayers(
+        layers, count);
+  };
+#else
   compositor.avoid_backing_store_cache = true;
+#endif
   return compositor;
 }
+
+#if BUILD_COMPOSITOR
+void DrmBackend::RegisterCompositorSurface(
+    FlutterPlatformViewIdentifier id,
+    std::shared_ptr<ICompositorSurface> surface) {
+  if (compositor_) {
+    compositor_->RegisterSurface(id, std::move(surface));
+  }
+}
+
+void DrmBackend::UnregisterCompositorSurface(
+    FlutterPlatformViewIdentifier id) {
+  if (compositor_) {
+    compositor_->UnregisterSurface(id);
+  }
+}
+
+void DrmBackend::ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                                         int32_t width,
+                                         int32_t height) {
+  if (compositor_) {
+    compositor_->ResizeSurface(id, width, height);
+  }
+}
+#endif
 
 bool DrmBackend::GetEglContext(BackendEglContext* out) const {
   if (!out) {
