@@ -17,6 +17,7 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <array>
@@ -66,6 +67,10 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg) {
 DrmBackend::DrmBackend(DrmConfig cfg) : cfg_(std::move(cfg)) {}
 
 DrmBackend::~DrmBackend() {
+  // Let any in-flight page flip land so we don't free a BO still being
+  // scanned out.
+  WaitForPendingFlip();
+
   if (egl_display_ != EGL_NO_DISPLAY) {
     eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
                    EGL_NO_CONTEXT);
@@ -91,6 +96,12 @@ DrmBackend::~DrmBackend() {
     drmModeFreeCrtc(saved_crtc_);
   }
 
+  if (pending_fb_ != 0) {
+    drmModeRmFB(drm_fd_, pending_fb_);
+  }
+  if (pending_bo_) {
+    gbm_surface_release_buffer(gbm_surface_, pending_bo_);
+  }
   if (current_fb_ != 0) {
     drmModeRmFB(drm_fd_, current_fb_);
   }
@@ -343,7 +354,62 @@ bool DrmBackend::TextureClearCurrent() {
                         EGL_NO_CONTEXT) == EGL_TRUE;
 }
 
+void DrmBackend::PageFlipHandler(int /*fd*/,
+                                 unsigned int /*sequence*/,
+                                 unsigned int /*tv_sec*/,
+                                 unsigned int /*tv_usec*/,
+                                 void* user_data) {
+  auto* self = static_cast<DrmBackend*>(user_data);
+  // The page flip just promoted pending → scanout. What was scanned out
+  // before is now safe to release.
+  if (self->current_fb_ != 0) {
+    drmModeRmFB(self->drm_fd_, self->current_fb_);
+  }
+  if (self->current_bo_) {
+    gbm_surface_release_buffer(self->gbm_surface_, self->current_bo_);
+  }
+  self->current_bo_ = self->pending_bo_;
+  self->current_fb_ = self->pending_fb_;
+  self->pending_bo_ = nullptr;
+  self->pending_fb_ = 0;
+  self->flip_pending_ = false;
+}
+
+bool DrmBackend::WaitForPendingFlip() {
+  if (!flip_pending_ || drm_fd_ < 0) {
+    return true;
+  }
+
+  drmEventContext ctx{};
+  ctx.version = 2;
+  ctx.page_flip_handler = &DrmBackend::PageFlipHandler;
+
+  while (flip_pending_) {
+    pollfd pfd{};
+    pfd.fd = drm_fd_;
+    pfd.events = POLLIN;
+    const int r = poll(&pfd, 1, -1);
+    if (r < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      spdlog::error("[DrmBackend] poll: {}", std::strerror(errno));
+      return false;
+    }
+    if (pfd.revents & POLLIN) {
+      drmHandleEvent(drm_fd_, &ctx);
+    }
+  }
+  return true;
+}
+
 bool DrmBackend::Present() {
+  // Finish the previous flip before issuing a new one. The kernel rejects a
+  // second queued flip while one is still in flight.
+  if (!WaitForPendingFlip()) {
+    return false;
+  }
+
   if (!eglSwapBuffers(egl_display_, egl_surface_)) {
     spdlog::error("[DrmBackend] eglSwapBuffers: 0x{:x}", eglGetError());
     return false;
@@ -361,27 +427,28 @@ bool DrmBackend::Present() {
     return false;
   }
 
-  bool ok = true;
   if (!mode_set_) {
+    // First frame: drive the mode set synchronously. current_* hold the
+    // active scanout BO/FB until the next successful flip.
     current_bo_ = next_bo;
     current_fb_ = next_fb;
-    ok = SetInitialMode();
-  } else {
-    if (drmModePageFlip(drm_fd_, crtc_id_, next_fb, DRM_MODE_PAGE_FLIP_EVENT,
-                        this) != 0) {
-      spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
-      ok = false;
-    }
-    if (current_fb_ != 0) {
-      drmModeRmFB(drm_fd_, current_fb_);
-    }
-    if (current_bo_) {
-      gbm_surface_release_buffer(gbm_surface_, current_bo_);
-    }
-    current_bo_ = next_bo;
-    current_fb_ = next_fb;
+    return SetInitialMode();
   }
-  return ok;
+
+  if (drmModePageFlip(drm_fd_, crtc_id_, next_fb, DRM_MODE_PAGE_FLIP_EVENT,
+                      this) != 0) {
+    spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
+    drmModeRmFB(drm_fd_, next_fb);
+    gbm_surface_release_buffer(gbm_surface_, next_bo);
+    return false;
+  }
+
+  // The kernel now owns next_bo/next_fb until the page-flip-complete event
+  // fires. current_bo_/current_fb_ remain the live scanout until then.
+  pending_bo_ = next_bo;
+  pending_fb_ = next_fb;
+  flip_pending_ = true;
+  return true;
 }
 
 void DrmBackend::Resize(size_t /*index*/,
