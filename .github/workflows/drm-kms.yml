@@ -1,0 +1,138 @@
+---
+name: drm-kms
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [v2.0]
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cc: gcc-14
+            cxx: g++-14
+            extra_pkgs: g++-14
+          - compiler: clang
+            cc: clang-19
+            cxx: clang++-19
+            extra_pkgs: clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+
+    name: drm-${{ matrix.compiler }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            ninja-build
+            libwayland-dev wayland-protocols libxkbcommon-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+            libdrm-dev libgbm-dev libinput-dev libudev-dev
+            libdisplay-info-dev
+            libglib2.0-dev
+            ${{ matrix.extra_pkgs }}
+          version: 1.0
+
+      - name: Configure (DRM/KMS EGL + compositor)
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -D BUILD_BACKEND_DRM_KMS_EGL=ON \
+            -D BUILD_BACKEND_WAYLAND_EGL=OFF \
+            -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
+            -D BUILD_COMPOSITOR=ON \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Build
+        run: ninja -C ${{github.workspace}}/build
+
+      - name: Verify binary is DRM-enabled
+        run: |
+          strings ${{github.workspace}}/build/shell/homescreen \
+            | grep -q '\[DrmBackend\]'
+
+  vkms-smoke:
+    if: ${{ github.server_url == 'https://github.com' }}
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            ninja-build
+            libwayland-dev wayland-protocols libxkbcommon-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+            libdrm-dev libgbm-dev libinput-dev libudev-dev
+            libdisplay-info-dev
+            libglib2.0-dev
+            clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          version: 1.0
+
+      - name: Build (clang, DRM + compositor)
+        env:
+          CC: clang-19
+          CXX: clang++-19
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D BUILD_BACKEND_DRM_KMS_EGL=ON \
+            -D BUILD_BACKEND_WAYLAND_EGL=OFF \
+            -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
+            -D BUILD_COMPOSITOR=ON \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+          ninja -C ${{github.workspace}}/build
+
+      - name: Load vkms
+        run: |
+          sudo modprobe vkms
+          # Verify the module loaded and a card appeared.
+          lsmod | grep vkms
+          ls /sys/class/drm/card*-Virtual-* 2>/dev/null \
+            || (echo "vkms loaded but no Virtual connector found" && exit 1)
+
+      - name: Harness pre-flight (--check)
+        run: |
+          test/drm_kms_vkms.sh --check
+
+      # A full harness run requires a Flutter bundle whose
+      # libflutter_engine.so version matches the one in third_party/flutter.
+      # When a CI-ready bundle is available, uncomment the step below.
+      #
+      # - name: Full vkms smoke test
+      #   env:
+      #     HOMESCREEN: ${{github.workspace}}/build/shell/homescreen
+      #     BUNDLE: /path/to/ci/bundle/.desktop-homescreen
+      #     SOFTWARE_RENDER: '1'
+      #     DURATION: '5'
+      #   run: |
+      #     test/drm_kms_vkms.sh
