@@ -526,6 +526,21 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                             id);
                       });
 
+  // Clear the window backbuffer before compositing. Without this, stale
+  // pixels from the driver's swapchain rotation remain wherever no opaque
+  // layer covers them — visible as trails behind a moving platform view
+  // when the Flutter overlay is mostly transparent.
+  //
+  // Alpha=0 so regions left uncovered by any composited layer fall through
+  // to the Wayland compositor. The surface has no wl_surface_set_opaque_region
+  // set by default, and the EGL config has EGL_ALPHA_SIZE=8, so per-pixel
+  // alpha is honoured downstream.
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
   bool ok = true;
   // Engine emits layers bottom-to-top. The first composited layer lands on
   // the window backbuffer with an opaque copy; every subsequent layer is an
