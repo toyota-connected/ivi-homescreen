@@ -244,6 +244,7 @@ void DrmCompositor::PageFlipHandler(int /*fd*/, unsigned int /*seq*/,
                                     void* user_data) {
   auto* self = static_cast<DrmCompositor*>(user_data);
   self->flip_pending_ = false;
+  self->backend_->RecordFlipComplete();
 }
 
 bool DrmCompositor::WaitForPendingFlip() {
@@ -459,8 +460,10 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                  result.error().message());
     return PresentViaGlFallback(layers, layer_count);
   }
-  SPDLOG_DEBUG("[DrmCompositor] {} of {} layers on HW planes", *result,
-               frame_layers.size());
+  if (backend_->cfg_.debug_backend) {
+    spdlog::info("[DrmCompositor] {} of {} layers on HW planes", *result,
+                 frame_layers.size());
+  }
 
   // ── GL-composite layers that overflowed into the composition buffer ──
 
@@ -528,6 +531,9 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, layer_count);
   }
 
+  if (backend_->cfg_.debug_backend) {
+    backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
+  }
   auto commit_ok = commit_req.commit(
       DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK |
           DRM_MODE_ATOMIC_ALLOW_MODESET,
