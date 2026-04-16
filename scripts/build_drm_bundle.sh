@@ -31,8 +31,9 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
 # ── Configurable paths ───────────────────────────────────────────────────
 
-ENGINE_BUNDLE="${ENGINE_BUNDLE:-/mnt/raid10/workspace-automation/.config/flutter_workspace/flutter-engine/bundle-debug-x64}"
-CONFIG_TEMPLATE="${CONFIG_TEMPLATE:-/mnt/raid10/workspace-automation/.config/flutter_workspace/desktop-homescreen/config.toml}"
+[[ -n "${FLUTTER_WORKSPACE:-}" ]] || die "FLUTTER_WORKSPACE env var must be set"
+ENGINE_BUNDLE="${ENGINE_BUNDLE:-${FLUTTER_WORKSPACE}/flutter-engine/bundle-debug-x64}"
+CONFIG_TEMPLATE="${CONFIG_TEMPLATE:-${FLUTTER_WORKSPACE}/desktop-homescreen/config.toml}"
 DRM_DEVICE="${1:-/dev/dri/card0}"
 BUNDLE_DIR=".desktop-homescreen"
 
