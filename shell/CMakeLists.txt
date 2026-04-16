@@ -72,6 +72,23 @@ if (BUILD_BACKEND_HEADLESS_EGL)
     )
 endif ()
 
+if (BUILD_BACKEND_DRM_KMS_EGL)
+    target_sources(${PROJECT_NAME} PRIVATE
+            backend/drm_kms_egl/drm_backend.cc
+            backend/drm_kms_egl/drm_compositor.cc
+            input/drm_seat.cc
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+            drm-cxx::drm-cxx
+            PkgConfig::DRM
+            PkgConfig::GBM
+            PkgConfig::LIBINPUT
+            PkgConfig::UDEV
+            EGL
+            GLESv2
+    )
+endif ()
+
 if (ENABLE_DLT)
     target_sources(${PROJECT_NAME} PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
