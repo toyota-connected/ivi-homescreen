@@ -212,7 +212,7 @@ void FlutterView::RegisterPlugins() {
   auto engine = m_state->engine_state.get();
   auto registrar = engine->plugin_registrar.get();
 
-  const bool static_first = true;  // TODO: get from app args
+  const bool static_first = !m_config.dynamic_plugins_first;
   std::map<std::string, FlutterPluginRegisterCallback> static_plugin_handles;
 
   // Get list of plugins to load from

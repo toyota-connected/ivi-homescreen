@@ -31,6 +31,7 @@ class Configuration {
     std::string wayland_event_mask;
     std::optional<bool> debug_backend;
     std::vector<std::string> bundle_paths;
+    bool dynamic_plugins_first;
 
     struct {
       std::string bundle_path;

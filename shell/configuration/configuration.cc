@@ -297,7 +297,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.app_id))(
             "wayland-event-mask", "Wayland Events to mask",
             cxxopts::value<std::string>(config.wayland_event_mask))(
-            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>());
+            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>())(
+            "dynamic-plugins-first",
+            "Load dynamic plugins before static plugins"
+            "(static plugins are loaded first by default)",
+            cxxopts::value<bool>(config.dynamic_plugins_first));
 
     const auto result = allocated->parse(argc, argv);
 
