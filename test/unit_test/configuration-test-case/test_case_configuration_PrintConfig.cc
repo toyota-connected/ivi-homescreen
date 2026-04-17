@@ -1,7 +1,7 @@
-#include <filesystem>
-#include <stdexcept>
 #include <gtest/gtest.h>
+#include <filesystem>
 #include <iostream>
+#include <stdexcept>
 
 #include <configuration/configuration.h>
 
@@ -32,31 +32,60 @@ TEST(HomescreenConfigurationPrintConfig, Lv1Normal001) {
   config.view.ivi_surface_id = 1;
   config.view.fullscreen = true;
 
-  std::cout << "\n##################### Reference Output #######################\n" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] {branch} @ {commit id}" << std::endl;
+  std::cout
+      << "\n##################### Reference Output #######################\n"
+      << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] {branch} @ {commit id}"
+            << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] **********" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] * Global *" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] **********" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Application Id: .......... homescreen" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Cursor Theme: ............ DMZ-White" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Disable Cursor: .......... true" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Wayland Event Mask: ...... keyboard" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Debug Backend: ........... true" << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Application Id: .......... "
+               "homescreen"
+            << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Cursor Theme: ............ DMZ-White"
+      << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Disable Cursor: .......... true"
+      << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Wayland Event Mask: ...... keyboard"
+      << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Debug Backend: ........... true"
+      << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] ********" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] * View *" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] ********" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] VM Args:" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] --enable-asserts" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] --pause-isolates-on-start" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Bundle Path: .............. /home/" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Window Type: .............. NORMAL" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Output Index: ............. 1" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Size: ..................... 1280 x 720" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Pixel Ratio: .............. 1.2" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Fullscreen: ............... true" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Accessibility Features: ... 1" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Ivi Surface ID: ........... 1" << std::endl;
-  std::cout << "\n################## Please check visually #####################\n" << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] --pause-isolates-on-start"
+            << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Bundle Path: .............. /home/"
+      << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Window Type: .............. NORMAL"
+      << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Output Index: ............. 1"
+            << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Size: ..................... "
+               "1280 x 720"
+            << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Pixel Ratio: .............. 1.2"
+      << std::endl;
+  std::cout
+      << "[20xx-xx-xx xx:xx:xx.xxx] [info] Fullscreen: ............... true"
+      << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Accessibility Features: ... 1"
+            << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Ivi Surface ID: ........... 1"
+            << std::endl;
+  std::cout
+      << "\n################## Please check visually #####################\n"
+      << std::endl;
 
   Configuration::PrintConfig(config);
 }

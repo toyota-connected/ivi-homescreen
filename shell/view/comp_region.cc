@@ -14,8 +14,8 @@
 
 #include "comp_region.h"
 
-#include "flutter_view.h"
 #include "engine.h"
+#include "flutter_view.h"
 
 void CompositorRegionPlugin::ClearGroups(const flutter::EncodableList& types,
                                          const FlutterView* view) {
