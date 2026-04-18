@@ -168,13 +168,29 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   }
   const unsigned int active_vt = vtstat.v_active;
 
-  struct stat st{};
-  if (::stat("/dev/tty", &st) != 0) {
+  // open("/dev/tty") redirects to the process's controlling terminal; fstat
+  // on the resulting fd returns that terminal's device number. stat("/dev/tty")
+  // would always return (5, 0) — the stats of the /dev/tty device node itself
+  // — and the major check below would reject every caller, so go through the
+  // open/fstat dance instead.
+  const int ctl_fd = ::open("/dev/tty", O_RDONLY | O_CLOEXEC | O_NOCTTY);
+  if (ctl_fd < 0) {
     spdlog::error(
-        "[DrmBackend] no controlling terminal (stat /dev/tty: {}). Cannot "
+        "[DrmBackend] no controlling terminal (open /dev/tty: {}). Cannot "
         "drive {} without a foreground VT — switch to the active console "
         "(tty{}) and rerun.",
         std::strerror(errno), drm_device, active_vt);
+    return false;
+  }
+  struct stat st{};
+  const int fstat_rc = ::fstat(ctl_fd, &st);
+  const int fstat_errno = errno;
+  ::close(ctl_fd);
+  if (fstat_rc != 0) {
+    spdlog::error(
+        "[DrmBackend] fstat(/dev/tty): {}. Cannot drive {} without a "
+        "foreground VT — switch to the active console (tty{}) and rerun.",
+        std::strerror(fstat_errno), drm_device, active_vt);
     return false;
   }
 
