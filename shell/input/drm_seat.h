@@ -17,14 +17,15 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
 #include <memory>
 #include <thread>
 
+#include <drm-cxx/input/keyboard.hpp>
 #include <drm-cxx/input/seat.hpp>
 
 #include <shell/platform/embedder/embedder.h>
 
+#include "backend/drm_kms_egl/session_watchdog.h"
 #include "input/iseat.h"
 
 namespace homescreen {
@@ -44,13 +45,13 @@ class DrmSeat final : public ISeat {
       FlutterDesktopViewControllerState* state) override;
 
  private:
-  void DispatchLoop();
+  void DispatchLoop() const;
   void HandleEvent(const drm::input::InputEvent& ev);
-  void HandleKeyboard(const drm::input::KeyboardEvent& ev);
+  void HandleKeyboard(const drm::input::KeyboardEvent& ev) const;
   void HandlePointerMotion(const drm::input::PointerMotionEvent& ev);
   void HandlePointerButton(const drm::input::PointerButtonEvent& ev);
-  void HandlePointerAxis(const drm::input::PointerAxisEvent& ev);
-  void HandleTouch(const drm::input::TouchEvent& ev);
+  void HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const;
+  void HandleTouch(const drm::input::TouchEvent& ev) const;
 
   [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) CurrentEngine() const;
 
@@ -60,8 +61,20 @@ class DrmSeat final : public ISeat {
   std::atomic<FlutterDesktopViewControllerState*> state_{nullptr};
 
   std::unique_ptr<drm::input::Seat> seat_;
+  std::unique_ptr<drm::input::Keyboard> keyboard_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
+
+  // VT keyboard mode. In a text console, without K_OFF keystrokes are
+  // also consumed by the kernel tty line discipline (echoed to the
+  // underlying shell). K_OFF suppresses that; xkbcommon translation of
+  // libinput events is unaffected and happens via keyboard_.
+  int tty_fd_ = -1;
+  int saved_kb_mode_ = 0;
+
+  // Reverse-watchdog that restores saved_kb_mode_ if the parent dies via
+  // SIGKILL (or any other path that skips Stop()). See session_watchdog.h.
+  homescreen::watchdog::Handle tty_watchdog_{};
 
   // Accessed only from the dispatch thread.
   double pointer_x_ = 0.0;

@@ -15,6 +15,9 @@
 #include <algorithm>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
+#include <string>
+#include <string_view>
 
 #include "config/common.h"
 
@@ -22,25 +25,41 @@
 #include "configuration/configuration.h"
 #include "logging/logging.h"
 
+#if BUILD_BACKEND_DRM_KMS_EGL
+#include "backend/drm_kms_egl/drm_backend.h"
+#endif
+
 #if BUILD_CRASH_HANDLER
 #include "crash_handler.h"
 #endif
 
-volatile bool running = true;
+volatile sig_atomic_t running = 1;
 
 std::unique_ptr<Logging> gLogger;
 
-/**
- * @brief Signal handler
- * @return void
- * @relation
- * internal
- */
-void SignalHandler(int /* signal */) {
-  SPDLOG_INFO("Ctl+C");
-  running = false;
-  exit(0);
+namespace {
+
+// Async-signal-safe: just flip the running flag. Everything else (logging,
+// resource teardown) happens on the main thread when the loop falls through
+// and the App / backend destructors run. Calling exit() here would skip
+// stack unwinding and strand the console: the DRM backend would never
+// restore the saved CRTC, and DrmSeat would never restore the VT keyboard
+// mode from K_OFF — leaving the TTY both blank and deaf to keystrokes.
+extern "C" void HandleShutdownSignal(int /*sig*/) {
+  running = 0;
 }
+
+void InstallShutdownHandlers() {
+  struct sigaction sa{};
+  sa.sa_handler = &HandleShutdownSignal;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  for (const int sig : {SIGINT, SIGTERM, SIGHUP}) {
+    sigaction(sig, &sa, nullptr);
+  }
+}
+
+}  // namespace
 
 /**
  * @brief Main function
@@ -57,6 +76,28 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // Handle --drm-list-modes[=<path>] before the main config parse so the
+  // user doesn't need to supply a bundle path just to inspect modes. Value
+  // is optional; default device is /dev/dri/card1 to match DrmConfig.
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    std::string dev;
+    if (arg == "--drm-list-modes") {
+      dev = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
+                                                    : "/dev/dri/card1";
+      return PrintDrmModes(dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+    if (arg.rfind("--drm-list-modes=", 0) == 0) {
+      dev = std::string(arg.substr(std::strlen("--drm-list-modes=")));
+      if (dev.empty()) {
+        dev = "/dev/dri/card1";
+      }
+      return PrintDrmModes(dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+  }
+#endif
+
   gLogger = std::make_unique<Logging>();
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
@@ -64,7 +105,7 @@ int main(const int argc, char** argv) {
 
   const App app(configs);
 
-  std::signal(SIGINT, SignalHandler);
+  InstallShutdownHandlers();
 
   // run the application
   int ret = 0;
