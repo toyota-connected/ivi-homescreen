@@ -64,17 +64,16 @@ Engine::Engine(FlutterView* view,
   m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
   m_args.log_tag = "flutter";
 
-#if BUILD_BACKEND_DRM_KMS_EGL
-  m_args.vsync_callback = [](void* user_data, intptr_t baton) {
-    const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-    if (!state || !state->view_controller || !state->view_controller->engine) {
-      return;
-    }
-    auto* engine = state->view_controller->engine;
-    auto* backend = reinterpret_cast<DrmBackend*>(engine->GetBackend());
-    backend->SetVsyncBaton(engine->GetFlutterEngine(), baton);
-  };
-#endif
+  // TODO: Re-enable vsync_callback once the DRM backend's page-flip
+  // event delivery is working end-to-end. The current implementation
+  // deadlocks because the first frame uses drmModeSetCrtc (no flip
+  // event), and the baton for frame 2 arrives after Present returns
+  // but before any flip is queued. Flutter's internal wall-clock
+  // scheduler works correctly without it.
+  //
+  // #if BUILD_BACKEND_DRM_KMS_EGL
+  //   m_args.vsync_callback = ...;
+  // #endif
 
   /// Task Runner
   m_platform_task_runner =

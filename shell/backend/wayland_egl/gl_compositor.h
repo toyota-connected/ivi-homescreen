@@ -42,14 +42,18 @@ class GlCompositor {
   GlCompositor& operator=(const GlCompositor&) = delete;
 
   /**
-   * @brief Composite the given backing store onto the default framebuffer.
+   * @brief Composite the given backing store into @p dst_fbo.
    *
-   * @param src_fbo         Source framebuffer containing @p src_color_texture.
-   *                        Used by the blit path.
+   * @param dst_fbo         Destination framebuffer; 0 selects the default
+   *                        framebuffer.
+   * @param src_fbo         Source framebuffer containing @p src_color_tex.
+   *                        Used by the blit path. Pass 0 to force the quad
+   *                        path (e.g. raw platform-view textures with no
+   *                        associated FBO).
    * @param src_color_tex   Source color texture. Used by the quad path.
    * @param src_w,src_h     Source dimensions in pixels.
-   * @param dst_x,dst_y     Destination origin on the default framebuffer,
-   *                        in OpenGL coordinates (origin bottom-left).
+   * @param dst_x,dst_y     Destination origin in @p dst_fbo, in OpenGL
+   *                        coordinates (origin bottom-left).
    * @param dst_w,dst_h     Destination dimensions in pixels.
    * @param blend           When true, force the quad path with premultiplied
    *                        alpha blending so transparent pixels preserve the
@@ -59,6 +63,19 @@ class GlCompositor {
    *                        textures drawn in GL-native (bottom-left) origin
    *                        that need to land in Flutter's top-down layout.
    */
+  void CompositeToFbo(GLuint dst_fbo,
+                      GLuint src_fbo,
+                      GLuint src_color_tex,
+                      GLsizei src_w,
+                      GLsizei src_h,
+                      GLint dst_x,
+                      GLint dst_y,
+                      GLsizei dst_w,
+                      GLsizei dst_h,
+                      bool blend = false,
+                      bool flip_y = false);
+
+  // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,
                           GLuint src_color_tex,
                           GLsizei src_w,
@@ -68,7 +85,10 @@ class GlCompositor {
                           GLsizei dst_w,
                           GLsizei dst_h,
                           bool blend = false,
-                          bool flip_y = false);
+                          bool flip_y = false) {
+    CompositeToFbo(0, src_fbo, src_color_tex, src_w, src_h, dst_x, dst_y, dst_w,
+                   dst_h, blend, flip_y);
+  }
 
  private:
   const GlCaps* caps_;

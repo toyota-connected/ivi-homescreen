@@ -16,15 +16,23 @@
 
 #include "backend/drm_kms_egl/drm_backend.h"
 
+#include <fcntl.h>
+#include <linux/vt.h>
 #include <poll.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
-#include <cstring>
+#include <cstdio>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
@@ -37,11 +45,13 @@
 
 namespace {
 
-// The GBM surface format. Every scanout BO we allocate uses this, and the
-// EGL config we pick must advertise the same EGL_NATIVE_VISUAL_ID.
-constexpr uint32_t kGbmSurfaceFormat = GBM_FORMAT_XRGB8888;
+// EGL attribute arrays are selected per resolved primary format. All
+// variants request WINDOW_BIT + ES2. R/G/B/A and depth sizes differ for
+// RGB565 (5/6/5/0, depth 16) vs. 32-bit formats (8/8/8/{0|8}, depth 24).
+// ALPHA_SIZE=8 is preferred for ARGB/ABGR primaries, so Flutter's blend
+// operations land in a format matching the scanout BO.
 
-constexpr std::array<EGLint, 15> kDrmEglConfigAttribs = {{
+constexpr std::array<EGLint, 15> kEglAttrs_8880_D24 = {{
     EGL_SURFACE_TYPE,
     EGL_WINDOW_BIT,
     EGL_RENDERABLE_TYPE,
@@ -58,6 +68,62 @@ constexpr std::array<EGLint, 15> kDrmEglConfigAttribs = {{
     24,
     EGL_NONE,
 }};
+constexpr std::array<EGLint, 15> kEglAttrs_8888_D24 = {{
+    EGL_SURFACE_TYPE,
+    EGL_WINDOW_BIT,
+    EGL_RENDERABLE_TYPE,
+    EGL_OPENGL_ES2_BIT,
+    EGL_RED_SIZE,
+    8,
+    EGL_GREEN_SIZE,
+    8,
+    EGL_BLUE_SIZE,
+    8,
+    EGL_ALPHA_SIZE,
+    8,
+    EGL_DEPTH_SIZE,
+    24,
+    EGL_NONE,
+}};
+constexpr std::array<EGLint, 15> kEglAttrs_5650_D16 = {{
+    EGL_SURFACE_TYPE,
+    EGL_WINDOW_BIT,
+    EGL_RENDERABLE_TYPE,
+    EGL_OPENGL_ES2_BIT,
+    EGL_RED_SIZE,
+    5,
+    EGL_GREEN_SIZE,
+    6,
+    EGL_BLUE_SIZE,
+    5,
+    EGL_ALPHA_SIZE,
+    0,
+    EGL_DEPTH_SIZE,
+    16,
+    EGL_NONE,
+}};
+
+// Pick the EGL attribute array that matches the scanout primary format.
+const EGLint* EglAttrsFor(const uint32_t fourcc) {
+  switch (fourcc) {
+    case GBM_FORMAT_ARGB8888:
+    case GBM_FORMAT_ABGR8888:
+      return kEglAttrs_8888_D24.data();
+    case GBM_FORMAT_RGB565:
+      return kEglAttrs_5650_D16.data();
+    case GBM_FORMAT_XRGB8888:
+    case GBM_FORMAT_XBGR8888:
+    default:
+      return kEglAttrs_8880_D24.data();
+  }
+}
+
+// For scoring EGL configs against the resolved primary: XRGB/XBGR want
+// alpha=0, ARGB/ABGR want alpha=8, RGB565 wants alpha=0.
+EGLint PreferredAlphaFor(const uint32_t fourcc) {
+  return (fourcc == GBM_FORMAT_ARGB8888 || fourcc == GBM_FORMAT_ABGR8888) ? 8
+                                                                          : 0;
+}
 
 constexpr std::array<EGLint, 3> kEsContextAttribs = {{
     EGL_CONTEXT_CLIENT_VERSION,
@@ -71,11 +137,179 @@ DrmBackend* BackendFromState(void* user_data) {
       state->view_controller->engine->GetBackend());
 }
 
+// Refuse to run unless our controlling terminal is the *foreground* VT on
+// the kernel console. Rationale: drmSetMaster can succeed from a non-
+// foreground VT (e.g. a terminal emulator, SSH, or an inactive text VT)
+// when no compositor currently holds master, but the GPU keeps scanning
+// out whatever the foreground VT owns. Atomic commits get silently
+// accepted and no PAGE_FLIP_EVENT ever fires, so PresentLayers stalls on
+// the next flip wait — the "master-acquired but black screen" pathology
+// we kept hitting. Fail fast with an actionable message instead.
+//
+// Returns true if it's safe to proceed, false with a logged error if not.
+// A missing /dev/tty0 (container / headless service) is not fatal —
+// those cases are outside the scope of this check.
+bool VerifyForegroundVt(const std::string& drm_device) {
+  const int tty0 = ::open("/dev/tty0", O_RDONLY | O_CLOEXEC);
+  if (tty0 < 0) {
+    spdlog::warn(
+        "[DrmBackend] open(/dev/tty0): {} — skipping foreground-VT check",
+        std::strerror(errno));
+    return true;
+  }
+  struct vt_stat vtstat{};
+  const bool got_state = ::ioctl(tty0, VT_GETSTATE, &vtstat) == 0;
+  const int vt_errno = errno;
+  ::close(tty0);
+  if (!got_state) {
+    spdlog::warn("[DrmBackend] VT_GETSTATE: {} — skipping foreground-VT check",
+                 std::strerror(vt_errno));
+    return true;
+  }
+  const unsigned int active_vt = vtstat.v_active;
+
+  struct stat st{};
+  if (::stat("/dev/tty", &st) != 0) {
+    spdlog::error(
+        "[DrmBackend] no controlling terminal (stat /dev/tty: {}). Cannot "
+        "drive {} without a foreground VT — switch to the active console "
+        "(tty{}) and rerun.",
+        std::strerror(errno), drm_device, active_vt);
+    return false;
+  }
+
+  // TTY_MAJOR is 4 on Linux; /dev/ttyN lives at (4, N). Terminal emulators
+  // and SSH sessions give /dev/tty a pts major (136+), which is precisely
+  // the case we want to refuse.
+  constexpr unsigned int kTtyMajor = 4;
+  const unsigned int ctl_major = major(st.st_rdev);
+  const unsigned int ctl_minor = minor(st.st_rdev);
+  if (ctl_major != kTtyMajor) {
+    spdlog::error(
+        "[DrmBackend] controlling terminal is not a kernel VT "
+        "(major={}, minor={}) — you're running from a terminal emulator or "
+        "SSH. Active VT is tty{}. Switch to tty{} (Ctrl+Alt+F{}) and rerun, "
+        "or `sudo systemctl isolate multi-user.target` first. Refusing to "
+        "drive {}.",
+        ctl_major, ctl_minor, active_vt, active_vt, active_vt, drm_device);
+    return false;
+  }
+  if (ctl_minor != active_vt) {
+    spdlog::error(
+        "[DrmBackend] controlling VT is tty{} but foreground VT is tty{} — "
+        "scanout goes to the foreground. Switch to tty{} (Ctrl+Alt+F{}) and "
+        "rerun. Refusing to drive {}.",
+        ctl_minor, active_vt, ctl_minor, ctl_minor, drm_device);
+    return false;
+  }
+  spdlog::info("[DrmBackend] foreground VT check: on tty{} (active)",
+               active_vt);
+  return true;
+}
+
+const char* ConnectorTypeName(uint32_t type) {
+  switch (type) {
+    case DRM_MODE_CONNECTOR_Unknown:
+      return "Unknown";
+    case DRM_MODE_CONNECTOR_VGA:
+      return "VGA";
+    case DRM_MODE_CONNECTOR_DVII:
+      return "DVI-I";
+    case DRM_MODE_CONNECTOR_DVID:
+      return "DVI-D";
+    case DRM_MODE_CONNECTOR_DVIA:
+      return "DVI-A";
+    case DRM_MODE_CONNECTOR_Composite:
+      return "Composite";
+    case DRM_MODE_CONNECTOR_SVIDEO:
+      return "S-Video";
+    case DRM_MODE_CONNECTOR_LVDS:
+      return "LVDS";
+    case DRM_MODE_CONNECTOR_Component:
+      return "Component";
+    case DRM_MODE_CONNECTOR_9PinDIN:
+      return "9PinDIN";
+    case DRM_MODE_CONNECTOR_DisplayPort:
+      return "DP";
+    case DRM_MODE_CONNECTOR_HDMIA:
+      return "HDMI-A";
+    case DRM_MODE_CONNECTOR_HDMIB:
+      return "HDMI-B";
+    case DRM_MODE_CONNECTOR_TV:
+      return "TV";
+    case DRM_MODE_CONNECTOR_eDP:
+      return "eDP";
+    case DRM_MODE_CONNECTOR_VIRTUAL:
+      return "Virtual";
+    case DRM_MODE_CONNECTOR_DSI:
+      return "DSI";
+    case DRM_MODE_CONNECTOR_DPI:
+      return "DPI";
+    case DRM_MODE_CONNECTOR_WRITEBACK:
+      return "Writeback";
+    default:
+      return "?";
+  }
+}
+
 }  // namespace
+
+int PrintDrmModes(const std::string& device) {
+  const int fd = ::open(device.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    std::fprintf(stderr, "open(%s): %s\n", device.c_str(),
+                 std::strerror(errno));
+    return 1;
+  }
+  drmModeRes* res = drmModeGetResources(fd);
+  if (!res) {
+    std::fprintf(stderr, "drmModeGetResources(%s): %s\n", device.c_str(),
+                 std::strerror(errno));
+    ::close(fd);
+    return 1;
+  }
+  std::printf("Device: %s\n", device.c_str());
+  std::printf("Connectors: %d\n\n", res->count_connectors);
+  for (int ci = 0; ci < res->count_connectors; ++ci) {
+    drmModeConnector* c = drmModeGetConnector(fd, res->connectors[ci]);
+    if (!c)
+      continue;
+    const char* state = (c->connection == DRM_MODE_CONNECTED) ? "connected"
+                        : (c->connection == DRM_MODE_DISCONNECTED)
+                            ? "disconnected"
+                            : "unknown";
+    std::printf("[%u] %s-%u  %s  modes=%d\n", c->connector_id,
+                ConnectorTypeName(c->connector_type), c->connector_type_id,
+                state, c->count_modes);
+    for (int mi = 0; mi < c->count_modes; ++mi) {
+      const drmModeModeInfo& m = c->modes[mi];
+      const bool preferred = (m.type & DRM_MODE_TYPE_PREFERRED) != 0;
+      std::printf("  %4dx%-4d @ %3dHz  %-20s  %s\n", m.hdisplay, m.vdisplay,
+                  m.vrefresh, m.name, preferred ? "[preferred]" : "");
+    }
+    std::printf("\n");
+    drmModeFreeConnector(c);
+  }
+  drmModeFreeResources(res);
+  ::close(fd);
+  return 0;
+}
 
 std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg) {
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg));
-  if (!backend->InitDrm() || !backend->InitGbm() || !backend->InitEgl()) {
+  if (!backend->InitDrm()) {
+    return nullptr;
+  }
+
+  // Resolve tristate knobs now — InitDrm has the CRTC selected and the
+  // DRM caps set. The probe drives format choice in InitGbm below, so
+  // this must happen before it.
+  backend->resolved_ = std::make_unique<homescreen::driver_probe::Resolved>(
+      homescreen::driver_probe::Resolve(backend->drm_dev_->fd(),
+                                        backend->crtc_id_, cfg));
+  homescreen::driver_probe::LogResolved(*backend->resolved_);
+
+  if (!backend->InitGbm() || !backend->InitEgl()) {
     return nullptr;
   }
 #if BUILD_COMPOSITOR
@@ -89,7 +323,7 @@ DrmBackend::DrmBackend(DrmConfig cfg) : cfg_(std::move(cfg)) {}
 DrmBackend::~DrmBackend() {
   // Let any in-flight page flip land so we don't free a BO still being
   // scanned out.
-  WaitForPendingFlip();
+  (void)WaitForPendingFlip();
 
 #if BUILD_COMPOSITOR
   // Release compositor GL resources while the context is still current.
@@ -124,6 +358,9 @@ DrmBackend::~DrmBackend() {
     drmModeFreeCrtc(saved_crtc_);
   }
 
+  // Reverse-watchdog no longer needed: we restored the CRTC ourselves.
+  homescreen::watchdog::Disarm(drm_watchdog_);
+
   if (drm_dev_ && pending_fb_ != 0) {
     drmModeRmFB(drm_dev_->fd(), pending_fb_);
   }
@@ -142,10 +379,27 @@ DrmBackend::~DrmBackend() {
   if (gbm_device_) {
     gbm_device_destroy(gbm_device_);
   }
+
+  // Release DRM master so whoever takes over next (fbcon, getty, the
+  // greeter coming back up) can drive the display. Must happen last,
+  // after all our atomic work is done — drm::Device's destructor closes
+  // the fd, which also drops master, but being explicit keeps the log
+  // honest.
+  if (drm_master_ && drm_dev_) {
+    drmDropMaster(drm_dev_->fd());
+    drm_master_ = false;
+  }
   // drm_dev_ destructor closes the fd automatically.
 }
 
 bool DrmBackend::InitDrm() {
+  // Refuse up-front if we're not on the active VT. Prevents the "master
+  // acquired, commits return success, but scanout stays on the other VT"
+  // trap where drmSetMaster succeeds, but PAGE_FLIP_EVENT never fires.
+  if (!VerifyForegroundVt(cfg_.drm_device)) {
+    return false;
+  }
+
   auto dev = drm::Device::open(cfg_.drm_device);
   if (!dev) {
     spdlog::error("[DrmBackend] open({}): {}", cfg_.drm_device,
@@ -153,6 +407,28 @@ bool DrmBackend::InitDrm() {
     return false;
   }
   drm_dev_.emplace(std::move(*dev));
+
+  // Acquire DRM master. Required for modeset/atomic commits. Atomic
+  // writes from a non-master fd are silently accepted by some drivers
+  // (amdgpu in particular) as no-ops — the commit returns success, but
+  // nothing actually changes on screen, which is exactly the "blank
+  // panel, no PAGE_FLIP_EVENT" pathology. Refuse to run in that state.
+  if (drmSetMaster(drm_dev_->fd()) != 0) {
+    if (const int err = errno; err == EBUSY || err == EACCES || err == EPERM) {
+      spdlog::error(
+          "[DrmBackend] cannot acquire DRM master on {} ({}). Another "
+          "display server (gdm / gnome-shell / sddm / Xorg / a Wayland "
+          "compositor) is already holding the device. Stop it or run from "
+          "a bare TTY (e.g. `sudo systemctl isolate multi-user.target`).",
+          cfg_.drm_device, std::strerror(err));
+    } else {
+      spdlog::error("[DrmBackend] drmSetMaster({}): {}", cfg_.drm_device,
+                    std::strerror(err));
+    }
+    return false;
+  }
+  drm_master_ = true;
+  spdlog::info("[DrmBackend] DRM master on {}", cfg_.drm_device);
 
   if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) !=
       0) {
@@ -187,19 +463,30 @@ bool DrmBackend::InitDrm() {
   }
   connector_id_ = connector->connector_id;
 
+  // Always drive the display at its preferred/native mode. If the user
+  // specified a (smaller) size, we keep the preferred mode for the CRTC
+  // and letterbox the requested FB inside it (see fb_w_/fb_h_ below).
+  // Picking a smaller mode to match the request is worse on almost every
+  // axis — blurry on LCDs, worse backlight uniformity on some panels,
+  // and on some connectors the mode list doesn't contain an exact match.
   for (int i = 0; i < connector->count_modes; ++i) {
     const auto& m = connector->modes[i];
-    if (m.hdisplay == cfg_.width && m.vdisplay == cfg_.height) {
-      mode_ = m;
-      break;
-    }
     if (m.type & DRM_MODE_TYPE_PREFERRED) {
       mode_ = m;
+      break;
     }
   }
   if (mode_.clock == 0) {
     mode_ = connector->modes[0];
   }
+
+  // Framebuffer size: explicit request wins; otherwise full-screen.
+  // Clamp to the mode so a too-large request still produces a valid
+  // centered rect (CRTC_W > mode would fail the atomic TEST).
+  fb_w_ =
+      std::min<uint32_t>(cfg_.width.value_or(mode_.hdisplay), mode_.hdisplay);
+  fb_h_ =
+      std::min<uint32_t>(cfg_.height.value_or(mode_.vdisplay), mode_.vdisplay);
 
   drmModeEncoder* enc = nullptr;
   if (connector->encoder_id) {
@@ -244,9 +531,27 @@ bool DrmBackend::InitDrm() {
 
   saved_crtc_ = drmModeGetCrtc(drm_dev_->fd(), crtc_id_);
 
-  spdlog::info("[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz",
-               connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay,
-               mode_.vrefresh);
+  if (fb_w_ == mode_.hdisplay && fb_h_ == mode_.vdisplay) {
+    spdlog::info("[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz",
+                 connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay,
+                 mode_.vrefresh);
+  } else {
+    spdlog::info(
+        "[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz fb={}x{} "
+        "(letterboxed)",
+        connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay, mode_.vrefresh,
+        fb_w_, fb_h_);
+  }
+
+  // Arm the reverse-watchdog BEFORE any code path can call drmModeSetCrtc
+  // (the first one lands in SetInitialMode via the first Present). If the
+  // parent dies — SIGKILL included — the child restores this snapshot, so
+  // the text console comes back instead of the last Flutter framebuffer.
+  if (saved_crtc_) {
+    drm_watchdog_ = homescreen::watchdog::SpawnDrmRestore(
+        drm_dev_->fd(), saved_crtc_->crtc_id, saved_crtc_->buffer_id,
+        saved_crtc_->x, saved_crtc_->y, connector_id_, saved_crtc_->mode);
+  }
 
   drmModeFreeConnector(connector);
   drmModeFreeResources(res);
@@ -254,25 +559,38 @@ bool DrmBackend::InitDrm() {
 }
 
 bool DrmBackend::InitGbm() {
+  // DriverProbe returns 0 when the primary plane advertises none of the
+  // formats we know how to drive; surface that clearly instead of letting
+  // gbm_surface_create fail with a generic nullptr.
+  if (resolved_->primary_format == 0) {
+    spdlog::error(
+        "[DrmBackend] primary plane advertises no supported format "
+        "(XRGB8888/XBGR8888/ARGB8888/ABGR8888/RGB565). Override with "
+        "--drm-primary-format if you know what's there.");
+    return false;
+  }
+
   gbm_device_ = gbm_create_device(drm_dev_->fd());
   if (!gbm_device_) {
     spdlog::error("[DrmBackend] gbm_create_device failed");
     return false;
   }
 
-  gbm_surface_ = gbm_surface_create(gbm_device_, mode_.hdisplay, mode_.vdisplay,
-                                    kGbmSurfaceFormat,
-                                    GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+  gbm_surface_ =
+      gbm_surface_create(gbm_device_, fb_w_, fb_h_, resolved_->primary_format,
+                         GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
   if (!gbm_surface_) {
-    spdlog::error("[DrmBackend] gbm_surface_create failed");
+    spdlog::error("[DrmBackend] gbm_surface_create(format=0x{:08x}) failed",
+                  resolved_->primary_format);
     return false;
   }
   return true;
 }
 
 bool DrmBackend::InitEgl() {
-  auto get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-      eglGetProcAddress("eglGetPlatformDisplayEXT"));
+  const auto get_platform_display =
+      reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+          eglGetProcAddress("eglGetPlatformDisplayEXT"));
   if (get_platform_display) {
     egl_display_ =
         get_platform_display(EGL_PLATFORM_GBM_KHR, gbm_device_, nullptr);
@@ -301,19 +619,19 @@ bool DrmBackend::InitEgl() {
   // eglChooseConfig returns any config whose bit-sizes cover the request —
   // it does not constrain EGL_NATIVE_VISUAL_ID, so the first hit often has
   // a visual that doesn't match the GBM surface and eglCreateWindowSurface
-  // fails with EGL_BAD_MATCH. Enumerate all candidates and pick one whose
+  // fails with EGL_BAD_MATCH. List all candidates and pick one whose
   // native visual matches the GBM format we used for the surface.
+  const EGLint* egl_attrs = EglAttrsFor(resolved_->primary_format);
   EGLint num_configs = 0;
-  if (!eglChooseConfig(egl_display_, kDrmEglConfigAttribs.data(), nullptr, 0,
-                       &num_configs) ||
+  if (!eglChooseConfig(egl_display_, egl_attrs, nullptr, 0, &num_configs) ||
       num_configs < 1) {
     spdlog::error("[DrmBackend] eglChooseConfig (count) failed: 0x{:x}",
                   eglGetError());
     return false;
   }
   std::vector<EGLConfig> configs(static_cast<size_t>(num_configs));
-  if (!eglChooseConfig(egl_display_, kDrmEglConfigAttribs.data(),
-                       configs.data(), num_configs, &num_configs)) {
+  if (!eglChooseConfig(egl_display_, egl_attrs, configs.data(), num_configs,
+                       &num_configs)) {
     spdlog::error("[DrmBackend] eglChooseConfig (fill) failed: 0x{:x}",
                   eglGetError());
     return false;
@@ -348,11 +666,11 @@ bool DrmBackend::InitEgl() {
   // surface format. The "best" depends on what the main window surface is
   // actually used for:
   //
-  //   Compositor ON  (BUILD_COMPOSITOR=1)
+  //   Compositor ON (BUILD_COMPOSITOR=1)
   //     Flutter renders every layer into an EglFboBackingStore that owns
   //     its own depth+stencil; the main surface only composites textured
   //     quads into FBO 0. It does not depth-test or stencil, so we prefer
-  //     the thinnest window surface: stencil=0, smallest depth.
+  //     the thinnest window surface: stencil=0, the smallest depth.
   //
   //   Compositor OFF
   //     Flutter renders directly into the default framebuffer and needs
@@ -367,20 +685,20 @@ bool DrmBackend::InitEgl() {
 #else
   constexpr EGLint kPreferredStencil = 8;
 #endif
-  constexpr EGLint kPreferredAlpha = 0;  // matches kGbmSurfaceFormat (XRGB)
+  const EGLint preferred_alpha = PreferredAlphaFor(resolved_->primary_format);
 
-  auto abs_diff = [](EGLint a, EGLint b) -> EGLint {
+  auto abs_diff = [](const EGLint a, const EGLint b) -> EGLint {
     return a > b ? a - b : b - a;
   };
 
   // Lower tuple = better. std::tuple's lexicographic operator< gives us
   // strict priority ordering without nested branches.
   using Score = std::tuple<EGLint, EGLint, EGLint, EGLint, EGLint>;
-  auto score = [&](EGLint i) -> Score {
+  auto score = [&](const EGLint i) -> Score {
     return {
         attr(configs[i], EGL_SAMPLES),                                    // 1
         attr(configs[i], EGL_CONFIG_CAVEAT) == EGL_NONE ? 0 : 1,          // 2
-        abs_diff(attr(configs[i], EGL_ALPHA_SIZE), kPreferredAlpha),      // 3
+        abs_diff(attr(configs[i], EGL_ALPHA_SIZE), preferred_alpha),      // 3
         abs_diff(attr(configs[i], EGL_STENCIL_SIZE), kPreferredStencil),  // 4
         attr(configs[i], EGL_DEPTH_SIZE),                                 // 5
     };
@@ -390,7 +708,7 @@ bool DrmBackend::InitEgl() {
   EGLint best_idx = -1;
   for (EGLint i = 0; i < num_configs; ++i) {
     if (attr(configs[i], EGL_NATIVE_VISUAL_ID) !=
-        static_cast<EGLint>(kGbmSurfaceFormat)) {
+        static_cast<EGLint>(resolved_->primary_format)) {
       continue;
     }
     if (best_idx < 0 || score(i) < score(best_idx)) {
@@ -401,7 +719,7 @@ bool DrmBackend::InitEgl() {
     spdlog::error(
         "[DrmBackend] no EGL config matches GBM format 0x{:x} (checked {} "
         "configs)",
-        kGbmSurfaceFormat, num_configs);
+        resolved_->primary_format, num_configs);
     return false;
   }
   egl_config_ = configs[static_cast<size_t>(best_idx)];
@@ -433,7 +751,7 @@ bool DrmBackend::InitEgl() {
   return true;
 }
 
-uint32_t DrmBackend::AddFb(gbm_bo* bo) {
+uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
   const uint32_t width = gbm_bo_get_width(bo);
   const uint32_t height = gbm_bo_get_height(bo);
   const uint32_t stride = gbm_bo_get_stride(bo);
@@ -451,6 +769,19 @@ bool DrmBackend::SetInitialMode() {
   if (!current_bo_ || current_fb_ == 0) {
     return false;
   }
+  // Legacy drmModeSetCrtc scans the FB at (0,0) on the CRTC and requires
+  // FB dims ≥ mode dims. Framed mode (FB smaller than mode) can't be
+  // centered on this path without a scratch mode-sized FB + per-frame
+  // memcpy — rejected in favor of failing loudly so the user sees the
+  // plane-compositor regression that pushed us here.
+  if (fb_w_ != mode_.hdisplay || fb_h_ != mode_.vdisplay) {
+    spdlog::error(
+        "[DrmBackend] legacy modeset reached with framed FB ({}x{} on "
+        "{}x{} mode); atomic plane-compositor must succeed for framing. "
+        "Remove view.width/view.height from config to run full-screen.",
+        fb_w_, fb_h_, mode_.hdisplay, mode_.vdisplay);
+    return false;
+  }
   if (drmModeSetCrtc(drm_dev_->fd(), crtc_id_, current_fb_, 0, 0,
                      &connector_id_, 1, &mode_) != 0) {
     spdlog::error("[DrmBackend] drmModeSetCrtc: {}", std::strerror(errno));
@@ -460,17 +791,17 @@ bool DrmBackend::SetInitialMode() {
   return true;
 }
 
-bool DrmBackend::MakeCurrent() {
+bool DrmBackend::MakeCurrent() const {
   return eglMakeCurrent(egl_display_, egl_surface_, egl_surface_,
                         egl_context_) == EGL_TRUE;
 }
 
-bool DrmBackend::ClearCurrent() {
+bool DrmBackend::ClearCurrent() const {
   return eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
                         EGL_NO_CONTEXT) == EGL_TRUE;
 }
 
-bool DrmBackend::MakeResourceCurrent() {
+bool DrmBackend::MakeResourceCurrent() const {
   return eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
                         egl_resource_context_) == EGL_TRUE;
 }
@@ -501,8 +832,8 @@ void DrmBackend::RecordFlipComplete() {
   if (fps_epoch_ns_ == 0) {
     fps_epoch_ns_ = now;
   }
-  const double elapsed_s = static_cast<double>(now - fps_epoch_ns_) / 1e9;
-  if (elapsed_s >= 1.0) {
+  if (const double elapsed_s = static_cast<double>(now - fps_epoch_ns_) / 1e9;
+      elapsed_s >= 1.0) {
     spdlog::info("[DrmBackend] FPS: {:.1f} ({} frames / {:.2f}s)",
                  frame_count_ / elapsed_s, frame_count_, elapsed_s);
     frame_count_ = 0;
@@ -511,7 +842,20 @@ void DrmBackend::RecordFlipComplete() {
 }
 
 void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                               intptr_t baton) {
+                               const intptr_t baton) {
+  // Bootstrap: before the first page-flip, there's no flip-complete event
+  // to return the baton from. Return it immediately so Flutter can
+  // schedule its first frame. Subsequent batons go through the normal
+  // PageFlipHandler path, locked to actual vblank.
+  if (!mode_set_) {
+    const uint64_t now = LibFlutterEngine->GetCurrentTime();
+    const uint64_t period_ns =
+        mode_.vrefresh > 0
+            ? 1000000000ULL / static_cast<uint64_t>(mode_.vrefresh)
+            : 16666667ULL;
+    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+    return;
+  }
   vsync_engine_.store(engine, std::memory_order_relaxed);
   vsync_baton_.store(baton, std::memory_order_release);
 }
@@ -543,8 +887,8 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
   const intptr_t baton =
       self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
   if (baton != 0) {
-    auto engine = self->vsync_engine_.load(std::memory_order_relaxed);
-    if (engine) {
+    if (const auto engine =
+            self->vsync_engine_.load(std::memory_order_relaxed)) {
       const uint64_t now = LibFlutterEngine->GetCurrentTime();
       const uint64_t period_ns =
           self->mode_.vrefresh > 0
@@ -555,7 +899,7 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
   }
 }
 
-bool DrmBackend::WaitForPendingFlip() {
+bool DrmBackend::WaitForPendingFlip() const {
   if (!flip_pending_ || !drm_dev_) {
     return true;
   }
@@ -568,8 +912,7 @@ bool DrmBackend::WaitForPendingFlip() {
     pollfd pfd{};
     pfd.fd = drm_dev_->fd();
     pfd.events = POLLIN;
-    const int r = poll(&pfd, 1, -1);
-    if (r < 0) {
+    if (const int r = poll(&pfd, 1, -1); r < 0) {
       if (errno == EINTR) {
         continue;
       }
@@ -584,8 +927,6 @@ bool DrmBackend::WaitForPendingFlip() {
 }
 
 bool DrmBackend::Present() {
-  // Finish the previous flip before issuing a new one. The kernel rejects a
-  // second queued flip while one is still in flight.
   if (!WaitForPendingFlip()) {
     return false;
   }
@@ -608,11 +949,13 @@ bool DrmBackend::Present() {
   }
 
   if (!mode_set_) {
-    // First frame: drive the mode set synchronously. current_* hold the
-    // active scanout BO/FB until the next successful flip.
     current_bo_ = next_bo;
     current_fb_ = next_fb;
-    return SetInitialMode();
+    if (!SetInitialMode()) {
+      return false;
+    }
+    RecordFlipComplete();
+    return true;
   }
 
   if (cfg_.debug_backend) {
@@ -638,7 +981,7 @@ void DrmBackend::Resize(size_t /*index*/,
                         Engine* /*engine*/,
                         int32_t /*w*/,
                         int32_t /*h*/) {
-  // DRM/KMS mode is fixed at the connector; engine is driven by the initial
+  // DRM/KMS mode is fixed at the connector; the engine is driven by the initial
   // mode resolution. Runtime mode switches are not supported in this phase.
 }
 
@@ -654,7 +997,19 @@ FlutterRendererConfig DrmBackend::GetRenderConfig() {
     return BackendFromState(user_data)->ClearCurrent();
   };
   config.open_gl.present = [](void* user_data) -> bool {
-    return BackendFromState(user_data)->Present();
+    auto* b = BackendFromState(user_data);
+#if BUILD_COMPOSITOR
+    // When the plane compositor owns scanout, DrmCompositor::PresentLayers
+    // has already committed the frame atomically — the engine's renderer
+    // .present call is a stale no-op for this path. Doing eglSwapBuffers
+    // + drmModePageFlip here would collide with the atomic commit on the
+    // same CRTC. Only run the legacy Present when planes aren't active
+    // (fallback latched or probe disabled planes in the first place).
+    if (b->compositor_ && b->compositor_->planes_active()) {
+      return true;
+    }
+#endif
+    return b->Present();
   };
   config.open_gl.fbo_callback = [](void* /*user_data*/) -> uint32_t {
     return 0;  // window FBO
@@ -676,9 +1031,15 @@ FlutterCompositor DrmBackend::GetCompositorConfig() {
   compositor.user_data = this;
 
 #if BUILD_COMPOSITOR
-  // The engine reuses backing stores across frames when sizes match;
-  // allow caching since our EglFboBackingStore is identity-keyed.
-  compositor.avoid_backing_store_cache = false;
+  // avoid_backing_store_cache = true forces the engine to allocate/pool
+  // fresh backing stores each frame, giving us the multi-BO supply the
+  // plane-direct scanout path needs. With it false, Flutter reuses a
+  // single BO frame-to-frame — fine for a GL fallback that blits into
+  // FBO 0 each time, but catastrophic for direct scanout: the kernel
+  // may optimize away a "flip to the same FB" and never fire a
+  // PAGE_FLIP_EVENT, and even if it does, Flutter renders into the
+  // live-scanout BO on the next frame.
+  compositor.avoid_backing_store_cache = true;
   compositor.create_backing_store_callback =
       [](const FlutterBackingStoreConfig* config, FlutterBackingStore* out,
          void* user_data) -> bool {
@@ -703,7 +1064,7 @@ FlutterCompositor DrmBackend::GetCompositorConfig() {
 
 #if BUILD_COMPOSITOR
 void DrmBackend::RegisterCompositorSurface(
-    FlutterPlatformViewIdentifier id,
+    const FlutterPlatformViewIdentifier id,
     std::shared_ptr<ICompositorSurface> surface) {
   if (compositor_) {
     compositor_->RegisterSurface(id, std::move(surface));

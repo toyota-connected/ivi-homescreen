@@ -221,23 +221,27 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   glUseProgram(0);
 }
 
-void GlCompositor::CompositeToDefault(GLuint src_fbo,
-                                      GLuint src_color_tex,
-                                      GLsizei src_w,
-                                      GLsizei src_h,
-                                      GLint dst_x,
-                                      GLint dst_y,
-                                      GLsizei dst_w,
-                                      GLsizei dst_h,
-                                      bool blend,
-                                      bool flip_y) {
+void GlCompositor::CompositeToFbo(GLuint dst_fbo,
+                                  GLuint src_fbo,
+                                  GLuint src_color_tex,
+                                  GLsizei src_w,
+                                  GLsizei src_h,
+                                  GLint dst_x,
+                                  GLint dst_y,
+                                  GLsizei dst_w,
+                                  GLsizei dst_h,
+                                  bool blend,
+                                  bool flip_y) {
   // Blit can't alpha-blend, so overlay layers must take the quad path.
+  // Also skip blit when there is no source FBO to read from (e.g. raw
+  // platform-view textures with no associated FBO) — falling through to
+  // the quad path handles that case via sampler.
   // glBlitFramebuffer flips vertically when dstY1 < dstY0; we use that for
   // GL-native-origin sources that need to land top-down.
-  if (!blend && caps_ && caps_->has_blit_framebuffer &&
+  if (!blend && src_fbo != 0 && caps_ && caps_->has_blit_framebuffer &&
       caps_->blit_framebuffer) {
     glBindFramebuffer(kReadFramebuffer, src_fbo);
-    glBindFramebuffer(kDrawFramebuffer, 0);
+    glBindFramebuffer(kDrawFramebuffer, dst_fbo);
     const GLint dst_y0 = flip_y ? dst_y + dst_h : dst_y;
     const GLint dst_y1 = flip_y ? dst_y : dst_y + dst_h;
     caps_->blit_framebuffer(0, 0, src_w, src_h, dst_x, dst_y0, dst_x + dst_w,
@@ -245,5 +249,8 @@ void GlCompositor::CompositeToDefault(GLuint src_fbo,
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return;
   }
+  // Quad path draws into whatever FBO is currently bound.
+  glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
   CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend, flip_y);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }

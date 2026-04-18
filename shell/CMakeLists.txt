@@ -76,6 +76,8 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_egl/drm_backend.cc
             backend/drm_kms_egl/drm_compositor.cc
+            backend/drm_kms_egl/driver_probe.cc
+            backend/drm_kms_egl/session_watchdog.cc
             backend/gl_process_resolver.cc
             display/drm_display.cc
             input/drm_seat.cc

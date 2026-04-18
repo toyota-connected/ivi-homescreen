@@ -15,6 +15,7 @@
 
 #include "configuration.h"
 
+#include <cstdlib>
 #include <filesystem>
 
 #include "config/common.h"
@@ -78,6 +79,42 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
   if (tbl->at_path("view.fullscreen").is_boolean()) {
     instance.view.fullscreen =
         tbl->at_path("view.fullscreen").value<bool>().value();
+  }
+
+  // ── DRM backend knobs (all strings; see configuration.h) ───────────────
+  if (tbl->at_path("view.drm_device").is_string()) {
+    instance.view.drm_device =
+        tbl->at_path("view.drm_device").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_compositor").is_string()) {
+    instance.view.drm_compositor =
+        tbl->at_path("view.drm_compositor").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_modeset").is_string()) {
+    instance.view.drm_modeset =
+        tbl->at_path("view.drm_modeset").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_allow_nonblock_modeset").is_string()) {
+    instance.view.drm_allow_nonblock_modeset =
+        tbl->at_path("view.drm_allow_nonblock_modeset")
+            .as_string()
+            ->value_or("");
+  }
+  if (tbl->at_path("view.drm_primary_format").is_string()) {
+    instance.view.drm_primary_format =
+        tbl->at_path("view.drm_primary_format").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_overlay_planes").is_string()) {
+    instance.view.drm_overlay_planes =
+        tbl->at_path("view.drm_overlay_planes").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_explicit_sync").is_string()) {
+    instance.view.drm_explicit_sync =
+        tbl->at_path("view.drm_explicit_sync").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_async_flip").is_string()) {
+    instance.view.drm_async_flip =
+        tbl->at_path("view.drm_async_flip").as_string()->value_or("");
   }
 
   if (tbl->at_path("window_activation_area.x").is_integer()) {
@@ -163,6 +200,31 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (cli.view.fullscreen.has_value()) {
     instance.view.fullscreen = cli.view.fullscreen.value();
+  }
+  if (cli.view.drm_device.has_value()) {
+    instance.view.drm_device = cli.view.drm_device.value();
+  }
+  if (cli.view.drm_compositor.has_value()) {
+    instance.view.drm_compositor = cli.view.drm_compositor.value();
+  }
+  if (cli.view.drm_modeset.has_value()) {
+    instance.view.drm_modeset = cli.view.drm_modeset.value();
+  }
+  if (cli.view.drm_allow_nonblock_modeset.has_value()) {
+    instance.view.drm_allow_nonblock_modeset =
+        cli.view.drm_allow_nonblock_modeset.value();
+  }
+  if (cli.view.drm_primary_format.has_value()) {
+    instance.view.drm_primary_format = cli.view.drm_primary_format.value();
+  }
+  if (cli.view.drm_overlay_planes.has_value()) {
+    instance.view.drm_overlay_planes = cli.view.drm_overlay_planes.value();
+  }
+  if (cli.view.drm_explicit_sync.has_value()) {
+    instance.view.drm_explicit_sync = cli.view.drm_explicit_sync.value();
+  }
+  if (cli.view.drm_async_flip.has_value()) {
+    instance.view.drm_async_flip = cli.view.drm_async_flip.value();
   }
 }
 
@@ -297,7 +359,28 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.app_id))(
             "wayland-event-mask", "Wayland Events to mask",
             cxxopts::value<std::string>(config.wayland_event_mask))(
-            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>());
+            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>())(
+            "drm-device", "DRM device path (e.g. /dev/dri/card0)",
+            cxxopts::value<std::string>())(
+            "drm-compositor", "DRM compositor strategy: auto|planes|gl",
+            cxxopts::value<std::string>())(
+            "drm-modeset", "DRM modeset API: auto|legacy|atomic",
+            cxxopts::value<std::string>())(
+            "drm-allow-nonblock-modeset",
+            "Allow NONBLOCK | ALLOW_MODESET atomic commits: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-primary-format",
+            "Primary plane format: auto|xrgb8888|xbgr8888|argb8888|abgr8888|"
+            "rgb565",
+            cxxopts::value<std::string>())("drm-overlay-planes",
+                                           "Use overlay planes: auto|yes|no",
+                                           cxxopts::value<std::string>())(
+            "drm-explicit-sync",
+            "Use IN_FENCE_FD / OUT_FENCE_PTR on commits: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-async-flip",
+            "Use DRM_MODE_PAGE_FLIP_ASYNC on flip-only commits: auto|yes|no",
+            cxxopts::value<std::string>());
 
     const auto result = allocated->parse(argc, argv);
 
@@ -410,6 +493,38 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     if (result.count("ivi-surface-id")) {
       config.view.ivi_surface_id = result["ivi-surface-id"].as<uint32_t>();
     }
+
+    // DRM knobs. CLI wins; env (HOMESCREEN_DRM_*) fills only when the
+    // matching CLI flag was absent. Empty string is treated as unset.
+    auto pick_string = [&](const char* cli_name, const char* env_name,
+                           std::optional<std::string>& out) {
+      if (result.count(cli_name)) {
+        const auto v = result[cli_name].as<std::string>();
+        if (!v.empty()) {
+          out = v;
+          return;
+        }
+      }
+      if (const char* e = std::getenv(env_name); e && *e) {
+        out = std::string(e);
+      }
+    };
+    pick_string("drm-device", "HOMESCREEN_DRM_DEVICE", config.view.drm_device);
+    pick_string("drm-compositor", "HOMESCREEN_DRM_COMPOSITOR",
+                config.view.drm_compositor);
+    pick_string("drm-modeset", "HOMESCREEN_DRM_MODESET",
+                config.view.drm_modeset);
+    pick_string("drm-allow-nonblock-modeset",
+                "HOMESCREEN_DRM_ALLOW_NONBLOCK_MODESET",
+                config.view.drm_allow_nonblock_modeset);
+    pick_string("drm-primary-format", "HOMESCREEN_DRM_PRIMARY_FORMAT",
+                config.view.drm_primary_format);
+    pick_string("drm-overlay-planes", "HOMESCREEN_DRM_OVERLAY_PLANES",
+                config.view.drm_overlay_planes);
+    pick_string("drm-explicit-sync", "HOMESCREEN_DRM_EXPLICIT_SYNC",
+                config.view.drm_explicit_sync);
+    pick_string("drm-async-flip", "HOMESCREEN_DRM_ASYNC_FLIP",
+                config.view.drm_async_flip);
 
     config.view.vm_args.reserve(result.unmatched().size());
     for (const auto& option : result.unmatched()) {
