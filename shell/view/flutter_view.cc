@@ -33,6 +33,7 @@
 
 #include "configuration/configuration.h"
 #include "engine.h"
+#include "logging.h"
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
@@ -62,11 +63,100 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.height.value_or(kDefaultViewHeight),
       m_config.debug_backend.value_or(false), kEglBufferSize);
 #elif BUILD_BACKEND_DRM_KMS_EGL
-  m_backend =
-      DrmBackend::Create({m_config.view.drm_device.value_or("/dev/dri/card0"),
-                          m_config.view.width.value_or(kDefaultViewWidth),
-                          m_config.view.height.value_or(kDefaultViewHeight),
-                          m_config.debug_backend.value_or(false)});
+  {
+    auto parse_tri = [](const std::optional<std::string>& s,
+                        drm_config::TriState def =
+                            drm_config::TriState::kAuto) {
+      if (!s.has_value() || s->empty() || *s == "auto") {
+        return def;
+      }
+      if (*s == "yes" || *s == "true" || *s == "on") {
+        return drm_config::TriState::kYes;
+      }
+      if (*s == "no" || *s == "false" || *s == "off") {
+        return drm_config::TriState::kNo;
+      }
+      spdlog::warn("[FlutterView] drm tri-state '{}' unrecognized; using auto",
+                   *s);
+      return drm_config::TriState::kAuto;
+    };
+    auto parse_compositor = [](const std::optional<std::string>& s) {
+      if (!s.has_value() || s->empty() || *s == "auto") {
+        return drm_config::Compositor::kAuto;
+      }
+      if (*s == "planes") {
+        return drm_config::Compositor::kPlanes;
+      }
+      if (*s == "gl") {
+        return drm_config::Compositor::kGl;
+      }
+      spdlog::warn("[FlutterView] drm-compositor '{}' unrecognized; using auto",
+                   *s);
+      return drm_config::Compositor::kAuto;
+    };
+    auto parse_modeset = [](const std::optional<std::string>& s) {
+      if (!s.has_value() || s->empty() || *s == "auto") {
+        return drm_config::Modeset::kAuto;
+      }
+      if (*s == "legacy") {
+        return drm_config::Modeset::kLegacy;
+      }
+      if (*s == "atomic") {
+        return drm_config::Modeset::kAtomic;
+      }
+      spdlog::warn("[FlutterView] drm-modeset '{}' unrecognized; using auto",
+                   *s);
+      return drm_config::Modeset::kAuto;
+    };
+    auto parse_format = [](const std::optional<std::string>& s) {
+      if (!s.has_value() || s->empty() || *s == "auto") {
+        return drm_config::PrimaryFormat::kAuto;
+      }
+      if (*s == "xrgb8888") {
+        return drm_config::PrimaryFormat::kXrgb8888;
+      }
+      if (*s == "xbgr8888") {
+        return drm_config::PrimaryFormat::kXbgr8888;
+      }
+      if (*s == "argb8888") {
+        return drm_config::PrimaryFormat::kArgb8888;
+      }
+      if (*s == "abgr8888") {
+        return drm_config::PrimaryFormat::kAbgr8888;
+      }
+      if (*s == "rgb565") {
+        return drm_config::PrimaryFormat::kRgb565;
+      }
+      spdlog::warn(
+          "[FlutterView] drm-primary-format '{}' unrecognized "
+          "(expected auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565); "
+          "using auto",
+          *s);
+      return drm_config::PrimaryFormat::kAuto;
+    };
+
+    // --fullscreen on DRM = drive the panel at its preferred mode with no
+    // framing. Clearing width/height here lets DrmBackend fall through to
+    // cfg_.width.value_or(mode_.hdisplay), i.e. the native mode. When -f
+    // is combined with explicit width/height, -f wins — matches how most
+    // CLI tools handle a scalar "use native" flag vs. explicit sizing.
+    const bool fullscreen = m_config.view.fullscreen.value_or(false);
+    DrmConfig cfg{
+        m_config.view.drm_device.value_or("/dev/dri/card1"),
+        fullscreen ? std::optional<uint32_t>{} : m_config.view.width,
+        fullscreen ? std::optional<uint32_t>{} : m_config.view.height,
+        m_config.debug_backend.value_or(false),
+    };
+    cfg.compositor = parse_compositor(m_config.view.drm_compositor);
+    cfg.modeset = parse_modeset(m_config.view.drm_modeset);
+    cfg.allow_nonblock_modeset =
+        parse_tri(m_config.view.drm_allow_nonblock_modeset);
+    cfg.primary_format = parse_format(m_config.view.drm_primary_format);
+    cfg.overlay_planes = parse_tri(m_config.view.drm_overlay_planes);
+    cfg.explicit_sync = parse_tri(m_config.view.drm_explicit_sync);
+    cfg.async_flip = parse_tri(m_config.view.drm_async_flip);
+    m_backend = DrmBackend::Create(cfg);
+  }
 #elif BUILD_BACKEND_WAYLAND_EGL
   {
     auto* wl = dynamic_cast<Display*>(display.get());
@@ -175,8 +265,12 @@ void FlutterView::Initialize() {
   display.refresh_rate =
       m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
 #if BUILD_BACKEND_DRM_KMS_EGL
-  auto [width, height] =
-      m_display->GetVideoModeSize(static_cast<uint32_t>(m_index));
+  // DrmDisplay is constructed from the config-level width/height in app.cc,
+  // which may still hold the TOML-specified size even when `-f` cleared those
+  // values for the backend. Query the backend for the resolved FB size so
+  // fullscreen actually gets mode dims here instead of a stale 1024x768 etc.
+  const auto width = static_cast<int32_t>(m_backend->width());
+  const auto height = static_cast<int32_t>(m_backend->height());
 #else
   auto [width, height] = m_wayland_window->GetSize();
 #endif
@@ -195,7 +289,17 @@ void FlutterView::Initialize() {
   // update view
   m_state->view = m_state->view_wrapper->view = this;
 
-#if !BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // On the DRM path there is no WaylandWindow to trigger the initial
+  // window-metrics event. Without it Flutter never learns the viewport
+  // size and never schedules a frame. Send it explicitly now that the
+  // engine is running.
+  {
+    const auto result = m_flutter_engine->SetWindowSize(height, width);
+    spdlog::info("[DrmBackend] SendWindowMetrics {}x{} result={}", width,
+                 height, static_cast<int>(result));
+  }
+#else
   // Engine events are decoded by surface pointer
   dynamic_cast<Display*>(m_display.get())
       ->SetEngine(m_wayland_window->GetBaseSurface(), m_flutter_engine.get());

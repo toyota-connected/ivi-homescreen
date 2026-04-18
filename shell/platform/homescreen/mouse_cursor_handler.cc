@@ -60,6 +60,12 @@ void MouseCursorHandler::HandleMethodCall(
       return;
     }
     auto window = view_->GetWindow();
+    if (!window) {
+      // DRM/KMS path has no WaylandWindow; cursor is handled at the
+      // KMS plane level (or not at all until HW cursor is implemented).
+      result->Success(flutter::EncodableValue(true));
+      return;
+    }
     auto res = window->ActivateSystemCursor(device, kind);
 
     result->Success(flutter::EncodableValue(res));

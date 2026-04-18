@@ -32,15 +32,64 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
+#include "backend/drm_kms_egl/session_watchdog.h"
 
 class DrmCompositor;
 
+// Defined in driver_probe.h — forward-declared here so DrmBackend can hold
+// a std::unique_ptr<Resolved> without pulling that header into every TU.
+namespace homescreen::driver_probe {
+struct Resolved;
+}
+
+namespace drm_config {
+
+// Each user-facing knob is tristate: kAuto lets DriverProbe resolve it
+// based on cap queries + driver name. Explicit values override the probe.
+enum class Compositor : uint8_t { kAuto, kPlanes, kGl };
+enum class Modeset : uint8_t { kAuto, kLegacy, kAtomic };
+enum class TriState : uint8_t { kAuto, kYes, kNo };
+// 32-bit formats + RGB565. Byte order matters for scanout: XRGB vs. XBGR
+// differ only in R/B lane ordering, and drivers often advertise just one.
+// RGB565 is the fallback for low-end fb drivers (tilcdc, panel-mipi-dbi,
+// etc.) whose primary plane doesn't advertise any 32-bit format.
+enum class PrimaryFormat : uint8_t {
+  kAuto,
+  kXrgb8888,
+  kXbgr8888,
+  kArgb8888,
+  kAbgr8888,
+  kRgb565,
+};
+
+}  // namespace drm_config
+
 struct DrmConfig {
   std::string drm_device;
-  uint32_t width;
-  uint32_t height;
+  // Unset = use the connector's preferred mode as-is (engine + FB at mode
+  // size, no framing). Set = use preferred mode for CRTC but size the FB
+  // at (width, height) and center it on screen with black borders.
+  std::optional<uint32_t> width;
+  std::optional<uint32_t> height;
   bool debug_backend{false};
+
+  // User-facing knobs. All default to kAuto; DriverProbe resolves them
+  // into the concrete values stored on DrmBackend::resolved_. See
+  // driver_probe.h for the resolution rules.
+  drm_config::Compositor compositor{drm_config::Compositor::kAuto};
+  drm_config::Modeset modeset{drm_config::Modeset::kAuto};
+  drm_config::TriState allow_nonblock_modeset{drm_config::TriState::kAuto};
+  drm_config::PrimaryFormat primary_format{drm_config::PrimaryFormat::kAuto};
+  drm_config::TriState overlay_planes{drm_config::TriState::kAuto};
+  drm_config::TriState explicit_sync{drm_config::TriState::kAuto};
+  drm_config::TriState async_flip{drm_config::TriState::kAuto};
 };
+
+// Probe-and-print helper: opens `device`, lists every connector's modes
+// (flagging connected vs disconnected, and the preferred mode), prints to
+// stdout. Returns 0 on success, non-zero if the device can't be opened or
+// has no resources. Intended for the --drm-list-modes CLI path.
+int PrintDrmModes(const std::string& device);
 
 class DrmBackend : public Backend {
   friend class DrmCompositor;
@@ -70,9 +119,9 @@ class DrmBackend : public Backend {
                                int32_t height) override;
 #endif
 
-  bool MakeCurrent();
-  bool ClearCurrent();
-  bool MakeResourceCurrent();
+  bool MakeCurrent() const;
+  bool ClearCurrent() const;
+  bool MakeResourceCurrent() const;
   bool Present();
 
   void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
@@ -82,11 +131,26 @@ class DrmBackend : public Backend {
   [[nodiscard]] uint32_t connector_id() const { return connector_id_; }
   [[nodiscard]] uint32_t crtc_id() const { return crtc_id_; }
   [[nodiscard]] uint32_t crtc_index() const { return crtc_index_; }
-  [[nodiscard]] uint32_t width() const { return mode_.hdisplay; }
-  [[nodiscard]] uint32_t height() const { return mode_.vdisplay; }
+  // Framebuffer size — what the Flutter engine renders at. When the user
+  // didn't request a size, this equals the CRTC mode (full-screen). When
+  // they did, it's the requested size and the primary plane is centered
+  // on the CRTC with black borders.
+  [[nodiscard]] uint32_t width() const { return fb_w_; }
+  [[nodiscard]] uint32_t height() const { return fb_h_; }
+  // CRTC mode size — what the display is actually driven at.
+  [[nodiscard]] uint32_t mode_width() const { return mode_.hdisplay; }
+  [[nodiscard]] uint32_t mode_height() const { return mode_.vdisplay; }
   [[nodiscard]] uint32_t vrefresh() const { return mode_.vrefresh; }
+  [[nodiscard]] const drmModeModeInfo& mode() const { return mode_; }
   [[nodiscard]] EGLDisplay egl_display() const { return egl_display_; }
   [[nodiscard]] gbm_device* gbm() const { return gbm_device_; }
+
+  // Resolved probe output — post-probe, every field is concrete (no kAuto).
+  // Forward-declared to avoid a dependency cycle with driver_probe.h;
+  // callers that need to read fields include driver_probe.h themselves.
+  [[nodiscard]] const homescreen::driver_probe::Resolved& resolved() const {
+    return *resolved_;
+  }
 
  private:
   explicit DrmBackend(DrmConfig cfg);
@@ -94,8 +158,8 @@ class DrmBackend : public Backend {
   bool InitGbm();
   bool InitEgl();
   bool SetInitialMode();
-  uint32_t AddFb(gbm_bo* bo);
-  bool WaitForPendingFlip();
+  uint32_t AddFb(gbm_bo* bo) const;
+  bool WaitForPendingFlip() const;
   static void PageFlipHandler(int fd,
                               unsigned int sequence,
                               unsigned int tv_sec,
@@ -106,11 +170,27 @@ class DrmBackend : public Backend {
 
   // DRM — drm::Device is RAII (closes fd on destruction).
   std::optional<drm::Device> drm_dev_;
+  bool drm_master_ = false;  // true after a successful drmSetMaster
   uint32_t connector_id_ = 0;
   uint32_t crtc_id_ = 0;
   uint32_t crtc_index_ = 0;
   drmModeModeInfo mode_{};
+  // Framebuffer dimensions. Equal to mode_ dimensions when cfg_.width/
+  // cfg_.height are unset; equal to cfg_ values when set (framed mode).
+  // Populated in InitDrm after mode selection.
+  uint32_t fb_w_ = 0;
+  uint32_t fb_h_ = 0;
   drmModeCrtc* saved_crtc_ = nullptr;
+
+  // Reverse-watchdog that restores saved_crtc_ if the parent dies via
+  // SIGKILL (or any other path that skips the destructor). See
+  // session_watchdog.h.
+  homescreen::watchdog::Handle drm_watchdog_{};
+
+  // Populated by DriverProbe::Resolve() inside Create(). Non-null for the
+  // lifetime of the backend. unique_ptr so driver_probe.h isn't needed in
+  // this header.
+  std::unique_ptr<homescreen::driver_probe::Resolved> resolved_;
 
   // GBM
   gbm_device* gbm_device_ = nullptr;

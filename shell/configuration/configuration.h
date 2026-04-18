@@ -48,6 +48,25 @@ class Configuration {
       std::optional<double> pixel_ratio;
       std::optional<uint32_t> ivi_surface_id;
       std::optional<std::string> drm_device;
+
+      // DRM backend knobs — all strings so Configuration stays decoupled
+      // from the DRM headers. Valid values:
+      //   drm_compositor            : "auto" | "planes" | "gl"
+      //   drm_modeset               : "auto" | "legacy" | "atomic"
+      //   drm_allow_nonblock_modeset: "auto" | "yes" | "no"
+      //   drm_primary_format        : "auto" | "xrgb8888" | "argb8888"
+      //   drm_overlay_planes        : "auto" | "yes" | "no"
+      //   drm_explicit_sync         : "auto" | "yes" | "no"
+      //   drm_async_flip            : "auto" | "yes" | "no"
+      // FlutterView parses these into the DrmConfig enum fields. Anything
+      // unrecognized is treated as "auto" with a warning.
+      std::optional<std::string> drm_compositor;
+      std::optional<std::string> drm_modeset;
+      std::optional<std::string> drm_allow_nonblock_modeset;
+      std::optional<std::string> drm_primary_format;
+      std::optional<std::string> drm_overlay_planes;
+      std::optional<std::string> drm_explicit_sync;
+      std::optional<std::string> drm_async_flip;
     } view;
   };
 
