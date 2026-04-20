@@ -167,7 +167,9 @@ uint32_t CountOverlayPlanes(const int drm_fd, const uint32_t crtc_id) {
   return overlay_count;
 }
 
-bool PlaneHasProperty(const int drm_fd, const uint32_t plane_id, const char* name) {
+bool PlaneHasProperty(const int drm_fd,
+                      const uint32_t plane_id,
+                      const char* name) {
   drmModeObjectPropertiesPtr props =
       drmModeObjectGetProperties(drm_fd, plane_id, DRM_MODE_OBJECT_PLANE);
   if (!props) {

@@ -33,9 +33,9 @@
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "drm-cxx/src/modeset/atomic.hpp"
 #include "libflutter_engine.h"
 #include "logging.h"
-#include "drm-cxx/src/modeset/atomic.hpp"
 #include "view/compositor_surface_interface.h"
 
 namespace {
@@ -838,14 +838,13 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                 layer->offset.y, layer->size.width, layer->size.height, blend,
                 flip_y, surface_sp->TextureIsTopFirst());
           }
-          CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
-                                surface_sp->GetGlTextureWidth(),
-                                surface_sp->GetGlTextureHeight(),
-                                static_cast<GLint>(layer->offset.x),
-                                static_cast<GLint>(layer->offset.y),
-                                static_cast<GLsizei>(layer->size.width),
-                                static_cast<GLsizei>(layer->size.height), blend,
-                                flip_y);
+          CompositeLayerIntoFbo(
+              comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
+              surface_sp->GetGlTextureHeight(),
+              static_cast<GLint>(layer->offset.x),
+              static_cast<GLint>(layer->offset.y),
+              static_cast<GLsizei>(layer->size.width),
+              static_cast<GLsizei>(layer->size.height), blend, flip_y);
           composited_any = true;
           if (backend_->cfg_.debug_backend) {
             const GLint cx =
@@ -984,7 +983,9 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   // -EINVAL regardless of value, so skip the write when the cached flags
   // say it's immutable. Missing property is benign.
   if (auto pid = framed_props_.property_id(framed_primary_id_, "zpos")) {
-    if (const auto immut = framed_props_.is_immutable(framed_primary_id_, "zpos"); !immut || !*immut) {
+    if (const auto immut =
+            framed_props_.is_immutable(framed_primary_id_, "zpos");
+        !immut || !*immut) {
       (void)req.add_property(framed_primary_id_, *pid, primary_zpos_);
       log_raw(framed_primary_id_, *pid, "zpos", primary_zpos_);
     }
@@ -1006,7 +1007,9 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, count);
   }
   if (auto pid = framed_props_.property_id(framed_overlay_id_, "zpos")) {
-    if (const auto immut = framed_props_.is_immutable(framed_overlay_id_, "zpos"); !immut || !*immut) {
+    if (const auto immut =
+            framed_props_.is_immutable(framed_overlay_id_, "zpos");
+        !immut || !*immut) {
       (void)req.add_property(framed_overlay_id_, *pid, framed_overlay_zpos_);
       log_raw(framed_overlay_id_, *pid, "zpos", framed_overlay_zpos_);
     }
@@ -1423,8 +1426,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                             static_cast<GLint>(flutter->offset.x),
                             static_cast<GLint>(flutter->offset.y),
                             static_cast<GLsizei>(flutter->size.width),
-                            static_cast<GLsizei>(flutter->size.height),
-                            blend,
+                            static_cast<GLsizei>(flutter->size.height), blend,
                             /*flip_y=*/true);
       any_composited = true;
     } else if (flutter->type == kFlutterLayerContentTypePlatformView &&
@@ -1442,14 +1444,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
         if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
           // See comp.fbo rationale in PresentFramed's platform-view branch.
           const bool flip_y = !surface_sp->TextureIsTopFirst();
-          CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
-                                surface_sp->GetGlTextureWidth(),
-                                surface_sp->GetGlTextureHeight(),
-                                static_cast<GLint>(flutter->offset.x),
-                                static_cast<GLint>(flutter->offset.y),
-                                static_cast<GLsizei>(flutter->size.width),
-                                static_cast<GLsizei>(flutter->size.height),
-                                blend, flip_y);
+          CompositeLayerIntoFbo(
+              comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
+              surface_sp->GetGlTextureHeight(),
+              static_cast<GLint>(flutter->offset.x),
+              static_cast<GLint>(flutter->offset.y),
+              static_cast<GLsizei>(flutter->size.width),
+              static_cast<GLsizei>(flutter->size.height), blend, flip_y);
           any_composited = true;
         }
       }
