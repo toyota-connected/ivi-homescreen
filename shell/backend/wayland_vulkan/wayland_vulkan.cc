@@ -1246,11 +1246,19 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
 
   // Sequence platform-view subsurface Z-order for this frame.
   m_sequencer.Present(layers, count, nullptr,
-                      [](FlutterPlatformViewIdentifier id) {
-                        spdlog::warn(
-                            "Vulkan compositor: platform view {} has no "
-                            "registered subsurface",
-                            id);
+                      [this](FlutterPlatformViewIdentifier id) {
+                        // PVs may choose the wl_subsurface route (sequencer)
+                        // or the ICompositorSurface texture route (below).
+                        // Only warn when *neither* is registered.
+                        std::lock_guard<std::mutex> lock(
+                            m_compositor_surfaces_mu_);
+                        if (m_compositor_surfaces.find(id) ==
+                            m_compositor_surfaces.end()) {
+                          spdlog::warn(
+                              "Vulkan compositor: platform view {} has no "
+                              "registered subsurface or compositor surface",
+                              id);
+                        }
                       });
 
   bool ok = true;

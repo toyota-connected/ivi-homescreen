@@ -58,7 +58,7 @@ std::string GetDriverName(const int drm_fd) {
 }
 
 // Returns 0 if no primary plane found for the CRTC.
-uint32_t FindPrimaryPlane(int drm_fd, uint32_t crtc_id) {
+uint32_t FindPrimaryPlane(const int drm_fd, const uint32_t crtc_id) {
   drmModePlaneResPtr planes = drmModeGetPlaneResources(drm_fd);
   if (!planes) {
     return 0;
@@ -167,7 +167,7 @@ uint32_t CountOverlayPlanes(const int drm_fd, const uint32_t crtc_id) {
   return overlay_count;
 }
 
-bool PlaneHasProperty(int drm_fd, uint32_t plane_id, const char* name) {
+bool PlaneHasProperty(const int drm_fd, const uint32_t plane_id, const char* name) {
   drmModeObjectPropertiesPtr props =
       drmModeObjectGetProperties(drm_fd, plane_id, DRM_MODE_OBJECT_PLANE);
   if (!props) {
@@ -188,9 +188,9 @@ bool PlaneHasProperty(int drm_fd, uint32_t plane_id, const char* name) {
   return found;
 }
 
-bool PrimaryPlaneSupportsFormat(int drm_fd,
-                                uint32_t plane_id,
-                                uint32_t fourcc) {
+bool PrimaryPlaneSupportsFormat(const int drm_fd,
+                                const uint32_t plane_id,
+                                const uint32_t fourcc) {
   drmModePlanePtr p = drmModeGetPlane(drm_fd, plane_id);
   if (!p) {
     return false;
@@ -205,14 +205,14 @@ bool PrimaryPlaneSupportsFormat(int drm_fd,
   return ok;
 }
 
-bool HasAtomicCap(int drm_fd) {
+bool HasAtomicCap(const int drm_fd) {
   // DRM_CLIENT_CAP_ATOMIC — we set it in InitDrm, but re-check here
   // because the kernel may lazily reject the cap on some drivers.
   uint64_t cap = 0;
   return drmGetCap(drm_fd, DRM_CAP_CRTC_IN_VBLANK_EVENT, &cap) == 0 && cap == 1;
 }
 
-bool HasAsyncFlipCap(int drm_fd) {
+bool HasAsyncFlipCap(const int drm_fd) {
   uint64_t cap = 0;
   return drmGetCap(drm_fd, DRM_CAP_ASYNC_PAGE_FLIP, &cap) == 0 && cap == 1;
 }
@@ -318,6 +318,30 @@ Resolved Resolve(const int drm_fd,
       break;
   }
 
+  // ── bs_format ─────────────────────────────────────────────────────────
+  // Flutter backing stores need an alpha channel so Skia's transparent
+  // platform-view cutouts sample correctly during GL composition. Prefer
+  // the alpha sibling of primary_format when primary advertises it in
+  // IN_FORMATS (so direct-scanout still works on drivers that accept
+  // either); otherwise fall back to primary_format.
+  auto alpha_sibling = [](uint32_t f) -> uint32_t {
+    switch (f) {
+      case DRM_FORMAT_XRGB8888:
+        return DRM_FORMAT_ARGB8888;
+      case DRM_FORMAT_XBGR8888:
+        return DRM_FORMAT_ABGR8888;
+      default:
+        return f;
+    }
+  };
+  const uint32_t sibling = alpha_sibling(r.primary_format);
+  if (primary_plane != 0 && sibling != r.primary_format &&
+      PrimaryPlaneSupportsFormat(drm_fd, primary_plane, sibling)) {
+    r.bs_format = sibling;
+  } else {
+    r.bs_format = r.primary_format;
+  }
+
   // ── overlay_planes ────────────────────────────────────────────────────
   switch (cfg.overlay_planes) {
     case drm_config::TriState::kYes:
@@ -367,11 +391,12 @@ Resolved Resolve(const int drm_fd,
 void LogResolved(const Resolved& r) {
   spdlog::info(
       "[DrmBackend] driver='{}' compositor={} modeset={} nonblock-modeset={} "
-      "primary-fmt=0x{:08x} overlay-planes={} explicit-sync={} async-flip={}",
+      "primary-fmt=0x{:08x} bs-fmt=0x{:08x} overlay-planes={} "
+      "explicit-sync={} async-flip={}",
       r.driver_name.empty() ? "?" : r.driver_name,
       r.use_plane_compositor ? "planes" : "gl",
       r.atomic_modeset ? "atomic" : "legacy",
-      r.allow_nonblock_modeset ? "yes" : "no", r.primary_format,
+      r.allow_nonblock_modeset ? "yes" : "no", r.primary_format, r.bs_format,
       r.overlay_planes ? "yes" : "no", r.explicit_sync ? "yes" : "no",
       r.async_flip ? "yes" : "no");
 }
