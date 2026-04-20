@@ -519,11 +519,19 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
   // each Flutter layer is blitted onto the window, each platform view is
   // dispatched to its registered ICompositorSurface.
   m_sequencer.Present(layers, count, nullptr,
-                      [](FlutterPlatformViewIdentifier id) {
-                        spdlog::warn(
-                            "EGL compositor: platform view {} has no "
-                            "registered subsurface",
-                            id);
+                      [this](FlutterPlatformViewIdentifier id) {
+                        // PVs may choose the wl_subsurface route (sequencer)
+                        // or the ICompositorSurface texture route (below).
+                        // Only warn when *neither* is registered.
+                        std::lock_guard<std::mutex> lock(
+                            m_compositor_surfaces_mu_);
+                        if (m_compositor_surfaces.find(id) ==
+                            m_compositor_surfaces.end()) {
+                          spdlog::warn(
+                              "EGL compositor: platform view {} has no "
+                              "registered subsurface or compositor surface",
+                              id);
+                        }
                       });
 
   // Clear the window backbuffer before compositing. Without this, stale
@@ -605,9 +613,12 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
           // lands where Flutter's overlay markers are drawn.
           const auto dy = static_cast<GLint>(m_initial_height) -
                           static_cast<GLint>(layer->offset.y) - dh;
-          // Plugin textures are drawn in GL-native (bottom-left origin) and
-          // must be vertically flipped to match Flutter's top-down layout.
-          constexpr bool kFlipY = true;
+          // Orientation: FBO 0 on Wayland uses standard GL window NDC.
+          // GL-native plugin textures (bottom-first memory) sample correctly
+          // with no flip. Plugins that produce top-first textures (NV12
+          // dmabuf, pre-flipped YUV shader) opt into a sampler V-invert by
+          // overriding ICompositorSurface::TextureIsTopFirst() → true.
+          const bool flip_y = surface.TextureIsTopFirst();
           if (!blend && m_gl_caps.has_blit_framebuffer) {
             if (!m_texture_blit_fbo_) {
               glGenFramebuffers(1, &m_texture_blit_fbo_);
@@ -617,10 +628,10 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                    GL_TEXTURE_2D, tex, 0);
             m_gl_compositor->CompositeToDefault(m_texture_blit_fbo_, tex, sw,
                                                 sh, dx, dy, dw, dh, blend,
-                                                kFlipY);
+                                                flip_y);
           } else {
             m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh,
-                                                blend, kFlipY);
+                                                blend, flip_y);
           }
           composited_any = true;
         }

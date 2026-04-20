@@ -44,6 +44,14 @@ struct Resolved {
   // GBM / DRM format for primary-plane scanout buffers.
   uint32_t primary_format{0};
 
+  // Format for Flutter-side backing-store BOs. Prefers the alpha sibling
+  // of primary_format (XR24→AR24, XB24→AB24) when the primary plane
+  // advertises it in IN_FORMATS, so Skia's transparent PV cutouts
+  // survive GL blending. Falls back to primary_format on drivers whose
+  // primary is alpha-less-only (some imx/rockchip parts), which keeps
+  // direct-scanout viable at the cost of opaque overlays.
+  uint32_t bs_format{0};
+
   // Use overlay planes for per-layer scanout (otherwise all layers fold
   // into the composition buffer).
   bool overlay_planes{false};
