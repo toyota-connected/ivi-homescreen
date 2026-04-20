@@ -19,22 +19,23 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <cstdio>
-#include <cstdlib>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <drm_fourcc.h>
 #include <drm_mode.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
-#include <drm-cxx/modeset/atomic.hpp>
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "libflutter_engine.h"
 #include "logging.h"
+#include "drm-cxx/src/modeset/atomic.hpp"
 #include "view/compositor_surface_interface.h"
 
 namespace {
@@ -70,7 +71,7 @@ void DumpObjectProps(const int fd,
       continue;
     }
     const uint64_t value = props->prop_values[i];
-    const char* kind = "RANGE";
+    auto kind = "RANGE";
     if ((prop->flags & DRM_MODE_PROP_IMMUTABLE) != 0U) {
       kind = "IMMUT";
     } else if ((prop->flags & DRM_MODE_PROP_ENUM) != 0U) {
@@ -172,7 +173,7 @@ bool DrmCompositor::InitPlaneAllocator() {
   spdlog::info("[DrmCompositor] {} planes available for CRTC {}",
                available.size(), backend_->crtc_id());
   for (const auto* p : available) {
-    const char* type_str = "?";
+    auto type_str = "?";
     switch (p->type) {
       case drm::planes::DRMPlaneType::PRIMARY:
         type_str = "PRIMARY";
@@ -314,7 +315,7 @@ bool DrmCompositor::InitFramedMode() {
                   r.error().message());
     return false;
   }
-  // Also cache non-cursor planes we'll need to disable each frame, so
+  // Also, cache non-cursor planes we'll need to disable each frame, so
   // their FB_ID/CRTC_ID IDs are resolvable without touching the kernel.
   for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
     if (p->type == drm::planes::DRMPlaneType::CURSOR) {
@@ -384,7 +385,7 @@ void DrmCompositor::EnsureGlCapsProbed() {
   }
 
   // Only take the plane path if DriverProbe said this driver supports it
-  // (atomic + primary + ≥1 overlay). Otherwise all frames go through
+  // (atomic + primary + ≥1 overlay). Otherwise, all frames go through
   // PresentViaGlFallback — same outcome as before, just honest about it.
   if (backend_->resolved().use_plane_compositor) {
     if (!InitPlaneAllocator()) {
@@ -392,7 +393,7 @@ void DrmCompositor::EnsureGlCapsProbed() {
     } else {
       // Flip planes_available_ BEFORE InitCompositionBuffers so the
       // CreateGbmStore call-chain inside it imports each comp BO as a
-      // KMS FB. Otherwise comp.drm_fb_id is 0 and the atomic commit
+      // KMS FB. Otherwise, comp.drm_fb_id is 0, and the atomic commit
       // tells the kernel to disable the primary plane — blank screen.
       planes_available_ = true;
       if (InitCompositionBuffers()) {
@@ -478,7 +479,7 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
   // KMS framebuffer import is deferred to EnsureDrmFbId(). Callers that
   // immediately scan out this BO (comp_bufs_, bg_store_) must invoke
   // EnsureDrmFbId() after construction; Flutter-side backing stores
-  // let the layer-setup path import on first direct-scanout use.
+  // let the layer-setup path import on the first direct-scanout use.
   return true;
 }
 
@@ -547,30 +548,30 @@ uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) const {
   return fb_id;
 }
 
-void DrmCompositor::DestroyGbmStore(GbmBackingStore& s) const {
-  if (s.fbo != 0) {
-    glDeleteFramebuffers(1, &s.fbo);
-    s.fbo = 0;
+void DrmCompositor::DestroyGbmStore(GbmBackingStore& store) const {
+  if (store.fbo != 0) {
+    glDeleteFramebuffers(1, &store.fbo);
+    store.fbo = 0;
   }
-  if (s.color_tex != 0) {
-    glDeleteTextures(1, &s.color_tex);
-    s.color_tex = 0;
+  if (store.color_tex != 0) {
+    glDeleteTextures(1, &store.color_tex);
+    store.color_tex = 0;
   }
-  if (s.depth_stencil_rb != 0) {
-    glDeleteRenderbuffers(1, &s.depth_stencil_rb);
-    s.depth_stencil_rb = 0;
+  if (store.depth_stencil_rb != 0) {
+    glDeleteRenderbuffers(1, &store.depth_stencil_rb);
+    store.depth_stencil_rb = 0;
   }
-  if (s.egl_image != EGL_NO_IMAGE_KHR && eglDestroyImageKHR_) {
-    eglDestroyImageKHR_(backend_->egl_display(), s.egl_image);
-    s.egl_image = EGL_NO_IMAGE_KHR;
+  if (store.egl_image != EGL_NO_IMAGE_KHR && eglDestroyImageKHR_) {
+    eglDestroyImageKHR_(backend_->egl_display(), store.egl_image);
+    store.egl_image = EGL_NO_IMAGE_KHR;
   }
-  if (s.drm_fb_id != 0) {
-    drmModeRmFB(backend_->drm_fd(), s.drm_fb_id);
-    s.drm_fb_id = 0;
+  if (store.drm_fb_id != 0) {
+    drmModeRmFB(backend_->drm_fd(), store.drm_fb_id);
+    store.drm_fb_id = 0;
   }
-  if (s.bo) {
-    gbm_bo_destroy(s.bo);
-    s.bo = nullptr;
+  if (store.bo) {
+    gbm_bo_destroy(store.bo);
+    store.bo = nullptr;
   }
 }
 
@@ -652,7 +653,7 @@ void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
 // ─── GL fallback (no plane allocator) ────────────────────────────────────
 
 bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
-                                         size_t count) {
+                                         const size_t count) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDisable(GL_SCISSOR_TEST);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -700,8 +701,11 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
           const auto dh = static_cast<GLsizei>(layer->size.height);
           const auto dy = static_cast<GLint>(backend_->height()) -
                           static_cast<GLint>(layer->offset.y) - dh;
+          // GlFallback writes into FBO 0 (gbm_surface, standard GL NDC).
+          // Flip only when the surface reports top-first storage.
+          const bool flip_y = surface_sp->TextureIsTopFirst();
           gl_compositor_->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh,
-                                             blend, true);
+                                             blend, flip_y);
           composited_any = true;
         }
       }
@@ -715,9 +719,9 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 // ─── Framed-mode present (primary BG + overlay content) ─────────────────
 
 bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
-                                  const size_t layer_count) {
+                                  const size_t count) {
   if (!WaitForPendingFlip()) {
-    return PresentViaGlFallback(layers, layer_count);
+    return PresentViaGlFallback(layers, count);
   }
 
   // Composite every Flutter layer into the current comp buffer. Same
@@ -730,8 +734,24 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
+  struct PvProbe {
+    size_t layer_idx;
+    int64_t id;
+    GLint cx;
+    GLint cy;
+    std::array<uint8_t, 4> after_pv;
+  };
+  std::vector<PvProbe> pv_probes;
+
+  auto read_px = [&](GLint x, GLint y) -> std::array<uint8_t, 4> {
+    std::array<uint8_t, 4> px{};
+    glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
+    glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    return px;
+  };
+
   bool composited_any = false;
-  for (size_t i = 0; i < layer_count; ++i) {
+  for (size_t i = 0; i < count; ++i) {
     const FlutterLayer* layer = layers[i];
     if (!layer) {
       continue;
@@ -742,6 +762,13 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
       if (baton && baton->store) {
         const auto* s = baton->store;
+        if (backend_->cfg_.debug_backend) {
+          spdlog::debug(
+              "[DrmCompositor] framed layer[{}] BS src={}x{} "
+              "offset=({:.1f},{:.1f}) size={:.1f}x{:.1f} blend={}",
+              i, s->width, s->height, layer->offset.x, layer->offset.y,
+              layer->size.width, layer->size.height, blend);
+        }
         CompositeLayerIntoFbo(comp.fbo, s->fbo, s->color_tex,
                               static_cast<GLsizei>(s->width),
                               static_cast<GLsizei>(s->height),
@@ -751,20 +778,66 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                               static_cast<GLsizei>(layer->size.height), blend,
                               /*flip_y=*/true);
         composited_any = true;
+        if (backend_->cfg_.debug_backend && !pv_probes.empty()) {
+          for (const auto& p : pv_probes) {
+            auto px = read_px(p.cx, p.cy);
+            spdlog::debug(
+                "[DrmCompositor] probe PV id={} @({},{}) after BS layer[{}] "
+                "rgba=({},{},{},{})",
+                p.id, p.cx, p.cy, i, px[0], px[1], px[2], px[3]);
+          }
+        }
+      } else if (backend_->cfg_.debug_backend) {
+        spdlog::debug(
+            "[DrmCompositor] framed layer[{}] BS SKIPPED (baton/store null)",
+            i);
       }
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       std::shared_ptr<ICompositorSurface> surface_sp;
+      size_t surfaces_size = 0;
       {
         std::lock_guard<std::mutex> lock(surfaces_mu_);
+        surfaces_size = surfaces_.size();
         if (auto it = surfaces_.find(layer->platform_view->identifier);
             it != surfaces_.end()) {
           surface_sp = it->second;
         }
       }
-      if (surface_sp) {
+      if (!surface_sp) {
+        if (backend_->cfg_.debug_backend) {
+          spdlog::debug(
+              "[DrmCompositor] framed layer[{}] PV id={} SKIPPED (no "
+              "registered surface; registry size={})",
+              i, layer->platform_view->identifier, surfaces_size);
+        }
+      } else {
         surface_sp->OnPresent(layer);
-        if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
+        const auto tex = surface_sp->GetGlTextureName();
+        if (tex == 0) {
+          if (backend_->cfg_.debug_backend) {
+            spdlog::debug(
+                "[DrmCompositor] framed layer[{}] PV id={} SKIPPED "
+                "(GetGlTextureName=0)",
+                i, layer->platform_view->identifier);
+          }
+        } else {
+          // comp.fbo has KMS-inverted NDC-y vs. GL's window convention.
+          // GL-native (bottom-first) sources need flip_y=true; top-first
+          // sources (e.g. NV12 dmabuf or pre-flipped YUV shader) need
+          // flip_y=false so their already-top-down bytes land right-side-up.
+          const bool flip_y = !surface_sp->TextureIsTopFirst();
+          if (backend_->cfg_.debug_backend) {
+            spdlog::debug(
+                "[DrmCompositor] framed layer[{}] PV id={} tex={} "
+                "src={}x{} offset=({:.1f},{:.1f}) size={:.1f}x{:.1f} "
+                "blend={} flip_y={} top_first={}",
+                i, layer->platform_view->identifier, tex,
+                surface_sp->GetGlTextureWidth(),
+                surface_sp->GetGlTextureHeight(), layer->offset.x,
+                layer->offset.y, layer->size.width, layer->size.height, blend,
+                flip_y, surface_sp->TextureIsTopFirst());
+          }
           CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
                                 surface_sp->GetGlTextureWidth(),
                                 surface_sp->GetGlTextureHeight(),
@@ -772,10 +845,39 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                                 static_cast<GLint>(layer->offset.y),
                                 static_cast<GLsizei>(layer->size.width),
                                 static_cast<GLsizei>(layer->size.height), blend,
-                                /*flip_y=*/true);
+                                flip_y);
           composited_any = true;
+          if (backend_->cfg_.debug_backend) {
+            const GLint cx =
+                static_cast<GLint>(layer->offset.x + layer->size.width / 2.0);
+            const GLint cy =
+                static_cast<GLint>(layer->offset.y + layer->size.height / 2.0);
+            auto px = read_px(cx, cy);
+            spdlog::debug(
+                "[DrmCompositor] probe PV id={} @({},{}) after-PV "
+                "rgba=({},{},{},{})",
+                layer->platform_view->identifier, cx, cy, px[0], px[1], px[2],
+                px[3]);
+            pv_probes.push_back(
+                {i, layer->platform_view->identifier, cx, cy, px});
+          }
         }
       }
+    } else if (backend_->cfg_.debug_backend) {
+      spdlog::debug("[DrmCompositor] framed layer[{}] unhandled type={}", i,
+                    static_cast<int>(layer->type));
+    }
+  }
+  if (backend_->cfg_.debug_backend && !pv_probes.empty()) {
+    for (const auto& p : pv_probes) {
+      auto px = read_px(p.cx, p.cy);
+      const bool changed = px != p.after_pv;
+      spdlog::debug(
+          "[DrmCompositor] probe PV id={} @({},{}) after-all "
+          "rgba=({},{},{},{}) was=({},{},{},{}) {}",
+          p.id, p.cx, p.cy, px[0], px[1], px[2], px[3], p.after_pv[0],
+          p.after_pv[1], p.after_pv[2], p.after_pv[3],
+          changed ? "(OVERWRITTEN)" : "(unchanged)");
     }
   }
   glFinish();
@@ -785,7 +887,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     spdlog::debug(
         "[DrmCompositor] framed frame: layers={} composited={} comp_idx={} "
         "comp_fb={}",
-        layer_count, composited_any, comp_idx_, comp.drm_fb_id);
+        count, composited_any, comp_idx_, comp.drm_fb_id);
   }
 
   // ── Build the atomic request ──
@@ -794,7 +896,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   if (!req.valid()) {
     spdlog::warn("[DrmCompositor] framed: AtomicRequest alloc failed");
     fallback_latched_ = true;
-    return PresentViaGlFallback(layers, layer_count);
+    return PresentViaGlFallback(layers, count);
   }
 
   const uint32_t crtc_id = backend_->crtc_id();
@@ -821,7 +923,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     if (auto r = modeset_->attach(req); !r) {
       spdlog::warn("[DrmCompositor] framed: modeset attach: {}",
                    r.error().message());
-      return PresentViaGlFallback(layers, layer_count);
+      return PresentViaGlFallback(layers, count);
     }
     if (dump) {
       spdlog::debug(
@@ -864,7 +966,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   };
 
   // Primary: persistent mode-sized opaque BG covering the whole CRTC.
-  // Kept on every frame so amdgpu DC sees "primary covers CRTC".
+  // Kept on every frame, so amdgpu DC sees "primary covers CRTC".
   if (!set(framed_primary_id_, "FB_ID", bg_store_.drm_fb_id) ||
       !set(framed_primary_id_, "CRTC_ID", crtc_id) ||
       !set(framed_primary_id_, "CRTC_X", 0) ||
@@ -875,15 +977,14 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       !set(framed_primary_id_, "SRC_Y", 0) ||
       !set(framed_primary_id_, "SRC_W", static_cast<uint64_t>(mode_w) << 16) ||
       !set(framed_primary_id_, "SRC_H", static_cast<uint64_t>(mode_h) << 16)) {
-    return PresentViaGlFallback(layers, layer_count);
+    return PresentViaGlFallback(layers, count);
   }
   // zpos may be immutable on some drivers (amdgpu primary = [2,2]).
   // The kernel rejects any atomic write to an IMMUTABLE property with
   // -EINVAL regardless of value, so skip the write when the cached flags
   // say it's immutable. Missing property is benign.
   if (auto pid = framed_props_.property_id(framed_primary_id_, "zpos")) {
-    const auto immut = framed_props_.is_immutable(framed_primary_id_, "zpos");
-    if (!immut || !*immut) {
+    if (const auto immut = framed_props_.is_immutable(framed_primary_id_, "zpos"); !immut || !*immut) {
       (void)req.add_property(framed_primary_id_, *pid, primary_zpos_);
       log_raw(framed_primary_id_, *pid, "zpos", primary_zpos_);
     }
@@ -902,11 +1003,10 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       !set(framed_overlay_id_, "SRC_Y", 0) ||
       !set(framed_overlay_id_, "SRC_W", static_cast<uint64_t>(fb_w) << 16) ||
       !set(framed_overlay_id_, "SRC_H", static_cast<uint64_t>(fb_h) << 16)) {
-    return PresentViaGlFallback(layers, layer_count);
+    return PresentViaGlFallback(layers, count);
   }
   if (auto pid = framed_props_.property_id(framed_overlay_id_, "zpos")) {
-    const auto immut = framed_props_.is_immutable(framed_overlay_id_, "zpos");
-    if (!immut || !*immut) {
+    if (const auto immut = framed_props_.is_immutable(framed_overlay_id_, "zpos"); !immut || !*immut) {
       (void)req.add_property(framed_overlay_id_, *pid, framed_overlay_zpos_);
       log_raw(framed_overlay_id_, *pid, "zpos", framed_overlay_zpos_);
     }
@@ -948,7 +1048,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   // real commit can be attributed to validation (EINVAL returned here)
   // vs. page-flip/driver dispatch. No side effect if the test succeeds.
   if (dump) {
-    const uint32_t test_flags =
+    constexpr uint32_t test_flags =
         DRM_MODE_ATOMIC_TEST_ONLY | DRM_MODE_ATOMIC_ALLOW_MODESET;
     if (auto r = req.test(test_flags); !r) {
       spdlog::warn(
@@ -974,7 +1074,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         "plane support; GL fallback cannot letterbox. Next Present will fail.",
         fb_w, fb_h, mode_w, mode_h);
     fallback_latched_ = true;
-    return PresentViaGlFallback(layers, layer_count);
+    return PresentViaGlFallback(layers, count);
   }
 
   if (!plane_mode_set_) {
@@ -1057,8 +1157,7 @@ void DrmCompositor::VerifyPipeRunning() const {
                                                  DRM_MODE_OBJECT_PLANE)) {
       for (uint32_t i = 0; i < props->count_props; ++i) {
         if (auto* p = drmModeGetProperty(fd, props->props[i])) {
-          const std::string_view name(p->name);
-          if (name == "FB_ID") {
+          if (const std::string_view name(p->name); name == "FB_ID") {
             primary_fb = props->prop_values[i];
             fb_found = true;
           } else if (name == "CRTC_ID") {
@@ -1312,43 +1411,45 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  for (auto& fl : frame_layers) {
-    if (!fl.drm->needs_composition()) {
+  for (auto& [flutter, store, drm] : frame_layers) {
+    if (!drm->needs_composition()) {
       continue;
     }
     const bool blend = any_composited;
-    if (fl.store) {
-      CompositeLayerIntoFbo(comp.fbo, fl.store->fbo, fl.store->color_tex,
-                            static_cast<GLsizei>(fl.store->width),
-                            static_cast<GLsizei>(fl.store->height),
-                            static_cast<GLint>(fl.flutter->offset.x),
-                            static_cast<GLint>(fl.flutter->offset.y),
-                            static_cast<GLsizei>(fl.flutter->size.width),
-                            static_cast<GLsizei>(fl.flutter->size.height),
+    if (store) {
+      CompositeLayerIntoFbo(comp.fbo, store->fbo, store->color_tex,
+                            static_cast<GLsizei>(store->width),
+                            static_cast<GLsizei>(store->height),
+                            static_cast<GLint>(flutter->offset.x),
+                            static_cast<GLint>(flutter->offset.y),
+                            static_cast<GLsizei>(flutter->size.width),
+                            static_cast<GLsizei>(flutter->size.height),
                             blend,
                             /*flip_y=*/true);
       any_composited = true;
-    } else if (fl.flutter->type == kFlutterLayerContentTypePlatformView &&
-               fl.flutter->platform_view) {
+    } else if (flutter->type == kFlutterLayerContentTypePlatformView &&
+               flutter->platform_view) {
       std::shared_ptr<ICompositorSurface> surface_sp;
       {
         std::lock_guard<std::mutex> lock(surfaces_mu_);
-        auto it = surfaces_.find(fl.flutter->platform_view->identifier);
+        auto it = surfaces_.find(flutter->platform_view->identifier);
         if (it != surfaces_.end()) {
           surface_sp = it->second;
         }
       }
       if (surface_sp) {
-        surface_sp->OnPresent(fl.flutter);
+        surface_sp->OnPresent(flutter);
         if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
+          // See comp.fbo rationale in PresentFramed's platform-view branch.
+          const bool flip_y = !surface_sp->TextureIsTopFirst();
           CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
                                 surface_sp->GetGlTextureWidth(),
                                 surface_sp->GetGlTextureHeight(),
-                                static_cast<GLint>(fl.flutter->offset.x),
-                                static_cast<GLint>(fl.flutter->offset.y),
-                                static_cast<GLsizei>(fl.flutter->size.width),
-                                static_cast<GLsizei>(fl.flutter->size.height),
-                                blend, /*flip_y=*/true);
+                                static_cast<GLint>(flutter->offset.x),
+                                static_cast<GLint>(flutter->offset.y),
+                                static_cast<GLsizei>(flutter->size.width),
+                                static_cast<GLsizei>(flutter->size.height),
+                                blend, flip_y);
           any_composited = true;
         }
       }
@@ -1381,8 +1482,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
   }
 
-  auto commit_ok = req.commit(commit_flags, this);
-  if (!commit_ok) {
+  if (auto commit_ok = req.commit(commit_flags, this); !commit_ok) {
     // Latch: stop trying planes for the rest of the session. One WARN
     // per latch so the failure is visible without flooding.
     spdlog::warn(
@@ -1448,13 +1548,15 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
   const auto w = static_cast<uint32_t>(config->size.width);
   const auto h = static_cast<uint32_t>(config->size.height);
 
-  // Match the primary plane's native format so layer 0 can scan out
-  // directly without a format conversion. On amdgpu/i915 primary tends
-  // to advertise both XR24 and AR24, but some CRTC/mode combinations
-  // silently refuse to flip when the new FB format differs from the
-  // CRTC's current active format (the TTY's XR24 in our case), leaving
-  // the old FB on scanout. Using the resolved primary format avoids it.
-  const uint32_t backing_format = backend_->resolved().primary_format;
+  // Flutter backing stores must carry an alpha channel: Skia draws
+  // transparent pixels over platform-view cutouts, and the top overlay
+  // BS is composited with GL_ONE/GL_ONE_MINUS_SRC_ALPHA. An alpha-less
+  // (X-bits) backing store would sample those unused bits as 0xFF and
+  // paint opaque black over the PVs. driver_probe picks the alpha
+  // sibling of primary_format when the primary plane advertises it in
+  // IN_FORMATS, and falls back to primary_format otherwise so
+  // direct-scanout still works on drivers whose primary is alpha-less.
+  const uint32_t backing_format = backend_->resolved().bs_format;
 
   std::unique_ptr<GbmBackingStore> store;
   for (auto it = store_pool_.begin(); it != store_pool_.end(); ++it) {
@@ -1531,11 +1633,19 @@ void DrmCompositor::RegisterSurface(
     std::shared_ptr<ICompositorSurface> surface) {
   std::lock_guard lock(surfaces_mu_);
   surfaces_[id] = std::move(surface);
+  if (backend_->cfg_.debug_backend) {
+    spdlog::debug("[DrmCompositor] RegisterSurface id={} registry_size={}", id,
+                  surfaces_.size());
+  }
 }
 
 void DrmCompositor::UnregisterSurface(FlutterPlatformViewIdentifier id) {
   std::lock_guard lock(surfaces_mu_);
   surfaces_.erase(id);
+  if (backend_->cfg_.debug_backend) {
+    spdlog::debug("[DrmCompositor] UnregisterSurface id={} registry_size={}",
+                  id, surfaces_.size());
+  }
 }
 
 void DrmCompositor::ResizeSurface(FlutterPlatformViewIdentifier id,

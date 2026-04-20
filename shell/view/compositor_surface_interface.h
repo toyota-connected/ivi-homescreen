@@ -95,4 +95,21 @@ class ICompositorSurface {
    * @brief Height of the GL texture returned by @c GetGlTextureName.
    */
   [[nodiscard]] virtual int32_t GetGlTextureHeight() const { return 0; }
+
+  /**
+   * @brief Declare the in-memory Y orientation of the exposed GL texture.
+   *
+   * The compositor needs this to decide whether to invert V at sample time.
+   *
+   * - @c false (default) — the texture is GL-native: memory row 0 maps to
+   *   texcoord v=0 (bottom in GL convention). Typical for plugins that render
+   *   their own content into an FBO-bound texture without a manual flip, which
+   *   is what the standard embedder contract assumes.
+   * - @c true — memory row 0 corresponds to the visual top of the source
+   *   (e.g. NV12 dmabuf imported via EGLImage, or a YUV-to-RGB shader that
+   *   was deliberately authored with a `1 - v` sampler flip). The compositor
+   *   compensates so the image lands right-side-up on both standard FBO-0 and
+   *   the DRM scanout-FBO destinations.
+   */
+  [[nodiscard]] virtual bool TextureIsTopFirst() const { return false; }
 };
