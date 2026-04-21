@@ -34,6 +34,7 @@
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
+#include "backend/drm_kms_egl/drm_session.h"
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
 #include "logging.h"
@@ -311,8 +312,10 @@ int PrintDrmModes(const std::string& device) {
   return 0;
 }
 
-std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg) {
-  std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg));
+std::unique_ptr<DrmBackend> DrmBackend::Create(
+    const DrmConfig& cfg,
+    homescreen::DrmSession* session) {
+  std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
   if (!backend->InitDrm()) {
     return nullptr;
   }
@@ -334,7 +337,8 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg) {
   return backend;
 }
 
-DrmBackend::DrmBackend(DrmConfig cfg) : cfg_(std::move(cfg)) {}
+DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
+    : cfg_(std::move(cfg)), session_(session) {}
 
 DrmBackend::~DrmBackend() {
   // Let any in-flight page flip land so we don't free a BO still being
@@ -409,42 +413,62 @@ DrmBackend::~DrmBackend() {
 }
 
 bool DrmBackend::InitDrm() {
-  // Refuse up-front if we're not on the active VT. Prevents the "master
-  // acquired, commits return success, but scanout stays on the other VT"
-  // trap where drmSetMaster succeeds, but PAGE_FLIP_EVENT never fires.
-  if (!VerifyForegroundVt(cfg_.drm_device)) {
-    return false;
-  }
-
-  auto dev = drm::Device::open(cfg_.drm_device);
-  if (!dev) {
-    spdlog::error("[DrmBackend] open({}): {}", cfg_.drm_device,
-                  dev.error().message());
-    return false;
-  }
-  drm_dev_.emplace(std::move(*dev));
-
-  // Acquire DRM master. Required for modeset/atomic commits. Atomic
-  // writes from a non-master fd are silently accepted by some drivers
-  // (amdgpu in particular) as no-ops — the commit returns success, but
-  // nothing actually changes on screen, which is exactly the "blank
-  // panel, no PAGE_FLIP_EVENT" pathology. Refuse to run in that state.
-  if (drmSetMaster(drm_dev_->fd()) != 0) {
-    if (const int err = errno; err == EBUSY || err == EACCES || err == EPERM) {
-      spdlog::error(
-          "[DrmBackend] cannot acquire DRM master on {} ({}). Another "
-          "display server (gdm / gnome-shell / sddm / Xorg / a Wayland "
-          "compositor) is already holding the device. Stop it or run from "
-          "a bare TTY (e.g. `sudo systemctl isolate multi-user.target`).",
-          cfg_.drm_device, std::strerror(err));
-    } else {
-      spdlog::error("[DrmBackend] drmSetMaster({}): {}", cfg_.drm_device,
-                    std::strerror(err));
+  if (session_ != nullptr) {
+    // libseat path: the seat provider (logind/seatd/builtin) owns VT
+    // activation and master handoff. Skip the foreground-VT check
+    // (logind activates us only when the VT is ours), skip drmSetMaster
+    // (libseat_open_device returns a master-capable fd while we hold
+    // the seat), and skip the reverse-watchdog (the seat provider
+    // releases the session cleanly on socket drop — SIGKILL included).
+    const int fd = session_->TakeDevice(cfg_.drm_device);
+    if (fd < 0) {
+      spdlog::error("[DrmBackend] session take_device({}): failed",
+                    cfg_.drm_device);
+      return false;
     }
-    return false;
+    drm_dev_.emplace(drm::Device::from_fd(fd));
+    spdlog::info("[DrmBackend] opened {} via libseat (fd={})", cfg_.drm_device,
+                 fd);
+  } else {
+    // Fallback path: no seat backend available. Refuse up-front if we're
+    // not on the active VT — prevents the "master acquired, commits
+    // return success, but scanout stays on the other VT" trap where
+    // drmSetMaster succeeds but PAGE_FLIP_EVENT never fires.
+    if (!VerifyForegroundVt(cfg_.drm_device)) {
+      return false;
+    }
+
+    auto dev = drm::Device::open(cfg_.drm_device);
+    if (!dev) {
+      spdlog::error("[DrmBackend] open({}): {}", cfg_.drm_device,
+                    dev.error().message());
+      return false;
+    }
+    drm_dev_.emplace(std::move(*dev));
+
+    // Acquire DRM master. Required for modeset/atomic commits. Atomic
+    // writes from a non-master fd are silently accepted by some drivers
+    // (amdgpu in particular) as no-ops — the commit returns success, but
+    // nothing actually changes on screen, which is exactly the "blank
+    // panel, no PAGE_FLIP_EVENT" pathology. Refuse to run in that state.
+    if (drmSetMaster(drm_dev_->fd()) != 0) {
+      if (const int err = errno;
+          err == EBUSY || err == EACCES || err == EPERM) {
+        spdlog::error(
+            "[DrmBackend] cannot acquire DRM master on {} ({}). Another "
+            "display server (gdm / gnome-shell / sddm / Xorg / a Wayland "
+            "compositor) is already holding the device. Stop it or run from "
+            "a bare TTY (e.g. `sudo systemctl isolate multi-user.target`).",
+            cfg_.drm_device, std::strerror(err));
+      } else {
+        spdlog::error("[DrmBackend] drmSetMaster({}): {}", cfg_.drm_device,
+                      std::strerror(err));
+      }
+      return false;
+    }
+    drm_master_ = true;
+    spdlog::info("[DrmBackend] DRM master on {}", cfg_.drm_device);
   }
-  drm_master_ = true;
-  spdlog::info("[DrmBackend] DRM master on {}", cfg_.drm_device);
 
   if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) !=
       0) {
@@ -563,7 +587,13 @@ bool DrmBackend::InitDrm() {
   // (the first one lands in SetInitialMode via the first Present). If the
   // parent dies — SIGKILL included — the child restores this snapshot, so
   // the text console comes back instead of the last Flutter framebuffer.
-  if (saved_crtc_) {
+  //
+  // When a seat session is live, skip it: the seat provider (logind/seatd)
+  // observes our socket close on SIGKILL and releases the session itself,
+  // which restores the underlying TTY fb. The reverse watchdog would be
+  // redundant (and its inherited fd could briefly fight the seat
+  // provider's cleanup).
+  if (saved_crtc_ && session_ == nullptr) {
     drm_watchdog_ = homescreen::watchdog::SpawnDrmRestore(
         drm_dev_->fd(), saved_crtc_->crtc_id, saved_crtc_->buffer_id,
         saved_crtc_->x, saved_crtc_->y, connector_id_, saved_crtc_->mode);

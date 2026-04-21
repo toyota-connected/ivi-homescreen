@@ -43,4 +43,21 @@ add_subdirectory(${_drm_cxx_src} ${CMAKE_BINARY_DIR}/third_party/drm-cxx EXCLUDE
 # ivi-homescreen binary (libc++) fails to link its STL symbols.
 if (TARGET toolchain)
     target_link_libraries(drm-cxx PRIVATE toolchain::toolchain)
+
+    # drm-cxx transitively pulls in fmt via FetchContent when the toolchain
+    # lacks std::print. fmt builds with the default compiler stdlib
+    # (libstdc++), so its objects won't satisfy the libc++ symbols the main
+    # binary needs. Attaching `toolchain` as a link dep would drag it into
+    # fmt's install EXPORT set — fmt forces FMT_INSTALL=ON — so copy just
+    # the compile/link flags instead, leaving fmt's export set untouched.
+    if (TARGET fmt)
+        get_target_property(_tc_copts toolchain INTERFACE_COMPILE_OPTIONS)
+        get_target_property(_tc_lopts toolchain INTERFACE_LINK_OPTIONS)
+        if (_tc_copts)
+            target_compile_options(fmt PRIVATE ${_tc_copts})
+        endif ()
+        if (_tc_lopts)
+            target_link_options(fmt PRIVATE ${_tc_lopts})
+        endif ()
+    endif ()
 endif ()
