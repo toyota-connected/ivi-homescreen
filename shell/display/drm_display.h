@@ -21,10 +21,23 @@
 #include "display/idisplay.h"
 #include "input/iseat.h"
 
+namespace homescreen {
+class DrmSession;
+}
+
 class DrmDisplay final : public IDisplay {
  public:
   DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz);
   ~DrmDisplay() override;
+
+  // Process-wide libseat session. Null when no seat backend is available
+  // (no logind/seatd/builtin) or when drm-cxx was built without libseat.
+  // DrmBackend consults this to route its DRM device open through the
+  // seat; when null, the backend falls back to direct open + the legacy
+  // VT/master/watchdog guards.
+  [[nodiscard]] homescreen::DrmSession* session() const {
+    return session_.get();
+  }
 
   void StartEvents() override;
   void StopEvents() override;
@@ -60,6 +73,11 @@ class DrmDisplay final : public IDisplay {
   int32_t height_;
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
+
+  // Seat session must outlive seat_ (DrmSeat's libinput_opener captures
+  // into the session's internal state). Declare it first so it's
+  // destroyed last.
+  std::unique_ptr<homescreen::DrmSession> session_;
 
   // Input source. Defaults to a libinput-backed DrmSeat; the polymorphism
   // is there so a Wayland-client + DRM-rendering configuration can swap in

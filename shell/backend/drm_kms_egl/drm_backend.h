@@ -35,6 +35,9 @@
 #include "backend/drm_kms_egl/session_watchdog.h"
 
 class DrmCompositor;
+namespace homescreen {
+class DrmSession;
+}
 
 // Defined in driver_probe.h — forward-declared here so DrmBackend can hold
 // a std::unique_ptr<Resolved> without pulling that header into every TU.
@@ -95,7 +98,14 @@ class DrmBackend : public Backend {
   friend class DrmCompositor;
 
  public:
-  static std::unique_ptr<DrmBackend> Create(const DrmConfig& cfg);
+  // `session` may be null — when libseat isn't available we fall back to
+  // opening the DRM device directly and keeping the legacy foreground-VT
+  // check, drmSetMaster call, and reverse watchdog. When non-null, the
+  // seat provider owns master handoff on VT switch so all three are
+  // skipped. The caller retains ownership of the session; it must
+  // outlive the backend.
+  static std::unique_ptr<DrmBackend> Create(const DrmConfig& cfg,
+                                            homescreen::DrmSession* session);
   ~DrmBackend() override;
 
   DrmBackend(const DrmBackend&) = delete;
@@ -153,7 +163,7 @@ class DrmBackend : public Backend {
   }
 
  private:
-  explicit DrmBackend(DrmConfig cfg);
+  DrmBackend(DrmConfig cfg, homescreen::DrmSession* session);
   bool InitDrm();
   bool InitGbm();
   bool InitEgl();
@@ -167,8 +177,10 @@ class DrmBackend : public Backend {
                               void* user_data);
 
   DrmConfig cfg_;
+  homescreen::DrmSession* session_ = nullptr;
 
-  // DRM — drm::Device is RAII (closes fd on destruction).
+  // DRM — drm::Device is RAII (closes fd on destruction), unless
+  // constructed via Device::from_fd (libseat-owned fd path).
   std::optional<drm::Device> drm_dev_;
   bool drm_master_ = false;  // true after a successful drmSetMaster
   uint32_t connector_id_ = 0;

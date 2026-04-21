@@ -847,9 +847,9 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
               static_cast<GLsizei>(layer->size.height), blend, flip_y);
           composited_any = true;
           if (backend_->cfg_.debug_backend) {
-            const GLint cx =
+            const auto cx =
                 static_cast<GLint>(layer->offset.x + layer->size.width / 2.0);
-            const GLint cy =
+            const auto cy =
                 static_cast<GLint>(layer->offset.y + layer->size.height / 2.0);
             auto px = read_px(cx, cy);
             spdlog::debug(

@@ -118,8 +118,12 @@ void InstallBackstop() {
 }
 }  // namespace
 
-DrmSeat::DrmSeat(const int32_t viewport_width, const int32_t viewport_height)
-    : viewport_w_(viewport_width), viewport_h_(viewport_height) {
+DrmSeat::DrmSeat(const int32_t viewport_width,
+                 const int32_t viewport_height,
+                 drm::input::InputDeviceOpener opener)
+    : viewport_w_(viewport_width),
+      viewport_h_(viewport_height),
+      opener_(std::move(opener)) {
   // Start the pointer in the middle of the viewport so the first hover is
   // visible before the user moves the mouse.
   pointer_x_ = viewport_w_ / 2.0;
@@ -147,39 +151,48 @@ bool DrmSeat::Start() {
     return true;
   }
 
+  const bool have_session = !opener_.empty();
+
   // Without K_OFF on a bare text VT, keystrokes are also consumed by the
   // kernel tty line discipline (echoed to the shell underneath). K_OFF
   // disables that — it does NOT affect libinput/xkbcommon translation,
   // which is done by keyboard_ below. Restored in Stop().
-  tty_fd_ = ::open("/dev/tty", O_RDWR | O_CLOEXEC);
-  if (tty_fd_ >= 0) {
-    if (ioctl(tty_fd_, KDGKBMODE, &saved_kb_mode_) == 0) {
-      // Arm the reverse-watchdog BEFORE mutating the kb mode. If the
-      // parent is SIGKILL'd before Stop() runs, the child restores
-      // saved_kb_mode_ so the console keyboard comes back.
-      tty_watchdog_ =
-          homescreen::watchdog::SpawnTtyRestore(tty_fd_, saved_kb_mode_);
+  //
+  // When libseat is driving the session, logind/seatd manages VT
+  // keyboard state as part of session activation — we must not fight
+  // it. Skip the K_OFF path entirely in that mode.
+  if (!have_session) {
+    tty_fd_ = ::open("/dev/tty", O_RDWR | O_CLOEXEC);
+    if (tty_fd_ >= 0) {
+      if (ioctl(tty_fd_, KDGKBMODE, &saved_kb_mode_) == 0) {
+        // Arm the reverse-watchdog BEFORE mutating the kb mode. If the
+        // parent is SIGKILL'd before Stop() runs, the child restores
+        // saved_kb_mode_ so the console keyboard comes back.
+        tty_watchdog_ =
+            homescreen::watchdog::SpawnTtyRestore(tty_fd_, saved_kb_mode_);
 
-      if (ioctl(tty_fd_, KDSKBMODE, K_OFF) == 0) {
-        spdlog::info("[DrmSeat] VT keyboard mode set to K_OFF (was {})",
-                     saved_kb_mode_);
+        if (ioctl(tty_fd_, KDSKBMODE, K_OFF) == 0) {
+          spdlog::info("[DrmSeat] VT keyboard mode set to K_OFF (was {})",
+                       saved_kb_mode_);
 
-        // Publish the fd + original mode for the crash/atexit backstop.
-        // Store the mode first so any concurrent restore sees a valid
-        // value once the fd is visible.
-        g_saved_kb_mode.store(saved_kb_mode_, std::memory_order_release);
-        g_tty_fd.store(tty_fd_, std::memory_order_release);
-        std::call_once(g_backstop_installed, &InstallBackstop);
-      } else {
-        // Nothing mutated — drop the watchdog.
-        homescreen::watchdog::Disarm(tty_watchdog_);
-        spdlog::warn("[DrmSeat] KDSKBMODE K_OFF failed: {}",
-                     std::strerror(errno));
+          // Publish the fd + original mode for the crash/atexit backstop.
+          // Store the mode first so any concurrent restore sees a valid
+          // value once the fd is visible.
+          g_saved_kb_mode.store(saved_kb_mode_, std::memory_order_release);
+          g_tty_fd.store(tty_fd_, std::memory_order_release);
+          std::call_once(g_backstop_installed, &InstallBackstop);
+        } else {
+          // Nothing mutated — drop the watchdog.
+          homescreen::watchdog::Disarm(tty_watchdog_);
+          spdlog::warn("[DrmSeat] KDSKBMODE K_OFF failed: {}",
+                       std::strerror(errno));
+        }
       }
     }
   }
 
-  auto opened = drm::input::Seat::open();
+  auto opened = have_session ? drm::input::Seat::open({}, std::move(opener_))
+                             : drm::input::Seat::open();
   if (!opened) {
     spdlog::error("[DrmSeat] libinput seat open failed: {}",
                   opened.error().message());

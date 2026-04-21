@@ -34,9 +34,18 @@ namespace homescreen {
 // and translates them into FlutterPointerEvent / FlutterKeyEvent. Events
 // received before the Flutter engine is up are dropped (the state pointer
 // resolves to a null engine handle in that window).
+//
+// When a libseat-backed session is live, the caller passes an
+// InputDeviceOpener (from DrmSession::InputOpener()) so libinput's
+// privileged /dev/input/event* opens route through libseat — giving
+// input fds the same revocable lifetime as the DRM fd. In that mode,
+// the K_OFF TTY keyboard-mode hack and its reverse-watchdog are skipped;
+// logind/seatd manages VT keyboard state on session activation.
 class DrmSeat final : public ISeat {
  public:
-  DrmSeat(int32_t viewport_width, int32_t viewport_height);
+  DrmSeat(int32_t viewport_width,
+          int32_t viewport_height,
+          drm::input::InputDeviceOpener opener = {});
   ~DrmSeat() override;
 
   bool Start() override;
@@ -59,6 +68,11 @@ class DrmSeat final : public ISeat {
   const int32_t viewport_h_;
 
   std::atomic<FlutterDesktopViewControllerState*> state_{nullptr};
+
+  // Caller-supplied hook for libinput's privileged device opens. Empty
+  // when there's no libseat session (falls back to ::open/::close inside
+  // drm::input::Seat).
+  drm::input::InputDeviceOpener opener_;
 
   std::unique_ptr<drm::input::Seat> seat_;
   std::unique_ptr<drm::input::Keyboard> keyboard_;
