@@ -14,6 +14,7 @@
 
 #include "flutter_view.h"
 
+#include <cassert>
 #include <memory>
 #include <utility>
 
@@ -23,6 +24,7 @@
 #include "backend/headless/headless.h"
 #elif BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "display/drm_display.h"
 #elif BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
 #elif BUILD_BACKEND_WAYLAND_VULKAN
@@ -155,7 +157,16 @@ FlutterView::FlutterView(Configuration::Config config,
     cfg.overlay_planes = parse_tri(m_config.view.drm_overlay_planes);
     cfg.explicit_sync = parse_tri(m_config.view.drm_explicit_sync);
     cfg.async_flip = parse_tri(m_config.view.drm_async_flip);
-    m_backend = DrmBackend::Create(cfg);
+
+    // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
+    // process-wide libseat session. Pull the raw pointer — may be null
+    // when no seat backend is available, in which case DrmBackend takes
+    // the legacy direct-open path. In a DRM build, MakeDisplay always
+    // returns a DrmDisplay, so dynamic_cast fails only on programmer
+    // error; assert keeps the invariant loud.
+    auto* drm_display = dynamic_cast<DrmDisplay*>(m_display.get());
+    assert(drm_display != nullptr);
+    m_backend = DrmBackend::Create(cfg, drm_display->session());
   }
 #elif BUILD_BACKEND_WAYLAND_EGL
   {

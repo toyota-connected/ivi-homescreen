@@ -16,13 +16,44 @@
 
 #include "display/drm_display.h"
 
+#include <utility>
+
+#include "backend/drm_kms_egl/drm_session.h"
 #include "input/drm_seat.h"
+#include "logging.h"
+
+namespace {
+
+std::unique_ptr<homescreen::DrmSession> OpenSessionOrLog() {
+  auto session = homescreen::DrmSession::Open();
+  if (!session) {
+    spdlog::info(
+        "[DrmDisplay] no libseat backend available — falling back to "
+        "direct /dev/dri open + legacy VT/master guards");
+  } else {
+    spdlog::info("[DrmDisplay] libseat session active");
+  }
+  return session;
+}
+
+drm::input::InputDeviceOpener OpenerFrom(homescreen::DrmSession* session) {
+  if (session == nullptr) {
+    return {};
+  }
+  return session->InputOpener();
+}
+
+}  // namespace
 
 DrmDisplay::DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz)
     : width_(width),
       height_(height),
       refresh_rate_hz_(refresh_rate_hz),
-      seat_(std::make_unique<homescreen::DrmSeat>(width, height)) {}
+      session_(OpenSessionOrLog()),
+      seat_(std::make_unique<homescreen::DrmSeat>(width,
+                                                  height,
+                                                  OpenerFrom(session_.get()))) {
+}
 
 DrmDisplay::~DrmDisplay() = default;
 
