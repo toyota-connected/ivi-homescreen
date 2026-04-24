@@ -38,6 +38,7 @@ struct KeyEventCallbackData {
   xkb_keysym_t keysym;
   uint32_t xkb_scancode;
   uint32_t modifiers;
+  bool released;
 };
 
 // Converts a UTF-32 codepoint to a UTF-8 string (for FlutterKeyEvent.character).
@@ -62,12 +63,15 @@ std::string Utf32ToUtf8(const uint32_t codepoint) {
 }
 
 // Callback invoked by the Flutter engine after processing a key event via the
-// embedder API. If the event was not handled AND it produced a printable
-// character, fall back to the TextInputPlugin for text insertion.
+// embedder API. If the event was not handled, fall back to TextInputPlugin so
+// that special keys (backspace, arrows, home/end, etc.) and unhandled printable
+// characters are still handled by the text input model.
 void OnKeyEventResponse(bool handled, void* user_data) {
   auto* data = static_cast<KeyEventCallbackData*>(user_data);
-  if (!handled && !data->character.empty() && data->text_input != nullptr) {
-    data->text_input->KeyboardHook(/*released=*/false, data->keysym,
+  spdlog::debug("[key] engine response: keysym=0x{:08x} released={} handled={}",
+               data->keysym, data->released, handled);
+  if (!handled && data->text_input != nullptr) {
+    data->text_input->KeyboardHook(data->released, data->keysym,
                                    data->xkb_scancode, data->modifiers);
   }
   delete data;
@@ -94,6 +98,11 @@ void KeyEventHandler::KeyboardHook(const bool released,
                                    const uint32_t modifiers) {
   const uint64_t physical = key_mapping::XkbScancodeToPhysicalKey(xkb_scancode);
   const uint32_t utf32 = xkb_keysym_to_utf32(keysym);
+
+  spdlog::debug("[key] {} keysym=0x{:08x} scan={} mods=0x{:02x} "
+               "physical=0x{:016x} utf32=0x{:04x}",
+               released ? "up  " : "down", keysym, xkb_scancode, modifiers,
+               physical, utf32);
 
   // -----------------------------------------------------------------------
   // Determine event type and logical key, tracking down/up pairs so that
@@ -131,7 +140,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
 
     // Heap-allocate event data — ownership passes to OnKeyEventResponse.
     auto* cb_data = new KeyEventCallbackData{
-        text_input_, character_str, keysym, xkb_scancode, modifiers};
+        text_input_, character_str, keysym, xkb_scancode, modifiers, released};
 
     // Copy for capture (FlutterKeyEvent holds a char* into character_str, so
     // keep both alive in the lambda until the post fires).
@@ -146,6 +155,11 @@ void KeyEventHandler::KeyboardHook(const bool released,
         cb_data->character.empty() ? nullptr : cb_data->character.c_str();
     flutter_event.synthesized = false;
     flutter_event.device_type = kFlutterKeyEventDeviceTypeKeyboard;
+
+    spdlog::debug("[key] -> embedder type={} physical=0x{:016x} "
+                 "logical=0x{:016x} char='{}'",
+                 static_cast<int>(type), physical, logical,
+                 character_str.empty() ? "(none)" : character_str);
 
     Engine* eng = engine_;
     asio::post(
@@ -175,7 +189,9 @@ void KeyEventHandler::KeyboardHook(const bool released,
   if (utf32) {
     event.AddMember(kUnicodeScalarValues, utf32, allocator);
   }
-  event.AddMember(kTypeKey, released ? kKeyUp : kKeyDown, allocator);
+  event.AddMember(kTypeKey,
+                  rapidjson::StringRef(released ? kKeyUp : kKeyDown),
+                  allocator);
 
   channel_->Send(event);
 }
