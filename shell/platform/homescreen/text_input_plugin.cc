@@ -4,6 +4,8 @@
 
 #include "shell/platform/homescreen/text_input_plugin.h"
 
+#include <algorithm>
+
 #include "flutter/shell/platform/common/json_method_codec.h"
 
 static constexpr char kSetEditingStateMethod[] = "TextInput.setEditingState";
@@ -37,6 +39,72 @@ static constexpr char kInternalConsistencyError[] =
     "Internal Consistency Error";
 
 namespace flutter {
+
+// Returns the byte offset that is |col| columns into the line starting at
+// |line_start| in |text|, clamped to the line end (the '\n' or end of string).
+static size_t ClampedColumn(const std::string& text,
+                            size_t line_start,
+                            size_t col) {
+  const size_t line_end = text.find('\n', line_start);
+  const size_t line_len = (line_end == std::string::npos)
+                              ? text.size() - line_start
+                              : line_end - line_start;
+
+  return line_start + std::min(col, line_len);
+}
+
+// Returns the cursor position for moving up one line, preserving column.
+// Returns |pos| unchanged when already on the first line (no-op).
+static size_t PreviousLinePosition(const std::string& text, size_t pos) {
+  // Find the '\n' that ends the previous line.
+  const size_t prev_nl =
+      (pos == 0) ? std::string::npos : text.rfind('\n', pos - 1);
+  if (prev_nl == std::string::npos) {
+    // first line: return beginning of string
+    spdlog::debug("PreviousLinePosition: already on first line");
+    return 0;
+  }
+  // Start of current line (one past the '\n' we found).
+  const size_t cur_line_start = prev_nl + 1;
+  const size_t col = pos - cur_line_start;
+
+  // Find start of the previous line.
+  const size_t prev_line_start =
+      (prev_nl == 0)
+          ? 0
+          : [&] {
+              const size_t pp = text.rfind('\n', prev_nl - 1);
+              spdlog::debug("PreviousLinePosition: prev_nl {}, pos {}, pp {}", prev_nl, pos, pp);
+              return (pp == std::string::npos) ? 0 : pp + 1;
+            }();
+
+  spdlog::debug("PreviousLinePosition: calling ClampedColumn with prev_line_start {}, col {}", prev_line_start, col);
+  return ClampedColumn(text, prev_line_start, col);
+}
+
+// Returns the cursor position for moving down one line, preserving column.
+// Returns |pos| unchanged when already on the last line (no-op).
+static size_t NextLinePosition(const std::string& text, size_t pos) {
+  const size_t cur_nl = text.find('\n', pos);
+  if (cur_nl == std::string::npos) {
+    // last line: return end of string
+    spdlog::debug("NextLinePosition: already on last line");
+    return text.size();
+  }
+  // Start of current line for column calculation.
+  const size_t cur_line_start = [&] {
+    if (pos == 0) return size_t{0};
+    const size_t pp = text.rfind('\n', pos - 1);
+    spdlog::debug("NextLinePosition: cur_nl {}, pos {}, pp {}", cur_nl, pos, pp);
+    return (pp == std::string::npos) ? 0 : pp + 1;
+  }();
+  const size_t col = pos - cur_line_start;
+  const size_t next_line_start = cur_nl + 1;
+
+  spdlog::debug("NextLinePosition: calling ClampedColumn with next_line_start {}, col {}", next_line_start, col);
+  return ClampedColumn(text, next_line_start, col);
+}
+
 void TextInputPlugin::CharHook(const unsigned int code_point) {
   spdlog::debug("TextInputPlugin::CharHook: code_point: {}", code_point);
   if (active_model_ == nullptr) {
@@ -61,6 +129,8 @@ void TextInputPlugin::KeyboardHook(bool released,
           SendStateUpdate(*active_model_);
         }
         break;
+      // Arrow selection and movement keys. See:
+      // https://api.flutter.dev/flutter/services/LogicalKeyboardKey-class.html
       case XKB_KEY_Left:
       case XKB_KEY_KP_Left:
         if (shift) {
@@ -88,6 +158,32 @@ void TextInputPlugin::KeyboardHook(bool released,
           SendStateUpdate(*active_model_);
         }
         break;
+      case XKB_KEY_Up:
+      case XKB_KEY_KP_Up: {
+        const std::string text = active_model_->GetText();
+        const size_t new_pos =
+            PreviousLinePosition(text, active_model_->selection().extent());
+        if (new_pos != active_model_->selection().extent()) {
+          active_model_->SetSelection(
+              shift ? TextRange(active_model_->selection().base(), new_pos)
+                    : TextRange(new_pos));
+          SendStateUpdate(*active_model_);
+        }
+        break;
+      }
+      case XKB_KEY_Down:
+      case XKB_KEY_KP_Down: {
+        const std::string text = active_model_->GetText();
+        const size_t new_pos =
+            NextLinePosition(text, active_model_->selection().extent());
+        if (new_pos != active_model_->selection().extent()) {
+          active_model_->SetSelection(
+              shift ? TextRange(active_model_->selection().base(), new_pos)
+                    : TextRange(new_pos));
+          SendStateUpdate(*active_model_);
+        }
+        break;
+      }
       case XKB_KEY_End:
       case XKB_KEY_KP_End:
         if (shift) {
@@ -138,8 +234,6 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Scroll_Lock:
       case XKB_KEY_Sys_Req:
       case XKB_KEY_Escape:
-      case XKB_KEY_Up:
-      case XKB_KEY_Down:
       case XKB_KEY_Page_Up:
       case XKB_KEY_Page_Down:
       case XKB_KEY_Begin:
@@ -147,8 +241,6 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Insert:
       case XKB_KEY_Menu:
       case XKB_KEY_Num_Lock:
-      case XKB_KEY_KP_Up:
-      case XKB_KEY_KP_Down:
       case XKB_KEY_KP_Page_Up:
       case XKB_KEY_KP_Page_Down:
       case XKB_KEY_KP_Begin:
