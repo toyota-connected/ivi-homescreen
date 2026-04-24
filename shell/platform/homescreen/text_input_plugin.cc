@@ -112,6 +112,7 @@ void TextInputPlugin::KeyboardHook(bool released,
           SendStateUpdate(*active_model_);
         }
         break;
+      case XKB_KEY_Return:
       case XKB_KEY_ISO_Enter:
       case XKB_KEY_KP_Enter:
         EnterPressed(active_model_.get());
@@ -133,7 +134,6 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Tab:
       case XKB_KEY_Linefeed:
       case XKB_KEY_Clear:
-      case XKB_KEY_Return:
       case XKB_KEY_Pause:
       case XKB_KEY_Scroll_Lock:
       case XKB_KEY_Sys_Req:
