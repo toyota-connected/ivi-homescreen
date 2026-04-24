@@ -49,11 +49,12 @@ void TextInputPlugin::CharHook(const unsigned int code_point) {
 void TextInputPlugin::KeyboardHook(bool released,
                                    xkb_keysym_t keysym,
                                    uint32_t /* xkb_scancode */,
-                                   uint32_t /* modifiers */) {
+                                   uint32_t modifiers) {
   if (active_model_ == nullptr) {
     return;
   }
   if (!released) {
+    const bool shift = (modifiers & 0x1) != 0;
     switch (keysym) {
       case XKB_KEY_BackSpace:
         if (active_model_->Backspace()) {
@@ -62,24 +63,47 @@ void TextInputPlugin::KeyboardHook(bool released,
         break;
       case XKB_KEY_Left:
       case XKB_KEY_KP_Left:
-        if (active_model_->MoveCursorBack()) {
+        if (shift) {
+          auto sel = active_model_->selection();
+          if (sel.extent() > 0) {
+            active_model_->SetSelection(
+                TextRange(sel.base(), sel.extent() - 1));
+            SendStateUpdate(*active_model_);
+          }
+        } else if (active_model_->MoveCursorBack()) {
           SendStateUpdate(*active_model_);
         }
         break;
       case XKB_KEY_Right:
       case XKB_KEY_KP_Right:
-        if (active_model_->MoveCursorForward()) {
+        if (shift) {
+          auto sel = active_model_->selection();
+          auto range = active_model_->text_range();
+          if (sel.extent() < range.end()) {
+            active_model_->SetSelection(
+                TextRange(sel.base(), sel.extent() + 1));
+            SendStateUpdate(*active_model_);
+          }
+        } else if (active_model_->MoveCursorForward()) {
           SendStateUpdate(*active_model_);
         }
         break;
       case XKB_KEY_End:
       case XKB_KEY_KP_End:
-        active_model_->MoveCursorToEnd();
+        if (shift) {
+          active_model_->SelectToEnd();
+        } else {
+          active_model_->MoveCursorToEnd();
+        }
         SendStateUpdate(*active_model_);
         break;
       case XKB_KEY_Home:
       case XKB_KEY_KP_Home:
-        active_model_->MoveCursorToBeginning();
+        if (shift) {
+          active_model_->SelectToBeginning();
+        } else {
+          active_model_->MoveCursorToBeginning();
+        }
         SendStateUpdate(*active_model_);
         break;
       case XKB_KEY_Delete:

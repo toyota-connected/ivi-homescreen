@@ -344,6 +344,17 @@ class Engine {
     return m_platform_task_runner.get();
   }
 
+  /**
+   * @brief Send a key event to the Flutter engine via the embedder API
+   * @param[in] event The key event to send
+   * @param[in] callback Callback invoked with whether the event was handled
+   * @param[in] user_data User data passed to the callback
+   * @return FlutterEngineResult
+   */
+  FlutterEngineResult SendKeyEvent(const FlutterKeyEvent& event,
+                                   FlutterKeyEventCallback callback,
+                                   void* user_data) const;
+
  private:
   size_t m_index;
   bool m_running;
