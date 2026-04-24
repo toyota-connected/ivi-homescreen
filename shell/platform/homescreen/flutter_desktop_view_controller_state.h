@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "flutter_desktop_view.h"
 #include "keyboard_hook_handler.h"
 
@@ -10,6 +12,7 @@ class Engine;
 class FlutterView;
 namespace flutter {
 class KeyboardHookHandler;
+class TextInputPlugin;
 }
 
 // Struct for storing state within an instance of the View.
@@ -29,4 +32,8 @@ struct FlutterDesktopViewControllerState {
   // Handlers for keyboard events from Display.
   std::vector<std::unique_ptr<flutter::KeyboardHookHandler>>
       keyboard_hook_handlers;
+
+  // TextInputPlugin is owned here so that KeyEventHandler can hold a raw
+  // pointer to it for fallback text insertion after embedder key dispatch.
+  std::unique_ptr<flutter::TextInputPlugin> text_input_plugin;
 };
