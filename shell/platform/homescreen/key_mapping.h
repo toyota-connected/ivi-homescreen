@@ -26,8 +26,10 @@ uint64_t XkbScancodeToPhysicalKey(uint32_t xkb_scancode);
 
 // Converts an XKB keysym + UTF-32 codepoint to a Flutter logical key code.
 // Printable characters map to their Unicode codepoint.
-// Non-printable keys map using the XKB plane: 0x00100000000 | keysym, or a
-// curated HID-based logical value for well-known keys.
-uint64_t KeysymToLogicalKey(xkb_keysym_t keysym, uint32_t utf32);
+// When physical (from XkbScancodeToPhysicalKey) is provided and the key is in
+// the USB HID plane, logical is derived as 0x100000000 | hid_usage so that
+// Flutter's HardwareKeyboard correctly tracks modifier state (Ctrl, Shift…).
+uint64_t KeysymToLogicalKey(xkb_keysym_t keysym, uint32_t utf32,
+                            uint64_t physical = 0);
 
 }  // namespace key_mapping

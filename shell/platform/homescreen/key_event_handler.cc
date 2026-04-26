@@ -68,11 +68,24 @@ std::string Utf32ToUtf8(const uint32_t codepoint) {
 // characters are still handled by the text input model.
 void OnKeyEventResponse(bool handled, void* user_data) {
   auto* data = static_cast<KeyEventCallbackData*>(user_data);
-  spdlog::debug("[key] engine response: keysym=0x{:08x} released={} handled={}",
-               data->keysym, data->released, handled);
+  spdlog::debug("[key] engine response: keysym=0x{:08x} released={} handled={} "
+               "mods=0x{:02x} char='{}'",
+               data->keysym, data->released, handled, data->modifiers,
+               data->character.empty() ? "(none)" : data->character);
   if (!handled && data->text_input != nullptr) {
-    data->text_input->KeyboardHook(data->released, data->keysym,
-                                   data->xkb_scancode, data->modifiers);
+    // Don't delegate to TextInputPlugin when a control or alt modifier is
+    // active AND the key produced a printable character — that combination is
+    // a keyboard shortcut (e.g. Ctrl+C), not text input.  Navigation keys
+    // (arrows, backspace, home/end…) have an empty character string and are
+    // always delegated regardless of modifiers.
+    const bool ctrl_or_alt = (data->modifiers & 0x0c) != 0;
+    if (!(ctrl_or_alt && !data->character.empty())) {
+      data->text_input->KeyboardHook(data->released, data->keysym,
+                                     data->xkb_scancode, data->modifiers);
+    } else {
+      SPDLOG_DEBUG("[key] suppressing TextInputPlugin fallback "
+                   "(ctrl/alt + char key, mods=0x{:02x})", data->modifiers);
+    }
   }
   delete data;
 }
@@ -116,14 +129,14 @@ void KeyEventHandler::KeyboardHook(const bool released,
     const bool already_pressed = pressed_logical_keys_.count(physical) > 0;
     type = already_pressed ? kFlutterKeyEventTypeRepeat
                            : kFlutterKeyEventTypeDown;
-    logical = key_mapping::KeysymToLogicalKey(keysym, utf32);
+    logical = key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
     pressed_logical_keys_[physical] = logical;
   } else {
     type = kFlutterKeyEventTypeUp;
     const auto it = pressed_logical_keys_.find(physical);
     logical = (it != pressed_logical_keys_.end())
                   ? it->second
-                  : key_mapping::KeysymToLogicalKey(keysym, utf32);
+                  : key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
     pressed_logical_keys_.erase(physical);
   }
 
