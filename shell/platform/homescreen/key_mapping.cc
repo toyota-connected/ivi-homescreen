@@ -169,83 +169,92 @@ static const std::unordered_map<uint32_t, uint32_t> kEvdevToHid = {
 // clang-format on
 
 // ---------------------------------------------------------------------------
-// USB HID usage → Flutter logical key.
-// Logical keys for non-printable keys live in the Flutter HID plane:
-//   0x00100070000 + hid_usage  (i.e. 0x100000000 | 0x00700000 | hid_usage)
-// Source: flutter/packages/flutter/lib/src/services/keyboard_key.g.dart
+// XKB keysym → Flutter logical key ID.
+// Values from flutter/packages/flutter/lib/src/services/keyboard_key.g.dart.
+// Only non-printable keys are listed; printable ones are handled by the
+// utf32 path in KeysymToLogicalKey.
 // ---------------------------------------------------------------------------
 
 // clang-format off
-static const std::unordered_map<uint32_t, uint64_t> kHidToLogical = {
-  {0x28, 0x100000000 | 0x0700'0028ULL},  // Enter
-  {0x29, 0x100000000 | 0x0700'0029ULL},  // Escape
-  {0x2a, 0x100000000 | 0x0700'002aULL},  // Backspace
-  {0x2b, 0x100000000 | 0x0700'002bULL},  // Tab
-  {0x2c, 0x100000000 | 0x0700'002cULL},  // Space
-  {0x39, 0x100000000 | 0x0700'0039ULL},  // CapsLock
-  {0x3a, 0x100000000 | 0x0700'003aULL},  // F1
-  {0x3b, 0x100000000 | 0x0700'003bULL},  // F2
-  {0x3c, 0x100000000 | 0x0700'003cULL},  // F3
-  {0x3d, 0x100000000 | 0x0700'003dULL},  // F4
-  {0x3e, 0x100000000 | 0x0700'003eULL},  // F5
-  {0x3f, 0x100000000 | 0x0700'003fULL},  // F6
-  {0x40, 0x100000000 | 0x0700'0040ULL},  // F7
-  {0x41, 0x100000000 | 0x0700'0041ULL},  // F8
-  {0x42, 0x100000000 | 0x0700'0042ULL},  // F9
-  {0x43, 0x100000000 | 0x0700'0043ULL},  // F10
-  {0x44, 0x100000000 | 0x0700'0044ULL},  // F11
-  {0x45, 0x100000000 | 0x0700'0045ULL},  // F12
-  {0x46, 0x100000000 | 0x0700'0046ULL},  // PrintScreen
-  {0x47, 0x100000000 | 0x0700'0047ULL},  // ScrollLock
-  {0x48, 0x100000000 | 0x0700'0048ULL},  // Pause
-  {0x49, 0x100000000 | 0x0700'0049ULL},  // Insert
-  {0x4a, 0x100000000 | 0x0700'004aULL},  // Home
-  {0x4b, 0x100000000 | 0x0700'004bULL},  // PageUp
-  {0x4c, 0x100000000 | 0x0700'004cULL},  // Delete
-  {0x4d, 0x100000000 | 0x0700'004dULL},  // End
-  {0x4e, 0x100000000 | 0x0700'004eULL},  // PageDown
-  {0x4f, 0x100000000 | 0x0700'004fULL},  // ArrowRight
-  {0x50, 0x100000000 | 0x0700'0050ULL},  // ArrowLeft
-  {0x51, 0x100000000 | 0x0700'0051ULL},  // ArrowDown
-  {0x52, 0x100000000 | 0x0700'0052ULL},  // ArrowUp
-  {0x53, 0x100000000 | 0x0700'0053ULL},  // NumLock
-  {0x54, 0x100000000 | 0x0700'0054ULL},  // NumpadDivide
-  {0x55, 0x100000000 | 0x0700'0055ULL},  // NumpadMultiply
-  {0x56, 0x100000000 | 0x0700'0056ULL},  // NumpadSubtract
-  {0x57, 0x100000000 | 0x0700'0057ULL},  // NumpadAdd
-  {0x58, 0x100000000 | 0x0700'0058ULL},  // NumpadEnter
-  {0x59, 0x100000000 | 0x0700'0059ULL},  // Numpad1
-  {0x5a, 0x100000000 | 0x0700'005aULL},  // Numpad2
-  {0x5b, 0x100000000 | 0x0700'005bULL},  // Numpad3
-  {0x5c, 0x100000000 | 0x0700'005cULL},  // Numpad4
-  {0x5d, 0x100000000 | 0x0700'005dULL},  // Numpad5
-  {0x5e, 0x100000000 | 0x0700'005eULL},  // Numpad6
-  {0x5f, 0x100000000 | 0x0700'005fULL},  // Numpad7
-  {0x60, 0x100000000 | 0x0700'0060ULL},  // Numpad8
-  {0x61, 0x100000000 | 0x0700'0061ULL},  // Numpad9
-  {0x62, 0x100000000 | 0x0700'0062ULL},  // Numpad0
-  {0x63, 0x100000000 | 0x0700'0063ULL},  // NumpadDecimal
-  {0x65, 0x100000000 | 0x0700'0065ULL},  // ContextMenu
-  {0x68, 0x100000000 | 0x0700'0068ULL},  // F13
-  {0x69, 0x100000000 | 0x0700'0069ULL},  // F14
-  {0x6a, 0x100000000 | 0x0700'006aULL},  // F15
-  {0x6b, 0x100000000 | 0x0700'006bULL},  // F16
-  {0x6c, 0x100000000 | 0x0700'006cULL},  // F17
-  {0x6d, 0x100000000 | 0x0700'006dULL},  // F18
-  {0x6e, 0x100000000 | 0x0700'006eULL},  // F19
-  {0x6f, 0x100000000 | 0x0700'006fULL},  // F20
-  {0x70, 0x100000000 | 0x0700'0070ULL},  // F21
-  {0x71, 0x100000000 | 0x0700'0071ULL},  // F22
-  {0x72, 0x100000000 | 0x0700'0072ULL},  // F23
-  {0x73, 0x100000000 | 0x0700'0073ULL},  // F24
-  {0xe0, 0x100000000 | 0x0700'00e0ULL},  // ControlLeft
-  {0xe1, 0x100000000 | 0x0700'00e1ULL},  // ShiftLeft
-  {0xe2, 0x100000000 | 0x0700'00e2ULL},  // AltLeft
-  {0xe3, 0x100000000 | 0x0700'00e3ULL},  // MetaLeft
-  {0xe4, 0x100000000 | 0x0700'00e4ULL},  // ControlRight
-  {0xe5, 0x100000000 | 0x0700'00e5ULL},  // ShiftRight
-  {0xe6, 0x100000000 | 0x0700'00e6ULL},  // AltRight
-  {0xe7, 0x100000000 | 0x0700'00e7ULL},  // MetaRight
+static const std::unordered_map<xkb_keysym_t, uint64_t> kKeysymToLogical = {
+  // Control / editing
+  {XKB_KEY_BackSpace,    UINT64_C(0x100000008)},  // backspace
+  {XKB_KEY_Tab,          UINT64_C(0x100000009)},  // tab
+  {XKB_KEY_Return,       UINT64_C(0x10000000d)},  // enter
+  {XKB_KEY_Escape,       UINT64_C(0x10000001b)},  // escape
+  {XKB_KEY_Delete,       UINT64_C(0x10000007f)},  // delete
+
+  // Navigation
+  {XKB_KEY_Home,         UINT64_C(0x100000306)},
+  {XKB_KEY_Left,         UINT64_C(0x100000302)},
+  {XKB_KEY_Up,           UINT64_C(0x100000304)},
+  {XKB_KEY_Right,        UINT64_C(0x100000303)},
+  {XKB_KEY_Down,         UINT64_C(0x100000301)},
+  {XKB_KEY_Page_Up,      UINT64_C(0x100000308)},
+  {XKB_KEY_Page_Down,    UINT64_C(0x100000307)},
+  {XKB_KEY_End,          UINT64_C(0x100000305)},
+  {XKB_KEY_Insert,       UINT64_C(0x100000407)},
+
+  // Numpad navigation (NumLock off)
+  {XKB_KEY_KP_Home,      UINT64_C(0x100000306)},
+  {XKB_KEY_KP_Left,      UINT64_C(0x100000302)},
+  {XKB_KEY_KP_Up,        UINT64_C(0x100000304)},
+  {XKB_KEY_KP_Right,     UINT64_C(0x100000303)},
+  {XKB_KEY_KP_Down,      UINT64_C(0x100000301)},
+  {XKB_KEY_KP_Page_Up,   UINT64_C(0x100000308)},
+  {XKB_KEY_KP_Page_Down, UINT64_C(0x100000307)},
+  {XKB_KEY_KP_End,       UINT64_C(0x100000305)},
+  {XKB_KEY_KP_Insert,    UINT64_C(0x100000407)},
+  {XKB_KEY_KP_Delete,    UINT64_C(0x10000007f)},
+  {XKB_KEY_KP_Enter,     UINT64_C(0x10000000d)},
+
+  // Lock keys
+  {XKB_KEY_Caps_Lock,    UINT64_C(0x100000104)},
+  {XKB_KEY_Num_Lock,     UINT64_C(0x10000010a)},
+  {XKB_KEY_Scroll_Lock,  UINT64_C(0x10000010c)},
+
+  // Modifier keys — use Flutter's modifier-plane IDs (0x200000xxx)
+  {XKB_KEY_Control_L,    UINT64_C(0x200000100)},
+  {XKB_KEY_Control_R,    UINT64_C(0x200000101)},
+  {XKB_KEY_Shift_L,      UINT64_C(0x200000102)},
+  {XKB_KEY_Shift_R,      UINT64_C(0x200000103)},
+  {XKB_KEY_Alt_L,        UINT64_C(0x200000104)},
+  {XKB_KEY_Alt_R,        UINT64_C(0x200000105)},
+  {XKB_KEY_Meta_L,       UINT64_C(0x200000106)},
+  {XKB_KEY_Meta_R,       UINT64_C(0x200000107)},
+  {XKB_KEY_Super_L,      UINT64_C(0x200000106)},
+  {XKB_KEY_Super_R,      UINT64_C(0x200000107)},
+
+  // Function keys
+  {XKB_KEY_F1,           UINT64_C(0x100000801)},
+  {XKB_KEY_F2,           UINT64_C(0x100000802)},
+  {XKB_KEY_F3,           UINT64_C(0x100000803)},
+  {XKB_KEY_F4,           UINT64_C(0x100000804)},
+  {XKB_KEY_F5,           UINT64_C(0x100000805)},
+  {XKB_KEY_F6,           UINT64_C(0x100000806)},
+  {XKB_KEY_F7,           UINT64_C(0x100000807)},
+  {XKB_KEY_F8,           UINT64_C(0x100000808)},
+  {XKB_KEY_F9,           UINT64_C(0x100000809)},
+  {XKB_KEY_F10,          UINT64_C(0x10000080a)},
+  {XKB_KEY_F11,          UINT64_C(0x10000080b)},
+  {XKB_KEY_F12,          UINT64_C(0x10000080c)},
+  {XKB_KEY_F13,          UINT64_C(0x10000080d)},
+  {XKB_KEY_F14,          UINT64_C(0x10000080e)},
+  {XKB_KEY_F15,          UINT64_C(0x10000080f)},
+  {XKB_KEY_F16,          UINT64_C(0x100000810)},
+  {XKB_KEY_F17,          UINT64_C(0x100000811)},
+  {XKB_KEY_F18,          UINT64_C(0x100000812)},
+  {XKB_KEY_F19,          UINT64_C(0x100000813)},
+  {XKB_KEY_F20,          UINT64_C(0x100000814)},
+  {XKB_KEY_F21,          UINT64_C(0x100000815)},
+  {XKB_KEY_F22,          UINT64_C(0x100000816)},
+  {XKB_KEY_F23,          UINT64_C(0x100000817)},
+  {XKB_KEY_F24,          UINT64_C(0x100000818)},
+
+  // Misc
+  {XKB_KEY_Print,        UINT64_C(0x100000408)},
+  {XKB_KEY_Sys_Req,      UINT64_C(0x100000408)},
+  {XKB_KEY_Pause,        UINT64_C(0x100000409)},
 };
 // clang-format on
 
@@ -266,23 +275,20 @@ uint64_t XkbScancodeToPhysicalKey(const uint32_t xkb_scancode) {
   return UINT64_C(0x00600000) | evdev;
 }
 
-uint64_t KeysymToLogicalKey(const xkb_keysym_t keysym, const uint32_t utf32) {
+uint64_t KeysymToLogicalKey(const xkb_keysym_t keysym, const uint32_t utf32,
+                            const uint64_t /*physical*/) {
   // Printable Unicode characters: logical key == Unicode code point.
   if (utf32 >= 0x20 && utf32 != 0x7f) {
     return static_cast<uint64_t>(utf32);
   }
 
-  // For non-printable keys look up via HID (we must convert keysym → HID
-  // via the same evdev→HID table indirectly — easier to do a direct keysym
-  // lookup via a small well-known set first, then fall back).
-  //
-  // Most of the non-printable keysyms we care about are covered by the
-  // kHidToLogical table combined with XkbScancodeToPhysicalKey. However,
-  // KeysymToLogicalKey is called independently of scancode context (e.g. on
-  // key-up when we have the logical key already stored). Use the XKB plane
-  // as a reliable fallback: Flutter's key event system accepts
-  //   0x00100000000 | xkb_keysym
-  // for all non-Unicode keys (matching the behavior of the GTK embedder).
+  // Look up exact Flutter logical key ID from the keysym table.
+  const auto it = kKeysymToLogical.find(keysym);
+  if (it != kKeysymToLogical.end()) {
+    return it->second;
+  }
+
+  // Fallback: XKB plane — 0x100000000 | xkb_keysym.
   return UINT64_C(0x100000000) | static_cast<uint64_t>(keysym);
 }
 
