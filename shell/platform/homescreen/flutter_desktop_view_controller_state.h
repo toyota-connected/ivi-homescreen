@@ -13,7 +13,7 @@ class FlutterView;
 namespace flutter {
 class KeyboardHookHandler;
 class TextInputPlugin;
-}
+}  // namespace flutter
 
 // Struct for storing state within an instance of the View.
 struct FlutterDesktopViewControllerState {

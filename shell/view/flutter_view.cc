@@ -175,7 +175,7 @@ void FlutterView::Initialize() {
 
   // Wire engine and text input plugin into the key event handler now that the
   // engine is running and the platform task runner is available.
-  auto* keh = static_cast<flutter::KeyEventHandler*>(
+  auto* keh = dynamic_cast<flutter::KeyEventHandler*>(
       m_state->keyboard_hook_handlers[0].get());
   keh->SetEngine(m_flutter_engine.get());
   keh->SetTextInputPlugin(m_state->text_input_plugin.get());
