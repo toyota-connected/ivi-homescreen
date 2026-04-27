@@ -20,7 +20,7 @@
 namespace key_mapping {
 
 // Converts an XKB scancode (Linux evdev + 8) to a Flutter physical key code.
-// Physical keys use the USB HID plane: 0x00700000 | hid_usage_id.
+// Physical keys use the USB HID plane: 0x00070000 | hid_usage_id.
 // Unmapped keys fall back to the Linux code plane: 0x00600000 | evdev_code.
 uint64_t XkbScancodeToPhysicalKey(uint32_t xkb_scancode);
 
