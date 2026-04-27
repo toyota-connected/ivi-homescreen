@@ -41,7 +41,8 @@ struct KeyEventCallbackData {
   bool released;
 };
 
-// Converts a UTF-32 codepoint to a UTF-8 string (for FlutterKeyEvent.character).
+// Converts a UTF-32 codepoint to a UTF-8 string (for
+// FlutterKeyEvent.character).
 std::string Utf32ToUtf8(const uint32_t codepoint) {
   std::string out;
   if (codepoint <= 0x7f) {
@@ -68,10 +69,11 @@ std::string Utf32ToUtf8(const uint32_t codepoint) {
 // characters are still handled by the text input model.
 void OnKeyEventResponse(bool handled, void* user_data) {
   auto* data = static_cast<KeyEventCallbackData*>(user_data);
-  spdlog::debug("[key] engine response: keysym=0x{:08x} released={} handled={} "
-               "mods=0x{:02x} char='{}'",
-               data->keysym, data->released, handled, data->modifiers,
-               data->character.empty() ? "(none)" : data->character);
+  // SPDLOG_DEBUG(
+  //     "[key] engine response: keysym=0x{:08x} released={} handled={} "
+  //     "mods=0x{:02x} char='{}'",
+  //     data->keysym, data->released, handled, data->modifiers,
+  //     data->character.empty() ? "(none)" : data->character);
   if (!handled && data->text_input != nullptr) {
     // Don't delegate to TextInputPlugin when a control or alt modifier is
     // active AND the key produced a printable character — that combination is
@@ -83,8 +85,10 @@ void OnKeyEventResponse(bool handled, void* user_data) {
       data->text_input->KeyboardHook(data->released, data->keysym,
                                      data->xkb_scancode, data->modifiers);
     } else {
-      SPDLOG_DEBUG("[key] suppressing TextInputPlugin fallback "
-                   "(ctrl/alt + char key, mods=0x{:02x})", data->modifiers);
+      SPDLOG_DEBUG(
+          "[key] suppressing TextInputPlugin fallback "
+          "(ctrl/alt + char key, mods=0x{:02x})",
+          data->modifiers);
     }
   }
   delete data;
@@ -112,23 +116,22 @@ void KeyEventHandler::KeyboardHook(const bool released,
   const uint64_t physical = key_mapping::XkbScancodeToPhysicalKey(xkb_scancode);
   const uint32_t utf32 = xkb_keysym_to_utf32(keysym);
 
-  spdlog::debug("[key] {} keysym=0x{:08x} scan={} mods=0x{:02x} "
-               "physical=0x{:016x} utf32=0x{:04x}",
-               released ? "up  " : "down", keysym, xkb_scancode, modifiers,
-               physical, utf32);
+  // SPDLOG_DEBUG(
+  //     "[key] {} keysym=0x{:08x} scan={} mods=0x{:02x} "
+  //     "physical=0x{:016x} utf32=0x{:04x}",
+  //     released ? "up  " : "down", keysym, xkb_scancode, modifiers, physical,
+  //     utf32);
 
-  // -----------------------------------------------------------------------
   // Determine event type and logical key, tracking down/up pairs so that
   // key-up always sends the same logical key as the corresponding key-down
   // (utf32 is 0 on release which would otherwise yield a different value).
-  // -----------------------------------------------------------------------
   FlutterKeyEventType type;
   uint64_t logical;
 
   if (!released) {
     const bool already_pressed = pressed_logical_keys_.count(physical) > 0;
-    type = already_pressed ? kFlutterKeyEventTypeRepeat
-                           : kFlutterKeyEventTypeDown;
+    type =
+        already_pressed ? kFlutterKeyEventTypeRepeat : kFlutterKeyEventTypeDown;
     logical = key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
     pressed_logical_keys_[physical] = logical;
   } else {
@@ -140,10 +143,8 @@ void KeyEventHandler::KeyboardHook(const bool released,
     pressed_logical_keys_.erase(physical);
   }
 
-  // -----------------------------------------------------------------------
-  // 1. Send via embedder API (FlutterEngineSendKeyEvent) — primary path for
-  //    HardwareKeyboard / Focus.onKeyEvent / Shortcuts in the framework.
-  // -----------------------------------------------------------------------
+  // 1. Send via embedder API `FlutterEngineSendKeyEvent`/`HardwareKeyboard`
+  //    (primary path)
   if (engine_ != nullptr) {
     // Build character string (only for key-down/repeat of printable chars).
     std::string character_str;
@@ -169,28 +170,26 @@ void KeyEventHandler::KeyboardHook(const bool released,
     flutter_event.synthesized = false;
     flutter_event.device_type = kFlutterKeyEventDeviceTypeKeyboard;
 
-    spdlog::debug("[key] -> embedder type={} physical=0x{:016x} "
-                 "logical=0x{:016x} char='{}'",
-                 static_cast<int>(type), physical, logical,
-                 character_str.empty() ? "(none)" : character_str);
+    // SPDLOG_DEBUG(
+    //     "[key] -> embedder type={} physical=0x{:016x} "
+    //     "logical=0x{:016x} char='{}'",
+    //     static_cast<int>(type), physical, logical,
+    //     character_str.empty() ? "(none)" : character_str);
 
     Engine* eng = engine_;
-    asio::post(
-        *eng->GetPlatformTaskRunner()->GetStrandContext(),
-        [eng, flutter_event, cb_data]() mutable {
-          // Re-point character pointer inside the lambda copy since the
-          // original stack variable is gone; cb_data owns the string.
-          flutter_event.character =
-              cb_data->character.empty() ? nullptr : cb_data->character.c_str();
-          eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
-        });
+    asio::post(*eng->GetPlatformTaskRunner()->GetStrandContext(),
+               [eng, flutter_event, cb_data]() mutable {
+                 // Re-point character pointer inside the lambda copy since the
+                 // original stack variable is gone; cb_data owns the string.
+                 flutter_event.character = cb_data->character.empty()
+                                               ? nullptr
+                                               : cb_data->character.c_str();
+                 eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
+               });
   }
 
-  // -----------------------------------------------------------------------
-  // 2. Send via channel (flutter/keyevent) — legacy RawKeyboard path.
-  //    Required for ModalRoute ESC dismissal and other Shortcuts-bridge
-  //    features that rely on the RawKeyboard system.
-  // -----------------------------------------------------------------------
+  // 2. Send via channel `flutter/keyevent`
+  //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
   rapidjson::Document event(rapidjson::kObjectType);
   auto& allocator = event.GetAllocator();
@@ -202,8 +201,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
   if (utf32) {
     event.AddMember(kUnicodeScalarValues, utf32, allocator);
   }
-  event.AddMember(kTypeKey,
-                  rapidjson::StringRef(released ? kKeyUp : kKeyDown),
+  event.AddMember(kTypeKey, rapidjson::StringRef(released ? kKeyUp : kKeyDown),
                   allocator);
 
   channel_->Send(event);

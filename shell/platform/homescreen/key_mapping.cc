@@ -275,7 +275,8 @@ uint64_t XkbScancodeToPhysicalKey(const uint32_t xkb_scancode) {
   return UINT64_C(0x00600000) | evdev;
 }
 
-uint64_t KeysymToLogicalKey(const xkb_keysym_t keysym, const uint32_t utf32,
+uint64_t KeysymToLogicalKey(const xkb_keysym_t keysym,
+                            const uint32_t utf32,
                             const uint64_t /*physical*/) {
   // Printable Unicode characters: logical key == Unicode code point.
   if (utf32 >= 0x20 && utf32 != 0x7f) {

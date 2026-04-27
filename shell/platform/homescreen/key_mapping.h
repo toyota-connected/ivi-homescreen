@@ -14,8 +14,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include <xkbcommon/xkbcommon.h>
+#include <cstdint>
 
 namespace key_mapping {
 
@@ -29,7 +29,8 @@ uint64_t XkbScancodeToPhysicalKey(uint32_t xkb_scancode);
 // When physical (from XkbScancodeToPhysicalKey) is provided and the key is in
 // the USB HID plane, logical is derived as 0x100000000 | hid_usage so that
 // Flutter's HardwareKeyboard correctly tracks modifier state (Ctrl, Shift…).
-uint64_t KeysymToLogicalKey(xkb_keysym_t keysym, uint32_t utf32,
+uint64_t KeysymToLogicalKey(xkb_keysym_t keysym,
+                            uint32_t utf32,
                             uint64_t physical = 0);
 
 }  // namespace key_mapping

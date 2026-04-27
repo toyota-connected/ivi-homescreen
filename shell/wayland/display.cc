@@ -624,8 +624,8 @@ void Display::keyboard_handle_key(void* data,
   // XKB_KEY_NoSymbol
   //
   xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, xkb_scancode);
-  const uint32_t modifiers = xkb_state_serialize_mods(
-    d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
+  const uint32_t modifiers =
+      xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
 
   if (keysym == XKB_KEY_NoSymbol) {
     const xkb_keysym_t* key_symbols;
@@ -644,7 +644,8 @@ void Display::keyboard_handle_key(void* data,
   }
 
   KeyCallback(d->m_view_controller_state,
-              state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode, modifiers);
+              state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode,
+              modifiers);
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
@@ -652,9 +653,10 @@ void Display::keyboard_handle_key(void* data,
       d->m_keysym_pressed = keysym;
       set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
-    } else {
-      SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
     }
+    // else {
+    //   SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
+    // }
 
   } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
     if (d->m_repeat_code == xkb_scancode) {
@@ -697,9 +699,9 @@ const wl_keyboard_listener Display::keyboard_listener = {
 void Display::keyboard_repeat_func(void* data) {
   if (auto d = static_cast<Display*>(data);
       XKB_KEY_NoSymbol != d->m_repeat_code) {
-    const uint32_t modifiers = xkb_state_serialize_mods(
-        d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
-        
+    const uint32_t modifiers =
+        xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
+
     KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
                 d->m_repeat_code, modifiers);
   }

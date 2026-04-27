@@ -61,7 +61,6 @@ static size_t PreviousLinePosition(const std::string& text, size_t pos) {
       (pos == 0) ? std::string::npos : text.rfind('\n', pos - 1);
   if (prev_nl == std::string::npos) {
     // first line: return beginning of string
-    spdlog::debug("PreviousLinePosition: already on first line");
     return 0;
   }
   // Start of current line (one past the '\n' we found).
@@ -69,16 +68,11 @@ static size_t PreviousLinePosition(const std::string& text, size_t pos) {
   const size_t col = pos - cur_line_start;
 
   // Find start of the previous line.
-  const size_t prev_line_start =
-      (prev_nl == 0)
-          ? 0
-          : [&] {
-              const size_t pp = text.rfind('\n', prev_nl - 1);
-              spdlog::debug("PreviousLinePosition: prev_nl {}, pos {}, pp {}", prev_nl, pos, pp);
-              return (pp == std::string::npos) ? 0 : pp + 1;
-            }();
+  const size_t prev_line_start = (prev_nl == 0) ? 0 : [&] {
+    const size_t pp = text.rfind('\n', prev_nl - 1);
+    return (pp == std::string::npos) ? 0 : pp + 1;
+  }();
 
-  spdlog::debug("PreviousLinePosition: calling ClampedColumn with prev_line_start {}, col {}", prev_line_start, col);
   return ClampedColumn(text, prev_line_start, col);
 }
 
@@ -88,25 +82,23 @@ static size_t NextLinePosition(const std::string& text, size_t pos) {
   const size_t cur_nl = text.find('\n', pos);
   if (cur_nl == std::string::npos) {
     // last line: return end of string
-    spdlog::debug("NextLinePosition: already on last line");
     return text.size();
   }
   // Start of current line for column calculation.
   const size_t cur_line_start = [&] {
-    if (pos == 0) return size_t{0};
+    if (pos == 0)
+      return size_t{0};
     const size_t pp = text.rfind('\n', pos - 1);
-    spdlog::debug("NextLinePosition: cur_nl {}, pos {}, pp {}", cur_nl, pos, pp);
     return (pp == std::string::npos) ? 0 : pp + 1;
   }();
   const size_t col = pos - cur_line_start;
   const size_t next_line_start = cur_nl + 1;
 
-  spdlog::debug("NextLinePosition: calling ClampedColumn with next_line_start {}, col {}", next_line_start, col);
   return ClampedColumn(text, next_line_start, col);
 }
 
 void TextInputPlugin::CharHook(const unsigned int code_point) {
-  spdlog::debug("TextInputPlugin::CharHook: code_point: {}", code_point);
+  // SPDLOG_DEBUG("TextInputPlugin::CharHook: code_point: {}", code_point);
   if (active_model_ == nullptr) {
     return;
   }
