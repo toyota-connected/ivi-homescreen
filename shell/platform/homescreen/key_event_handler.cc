@@ -178,33 +178,34 @@ void KeyEventHandler::KeyboardHook(const bool released,
 
     Engine* eng = engine_;
     asio::post(*eng->GetPlatformTaskRunner()->GetStrandContext(),
-               [eng, flutter_event, cb_data]() mutable {
+               [eng, flutter_event, cb_data, utf32, keysym, xkb_scancode, modifiers, released, channelPtr = channel_.get()]() mutable {
                  // Re-point character pointer inside the lambda copy since the
                  // original stack variable is gone; cb_data owns the string.
                  flutter_event.character = cb_data->character.empty()
                                                ? nullptr
                                                : cb_data->character.c_str();
                  eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
+
+                  // 2. Send via channel `flutter/keyevent`
+                  //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
+                  //    Sent in the callback to ensure correct ordering
+                  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
+                  rapidjson::Document event(rapidjson::kObjectType);
+                  auto& allocator = event.GetAllocator();
+                  event.AddMember(kKeyCodeKey, keysym, allocator);
+                  event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
+                  event.AddMember(kToolkitKey, kValueToolkitGtk, allocator);
+                  event.AddMember(kScanCodeKey, xkb_scancode, allocator);
+                  event.AddMember(kModifiersKey, modifiers, allocator);
+                  if (utf32) {
+                    event.AddMember(kUnicodeScalarValues, utf32, allocator);
+                  }
+                  event.AddMember(kTypeKey, rapidjson::StringRef(released ? kKeyUp : kKeyDown),
+                                  allocator);
+
+                  channelPtr->Send(event);
                });
   }
-
-  // 2. Send via channel `flutter/keyevent`
-  //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
-  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-  rapidjson::Document event(rapidjson::kObjectType);
-  auto& allocator = event.GetAllocator();
-  event.AddMember(kKeyCodeKey, keysym, allocator);
-  event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
-  event.AddMember(kToolkitKey, kValueToolkitGtk, allocator);
-  event.AddMember(kScanCodeKey, xkb_scancode, allocator);
-  event.AddMember(kModifiersKey, modifiers, allocator);
-  if (utf32) {
-    event.AddMember(kUnicodeScalarValues, utf32, allocator);
-  }
-  event.AddMember(kTypeKey, rapidjson::StringRef(released ? kKeyUp : kKeyDown),
-                  allocator);
-
-  channel_->Send(event);
 }
 
 }  // namespace flutter
