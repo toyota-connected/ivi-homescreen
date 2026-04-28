@@ -264,8 +264,14 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_F24:
         break;
       default:
-        active_model_->AddCodePoint(keysym);
-        SendStateUpdate(*(active_model_));
+        // Translate the keysym to a UTF-32 code point
+        // and add it to the model if it's printable
+        const char32_t utf32 = xkb_keysym_to_utf32(keysym);
+        // Filter out non-printable characters
+        if (utf32 >= 0x20 && utf32 != 0x7f) {
+          active_model_->AddCodePoint(utf32);
+          SendStateUpdate(*(active_model_));
+        }
         break;
     }
   }
