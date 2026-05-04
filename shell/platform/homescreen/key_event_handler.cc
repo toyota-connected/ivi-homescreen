@@ -128,9 +128,8 @@ KeyEventHandler::~KeyEventHandler() {
 void KeyEventHandler::CharHook(unsigned int /* code_point */) {}
 
 void KeyEventHandler::FocusLost() {
-
-  // Clear embedder list
-  pressed_logical_keys_.clear();
+  // NOTE: Do NOT clear pressed_logical_keys_ here.
+  // Doing so results in issues when keystrokes are repeated on focus re-entry.
 }
 
 void KeyEventHandler::KeymapChanged(xkb_keymap* keymap) {
@@ -178,6 +177,18 @@ void KeyEventHandler::KeyboardHook(const bool released,
                   ? it->second
                   : key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
     pressed_logical_keys_.erase(physical);
+
+    // If this is a key release for a key we haven't seen pressed,
+    // do not send the event.
+    //
+    // Eg. occurs when Alt+Tab'ing into the app
+    if (it == pressed_logical_keys_.end()) {
+      spdlog::debug(
+          "[key] ignoring key-up for unpressed key "
+          "(keysym=0x{:08x} scan={} mods=0x{:02x} physical=0x{:016x})",
+          keysym, xkb_scancode, modifiers, physical);
+      return;
+    }
   }
 
   if (engine_ != nullptr) {
