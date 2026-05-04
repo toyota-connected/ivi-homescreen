@@ -35,6 +35,11 @@ extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
                         uint32_t xkb_scancode,
                         uint32_t modifiers);
 
+extern void FocusLostCallback(FlutterDesktopViewControllerState* view_state);
+
+extern void KeymapChangedCallback(FlutterDesktopViewControllerState* view_state,
+                                  xkb_keymap* keymap);
+
 Display::Display(const bool enable_cursor,
                  const std::string& ignore_wayland_event,
                  std::string cursor_theme_name,
@@ -581,7 +586,11 @@ void Display::keyboard_handle_leave(void* data,
 
   d->m_repeat_timer->disarm();
   set_repeat_code(d, XKB_KEY_NoSymbol);
+  if (d->m_view_controller_state) {
+    FocusLostCallback(d->m_view_controller_state);
+  }
   SPDLOG_TRACE("- Display::keyboard_handle_leave()");
+  ;
 }
 
 void Display::keyboard_handle_keymap(void* data,
@@ -600,6 +609,9 @@ void Display::keyboard_handle_keymap(void* data,
   close(fd);
   xkb_state_unref(d->m_xkb_state);
   d->m_xkb_state = xkb_state_new(d->m_keymap);
+  if (d->m_view_controller_state && d->m_keymap) {
+    KeymapChangedCallback(d->m_view_controller_state, d->m_keymap);
+  }
 }
 
 void Display::keyboard_handle_key(void* data,

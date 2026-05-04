@@ -40,6 +40,33 @@ static constexpr char kInternalConsistencyError[] =
 
 namespace flutter {
 
+// Converts a UTF-8 byte offset into the corresponding UTF-16 code-unit index.
+// A BMP character (1–3 UTF-8 bytes) occupies 1 UTF-16 unit; a supplementary
+// character (4 UTF-8 bytes) occupies 2 UTF-16 units (surrogate pair).
+// |utf8_pos| must not land in the middle of a multi-byte sequence; it is
+// clamped to the end of the string if it exceeds it.
+static size_t Utf8PosToUtf16Index(const std::string& utf8, size_t utf8_pos) {
+  utf8_pos = std::min(utf8_pos, utf8.size());
+  size_t u16 = 0;
+  size_t i = 0;
+  while (i < utf8_pos) {
+    const auto c = static_cast<unsigned char>(utf8[i]);
+    size_t seq_len;
+    if (c < 0x80) {
+      seq_len = 1;
+    } else if (c < 0xe0) {
+      seq_len = 2;
+    } else if (c < 0xf0) {
+      seq_len = 3;
+    } else {
+      seq_len = 4;  // supplementary plane → surrogate pair → 2 UTF-16 units
+    }
+    u16 += (seq_len == 4) ? 2u : 1u;
+    i += seq_len;
+  }
+  return u16;
+}
+
 // Returns the byte offset that is |col| columns into the line starting at
 // |line_start| in |text|, clamped to the line end (the '\n' or end of string).
 static size_t ClampedColumn(const std::string& text,
@@ -114,7 +141,7 @@ void TextInputPlugin::KeyboardHook(bool released,
     return;
   }
   if (!released) {
-    const bool shift = (modifiers & 0x1) != 0;
+    const bool shift = (modifiers & shift_mask_) != 0;
     switch (keysym) {
       case XKB_KEY_BackSpace:
         if (active_model_->Backspace()) {
@@ -126,12 +153,16 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Left:
       case XKB_KEY_KP_Left:
         if (shift) {
-          auto sel = active_model_->selection();
-          if (sel.extent() > 0) {
-            active_model_->SetSelection(
-                TextRange(sel.base(), sel.extent() - 1));
-            SendStateUpdate(*active_model_);
-          }
+          // Extend/shrink the selection by one code point toward the start.
+          // Use the model's own MoveCursorBack so surrogate pairs are handled
+          // correctly (advances 2 UTF-16 units for supplementary characters).
+          const size_t old_base = active_model_->selection().base();
+          active_model_->SetSelection(
+              TextRange(active_model_->selection().extent()));
+          active_model_->MoveCursorBack();
+          active_model_->SetSelection(
+              TextRange(old_base, active_model_->selection().position()));
+          SendStateUpdate(*active_model_);
         } else if (active_model_->MoveCursorBack()) {
           SendStateUpdate(*active_model_);
         }
@@ -139,26 +170,32 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Right:
       case XKB_KEY_KP_Right:
         if (shift) {
-          auto sel = active_model_->selection();
-          auto range = active_model_->text_range();
-          if (sel.extent() < range.end()) {
-            active_model_->SetSelection(
-                TextRange(sel.base(), sel.extent() + 1));
-            SendStateUpdate(*active_model_);
-          }
+          // Extend/shrink the selection by one code point toward the end.
+          const size_t old_base = active_model_->selection().base();
+          active_model_->SetSelection(
+              TextRange(active_model_->selection().extent()));
+          active_model_->MoveCursorForward();
+          active_model_->SetSelection(
+              TextRange(old_base, active_model_->selection().position()));
+          SendStateUpdate(*active_model_);
         } else if (active_model_->MoveCursorForward()) {
           SendStateUpdate(*active_model_);
         }
         break;
       case XKB_KEY_Up:
       case XKB_KEY_KP_Up: {
+        // GetCursorOffset() returns the UTF-8 byte offset of
+        // selection.extent(). PreviousLinePosition works in UTF-8 byte space.
+        // Convert the result back to a UTF-16 code-unit index for SetSelection.
         const std::string text = active_model_->GetText();
-        const size_t new_pos =
-            PreviousLinePosition(text, active_model_->selection().extent());
-        if (new_pos != active_model_->selection().extent()) {
+        const auto utf8_pos =
+            static_cast<size_t>(active_model_->GetCursorOffset());
+        const size_t new_utf8_pos = PreviousLinePosition(text, utf8_pos);
+        const size_t new_u16_pos = Utf8PosToUtf16Index(text, new_utf8_pos);
+        if (new_u16_pos != active_model_->selection().extent()) {
           active_model_->SetSelection(
-              shift ? TextRange(active_model_->selection().base(), new_pos)
-                    : TextRange(new_pos));
+              shift ? TextRange(active_model_->selection().base(), new_u16_pos)
+                    : TextRange(new_u16_pos));
           SendStateUpdate(*active_model_);
         }
         break;
@@ -166,12 +203,14 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Down:
       case XKB_KEY_KP_Down: {
         const std::string text = active_model_->GetText();
-        const size_t new_pos =
-            NextLinePosition(text, active_model_->selection().extent());
-        if (new_pos != active_model_->selection().extent()) {
+        const auto utf8_pos =
+            static_cast<size_t>(active_model_->GetCursorOffset());
+        const size_t new_utf8_pos = NextLinePosition(text, utf8_pos);
+        const size_t new_u16_pos = Utf8PosToUtf16Index(text, new_utf8_pos);
+        if (new_u16_pos != active_model_->selection().extent()) {
           active_model_->SetSelection(
-              shift ? TextRange(active_model_->selection().base(), new_pos)
-                    : TextRange(new_pos));
+              shift ? TextRange(active_model_->selection().base(), new_u16_pos)
+                    : TextRange(new_u16_pos));
           SendStateUpdate(*active_model_);
         }
         break;
@@ -290,6 +329,14 @@ TextInputPlugin::TextInputPlugin(flutter::BinaryMessenger* messenger)
 }
 
 TextInputPlugin::~TextInputPlugin() = default;
+
+void TextInputPlugin::KeymapChanged(xkb_keymap* keymap) {
+  const xkb_mod_index_t idx =
+      xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_SHIFT);
+  if (idx != XKB_MOD_INVALID) {
+    shift_mask_ = 1u << idx;
+  }
+}
 
 void TextInputPlugin::HandleMethodCall(
     const flutter::MethodCall<rapidjson::Document>& method_call,

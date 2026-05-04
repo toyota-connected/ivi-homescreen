@@ -20,6 +20,7 @@
 #include "flutter_desktop_view_controller_state.h"
 
 #include "backend/backend.h"
+#include "text_input_plugin.h"
 #include "view/flutter_view.h"
 
 #include "libflutter_engine.h"
@@ -501,5 +502,26 @@ void KeyCallback(FlutterDesktopViewControllerState* view_state,
                 released, keysym, xkb_scancode);
   for (const auto& handler : view_state->keyboard_hook_handlers) {
     handler->KeyboardHook(released, keysym, xkb_scancode, modifiers);
+  }
+}
+
+// Notifies handlers that keyboard focus has been lost so they can clear any
+// pressed-key tracking state.
+void FocusLostCallback(FlutterDesktopViewControllerState* view_state) {
+  for (const auto& handler : view_state->keyboard_hook_handlers) {
+    handler->FocusLost();
+  }
+}
+
+// Notifies handlers that the active XKB keymap has changed so they can
+// recompute modifier bitmasks.
+void KeymapChangedCallback(FlutterDesktopViewControllerState* view_state,
+                           xkb_keymap* keymap) {
+  for (const auto& handler : view_state->keyboard_hook_handlers) {
+    handler->KeymapChanged(keymap);
+  }
+  // Also notify the TextInputPlugin (not in keyboard_hook_handlers).
+  if (view_state->text_input_plugin) {
+    view_state->text_input_plugin->KeymapChanged(keymap);
   }
 }
