@@ -130,6 +130,29 @@ static size_t NextLinePosition(const std::string& text, size_t pos) {
   return ClampedColumn(text, next_line_start, col);
 }
 
+std::string TextInputPlugin::GetSelectedText() const {
+  if (active_model_ == nullptr) {
+    return "";
+  }
+  return active_model_->GetSelectedText();
+}
+
+void TextInputPlugin::PasteText(const std::string& text) {
+  if (active_model_ == nullptr || text.empty()) {
+    return;
+  }
+  active_model_->SetSelectedText(text);
+  SendStateUpdate(*active_model_);
+}
+
+void TextInputPlugin::DeleteSelectedText() {
+  if (active_model_ == nullptr || active_model_->selection().collapsed()) {
+    return;
+  }
+  active_model_->Delete();
+  SendStateUpdate(*active_model_);
+}
+
 void TextInputPlugin::CharHook(const unsigned int code_point) {
   // SPDLOG_DEBUG("TextInputPlugin::CharHook: code_point: {}", code_point);
   if (active_model_ == nullptr) {
