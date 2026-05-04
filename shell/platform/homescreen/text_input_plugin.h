@@ -12,6 +12,9 @@
 #include "flutter/shell/platform/common/text_input_model.h"
 #include "shell/platform/homescreen/keyboard_hook_handler.h"
 
+#include <xkbcommon/xkbcommon-names.h>
+#include <xkbcommon/xkbcommon.h>
+
 #include "rapidjson/rapidjson.h"
 
 #include "rapidjson/document.h"
@@ -36,6 +39,11 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // |KeyboardHookHandler|
   void CharHook(unsigned int code_point) override;
 
+  // |KeyboardHookHandler|
+  // Updates the shift modifier bitmask from the active XKB keymap so that
+  // shift detection works even with custom keymaps that reorder modifiers.
+  void KeymapChanged(xkb_keymap* keymap) override;
+
  private:
   // Sends the current state of the given model to the Flutter engine.
   void SendStateUpdate(const TextInputModel& model) const;
@@ -51,6 +59,10 @@ class TextInputPlugin final : public KeyboardHookHandler {
 
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<rapidjson::Document>> channel_;
+
+  // Bitmask for the Shift modifier; computed from the active XKB keymap in
+  // KeymapChanged() so custom keymaps with reordered modifiers are handled.
+  uint32_t shift_mask_ = 0x1u;
 
   // The active client id.
   int client_id_ = 0;

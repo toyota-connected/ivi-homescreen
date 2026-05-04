@@ -38,7 +38,13 @@ struct KeyEventCallbackData {
   xkb_keysym_t keysym;
   uint32_t xkb_scancode;
   uint32_t modifiers;
+  uint32_t ctrl_mask;  // cached from KeyEventHandler at dispatch time
+  uint32_t alt_mask;   // cached from KeyEventHandler at dispatch time
   bool released;
+  // Weak reference to the owning handler's lifetime sentinel.
+  // If the handler has been destroyed, the locked shared_ptr will be null or
+  // the atomic will be false, and the callback must not touch engine/plugin.
+  std::weak_ptr<std::atomic<bool>> handler_alive;
 };
 
 // Converts a UTF-32 codepoint to a UTF-8 string (for
@@ -69,18 +75,23 @@ std::string Utf32ToUtf8(const uint32_t codepoint) {
 // characters are still handled by the text input model.
 void OnKeyEventResponse(bool handled, void* user_data) {
   auto* data = static_cast<KeyEventCallbackData*>(user_data);
-  // SPDLOG_DEBUG(
-  //     "[key] engine response: keysym=0x{:08x} released={} handled={} "
-  //     "mods=0x{:02x} char='{}'",
-  //     data->keysym, data->released, handled, data->modifiers,
-  //     data->character.empty() ? "(none)" : data->character);
+
+  // Guard against use-after-free: if the owning KeyEventHandler has been
+  // destroyed the sentinel will be false (or the weak_ptr expired).
+  const auto alive = data->handler_alive.lock();
+  if (!alive || !alive->load()) {
+    delete data;
+    return;
+  }
+
   if (!handled && data->text_input != nullptr) {
     // Don't delegate to TextInputPlugin when a control or alt modifier is
     // active AND the key produced a printable character — that combination is
     // a keyboard shortcut (e.g. Ctrl+C), not text input.  Navigation keys
     // (arrows, backspace, home/end…) have an empty character string and are
     // always delegated regardless of modifiers.
-    const bool ctrl_or_alt = (data->modifiers & 0x0c) != 0;
+    const bool ctrl_or_alt = (data->modifiers & data->ctrl_mask) != 0 ||
+                             (data->modifiers & data->alt_mask) != 0;
     if (!(ctrl_or_alt && !data->character.empty())) {
       data->text_input->KeyboardHook(data->released, data->keysym,
                                      data->xkb_scancode, data->modifiers);
@@ -105,9 +116,35 @@ KeyEventHandler::KeyEventHandler(flutter::BinaryMessenger* messenger)
               kChannelName,
               &flutter::JsonMessageCodec::GetInstance())) {}
 
-KeyEventHandler::~KeyEventHandler() = default;
+KeyEventHandler::~KeyEventHandler() {
+  // Signal all in-flight callbacks that this handler is gone.
+  // After this any pending OnKeyEventResponse / lambda will bail early
+  // and free cb_data without touching engine_ or text_input_.
+  alive_->store(false);
+  engine_ = nullptr;
+  text_input_ = nullptr;
+}
 
 void KeyEventHandler::CharHook(unsigned int /* code_point */) {}
+
+void KeyEventHandler::FocusLost() {
+
+  // Clear embedder list
+  pressed_logical_keys_.clear();
+}
+
+void KeyEventHandler::KeymapChanged(xkb_keymap* keymap) {
+  const xkb_mod_index_t ctrl_idx =
+      xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_CTRL);
+  if (ctrl_idx != XKB_MOD_INVALID) {
+    ctrl_mask_ = 1u << ctrl_idx;
+  }
+  const xkb_mod_index_t alt_idx =
+      xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_ALT);
+  if (alt_idx != XKB_MOD_INVALID) {
+    alt_mask_ = 1u << alt_idx;
+  }
+}
 
 void KeyEventHandler::KeyboardHook(const bool released,
                                    const xkb_keysym_t keysym,
@@ -143,8 +180,6 @@ void KeyEventHandler::KeyboardHook(const bool released,
     pressed_logical_keys_.erase(physical);
   }
 
-  // 1. Send via embedder API `FlutterEngineSendKeyEvent`/`HardwareKeyboard`
-  //    (primary path)
   if (engine_ != nullptr) {
     // Build character string (only for key-down/repeat of printable chars).
     std::string character_str;
@@ -154,7 +189,8 @@ void KeyEventHandler::KeyboardHook(const bool released,
 
     // Heap-allocate event data — ownership passes to OnKeyEventResponse.
     auto* cb_data = new KeyEventCallbackData{
-        text_input_, character_str, keysym, xkb_scancode, modifiers, released};
+        text_input_, character_str, keysym,   xkb_scancode, modifiers,
+        ctrl_mask_,  alt_mask_,     released, alive_};
 
     // Copy for capture (FlutterKeyEvent holds a char* into character_str, so
     // keep both alive in the lambda until the post fires).
@@ -177,34 +213,48 @@ void KeyEventHandler::KeyboardHook(const bool released,
     //     character_str.empty() ? "(none)" : character_str);
 
     Engine* eng = engine_;
-    asio::post(*eng->GetPlatformTaskRunner()->GetStrandContext(),
-               [eng, flutter_event, cb_data, utf32, keysym, xkb_scancode, modifiers, released, channelPtr = channel_.get()]() mutable {
-                 // Re-point character pointer inside the lambda copy since the
-                 // original stack variable is gone; cb_data owns the string.
-                 flutter_event.character = cb_data->character.empty()
-                                               ? nullptr
-                                               : cb_data->character.c_str();
-                 eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
+    asio::post(
+        *eng->GetPlatformTaskRunner()->GetStrandContext(),
+        [eng, flutter_event, cb_data, utf32, keysym, xkb_scancode, modifiers,
+         released, channelPtr = channel_.get(),
+         weak_alive = std::weak_ptr<std::atomic<bool>>(alive_)]() mutable {
+          // Bail if the owning KeyEventHandler was destroyed while this
+          // post was queued; free cb_data to prevent the leak.
+          const auto alive = weak_alive.lock();
+          if (!alive || !alive->load()) {
+            delete cb_data;
+            return;
+          }
 
-                  // 2. Send via channel `flutter/keyevent`
-                  //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
-                  //    Sent in the callback to ensure correct ordering
-                  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-                  rapidjson::Document event(rapidjson::kObjectType);
-                  auto& allocator = event.GetAllocator();
-                  event.AddMember(kKeyCodeKey, keysym, allocator);
-                  event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
-                  event.AddMember(kToolkitKey, kValueToolkitGtk, allocator);
-                  event.AddMember(kScanCodeKey, xkb_scancode, allocator);
-                  event.AddMember(kModifiersKey, modifiers, allocator);
-                  if (utf32) {
-                    event.AddMember(kUnicodeScalarValues, utf32, allocator);
-                  }
-                  event.AddMember(kTypeKey, rapidjson::StringRef(released ? kKeyUp : kKeyDown),
-                                  allocator);
+          // cb_data is heap-allocated; character pointer is valid.
+          flutter_event.character =
+              cb_data->character.empty() ? nullptr : cb_data->character.c_str();
 
-                  channelPtr->Send(event);
-               });
+          // 1. Send via embedder API
+          // `FlutterEngineSendKeyEvent`/`HardwareKeyboard`
+          //    (primary path)
+          eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
+
+          // 2. Send via channel `flutter/keyevent`
+          //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
+          //    Sent after SendKeyEvent to ensure correct ordering.
+          // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
+          rapidjson::Document event(rapidjson::kObjectType);
+          auto& allocator = event.GetAllocator();
+          event.AddMember(kKeyCodeKey, keysym, allocator);
+          event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
+          event.AddMember(kToolkitKey, kValueToolkitGtk, allocator);
+          event.AddMember(kScanCodeKey, xkb_scancode, allocator);
+          event.AddMember(kModifiersKey, modifiers, allocator);
+          if (utf32) {
+            event.AddMember(kUnicodeScalarValues, utf32, allocator);
+          }
+          event.AddMember(kTypeKey,
+                          rapidjson::StringRef(released ? kKeyUp : kKeyDown),
+                          allocator);
+
+          channelPtr->Send(event);
+        });
   }
 }
 

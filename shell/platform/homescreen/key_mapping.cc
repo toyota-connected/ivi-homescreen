@@ -443,11 +443,16 @@ uint64_t XkbScancodeToPhysicalKey(const uint32_t xkb_scancode) {
   }
   const uint32_t evdev = xkb_scancode - 8;
 
-  const uint8_t evdev8 = evdev & 0xff;  // Clamp to 0..255 for lookup.
-  const uint32_t hidCode = kEvdevToHidMap[evdev8];
-  if (hidCode != 0x00) {
-    return UINT64_C(0x00070000) | hidCode;
+  // Make sure evdev is in bounds for the lookup table...
+  if (evdev <= 0xff) {
+    const auto evdev8 = evdev & 0xff;  // Clamp to 0..255 for lookup.
+    const uint32_t hidCode = kEvdevToHidMap[evdev8];
+    if (hidCode != 0x00) {
+      return UINT64_C(0x00070000) | hidCode;
+    }
   }
+
+  // ..otherwise:
   // Fallback: Linux code plane.
   return UINT64_C(0x00600000) | evdev;
 }
