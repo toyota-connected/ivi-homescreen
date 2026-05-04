@@ -85,22 +85,21 @@ void OnKeyEventResponse(bool handled, void* user_data) {
   }
 
   if (!handled && data->text_input != nullptr) {
-    // Don't delegate to TextInputPlugin when a control or alt modifier is
-    // active AND the key produced a printable character — that combination is
-    // a keyboard shortcut (e.g. Ctrl+C), not text input.  Navigation keys
-    // (arrows, backspace, home/end…) have an empty character string and are
-    // always delegated regardless of modifiers.
+    // Log when a control or alt modifier is active alongside a printable
+    // character — this is usually a keyboard shortcut (e.g. Ctrl+C).
+    // TextInputPlugin::KeyboardHook handles the suppression of such keys
+    // for normal text insertion while still allowing the unicode input state
+    // machine (Ctrl+Shift+U activation and in-mode hex digits) to work.
     const bool ctrl_or_alt = (data->modifiers & data->ctrl_mask) != 0 ||
                              (data->modifiers & data->alt_mask) != 0;
-    if (!(ctrl_or_alt && !data->character.empty())) {
-      data->text_input->KeyboardHook(data->released, data->keysym,
-                                     data->xkb_scancode, data->modifiers);
-    } else {
+    if (ctrl_or_alt && !data->character.empty()) {
       SPDLOG_DEBUG(
-          "[key] suppressing TextInputPlugin fallback "
-          "(ctrl/alt + char key, mods=0x{:02x})",
+          "[key] ctrl/alt + char key forwarded to TextInputPlugin "
+          "(mods=0x{:02x})",
           data->modifiers);
     }
+    data->text_input->KeyboardHook(data->released, data->keysym,
+                                   data->xkb_scancode, data->modifiers);
   }
   delete data;
 }
@@ -130,6 +129,11 @@ void KeyEventHandler::CharHook(unsigned int /* code_point */) {}
 void KeyEventHandler::FocusLost() {
   // NOTE: Do NOT clear pressed_logical_keys_ here.
   // Doing so results in issues when keystrokes are repeated on focus re-entry.
+
+  // Forward to TextInputPlugin
+  if (text_input_ != nullptr) {
+    text_input_->FocusLost();
+  }
 }
 
 void KeyEventHandler::KeymapChanged(xkb_keymap* keymap) {

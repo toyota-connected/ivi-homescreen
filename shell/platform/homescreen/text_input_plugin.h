@@ -44,7 +44,32 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // shift detection works even with custom keymaps that reorder modifiers.
   void KeymapChanged(xkb_keymap* keymap) override;
 
+  // |KeyboardHookHandler|
+  // Cancels any in-progress Unicode input composing state when focus is lost.
+  void FocusLost() override;
+
+  // Returns true while the plugin is waiting for hex digits after a
+  // Ctrl+Shift+U activation (GTK-style Unicode input mode).
+  bool IsUnicodeInputActive() const {
+    return unicode_state_ == UnicodeInputState::kPendingHex;
+  }
+
  private:
+  // State for GTK-style Ctrl+Shift+U Unicode input.
+  enum class UnicodeInputState { kNormal, kPendingHex };
+
+  // Enters Unicode input mode: inserts 'u' into the model with a composing
+  // range so Flutter renders it underlined.
+  void ActivateUnicodeInput();
+
+  // Commits the accumulated hex digits as a single Unicode codepoint, removes
+  // the composing 'u' + hex text, and exits Unicode input mode.
+  void CommitUnicodeInput();
+
+  // Removes the composing 'u' + any accumulated hex digits from the model and
+  // exits Unicode input mode without inserting any character.
+  void CancelUnicodeInput();
+
   // Sends the current state of the given model to the Flutter engine.
   void SendStateUpdate(const TextInputModel& model) const;
 
@@ -64,6 +89,10 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // KeymapChanged() so custom keymaps with reordered modifiers are handled.
   uint32_t shift_mask_ = 0x1u;
 
+  // Bitmask for the Ctrl modifier; computed from the active XKB keymap in
+  // KeymapChanged() so custom keymaps with reordered modifiers are handled.
+  uint32_t ctrl_mask_ = 0x4u;
+
   // The active client id.
   int client_id_ = 0;
 
@@ -77,6 +106,17 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // An action requested by the user on the input client. See available options:
   // https://api.flutter.dev/flutter/services/TextInputAction-class.html
   std::string input_action_;
+
+  // GTK-style Ctrl+Shift+U Unicode input state.
+  UnicodeInputState unicode_state_ = UnicodeInputState::kNormal;
+
+  // Accumulated lowercase hex digits entered after Ctrl+Shift+U.
+  std::string unicode_hex_;
+
+  // UTF-16 code-unit indices of the composing range used to underline the
+  // 'u' + hex digits while in kPendingHex state. -1 when inactive.
+  int compose_base_utf16_ = -1;
+  int compose_extent_utf16_ = -1;
 };
 
 }  // namespace flutter
