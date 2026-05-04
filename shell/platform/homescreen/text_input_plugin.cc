@@ -34,6 +34,12 @@ static constexpr char kTextKey[] = "text";
 
 static constexpr char kChannelName[] = "flutter/textinput";
 
+// Returns true if the UTF-32 codepoint is an ASCII hex digit (0-9, a-f, A-F).
+static bool IsHexDigit(const char32_t c) {
+  return (c >= U'0' && c <= U'9') || (c >= U'a' && c <= U'f') ||
+         (c >= U'A' && c <= U'F');
+}
+
 static constexpr char kBadArgumentError[] = "Bad Arguments";
 static constexpr char kInternalConsistencyError[] =
     "Internal Consistency Error";
@@ -141,6 +147,72 @@ void TextInputPlugin::KeyboardHook(bool released,
     return;
   }
   if (!released) {
+    /* --- GTK-style Ctrl+Shift+U Unicode input ---
+     * Activation: Ctrl+Shift+U (keysym XKB_KEY_U, capital U).
+     *
+     * While active:
+     * - an underlined 'u' is shown in the text field
+     * - hex digits are accumulated and shown after the 'u'
+     * - other keys are ignored
+     * - Enter commits the code point
+     * - Backspace removes the last hex digit
+     * - If no digits, Backspace cancels the mode
+     * - Esc cancels the mode
+     * - Focus loss cancels the mode
+     *
+     * Also see:
+     * - https://www.freedesktop.org/wiki/Software/ibus/UnicodeInput/
+     * - key_event_handler.cc: forwards FocusLost
+     */
+    if (keysym == XKB_KEY_U && (modifiers & ctrl_mask_) != 0 &&
+        unicode_state_ == UnicodeInputState::kNormal) {
+      ActivateUnicodeInput();
+      return;
+    }
+    // While in kPendingHex state intercept all keys for the state machine.
+    if (unicode_state_ == UnicodeInputState::kPendingHex) {
+      switch (keysym) {
+        case XKB_KEY_Return:
+        case XKB_KEY_ISO_Enter:
+        case XKB_KEY_KP_Enter:
+          CommitUnicodeInput();
+          break;
+        case XKB_KEY_Escape:
+          CancelUnicodeInput();
+          break;
+        case XKB_KEY_BackSpace:
+          if (!unicode_hex_.empty()) {
+            // Remove the last hex digit from the model and the accumulator.
+            active_model_->Backspace();
+            unicode_hex_.pop_back();
+            compose_extent_utf16_--;
+            SendStateUpdate(*active_model_);
+          } else {
+            // Nothing accumulated yet; Backspace cancels the mode entirely.
+            CancelUnicodeInput();
+          }
+          break;
+        default: {
+          const char32_t utf32 = xkb_keysym_to_utf32(keysym);
+          if (unicode_hex_.size() < 6 && IsHexDigit(utf32)) {
+            // Normalise to lowercase for display and stoul().
+            const char32_t lower =
+                (utf32 >= U'A' && utf32 <= U'F')
+                    ? static_cast<char32_t>(utf32 - U'A' + U'a')
+                    : utf32;
+            unicode_hex_ += static_cast<char>(lower);
+            active_model_->AddCodePoint(lower);
+            compose_extent_utf16_++;
+            SendStateUpdate(*active_model_);
+          }
+          // Non-hex keystrokes are silently ignored while in unicode mode.
+          break;
+        }
+      }
+      return;
+    }
+    // --- End Unicode input handling ---
+
     const bool shift = (modifiers & shift_mask_) != 0;
     switch (keysym) {
       case XKB_KEY_BackSpace:
@@ -304,10 +376,11 @@ void TextInputPlugin::KeyboardHook(bool released,
         break;
       default:
         // Translate the keysym to a UTF-32 code point
-        // and add it to the model if it's printable
+        // and add it to the model if it's printable.
+        // Suppress insertion when a ctrl modifier is active — that combination
+        // is a keyboard shortcut (e.g. Ctrl+C), not text input.
         const char32_t utf32 = xkb_keysym_to_utf32(keysym);
-        // Filter out non-printable characters
-        if (utf32 >= 0x20 && utf32 != 0x7f) {
+        if (utf32 >= 0x20 && utf32 != 0x7f && (modifiers & ctrl_mask_) == 0) {
           active_model_->AddCodePoint(utf32);
           SendStateUpdate(*(active_model_));
         }
@@ -331,11 +404,87 @@ TextInputPlugin::TextInputPlugin(flutter::BinaryMessenger* messenger)
 TextInputPlugin::~TextInputPlugin() = default;
 
 void TextInputPlugin::KeymapChanged(xkb_keymap* keymap) {
-  const xkb_mod_index_t idx =
+  const xkb_mod_index_t shift_idx =
       xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_SHIFT);
-  if (idx != XKB_MOD_INVALID) {
-    shift_mask_ = 1u << idx;
+  if (shift_idx != XKB_MOD_INVALID) {
+    shift_mask_ = 1u << shift_idx;
   }
+  const xkb_mod_index_t ctrl_idx =
+      xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_CTRL);
+  if (ctrl_idx != XKB_MOD_INVALID) {
+    ctrl_mask_ = 1u << ctrl_idx;
+  }
+}
+
+void TextInputPlugin::FocusLost() {
+  if (active_model_ != nullptr) {
+    CancelUnicodeInput();
+  }
+}
+
+void TextInputPlugin::ActivateUnicodeInput() {
+  if (active_model_ == nullptr) {
+    return;
+  }
+  unicode_state_ = UnicodeInputState::kPendingHex;
+  unicode_hex_.clear();
+  // Record the cursor position (UTF-16 units) before inserting 'u'.
+  const int cursor = static_cast<int>(active_model_->selection().position());
+  active_model_->AddCodePoint(U'u');
+  compose_base_utf16_ = cursor;
+  compose_extent_utf16_ = cursor + 1;
+  SendStateUpdate(*active_model_);
+}
+
+void TextInputPlugin::CommitUnicodeInput() {
+  if (active_model_ == nullptr) {
+    unicode_state_ = UnicodeInputState::kNormal;
+    unicode_hex_.clear();
+    compose_base_utf16_ = compose_extent_utf16_ = -1;
+    return;
+  }
+  // Remove the composing 'u' + accumulated hex digit characters.
+  const size_t remove_count = 1 + unicode_hex_.size();
+  for (size_t i = 0; i < remove_count; ++i) {
+    active_model_->Backspace();
+  }
+  compose_base_utf16_ = compose_extent_utf16_ = -1;
+  unicode_state_ = UnicodeInputState::kNormal;
+
+  if (!unicode_hex_.empty()) {
+    unsigned long codepoint = 0;
+    try {
+      codepoint = std::stoul(unicode_hex_, nullptr, 16);
+    } catch (...) {
+      // Malformed hex — nothing to insert.
+    }
+    // Reject U+0000, surrogates (U+D800–U+DFFF), and values above U+10FFFF.
+    const bool valid = codepoint > 0 && codepoint <= 0x10FFFF &&
+                       !(codepoint >= 0xD800 && codepoint <= 0xDFFF);
+    if (valid) {
+      active_model_->AddCodePoint(static_cast<char32_t>(codepoint));
+    }
+  }
+  unicode_hex_.clear();
+  SendStateUpdate(*active_model_);
+}
+
+void TextInputPlugin::CancelUnicodeInput() {
+  if (unicode_state_ == UnicodeInputState::kNormal) {
+    return;
+  }
+  if (active_model_ != nullptr) {
+    // Remove the composing 'u' + any accumulated hex digit characters.
+    const size_t remove_count = 1 + unicode_hex_.size();
+    for (size_t i = 0; i < remove_count; ++i) {
+      active_model_->Backspace();
+    }
+    compose_base_utf16_ = compose_extent_utf16_ = -1;
+    SendStateUpdate(*active_model_);
+  }
+  unicode_state_ = UnicodeInputState::kNormal;
+  unicode_hex_.clear();
+  compose_base_utf16_ = compose_extent_utf16_ = -1;
 }
 
 void TextInputPlugin::HandleMethodCall(
@@ -346,6 +495,7 @@ void TextInputPlugin::HandleMethodCall(
   if (method == kShowMethod || method == kHideMethod) {
     // These methods are no-ops.
   } else if (method == kClearClientMethod) {
+    CancelUnicodeInput();
     active_model_ = nullptr;
   } else if (method == kSetClientMethod) {
     if (!method_call.arguments() || method_call.arguments()->IsNull()) {
@@ -385,6 +535,10 @@ void TextInputPlugin::HandleMethodCall(
         input_type_ = input_type_json->value.GetString();
       }
     }
+    // Reset any in-progress Unicode input state from the previous client.
+    unicode_state_ = UnicodeInputState::kNormal;
+    unicode_hex_.clear();
+    compose_base_utf16_ = compose_extent_utf16_ = -1;
     active_model_ = std::make_unique<TextInputModel>();
   } else if (method == kSetEditingStateMethod) {
     if (!method_call.arguments() || method_call.arguments()->IsNull()) {
@@ -439,8 +593,9 @@ void TextInputPlugin::SendStateUpdate(const TextInputModel& model) const {
 
   const TextRange selection = model.selection();
   rapidjson::Value editing_state(rapidjson::kObjectType);
-  editing_state.AddMember(kComposingBaseKey, -1, allocator);
-  editing_state.AddMember(kComposingExtentKey, -1, allocator);
+  editing_state.AddMember(kComposingBaseKey, compose_base_utf16_, allocator);
+  editing_state.AddMember(kComposingExtentKey, compose_extent_utf16_,
+                          allocator);
   editing_state.AddMember(kSelectionAffinityKey, kAffinityDownstream,
                           allocator);
   editing_state.AddMember(kSelectionBaseKey, selection.base(), allocator);
