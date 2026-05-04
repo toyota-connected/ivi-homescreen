@@ -93,6 +93,11 @@ class KeyEventHandler final : public KeyboardHookHandler {
   // the same logical key (utf32 is 0 on release, which would produce a
   // different value). Indexed by physical key code.
   mutable std::unordered_map<uint64_t, uint64_t> pressed_logical_keys_;
+
+  // In-process clipboard: persists across text-field switches so that text
+  // copied from one field can be pasted into another.
+  // TODO: integrate with the system clipboard
+  std::string clipboard_;
 };
 
 }  // namespace flutter

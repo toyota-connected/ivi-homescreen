@@ -295,6 +295,18 @@ std::string TextInputModel::GetText() const {
   return fml::Utf16ToUtf8(text_);
 }
 
+std::string TextInputModel::GetSelectedText() const {
+  if (selection_.collapsed()) {
+    return "";
+  }
+  return fml::Utf16ToUtf8(
+      text_.substr(selection_.start(), selection_.length()));
+}
+
+void TextInputModel::SetSelectedText(const std::string& text) {
+  AddText(text);
+}
+
 int TextInputModel::GetCursorOffset() const {
   // Measure the length of the current text up to the selection extent.
   // There is probably a much more efficient way of doing this.

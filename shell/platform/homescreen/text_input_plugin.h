@@ -54,6 +54,22 @@ class TextInputPlugin final : public KeyboardHookHandler {
     return unicode_state_ == UnicodeInputState::kPendingHex;
   }
 
+  // Returns the currently selected text in the active text field as UTF-8.
+  // Returns an empty string when no text field is active or the selection is
+  // collapsed.
+  std::string GetSelectedText() const;
+
+  // Inserts |text| (UTF-8) into the active text field, replacing the current
+  // selection (or inserting at the cursor if no selection exists), and sends
+  // the updated editing state to the Flutter engine.
+  // No-op when no text field is active.
+  void PasteText(const std::string& text);
+
+  // Deletes the current selection in the active text field and sends the
+  // updated editing state to the Flutter engine.
+  // No-op when no text field is active or the selection is collapsed.
+  void DeleteSelectedText();
+
  private:
   // State for GTK-style Ctrl+Shift+U Unicode input.
   enum class UnicodeInputState { kNormal, kPendingHex };

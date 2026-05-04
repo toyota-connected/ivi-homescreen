@@ -231,7 +231,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
     asio::post(
         *eng->GetPlatformTaskRunner()->GetStrandContext(),
         [eng, flutter_event, cb_data, utf32, keysym, xkb_scancode, modifiers,
-         released, channelPtr = channel_.get(),
+         released, channelPtr = channel_.get(), clipboard = &clipboard_,
          weak_alive = std::weak_ptr<std::atomic<bool>>(alive_)]() mutable {
           // Bail if the owning KeyEventHandler was destroyed while this
           // post was queued; free cb_data to prevent the leak.
@@ -239,6 +239,30 @@ void KeyEventHandler::KeyboardHook(const bool released,
           if (!alive || !alive->load()) {
             delete cb_data;
             return;
+          }
+
+          // Handle clipboard shortcuts (Ctrl+C, Ctrl+X, Ctrl+V) on key-down
+          // before dispatching to the Flutter engine.  The clipboard outlives
+          // individual text fields so copy/paste works across them.
+          if (!released && cb_data->text_input != nullptr) {
+            const bool ctrl_active = (modifiers & cb_data->ctrl_mask) != 0;
+            if (ctrl_active) {
+              if (keysym == XKB_KEY_c || keysym == XKB_KEY_C) {
+                // Copy: save selected text to the in-process clipboard.
+                *clipboard = cb_data->text_input->GetSelectedText();
+              } else if (keysym == XKB_KEY_x || keysym == XKB_KEY_X) {
+                // Cut: copy then delete the selection.
+                *clipboard = cb_data->text_input->GetSelectedText();
+                if (!clipboard->empty()) {
+                  cb_data->text_input->DeleteSelectedText();
+                }
+              } else if (keysym == XKB_KEY_v || keysym == XKB_KEY_V) {
+                // Paste: insert clipboard text at the cursor / over selection.
+                if (!clipboard->empty()) {
+                  cb_data->text_input->PasteText(*clipboard);
+                }
+              }
+            }
           }
 
           // cb_data is heap-allocated; character pointer is valid.
