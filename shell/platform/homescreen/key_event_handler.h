@@ -12,12 +12,14 @@
 #include <xkbcommon/xkbcommon-names.h>
 #include <xkbcommon/xkbcommon.h>
 
-#include "rapidjson/rapidjson.h"
-
-#include "flutter/shell/platform/common/client_wrapper/include/flutter/basic_message_channel.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/binary_messenger.h"
-#include "rapidjson/document.h"
 #include "shell/platform/homescreen/keyboard_hook_handler.h"
+
+#ifdef ENABLE_LEGACY_KEYBOARD
+#include "flutter/shell/platform/common/client_wrapper/include/flutter/basic_message_channel.h"
+#include "rapidjson/document.h"
+#include "rapidjson/rapidjson.h"
+#endif
 
 class Engine;
 
@@ -70,9 +72,6 @@ class KeyEventHandler final : public KeyboardHookHandler {
   void KeymapChanged(xkb_keymap* keymap) override;
 
  private:
-  // The Flutter system channel for key event messages (legacy RawKeyboard).
-  std::unique_ptr<flutter::BasicMessageChannel<rapidjson::Document>> channel_;
-
   // Non-owning pointers set after construction; nulled in the destructor so
   // that in-flight async callbacks can detect teardown via alive_.
   Engine* engine_ = nullptr;
@@ -99,10 +98,14 @@ class KeyEventHandler final : public KeyboardHookHandler {
   // TODO: integrate with the system clipboard
   std::string clipboard_;
 
+#ifdef ENABLE_LEGACY_KEYBOARD
+  // The Flutter system channel for key event messages (legacy RawKeyboard).
+  std::unique_ptr<flutter::BasicMessageChannel<rapidjson::Document>> channel_;
   // Reused document for legacy flutter/keyevent channel sends.
   // Avoids a fresh allocator-chunk heap allocation per keystroke.
   // Accessed only from the platform strand.
   rapidjson::Document legacy_event_doc_;
+#endif
 };
 
 }  // namespace flutter
