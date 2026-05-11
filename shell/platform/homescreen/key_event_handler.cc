@@ -52,7 +52,13 @@ struct KeyEventCallbackData {
 
 // Converts a UTF-32 codepoint to a UTF-8 string (for
 // FlutterKeyEvent.character).
+// M2: lone surrogates [0xD800, 0xDFFF] and values above U+10FFFF are
+// explicitly rejected (RFC 3629 §3).  Returns an empty string for those.
 std::string Utf32ToUtf8(const uint32_t codepoint) {
+  // Reject lone surrogates and out-of-range values.
+  if ((codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint > 0x10FFFF) {
+    return {};
+  }
   std::string out;
   if (codepoint <= 0x7f) {
     out += static_cast<char>(codepoint);
@@ -63,7 +69,7 @@ std::string Utf32ToUtf8(const uint32_t codepoint) {
     out += static_cast<char>(0xe0 | (codepoint >> 12));
     out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
     out += static_cast<char>(0x80 | (codepoint & 0x3f));
-  } else if (codepoint <= 0x10ffff) {
+  } else {
     out += static_cast<char>(0xf0 | (codepoint >> 18));
     out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f));
     out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
@@ -135,6 +141,13 @@ KeyEventHandler::~KeyEventHandler() {
   alive_->store(false);
   engine_ = nullptr;
   text_input_ = nullptr;
+  // M1: explicitly zero the clipboard so sensitive text (e.g. passwords)
+  // does not linger in the process heap after the handler is torn down.
+  // std::string's destructor does not zero its buffer.
+  if (!clipboard_.empty()) {
+    std::fill(clipboard_.begin(), clipboard_.end(), '\0');
+    clipboard_.clear();
+  }
   // NOTE: Do not change the teardown order so that the strand is destroyed
   // before this handler.
 }
@@ -308,7 +321,11 @@ void KeyEventHandler::KeyboardHook(const bool released,
           // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           rapidjson::Document event(rapidjson::kObjectType);
           auto& allocator = event.GetAllocator();
-          event.AddMember(kKeyCodeKey, keysym, allocator);
+          // M4: keysym is uint32_t; some Unicode-plane values exceed INT32_MAX
+          // and would be sign-extended to negative by the int overload.  Use
+          // uint64_t so the JSON recipient always sees a non-negative number.
+          event.AddMember(kKeyCodeKey, static_cast<uint64_t>(keysym),
+                          allocator);
           event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
           event.AddMember(kToolkitKey, kValueToolkitGtk, allocator);
           event.AddMember(kScanCodeKey, xkb_scancode, allocator);
