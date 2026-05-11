@@ -172,6 +172,17 @@ if (BUILD_WATCHDOG)
 endif ()
 
 #
+# legacy keyboard support
+#
+option(ENABLE_LEGACY_KEYBOARD "Enable legacy keyboard support" ON)
+if (ENABLE_LEGACY_KEYBOARD)
+    MESSAGE(STATUS "Legacy Keyboard Support .. Enabled")
+    add_compile_definitions(ENABLE_LEGACY_KEYBOARD)
+else ()
+    MESSAGE(STATUS "Legacy Keyboard Support .. Disabled")
+endif ()
+
+#
 # Static linking
 #
 option(ENABLE_STATIC_LINK "Link stdlib with static libs" OFF)

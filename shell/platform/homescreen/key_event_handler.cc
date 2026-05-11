@@ -7,12 +7,15 @@
 #include <string>
 
 #include "asio/post.hpp"
-#include "flutter/shell/platform/common/json_message_codec.h"
 #include "shell/engine.h"
+#ifdef ENABLE_LEGACY_KEYBOARD
+#include "flutter/shell/platform/common/json_message_codec.h"
+#endif
 #include "shell/platform/homescreen/key_mapping.h"
 #include "shell/platform/homescreen/text_input_plugin.h"
 #include "shell/task_runner.h"
 
+#ifdef ENABLE_LEGACY_KEYBOARD
 static constexpr char kChannelName[] = "flutter/keyevent";
 
 static constexpr char kKeyCodeKey[] = "keyCode";
@@ -28,6 +31,7 @@ static constexpr char kValueToolkitGtk[] = "gtk";
 
 static constexpr char kKeyUp[] = "keyup";
 static constexpr char kKeyDown[] = "keydown";
+#endif
 
 namespace {
 
@@ -138,12 +142,16 @@ void OnKeyEventResponse(bool handled, void* user_data) {
 
 namespace flutter {
 
+#ifdef ENABLE_LEGACY_KEYBOARD
 KeyEventHandler::KeyEventHandler(flutter::BinaryMessenger* messenger)
     : channel_(
           std::make_unique<flutter::BasicMessageChannel<rapidjson::Document>>(
               messenger,
               kChannelName,
               &flutter::JsonMessageCodec::GetInstance())) {}
+#else
+KeyEventHandler::KeyEventHandler(flutter::BinaryMessenger* /* messenger */) {}
+#endif
 
 KeyEventHandler::~KeyEventHandler() {
   // Signal all in-flight callbacks that this handler is gone.
@@ -282,9 +290,12 @@ void KeyEventHandler::KeyboardHook(const bool released,
     Engine* eng = engine_;
     asio::post(
         *eng->GetPlatformTaskRunner()->GetStrandContext(),
-        [eng, flutter_event, cb_data, utf32, keysym, xkb_scancode, modifiers,
-         released, channelPtr = channel_.get(), clipboard = &clipboard_,
-         legacyEventDoc = &legacy_event_doc_,
+        [eng, flutter_event, cb_data, keysym, modifiers, released,
+#ifdef ENABLE_LEGACY_KEYBOARD
+         channelPtr = channel_.get(), legacyEventDoc = &legacy_event_doc_,
+         utf32, xkb_scancode,
+#endif
+         clipboard = &clipboard_,
          weak_alive = std::weak_ptr<std::atomic<bool>>(alive_)]() mutable {
           // Bail if the owning KeyEventHandler was destroyed while this
           // post was queued; free cb_data to prevent the leak.
@@ -337,6 +348,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
             OnKeyEventResponse(false, cb_data);
           }
 
+#ifdef ENABLE_LEGACY_KEYBOARD
           // 2. Send via channel `flutter/keyevent`
           //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
           //    Sent after SendKeyEvent to ensure correct ordering.
@@ -359,6 +371,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
               allocator);
 
           channelPtr->Send(*legacyDoc);
+#endif
         });
   }
 }
