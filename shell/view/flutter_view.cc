@@ -116,8 +116,10 @@ FlutterView::FlutterView(Configuration::Config config,
       std::make_unique<flutter::TextInputPlugin>(internal_plugin_messenger);
 
   // Create KeyEventHandler and register it.
-  m_state->keyboard_hook_handlers.push_back(
-      std::make_unique<flutter::KeyEventHandler>(internal_plugin_messenger));
+  auto keh_owned =
+      std::make_unique<flutter::KeyEventHandler>(internal_plugin_messenger);
+  m_key_event_handler = keh_owned.get();
+  m_state->keyboard_hook_handlers.push_back(std::move(keh_owned));
 
   m_wayland_display->SetViewControllerState(
       m_state->engine_state->view_controller);
@@ -176,12 +178,10 @@ void FlutterView::Initialize() {
 
   // Wire engine and text input plugin into the key event handler now that the
   // engine is running and the platform task runner is available.
-  // keyboard_hook_handlers[0] is always a KeyEventHandler (set in constructor).
-  auto* keh = dynamic_cast<flutter::KeyEventHandler*>(
-      m_state->keyboard_hook_handlers[0].get());
-  assert(keh != nullptr);
-  keh->SetEngine(m_flutter_engine.get());
-  keh->SetTextInputPlugin(m_state->text_input_plugin.get());
+  // L3: use the cached raw pointer set in the constructor instead of a
+  // dynamic_cast + assert that silently breaks in release builds on re-order.
+  m_key_event_handler->SetEngine(m_flutter_engine.get());
+  m_key_event_handler->SetTextInputPlugin(m_state->text_input_plugin.get());
 
   // update view
   m_state->view = m_state->view_wrapper->view = this;

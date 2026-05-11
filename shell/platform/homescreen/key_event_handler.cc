@@ -45,6 +45,9 @@ struct KeyEventCallbackData {
   // If the handler has been destroyed, the locked shared_ptr will be null or
   // the atomic will be false, and the callback must not touch engine/plugin.
   std::weak_ptr<std::atomic<bool>> handler_alive;
+  // Platform strand used to post the TextInputPlugin fallback call so
+  // that all TextInputPlugin state mutations are serialised on one thread.
+  asio::io_context::strand* strand;
 };
 
 // Converts a UTF-32 codepoint to a UTF-8 string (for
@@ -98,8 +101,18 @@ void OnKeyEventResponse(bool handled, void* user_data) {
           "(mods=0x{:02x})",
           data->modifiers);
     }
-    data->text_input->KeyboardHook(data->released, data->keysym,
-                                   data->xkb_scancode, data->modifiers);
+    // Post the fallback onto the platform strand so that TextInputPlugin
+    // state is only ever mutated from the strand, preventing concurrent access
+    // with the clipboard path and FocusLost/KeymapChanged callbacks.
+    auto* text_input = data->text_input;
+    const auto released = data->released;
+    const auto keysym = data->keysym;
+    const auto xkb_scancode = data->xkb_scancode;
+    const auto modifiers = data->modifiers;
+    asio::post(*data->strand, [text_input, released, keysym, xkb_scancode,
+                               modifiers]() {
+      text_input->KeyboardHook(released, keysym, xkb_scancode, modifiers);
+    });
   }
   delete data;
 }
@@ -122,6 +135,8 @@ KeyEventHandler::~KeyEventHandler() {
   alive_->store(false);
   engine_ = nullptr;
   text_input_ = nullptr;
+  // NOTE: Do not change the teardown order so that the strand is destroyed
+  // before this handler.
 }
 
 void KeyEventHandler::CharHook(unsigned int /* code_point */) {}
@@ -204,8 +219,11 @@ void KeyEventHandler::KeyboardHook(const bool released,
 
     // Heap-allocate event data — ownership passes to OnKeyEventResponse.
     auto* cb_data = new KeyEventCallbackData{
-        text_input_, character_str, keysym,   xkb_scancode, modifiers,
-        ctrl_mask_,  alt_mask_,     released, alive_};
+        text_input_, character_str,
+        keysym,      xkb_scancode,
+        modifiers,   ctrl_mask_,
+        alt_mask_,   released,
+        alive_,      engine_->GetPlatformTaskRunner()->GetStrandContext()};
 
     // Copy for capture (FlutterKeyEvent holds a char* into character_str, so
     // keep both alive in the lambda until the post fires).
@@ -244,9 +262,13 @@ void KeyEventHandler::KeyboardHook(const bool released,
           // Handle clipboard shortcuts (Ctrl+C, Ctrl+X, Ctrl+V) on key-down
           // before dispatching to the Flutter engine.  The clipboard outlives
           // individual text fields so copy/paste works across them.
-          if (!released && cb_data->text_input != nullptr) {
+          if (!released && cb_data->text_input != nullptr &&
+              !cb_data->text_input->IsUnicodeInputActive()) {
             const bool ctrl_active = (modifiers & cb_data->ctrl_mask) != 0;
             if (ctrl_active) {
+              // Skip clipboard shortcuts while Unicode input mode is active —
+              // pasting mid-composition corrupts the composing region's
+              // backspace count.
               if (keysym == XKB_KEY_c || keysym == XKB_KEY_C) {
                 // Copy: save selected text to the in-process clipboard.
                 *clipboard = cb_data->text_input->GetSelectedText();
@@ -272,7 +294,13 @@ void KeyEventHandler::KeyboardHook(const bool released,
           // 1. Send via embedder API
           // `FlutterEngineSendKeyEvent`/`HardwareKeyboard`
           //    (primary path)
-          eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
+          const auto rc =
+              eng->SendKeyEvent(flutter_event, OnKeyEventResponse, cb_data);
+
+          // Drive the fallback path on failure
+          if (rc != kSuccess) {
+            OnKeyEventResponse(false, cb_data);
+          }
 
           // 2. Send via channel `flutter/keyevent`
           //    (legacy RawKeyboard path, deprecated from Flutter 3.19)

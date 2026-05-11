@@ -43,6 +43,9 @@ class Backend;
 class PlatformHandler;
 class PlatformChannel;
 class WaylandWindow;
+namespace flutter {
+class KeyEventHandler;
+}
 #if BUILD_BACKEND_HEADLESS_EGL
 class HeadlessBackend;
 #elif BUILD_BACKEND_WAYLAND_DRM
@@ -239,6 +242,13 @@ class FlutterView {
   size_t m_index;
 
   std::unique_ptr<FlutterDesktopViewControllerState> m_state;
+
+  // Non-owning pointer to the KeyEventHandler in
+  // m_state->keyboard_hook_handlers[0].
+  // Stored at construction so that Initialize() can call
+  // SetEngine/SetTextInputPlugin without a dynamic_cast + assert
+  // (important for release builds)
+  flutter::KeyEventHandler* m_key_event_handler{};
 
   uint64_t m_pointer_events{};
 

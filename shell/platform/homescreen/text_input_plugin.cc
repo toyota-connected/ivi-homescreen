@@ -479,7 +479,9 @@ void TextInputPlugin::CommitUnicodeInput() {
     try {
       codepoint = std::stoul(unicode_hex_, nullptr, 16);
     } catch (...) {
-      // Malformed hex — nothing to insert.
+      // Make malformed hex observable so it can be debugged.
+      spdlog::warn("[text] CommitUnicodeInput: malformed hex '{}'; dropping",
+                   unicode_hex_);
     }
     // Reject U+0000, surrogates (U+D800–U+DFFF), and values above U+10FFFF.
     const bool valid = codepoint > 0 && codepoint <= 0x10FFFF &&
@@ -600,6 +602,13 @@ void TextInputPlugin::HandleMethodCall(
     active_model_->SetText(text->value.GetString());
     active_model_->SetSelection(
         TextRange(static_cast<size_t>(base), static_cast<size_t>(extent)));
+    // Reset the state machine here if the framework calls
+    // setEditingState while Unicode input is in progress.  This can happen if
+    // the framework tries to Prevents Commit/CancelUnicodeInput corruption of
+    // user-typed text.
+    unicode_state_ = UnicodeInputState::kNormal;
+    unicode_hex_.clear();
+    compose_base_utf16_ = compose_extent_utf16_ = -1;
   } else {
     result->NotImplemented();
     return;
