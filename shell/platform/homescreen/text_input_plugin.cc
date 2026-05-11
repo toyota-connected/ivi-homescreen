@@ -537,6 +537,13 @@ void TextInputPlugin::HandleMethodCall(
       result->Error(kBadArgumentError, "Could not set client, ID is null.");
       return;
     }
+    // H1: reject non-integer types before calling GetInt() — RapidJSON
+    // asserts (or returns indeterminate in NDEBUG) for wrong types.
+    if (!client_id_json.IsInt()) {
+      result->Error(kBadArgumentError,
+                    "Could not set client, ID is not an integer.");
+      return;
+    }
     if (client_config.IsNull()) {
       result->Error(kBadArgumentError,
                     "Could not set client, missing arguments.");
@@ -579,7 +586,8 @@ void TextInputPlugin::HandleMethodCall(
       return;
     }
     const auto text = args.FindMember(kTextKey);
-    if (text == args.MemberEnd() || text->value.IsNull()) {
+    if (text == args.MemberEnd() || text->value.IsNull() ||
+        !text->value.IsString()) {
       result->Error(kBadArgumentError,
                     "Set editing state has been invoked, but without text.");
       return;
@@ -588,7 +596,8 @@ void TextInputPlugin::HandleMethodCall(
     const auto selection_extent = args.FindMember(kSelectionExtentKey);
     if (selection_base == args.MemberEnd() || selection_base->value.IsNull() ||
         selection_extent == args.MemberEnd() ||
-        selection_extent->value.IsNull()) {
+        selection_extent->value.IsNull() || !selection_base->value.IsInt() ||
+        !selection_extent->value.IsInt()) {
       result->Error(kInternalConsistencyError,
                     "Selection base/extent values invalid.");
       return;
@@ -599,9 +608,21 @@ void TextInputPlugin::HandleMethodCall(
     if (base == -1 && extent == -1) {
       base = extent = 0;
     }
-    active_model_->SetText(text->value.GetString());
-    active_model_->SetSelection(
-        TextRange(static_cast<size_t>(base), static_cast<size_t>(extent)));
+    // H2: reject negative values other than the -1/-1 sentinel (already
+    // resolved above) and clamp to [0, utf16_text_length] to prevent
+    // out-of-range indices from reaching arrow-key navigation math.
+    if (base < 0 || extent < 0) {
+      result->Error(kBadArgumentError, "Selection base/extent must be >= 0.");
+      return;
+    }
+    const std::string text_str(text->value.GetString(),
+                               text->value.GetStringLength());
+    const size_t utf16_len = Utf8PosToUtf16Index(text_str, text_str.size());
+    const size_t clamped_base = std::min(static_cast<size_t>(base), utf16_len);
+    const size_t clamped_extent =
+        std::min(static_cast<size_t>(extent), utf16_len);
+    active_model_->SetText(text_str);
+    active_model_->SetSelection(TextRange(clamped_base, clamped_extent));
     // Reset the state machine here if the framework calls
     // setEditingState while Unicode input is in progress.  This can happen if
     // the framework tries to Prevents Commit/CancelUnicodeInput corruption of
