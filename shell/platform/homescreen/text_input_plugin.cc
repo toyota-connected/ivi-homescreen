@@ -187,7 +187,11 @@ void TextInputPlugin::KeyboardHook(bool released,
      * - https://www.freedesktop.org/wiki/Software/ibus/UnicodeInput/
      * - key_event_handler.cc: forwards FocusLost
      */
-    if (keysym == XKB_KEY_U && (modifiers & ctrl_mask_) != 0 &&
+    // Ctrl+Shift+U activates Unicode input mode (IBus convention).
+    // Accept both XKB_KEY_U (normal) and XKB_KEY_u (Caps Lock + Shift, where
+    // Caps Lock and Shift cancel out and produce the lowercase keysym).
+    if ((keysym == XKB_KEY_U || keysym == XKB_KEY_u) &&
+        (modifiers & ctrl_mask_) != 0 && (modifiers & shift_mask_) != 0 &&
         unicode_state_ == UnicodeInputState::kNormal) {
       ActivateUnicodeInput();
       return;
@@ -537,8 +541,7 @@ void TextInputPlugin::HandleMethodCall(
       result->Error(kBadArgumentError, "Could not set client, ID is null.");
       return;
     }
-    // H1: reject non-integer types before calling GetInt() — RapidJSON
-    // asserts (or returns indeterminate in NDEBUG) for wrong types.
+    // Reject non-integer types before calling GetInt()
     if (!client_id_json.IsInt()) {
       result->Error(kBadArgumentError,
                     "Could not set client, ID is not an integer.");
@@ -608,13 +611,15 @@ void TextInputPlugin::HandleMethodCall(
     if (base == -1 && extent == -1) {
       base = extent = 0;
     }
-    // H2: reject negative values other than the -1/-1 sentinel (already
+
+    // Reject negative values other than the -1/-1 sentinel (already
     // resolved above) and clamp to [0, utf16_text_length] to prevent
     // out-of-range indices from reaching arrow-key navigation math.
     if (base < 0 || extent < 0) {
       result->Error(kBadArgumentError, "Selection base/extent must be >= 0.");
       return;
     }
+
     const std::string text_str(text->value.GetString(),
                                text->value.GetStringLength());
     const size_t utf16_len = Utf8PosToUtf16Index(text_str, text_str.size());

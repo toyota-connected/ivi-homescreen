@@ -178,7 +178,7 @@ void FlutterView::Initialize() {
 
   // Wire engine and text input plugin into the key event handler now that the
   // engine is running and the platform task runner is available.
-  // L3: use the cached raw pointer set in the constructor instead of a
+  // Use the cached raw pointer set in the constructor instead of a
   // dynamic_cast + assert that silently breaks in release builds on re-order.
   m_key_event_handler->SetEngine(m_flutter_engine.get());
   m_key_event_handler->SetTextInputPlugin(m_state->text_input_plugin.get());
