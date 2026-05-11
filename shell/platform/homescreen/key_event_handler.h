@@ -98,6 +98,11 @@ class KeyEventHandler final : public KeyboardHookHandler {
   // copied from one field can be pasted into another.
   // TODO: integrate with the system clipboard
   std::string clipboard_;
+
+  // Reused document for legacy flutter/keyevent channel sends.
+  // Avoids a fresh allocator-chunk heap allocation per keystroke.
+  // Accessed only from the platform strand.
+  rapidjson::Document legacy_event_doc_;
 };
 
 }  // namespace flutter

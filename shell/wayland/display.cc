@@ -657,8 +657,7 @@ void Display::keyboard_handle_key(void* data,
   // XKB_KEY_NoSymbol
   //
   xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, xkb_scancode);
-  const uint32_t modifiers =
-      xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
+  const uint32_t modifiers = d->m_mods_effective;
 
   if (keysym == XKB_KEY_NoSymbol) {
     const xkb_keysym_t* key_symbols;
@@ -705,9 +704,13 @@ void Display::keyboard_handle_modifiers(void* data,
                                         uint32_t mods_latched,
                                         uint32_t mods_locked,
                                         uint32_t group) {
-  const auto* d = static_cast<Display*>(data);
+  auto* d = static_cast<Display*>(data);
   xkb_state_update_mask(d->m_xkb_state, mods_depressed, mods_latched,
                         mods_locked, 0, 0, group);
+  // Cache the effective modifier mask so key and repeat callbacks can
+  // read it without calling xkb_state_serialize_mods themselves.
+  d->m_mods_effective =
+      xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
 }
 
 void Display::keyboard_handle_repeat_info(void* data,
@@ -731,12 +734,9 @@ const wl_keyboard_listener Display::keyboard_listener = {
 void Display::keyboard_repeat_func(void* data) {
   if (auto d = static_cast<Display*>(data);
       XKB_KEY_NoSymbol != d->m_repeat_code) {
-    const uint32_t modifiers =
-        xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
-
     if (d->m_view_controller_state) {
       KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
-                  d->m_repeat_code, modifiers);
+                  d->m_repeat_code, d->m_mods_effective);
     }
   }
 }

@@ -34,7 +34,10 @@ namespace {
 // Per-event callback context heap-allocated for the embedder API call.
 struct KeyEventCallbackData {
   flutter::TextInputPlugin* text_input;
-  std::string character;  // UTF-8; empty for non-printable / key-up events
+  // Up to 4 UTF-8 bytes plus a NUL terminator for a single Unicode codepoint.
+  // Character is stored as a fixed-size UTF-8 array (max 4 bytes + NUL)
+  // to avoid an std::string heap allocation per keystroke.
+  char character[5];  // empty when character[0] == '\0'
   xkb_keysym_t keysym;
   uint32_t xkb_scancode;
   uint32_t modifiers;
@@ -50,32 +53,40 @@ struct KeyEventCallbackData {
   asio::io_context::strand* strand;
 };
 
-// Converts a UTF-32 codepoint to a UTF-8 string (for
-// FlutterKeyEvent.character).
-// M2: lone surrogates [0xD800, 0xDFFF] and values above U+10FFFF are
-// explicitly rejected (RFC 3629 §3).  Returns an empty string for those.
-std::string Utf32ToUtf8(const uint32_t codepoint) {
-  // Reject lone surrogates and out-of-range values.
+// Converts a UTF-32 codepoint to a UTF-8 sequence and writes it into |out|
+// (which must be at least 5 bytes).  |out| is NUL-terminated.  Returns the
+// byte length of the sequence, or 0 when the codepoint is invalid.
+// Rejects lone surrogates [0xD800, 0xDFFF] and values above U+10FFFF
+// (RFC 3629 §3) — symmetric to CommitUnicodeInput validation.
+int Utf32ToUtf8(const uint32_t codepoint, char out[5]) {
+  out[0] = '\0';
   if ((codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint > 0x10FFFF) {
-    return {};
+    return 0;
   }
-  std::string out;
   if (codepoint <= 0x7f) {
-    out += static_cast<char>(codepoint);
-  } else if (codepoint <= 0x7ff) {
-    out += static_cast<char>(0xc0 | (codepoint >> 6));
-    out += static_cast<char>(0x80 | (codepoint & 0x3f));
-  } else if (codepoint <= 0xffff) {
-    out += static_cast<char>(0xe0 | (codepoint >> 12));
-    out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
-    out += static_cast<char>(0x80 | (codepoint & 0x3f));
-  } else {
-    out += static_cast<char>(0xf0 | (codepoint >> 18));
-    out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f));
-    out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
-    out += static_cast<char>(0x80 | (codepoint & 0x3f));
+    out[0] = static_cast<char>(codepoint);
+    out[1] = '\0';
+    return 1;
   }
-  return out;
+  if (codepoint <= 0x7ff) {
+    out[0] = static_cast<char>(0xc0 | (codepoint >> 6));
+    out[1] = static_cast<char>(0x80 | (codepoint & 0x3f));
+    out[2] = '\0';
+    return 2;
+  }
+  if (codepoint <= 0xffff) {
+    out[0] = static_cast<char>(0xe0 | (codepoint >> 12));
+    out[1] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
+    out[2] = static_cast<char>(0x80 | (codepoint & 0x3f));
+    out[3] = '\0';
+    return 3;
+  }
+  out[0] = static_cast<char>(0xf0 | (codepoint >> 18));
+  out[1] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f));
+  out[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
+  out[3] = static_cast<char>(0x80 | (codepoint & 0x3f));
+  out[4] = '\0';
+  return 4;
 }
 
 // Callback invoked by the Flutter engine after processing a key event via the
@@ -101,7 +112,7 @@ void OnKeyEventResponse(bool handled, void* user_data) {
     // machine (Ctrl+Shift+U activation and in-mode hex digits) to work.
     const bool ctrl_or_alt = (data->modifiers & data->ctrl_mask) != 0 ||
                              (data->modifiers & data->alt_mask) != 0;
-    if (ctrl_or_alt && !data->character.empty()) {
+    if (ctrl_or_alt && data->character[0] != '\0') {
       SPDLOG_DEBUG(
           "[key] ctrl/alt + char key forwarded to TextInputPlugin "
           "(mods=0x{:02x})",
@@ -141,9 +152,10 @@ KeyEventHandler::~KeyEventHandler() {
   alive_->store(false);
   engine_ = nullptr;
   text_input_ = nullptr;
-  // M1: explicitly zero the clipboard so sensitive text (e.g. passwords)
+
+  // NOTE: std::string's destructor does not zero its buffer.
+  // Explicitly zero the clipboard so sensitive text (e.g. passwords)
   // does not linger in the process heap after the handler is torn down.
-  // std::string's destructor does not zero its buffer.
   if (!clipboard_.empty()) {
     std::fill(clipboard_.begin(), clipboard_.end(), '\0');
     clipboard_.clear();
@@ -224,22 +236,31 @@ void KeyEventHandler::KeyboardHook(const bool released,
   }
 
   if (engine_ != nullptr) {
-    // Build character string (only for key-down/repeat of printable chars).
-    std::string character_str;
+    // Build character bytes (only for key-down/repeat of printable chars).
+    // Written directly into the cb_data fixed array — no heap alloc.
+    char character_buf[5] = {};
     if (!released && utf32 >= 0x20 && utf32 != 0x7f) {
-      character_str = Utf32ToUtf8(utf32);
+      Utf32ToUtf8(utf32, character_buf);
     }
 
     // Heap-allocate event data — ownership passes to OnKeyEventResponse.
-    auto* cb_data = new KeyEventCallbackData{
-        text_input_, character_str,
-        keysym,      xkb_scancode,
-        modifiers,   ctrl_mask_,
-        alt_mask_,   released,
-        alive_,      engine_->GetPlatformTaskRunner()->GetStrandContext()};
+    auto* cb_data = new KeyEventCallbackData{};
+    cb_data->text_input = text_input_;
+    cb_data->character[0] = '\0';
+    std::copy(std::begin(character_buf), std::end(character_buf),
+              cb_data->character);
+    cb_data->keysym = keysym;
+    cb_data->xkb_scancode = xkb_scancode;
+    cb_data->modifiers = modifiers;
+    cb_data->ctrl_mask = ctrl_mask_;
+    cb_data->alt_mask = alt_mask_;
+    cb_data->released = released;
+    cb_data->handler_alive = alive_;
+    cb_data->strand = engine_->GetPlatformTaskRunner()->GetStrandContext();
 
-    // Copy for capture (FlutterKeyEvent holds a char* into character_str, so
-    // keep both alive in the lambda until the post fires).
+    // FlutterKeyEvent holds a char* into cb_data->character (fixed array in
+    // the heap-allocated struct), which stays valid until OnKeyEventResponse
+    // frees cb_data.
     FlutterKeyEvent flutter_event{};
     flutter_event.struct_size = sizeof(FlutterKeyEvent);
     flutter_event.timestamp =
@@ -248,7 +269,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
     flutter_event.physical = physical;
     flutter_event.logical = logical;
     flutter_event.character =
-        cb_data->character.empty() ? nullptr : cb_data->character.c_str();
+        cb_data->character[0] == '\0' ? nullptr : cb_data->character;
     flutter_event.synthesized = false;
     flutter_event.device_type = kFlutterKeyEventDeviceTypeKeyboard;
 
@@ -263,6 +284,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
         *eng->GetPlatformTaskRunner()->GetStrandContext(),
         [eng, flutter_event, cb_data, utf32, keysym, xkb_scancode, modifiers,
          released, channelPtr = channel_.get(), clipboard = &clipboard_,
+         legacyEventDoc = &legacy_event_doc_,
          weak_alive = std::weak_ptr<std::atomic<bool>>(alive_)]() mutable {
           // Bail if the owning KeyEventHandler was destroyed while this
           // post was queued; free cb_data to prevent the leak.
@@ -300,9 +322,9 @@ void KeyEventHandler::KeyboardHook(const bool released,
             }
           }
 
-          // cb_data is heap-allocated; character pointer is valid.
+          // cb_data is heap-allocated; character array is valid.
           flutter_event.character =
-              cb_data->character.empty() ? nullptr : cb_data->character.c_str();
+              cb_data->character[0] == '\0' ? nullptr : cb_data->character;
 
           // 1. Send via embedder API
           // `FlutterEngineSendKeyEvent`/`HardwareKeyboard`
@@ -319,25 +341,24 @@ void KeyEventHandler::KeyboardHook(const bool released,
           //    (legacy RawKeyboard path, deprecated from Flutter 3.19)
           //    Sent after SendKeyEvent to ensure correct ordering.
           // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-          rapidjson::Document event(rapidjson::kObjectType);
-          auto& allocator = event.GetAllocator();
-          // M4: keysym is uint32_t; some Unicode-plane values exceed INT32_MAX
-          // and would be sign-extended to negative by the int overload.  Use
-          // uint64_t so the JSON recipient always sees a non-negative number.
-          event.AddMember(kKeyCodeKey, static_cast<uint64_t>(keysym),
-                          allocator);
-          event.AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
-          event.AddMember(kToolkitKey, kValueToolkitGtk, allocator);
-          event.AddMember(kScanCodeKey, xkb_scancode, allocator);
-          event.AddMember(kModifiersKey, modifiers, allocator);
+          auto* legacyDoc = legacyEventDoc;
+          legacyDoc->SetObject();
+          auto& allocator = legacyDoc->GetAllocator();
+          allocator.Clear();
+          legacyDoc->AddMember(kKeyCodeKey, static_cast<uint64_t>(keysym),
+                               allocator);
+          legacyDoc->AddMember(kKeyMapKey, kLinuxKeyMap, allocator);
+          legacyDoc->AddMember(kToolkitKey, kValueToolkitGtk, allocator);
+          legacyDoc->AddMember(kScanCodeKey, xkb_scancode, allocator);
+          legacyDoc->AddMember(kModifiersKey, modifiers, allocator);
           if (utf32) {
-            event.AddMember(kUnicodeScalarValues, utf32, allocator);
+            legacyDoc->AddMember(kUnicodeScalarValues, utf32, allocator);
           }
-          event.AddMember(kTypeKey,
-                          rapidjson::StringRef(released ? kKeyUp : kKeyDown),
-                          allocator);
+          legacyDoc->AddMember(
+              kTypeKey, rapidjson::StringRef(released ? kKeyUp : kKeyDown),
+              allocator);
 
-          channelPtr->Send(event);
+          channelPtr->Send(*legacyDoc);
         });
   }
 }
