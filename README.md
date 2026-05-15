@@ -580,8 +580,10 @@ CMake Variables
 Optional Environment Variables
 
     SENTRY_DSN -- Overrides CMake CRASH_HANDLER_DSN value
+    SENTRY_HOMESCREEN_ENV -- Homescreen Sentry environment (default: CMAKE_BUILD_TYPE)
+    SENTRY_HOMESCREEN_RELEASE -- Homescreen Sentry release identifier
+    SENTRY_HOMESCREEN_TAGS -- Homescreen tags in "key:value,key2:value2" format
     SENTRY_ATTACHMENTS -- Additional file attachments to add to Sentry crash reports (Appended to those defined in CRASH_HANDLER_ATTACHMENTS), multiple files can be defined, separated by commas (,)
-    SENTRY_TAGS -- Additional tags to accompany Sentry crash reports (Appended to those defined in CRASH_HANDLER_TAGS), multiple tags can be defined, separated by commas (,)
 
 To resolve crash dump stack trace, debug binaries and symbols need to be uploaded to Sentry via sentry-cli tool: https://docs.sentry.io/cli/installation/
 

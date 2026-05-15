@@ -5,6 +5,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <sstream>
 
 #include "sentry.h"
 
@@ -64,6 +65,24 @@ void CrashHandler::set_sentry_tags() {
   }
 }
 
+const char* CrashHandler::get_sentry_env() {
+  const auto env = getenv("SENTRY_HOMESCREEN_ENV");
+  if (env && *env)
+    return env;
+#if defined(CMAKE_BUILD_TYPE)
+  return CMAKE_BUILD_TYPE;
+#else
+  return "development";
+#endif
+}
+
+const char* CrashHandler::get_sentry_release() {
+  const auto release = getenv("SENTRY_HOMESCREEN_RELEASE");
+  if (release && *release)
+    return release;
+  return kCrashHandlerRelease;
+}
+
 CrashHandler::CrashHandler() {
   sentry_options_t* options = sentry_options_new();
   sentry_options_set_dsn(options, get_dsn());
@@ -73,11 +92,25 @@ CrashHandler::CrashHandler() {
   sentry_options_set_handler_path(options, kCrashpadBinaryPath);
   sentry_options_set_database_path(options, db_path.c_str());
 
-  const auto release_env = getenv("SENTRY_RELEASE");
-  if (release_env && *release_env) {
-    sentry_options_set_release(options, release_env);
-  } else {
-    sentry_options_set_release(options, kCrashHandlerRelease);
+  // Use SENTRY_HOMESCREEN_RELEASE only
+  sentry_options_set_release(options, get_sentry_release());
+
+  // Use SENTRY_HOMESCREEN_ENV only
+  sentry_options_set_environment(options, get_sentry_env());
+
+  // Use SENTRY_HOMESCREEN_TAGS only
+  const auto homescreen_tags_env = getenv("SENTRY_HOMESCREEN_TAGS");
+  if (homescreen_tags_env && *homescreen_tags_env) {
+    std::stringstream ss(homescreen_tags_env);
+    std::string tag;
+    while (getline(ss, tag, ',')) {
+      size_t del = tag.find("=", 0);
+      if (del != std::string::npos) {
+        std::string tag_name = tag.substr(0, del);
+        std::string tag_val = tag.substr(del + 1);
+        sentry_set_tag(tag_name.c_str(), tag_val.c_str());
+      }
+    }
   }
 
   set_sentry_attachments(options);
@@ -86,7 +119,6 @@ CrashHandler::CrashHandler() {
   sentry_options_set_debug(options, 0);
 
   sentry_init(options);
-  set_sentry_tags();
 }
 
 CrashHandler::~CrashHandler() {
