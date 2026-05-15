@@ -224,13 +224,9 @@ if (BUILD_CRASH_HANDLER)
             set(CRASHPAD_BINARY_DIR ${CMAKE_INSTALL_PREFIX}/bin)
         else ()
             message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
-        endif ()
-    endif ()
-
-    if (NOT CRASH_HANDLER_DSN)
-        message(STATUS "Sentry DSN not set, use environment variable SENTRY_DSN to direct coredumps")
-    endif ()
-
+        endif()
+    endif()
+    
     find_package(sentry REQUIRED)
     find_package(PkgConfig)
     pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)
