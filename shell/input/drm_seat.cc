@@ -48,6 +48,22 @@ namespace homescreen {
 namespace {
 constexpr int kPollTimeoutMs = 100;
 
+// Strip control bytes from user-supplied strings before logging. The
+// RMLVO fields fed to ReloadKeymap come from a future settings channel
+// (Flutter platform-message → here), so the values must be treated as
+// untrusted: bytes < 0x20 or 0x7f would otherwise flow into stdout
+// sinks as terminal control sequences. Mirrors the helper in
+// driver_probe.cc.
+std::string Sanitize(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (const char c : s) {
+    const auto u = static_cast<unsigned char>(c);
+    out.push_back((u < 0x20 || u == 0x7f) ? '?' : c);
+  }
+  return out;
+}
+
 size_t FlutterTimestampMicros() {
   return static_cast<size_t>(LibFlutterEngine->GetCurrentTime() / 1000);
 }
@@ -270,6 +286,7 @@ void DrmSeat::DispatchLoop() {
   constexpr short kErr = POLLERR | POLLHUP | POLLNVAL;
 
   while (!stop_.load(std::memory_order_acquire)) {
+    ApplyPendingKeymap();
     pollfd pfds[2];
     pfds[0] = {seat_fd, POLLIN, 0};
     nfds_t nfds = 1;
@@ -342,6 +359,46 @@ void DrmSeat::HandleEvent(const drm::input::InputEvent& ev) {
         // SwitchEvent (lid / tablet-mode) is intentionally dropped.
       },
       ev);
+}
+
+void DrmSeat::ReloadKeymap(KeymapConfig cfg) {
+  std::lock_guard lk(pending_mu_);
+  pending_keymap_ = std::move(cfg);
+}
+
+void DrmSeat::ApplyPendingKeymap() {
+  std::optional<KeymapConfig> cfg;
+  {
+    std::lock_guard lk(pending_mu_);
+    cfg.swap(pending_keymap_);
+  }
+  if (!cfg || !keyboard_) {
+    return;
+  }
+  drm::input::KeymapOptions opts;
+  opts.rules = cfg->rules;
+  opts.model = cfg->model;
+  opts.layout = cfg->layout;
+  opts.variant = cfg->variant;
+  opts.options = cfg->options;
+  if (auto r = keyboard_->reload(opts); !r) {
+    spdlog::warn(
+        "[DrmSeat] keymap reload failed (rules='{}' model='{}' layout='{}' "
+        "variant='{}' options='{}'): {} — existing keymap kept",
+        Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
+        Sanitize(cfg->variant), Sanitize(cfg->options), r.error().message());
+    return;
+  }
+  spdlog::info(
+      "[DrmSeat] keymap reloaded (rules='{}' model='{}' layout='{}' "
+      "variant='{}' options='{}')",
+      Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
+      Sanitize(cfg->variant), Sanitize(cfg->options));
+  if (seat_) {
+    // Push the latched Caps/Num/Scroll Lock state to physical LEDs so
+    // they don't lag the freshly-rebuilt xkb state.
+    seat_->update_keyboard_leds(keyboard_->leds_state());
+  }
 }
 
 void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
