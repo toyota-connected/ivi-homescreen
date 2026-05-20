@@ -75,7 +75,6 @@ endif ()
 if (BUILD_BACKEND_DRM_KMS_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_egl/drm_backend.cc
-            backend/drm_kms_egl/drm_compositor.cc
             backend/drm_kms_egl/drm_session.cc
             backend/drm_kms_egl/driver_probe.cc
             backend/drm_kms_egl/session_watchdog.cc
@@ -88,6 +87,7 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
         # backend-agnostic GL helpers. Share the TUs rather than forking.
         # egl_backing_store is NOT needed — the DRM path uses GbmBackingStore.
         target_sources(${PROJECT_NAME} PRIVATE
+                backend/drm_kms_egl/drm_compositor.cc
                 backend/wayland_egl/gl_caps.cc
                 backend/wayland_egl/gl_compositor.cc
         )
