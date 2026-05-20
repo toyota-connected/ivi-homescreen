@@ -29,6 +29,7 @@
 #include <string_view>
 #include <utility>
 
+#include <drm-cxx/core/format.hpp>
 #include <drm-cxx/detail/span.hpp>
 #include <drm-cxx/display/edid.hpp>
 
@@ -462,12 +463,13 @@ std::string Sanitize(std::string_view s) {
 void LogResolved(const Resolved& r) {
   spdlog::info(
       "[DrmBackend] driver='{}' compositor={} modeset={} nonblock-modeset={} "
-      "primary-fmt=0x{:08x} bs-fmt=0x{:08x} overlay-planes={} "
+      "primary-fmt={} bs-fmt={} overlay-planes={} "
       "explicit-sync={} async-flip={}",
       r.driver_name.empty() ? "?" : r.driver_name,
       r.use_plane_compositor ? "planes" : "gl",
       r.atomic_modeset ? "atomic" : "legacy",
-      r.allow_nonblock_modeset ? "yes" : "no", r.primary_format, r.bs_format,
+      r.allow_nonblock_modeset ? "yes" : "no",
+      drm::format_name(r.primary_format), drm::format_name(r.bs_format),
       r.overlay_planes ? "yes" : "no", r.explicit_sync ? "yes" : "no",
       r.async_flip ? "yes" : "no");
 
