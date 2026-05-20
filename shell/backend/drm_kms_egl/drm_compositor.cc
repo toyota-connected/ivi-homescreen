@@ -23,6 +23,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -1068,6 +1069,11 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   }
 
   if (auto r = req.commit(commit_flags, this); !r) {
+    if (r.error() == std::errc::permission_denied) {
+      spdlog::warn(
+          "[DrmCompositor] framed commit: master revoked (EACCES); skip frame");
+      return false;
+    }
     spdlog::warn(
         "[DrmCompositor] framed atomic commit failed ({}); latching GL "
         "fallback",
@@ -1377,6 +1383,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
   auto result = allocator_->apply(output, req, test_flags);
   if (!result) {
+    if (result.error() == std::errc::permission_denied) {
+      // libseat pause race: kernel revoked master before pause_cb raised
+      // SIGTERM. GL fallback would also EACCES; skip cleanly until exit.
+      spdlog::warn(
+          "[DrmCompositor] allocator: master revoked (EACCES); skip frame");
+      return false;
+    }
     spdlog::warn("[DrmCompositor] allocator: {}; falling back to GL",
                  result.error().message());
     return PresentViaGlFallback(layers, layer_count);
@@ -1484,6 +1497,11 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   }
 
   if (auto commit_ok = req.commit(commit_flags, this); !commit_ok) {
+    if (commit_ok.error() == std::errc::permission_denied) {
+      spdlog::warn(
+          "[DrmCompositor] atomic commit: master revoked (EACCES); skip frame");
+      return false;
+    }
     // Latch: stop trying planes for the rest of the session. One WARN
     // per latch so the failure is visible without flooding.
     spdlog::warn(
