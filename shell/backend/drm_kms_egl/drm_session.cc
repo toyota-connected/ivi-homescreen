@@ -19,7 +19,9 @@
 #include <poll.h>
 #include <cerrno>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
+#include <string_view>
 #include <utility>
 
 #include "logging.h"
@@ -61,6 +63,29 @@ DrmSession::DrmSession(drm::session::Seat seat) : seat_(std::move(seat)) {
         std::string(path), new_fd);
   });
 
+  // Open the DRM hotplug monitor unless explicitly gated off. Failure
+  // is non-fatal — the rest of the session works without hotplug, just
+  // without connector-change notifications.
+  const char* hotplug_gate = std::getenv("IVI_DRM_HOTPLUG");
+  if (hotplug_gate == nullptr || std::string_view(hotplug_gate) != "0") {
+    if (auto hp = drm::display::HotplugMonitor::open()) {
+      hotplug_.emplace(std::move(*hp));
+      hotplug_->set_handler([this](const drm::display::HotplugEvent& e) {
+        HotplugHandler local;
+        {
+          std::lock_guard lk(hotplug_handler_mu_);
+          local = hotplug_handler_;
+        }
+        if (local) {
+          local(e);
+        }
+      });
+    } else {
+      spdlog::warn("[DrmSession] hotplug monitor unavailable: {}",
+                   hp.error().message());
+    }
+  }
+
   thread_ = std::thread(&DrmSession::DispatchLoop, this);
 }
 
@@ -86,18 +111,25 @@ drm::input::InputDeviceOpener DrmSession::InputOpener() {
 }
 
 void DrmSession::DispatchLoop() {
-  const int fd = seat_.poll_fd();
-  if (fd < 0) {
+  const int seat_fd = seat_.poll_fd();
+  if (seat_fd < 0) {
     // No backend-backed poll fd — shouldn't happen because Open() would
     // have returned nullptr, but fail soft rather than busy-looping.
     spdlog::warn("[DrmSession] poll_fd() returned -1; dispatcher exiting");
     return;
   }
+  int hp_fd = hotplug_ ? hotplug_->fd() : -1;
+  constexpr short kErr = POLLERR | POLLHUP | POLLNVAL;
+
   while (!stop_.load(std::memory_order_acquire)) {
-    pollfd pfd{};
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    const int r = poll(&pfd, 1, kPollTimeoutMs);
+    pollfd pfds[2];
+    pfds[0] = {seat_fd, POLLIN, 0};
+    nfds_t nfds = 1;
+    if (hp_fd >= 0) {
+      pfds[1] = {hp_fd, POLLIN, 0};
+      nfds = 2;
+    }
+    const int r = poll(pfds, nfds, kPollTimeoutMs);
     if (r < 0) {
       if (errno == EINTR) {
         continue;
@@ -105,10 +137,39 @@ void DrmSession::DispatchLoop() {
       spdlog::error("[DrmSession] poll: {}", std::strerror(errno));
       break;
     }
-    if (r > 0 && (pfd.revents & POLLIN) != 0) {
-      seat_.dispatch();
+    if (r > 0) {
+      if ((pfds[0].revents & kErr) != 0) {
+        spdlog::error("[DrmSession] seat fd error (revents={:#x}); exiting",
+                      static_cast<unsigned>(pfds[0].revents));
+        break;
+      }
+      if ((pfds[0].revents & POLLIN) != 0) {
+        seat_.dispatch();
+      }
+      if (nfds == 2) {
+        if ((pfds[1].revents & kErr) != 0) {
+          // Drop the hotplug monitor and keep serving the seat. A bad
+          // hotplug fd shouldn't silently busy-loop the seat dispatcher.
+          spdlog::warn(
+              "[DrmSession] hotplug fd error (revents={:#x}); disabling "
+              "monitor",
+              static_cast<unsigned>(pfds[1].revents));
+          hotplug_.reset();
+          hp_fd = -1;
+        } else if ((pfds[1].revents & POLLIN) != 0) {
+          if (auto rc = hotplug_->dispatch(); !rc) {
+            spdlog::warn("[DrmSession] hotplug dispatch: {}",
+                         rc.error().message());
+          }
+        }
+      }
     }
   }
+}
+
+void DrmSession::set_hotplug_handler(HotplugHandler handler) {
+  std::lock_guard lk(hotplug_handler_mu_);
+  hotplug_handler_ = std::move(handler);
 }
 
 }  // namespace homescreen
