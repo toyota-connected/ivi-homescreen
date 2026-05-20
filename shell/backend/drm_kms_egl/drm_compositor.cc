@@ -595,7 +595,7 @@ void DrmCompositor::PageFlipHandler(int /*fd*/,
   if (baton == 0) {
     return;
   }
-  auto engine = self->backend_->vsync_engine_.load(std::memory_order_relaxed);
+  auto engine = self->backend_->engine_handle_.load(std::memory_order_relaxed);
   if (!engine) {
     return;
   }
@@ -616,6 +616,13 @@ bool DrmCompositor::WaitForPendingFlip() const {
   ctx.page_flip_handler = &DrmCompositor::PageFlipHandler;
 
   while (flip_pending_) {
+    // Session went inactive between submitting the flip and the
+    // kernel firing PAGE_FLIP_EVENT — the event will never come.
+    // OnResume() will clear flip_pending_; bail now so the rasterizer
+    // doesn't poll a dead fd forever.
+    if (paused_.load(std::memory_order_acquire)) {
+      return false;
+    }
     pollfd pfd{};
     pfd.fd = backend_->drm_fd();
     pfd.events = POLLIN;
@@ -1070,8 +1077,15 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
 
   if (auto r = req.commit(commit_flags, this); !r) {
     if (r.error() == std::errc::permission_denied) {
-      spdlog::warn(
-          "[DrmCompositor] framed commit: master revoked (EACCES); skip frame");
+      // EACCES races: paused_ might be set already (steady-state pause)
+      // or not yet (kernel revoked before libseat's disable_seat reached
+      // us). Either way, skip the frame; in the still-active-flag case
+      // log a warning so an unexpected revoke is still visible.
+      if (!paused_.load(std::memory_order_acquire)) {
+        spdlog::warn(
+            "[DrmCompositor] framed commit: master revoked (EACCES); skip "
+            "frame");
+      }
       return false;
     }
     spdlog::warn(
@@ -1095,7 +1109,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       if (auto engine =
-              backend_->vsync_engine_.load(std::memory_order_relaxed)) {
+              backend_->engine_handle_.load(std::memory_order_relaxed)) {
         const uint64_t now = LibFlutterEngine->GetCurrentTime();
         const uint64_t period_ns =
             backend_->vrefresh() > 0
@@ -1236,6 +1250,25 @@ void DrmCompositor::VerifyPipeRunning() const {
 
 bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                                   const size_t layer_count) {
+  // Session-pause gate. While inactive, any atomic commit returns
+  // EACCES and any flip event never fires. Ack the frame to Flutter
+  // (return true) without touching the kernel. The vsync baton stays
+  // pending in vsync_baton_; OnResume() fires a synthetic OnVsync to
+  // restart the pacer, after which the next Present does a full
+  // re-modeset (plane_mode_set_ is cleared in OnResume).
+  if (paused_.load(std::memory_order_acquire)) {
+    return true;
+  }
+
+  // One-shot post-resume probe.
+  if (!resume_pending_logged_ && !plane_mode_set_) {
+    resume_pending_logged_ = true;
+    spdlog::info(
+        "[DrmCompositor] PresentLayers entered post-resume; layer_count={} "
+        "framed={} fallback_latched={}",
+        layer_count, framed_, fallback_latched_);
+  }
+
   backend_->MaybeCaptureSnapshot();
   EnsureGlCapsProbed();
 
@@ -1385,10 +1418,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   auto result = allocator_->apply(output, req, test_flags);
   if (!result) {
     if (result.error() == std::errc::permission_denied) {
-      // libseat pause race: kernel revoked master before pause_cb raised
-      // SIGTERM. GL fallback would also EACCES; skip cleanly until exit.
-      spdlog::warn(
-          "[DrmCompositor] allocator: master revoked (EACCES); skip frame");
+      // libseat pause race: kernel revoked master before pause_cb
+      // toggled paused_. Skip the frame either way; warn only when
+      // paused_ isn't set so an unexpected revoke remains visible.
+      if (!paused_.load(std::memory_order_acquire)) {
+        spdlog::warn(
+            "[DrmCompositor] allocator: master revoked (EACCES); skip frame");
+      }
       return false;
     }
     spdlog::warn("[DrmCompositor] allocator: {}; falling back to GL",
@@ -1499,8 +1535,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
   if (auto commit_ok = req.commit(commit_flags, this); !commit_ok) {
     if (commit_ok.error() == std::errc::permission_denied) {
-      spdlog::warn(
-          "[DrmCompositor] atomic commit: master revoked (EACCES); skip frame");
+      // EACCES race with libseat pause; warn only when paused_ hasn't
+      // toggled yet so unexpected revokes still surface.
+      if (!paused_.load(std::memory_order_acquire)) {
+        spdlog::warn(
+            "[DrmCompositor] atomic commit: master revoked (EACCES); skip "
+            "frame");
+      }
       return false;
     }
     // Latch: stop trying planes for the rest of the session. One WARN
@@ -1541,7 +1582,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
         backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       if (auto engine =
-              backend_->vsync_engine_.load(std::memory_order_relaxed)) {
+              backend_->engine_handle_.load(std::memory_order_relaxed)) {
         const uint64_t now = LibFlutterEngine->GetCurrentTime();
         const uint64_t period_ns =
             backend_->vrefresh() > 0
@@ -1644,6 +1685,26 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
                   store_collect_total_, stores_.size(), store_pool_.size());
   }
   return true;
+}
+
+// ─── Session pause / resume ──────────────────────────────────────────────
+
+void DrmCompositor::SetPaused(const bool paused) {
+  paused_.store(paused, std::memory_order_release);
+  spdlog::info("[DrmCompositor] session {}", paused ? "paused" : "resumed");
+}
+
+void DrmCompositor::OnResume() {
+  // The kernel revoked master while we were inactive; whatever flip
+  // we had outstanding never fired PAGE_FLIP_EVENT, and on amdgpu the
+  // CRTC state can be re-asserted by re-issuing the mode. Clear the
+  // latches so the next PresentLayers does a full mode-set, the same
+  // way the first commit after Create() does.
+  flip_pending_ = false;
+  plane_mode_set_ = false;
+  paused_.store(false, std::memory_order_release);
+  resume_pending_logged_ = false;
+  spdlog::info("[DrmCompositor] resumed — next commit will re-modeset");
 }
 
 // ─── Surface registry ────────────────────────────────────────────────────
