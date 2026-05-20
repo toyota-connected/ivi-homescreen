@@ -1,0 +1,82 @@
+---
+name: Setup libdisplay-info
+description: >-
+  Use the host's libdisplay-info when it satisfies the version requirement;
+  otherwise build the pinned version from source and cache the install tree.
+  Exports PKG_CONFIG_PATH / LD_LIBRARY_PATH so subsequent cmake + ninja steps
+  pick up the from-source build.
+
+inputs:
+  required-version:
+    description: Minimum version that satisfies the build.
+    required: false
+    default: "0.2.0"
+  pin-version:
+    description: Tag built from source when the host is too old.
+    required: false
+    default: "0.2.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Probe system libdisplay-info
+      id: probe
+      shell: bash
+      run: |
+        set -e
+        sys_ver="$(pkg-config --modversion libdisplay-info 2>/dev/null || true)"
+        if [ -n "$sys_ver" ] && \
+           pkg-config --atleast-version="${{ inputs.required-version }}" libdisplay-info; then
+          echo "Using system libdisplay-info ${sys_ver}"
+          echo "from-source=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "System libdisplay-info ${sys_ver:-absent} does not satisfy >= ${{ inputs.required-version }}; will build ${{ inputs.pin-version }}"
+          echo "from-source=true" >> "$GITHUB_OUTPUT"
+          echo "prefix=${RUNNER_TEMP}/libdisplay-info-install" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Restore cached libdisplay-info
+      if: steps.probe.outputs.from-source == 'true'
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.probe.outputs.prefix }}
+        key: libdisplay-info-${{ inputs.pin-version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Build libdisplay-info from source
+      if: steps.probe.outputs.from-source == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PREFIX: ${{ steps.probe.outputs.prefix }}
+        PIN: ${{ inputs.pin-version }}
+      run: |
+        set -e
+        sudo apt-get -y install meson ninja-build pkg-config
+        src="${RUNNER_TEMP}/libdisplay-info-src"
+        rm -rf "$src" "$PREFIX"
+        git clone --depth 1 --branch "$PIN" \
+          https://gitlab.freedesktop.org/emersion/libdisplay-info.git "$src"
+        meson setup "$src/build" "$src" \
+          --prefix="$PREFIX" \
+          --buildtype=release \
+          -Ddefault_library=shared
+        meson install -C "$src/build"
+
+    - name: Export PKG_CONFIG_PATH / LD_LIBRARY_PATH
+      if: steps.probe.outputs.from-source == 'true'
+      shell: bash
+      env:
+        PREFIX: ${{ steps.probe.outputs.prefix }}
+      run: |
+        # meson installs the .pc to <prefix>/lib/pkgconfig (no multiarch);
+        # the multiarch variant is added defensively for distros that move it.
+        for d in "$PREFIX/lib/pkgconfig" "$PREFIX/lib/x86_64-linux-gnu/pkgconfig"; do
+          if [ -d "$d" ]; then
+            echo "PKG_CONFIG_PATH=$d:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          fi
+        done
+        for d in "$PREFIX/lib" "$PREFIX/lib/x86_64-linux-gnu"; do
+          if [ -d "$d" ]; then
+            echo "LD_LIBRARY_PATH=$d:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          fi
+        done
