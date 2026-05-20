@@ -17,6 +17,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -86,6 +87,28 @@ class DrmSeat final : public ISeat {
   // intended for a future settings/locale channel.
   void ReloadKeymap(KeymapConfig cfg);
 
+  // Handler invoked on a Ctrl+Alt+F<n> chord. With K_OFF on the VT,
+  // the kernel's keymap-layer chord handler doesn't run — DrmSeat
+  // intercepts the combination from libinput's stream and asks the
+  // installed handler to perform the session switch (typically via
+  // libseat). Receives the VT number (F1=1, …, F12=12). Returning
+  // true consumes the event so it doesn't also reach Flutter; false
+  // means the handler couldn't switch and the keys should still flow
+  // through. Set from any thread before Start(); the dispatch thread
+  // reads via acquire.
+  using VtSwitchHandler = std::function<bool(int)>;
+  void SetVtSwitchHandler(VtSwitchHandler handler);
+
+  // Session lifecycle hooks, called from the libseat dispatch thread
+  // (NOT this seat's dispatch thread). Flip the pending flag here;
+  // DispatchLoop picks it up on its next iteration and calls the
+  // matching libinput suspend/resume on the right thread. Without
+  // this dance, after a VT round-trip libinput's evdev fds are stale
+  // (revoked during pause) and key events stop flowing — the symptom
+  // is "chord works once, then never again."
+  void OnSessionPaused();
+  void OnSessionResumed();
+
  private:
   void DispatchLoop();
   void ApplyPendingKeymap();
@@ -129,6 +152,23 @@ class DrmSeat final : public ISeat {
   // them alive past ReloadKeymap() returning.
   std::mutex pending_mu_;
   std::optional<KeymapConfig> pending_keymap_;
+
+  // Ctrl+Alt+F<n> chord handler. Written via SetVtSwitchHandler (any
+  // thread, before Start()); read by the dispatch thread inside
+  // HandleKeyboard. The mutex guards installation; the handler itself
+  // is called without the mutex held (it does its own libseat work
+  // and may block briefly).
+  std::mutex vt_switch_mu_;
+  VtSwitchHandler vt_switch_handler_;
+
+  // Pending libinput suspend/resume action posted from the libseat
+  // dispatch thread (via On*Paused/Resumed) and applied on this
+  // seat's dispatch thread at the top of DispatchLoop. libinput is
+  // single-threaded, so the suspend/resume call MUST happen on the
+  // thread that owns the libinput context.
+  enum class PendingSessionAction : uint8_t { kNone, kSuspend, kResume };
+  std::atomic<PendingSessionAction> pending_session_action_{
+      PendingSessionAction::kNone};
 
   // VT keyboard mode. In a text console, without K_OFF keystrokes are
   // also consumed by the kernel tty line discipline (echoed to the
