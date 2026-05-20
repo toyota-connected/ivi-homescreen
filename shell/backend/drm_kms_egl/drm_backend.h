@@ -106,9 +106,9 @@ class DrmBackend : public Backend {
  public:
   // `session` may be null — when libseat isn't available we fall back to
   // opening the DRM device directly and keeping the legacy foreground-VT
-  // check, drmSetMaster call, and reverse watchdog. When non-null, the
-  // seat provider owns master handoff on VT switch so all three are
-  // skipped. The caller retains ownership of the session; it must
+  // check and drmSetMaster call. When non-null, the seat provider owns
+  // master handoff on VT switch so both are skipped. The caller retains
+  // ownership of the session; it must
   // outlive the backend.
   static std::unique_ptr<DrmBackend> Create(const DrmConfig& cfg,
                                             homescreen::DrmSession* session);

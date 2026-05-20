@@ -55,8 +55,8 @@ struct KeymapConfig {
 // InputDeviceOpener (from DrmSession::InputOpener()) so libinput's
 // privileged /dev/input/event* opens route through libseat — giving
 // input fds the same revocable lifetime as the DRM fd. In that mode,
-// the K_OFF TTY keyboard-mode hack and its reverse-watchdog are skipped;
-// logind/seatd manages VT keyboard state on session activation.
+// the K_OFF TTY keyboard-mode hack is skipped; logind/seatd manages
+// VT keyboard state on session activation.
 class DrmSeat final : public ISeat {
  public:
   DrmSeat(int32_t viewport_width,

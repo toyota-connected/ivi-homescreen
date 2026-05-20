@@ -35,7 +35,7 @@ class DrmDisplay final : public IDisplay {
   // (no logind/seatd/builtin) or when drm-cxx was built without libseat.
   // DrmBackend consults this to route its DRM device open through the
   // seat; when null, the backend falls back to direct open + the legacy
-  // VT/master/watchdog guards.
+  // VT/master guards.
   [[nodiscard]] homescreen::DrmSession* session() const {
     return session_.get();
   }
