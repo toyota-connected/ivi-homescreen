@@ -43,10 +43,12 @@ jobs:
             libwayland-dev wayland-protocols libxkbcommon-dev
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
             libdrm-dev libgbm-dev libinput-dev libudev-dev
-            libdisplay-info-dev
             libglib2.0-dev
             ${{ matrix.extra_pkgs }}
           version: 1.0
+
+      - name: Setup libdisplay-info (system or from-source)
+        uses: ./.github/actions/setup-libdisplay-info
 
       - name: Configure (DRM/KMS EGL + compositor)
         env:
@@ -92,10 +94,12 @@ jobs:
             libwayland-dev wayland-protocols libxkbcommon-dev
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
             libdrm-dev libgbm-dev libinput-dev libudev-dev
-            libdisplay-info-dev
             libglib2.0-dev
             clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
           version: 1.0
+
+      - name: Setup libdisplay-info (system or from-source)
+        uses: ./.github/actions/setup-libdisplay-info
 
       - name: Build (clang, DRM + compositor)
         env:
