@@ -35,6 +35,7 @@
 
 class DrmCompositor;
 namespace homescreen {
+class DrmCapture;
 class DrmCursor;
 class DrmSession;
 }  // namespace homescreen
@@ -239,9 +240,18 @@ class DrmBackend : public Backend {
   std::unique_ptr<DrmCompositor> compositor_;
 #endif
   std::unique_ptr<homescreen::DrmCursor> cursor_;
+#if HAVE_DRM_CAPTURE
+  std::unique_ptr<homescreen::DrmCapture> capture_;
+#endif
 
  public:
   [[nodiscard]] homescreen::DrmCursor* drm_cursor() const {
     return cursor_.get();
   }
+
+  // Called once per frame from both Present() (GL fallback) and
+  // DrmCompositor::PresentLayers (plane path). Always defined so call
+  // sites stay unconditional; when HAVE_DRM_CAPTURE is off (no Blend2D)
+  // the body compiles to nothing.
+  void MaybeCaptureSnapshot();
 };

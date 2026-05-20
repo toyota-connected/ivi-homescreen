@@ -37,6 +37,7 @@
 #include <drm-cxx/core/format.hpp>
 #include "backend/drm_kms_egl/driver_probe.h"
 
+#include "backend/drm_kms_egl/drm_capture.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/drm_session.h"
@@ -368,8 +369,19 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
       *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
       backend->mode_, backend->fb_w_, backend->fb_h_);
 #endif
+#if HAVE_DRM_CAPTURE
+  backend->capture_ = homescreen::DrmCapture::Create();
+#endif
 
   return backend;
+}
+
+void DrmBackend::MaybeCaptureSnapshot() {
+#if HAVE_DRM_CAPTURE
+  if (capture_ != nullptr && drm_dev_) {
+    capture_->MaybeCapture(*drm_dev_, crtc_id_);
+  }
+#endif
 }
 
 DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
@@ -1071,6 +1083,7 @@ bool DrmBackend::WaitForPendingFlip() const {
 }
 
 bool DrmBackend::Present() {
+  MaybeCaptureSnapshot();
   if (!WaitForPendingFlip()) {
     return false;
   }
