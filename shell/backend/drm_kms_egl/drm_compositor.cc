@@ -1236,6 +1236,7 @@ void DrmCompositor::VerifyPipeRunning() const {
 
 bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                                   const size_t layer_count) {
+  backend_->MaybeCaptureSnapshot();
   EnsureGlCapsProbed();
 
   // Runtime latch: once an atomic commit fails irrecoverably we stay on

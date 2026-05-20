@@ -94,6 +94,20 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
     else ()
         message(STATUS "libxcursor not found; DRM HW cursor disabled")
     endif ()
+    # SIGUSR1-driven snapshot diagnostic. Depends on drm-cxx's capture
+    # module, which gates on Blend2D. We mirror that probe so the
+    # homescreen build skips drm_capture.cc when Blend2D is absent —
+    # otherwise drm::capture::snapshot / write_png would unresolved at
+    # link time. find_package matches drm-cxx's own gating.
+    find_package(blend2d CONFIG QUIET)
+    if (blend2d_FOUND)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/drm_kms_egl/drm_capture.cc
+        )
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_DRM_CAPTURE=1)
+    else ()
+        message(STATUS "blend2d not found; SIGUSR1 snapshot diagnostic disabled")
+    endif ()
     if (BUILD_COMPOSITOR)
         # gl_caps and gl_compositor live under wayland_egl/ but are
         # backend-agnostic GL helpers. Share the TUs rather than forking.
