@@ -175,6 +175,15 @@ FlutterView::FlutterView(Configuration::Config config,
     assert(drm_display != nullptr);
     m_backend = DrmBackend::Create(cfg, drm_display->session());
 
+    // DrmBackend::Create returns nullptr on any init failure (libseat
+    // take_device, drmSetMaster, no usable connector, GBM/EGL setup,
+    // …). Continuing would dereference a null backend in Engine::Run
+    // and SEGV; fail-fast with the same exit path as a missing bundle.
+    if (!m_backend) {
+      spdlog::critical("[FlutterView] DRM backend init failed; aborting");
+      exit(EXIT_FAILURE);
+    }
+
     // Wire the HW cursor (if Create succeeded in opening one) to the
     // seat dispatch thread so pointer events move the on-screen sprite.
     // The pointer stays valid for the FlutterView's lifetime — both
