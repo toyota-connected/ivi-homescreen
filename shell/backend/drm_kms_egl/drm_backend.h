@@ -32,7 +32,6 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
-#include "backend/drm_kms_egl/session_watchdog.h"
 
 class DrmCompositor;
 namespace homescreen {
@@ -200,11 +199,6 @@ class DrmBackend : public Backend {
   uint32_t fb_w_ = 0;
   uint32_t fb_h_ = 0;
   drmModeCrtc* saved_crtc_ = nullptr;
-
-  // Reverse-watchdog that restores saved_crtc_ if the parent dies via
-  // SIGKILL (or any other path that skips the destructor). See
-  // session_watchdog.h.
-  homescreen::watchdog::Handle drm_watchdog_{};
 
   // Populated by DriverProbe::Resolve() inside Create(). Non-null for the
   // lifetime of the backend. unique_ptr so driver_probe.h isn't needed in

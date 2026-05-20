@@ -411,9 +411,6 @@ DrmBackend::~DrmBackend() {
     drmModeFreeCrtc(saved_crtc_);
   }
 
-  // Reverse-watchdog no longer needed: we restored the CRTC ourselves.
-  homescreen::watchdog::Disarm(drm_watchdog_);
-
   if (drm_dev_ && pending_fb_ != 0) {
     drmModeRmFB(drm_dev_->fd(), pending_fb_);
   }
@@ -696,22 +693,6 @@ bool DrmBackend::InitDrm() {
         "(letterboxed)",
         connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay, mode_.vrefresh,
         fb_w_, fb_h_);
-  }
-
-  // Arm the reverse-watchdog BEFORE any code path can call drmModeSetCrtc
-  // (the first one lands in SetInitialMode via the first Present). If the
-  // parent dies — SIGKILL included — the child restores this snapshot, so
-  // the text console comes back instead of the last Flutter framebuffer.
-  //
-  // When a seat session is live, skip it: the seat provider (logind/seatd)
-  // observes our socket close on SIGKILL and releases the session itself,
-  // which restores the underlying TTY fb. The reverse watchdog would be
-  // redundant (and its inherited fd could briefly fight the seat
-  // provider's cleanup).
-  if (saved_crtc_ && session_ == nullptr) {
-    drm_watchdog_ = homescreen::watchdog::SpawnDrmRestore(
-        drm_dev_->fd(), saved_crtc_->crtc_id, saved_crtc_->buffer_id,
-        saved_crtc_->x, saved_crtc_->y, connector_id_, saved_crtc_->mode);
   }
 
   drmModeFreeConnector(connector);
