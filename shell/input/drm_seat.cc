@@ -303,6 +303,7 @@ void DrmSeat::DispatchLoop() {
         if (auto ok = seat_->dispatch(); !ok) {
           spdlog::warn("[DrmSeat] dispatch: {}", ok.error().message());
         }
+        FlushCursorMotion();
       }
       if (nfds == 2) {
         if ((pfds[1].revents & kErr) != 0) {
@@ -319,6 +320,16 @@ void DrmSeat::DispatchLoop() {
         }
       }
     }
+  }
+}
+
+void DrmSeat::FlushCursorMotion() {
+  if (!cursor_motion_pending_) {
+    return;
+  }
+  cursor_motion_pending_ = false;
+  if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
+    c->Move(static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
   }
 }
 
@@ -470,9 +481,11 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
   pointer_y_ =
       std::clamp(pointer_y_ + ev.dy, 0.0, static_cast<double>(viewport_h_ - 1));
 
-  if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
-    c->Move(static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
-  }
+  // Defer the cursor commit to FlushCursorMotion (called after the
+  // dispatch batch). A blocking atomic cursor flip per libinput event
+  // caps the seat thread at one vblank per event — at 60Hz that's 60
+  // events/s, well under what a 125–1000Hz mouse delivers.
+  cursor_motion_pending_ = true;
 
   FlutterPointerEvent pe[2];
   size_t count = 0;

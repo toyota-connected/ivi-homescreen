@@ -89,6 +89,12 @@ class DrmSeat final : public ISeat {
  private:
   void DispatchLoop();
   void ApplyPendingKeymap();
+  // If pointer motion accumulated during the previous dispatch batch,
+  // issue a single cursor commit with the latest position. Cursor
+  // commits are blocking atomic flips (one vblank each on amdgpu DC),
+  // so coalescing per batch keeps the seat thread from queueing one
+  // commit per libinput event when the mouse outpaces vblank.
+  void FlushCursorMotion();
   void HandleEvent(const drm::input::InputEvent& ev);
   void HandleKeyboard(const drm::input::KeyboardEvent& ev);
   void DispatchKeyToFlutter(const drm::input::KeyboardEvent& resolved) const;
@@ -136,6 +142,10 @@ class DrmSeat final : public ISeat {
   double pointer_y_ = 0.0;
   int64_t button_mask_ = 0;
   bool pointer_added_ = false;
+  // Set by HandlePointerMotion, cleared by FlushCursorMotion. Lets the
+  // dispatch loop coalesce a batch of motion events into one cursor
+  // commit at the end of seat_->dispatch().
+  bool cursor_motion_pending_ = false;
 
   // KMS hardware cursor target. Owned by DrmBackend; this seat just
   // forwards motion to it. Atomic because the wiring runs on a
