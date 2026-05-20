@@ -504,15 +504,90 @@ bool DrmBackend::InitDrm() {
     return false;
   }
 
-  drmModeConnector* connector = nullptr;
+  // Preference order for auto-pick: internal panels first, then cable-out,
+  // VGA last. Copied from drm-cxx examples/common/select_connector.hpp's
+  // k_main_rank — keeping it inline so the shell doesn't take a dependency
+  // on the examples/ tree.
+  static constexpr std::array<uint32_t, 11> kConnectorRank = {{
+      DRM_MODE_CONNECTOR_eDP,
+      DRM_MODE_CONNECTOR_LVDS,
+      DRM_MODE_CONNECTOR_DSI,
+      DRM_MODE_CONNECTOR_DPI,
+      DRM_MODE_CONNECTOR_HDMIA,
+      DRM_MODE_CONNECTOR_HDMIB,
+      DRM_MODE_CONNECTOR_DisplayPort,
+      DRM_MODE_CONNECTOR_DVID,
+      DRM_MODE_CONNECTOR_DVII,
+      DRM_MODE_CONNECTOR_DVIA,
+      DRM_MODE_CONNECTOR_VGA,
+  }};
+  // Use the local ConnectorTypeName() helper (not libdrm's) so the
+  // matched name is byte-identical to what --drm-list-modes prints.
+  // libdrm's drmModeGetConnectorTypeName can also return NULL for
+  // unknown types — std::string(NULL) is UB.
+  const auto connector_name = [](const drmModeConnector* c) {
+    return std::string(ConnectorTypeName(c->connector_type)) + "-" +
+           std::to_string(c->connector_type_id);
+  };
+
+  // Collect every eligible connector (CONNECTED + has modes); free the
+  // rest as we walk. We deliberately don't require encoder_id != 0 —
+  // the CRTC-selection step below walks connector->encoders[] when the
+  // current encoder is missing (hotplug or some ARM/i915 paths).
+  std::vector<drmModeConnector*> eligible;
+  eligible.reserve(static_cast<size_t>(res->count_connectors));
   for (int i = 0; i < res->count_connectors; ++i) {
-    connector = drmModeGetConnector(drm_dev_->fd(), res->connectors[i]);
-    if (connector && connector->connection == DRM_MODE_CONNECTED &&
-        connector->count_modes > 0) {
-      break;
+    drmModeConnector* c =
+        drmModeGetConnector(drm_dev_->fd(), res->connectors[i]);
+    if (c && c->connection == DRM_MODE_CONNECTED && c->count_modes > 0) {
+      eligible.push_back(c);
+    } else {
+      drmModeFreeConnector(c);
     }
-    drmModeFreeConnector(connector);
-    connector = nullptr;
+  }
+
+  drmModeConnector* connector = nullptr;
+  std::string pick_reason;
+  if (cfg_.connector_name.has_value()) {
+    const std::string& want = *cfg_.connector_name;
+    for (drmModeConnector* c : eligible) {
+      if (connector_name(c) == want) {
+        connector = c;
+        pick_reason = "user pin (--drm-connector)";
+        break;
+      }
+    }
+    if (!connector) {
+      spdlog::error(
+          "[DrmBackend] --drm-connector={} not found among eligible "
+          "connectors; available:",
+          want);
+      for (drmModeConnector* c : eligible) {
+        spdlog::error("[DrmBackend]   {}", connector_name(c));
+      }
+      for (drmModeConnector* c : eligible) {
+        drmModeFreeConnector(c);
+      }
+      drmModeFreeResources(res);
+      return false;
+    }
+  } else {
+    for (const uint32_t want_type : kConnectorRank) {
+      for (drmModeConnector* c : eligible) {
+        if (c->connector_type == want_type) {
+          connector = c;
+          pick_reason = "rank";
+          break;
+        }
+      }
+      if (connector != nullptr) {
+        break;
+      }
+    }
+    if (!connector && !eligible.empty()) {
+      connector = eligible.front();
+      pick_reason = "first-eligible (no rank match)";
+    }
   }
 
   if (!connector) {
@@ -520,6 +595,13 @@ bool DrmBackend::InitDrm() {
     drmModeFreeResources(res);
     return false;
   }
+  for (drmModeConnector* c : eligible) {
+    if (c != connector) {
+      drmModeFreeConnector(c);
+    }
+  }
+  spdlog::info("[DrmBackend] picked connector {} via {}",
+               connector_name(connector), pick_reason);
   connector_id_ = connector->connector_id;
 
   // Always drive the display at its preferred/native mode. If the user

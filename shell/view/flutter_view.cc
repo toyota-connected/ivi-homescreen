@@ -149,6 +149,13 @@ FlutterView::FlutterView(Configuration::Config config,
         fullscreen ? std::optional<uint32_t>{} : m_config.view.height,
         m_config.debug_backend.value_or(false),
     };
+    // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
+    // `drm_connector = ""` in TOML shouldn't force a strict empty-name
+    // match against zero connectors.
+    if (m_config.view.drm_connector.has_value() &&
+        !m_config.view.drm_connector->empty()) {
+      cfg.connector_name = m_config.view.drm_connector;
+    }
     cfg.compositor = parse_compositor(m_config.view.drm_compositor);
     cfg.modeset = parse_modeset(m_config.view.drm_modeset);
     cfg.allow_nonblock_modeset =

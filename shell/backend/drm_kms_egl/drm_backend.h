@@ -76,6 +76,12 @@ struct DrmConfig {
   std::optional<uint32_t> height;
   bool debug_backend{false};
 
+  // Unset = pick the highest-ranking connected connector (internal panels
+  // preferred, then cable-out). Set = pick the connector whose name
+  // (e.g. "eDP-1", "HDMI-A-1") matches; init fails if no such connector
+  // is connected. Name format matches --drm-list-modes output.
+  std::optional<std::string> connector_name;
+
   // User-facing knobs. All default to kAuto; DriverProbe resolves them
   // into the concrete values stored on DrmBackend::resolved_. See
   // driver_probe.h for the resolution rules.
