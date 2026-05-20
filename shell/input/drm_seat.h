@@ -34,6 +34,8 @@
 
 namespace homescreen {
 
+class DrmCursor;
+
 // Owned-string variant of drm::input::KeymapOptions, safe to pass
 // across threads. drm::input::KeymapOptions itself uses string_views,
 // which can't survive cross-thread hand-off.
@@ -67,6 +69,14 @@ class DrmSeat final : public ISeat {
   void Stop() override;
   void SetViewControllerState(
       FlutterDesktopViewControllerState* state) override;
+
+  // Set (or clear) the DRM hardware cursor this seat moves. Safe to
+  // call from any thread; the dispatch loop reads via acquire and
+  // ignores nullptr. Caller must clear (pass nullptr) before the
+  // pointed-to DrmCursor is destroyed.
+  void SetCursor(DrmCursor* cursor) {
+    cursor_.store(cursor, std::memory_order_release);
+  }
 
   // Hot-swap the xkb keymap. Safe to call from any thread; the actual
   // reload runs on the dispatch thread on the next poll iteration.
@@ -131,6 +141,11 @@ class DrmSeat final : public ISeat {
   double pointer_y_ = 0.0;
   int64_t button_mask_ = 0;
   bool pointer_added_ = false;
+
+  // KMS hardware cursor target. Owned by DrmBackend; this seat just
+  // forwards motion to it. Atomic because the wiring runs on a
+  // different thread than the dispatch loop that reads it.
+  std::atomic<DrmCursor*> cursor_{nullptr};
 };
 
 }  // namespace homescreen

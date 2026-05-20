@@ -82,6 +82,19 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             display/drm_display.cc
             input/drm_seat.cc
     )
+    # DRM HW cursor depends on drm-cxx's cursor module, which gates on
+    # libxcursor. Probe for libxcursor here so the homescreen build
+    # tracks drm-cxx's optionality: present → compile drm_cursor.cc
+    # and define HAVE_DRM_CURSOR=1; absent → skip the cursor wire-up.
+    pkg_check_modules(XCURSOR xcursor)
+    if (XCURSOR_FOUND)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/drm_kms_egl/drm_cursor.cc
+        )
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_DRM_CURSOR=1)
+    else ()
+        message(STATUS "libxcursor not found; DRM HW cursor disabled")
+    endif ()
     if (BUILD_COMPOSITOR)
         # gl_caps and gl_compositor live under wayland_egl/ but are
         # backend-agnostic GL helpers. Share the TUs rather than forking.
