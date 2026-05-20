@@ -28,7 +28,9 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -79,7 +81,7 @@ int64_t MapMouseButton(const uint32_t evdev_button) {
 // of async-signal-safe fatal-signal handlers that restore the mode and
 // then re-raise with the default disposition so core dumps still work.
 // Stop() hands the fd off to this backstop before we close it, so the
-// backstop is a no-op once normal teardown has happened.
+// backstop is a no-op once a normal teardown has happened.
 std::atomic<int> g_tty_fd{-1};
 std::atomic<int> g_saved_kb_mode{0};
 std::once_flag g_backstop_installed;
@@ -213,6 +215,24 @@ bool DrmSeat::Start() {
   }
   keyboard_ = std::make_unique<drm::input::Keyboard>(std::move(*kb));
 
+  // Auto-repeat for held keys. libinput doesn't repeat by design — the
+  // compositor/embedder synthesizes it. KeyRepeater is timerfd-driven and
+  // re-resolves sym/utf8 every tick so modifier changes mid-hold (Shift,
+  // AltGr) apply to the next repeat. Failure is non-fatal: zero repeat
+  // events still beats failing to start. IVI_DRM_KEY_REPEAT=0 disables.
+  const char* repeat_gate = std::getenv("IVI_DRM_KEY_REPEAT");
+  if (repeat_gate == nullptr || std::string_view(repeat_gate) != "0") {
+    if (auto rep = drm::input::KeyRepeater::create(keyboard_.get())) {
+      repeater_.emplace(std::move(*rep));
+      repeater_->set_handler([this](const drm::input::KeyboardEvent& e) {
+        DispatchKeyToFlutter(e);
+      });
+    } else {
+      spdlog::warn("[DrmSeat] KeyRepeater unavailable: {}",
+                   rep.error().message());
+    }
+  }
+
   stop_.store(false, std::memory_order_release);
   thread_ = std::thread([this] { DispatchLoop(); });
   spdlog::info("[DrmSeat] started");
@@ -223,6 +243,10 @@ void DrmSeat::Stop() {
   stop_.store(true, std::memory_order_release);
   if (thread_.joinable()) {
     thread_.join();
+  }
+  // Defensive: cancel any in-flight repeat before the repeater destructs.
+  if (repeater_) {
+    repeater_->cancel();
   }
   seat_.reset();
 
@@ -240,13 +264,20 @@ void DrmSeat::Stop() {
   homescreen::watchdog::Disarm(tty_watchdog_);
 }
 
-void DrmSeat::DispatchLoop() const {
-  const int fd = seat_->fd();
+void DrmSeat::DispatchLoop() {
+  const int seat_fd = seat_->fd();
+  int repeat_fd = repeater_ ? repeater_->fd() : -1;
+  constexpr short kErr = POLLERR | POLLHUP | POLLNVAL;
+
   while (!stop_.load(std::memory_order_acquire)) {
-    pollfd pfd{};
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    const int r = poll(&pfd, 1, kPollTimeoutMs);
+    pollfd pfds[2];
+    pfds[0] = {seat_fd, POLLIN, 0};
+    nfds_t nfds = 1;
+    if (repeat_fd >= 0) {
+      pfds[1] = {repeat_fd, POLLIN, 0};
+      nfds = 2;
+    }
+    const int r = poll(pfds, nfds, kPollTimeoutMs);
     if (r < 0) {
       if (errno == EINTR) {
         continue;
@@ -254,9 +285,30 @@ void DrmSeat::DispatchLoop() const {
       spdlog::error("[DrmSeat] poll: {}", std::strerror(errno));
       break;
     }
-    if (r > 0 && (pfd.revents & POLLIN)) {
-      if (auto ok = seat_->dispatch(); !ok) {
-        spdlog::warn("[DrmSeat] dispatch: {}", ok.error().message());
+    if (r > 0) {
+      if ((pfds[0].revents & kErr) != 0) {
+        spdlog::error("[DrmSeat] seat fd error (revents={:#x}); exiting",
+                      static_cast<unsigned>(pfds[0].revents));
+        break;
+      }
+      if ((pfds[0].revents & POLLIN) != 0) {
+        if (auto ok = seat_->dispatch(); !ok) {
+          spdlog::warn("[DrmSeat] dispatch: {}", ok.error().message());
+        }
+      }
+      if (nfds == 2) {
+        if ((pfds[1].revents & kErr) != 0) {
+          // Repeater timerfd died (HUP/ERR/NVAL). Drop it and keep
+          // serving the seat — otherwise poll() returns POLLERR forever
+          // and the loop spins.
+          spdlog::warn(
+              "[DrmSeat] repeater fd error (revents={:#x}); disabling repeat",
+              static_cast<unsigned>(pfds[1].revents));
+          repeater_.reset();
+          repeat_fd = -1;
+        } else if ((pfds[1].revents & POLLIN) != 0) {
+          repeater_->dispatch();
+        }
       }
     }
   }
@@ -292,12 +344,22 @@ void DrmSeat::HandleEvent(const drm::input::InputEvent& ev) {
       ev);
 }
 
-void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) const {
+void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   drm::input::KeyboardEvent resolved = ev;
   if (keyboard_) {
     keyboard_->process_key(resolved);
   }
+  // Track press/release in the repeater so it arms on press of an
+  // eligible key and cancels on release. The repeater filters its own
+  // synthesized events out of on_key (event.repeat == true is dropped).
+  if (repeater_) {
+    repeater_->on_key(ev);
+  }
+  DispatchKeyToFlutter(resolved);
+}
 
+void DrmSeat::DispatchKeyToFlutter(
+    const drm::input::KeyboardEvent& resolved) const {
   const uint64_t physical = keys::EvdevToPhysical(resolved.key);
   const uint64_t logical = keys::DeriveLogicalKey(resolved.utf8, resolved.sym);
 
@@ -317,18 +379,23 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) const {
   FlutterKeyEvent ke{};
   ke.struct_size = sizeof(FlutterKeyEvent);
   ke.timestamp = static_cast<double>(FlutterTimestampMicros());
-  ke.type =
-      resolved.pressed ? kFlutterKeyEventTypeDown : kFlutterKeyEventTypeUp;
+  if (resolved.repeat) {
+    ke.type = kFlutterKeyEventTypeRepeat;
+  } else if (resolved.pressed) {
+    ke.type = kFlutterKeyEventTypeDown;
+  } else {
+    ke.type = kFlutterKeyEventTypeUp;
+  }
   ke.physical = physical;
   ke.logical = logical;
   ke.synthesized = false;
   ke.device_type = kFlutterKeyEventDeviceTypeKeyboard;
 
   // Flutter's hardware_keyboard.dart asserts that `character` is null
-  // for KEY_UP events (and synthesized events). Attach it only to
-  // DOWN transitions — repeat/up carry physical+logical only.
+  // for KEY_UP, synthesized, and repeat events. Attach it only to the
+  // initial DOWN transition.
   std::string character_owned;
-  if (resolved.pressed && resolved.utf8[0] != '\0') {
+  if (resolved.pressed && !resolved.repeat && resolved.utf8[0] != '\0') {
     character_owned = resolved.utf8;
   }
 
