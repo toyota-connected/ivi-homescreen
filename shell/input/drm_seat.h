@@ -18,8 +18,10 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <thread>
 
+#include <drm-cxx/input/key_repeater.hpp>
 #include <drm-cxx/input/keyboard.hpp>
 #include <drm-cxx/input/seat.hpp>
 
@@ -54,9 +56,10 @@ class DrmSeat final : public ISeat {
       FlutterDesktopViewControllerState* state) override;
 
  private:
-  void DispatchLoop() const;
+  void DispatchLoop();
   void HandleEvent(const drm::input::InputEvent& ev);
-  void HandleKeyboard(const drm::input::KeyboardEvent& ev) const;
+  void HandleKeyboard(const drm::input::KeyboardEvent& ev);
+  void DispatchKeyToFlutter(const drm::input::KeyboardEvent& resolved) const;
   void HandlePointerMotion(const drm::input::PointerMotionEvent& ev);
   void HandlePointerButton(const drm::input::PointerButtonEvent& ev);
   void HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const;
@@ -76,6 +79,9 @@ class DrmSeat final : public ISeat {
 
   std::unique_ptr<drm::input::Seat> seat_;
   std::unique_ptr<drm::input::Keyboard> keyboard_;
+  // Synthesizes auto-repeat KeyboardEvents for held keys. Absent when
+  // disabled via IVI_DRM_KEY_REPEAT=0 or when KeyRepeater::create fails.
+  std::optional<drm::input::KeyRepeater> repeater_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
 
