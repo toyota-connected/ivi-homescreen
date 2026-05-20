@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
+
+#include <drm-cxx/display/connector_info.hpp>
 
 #include "backend/drm_kms_egl/drm_backend.h"
 
@@ -61,15 +64,25 @@ struct Resolved {
 
   // Use DRM_MODE_PAGE_FLIP_ASYNC on flip-only commits (tearing updates).
   bool async_flip{false};
+
+  // Parsed EDID for the chosen connector: monitor name, color primaries,
+  // HDR static metadata, wide-gamut signaling. nullopt when the kernel
+  // exposes no EDID blob or libdisplay-info rejects it. Read-only —
+  // consumed by logging today, by HDR signaling work later.
+  std::optional<drm::display::ConnectorInfo> connector_info;
 };
 
 // Probe the driver behind `drm_fd` and resolve every kAuto field in `cfg`
 // against cap queries, plane properties, and a small driver-name quirk
 // list. Explicit (non-kAuto) values in `cfg` are honored verbatim.
 //
-// `crtc_id` is used to find the primary plane (for format selection).
-// This function does not hold state; the returned Resolved is plain data.
-Resolved Resolve(int drm_fd, uint32_t crtc_id, const DrmConfig& cfg);
+// `connector_id` is used to read the connector's EDID blob; `crtc_id`
+// is used to find the primary plane (for format selection). This
+// function does not hold state; the returned Resolved is plain data.
+Resolved Resolve(int drm_fd,
+                 uint32_t connector_id,
+                 uint32_t crtc_id,
+                 const DrmConfig& cfg);
 
 // One-line log summary of the resolved config, at spdlog::info. Emitted
 // by DrmBackend::Create so the effective knobs are visible at startup.
