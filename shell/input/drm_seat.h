@@ -29,7 +29,6 @@
 
 #include <shell/platform/embedder/embedder.h>
 
-#include "backend/drm_kms_egl/session_watchdog.h"
 #include "input/iseat.h"
 
 namespace homescreen {
@@ -131,10 +130,6 @@ class DrmSeat final : public ISeat {
   // libinput events is unaffected and happens via keyboard_.
   int tty_fd_ = -1;
   int saved_kb_mode_ = 0;
-
-  // Reverse-watchdog that restores saved_kb_mode_ if the parent dies via
-  // SIGKILL (or any other path that skips Stop()). See session_watchdog.h.
-  homescreen::watchdog::Handle tty_watchdog_{};
 
   // Accessed only from the dispatch thread.
   double pointer_x_ = 0.0;
