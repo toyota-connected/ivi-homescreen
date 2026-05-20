@@ -34,7 +34,9 @@
 #include <utility>
 #include <vector>
 
+#include <drm-cxx/core/format.hpp>
 #include "backend/drm_kms_egl/driver_probe.h"
+
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/drm_session.h"
@@ -722,8 +724,8 @@ bool DrmBackend::InitGbm() {
       gbm_surface_create(gbm_device_, fb_w_, fb_h_, resolved_->primary_format,
                          GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
   if (!gbm_surface_) {
-    spdlog::error("[DrmBackend] gbm_surface_create(format=0x{:08x}) failed",
-                  resolved_->primary_format);
+    spdlog::error("[DrmBackend] gbm_surface_create(format={}) failed",
+                  drm::format_name(resolved_->primary_format));
     return false;
   }
   return true;
