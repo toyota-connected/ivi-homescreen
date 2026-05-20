@@ -76,3 +76,13 @@ void DrmDisplay::SetViewControllerState(
     seat_->SetViewControllerState(state);
   }
 }
+
+void DrmDisplay::SetCursor(homescreen::DrmCursor* cursor) {
+  // The seat's polymorphic base ISeat has no cursor hook — that's
+  // intentional, only the DRM seat drives a KMS cursor. Cast to the
+  // concrete type and forward; the cast fails only if the build mixes
+  // a non-DRM seat with this display, which doesn't happen today.
+  if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+    drm_seat->SetCursor(cursor);
+  }
+}

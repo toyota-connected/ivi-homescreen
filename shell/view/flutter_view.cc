@@ -174,6 +174,16 @@ FlutterView::FlutterView(Configuration::Config config,
     auto* drm_display = dynamic_cast<DrmDisplay*>(m_display.get());
     assert(drm_display != nullptr);
     m_backend = DrmBackend::Create(cfg, drm_display->session());
+
+    // Wire the HW cursor (if Create succeeded in opening one) to the
+    // seat dispatch thread so pointer events move the on-screen sprite.
+    // The pointer stays valid for the FlutterView's lifetime — both
+    // m_backend and drm_display are members destroyed in declaration
+    // order during ~FlutterView.
+    if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get());
+        drm_backend != nullptr) {
+      drm_display->SetCursor(drm_backend->drm_cursor());
+    }
   }
 #elif BUILD_BACKEND_WAYLAND_EGL
   {

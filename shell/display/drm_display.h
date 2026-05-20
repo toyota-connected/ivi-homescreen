@@ -22,8 +22,9 @@
 #include "input/iseat.h"
 
 namespace homescreen {
+class DrmCursor;
 class DrmSession;
-}
+}  // namespace homescreen
 
 class DrmDisplay final : public IDisplay {
  public:
@@ -45,6 +46,12 @@ class DrmDisplay final : public IDisplay {
 
   void SetViewControllerState(
       FlutterDesktopViewControllerState* state) override;
+
+  // Forward the DRM hardware cursor to the seat thread so pointer
+  // events move the on-screen sprite. nullptr is safe and disables
+  // the sprite (used during teardown before DrmBackend destroys the
+  // DrmCursor it owns).
+  void SetCursor(homescreen::DrmCursor* cursor);
 
   [[nodiscard]] double GetRefreshRate(uint32_t /*index*/) const override {
     return refresh_rate_hz_;

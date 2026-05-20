@@ -36,6 +36,7 @@
 
 #include "asio/dispatch.hpp"
 #include "asio/post.hpp"
+#include "backend/drm_kms_egl/drm_cursor.h"
 #include "engine.h"
 #include "input/key_mapping.h"
 #include "libflutter_engine.h"
@@ -478,6 +479,10 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
       std::clamp(pointer_x_ + ev.dx, 0.0, static_cast<double>(viewport_w_ - 1));
   pointer_y_ =
       std::clamp(pointer_y_ + ev.dy, 0.0, static_cast<double>(viewport_h_ - 1));
+
+  if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
+    c->Move(static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
+  }
 
   FlutterPointerEvent pe[2];
   size_t count = 0;

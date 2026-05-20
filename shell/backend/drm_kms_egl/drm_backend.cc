@@ -36,6 +36,7 @@
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
+#include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/drm_session.h"
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
@@ -354,6 +355,18 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
 #if BUILD_COMPOSITOR
   backend->compositor_ = std::make_unique<DrmCompositor>(backend.get());
 #endif
+
+  // HW cursor on the CRTC's cursor plane (or legacy drmModeSetCursor
+  // when the driver doesn't expose one). Failure is non-fatal —
+  // pointer events still flow to Flutter, just without a visible
+  // sprite. Independent of the compositor: cursor commits run on
+  // their own AtomicRequests on the seat dispatch thread.
+#if HAVE_DRM_CURSOR
+  backend->cursor_ = homescreen::DrmCursor::Create(
+      *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
+      backend->mode_, backend->fb_w_, backend->fb_h_);
+#endif
+
   return backend;
 }
 

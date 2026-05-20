@@ -36,8 +36,9 @@
 
 class DrmCompositor;
 namespace homescreen {
+class DrmCursor;
 class DrmSession;
-}
+}  // namespace homescreen
 
 // Defined in driver_probe.h — forward-declared here so DrmBackend can hold
 // a std::unique_ptr<Resolved> without pulling that header into every TU.
@@ -243,4 +244,10 @@ class DrmBackend : public Backend {
 #if BUILD_COMPOSITOR
   std::unique_ptr<DrmCompositor> compositor_;
 #endif
+  std::unique_ptr<homescreen::DrmCursor> cursor_;
+
+ public:
+  [[nodiscard]] homescreen::DrmCursor* drm_cursor() const {
+    return cursor_.get();
+  }
 };
