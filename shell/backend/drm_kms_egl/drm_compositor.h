@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -87,6 +88,15 @@ class DrmCompositor {
   void ResizeSurface(FlutterPlatformViewIdentifier id,
                      int32_t width,
                      int32_t height);
+
+  // Session pause/resume hooks, invoked by DrmBackend from the
+  // DrmSession dispatch thread. SetPaused(true) gates the Present*
+  // entry points so they ack the frame without touching the kernel;
+  // OnResume() clears the pause flag, drops the stale flip-pending
+  // latch (no PAGE_FLIP_EVENT will come for the suppressed commits),
+  // and forces the next commit to be a full modeset.
+  void SetPaused(bool paused);
+  void OnResume();
 
  private:
   struct StoreBaton {
@@ -256,6 +266,17 @@ class DrmCompositor {
   // Set once we hit an unrecoverable atomic-commit failure. All future
   // frames route through PresentViaGlFallback until restart.
   bool fallback_latched_{false};
+
+  // Session-pause gate. Set by DrmBackend::OnSessionPaused (libseat
+  // disable_seat) and cleared by OnResume on libseat enable_seat. Read
+  // by the Present* entry points on the rasterizer thread; written on
+  // DrmSession's dispatch thread — must be atomic.
+  std::atomic<bool> paused_{false};
+
+  // One-shot diagnostic: log on the first PresentLayers entry after a
+  // resume so a stuck Flutter frame pacer is visible. Cleared by
+  // OnResume, set on entry.
+  bool resume_pending_logged_{false};
 
  public:
   // Queried by DrmBackend to decide whether .present should be a no-op
