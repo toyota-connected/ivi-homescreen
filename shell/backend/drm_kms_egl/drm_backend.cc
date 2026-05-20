@@ -28,6 +28,8 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -318,6 +320,23 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
   if (!backend->InitDrm()) {
     return nullptr;
+  }
+
+  // Observability-only hotplug handler: log every connector plug/unplug
+  // uevent so field traces show display changes. No state mutation yet.
+  if (session != nullptr) {
+    const uint32_t our_connector = backend->connector_id_;
+    session->set_hotplug_handler(
+        [our_connector](const drm::display::HotplugEvent& e) {
+          const std::string id_str = e.connector_id
+                                         ? std::to_string(*e.connector_id)
+                                         : std::string("<unspecified>");
+          const bool ours = e.connector_id && *e.connector_id == our_connector;
+          spdlog::info(
+              "[DrmBackend] hotplug: devnode={} connector_id={}{}",
+              e.devnode.empty() ? std::string_view{"<unknown>"} : e.devnode,
+              id_str, ours ? " (active connector)" : "");
+        });
   }
 
   // Resolve tristate knobs now — InitDrm has the CRTC selected and the

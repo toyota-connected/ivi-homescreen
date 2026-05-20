@@ -17,10 +17,14 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
+#include <drm-cxx/display/hotplug_monitor.hpp>
 #include <drm-cxx/input/seat.hpp>
 #include <drm-cxx/session/seat.hpp>
 
@@ -63,11 +67,22 @@ class DrmSession {
   // open_restricted/close_restricted route through libseat.
   [[nodiscard]] drm::input::InputDeviceOpener InputOpener();
 
+  // Install or replace a handler invoked on every DRM hotplug uevent
+  // (connector plug/unplug). Fires on the dispatch thread, so the
+  // handler must be thread-safe with respect to anything it touches.
+  // No-op if the underlying HotplugMonitor failed to open or was
+  // disabled via IVI_DRM_HOTPLUG=0.
+  using HotplugHandler = std::function<void(const drm::display::HotplugEvent&)>;
+  void set_hotplug_handler(HotplugHandler handler);
+
  private:
   explicit DrmSession(drm::session::Seat seat);
   void DispatchLoop();
 
   drm::session::Seat seat_;
+  std::optional<drm::display::HotplugMonitor> hotplug_;
+  std::mutex hotplug_handler_mu_;
+  HotplugHandler hotplug_handler_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
 };
