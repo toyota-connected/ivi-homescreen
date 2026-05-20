@@ -16,6 +16,7 @@
 
 #include "display/drm_display.h"
 
+#include <cstring>
 #include <utility>
 
 #include "backend/drm_kms_egl/drm_session.h"
@@ -53,6 +54,33 @@ DrmDisplay::DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz)
       seat_(std::make_unique<homescreen::DrmSeat>(width,
                                                   height,
                                                   OpenerFrom(session_.get()))) {
+  // Route Ctrl+Alt+F<n> through libseat. K_OFF (set inside DrmSeat) hides
+  // the chord from the kernel keymap layer, so without this hook the
+  // user has no way to leave the session short of remoting in and
+  // running `chvt`. Only installed when both pieces exist — without a
+  // libseat session there's no switch_session API to call.
+  //
+  // While we're here, also subscribe DrmSeat to session pause/resume
+  // so libinput's evdev fds get suspended/resumed across the VT
+  // round-trip. DrmBackend installs its own pair separately
+  // (compositor pause + ScheduleFrame on resume).
+  if (session_) {
+    if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+      homescreen::DrmSession* sess = session_.get();
+      drm_seat->SetVtSwitchHandler([sess](int vt) -> bool {
+        const int err = sess->SwitchSession(vt);
+        if (err != 0) {
+          spdlog::warn("[DrmDisplay] SwitchSession({}) failed: {}", vt,
+                       std::strerror(err));
+          return false;
+        }
+        return true;
+      });
+      session_->AddPauseHandler([drm_seat]() { drm_seat->OnSessionPaused(); });
+      session_->AddResumeHandler(
+          [drm_seat](int /*fd*/) { drm_seat->OnSessionResumed(); });
+    }
+  }
 }
 
 DrmDisplay::~DrmDisplay() = default;
