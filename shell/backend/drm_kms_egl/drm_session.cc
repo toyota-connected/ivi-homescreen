@@ -46,20 +46,46 @@ std::unique_ptr<DrmSession> DrmSession::Open() {
 DrmSession::DrmSession(drm::session::Seat seat) : seat_(std::move(seat)) {
   // Set callbacks before starting the dispatch thread so they're live
   // for any event the first dispatch() call drains.
-  seat_.set_pause_callback([]() {
+  //
+  // Default pause behavior (no lifecycle handler installed yet): raise
+  // SIGTERM so a partially-initialized process exits cleanly rather
+  // than wedging the seat. Once DrmBackend calls SetLifecycleHandlers,
+  // the installed handler takes over and the process stays alive
+  // across VT switches.
+  seat_.set_pause_callback([this]() {
+    std::vector<PauseFn> handlers;
+    {
+      std::lock_guard lk(lifecycle_mu_);
+      handlers = pause_handlers_;
+    }
+    if (!handlers.empty()) {
+      for (auto& h : handlers) {
+        h();
+      }
+      return;
+    }
     spdlog::warn(
-        "[DrmSession] session preempted (VT switch-out) — raising SIGTERM");
-    // Signal the process-wide shutdown handler installed in main. raise()
-    // delivers to this thread; SIGTERM's handler is async-signal-safe and
-    // just flips the global `running` flag, which the main loop observes
-    // on its next iteration.
+        "[DrmSession] session preempted (VT switch-out) before lifecycle "
+        "handlers installed — raising SIGTERM");
+    // raise() delivers to this thread; SIGTERM's handler is async-
+    // signal-safe and just flips the global `running` flag, which the
+    // main loop observes on its next iteration.
     raise(SIGTERM);
   });
-  seat_.set_resume_callback([](std::string_view path, int new_fd) {
+  seat_.set_resume_callback([this](std::string_view path, int new_fd) {
+    std::vector<ResumeFn> handlers;
+    {
+      std::lock_guard lk(lifecycle_mu_);
+      handlers = resume_handlers_;
+    }
+    if (!handlers.empty()) {
+      for (auto& h : handlers) {
+        h(new_fd);
+      }
+      return;
+    }
     spdlog::warn(
-        "[DrmSession] resume callback fired for {} (new_fd={}) — "
-        "pause/resume handling is stubbed; the process should already "
-        "be shutting down",
+        "[DrmSession] resume for {} (fd={}) ignored — no lifecycle handler",
         std::string(path), new_fd);
   });
 
@@ -99,7 +125,13 @@ DrmSession::~DrmSession() {
 }
 
 int DrmSession::TakeDevice(const std::string& path) {
-  auto handle = seat_.take_device(path);
+  // preserve_fd_across_resume = true: logind/seatd revoke the master
+  // capability without invalidating the fd integer. Keeping the same
+  // fd lets DrmBackend keep its GBM / EGL / property-blob / FB-ID
+  // state alive across VT switches and just re-modeset on resume.
+  drm::session::TakeDeviceOpts opts{};
+  opts.preserve_fd_across_resume = true;
+  auto handle = seat_.take_device(path, opts);
   if (!handle) {
     return -1;
   }
@@ -108,6 +140,24 @@ int DrmSession::TakeDevice(const std::string& path) {
 
 drm::input::InputDeviceOpener DrmSession::InputOpener() {
   return seat_.input_opener();
+}
+
+int DrmSession::SwitchSession(const int session_num) {
+  auto r = seat_.switch_session(session_num);
+  if (!r) {
+    return r.error().value();
+  }
+  return 0;
+}
+
+void DrmSession::AddPauseHandler(PauseFn on_pause) {
+  std::lock_guard lk(lifecycle_mu_);
+  pause_handlers_.push_back(std::move(on_pause));
+}
+
+void DrmSession::AddResumeHandler(ResumeFn on_resume) {
+  std::lock_guard lk(lifecycle_mu_);
+  resume_handlers_.push_back(std::move(on_resume));
 }
 
 void DrmSession::DispatchLoop() {
