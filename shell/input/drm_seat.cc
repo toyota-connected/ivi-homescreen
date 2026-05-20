@@ -184,12 +184,6 @@ bool DrmSeat::Start() {
     tty_fd_ = ::open("/dev/tty", O_RDWR | O_CLOEXEC);
     if (tty_fd_ >= 0) {
       if (ioctl(tty_fd_, KDGKBMODE, &saved_kb_mode_) == 0) {
-        // Arm the reverse-watchdog BEFORE mutating the kb mode. If the
-        // parent is SIGKILL'd before Stop() runs, the child restores
-        // saved_kb_mode_ so the console keyboard comes back.
-        tty_watchdog_ =
-            homescreen::watchdog::SpawnTtyRestore(tty_fd_, saved_kb_mode_);
-
         if (ioctl(tty_fd_, KDSKBMODE, K_OFF) == 0) {
           spdlog::info("[DrmSeat] VT keyboard mode set to K_OFF (was {})",
                        saved_kb_mode_);
@@ -201,8 +195,6 @@ bool DrmSeat::Start() {
           g_tty_fd.store(tty_fd_, std::memory_order_release);
           std::call_once(g_backstop_installed, &InstallBackstop);
         } else {
-          // Nothing mutated — drop the watchdog.
-          homescreen::watchdog::Disarm(tty_watchdog_);
           spdlog::warn("[DrmSeat] KDSKBMODE K_OFF failed: {}",
                        std::strerror(errno));
         }
@@ -277,8 +269,6 @@ void DrmSeat::Stop() {
     ::close(tty_fd_);
     tty_fd_ = -1;
   }
-  // Reverse-watchdog no longer needed: we restored the mode ourselves.
-  homescreen::watchdog::Disarm(tty_watchdog_);
 }
 
 void DrmSeat::DispatchLoop() {
