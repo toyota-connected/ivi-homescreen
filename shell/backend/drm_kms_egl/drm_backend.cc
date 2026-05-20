@@ -373,6 +373,18 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   backend->capture_ = homescreen::DrmCapture::Create();
 #endif
 
+  // Wire pause/resume lifecycle handlers now that the compositor exists.
+  // The handlers fire on DrmSession's dispatch thread; both do only
+  // atomic-flag work + (on resume) a single ScheduleFrame call — no
+  // kernel ioctls — so the seat dispatch loop stays responsive.
+  // DrmSeat installs its own pair separately (libinput suspend/resume).
+  if (session != nullptr) {
+    DrmBackend* raw = backend.get();
+    session->AddPauseHandler([raw]() { raw->OnSessionPaused(); });
+    session->AddResumeHandler(
+        [raw](int new_fd) { raw->OnSessionResumed(new_fd); });
+  }
+
   return backend;
 }
 
@@ -1012,8 +1024,64 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
     LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
     return;
   }
-  vsync_engine_.store(engine, std::memory_order_relaxed);
+  engine_handle_.store(engine, std::memory_order_relaxed);
   vsync_baton_.store(baton, std::memory_order_release);
+}
+
+void DrmBackend::OnSessionPaused() {
+  spdlog::info("[DrmBackend] session paused (VT switch-out)");
+#if BUILD_COMPOSITOR
+  if (compositor_) {
+    compositor_->SetPaused(true);
+  }
+#endif
+  // Drop the legacy-path flip latch too. PAGE_FLIP_EVENT won't come for
+  // a commit submitted before the revoke; the next Present after resume
+  // will start a fresh flip cycle.
+  flip_pending_ = false;
+}
+
+void DrmBackend::OnSessionResumed(const int new_fd) {
+  // preserve-fd contract: the new fd should equal the one we took at
+  // init. If it doesn't, something has changed about the underlying
+  // libseat backend's behavior — log loudly because the rest of the
+  // backend assumes per-fd state survived the round trip.
+  if (drm_dev_ && new_fd != drm_dev_->fd()) {
+    spdlog::error(
+        "[DrmBackend] resume: fd changed ({} -> {}) — preserve-fd contract "
+        "violated; per-fd state (FB ids, EGL/GBM, property cache) is stale "
+        "and the next commit will likely fail",
+        drm_dev_->fd(), new_fd);
+  }
+  spdlog::info("[DrmBackend] session resumed (VT switch-in, fd={})", new_fd);
+#if BUILD_COMPOSITOR
+  if (compositor_) {
+    compositor_->OnResume();
+  }
+#endif
+  mode_set_ = false;
+
+  // The vsync_callback path is currently disabled (engine.cc:67), so
+  // Flutter uses its internal wall-clock scheduler and won't request a
+  // frame on its own when the UI is idle. Ask the engine to schedule
+  // one so the rasterizer thread runs PresentLayers, sees
+  // plane_mode_set_ cleared by OnResume, and re-modesets the CRTC.
+  // Without this the screen stays blank until the next animation tick
+  // (sometimes never, for static screens).
+  if (auto engine = engine_handle_.load(std::memory_order_acquire);
+      engine != nullptr) {
+    const FlutterEngineResult r = LibFlutterEngine->ScheduleFrame(engine);
+    if (r != kSuccess) {
+      spdlog::warn("[DrmBackend] resume: ScheduleFrame failed (rc={})",
+                   static_cast<int>(r));
+    } else {
+      spdlog::info("[DrmBackend] resume: ScheduleFrame requested");
+    }
+  } else {
+    spdlog::warn(
+        "[DrmBackend] resume: no engine handle yet; redraw skipped (UI must "
+        "tick on its own)");
+  }
 }
 
 void DrmBackend::PageFlipHandler(int /*fd*/,
@@ -1044,7 +1112,7 @@ void DrmBackend::PageFlipHandler(int /*fd*/,
       self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
   if (baton != 0) {
     if (const auto engine =
-            self->vsync_engine_.load(std::memory_order_relaxed)) {
+            self->engine_handle_.load(std::memory_order_relaxed)) {
       const uint64_t now = LibFlutterEngine->GetCurrentTime();
       const uint64_t period_ns =
           self->mode_.vrefresh > 0

@@ -143,6 +143,24 @@ class DrmBackend : public Backend {
 
   void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
 
+  // Set the running engine handle so OnSessionResumed can call
+  // FlutterEngineScheduleFrame. Wired by FlutterView after Engine::Run
+  // succeeds. Stored atomically because reads happen on the libseat
+  // dispatch thread.
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) {
+    engine_handle_.store(engine, std::memory_order_release);
+  }
+
+  // Session lifecycle hooks, called from DrmSession's dispatch thread by
+  // the libseat trampoline. OnSessionPaused gates the compositor's
+  // Present paths and lets the rasterizer drop any flip it had pending;
+  // OnSessionResumed clears the pause flag, marks the compositor for a
+  // re-modeset on the next commit, and asks the engine to schedule a
+  // frame so Flutter actually produces one — without that kick an idle
+  // UI never calls Present again and the screen stays blank.
+  void OnSessionPaused();
+  void OnSessionResumed(int new_fd);
+
   [[nodiscard]] const drm::Device& device() const { return *drm_dev_; }
   [[nodiscard]] int drm_fd() const { return drm_dev_->fd(); }
   [[nodiscard]] uint32_t connector_id() const { return connector_id_; }
@@ -226,7 +244,13 @@ class DrmBackend : public Backend {
   bool mode_set_ = false;
 
   std::atomic<intptr_t> vsync_baton_{0};
-  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> vsync_engine_{nullptr};
+  // FlutterEngine handle. Installed by FlutterView via SetEngineHandle
+  // after Engine::Run. Also updated defensively by SetVsyncBaton so the
+  // vsync_callback path (currently dead — see engine.cc:67) stays
+  // consistent if it gets re-enabled. Read by OnSessionResumed (calls
+  // ScheduleFrame so the UI redraws after a VT round-trip) and by
+  // DrmCompositor's flip handlers when returning vsync batons.
+  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_handle_{nullptr};
 
   // Frame stats — only active when cfg_.debug_backend is set. Accessed
   // from the rasterizer thread only (Present / PageFlipHandler), so no

@@ -294,6 +294,16 @@ void FlutterView::Initialize() {
     exit(EXIT_FAILURE);
   }
 
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // Hand the engine handle to the DRM backend so OnSessionResumed can
+  // call ScheduleFrame after a VT round-trip — without that kick an
+  // idle UI never asks us to draw and the screen stays blank.
+  if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get());
+      drm_backend != nullptr) {
+    drm_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
+  }
+#endif
+
   // notify display update
   FlutterEngineDisplay display{};
   display.struct_size = sizeof(FlutterEngineDisplay);
