@@ -18,7 +18,9 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 
 #include <drm-cxx/input/key_repeater.hpp>
@@ -31,6 +33,17 @@
 #include "input/iseat.h"
 
 namespace homescreen {
+
+// Owned-string variant of drm::input::KeymapOptions, safe to pass
+// across threads. drm::input::KeymapOptions itself uses string_views,
+// which can't survive cross-thread hand-off.
+struct KeymapConfig {
+  std::string rules;
+  std::string model;
+  std::string layout;
+  std::string variant;
+  std::string options;
+};
 
 // libinput-backed seat. Pumps drm::input::Seat events on a dedicated thread
 // and translates them into FlutterPointerEvent / FlutterKeyEvent. Events
@@ -55,8 +68,18 @@ class DrmSeat final : public ISeat {
   void SetViewControllerState(
       FlutterDesktopViewControllerState* state) override;
 
+  // Hot-swap the xkb keymap. Safe to call from any thread; the actual
+  // reload runs on the dispatch thread on the next poll iteration.
+  // Held keys and lock latches are preserved across the swap. On
+  // failure (bad RMLVO names), the existing keymap is left intact and
+  // a warning is logged. Empty fields fall back to xkb's system
+  // defaults for that knob. Currently dormant — no caller wires this;
+  // intended for a future settings/locale channel.
+  void ReloadKeymap(KeymapConfig cfg);
+
  private:
   void DispatchLoop();
+  void ApplyPendingKeymap();
   void HandleEvent(const drm::input::InputEvent& ev);
   void HandleKeyboard(const drm::input::KeyboardEvent& ev);
   void DispatchKeyToFlutter(const drm::input::KeyboardEvent& resolved) const;
@@ -84,6 +107,13 @@ class DrmSeat final : public ISeat {
   std::optional<drm::input::KeyRepeater> repeater_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
+
+  // Keymap reloads posted from any thread, drained on the dispatch
+  // thread by ApplyPendingKeymap() at the top of each DispatchLoop
+  // iteration. Owns its strings so caller threads don't have to keep
+  // them alive past ReloadKeymap() returning.
+  std::mutex pending_mu_;
+  std::optional<KeymapConfig> pending_keymap_;
 
   // VT keyboard mode. In a text console, without K_OFF keystrokes are
   // also consumed by the kernel tty line discipline (echoed to the
