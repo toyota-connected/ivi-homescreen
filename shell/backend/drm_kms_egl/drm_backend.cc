@@ -446,10 +446,10 @@ bool DrmBackend::InitDrm() {
   if (session_ != nullptr) {
     // libseat path: the seat provider (logind/seatd/builtin) owns VT
     // activation and master handoff. Skip the foreground-VT check
-    // (logind activates us only when the VT is ours), skip drmSetMaster
+    // (logind activates us only when the VT is ours) and drmSetMaster
     // (libseat_open_device returns a master-capable fd while we hold
-    // the seat), and skip the reverse-watchdog (the seat provider
-    // releases the session cleanly on socket drop — SIGKILL included).
+    // the seat). The seat provider also releases the session cleanly
+    // on socket drop (SIGKILL included), restoring TTY state externally.
     const int fd = session_->TakeDevice(cfg_.drm_device);
     if (fd < 0) {
       spdlog::error("[DrmBackend] session take_device({}): failed",

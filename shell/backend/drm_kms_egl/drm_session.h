@@ -47,8 +47,12 @@ namespace homescreen {
 // no seatd, no permissions for builtin, or drm-cxx built without libseat
 // support). Callers then fall back to opening DRM / input devices
 // directly, with the pre-libseat guards (foreground-VT check,
-// drmSetMaster, reverse watchdogs) providing roughly the same guarantees
-// the seat provider would.
+// drmSetMaster) providing roughly the same activation guarantees the
+// seat provider would. The SIGKILL-recovery reverse watchdog that used
+// to back the fallback path has been removed; on a SIGKILL'd bare-TTY
+// shell the VT may be stranded in K_OFF and the CRTC pointing at a
+// freed BO until the next compositor reprograms — recover manually
+// with `sudo kbd_mode -a` and a `chvt` round-trip.
 class DrmSession {
  public:
   static std::unique_ptr<DrmSession> Open();
