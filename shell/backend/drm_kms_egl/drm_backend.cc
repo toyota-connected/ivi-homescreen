@@ -344,6 +344,7 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   // this must happen before it.
   backend->resolved_ = std::make_unique<homescreen::driver_probe::Resolved>(
       homescreen::driver_probe::Resolve(backend->drm_dev_->fd(),
+                                        backend->connector_id_,
                                         backend->crtc_id_, cfg));
   homescreen::driver_probe::LogResolved(*backend->resolved_);
 

@@ -17,13 +17,20 @@
 #include "backend/drm_kms_egl/driver_probe.h"
 
 #include <drm_fourcc.h>
+#include <drm_mode.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string_view>
+#include <utility>
+
+#include <drm-cxx/detail/span.hpp>
+#include <drm-cxx/display/edid.hpp>
 
 #include "logging.h"
 
@@ -219,9 +226,53 @@ bool HasAsyncFlipCap(const int drm_fd) {
   return drmGetCap(drm_fd, DRM_CAP_ASYNC_PAGE_FLIP, &cap) == 0 && cap == 1;
 }
 
+// Fetch + parse the EDID blob on the given connector. Walks the
+// connector's properties to find one named "EDID", reads its blob, hands
+// the bytes to drm-cxx's libdisplay-info-backed parser. nullopt on any
+// failure (no EDID blob, bad bytes, libdisplay-info rejects it) — EDID
+// data is informational here, never load-bearing.
+std::optional<drm::display::ConnectorInfo> ProbeConnectorInfo(
+    const int drm_fd,
+    const uint32_t connector_id) {
+  drmModeObjectProperties* props = drmModeObjectGetProperties(
+      drm_fd, connector_id, DRM_MODE_OBJECT_CONNECTOR);
+  if (props == nullptr) {
+    return std::nullopt;
+  }
+  uint32_t edid_blob_id = 0;
+  for (uint32_t i = 0; i < props->count_props && edid_blob_id == 0; ++i) {
+    drmModePropertyRes* prop = drmModeGetProperty(drm_fd, props->props[i]);
+    if (prop != nullptr) {
+      if (std::string_view(prop->name) == "EDID") {
+        edid_blob_id = static_cast<uint32_t>(props->prop_values[i]);
+      }
+      drmModeFreeProperty(prop);
+    }
+  }
+  drmModeFreeObjectProperties(props);
+  if (edid_blob_id == 0) {
+    return std::nullopt;
+  }
+  drmModePropertyBlobRes* blob = drmModeGetPropertyBlob(drm_fd, edid_blob_id);
+  if (blob == nullptr || blob->data == nullptr || blob->length == 0) {
+    if (blob != nullptr) {
+      drmModeFreePropertyBlob(blob);
+    }
+    return std::nullopt;
+  }
+  auto parsed = drm::display::parse_edid(drm::span<const uint8_t>(
+      static_cast<const uint8_t*>(blob->data), blob->length));
+  drmModeFreePropertyBlob(blob);
+  if (!parsed) {
+    return std::nullopt;
+  }
+  return std::optional<drm::display::ConnectorInfo>(std::move(*parsed));
+}
+
 }  // namespace
 
 Resolved Resolve(const int drm_fd,
+                 const uint32_t connector_id,
                  const uint32_t crtc_id,
                  const DrmConfig& cfg) {
   Resolved r{};
@@ -387,8 +438,26 @@ Resolved Resolve(const int drm_fd,
       break;
   }
 
+  r.connector_info = ProbeConnectorInfo(drm_fd, connector_id);
+
   return r;
 }
+
+namespace {
+// Strip control bytes from EDID-derived strings before logging.
+// EDID monitor descriptors are attacker-influenced (any connected
+// device picks them) and can carry ANSI escapes or terminal-control
+// bytes that would otherwise flow into stdout sinks unsanitized.
+std::string Sanitize(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (const char c : s) {
+    const auto u = static_cast<unsigned char>(c);
+    out.push_back((u < 0x20 || u == 0x7f) ? '?' : c);
+  }
+  return out;
+}
+}  // namespace
 
 void LogResolved(const Resolved& r) {
   spdlog::info(
@@ -401,6 +470,25 @@ void LogResolved(const Resolved& r) {
       r.allow_nonblock_modeset ? "yes" : "no", r.primary_format, r.bs_format,
       r.overlay_planes ? "yes" : "no", r.explicit_sync ? "yes" : "no",
       r.async_flip ? "yes" : "no");
+
+  if (r.connector_info.has_value()) {
+    const auto& ci = *r.connector_info;
+    if (ci.hdr.has_value()) {
+      const auto& h = *ci.hdr;
+      spdlog::info(
+          "[DrmBackend] panel='{}' hdr=type1:{} sdr:{} hdr:{} pq:{} hlg:{} "
+          "lum-max={:.0f} lum-min={:.4f}",
+          ci.name.empty() ? std::string{"?"} : Sanitize(ci.name),
+          h.type1 ? "y" : "n", h.traditional_sdr ? "y" : "n",
+          h.traditional_hdr ? "y" : "n", h.pq ? "y" : "n", h.hlg ? "y" : "n",
+          h.desired_content_max_luminance, h.desired_content_min_luminance);
+    } else {
+      spdlog::info("[DrmBackend] panel='{}' hdr=absent",
+                   ci.name.empty() ? std::string{"?"} : Sanitize(ci.name));
+    }
+  } else {
+    spdlog::info("[DrmBackend] panel=<no EDID>");
+  }
 }
 
 }  // namespace homescreen::driver_probe
