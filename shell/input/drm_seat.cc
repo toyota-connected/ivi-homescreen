@@ -278,6 +278,41 @@ void DrmSeat::DispatchLoop() {
 
   while (!stop_.load(std::memory_order_acquire)) {
     ApplyPendingKeymap();
+
+    // Drain any pending session pause/resume action posted by the
+    // libseat dispatch thread. libinput suspend/resume MUST run on the
+    // thread that owns the libinput context (this one). On suspend,
+    // libinput closes its evdev fds via close_restricted, which
+    // releases them through libseat. On resume, libinput reopens via
+    // open_restricted, which routes back through libseat and gets
+    // fresh post-VT-switch fds. Without this dance, post-resume
+    // libinput is reading from revoked fds and produces no events —
+    // the symptom is the chord working once and then never again.
+    switch (const auto act = pending_session_action_.exchange(
+                PendingSessionAction::kNone, std::memory_order_acq_rel);
+            act) {
+      case PendingSessionAction::kSuspend:
+        if (seat_) {
+          if (auto r = seat_->suspend(); !r) {
+            spdlog::warn("[DrmSeat] libinput suspend: {}", r.error().message());
+          } else {
+            spdlog::info("[DrmSeat] libinput suspended for VT switch-out");
+          }
+        }
+        break;
+      case PendingSessionAction::kResume:
+        if (seat_) {
+          if (auto r = seat_->resume(); !r) {
+            spdlog::warn("[DrmSeat] libinput resume: {}", r.error().message());
+          } else {
+            spdlog::info("[DrmSeat] libinput resumed after VT switch-in");
+          }
+        }
+        break;
+      case PendingSessionAction::kNone:
+        break;
+    }
+
     pollfd pfds[2];
     pfds[0] = {seat_fd, POLLIN, 0};
     nfds_t nfds = 1;
@@ -368,6 +403,21 @@ void DrmSeat::ReloadKeymap(KeymapConfig cfg) {
   pending_keymap_ = std::move(cfg);
 }
 
+void DrmSeat::SetVtSwitchHandler(VtSwitchHandler handler) {
+  std::lock_guard lk(vt_switch_mu_);
+  vt_switch_handler_ = std::move(handler);
+}
+
+void DrmSeat::OnSessionPaused() {
+  pending_session_action_.store(PendingSessionAction::kSuspend,
+                                std::memory_order_release);
+}
+
+void DrmSeat::OnSessionResumed() {
+  pending_session_action_.store(PendingSessionAction::kResume,
+                                std::memory_order_release);
+}
+
 void DrmSeat::ApplyPendingKeymap() {
   std::optional<KeymapConfig> cfg;
   {
@@ -408,6 +458,72 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   if (keyboard_) {
     keyboard_->process_key(resolved);
   }
+
+  // VT-switch chord interception. With K_OFF the kernel keymap layer
+  // doesn't dispatch Ctrl+Alt+F<n> for us; intercept the chord here and
+  // route it through the installed handler (typically libseat
+  // switch_session). Only on the press edge of the F-key — releases and
+  // repeats are dropped so the chord doesn't fire repeatedly while held
+  // and doesn't bounce Flutter on the release. Modifier-key events
+  // (Ctrl/Alt themselves) skip this entirely so they still latch the
+  // keyboard_ state above.
+  if (resolved.pressed && !resolved.repeat && keyboard_ &&
+      keyboard_->ctrl_active() && keyboard_->alt_active()) {
+    int vt = 0;
+    switch (resolved.key) {
+      case KEY_F1:
+        vt = 1;
+        break;
+      case KEY_F2:
+        vt = 2;
+        break;
+      case KEY_F3:
+        vt = 3;
+        break;
+      case KEY_F4:
+        vt = 4;
+        break;
+      case KEY_F5:
+        vt = 5;
+        break;
+      case KEY_F6:
+        vt = 6;
+        break;
+      case KEY_F7:
+        vt = 7;
+        break;
+      case KEY_F8:
+        vt = 8;
+        break;
+      case KEY_F9:
+        vt = 9;
+        break;
+      case KEY_F10:
+        vt = 10;
+        break;
+      case KEY_F11:
+        vt = 11;
+        break;
+      case KEY_F12:
+        vt = 12;
+        break;
+      default:
+        break;
+    }
+    if (vt != 0) {
+      VtSwitchHandler handler;
+      {
+        std::lock_guard lk(vt_switch_mu_);
+        handler = vt_switch_handler_;
+      }
+      if (handler && handler(vt)) {
+        spdlog::info("[DrmSeat] Ctrl+Alt+F{} → VT switch requested", vt);
+        // Consume the event: don't repeat-track, don't forward to Flutter.
+        return;
+      }
+    }
+  }
+
   // Track press/release in the repeater so it arms on press of an
   // eligible key and cancels on release. The repeater filters its own
   // synthesized events out of on_key (event.repeat == true is dropped).
