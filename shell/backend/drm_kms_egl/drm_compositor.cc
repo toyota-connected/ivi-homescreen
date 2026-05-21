@@ -115,6 +115,36 @@ struct FrameProfile {
   }
 };
 
+// Returns true iff `plane_id`'s `rotation` property is a BITMASK that
+// includes the `reflect-y` bit. Drivers that don't expose any rotation
+// property (zero-rotate planes) or that expose it but list only
+// "rotate-0" return false. Called once at init — not on the hot path.
+bool PlaneSupportsReflectY(const int fd, const uint32_t plane_id) {
+  auto* props = drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE);
+  if (props == nullptr) {
+    return false;
+  }
+  bool supports = false;
+  for (uint32_t i = 0; i < props->count_props && !supports; ++i) {
+    auto* prop = drmModeGetProperty(fd, props->props[i]);
+    if (prop == nullptr) {
+      continue;
+    }
+    if (std::strcmp(prop->name, "rotation") == 0 &&
+        (prop->flags & DRM_MODE_PROP_BITMASK) != 0U) {
+      for (int e = 0; e < prop->count_enums; ++e) {
+        if (std::strcmp(prop->enums[e].name, "reflect-y") == 0) {
+          supports = true;
+          break;
+        }
+      }
+    }
+    drmModeFreeProperty(prop);
+  }
+  drmModeFreeObjectProperties(props);
+  return supports;
+}
+
 // One-shot dump of every property on a DRM object, in "name=value
 // [flags]" form. Pre-commit snapshot of the pipe state so we can see
 // what fbcon/prior session left on the CRTC / planes / connector.
@@ -268,8 +298,25 @@ bool DrmCompositor::InitPlaneAllocator() {
       // layer on the bottom.
       primary_zpos_ = p->zpos_min.value_or(0);
     }
+    // Per-plane probe for REFLECT_Y. Direct-scanout in PresentLayers
+    // sets rotation=REFLECT_Y so GL-rendered (bottom-up) bits flip to
+    // scanout (top-down) order. The drm-cxx allocator's static screen
+    // filters planes on a coarse supports_rotation (binary) — it
+    // doesn't know whether the rotation property's bitmask actually
+    // includes reflect-y. Probing each plane here gives us a
+    // CRTC-wide "any plane can satisfy us" verdict, which gates the
+    // whole direct-scanout attempt. Without that gate, on hardware
+    // where NO plane supports REFLECT_Y, we'd burn a TEST_ONLY per
+    // plane per frame before giving up.
+    if (PlaneSupportsReflectY(backend_->drm_fd(),
+                              static_cast<uint32_t>(p->id))) {
+      any_plane_supports_reflect_y_ = true;
+      spdlog::info("[DrmCompositor]   plane {} supports REFLECT_Y", p->id);
+    }
   }
   spdlog::info("[DrmCompositor] primary plane zpos = {}", primary_zpos_);
+  spdlog::info("[DrmCompositor] direct-scanout REFLECT_Y available: {}",
+               any_plane_supports_reflect_y_ ? "yes" : "no");
 
   // Pre-commit snapshot: what fbcon/prior session left on the pipe.
   // EINVAL on the first atomic TEST usually correlates to a residual
@@ -1419,18 +1466,34 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       }
     }
 
-    // Direct-scanout requires a KMS framebuffer on the store's BO.
-    // EnsureDrmFbId imports on first use and caches for the BO's
-    // lifetime; pooled stores keep the fb_id across Collect → Create
-    // cycles, so at steady state there are no AddFB2 calls per frame.
-    if (store && EnsureDrmFbId(*store)) {
-      // Layer 0 → primary plane (zpos = primary's immutable/min zpos,
-      // queried at init). Subsequent layers stack above at
-      // primary_zpos_ + i, which falls in the overlay zpos range on
-      // every driver we've seen. Without this, a layer at zpos=0 on a
-      // driver where primary's zpos is != 0 (e.g. amdgpu's [2,2]) lands
-      // on an overlay and primary stays FB-less — blank screen.
-      const uint64_t layer_zpos = primary_zpos_ + static_cast<uint64_t>(i);
+    // Direct-scanout requires a KMS framebuffer on the store's BO
+    // AND a primary plane that can flip GL-rendered (bottom-up) bits
+    // to scanout (top-down) — i.e. REFLECT_Y in its rotation
+    // bitmask. Without that the BS would scan out upside-down, so
+    // bail to composition where the GL compositor's sample-with-flip
+    // already handles the orientation difference.
+    if (store && EnsureDrmFbId(*store) && any_plane_supports_reflect_y_) {
+      // PixelFormat + FbModifier are *static compatibility hints* the
+      // allocator reads BEFORE running TEST_ONLY commits — without
+      // them, `Layer::format()` returns nullopt and
+      // `Allocator::is_compatible_static_screen` returns false for
+      // every plane, so the allocator marks every layer as overflow
+      // and we end up GL-compositing everything. See LayerScene's
+      // equivalent path (third_party/drm-cxx/src/scene/layer_scene.cpp
+      // ~line 942) — same hints, same reason.
+      drm_layer.set_property(drm::planes::PropTag::PixelFormat, store->format)
+          .set_property(drm::planes::PropTag::FbModifier,
+                        gbm_bo_get_modifier(store->bo));
+      // Flutter renders to the BS using GL's bottom-up NDC convention:
+      // pixel rows live in memory with the visual bottom at the low
+      // address. The composite path compensates by sampling with
+      // flip_y=true into the comp BO before scanout. Direct-scanout
+      // has no compose step, so we ask KMS to mirror the plane on the
+      // way out (REFLECT_Y). amdgpu DC primary + overlay planes
+      // support this; on a driver that doesn't, the allocator's
+      // supports_rotation static screen rejects the layer and we fall
+      // back to GL composition.
+      constexpr uint64_t kReflectY = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
       drm_layer.set_property("FB_ID", store->drm_fb_id)
           .set_property("CRTC_ID", backend_->crtc_id())
           .set_property("CRTC_X",
@@ -1445,7 +1508,11 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
           .set_property("SRC_Y", 0)
           .set_property("SRC_W", static_cast<uint64_t>(store->width) << 16)
           .set_property("SRC_H", static_cast<uint64_t>(store->height) << 16)
-          .set_property("zpos", layer_zpos);
+          .set_property("rotation", kReflectY);
+      // Skip explicit zpos: LayerScene deliberately omits it (line ~945
+      // in layer_scene.cpp) because emitting zpos=N where N matches
+      // primary's immutable zpos can mis-screen overlays. Letting the
+      // allocator pick by plane class works better.
       drm_layer.set_content_type(i == 0 ? drm::planes::ContentType::UI
                                         : drm::planes::ContentType::Generic);
     } else {
@@ -1540,59 +1607,78 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   }
 
   // ── GL-composite layers that overflowed into the composition buffer ──
-
-  bool any_composited = false;
-  glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
-  glDisable(GL_SCISSOR_TEST);
-  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
-
-  for (auto& [flutter, store, drm] : frame_layers) {
-    if (!drm->needs_composition()) {
-      continue;
-    }
-    const bool blend = any_composited;
-    if (store) {
-      CompositeLayerIntoFbo(comp.fbo, store->fbo, store->color_tex,
-                            static_cast<GLsizei>(store->width),
-                            static_cast<GLsizei>(store->height),
-                            static_cast<GLint>(flutter->offset.x),
-                            static_cast<GLint>(flutter->offset.y),
-                            static_cast<GLsizei>(flutter->size.width),
-                            static_cast<GLsizei>(flutter->size.height), blend,
-                            /*flip_y=*/true);
-      any_composited = true;
-    } else if (flutter->type == kFlutterLayerContentTypePlatformView &&
-               flutter->platform_view) {
-      std::shared_ptr<ICompositorSurface> surface_sp;
-      {
-        std::lock_guard<std::mutex> lock(surfaces_mu_);
-        auto it = surfaces_.find(flutter->platform_view->identifier);
-        if (it != surfaces_.end()) {
-          surface_sp = it->second;
-        }
-      }
-      if (surface_sp) {
-        surface_sp->OnPresent(flutter);
-        if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
-          // See comp.fbo rationale in PresentFramed's platform-view branch.
-          const bool flip_y = !surface_sp->TextureIsTopFirst();
-          CompositeLayerIntoFbo(
-              comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
-              surface_sp->GetGlTextureHeight(),
-              static_cast<GLint>(flutter->offset.x),
-              static_cast<GLint>(flutter->offset.y),
-              static_cast<GLsizei>(flutter->size.width),
-              static_cast<GLsizei>(flutter->size.height), blend, flip_y);
-          any_composited = true;
-        }
-      }
+  //
+  // Direct-scanout fast path: when the allocator placed every Flutter
+  // layer on its own plane, there's nothing to composite — skip the
+  // entire GL block (bind / clear / glFinish) and let the comp buffer
+  // retain its prior content. It won't be scanned out: comp_layer is
+  // either unassigned by the allocator, or assigned to primary and
+  // covered by the per-layer scanout overlays above it. On a fullscreen
+  // single-BS frame this cuts the per-Present GL cost from ~6ms to
+  // ~0ms in local 2560x1440@240Hz measurements.
+  bool needs_compositing = false;
+  for (const auto& fl : frame_layers) {
+    if (fl.drm->needs_composition()) {
+      needs_compositing = true;
+      break;
     }
   }
 
-  glFinish();
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  bool any_composited = false;
+  if (needs_compositing) {
+    glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    for (auto& [flutter, store, drm] : frame_layers) {
+      if (!drm->needs_composition()) {
+        continue;
+      }
+      const bool blend = any_composited;
+      if (store) {
+        CompositeLayerIntoFbo(comp.fbo, store->fbo, store->color_tex,
+                              static_cast<GLsizei>(store->width),
+                              static_cast<GLsizei>(store->height),
+                              static_cast<GLint>(flutter->offset.x),
+                              static_cast<GLint>(flutter->offset.y),
+                              static_cast<GLsizei>(flutter->size.width),
+                              static_cast<GLsizei>(flutter->size.height), blend,
+                              /*flip_y=*/true);
+        any_composited = true;
+      } else if (flutter->type == kFlutterLayerContentTypePlatformView &&
+                 flutter->platform_view) {
+        std::shared_ptr<ICompositorSurface> surface_sp;
+        {
+          std::lock_guard<std::mutex> lock(surfaces_mu_);
+          auto it = surfaces_.find(flutter->platform_view->identifier);
+          if (it != surfaces_.end()) {
+            surface_sp = it->second;
+          }
+        }
+        if (surface_sp) {
+          surface_sp->OnPresent(flutter);
+          if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
+            // See comp.fbo rationale in PresentFramed's platform-view
+            // branch.
+            const bool flip_y = !surface_sp->TextureIsTopFirst();
+            CompositeLayerIntoFbo(
+                comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
+                surface_sp->GetGlTextureHeight(),
+                static_cast<GLint>(flutter->offset.x),
+                static_cast<GLint>(flutter->offset.y),
+                static_cast<GLsizei>(flutter->size.width),
+                static_cast<GLsizei>(flutter->size.height), blend, flip_y);
+            any_composited = true;
+          }
+        }
+      }
+    }
+
+    glFinish();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
 
   // ── Atomic commit ──
   // The test-only apply() above already populated `req` with all plane
@@ -1678,7 +1764,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   } else {
     flip_pending_.store(true, std::memory_order_release);
   }
-  comp_idx_ ^= 1;  // swap composition double-buffer for next frame
+  // Only advance the comp-buffer double-buffer index if we actually
+  // wrote to it this frame. Direct-scanout frames don't touch comp,
+  // so the next frame can keep using the same comp_idx_ if it needs
+  // composition again.
+  if (any_composited) {
+    comp_idx_ ^= 1;
+  }
   output.mark_clean();
 
   if (profile && profile_) {

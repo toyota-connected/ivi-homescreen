@@ -288,6 +288,16 @@ class DrmCompositor {
   // DrmSession's dispatch thread — must be atomic.
   std::atomic<bool> paused_{false};
 
+  // Probed once in InitPlaneAllocator: true iff at least one plane on
+  // the CRTC has reflect-y in its rotation bitmask. Gates the
+  // direct-scanout fast path in PresentLayers — without REFLECT_Y
+  // available somewhere, BS pixels (rendered bottom-up via GL) would
+  // scan out upside-down, so the layer must go through GL composition
+  // instead. Per-plane gating (not primary-only) so that hardware
+  // where overlays support rotation but primary doesn't can still
+  // benefit on the layers where the allocator can use an overlay.
+  bool any_plane_supports_reflect_y_{false};
+
   // One-shot diagnostic: log on the first PresentLayers entry after a
   // resume so a stuck Flutter frame pacer is visible. Cleared by
   // OnResume, set on entry.
