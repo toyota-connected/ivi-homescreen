@@ -109,6 +109,14 @@ class DrmSeat final : public ISeat {
   void OnSessionPaused();
   void OnSessionResumed();
 
+  // Update the cursor clamping rectangle. Called by FlutterView after
+  // DrmBackend::Create resolves the actual framebuffer dimensions
+  // (which can differ from the config's view.width/height when `-f`
+  // promoted the FB to the full mode). Must be called before Start()
+  // so the dispatch thread sees the final values without atomics; the
+  // dispatch thread's pointer math reads these once on the hot path.
+  void SetViewport(int32_t width, int32_t height);
+
  private:
   void DispatchLoop();
   void ApplyPendingKeymap();
@@ -128,8 +136,13 @@ class DrmSeat final : public ISeat {
 
   [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) CurrentEngine() const;
 
-  const int32_t viewport_w_;
-  const int32_t viewport_h_;
+  // Mutable so FlutterView can rewrite them in SetViewport after
+  // DrmBackend::Create has resolved the actual framebuffer size
+  // (e.g. when `-f` promoted the FB to the full mode). Read on the
+  // dispatch thread; SetViewport runs on the main thread before
+  // Start() is called, so no atomic needed.
+  int32_t viewport_w_;
+  int32_t viewport_h_;
 
   std::atomic<FlutterDesktopViewControllerState*> state_{nullptr};
 

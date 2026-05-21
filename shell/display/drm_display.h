@@ -53,6 +53,15 @@ class DrmDisplay final : public IDisplay {
   // DrmCursor it owns).
   void SetCursor(homescreen::DrmCursor* cursor);
 
+  // Update the seat's cursor clamping rectangle to match the actual
+  // backend framebuffer size. App::MakeDisplay constructs DrmDisplay
+  // with the config's view.width/height (defaults 1024x768) — but
+  // when `-f` is passed the backend FB is promoted to the full mode
+  // dimensions. FlutterView calls this after DrmBackend::Create
+  // resolves the real width/height so cursor motion clamps to the
+  // visible area rather than the stale config size.
+  void SetViewportSize(int32_t width, int32_t height);
+
   [[nodiscard]] double GetRefreshRate(uint32_t /*index*/) const override {
     return refresh_rate_hz_;
   }

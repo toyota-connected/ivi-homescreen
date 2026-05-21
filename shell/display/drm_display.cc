@@ -105,6 +105,14 @@ void DrmDisplay::SetViewControllerState(
   }
 }
 
+void DrmDisplay::SetViewportSize(const int32_t width, const int32_t height) {
+  width_ = width;
+  height_ = height;
+  if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+    drm_seat->SetViewport(width, height);
+  }
+}
+
 void DrmDisplay::SetCursor(homescreen::DrmCursor* cursor) {
   // The seat's polymorphic base ISeat has no cursor hook — that's
   // intentional, only the DRM seat drives a KMS cursor. Cast to the
