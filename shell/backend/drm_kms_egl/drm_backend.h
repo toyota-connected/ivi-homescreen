@@ -128,6 +128,14 @@ class DrmBackend : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
   bool GetEglContext(BackendEglContext* out) const override;
+  // vblank-locked OnVsync via DRM PAGE_FLIP_EVENT. Returns nullptr (so
+  // Flutter falls back to its wall-clock scheduler) when the user opts
+  // out via IVI_DRM_VSYNC=0 — useful for diagnosing pacing regressions
+  // without rebuilding. The trampoline marshals the baton back into
+  // SetVsyncBaton, which posts OnVsync onto the platform task runner
+  // (Flutter rejects OnVsync from any other thread with
+  // kInternalInconsistency).
+  VsyncCallback GetVsyncCallback() const override;
 
 #if BUILD_COMPOSITOR
   void RegisterCompositorSurface(
@@ -145,6 +153,16 @@ class DrmBackend : public Backend {
   bool Present();
 
   void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
+
+  // Schedule OnVsync(engine, baton) on the platform task runner. Used by
+  // every site that needs to return a baton (SetVsyncBaton's first-baton
+  // kick, the legacy Present's post-SetInitialMode kick, both
+  // PageFlipHandlers, the compositor's first-commit drains). Marshalling
+  // through the runner satisfies Flutter's "OnVsync on the
+  // FlutterEngineRun thread only" rule (embedder.h:2285). No-op when
+  // either the engine handle or the platform runner is unset.
+  void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                   intptr_t baton) const;
 
   // Set the running engine handle so OnSessionResumed can call
   // FlutterEngineScheduleFrame. Wired by FlutterView after Engine::Run
@@ -226,6 +244,10 @@ class DrmBackend : public Backend {
   // flip_pending_, record frame stats. Called by UnifiedPageFlipHandler
   // when planes are not active.
   void OnLegacyFlipComplete();
+  // FlutterProjectArgs.vsync_callback trampoline. Resolves the
+  // FlutterDesktopEngineState user_data back to this backend + the
+  // engine handle, then forwards to SetVsyncBaton.
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
   // Bind the drm fd to the platform task runner's io_context and
   // arm the first async_wait for POLLIN. Re-armed inside the
   // completion handler so flip events keep flowing without rasterizer
