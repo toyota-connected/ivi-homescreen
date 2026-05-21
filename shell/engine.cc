@@ -68,16 +68,20 @@ extern "C" void EngineThreadPrioritySetter(FlutterThreadPriority prio) {
     case kRaster:
       // Builds frames + calls present_layers. Misses vblank → dropped
       // frame. Highest of our RT prios so it preempts the display
-      // thread if they ever contend. Prio 10 leaves headroom below
-      // typical kernel kthread / watchdog ranges (50+) and audio-rt
-      // (often 5) while still preempting nearly all user-space work.
-      p.sched_priority = 10;
+      // thread if they ever contend.
+      //
+      // Why prio 2 specifically — testing at prio 10 regressed 240Hz
+      // cadence from 98% to 41% on amdgpu: raster preempted the
+      // GPU-fence completion kthreads it was waiting on, so glFinish
+      // spun on a fence that couldn't fire. Prio 2 lets ksoftirqd and
+      // amdgpu kthreads (typically lower-RT or SCHED_OTHER) preempt
+      // us, which is exactly what we want during glFinish.
+      p.sched_priority = 2;
       pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
       break;
     case kDisplay:
-      // UI / Dart thread. RT-class but below raster — if both wake
-      // simultaneously, raster wins.
-      p.sched_priority = 5;
+      // UI / Dart thread. RT-class but one prio below raster.
+      p.sched_priority = 1;
       pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
       break;
     case kBackground:
