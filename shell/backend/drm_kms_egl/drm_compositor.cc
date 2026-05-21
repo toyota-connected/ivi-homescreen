@@ -21,9 +21,11 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -40,8 +42,6 @@
 #include "view/compositor_surface_interface.h"
 
 namespace {
-
-constexpr int kPollTimeoutMs = 100;
 
 bool AllocDebug() {
   static const bool enabled = std::getenv("DRM_ALLOC_DEBUG") != nullptr;
@@ -578,65 +578,29 @@ void DrmCompositor::DestroyGbmStore(GbmBackingStore& store) const {
 
 // ─── Page-flip synchronisation ───────────────────────────────────────────
 
-void DrmCompositor::PageFlipHandler(int /*fd*/,
-                                    unsigned int /*seq*/,
-                                    unsigned int /*tv_sec*/,
-                                    unsigned int /*tv_usec*/,
-                                    void* user_data) {
-  auto* self = static_cast<DrmCompositor*>(user_data);
-  self->flip_pending_ = false;
-  self->backend_->RecordFlipComplete();
-
-  // Return the vsync baton now that the kernel has confirmed scanout.
-  // Mirrors DrmBackend::PageFlipHandler (legacy path) so the steady-state
-  // flip cadence drives Flutter's scheduler in plane mode too.
-  const intptr_t baton =
-      self->backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-  if (baton == 0) {
-    return;
-  }
-  auto engine = self->backend_->engine_handle_.load(std::memory_order_relaxed);
-  if (!engine) {
-    return;
-  }
-  const uint64_t now = LibFlutterEngine->GetCurrentTime();
-  const uint64_t period_ns =
-      self->backend_->vrefresh() > 0
-          ? 1000000000ULL / static_cast<uint64_t>(self->backend_->vrefresh())
-          : 16666667ULL;
-  LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+void DrmCompositor::OnFlipComplete() {
+  // Called from DrmBackend::UnifiedPageFlipHandler on the platform
+  // task runner thread when planes are active. Baton return is the
+  // unified handler's job; we just record the flip.
+  flip_pending_.store(false, std::memory_order_release);
+  backend_->RecordFlipComplete();
 }
 
 bool DrmCompositor::WaitForPendingFlip() const {
-  if (!flip_pending_) {
-    return true;
-  }
-  drmEventContext ctx{};
-  ctx.version = 2;
-  ctx.page_flip_handler = &DrmCompositor::PageFlipHandler;
-
-  while (flip_pending_) {
+  // The asio flip monitor in DrmBackend drains PAGE_FLIP_EVENTs on the
+  // platform task runner thread and clears flip_pending_ via
+  // UnifiedPageFlipHandler → OnFlipComplete. We just wait for it.
+  // Short sleep keeps the rasterizer responsive without burning CPU.
+  using namespace std::chrono_literals;
+  while (flip_pending_.load(std::memory_order_acquire)) {
     // Session went inactive between submitting the flip and the
     // kernel firing PAGE_FLIP_EVENT — the event will never come.
     // OnResume() will clear flip_pending_; bail now so the rasterizer
-    // doesn't poll a dead fd forever.
+    // doesn't spin forever.
     if (paused_.load(std::memory_order_acquire)) {
       return false;
     }
-    pollfd pfd{};
-    pfd.fd = backend_->drm_fd();
-    pfd.events = POLLIN;
-    const int r = poll(&pfd, 1, kPollTimeoutMs);
-    if (r < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      spdlog::error("[DrmCompositor] poll: {}", std::strerror(errno));
-      return false;
-    }
-    if (r > 0 && (pfd.revents & POLLIN)) {
-      drmHandleEvent(backend_->drm_fd(), &ctx);
-    }
+    std::this_thread::sleep_for(500us);
   }
   return true;
 }
@@ -1075,7 +1039,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     spdlog::debug("[DrmCompositor] framed commit: flags=0x{:x}", commit_flags);
   }
 
-  if (auto r = req.commit(commit_flags, this); !r) {
+  if (auto r = req.commit(commit_flags, backend_); !r) {
     if (r.error() == std::errc::permission_denied) {
       // EACCES races: paused_ might be set already (steady-state pause)
       // or not yet (kernel revoked before libseat's disable_seat reached
@@ -1102,14 +1066,20 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
 
   if (!plane_mode_set_) {
     plane_mode_set_ = true;
-    flip_pending_ = false;
+    flip_pending_.store(false, std::memory_order_release);
     VerifyPipeRunning();
 
+    // First-commit drain: ALLOW_MODESET commits are blocking with no
+    // PAGE_FLIP_EVENT, so the baton would otherwise sit unfired. Inline
+    // OnVsync here is a no-op until the FlutterVsyncCallback path is
+    // wired (vsync_baton_ stays 0); a follow-up commit will route this
+    // through the platform task runner so it's safe to use when
+    // vsync_callback is active.
     const intptr_t baton =
         backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_relaxed)) {
+              backend_->engine_handle_.load(std::memory_order_acquire)) {
         const uint64_t now = LibFlutterEngine->GetCurrentTime();
         const uint64_t period_ns =
             backend_->vrefresh() > 0
@@ -1119,7 +1089,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       }
     }
   } else {
-    flip_pending_ = true;
+    flip_pending_.store(true, std::memory_order_release);
   }
   comp_idx_ ^= 1;
   return true;
@@ -1533,7 +1503,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
   }
 
-  if (auto commit_ok = req.commit(commit_flags, this); !commit_ok) {
+  if (auto commit_ok = req.commit(commit_flags, backend_); !commit_ok) {
     if (commit_ok.error() == std::errc::permission_denied) {
       // EACCES race with libseat pause; warn only when paused_ hasn't
       // toggled yet so unexpected revokes still surface.
@@ -1568,7 +1538,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     // The blocking commit returned only after the modeset completed,
     // so there's no page-flip event in flight.
     plane_mode_set_ = true;
-    flip_pending_ = false;
+    flip_pending_.store(false, std::memory_order_release);
 
     // Readback + vblank probe to catch the "commit reported success but
     // the pipe isn't actually running" case before Flutter stalls on the
@@ -1578,11 +1548,14 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
     // Deliver the initial vsync baton now so Flutter can schedule the
     // next frame. Normal PAGE_FLIP_EVENT deliveries take over from here.
+    // Inline OnVsync is a no-op until the FlutterVsyncCallback path is
+    // wired (vsync_baton_ stays 0); a follow-up commit will route this
+    // through the platform task runner.
     const intptr_t baton =
         backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_relaxed)) {
+              backend_->engine_handle_.load(std::memory_order_acquire)) {
         const uint64_t now = LibFlutterEngine->GetCurrentTime();
         const uint64_t period_ns =
             backend_->vrefresh() > 0
@@ -1592,7 +1565,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       }
     }
   } else {
-    flip_pending_ = true;
+    flip_pending_.store(true, std::memory_order_release);
   }
   comp_idx_ ^= 1;  // swap composition double-buffer for next frame
   output.mark_clean();
@@ -1700,7 +1673,7 @@ void DrmCompositor::OnResume() {
   // CRTC state can be re-asserted by re-issuing the mode. Clear the
   // latches so the next PresentLayers does a full mode-set, the same
   // way the first commit after Create() does.
-  flip_pending_ = false;
+  flip_pending_.store(false, std::memory_order_release);
   plane_mode_set_ = false;
   paused_.store(false, std::memory_order_release);
   resume_pending_logged_ = false;

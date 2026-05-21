@@ -295,12 +295,16 @@ void FlutterView::Initialize() {
   }
 
 #if BUILD_BACKEND_DRM_KMS_EGL
-  // Hand the engine handle to the DRM backend so OnSessionResumed can
-  // call ScheduleFrame after a VT round-trip — without that kick an
-  // idle UI never asks us to draw and the screen stays blank.
+  // Hand the engine handle + platform task runner to the DRM backend
+  // so OnSessionResumed can call ScheduleFrame after a VT round-trip
+  // and PostOnVsync can marshal OnVsync onto the FlutterEngineRun
+  // thread (Flutter rejects OnVsync from any other thread with
+  // kInternalInconsistency).
   if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get());
       drm_backend != nullptr) {
     drm_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
+    drm_backend->SetPlatformTaskRunner(
+        m_flutter_engine->GetPlatformTaskRunner());
   }
 #endif
 

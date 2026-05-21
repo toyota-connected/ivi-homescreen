@@ -27,9 +27,11 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -45,6 +47,7 @@
 #include "engine.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "task_runner.h"
 
 #if BUILD_COMPOSITOR
 #include "view/compositor_surface_interface.h"
@@ -1038,7 +1041,7 @@ void DrmBackend::OnSessionPaused() {
   // Drop the legacy-path flip latch too. PAGE_FLIP_EVENT won't come for
   // a commit submitted before the revoke; the next Present after resume
   // will start a fresh flip cycle.
-  flip_pending_ = false;
+  flip_pending_.store(false, std::memory_order_release);
 }
 
 void DrmBackend::OnSessionResumed(const int new_fd) {
@@ -1084,68 +1087,133 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
   }
 }
 
-void DrmBackend::PageFlipHandler(int /*fd*/,
-                                 unsigned int /*sequence*/,
-                                 unsigned int /*tv_sec*/,
-                                 unsigned int /*tv_usec*/,
-                                 void* user_data) {
-  auto* self = static_cast<DrmBackend*>(user_data);
+void DrmBackend::OnLegacyFlipComplete() {
   // The page flip just promoted pending → scanout. What was scanned out
   // before is now safe to release.
-  if (self->current_fb_ != 0) {
-    drmModeRmFB(self->drm_dev_->fd(), self->current_fb_);
+  if (current_fb_ != 0) {
+    drmModeRmFB(drm_dev_->fd(), current_fb_);
   }
-  if (self->current_bo_) {
-    gbm_surface_release_buffer(self->gbm_surface_, self->current_bo_);
+  if (current_bo_) {
+    gbm_surface_release_buffer(gbm_surface_, current_bo_);
   }
-  self->current_bo_ = self->pending_bo_;
-  self->current_fb_ = self->pending_fb_;
-  self->pending_bo_ = nullptr;
-  self->pending_fb_ = 0;
-  self->flip_pending_ = false;
-  self->RecordFlipComplete();
+  current_bo_ = pending_bo_;
+  current_fb_ = pending_fb_;
+  pending_bo_ = nullptr;
+  pending_fb_ = 0;
+  flip_pending_.store(false, std::memory_order_release);
+  RecordFlipComplete();
+}
 
-  // Return the vsync baton to the engine if one is pending. This tells
-  // Flutter's scheduler "the display just vblanked — start the next
-  // frame now, targeting the subsequent vblank."
+void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
+                                        unsigned int /*sequence*/,
+                                        unsigned int /*tv_sec*/,
+                                        unsigned int /*tv_usec*/,
+                                        void* user_data) {
+  // Always cast to DrmBackend* — both legacy Present and compositor
+  // commits register `this`/`backend_` as user_data with that type.
+  auto* self = static_cast<DrmBackend*>(user_data);
+  // Diagnostic: log every Nth flip to see the asio monitor cadence.
+  // Set IVI_DRM_FLIP_TRACE=1 to log every flip (very chatty); unset or
+  // anything else logs every 60th (≈ once per second at 60Hz).
+  static const bool flip_trace = []() {
+    const char* env = std::getenv("IVI_DRM_FLIP_TRACE");
+    return env != nullptr && std::string_view(env) == "1";
+  }();
+  static std::atomic<uint64_t> flip_count{0};
+  const uint64_t n = flip_count.fetch_add(1, std::memory_order_relaxed) + 1;
+  if (flip_trace || (n % 60) == 0) {
+    spdlog::info("[DrmBackend] flip #{} handled (asio monitor)", n);
+  }
+#if BUILD_COMPOSITOR
+  if (self->compositor_ && self->compositor_->planes_active()) {
+    self->compositor_->OnFlipComplete();
+  } else {
+    self->OnLegacyFlipComplete();
+  }
+#else
+  self->OnLegacyFlipComplete();
+#endif
+
+  // Return the vsync baton to the engine if one is pending. We're on
+  // the platform task runner thread already (asio dispatched the
+  // async_wait completion here), so OnVsync can be called directly —
+  // no PostOnVsync round-trip needed.
   const intptr_t baton =
       self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-  if (baton != 0) {
-    if (const auto engine =
-            self->engine_handle_.load(std::memory_order_relaxed)) {
-      const uint64_t now = LibFlutterEngine->GetCurrentTime();
-      const uint64_t period_ns =
-          self->mode_.vrefresh > 0
-              ? 1000000000ULL / static_cast<uint64_t>(self->mode_.vrefresh)
-              : 16666667ULL;
-      LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
-    }
+  if (baton == 0) {
+    return;
   }
+  const auto engine = self->engine_handle_.load(std::memory_order_acquire);
+  if (engine == nullptr) {
+    return;
+  }
+  const uint64_t now = LibFlutterEngine->GetCurrentTime();
+  const uint64_t period_ns =
+      self->mode_.vrefresh > 0
+          ? 1000000000ULL / static_cast<uint64_t>(self->mode_.vrefresh)
+          : 16666667ULL;
+  LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+}
+
+void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
+  platform_task_runner_.store(runner, std::memory_order_release);
+  StartFlipMonitor();
+}
+
+void DrmBackend::StartFlipMonitor() {
+  if (flip_descriptor_.has_value()) {
+    return;  // already started
+  }
+  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetIoContext() == nullptr ||
+      !drm_dev_.has_value()) {
+    return;
+  }
+  // Construct with assign() so the descriptor doesn't take ownership —
+  // drm::Device's destructor closes the fd; we just want the asio wrap.
+  flip_descriptor_.emplace(*runner->GetIoContext());
+  flip_descriptor_->assign(drm_dev_->fd());
+  ArmFlipRead();
+  spdlog::info("[DrmBackend] flip monitor armed on fd={}", drm_dev_->fd());
+}
+
+void DrmBackend::ArmFlipRead() {
+  if (!flip_descriptor_.has_value()) {
+    return;
+  }
+  flip_descriptor_->async_wait(
+      asio::posix::stream_descriptor::wait_read,
+      [this](const std::error_code& ec) {
+        if (ec) {
+          // operation_aborted fires on shutdown/cancellation; quiet path.
+          if (ec != asio::error::operation_aborted) {
+            spdlog::warn("[DrmBackend] flip monitor wait: {}", ec.message());
+          }
+          return;
+        }
+        if (!drm_dev_.has_value()) {
+          return;
+        }
+        drmEventContext ctx{};
+        ctx.version = 2;
+        ctx.page_flip_handler = &DrmBackend::UnifiedPageFlipHandler;
+        drmHandleEvent(drm_dev_->fd(), &ctx);
+        ArmFlipRead();  // re-arm for the next vblank
+      });
 }
 
 bool DrmBackend::WaitForPendingFlip() const {
-  if (!flip_pending_ || !drm_dev_) {
-    return true;
-  }
-
-  drmEventContext ctx{};
-  ctx.version = 2;
-  ctx.page_flip_handler = &DrmBackend::PageFlipHandler;
-
-  while (flip_pending_) {
-    pollfd pfd{};
-    pfd.fd = drm_dev_->fd();
-    pfd.events = POLLIN;
-    if (const int r = poll(&pfd, 1, -1); r < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      spdlog::error("[DrmBackend] poll: {}", std::strerror(errno));
-      return false;
+  // The asio flip monitor (StartFlipMonitor) drains PAGE_FLIP_EVENTs
+  // on the platform task runner thread and clears flip_pending_ via
+  // UnifiedPageFlipHandler → OnLegacyFlipComplete. We just wait for
+  // it. Short sleep so a 60 Hz frame's ~16ms window has plenty of
+  // resolution but we don't burn the rasterizer CPU.
+  using namespace std::chrono_literals;
+  while (flip_pending_.load(std::memory_order_acquire)) {
+    if (!drm_dev_) {
+      return true;
     }
-    if (pfd.revents & POLLIN) {
-      drmHandleEvent(drm_dev_->fd(), &ctx);
-    }
+    std::this_thread::sleep_for(500us);
   }
   return true;
 }
@@ -1198,7 +1266,7 @@ bool DrmBackend::Present() {
   // fires. current_bo_/current_fb_ remain the live scanout until then.
   pending_bo_ = next_bo;
   pending_fb_ = next_fb;
-  flip_pending_ = true;
+  flip_pending_.store(true, std::memory_order_release);
   return true;
 }
 
