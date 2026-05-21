@@ -118,6 +118,22 @@ class Backend {
    */
   virtual FlutterCompositor GetCompositorConfig() = 0;
 
+  /**
+   * @brief Per-backend FlutterVsyncCallback.
+   *
+   * Returning nullptr (the default) leaves @c FlutterProjectArgs.vsync_callback
+   * unset and Flutter falls back to its internal wall-clock scheduler.
+   * Backends that can deliver vblank-locked OnVsync events override this and
+   * return a function pointer; the engine only wires it into the embedder
+   * args when non-null. The @c user_data the callback receives is the
+   * @c FlutterDesktopEngineState* passed to @c FlutterEngineRun.
+   *
+   * Implementations MUST marshal @c FlutterEngineOnVsync calls onto the
+   * platform task runner — Flutter enforces that constraint and returns
+   * @c kInternalInconsistency otherwise.
+   */
+  virtual VsyncCallback GetVsyncCallback() const { return nullptr; }
+
 #if BUILD_COMPOSITOR
   /**
    * @brief Register a platform-view compositor surface.

@@ -1070,22 +1070,17 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     VerifyPipeRunning();
 
     // First-commit drain: ALLOW_MODESET commits are blocking with no
-    // PAGE_FLIP_EVENT, so the baton would otherwise sit unfired. Inline
-    // OnVsync here is a no-op until the FlutterVsyncCallback path is
-    // wired (vsync_baton_ stays 0); a follow-up commit will route this
-    // through the platform task runner so it's safe to use when
-    // vsync_callback is active.
+    // PAGE_FLIP_EVENT, so the baton Flutter requested while we were
+    // building this frame would otherwise sit in vsync_baton_
+    // unfired. PostOnVsync marshals via the platform task runner
+    // (we're on the rasterizer thread here; OnVsync must be on the
+    // FlutterEngineRun thread).
     const intptr_t baton =
         backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       if (auto engine =
               backend_->engine_handle_.load(std::memory_order_acquire)) {
-        const uint64_t now = LibFlutterEngine->GetCurrentTime();
-        const uint64_t period_ns =
-            backend_->vrefresh() > 0
-                ? 1000000000ULL / static_cast<uint64_t>(backend_->vrefresh())
-                : 16666667ULL;
-        LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+        backend_->PostOnVsync(engine, baton);
       }
     }
   } else {
@@ -1548,20 +1543,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
     // Deliver the initial vsync baton now so Flutter can schedule the
     // next frame. Normal PAGE_FLIP_EVENT deliveries take over from here.
-    // Inline OnVsync is a no-op until the FlutterVsyncCallback path is
-    // wired (vsync_baton_ stays 0); a follow-up commit will route this
-    // through the platform task runner.
+    // PostOnVsync marshals via the platform task runner.
     const intptr_t baton =
         backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
     if (baton != 0) {
       if (auto engine =
               backend_->engine_handle_.load(std::memory_order_acquire)) {
-        const uint64_t now = LibFlutterEngine->GetCurrentTime();
-        const uint64_t period_ns =
-            backend_->vrefresh() > 0
-                ? 1000000000ULL / static_cast<uint64_t>(backend_->vrefresh())
-                : 16666667ULL;
-        LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+        backend_->PostOnVsync(engine, baton);
       }
     }
   } else {

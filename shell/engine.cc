@@ -64,16 +64,15 @@ Engine::Engine(FlutterView* view,
   m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
   m_args.log_tag = "flutter";
 
-  // TODO: Re-enable vsync_callback once the DRM backend's page-flip
-  // event delivery is working end-to-end. The current implementation
-  // deadlocks because the first frame uses drmModeSetCrtc (no flip
-  // event), and the baton for frame 2 arrives after Present returns
-  // but before any flip is queued. Flutter's internal wall-clock
-  // scheduler works correctly without it.
-  //
-  // #if BUILD_BACKEND_DRM_KMS_EGL
-  //   m_args.vsync_callback = ...;
-  // #endif
+  // Optional per-backend vsync_callback. nullptr (the default for
+  // headless / wayland_egl / wayland_vulkan) leaves the field unset
+  // and Flutter falls back to its internal wall-clock scheduler.
+  // DrmBackend overrides this to deliver vblank-locked OnVsync via
+  // DRM PAGE_FLIP_EVENT (env-gated by IVI_DRM_VSYNC; set to 0 to
+  // force wall-clock pacing for diagnostics).
+  if (auto* vsync_cb = m_backend->GetVsyncCallback(); vsync_cb != nullptr) {
+    m_args.vsync_callback = vsync_cb;
+  }
 
   /// Task Runner
   m_platform_task_runner =
