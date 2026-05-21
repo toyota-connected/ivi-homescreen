@@ -39,6 +39,7 @@
 #include <drm-cxx/core/format.hpp>
 #include "backend/drm_kms_egl/driver_probe.h"
 
+#include "asio/post.hpp"
 #include "backend/drm_kms_egl/drm_capture.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
@@ -47,6 +48,7 @@
 #include "engine.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "shell/platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "task_runner.h"
 
 #if BUILD_COMPOSITOR
@@ -1012,23 +1014,92 @@ void DrmBackend::RecordFlipComplete() {
   }
 }
 
-void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                               const intptr_t baton) {
-  // Bootstrap: before the first page-flip, there's no flip-complete event
-  // to return the baton from. Return it immediately so Flutter can
-  // schedule its first frame. Subsequent batons go through the normal
-  // PageFlipHandler path, locked to actual vblank.
-  if (!mode_set_) {
-    const uint64_t now = LibFlutterEngine->GetCurrentTime();
-    const uint64_t period_ns =
-        mode_.vrefresh > 0
-            ? 1000000000ULL / static_cast<uint64_t>(mode_.vrefresh)
-            : 16666667ULL;
-    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+VsyncCallback DrmBackend::GetVsyncCallback() const {
+  // IVI_DRM_VSYNC=0 disables vsync_callback wiring and lets Flutter's
+  // wall-clock scheduler drive pacing. Useful for bisecting pacing
+  // regressions or running on hardware where PAGE_FLIP_EVENT delivery
+  // is unreliable. Anything else (unset, "1", arbitrary string) leaves
+  // vsync_callback enabled.
+  static const bool enabled = []() {
+    const char* env = std::getenv("IVI_DRM_VSYNC");
+    return !(env != nullptr && std::string_view(env) == "0");
+  }();
+  return enabled ? &VsyncTrampoline : nullptr;
+}
+
+void DrmBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
+  // user_data is the FlutterDesktopEngineState* passed as userdata to
+  // FlutterEngineInitialize. Recover the engine + backend from it; if
+  // either is gone (shutdown race) drop the baton — leaking is the
+  // documented price of an unresponded baton but the only safe option.
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->view_controller == nullptr ||
+      state->view_controller->engine == nullptr) {
     return;
   }
-  engine_handle_.store(engine, std::memory_order_relaxed);
+  auto* engine_obj = state->view_controller->engine;
+  auto* backend = dynamic_cast<DrmBackend*>(engine_obj->GetBackend());
+  if (backend == nullptr) {
+    return;
+  }
+  backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
+}
+
+void DrmBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                             const intptr_t baton) const {
+  if (engine == nullptr || baton == 0) {
+    return;
+  }
+  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    // Plumbing not in place yet — drop. Happens between vsync_callback
+    // firing during engine bring-up and FlutterView::SetPlatformTaskRunner
+    // landing. The kick latch ensures Flutter still gets a baton from
+    // the next-frame path once the runner is wired.
+    return;
+  }
+  const uint64_t now = LibFlutterEngine->GetCurrentTime();
+  const uint64_t period_ns =
+      mode_.vrefresh > 0 ? 1000000000ULL / static_cast<uint64_t>(mode_.vrefresh)
+                         : 16666667ULL;
+  asio::post(*runner->GetStrandContext(), [engine, baton, now, period_ns]() {
+    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+  });
+}
+
+void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                               const intptr_t baton) {
+  engine_handle_.store(engine, std::memory_order_release);
+
+  // Store the baton first so that if the asio flip monitor races us
+  // (PAGE_FLIP_EVENT arrives between our flip-pending check and
+  // store), it picks up the baton and we don't double-deliver.
   vsync_baton_.store(baton, std::memory_order_release);
+
+  // If a flip is in flight, the asio handler will fire OnVsync when
+  // PAGE_FLIP_EVENT lands. If not, the pipeline is idle (first frame,
+  // post-resume, or Flutter waking from idle on input) and there's
+  // nothing to feed the asio handler — we have to kick the baton
+  // ourselves or Flutter will sit forever waiting for OnVsync that
+  // never comes. Check both flip latches: backend's is set by the
+  // legacy Present, compositor's is set by atomic commits.
+  bool flip_in_flight = flip_pending_.load(std::memory_order_acquire);
+#if BUILD_COMPOSITOR
+  if (compositor_ && compositor_->planes_active()) {
+    flip_in_flight = compositor_->IsFlipPending();
+  }
+#endif
+  if (flip_in_flight) {
+    return;
+  }
+
+  // Exchange to take the baton back. The asio handler may have raced
+  // us and already consumed it; exchange returning 0 means it's
+  // already on its way.
+  if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
+      mine != 0) {
+    PostOnVsync(engine, mine);
+  }
 }
 
 void DrmBackend::OnSessionPaused() {
@@ -1064,26 +1135,41 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
 #endif
   mode_set_ = false;
 
-  // The vsync_callback path is currently disabled (engine.cc:67), so
-  // Flutter uses its internal wall-clock scheduler and won't request a
-  // frame on its own when the UI is idle. Ask the engine to schedule
-  // one so the rasterizer thread runs PresentLayers, sees
-  // plane_mode_set_ cleared by OnResume, and re-modesets the CRTC.
-  // Without this the screen stays blank until the next animation tick
-  // (sometimes never, for static screens).
-  if (auto engine = engine_handle_.load(std::memory_order_acquire);
-      engine != nullptr) {
+  // Post-resume re-modeset is blocking with no PAGE_FLIP_EVENT (same as
+  // initial startup). SetVsyncBaton's flip-in-flight check handles
+  // this automatically: it sees flip_pending_=false and kicks any
+  // baton inline. We just need to make sure Flutter actually asks for
+  // a baton (idle UI case) below.
+
+  auto* engine = engine_handle_.load(std::memory_order_acquire);
+  if (engine == nullptr) {
+    spdlog::warn(
+        "[DrmBackend] resume: no engine handle yet; redraw skipped (UI must "
+        "tick on its own)");
+    return;
+  }
+
+  // Two cases:
+  //  - Flutter was parked on a stored baton when pause hit (vsync_callback
+  //    enabled, idle UI waiting on OnVsync): drain it now so Flutter
+  //    wakes and renders the re-modeset frame. PostOnVsync routes the
+  //    delivery through the platform task runner.
+  //  - No pending baton (wall-clock pacer, or no in-flight vsync request):
+  //    ScheduleFrame to prompt Flutter into a new frame request, which
+  //    our reset kick will deliver as the first-baton inline-fire.
+  if (const intptr_t pending =
+          vsync_baton_.exchange(0, std::memory_order_acq_rel);
+      pending != 0) {
+    PostOnVsync(engine, pending);
+    spdlog::info("[DrmBackend] resume: drained pending baton via PostOnVsync");
+  } else {
     const FlutterEngineResult r = LibFlutterEngine->ScheduleFrame(engine);
     if (r != kSuccess) {
       spdlog::warn("[DrmBackend] resume: ScheduleFrame failed (rc={})",
                    static_cast<int>(r));
     } else {
-      spdlog::info("[DrmBackend] resume: ScheduleFrame requested");
+      spdlog::info("[DrmBackend] resume: ScheduleFrame requested (idle UI)");
     }
-  } else {
-    spdlog::warn(
-        "[DrmBackend] resume: no engine handle yet; redraw skipped (UI must "
-        "tick on its own)");
   }
 }
 
@@ -1248,6 +1334,19 @@ bool DrmBackend::Present() {
       return false;
     }
     RecordFlipComplete();
+    // Mirror the compositor's first-commit drain: drmModeSetCrtc
+    // produces no PAGE_FLIP_EVENT, so the second baton (Flutter
+    // requested it after the first OnVsync) would sit in vsync_baton_
+    // unfired. Drain it now via the platform task runner; subsequent
+    // batons go through the normal PageFlipHandler path.
+    if (auto* engine = engine_handle_.load(std::memory_order_acquire);
+        engine != nullptr) {
+      if (const intptr_t baton =
+              vsync_baton_.exchange(0, std::memory_order_acq_rel);
+          baton != 0) {
+        PostOnVsync(engine, baton);
+      }
+    }
     return true;
   }
 
