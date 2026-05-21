@@ -261,6 +261,7 @@ Typical first-run log lines worth reading:
 | `--drm-device=<path>` | Override `/dev/dri/card1` |
 | `--drm-connector=<name>` | Pin a specific connector (e.g. `eDP-1`, `HDMI-A-1`) |
 | `--drm-list-modes[=<dev>]` | Print every connector + its modes, then exit |
+| `--drm-mode=<W>x<H>@<R>` | Pin a specific mode (e.g. `1920x1080@120`); default = preferred mode |
 | `--drm-compositor=auto\|planes\|gl` | Force compositor strategy |
 | `--drm-modeset=auto\|legacy\|atomic` | Force modeset API |
 | `--drm-allow-nonblock-modeset=auto\|yes\|no` | Override `NONBLOCK \| ALLOW_MODESET` quirk |
@@ -286,6 +287,7 @@ Every `--drm-*` flag has a `HOMESCREEN_DRM_*` env-var equivalent and a
 | `IVI_DRM_RT` | (off) | Set to anything non-empty to enable per-thread priority elevation via Flutter's `thread_priority_setter` — rasterizer gets `SCHED_FIFO` prio 2, UI thread `SCHED_FIFO` prio 1, background tasks `SCHED_BATCH`. The deliberately low prios let amdgpu / ksoftirqd kthreads preempt the rasterizer during `glFinish` (bumping to prio 10 regressed cadence from 98% → 41% on this hardware). The platform task runner thread (asio flip monitor) is covered too. DrmSession / DrmSeat stay at default. |
 | `IVI_DRM_FLIP_TRACE` | (off) | `1` logs every PAGE_FLIP_EVENT (frame-cadence diagnostic) |
 | `IVI_DRM_PROFILE` | (off) | Anything non-empty enables per-frame composite profiling. Every 60 frames, `PresentFramed` / `PresentLayers` log a line: `framed/planes profile (n=60): wait=Xms compose=Yms commit=Zms total=Wms` with both per-stage mean and max. Useful for diagnosing where the per-frame budget goes. |
+| `IVI_DRM_NO_DIRECT_SCANOUT` | (off) | `1` forces GL composite even when REFLECT_Y is available. Diagnostic — bisects visual artifacts that may live on the direct-scanout path. |
 | `VIDEO_PLAYER_AUDIO_SINK` | — | Set to `alsasink` on bare TTY (no PipeWire) |
 
 #### Real-time scheduling: capability setup
@@ -481,6 +483,53 @@ On hardware with at least one CRTC plane supporting REFLECT_Y (modern Intel / Ma
 The 43× compositor speedup expands the per-frame headroom at any refresh rate. On a 240 Hz panel where the budget is 4.17 ms, going from "7 ms compositor + Flutter render" to "0.16 ms compositor + Flutter render" turns "always missing one vblank" into "always making vblank."
 
 The probe happens once in `InitPlaneAllocator`; the log line is `[DrmCompositor] direct-scanout REFLECT_Y available: yes|no`. Operators can read it once at startup to know which path their hardware will take.
+
+#### Multi-buffered BS + explicit sync (how direct-scanout works on every driver)
+
+Direct-scanout binds Flutter's backing-store gbm_bo directly to the primary plane (no intermediate composite BO). Two races have to be eliminated for this to be visually correct on every driver:
+
+1. **BS recycle race.** Flutter wants to start frame N+1 immediately after PresentLayers returns; if the BS is single-buffered, Flutter's writes trample the BO that the kernel is still scanning out. amdgpu / Intel mask this via implicit dma-fence sync — the kernel holds the BO during scanout and the GPU stalls Flutter's next write. `nvidia-drm` (validated on Jetson Orin L4T R36.4.7) does **not** insert that fence; the race produces visible whole-frame flicker.
+2. **GPU-write completion race.** Even with multi-buffering, the kernel can scan out a BO before Flutter's GPU writes to it have actually landed in memory. amdgpu / Intel implicit-sync also covers this. `nvidia-drm` doesn't.
+
+The backend solves both with a **3-slot BS pool + IN_FENCE_FD**:
+
+- Each Flutter BS owns a pool of 3 `gbm_bo`s. `PresentLayers` rotates the FBO's color attachment between slots after every commit — Flutter's frame N+1 renders into a different BO from the one the kernel is scanning out. Slot release is event-driven via `PAGE_FLIP_EVENT`, so any pool size ≥ 2 is correctness-safe; default 3 gives one slot in flight + one queued + one ready to render.
+- Before the atomic commit, the backend creates an `EGL_SYNC_NATIVE_FENCE_ANDROID` fence and attaches its dup'd FD to each direct-scanout layer as the plane's `IN_FENCE_FD` property. The kernel waits on the fence (asynchronously, kernel-side) before scanning out the BO. Flutter's writes are guaranteed visible at scanout time without a synchronous user-space stall.
+- When the EGL native-fence-sync extension is missing, the path falls back to a synchronous `glFinish` before commit (correctness preserved, ~2 ms perf cost).
+
+Pool size auto-scales: BSes get 3 slots only when `any_plane_supports_reflect_y_` is true (i.e. direct-scanout is reachable). Drivers without REFLECT_Y or with the universal kill-switch `IVI_DRM_NO_DIRECT_SCANOUT=1` keep pool_size=1 to avoid 3× GBM allocation footprint on memory-constrained targets.
+
+Validated end-to-end on `nvidia-drm` Jetson Orin L4T R36.4.7: clean 60 Hz lock at 1440p with the full direct-scanout speedup, no visible flicker. Composite path remains the safe fallback via `IVI_DRM_NO_DIRECT_SCANOUT=1` if a new driver release ever exhibits a regression.
+
+### Tegra L4T (nvidia-drm) — measured numbers
+
+Measured on Jetson Orin (`nvidia-drm`), L4T R36.4.7 / kernel 5.15.148-tegra, LG UltraGear+ on DP-1, `flutter/examples/image_list`, `IVI_DRM_RT=1 IVI_DRM_VSYNC=1 IVI_DRM_PROFILE=1`. Default config — multi-buffered BS pool (3 slots) + IN_FENCE_FD active. Steady-state means computed from the last 4 profile windows (= 240 frames) of each run; numbers reproduced across two independent runs at each refresh rate.
+
+**2560×1440 @ 60 Hz** (panel preferred mode, vblank budget 16.67 ms):
+
+| Stage | mean (steady) | max | vs GL composite |
+|---|---:|---:|---:|
+| wait | 9.17 ms | 9.65 ms | ~equal |
+| compose | 0.79 ms | 1.02 ms | -2.76 ms |
+| commit | 0.63 ms | 0.97 ms | -0.16 ms |
+| **total** | **10.59 ms** | 11.38 ms | **-3.69 ms** |
+
+Clean 60 Hz lock with **6.08 ms vblank headroom**. Direct-scanout compose is ~0.8 ms (vs ~3.6 ms when the same workload routes through GL composite) — `IN_FENCE_FD` keeps the GPU-wait kernel-side rather than stalling our user-space thread.
+
+**1920×1080 @ 120 Hz** (`--drm-mode=1920x1080@120`, vblank budget 8.33 ms):
+
+| Stage | mean (steady) | max |
+|---|---:|---:|
+| wait | 2.46 ms | 3.93 ms |
+| compose | 1.03 ms | 1.79 ms |
+| commit | 0.71 ms | 1.27 ms |
+| **total** | **4.20 ms** | 6.20 ms |
+
+Clean 120 Hz lock with **4.13 ms vblank headroom**. Steady-state flip cadence measured at 8.33 ms ± 0.08 ms — the panel's vblank period to single-digit microsecond precision. GL composite alone (i.e. without direct-scanout) cannot make 120 Hz on this hardware: its compositor cost sits at ~3.4 ms baseline, which combined with Flutter render variance pushes individual frames past the 8.33 ms budget.
+
+**Reproducibility:** the steady-state totals above replicate within ±5% across multiple independent runs at each refresh rate. Image-decode hitches during `image_list` startup produce one frame near the budget edge in each run; after Flutter's loading phase completes the cadence locks cleanly.
+
+**Out of reach (not yet validated):** 240 Hz at any resolution; 120 Hz at 1440p (panel doesn't expose this mode on DP-1 — see `--drm-list-modes` output).
 
 ---
 

@@ -280,6 +280,7 @@ Resolved Resolve(const int drm_fd,
   r.driver_name = GetDriverName(drm_fd);
 
   const uint32_t primary_plane = FindPrimaryPlane(drm_fd, crtc_id);
+  r.primary_plane = primary_plane;
   const uint32_t overlay_count = CountOverlayPlanes(drm_fd, crtc_id);
   const bool atomic_ok = HasAtomicCap(drm_fd);
 

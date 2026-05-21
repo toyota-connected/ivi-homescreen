@@ -29,6 +29,8 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -169,7 +171,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
         std::strerror(errno));
     return true;
   }
-  struct vt_stat vtstat{};
+  struct vt_stat vtstat {};
   const bool got_state = ::ioctl(tty0, VT_GETSTATE, &vtstat) == 0;
   const int vt_errno = errno;
   ::close(tty0);
@@ -194,7 +196,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
         std::strerror(errno), drm_device, active_vt);
     return false;
   }
-  struct stat st{};
+  struct stat st {};
   const int fstat_rc = ::fstat(ctl_fd, &st);
   const int fstat_errno = errno;
   ::close(ctl_fd);
@@ -646,21 +648,92 @@ bool DrmBackend::InitDrm() {
                connector_name(connector), pick_reason);
   connector_id_ = connector->connector_id;
 
-  // Always drive the display at its preferred/native mode. If the user
-  // specified a (smaller) size, we keep the preferred mode for the CRTC
-  // and letterbox the requested FB inside it (see fb_w_/fb_h_ below).
-  // Picking a smaller mode to match the request is worse on almost every
+  // Default: drive the display at its preferred/native mode. Picking a
+  // smaller mode to match a requested FB size is worse on almost every
   // axis — blurry on LCDs, worse backlight uniformity on some panels,
   // and on some connectors the mode list doesn't contain an exact match.
-  for (int i = 0; i < connector->count_modes; ++i) {
-    const auto& m = connector->modes[i];
-    if (m.type & DRM_MODE_TYPE_PREFERRED) {
-      mode_ = m;
-      break;
+  // If the user specified a (smaller) FB size, we keep the preferred
+  // mode for the CRTC and letterbox the requested FB inside it (see
+  // fb_w_/fb_h_ below).
+  //
+  // Override: cfg_.mode_spec (--drm-mode=<W>x<H>@<R>) overrides the
+  // preferred-mode pick. Useful for high-refresh validation when the
+  // panel reports a lower refresh as preferred (e.g. 2560x1440@60Hz
+  // preferred on a panel that also offers 1920x1080@120Hz).
+  if (cfg_.mode_spec.has_value()) {
+    // Parse "<W>x<H>@<R>" via strtoul so we catch overflow and trailing
+    // garbage; sscanf("%u…") silently wraps on out-of-range input
+    // (cert-err34-c). Each segment must be a non-zero unsigned int that
+    // fits in uint32_t and is followed by the expected delimiter.
+    const auto parse_u32 = [](const char* p, char sep, uint32_t& out,
+                              const char*& next) -> bool {
+      errno = 0;
+      char* end = nullptr;
+      const unsigned long v = std::strtoul(p, &end, 10);
+      if (end == p || errno == ERANGE || v == 0 ||
+          v > std::numeric_limits<uint32_t>::max() || *end != sep) {
+        return false;
+      }
+      out = static_cast<uint32_t>(v);
+      next = end + 1;  // skip the separator
+      return true;
+    };
+    uint32_t want_w = 0;
+    uint32_t want_h = 0;
+    uint32_t want_r = 0;
+    const char* p = cfg_.mode_spec->c_str();
+    const char* p2 = nullptr;
+    const char* p3 = nullptr;
+    char* end = nullptr;
+    bool ok = parse_u32(p, 'x', want_w, p2) && parse_u32(p2, '@', want_h, p3);
+    if (ok) {
+      errno = 0;
+      const unsigned long r = std::strtoul(p3, &end, 10);
+      ok = end != p3 && errno != ERANGE && r != 0 &&
+           r <= std::numeric_limits<uint32_t>::max() && *end == '\0';
+      if (ok) {
+        want_r = static_cast<uint32_t>(r);
+      }
     }
-  }
-  if (mode_.clock == 0) {
-    mode_ = connector->modes[0];
+    if (!ok) {
+      spdlog::error(
+          "[DrmBackend] --drm-mode='{}' is not in '<W>x<H>@<R>' form "
+          "(e.g. 1920x1080@120)",
+          *cfg_.mode_spec);
+      drmModeFreeConnector(connector);
+      drmModeFreeResources(res);
+      return false;
+    }
+    for (int i = 0; i < connector->count_modes; ++i) {
+      const auto& m = connector->modes[i];
+      if (m.hdisplay == want_w && m.vdisplay == want_h &&
+          m.vrefresh == want_r) {
+        mode_ = m;
+        break;
+      }
+    }
+    if (mode_.clock == 0) {
+      spdlog::error(
+          "[DrmBackend] --drm-mode='{}' not available on connector {}; run "
+          "--drm-list-modes for the supported list",
+          *cfg_.mode_spec, connector_name(connector));
+      drmModeFreeConnector(connector);
+      drmModeFreeResources(res);
+      return false;
+    }
+    spdlog::info("[DrmBackend] mode override: {}x{}@{}Hz (--drm-mode)",
+                 mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
+  } else {
+    for (int i = 0; i < connector->count_modes; ++i) {
+      const auto& m = connector->modes[i];
+      if (m.type & DRM_MODE_TYPE_PREFERRED) {
+        mode_ = m;
+        break;
+      }
+    }
+    if (mode_.clock == 0) {
+      mode_ = connector->modes[0];
+    }
   }
 
   // Framebuffer size: explicit request wins; otherwise full-screen.
@@ -731,6 +804,71 @@ bool DrmBackend::InitDrm() {
   return true;
 }
 
+namespace {
+
+// Walk the primary plane's IN_FORMATS blob and collect every modifier
+// the kernel advertises for `fourcc`. Returns an empty vector when the
+// blob is missing or `fourcc` isn't listed — the legacy API path then
+// takes over. The IN_FORMATS layout uses a 64-format bitmask per
+// drm_format_modifier entry; that's the `(formats >> (idx - offset))`
+// shift the kernel uses internally.
+std::vector<uint64_t> QueryPlaneModifiers(const int drm_fd,
+                                          const uint32_t plane_id,
+                                          const uint32_t fourcc) {
+  std::vector<uint64_t> out;
+  drmModeObjectProperties* props =
+      drmModeObjectGetProperties(drm_fd, plane_id, DRM_MODE_OBJECT_PLANE);
+  if (props == nullptr) {
+    return out;
+  }
+  uint32_t blob_id = 0;
+  for (uint32_t i = 0; i < props->count_props && blob_id == 0; ++i) {
+    if (drmModePropertyRes* p = drmModeGetProperty(drm_fd, props->props[i])) {
+      if (std::string_view(p->name) == "IN_FORMATS") {
+        blob_id = static_cast<uint32_t>(props->prop_values[i]);
+      }
+      drmModeFreeProperty(p);
+    }
+  }
+  drmModeFreeObjectProperties(props);
+  if (blob_id == 0) {
+    return out;
+  }
+  drmModePropertyBlobRes* blob = drmModeGetPropertyBlob(drm_fd, blob_id);
+  if (blob == nullptr || blob->data == nullptr) {
+    if (blob != nullptr) {
+      drmModeFreePropertyBlob(blob);
+    }
+    return out;
+  }
+  const auto* hdr = static_cast<const drm_format_modifier_blob*>(blob->data);
+  const auto* fmts = reinterpret_cast<const uint32_t*>(
+      static_cast<const char*>(blob->data) + hdr->formats_offset);
+  const auto* mods = reinterpret_cast<const drm_format_modifier*>(
+      static_cast<const char*>(blob->data) + hdr->modifiers_offset);
+  uint32_t fmt_idx = UINT32_MAX;
+  for (uint32_t i = 0; i < hdr->count_formats; ++i) {
+    if (fmts[i] == fourcc) {
+      fmt_idx = i;
+      break;
+    }
+  }
+  if (fmt_idx != UINT32_MAX) {
+    for (uint32_t i = 0; i < hdr->count_modifiers; ++i) {
+      if (fmt_idx < mods[i].offset || fmt_idx >= mods[i].offset + 64) {
+        continue;
+      }
+      if (mods[i].formats & (1ULL << (fmt_idx - mods[i].offset))) {
+        out.push_back(mods[i].modifier);
+      }
+    }
+  }
+  drmModeFreePropertyBlob(blob);
+  return out;
+}
+
+}  // namespace
+
 bool DrmBackend::InitGbm() {
   // DriverProbe returns 0 when the primary plane advertises none of the
   // formats we know how to drive; surface that clearly instead of letting
@@ -749,6 +887,32 @@ bool DrmBackend::InitGbm() {
     return false;
   }
 
+  // Try gbm_surface_create_with_modifiers first when the kernel
+  // advertises any modifiers for our format. NVIDIA L4T's GBM only
+  // implements the modifier-aware entrypoint (legacy gbm_surface_create
+  // returns ENOSYS); modifier-aware also gives us the right plumbing
+  // on newer Mesa drivers that require non-LINEAR tilings for scanout.
+  if (resolved_->primary_plane != 0) {
+    const auto modifiers = QueryPlaneModifiers(
+        drm_dev_->fd(), resolved_->primary_plane, resolved_->primary_format);
+    if (!modifiers.empty()) {
+      gbm_surface_ = gbm_surface_create_with_modifiers(
+          gbm_device_, fb_w_, fb_h_, resolved_->primary_format,
+          modifiers.data(), static_cast<unsigned>(modifiers.size()));
+      if (gbm_surface_) {
+        spdlog::info(
+            "[DrmBackend] gbm_surface_create_with_modifiers OK "
+            "(format={}, {} IN_FORMATS modifiers)",
+            drm::format_name(resolved_->primary_format), modifiers.size());
+        return true;
+      }
+      spdlog::debug(
+          "[DrmBackend] gbm_surface_create_with_modifiers failed "
+          "(errno={}); falling back to legacy gbm_surface_create",
+          errno);
+    }
+  }
+
   gbm_surface_ =
       gbm_surface_create(gbm_device_, fb_w_, fb_h_, resolved_->primary_format,
                          GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
@@ -757,6 +921,8 @@ bool DrmBackend::InitGbm() {
                   drm::format_name(resolved_->primary_format));
     return false;
   }
+  spdlog::info("[DrmBackend] gbm_surface_create OK (format={}, legacy path)",
+               drm::format_name(resolved_->primary_format));
   return true;
 }
 

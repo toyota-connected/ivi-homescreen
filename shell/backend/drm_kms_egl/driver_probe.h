@@ -44,6 +44,13 @@ struct Resolved {
   // conservative by default.
   bool allow_nonblock_modeset{false};
 
+  // KMS plane id picked as the primary for this CRTC. Zero when the
+  // probe couldn't find one (`use_plane_compositor` is also false in
+  // that case). Used by InitGbm to query IN_FORMATS modifiers — some
+  // drivers (notably NVIDIA L4T) implement only the modifier-aware
+  // gbm_surface_create_with_modifiers entrypoint.
+  uint32_t primary_plane{0};
+
   // GBM / DRM format for primary-plane scanout buffers.
   uint32_t primary_format{0};
 
