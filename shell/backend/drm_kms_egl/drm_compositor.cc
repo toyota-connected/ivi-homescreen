@@ -1775,9 +1775,32 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
   if (profile && profile_) {
     const uint64_t t3 = NsNow();
+    const uint64_t wait_ns = t1 - t0;
+    const uint64_t compose_ns = t2 - t1;
+    const uint64_t commit_ns = t3 - t2;
+    const uint64_t total_ns = t3 - t0;
     // PresentLayers doesn't run a TEST_ONLY probe in steady state; t3
     // is end-of-commit, "test" stays 0 in the summary.
-    profile_->p.account(t1 - t0, t2 - t1, /*test=*/0, t3 - t2, t3 - t0);
+    profile_->p.account(wait_ns, compose_ns, /*test=*/0, commit_ns, total_ns);
+    // Per-frame slow-frame log: any frame whose total exceeds 1.5 ×
+    // the vblank period missed its target (or got close enough that
+    // the next miss is one cosmic-ray away). Print the breakdown so
+    // it's obvious which stage spiked — wait/compose/commit. Cheap
+    // because slow frames are rare by definition.
+    const uint64_t period_ns = backend_->vrefresh() > 0
+                                   ? 1000000000ULL / backend_->vrefresh()
+                                   : 16666667ULL;
+    const uint64_t slow_threshold_ns = (period_ns * 3) / 2;
+    if (total_ns > slow_threshold_ns) {
+      spdlog::info(
+          "[DrmCompositor] slow frame: wait={:.2f}ms compose={:.2f}ms "
+          "commit={:.2f}ms total={:.2f}ms (vblank budget {:.2f}ms)",
+          static_cast<double>(wait_ns) / 1e6,
+          static_cast<double>(compose_ns) / 1e6,
+          static_cast<double>(commit_ns) / 1e6,
+          static_cast<double>(total_ns) / 1e6,
+          static_cast<double>(period_ns) / 1e6);
+    }
     if (profile_->p.frames >= kProfileWindow) {
       const auto& s = profile_->p;
       const auto ms = [&](uint64_t ns_sum) {
