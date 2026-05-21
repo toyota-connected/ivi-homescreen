@@ -36,6 +36,7 @@
 #include "configuration/configuration.h"
 #include "engine.h"
 #include "logging.h"
+#include "platform/homescreen/flutter_desktop_messenger.h"
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "plugins/gstreamer_egl/gstreamer_egl.h"
 #endif
@@ -249,7 +250,11 @@ FlutterView::FlutterView(Configuration::Config config,
   m_state->view_wrapper = std::make_unique<FlutterDesktopView>();
   m_state->view_wrapper->view = this;
 
-  m_state->engine_state = std::make_unique<FlutterDesktopEngineState>();
+  // Create engine_state locally so we own it through configuration; it'll
+  // be moved into m_flutter_engine in Initialize() so that it survives
+  // FlutterEngineDeinitialize. m_state holds a non-owning raw pointer.
+  m_pending_engine_state = std::make_unique<FlutterDesktopEngineState>();
+  m_state->engine_state = m_pending_engine_state.get();
   m_state->engine_state->view_controller = m_state.get();
 
   // Set the flutter assets folder
@@ -257,7 +262,7 @@ FlutterView::FlutterView(Configuration::Config config,
   path /= kBundleFlutterAssets;
   m_state->engine_state->flutter_asset_directory = path.generic_string();
 
-  SetUpCommonEngineState(m_state->engine_state.get(), this);
+  SetUpCommonEngineState(m_state->engine_state, this);
 
   // Set up the keyboard handlers
   auto internal_plugin_messenger =
@@ -269,11 +274,37 @@ FlutterView::FlutterView(Configuration::Config config,
   m_display->SetViewControllerState(m_state->engine_state->view_controller);
 
 #if ENABLE_PLUGINS
-  PluginsApiRegisterPlugins(m_state->engine_state.get());
+  PluginsApiRegisterPlugins(m_state->engine_state);
 #endif
 }
 
 FlutterView::~FlutterView() {
+  // Latch shutting_down on the texture registrar BEFORE m_state destructs.
+  // Plugin streaming threads (video_player's gstreamer handoff is the
+  // canonical case) call FlutterDesktopTexture{Make,Clear}Current and
+  // MarkExternalTextureFrameAvailable from their own threads, independent
+  // of the Flutter engine's lifecycle. Once m_state.reset() runs, the
+  // texture_registrar inside m_state->engine_state is freed and the
+  // engine/view_controller back-pointers dangle. Setting the gate here
+  // makes those entry points return false instead of dereferencing freed
+  // memory while the plugin's pipeline winds down.
+  if (m_state && m_state->engine_state &&
+      m_state->engine_state->texture_registrar) {
+    m_state->engine_state->texture_registrar->shutting_down.store(
+        true, std::memory_order_release);
+  }
+
+  // Null the messenger's engine pointer for the same reason — the
+  // singleton plugin_common_glib::MainLoop outlives main() and its glib
+  // thread can dispatch a queued gst bus message into a freed
+  // VideoPlayer, which calls FlutterDesktopMessengerSend on a messenger
+  // whose engine_state has been freed. SetEngine takes the messenger's
+  // own mutex; FlutterDesktopMessengerSendWithReply takes the same
+  // mutex and bails when engine is null.
+  if (m_state && m_state->engine_state && m_state->engine_state->messenger) {
+    m_state->engine_state->messenger->SetEngine(nullptr);
+  }
+
 #if BUILD_BACKEND_DRM_KMS_EGL
   // Tear down the DRM flip monitor before m_flutter_engine destructs.
   // The monitor's asio async_wait on drm_dev_->fd() lives on the
@@ -311,7 +342,12 @@ void FlutterView::Initialize() {
 
   m_state->engine = m_flutter_engine.get();
 
-  m_flutter_engine->Run(m_state->engine_state.get());
+  // Hand engine_state ownership to Engine so it survives
+  // FlutterEngineDeinitialize. m_state->engine_state stays as a raw
+  // pointer — same target, different owner.
+  m_flutter_engine->TakeEngineState(std::move(m_pending_engine_state));
+
+  m_flutter_engine->Run(m_state->engine_state);
 
   if (!m_flutter_engine->IsRunning()) {
     spdlog::critical("Failed to Run Engine");
