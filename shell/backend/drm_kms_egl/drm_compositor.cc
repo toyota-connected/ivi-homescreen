@@ -34,6 +34,8 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include <drm-cxx/core/format.hpp>
+
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "drm-cxx/src/modeset/atomic.hpp"
@@ -60,7 +62,7 @@ bool ProfileEnabled() {
 }
 
 uint64_t NsNow() {
-  struct timespec ts{};
+  struct timespec ts {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
          static_cast<uint64_t>(ts.tv_nsec);
@@ -262,6 +264,31 @@ bool DrmCompositor::InitEglExtensions() {
   glEGLImageTargetTexture2DOES_ =
       reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
           eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+
+  // Native-fence sync — used on direct-scanout for IN_FENCE_FD. Probe
+  // for the extension on the active EGLDisplay; eglGetProcAddress can
+  // return non-null for extensions the display doesn't actually support.
+  eglCreateSyncKHR_ = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(
+      eglGetProcAddress("eglCreateSyncKHR"));
+  eglDestroySyncKHR_ = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(
+      eglGetProcAddress("eglDestroySyncKHR"));
+  eglDupNativeFenceFDANDROID_ =
+      reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+          eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+  const char* exts = eglQueryString(backend_->egl_display(), EGL_EXTENSIONS);
+  const bool has_fence_sync =
+      exts && std::strstr(exts, "EGL_KHR_fence_sync") != nullptr;
+  const bool has_native_fence =
+      exts && std::strstr(exts, "EGL_ANDROID_native_fence_sync") != nullptr;
+  has_native_fence_sync_ = has_fence_sync && has_native_fence &&
+                           eglCreateSyncKHR_ && eglDestroySyncKHR_ &&
+                           eglDupNativeFenceFDANDROID_;
+  spdlog::info(
+      "[DrmCompositor] explicit sync via IN_FENCE_FD: {} (fence_sync={}, "
+      "native_fence_sync={})",
+      has_native_fence_sync_ ? "available" : "unavailable",
+      has_fence_sync ? "y" : "n", has_native_fence ? "y" : "n");
+
   return eglCreateImageKHR_ && eglDestroyImageKHR_ &&
          glEGLImageTargetTexture2DOES_;
 }
@@ -315,6 +342,16 @@ bool DrmCompositor::InitPlaneAllocator() {
     }
   }
   spdlog::info("[DrmCompositor] primary plane zpos = {}", primary_zpos_);
+
+  // Universal diagnostic kill-switch: force GL composite even when
+  // REFLECT_Y is available. Useful for bisecting visual artifacts that
+  // appear on the direct-scanout path.
+  if (const char* v = std::getenv("IVI_DRM_NO_DIRECT_SCANOUT");
+      v && *v && *v != '0') {
+    any_plane_supports_reflect_y_ = false;
+    spdlog::info(
+        "[DrmCompositor] IVI_DRM_NO_DIRECT_SCANOUT set; forcing GL composite");
+  }
   spdlog::info("[DrmCompositor] direct-scanout REFLECT_Y available: {}",
                any_plane_supports_reflect_y_ ? "yes" : "no");
 
@@ -537,42 +574,111 @@ void DrmCompositor::EnsureGlCapsProbed() {
 bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
                                    uint32_t w,
                                    uint32_t h,
-                                   const uint32_t format) const {
+                                   const uint32_t format,
+                                   const size_t pool_size) const {
+  if (pool_size == 0 || pool_size > GbmBackingStore::kMaxPoolSize) {
+    spdlog::error(
+        "[DrmCompositor] CreateGbmStore: pool_size={} out of range [1, {}]",
+        pool_size, GbmBackingStore::kMaxPoolSize);
+    return false;
+  }
   store.width = w;
   store.height = h;
   store.format = format;
+  store.pool_size = pool_size;
   const uint32_t usage = planes_available_
                              ? (GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT)
                              : GBM_BO_USE_RENDERING;
-  store.bo = gbm_bo_create(backend_->gbm(), w, h, format, usage);
-  if (!store.bo) {
-    spdlog::error("[DrmCompositor] gbm_bo_create {}x{}: {}", w, h,
-                  std::strerror(errno));
-    return false;
+
+  // Allocate N (= pool_size) gbm_bos + EGLImages + color textures, one
+  // per pool slot. Shared FBO + depth/stencil RB are created once at the
+  // end and attached to slot 0 initially; PresentLayers rebinds the
+  // color attachment as the pool rotates. On any per-slot failure,
+  // DestroyGbmStore handles partial state (it tolerates zero-value
+  // fields in each slot).
+  for (size_t i = 0; i < pool_size; ++i) {
+    auto& slot = store.pool[i];
+    slot.bo = gbm_bo_create(backend_->gbm(), w, h, format, usage);
+    if (!slot.bo) {
+      spdlog::error("[DrmCompositor] gbm_bo_create slot={} {}x{}: {}", i, w, h,
+                    std::strerror(errno));
+      DestroyGbmStore(store);
+      return false;
+    }
+
+    // Import the gbm_bo via EGL_EXT_image_dma_buf_import. Mesa's
+    // EGL_NATIVE_PIXMAP_KHR-over-gbm_bo convention is not implemented
+    // by NVIDIA's EGL (returns EGL_BAD_PARAMETER on L4T). The dmabuf
+    // path is portable across amdgpu / Intel / Mali / NVIDIA. Modifier
+    // attribs are appended when the bo carries a real modifier —
+    // required by NVIDIA, harmless to Mesa.
+    const int dmabuf_fd = gbm_bo_get_fd(slot.bo);
+    if (dmabuf_fd < 0) {
+      spdlog::error("[DrmCompositor] gbm_bo_get_fd slot={}: {}", i,
+                    std::strerror(errno));
+      DestroyGbmStore(store);
+      return false;
+    }
+    const uint32_t stride = gbm_bo_get_stride_for_plane(slot.bo, 0);
+    const uint32_t offset = gbm_bo_get_offset(slot.bo, 0);
+    const uint64_t modifier = gbm_bo_get_modifier(slot.bo);
+
+    // eglCreateImageKHR's attrib_list is EGLint*, not EGLAttrib*;
+    // modifier halves are passed as the bit-pattern of each 32-bit half.
+    std::array<EGLint, 21> attribs{};
+    size_t n = 0;
+    attribs[n++] = EGL_WIDTH;
+    attribs[n++] = static_cast<EGLint>(w);
+    attribs[n++] = EGL_HEIGHT;
+    attribs[n++] = static_cast<EGLint>(h);
+    attribs[n++] = EGL_LINUX_DRM_FOURCC_EXT;
+    attribs[n++] = static_cast<EGLint>(format);
+    attribs[n++] = EGL_DMA_BUF_PLANE0_FD_EXT;
+    attribs[n++] = dmabuf_fd;
+    attribs[n++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
+    attribs[n++] = static_cast<EGLint>(offset);
+    attribs[n++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
+    attribs[n++] = static_cast<EGLint>(stride);
+    if (modifier != DRM_FORMAT_MOD_INVALID) {
+      attribs[n++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+      attribs[n++] = static_cast<EGLint>(modifier & 0xffffffffULL);
+      attribs[n++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+      attribs[n++] = static_cast<EGLint>(modifier >> 32);
+    }
+    attribs[n++] = EGL_NONE;
+
+    slot.egl_image = eglCreateImageKHR_(
+        backend_->egl_display(), EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+        static_cast<EGLClientBuffer>(nullptr), attribs.data());
+    close(dmabuf_fd);  // EGL dup's the fd; safe to close after the call.
+    if (slot.egl_image == EGL_NO_IMAGE_KHR) {
+      spdlog::error(
+          "[DrmCompositor] eglCreateImageKHR(slot={}, LINUX_DMA_BUF, "
+          "fourcc={}, stride={}, offset={}, mod=0x{:x}): 0x{:x}",
+          i, drm::format_name(format), stride, offset, modifier, eglGetError());
+      DestroyGbmStore(store);
+      return false;
+    }
+
+    glGenTextures(1, &slot.color_tex);
+    glBindTexture(GL_TEXTURE_2D, slot.color_tex);
+    glEGLImageTargetTexture2DOES_(GL_TEXTURE_2D,
+                                  static_cast<GLeglImageOES>(slot.egl_image));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   }
 
-  store.egl_image = eglCreateImageKHR_(
-      backend_->egl_display(), EGL_NO_CONTEXT, EGL_NATIVE_PIXMAP_KHR,
-      reinterpret_cast<EGLClientBuffer>(store.bo), nullptr);
-  if (store.egl_image == EGL_NO_IMAGE_KHR) {
-    spdlog::error("[DrmCompositor] eglCreateImageKHR: 0x{:x}", eglGetError());
-    DestroyGbmStore(store);
-    return false;
-  }
-
-  glGenTextures(1, &store.color_tex);
-  glBindTexture(GL_TEXTURE_2D, store.color_tex);
-  glEGLImageTargetTexture2DOES_(GL_TEXTURE_2D,
-                                static_cast<GLeglImageOES>(store.egl_image));
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  // Shared FBO + depth/stencil RB. Color attachment initially points
+  // at slot 0; PresentLayers rebinds it as the pool rotates.
+  store.active_idx = 0;
+  store.pool[0].state = GbmBackingStore::Slot::State::Active;
 
   glGenFramebuffers(1, &store.fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, store.fbo);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                         store.color_tex, 0);
+                         store.pool[0].color_tex, 0);
 
   glGenRenderbuffers(1, &store.depth_stencil_rb);
   glBindRenderbuffer(GL_RENDERBUFFER, store.depth_stencil_rb);
@@ -606,14 +712,15 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
 }
 
 bool DrmCompositor::EnsureDrmFbId(GbmBackingStore& store) const {
-  if (store.drm_fb_id != 0) {
+  auto& slot = store.active();
+  if (slot.drm_fb_id != 0) {
     return true;
   }
-  if (!store.bo) {
+  if (!slot.bo) {
     return false;
   }
-  store.drm_fb_id = ImportBoAsFb(store.bo);
-  return store.drm_fb_id != 0;
+  slot.drm_fb_id = ImportBoAsFb(slot.bo);
+  return slot.drm_fb_id != 0;
 }
 
 uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) const {
@@ -671,39 +778,64 @@ uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) const {
 }
 
 void DrmCompositor::DestroyGbmStore(GbmBackingStore& store) const {
+  // Shared resources first: one FBO + one depth/stencil RB per BS.
   if (store.fbo != 0) {
     glDeleteFramebuffers(1, &store.fbo);
     store.fbo = 0;
-  }
-  if (store.color_tex != 0) {
-    glDeleteTextures(1, &store.color_tex);
-    store.color_tex = 0;
   }
   if (store.depth_stencil_rb != 0) {
     glDeleteRenderbuffers(1, &store.depth_stencil_rb);
     store.depth_stencil_rb = 0;
   }
-  if (store.egl_image != EGL_NO_IMAGE_KHR && eglDestroyImageKHR_) {
-    eglDestroyImageKHR_(backend_->egl_display(), store.egl_image);
-    store.egl_image = EGL_NO_IMAGE_KHR;
+  // Per-slot resources.
+  for (auto& slot : store.pool) {
+    if (slot.color_tex != 0) {
+      glDeleteTextures(1, &slot.color_tex);
+      slot.color_tex = 0;
+    }
+    if (slot.egl_image != EGL_NO_IMAGE_KHR && eglDestroyImageKHR_) {
+      eglDestroyImageKHR_(backend_->egl_display(), slot.egl_image);
+      slot.egl_image = EGL_NO_IMAGE_KHR;
+    }
+    if (slot.drm_fb_id != 0) {
+      drmModeRmFB(backend_->drm_fd(), slot.drm_fb_id);
+      slot.drm_fb_id = 0;
+    }
+    if (slot.bo) {
+      gbm_bo_destroy(slot.bo);
+      slot.bo = nullptr;
+    }
+    slot.state = GbmBackingStore::Slot::State::Free;
   }
-  if (store.drm_fb_id != 0) {
-    drmModeRmFB(backend_->drm_fd(), store.drm_fb_id);
-    store.drm_fb_id = 0;
-  }
-  if (store.bo) {
-    gbm_bo_destroy(store.bo);
-    store.bo = nullptr;
-  }
+  store.active_idx = 0;
 }
 
-// ─── Page-flip synchronisation ───────────────────────────────────────────
+// ─── Page-flip synchronization ───────────────────────────────────────────
 
 void DrmCompositor::OnFlipComplete() {
   // Called from DrmBackend::UnifiedPageFlipHandler on the platform
   // task runner thread when planes are active. Baton return is the
   // unified handler's job; we just record the flip.
   flip_pending_.store(false, std::memory_order_release);
+
+  // Advance the BS-slot release pipeline. The slots that *were*
+  // scanning out are now displaced and free; the slots from the most
+  // recent commit (front of in_flight_slots_) become the new scanning
+  // set. The event we just received is semantically "previous front
+  // retired, new front is now active", which is exactly this
+  // transition.
+  {
+    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+    for (auto& ref : scanning_slots_) {
+      ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
+    }
+    scanning_slots_.clear();
+    if (!in_flight_slots_.empty()) {
+      scanning_slots_ = std::move(in_flight_slots_.front());
+      in_flight_slots_.pop_front();
+    }
+  }
+
   backend_->RecordFlipComplete();
 }
 
@@ -766,7 +898,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
       if (baton && baton->store) {
         const auto* s = baton->store;
         gl_compositor_->CompositeToDefault(
-            s->fbo, s->color_tex, static_cast<GLsizei>(s->width),
+            s->fbo, s->active().color_tex, static_cast<GLsizei>(s->width),
             static_cast<GLsizei>(s->height),
             static_cast<GLint>(layer->offset.x),
             static_cast<GLint>(layer->offset.y),
@@ -870,7 +1002,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
               i, s->width, s->height, layer->offset.x, layer->offset.y,
               layer->size.width, layer->size.height, blend);
         }
-        CompositeLayerIntoFbo(comp.fbo, s->fbo, s->color_tex,
+        CompositeLayerIntoFbo(comp.fbo, s->fbo, s->active().color_tex,
                               static_cast<GLsizei>(s->width),
                               static_cast<GLsizei>(s->height),
                               static_cast<GLint>(layer->offset.x),
@@ -987,7 +1119,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     spdlog::debug(
         "[DrmCompositor] framed frame: layers={} composited={} comp_idx={} "
         "comp_fb={}",
-        count, composited_any, comp_idx_, comp.drm_fb_id);
+        count, composited_any, comp_idx_, comp.active().drm_fb_id);
   }
 
   // ── Build the atomic request ──
@@ -1067,7 +1199,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
 
   // Primary: persistent mode-sized opaque BG covering the whole CRTC.
   // Kept on every frame, so amdgpu DC sees "primary covers CRTC".
-  if (!set(framed_primary_id_, "FB_ID", bg_store_.drm_fb_id) ||
+  if (!set(framed_primary_id_, "FB_ID", bg_store_.active().drm_fb_id) ||
       !set(framed_primary_id_, "CRTC_ID", crtc_id) ||
       !set(framed_primary_id_, "CRTC_X", 0) ||
       !set(framed_primary_id_, "CRTC_Y", 0) ||
@@ -1092,8 +1224,8 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     }
   }
 
-  // Overlay: carries the composited content, centred on the CRTC.
-  if (!set(framed_overlay_id_, "FB_ID", comp.drm_fb_id) ||
+  // Overlay: carries the composited content, centered on the CRTC.
+  if (!set(framed_overlay_id_, "FB_ID", comp.active().drm_fb_id) ||
       !set(framed_overlay_id_, "CRTC_ID", crtc_id) ||
       !set(framed_overlay_id_, "CRTC_X",
            static_cast<uint64_t>(static_cast<int64_t>(lx))) ||
@@ -1483,7 +1615,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       // ~line 942) — same hints, same reason.
       drm_layer.set_property(drm::planes::PropTag::PixelFormat, store->format)
           .set_property(drm::planes::PropTag::FbModifier,
-                        gbm_bo_get_modifier(store->bo));
+                        gbm_bo_get_modifier(store->active().bo));
       // Flutter renders to the BS using GL's bottom-up NDC convention:
       // pixel rows live in memory with the visual bottom at the low
       // address. The composite path compensates by sampling with
@@ -1494,7 +1626,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       // supports_rotation static screen rejects the layer and we fall
       // back to GL composition.
       constexpr uint64_t kReflectY = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
-      drm_layer.set_property("FB_ID", store->drm_fb_id)
+      drm_layer.set_property("FB_ID", store->active().drm_fb_id)
           .set_property("CRTC_ID", backend_->crtc_id())
           .set_property("CRTC_X",
                         static_cast<uint64_t>(
@@ -1515,6 +1647,25 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       // allocator pick by plane class works better.
       drm_layer.set_content_type(i == 0 ? drm::planes::ContentType::UI
                                         : drm::planes::ContentType::Generic);
+      // Diagnostic (under --debug-backend): track whether the BS BO
+      // actually rotates between frames on direct-scanout. With
+      // pool_size=3 every frame's bo differs from the last, so
+      // unconditional logging would emit ~120 lines/s at 120 Hz.
+      // Useful for confirming the pool is doing its job on a new
+      // driver / config.
+      if (backend_->cfg_.debug_backend) {
+        static const gbm_bo* last_bo = nullptr;
+        static int distinct_count = 0;
+        const auto& s = store->active();
+        if (s.bo != last_bo) {
+          ++distinct_count;
+          spdlog::debug(
+              "[DrmCompositor] direct-scanout bo cycle: bo={} fb_id={} "
+              "(distinct={})",
+              static_cast<const void*>(s.bo), s.drm_fb_id, distinct_count);
+          last_bo = s.bo;
+        }
+      }
     } else {
       // Platform view or store without a KMS FB — must be composited.
       drm_layer.set_composited();
@@ -1532,7 +1683,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // here produces EINVAL on commit. primary_zpos_ is the value the
   // allocator already uses for the backing-store layer stack.
   auto& comp = comp_bufs_[comp_idx_];
-  comp_layer_.set_property("FB_ID", comp.drm_fb_id)
+  comp_layer_.set_property("FB_ID", comp.active().drm_fb_id)
       .set_property("CRTC_ID", backend_->crtc_id())
       .set_property("CRTC_X", static_cast<uint64_t>(letterbox_x))
       .set_property("CRTC_Y", static_cast<uint64_t>(letterbox_y))
@@ -1590,7 +1741,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       if (auto pid = fl.drm->assigned_plane_id()) {
         spdlog::info(
             "[DrmCompositor]   layer {} → plane {} (fb_id={}, {}x{}, zpos={})",
-            i, *pid, fl.store ? fl.store->drm_fb_id : 0,
+            i, *pid, fl.store ? fl.store->active().drm_fb_id : 0,
             fl.store ? fl.store->width : 0, fl.store ? fl.store->height : 0,
             primary_zpos_ + i);
       } else if (fl.drm->needs_composition()) {
@@ -1603,7 +1754,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     spdlog::info(
         "[DrmCompositor]   comp_layer → {} (fb_id={})",
         comp_pid ? std::to_string(*comp_pid) : std::string("<unassigned>"),
-        comp.drm_fb_id);
+        comp.active().drm_fb_id);
   }
 
   // ── GL-composite layers that overflowed into the composition buffer ──
@@ -1638,7 +1789,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       }
       const bool blend = any_composited;
       if (store) {
-        CompositeLayerIntoFbo(comp.fbo, store->fbo, store->color_tex,
+        CompositeLayerIntoFbo(comp.fbo, store->fbo, store->active().color_tex,
                               static_cast<GLsizei>(store->width),
                               static_cast<GLsizei>(store->height),
                               static_cast<GLint>(flutter->offset.x),
@@ -1680,6 +1831,62 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
+  // Explicit GPU↔display sync for the direct-scanout path. The GL
+  // composite block above ends in glFinish (covers both Flutter's BS
+  // writes and our composite), but direct-scanout skips composite
+  // entirely. On drivers that don't insert implicit dma-fence on
+  // commit (notably nvidia-drm), the kernel scans before Flutter's
+  // writes have landed → visible artifacts. Hand the kernel an
+  // IN_FENCE_FD that signals when Flutter's GPU work is done; the
+  // kernel waits asynchronously rather than us stalling the
+  // rasterizer thread.
+  //
+  // Fallback: if the EGL native-fence-sync extension isn't available,
+  // glFinish here is the only option — same correctness, ~2 ms
+  // synchronous stall.
+  int in_fence_fd = -1;
+  // RAII: close the dup'd fence FD on every exit path from this
+  // function. The kernel takes its own reference during atomic_check,
+  // so closing after the commit returns (success or failure) is safe.
+  struct FenceFdCloser {
+    int& fd;
+    ~FenceFdCloser() {
+      if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+      }
+    }
+  } fence_closer{in_fence_fd};
+
+  if (!needs_compositing) {
+    if (has_native_fence_sync_) {
+      glFlush();  // make sure pending GL work is queued for the fence
+      EGLSyncKHR sync = eglCreateSyncKHR_(
+          backend_->egl_display(), EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+      if (sync != EGL_NO_SYNC_KHR) {
+        in_fence_fd =
+            eglDupNativeFenceFDANDROID_(backend_->egl_display(), sync);
+        eglDestroySyncKHR_(backend_->egl_display(), sync);
+        if (in_fence_fd == EGL_NO_NATIVE_FENCE_FD_ANDROID) {
+          in_fence_fd = -1;
+        }
+      }
+    }
+    if (in_fence_fd < 0) {
+      // Extension missing, sync creation failed, or fence FD couldn't
+      // be dup'd — fall back to synchronous GPU drain.
+      glFinish();
+    } else {
+      // Attach the fence FD to every direct-scanout layer's plane.
+      for (auto& [flutter, store, drm] : frame_layers) {
+        if (store && any_plane_supports_reflect_y_ &&
+            store->active().drm_fb_id != 0) {
+          drm->set_property("IN_FENCE_FD", static_cast<uint64_t>(in_fence_fd));
+        }
+      }
+    }
+  }
+
   // ── Atomic commit ──
   // The test-only apply() above already populated `req` with all plane
   // property assignments. Commit it with the real flags — no need to
@@ -1697,7 +1904,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   //     ALLOW_MODESET is not combined with NONBLOCK unless the driver
   //     has opted in via --drm-allow-nonblock-modeset.
   uint32_t commit_flags = 0;
-  if (!plane_mode_set_) {
+  const bool was_first_commit_pre = !plane_mode_set_;
+  if (was_first_commit_pre) {
     commit_flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
   } else {
     commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
@@ -1772,6 +1980,83 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     comp_idx_ ^= 1;
   }
   output.mark_clean();
+
+  // Rotate each Flutter BS pool that participated in this frame. The
+  // commit handed the kernel each store's active slot's FB_ID; Flutter's
+  // next render must target a *different* slot so we don't overwrite
+  // content the kernel is still scanning out — the visible-flicker mode
+  // on drivers that don't kernel-side hold the BO during scanout
+  // (notably nvidia-drm).
+  //
+  // Round-robin with pool_size >= 3 is empirically safe: by the time
+  // we cycle back to a slot it's been ~2 vblanks since the kernel last
+  // referenced it. The slot-release pipeline (in_flight_slots_ +
+  // scanning_slots_) tracks the actual state so a later size of 2
+  // would also be correct.
+  //
+  // Stores with pool_size == 1 (comp_bufs_, bg_store_) skip the rotate;
+  // they're already multi-buffered at a higher level (comp_idx_) or
+  // single-shot (bg_store_).
+  bool any_rotated = false;
+  std::vector<SlotRef> committed_this_frame;
+  for (const auto& fl : frame_layers) {
+    if (!fl.store || fl.store->pool_size <= 1) {
+      continue;
+    }
+    auto& store = *fl.store;
+    const size_t committed_idx = store.active_idx;
+    store.pool[committed_idx].state = GbmBackingStore::Slot::State::Pending;
+    committed_this_frame.push_back({&store, committed_idx});
+    store.active_idx = (store.active_idx + 1) % store.pool_size;
+    store.pool[store.active_idx].state = GbmBackingStore::Slot::State::Active;
+    // Rebind the FBO's color attachment to the new active slot's
+    // texture. The FBO ID we returned to Flutter via
+    // FlutterBackingStore::open_gl.framebuffer.name is unchanged; only
+    // the attachment is swapped, so Flutter's cached FBO state stays
+    // valid.
+    glBindFramebuffer(GL_FRAMEBUFFER, store.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           store.active().color_tex, 0);
+    any_rotated = true;
+    if (backend_->cfg_.debug_backend) {
+      GLint attached_tex = 0;
+      glGetFramebufferAttachmentParameteriv(
+          GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached_tex);
+      if (static_cast<GLuint>(attached_tex) != store.active().color_tex) {
+        spdlog::warn(
+            "[DrmCompositor] FBO rebind verify failed: expected "
+            "color_tex={} got={}",
+            store.active().color_tex, attached_tex);
+      }
+    }
+  }
+  // Only restore the default FBO when we actually rebound. Calling
+  // glBindFramebuffer(0) unconditionally per frame triggered GL-driver
+  // state-flush jitter under image-decode-heavy workloads on Tegra
+  // (sustained 60 Hz lock degraded to 25 fps after ~9 s); gating on
+  // any_rotated keeps the call out of the hot path when no Flutter BS
+  // participated in this frame.
+  if (any_rotated) {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+
+  // Hand off committed slots to the release pipeline. The first commit
+  // was blocking + ALLOW_MODESET, so no PAGE_FLIP_EVENT will fire —
+  // promote the slots straight to "scanning" so the next event frees
+  // them. Subsequent commits queue and the flip handler drains.
+  if (!committed_this_frame.empty()) {
+    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+    if (was_first_commit_pre) {
+      for (auto& ref : scanning_slots_) {
+        ref.store->pool[ref.slot_idx].state =
+            GbmBackingStore::Slot::State::Free;
+      }
+      scanning_slots_ = std::move(committed_this_frame);
+    } else {
+      in_flight_slots_.push_back(std::move(committed_this_frame));
+    }
+  }
 
   if (profile && profile_) {
     const uint64_t t3 = NsNow();
@@ -1854,7 +2139,18 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
   }
   if (!store) {
     store = std::make_unique<GbmBackingStore>();
-    if (!CreateGbmStore(*store, w, h, backing_format)) {
+    // Only multi-buffer when direct-scanout is actually reachable.
+    // GL composite reads the BS BO as a texture (read-only during the
+    // composite step) and writes into comp.fbo, which is already
+    // multi-buffered at the comp_idx_ level — so the BS recycle race
+    // doesn't exist on that path and the extra BOs are pure memory
+    // tax. On Tegra with the nvidia-drm gate active this would 3×
+    // the GBM footprint of image-heavy bundles (image_list,
+    // wonderous, …) and visibly regress steady-state cadence via
+    // GL-driver memory pressure.
+    const size_t pool_size =
+        any_plane_supports_reflect_y_ ? kFlutterBsPoolSize : 1;
+    if (!CreateGbmStore(*store, w, h, backing_format, pool_size)) {
       return false;
     }
     ++store_pool_misses_;
@@ -1927,6 +2223,25 @@ void DrmCompositor::OnResume() {
   plane_mode_set_ = false;
   paused_.store(false, std::memory_order_release);
   resume_pending_logged_ = false;
+
+  // Drain the BS-slot release pipeline — any flip events that would
+  // have freed slots queued before pause never fired. Promote
+  // everything to Free so the next render finds usable slots.
+  {
+    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+    for (auto& ref : scanning_slots_) {
+      ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
+    }
+    scanning_slots_.clear();
+    while (!in_flight_slots_.empty()) {
+      for (auto& ref : in_flight_slots_.front()) {
+        ref.store->pool[ref.slot_idx].state =
+            GbmBackingStore::Slot::State::Free;
+      }
+      in_flight_slots_.pop_front();
+    }
+  }
+
   spdlog::info("[DrmCompositor] resumed — next commit will re-modeset");
 }
 

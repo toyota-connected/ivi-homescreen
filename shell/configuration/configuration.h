@@ -53,6 +53,8 @@ class Configuration {
       // from the DRM headers. Valid values:
       //   drm_connector             : "<TypeName>-<id>" (e.g. "eDP-1",
       //                               "HDMI-A-1"); unset = rank-pick
+      //   drm_mode                  : "<W>x<H>@<R>" (e.g. "1920x1080@120");
+      //                               unset = preferred mode from EDID
       //   drm_compositor            : "auto" | "planes" | "gl"
       //   drm_modeset               : "auto" | "legacy" | "atomic"
       //   drm_allow_nonblock_modeset: "auto" | "yes" | "no"
@@ -63,6 +65,7 @@ class Configuration {
       // FlutterView parses these into the DrmConfig enum fields. Anything
       // unrecognized is treated as "auto" with a warning.
       std::optional<std::string> drm_connector;
+      std::optional<std::string> drm_mode;
       std::optional<std::string> drm_compositor;
       std::optional<std::string> drm_modeset;
       std::optional<std::string> drm_allow_nonblock_modeset;

@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <cstddef>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -43,20 +46,60 @@
 class DrmBackend;
 class ICompositorSurface;
 
+// Default pool sizes used by CreateGbmStore. Flutter backing-stores
+// rotate among N=3 BOs so direct-scanout never binds the BO that's
+// currently being written.
+// Composition buffers (`comp_bufs_`) and the background store
+// (`bg_store_`) stay single-buffered: the former are already
+// multi-buffered at the `comp_idx_` level (kNumCompBufs=2), the latter
+// is a single-shot scanout target with no per-frame writes.
+inline constexpr size_t kFlutterBsPoolSize = 3;
+inline constexpr size_t kCompBufPoolSize = 1;
+inline constexpr size_t kBgStorePoolSize = 1;
+
+// One renderable surface that Flutter composes into via FBO. The pool
+// rotates BOs so direct-scanout never binds the BO that's currently
+// being written. Each Slot owns the per-frame storage (BO, EGLImage,
+// color texture, KMS FB id); the BS-level FBO and depth/stencil
+// renderbuffer are shared and rebound across slots.
 struct GbmBackingStore {
-  gbm_bo* bo = nullptr;
-  EGLImageKHR egl_image = EGL_NO_IMAGE_KHR;
+  // Compile-time upper bound on slots-per-store. Per-instance
+  // `pool_size` selects how many are actually allocated; unused slots
+  // stay zero-initialized.
+  static constexpr size_t kMaxPoolSize = 3;
+
+  // Per-slot state. State drives the rotate in PresentLayers:
+  //   Free    — available for next render
+  //   Active  — FBO color attachment points here; Flutter is rendering
+  //   Pending — atomic-committed; awaiting PAGE_FLIP_EVENT
+  struct Slot {
+    gbm_bo* bo = nullptr;
+    EGLImageKHR egl_image = EGL_NO_IMAGE_KHR;
+    GLuint color_tex = 0;
+    // Lazily populated by EnsureDrmFbId() on first direct-scanout use
+    // and cached for the BO's lifetime — stays 0 on paths that only
+    // sample the store as a GL texture (e.g. framed mode, GL fallback),
+    // avoiding a per-BO drmModeAddFB2/RmFB syscall pair that never
+    // earned its keep.
+    uint32_t drm_fb_id = 0;
+    enum class State : uint8_t { Free, Active, Pending } state = State::Free;
+  };
+
+  std::array<Slot, kMaxPoolSize> pool{};
+  size_t pool_size = 1;
+  size_t active_idx = 0;
+
+  // Shared across slots: one FBO whose GL_COLOR_ATTACHMENT0 we rebind
+  // as the pool rotates, plus a single scratch depth/stencil RB (cleared
+  // each frame; need not be multi-buffered).
   GLuint fbo = 0;
-  GLuint color_tex = 0;
   GLuint depth_stencil_rb = 0;
-  // Lazily populated by EnsureDrmFbId() on first direct-scanout use and
-  // cached for the BO's lifetime — stays 0 on paths that only sample the
-  // store as a GL texture (e.g. framed mode, GL fallback), avoiding a
-  // per-BO drmModeAddFB2/RmFB syscall pair that never earned its keep.
-  uint32_t drm_fb_id = 0;
   uint32_t width = 0;
   uint32_t height = 0;
   uint32_t format = 0;
+
+  [[nodiscard]] Slot& active() noexcept { return pool[active_idx]; }
+  [[nodiscard]] const Slot& active() const noexcept { return pool[active_idx]; }
 };
 
 // FlutterCompositor for the DRM/KMS backend with hardware-plane overlay
@@ -135,7 +178,8 @@ class DrmCompositor {
   bool CreateGbmStore(GbmBackingStore& store,
                       uint32_t w,
                       uint32_t h,
-                      uint32_t format) const;
+                      uint32_t format,
+                      size_t pool_size = 1) const;
   uint32_t ImportBoAsFb(gbm_bo* bo) const;
   // Lazily import the store's BO as a DRM framebuffer on first direct-
   // scanout use. Returns true when @c store.drm_fb_id is non-zero on
@@ -187,7 +231,7 @@ class DrmCompositor {
   // mode-independent composition buffer (same pixel work as the GL
   // fallback) and atomic-commits a two-plane layout: primary plane
   // covers the full CRTC with a persistent opaque BG FB, overlay plane
-  // scans out the composition buffer centred on the CRTC. Bypasses the
+  // scans out the composition buffer centered on the CRTC. Bypasses the
   // drm-cxx Allocator entirely — its "composition layer → primary"
   // convention can't produce a partial-coverage primary and amdgpu DC
   // rejects that anyway.
@@ -199,6 +243,18 @@ class DrmCompositor {
   PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ = nullptr;
   PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ = nullptr;
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES_ = nullptr;
+
+  // EGL native-fence sync. Used on the direct-scanout path to hand the
+  // kernel an `IN_FENCE_FD` so it waits for Flutter's GPU writes to
+  // retire before scanning the BO.
+  // Required on drivers that don't insert implicit dma-fence on commit
+  // (notably nvidia-drm). If the extension is missing, the path falls
+  // back to a synchronous glFinish before commit (correctness preserved
+  // at the cost of a per-frame stall).
+  PFNEGLCREATESYNCKHRPROC eglCreateSyncKHR_ = nullptr;
+  PFNEGLDESTROYSYNCKHRPROC eglDestroySyncKHR_ = nullptr;
+  PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID_ = nullptr;
+  bool has_native_fence_sync_ = false;
 
   GlCaps gl_caps_{};
   bool gl_caps_probed_{false};
@@ -273,6 +329,21 @@ class DrmCompositor {
   // commit paths. Atomic because the writes and reads cross threads.
   std::atomic<bool> flip_pending_{false};
 
+  // Backing-store slot release pipeline. PresentLayers pushes the
+  // just-committed Pending slots onto in_flight_slots_ on the
+  // rasterizer thread; OnFlipComplete pops them on the platform task
+  // runner thread when PAGE_FLIP_EVENT arrives. The slots currently
+  // being scanned out are tracked in scanning_slots_ so they can be
+  // freed at the NEXT flip event (the event that displaces them as
+  // the active scanout).
+  struct SlotRef {
+    GbmBackingStore* store;
+    size_t slot_idx;
+  };
+  std::mutex slot_pipeline_mu_;
+  std::deque<std::vector<SlotRef>> in_flight_slots_;
+  std::vector<SlotRef> scanning_slots_;
+
   // First atomic commit after Create(). The kernel needs the modeset
   // flag + a blocking commit; subsequent commits use NONBLOCK +
   // PAGE_FLIP_EVENT.
@@ -306,7 +377,7 @@ class DrmCompositor {
   // Per-frame composite-path profiling state. Opaque struct in
   // drm_compositor.cc so the header doesn't need <chrono>/<atomic>.
   // Only mutated on the rasterizer thread (PresentFramed /
-  // PresentLayers), so no synchronisation.
+  // PresentLayers), so no synchronization.
   struct FrameProfileState;
   std::unique_ptr<FrameProfileState> profile_;
 
