@@ -431,6 +431,59 @@ hangs waiting for the next flip. Fail-fast is better.
 
 ---
 
+## Benchmarks
+
+Measured on amdgpu (RDNA/Polaris-class), `feat/drm-kms-egl @ 85a78d10`, Fedora 43 kernel 6.19, running the flutter-wonderous-app bundle.
+
+### Methodology
+
+`IVI_DRM_FLIP_TRACE=1` logs every PAGE_FLIP_EVENT. The intervals between consecutive flips give the achieved cadence — that's the metric here. Each log is parsed with an awk one-liner that buckets intervals into native vblank multiples (e.g. at 240 Hz: ≤6 ms = 240 Hz hit, 7–11 ms = 120 Hz miss, 12–19 ms = 60 Hz miss). The reproducer scripts live in `/tmp/run-rt-test*.sh` in dev environments.
+
+For a per-stage breakdown, `IVI_DRM_PROFILE=1` adds a log line every 60 frames with mean+max of `wait`/`compose`/`commit`/`total` from `PresentFramed` (framed mode) or `PresentLayers` (plane allocator) — see the env table above.
+
+### Headline result
+
+**240 Hz panel (2560×1440), wonderous fullscreen, `IVI_DRM_RT=1` + `IVI_DRM_VSYNC=1`:**
+
+| Cadence bucket | Frames | % |
+|---|---:|---:|
+| 240 Hz native (≤6 ms) | 63 479 | **98.0%** |
+| 120 Hz (7–11 ms) | 1 141 | 1.8% |
+| 60 Hz (12–19 ms) | 134 | 0.2% |
+| 30 Hz (20–36 ms) | 5 | ~0% |
+| Idle/pause | 9 | ~0% |
+
+Avg interval 4.31 ms, p50 4 ms, p95 4 ms, p99 8 ms — a 64 769-frame sample.
+
+### Path that landed the improvements
+
+The 240 Hz vblank budget is 4.17 ms, so even small scheduling jitter or per-frame overhead is fatal. Pre-optimization the same setup achieved 23.9 % native at 240 Hz; the cumulative effect of these commits walked it to 98 %:
+
+1. **asio-driven PAGE_FLIP_EVENT monitor** (`6bab1163`). Drains the drm fd on the platform task runner instead of waiting for the rasterizer to poll inside `WaitForPendingFlip`. Decouples baton return from Present cadence and is the prerequisite for the next commit.
+2. **Wired `FlutterVsyncCallback`** (`226a9158`). Lets Flutter lock its frame pacer to actual vblank instead of its internal wall-clock scheduler. `IVI_DRM_VSYNC=0` reverts to wall-clock for bisection.
+3. **Per-thread RT priority via `thread_priority_setter`** (`5ae8ae50`). Flutter's rasterizer gets `SCHED_FIFO` prio 2; UI thread gets `SCHED_FIFO` prio 1; background pool gets `SCHED_BATCH`. Gated by `IVI_DRM_RT` because a runaway RT thread is unrecoverable without a hard reset. Eliminating raster-thread preemption jitter is the single biggest contributor at high refresh rates.
+4. **Composite-path gating + direct-scanout fast path** (`85a78d10`). `PresentLayers` skips its GL composite block when no Flutter layer needs composition, and tries direct-scanout (set `PixelFormat` + `FbModifier` + `REFLECT_Y` rotation on the layer) when the primary plane's rotation bitmask allows it. On hardware that supports `REFLECT_Y` the per-frame compositor cost drops from ~7 ms → ~0.16 ms (43×); on hardware that doesn't, the path falls back cleanly to the prior composite cost.
+5. **Composite profiling** (`bda9c638`). The instrumentation that made the cost breakdown legible.
+
+### Where the remaining 2% comes from
+
+The 1.8 % at 120 Hz buckets are individual frames missing the next vblank by a few hundred microseconds. Per-stage profiling on the same workload shows `compose` averaging ~5 ms with occasional max excursions of 7–15 ms (Flutter render spikes from text layout or texture upload). Eliminating those would need work on the Flutter side, not the compositor. The compositor itself is verified efficient: `commit` averages 0.02–0.06 ms.
+
+### Direct-scanout (when REFLECT_Y is available)
+
+On hardware with at least one CRTC plane supporting REFLECT_Y (modern Intel / Mali / newer amdgpu generations), `PresentLayers` switches to direct-scanout. Single-fullscreen-BS frames bypass GL composition entirely:
+
+| Path | wait | compose | commit | total |
+|---|---:|---:|---:|---:|
+| Composite (REFLECT_Y unavailable) | 1.69 ms | 5.26 ms | 0.06 ms | 7.00 ms |
+| Direct-scanout (REFLECT_Y available) | 0.00 ms | 0.15 ms | 0.01 ms | **0.16 ms** |
+
+The 43× compositor speedup expands the per-frame headroom at any refresh rate. On a 240 Hz panel where the budget is 4.17 ms, going from "7 ms compositor + Flutter render" to "0.16 ms compositor + Flutter render" turns "always missing one vblank" into "always making vblank."
+
+The probe happens once in `InitPlaneAllocator`; the log line is `[DrmCompositor] direct-scanout REFLECT_Y available: yes|no`. Operators can read it once at startup to know which path their hardware will take.
+
+---
+
 ## File map
 
 ```
