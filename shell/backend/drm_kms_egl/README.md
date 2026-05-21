@@ -285,6 +285,7 @@ Every `--drm-*` flag has a `HOMESCREEN_DRM_*` env-var equivalent and a
 | `IVI_DRM_VSYNC` | (on) | `0` falls back from Flutter `vsync_callback` (PAGE_FLIP_EVENT-locked) to the engine's internal wall-clock scheduler |
 | `IVI_DRM_RT` | (off) | Set to anything non-empty to enable per-thread priority elevation via Flutter's `thread_priority_setter` — rasterizer gets `SCHED_FIFO` prio 2, UI thread `SCHED_FIFO` prio 1, background tasks `SCHED_BATCH`. The platform task runner thread (asio flip monitor) is covered too. DrmSession / DrmSeat stay at default. |
 | `IVI_DRM_FLIP_TRACE` | (off) | `1` logs every PAGE_FLIP_EVENT (frame-cadence diagnostic) |
+| `IVI_DRM_PROFILE` | (off) | Anything non-empty enables per-frame composite profiling. Every 60 frames, `PresentFramed` / `PresentLayers` log a line: `framed/planes profile (n=60): wait=Xms compose=Yms commit=Zms total=Wms` with both per-stage mean and max. Useful for diagnosing where the per-frame budget goes. |
 | `VIDEO_PLAYER_AUDIO_SINK` | — | Set to `alsasink` on bare TTY (no PipeWire) |
 
 #### Real-time scheduling: capability setup

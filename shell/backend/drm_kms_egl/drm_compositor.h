@@ -293,6 +293,13 @@ class DrmCompositor {
   // OnResume, set on entry.
   bool resume_pending_logged_{false};
 
+  // Per-frame composite-path profiling state. Opaque struct in
+  // drm_compositor.cc so the header doesn't need <chrono>/<atomic>.
+  // Only mutated on the rasterizer thread (PresentFramed /
+  // PresentLayers), so no synchronisation.
+  struct FrameProfileState;
+  std::unique_ptr<FrameProfileState> profile_;
+
  public:
   // Queried by DrmBackend to decide whether .present should be a no-op
   // (plane path active) or run the legacy eglSwapBuffers + drmModePageFlip
