@@ -48,6 +48,73 @@ bool AllocDebug() {
   return enabled;
 }
 
+// Per-frame composite profiling (IVI_DRM_PROFILE=1). When enabled, the
+// PresentFramed hot path samples a few fence-post timestamps and
+// accumulates per-stage means/maxes; every kProfileWindow frames the
+// rolling stats get logged and the accumulators reset. clock_gettime
+// is single-digit-ns on modern x86 so the overhead is negligible
+// relative to the work being measured.
+bool ProfileEnabled() {
+  static const bool enabled = std::getenv("IVI_DRM_PROFILE") != nullptr;
+  return enabled;
+}
+
+uint64_t NsNow() {
+  struct timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
+constexpr uint32_t kProfileWindow = 60;
+
+struct FrameProfile {
+  // Accumulated nanoseconds across the last kProfileWindow frames.
+  uint64_t wait_sum_ns{0};
+  uint64_t compose_sum_ns{0};
+  uint64_t test_sum_ns{0};
+  uint64_t commit_sum_ns{0};
+  uint64_t total_sum_ns{0};
+  // Worst single frame seen in this window.
+  uint64_t wait_max_ns{0};
+  uint64_t compose_max_ns{0};
+  uint64_t test_max_ns{0};
+  uint64_t commit_max_ns{0};
+  uint64_t total_max_ns{0};
+  uint32_t frames{0};
+
+  void account(uint64_t wait,
+               uint64_t compose,
+               uint64_t test,
+               uint64_t commit,
+               uint64_t total) {
+    wait_sum_ns += wait;
+    compose_sum_ns += compose;
+    test_sum_ns += test;
+    commit_sum_ns += commit;
+    total_sum_ns += total;
+    if (wait > wait_max_ns)
+      wait_max_ns = wait;
+    if (compose > compose_max_ns)
+      compose_max_ns = compose;
+    if (test > test_max_ns)
+      test_max_ns = test;
+    if (commit > commit_max_ns)
+      commit_max_ns = commit;
+    if (total > total_max_ns)
+      total_max_ns = total;
+    ++frames;
+  }
+
+  void reset() {
+    wait_sum_ns = compose_sum_ns = test_sum_ns = commit_sum_ns = total_sum_ns =
+        0;
+    wait_max_ns = compose_max_ns = test_max_ns = commit_max_ns = total_max_ns =
+        0;
+    frames = 0;
+  }
+};
+
 // One-shot dump of every property on a DRM object, in "name=value
 // [flags]" form. Pre-commit snapshot of the pipe state so we can see
 // what fbcon/prior session left on the CRTC / planes / connector.
@@ -110,7 +177,14 @@ const char* PlaneTypeName(const drm::planes::DRMPlaneType t) {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────
 
-DrmCompositor::DrmCompositor(DrmBackend* backend) : backend_(backend) {}
+struct DrmCompositor::FrameProfileState {
+  FrameProfile p;
+};
+
+DrmCompositor::DrmCompositor(DrmBackend* backend)
+    : backend_(backend),
+      profile_(ProfileEnabled() ? std::make_unique<FrameProfileState>()
+                                : nullptr) {}
 
 DrmCompositor::~DrmCompositor() {
   (void)WaitForPendingFlip();
@@ -692,9 +766,17 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 
 bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                                   const size_t count) {
+  // Frame profile fence posts: t0 entry → t1 post-wait → t2 post-compose
+  // → t3 post-TEST_ONLY → t4 post-commit. All in monotonic ns. Cheap
+  // enough (~30 ns per call) to leave unconditional; only the bookkeep
+  // + summary log are gated on IVI_DRM_PROFILE.
+  const bool profile = ProfileEnabled();
+  const uint64_t t0 = profile ? NsNow() : 0;
+
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, count);
   }
+  const uint64_t t1 = profile ? NsNow() : 0;
 
   // Composite every Flutter layer into the current comp buffer. Same
   // pixel work as PresentViaGlFallback, but the destination is the GBM
@@ -1019,6 +1101,10 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
   }
 
+  // Profile fence post: end of compose / req build, just before the
+  // optional TEST_ONLY probe + the real commit.
+  const uint64_t t2 = profile ? NsNow() : 0;
+
   // Debug-only TEST_ONLY probe on the very first commit so a failed
   // real commit can be attributed to validation (EINVAL returned here)
   // vs. page-flip/driver dispatch. No side effect if the test succeeds.
@@ -1034,6 +1120,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       spdlog::debug("[DrmCompositor] framed TEST_ONLY commit passed");
     }
   }
+  const uint64_t t3 = profile ? NsNow() : 0;
 
   if (dump) {
     spdlog::debug("[DrmCompositor] framed commit: flags=0x{:x}", commit_flags);
@@ -1087,6 +1174,31 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     flip_pending_.store(true, std::memory_order_release);
   }
   comp_idx_ ^= 1;
+
+  if (profile && profile_) {
+    const uint64_t t4 = NsNow();
+    profile_->p.account(t1 - t0, t2 - t1, t3 - t2, t4 - t3, t4 - t0);
+    if (profile_->p.frames >= kProfileWindow) {
+      const auto& s = profile_->p;
+      const auto ms = [&](uint64_t ns_sum) {
+        return static_cast<double>(ns_sum) /
+               (static_cast<double>(s.frames) * 1e6);
+      };
+      const auto ms_max = [](uint64_t ns) {
+        return static_cast<double>(ns) / 1e6;
+      };
+      spdlog::info(
+          "[DrmCompositor] framed profile (n={}): "
+          "wait={:.2f}ms (max {:.2f})  compose={:.2f}ms (max {:.2f})  "
+          "test={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
+          "total={:.2f}ms (max {:.2f})",
+          s.frames, ms(s.wait_sum_ns), ms_max(s.wait_max_ns),
+          ms(s.compose_sum_ns), ms_max(s.compose_max_ns), ms(s.test_sum_ns),
+          ms_max(s.test_max_ns), ms(s.commit_sum_ns), ms_max(s.commit_max_ns),
+          ms(s.total_sum_ns), ms_max(s.total_max_ns));
+      profile_->p.reset();
+    }
+  }
   return true;
 }
 
@@ -1251,12 +1363,19 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     return PresentFramed(layers, layer_count);
   }
 
+  // Profile fence post t0 (entry). Same wait/compose/commit/total
+  // breakdown as PresentFramed; logs every kProfileWindow frames when
+  // IVI_DRM_PROFILE=1.
+  const bool profile = ProfileEnabled();
+  const uint64_t t0 = profile ? NsNow() : 0;
+
   // Wait for any in-flight atomic commit before building the next frame.
   // Baton return is handled inside PageFlipHandler (vsync-locked) and
   // the first-frame path below, so no baton work is needed here.
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, layer_count);
   }
+  const uint64_t t1 = profile ? NsNow() : 0;
 
   // ── Build the drm-cxx Output with one Layer per Flutter layer ──
 
@@ -1498,6 +1617,10 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
   }
 
+  // Profile fence post: end of allocator + compose + req build, just
+  // before the kernel-side commit.
+  const uint64_t t2 = profile ? NsNow() : 0;
+
   if (auto commit_ok = req.commit(commit_flags, backend_); !commit_ok) {
     if (commit_ok.error() == std::errc::permission_denied) {
       // EACCES race with libseat pause; warn only when paused_ hasn't
@@ -1558,6 +1681,30 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   comp_idx_ ^= 1;  // swap composition double-buffer for next frame
   output.mark_clean();
 
+  if (profile && profile_) {
+    const uint64_t t3 = NsNow();
+    // PresentLayers doesn't run a TEST_ONLY probe in steady state; t3
+    // is end-of-commit, "test" stays 0 in the summary.
+    profile_->p.account(t1 - t0, t2 - t1, /*test=*/0, t3 - t2, t3 - t0);
+    if (profile_->p.frames >= kProfileWindow) {
+      const auto& s = profile_->p;
+      const auto ms = [&](uint64_t ns_sum) {
+        return static_cast<double>(ns_sum) /
+               (static_cast<double>(s.frames) * 1e6);
+      };
+      const auto ms_max = [](uint64_t ns) {
+        return static_cast<double>(ns) / 1e6;
+      };
+      spdlog::info(
+          "[DrmCompositor] planes profile (n={}): "
+          "wait={:.2f}ms (max {:.2f})  compose={:.2f}ms (max {:.2f})  "
+          "commit={:.2f}ms (max {:.2f})  total={:.2f}ms (max {:.2f})",
+          s.frames, ms(s.wait_sum_ns), ms_max(s.wait_max_ns),
+          ms(s.compose_sum_ns), ms_max(s.compose_max_ns), ms(s.commit_sum_ns),
+          ms_max(s.commit_max_ns), ms(s.total_sum_ns), ms_max(s.total_max_ns));
+      profile_->p.reset();
+    }
+  }
   return true;
 }
 
