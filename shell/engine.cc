@@ -68,13 +68,16 @@ extern "C" void EngineThreadPrioritySetter(FlutterThreadPriority prio) {
     case kRaster:
       // Builds frames + calls present_layers. Misses vblank → dropped
       // frame. Highest of our RT prios so it preempts the display
-      // thread if they ever contend.
-      p.sched_priority = 2;
+      // thread if they ever contend. Prio 10 leaves headroom below
+      // typical kernel kthread / watchdog ranges (50+) and audio-rt
+      // (often 5) while still preempting nearly all user-space work.
+      p.sched_priority = 10;
       pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
       break;
     case kDisplay:
-      // UI / Dart thread. RT-class but one prio below raster.
-      p.sched_priority = 1;
+      // UI / Dart thread. RT-class but below raster — if both wake
+      // simultaneously, raster wins.
+      p.sched_priority = 5;
       pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
       break;
     case kBackground:
