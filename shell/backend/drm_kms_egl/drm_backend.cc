@@ -1446,6 +1446,44 @@ void DrmBackend::StopFlipMonitor() {
     flip_descriptor_.reset();
   }
   platform_task_runner_.store(nullptr, std::memory_order_release);
+
+  // Synchronously drain any in-flight PAGE_FLIP_EVENT. Without this,
+  // ~DrmCompositor → WaitForPendingFlip spins forever: the async flip
+  // monitor was what called drmHandleEvent to clear flip_pending_, and
+  // we just shut it down. The kernel typically fires the event within
+  // one vblank period (~16ms at 60Hz); poll briefly with a margin and
+  // dispatch via the same UnifiedPageFlipHandler the async path used.
+  // If the flag is still set after the poll loop bails (commit was
+  // dropped, session paused, etc.), force-clear it so destructors can
+  // make progress instead of hanging.
+  if (drm_dev_.has_value() && flip_pending_.load(std::memory_order_acquire)) {
+    constexpr int kDrainTimeoutMs = 100;
+    constexpr int kPollSliceMs = 10;
+    int elapsed_ms = 0;
+    while (elapsed_ms < kDrainTimeoutMs &&
+           flip_pending_.load(std::memory_order_acquire)) {
+      pollfd pfd{drm_dev_->fd(), POLLIN, 0};
+      const int rc = ::poll(&pfd, 1, kPollSliceMs);
+      if (rc > 0 && (pfd.revents & POLLIN)) {
+        drmEventContext ctx{};
+        ctx.version = 2;
+        ctx.page_flip_handler = &DrmBackend::UnifiedPageFlipHandler;
+        drmHandleEvent(drm_dev_->fd(), &ctx);
+      } else if (rc < 0 && errno != EINTR) {
+        break;
+      }
+      elapsed_ms += kPollSliceMs;
+    }
+    if (flip_pending_.load(std::memory_order_acquire)) {
+      spdlog::warn(
+          "[DrmBackend] StopFlipMonitor: flip event never arrived, "
+          "force-clearing flip_pending_ to unblock destructors");
+      flip_pending_.store(false, std::memory_order_release);
+      if (compositor_) {
+        compositor_->OnFlipComplete();
+      }
+    }
+  }
 }
 
 void DrmBackend::ArmFlipRead() {

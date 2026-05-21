@@ -254,6 +254,12 @@ Engine::~Engine() {
       LibFlutterEngine->CollectAOTData(m_aot_data);
     }
   }
+  // Free engine_state explicitly here — after Deinitialize/Shutdown have
+  // joined all engine threads and drained final callbacks (so user_data
+  // dereferences in OnFlutterPlatformMessage hit live state), but before
+  // m_platform_task_runner.reset() destroys the task runner that
+  // engine_state→messenger holds pointers into.
+  m_engine_state.reset();
   m_platform_task_runner.reset();
 }
 
