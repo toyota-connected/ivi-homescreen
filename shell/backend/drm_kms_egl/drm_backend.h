@@ -86,6 +86,12 @@ struct DrmConfig {
   // is connected. Name format matches --drm-list-modes output.
   std::optional<std::string> connector_name;
 
+  // Unset = pick the connector's preferred mode (DRM_MODE_TYPE_PREFERRED).
+  // Set = pick the first mode matching the spec "<W>x<H>@<R>" (e.g.
+  // "1920x1080@120"). Refresh is matched against drmModeModeInfo::vrefresh
+  // (integer Hz). Init fails if no matching mode is found.
+  std::optional<std::string> mode_spec;
+
   // User-facing knobs. All default to kAuto; DriverProbe resolves them
   // into the concrete values stored on DrmBackend::resolved_. See
   // driver_probe.h for the resolution rules.

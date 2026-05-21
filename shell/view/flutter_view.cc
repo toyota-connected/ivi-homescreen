@@ -156,6 +156,10 @@ FlutterView::FlutterView(Configuration::Config config,
         !m_config.view.drm_connector->empty()) {
       cfg.connector_name = m_config.view.drm_connector;
     }
+    if (m_config.view.drm_mode.has_value() &&
+        !m_config.view.drm_mode->empty()) {
+      cfg.mode_spec = m_config.view.drm_mode;
+    }
     cfg.compositor = parse_compositor(m_config.view.drm_compositor);
     cfg.modeset = parse_modeset(m_config.view.drm_modeset);
     cfg.allow_nonblock_modeset =

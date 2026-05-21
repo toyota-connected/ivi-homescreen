@@ -90,6 +90,10 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
     instance.view.drm_connector =
         tbl->at_path("view.drm_connector").as_string()->value_or("");
   }
+  if (tbl->at_path("view.drm_mode").is_string()) {
+    instance.view.drm_mode =
+        tbl->at_path("view.drm_mode").as_string()->value_or("");
+  }
   if (tbl->at_path("view.drm_compositor").is_string()) {
     instance.view.drm_compositor =
         tbl->at_path("view.drm_compositor").as_string()->value_or("");
@@ -210,6 +214,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (cli.view.drm_connector.has_value()) {
     instance.view.drm_connector = cli.view.drm_connector.value();
+  }
+  if (cli.view.drm_mode.has_value()) {
+    instance.view.drm_mode = cli.view.drm_mode.value();
   }
   if (cli.view.drm_compositor.has_value()) {
     instance.view.drm_compositor = cli.view.drm_compositor.value();
@@ -372,6 +379,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             "drm-connector",
             "DRM connector to drive (e.g. eDP-1, HDMI-A-1); default rank-picks",
             cxxopts::value<std::string>())(
+            "drm-mode",
+            "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
+            cxxopts::value<std::string>())(
             "drm-compositor", "DRM compositor strategy: auto|planes|gl",
             cxxopts::value<std::string>())(
             "drm-modeset", "DRM modeset API: auto|legacy|atomic",
@@ -522,6 +532,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     pick_string("drm-device", "HOMESCREEN_DRM_DEVICE", config.view.drm_device);
     pick_string("drm-connector", "HOMESCREEN_DRM_CONNECTOR",
                 config.view.drm_connector);
+    pick_string("drm-mode", "HOMESCREEN_DRM_MODE", config.view.drm_mode);
     pick_string("drm-compositor", "HOMESCREEN_DRM_COMPOSITOR",
                 config.view.drm_compositor);
     pick_string("drm-modeset", "HOMESCREEN_DRM_MODESET",
