@@ -27,6 +27,8 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "asio/posix/stream_descriptor.hpp"
+
 #include <drm-cxx/core/device.hpp>
 
 #include <shell/platform/embedder/embedder.h>
@@ -34,6 +36,7 @@
 #include "backend/backend.h"
 
 class DrmCompositor;
+class TaskRunner;
 namespace homescreen {
 class DrmCapture;
 class DrmCursor;
@@ -151,6 +154,16 @@ class DrmBackend : public Backend {
     engine_handle_.store(engine, std::memory_order_release);
   }
 
+  // Hand over the platform task runner so PostOnVsync can marshal back
+  // to the FlutterEngineRun thread. Wired by FlutterView from the same
+  // post-Engine::Run hook that installs the engine handle. Also starts
+  // the asio-based flip monitor on the runner's io_context — without
+  // that the drm fd is only polled from WaitForPendingFlip on the
+  // rasterizer thread, which deadlocks with vsync_callback because the
+  // next Present never starts (it's waiting on OnVsync, which is
+  // waiting on PAGE_FLIP_EVENT to be drained).
+  void SetPlatformTaskRunner(TaskRunner* runner);
+
   // Session lifecycle hooks, called from DrmSession's dispatch thread by
   // the libseat trampoline. OnSessionPaused gates the compositor's
   // Present paths and lets the rasterizer drop any flip it had pending;
@@ -195,11 +208,30 @@ class DrmBackend : public Backend {
   bool SetInitialMode();
   uint32_t AddFb(gbm_bo* bo) const;
   bool WaitForPendingFlip() const;
-  static void PageFlipHandler(int fd,
-                              unsigned int sequence,
-                              unsigned int tv_sec,
-                              unsigned int tv_usec,
-                              void* user_data);
+  // Unified PAGE_FLIP_EVENT dispatcher. Registered as the
+  // drmEventContext.page_flip_handler from the asio flip monitor; the
+  // user_data is always a DrmBackend* (compositor commits also pass
+  // `backend_` instead of `this`, so the dispatcher can branch on
+  // compositor_->planes_active() to route the per-frame state work to
+  // the right place). Returning a pending vsync baton happens here
+  // too — we're already on the platform task runner thread, so
+  // OnVsync can be called directly without re-posting.
+  static void UnifiedPageFlipHandler(int fd,
+                                     unsigned int sequence,
+                                     unsigned int tv_sec,
+                                     unsigned int tv_usec,
+                                     void* user_data);
+  // Per-flip-complete work for the legacy (non-compositor) path:
+  // promote pending→current, drmModeRmFB the previous scanout, clear
+  // flip_pending_, record frame stats. Called by UnifiedPageFlipHandler
+  // when planes are not active.
+  void OnLegacyFlipComplete();
+  // Bind the drm fd to the platform task runner's io_context and
+  // arm the first async_wait for POLLIN. Re-armed inside the
+  // completion handler so flip events keep flowing without rasterizer
+  // involvement.
+  void StartFlipMonitor();
+  void ArmFlipRead();
 
   DrmConfig cfg_;
   homescreen::DrmSession* session_ = nullptr;
@@ -231,7 +263,12 @@ class DrmBackend : public Backend {
   uint32_t current_fb_ = 0;
   gbm_bo* pending_bo_ = nullptr;
   uint32_t pending_fb_ = 0;
-  bool flip_pending_ = false;
+  // Atomic so the asio flip monitor (writes false on completion via
+  // UnifiedPageFlipHandler → OnLegacyFlipComplete) and the rasterizer
+  // thread (reads in WaitForPendingFlip; writes true when queuing the
+  // next flip in Present) don't race. Same justification on the
+  // compositor's mirror.
+  std::atomic<bool> flip_pending_{false};
 
   // EGL
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
@@ -245,12 +282,19 @@ class DrmBackend : public Backend {
 
   std::atomic<intptr_t> vsync_baton_{0};
   // FlutterEngine handle. Installed by FlutterView via SetEngineHandle
-  // after Engine::Run. Also updated defensively by SetVsyncBaton so the
-  // vsync_callback path (currently dead — see engine.cc:67) stays
-  // consistent if it gets re-enabled. Read by OnSessionResumed (calls
-  // ScheduleFrame so the UI redraws after a VT round-trip) and by
-  // DrmCompositor's flip handlers when returning vsync batons.
+  // after Engine::Run; also updated defensively by SetVsyncBaton so the
+  // vsync_callback path stays consistent. Read by OnSessionResumed and
+  // by the PageFlipHandlers when returning vsync batons.
   std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_handle_{nullptr};
+  // Platform task runner used by PostOnVsync to marshal OnVsync calls
+  // back to the FlutterEngineRun thread. nullptr until FlutterView
+  // wires it after Engine::Run; PostOnVsync no-ops in that window.
+  std::atomic<TaskRunner*> platform_task_runner_{nullptr};
+  // asio-managed drm fd reader. Bound to the platform task runner's
+  // io_context in SetPlatformTaskRunner; async_wait(POLLIN) re-arms
+  // itself after every drmHandleEvent so PAGE_FLIP_EVENTs are drained
+  // independently of the rasterizer's Present cadence.
+  std::optional<asio::posix::stream_descriptor> flip_descriptor_;
 
   // Frame stats — only active when cfg_.debug_backend is set. Accessed
   // from the rasterizer thread only (Present / PageFlipHandler), so no
