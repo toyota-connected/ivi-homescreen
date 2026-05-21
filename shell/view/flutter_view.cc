@@ -273,7 +273,19 @@ FlutterView::FlutterView(Configuration::Config config,
 #endif
 }
 
-FlutterView::~FlutterView() = default;
+FlutterView::~FlutterView() {
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // Tear down the DRM flip monitor before m_flutter_engine destructs.
+  // The monitor's asio async_wait on drm_dev_->fd() lives on the
+  // engine's platform task runner; if it's still outstanding when
+  // Engine::~Engine resets the runner, TaskRunner::~TaskRunner blocks
+  // forever joining a worker that's parked in epoll_wait waiting for a
+  // flip event that will never arrive (kernel is idle between commits).
+  if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
+    drm->StopFlipMonitor();
+  }
+#endif
+}
 
 #if !BUILD_BACKEND_DRM_KMS_EGL
 Display* FlutterView::GetDisplay() const {

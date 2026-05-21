@@ -171,7 +171,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
         std::strerror(errno));
     return true;
   }
-  struct vt_stat vtstat {};
+  struct vt_stat vtstat{};
   const bool got_state = ::ioctl(tty0, VT_GETSTATE, &vtstat) == 0;
   const int vt_errno = errno;
   ::close(tty0);
@@ -196,7 +196,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
         std::strerror(errno), drm_device, active_vt);
     return false;
   }
-  struct stat st {};
+  struct stat st{};
   const int fstat_rc = ::fstat(ctl_fd, &st);
   const int fstat_errno = errno;
   ::close(ctl_fd);
@@ -1421,12 +1421,31 @@ void DrmBackend::StartFlipMonitor() {
       !drm_dev_.has_value()) {
     return;
   }
-  // Construct with assign() so the descriptor doesn't take ownership —
-  // drm::Device's destructor closes the fd; we just want the asio wrap.
+  // assign() makes asio take ownership of the fd — StopFlipMonitor must
+  // call release() before reset() so drm_dev_'s close on its own fd
+  // isn't a double-close.
   flip_descriptor_.emplace(*runner->GetIoContext());
   flip_descriptor_->assign(drm_dev_->fd());
   ArmFlipRead();
   spdlog::info("[DrmBackend] flip monitor armed on fd={}", drm_dev_->fd());
+}
+
+void DrmBackend::StopFlipMonitor() {
+  if (flip_descriptor_.has_value()) {
+    std::error_code ec;
+    // cancel() wakes the worker thread out of epoll_wait — the pending
+    // async_wait completion fires with operation_aborted, asio's
+    // outstanding-work count drops to zero, and the TaskRunner worker
+    // loop's run_one() can finally return.
+    flip_descriptor_->cancel(ec);
+    // release() detaches the fd so the descriptor's destructor doesn't
+    // close it (drm_dev_ owns the fd lifetime). Takes no args, returns
+    // the native handle which we deliberately discard — drm_dev_ closes
+    // it later.
+    (void)flip_descriptor_->release();
+    flip_descriptor_.reset();
+  }
+  platform_task_runner_.store(nullptr, std::memory_order_release);
 }
 
 void DrmBackend::ArmFlipRead() {
