@@ -191,6 +191,14 @@ FlutterView::FlutterView(Configuration::Config config,
     // order during ~FlutterView.
     if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get());
         drm_backend != nullptr) {
+      // Push the resolved framebuffer dimensions into the seat's
+      // cursor-clamp viewport. App::MakeDisplay seeds DrmDisplay with
+      // the config's view.width/height (defaults 1024x768) before the
+      // backend has resolved the actual mode — `-f` then promotes the
+      // FB to the full mode dimensions, leaving the seat's pointer
+      // clamp stuck at the config size unless we update it here.
+      drm_display->SetViewportSize(static_cast<int32_t>(drm_backend->width()),
+                                   static_cast<int32_t>(drm_backend->height()));
       drm_display->SetCursor(drm_backend->drm_cursor());
     }
   }

@@ -408,6 +408,15 @@ void DrmSeat::SetVtSwitchHandler(VtSwitchHandler handler) {
   vt_switch_handler_ = std::move(handler);
 }
 
+void DrmSeat::SetViewport(const int32_t width, const int32_t height) {
+  viewport_w_ = width;
+  viewport_h_ = height;
+  // Re-center the cursor so the user starts in a sane place after a
+  // viewport change (typically once, at startup, before Start()).
+  pointer_x_ = viewport_w_ / 2.0;
+  pointer_y_ = viewport_h_ / 2.0;
+}
+
 void DrmSeat::OnSessionPaused() {
   pending_session_action_.store(PendingSessionAction::kSuspend,
                                 std::memory_order_release);
