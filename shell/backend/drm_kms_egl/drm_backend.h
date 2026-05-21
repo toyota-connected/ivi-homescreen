@@ -188,6 +188,13 @@ class DrmBackend : public Backend {
   // waiting on PAGE_FLIP_EVENT to be drained).
   void SetPlatformTaskRunner(TaskRunner* runner);
 
+  // Cancel the pending async_wait on flip_descriptor_ and detach the fd.
+  // MUST be called from FlutterView::~FlutterView before m_flutter_engine
+  // destructs — otherwise TaskRunner::~TaskRunner blocks forever joining
+  // its io_context worker thread (the async_wait counts as outstanding
+  // asio work, so run_one() never returns even after work_.reset()).
+  void StopFlipMonitor();
+
   // Session lifecycle hooks, called from DrmSession's dispatch thread by
   // the libseat trampoline. OnSessionPaused gates the compositor's
   // Present paths and lets the rasterizer drop any flip it had pending;
