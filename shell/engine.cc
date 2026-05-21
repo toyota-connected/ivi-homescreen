@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <pthread.h>
+#include <sched.h>
 #include <filesystem>
 #include <utility>
 #include <vector>
@@ -33,6 +35,61 @@
 extern void EngineOnFlutterPlatformMessage(
     const FlutterPlatformMessage* engine_message,
     void* user_data);
+
+namespace {
+
+// Wired into FlutterCustomTaskRunners.thread_priority_setter. Flutter
+// calls this from each of its internal threads (raster, UI, IO) on
+// thread startup, AND from the platform thread hosting the embedder-
+// provided task runner — so we can target the threads that actually
+// need to hit vblank deadlines (raster, display, platform-runner host)
+// without touching DrmSession / DrmSeat / other infrastructure.
+//
+// Gated by IVI_DRM_RT (set to anything non-empty to enable). Default
+// off because a SCHED_FIFO thread that spins is unrecoverable without
+// a hard reset — dev-time safety. Once the code earns trust, flip the
+// default by changing the env check.
+//
+// Requires CAP_SYS_NICE for the SCHED_FIFO paths. Grant it once on
+// the binary:
+//
+//   sudo setcap cap_sys_nice=eip <binary>
+//
+// Without the capability pthread_setschedparam returns EPERM and the
+// thread silently stays at SCHED_OTHER nice 0. Read the README if
+// your IVI_DRM_RT flag isn't visibly helping.
+extern "C" void EngineThreadPrioritySetter(FlutterThreadPriority prio) {
+  static const bool enabled = std::getenv("IVI_DRM_RT") != nullptr;
+  if (!enabled) {
+    return;
+  }
+  struct sched_param p{};
+  switch (prio) {
+    case kRaster:
+      // Builds frames + calls present_layers. Misses vblank → dropped
+      // frame. Highest of our RT prios so it preempts the display
+      // thread if they ever contend.
+      p.sched_priority = 2;
+      pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
+      break;
+    case kDisplay:
+      // UI / Dart thread. RT-class but one prio below raster.
+      p.sched_priority = 1;
+      pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
+      break;
+    case kBackground:
+      // Cleanup / async work. SCHED_BATCH tells the kernel "don't
+      // pick me for interactive responsiveness." No privilege needed.
+      pthread_setschedparam(pthread_self(), SCHED_BATCH, &p);
+      break;
+    case kNormal:
+    default:
+      // Leave at SCHED_OTHER nice 0.
+      break;
+  }
+}
+
+}  // namespace
 
 Engine::Engine(FlutterView* view,
                const size_t index,
@@ -173,6 +230,9 @@ Engine::Engine(FlutterView* view,
   m_custom_task_runners.struct_size = sizeof(FlutterCustomTaskRunners);
   m_custom_task_runners.platform_task_runner =
       &m_platform_task_runner_description;
+  // Per-thread priority setter (opt-in via IVI_DRM_RT=1). See
+  // EngineThreadPrioritySetter for the mapping rationale.
+  m_custom_task_runners.thread_priority_setter = &EngineThreadPrioritySetter;
 
   m_args.custom_task_runners = &m_custom_task_runners;
 
