@@ -98,6 +98,22 @@ class DrmCompositor {
   void SetPaused(bool paused);
   void OnResume();
 
+  // Per-flip-complete work for the atomic plane path. Called by
+  // DrmBackend::UnifiedPageFlipHandler on the platform task runner
+  // thread when planes_active() returns true. Just clears
+  // flip_pending_ and records the frame completion; baton return
+  // happens in the unified handler.
+  void OnFlipComplete();
+
+  // Queried by DrmBackend::SetVsyncBaton to decide whether a baton
+  // arriving from Flutter can wait for the asio flip monitor to
+  // deliver it (yes, if a flip is in flight) or must be kicked
+  // inline (no, if the pipeline is idle — otherwise the baton would
+  // never reach Flutter).
+  [[nodiscard]] bool IsFlipPending() const {
+    return flip_pending_.load(std::memory_order_acquire);
+  }
+
  private:
   struct StoreBaton {
     DrmCompositor* owner;
@@ -152,11 +168,6 @@ class DrmCompositor {
                              bool flip_y = false) const;
 
   bool WaitForPendingFlip() const;
-  static void PageFlipHandler(int fd,
-                              unsigned int sequence,
-                              unsigned int tv_sec,
-                              unsigned int tv_usec,
-                              void* user_data);
 
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via
@@ -254,9 +265,13 @@ class DrmCompositor {
   uint64_t framed_overlay_zpos_{0};
   drm::PropertyStore framed_props_;
 
-  // Atomic-commit flip state (compositor owns its own flip lifecycle
-  // when using the plane-allocator path).
-  bool flip_pending_{false};
+  // Atomic-commit flip state. Written by
+  // DrmBackend::UnifiedPageFlipHandler → OnFlipComplete on the
+  // platform task runner thread (when the kernel reports flip
+  // completion); also written false on session pause / resume. Read
+  // by the rasterizer thread inside WaitForPendingFlip and on the
+  // commit paths. Atomic because the writes and reads cross threads.
+  std::atomic<bool> flip_pending_{false};
 
   // First atomic commit after Create(). The kernel needs the modeset
   // flag + a blocking commit; subsequent commits use NONBLOCK +
