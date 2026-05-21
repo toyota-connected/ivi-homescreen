@@ -244,6 +244,15 @@ class FlutterView {
 
   std::unique_ptr<FlutterDesktopViewControllerState> m_state;
 
+  // Temporary owner of FlutterDesktopEngineState between FlutterView
+  // construction (where engine_state is allocated and populated) and
+  // Initialize() (where it's moved into m_flutter_engine via
+  // Engine::TakeEngineState). After the move this is null; lifetime
+  // belongs to m_flutter_engine so engine_state outlives
+  // FlutterEngineDeinitialize. m_state->engine_state is a non-owning
+  // raw pointer to the same target throughout.
+  std::unique_ptr<FlutterDesktopEngineState> m_pending_engine_state;
+
   uint64_t m_pointer_events{};
 
   static void RegisterPlugins(FlutterDesktopEngineRef engine);

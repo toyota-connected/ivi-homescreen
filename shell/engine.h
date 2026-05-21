@@ -344,6 +344,21 @@ class Engine {
     return m_platform_task_runner.get();
   }
 
+  // Take ownership of the engine state struct. FlutterView constructs and
+  // populates the FlutterDesktopEngineState (messenger, message_dispatcher,
+  // texture_registrar, plugin_registrar, etc.) before constructing the
+  // Engine, then hands it off here. Engine::~Engine releases it AFTER
+  // FlutterEngineDeinitialize / Shutdown so the engine can safely dispatch
+  // its final platform-message callbacks (whose user_data is this
+  // engine_state pointer) without the embedder having freed it underneath.
+  void TakeEngineState(std::unique_ptr<FlutterDesktopEngineState> state) {
+    m_engine_state = std::move(state);
+  }
+
+  [[nodiscard]] FlutterDesktopEngineState* GetEngineState() const {
+    return m_engine_state.get();
+  }
+
  private:
   size_t m_index;
   bool m_running;
@@ -373,6 +388,11 @@ class Engine {
   FlutterCustomTaskRunners m_custom_task_runners{};
 
   FlutterEngineAOTData m_aot_data;
+
+  // Owned by Engine so it survives FlutterEngineDeinitialize. See
+  // TakeEngineState() above. ~Engine resets this between Shutdown and
+  // m_platform_task_runner.reset().
+  std::unique_ptr<FlutterDesktopEngineState> m_engine_state;
 
   /**
    * @brief Load AOT data
