@@ -282,7 +282,24 @@ Every `--drm-*` flag has a `HOMESCREEN_DRM_*` env-var equivalent and a
 | `IVI_DRM_KEY_REPEAT` | (on) | `0` disables auto-repeat for held keys |
 | `IVI_DRM_CURSOR` | (on) | `0` disables the KMS HW cursor |
 | `IVI_DRM_CAPTURE` | (off) | `1` arms the SIGUSR1 snapshot handler |
+| `IVI_DRM_VSYNC` | (on) | `0` falls back from Flutter `vsync_callback` (PAGE_FLIP_EVENT-locked) to the engine's internal wall-clock scheduler |
+| `IVI_DRM_RT` | (off) | Set to anything non-empty to enable per-thread priority elevation via Flutter's `thread_priority_setter` — rasterizer gets `SCHED_FIFO` prio 2, UI thread `SCHED_FIFO` prio 1, background tasks `SCHED_BATCH`. The platform task runner thread (asio flip monitor) is covered too. DrmSession / DrmSeat stay at default. |
+| `IVI_DRM_FLIP_TRACE` | (off) | `1` logs every PAGE_FLIP_EVENT (frame-cadence diagnostic) |
 | `VIDEO_PLAYER_AUDIO_SINK` | — | Set to `alsasink` on bare TTY (no PipeWire) |
+
+#### Real-time scheduling: capability setup
+
+`IVI_DRM_RT` calls `pthread_setschedparam(SCHED_FIFO, ...)` on the rasterizer + UI threads (from inside Flutter's `thread_priority_setter` callback). The kernel rejects this with `EPERM` unless the process holds `CAP_SYS_NICE` (or runs as root). For an unprivileged install, grant the capability once on the binary:
+
+```bash
+sudo setcap cap_sys_nice=eip cmake-build-debug-clang/shell/homescreen
+```
+
+Then any user can run it with `IVI_DRM_RT=1`. Without the capability the `pthread_setschedparam` call silently returns `EPERM` and the thread stays at `SCHED_OTHER` — no warning, no partial fallback. If your `IVI_DRM_RT` flag isn't visibly helping, check that `getcap <binary>` reports `cap_sys_nice=eip`.
+
+Default off because a `SCHED_FIFO` thread that spins (infinite loop, deadlock) is unrecoverable without a hard reset — that's painful during compositor development. Once the code earns trust the default should flip on.
+
+On an idle system the boost is small (~+10pp of frames hitting the vblank deadline in local benchmarks at 60 Hz). It pays off proportionally more at higher refresh rates (240 Hz has a 4.2 ms vblank budget — much tighter) and on systems with competing CPU load.
 
 ---
 
