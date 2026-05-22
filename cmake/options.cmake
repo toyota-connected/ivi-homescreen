@@ -111,6 +111,13 @@ if (BUILD_BACKEND_HEADLESS_EGL)
     pkg_check_modules(OSMESA osmesa glesv2 egl IMPORTED_TARGET REQUIRED)
 endif ()
 
+#
+# Software (CPU rendering; no GPU, no display server)
+#
+option(BUILD_BACKEND_SOFTWARE
+        "Build software (CPU) backend — kSoftware renderer, no GPU/display required"
+        OFF)
+
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
 
 #

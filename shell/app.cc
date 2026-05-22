@@ -27,6 +27,10 @@
 #include "display/drm_display.h"
 #endif
 
+#if BUILD_BACKEND_SOFTWARE
+#include "display/software_display.h"
+#endif
+
 #if BUILD_BACKEND_HEADLESS_EGL
 #include "backend/headless/headless.h"
 #endif
@@ -44,6 +48,14 @@ std::shared_ptr<IDisplay> MakeDisplay(
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
                                       static_cast<int32_t>(h), 60.0);
+#elif BUILD_BACKEND_SOFTWARE
+  // No compositor, no Wayland, no DRM — just a no-op IDisplay so
+  // App::Loop's sleep math has a refresh-rate denominator. 60 Hz is the
+  // arbitrary default.
+  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
+  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  return std::make_shared<SoftwareDisplay>(static_cast<int32_t>(w),
+                                           static_cast<int32_t>(h), 60.0);
 #else
   return std::make_shared<Display>(!configs[0].disable_cursor,
                                    configs[0].wayland_event_mask,
