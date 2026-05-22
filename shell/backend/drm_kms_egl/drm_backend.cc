@@ -325,7 +325,7 @@ int PrintDrmModes(const std::string& device) {
   return 0;
 }
 
-std::unique_ptr<DrmBackend> DrmBackend::Create(
+static std::unique_ptr<DrmBackend> DrmBackend::Create(
     const DrmConfig& cfg,
     homescreen::DrmSession* session) {
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
@@ -403,7 +403,7 @@ void DrmBackend::MaybeCaptureSnapshot() {
 #endif
 }
 
-DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
+DrmBackend::DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session)
     : cfg_(std::move(cfg)), session_(session) {}
 
 DrmBackend::~DrmBackend() {
@@ -1090,7 +1090,7 @@ bool DrmBackend::InitEgl() {
   return true;
 }
 
-uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
+uint32_t DrmBackend::AddFb(gbm_bo* bo) {
   const uint32_t width = gbm_bo_get_width(bo);
   const uint32_t height = gbm_bo_get_height(bo);
   const uint32_t stride = gbm_bo_get_stride(bo);
@@ -1421,7 +1421,7 @@ void DrmBackend::StartFlipMonitor() {
       !drm_dev_.has_value()) {
     return;
   }
-  // assign() makes asio take ownership of the fd — StopFlipMonitor must
+  // assign() makes asio take ownership of the fd — StopVsyncMonitor must
   // call release() before reset() so drm_dev_'s close on its own fd
   // isn't a double-close.
   flip_descriptor_.emplace(*runner->GetIoContext());
@@ -1430,7 +1430,7 @@ void DrmBackend::StartFlipMonitor() {
   spdlog::info("[DrmBackend] flip monitor armed on fd={}", drm_dev_->fd());
 }
 
-void DrmBackend::StopFlipMonitor() {
+void DrmBackend::StopVsyncMonitor() {
   if (flip_descriptor_.has_value()) {
     std::error_code ec;
     // cancel() wakes the worker thread out of epoll_wait — the pending
@@ -1476,7 +1476,7 @@ void DrmBackend::StopFlipMonitor() {
     }
     if (flip_pending_.load(std::memory_order_acquire)) {
       spdlog::warn(
-          "[DrmBackend] StopFlipMonitor: flip event never arrived, "
+          "[DrmBackend] StopVsyncMonitor: flip event never arrived, "
           "force-clearing flip_pending_ to unblock destructors");
       flip_pending_.store(false, std::memory_order_release);
       if (compositor_) {
@@ -1511,7 +1511,7 @@ void DrmBackend::ArmFlipRead() {
       });
 }
 
-bool DrmBackend::WaitForPendingFlip() const {
+bool DrmBackend::WaitForPendingFlip() {
   // The asio flip monitor (StartFlipMonitor) drains PAGE_FLIP_EVENTs
   // on the platform task runner thread and clears flip_pending_ via
   // UnifiedPageFlipHandler → OnLegacyFlipComplete. We just wait for
