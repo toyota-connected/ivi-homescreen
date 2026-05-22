@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
@@ -81,4 +82,13 @@ class SoftwareBackend final : public Backend {
   uint32_t width_;
   uint32_t height_;
   std::unique_ptr<ISurfaceSink> sink_;
+
+  // IVI_SW_STOP_AFTER_FRAMES=N: after N successful presents, raise
+  // SIGTERM so the existing shutdown handler exits cleanly. Lets CI
+  // bound runtime by frame count instead of wall-clock. 0 disables.
+  // Sampled once at construction; the static check in PresentFrame
+  // costs one atomic load on the rasterizer thread when disabled.
+  uint64_t stop_after_frames_{0};
+  std::atomic<uint64_t> presented_frames_{0};
+  std::atomic<bool> stop_signaled_{false};
 };
