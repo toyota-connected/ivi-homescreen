@@ -28,6 +28,7 @@
 
 #include "engine.h"
 #include "timer.h"
+#include "window.h"
 
 extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
                         bool released,
@@ -230,6 +231,7 @@ void Display::registry_handle_global(void* data,
     const auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
     oi->global_id = name;
+    oi->display = d;
     // be compat with v2 as well
 #if defined(WL_OUTPUT_NAME_SINCE_VERSION) && \
     defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
@@ -340,6 +342,9 @@ void Display::display_handle_mode(void* data,
     oi->height = static_cast<unsigned int>(height);
     oi->width = static_cast<unsigned int>(width);
     oi->refresh_rate = refresh / 1000.0;
+    if (oi->display) {
+      oi->display->NotifyOutputResized(oi);
+    }
   }
 
   SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height, refresh / 1000.0);
@@ -898,6 +903,46 @@ void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
   m_active_surface = surface;
   m_surface_engine_map[surface] = engine;
+}
+
+void Display::RegisterWindow(WaylandWindow* window) {
+  if (!window) {
+    return;
+  }
+  std::lock_guard lock(m_windows_lock);
+  m_windows.push_back(window);
+}
+
+void Display::UnregisterWindow(WaylandWindow* window) {
+  std::lock_guard lock(m_windows_lock);
+  m_windows.erase(std::remove(m_windows.begin(), m_windows.end(), window),
+                  m_windows.end());
+}
+
+size_t Display::IndexOfOutput(const output_info_t* oi) const {
+  for (size_t i = 0; i < m_all_outputs.size(); ++i) {
+    if (m_all_outputs[i].get() == oi) {
+      return i;
+    }
+  }
+  return m_all_outputs.size();
+}
+
+void Display::NotifyOutputResized(const output_info_t* oi) {
+  const size_t idx = IndexOfOutput(oi);
+  if (idx >= m_all_outputs.size()) {
+    return;
+  }
+  const auto width = static_cast<int32_t>(oi->width);
+  const auto height = static_cast<int32_t>(oi->height);
+  std::vector<WaylandWindow*> snapshot;
+  {
+    std::lock_guard lock(m_windows_lock);
+    snapshot = m_windows;
+  }
+  for (auto* w : snapshot) {
+    w->OnOutputResized(idx, width, height);
+  }
 }
 
 bool Display::ActivateSystemCursor(const int32_t device,

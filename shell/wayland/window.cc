@@ -137,11 +137,22 @@ WaylandWindow::WaylandWindow(const size_t index,
   m_backend->CreateSurface(m_index, m_base_surface, m_geometry.width,
                            m_geometry.height);
 
+  // Register *after* initial geometry has settled so the event-thread
+  // OnOutputResized path never observes a partially-constructed window.
+  m_display->RegisterWindow(this);
+
   SPDLOG_TRACE("({}) - WaylandWindow()", m_index);
 }
 
 WaylandWindow::~WaylandWindow() {
   SPDLOG_TRACE("({}) + ~WaylandWindow()", m_index);
+
+  // Unregister first so an in-flight wl_output.mode callback can't see
+  // us mid-destruction; UnregisterWindow's lock pairs with the snapshot
+  // copy in Display::NotifyOutputResized.
+  if (m_display) {
+    m_display->UnregisterWindow(this);
+  }
 
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
@@ -319,6 +330,37 @@ void WaylandWindow::handle_toplevel_configure_bounds(
   auto* w = static_cast<WaylandWindow*>(data);
   w->m_configure_bounds.width = width;
   w->m_configure_bounds.height = height;
+}
+
+void WaylandWindow::OnOutputResized(const size_t output_index,
+                                    const int32_t new_w,
+                                    const int32_t new_h) {
+  if (output_index != m_output_index) {
+    return;
+  }
+  // Only shrink — Weston (nested) emits a fresh wl_output.mode whenever
+  // the host window is resized but does NOT re-send xdg_toplevel.configure,
+  // so without this hook a 1024x768 surface stays oversized after the user
+  // pulls Weston down to 1024x640 and Weston starts spamming events to
+  // compensate ("Data too big for buffer"). Growth is the compositor's
+  // call — leave that to the next configure.
+  if (new_w <= 0 || new_h <= 0) {
+    return;
+  }
+  int32_t target_w = m_geometry.width;
+  int32_t target_h = m_geometry.height;
+  if (target_w > new_w) {
+    target_w = new_w;
+  }
+  if (target_h > new_h) {
+    target_h = new_h;
+  }
+  if (target_w == m_geometry.width && target_h == m_geometry.height) {
+    return;
+  }
+  m_geometry.width = target_w;
+  m_geometry.height = target_h;
+  m_backend->Resize(m_index, m_flutter_engine.get(), target_w, target_h);
 }
 
 void WaylandWindow::handle_toplevel_close(
