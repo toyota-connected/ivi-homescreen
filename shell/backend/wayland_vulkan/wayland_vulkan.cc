@@ -16,14 +16,19 @@
 
 #include "wayland_vulkan.h"
 
+#include <asio/post.hpp>
+
 #include <cassert>
 #include <cstdlib>
 #include <optional>
 #include <queue>
+#include <string_view>
 
 #include "config/common.h"
 #include "engine.h"
 #include "logging.h"
+#include "task_runner.h"
+#include "wayland/display.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -38,7 +43,8 @@ const auto& d = vk::detail::defaultDispatchLoaderDynamic;
     vk::detail::resultCheck(static_cast<vk::Result>(x), LOCATION); \
   } while (0)
 
-WaylandVulkanBackend::WaylandVulkanBackend(wl_display* display,
+WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
+                                           wl_display* display,
                                            const uint32_t width,
                                            const uint32_t height,
                                            const bool enable_validation_layers)
@@ -48,6 +54,29 @@ WaylandVulkanBackend::WaylandVulkanBackend(wl_display* display,
       wl_display_(display),
       width_(width),
       height_(height) {
+  if (shell_display != nullptr) {
+    wp_presentation_ = shell_display->GetWpPresentation();
+    presentation_clock_id_ = shell_display->GetPresentationClockId();
+    // FlutterEngineGetCurrentTime() returns CLOCK_MONOTONIC ns; only when
+    // the compositor announced the same domain can we hand its presented
+    // timestamps to OnVsync without a cross-clock translation. Mainline
+    // compositors all use CLOCK_MONOTONIC; anything else falls back to
+    // the engine wall-clock scheduler.
+    clock_compatible_ = (presentation_clock_id_ == CLOCK_MONOTONIC);
+    if (wp_presentation_ == nullptr) {
+      spdlog::info(
+          "[WaylandVulkanBackend] wp_presentation not advertised — "
+          "vsync_callback disabled, falling back to engine wall-clock "
+          "scheduler");
+    } else if (!clock_compatible_) {
+      spdlog::warn(
+          "[WaylandVulkanBackend] wp_presentation clock_id={} != "
+          "CLOCK_MONOTONIC ({}); vsync_callback disabled (cross-clock "
+          "translation NYI)",
+          static_cast<int>(presentation_clock_id_),
+          static_cast<int>(CLOCK_MONOTONIC));
+    }
+  }
   VULKAN_HPP_DEFAULT_DISPATCHER.init();
   createInstance();
   setupDebugMessenger();
@@ -112,11 +141,17 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
     const uint32_t total = s.bucket_60hz + s.bucket_30hz + s.bucket_20hz +
                            s.bucket_slow + s.bucket_idle;
+    const uint64_t s_lat_mean_us =
+        s.pipeline_latency_samples > 0
+            ? (s.pipeline_latency_sum_ns / s.pipeline_latency_samples) / 1000
+            : 0;
     spdlog::info(
         "[WaylandVulkanBackend] session summary: frames={} fps={:.2f} "
-        "mean_interval={}us max_interval={}us present_failures={}",
+        "mean_interval={}us max_interval={}us present_failures={} "
+        "discarded={} flags=0x{:x} pipeline_mean={}us pipeline_max={}us",
         s.presented_frames, fps, mean_ns / 1000, s.interval_max_ns / 1000,
-        s.present_failures);
+        s.present_failures, s.discarded_frames, s.flags_or, s_lat_mean_us,
+        s.pipeline_latency_max_ns / 1000);
     if (total > 0) {
       const double inv = 100.0 / static_cast<double>(total);
       spdlog::info(
@@ -616,14 +651,54 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
       physical_device_, surface_, &mode_count, modes.data()));
   assert(!formats.empty());  // Shouldn't be possible.
 
-  // If the preferred mode isn't available, just choose the first one.
+  // Default = FIFO (strict vblank gating, the spec-mandated mode). Env
+  // override IVI_VK_PRESENT_MODE picks an alternative IFF the compositor
+  // advertises it; otherwise warn and fall back to FIFO. MAILBOX is the
+  // interesting case for vsync_callback profiling: it lets the rasterizer
+  // outpace scanout, weakening Mesa's WSI backpressure so Flutter's
+  // own scheduling drift becomes visible at the present-interval layer.
+  VkPresentModeKHR requested_mode = kPreferredPresentMode;
+  if (const char* env = std::getenv("IVI_VK_PRESENT_MODE"); env != nullptr) {
+    const std::string_view name(env);
+    if (name == "mailbox") {
+      requested_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+    } else if (name == "fifo_relaxed") {
+      requested_mode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    } else if (name == "immediate") {
+      requested_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    } else if (name != "fifo") {
+      spdlog::warn(
+          "[WaylandVulkanBackend] IVI_VK_PRESENT_MODE='{}' unrecognized; "
+          "valid: fifo|fifo_relaxed|mailbox|immediate. Falling back to fifo.",
+          env);
+    }
+  }
   VkPresentModeKHR present_mode = modes[0];
+  bool got_requested = false;
   for (const auto& mode : modes) {
-    if (mode == kPreferredPresentMode) {
+    if (mode == requested_mode) {
       present_mode = mode;
+      got_requested = true;
       break;
     }
   }
+  if (!got_requested && requested_mode != kPreferredPresentMode) {
+    // Requested mode wasn't advertised — fall back to FIFO if present
+    // (it's required by the spec for any compositor that supports a
+    // swapchain at all), else first available.
+    for (const auto& mode : modes) {
+      if (mode == kPreferredPresentMode) {
+        present_mode = mode;
+        break;
+      }
+    }
+    spdlog::warn(
+        "[WaylandVulkanBackend] requested present mode {} not advertised "
+        "by compositor; using {}.",
+        static_cast<int>(requested_mode), static_cast<int>(present_mode));
+  }
+  spdlog::info("[WaylandVulkanBackend] present mode: {}",
+               static_cast<int>(present_mode));
 
   // --------------------------------------------------------------------------
   // Create the swap chain.
@@ -827,6 +902,11 @@ bool WaylandVulkanBackend::PresentCallback(
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &b->swapchain_;
   present_info.pImageIndices = &b->last_image_index_;
+  // Mint the wp_presentation_feedback BEFORE vkQueuePresentKHR — Mesa's
+  // Wayland WSI does wl_surface.commit inside that call, and the
+  // feedback object binds to the most recent surface request prior to
+  // the commit.
+  b->RequestPresentationFeedback();
   const VkResult result = d.vkQueuePresentKHR(b->queue_, &present_info);
 
   // If the swap chain is no longer compatible with the surface, discard the
@@ -889,6 +969,22 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
   p.last_present_ns = now_ns;
   ++p.presented_frames;
 
+  // beginFrame-to-present latency. last_begin_frame_ns_ is 0 when
+  // vsync_callback isn't wired; in that case we have no Flutter-scheduled
+  // start time to compare against, so skip. Pipelining (multiple frames
+  // in flight) means a given present may not correspond to the *most
+  // recent* OnVsync — the running mean still tracks the difference
+  // between vsync-aware and wall-clock scheduling under load.
+  const uint64_t begin = last_begin_frame_ns_.load(std::memory_order_acquire);
+  if (begin > 0 && now_ns > begin) {
+    const uint64_t latency = now_ns - begin;
+    p.pipeline_latency_sum_ns += latency;
+    if (latency > p.pipeline_latency_max_ns) {
+      p.pipeline_latency_max_ns = latency;
+    }
+    ++p.pipeline_latency_samples;
+  }
+
   constexpr uint32_t kProfileWindow = 60;
   if (p.presented_frames < kProfileWindow) {
     return;
@@ -897,17 +993,26 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
       (p.interval_sum_ns > 0) ? p.presented_frames - 1 : p.presented_frames;
   const uint64_t mean_ns = samples > 0 ? p.interval_sum_ns / samples : 0;
   const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
+  const uint64_t lat_mean_us =
+      p.pipeline_latency_samples > 0
+          ? (p.pipeline_latency_sum_ns / p.pipeline_latency_samples) / 1000
+          : 0;
   spdlog::info(
       "[WaylandVulkanBackend] profile (n={}): fps={:.2f} mean_interval={}us "
-      "max_interval={}us present_failures={} "
+      "max_interval={}us present_failures={} discarded={} "
+      "refresh={}us flags=0x{:x} pipeline_mean={}us pipeline_max={}us "
       "buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
       p.presented_frames, fps, mean_ns / 1000, p.interval_max_ns / 1000,
-      p.present_failures, p.bucket_60hz, p.bucket_30hz, p.bucket_20hz,
-      p.bucket_slow, p.bucket_idle);
+      p.present_failures, p.discarded_frames,
+      last_refresh_ns_.load(std::memory_order_relaxed) / 1000, p.flags_or,
+      lat_mean_us, p.pipeline_latency_max_ns / 1000, p.bucket_60hz,
+      p.bucket_30hz, p.bucket_20hz, p.bucket_slow, p.bucket_idle);
 
   auto& s = session_totals_;
   s.presented_frames += p.presented_frames;
   s.present_failures += p.present_failures;
+  s.discarded_frames += p.discarded_frames;
+  s.flags_or |= p.flags_or;
   s.interval_sum_ns += p.interval_sum_ns;
   if (p.interval_max_ns > s.interval_max_ns) {
     s.interval_max_ns = p.interval_max_ns;
@@ -917,7 +1022,278 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
   s.bucket_20hz += p.bucket_20hz;
   s.bucket_slow += p.bucket_slow;
   s.bucket_idle += p.bucket_idle;
+  s.pipeline_latency_sum_ns += p.pipeline_latency_sum_ns;
+  s.pipeline_latency_samples += p.pipeline_latency_samples;
+  if (p.pipeline_latency_max_ns > s.pipeline_latency_max_ns) {
+    s.pipeline_latency_max_ns = p.pipeline_latency_max_ns;
+  }
   p = FrameProfile{.last_present_ns = p.last_present_ns};
+}
+
+// -----------------------------------------------------------------------------
+// wp_presentation-driven vsync. Mirrors WaylandEglBackend; the only path
+// differences are (a) the present-path hook fires before vkQueuePresentKHR
+// instead of eglSwapBuffers, and (b) the Vulkan backend has no
+// `clock_compatible_` shortcut in the present path because there's
+// nothing equivalent to EGL's MakeCurrent/dispatch interleaving.
+// -----------------------------------------------------------------------------
+
+VsyncCallback WaylandVulkanBackend::GetVsyncCallback() const {
+  static const bool env_disabled = []() {
+    const char* env = std::getenv("IVI_VK_VSYNC");
+    return env != nullptr && std::string_view(env) == "0";
+  }();
+  if (env_disabled) {
+    spdlog::info(
+        "[WaylandVulkanBackend] IVI_VK_VSYNC=0 — wall-clock scheduler");
+    return nullptr;
+  }
+  if (wp_presentation_ == nullptr || !clock_compatible_) {
+    return nullptr;
+  }
+  return &VsyncTrampoline;
+}
+
+void WaylandVulkanBackend::VsyncTrampoline(void* user_data,
+                                           const intptr_t baton) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->view_controller == nullptr ||
+      state->view_controller->engine == nullptr) {
+    return;
+  }
+  auto* engine_obj = state->view_controller->engine;
+  auto* backend = dynamic_cast<WaylandVulkanBackend*>(engine_obj->GetBackend());
+  if (backend == nullptr) {
+    return;
+  }
+  backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
+}
+
+void WaylandVulkanBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                                       const intptr_t baton) const {
+  if (engine == nullptr || baton == 0) {
+    return;
+  }
+  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;
+  }
+  const uint64_t now = LibFlutterEngine->GetCurrentTime();
+  const uint64_t period_ns = last_refresh_ns_.load(std::memory_order_acquire);
+  last_begin_frame_ns_.store(now, std::memory_order_release);
+  asio::post(*runner->GetStrandContext(), [engine, baton, now, period_ns]() {
+    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+  });
+}
+
+void WaylandVulkanBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine)
+                                             engine,
+                                         const intptr_t baton) {
+  engine_handle_.store(engine, std::memory_order_release);
+  vsync_baton_.store(baton, std::memory_order_release);
+
+  if (feedback_pending_.load(std::memory_order_acquire)) {
+    return;
+  }
+  // Pipeline idle: drain the baton ourselves so Flutter doesn't sit
+  // forever waiting for a present that never schedules.
+  if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
+      mine != 0) {
+    PostOnVsync(engine, mine);
+  }
+}
+
+void WaylandVulkanBackend::RequestPresentationFeedback() {
+  static const bool env_disabled = []() {
+    const char* env = std::getenv("IVI_VK_VSYNC");
+    return env != nullptr && std::string_view(env) == "0";
+  }();
+  if (env_disabled || wp_presentation_ == nullptr || !clock_compatible_) {
+    return;
+  }
+  auto* surface = wl_surface_.load(std::memory_order_acquire);
+  if (surface == nullptr) {
+    return;
+  }
+  constexpr size_t kFeedbackInFlightCap = 16;
+  {
+    std::lock_guard<std::mutex> lock(m_feedback_mu_);
+    if (feedback_in_flight_.size() >= kFeedbackInFlightCap) {
+      spdlog::warn(
+          "[WaylandVulkanBackend] feedback_in_flight_ saturated at {} — "
+          "compositor is silently dropping wp_presentation_feedback "
+          "requests; skipping",
+          feedback_in_flight_.size());
+      return;
+    }
+  }
+  struct wp_presentation_feedback* fb =
+      wp_presentation_feedback(wp_presentation_, surface);
+  if (fb == nullptr) {
+    spdlog::warn(
+        "[WaylandVulkanBackend] wp_presentation_feedback() returned null");
+    return;
+  }
+  wp_presentation_feedback_add_listener(fb, &feedback_listener_, this);
+  {
+    std::lock_guard<std::mutex> lock(m_feedback_mu_);
+    feedback_in_flight_.push_back(fb);
+  }
+  feedback_pending_.store(true, std::memory_order_release);
+}
+
+void WaylandVulkanBackend::on_feedback_sync_output(
+    void* /*data*/,
+    struct wp_presentation_feedback* /*fb*/,
+    struct wl_output* /*output*/) {
+  // Informational; ignored for the single-surface case.
+}
+
+void WaylandVulkanBackend::on_feedback_presented(
+    void* data,
+    struct wp_presentation_feedback* fb,
+    const uint32_t tv_sec_hi,
+    const uint32_t tv_sec_lo,
+    const uint32_t tv_nano_sec,
+    const uint32_t refresh,
+    uint32_t /*seq_hi*/,
+    uint32_t /*seq_lo*/,
+    const uint32_t flags) {
+  auto* self = static_cast<WaylandVulkanBackend*>(data);
+  if (self == nullptr) {
+    return;
+  }
+  constexpr uint64_t kMaxPlausibleRefreshNs = 100'000'000;  // 10Hz floor
+  if (refresh > 0 && refresh <= kMaxPlausibleRefreshNs) {
+    self->last_refresh_ns_.store(refresh, std::memory_order_release);
+  }
+  if (tv_sec_hi != 0) {
+    spdlog::warn(
+        "[WaylandVulkanBackend] feedback.presented tv_sec_hi={} (expected 0); "
+        "dropping baton with wall-clock fallback",
+        tv_sec_hi);
+    WaylandVulkanBackend::on_feedback_discarded(data, fb);
+    return;
+  }
+  const auto tv_sec = static_cast<uint64_t>(tv_sec_lo);
+  const uint64_t tv_ns =
+      tv_sec * 1'000'000'000ULL + static_cast<uint64_t>(tv_nano_sec);
+
+  // Profile accumulation: flags_or only. Interval bucketing is owned by
+  // ProfilePresent on the rasterizer thread; doing it twice would
+  // double-count.
+  static const bool profile_enabled = std::getenv("IVI_VK_PROFILE") != nullptr;
+  if (profile_enabled) {
+    self->profile_.flags_or |= flags;
+  }
+
+  // Race-safe destroy: only the path that successfully removed `fb` from
+  // feedback_in_flight_ owns its destruction. If StopVsyncMonitor swapped
+  // the vector out from under us, `fb` is in StopVsyncMonitor's drained
+  // copy and IT will destroy it.
+  bool removed_one = false;
+  bool empty = false;
+  {
+    std::lock_guard<std::mutex> lock(self->m_feedback_mu_);
+    auto& vec = self->feedback_in_flight_;
+    auto it = std::find(vec.begin(), vec.end(), fb);
+    if (it != vec.end()) {
+      vec.erase(it);
+      removed_one = true;
+    }
+    empty = vec.empty();
+  }
+  if (removed_one) {
+    wp_presentation_feedback_destroy(fb);
+  }
+  if (empty) {
+    self->feedback_pending_.store(false, std::memory_order_release);
+  }
+
+  // Hand the baton back to Flutter with the presentation timestamp.
+  const intptr_t baton =
+      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+  if (baton == 0) {
+    return;
+  }
+  auto* engine = self->engine_handle_.load(std::memory_order_acquire);
+  if (engine == nullptr) {
+    return;
+  }
+  auto* runner = self->platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;
+  }
+  const uint64_t period_ns =
+      self->last_refresh_ns_.load(std::memory_order_acquire);
+  self->last_begin_frame_ns_.store(tv_ns, std::memory_order_release);
+  asio::post(*runner->GetStrandContext(), [engine, baton, tv_ns, period_ns]() {
+    LibFlutterEngine->OnVsync(engine, baton, tv_ns, tv_ns + period_ns);
+  });
+}
+
+void WaylandVulkanBackend::on_feedback_discarded(
+    void* data,
+    struct wp_presentation_feedback* fb) {
+  auto* self = static_cast<WaylandVulkanBackend*>(data);
+  if (self == nullptr) {
+    return;
+  }
+  static const bool profile_enabled = std::getenv("IVI_VK_PROFILE") != nullptr;
+  if (profile_enabled) {
+    ++self->profile_.discarded_frames;
+  }
+  bool removed_one = false;
+  bool empty = false;
+  {
+    std::lock_guard<std::mutex> lock(self->m_feedback_mu_);
+    auto& vec = self->feedback_in_flight_;
+    auto it = std::find(vec.begin(), vec.end(), fb);
+    if (it != vec.end()) {
+      vec.erase(it);
+      removed_one = true;
+    }
+    empty = vec.empty();
+  }
+  if (removed_one) {
+    wp_presentation_feedback_destroy(fb);
+  }
+  if (empty) {
+    self->feedback_pending_.store(false, std::memory_order_release);
+  }
+
+  const intptr_t baton =
+      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+  if (baton == 0) {
+    return;
+  }
+  auto* engine = self->engine_handle_.load(std::memory_order_acquire);
+  if (engine == nullptr) {
+    return;
+  }
+  self->PostOnVsync(engine, baton);
+}
+
+const wp_presentation_feedback_listener
+    WaylandVulkanBackend::feedback_listener_ = {
+        .sync_output = WaylandVulkanBackend::on_feedback_sync_output,
+        .presented = WaylandVulkanBackend::on_feedback_presented,
+        .discarded = WaylandVulkanBackend::on_feedback_discarded,
+};
+
+void WaylandVulkanBackend::StopVsyncMonitor() {
+  std::vector<struct wp_presentation_feedback*> drained;
+  {
+    std::lock_guard<std::mutex> lock(m_feedback_mu_);
+    drained.swap(feedback_in_flight_);
+  }
+  for (auto* fb : drained) {
+    wp_presentation_feedback_destroy(fb);
+  }
+  feedback_pending_.store(false, std::memory_order_release);
+  vsync_baton_.store(0, std::memory_order_release);
+  engine_handle_.store(nullptr, std::memory_order_release);
+  platform_task_runner_.store(nullptr, std::memory_order_release);
 }
 
 void WaylandVulkanBackend::Resize(size_t /* index */,
@@ -949,6 +1325,12 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   assert(surface != nullptr);
 
   surface_ = VK_NULL_HANDLE;
+
+  // Stash for wp_presentation_feedback. Released-acquire so the
+  // rasterizer-thread RequestPresentationFeedback path sees it the next
+  // time it's called after CreateSurface (which always runs on the
+  // platform thread before any frames present).
+  wl_surface_.store(surface, std::memory_order_release);
 
   VkWaylandSurfaceCreateInfoKHR createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
@@ -1466,6 +1848,9 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &swapchain_;
   present_info.pImageIndices = &image_index;
+  // Mint wp_presentation_feedback before the commit baked into
+  // vkQueuePresentKHR. See PresentCallback for rationale.
+  RequestPresentationFeedback();
   const VkResult result = d.vkQueuePresentKHR(queue_, &present_info);
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;

@@ -16,8 +16,12 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <ctime>
 #include <vector>
+
+#include <presentation-time-client-protocol.h>
 
 // Use vulkan.hpp's convenient proc table and resolver.
 #define VULKAN_HPP_NO_EXCEPTIONS 1
@@ -43,14 +47,60 @@
 #include "view/present_layer_sequencer.h"
 #endif
 
+class Display;
+class TaskRunner;
+
 class WaylandVulkanBackend final : public Backend {
  public:
-  WaylandVulkanBackend(wl_display* display,
+  // @p shell_display may be null in headless / test contexts; the
+  // wp_presentation handle for vsync_callback is read from it at
+  // construction. The raw wl_display* is the same one returned by
+  // shell_display->GetDisplay() — passed separately because Vulkan WSI
+  // creation needs it before any Display lookup happens.
+  WaylandVulkanBackend(Display* shell_display,
+                       wl_display* display,
                        uint32_t width,
                        uint32_t height,
                        bool enable_validation_layers);
 
   ~WaylandVulkanBackend() override;
+
+  /**
+   * @brief Per-backend FlutterVsyncCallback.
+   *
+   * Returns @c &VsyncTrampoline iff (a) the compositor advertised
+   * wp_presentation, (b) the announced clock_id is CLOCK_MONOTONIC,
+   * and (c) @c IVI_VK_VSYNC is not @c 0. Otherwise returns nullptr and
+   * Flutter falls back to its internal wall-clock scheduler.
+   */
+  [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
+
+  /**
+   * @brief Stash the engine handle for the wp_presentation_feedback
+   * path. Captured atomically because dispatch may read it from
+   * Display's event_thread_ when the listener fires.
+   */
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
+    engine_handle_.store(engine, std::memory_order_release);
+  }
+
+  /**
+   * @brief Stash the platform task runner so @c FlutterEngineOnVsync can
+   * be marshalled onto its strand. Required because the listener for
+   * @c wp_presentation_feedback.presented fires on Display's event_thread_,
+   * and Flutter rejects @c OnVsync from any thread other than the engine's
+   * run thread.
+   */
+  void SetPlatformTaskRunner(TaskRunner* runner) override {
+    platform_task_runner_.store(runner, std::memory_order_release);
+  }
+
+  /**
+   * @brief Cancel outstanding wp_presentation_feedback objects so
+   * listeners can't fire after the engine has destructed. Called from
+   * @c FlutterView::~FlutterView before the engine destructs.
+   */
+  void StopVsyncMonitor() override;
 
   /**
    * @brief Resize Flutter engine Window size
@@ -396,15 +446,17 @@ class WaylandVulkanBackend final : public Backend {
   void CompositorPipeliningCleanup();
 #endif
 
-  // Per-frame cadence profile (IVI_VK_PROFILE=1). Measure-only: samples
-  // CLOCK_MONOTONIC immediately after each successful vkQueuePresentKHR
-  // on the rasterizer thread (the only writer for either present path —
-  // PresentCallback for non-compositor, PresentLayersImpl for compositor —
-  // and only one of those is active per build). Same shape as the
-  // wayland_egl FrameProfile so the bucket histograms are directly
-  // comparable. Inter-present interval is the only signal available
-  // without wp_presentation_feedback wiring; "discarded" and "flags"
-  // are intentionally absent from the Vulkan path.
+  // Per-frame cadence profile (IVI_VK_PROFILE=1). Inter-present interval
+  // is sampled on CLOCK_MONOTONIC immediately after each successful
+  // vkQueuePresentKHR on the rasterizer thread. When the vsync_callback
+  // path is engaged (wp_presentation_ != nullptr && clock_compatible_),
+  // on_feedback_presented / on_feedback_discarded additionally accumulate
+  // flags_or and discarded_frames — matching the wayland_egl FrameProfile
+  // exactly so the histograms are directly comparable.
+  //
+  // Multiple writers (rasterizer for intervals; Display event_thread_ for
+  // flags_or / discarded_frames) update *disjoint* fields. The bucketing
+  // arithmetic itself is single-writer (rasterizer only).
   struct FrameProfile {
     uint64_t last_present_ns{0};
     uint64_t interval_sum_ns{0};
@@ -416,6 +468,18 @@ class WaylandVulkanBackend final : public Backend {
     uint32_t bucket_20hz{0};       // 34-50ms
     uint32_t bucket_slow{0};       // 51-100ms
     uint32_t bucket_idle{0};       // >100ms
+    // Populated by on_feedback_presented / on_feedback_discarded when
+    // wp_presentation_feedback is wired (vsync_callback engaged).
+    // Always zero when the wall-clock fallback is in use.
+    uint32_t discarded_frames{0};
+    uint32_t flags_or{0};
+    // beginFrame-to-present latency: time from the frame_start_time we
+    // handed Flutter via OnVsync to the next vkQueuePresentKHR return.
+    // Only meaningful when vsync_callback is wired (otherwise
+    // last_begin_frame_ns_ is never set and these stay 0).
+    uint64_t pipeline_latency_sum_ns{0};
+    uint64_t pipeline_latency_max_ns{0};
+    uint32_t pipeline_latency_samples{0};
   };
   FrameProfile profile_{};
   FrameProfile session_totals_{};
@@ -424,4 +488,65 @@ class WaylandVulkanBackend final : public Backend {
   // No-op when IVI_VK_PROFILE is unset. Mutates profile_/session_totals_
   // without locks because the rasterizer thread is the only writer.
   void ProfilePresent(bool ok);
+
+  // wp_presentation-driven vsync plumbing. Same shape as the EGL backend
+  // — only the present-path hook site (vkQueuePresentKHR vs eglSwapBuffers)
+  // and the rasterizer-thread origin differ. See WaylandEglBackend for the
+  // shared design rationale.
+  std::atomic<intptr_t> vsync_baton_{0};
+  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_handle_{nullptr};
+  std::atomic<TaskRunner*> platform_task_runner_{nullptr};
+  std::atomic<bool> feedback_pending_{false};
+
+  std::mutex m_feedback_mu_;
+  std::vector<struct wp_presentation_feedback*> feedback_in_flight_;
+
+  struct wp_presentation* wp_presentation_{nullptr};
+  clockid_t presentation_clock_id_{CLOCK_MONOTONIC};
+  bool clock_compatible_{false};
+
+  std::atomic<uint64_t> last_refresh_ns_{16'666'667};
+
+  // frame_start_time most recently handed to FlutterEngineOnVsync.
+  // Updated atomically by the OnVsync-posting paths (PostOnVsync's
+  // lambda and on_feedback_presented's inline post). Read by
+  // ProfilePresent on the rasterizer thread to compute beginFrame-to-
+  // present latency. Stays 0 when vsync_callback isn't wired, in which
+  // case ProfilePresent skips the latency math.
+  //
+  // mutable because PostOnVsync is const (mirrors EGL signature) but
+  // needs to record the timestamp it hands to the engine.
+  mutable std::atomic<uint64_t> last_begin_frame_ns_{0};
+
+  // wl_surface stashed in CreateSurface so wp_presentation_feedback()
+  // has a target without re-deriving from VkSurfaceKHR (Vulkan stores
+  // the wl_surface internally but doesn't expose it back).
+  std::atomic<struct wl_surface*> wl_surface_{nullptr};
+
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
+  void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
+  void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                   intptr_t baton) const;
+
+  // Per-commit feedback request — called from BOTH present paths
+  // BEFORE the vkQueuePresentKHR that mints the wl_surface.commit the
+  // feedback object binds to. No-op when wp_presentation isn't usable.
+  void RequestPresentationFeedback();
+
+  static void on_feedback_sync_output(void* data,
+                                      struct wp_presentation_feedback* fb,
+                                      struct wl_output* output);
+  static void on_feedback_presented(void* data,
+                                    struct wp_presentation_feedback* fb,
+                                    uint32_t tv_sec_hi,
+                                    uint32_t tv_sec_lo,
+                                    uint32_t tv_nano_sec,
+                                    uint32_t refresh,
+                                    uint32_t seq_hi,
+                                    uint32_t seq_lo,
+                                    uint32_t flags);
+  static void on_feedback_discarded(void* data,
+                                    struct wp_presentation_feedback* fb);
+
+  static const struct wp_presentation_feedback_listener feedback_listener_;
 };
