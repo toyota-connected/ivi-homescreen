@@ -158,6 +158,13 @@ class WaylandWindow {
     int32_t height;
   } m_window_size{};
 
+  // Latest hint from xdg_toplevel.configure_bounds (output area minus
+  // struts). 0 = no hint received.
+  struct {
+    int32_t width;
+    int32_t height;
+  } m_configure_bounds{};
+
   enum window_type m_type;
   std::string m_app_id;
 
@@ -255,6 +262,14 @@ class WaylandWindow {
    */
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
+
+  // xdg-shell v4: compositor hint for the maximum surface size that fits
+  // the available output area (output minus panels/struts). Stored so the
+  // (0,0)-configure path can downsize the client-requested geometry.
+  static void handle_toplevel_configure_bounds(void* data,
+                                               struct xdg_toplevel* toplevel,
+                                               int32_t width,
+                                               int32_t height);
 
   /**
    * @brief handler for frame event of a base surface

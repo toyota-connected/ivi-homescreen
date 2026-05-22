@@ -284,12 +284,41 @@ void WaylandWindow::handle_toplevel_configure(
     w->m_geometry.height = height;
 
   } else if (!w->m_fullscreen && !w->m_maximized) {
-    w->m_geometry.width = w->m_window_size.width;
-    w->m_geometry.height = w->m_window_size.height;
+    // (0,0) configure = "client picks size". Downsize the client request
+    // to fit the compositor's hint (configure_bounds if known, else the
+    // output mode) so we don't render off-screen or get clipped on
+    // compositors like tinywlr that don't enforce bounds at commit time.
+    int32_t cap_w = w->m_configure_bounds.width;
+    int32_t cap_h = w->m_configure_bounds.height;
+    if (cap_w <= 0 || cap_h <= 0) {
+      const auto out = w->m_display->GetVideoModeSize(w->m_output_index);
+      cap_w = out.first;
+      cap_h = out.second;
+    }
+    int32_t target_w = w->m_window_size.width;
+    int32_t target_h = w->m_window_size.height;
+    if (cap_w > 0 && target_w > cap_w) {
+      target_w = cap_w;
+    }
+    if (cap_h > 0 && target_h > cap_h) {
+      target_h = cap_h;
+    }
+    w->m_geometry.width = target_w;
+    w->m_geometry.height = target_h;
   }
 
   w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
                        w->m_geometry.width, w->m_geometry.height);
+}
+
+void WaylandWindow::handle_toplevel_configure_bounds(
+    void* data,
+    struct xdg_toplevel* /* toplevel */,
+    int32_t width,
+    int32_t height) {
+  auto* w = static_cast<WaylandWindow*>(data);
+  w->m_configure_bounds.width = width;
+  w->m_configure_bounds.height = height;
 }
 
 void WaylandWindow::handle_toplevel_close(
@@ -303,7 +332,7 @@ const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
     .configure = handle_toplevel_configure,
     .close = handle_toplevel_close,
 #if defined(XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION)
-    .configure_bounds = nullptr,
+    .configure_bounds = handle_toplevel_configure_bounds,
 #endif
 #if defined(XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION)
     .wm_capabilities = nullptr,
