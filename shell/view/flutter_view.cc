@@ -32,6 +32,8 @@
 #include "backend/wayland_egl/wayland_egl.h"
 #elif BUILD_BACKEND_WAYLAND_VULKAN
 #include "backend/wayland_vulkan/wayland_vulkan.h"
+#else
+#error "no Flutter backend selected (see flutter_view.h)"
 #endif
 #include <key_event_handler.h>
 #include <text_input_plugin.h>
