@@ -85,6 +85,11 @@ if (BUILD_BACKEND_SOFTWARE)
         )
         target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM_DUMB)
     endif ()
+    if (BUILD_SOFTWARE_SINK_FBDEV)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/fbdev_sink.cc
+        )
+    endif ()
 endif ()
 
 if (BUILD_BACKEND_DRM_KMS_EGL)
