@@ -134,11 +134,9 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
       return b->SwapBuffers();
     }
 
-    // Free the existing damage that was allocated to this frame.
-    if (b->m_existing_damage_map[info->fbo_id] != nullptr) {
-      free(b->m_existing_damage_map[info->fbo_id]);
-      b->m_existing_damage_map[info->fbo_id] = nullptr;
-    }
+    // Existing-damage storage is held by value in m_existing_damage_map;
+    // populate_existing_damage rewrites the entry in place on every call,
+    // so no per-frame free is required here.
 
     if (b->GetSetDamageRegion()) {
       // Set the buffer damage as the damage region.
@@ -186,13 +184,13 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
 
     existing_damage->num_rects = 1;
 
-    // Allocate the array of rectangles for the existing damage.
-    b->m_existing_damage_map[fbo_id] = static_cast<FlutterRect*>(
-        malloc(sizeof(FlutterRect) * existing_damage->num_rects));
-    b->m_existing_damage_map[fbo_id][0] =
-        FlutterRect{0, 0, static_cast<double>(b->m_initial_width),
-                    static_cast<double>(b->m_initial_height)};
-    existing_damage->damage = b->m_existing_damage_map[fbo_id];
+    // Reuse the per-fbo slot in the map. operator[] default-constructs the
+    // FlutterRect on first use and returns a stable reference thereafter
+    // (std::unordered_map keeps node addresses stable across insertions).
+    FlutterRect& slot = b->m_existing_damage_map[fbo_id];
+    slot = FlutterRect{0, 0, static_cast<double>(b->m_initial_width),
+                       static_cast<double>(b->m_initial_height)};
+    existing_damage->damage = &slot;
 
     if (age > 1) {
       --age;
@@ -1011,11 +1009,45 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
   // to the Wayland compositor. The surface has no wl_surface_set_opaque_region
   // set by default, and the EGL config has EGL_ALPHA_SIZE=8, so per-pixel
   // alpha is honoured downstream.
+  //
+  // Skip the clear when the first composited layer is a window-sized
+  // BackingStore at offset (0,0): its blend=false path overwrites the
+  // entire FBO 0, so the upfront clear's pixels are immediately discarded.
+  // PlatformView layers ahead of any BackingStore disqualify the skip
+  // because their cutouts may not be covered by any later layer.
+  bool first_layer_covers_window = false;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (!layer) {
+      continue;
+    }
+    if (layer->type == kFlutterLayerContentTypeBackingStore &&
+        layer->backing_store) {
+      first_layer_covers_window =
+          layer->offset.x == 0.0 && layer->offset.y == 0.0 &&
+          static_cast<uint32_t>(layer->size.width) == m_initial_width &&
+          static_cast<uint32_t>(layer->size.height) == m_initial_height;
+      break;
+    }
+    if (layer->type == kFlutterLayerContentTypePlatformView) {
+      break;
+    }
+  }
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  glDisable(GL_SCISSOR_TEST);
-  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
+  if (!first_layer_covers_window) {
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
+
+  // Enter frame-batched compositor mode so each quad-path composite skips
+  // the program/VBO/attrib setup that's invariant across layers within a
+  // frame. Matched by EndFrame after the loop. Probe caps up front so
+  // m_gl_compositor is constructed.
+  EnsureGlCapsProbed();
+  m_gl_compositor->BeginFrame();
 
   bool ok = true;
   // Engine emits layers bottom-to-top. The first composited layer lands on
@@ -1107,6 +1139,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     }
   }
 
+  m_gl_compositor->EndFrame();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   return SwapBuffers() && ok;
 }
