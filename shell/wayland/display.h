@@ -559,6 +559,17 @@ class Display : public IDisplay {
   void NotifyOutputResized(const output_info_t* oi);
   bool m_buffer_scale_enable{};
 
+  // Tracks whether the compositor advertised a GPU buffer-allocation
+  // protocol that Mesa's Vulkan WSI can use. Set from
+  // registry_handle_global; consumed by the Vulkan backend pre-flight.
+  bool m_has_linux_dmabuf{false};
+  bool m_has_wl_drm{false};
+
+ public:
+  [[nodiscard]] bool HasLinuxDmabuf() const { return m_has_linux_dmabuf; }
+  [[nodiscard]] bool HasWlDrm() const { return m_has_wl_drm; }
+
+ private:
   static void wayland_event_mask_update(
       const std::string& ignore_wayland_events,
       struct wayland_event_mask& mask);

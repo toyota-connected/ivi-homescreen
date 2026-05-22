@@ -174,6 +174,17 @@ void Display::registry_handle_global(void* data,
 
   SPDLOG_DEBUG("Wayland: {} version {}", interface, version);
 
+  // Note when GPU-buffer-allocation protocols are advertised. Mesa's
+  // Vulkan WSI Wayland implementation needs one of these to back the
+  // swapchain; vkGetPhysicalDeviceSurfaceFormatsKHR returns
+  // VK_ERROR_SURFACE_LOST_KHR when both are absent. The flags let the
+  // backend pre-flight and emit a clear error rather than asserting.
+  if (strcmp(interface, "zwp_linux_dmabuf_v1") == 0) {
+    d->m_has_linux_dmabuf = true;
+  } else if (strcmp(interface, "wl_drm") == 0) {
+    d->m_has_wl_drm = true;
+  }
+
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
     if (version >= 3) {
       d->m_compositor = static_cast<wl_compositor*>(
