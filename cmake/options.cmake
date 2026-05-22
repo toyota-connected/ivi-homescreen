@@ -131,6 +131,14 @@ if (BUILD_BACKEND_SOFTWARE)
         message(FATAL_ERROR
                 "BUILD_SOFTWARE_SINK_DRM=ON but pkg-config libdrm was not found")
     endif ()
+    # Optional /dev/fb* sink. Linux-only, no library dependency beyond
+    # the kernel uapi headers (linux/fb.h) which ship with every libc.
+    # Default ON when targeting Linux; the build hosts targeting other
+    # OSes (the embedder targets Linux today, but defensive) can flip
+    # it off via -DBUILD_SOFTWARE_SINK_FBDEV=OFF.
+    option(BUILD_SOFTWARE_SINK_FBDEV
+            "Build the fbdev (/dev/fb*) sink for the software backend"
+            ON)
 endif ()
 
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)

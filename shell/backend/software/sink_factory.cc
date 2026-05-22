@@ -28,6 +28,10 @@
 #include "backend/software/drm_dumb_sink.h"
 #endif
 
+#if BUILD_SOFTWARE_SINK_FBDEV
+#include "backend/software/fbdev_sink.h"
+#endif
+
 std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
   if (spec.empty() || spec == "none") {
     spdlog::info("[SoftwareBackend] sink: none (frames discarded)");
@@ -79,9 +83,36 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
 #endif
   }
 
+  // fbdev:<device>  (device is optional; defaults to /dev/fb0)
+  constexpr std::string_view kFbDevPrefix = "fbdev:";
+  if (spec == "fbdev" || spec.rfind(kFbDevPrefix, 0) == 0) {
+#if BUILD_SOFTWARE_SINK_FBDEV
+    const std::string device(spec == "fbdev"
+                                 ? std::string_view{}
+                                 : spec.substr(kFbDevPrefix.size()));
+    auto fb_sink = FbDevSink::Create(device);
+    if (fb_sink) {
+      spdlog::info("[SoftwareBackend] sink: fbdev (device='{}', {}x{})",
+                   device.empty() ? std::string("/dev/fb0") : device,
+                   fb_sink->fb_width(), fb_sink->fb_height());
+      return fb_sink;
+    }
+    spdlog::warn(
+        "[SoftwareBackend] fbdev sink failed to initialize; "
+        "falling back to NoneSink");
+    return std::make_unique<NoneSink>();
+#else
+    spdlog::warn(
+        "[SoftwareBackend] fbdev sink requested but compiled without "
+        "BUILD_SOFTWARE_SINK_FBDEV; falling back to NoneSink");
+    return std::make_unique<NoneSink>();
+#endif
+  }
+
   spdlog::warn(
       "[SoftwareBackend] unrecognized sink spec '{}' (valid: none | memory | "
-      "file:<pattern> | drm-dumb[:<device>]); falling back to NoneSink",
+      "file:<pattern> | fbdev[:<device>] | drm-dumb[:<device>]); falling "
+      "back to NoneSink",
       std::string(spec));
   return std::make_unique<NoneSink>();
 }
