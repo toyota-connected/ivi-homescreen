@@ -92,7 +92,7 @@ option(BUILD_COMPOSITOR "Enable FlutterCompositor backing store API" OFF)
 # falls back to a non-exportable allocation if unavailable.
 #
 option(BUILD_COMPOSITOR_DMABUF_EXPORT
-       "Export Vulkan backing stores as DMA-BUF for zero-copy plugins" OFF)
+        "Export Vulkan backing stores as DMA-BUF for zero-copy plugins" OFF)
 
 #
 # DRM
@@ -117,6 +117,21 @@ endif ()
 option(BUILD_BACKEND_SOFTWARE
         "Build software (CPU) backend — kSoftware renderer, no GPU/display required"
         OFF)
+if (BUILD_BACKEND_SOFTWARE)
+    # Optional DRM dumb-buffer sink. Defaults ON when libdrm is
+    # available (typical Linux dev/CI host) so the sink is reachable
+    # without an explicit cmake flag. Auto-disables on systems
+    # without libdrm; can also be force-OFF for a minimal CI image.
+    find_package(PkgConfig)
+    pkg_check_modules(DRM_DUMB libdrm IMPORTED_TARGET)
+    option(BUILD_SOFTWARE_SINK_DRM
+            "Build the DRM dumb-buffer sink for the software backend"
+            ${DRM_DUMB_FOUND})
+    if (BUILD_SOFTWARE_SINK_DRM AND NOT DRM_DUMB_FOUND)
+        message(FATAL_ERROR
+                "BUILD_SOFTWARE_SINK_DRM=ON but pkg-config libdrm was not found")
+    endif ()
+endif ()
 
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
 
@@ -138,29 +153,29 @@ if (BUILD_CRASH_HANDLER)
             set(sentry_DIR {CMAKE_INSTALL_PREFIX}/lib/cmake/sentry)
         else ()
             message(FATAL_ERROR "Sentry could not be found at ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake, please set SENTRY_NATIVE_LIBDIR")
-        endif()
+        endif ()
     endif ()
 
-    
+
     if (CRASHPAD_BINARY_DIR)
         if (NOT EXISTS ${CRASHPAD_BINARY_DIR}/crashpad_handler)
             message(FATAL_ERROR "${CRASHPAD_BINARY_DIR}/crashpad_handler does not exist")
-        else()
+        else ()
             message(STATUS "Using crashpad_handler at specified directory: ${CRASHPAD_BINARY_DIR}")
-        endif()
+        endif ()
     else ()
         if (EXISTS ${CMAKE_INSTALL_PREFIX}/bin/crashpad_handler)
             message(STATUS "Defaulting to system crashpad_handler at ${CMAKE_INSTALL_PREFIX}")
             set(CRASHPAD_BINARY_DIR ${CMAKE_INSTALL_PREFIX}/bin)
         else ()
             message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
-        endif()
-    endif()
+        endif ()
+    endif ()
 
     if (NOT CRASH_HANDLER_DSN)
         message(STATUS "Sentry DSN not set, use environment variable SENTRY_DSN to direct coredumps")
     endif ()
-    
+
     find_package(sentry REQUIRED)
     find_package(PkgConfig)
     pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)

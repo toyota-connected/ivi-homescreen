@@ -51,11 +51,19 @@ class ISurfaceSink {
   // own framebuffers (fbdev, drm-dumb) use this to (re)allocate.
   virtual void OnSize(uint32_t /*width*/, uint32_t /*height*/) {}
 
-  // Optional vsync hooks for sinks with a real vblank source. The
-  // default no-ops keep Flutter on its wall-clock scheduler.
-  [[nodiscard]] virtual VsyncCallback GetVsyncCallback() const {
-    return nullptr;
-  }
+  // True when the sink has a real vblank source it can drive Flutter's
+  // vsync_callback from. SoftwareBackend's GetVsyncCallback() returns
+  // a trampoline iff this is true.
+  [[nodiscard]] virtual bool SupportsVsync() const { return false; }
+
+  // Forwarded from SoftwareBackend's VsyncTrampoline. Sinks that
+  // override SupportsVsync() store the baton and either return it
+  // inline (idle-kick) or hand it back later from their vblank event
+  // handler. Default no-op.
+  virtual void SubmitBaton(void* /*engine*/, intptr_t /*baton*/) {}
+
+  // Backend handle / runner plumbing. SoftwareBackend forwards these
+  // unconditionally; sinks that don't need them inherit no-ops.
   virtual void SetEngineHandle(void* /*engine*/) {}
   virtual void SetPlatformTaskRunner(TaskRunner* /*runner*/) {}
   virtual void StopVsyncMonitor() {}

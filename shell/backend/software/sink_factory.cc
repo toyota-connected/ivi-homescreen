@@ -24,6 +24,10 @@
 #include "backend/software/none_sink.h"
 #include "logging.h"
 
+#if BUILD_SOFTWARE_SINK_DRM
+#include "backend/software/drm_dumb_sink.h"
+#endif
+
 std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
   if (spec.empty() || spec == "none") {
     spdlog::info("[SoftwareBackend] sink: none (frames discarded)");
@@ -46,9 +50,38 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
     spdlog::info("[SoftwareBackend] sink: file (pattern='{}')", pattern);
     return std::make_unique<FileSink>(std::move(pattern));
   }
+
+  // drm-dumb:<device>  (device is optional; defaults to /dev/dri/card0)
+  constexpr std::string_view kDrmPrefix = "drm-dumb:";
+  if (spec == "drm-dumb" || spec.rfind(kDrmPrefix, 0) == 0) {
+#if BUILD_SOFTWARE_SINK_DRM
+    const std::string device(spec == "drm-dumb"
+                                 ? std::string_view{}
+                                 : spec.substr(kDrmPrefix.size()));
+    auto drm_sink = DrmDumbSink::Create(device);
+    if (drm_sink) {
+      spdlog::info(
+          "[SoftwareBackend] sink: drm-dumb (device='{}', {}x{}@{:.2f}Hz)",
+          device.empty() ? std::string("/dev/dri/card0") : device,
+          drm_sink->mode_width(), drm_sink->mode_height(),
+          drm_sink->refresh_rate_hz());
+      return drm_sink;
+    }
+    spdlog::warn(
+        "[SoftwareBackend] drm-dumb sink failed to initialize; "
+        "falling back to NoneSink");
+    return std::make_unique<NoneSink>();
+#else
+    spdlog::warn(
+        "[SoftwareBackend] drm-dumb sink requested but compiled without "
+        "BUILD_SOFTWARE_SINK_DRM; falling back to NoneSink");
+    return std::make_unique<NoneSink>();
+#endif
+  }
+
   spdlog::warn(
       "[SoftwareBackend] unrecognized sink spec '{}' (valid: none | memory | "
-      "file:<pattern>); falling back to NoneSink",
+      "file:<pattern> | drm-dumb[:<device>]); falling back to NoneSink",
       std::string(spec));
   return std::make_unique<NoneSink>();
 }
