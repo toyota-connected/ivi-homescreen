@@ -247,6 +247,16 @@ Engine::Engine(FlutterView* view,
 }
 
 Engine::~Engine() {
+  // Latch the platform task runner BEFORE invalidating the engine
+  // handle. Flutter may have queued FlutterTasks in the runner's strand
+  // that won't fire until ~TaskRunner drains the io_context — by which
+  // point FlutterEngineShutdown has destroyed the engine and a
+  // LibFlutterEngine->RunTask(engine_, ...) call SEGVs in
+  // FlutterEngineRunTask. The latch makes QueueFlutterTask and the
+  // already-queued lambdas drop their FlutterTask instead.
+  if (m_platform_task_runner) {
+    m_platform_task_runner->LatchShutdown();
+  }
   if (m_running) {
     LibFlutterEngine->Deinitialize(m_flutter_engine);
     LibFlutterEngine->Shutdown(m_flutter_engine);

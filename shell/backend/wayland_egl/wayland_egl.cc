@@ -45,18 +45,33 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
   FlutterRendererConfig config{};
   config.type = kOpenGL;
   config.open_gl.struct_size = sizeof(FlutterOpenGLRendererConfig);
+  // The lambdas below read engine_state->backend rather than the
+  // view_controller->engine->GetBackend() chain. Flutter fires these
+  // callbacks from worker threads up to and including the final
+  // FlutterEngineDeinitialize() call in Engine::~Engine, by which point
+  // FlutterView::m_state (owner of view_controller) has already
+  // destructed and the indirection would UAF. engine_state itself is
+  // owned by Engine and the Backend lifetime exceeds Engine's, so the
+  // cached pointer stays valid throughout teardown. Each callback also
+  // consults IsShuttingDown() so the final Deinitialize-driven calls
+  // don't drive GL state changes after the compositor's backing stores
+  // have been collected.
   config.open_gl.make_current = [](void* user_data) -> bool {
     const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-    return reinterpret_cast<WaylandEglBackend*>(
-               state->view_controller->engine->GetBackend())
-        ->MakeCurrent();
+    auto* b = dynamic_cast<WaylandEglBackend*>(state->backend);
+    if (b == nullptr || b->IsShuttingDown()) {
+      return false;
+    }
+    return b->MakeCurrent();
   };
 
   config.open_gl.clear_current = [](void* user_data) -> bool {
     const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-    return reinterpret_cast<WaylandEglBackend*>(
-               state->view_controller->engine->GetBackend())
-        ->ClearCurrent();
+    auto* b = dynamic_cast<WaylandEglBackend*>(state->backend);
+    if (b == nullptr || b->IsShuttingDown()) {
+      return false;
+    }
+    return b->ClearCurrent();
   };
 
   config.open_gl.fbo_callback = [](void* /* user_data */) -> uint32_t {
@@ -65,9 +80,11 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
 
   config.open_gl.make_resource_current = [](void* user_data) -> bool {
     const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-    return reinterpret_cast<WaylandEglBackend*>(
-               state->view_controller->engine->GetBackend())
-        ->MakeResourceCurrent();
+    auto* b = dynamic_cast<WaylandEglBackend*>(state->backend);
+    if (b == nullptr || b->IsShuttingDown()) {
+      return false;
+    }
+    return b->MakeResourceCurrent();
   };
 
   config.open_gl.fbo_reset_after_present = false;
@@ -88,8 +105,10 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
   config.open_gl.present_with_info =
       [](void* userdata, const FlutterPresentInfo* info) -> bool {
     const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
-    auto* b = reinterpret_cast<WaylandEglBackend*>(
-        state->view_controller->engine->GetBackend());
+    auto* b = dynamic_cast<WaylandEglBackend*>(state->backend);
+    if (b == nullptr || b->IsShuttingDown()) {
+      return true;
+    }
 
     // Full swap if FlutterPresentInfo is invalid
     if (info->struct_size != sizeof(FlutterPresentInfo)) {
@@ -133,8 +152,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
       [](void* userdata, const intptr_t fbo_id,
          FlutterDamage* existing_damage) -> void {
     const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
-    auto* b = reinterpret_cast<WaylandEglBackend*>(
-        state->view_controller->engine->GetBackend());
+    auto* b = dynamic_cast<WaylandEglBackend*>(state->backend);
     // Given the FBO age, create existing damage region by joining
     // all frame damages since FBO was last used
     EGLint age;
@@ -198,7 +216,15 @@ FlutterCompositor WaylandEglBackend::GetCompositorConfig() {
 
   compositor.present_layers_callback = [](const FlutterLayer** layers,
                                           size_t count, void* ud) -> bool {
-    return static_cast<WaylandEglBackend*>(ud)->PresentLayers(layers, count);
+    auto* b = static_cast<WaylandEglBackend*>(ud);
+    // Flutter fires this callback even during FlutterEngineDeinitialize
+    // — by that point the backing-store FBOs may have been collected
+    // and the GL compositor's internal state is mid-teardown. Drive
+    // straight past it without touching GL state.
+    if (b->IsShuttingDown()) {
+      return true;
+    }
+    return b->PresentLayers(layers, count);
   };
 #else
   compositor.avoid_backing_store_cache = true;
@@ -359,8 +385,8 @@ bool WaylandEglBackend::CreateBackingStore(
     FlutterBackingStore* store_out) {
   EnsureGlCapsProbed();
 
-  const int32_t w = static_cast<int32_t>(config->size.width);
-  const int32_t h = static_cast<int32_t>(config->size.height);
+  const auto w = static_cast<int32_t>(config->size.width);
+  const auto h = static_cast<int32_t>(config->size.height);
 
   // Sized internal format preference — ES3 / OES_rgb8_rgba8 → sized, else
   // unsized. Same rule the backing store itself uses internally.

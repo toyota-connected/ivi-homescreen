@@ -50,17 +50,51 @@ TaskRunner::~TaskRunner() {
   spdlog::debug("[0x{:x}] {} ~Task Runner", pthread_self(), name_);
 }
 
+void TaskRunner::LatchShutdown() {
+  shutting_down_.store(true, std::memory_order_release);
+  // The atomic alone leaves a TOCTOU window: a lambda already past
+  // its own shutting_down_ check could be milliseconds away from
+  // calling RunTask(engine_) when Engine::~Engine reaches the
+  // FlutterEngineShutdown call. Drain by posting a sentinel through
+  // the same strand and waiting — because asio::io_context::strand
+  // serializes posts, anything queued before the sentinel has
+  // completed by the time the sentinel runs.
+  if (strand_ == nullptr) {
+    return;
+  }
+  std::promise<void> done;
+  auto fut = done.get_future();
+  asio::post(*strand_, [&done]() { done.set_value(); });
+  fut.wait();
+}
+
 void TaskRunner::QueueFlutterTask([[maybe_unused]] size_t index,
                                   uint64_t target_time,
                                   FlutterTask task,
                                   void* /* context */) {
   SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
   (void)index;
+  // Reject new tasks once Engine::~Engine has latched shutdown.
+  // FlutterEngineShutdown has either run or is about to, so calling
+  // RunTask on engine_ would dereference a dead handle. Tasks already
+  // queued in the strand still get drained (asio invariant) but check
+  // the flag inside their lambda body — same reason.
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    return;
+  }
   const auto current = LibFlutterEngine->GetCurrentTime();
   if (current >= target_time) {
-    post(*strand_, [&, task]() { LibFlutterEngine->RunTask(engine_, &task); });
+    post(*strand_, [this, task]() {
+      if (shutting_down_.load(std::memory_order_acquire)) {
+        return;
+      }
+      LibFlutterEngine->RunTask(engine_, &task);
+    });
   } else {
-    asio::post(*strand_, pri_queue_->wrap(target_time, [&, task]() {
+    asio::post(*strand_, pri_queue_->wrap(target_time, [this, task]() {
+      if (shutting_down_.load(std::memory_order_acquire)) {
+        return;
+      }
       LibFlutterEngine->RunTask(engine_, &task);
     }));
   }

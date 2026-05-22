@@ -305,6 +305,18 @@ FlutterView::~FlutterView() {
     m_state->engine_state->messenger->SetEngine(nullptr);
   }
 
+  // Latch the backend's shutdown flag BEFORE m_flutter_engine destructs.
+  // Flutter's engine continues firing registered callbacks
+  // (make_current, present_layers_callback, present_with_info, …) on
+  // its raster/IO threads through FlutterEngineDeinitialize and even
+  // briefly after Shutdown — by that point the GL compositor's backing
+  // stores have been collected and any present path that touches GL
+  // state segfaults. Each callback consults Backend::IsShuttingDown()
+  // and bails before touching GL state.
+  if (m_backend) {
+    m_backend->LatchShutdown();
+  }
+
 #if BUILD_BACKEND_DRM_KMS_EGL
   // Tear down the DRM flip monitor before m_flutter_engine destructs.
   // The monitor's asio async_wait on drm_dev_->fd() lives on the
@@ -341,6 +353,17 @@ void FlutterView::Initialize() {
       m_config.view.accessibility_features.value_or(0));
 
   m_state->engine = m_flutter_engine.get();
+
+  // Cache the backend pointer directly on engine_state so the
+  // FlutterRendererConfig lambdas (make_current, present, ...) can skip
+  // the state->view_controller->engine->GetBackend() chain. The chain
+  // UAFs during SIGTERM teardown because m_state (owner of
+  // view_controller) destructs before m_flutter_engine, and
+  // Engine::~Engine then fires Deinitialize callbacks against a freed
+  // view_controller. The cached pointer is safe: m_backend is declared
+  // first in FlutterView (destructs last), so the Backend outlives
+  // engine_state.
+  m_state->engine_state->backend = m_backend.get();
 
   // Hand engine_state ownership to Engine so it survives
   // FlutterEngineDeinitialize. m_state->engine_state stays as a raw

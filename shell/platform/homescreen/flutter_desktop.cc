@@ -300,11 +300,10 @@ bool FlutterDesktopPluginRegistrarGetEglContext(
   out->display = nullptr;
   out->config = nullptr;
   out->share_context = nullptr;
-  if (!registrar || !registrar->engine || !registrar->engine->view_controller ||
-      !registrar->engine->view_controller->view) {
+  if (!registrar || !registrar->engine || !registrar->engine->backend) {
     return false;
   }
-  auto* backend = registrar->engine->view_controller->view->GetBackend();
+  auto* backend = registrar->engine->backend;
   if (!backend) {
     return false;
   }
@@ -443,15 +442,13 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
 
   if (removed) {
     // Pixel-buffer textures: the embedder owns the GL texture, so free it
-    // under a currently-made texture context. Guard the full backend chain
-    // in case the engine is mid-teardown.
+    // under a currently-made texture context. Guard against teardown by
+    // reading the cached backend pointer (null when the engine has
+    // already torn down past Initialize).
     if (removed->pixel_buffer_callback && removed->name != 0) {
       Backend* backend = nullptr;
-      if (texture_registrar->engine &&
-          texture_registrar->engine->view_controller &&
-          texture_registrar->engine->view_controller->view) {
-        backend =
-            texture_registrar->engine->view_controller->view->GetBackend();
+      if (texture_registrar->engine) {
+        backend = texture_registrar->engine->backend;
       }
       if (backend && backend->TextureMakeCurrent()) {
         GLuint name = removed->name;
@@ -491,8 +488,10 @@ bool FlutterDesktopTextureMakeCurrent(
   if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
     return false;
   }
-  const auto backend =
-      texture_registrar->engine->view_controller->view->GetBackend();
+  const auto backend = texture_registrar->engine->backend;
+  if (backend == nullptr) {
+    return false;
+  }
   SPDLOG_TRACE("TextureMakeCurrent: {}", fmt::ptr(backend));
   return backend->TextureMakeCurrent();
 }
@@ -502,8 +501,10 @@ bool FlutterDesktopTextureClearCurrent(
   if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
     return false;
   }
-  const auto backend =
-      texture_registrar->engine->view_controller->view->GetBackend();
+  const auto backend = texture_registrar->engine->backend;
+  if (backend == nullptr) {
+    return false;
+  }
   SPDLOG_TRACE("TextureClearCurrent: {}", fmt::ptr(backend));
   return backend->TextureClearCurrent();
 }

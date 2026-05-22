@@ -146,9 +146,15 @@ constexpr std::array<EGLint, 3> kEsContextAttribs = {{
 }};
 
 DrmBackend* BackendFromState(void* user_data) {
+  // Reads the cached engine_state->backend directly rather than
+  // navigating view_controller->engine. The latter UAFs during SIGTERM
+  // teardown: FlutterView::m_state (owner of view_controller) destructs
+  // before m_flutter_engine, and Engine::~Engine fires Deinitialize
+  // callbacks against a freed view_controller. engine_state itself is
+  // owned by Engine, and m_backend outlives Engine, so the cached
+  // pointer remains valid through the entire teardown.
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  return reinterpret_cast<DrmBackend*>(
-      state->view_controller->engine->GetBackend());
+  return dynamic_cast<DrmBackend*>(state->backend);
 }
 
 // Refuse to run unless our controlling terminal is the *foreground* VT on
@@ -1195,20 +1201,21 @@ VsyncCallback DrmBackend::GetVsyncCallback() const {
 
 void DrmBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
   // user_data is the FlutterDesktopEngineState* passed as userdata to
-  // FlutterEngineInitialize. Recover the engine + backend from it; if
-  // either is gone (shutdown race) drop the baton — leaking is the
-  // documented price of an unresponded baton but the only safe option.
+  // FlutterEngineInitialize. Recover the backend + engine handle from
+  // its cached fields directly; the previous view_controller->engine
+  // chain UAFed during shutdown (m_state destructs first). Drop the
+  // baton if any field is gone — leaking is the documented price of
+  // an unresponded baton but the only safe option here.
   auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
-  if (state == nullptr || state->view_controller == nullptr ||
-      state->view_controller->engine == nullptr) {
+  if (state == nullptr || state->backend == nullptr ||
+      state->flutter_engine == nullptr) {
     return;
   }
-  auto* engine_obj = state->view_controller->engine;
-  auto* backend = dynamic_cast<DrmBackend*>(engine_obj->GetBackend());
+  auto* backend = dynamic_cast<DrmBackend*>(state->backend);
   if (backend == nullptr) {
     return;
   }
-  backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
+  backend->SetVsyncBaton(state->flutter_engine, baton);
 }
 
 void DrmBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,

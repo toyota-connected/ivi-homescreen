@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <future>
 #include <memory>
 
@@ -69,6 +70,27 @@ class TaskRunner {
     return io_context_.get();
   }
 
+  /// Latch shutdown AND synchronously drain any tasks already queued
+  /// on the strand. Must be called by Engine::~Engine before
+  /// FlutterEngineDeinitialize / FlutterEngineShutdown invalidate the
+  /// engine handle — otherwise late tasks dispatch
+  /// LibFlutterEngine->RunTask(engine_, ...) on a dead engine and
+  /// SEGV in FlutterEngineRunTask.
+  ///
+  /// Sequence:
+  ///   1. Set the atomic so QueueFlutterTask rejects new posts.
+  ///   2. Post a sentinel onto the strand and wait for it. Because
+  ///      the strand serializes posts, anything queued before the
+  ///      sentinel has finished by the time the sentinel runs.
+  ///   3. After this returns, no FlutterTask lambda is mid-execution
+  ///      and no future post will attempt RunTask. Safe to invalidate
+  ///      the engine handle.
+  void LatchShutdown();
+
+  [[nodiscard]] bool IsShuttingDown() const {
+    return shutting_down_.load(std::memory_order_acquire);
+  }
+
  private:
   std::string name_;
   FlutterEngine& engine_;
@@ -78,4 +100,5 @@ class TaskRunner {
   asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
   std::unique_ptr<asio::io_context::strand> strand_;
   std::unique_ptr<handler_priority_queue> pri_queue_;
+  std::atomic<bool> shutting_down_{false};
 };

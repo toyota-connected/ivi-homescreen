@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 
 #include "config/common.h"
@@ -57,6 +58,26 @@ class Backend {
   Backend(const Backend&) = delete;
   const Backend& operator=(const Backend&) = delete;
 
+  /// Latched true from ~FlutterView before m_flutter_engine destructs.
+  /// Flutter's engine continues calling registered callbacks
+  /// (make_current, present_layers_callback, present_with_info, …) from
+  /// its raster/IO threads through FlutterEngineDeinitialize and even
+  /// briefly after Shutdown. By that point dependent state (m_state,
+  /// the GL compositor backing stores, plugin-owned textures) is being
+  /// torn down. Each callback consults @c IsShuttingDown() and returns
+  /// without touching mutating GL state.
+  void LatchShutdown() {
+    shutting_down_.store(true, std::memory_order_release);
+  }
+
+  [[nodiscard]] bool IsShuttingDown() const {
+    return shutting_down_.load(std::memory_order_acquire);
+  }
+
+ private:
+  std::atomic<bool> shutting_down_{false};
+
+ public:
   /**
    * @brief Execute the callback function for window resizing
    * @param[in] index Set Application ID

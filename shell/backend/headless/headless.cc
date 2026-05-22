@@ -63,18 +63,21 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
   return {.type = kOpenGL,
           .open_gl = {
               .struct_size = sizeof(FlutterOpenGLRendererConfig),
+              // Read state->backend rather than navigating
+              // view_controller->engine. The latter UAFs during shutdown
+              // because FlutterView's m_state destructs before
+              // m_flutter_engine, and Engine::~Engine fires Deinitialize
+              // callbacks against a freed view_controller.
               .make_current = [](void* user_data) -> bool {
                 const auto state =
                     static_cast<FlutterDesktopEngineState*>(user_data);
-                return reinterpret_cast<HeadlessBackend*>(
-                           state->view_controller->engine->GetBackend())
+                return dynamic_cast<HeadlessBackend*>(state->backend)
                     ->MakeCurrent();
               },
               .clear_current = [](void* userdata) -> bool {
                 const auto state =
                     static_cast<FlutterDesktopEngineState*>(userdata);
-                return reinterpret_cast<HeadlessBackend*>(
-                           state->view_controller->engine->GetBackend())
+                return dynamic_cast<HeadlessBackend*>(state->backend)
                     ->ClearCurrent();
               },
               .present = [](void* /* userdata */) -> bool {
@@ -87,8 +90,7 @@ FlutterRendererConfig HeadlessBackend::GetRenderConfig() {
               .make_resource_current = [](void* userdata) -> bool {
                 const auto state =
                     static_cast<FlutterDesktopEngineState*>(userdata);
-                return reinterpret_cast<HeadlessBackend*>(
-                           state->view_controller->engine->GetBackend())
+                return dynamic_cast<HeadlessBackend*>(state->backend)
                     ->MakeResourceCurrent();
               },
               .fbo_reset_after_present = false,

@@ -17,6 +17,7 @@
 struct FlutterDesktopViewControllerState;
 struct FlutterDesktopMessenger;
 
+class Backend;
 class Engine;
 class PlatformHandler;
 class PlatformViewsHandler;
@@ -73,6 +74,23 @@ struct FlutterDesktopEngineState {
   // The controller associated with this engine instance, if any.
   // This will always be null for a headless engine.
   FlutterDesktopViewControllerState* view_controller = nullptr;
+
+  // Cached pointer to the backend that owns the render context for this
+  // engine. Wired by FlutterView::Initialize() before Engine::Run and
+  // used by the FlutterRendererConfig lambdas (make_current,
+  // clear_current, present, etc.) to skip the
+  // view_controller->engine->GetBackend() chain.
+  //
+  // This is load-bearing for SIGTERM shutdown: FlutterView's m_state
+  // (which owns view_controller) destructs BEFORE m_flutter_engine in
+  // member-order, so Engine::~Engine's call into FlutterEngineDeinitialize
+  // fires render callbacks against a freed view_controller. Reading
+  // backend directly off engine_state avoids the dangling indirection
+  // — engine_state is owned by Engine (lives through Deinitialize) and
+  // the Backend itself is m_backend in FlutterView (declared first,
+  // destructs last), so the pointer stays valid until after Engine's
+  // teardown completes.
+  Backend* backend = nullptr;
 
   // AOT data for this engine instance, if applicable.
   UniqueAotDataPtr aot_data = nullptr;

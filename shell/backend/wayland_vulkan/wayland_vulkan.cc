@@ -731,8 +731,7 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
         "sizeof(FlutterFrameInfo)");
   }
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  const auto b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  const auto b = dynamic_cast<WaylandVulkanBackend*>(state->backend);
   if (b->resize_pending_) {
     b->InitializeSwapChain();
   }
@@ -757,8 +756,7 @@ bool WaylandVulkanBackend::PresentCallback(
     void* user_data,
     const FlutterVulkanImage* /* image */) {
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  const auto b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  const auto b = dynamic_cast<WaylandVulkanBackend*>(state->backend);
 
   // Ensure the layout transition happens after the render pass in the same
   // command buffer Record vkCmdPipelineBarrier at the end of your render pass
@@ -873,8 +871,7 @@ bool WaylandVulkanBackend::CollectBackingStore(const FlutterBackingStore* store,
                                                void* user_data) {
 #if BUILD_COMPOSITOR
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  auto* b = dynamic_cast<WaylandVulkanBackend*>(state->backend);
   return b->CollectBackingStoreImpl(store);
 #else
   (void)store;
@@ -890,8 +887,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
     void* user_data) {
 #if BUILD_COMPOSITOR
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  auto* b = dynamic_cast<WaylandVulkanBackend*>(state->backend);
   return b->CreateBackingStoreImpl(config, backing_store_out);
 #else
   (void)config;
@@ -977,8 +973,7 @@ bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
                                          void* user_data) {
 #if BUILD_COMPOSITOR
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  auto* b = dynamic_cast<WaylandVulkanBackend*>(state->backend);
   return b->PresentLayersImpl(layers, layers_count);
 #else
   (void)layers;
