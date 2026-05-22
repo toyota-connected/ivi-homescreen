@@ -79,6 +79,12 @@ if (BUILD_BACKEND_SOFTWARE)
             backend/software/software_backend.cc
             display/software_display.cc
     )
+    if (BUILD_SOFTWARE_SINK_DRM)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/drm_dumb_sink.cc
+        )
+        target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM_DUMB)
+    endif ()
 endif ()
 
 if (BUILD_BACKEND_DRM_KMS_EGL)

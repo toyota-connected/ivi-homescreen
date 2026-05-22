@@ -145,3 +145,18 @@ bool SoftwareBackend::PresentTrampoline(void* user_data,
   }
   return ok;
 }
+
+void SoftwareBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->view_controller == nullptr ||
+      state->view_controller->engine == nullptr) {
+    return;
+  }
+  auto* engine_obj = state->view_controller->engine;
+  auto* backend = dynamic_cast<SoftwareBackend*>(engine_obj->GetBackend());
+  if (backend == nullptr || backend->sink_ == nullptr) {
+    return;
+  }
+  backend->sink_->SubmitBaton(
+      static_cast<void*>(engine_obj->GetFlutterEngine()), baton);
+}

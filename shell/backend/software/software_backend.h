@@ -51,11 +51,13 @@ class SoftwareBackend final : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
 
-  // Vsync wiring forwards to the sink. Sinks that have no real vblank
-  // source return nullptr from GetVsyncCallback and Flutter's
-  // wall-clock scheduler drives cadence.
+  // Vsync wiring is gated on the sink advertising a real vblank source
+  // (DRM dumb buffer is the only sink that currently does). Sinks
+  // without a vblank source return false from SupportsVsync(),
+  // GetVsyncCallback() returns nullptr, and Flutter falls back to its
+  // internal wall-clock scheduler.
   [[nodiscard]] VsyncCallback GetVsyncCallback() const override {
-    return sink_ ? sink_->GetVsyncCallback() : nullptr;
+    return (sink_ && sink_->SupportsVsync()) ? &VsyncTrampoline : nullptr;
   }
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
     if (sink_) {
@@ -78,6 +80,11 @@ class SoftwareBackend final : public Backend {
                                 const void* allocation,
                                 size_t row_bytes,
                                 size_t height);
+
+  // Flutter's vsync_callback entry point. Recovers the SoftwareBackend
+  // from the FlutterDesktopEngineState* user_data and forwards the
+  // baton to the sink, which owns the vblank-driven baton lifecycle.
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
 
   uint32_t width_;
   uint32_t height_;
