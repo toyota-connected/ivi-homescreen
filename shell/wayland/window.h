@@ -126,6 +126,13 @@ class WaylandWindow {
     return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
   }
 
+  // Called from Display::NotifyOutputResized when wl_output.mode reports
+  // new dimensions for output index @p output_index. Runs on the
+  // wayland event thread. If this window is bound to that output and
+  // its current geometry no longer fits, shrink to the new mode and
+  // re-Resize the backend.
+  void OnOutputResized(size_t output_index, int32_t new_w, int32_t new_h);
+
  private:
   size_t m_index;
   std::shared_ptr<Display> m_display;

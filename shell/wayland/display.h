@@ -41,6 +41,7 @@
 #include "timer.h"
 
 class Engine;
+class WaylandWindow;
 
 struct FlutterDesktopViewControllerState;
 
@@ -264,6 +265,12 @@ class Display : public IDisplay {
    */
   void SetEngine(wl_surface* surface, Engine* engine);
 
+  // Track WaylandWindows so wl_output.mode changes after startup can fan
+  // out to their geometry-clamp path (Weston re-resizes its nested
+  // output without re-sending xdg_toplevel.configure).
+  void RegisterWindow(WaylandWindow* window);
+  void UnregisterWindow(WaylandWindow* window);
+
   void SetViewControllerState(
       FlutterDesktopViewControllerState* view_controller_state) override {
     m_view_controller_state = view_controller_state;
@@ -452,6 +459,10 @@ class Display : public IDisplay {
     int transform;
     std::string name;
     std::string desc;
+    // Back-pointer to the owning Display so the output listeners (which
+    // receive the output_info_t* as user data) can fan a mode change out
+    // to registered WaylandWindows.
+    class Display* display;
   } output_info_t;
 
   struct pointer_event {
@@ -530,6 +541,22 @@ class Display : public IDisplay {
   }
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
+
+  // Registered WaylandWindows (raw, non-owning). Mutated from the wayland
+  // event thread (display_handle_mode callback) and the main thread
+  // (WaylandWindow ctor/dtor) so guarded by a mutex.
+  std::mutex m_windows_lock;
+  std::vector<WaylandWindow*> m_windows;
+
+  // Look up the index of an output_info_t in m_all_outputs (the same
+  // numeric value WaylandWindow stores as m_output_index). Returns
+  // m_all_outputs.size() if not found.
+  size_t IndexOfOutput(const output_info_t* oi) const;
+
+  // Called from display_handle_mode after the output_info_t has been
+  // updated. Fans the new width/height out to any WaylandWindow whose
+  // m_output_index matches; the window decides whether to shrink.
+  void NotifyOutputResized(const output_info_t* oi);
   bool m_buffer_scale_enable{};
 
   static void wayland_event_mask_update(
