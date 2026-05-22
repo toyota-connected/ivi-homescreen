@@ -325,7 +325,7 @@ int PrintDrmModes(const std::string& device) {
   return 0;
 }
 
-static std::unique_ptr<DrmBackend> DrmBackend::Create(
+std::unique_ptr<DrmBackend> DrmBackend::Create(
     const DrmConfig& cfg,
     homescreen::DrmSession* session) {
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
@@ -1090,7 +1090,7 @@ bool DrmBackend::InitEgl() {
   return true;
 }
 
-uint32_t DrmBackend::AddFb(gbm_bo* bo) {
+uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
   const uint32_t width = gbm_bo_get_width(bo);
   const uint32_t height = gbm_bo_get_height(bo);
   const uint32_t stride = gbm_bo_get_stride(bo);
@@ -1511,7 +1511,7 @@ void DrmBackend::ArmFlipRead() {
       });
 }
 
-bool DrmBackend::WaitForPendingFlip() {
+bool DrmBackend::WaitForPendingFlip() const {
   // The asio flip monitor (StartFlipMonitor) drains PAGE_FLIP_EVENTs
   // on the platform task runner thread and clears flip_pending_ via
   // UnifiedPageFlipHandler → OnLegacyFlipComplete. We just wait for
