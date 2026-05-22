@@ -445,7 +445,15 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     // Pixel-buffer textures: the embedder owns the GL texture, so free it
     // under a currently-made texture context. Guard the full backend chain
     // in case the engine is mid-teardown.
+    //
+    // GLESv2 is only linked into the final binary when a GL-based backend
+    // is enabled (Wayland EGL, DRM KMS EGL, Headless EGL). Wayland Vulkan
+    // builds don't link it and don't produce GL pixel-buffer textures at
+    // runtime — but the linker still needs the glDeleteTextures symbol
+    // unless we compile this branch out.
     if (removed->pixel_buffer_callback && removed->name != 0) {
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL || \
+    BUILD_BACKEND_HEADLESS_EGL
       Backend* backend = nullptr;
       if (texture_registrar->engine &&
           texture_registrar->engine->view_controller &&
@@ -463,6 +471,11 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
             "GL texture {} leaked",
             removed->name);
       }
+#else
+      // No GL backend in this configuration; the texture was never
+      // actually backed by a live GLuint. Nothing to free.
+      (void)texture_registrar;
+#endif
     }
     if (removed->release_callback != nullptr) {
       removed->release_callback(removed->release_context);
