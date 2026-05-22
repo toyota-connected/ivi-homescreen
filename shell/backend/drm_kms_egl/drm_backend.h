@@ -202,7 +202,7 @@ class DrmBackend : public Backend {
   // re-modeset on the next commit, and asks the engine to schedule a
   // frame so Flutter actually produces one — without that kick an idle
   // UI never calls Present again and the screen stays blank.
-  static void OnSessionPaused();
+  void OnSessionPaused();
   void OnSessionResumed(int new_fd);
 
   [[nodiscard]] const drm::Device& device() const { return *drm_dev_; }
@@ -237,7 +237,7 @@ class DrmBackend : public Backend {
   bool InitGbm();
   bool InitEgl();
   bool SetInitialMode();
-  static uint32_t AddFb(gbm_bo* bo);
+  uint32_t AddFb(gbm_bo* bo) const;
   bool WaitForPendingFlip() const;
   // Unified PAGE_FLIP_EVENT dispatcher. Registered as the
   // drmEventContext.page_flip_handler from the asio flip monitor; the
