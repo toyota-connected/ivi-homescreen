@@ -126,6 +126,13 @@ class WaylandWindow {
     return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
   }
 
+  // Called from Display::NotifyOutputResized when wl_output.mode reports
+  // new dimensions for output index @p output_index. Runs on the
+  // wayland event thread. If this window is bound to that output and
+  // its current geometry no longer fits, shrink to the new mode and
+  // re-Resize the backend.
+  void OnOutputResized(size_t output_index, int32_t new_w, int32_t new_h);
+
  private:
   size_t m_index;
   std::shared_ptr<Display> m_display;
@@ -157,6 +164,13 @@ class WaylandWindow {
     int32_t width;
     int32_t height;
   } m_window_size{};
+
+  // Latest hint from xdg_toplevel.configure_bounds (output area minus
+  // struts). 0 = no hint received.
+  struct {
+    int32_t width;
+    int32_t height;
+  } m_configure_bounds{};
 
   enum window_type m_type;
   std::string m_app_id;
@@ -255,6 +269,14 @@ class WaylandWindow {
    */
   static void handle_toplevel_close(void* data,
                                     struct xdg_toplevel* xdg_toplevel);
+
+  // xdg-shell v4: compositor hint for the maximum surface size that fits
+  // the available output area (output minus panels/struts). Stored so the
+  // (0,0)-configure path can downsize the client-requested geometry.
+  static void handle_toplevel_configure_bounds(void* data,
+                                               struct xdg_toplevel* toplevel,
+                                               int32_t width,
+                                               int32_t height);
 
   /**
    * @brief handler for frame event of a base surface

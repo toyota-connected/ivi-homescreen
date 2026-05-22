@@ -90,6 +90,22 @@ class GlCompositor {
                    dst_h, blend, flip_y);
   }
 
+  /**
+   * @brief Mark the start/end of a sequence of composite calls.
+   *
+   * Between BeginFrame and EndFrame the persistent GL quad state
+   * (program, VBO, vertex-attrib pointers, depth/stencil/scissor/cull
+   * disables, sampler uniform) is emitted once for the first quad-path
+   * composite and torn down on EndFrame, so subsequent quad composites
+   * within the frame skip ~13 redundant GL calls each. If BeginFrame is
+   * not called, CompositeToDefault keeps its per-call setup+teardown
+   * behaviour for one-off compositions.
+   *
+   * Calls must be balanced. Re-entrancy is not supported.
+   */
+  void BeginFrame();
+  void EndFrame();
+
  private:
   const GlCaps* caps_;
 
@@ -101,6 +117,15 @@ class GlCompositor {
   GLint attr_uv_{-1};
   GLint uni_tex_{-1};
 
+  // Per-frame batching state. frame_open_ is toggled by BeginFrame/EndFrame;
+  // persistent_state_emitted_ tracks whether the once-per-frame setup has
+  // actually been issued (deferred until the first quad-path composite, so
+  // a frame composed entirely of blit-path layers pays nothing).
+  bool frame_open_{false};
+  bool persistent_state_emitted_{false};
+  bool blend_enabled_{false};
+  GLuint bound_tex_{0};
+
   bool EnsureQuad();
   void CompositeViaQuad(GLuint src_color_tex,
                         GLint dst_x,
@@ -109,6 +134,8 @@ class GlCompositor {
                         GLsizei dst_h,
                         bool blend,
                         bool flip_y);
+  void EmitPersistentQuadState();
+  void TearDownPersistentQuadState();
 
   GLint uni_uv_y_scale_{-1};
   GLint uni_uv_y_offset_{-1};

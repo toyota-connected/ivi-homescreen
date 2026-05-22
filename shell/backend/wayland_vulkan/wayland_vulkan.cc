@@ -872,9 +872,12 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 bool WaylandVulkanBackend::CollectBackingStore(const FlutterBackingStore* store,
                                                void* user_data) {
 #if BUILD_COMPOSITOR
-  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  // user_data is `this` per FlutterCompositor.user_data set in
+  // GetCompositorConfig(). The prior code treated it as a
+  // FlutterDesktopEngineState* and walked view_controller->view->GetBackend
+  // — that read garbage offsets off the backend instance and SEGV'd at
+  // first use, leaving the Vulkan backend non-functional.
+  auto* b = static_cast<WaylandVulkanBackend*>(user_data);
   return b->CollectBackingStoreImpl(store);
 #else
   (void)store;
@@ -889,9 +892,9 @@ bool WaylandVulkanBackend::CreateBackingStore(
     FlutterBackingStore* backing_store_out,
     void* user_data) {
 #if BUILD_COMPOSITOR
-  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  // user_data is `this` per FlutterCompositor.user_data — see
+  // CollectBackingStore above for the prior-bug context.
+  auto* b = static_cast<WaylandVulkanBackend*>(user_data);
   return b->CreateBackingStoreImpl(config, backing_store_out);
 #else
   (void)config;
@@ -976,9 +979,9 @@ bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
                                          size_t layers_count,
                                          void* user_data) {
 #if BUILD_COMPOSITOR
-  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  // user_data is `this` per FlutterCompositor.user_data — see
+  // CollectBackingStore above for the prior-bug context.
+  auto* b = static_cast<WaylandVulkanBackend*>(user_data);
   return b->PresentLayersImpl(layers, layers_count);
 #else
   (void)layers;

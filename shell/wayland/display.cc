@@ -28,6 +28,7 @@
 
 #include "engine.h"
 #include "timer.h"
+#include "window.h"
 
 extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
                         bool released,
@@ -66,7 +67,15 @@ Display::Display(const bool enable_cursor,
 
   m_registry = wl_display_get_registry(m_display);
   wl_registry_add_listener(m_registry, &registry_listener, this);
+  // First dispatch picks up registry globals (synchronous: the server
+  // emits them immediately after we bind the registry). The roundtrip
+  // that follows pulls in events the server emits ONLY in response to
+  // our binds — notably wp_presentation.clock_id, which arrives in a
+  // second round-trip. Without this, WaylandEglBackend's clock_compatible_
+  // check could read the default-initialized CLOCK_MONOTONIC value
+  // before the compositor's announcement arrives.
   wl_display_dispatch(m_display);
+  wl_display_roundtrip(m_display);
 
   if (m_agl.shell && m_agl.bind_to_agl_shell && m_agl.version >= 2) {
     int ret = 0;
@@ -91,6 +100,9 @@ Display::Display(const bool enable_cursor,
 
 Display::~Display() {
   SPDLOG_TRACE("+ ~Display()");
+
+  if (m_wp_presentation)
+    wp_presentation_destroy(m_wp_presentation);
 
   if (m_shm)
     wl_shm_destroy(m_shm);
@@ -191,7 +203,18 @@ void Display::registry_handle_global(void* data,
     xdg_wm_base_add_listener(d->m_xdg_wm_base, &xdg_wm_base_listener, d);
   }
 #endif
-  else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  else if (strcmp(interface, wp_presentation_interface.name) == 0) {
+    // wp_presentation v2 added the presentation_feedback.kind 'zero_copy' flag
+    // and is supported by every mainline compositor. Cap at 2 so older
+    // compositors advertising v1 still work — we don't use any v2-only
+    // request/event from the wp_presentation interface itself.
+    d->m_wp_presentation = static_cast<wp_presentation*>(
+        wl_registry_bind(registry, name, &wp_presentation_interface,
+                         std::min(static_cast<uint32_t>(2), version)));
+    wp_presentation_add_listener(d->m_wp_presentation,
+                                 &wp_presentation_listener, d);
+    spdlog::debug("Wayland: wp_presentation version: {}", version);
+  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface,
                          std::min(static_cast<uint32_t>(1), version)));
@@ -208,6 +231,7 @@ void Display::registry_handle_global(void* data,
     const auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
     oi->global_id = name;
+    oi->display = d;
     // be compat with v2 as well
 #if defined(WL_OUTPUT_NAME_SINCE_VERSION) && \
     defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
@@ -274,6 +298,19 @@ const wl_registry_listener Display::registry_listener = {
     registry_handle_global_remove,
 };
 
+void Display::wp_presentation_handle_clock_id(
+    void* data,
+    struct wp_presentation* /*presentation*/,
+    uint32_t clk_id) {
+  auto* d = static_cast<Display*>(data);
+  d->m_presentation_clock_id = static_cast<clockid_t>(clk_id);
+  spdlog::debug("Wayland: wp_presentation clock_id={}", clk_id);
+}
+
+const struct wp_presentation_listener Display::wp_presentation_listener = {
+    .clock_id = wp_presentation_handle_clock_id,
+};
+
 void Display::display_handle_geometry(void* data,
                                       struct wl_output* /* wl_output */,
                                       int /* x */,
@@ -305,6 +342,9 @@ void Display::display_handle_mode(void* data,
     oi->height = static_cast<unsigned int>(height);
     oi->width = static_cast<unsigned int>(width);
     oi->refresh_rate = refresh / 1000.0;
+    if (oi->display) {
+      oi->display->NotifyOutputResized(oi);
+    }
   }
 
   SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height, refresh / 1000.0);
@@ -863,6 +903,46 @@ void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
   m_active_surface = surface;
   m_surface_engine_map[surface] = engine;
+}
+
+void Display::RegisterWindow(WaylandWindow* window) {
+  if (!window) {
+    return;
+  }
+  std::lock_guard lock(m_windows_lock);
+  m_windows.push_back(window);
+}
+
+void Display::UnregisterWindow(WaylandWindow* window) {
+  std::lock_guard lock(m_windows_lock);
+  m_windows.erase(std::remove(m_windows.begin(), m_windows.end(), window),
+                  m_windows.end());
+}
+
+size_t Display::IndexOfOutput(const output_info_t* oi) const {
+  for (size_t i = 0; i < m_all_outputs.size(); ++i) {
+    if (m_all_outputs[i].get() == oi) {
+      return i;
+    }
+  }
+  return m_all_outputs.size();
+}
+
+void Display::NotifyOutputResized(const output_info_t* oi) {
+  const size_t idx = IndexOfOutput(oi);
+  if (idx >= m_all_outputs.size()) {
+    return;
+  }
+  const auto width = static_cast<int32_t>(oi->width);
+  const auto height = static_cast<int32_t>(oi->height);
+  std::vector<WaylandWindow*> snapshot;
+  {
+    std::lock_guard lock(m_windows_lock);
+    snapshot = m_windows;
+  }
+  for (auto* w : snapshot) {
+    w->OnOutputResized(idx, width, height);
+  }
 }
 
 bool Display::ActivateSystemCursor(const int32_t device,

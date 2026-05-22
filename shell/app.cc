@@ -115,7 +115,13 @@ int App::Loop() const {
 
   const auto elapsed = end_time - start_time;
 
-  const auto frame_time = 1000.0 / m_display->GetMaxRefreshRate();
+  // Some compositors (e.g. tinywlr, virtual outputs) advertise refresh=0
+  // for their mode. Without a fallback, 1000.0 / 0 = +inf and the
+  // sleep_for below blocks the main thread forever — pointer events
+  // queued by the Wayland event thread never get flushed to Flutter.
+  const double refresh_hz = m_display->GetMaxRefreshRate();
+  const auto frame_time =
+      refresh_hz > 0.0 ? 1000.0 / refresh_hz : 1000.0 / 60.0;
   if (const auto sleep_time = frame_time - static_cast<double>(elapsed);
       sleep_time > 0) {
 #if BUILD_WATCHDOG

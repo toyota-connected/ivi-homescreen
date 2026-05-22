@@ -28,6 +28,7 @@
 #endif
 
 class Engine;
+class TaskRunner;
 
 // Carries an EGL context handle set that lets a plugin create its own EGL
 // context sharing GL objects with the embedder's raster context. All handles
@@ -133,6 +134,38 @@ class Backend {
    * @c kInternalInconsistency otherwise.
    */
   virtual VsyncCallback GetVsyncCallback() const { return nullptr; }
+
+  /**
+   * @brief Hand the running FlutterEngine handle to the backend.
+   *
+   * Backends that wire @c FlutterEngineOnVsync (or otherwise need the
+   * engine handle from outside an engine-supplied callback) override this
+   * to stash the handle atomically. Default is a no-op; backends without
+   * vsync_callback or session lifecycle hooks don't need it. Called from
+   * FlutterView once @c FlutterEngineRun returns successfully.
+   */
+  virtual void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) /*engine*/) {}
+
+  /**
+   * @brief Hand the platform task runner to the backend.
+   *
+   * Used by backends that must marshal @c FlutterEngineOnVsync (or other
+   * engine APIs) onto the FlutterEngineRun thread. Default is a no-op.
+   * Called from FlutterView from the same post-Engine::Run hook that
+   * installs the engine handle. Backends that drive an event-source fd
+   * (e.g. DRM page-flip, Wayland display) may use this hook to start an
+   * asio @c async_wait on the runner's io_context.
+   */
+  virtual void SetPlatformTaskRunner(TaskRunner* /*runner*/) {}
+
+  /**
+   * @brief Tear down any vsync/event-loop monitor the backend started.
+   *
+   * Called from @c FlutterView::~FlutterView before the engine destructs
+   * so the backend has a chance to cancel outstanding async work that
+   * could otherwise outlive the engine handle. Default is a no-op.
+   */
+  virtual void StopVsyncMonitor() {}
 
 #if BUILD_COMPOSITOR
   /**

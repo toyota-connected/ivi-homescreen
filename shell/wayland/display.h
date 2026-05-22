@@ -18,12 +18,14 @@
 #pragma once
 
 #include <chrono>
+#include <ctime>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include <presentation-time-client-protocol.h>
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
@@ -39,6 +41,7 @@
 #include "timer.h"
 
 class Engine;
+class WaylandWindow;
 
 struct FlutterDesktopViewControllerState;
 
@@ -134,6 +137,29 @@ class Display : public IDisplay {
   [[nodiscard]] wl_shm* GetShm() const {
     assert(m_shm);
     return m_shm;
+  }
+
+  /**
+   * @brief Get wp_presentation global, if the compositor advertised one.
+   * @return wp_presentation* or nullptr if the global is not present.
+   *
+   * Used by WaylandEglBackend to request per-commit presentation feedback
+   * for vsync_callback. Caller must null-check.
+   */
+  [[nodiscard]] wp_presentation* GetWpPresentation() const {
+    return m_wp_presentation;
+  }
+
+  /**
+   * @brief Compositor-announced presentation clock domain.
+   *
+   * Valid only when GetWpPresentation() is non-null AND wp_presentation
+   * has emitted its clock_id event (the compositor sends it once at bind
+   * time, before any feedback objects exist). Defaults to CLOCK_MONOTONIC
+   * which matches what every mainline compositor announces in practice.
+   */
+  [[nodiscard]] clockid_t GetPresentationClockId() const {
+    return m_presentation_clock_id;
   }
 
   /**
@@ -238,6 +264,12 @@ class Display : public IDisplay {
    * wayland
    */
   void SetEngine(wl_surface* surface, Engine* engine);
+
+  // Track WaylandWindows so wl_output.mode changes after startup can fan
+  // out to their geometry-clamp path (Weston re-resizes its nested
+  // output without re-sending xdg_toplevel.configure).
+  void RegisterWindow(WaylandWindow* window);
+  void UnregisterWindow(WaylandWindow* window);
 
   void SetViewControllerState(
       FlutterDesktopViewControllerState* view_controller_state) override {
@@ -377,6 +409,13 @@ class Display : public IDisplay {
 
   struct xdg_wm_base* m_xdg_wm_base{};
 
+  // wp_presentation_time global + announced clock domain. m_wp_presentation
+  // is nullptr when the compositor does not advertise the protocol;
+  // m_presentation_clock_id is only meaningful once the clock_id event has
+  // fired (defaulted to CLOCK_MONOTONIC to keep the value sane until then).
+  struct wp_presentation* m_wp_presentation{};
+  clockid_t m_presentation_clock_id{CLOCK_MONOTONIC};
+
   struct agl {
     bool bind_to_agl_shell = false;
     struct agl_shell* shell{};
@@ -420,6 +459,10 @@ class Display : public IDisplay {
     int transform;
     std::string name;
     std::string desc;
+    // Back-pointer to the owning Display so the output listeners (which
+    // receive the output_info_t* as user data) can fan a mode change out
+    // to registered WaylandWindows.
+    class Display* display;
   } output_info_t;
 
   struct pointer_event {
@@ -498,6 +541,22 @@ class Display : public IDisplay {
   }
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
+
+  // Registered WaylandWindows (raw, non-owning). Mutated from the wayland
+  // event thread (display_handle_mode callback) and the main thread
+  // (WaylandWindow ctor/dtor) so guarded by a mutex.
+  std::mutex m_windows_lock;
+  std::vector<WaylandWindow*> m_windows;
+
+  // Look up the index of an output_info_t in m_all_outputs (the same
+  // numeric value WaylandWindow stores as m_output_index). Returns
+  // m_all_outputs.size() if not found.
+  size_t IndexOfOutput(const output_info_t* oi) const;
+
+  // Called from display_handle_mode after the output_info_t has been
+  // updated. Fans the new width/height out to any WaylandWindow whose
+  // m_output_index matches; the window decides whether to shrink.
+  void NotifyOutputResized(const output_info_t* oi);
   bool m_buffer_scale_enable{};
 
   static void wayland_event_mask_update(
@@ -1352,4 +1411,20 @@ class Display : public IDisplay {
                                          uint32_t surface_id);
 
   static const struct ivi_wm_listener ivi_wm_listener;
+
+  /**
+   * @brief wp_presentation clock_id event handler.
+   *
+   * Compositors emit this once at bind time announcing the clock domain
+   * for all subsequent wp_presentation_feedback timestamps. We capture it
+   * into m_presentation_clock_id; WaylandEglBackend reads the value via
+   * GetPresentationClockId() to decide whether timestamps can be passed
+   * to FlutterEngineOnVsync without translation.
+   */
+  static void wp_presentation_handle_clock_id(
+      void* data,
+      struct wp_presentation* presentation,
+      uint32_t clk_id);
+
+  static const struct wp_presentation_listener wp_presentation_listener;
 };

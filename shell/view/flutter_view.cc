@@ -211,7 +211,7 @@ FlutterView::FlutterView(Configuration::Config config,
   {
     auto* wl = dynamic_cast<Display*>(display.get());
     m_backend = std::make_shared<WaylandEglBackend>(
-        wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+        wl, wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
         m_config.view.height.value_or(kDefaultViewHeight),
         m_config.debug_backend.value_or(false), kEglBufferSize);
   }
@@ -305,17 +305,16 @@ FlutterView::~FlutterView() {
     m_state->engine_state->messenger->SetEngine(nullptr);
   }
 
-#if BUILD_BACKEND_DRM_KMS_EGL
-  // Tear down the DRM flip monitor before m_flutter_engine destructs.
-  // The monitor's asio async_wait on drm_dev_->fd() lives on the
-  // engine's platform task runner; if it's still outstanding when
-  // Engine::~Engine resets the runner, TaskRunner::~TaskRunner blocks
-  // forever joining a worker that's parked in epoll_wait waiting for a
-  // flip event that will never arrive (kernel is idle between commits).
-  if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
-    drm->StopFlipMonitor();
+  // Tear down any backend-owned vsync/event-loop monitor before
+  // m_flutter_engine destructs. DRM's monitor is an asio async_wait on
+  // the drm fd living on the engine's platform task runner; if it's
+  // still outstanding when Engine::~Engine resets the runner,
+  // TaskRunner::~TaskRunner blocks forever joining a worker parked in
+  // epoll_wait waiting for an event that will never arrive. The default
+  // virtual is a no-op for backends without a monitor.
+  if (m_backend) {
+    m_backend->StopVsyncMonitor();
   }
-#endif
 }
 
 #if !BUILD_BACKEND_DRM_KMS_EGL
@@ -354,19 +353,15 @@ void FlutterView::Initialize() {
     exit(EXIT_FAILURE);
   }
 
-#if BUILD_BACKEND_DRM_KMS_EGL
-  // Hand the engine handle + platform task runner to the DRM backend
-  // so OnSessionResumed can call ScheduleFrame after a VT round-trip
-  // and PostOnVsync can marshal OnVsync onto the FlutterEngineRun
-  // thread (Flutter rejects OnVsync from any other thread with
-  // kInternalInconsistency).
-  if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get());
-      drm_backend != nullptr) {
-    drm_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
-    drm_backend->SetPlatformTaskRunner(
-        m_flutter_engine->GetPlatformTaskRunner());
+  // Hand the engine handle + platform task runner to the backend so
+  // post-Engine::Run lifecycle hooks (DRM's OnSessionResumed →
+  // ScheduleFrame; WaylandEgl's wp_presentation_feedback dispatch) can
+  // marshal back to the FlutterEngineRun thread without a dynamic_cast.
+  // Backends that don't need either inherit no-op defaults from Backend.
+  if (m_backend) {
+    m_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
+    m_backend->SetPlatformTaskRunner(m_flutter_engine->GetPlatformTaskRunner());
   }
-#endif
 
   // notify display update
   FlutterEngineDisplay display{};

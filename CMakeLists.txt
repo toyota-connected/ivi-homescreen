@@ -45,6 +45,16 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
     endif ()
 endif ()
 
+# FlutterView's backend type is picked by an #if/#elif chain over the
+# BUILD_BACKEND_* flags; enabling both Wayland EGL and Wayland Vulkan
+# yields a single binary whose renderer is silently determined by
+# header order rather than user intent. Reject the combination loudly.
+if (BUILD_BACKEND_WAYLAND_EGL AND BUILD_BACKEND_WAYLAND_VULKAN)
+    message(FATAL_ERROR
+            "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN "
+            "are mutually exclusive — pick exactly one Wayland backend")
+endif ()
+
 message(STATUS "Project ................ ${PROJECT_NAME}")
 message(STATUS "Version ................ ${PROJECT_VERSION}")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
