@@ -232,7 +232,7 @@ FlutterView::FlutterView(Configuration::Config config,
           "linux-dmabuf support built in).");
     }
     m_backend = std::make_shared<WaylandVulkanBackend>(
-        wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
+        wl, wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
         m_config.view.height.value_or(kDefaultViewHeight),
         m_config.debug_backend.value_or(false));
   }
