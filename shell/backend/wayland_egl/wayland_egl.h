@@ -199,8 +199,12 @@ class WaylandEglBackend : public Egl, public Backend {
   uint32_t m_initial_width;
   uint32_t m_initial_height;
 
-  // Keeps track of the existing damage associated with each FBO ID
-  std::unordered_map<intptr_t, FlutterRect*> m_existing_damage_map;
+  // Keeps track of the existing damage associated with each FBO ID.
+  // Storing the rect by value (not via heap) so populate_existing_damage
+  // doesn't malloc/free per frame; std::unordered_map keeps element
+  // addresses stable across insertions, so handing &map[fbo_id] to the
+  // engine is safe across frames.
+  std::unordered_map<intptr_t, FlutterRect> m_existing_damage_map;
 
   // Keeps track of the most recent frame damages so that existing damage can
   // be easily computed.
