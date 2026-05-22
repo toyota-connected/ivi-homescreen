@@ -395,4 +395,33 @@ class WaylandVulkanBackend final : public Backend {
   void CompositorPipeliningInit();
   void CompositorPipeliningCleanup();
 #endif
+
+  // Per-frame cadence profile (IVI_VK_PROFILE=1). Measure-only: samples
+  // CLOCK_MONOTONIC immediately after each successful vkQueuePresentKHR
+  // on the rasterizer thread (the only writer for either present path —
+  // PresentCallback for non-compositor, PresentLayersImpl for compositor —
+  // and only one of those is active per build). Same shape as the
+  // wayland_egl FrameProfile so the bucket histograms are directly
+  // comparable. Inter-present interval is the only signal available
+  // without wp_presentation_feedback wiring; "discarded" and "flags"
+  // are intentionally absent from the Vulkan path.
+  struct FrameProfile {
+    uint64_t last_present_ns{0};
+    uint64_t interval_sum_ns{0};
+    uint64_t interval_max_ns{0};
+    uint32_t presented_frames{0};
+    uint32_t present_failures{0};  // vkQueuePresentKHR != VK_SUCCESS
+    uint32_t bucket_60hz{0};       // ≤17ms
+    uint32_t bucket_30hz{0};       // 18-33ms
+    uint32_t bucket_20hz{0};       // 34-50ms
+    uint32_t bucket_slow{0};       // 51-100ms
+    uint32_t bucket_idle{0};       // >100ms
+  };
+  FrameProfile profile_{};
+  FrameProfile session_totals_{};
+
+  // Called from both present paths after vkQueuePresentKHR returns.
+  // No-op when IVI_VK_PROFILE is unset. Mutates profile_/session_totals_
+  // without locks because the rasterizer thread is the only writer.
+  void ProfilePresent(bool ok);
 };
