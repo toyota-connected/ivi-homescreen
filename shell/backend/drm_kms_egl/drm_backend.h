@@ -174,7 +174,7 @@ class DrmBackend : public Backend {
   // FlutterEngineScheduleFrame. Wired by FlutterView after Engine::Run
   // succeeds. Stored atomically because reads happen on the libseat
   // dispatch thread.
-  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) {
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
     engine_handle_.store(engine, std::memory_order_release);
   }
 
@@ -186,14 +186,14 @@ class DrmBackend : public Backend {
   // rasterizer thread, which deadlocks with vsync_callback because the
   // next Present never starts (it's waiting on OnVsync, which is
   // waiting on PAGE_FLIP_EVENT to be drained).
-  void SetPlatformTaskRunner(TaskRunner* runner);
+  void SetPlatformTaskRunner(TaskRunner* runner) override;
 
   // Cancel the pending async_wait on flip_descriptor_ and detach the fd.
   // MUST be called from FlutterView::~FlutterView before m_flutter_engine
   // destructs — otherwise TaskRunner::~TaskRunner blocks forever joining
   // its io_context worker thread (the async_wait counts as outstanding
   // asio work, so run_one() never returns even after work_.reset()).
-  void StopFlipMonitor();
+  void StopVsyncMonitor() override;
 
   // Session lifecycle hooks, called from DrmSession's dispatch thread by
   // the libseat trampoline. OnSessionPaused gates the compositor's
@@ -202,7 +202,7 @@ class DrmBackend : public Backend {
   // re-modeset on the next commit, and asks the engine to schedule a
   // frame so Flutter actually produces one — without that kick an idle
   // UI never calls Present again and the screen stays blank.
-  void OnSessionPaused();
+  static void OnSessionPaused();
   void OnSessionResumed(int new_fd);
 
   [[nodiscard]] const drm::Device& device() const { return *drm_dev_; }
@@ -232,12 +232,12 @@ class DrmBackend : public Backend {
   }
 
  private:
-  DrmBackend(DrmConfig cfg, homescreen::DrmSession* session);
+  DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session);
   bool InitDrm();
   bool InitGbm();
   bool InitEgl();
   bool SetInitialMode();
-  uint32_t AddFb(gbm_bo* bo) const;
+  static uint32_t AddFb(gbm_bo* bo);
   bool WaitForPendingFlip() const;
   // Unified PAGE_FLIP_EVENT dispatcher. Registered as the
   // drmEventContext.page_flip_handler from the asio flip monitor; the
@@ -273,7 +273,7 @@ class DrmBackend : public Backend {
 
   // DRM — drm::Device is RAII (closes fd on destruction), unless
   // constructed via Device::from_fd (libseat-owned fd path).
-  std::optional<drm::Device> drm_dev_;
+  std::optional<drm::Device> drm_dev_{};
   bool drm_master_ = false;  // true after a successful drmSetMaster
   uint32_t connector_id_ = 0;
   uint32_t crtc_id_ = 0;
@@ -289,7 +289,7 @@ class DrmBackend : public Backend {
   // Populated by DriverProbe::Resolve() inside Create(). Non-null for the
   // lifetime of the backend. unique_ptr so driver_probe.h isn't needed in
   // this header.
-  std::unique_ptr<homescreen::driver_probe::Resolved> resolved_;
+  std::unique_ptr<homescreen::driver_probe::Resolved> resolved_{};
 
   // GBM
   gbm_device* gbm_device_ = nullptr;
@@ -340,9 +340,9 @@ class DrmBackend : public Backend {
   void RecordFlipComplete();
 
 #if BUILD_COMPOSITOR
-  std::unique_ptr<DrmCompositor> compositor_;
+  std::unique_ptr<DrmCompositor> compositor_{};
 #endif
-  std::unique_ptr<homescreen::DrmCursor> cursor_;
+  std::unique_ptr<homescreen::DrmCursor> cursor_{};
 #if HAVE_DRM_CAPTURE
   std::unique_ptr<homescreen::DrmCapture> capture_;
 #endif

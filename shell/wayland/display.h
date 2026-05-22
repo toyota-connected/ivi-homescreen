@@ -18,12 +18,14 @@
 #pragma once
 
 #include <chrono>
+#include <ctime>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include <presentation-time-client-protocol.h>
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
@@ -134,6 +136,29 @@ class Display : public IDisplay {
   [[nodiscard]] wl_shm* GetShm() const {
     assert(m_shm);
     return m_shm;
+  }
+
+  /**
+   * @brief Get wp_presentation global, if the compositor advertised one.
+   * @return wp_presentation* or nullptr if the global is not present.
+   *
+   * Used by WaylandEglBackend to request per-commit presentation feedback
+   * for vsync_callback. Caller must null-check.
+   */
+  [[nodiscard]] wp_presentation* GetWpPresentation() const {
+    return m_wp_presentation;
+  }
+
+  /**
+   * @brief Compositor-announced presentation clock domain.
+   *
+   * Valid only when GetWpPresentation() is non-null AND wp_presentation
+   * has emitted its clock_id event (the compositor sends it once at bind
+   * time, before any feedback objects exist). Defaults to CLOCK_MONOTONIC
+   * which matches what every mainline compositor announces in practice.
+   */
+  [[nodiscard]] clockid_t GetPresentationClockId() const {
+    return m_presentation_clock_id;
   }
 
   /**
@@ -376,6 +401,13 @@ class Display : public IDisplay {
   struct wl_keyboard* m_keyboard{};
 
   struct xdg_wm_base* m_xdg_wm_base{};
+
+  // wp_presentation_time global + announced clock domain. m_wp_presentation
+  // is nullptr when the compositor does not advertise the protocol;
+  // m_presentation_clock_id is only meaningful once the clock_id event has
+  // fired (defaulted to CLOCK_MONOTONIC to keep the value sane until then).
+  struct wp_presentation* m_wp_presentation{};
+  clockid_t m_presentation_clock_id{CLOCK_MONOTONIC};
 
   struct agl {
     bool bind_to_agl_shell = false;
@@ -1352,4 +1384,20 @@ class Display : public IDisplay {
                                          uint32_t surface_id);
 
   static const struct ivi_wm_listener ivi_wm_listener;
+
+  /**
+   * @brief wp_presentation clock_id event handler.
+   *
+   * Compositors emit this once at bind time announcing the clock domain
+   * for all subsequent wp_presentation_feedback timestamps. We capture it
+   * into m_presentation_clock_id; WaylandEglBackend reads the value via
+   * GetPresentationClockId() to decide whether timestamps can be passed
+   * to FlutterEngineOnVsync without translation.
+   */
+  static void wp_presentation_handle_clock_id(
+      void* data,
+      struct wp_presentation* presentation,
+      uint32_t clk_id);
+
+  static const struct wp_presentation_listener wp_presentation_listener;
 };
