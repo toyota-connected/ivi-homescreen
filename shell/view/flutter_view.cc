@@ -218,6 +218,19 @@ FlutterView::FlutterView(Configuration::Config config,
 #elif BUILD_BACKEND_WAYLAND_VULKAN
   {
     auto* wl = dynamic_cast<Display*>(display.get());
+    // Mesa's Vulkan WSI on Wayland needs zwp_linux_dmabuf_v1 (modern) or
+    // wl_drm (legacy) to allocate GPU buffers. Without one of these,
+    // vkGetPhysicalDeviceSurfaceFormatsKHR returns SURFACE_LOST on the
+    // first surface call and the swapchain init bails. Warn loudly here so
+    // the user has a one-line root cause instead of a deep VK abort.
+    if (!wl->HasLinuxDmabuf() && !wl->HasWlDrm()) {
+      spdlog::warn(
+          "[WaylandVulkanBackend] compositor advertises neither "
+          "zwp_linux_dmabuf_v1 nor wl_drm — Mesa Vulkan WSI cannot "
+          "allocate swapchain images. Swapchain init will fail; fix on the "
+          "compositor side (e.g. Weston needs --backend=drm-backend or its "
+          "linux-dmabuf support built in).");
+    }
     m_backend = std::make_shared<WaylandVulkanBackend>(
         wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
         m_config.view.height.value_or(kDefaultViewHeight),

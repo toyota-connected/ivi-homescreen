@@ -499,8 +499,22 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // --------------------------------------------------------------------------
 
   uint32_t format_count;
-  CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
-      physical_device_, surface_, &format_count, nullptr));
+  // First touch on the Wayland-backed VkSurfaceKHR. Mesa's WSI surfaces a
+  // missing GPU-buffer-allocation protocol (zwp_linux_dmabuf_v1 / wl_drm)
+  // as VK_ERROR_SURFACE_LOST_KHR on this call — that's the root cause when
+  // the compositor was launched without dmabuf support. Soft-fail rather
+  // than asserting so CreateSurface can exit cleanly with a clear message.
+  if (const auto r =
+          static_cast<vk::Result>(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
+              physical_device_, surface_, &format_count, nullptr));
+      r != vk::Result::eSuccess) {
+    spdlog::critical(
+        "vkGetPhysicalDeviceSurfaceFormatsKHR failed: {}. On Wayland this "
+        "usually means the compositor exposes neither zwp_linux_dmabuf_v1 "
+        "nor wl_drm — Mesa Vulkan WSI cannot back the swapchain.",
+        vk::to_string(r));
+    return false;
+  }
   std::vector<VkSurfaceFormatKHR> formats(format_count);
   CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
       physical_device_, surface_, &format_count, formats.data()));
@@ -1043,8 +1057,8 @@ void WaylandVulkanBackend::ResizeCompositorSurface(
 bool WaylandVulkanBackend::CreateBackingStoreImpl(
     const FlutterBackingStoreConfig* config,
     FlutterBackingStore* store_out) {
-  const int32_t w = static_cast<int32_t>(config->size.width);
-  const int32_t h = static_cast<int32_t>(config->size.height);
+  const auto w = static_cast<int32_t>(config->size.width);
+  const auto h = static_cast<int32_t>(config->size.height);
 
   const bool want_dma_buf = BUILD_COMPOSITOR_DMABUF_EXPORT != 0;
   auto store =
@@ -1157,7 +1171,7 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
                                                 int32_t dst_x,
                                                 int32_t dst_y,
                                                 int32_t dst_w,
-                                                int32_t dst_h) const {
+                                                int32_t dst_h) {
   // Transition source -> TRANSFER_SRC_OPTIMAL.
   VkImageMemoryBarrier src_to_xfer{};
   src_to_xfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
