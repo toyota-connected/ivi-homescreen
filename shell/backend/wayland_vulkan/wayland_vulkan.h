@@ -363,13 +363,13 @@ class WaylandVulkanBackend final : public Backend {
   /// Blit @p src onto the given swapchain image, then transition the
   /// swapchain image into PRESENT_SRC_KHR. The command buffer is submitted
   /// and waited on the queue.
-  void BlitStoreToSwapchain(VkCommandBuffer cmd,
-                            VulkanBackingStore& src,
-                            VkImage dst,
-                            int32_t dst_x,
-                            int32_t dst_y,
-                            int32_t dst_w,
-                            int32_t dst_h) const;
+  static void BlitStoreToSwapchain(VkCommandBuffer cmd,
+                                   VulkanBackingStore& src,
+                                   VkImage dst,
+                                   int32_t dst_x,
+                                   int32_t dst_y,
+                                   int32_t dst_w,
+                                   int32_t dst_h);
 
   /// Per-frame pipelining state for compositor mode. We keep one slot per
   /// swapchain image; the slot owns its command buffer and the sync
