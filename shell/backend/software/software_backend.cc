@@ -38,8 +38,13 @@ SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
   if (const char* env = std::getenv("IVI_SW_STOP_AFTER_FRAMES");
       env != nullptr && env[0] != '\0') {
     char* end = nullptr;
-    const unsigned long long n = std::strtoull(env, &end, 10);
-    if (end != env && *end == '\0' && n > 0) {
+    // strtoull silently wraps a leading '-' into a huge positive value
+    // (e.g. "-1" → ULLONG_MAX), which would defeat the "positive integer"
+    // gate below. Reject leading sign characters explicitly so "-1" or
+    // "+0" produce a warn instead of an absurd stop-after threshold.
+    const bool has_sign = env[0] == '-' || env[0] == '+';
+    const unsigned long long n = has_sign ? 0ULL : std::strtoull(env, &end, 10);
+    if (!has_sign && end != env && *end == '\0' && n > 0) {
       stop_after_frames_ = n;
       spdlog::info("[SoftwareBackend] stop_after_frames={}", n);
     } else {
@@ -125,7 +130,10 @@ bool SoftwareBackend::PresentTrampoline(void* user_data,
       // First crosser fires SIGTERM; subsequent presents are harmless.
       // Raising the signal lets the existing main.cc handler exit
       // cleanly instead of forcing a hard exit() from a rasterizer-
-      // thread context.
+      // thread context. std::raise is async-signal-safe and main.cc's
+      // handler only flips a sig_atomic_t flag, so the rasterizer
+      // thread unwinds the trampoline normally before App::Loop
+      // observes the flag and returns.
       if (bool expected = false;
           backend->stop_signaled_.compare_exchange_strong(expected, true)) {
         spdlog::info(
