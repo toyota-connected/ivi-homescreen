@@ -16,6 +16,9 @@
 
 #include "backend/software/software_backend.h"
 
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
 #include <utility>
 
 #include "engine.h"
@@ -31,6 +34,20 @@ SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
       sink_(std::move(sink)) {
   if (sink_) {
     sink_->OnSize(width_, height_);
+  }
+  if (const char* env = std::getenv("IVI_SW_STOP_AFTER_FRAMES");
+      env != nullptr && env[0] != '\0') {
+    char* end = nullptr;
+    const unsigned long long n = std::strtoull(env, &end, 10);
+    if (end != env && *end == '\0' && n > 0) {
+      stop_after_frames_ = n;
+      spdlog::info("[SoftwareBackend] stop_after_frames={}", n);
+    } else {
+      spdlog::warn(
+          "[SoftwareBackend] IVI_SW_STOP_AFTER_FRAMES='{}' not a "
+          "positive integer; ignored",
+          env);
+    }
   }
 }
 
@@ -101,5 +118,22 @@ bool SoftwareBackend::PresentTrampoline(void* user_data,
   if (backend == nullptr || backend->sink_ == nullptr) {
     return false;
   }
-  return backend->sink_->Present(allocation, row_bytes, height);
+  const bool ok = backend->sink_->Present(allocation, row_bytes, height);
+  if (ok && backend->stop_after_frames_ > 0) {
+    const uint64_t presented = ++backend->presented_frames_;
+    if (presented >= backend->stop_after_frames_) {
+      // First crosser fires SIGTERM; subsequent presents are harmless.
+      // Raising the signal lets the existing main.cc handler exit
+      // cleanly instead of forcing a hard exit() from a rasterizer-
+      // thread context.
+      if (bool expected = false;
+          backend->stop_signaled_.compare_exchange_strong(expected, true)) {
+        spdlog::info(
+            "[SoftwareBackend] reached stop_after_frames={}; raising SIGTERM",
+            backend->stop_after_frames_);
+        std::raise(SIGTERM);
+      }
+    }
+  }
+  return ok;
 }

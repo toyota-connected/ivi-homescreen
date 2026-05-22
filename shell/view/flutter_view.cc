@@ -26,7 +26,7 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "display/drm_display.h"
 #elif BUILD_BACKEND_SOFTWARE
-#include "backend/software/none_sink.h"
+#include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
 #elif BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
@@ -241,11 +241,12 @@ FlutterView::FlutterView(Configuration::Config config,
   }
 #elif BUILD_BACKEND_SOFTWARE
   {
-    // NoneSink: engine boots, Dart runs, every frame is discarded.
+    // Sink is picked at startup from IVI_SW_SINK. Default 'none' just
+    // discards frames; 'memory' keeps the latest in-process; 'file:
+    // <pattern>' writes PAM-format snapshots to disk.
     m_backend = std::make_shared<SoftwareBackend>(
         m_config.view.width.value_or(kDefaultViewWidth),
-        m_config.view.height.value_or(kDefaultViewHeight),
-        std::make_unique<NoneSink>());
+        m_config.view.height.value_or(kDefaultViewHeight), MakeSinkFromEnv());
   }
 #endif
 

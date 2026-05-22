@@ -74,6 +74,8 @@ endif ()
 
 if (BUILD_BACKEND_SOFTWARE)
     target_sources(${PROJECT_NAME} PRIVATE
+            backend/software/file_sink.cc
+            backend/software/sink_factory.cc
             backend/software/software_backend.cc
             display/software_display.cc
     )
