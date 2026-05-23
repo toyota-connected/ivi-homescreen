@@ -224,8 +224,24 @@ void SoftwareSeat::HandleEvent(libinput_event* ev) {
     case LIBINPUT_EVENT_KEYBOARD_KEY:
       HandleKeyboardKey(libinput_event_get_keyboard_event(ev));
       break;
+    case LIBINPUT_EVENT_TOUCH_DOWN:
+      HandleTouchDown(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_UP:
+      HandleTouchUp(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_MOTION:
+      HandleTouchMotion(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_CANCEL:
+      HandleTouchCancel(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_FRAME:
     default:
-      // Touch, gesture, switch — not yet wired.
+      // TOUCH_FRAME is a batch-boundary marker; we dispatch events as
+      // they arrive, so no accumulation to flush. Falls through into
+      // the default no-op alongside gesture / switch events that
+      // aren't wired yet.
       break;
   }
 }
@@ -394,6 +410,140 @@ void SoftwareSeat::HandleKeyboardKey(libinput_event_keyboard* k) {
     return;
   }
   KeyCallback(s, state == LIBINPUT_KEY_STATE_RELEASED, keysym, xkb_scancode, 0);
+}
+
+void SoftwareSeat::HandleTouchDown(libinput_event_touch* t) {
+  if (viewport_w_ <= 0 || viewport_h_ <= 0) {
+    return;
+  }
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  s.x = libinput_event_touch_get_x_transformed(
+      t, static_cast<uint32_t>(viewport_w_));
+  s.y = libinput_event_touch_get_y_transformed(
+      t, static_cast<uint32_t>(viewport_h_));
+  s.down = true;
+
+  // Each touch slot gets its own Flutter device id so multi-touch
+  // sequences don't collide. kAdd + kDown in a single batch — Flutter
+  // requires kAdd before any phase on a previously-unseen device.
+  FlutterPointerEvent batch[2];
+  const uint64_t ts = FlutterTimestampMicros();
+  batch[0] = FlutterPointerEvent{};
+  batch[0].struct_size = sizeof(FlutterPointerEvent);
+  batch[0].phase = kAdd;
+  batch[0].timestamp = ts;
+  batch[0].x = s.x;
+  batch[0].y = s.y;
+  batch[0].device = slot;
+  batch[0].device_kind = kFlutterPointerDeviceKindTouch;
+  batch[1] = FlutterPointerEvent{};
+  batch[1].struct_size = sizeof(FlutterPointerEvent);
+  batch[1].phase = kDown;
+  batch[1].timestamp = ts;
+  batch[1].x = s.x;
+  batch[1].y = s.y;
+  batch[1].device = slot;
+  batch[1].device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvents(batch, 2);
+}
+
+void SoftwareSeat::HandleTouchMotion(libinput_event_touch* t) {
+  if (viewport_w_ <= 0 || viewport_h_ <= 0) {
+    return;
+  }
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  if (!s.down) {
+    return;  // motion without prior down — drop, don't fabricate state
+  }
+  s.x = libinput_event_touch_get_x_transformed(
+      t, static_cast<uint32_t>(viewport_w_));
+  s.y = libinput_event_touch_get_y_transformed(
+      t, static_cast<uint32_t>(viewport_h_));
+
+  FlutterPointerEvent pe{};
+  pe.struct_size = sizeof(FlutterPointerEvent);
+  pe.phase = kMove;
+  pe.timestamp = FlutterTimestampMicros();
+  pe.x = s.x;
+  pe.y = s.y;
+  pe.device = slot;
+  pe.device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvent(pe);
+}
+
+void SoftwareSeat::HandleTouchUp(libinput_event_touch* t) {
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  if (!s.down) {
+    return;
+  }
+  s.down = false;
+
+  // kUp + kRemove paired so Flutter retires the device id. Same
+  // (x, y) as the most recent motion — libinput's TOUCH_UP doesn't
+  // carry coordinates, so we keep the last-known position.
+  FlutterPointerEvent batch[2];
+  const uint64_t ts = FlutterTimestampMicros();
+  batch[0] = FlutterPointerEvent{};
+  batch[0].struct_size = sizeof(FlutterPointerEvent);
+  batch[0].phase = kUp;
+  batch[0].timestamp = ts;
+  batch[0].x = s.x;
+  batch[0].y = s.y;
+  batch[0].device = slot;
+  batch[0].device_kind = kFlutterPointerDeviceKindTouch;
+  batch[1] = FlutterPointerEvent{};
+  batch[1].struct_size = sizeof(FlutterPointerEvent);
+  batch[1].phase = kRemove;
+  batch[1].timestamp = ts;
+  batch[1].x = s.x;
+  batch[1].y = s.y;
+  batch[1].device = slot;
+  batch[1].device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvents(batch, 2);
+}
+
+void SoftwareSeat::HandleTouchCancel(libinput_event_touch* t) {
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  if (!s.down) {
+    return;
+  }
+  s.down = false;
+
+  FlutterPointerEvent batch[2];
+  const uint64_t ts = FlutterTimestampMicros();
+  batch[0] = FlutterPointerEvent{};
+  batch[0].struct_size = sizeof(FlutterPointerEvent);
+  batch[0].phase = kCancel;
+  batch[0].timestamp = ts;
+  batch[0].x = s.x;
+  batch[0].y = s.y;
+  batch[0].device = slot;
+  batch[0].device_kind = kFlutterPointerDeviceKindTouch;
+  batch[1] = FlutterPointerEvent{};
+  batch[1].struct_size = sizeof(FlutterPointerEvent);
+  batch[1].phase = kRemove;
+  batch[1].timestamp = ts;
+  batch[1].x = s.x;
+  batch[1].y = s.y;
+  batch[1].device = slot;
+  batch[1].device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvents(batch, 2);
 }
 
 SoftwareSeat::EngineRef SoftwareSeat::CurrentEngine() const {

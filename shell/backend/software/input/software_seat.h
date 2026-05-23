@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <thread>
@@ -30,6 +31,7 @@ struct libinput;
 struct libinput_event;
 struct libinput_event_pointer;
 struct libinput_event_keyboard;
+struct libinput_event_touch;
 struct udev;
 
 namespace homescreen {
@@ -71,6 +73,10 @@ class SoftwareSeat final : public ISeat {
   void HandlePointerButton(libinput_event_pointer* p);
   void HandlePointerAxis(libinput_event_pointer* p);
   void HandleKeyboardKey(libinput_event_keyboard* k);
+  void HandleTouchDown(libinput_event_touch* t);
+  void HandleTouchUp(libinput_event_touch* t);
+  void HandleTouchMotion(libinput_event_touch* t);
+  void HandleTouchCancel(libinput_event_touch* t);
 
   // Dispatch a populated FlutterPointerEvent on the platform task
   // runner's strand. Copies the event by value into the lambda.
@@ -111,6 +117,19 @@ class SoftwareSeat final : public ISeat {
   double pointer_y_{0.0};
   int64_t button_mask_{0};
   bool pointer_added_{false};
+
+  // Per-slot multi-touch state. libinput uses slot indices for
+  // multi-touch; we mirror the slot directly as Flutter's `device`
+  // id so each finger gets its own kAdd / kDown / kMove / kUp /
+  // kRemove sequence. Slots that touchscreen drivers report
+  // out-of-range are dropped.
+  static constexpr size_t kMaxTouchSlots = 16;
+  struct TouchSlot {
+    bool down{false};
+    double x{0.0};
+    double y{0.0};
+  };
+  std::array<TouchSlot, kMaxTouchSlots> touch_{};
 };
 
 }  // namespace homescreen
