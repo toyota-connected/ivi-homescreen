@@ -29,9 +29,12 @@ typedef void (*VsyncCallback)(void*, intptr_t);
 //
 // All Present() calls fire on Flutter's rasterizer thread. The buffer
 // pointer is only valid for the duration of the call — copy if you
-// need to retain. Pixel format is premultiplied RGBA8888;
-// row stride is @p row_bytes (>= 4 * width), buffer size is
-// row_bytes * height.
+// need to retain. Pixel format is Skia's kN32_SkColorType:
+// little-endian hosts deliver premultiplied BGRA8888 (memory bytes
+// [B, G, R, A]); big-endian hosts deliver RGBA8888. Sinks targeting a
+// named on-wire format should route through `pixel_swizzle.h` so the
+// endian gate stays in one place. Row stride is @p row_bytes (>= 4 *
+// width), buffer size is row_bytes * height.
 class ISurfaceSink {
  public:
   virtual ~ISurfaceSink() = default;
