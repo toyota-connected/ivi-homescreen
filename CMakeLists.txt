@@ -55,6 +55,19 @@ if (BUILD_BACKEND_WAYLAND_EGL AND BUILD_BACKEND_WAYLAND_VULKAN)
             "are mutually exclusive — pick exactly one Wayland backend")
 endif ()
 
+# Software backend is a pure-CPU presenter with no GPU or display-server
+# dependencies; the renderer config is FlutterRendererType.kSoftware,
+# incompatible with the GL/Vulkan configs the other backends produce.
+# Reject the combination at configure time.
+if (BUILD_BACKEND_SOFTWARE)
+    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_WAYLAND_EGL OR
+        BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_HEADLESS_EGL)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_SOFTWARE is mutually exclusive with the "
+                "DRM/Wayland/Headless EGL/Vulkan backends — pick exactly one")
+    endif ()
+endif ()
+
 message(STATUS "Project ................ ${PROJECT_NAME}")
 message(STATUS "Version ................ ${PROJECT_VERSION}")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
