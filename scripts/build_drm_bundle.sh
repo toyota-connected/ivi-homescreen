@@ -29,17 +29,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+die() { echo "error: $*" >&2; exit 1; }
+
 # ── Configurable paths ───────────────────────────────────────────────────
 
-[[ -n "${FLUTTER_WORKSPACE:-}" ]] || die "FLUTTER_WORKSPACE env var must be set"
-ENGINE_BUNDLE="${ENGINE_BUNDLE:-${FLUTTER_WORKSPACE}/flutter-engine/bundle-debug-x64}"
-CONFIG_TEMPLATE="${CONFIG_TEMPLATE:-${FLUTTER_WORKSPACE}/desktop-homescreen/config.toml}"
+# ENGINE_BUNDLE may also be set directly (skips the FLUTTER_WORKSPACE check).
+if [[ -z "${ENGINE_BUNDLE:-}" ]]; then
+    [[ -n "${FLUTTER_WORKSPACE:-}" ]] \
+        || die "set FLUTTER_WORKSPACE or ENGINE_BUNDLE before running"
+    ENGINE_BUNDLE="${FLUTTER_WORKSPACE}/flutter-engine/bundle-debug-x64"
+fi
+CONFIG_TEMPLATE="${CONFIG_TEMPLATE:-${FLUTTER_WORKSPACE:-}/desktop-homescreen/config.toml}"
 DRM_DEVICE="${1:-/dev/dri/card0}"
 BUNDLE_DIR=".desktop-homescreen"
 
 # ── Validation ───────────────────────────────────────────────────────────
-
-die() { echo "error: $*" >&2; exit 1; }
 
 [[ -f pubspec.yaml ]] || die "run from a Flutter project root (no pubspec.yaml)"
 [[ -d build/flutter_assets ]] || die "build/flutter_assets missing; run: flutter build bundle"
