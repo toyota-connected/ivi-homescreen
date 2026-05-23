@@ -16,7 +16,13 @@
 
 #pragma once
 
+#include <memory>
+
 #include "display/idisplay.h"
+
+namespace homescreen {
+class ISeat;
+}  // namespace homescreen
 
 // No-op IDisplay for the software backend. App::Loop expects an
 // IDisplay to query refresh-rate / drive the event-source loop; with
@@ -26,10 +32,16 @@
 class SoftwareDisplay final : public IDisplay {
  public:
   SoftwareDisplay(int32_t width, int32_t height, double refresh_rate_hz);
-  ~SoftwareDisplay() override = default;
+  ~SoftwareDisplay() override;
 
-  void StartEvents() override {}
-  void StopEvents() override {}
+  // Optionally seed an input source at construction. Pass null when
+  // running headless (CI memory/file sinks); on device sinks
+  // (fbdev / drm-dumb) the SoftwareBackend installs a SoftwareSeat so
+  // pointer / keyboard events drive Flutter.
+  void SetSeat(std::unique_ptr<homescreen::ISeat> seat);
+
+  void StartEvents() override;
+  void StopEvents() override;
   [[nodiscard]] int PollEvents() const override { return 0; }
 
   void SetViewControllerState(
@@ -62,4 +74,5 @@ class SoftwareDisplay final : public IDisplay {
   int32_t height_;
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
+  std::unique_ptr<homescreen::ISeat> seat_;
 };

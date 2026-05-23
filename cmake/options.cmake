@@ -139,6 +139,19 @@ if (BUILD_BACKEND_SOFTWARE)
     option(BUILD_SOFTWARE_SINK_FBDEV
             "Build the fbdev (/dev/fb*) sink for the software backend"
             ON)
+    # Optional libinput-backed seat for keyboard / pointer events.
+    # Auto-on if pkg-config finds libinput + libudev + xkbcommon (the
+    # universal Linux desktop input stack). Force-on without the deps
+    # is a fatal configure error.
+    pkg_check_modules(SW_LIBINPUT libinput libudev xkbcommon IMPORTED_TARGET)
+    option(BUILD_SOFTWARE_INPUT_LIBINPUT
+            "Build the libinput-backed input seat for the software backend"
+            ${SW_LIBINPUT_FOUND})
+    if (BUILD_SOFTWARE_INPUT_LIBINPUT AND NOT SW_LIBINPUT_FOUND)
+        message(FATAL_ERROR
+                "BUILD_SOFTWARE_INPUT_LIBINPUT=ON but pkg-config could not "
+                "find libinput / libudev / xkbcommon")
+    endif ()
 endif ()
 
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)

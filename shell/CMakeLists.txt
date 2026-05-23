@@ -90,6 +90,12 @@ if (BUILD_BACKEND_SOFTWARE)
                 backend/software/fbdev_sink.cc
         )
     endif ()
+    if (BUILD_SOFTWARE_INPUT_LIBINPUT)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/input/software_seat.cc
+        )
+        target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::SW_LIBINPUT)
+    endif ()
 endif ()
 
 if (BUILD_BACKEND_DRM_KMS_EGL)
