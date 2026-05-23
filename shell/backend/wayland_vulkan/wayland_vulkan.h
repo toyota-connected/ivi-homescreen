@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstdint>
 #include <ctime>
+#include <mutex>
 #include <vector>
 
 #include <presentation-time-client-protocol.h>
@@ -37,7 +38,6 @@
 
 #if BUILD_COMPOSITOR
 #include <memory>
-#include <mutex>
 #include <unordered_map>
 
 #include "backend/backing_store_pool.h"
