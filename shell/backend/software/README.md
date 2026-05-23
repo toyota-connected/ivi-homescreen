@@ -63,6 +63,9 @@ scheduler.
 |---|---|---|
 | `IVI_SW_SINK` | `none` | Pick the active sink at startup. Syntax above. Unrecognized specs log a warn and fall back to `NoneSink` so a CI typo never refuses to start. |
 | `IVI_SW_STOP_AFTER_FRAMES` | (off) | Raise `SIGTERM` after N successful presents. Lets CI bound runtime by frame count instead of wall-clock. Bare integer ≥ 1; leading `-`/`+` is rejected and logged. First crosser latches via `compare_exchange` so the signal fires exactly once. |
+| `IVI_SW_VSYNC` | `1` (on) | `0` forces Flutter onto its wall-clock scheduler regardless of whether the active sink advertises `SupportsVsync()`. Useful for A/B benchmarking the vsync_callback contribution (see benchmarks section). |
+| `IVI_SW_PROFILE` | (off) | Enable per-frame cadence profiling. Every 60 frames logs `profile (n=60): fps=X mean_interval=Yus max_interval=Zus present_failures=N buckets[60Hz/30Hz/20Hz/slow/idle]=…`. Session summary on clean dtor. Same shape as `IVI_VK_PROFILE` / `IVI_WL_PROFILE` for cross-backend comparison. |
+| `IVI_SW_INPUT` | `auto` | Wires the libinput-backed `SoftwareSeat` for device targets. Set to `none` to skip — useful for CI runs that lack `/dev/input/event*` or want pure engine-only smoke. |
 
 ## Build
 
@@ -85,8 +88,34 @@ CMakeLists.
 |---|---|---|
 | `BUILD_SOFTWARE_SINK_DRM` | auto-on if pkg-config finds `libdrm`, else off | Pulls in `libdrm` for the drm-dumb sink. Force-on without libdrm is a fatal configure error. |
 | `BUILD_SOFTWARE_SINK_FBDEV` | ON | No library dep — `linux/fb.h` ships with every libc. |
+| `BUILD_SOFTWARE_INPUT_LIBINPUT` | auto-on if pkg-config finds `libinput` + `libudev` + `xkbcommon`, else off | Pulls in the libinput stack for the `SoftwareSeat`. Force-on without deps is a fatal configure error. |
 
 `NoneSink`, `MemorySink`, and `FileSink` are always compiled in.
+
+## Input
+
+`SoftwareSeat` is a libinput-backed `homescreen::ISeat` that drives
+keyboard, pointer, and multi-touch events into Flutter from
+`/dev/input/event*`. Owned by `SoftwareDisplay` (parallel to how
+`DrmDisplay` owns `DrmSeat`) and started/stopped via the existing
+`IDisplay::StartEvents()` / `StopEvents()` lifecycle.
+
+Devices are opened under the calling process's credentials via raw
+`::open` — no libseat dependency. The operator must be in the
+`input` group (universal on systemd distros) or running as root.
+
+Coverage:
+
+| Source | What it does |
+|---|---|
+| Pointer | Relative + absolute motion clamped to the viewport, BTN_LEFT / RIGHT / MIDDLE / SIDE / EXTRA buttons, horizontal + vertical scroll axes. |
+| Keyboard | evdev keycode + 8 → xkb scancode via `xkb_state_key_get_one_sym`; system-default RMLVO (`XKB_DEFAULT_*` env vars honoured). Delivered through the project-wide `KeyCallback`. |
+| Key repeat | timerfd polled alongside libinput's fd; armed on press of an `xkb_keymap_key_repeats`-positive key at 500 ms / 33 ms (~30 Hz) cadence, disarmed on release of the currently-repeating key. Most-recently-pressed wins when a second repeating key arrives. |
+| Touch | libinput slots → Flutter per-finger `device` ids. Per slot: `kAdd + kDown` on touch-down, `kMove` on motion, `kUp + kRemove` on release, `kCancel + kRemove` on libinput cancellation. Bounded to 16 slots. |
+
+Not yet implemented: gesture events (`LIBINPUT_EVENT_GESTURE_*`),
+switch events (`LIBINPUT_EVENT_SWITCH_*`), tablet/pen, hot keymap
+reload, libseat session integration.
 
 ## Running
 
@@ -192,6 +221,107 @@ post-resume.
   The existing `main.cc` handler flips a `sig_atomic_t` flag, the
   trampoline unwinds, `App::Loop` observes the flag and returns
   normally — no hard exit, no torn destructor state.
+
+## Benchmarks (DrmDumbSink, vkms @ 60 Hz)
+
+Measured against the kernel's `vkms` virtual KMS module — `card0` is
+a vkms device exposing a 1024×768 @ 60 Hz Virtual-1 connector with a
+Writeback-2 sink. Reproducible without real hardware: `sudo modprobe
+vkms` adds the device, the rest of the embedder talks to it through
+the same `drmModePageFlip` path it would use on a real panel.
+
+### Methodology
+
+`IVI_SW_PROFILE=1` adds a log line every 60 presented frames with
+mean / max interval, present-failure count, and a 5-bucket histogram
+of per-frame intervals against a 60 Hz baseline (≤17 ms = on-vblank,
+18-33 ms = 1 vblank missed, 34-50 ms = 2 vblanks missed, 51-100 ms =
+slow, >100 ms = idle / pause). Identical bucket thresholds to the
+`drm_kms_egl` / `wayland_egl` / `wayland_vulkan` profilers so
+histograms line up across backends.
+
+Workload: the flutter-wonderous-app debug bundle. Three runs per
+configuration. Steady-state windows reported (windows dominated by
+content-load stalls — see "vkms quirk" below — are excluded for the
+typical-case table).
+
+### Steady-state, vsync ON
+
+`IVI_SW_SINK=drm-dumb IVI_SW_PROFILE=1`:
+
+| Run | fps | mean interval | 60Hz (≤17 ms) | 30Hz (18-33 ms) | 20Hz | slow | idle |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| r1 w1 | 56.94 | 17.56 ms | 39 | 20 | 0 | 0 | 0 |
+| r1 w3 | 58.42 | 17.12 ms | 50 | 10 | 0 | 0 | 0 |
+| r1 w4 | 50.28 | 19.89 ms | 36 | 24 | 0 | 0 | 0 |
+| r2 w1 | 56.84 | 17.59 ms | 37 | 22 | 0 | 0 | 0 |
+| r3 w1 | 56.66 | 17.65 ms | 38 | 21 | 0 | 0 | 0 |
+
+### Steady-state, vsync OFF
+
+Same workload, `IVI_SW_VSYNC=0` forcing Flutter to wall-clock
+scheduling regardless of the sink's `SupportsVsync()`:
+
+| Run | fps | mean interval | 60Hz (≤17 ms) | 30Hz (18-33 ms) | 20Hz | slow | idle |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| r1 w1 | 56.91 | 17.57 ms | 40 | 19 | 0 | 0 | 0 |
+| r2 w1 | 56.00 | 17.86 ms | 41 | 18 | 0 | 0 | 0 |
+| r3 w1 | 56.80 | 17.60 ms | 36 | 23 | 0 | 0 | 0 |
+
+### Reading
+
+The two configurations are **statistically indistinguishable** at
+the histogram layer — ~60-83 % on-vblank, ~17-40 % one-vblank-late,
+mean interval within ~0.1 ms of the 16.67 ms vblank period in both
+cases. The DrmDumbSink's spin-wait on `flip_pending_` paces the
+rasterizer thread to the kernel's PAGE_FLIP_EVENT cadence
+*regardless* of whether Flutter's `vsync_callback` is also wired —
+the sink's natural backpressure dominates the present-interval
+metric.
+
+This matches the wayland_vulkan FIFO finding documented in
+`shell/backend/wayland_vulkan/README.md`: when the sink (or WSI)
+imposes strict vblank gating, the `vsync_callback` contribution
+becomes invisible at the histogram level. Both runs lock the
+rasterizer to compositor cadence; what the env var toggle changes
+is whether Flutter's `beginFrame` timestamp comes from the kernel
+or from a wall-clock estimate. Animation-timing precision and
+input-to-photon latency may differ in ways this profiler doesn't
+measure; the present-interval rate doesn't.
+
+### vkms quirk worth knowing
+
+Two of the runs (`on-r1 w2`, `off-r1 w2`) showed `fps≈4` and a
+`max_interval` north of 10 seconds. This is the kernel's vkms
+module pausing the writeback queue when no consumer is reading from
+the `card0-Writeback-2` connector — PAGE_FLIP_EVENT stops arriving,
+the rasterizer parks on `flip_pending_`, and the spin-wait
+eventually trips its 5×-refresh deadline and force-clears the flag.
+The histogram exits the stall correctly (subsequent windows return
+to ~57 fps), but a CI run hitting this on a longer bundle would
+see the same artefact. Not a regression — same behaviour with
+vsync wiring off. On a real panel with a connected scanout
+consumer this doesn't occur.
+
+### Cross-backend comparison
+
+Per-vblank hit rate on the wonderous bundle at 60 Hz:
+
+| Backend | 60Hz on-vblank | Mean interval | Notes |
+|---|---:|---:|---|
+| `drm_kms_egl` (RT + vsync, 240 Hz panel) | 98.0 % | 4.31 ms | direct-scanout fast path |
+| `wayland_egl` (vsync, KWin 60 Hz) | 97.46 % | 17.64 ms | wp_presentation_feedback |
+| `wayland_vulkan` FIFO (vsync, KWin 60 Hz) | 70-73 % | ~17.5 ms | Mesa WSI strict gating |
+| **`software` drm-dumb (vsync, vkms 60 Hz)** | **60-83 %** | **17.6 ms** | **CPU swizzle + page-flip** |
+| `software` drm-dumb (no vsync, vkms 60 Hz) | 60-68 % | 17.7 ms | ≈ identical to vsync-on |
+
+The software backend's bucket dispersion is wider than
+wayland_egl's not because of a vsync wiring problem but because the
+CPU swizzle path (~3-5 ms for 1024×768 RGBA→XRGB on this host)
+shares the same vblank budget as Flutter's render — the budget
+margin is tighter and any small jitter lands frames in the 30Hz
+bucket. A panel with a faster CPU or smaller dimensions would push
+the histogram toward wayland_egl's profile.
 
 ## Known limitations
 
