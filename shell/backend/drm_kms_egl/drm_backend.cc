@@ -1162,7 +1162,8 @@ void DrmBackend::RecordFlipComplete() {
   const uint64_t now = LibFlutterEngine->GetCurrentTime();
 
   if (flip_submit_ns_ != 0) {
-    const double latency_ms = static_cast<double>(now - flip_submit_ns_) / 1e6;
+    [[maybe_unused]] const double latency_ms =
+        static_cast<double>(now - flip_submit_ns_) / 1e6;
     SPDLOG_DEBUG("[DrmBackend] flip latency: {:.2f} ms", latency_ms);
     flip_submit_ns_ = 0;
   }
@@ -1479,9 +1480,11 @@ void DrmBackend::StopVsyncMonitor() {
           "[DrmBackend] StopVsyncMonitor: flip event never arrived, "
           "force-clearing flip_pending_ to unblock destructors");
       flip_pending_.store(false, std::memory_order_release);
+#if BUILD_COMPOSITOR
       if (compositor_) {
         compositor_->OnFlipComplete();
       }
+#endif
     }
   }
 }
