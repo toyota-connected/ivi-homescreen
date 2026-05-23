@@ -15,6 +15,8 @@
 
 #include "app.h"
 
+#include <cstdlib>
+#include <string_view>
 #include <thread>
 
 #include "config/common.h"
@@ -29,6 +31,9 @@
 
 #if BUILD_BACKEND_SOFTWARE
 #include "display/software_display.h"
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
+#include "backend/software/input/software_seat.h"
+#endif
 #endif
 
 #if BUILD_BACKEND_HEADLESS_EGL
@@ -49,13 +54,31 @@ std::shared_ptr<IDisplay> MakeDisplay(
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
                                       static_cast<int32_t>(h), 60.0);
 #elif BUILD_BACKEND_SOFTWARE
-  // No compositor, no Wayland, no DRM — just a no-op IDisplay so
-  // App::Loop's sleep math has a refresh-rate denominator. 60 Hz is the
-  // arbitrary default.
+  // No compositor, no Wayland, no DRM — just an IDisplay that owns
+  // (a) a refresh-rate denominator for App::Loop and (b) an optional
+  // libinput-backed seat. 60 Hz default; a sink with a real vblank
+  // can override later.
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
-  return std::make_shared<SoftwareDisplay>(static_cast<int32_t>(w),
-                                           static_cast<int32_t>(h), 60.0);
+  auto display = std::make_shared<SoftwareDisplay>(
+      static_cast<int32_t>(w), static_cast<int32_t>(h), 60.0);
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
+  // IVI_SW_INPUT controls whether the seat is wired:
+  //   "none"     — skip; engine runs without input (CI default).
+  //   anything else (including unset / "libinput" / "auto") — wire
+  //   the libinput seat.
+  // Default-wire matches operator expectations on device targets and
+  // is a no-op on CI hosts that lack /dev/input/event* anyway.
+  const char* mode = std::getenv("IVI_SW_INPUT");
+  const bool want_input = mode == nullptr || std::string_view(mode) != "none";
+  if (want_input) {
+    display->SetSeat(std::make_unique<homescreen::SoftwareSeat>(
+        static_cast<int32_t>(w), static_cast<int32_t>(h)));
+  } else {
+    spdlog::info("[SoftwareBackend] IVI_SW_INPUT=none — no input seat");
+  }
+#endif
+  return display;
 #else
   return std::make_shared<Display>(!configs[0].disable_cursor,
                                    configs[0].wayland_event_mask,
