@@ -247,15 +247,13 @@ typical-case table).
 
 ### Steady-state, vsync ON
 
-`IVI_SW_SINK=drm-dumb IVI_SW_PROFILE=1`:
+`IVI_SW_SINK=drm-dumb IVI_SW_PROFILE=1 IVI_SW_STOP_AFTER_FRAMES=240`:
 
 | Run | fps | mean interval | 60Hz (≤17 ms) | 30Hz (18-33 ms) | 20Hz | slow | idle |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| r1 w1 | 56.94 | 17.56 ms | 39 | 20 | 0 | 0 | 0 |
-| r1 w3 | 58.42 | 17.12 ms | 50 | 10 | 0 | 0 | 0 |
-| r1 w4 | 50.28 | 19.89 ms | 36 | 24 | 0 | 0 | 0 |
-| r2 w1 | 56.84 | 17.59 ms | 37 | 22 | 0 | 0 | 0 |
-| r3 w1 | 56.66 | 17.65 ms | 38 | 21 | 0 | 0 | 0 |
+| r1 w1 | 57.20 | 17.48 ms | 37 | 22 | 0 | 0 | 0 |
+| r2 w1 | 57.15 | 17.50 ms | 39 | 20 | 0 | 0 | 0 |
+| r3 w1 | 55.96 | 17.87 ms | 37 | 22 | 0 | 0 | 0 |
 
 ### Steady-state, vsync OFF
 
@@ -264,15 +262,16 @@ scheduling regardless of the sink's `SupportsVsync()`:
 
 | Run | fps | mean interval | 60Hz (≤17 ms) | 30Hz (18-33 ms) | 20Hz | slow | idle |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| r1 w1 | 56.91 | 17.57 ms | 40 | 19 | 0 | 0 | 0 |
-| r2 w1 | 56.00 | 17.86 ms | 41 | 18 | 0 | 0 | 0 |
-| r3 w1 | 56.80 | 17.60 ms | 36 | 23 | 0 | 0 | 0 |
+| r1 w1 | 56.35 | 17.75 ms | 39 | 20 | 0 | 0 | 0 |
+| r2 w1 | 55.62 | 17.98 ms | 41 | 18 | 0 | 0 | 0 |
+| r3 w1 | 54.26 | 18.43 ms | 30 | 27 | 2 | 0 | 0 |
+| r3 w4 | 58.34 | 17.14 ms | 50 | 10 | 0 | 0 | 0 |
 
 ### Reading
 
 The two configurations are **statistically indistinguishable** at
-the histogram layer — ~60-83 % on-vblank, ~17-40 % one-vblank-late,
-mean interval within ~0.1 ms of the 16.67 ms vblank period in both
+the histogram layer — ~50-83 % on-vblank, ~17-50 % one-vblank-late,
+mean interval within ~0.3 ms of the 16.67 ms vblank period in both
 cases. The DrmDumbSink's spin-wait on `flip_pending_` paces the
 rasterizer thread to the kernel's PAGE_FLIP_EVENT cadence
 *regardless* of whether Flutter's `vsync_callback` is also wired —
@@ -291,14 +290,15 @@ measure; the present-interval rate doesn't.
 
 ### vkms quirk worth knowing
 
-Two of the runs (`on-r1 w2`, `off-r1 w2`) showed `fps≈4` and a
-`max_interval` north of 10 seconds. This is the kernel's vkms
-module pausing the writeback queue when no consumer is reading from
-the `card0-Writeback-2` connector — PAGE_FLIP_EVENT stops arriving,
+Longer runs occasionally show a window with `fps≈3` and a
+`max_interval` north of 10 seconds (vsync-off r3 w2 in the matrix
+above hit ~18 s). This is the kernel's vkms module pausing the
+writeback queue when no consumer is reading from the
+`card0-Writeback-2` connector — PAGE_FLIP_EVENT stops arriving,
 the rasterizer parks on `flip_pending_`, and the spin-wait
 eventually trips its 5×-refresh deadline and force-clears the flag.
-The histogram exits the stall correctly (subsequent windows return
-to ~57 fps), but a CI run hitting this on a longer bundle would
+The histogram exits the stall correctly (vsync-off r3 w4 recovers
+to ~58 fps), but a CI run hitting this on a longer bundle would
 see the same artefact. Not a regression — same behaviour with
 vsync wiring off. On a real panel with a connected scanout
 consumer this doesn't occur.
@@ -312,16 +312,19 @@ Per-vblank hit rate on the wonderous bundle at 60 Hz:
 | `drm_kms_egl` (RT + vsync, 240 Hz panel) | 98.0 % | 4.31 ms | direct-scanout fast path |
 | `wayland_egl` (vsync, KWin 60 Hz) | 97.46 % | 17.64 ms | wp_presentation_feedback |
 | `wayland_vulkan` FIFO (vsync, KWin 60 Hz) | 70-73 % | ~17.5 ms | Mesa WSI strict gating |
-| **`software` drm-dumb (vsync, vkms 60 Hz)** | **60-83 %** | **17.6 ms** | **CPU swizzle + page-flip** |
-| `software` drm-dumb (no vsync, vkms 60 Hz) | 60-68 % | 17.7 ms | ≈ identical to vsync-on |
+| **`software` drm-dumb (vsync, vkms 60 Hz)** | **61-66 %** | **17.6 ms** | **CPU memcpy + page-flip** |
+| `software` drm-dumb (no vsync, vkms 60 Hz) | 50-83 % | 17.8 ms | ≈ identical to vsync-on |
 
 The software backend's bucket dispersion is wider than
-wayland_egl's not because of a vsync wiring problem but because the
-CPU swizzle path (~3-5 ms for 1024×768 RGBA→XRGB on this host)
-shares the same vblank budget as Flutter's render — the budget
-margin is tighter and any small jitter lands frames in the 30Hz
-bucket. A panel with a faster CPU or smaller dimensions would push
-the histogram toward wayland_egl's profile.
+wayland_egl's because the rasterizer + memcpy + DRM page-flip path
+shares the same vblank budget as Flutter's CPU render — any small
+scheduling jitter lands frames in the 30Hz bucket. The per-frame
+CPU work on the present side is dominated by Flutter's raster, not
+the swizzle: `pixel_swizzle.h::FlutterToBGRX8888` on LE folds the
+memcpy + alpha-force into a single SIMD pass (~16-byte SSE2 stride,
+or 32-byte AVX2), so 1024×768 BGRA→XRGB is well under 1 ms on a
+modern host. A panel with a faster CPU or smaller dimensions would
+push the histogram toward wayland_egl's profile.
 
 ## Known limitations
 
@@ -339,11 +342,12 @@ the histogram toward wayland_egl's profile.
    (`HDMI-A-1`), or explicit mode selection aren't yet exposed.
    The sink-spec syntax has room — `drm-dumb:/dev/dri/card0,connector=HDMI-A-1,mode=1920x1080@60`
    would parse cleanly when the use case shows up.
-4. **No input plumbing.** For CI, you can drive
-   `FlutterEngineSendPointerEvent` via a test helper directly. For
-   device targets, evdev / libinput integration is a separate effort
-   — the `DrmBackend` already has the integration via `DrmSeat` and
-   most of that code transfers.
+4. **Input coverage is partial.** `SoftwareSeat` (see *Input* above)
+   handles pointer, keyboard, key-repeat, and multi-touch via
+   libinput. Not yet wired: gesture events (`LIBINPUT_EVENT_GESTURE_*`),
+   switch events, tablet/pen, hot keymap reload, libseat session
+   integration (devices are opened directly under the calling
+   process's credentials).
 5. **fbdev has no vsync**. `FBIO_WAITFORVSYNC` is broadly broken
    across drivers and not standardized; the sink doesn't expose it.
    For real vsync on a CPU-only SoC, use `drm-dumb` instead.
@@ -351,3 +355,9 @@ the histogram toward wayland_egl's profile.
    that report 59.94 round to 60 and Flutter's deadline drifts
    ~one frame per 17 minutes. If drift matters, switch to
    `mode.clock * 1000 / (htotal * vtotal)`.
+7. **BE host (big-endian)** isn't tested. `pixel_swizzle.h` keeps a
+   correct branch for DRM XRGB (byte order is endian-invariant per
+   drm_fourcc.h), but fbdev with `red.offset=16` lands at memory
+   `[X,R,G,B]` on BE rather than `[B,G,R,X]` — `FbDevSink` would
+   need a dedicated helper. Not implemented since all shipping
+   targets are LE; flagged for the day a BE target appears.
