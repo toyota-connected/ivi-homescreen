@@ -33,6 +33,12 @@ class SoftwareBackend final : public Backend {
                   uint32_t initial_height,
                   std::unique_ptr<ISurfaceSink> sink);
 
+  // dtor emits the IVI_SW_PROFILE session summary when the env var is
+  // set. Order matters: backend destructs before the sink so the
+  // summary log captures the full run regardless of which sink was
+  // active. Defined in the .cc.
+  ~SoftwareBackend() override;
+
   void Resize(size_t index,
               Engine* flutter_engine,
               int32_t width,
@@ -85,6 +91,35 @@ class SoftwareBackend final : public Backend {
   // from the FlutterDesktopEngineState* user_data and forwards the
   // baton to the sink, which owns the vblank-driven baton lifecycle.
   static void VsyncTrampoline(void* user_data, intptr_t baton);
+
+  // Per-frame cadence profile (IVI_SW_PROFILE=1). CLOCK_MONOTONIC
+  // sampled immediately after each successful sink->Present(); the
+  // rasterizer thread is the only writer so no locks. Same bucket
+  // thresholds as the wayland_egl / wayland_vulkan profilers
+  // (≤17ms / 18-33ms / 34-50ms / 51-100ms / >100ms) so histograms
+  // line up across backends. For sinks that have no real vblank
+  // source (file/memory/fbdev) the histogram measures Flutter's
+  // wall-clock pacing; the DRM dumb sink's strict ping-pong + page-
+  // flip wait makes the same metric reflect actual scanout cadence.
+  struct FrameProfile {
+    uint64_t last_present_ns{0};
+    uint64_t interval_sum_ns{0};
+    uint64_t interval_max_ns{0};
+    uint32_t presented_frames{0};
+    uint32_t present_failures{0};  // sink->Present returned false
+    uint32_t bucket_60hz{0};       // ≤17ms
+    uint32_t bucket_30hz{0};       // 18-33ms
+    uint32_t bucket_20hz{0};       // 34-50ms
+    uint32_t bucket_slow{0};       // 51-100ms
+    uint32_t bucket_idle{0};       // >100ms
+  };
+  FrameProfile profile_{};
+  FrameProfile session_totals_{};
+
+  // Called from PresentTrampoline after sink->Present(); no-op when
+  // IVI_SW_PROFILE is unset. Window log every 60 frames, session
+  // summary emitted from dtor.
+  void ProfilePresent(bool ok);
 
   uint32_t width_;
   uint32_t height_;
