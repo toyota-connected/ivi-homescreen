@@ -21,6 +21,7 @@
 #include <libudev.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
+#include <sys/timerfd.h>
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
@@ -150,6 +151,15 @@ bool SoftwareSeat::Start() {
     return false;
   }
 
+  // timerfd for key repeat. CLOCK_MONOTONIC + NONBLOCK so the poll
+  // loop can read without ever blocking. CLOEXEC because we fork
+  // nothing but the hygiene is cheap.
+  repeat_fd_ = ::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+  if (repeat_fd_ < 0) {
+    spdlog::warn("[SoftwareSeat] timerfd_create: {} — key repeat disabled",
+                 std::strerror(errno));
+  }
+
   stop_.store(false, std::memory_order_release);
   thread_ = std::thread([this]() { DispatchLoop(); });
   spdlog::info("[SoftwareSeat] started ({}x{} viewport)", viewport_w_,
@@ -161,6 +171,10 @@ void SoftwareSeat::Stop() {
   stop_.store(true, std::memory_order_release);
   if (thread_.joinable()) {
     thread_.join();
+  }
+  if (repeat_fd_ >= 0) {
+    ::close(repeat_fd_);
+    repeat_fd_ = -1;
   }
 }
 
@@ -175,14 +189,22 @@ void SoftwareSeat::SetViewport(const int32_t width, const int32_t height) {
 }
 
 void SoftwareSeat::DispatchLoop() {
-  // libinput's fd is the readiness gate; we still need to call
-  // libinput_dispatch() before draining events. Short poll timeout
-  // gives Stop() a worst-case wakeup latency comparable to one
-  // vblank.
+  // libinput's fd is the readiness gate for input events; the
+  // timerfd fires the key-repeat ticks. We still need to call
+  // libinput_dispatch() before draining events on POLLIN. Short
+  // timeout gives Stop() a worst-case wakeup latency comparable to
+  // one vblank.
   const int li_fd = libinput_get_fd(li_);
-  pollfd pfd{li_fd, POLLIN, 0};
+  pollfd fds[2];
+  fds[0] = pollfd{li_fd, static_cast<short>(POLLIN), 0};
+  fds[1] =
+      pollfd{repeat_fd_, static_cast<short>(repeat_fd_ >= 0 ? POLLIN : 0), 0};
+  // 16 ms poll cap means a repeat tick scheduled mid-interval is
+  // delivered up to 16 ms late — at the 33 ms (~30 Hz) repeat
+  // cadence that's tolerable jitter for held keys; matches the
+  // worst-case Stop() wakeup latency.
   while (!stop_.load(std::memory_order_acquire)) {
-    const int rc = ::poll(&pfd, 1, 16);
+    const int rc = ::poll(fds, 2, 16);
     if (rc < 0) {
       if (errno == EINTR) {
         continue;
@@ -190,10 +212,28 @@ void SoftwareSeat::DispatchLoop() {
       spdlog::error("[SoftwareSeat] poll: {}", std::strerror(errno));
       break;
     }
-    if (rc > 0 && (pfd.revents & POLLIN) != 0) {
+    if (rc == 0) {
+      continue;
+    }
+    if ((fds[0].revents & POLLIN) != 0) {
       DispatchLibinputEvents();
     }
+    if (repeat_fd_ >= 0 && (fds[1].revents & POLLIN) != 0) {
+      DispatchRepeatTick();
+    }
   }
+}
+
+void SoftwareSeat::DispatchRepeatTick() {
+  // Drain the expiration count. We don't care how many ticks elapsed
+  // (a slow consumer just means a brief burst on recovery); fire
+  // exactly one synthetic press per drain so the cadence stays even.
+  uint64_t expirations = 0;
+  while (::read(repeat_fd_, &expirations, sizeof(expirations)) ==
+         static_cast<ssize_t>(sizeof(expirations))) {
+    // loop until EAGAIN drains the fd
+  }
+  FireRepeat();
 }
 
 void SoftwareSeat::DispatchLibinputEvents() {
@@ -402,14 +442,81 @@ void SoftwareSeat::HandleKeyboardKey(libinput_event_keyboard* k) {
   const uint32_t xkb_scancode = key + 8;
   const xkb_keysym_t keysym =
       xkb_state_key_get_one_sym(xkb_state_, xkb_scancode);
-  xkb_state_update_key(
-      xkb_state_, xkb_scancode,
-      state == LIBINPUT_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
+  const bool pressed = state == LIBINPUT_KEY_STATE_PRESSED;
+  xkb_state_update_key(xkb_state_, xkb_scancode,
+                       pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
+  auto* s = state_.load(std::memory_order_acquire);
+  if (s != nullptr) {
+    KeyCallback(s, !pressed, keysym, xkb_scancode, 0);
+  }
+
+  // Key-repeat scheduling. xkbcommon's per-key repeat flag tells us
+  // whether the keymap considers this key repeatable (modifiers and
+  // dead keys typically aren't).
+  if (pressed) {
+    if (xkb_keymap_ != nullptr &&
+        xkb_keymap_key_repeats(xkb_keymap_, xkb_scancode) != 0) {
+      // Pressing a second repeating key while another is held replaces
+      // the first as the "currently repeating" key (the first is
+      // effectively forgotten until released). Matches Wayland's
+      // wl_keyboard.repeat_info handler and typical desktop UX where
+      // the most-recently-pressed key wins the repeat.
+      ArmRepeat(xkb_scancode, keysym);
+    }
+    // Press of a non-repeating key (Shift / Ctrl / dead keys)
+    // doesn't disturb an existing repeat — matches typical terminal
+    // / desktop behaviour.
+  } else if (xkb_scancode == repeat_scancode_) {
+    DisarmRepeat();
+  }
+}
+
+void SoftwareSeat::ArmRepeat(const uint32_t xkb_scancode,
+                             const xkb_keysym_t keysym) {
+  if (repeat_fd_ < 0) {
+    return;
+  }
+  repeat_scancode_ = xkb_scancode;
+  repeat_keysym_ = keysym;
+  // Default repeat cadence: 500 ms initial delay, ~30 Hz thereafter.
+  // Matches typical desktop defaults (X11 / GNOME / KDE).
+  itimerspec spec{};
+  spec.it_value.tv_sec = 0;
+  spec.it_value.tv_nsec = 500'000'000;  // 500 ms initial delay
+  spec.it_interval.tv_sec = 0;
+  spec.it_interval.tv_nsec = 33'000'000;  // ~30 Hz repeat
+  if (::timerfd_settime(repeat_fd_, 0, &spec, nullptr) != 0) {
+    spdlog::warn("[SoftwareSeat] timerfd_settime(arm): {}",
+                 std::strerror(errno));
+  }
+}
+
+void SoftwareSeat::DisarmRepeat() {
+  if (repeat_fd_ < 0) {
+    return;
+  }
+  repeat_scancode_ = 0;
+  repeat_keysym_ = XKB_KEY_NoSymbol;
+  itimerspec spec{};  // all zero = disarm
+  if (::timerfd_settime(repeat_fd_, 0, &spec, nullptr) != 0) {
+    spdlog::warn("[SoftwareSeat] timerfd_settime(disarm): {}",
+                 std::strerror(errno));
+  }
+}
+
+void SoftwareSeat::FireRepeat() {
+  if (repeat_scancode_ == 0) {
+    return;
+  }
   auto* s = state_.load(std::memory_order_acquire);
   if (s == nullptr) {
     return;
   }
-  KeyCallback(s, state == LIBINPUT_KEY_STATE_RELEASED, keysym, xkb_scancode, 0);
+  // Mirrors the Wayland-side handler: synthesize a "press" event for
+  // the held key. Flutter's text-input layer (and shortcut bindings)
+  // observe the repeated press just like they would on Wayland's
+  // wl_keyboard.key with the same scancode.
+  KeyCallback(s, /*released=*/false, repeat_keysym_, repeat_scancode_, 0);
 }
 
 void SoftwareSeat::HandleTouchDown(libinput_event_touch* t) {

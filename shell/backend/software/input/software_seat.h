@@ -67,6 +67,7 @@ class SoftwareSeat final : public ISeat {
  private:
   void DispatchLoop();
   void DispatchLibinputEvents();
+  void DispatchRepeatTick();
   void HandleEvent(libinput_event* ev);
   void HandlePointerMotion(libinput_event_pointer* p);
   void HandlePointerMotionAbsolute(libinput_event_pointer* p);
@@ -77,6 +78,15 @@ class SoftwareSeat final : public ISeat {
   void HandleTouchUp(libinput_event_touch* t);
   void HandleTouchMotion(libinput_event_touch* t);
   void HandleTouchCancel(libinput_event_touch* t);
+
+  // Key-repeat helpers. libinput emits a single press event per key;
+  // Flutter text inputs need repeated press events for held keys.
+  // ArmRepeat / DisarmRepeat manage a timerfd polled alongside
+  // libinput's fd; FireRepeat synthesizes the synthetic "press"
+  // event(s) the timer firing represents.
+  void ArmRepeat(uint32_t xkb_scancode, xkb_keysym_t keysym);
+  void DisarmRepeat();
+  void FireRepeat();
 
   // Dispatch a populated FlutterPointerEvent on the platform task
   // runner's strand. Copies the event by value into the lambda.
@@ -107,6 +117,14 @@ class SoftwareSeat final : public ISeat {
   xkb_context* xkb_ctx_{nullptr};
   xkb_keymap* xkb_keymap_{nullptr};
   xkb_state* xkb_state_{nullptr};
+
+  // timerfd for key repeat. Polled alongside libinput's fd. Armed on
+  // press of a repeating key, disarmed on release or on press of a
+  // different key. Default delay 500 ms, interval 33 ms (~30 Hz).
+  int repeat_fd_{-1};
+  // Currently-repeating key. 0 = none. xkb scancode = evdev + 8.
+  uint32_t repeat_scancode_{0};
+  xkb_keysym_t repeat_keysym_{XKB_KEY_NoSymbol};
 
   std::thread thread_;
   std::atomic<bool> stop_{false};
