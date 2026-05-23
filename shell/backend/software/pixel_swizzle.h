@@ -228,4 +228,55 @@ inline void FlutterToBGRX8888(uint8_t* dst,
   }
 }
 
+// Flutter → DRM_FORMAT_RGB565 / fbdev R@11 G@5 B@0. Memory layout is
+// the little-endian 16-bit word [R5 G6 B5] = byte 0 (low) holds
+// GGGBBBBB, byte 1 (high) holds RRRRRGGG. Alpha is discarded.
+//
+// Quantization is truncation: R8>>3, G8>>2, B8>>3. Visible banding
+// on smooth gradients — Bayer-dither variant lives in
+// FlutterToRGB565_BayerDither below for callers that prefer image
+// quality over bit-exact goldens.
+inline void FlutterToRGB565(uint16_t* dst, const uint8_t* src, size_t pixels) {
+  size_t i = 0;
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  // ld4 deinterleaves 8 px of BGRA into 4 D-reg channel planes.
+  // pack8 uses widening-shift-left into a 16-bit lane + two
+  // shift-right-and-inserts to pack 5/6/5 in 3 vector ops, no masks,
+  // no inter-lane shuffles. Source is BGRA-in-memory on LE so
+  // val[0]=B, val[1]=G, val[2]=R, val[3]=A.
+  auto pack8 = [](uint8x8x4_t p) {
+    uint16x8_t d = vshll_n_u8(p.val[2], 8);           // R → bits 15..8
+    d = vsriq_n_u16(d, vshll_n_u8(p.val[1], 8), 5);   // G → bits 10..5
+    d = vsriq_n_u16(d, vshll_n_u8(p.val[0], 8), 11);  // B → bits 4..0
+    return d;
+  };
+  // 16 px / iter, 2× unroll feeds the Cortex-A8's in-order pipeline.
+  // Prefetch is only armed when 256 B (4 cache lines) ahead is still
+  // inside the source buffer — __builtin_prefetch is non-faulting
+  // even on bad addresses, but ASan/HWASan/MTE will flag past-end
+  // reads in CI.
+  for (; i + 16 <= pixels; i += 16) {
+    if (i * 4 + 256 + 32 <= pixels * 4) {
+      __builtin_prefetch(src + i * 4 + 256, 0, 0);
+    }
+    uint8x8x4_t a = vld4_u8(src + i * 4);
+    uint8x8x4_t b = vld4_u8(src + i * 4 + 32);
+    vst1q_u16(dst + i, pack8(a));
+    vst1q_u16(dst + i + 8, pack8(b));
+  }
+  for (; i + 8 <= pixels; i += 8) {
+    vst1q_u16(dst + i, pack8(vld4_u8(src + i * 4)));
+  }
+#endif
+
+  for (; i < pixels; ++i) {
+    const uint8_t b = src[i * 4 + 0];
+    const uint8_t g = src[i * 4 + 1];
+    const uint8_t r = src[i * 4 + 2];
+    dst[i] =
+        static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+  }
+}
+
 }  // namespace ivi::swizzle
