@@ -58,13 +58,13 @@ class SoftwareBackend final : public Backend {
   FlutterCompositor GetCompositorConfig() override;
 
   // Vsync wiring is gated on the sink advertising a real vblank source
-  // (DRM dumb buffer is the only sink that currently does). Sinks
-  // without a vblank source return false from SupportsVsync(),
-  // GetVsyncCallback() returns nullptr, and Flutter falls back to its
+  // (DRM dumb buffer is the only sink that currently does) AND
+  // IVI_SW_VSYNC not being "0". Sinks without a vblank source return
+  // false from SupportsVsync(); the IVI_SW_VSYNC=0 kill-switch lets
+  // bench runs A/B between the wired and wall-clock-only paths.
+  // Either gate failing → nullptr → Flutter falls back to its
   // internal wall-clock scheduler.
-  [[nodiscard]] VsyncCallback GetVsyncCallback() const override {
-    return (sink_ && sink_->SupportsVsync()) ? &VsyncTrampoline : nullptr;
-  }
+  [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
     if (sink_) {
       sink_->SetEngineHandle(static_cast<void*>(engine));

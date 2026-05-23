@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <string_view>
 #include <utility>
 
 #include "engine.h"
@@ -94,6 +95,22 @@ FlutterRendererConfig SoftwareBackend::GetRenderConfig() {
   config.software.surface_present_callback =
       &SoftwareBackend::PresentTrampoline;
   return config;
+}
+
+VsyncCallback SoftwareBackend::GetVsyncCallback() const {
+  static const bool env_disabled = []() {
+    const char* env = std::getenv("IVI_SW_VSYNC");
+    return env != nullptr && std::string_view(env) == "0";
+  }();
+  if (env_disabled) {
+    static const bool logged = []() {
+      spdlog::info("[SoftwareBackend] IVI_SW_VSYNC=0 — wall-clock scheduler");
+      return true;
+    }();
+    (void)logged;
+    return nullptr;
+  }
+  return (sink_ && sink_->SupportsVsync()) ? &VsyncTrampoline : nullptr;
 }
 
 FlutterCompositor SoftwareBackend::GetCompositorConfig() {
