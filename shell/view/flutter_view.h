@@ -49,10 +49,17 @@ class WaylandWindow;
 class HeadlessBackend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
 class DrmBackend;
+#elif BUILD_BACKEND_SOFTWARE
+class SoftwareBackend;
 #elif BUILD_BACKEND_WAYLAND_EGL
 class WaylandEglBackend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN
 class WaylandVulkanBackend;
+#else
+#error \
+    "no Flutter backend selected: define one of BUILD_BACKEND_HEADLESS_EGL, " \
+    "BUILD_BACKEND_DRM_KMS_EGL, BUILD_BACKEND_SOFTWARE, " \
+    "BUILD_BACKEND_WAYLAND_EGL, BUILD_BACKEND_WAYLAND_VULKAN"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
@@ -229,10 +236,14 @@ class FlutterView {
   std::shared_ptr<HeadlessBackend> m_backend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
   std::shared_ptr<DrmBackend> m_backend{};
+#elif BUILD_BACKEND_SOFTWARE
+  std::shared_ptr<SoftwareBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_EGL
   std::shared_ptr<WaylandEglBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN
   std::shared_ptr<WaylandVulkanBackend> m_backend;
+#else
+#error "no Flutter backend selected (see forward-decl block above)"
 #endif
   std::shared_ptr<IDisplay> m_display;
   std::shared_ptr<WaylandWindow> m_wayland_window;

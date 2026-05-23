@@ -72,6 +72,32 @@ if (BUILD_BACKEND_HEADLESS_EGL)
     )
 endif ()
 
+if (BUILD_BACKEND_SOFTWARE)
+    target_sources(${PROJECT_NAME} PRIVATE
+            backend/software/file_sink.cc
+            backend/software/sink_factory.cc
+            backend/software/software_backend.cc
+            display/software_display.cc
+    )
+    if (BUILD_SOFTWARE_SINK_DRM)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/drm_dumb_sink.cc
+        )
+        target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM_DUMB)
+    endif ()
+    if (BUILD_SOFTWARE_SINK_FBDEV)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/fbdev_sink.cc
+        )
+    endif ()
+    if (BUILD_SOFTWARE_INPUT_LIBINPUT)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/input/software_seat.cc
+        )
+        target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::SW_LIBINPUT)
+    endif ()
+endif ()
+
 if (BUILD_BACKEND_DRM_KMS_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_egl/drm_backend.cc

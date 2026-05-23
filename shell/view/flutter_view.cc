@@ -25,10 +25,15 @@
 #elif BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "display/drm_display.h"
+#elif BUILD_BACKEND_SOFTWARE
+#include "backend/software/sink_factory.h"
+#include "backend/software/software_backend.h"
 #elif BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
 #elif BUILD_BACKEND_WAYLAND_VULKAN
 #include "backend/wayland_vulkan/wayland_vulkan.h"
+#else
+#error "no Flutter backend selected (see flutter_view.h)"
 #endif
 #include <key_event_handler.h>
 #include <text_input_plugin.h>
@@ -48,7 +53,7 @@
 extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
-#if !BUILD_BACKEND_DRM_KMS_EGL
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
@@ -236,13 +241,22 @@ FlutterView::FlutterView(Configuration::Config config,
         m_config.view.height.value_or(kDefaultViewHeight),
         m_config.debug_backend.value_or(false));
   }
+#elif BUILD_BACKEND_SOFTWARE
+  {
+    // Sink is picked at startup from IVI_SW_SINK. Default 'none' just
+    // discards frames; 'memory' keeps the latest in-process; 'file:
+    // <pattern>' writes PAM-format snapshots to disk.
+    m_backend = std::make_shared<SoftwareBackend>(
+        m_config.view.width.value_or(kDefaultViewWidth),
+        m_config.view.height.value_or(kDefaultViewHeight), MakeSinkFromEnv());
+  }
 #endif
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
                m_config.view.width.value_or(kDefaultViewWidth),
                m_config.view.height.value_or(kDefaultViewWidth));
 
-#if !BUILD_BACKEND_DRM_KMS_EGL
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
   auto* wl = dynamic_cast<Display*>(display.get());
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, std::dynamic_pointer_cast<Display>(display),
@@ -330,7 +344,7 @@ FlutterView::~FlutterView() {
   }
 }
 
-#if !BUILD_BACKEND_DRM_KMS_EGL
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
 Display* FlutterView::GetDisplay() const {
   return dynamic_cast<Display*>(m_display.get());
 }
@@ -390,6 +404,13 @@ void FlutterView::Initialize() {
   // fullscreen actually gets mode dims here instead of a stale 1024x768 etc.
   const auto width = static_cast<int32_t>(m_backend->width());
   const auto height = static_cast<int32_t>(m_backend->height());
+#elif BUILD_BACKEND_SOFTWARE
+  // No WaylandWindow + no DRM backend size source — use the config dims
+  // directly.
+  const auto width =
+      static_cast<int32_t>(m_config.view.width.value_or(kDefaultViewWidth));
+  const auto height =
+      static_cast<int32_t>(m_config.view.height.value_or(kDefaultViewHeight));
 #else
   auto [width, height] = m_wayland_window->GetSize();
 #endif
@@ -416,6 +437,15 @@ void FlutterView::Initialize() {
   {
     const auto result = m_flutter_engine->SetWindowSize(height, width);
     spdlog::info("[DrmBackend] SendWindowMetrics {}x{} result={}", width,
+                 height, static_cast<int>(result));
+  }
+#elif BUILD_BACKEND_SOFTWARE
+  // Same reason as DRM: no WaylandWindow to trigger the initial
+  // window-metrics event. Send it explicitly here so the bundle's Dart
+  // side gets a non-zero viewport on its first frame.
+  {
+    const auto result = m_flutter_engine->SetWindowSize(height, width);
+    spdlog::info("[SoftwareBackend] SendWindowMetrics {}x{} result={}", width,
                  height, static_cast<int>(result));
   }
 #else
