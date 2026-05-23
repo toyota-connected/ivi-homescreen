@@ -20,7 +20,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <utility>
+#include <vector>
 
+#include "backend/software/pixel_swizzle.h"
 #include "logging.h"
 
 FileSink::FileSink(std::string path_pattern)
@@ -81,8 +83,10 @@ bool FileSink::WritePam(const std::string& path,
     return false;
   }
 
-  // row_bytes is the stride. PAM expects packed RGBA8888 with 4 bytes
-  // per pixel, no padding. width = row_bytes / 4.
+  // row_bytes is the stride. PAM TUPLTYPE RGB_ALPHA expects bytes in
+  // file order [R, G, B, A]. Flutter's source format is endian-
+  // dependent (see surface_sink.h); pixel_swizzle.h's FlutterToRGBA
+  // handles both directions and emits a SIMD-accelerated swap on LE.
   const size_t width = row_bytes / 4;
   std::fprintf(fp,
                "P7\n"
@@ -94,23 +98,17 @@ bool FileSink::WritePam(const std::string& path,
                "ENDHDR\n",
                width, height);
 
-  // If row_bytes is exactly width*4, one write suffices. If the
-  // engine ever produces a strided buffer, write each row's leading
-  // width*4 bytes and skip the padding.
   const auto* bytes = static_cast<const uint8_t*>(allocation);
   const size_t row_pixels_bytes = width * 4;
+  std::vector<uint8_t> swizzled(row_pixels_bytes);
   bool ok = true;
-  if (row_bytes == row_pixels_bytes) {
-    if (std::fwrite(bytes, 1, row_bytes * height, fp) != row_bytes * height) {
+  for (size_t y = 0; y < height; ++y) {
+    ivi::swizzle::FlutterToRGBA8888(swizzled.data(), bytes + y * row_bytes,
+                                    width);
+    if (std::fwrite(swizzled.data(), 1, row_pixels_bytes, fp) !=
+        row_pixels_bytes) {
       ok = false;
-    }
-  } else {
-    for (size_t y = 0; y < height; ++y) {
-      if (std::fwrite(bytes + y * row_bytes, 1, row_pixels_bytes, fp) !=
-          row_pixels_bytes) {
-        ok = false;
-        break;
-      }
+      break;
     }
   }
 

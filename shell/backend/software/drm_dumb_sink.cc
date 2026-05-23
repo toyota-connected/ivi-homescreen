@@ -32,6 +32,7 @@
 
 #include <asio/post.hpp>
 
+#include "backend/software/pixel_swizzle.h"
 #include "libflutter_engine.h"
 #include "logging.h"
 #include "task_runner.h"
@@ -273,22 +274,14 @@ void DrmDumbSink::SwizzleInto(const size_t buffer_index,
   const size_t copy_width_px = std::min<size_t>(src_width_px, mode_width_);
   const size_t copy_height = std::min<size_t>(src_height, mode_height_);
 
+  // DRM_FORMAT_XRGB8888 is bytes [B, G, R, X] in memory per
+  // drm_fourcc.h. On LE that matches Flutter's BGRA exactly and
+  // FlutterToBGRX8888 collapses to memcpy + alpha-fix; on BE it
+  // byte-swaps. SIMD path lives in pixel_swizzle.h.
   for (size_t y = 0; y < copy_height; ++y) {
     const uint8_t* src_row = src + y * src_row_bytes;
     uint8_t* dst_row = b.map + y * b.pitch;
-    // Flutter buffer: [R, G, B, A]  →  XRGB8888 memory: [B, G, R, X]
-    for (size_t x = 0; x < copy_width_px; ++x) {
-      const uint8_t r = src_row[x * 4 + 0];
-      const uint8_t g = src_row[x * 4 + 1];
-      const uint8_t b_ = src_row[x * 4 + 2];
-      // Skip alpha — XRGB is opaque.
-      dst_row[x * 4 + 0] = b_;
-      dst_row[x * 4 + 1] = g;
-      dst_row[x * 4 + 2] = r;
-      dst_row[x * 4 + 3] = 0xFF;
-    }
-    // Pad remainder of the dst row to black so a smaller view doesn't
-    // leave stale pixels from the prior frame.
+    ivi::swizzle::FlutterToBGRX8888(dst_row, src_row, copy_width_px);
     if (copy_width_px < mode_width_) {
       std::memset(dst_row + copy_width_px * 4, 0,
                   (mode_width_ - copy_width_px) * 4);

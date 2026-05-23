@@ -25,6 +25,7 @@
 #include <cerrno>
 #include <cstring>
 
+#include "backend/software/pixel_swizzle.h"
 #include "logging.h"
 
 std::unique_ptr<FbDevSink> FbDevSink::Create(const std::string& device_path) {
@@ -132,22 +133,14 @@ bool FbDevSink::Present(const void* allocation,
   const size_t copy_width_px = std::min<size_t>(src_width_px, fb_width_);
   const size_t copy_height = std::min<size_t>(height, fb_height_);
 
-  // Flutter: [R, G, B, A]  →  fbdev BGRA: [B, G, R, X]. The format
-  // check in Init() validated this layout.
+  // Init() validated fbdev as red.offset=16, green.offset=8,
+  // blue.offset=0 — memory layout [B, G, R, X] on LE matches
+  // Flutter's BGRA source exactly, so FlutterToBGRX8888 collapses to
+  // memcpy + alpha-fix. On BE it byte-swaps.
   for (size_t y = 0; y < copy_height; ++y) {
     const uint8_t* src_row = src + y * row_bytes;
     uint8_t* dst_row = fb_map_ + y * fb_stride_;
-    for (size_t x = 0; x < copy_width_px; ++x) {
-      const uint8_t r = src_row[x * 4 + 0];
-      const uint8_t g = src_row[x * 4 + 1];
-      const uint8_t b = src_row[x * 4 + 2];
-      dst_row[x * 4 + 0] = b;
-      dst_row[x * 4 + 1] = g;
-      dst_row[x * 4 + 2] = r;
-      dst_row[x * 4 + 3] = 0xFF;
-    }
-    // Pad the remainder of the destination row to black so a
-    // smaller view doesn't leave stale pixels from a prior frame.
+    ivi::swizzle::FlutterToBGRX8888(dst_row, src_row, copy_width_px);
     if (copy_width_px < fb_width_) {
       std::memset(dst_row + copy_width_px * 4, 0,
                   (fb_width_ - copy_width_px) * 4);
