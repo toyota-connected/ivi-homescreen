@@ -34,11 +34,20 @@ class TaskRunner;
 // modesetting interface only — no GBM, no GL, no Mesa runtime.
 // Suitable for CPU-only SoCs with DRM/KMS but no render-capable GPU.
 //
+// Buffer format is selected at Create() time from the IVI_SW_DRM_FORMAT
+// env var: default (or "xrgb8888") allocates DRM_FORMAT_XRGB8888 at
+// 32 bpp — universally supported on legacy CRTCs; "rgb565" allocates
+// DRM_FORMAT_RGB565 at 16 bpp, halving framebuffer footprint and the
+// CRTC scanout bandwidth that legacy SoCs like TI AM335x are
+// bottlenecked on. If RGB565 is requested but the picked CRTC's
+// planes don't advertise it, the sink warns and falls back to XRGB.
+//
 // Pipeline per Present():
 //   1. Pick the back buffer (front buffer is currently scanning out).
-//   2. Swizzle Flutter's RGBA8888 → DRM_FORMAT_XRGB8888 (universally
-//      supported on legacy CRTCs); also crops/pads to the panel's
-//      mode dimensions if the embedder's view geometry differs.
+//   2. Pack Flutter's BGRA8888-in-memory source into the dumb buffer
+//      via pixel_swizzle.h — FlutterToBGRX8888 for XRGB, FlutterToRGB565
+//      for RGB565. Both crop/pad to the panel's mode dimensions if the
+//      embedder's view geometry differs.
 //   3. drmModePageFlip onto the back buffer. flip_pending_ becomes
 //      true; the next Present blocks until it clears.
 //
@@ -48,6 +57,13 @@ class TaskRunner;
 // baton out and posts FlutterEngineOnVsync onto the engine's strand.
 class DrmDumbSink final : public ISurfaceSink {
  public:
+  // Pixel format of the allocated dumb buffers. Chosen at Create()
+  // and immutable thereafter; both ping-pong buffers always agree.
+  enum class Format : uint8_t {
+    kXRGB8888,  // 32 bpp, DRM_FORMAT_XRGB8888 — default.
+    kRGB565,    // 16 bpp, DRM_FORMAT_RGB565   — bandwidth-saving.
+  };
+
   // @p device_path is something like "/dev/dri/card0"; can be empty
   // to let the sink probe the first card found via the legacy
   // drmOpen lookup. Returns nullptr if no usable connector / CRTC /
@@ -88,9 +104,15 @@ class DrmDumbSink final : public ISurfaceSink {
   bool AllocBuffer(size_t index);
   void FreeBuffer(size_t index);
 
-  // Swizzle one frame's bytes from Flutter's RGBA layout into the
-  // back buffer's XRGB layout. Handles row stride mismatch + size
-  // clipping when the view doesn't match the mode exactly.
+  // Walk the plane list and confirm at least one plane usable on
+  // crtc_id_ advertises @p fourcc. Called from InitDevice to gate
+  // the RGB565 path; XRGB8888 is assumed universally supported and
+  // skips the probe.
+  bool PlaneSupportsFormat(uint32_t fourcc) const;
+
+  // Pack one frame's bytes from Flutter's BGRA-in-memory source into
+  // the back buffer's allocated format. Handles row stride mismatch
+  // + size clipping when the view doesn't match the mode exactly.
   void SwizzleInto(size_t buffer_index,
                    const void* allocation,
                    size_t src_row_bytes,
@@ -118,6 +140,11 @@ class DrmDumbSink final : public ISurfaceSink {
   uint32_t mode_width_{0};
   uint32_t mode_height_{0};
   double refresh_rate_hz_{60.0};
+  Format format_{Format::kXRGB8888};
+  // IVI_SW_DRM_DITHER=1 enables Bayer 4×4 dithering on the RGB565
+  // pack path (no-op for XRGB8888 — there's no precision loss to
+  // hide). Default off so CI goldens stay bit-exact.
+  bool dither_{false};
 
   // Page-flip event delivery. asio descriptor lives on the platform
   // task runner's io_context; ArmFlipRead schedules a one-shot read,

@@ -228,4 +228,147 @@ inline void FlutterToBGRX8888(uint8_t* dst,
   }
 }
 
+// Flutter → DRM_FORMAT_RGB565 / fbdev R@11 G@5 B@0. Memory layout is
+// the little-endian 16-bit word [R5 G6 B5] = byte 0 (low) holds
+// GGGBBBBB, byte 1 (high) holds RRRRRGGG. Alpha is discarded.
+//
+// Quantization is truncation: R8>>3, G8>>2, B8>>3. Visible banding
+// on smooth gradients — Bayer-dither variant lives in
+// FlutterToRGB565_BayerDither below for callers that prefer image
+// quality over bit-exact goldens.
+inline void FlutterToRGB565(uint16_t* dst, const uint8_t* src, size_t pixels) {
+  size_t i = 0;
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  // ld4 deinterleaves 8 px of BGRA into 4 D-reg channel planes.
+  // pack8 uses widening-shift-left into a 16-bit lane + two
+  // shift-right-and-inserts to pack 5/6/5 in 3 vector ops, no masks,
+  // no inter-lane shuffles. Source is BGRA-in-memory on LE so
+  // val[0]=B, val[1]=G, val[2]=R, val[3]=A.
+  auto pack8 = [](uint8x8x4_t p) {
+    uint16x8_t d = vshll_n_u8(p.val[2], 8);           // R → bits 15..8
+    d = vsriq_n_u16(d, vshll_n_u8(p.val[1], 8), 5);   // G → bits 10..5
+    d = vsriq_n_u16(d, vshll_n_u8(p.val[0], 8), 11);  // B → bits 4..0
+    return d;
+  };
+  // 16 px / iter, 2× unroll feeds the Cortex-A8's in-order pipeline.
+  // Prefetch is only armed when 256 B (4 cache lines) ahead is still
+  // inside the source buffer — __builtin_prefetch is non-faulting
+  // even on bad addresses, but ASan/HWASan/MTE will flag past-end
+  // reads in CI.
+  for (; i + 16 <= pixels; i += 16) {
+    if (i * 4 + 256 + 32 <= pixels * 4) {
+      __builtin_prefetch(src + i * 4 + 256, 0, 0);
+    }
+    uint8x8x4_t a = vld4_u8(src + i * 4);
+    uint8x8x4_t b = vld4_u8(src + i * 4 + 32);
+    vst1q_u16(dst + i, pack8(a));
+    vst1q_u16(dst + i + 8, pack8(b));
+  }
+  for (; i + 8 <= pixels; i += 8) {
+    vst1q_u16(dst + i, pack8(vld4_u8(src + i * 4)));
+  }
+#endif
+
+  for (; i < pixels; ++i) {
+    const uint8_t b = src[i * 4 + 0];
+    const uint8_t g = src[i * 4 + 1];
+    const uint8_t r = src[i * 4 + 2];
+    dst[i] =
+        static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+  }
+}
+
+// Bayer-dithered RGB565 pack. Adds a per-(x,y) ordered-dither offset
+// to each channel via saturating add before quantization, breaking
+// the banding that truncation introduces on smooth gradients. The
+// offset matrix is the 4×4 Bayer pattern values 0..15, scaled per
+// channel:
+//   R, B (5-bit): >> 1 → range 0..7  (truncate drops 3 bits each)
+//   G    (6-bit): >> 2 → range 0..3  (truncate drops 2 bits)
+// Saturation (vqaddq_u8 on NEON, min on scalar) keeps near-white
+// pixels from wrapping back to black.
+//
+// @p y is the destination row index; callers pass the row they're
+// writing so the helper picks the correct Bayer row.
+inline void FlutterToRGB565_BayerDither(uint16_t* dst,
+                                        const uint8_t* src,
+                                        size_t pixels,
+                                        size_t y) {
+  // 4×4 Bayer matrix, values 0..15. Stored row-major.
+  static constexpr uint8_t kBayer4[4][4] = {
+      {0, 8, 2, 10},
+      {12, 4, 14, 6},
+      {3, 11, 1, 9},
+      {15, 7, 13, 5},
+  };
+  const uint8_t* brow = kBayer4[y & 3];
+  size_t i = 0;
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  // Pre-pack the per-channel offset vectors for this row. NEON
+  // consumes 8 px / D-reg lane; the (x & 3) pattern repeats so
+  // the 8-byte lane = brow[0..3] twice. >> 1 for R/B (range 0..7),
+  // >> 2 for G (range 0..3).
+  const uint8_t rb_lane[8] = {
+      static_cast<uint8_t>(brow[0] >> 1), static_cast<uint8_t>(brow[1] >> 1),
+      static_cast<uint8_t>(brow[2] >> 1), static_cast<uint8_t>(brow[3] >> 1),
+      static_cast<uint8_t>(brow[0] >> 1), static_cast<uint8_t>(brow[1] >> 1),
+      static_cast<uint8_t>(brow[2] >> 1), static_cast<uint8_t>(brow[3] >> 1),
+  };
+  const uint8_t g_lane[8] = {
+      static_cast<uint8_t>(brow[0] >> 2), static_cast<uint8_t>(brow[1] >> 2),
+      static_cast<uint8_t>(brow[2] >> 2), static_cast<uint8_t>(brow[3] >> 2),
+      static_cast<uint8_t>(brow[0] >> 2), static_cast<uint8_t>(brow[1] >> 2),
+      static_cast<uint8_t>(brow[2] >> 2), static_cast<uint8_t>(brow[3] >> 2),
+  };
+  const uint8x8_t off_rb = vld1_u8(rb_lane);
+  const uint8x8_t off_g = vld1_u8(g_lane);
+
+  auto pack8 = [&](uint8x8x4_t p) {
+    // val[0]=B, val[1]=G, val[2]=R (BGRA-in-memory on LE).
+    // Saturating add the dither offset, then the same vshll + vsri
+    // pack as FlutterToRGB565.
+    const uint8x8_t r = vqadd_u8(p.val[2], off_rb);
+    const uint8x8_t g = vqadd_u8(p.val[1], off_g);
+    const uint8x8_t b = vqadd_u8(p.val[0], off_rb);
+    uint16x8_t d = vshll_n_u8(r, 8);
+    d = vsriq_n_u16(d, vshll_n_u8(g, 8), 5);
+    d = vsriq_n_u16(d, vshll_n_u8(b, 8), 11);
+    return d;
+  };
+
+  for (; i + 16 <= pixels; i += 16) {
+    if (i * 4 + 256 + 32 <= pixels * 4) {
+      __builtin_prefetch(src + i * 4 + 256, 0, 0);
+    }
+    uint8x8x4_t a = vld4_u8(src + i * 4);
+    uint8x8x4_t b = vld4_u8(src + i * 4 + 32);
+    vst1q_u16(dst + i, pack8(a));
+    vst1q_u16(dst + i + 8, pack8(b));
+  }
+  for (; i + 8 <= pixels; i += 8) {
+    vst1q_u16(dst + i, pack8(vld4_u8(src + i * 4)));
+  }
+#endif
+
+  // Scalar fallback / tail. NEON consumed full 4-px-aligned chunks
+  // (8 / 16 px at a time), so brow[i & 3] picks up at the right
+  // column for any tail remainder.
+  for (; i < pixels; ++i) {
+    const uint16_t off = brow[i & 3];
+    const uint16_t b8 = src[i * 4 + 0];
+    const uint16_t g8 = src[i * 4 + 1];
+    const uint16_t r8 = src[i * 4 + 2];
+    const uint8_t r =
+        static_cast<uint8_t>(r8 + (off >> 1) > 0xFF ? 0xFF : r8 + (off >> 1));
+    const uint8_t g =
+        static_cast<uint8_t>(g8 + (off >> 2) > 0xFF ? 0xFF : g8 + (off >> 2));
+    const uint8_t b =
+        static_cast<uint8_t>(b8 + (off >> 1) > 0xFF ? 0xFF : b8 + (off >> 1));
+    dst[i] =
+        static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+  }
+}
+
 }  // namespace ivi::swizzle
