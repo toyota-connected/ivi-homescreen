@@ -87,4 +87,9 @@ class FbDevSink final : public ISurfaceSink {
   uint32_t fb_height_{0};
   uint32_t fb_stride_{0};  // bytes per row (line_length)
   Format format_{Format::kBGRX8888};
+  // IVI_SW_DRM_DITHER=1 enables Bayer 4×4 dithering on the RGB565
+  // pack path (no-op for BGRX8888). Same env var as DrmDumbSink so
+  // a single operator toggle covers both software sinks. Default
+  // off so CI goldens stay bit-exact.
+  bool dither_{false};
 };

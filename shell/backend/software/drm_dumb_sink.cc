@@ -94,12 +94,18 @@ uint32_t FormatBpp(DrmDumbSink::Format f) {
   return 32;
 }
 
+bool DitherRequestedFromEnv() {
+  const char* env = std::getenv("IVI_SW_DRM_DITHER");
+  return env != nullptr && std::string_view(env) == "1";
+}
+
 }  // namespace
 
 std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
     const std::string& device_path) {
   std::unique_ptr<DrmDumbSink> sink(new DrmDumbSink());
   sink->format_ = RequestedFormatFromEnv();
+  sink->dither_ = DitherRequestedFromEnv();
   if (!sink->InitDevice(device_path)) {
     return nullptr;
   }
@@ -247,8 +253,9 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
         crtc_id_);
     format_ = Format::kXRGB8888;
   }
-  spdlog::info("[DrmDumbSink] format={} ({} bpp)", FormatName(format_),
-               FormatBpp(format_));
+  spdlog::info("[DrmDumbSink] format={} ({} bpp){}", FormatName(format_),
+               FormatBpp(format_),
+               (format_ == Format::kRGB565 && dither_) ? " +bayer-dither" : "");
 
   // Allocate both dumb buffers at the mode's dimensions.
   for (size_t i = 0; i < buffers_.size(); ++i) {
@@ -402,12 +409,19 @@ void DrmDumbSink::SwizzleInto(const size_t buffer_index,
 
   // Pixel-format dispatch. XRGB8888 → 4 B/px, FlutterToBGRX8888
   // (memcpy + alpha-force on LE). RGB565 → 2 B/px, FlutterToRGB565
-  // (NEON vld4 + widening-shift + sri on ARM, scalar elsewhere).
+  // (NEON vld4 + widening-shift + sri on ARM, scalar elsewhere);
+  // dither_ adds a Bayer 4×4 offset before quantization to hide
+  // gradient banding at the cost of bit-exact goldens.
   if (format_ == Format::kRGB565) {
     for (size_t y = 0; y < copy_height; ++y) {
       const uint8_t* src_row = src + y * src_row_bytes;
       auto* dst_row = reinterpret_cast<uint16_t*>(b.map + y * b.pitch);
-      ivi::swizzle::FlutterToRGB565(dst_row, src_row, copy_width_px);
+      if (dither_) {
+        ivi::swizzle::FlutterToRGB565_BayerDither(dst_row, src_row,
+                                                  copy_width_px, y);
+      } else {
+        ivi::swizzle::FlutterToRGB565(dst_row, src_row, copy_width_px);
+      }
       if (copy_width_px < mode_width_) {
         std::memset(dst_row + copy_width_px, 0,
                     (mode_width_ - copy_width_px) * 2);
