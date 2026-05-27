@@ -33,13 +33,28 @@
 // broadly broken across drivers and not exposed here. Pacing comes
 // from Flutter's wall-clock scheduler.
 //
-// Pixel format: 32-bpp BGRA / BGRX is the universal modern layout
-// (red.offset=16, green.offset=8, blue.offset=0). FbDevSink refuses
-// any other layout (RGB565, palettized, planar) with a clear error so
-// the user knows to either reconfigure their console driver or pick a
-// different sink.
+// Pixel format auto-detected from the driver's FBIOGET_VSCREENINFO at
+// Init():
+//   - 32-bpp BGRA/BGRX (red.offset=16, green.offset=8, blue.offset=0)
+//     — the universal modern layout; rasterizer writes via
+//     FlutterToBGRX8888 (memcpy + alpha-force on LE).
+//   - 16-bpp RGB565 (red.offset=11/len=5, green.offset=5/len=6,
+//     blue.offset=0/len=5) — common on cost-sensitive embedded panels
+//     and kernel `vfb` with `-16`; rasterizer writes via
+//     FlutterToRGB565 (NEON-accelerated pack on ARM, scalar
+//     elsewhere). Halves panel scanout bandwidth.
+// Anything else (palettized, planar, vendor `nonstd`) is refused at
+// Init with a clear error and the sink falls back to NoneSink.
 class FbDevSink final : public ISurfaceSink {
  public:
+  // Pixel layout the driver advertises. Resolved at Init from the
+  // FBIOGET_VSCREENINFO offsets/lengths; both ping-pong buffers
+  // implicitly agree (there's only one framebuffer).
+  enum class Format : uint8_t {
+    kBGRX8888,  // 32 bpp, [B, G, R, X] in memory on LE.
+    kRGB565,    // 16 bpp, [R5 G6 B5] in the little-endian 16-bit word.
+  };
+
   // @p device_path is something like "/dev/fb0"; empty defaults to it.
   // Returns nullptr if the device can't be opened, the format isn't
   // supported, or mmap fails.
@@ -71,4 +86,5 @@ class FbDevSink final : public ISurfaceSink {
   uint32_t fb_width_{0};
   uint32_t fb_height_{0};
   uint32_t fb_stride_{0};  // bytes per row (line_length)
+  Format format_{Format::kBGRX8888};
 };
