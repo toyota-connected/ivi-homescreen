@@ -49,8 +49,8 @@ interesting lives there.
 | **NoneSink** | `none` (default) | Discards every frame. CI engine-only smoke. | — |
 | **MemorySink** | `memory` | Mutex-guarded `std::vector<uint8_t>` snapshot of the most recent frame. `SnapshotLatest(&row_bytes, &height)` exposes it to in-process test fixtures. | — |
 | **FileSink** | `file:<path-pattern>` | Writes each frame as a NetPBM PAM (P7) file. Pattern with `%d` / `%05d` interpolates the frame index. Pattern without `%` writes the first frame only. Parent directories auto-created. | — |
-| **FbDevSink** | `fbdev[:<device>]` | Opens `/dev/fb0` (or operator path), validates 32-bpp BGRA/BGRX, mmaps, memcpy+swizzles each Present. Refuses RGB565 / palettized / `nonstd != 0` with a clear error. | — |
-| **DrmDumbSink** | `drm-dumb[:<device>]` | Opens `/dev/dri/card0`, picks first connected connector + its CRTC + preferred mode, allocates 2 dumb buffers, modesets onto buffer 0. Per-frame: swizzle into the back buffer, `drmModePageFlip`. PAGE_FLIP_EVENT drives Flutter's `vsync_callback` with the kernel-provided scanout timestamp. | ✓ |
+| **FbDevSink** | `fbdev[:<device>]` | Opens `/dev/fb0` (or operator path), mmaps, packs each Present. Auto-detects 32-bpp BGRA/BGRX or 16-bpp RGB565 from the driver's `FBIOGET_VSCREENINFO` offsets; refuses palettized / `nonstd != 0` / other layouts with a clear error. | — |
+| **DrmDumbSink** | `drm-dumb[:<device>]` | Opens `/dev/dri/card0`, picks first connected connector + its CRTC + preferred mode, allocates 2 dumb buffers (XRGB8888 by default, RGB565 via `IVI_SW_DRM_FORMAT=rgb565` when the plane advertises it), modesets onto buffer 0. Per-frame: pack into the back buffer, `drmModePageFlip`. PAGE_FLIP_EVENT drives Flutter's `vsync_callback` with the kernel-provided scanout timestamp. | ✓ |
 
 `drm-dumb` is the only sink that advertises `SupportsVsync()`;
 `SoftwareBackend::GetVsyncCallback()` returns a trampoline iff the
@@ -66,6 +66,8 @@ scheduler.
 | `IVI_SW_VSYNC` | `1` (on) | `0` forces Flutter onto its wall-clock scheduler regardless of whether the active sink advertises `SupportsVsync()`. Useful for A/B benchmarking the vsync_callback contribution (see benchmarks section). |
 | `IVI_SW_PROFILE` | (off) | Enable per-frame cadence profiling. Every 60 frames logs `profile (n=60): fps=X mean_interval=Yus max_interval=Zus present_failures=N buckets[60Hz/30Hz/20Hz/slow/idle]=…`. Session summary on clean dtor. Same shape as `IVI_VK_PROFILE` / `IVI_WL_PROFILE` for cross-backend comparison. |
 | `IVI_SW_INPUT` | `auto` | Wires the libinput-backed `SoftwareSeat` for device targets. Set to `none` to skip — useful for CI runs that lack `/dev/input/event*` or want pure engine-only smoke. |
+| `IVI_SW_DRM_FORMAT` | `xrgb8888` | Pick the `DrmDumbSink` buffer format. `rgb565` halves framebuffer footprint and CRTC scanout bandwidth (the real bottleneck on legacy SoCs like TI AM335x / STM32MP1). If the picked CRTC's planes don't advertise RGB565, the sink warns and falls back to XRGB. Unrecognized values warn and fall back. Has no effect on `fbdev:` (auto-detected from the panel) or the other sinks. |
+| `IVI_SW_DRM_DITHER` | `0` (off) | `1` enables Bayer 4×4 ordered dithering on the RGB565 pack path in both `drm-dumb` and `fbdev` sinks. Hides the banding that pure truncation produces on smooth gradients at the cost of bit-exact goldens. No-op when the active sink's format is BGRX8888 — there's no precision loss to hide. |
 
 ## Build
 
@@ -156,10 +158,17 @@ IVI_SW_SINK=fbdev:/dev/fb0 ./homescreen -b bundle
 ```
 
 User must be in the `video` group (or whatever owns `/dev/fb*` on the
-target). Pixel format check is strict — if the panel exposes
-RGB565 / palettized / vendor-`nonstd` you'll see an error line on
-startup pointing at the actual bpp / R/G/B offsets, and the sink
-falls back to `NoneSink`.
+target). Two pixel layouts are accepted, auto-detected from
+`FBIOGET_VSCREENINFO`:
+
+* 32-bpp BGRA/BGRX (R@16, G@8, B@0, `nonstd=0`) — the universal
+  modern fbdev surface.
+* 16-bpp RGB565 (R@11/5, G@5/6, B@0/5, `nonstd=0`) — common on
+  cost-sensitive embedded panels.
+
+Anything else (palettized, vendor-`nonstd`, or unrecognised
+offsets) prints an error line on startup pointing at the actual
+bpp / R/G/B offsets, and the sink falls back to `NoneSink`.
 
 For a Linux dev host without a real fbdev, the kernel `vfb` module
 synthesises one:
@@ -167,7 +176,11 @@ synthesises one:
 ```sh
 sudo modprobe vfb vfb_enable=1
 # /dev/fb0 appears at 800x600 32-bpp BGRA by default.
+# Force RGB565 with: vfb_enable=1 video=vfb:1024x768-16
 ```
+
+`IVI_SW_DRM_DITHER=1` adds Bayer 4×4 dithering to the RGB565 pack
+to hide banding on smooth gradients.
 
 ### DRM dumb buffer + vsync
 
@@ -183,10 +196,23 @@ User must be in the `video` (or distro-specific) group. The sink:
   to `possible_crtcs`);
 * snapshots the prior CRTC binding so the dtor restores the console
   on exit;
-* allocates 2 `DRM_FORMAT_XRGB8888` dumb buffers and modesets onto
-  buffer 0;
-* per frame: swizzles RGBA→XRGB into the back buffer, queues
-  `drmModePageFlip` with `DRM_MODE_PAGE_FLIP_EVENT`.
+* allocates 2 dumb buffers in the format selected by
+  `IVI_SW_DRM_FORMAT` (default `xrgb8888` at 32 bpp; `rgb565` at
+  16 bpp when the picked CRTC's planes advertise it — falls back to
+  XRGB with a warn otherwise);
+* modesets onto buffer 0;
+* per frame: packs Flutter's BGRA into the back buffer via
+  `pixel_swizzle.h::FlutterToBGRX8888` (XRGB, single-pass memcpy +
+  alpha-force) or `FlutterToRGB565` /
+  `FlutterToRGB565_BayerDither` (RGB565), queues `drmModePageFlip`
+  with `DRM_MODE_PAGE_FLIP_EVENT`.
+
+RGB565 example:
+
+```sh
+IVI_SW_DRM_FORMAT=rgb565 IVI_SW_DRM_DITHER=1 \
+  IVI_SW_SINK=drm-dumb:/dev/dri/card0 ./homescreen -b bundle
+```
 
 PAGE_FLIP_EVENT arrives on the platform task runner via asio
 `async_wait` on the drm fd (mirrors `drm_kms_egl`'s pattern), the
@@ -334,9 +360,12 @@ push the histogram toward wayland_egl's profile.
    scene. Layer interleaving with platform views would need a
    software compositor (one CPU-allocated buffer per layer + blend
    on the rasterizer). Doable, not done.
-2. **fbdev pixel formats** other than 32-bpp BGRA/BGRX are refused.
-   RGB565 panels still exist on cost-sensitive SoCs; the swizzle
-   path would need a separate inner loop.
+2. **fbdev / DRM pixel formats** are limited to 32-bpp BGRA/BGRX
+   and 16-bpp RGB565. RGB555, packed-YUV, 10-bpc (XRGB2101010), and
+   palettized layouts would each need a dedicated pack helper in
+   `pixel_swizzle.h`. RGB555 is the closest existing case
+   (`FlutterToRGB565` is the template; mask widths shift by one bit
+   on R/B and G drops from 6 to 5).
 3. **`DrmDumbSink` picks the first connected connector** and its
    currently-bound CRTC. Multi-output panels, choosing by name
    (`HDMI-A-1`), or explicit mode selection aren't yet exposed.
