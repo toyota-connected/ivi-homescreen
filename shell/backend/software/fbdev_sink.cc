@@ -23,7 +23,9 @@
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
+#include <string_view>
 
 #include "backend/software/pixel_swizzle.h"
 #include "logging.h"
@@ -99,6 +101,10 @@ bool FbDevSink::Init(const std::string& device_path) {
     return false;
   }
   format_ = ok_rgb565 ? Format::kRGB565 : Format::kBGRX8888;
+  if (const char* env = std::getenv("IVI_SW_DRM_DITHER");
+      env != nullptr && std::string_view(env) == "1") {
+    dither_ = true;
+  }
 
   fb_width_ = var.xres;
   fb_height_ = var.yres;
@@ -128,8 +134,10 @@ bool FbDevSink::Init(const std::string& device_path) {
   fb_map_ = static_cast<uint8_t*>(mapped);
 
   spdlog::info(
-      "[FbDevSink] opened {} ({}x{}, format={}, stride={}, smem_len={})", path,
-      fb_width_, fb_height_, format_ == Format::kRGB565 ? "rgb565" : "bgrx8888",
+      "[FbDevSink] opened {} ({}x{}, format={}{}, stride={}, smem_len={})",
+      path, fb_width_, fb_height_,
+      format_ == Format::kRGB565 ? "rgb565" : "bgrx8888",
+      (format_ == Format::kRGB565 && dither_) ? " +bayer-dither" : "",
       fb_stride_, fb_size_);
   return true;
 }
@@ -147,12 +155,19 @@ bool FbDevSink::Present(const void* allocation,
 
   // Format dispatch. BGRX8888 → 4 B/px, FlutterToBGRX8888 (memcpy +
   // alpha-force on LE). RGB565 → 2 B/px, FlutterToRGB565 (NEON
-  // vld4 + widening-shift + sri on ARM, scalar elsewhere).
+  // vld4 + widening-shift + sri on ARM, scalar elsewhere); dither_
+  // adds a Bayer 4×4 offset before quantization to hide gradient
+  // banding at the cost of bit-exact goldens.
   if (format_ == Format::kRGB565) {
     for (size_t y = 0; y < copy_height; ++y) {
       const uint8_t* src_row = src + y * row_bytes;
       auto* dst_row = reinterpret_cast<uint16_t*>(fb_map_ + y * fb_stride_);
-      ivi::swizzle::FlutterToRGB565(dst_row, src_row, copy_width_px);
+      if (dither_) {
+        ivi::swizzle::FlutterToRGB565_BayerDither(dst_row, src_row,
+                                                  copy_width_px, y);
+      } else {
+        ivi::swizzle::FlutterToRGB565(dst_row, src_row, copy_width_px);
+      }
       if (copy_width_px < fb_width_) {
         std::memset(dst_row + copy_width_px, 0,
                     (fb_width_ - copy_width_px) * 2);

@@ -141,6 +141,10 @@ class DrmDumbSink final : public ISurfaceSink {
   uint32_t mode_height_{0};
   double refresh_rate_hz_{60.0};
   Format format_{Format::kXRGB8888};
+  // IVI_SW_DRM_DITHER=1 enables Bayer 4×4 dithering on the RGB565
+  // pack path (no-op for XRGB8888 — there's no precision loss to
+  // hide). Default off so CI goldens stay bit-exact.
+  bool dither_{false};
 
   // Page-flip event delivery. asio descriptor lives on the platform
   // task runner's io_context; ArmFlipRead schedules a one-shot read,
