@@ -26,8 +26,10 @@
 #include <xf86drmMode.h>
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <string_view>
 #include <utility>
 
 #include <asio/post.hpp>
@@ -37,9 +39,73 @@
 #include "logging.h"
 #include "task_runner.h"
 
+namespace {
+
+// Sample the IVI_SW_DRM_FORMAT env var once at Create() time. Default
+// (unset / empty / unrecognized) is kXRGB8888 — bit-for-bit identical
+// to the pre-RGB565 behaviour. Unrecognized values warn so a CI typo
+// doesn't silently land the operator on a different format.
+DrmDumbSink::Format RequestedFormatFromEnv() {
+  const char* env = std::getenv("IVI_SW_DRM_FORMAT");
+  if (env == nullptr || env[0] == '\0') {
+    return DrmDumbSink::Format::kXRGB8888;
+  }
+  const std::string_view v{env};
+  if (v == "xrgb8888" || v == "xrgb" || v == "XRGB8888") {
+    return DrmDumbSink::Format::kXRGB8888;
+  }
+  if (v == "rgb565" || v == "565" || v == "RGB565") {
+    return DrmDumbSink::Format::kRGB565;
+  }
+  spdlog::warn(
+      "[DrmDumbSink] IVI_SW_DRM_FORMAT='{}' unrecognized; "
+      "using xrgb8888. Accepted: xrgb8888 (default), rgb565.",
+      env);
+  return DrmDumbSink::Format::kXRGB8888;
+}
+
+const char* FormatName(DrmDumbSink::Format f) {
+  switch (f) {
+    case DrmDumbSink::Format::kXRGB8888:
+      return "xrgb8888";
+    case DrmDumbSink::Format::kRGB565:
+      return "rgb565";
+  }
+  return "?";
+}
+
+uint32_t FormatFourcc(DrmDumbSink::Format f) {
+  switch (f) {
+    case DrmDumbSink::Format::kXRGB8888:
+      return DRM_FORMAT_XRGB8888;
+    case DrmDumbSink::Format::kRGB565:
+      return DRM_FORMAT_RGB565;
+  }
+  return DRM_FORMAT_XRGB8888;
+}
+
+uint32_t FormatBpp(DrmDumbSink::Format f) {
+  switch (f) {
+    case DrmDumbSink::Format::kXRGB8888:
+      return 32;
+    case DrmDumbSink::Format::kRGB565:
+      return 16;
+  }
+  return 32;
+}
+
+bool DitherRequestedFromEnv() {
+  const char* env = std::getenv("IVI_SW_DRM_DITHER");
+  return env != nullptr && std::string_view(env) == "1";
+}
+
+}  // namespace
+
 std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
     const std::string& device_path) {
   std::unique_ptr<DrmDumbSink> sink(new DrmDumbSink());
+  sink->format_ = RequestedFormatFromEnv();
+  sink->dither_ = DitherRequestedFromEnv();
   if (!sink->InitDevice(device_path)) {
     return nullptr;
   }
@@ -175,6 +241,22 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
     drmModeFreeCrtc(prev);
   }
 
+  // Format negotiation. XRGB8888 is assumed universally supported
+  // (every modern DRM driver advertises it on a primary plane); for
+  // RGB565 we walk the CRTC's planes and confirm at least one of
+  // them lists the fourcc, falling back to XRGB with a warn if not.
+  // Caller's IVI_SW_DRM_FORMAT request lives in format_ already.
+  if (format_ == Format::kRGB565 && !PlaneSupportsFormat(DRM_FORMAT_RGB565)) {
+    spdlog::warn(
+        "[DrmDumbSink] DRM_FORMAT_RGB565 not advertised by any plane "
+        "usable on CRTC {}, falling back to XRGB8888",
+        crtc_id_);
+    format_ = Format::kXRGB8888;
+  }
+  spdlog::info("[DrmDumbSink] format={} ({} bpp){}", FormatName(format_),
+               FormatBpp(format_),
+               (format_ == Format::kRGB565 && dither_) ? " +bayer-dither" : "");
+
   // Allocate both dumb buffers at the mode's dimensions.
   for (size_t i = 0; i < buffers_.size(); ++i) {
     if (!AllocBuffer(i)) {
@@ -198,7 +280,7 @@ bool DrmDumbSink::AllocBuffer(const size_t index) {
   drm_mode_create_dumb create{};
   create.width = mode_width_;
   create.height = mode_height_;
-  create.bpp = 32;
+  create.bpp = FormatBpp(format_);
   if (drmIoctl(drm_fd_, DRM_IOCTL_MODE_CREATE_DUMB, &create) != 0) {
     spdlog::error("[DrmDumbSink] DRM_IOCTL_MODE_CREATE_DUMB: {}",
                   std::strerror(errno));
@@ -209,13 +291,15 @@ bool DrmDumbSink::AllocBuffer(const size_t index) {
   b.pitch = create.pitch;
   b.size = create.size;
 
-  // Attach as an FB. XRGB8888 means memory layout [B,G,R,X] per drm-fourcc.
+  // Attach as an FB. fourcc layout is endian-invariant per drm_fourcc.h:
+  // XRGB8888 → bytes [B,G,R,X], RGB565 → LE 16-bit word [R5 G6 B5].
   const uint32_t handles[4] = {b.handle, 0, 0, 0};
   const uint32_t pitches[4] = {b.pitch, 0, 0, 0};
   const uint32_t offsets[4] = {0, 0, 0, 0};
-  if (drmModeAddFB2(drm_fd_, mode_width_, mode_height_, DRM_FORMAT_XRGB8888,
+  if (drmModeAddFB2(drm_fd_, mode_width_, mode_height_, FormatFourcc(format_),
                     handles, pitches, offsets, &b.fb_id, 0) != 0) {
-    spdlog::error("[DrmDumbSink] drmModeAddFB2: {}", std::strerror(errno));
+    spdlog::error("[DrmDumbSink] drmModeAddFB2({}): {}", FormatName(format_),
+                  std::strerror(errno));
     return false;
   }
 
@@ -256,6 +340,55 @@ void DrmDumbSink::FreeBuffer(const size_t index) {
   }
 }
 
+bool DrmDumbSink::PlaneSupportsFormat(const uint32_t fourcc) const {
+  if (drm_fd_ < 0 || crtc_id_ == 0) {
+    return false;
+  }
+  // Universal-planes cap exposes the primary plane in addition to
+  // overlays; without it some drivers only return overlays from
+  // drmModeGetPlaneResources. Failures here are non-fatal — older
+  // kernels may not implement the cap but still return primary planes.
+  drmSetClientCap(drm_fd_, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+
+  // Find the CRTC index for crtc_id_; possible_crtcs is a bitmask
+  // indexed against drmModeRes::crtcs[], not raw crtc ids.
+  uint32_t crtc_index = UINT32_MAX;
+  if (drmModeRes* res = drmModeGetResources(drm_fd_)) {
+    for (int i = 0; i < res->count_crtcs; ++i) {
+      if (res->crtcs[i] == crtc_id_) {
+        crtc_index = static_cast<uint32_t>(i);
+        break;
+      }
+    }
+    drmModeFreeResources(res);
+  }
+  if (crtc_index == UINT32_MAX) {
+    return false;
+  }
+
+  drmModePlaneRes* plane_res = drmModeGetPlaneResources(drm_fd_);
+  if (plane_res == nullptr) {
+    return false;
+  }
+  bool found = false;
+  for (uint32_t i = 0; i < plane_res->count_planes && !found; ++i) {
+    drmModePlane* p = drmModeGetPlane(drm_fd_, plane_res->planes[i]);
+    if (p == nullptr) {
+      continue;
+    }
+    if ((p->possible_crtcs & (1U << crtc_index)) != 0) {
+      for (uint32_t f = 0; f < p->count_formats && !found; ++f) {
+        if (p->formats[f] == fourcc) {
+          found = true;
+        }
+      }
+    }
+    drmModeFreePlane(p);
+  }
+  drmModeFreePlaneResources(plane_res);
+  return found;
+}
+
 void DrmDumbSink::OnSize(uint32_t /*width*/, uint32_t /*height*/) {
   // Mode is fixed at construction; the swizzle path clips/pads if
   // Flutter's view geometry doesn't match. No-op here.
@@ -274,22 +407,42 @@ void DrmDumbSink::SwizzleInto(const size_t buffer_index,
   const size_t copy_width_px = std::min<size_t>(src_width_px, mode_width_);
   const size_t copy_height = std::min<size_t>(src_height, mode_height_);
 
-  // DRM_FORMAT_XRGB8888 is bytes [B, G, R, X] in memory per
-  // drm_fourcc.h. On LE that matches Flutter's BGRA exactly and
-  // FlutterToBGRX8888 collapses to memcpy + alpha-fix; on BE it
-  // byte-swaps. SIMD path lives in pixel_swizzle.h.
-  for (size_t y = 0; y < copy_height; ++y) {
-    const uint8_t* src_row = src + y * src_row_bytes;
-    uint8_t* dst_row = b.map + y * b.pitch;
-    ivi::swizzle::FlutterToBGRX8888(dst_row, src_row, copy_width_px);
-    if (copy_width_px < mode_width_) {
-      std::memset(dst_row + copy_width_px * 4, 0,
-                  (mode_width_ - copy_width_px) * 4);
+  // Pixel-format dispatch. XRGB8888 → 4 B/px, FlutterToBGRX8888
+  // (memcpy + alpha-force on LE). RGB565 → 2 B/px, FlutterToRGB565
+  // (NEON vld4 + widening-shift + sri on ARM, scalar elsewhere);
+  // dither_ adds a Bayer 4×4 offset before quantization to hide
+  // gradient banding at the cost of bit-exact goldens.
+  if (format_ == Format::kRGB565) {
+    for (size_t y = 0; y < copy_height; ++y) {
+      const uint8_t* src_row = src + y * src_row_bytes;
+      auto* dst_row = reinterpret_cast<uint16_t*>(b.map + y * b.pitch);
+      if (dither_) {
+        ivi::swizzle::FlutterToRGB565_BayerDither(dst_row, src_row,
+                                                  copy_width_px, y);
+      } else {
+        ivi::swizzle::FlutterToRGB565(dst_row, src_row, copy_width_px);
+      }
+      if (copy_width_px < mode_width_) {
+        std::memset(dst_row + copy_width_px, 0,
+                    (mode_width_ - copy_width_px) * 2);
+      }
     }
-  }
-  // Pad rows below the view with black for the same reason.
-  for (size_t y = copy_height; y < mode_height_; ++y) {
-    std::memset(b.map + y * b.pitch, 0, mode_width_ * 4);
+    for (size_t y = copy_height; y < mode_height_; ++y) {
+      std::memset(b.map + y * b.pitch, 0, mode_width_ * 2);
+    }
+  } else {
+    for (size_t y = 0; y < copy_height; ++y) {
+      const uint8_t* src_row = src + y * src_row_bytes;
+      uint8_t* dst_row = b.map + y * b.pitch;
+      ivi::swizzle::FlutterToBGRX8888(dst_row, src_row, copy_width_px);
+      if (copy_width_px < mode_width_) {
+        std::memset(dst_row + copy_width_px * 4, 0,
+                    (mode_width_ - copy_width_px) * 4);
+      }
+    }
+    for (size_t y = copy_height; y < mode_height_; ++y) {
+      std::memset(b.map + y * b.pitch, 0, mode_width_ * 4);
+    }
   }
 }
 
