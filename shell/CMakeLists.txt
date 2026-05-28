@@ -28,13 +28,27 @@ add_executable(${PROJECT_NAME}
         main.cc
         timer.cc
         view/flutter_view.cc
-        view/present_layer_sequencer.cc
         watchdog.cc
-        wayland/display.cc
-        wayland/window.cc
         task_runner.cc
         accessibility/accessibility_tree.cc
 )
+
+# Wayland-specific TUs:
+#   - wayland/display.cc + wayland/window.cc            — Display/Window
+#   - view/present_layer_sequencer.cc                   — wl_subsurface
+#                                                         layer-ordering
+# All call sites in the main shell are already
+# #if-gated on a Wayland backend. Skipping these for non-Wayland
+# binaries drops the libwayland-client + libwayland-cursor link/runtime
+# deps; drm-kms-egl and software builds become truly Wayland-free.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+    BUILD_BACKEND_HEADLESS_EGL)
+    target_sources(${PROJECT_NAME} PRIVATE
+            wayland/display.cc
+            wayland/window.cc
+            view/present_layer_sequencer.cc
+    )
+endif ()
 set_target_properties(${PROJECT_NAME}
         PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
 )
@@ -207,13 +221,25 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         asio
         flutter
         cxxopts::cxxopts
-        wayland-gen
         dl
         ${GST_LIBRARIES}
         ${GST_VIDEO_LIBRARIES}
         ${AVFORMAT_LIBRARIES}
         platform_homescreen
 )
+
+# Propagate wayland-gen's include dirs unconditionally (config/common.h
+# pulls <waypp/waypp.h> regardless of backend for the AGL/XDG client
+# compile defines) but link the static library only on Wayland builds
+# so non-Wayland binaries don't drag in libwayland-client /
+# libwayland-cursor as runtime deps.
+target_include_directories(${PROJECT_NAME} PRIVATE
+        $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
+)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+    BUILD_BACKEND_HEADLESS_EGL)
+    target_link_libraries(${PROJECT_NAME} PRIVATE wayland-gen)
+endif ()
 
 target_link_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_BINARY_DIR}

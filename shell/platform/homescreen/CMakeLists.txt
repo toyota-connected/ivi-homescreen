@@ -31,9 +31,23 @@ target_link_libraries(platform_homescreen PUBLIC
         flutter
         rapidjson
         spdlog
-        wayland-gen
         tomlplusplus::tomlplusplus
 )
+
+# config/common.h includes <waypp/waypp.h> unconditionally for the
+# ENABLE_AGL_SHELL_CLIENT / ENABLE_XDG_CLIENT compile defines,
+# regardless of backend. Propagate wayland-gen's INTERFACE include
+# dirs without linking the library so non-Wayland builds get the
+# headers but not the libwayland-client / libwayland-cursor
+# runtime deps (the static library archive carries every protocol
+# binding's wl_proxy_* references).
+target_include_directories(platform_homescreen PUBLIC
+        $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
+)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+    BUILD_BACKEND_HEADLESS_EGL)
+    target_link_libraries(platform_homescreen PUBLIC wayland-gen)
+endif ()
 
 find_package(ACCESSKIT QUIET)
 if (ACCESSKIT_FOUND)

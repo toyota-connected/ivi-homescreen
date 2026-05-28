@@ -54,8 +54,11 @@ extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
 #if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
 #include "wayland/display.h"
 #include "wayland/window.h"
+#endif
 #endif
 
 extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
