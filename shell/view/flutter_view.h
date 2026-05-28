@@ -23,7 +23,10 @@
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "shell/accessibility/accessibility_tree.h"
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
 #include "wayland/window.h"
+#endif
 
 #include <flutter_homescreen.h>
 
@@ -39,12 +42,21 @@
 #endif
 
 class IDisplay;
+// WaylandWindow / Display are forward-declared unconditionally so
+// shared_ptr<WaylandWindow> members and the GetWindow() accessor
+// compile across all backends. The class definitions are only
+// available when a Wayland backend is selected (wayland/window.h
+// is conditionally included above); make_shared<WaylandWindow> +
+// any method call require the complete type, so those sites are
+// guarded with #if BUILD_BACKEND_WAYLAND_EGL || …_VULKAN. The
+// non-Wayland binaries hold a default-null shared_ptr; callers
+// (engine.cc, mouse_cursor_handler.cc) already null-check.
 class Display;
+class WaylandWindow;
 class Engine;
 class Backend;
 class PlatformHandler;
 class PlatformChannel;
-class WaylandWindow;
 #if BUILD_BACKEND_HEADLESS_EGL
 class HeadlessBackend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
@@ -89,11 +101,10 @@ class FlutterView {
   void Initialize();
 
   /**
-   * @brief Get Egl Window
-   * @return shared_ptr<WaylandWindow>
-   * @retval Egl Window
-   * @relation
-   * wayland, flutter
+   * @brief Get the WaylandWindow associated with this view.
+   * @return The shared_ptr; default-constructed null on the DRM and
+   *         software backends (no Wayland surface). Callers must
+   *         null-check before dereferencing.
    */
   std::shared_ptr<WaylandWindow> GetWindow() { return m_wayland_window; }
 
@@ -246,6 +257,8 @@ class FlutterView {
 #error "no Flutter backend selected (see forward-decl block above)"
 #endif
   std::shared_ptr<IDisplay> m_display;
+  // Default-null on non-Wayland backends (only assigned under the
+  // BUILD_BACKEND_WAYLAND_* gate in flutter_view.cc::Initialize).
   std::shared_ptr<WaylandWindow> m_wayland_window;
   std::shared_ptr<Engine> m_flutter_engine;
   std::shared_ptr<AccessibilityTree> m_accessibility_tree;

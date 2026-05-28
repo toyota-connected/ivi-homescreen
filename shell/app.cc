@@ -24,7 +24,11 @@
 #include "timer.h"
 #include "view/flutter_view.h"
 
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
 #include "wayland/display.h"
+#include "wayland/window.h"
+#endif
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "display/drm_display.h"
 #endif
@@ -91,7 +95,13 @@ std::shared_ptr<IDisplay> MakeDisplay(
 App::App(const std::vector<Configuration::Config>& configs)
     : m_display(MakeDisplay(configs)) {
   SPDLOG_DEBUG("+App::App");
-#if ENABLE_AGL_SHELL_CLIENT
+// AGL Shell needs a Wayland backend — its WaylandWindow / Display
+// usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
+// defaults ON in waypp's CMake regardless of backend, so combine
+// with a Wayland-backend gate here.
+#if ENABLE_AGL_SHELL_CLIENT &&                                    \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+     BUILD_BACKEND_HEADLESS_EGL)
   bool found_view_with_bg = false;
 #endif
 
@@ -103,7 +113,13 @@ App::App(const std::vector<Configuration::Config>& configs)
     m_views.emplace_back(std::move(view));
     index++;
 
-#if ENABLE_AGL_SHELL_CLIENT
+// AGL Shell needs a Wayland backend — its WaylandWindow / Display
+// usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
+// defaults ON in waypp's CMake regardless of backend, so combine
+// with a Wayland-backend gate here.
+#if ENABLE_AGL_SHELL_CLIENT &&                                    \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+     BUILD_BACKEND_HEADLESS_EGL)
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
         WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
@@ -111,7 +127,13 @@ App::App(const std::vector<Configuration::Config>& configs)
 #endif
   }
 
-#if ENABLE_AGL_SHELL_CLIENT
+// AGL Shell needs a Wayland backend — its WaylandWindow / Display
+// usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
+// defaults ON in waypp's CMake regardless of backend, so combine
+// with a Wayland-backend gate here.
+#if ENABLE_AGL_SHELL_CLIENT &&                                    \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+     BUILD_BACKEND_HEADLESS_EGL)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
