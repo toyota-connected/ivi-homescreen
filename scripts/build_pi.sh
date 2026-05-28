@@ -47,11 +47,48 @@
 #     --toolchain-version <ver>     ARM GNU Toolchain version (defaults: bookworm→12.3.rel1,
 #                                                                       trixie→15.2.rel1)
 #     --toolchain-url <url>         override toolchain tarball URL
+#
+#   SD card imaging + device provisioning (post-build):
+#     --image-sd                    interactively detect & write the PiOS image to
+#                                     an SD card. Watches lsblk before/after a prompt
+#                                     for a newly-attached removable disk; refuses
+#                                     non-removable disks; requires retyping the
+#                                     device name to confirm.
+#     --device <path>               non-interactive: image to this device (skips the
+#                                     plug-in detection). Still validated for
+#                                     removability + recognised path pattern.
+#     --provision                   install homescreen as a systemd service into the
+#                                     imaged SD card. Implied by --image-sd; pass
+#                                     standalone to re-provision an already-imaged
+#                                     card without rewriting the image.
+#     --bundle <path>               Flutter .desktop-homescreen bundle to install
+#                                     under /opt/ivi-homescreen/bundle on the target.
+#                                     If omitted, only the engine SDK is staged
+#                                     (useful for smoke-validating the service).
+#     --service-backend <name>      pick the built backend whose binary gets
+#                                     installed: wayland-egl|wayland-vulkan|drm-kms-egl
+#                                     |software (default: first available, preferring
+#                                     drm-kms-egl > software > wayland-egl).
+#     --user <name>                 PiOS first-boot username (default: homescreen).
+#                                     Without /boot/userconf.txt, PiOS Lite firstboot
+#                                     refuses to come up.
+#     --password <pass>             first-boot password (default: homescreen).
+#     --no-mask-getty               do NOT mask getty@tty1 — keeps the login prompt
+#                                     visible on tty1 (for debugging).
+#     --no-deps-install             do NOT install a first-boot apt unit that
+#                                     pulls the homescreen's runtime shared
+#                                     libraries. Default: install the unit (so a
+#                                     networked Pi self-completes); pass this for
+#                                     offline kiosks where the operator pre-stages
+#                                     libs themselves.
+#     --skip-build                  reuse an existing build dir; just provision.
+#
 #     -v / --verbose
 #     -h / --help
 #
 # Sudo is invoked only for the loopback-mount / chroot apt steps during
-# sysroot preparation. The rest runs as the invoking user.
+# sysroot preparation, and for the dd / mount / umount steps if --image-sd
+# / --provision are used. The rest runs as the invoking user.
 
 set -euo pipefail
 
@@ -86,6 +123,18 @@ REFRESH_SYSROOT=0
 IMAGE_URL=""
 TOOLCHAIN_URL=""
 VERBOSE=0
+
+# SD imaging / provisioning state.
+IMAGE_SD=0
+PROVISION=0
+TARGET_DEVICE=""
+APP_BUNDLE=""
+SERVICE_BACKEND=""
+FIRSTBOOT_USER="homescreen"
+FIRSTBOOT_PASSWORD="homescreen"
+MASK_GETTY=1
+INSTALL_DEPS=1
+SKIP_BUILD=0
 
 # ARM GNU Toolchain (x86_64 host → aarch64 Linux glibc).
 #
@@ -147,11 +196,28 @@ while [[ $# -gt 0 ]]; do
         --image-url)          IMAGE_URL="$2"; shift 2 ;;
         --toolchain-url)      TOOLCHAIN_URL="$2"; shift 2 ;;
         --toolchain-version)  TC_VERSION="$2"; shift 2 ;;
+        --image-sd)           IMAGE_SD=1; PROVISION=1; shift ;;
+        --device)             TARGET_DEVICE="$2"; IMAGE_SD=1; PROVISION=1; shift 2 ;;
+        --provision)          PROVISION=1; shift ;;
+        --bundle)             APP_BUNDLE="$2"; shift 2 ;;
+        --service-backend)    SERVICE_BACKEND="$2"; shift 2 ;;
+        --user)               FIRSTBOOT_USER="$2"; shift 2 ;;
+        --password)           FIRSTBOOT_PASSWORD="$2"; shift 2 ;;
+        --no-mask-getty)      MASK_GETTY=0; shift ;;
+        --no-deps-install)    INSTALL_DEPS=0; shift ;;
+        --skip-build)         SKIP_BUILD=1; shift ;;
         -v|--verbose)         VERBOSE=1; shift ;;
         -h|--help)            usage 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done
+
+case "$SERVICE_BACKEND" in
+    ""|wayland-egl|wayland-vulkan|drm-kms-egl|software) ;;
+    *) die "--service-backend must be wayland-egl|wayland-vulkan|drm-kms-egl|software (got: $SERVICE_BACKEND)" ;;
+esac
+[[ -z "$TARGET_DEVICE" || "$TARGET_DEVICE" =~ ^/dev/(sd[a-z]+|mmcblk[0-9]+|nvme[0-9]+n[0-9]+)$ ]] \
+    || die "--device $TARGET_DEVICE: not a recognised path (need /dev/sd*, /dev/mmcblk*, or /dev/nvme*n*)"
 
 case "$PIOS" in bookworm|trixie) ;; *) die "--pios must be bookworm|trixie (got: $PIOS)" ;; esac
 case "$TARGET" in pi4|pi5|piz2|generic) ;; *) die "--target must be pi4|pi5|piz2|generic (got: $TARGET)" ;; esac
@@ -660,6 +726,464 @@ phase5_report() {
     echo "    scripts/build_drm_bundle.sh    (from your Flutter app dir)"
 }
 
+# ── Phase 6: SD card imaging ─────────────────────────────────────────────
+#
+# Two-step flow: snapshot lsblk's disk list BEFORE the user is prompted,
+# wait for them to attach the card, snapshot AFTER, diff to identify the
+# newly-attached disk. Refuses to touch:
+#   - non-removable disks  (system disk safety — /sys/block/<n>/removable)
+#   - paths not matching /dev/(sd*|mmcblk*|nvme*)
+#   - more than one new disk at once (operator must pick deliberately)
+# Final guard before dd: operator must retype the device name.
+
+lsblk_disks() {
+    # Top-level disk-type block devices, full paths, no headers. Used by
+    # the before/after diff in wait_for_sd.
+    lsblk -dpno NAME,TYPE | awk '$2 == "disk" { print $1 }' | sort -u
+}
+
+wait_for_sd() {
+    local before after new
+    before="$(lsblk_disks)"
+
+    echo
+    echo "  Plug in the SD card now."
+    echo "  (Will refuse to image internal / non-removable disks.)"
+    read -r -p "  Press Enter once the card is attached… " _
+
+    # udev typically settles within a second or two; give it some slack.
+    udevadm settle --timeout=10 >/dev/null 2>&1 || true
+    sleep 2
+
+    after="$(lsblk_disks)"
+    new="$(comm -13 <(echo "$before") <(echo "$after"))"
+
+    local count
+    count="$(printf '%s\n' "$new" | grep -c '^/' || true)"
+    case "$count" in
+        0) die "no new disk detected — check that the card mounted and retry" ;;
+        1) TARGET_DEVICE="$new" ;;
+        *) die "more than one new disk detected: $(echo "$new" | tr '\n' ' ')— unplug extras and retry" ;;
+    esac
+    log "detected SD card: $TARGET_DEVICE"
+}
+
+phase6_sd_image() {
+    log "Phase 6: SD card imaging"
+
+    if [[ -z "$TARGET_DEVICE" ]]; then
+        wait_for_sd
+    fi
+
+    local name
+    name="$(basename "$TARGET_DEVICE")"
+    [[ -b "$TARGET_DEVICE" ]] || die "$TARGET_DEVICE is not a block device"
+
+    # /sys/block/<name>/removable is "0" or "1". A USB SD-card reader
+    # exposes the card with removable=1; a builtin mmc reader does too.
+    # NVMe / SATA system disks are removable=0.
+    local removable
+    removable="$(cat "/sys/block/$name/removable" 2>/dev/null || echo 0)"
+    [[ "$removable" == "1" ]] \
+        || die "$TARGET_DEVICE is not flagged removable (got \"$removable\") — refusing to write"
+
+    # Show identity + confirm. Retyping the device name is the kill-switch.
+    echo
+    echo "  Target device:"
+    lsblk -dno NAME,SIZE,MODEL,VENDOR,TRAN "$TARGET_DEVICE" | sed 's/^/    /'
+    echo
+    echo "  This will WIPE $TARGET_DEVICE and write PiOS $PIOS to it."
+    echo "  All existing data on this device will be lost."
+    read -r -p "  Retype the device name (\"$name\") to confirm: " confirm
+    [[ "$confirm" == "$name" ]] || die "confirmation mismatch (\"$confirm\" != \"$name\"); aborting"
+
+    # Image file already produced by phase2_sysroot (.xz fetched + decompressed).
+    local img_xz img
+    img_xz="$DOWNLOADS/$(basename "$IMAGE_URL")"
+    img="${img_xz%.xz}"
+    [[ -s "$img" ]] || die "expected decompressed image at $img (run without --skip-build to fetch)"
+
+    # Unmount anything currently mounted from the target. Some desktops
+    # auto-mount inserted media; dd needs the partitions free.
+    local part
+    while read -r part; do
+        [[ -n "$part" ]] || continue
+        log "unmounting $part (was auto-mounted)"
+        sudo umount "$part" || true
+    done < <(lsblk -lnpo NAME,MOUNTPOINTS "$TARGET_DEVICE" | awk 'NF > 1 { print $1 }')
+
+    log "writing $(basename "$img") → $TARGET_DEVICE (this is the slow part)"
+    sudo dd if="$img" of="$TARGET_DEVICE" bs=4M conv=fsync status=progress
+    sudo sync
+
+    sudo partprobe "$TARGET_DEVICE" 2>/dev/null || true
+    udevadm settle --timeout=10 >/dev/null 2>&1 || true
+
+    log "image written; partitions now visible:"
+    lsblk -no NAME,SIZE,TYPE,FSTYPE "$TARGET_DEVICE" | sed 's/^/    /'
+}
+
+# ── Phase 7: device provisioning ─────────────────────────────────────────
+#
+# Mount the imaged SD card and install:
+#   /usr/local/bin/ivi-homescreen          (the binary, from build_dir_for)
+#   /opt/ivi-homescreen/bundle/            (Flutter .desktop-homescreen bundle)
+#   /etc/systemd/system/ivi-homescreen.service
+#   /etc/systemd/system/multi-user.target.wants/ivi-homescreen.service (symlink)
+#   /etc/systemd/system/getty@tty1.service → /dev/null  (mask, unless
+#                                                       --no-mask-getty)
+# Plus boot-partition fixups:
+#   /boot/userconf.txt                     (so firstboot doesn't hang)
+#   /boot/cmdline.txt                      (append quiet + nologo + nocursor)
+
+partition_paths() {
+    # Echo "boot_part root_part" for a given whole-disk device. mmcblk /
+    # nvme suffix partition numbers with 'p' (e.g. mmcblk0p1); plain
+    # sd[a-z] doesn't (sda1).
+    local dev="$1"
+    if [[ "$dev" =~ mmcblk|nvme ]]; then
+        echo "${dev}p1 ${dev}p2"
+    else
+        echo "${dev}1 ${dev}2"
+    fi
+}
+
+# Output a bcrypt-style hash (mkpasswd -m yescrypt or openssl passwd -6
+# fallback). PiOS firstboot accepts /etc/shadow-format hashes.
+hash_password() {
+    local pass="$1"
+    if command -v mkpasswd >/dev/null 2>&1; then
+        echo "$pass" | mkpasswd -m yescrypt --stdin
+    else
+        echo "$pass" | openssl passwd -6 -stdin
+    fi
+}
+
+resolve_service_backend() {
+    # Pick a backend whose homescreen binary actually exists in
+    # build_dir_for. Preference: drm-kms-egl > software > wayland-egl >
+    # wayland-vulkan. drm-kms-egl is the "kiosk first principle" choice
+    # (direct DRM, no compositor).
+    local try
+    if [[ -n "$SERVICE_BACKEND" ]]; then
+        echo "$SERVICE_BACKEND"; return
+    fi
+    for try in drm-kms-egl software wayland-egl wayland-vulkan; do
+        if [[ -x "$(build_dir_for "$try")/shell/homescreen" ]]; then
+            echo "$try"; return
+        fi
+    done
+    return 1
+}
+
+phase7_provision() {
+    log "Phase 7: device provisioning"
+
+    [[ -n "$TARGET_DEVICE" ]] || die "phase7 needs TARGET_DEVICE set (use --image-sd or --device)"
+    [[ -b "$TARGET_DEVICE" ]] || die "$TARGET_DEVICE is not a block device"
+
+    local p1 p2
+    read -r p1 p2 <<< "$(partition_paths "$TARGET_DEVICE")"
+    # udev sometimes takes another beat after partprobe.
+    local i=0
+    while [[ ! -b "$p1" || ! -b "$p2" ]] && (( i < 20 )); do
+        sleep 0.5; udevadm settle --timeout=3 >/dev/null 2>&1 || true; i=$((i+1))
+    done
+    [[ -b "$p1" && -b "$p2" ]] || die "partitions not visible after partprobe: $p1, $p2"
+
+    # Resolve a binary to install if one exists. The kiosk-service half
+    # of phase 7 is best-effort — the firstboot fixups (userconf.txt,
+    # ssh enable, quieted cmdline) run unconditionally so a card imaged
+    # without a built binary still boots into a usable PiOS.
+    local backend="" home_bin=""
+    if backend="$(resolve_service_backend 2>/dev/null)"; then
+        home_bin="$(build_dir_for "$backend")/shell/homescreen"
+        [[ -x "$home_bin" ]] || home_bin=""
+    fi
+    if [[ -n "$home_bin" ]]; then
+        log "will install $backend binary: $home_bin"
+    else
+        log "no built binary available — firstboot fixups only (no kiosk service)"
+    fi
+
+    local bundle_src=""
+    if [[ -n "$APP_BUNDLE" ]]; then
+        [[ -d "$APP_BUNDLE" ]] || die "bundle dir not found: $APP_BUNDLE"
+        [[ -f "$APP_BUNDLE/lib/libflutter_engine.so" ]] \
+            || die "bundle missing lib/libflutter_engine.so: $APP_BUNDLE"
+        bundle_src="$APP_BUNDLE"
+        log "bundle: $bundle_src"
+    fi
+
+    local mp_boot mp_root cleanup
+    mp_boot="$(mktemp -d -t ivi-boot.XXXXXX)"
+    mp_root="$(mktemp -d -t ivi-root.XXXXXX)"
+    cleanup="sudo umount -lq '$mp_boot' '$mp_root' 2>/dev/null; rmdir '$mp_boot' '$mp_root' 2>/dev/null || true"
+    # shellcheck disable=SC2064  # intentional: capture paths now, not at trap time
+    trap "$cleanup" EXIT
+
+    log "mounting $p1 → $mp_boot, $p2 → $mp_root"
+    sudo mount "$p1" "$mp_boot"
+    sudo mount "$p2" "$mp_root"
+
+    # ── Firstboot unblock (always run) ─────────────────────────────────
+    #
+    # Without these, PiOS Lite's userconfig.service fails on a headless
+    # boot (no interactive wizard target) and SSH is disabled by default,
+    # leaving the operator with no way in. Run before any kiosk-install
+    # work so a failure later doesn't leave the card stranded.
+
+    local hash
+    hash="$(hash_password "$FIRSTBOOT_PASSWORD")"
+    log "writing /boot/userconf.txt (user: $FIRSTBOOT_USER)"
+    echo "${FIRSTBOOT_USER}:${hash}" | sudo tee "$mp_boot/userconf.txt" >/dev/null
+    sudo chmod 0600 "$mp_boot/userconf.txt"
+
+    # Enable SSH on first boot — PiOS Lite refuses to start sshd unless
+    # /boot/ssh exists. Without --no-mask-getty there's literally no
+    # other way to reach the device.
+    log "enabling SSH (/boot/ssh)"
+    sudo touch "$mp_boot/ssh"
+
+    # Mask userconfig.service. PiOS Lite ships this (from
+    # raspberrypi-sys-mods) as a GUI-fallback first-boot wizard for
+    # operators who didn't provide a userconf.txt. We DO write
+    # userconf.txt above — firstrun handles the account creation
+    # — but userconfig.service still fires on first boot from the
+    # package's preset, fails noisily on a headless system
+    # ("[FAILED] Failed to start userconfig.service - User
+    # configuration dialog.") because there's no display for the
+    # dialog. Mask via /dev/null symlink so the boot stays clean.
+    log "masking userconfig.service (account is set up via userconf.txt)"
+    sudo ln -sf /dev/null "$mp_root/etc/systemd/system/userconfig.service"
+
+    # Quiet kernel cmdline so the boot is visually clean before the
+    # homescreen takes over. cmdline.txt is a single line; append flags
+    # idempotently.
+    local cmdline="$mp_boot/cmdline.txt"
+    if [[ -f "$cmdline" ]]; then
+        log "quieting kernel cmdline (/boot/cmdline.txt)"
+        local extra=""
+        local flag
+        for flag in "quiet" "logo.nologo" "vt.global_cursor_default=0" "loglevel=3"; do
+            grep -qw "$flag" "$cmdline" || extra="$extra $flag"
+        done
+        if [[ -n "$extra" ]]; then
+            sudo sed -i "s|\$|${extra}|" "$cmdline"
+            note "appended:$extra"
+        else
+            note "cmdline already contains all flags"
+        fi
+    else
+        note "no /boot/cmdline.txt (unexpected layout — skipping cmdline tweak)"
+    fi
+
+    # ── Kiosk install (only when a built binary is available) ─────────
+    if [[ -n "$home_bin" ]]; then
+        log "installing binary → /usr/local/bin/ivi-homescreen"
+        sudo install -m0755 "$home_bin" "$mp_root/usr/local/bin/ivi-homescreen"
+
+        sudo mkdir -p "$mp_root/opt/ivi-homescreen/bundle"
+        if [[ -n "$bundle_src" ]]; then
+            log "installing bundle → /opt/ivi-homescreen/bundle"
+            sudo rsync -a --delete "$bundle_src/" "$mp_root/opt/ivi-homescreen/bundle/"
+        else
+            log "no --bundle given; staging engine SDK only"
+            sudo mkdir -p "$mp_root/opt/ivi-homescreen/bundle/lib" \
+                          "$mp_root/opt/ivi-homescreen/bundle/data"
+            sudo install -m0644 "$FLUTTER_ENGINE/lib/libflutter_engine.so" \
+                "$mp_root/opt/ivi-homescreen/bundle/lib/libflutter_engine.so"
+            sudo install -m0644 "$FLUTTER_ENGINE/data/icudtl.dat" \
+                "$mp_root/opt/ivi-homescreen/bundle/data/icudtl.dat"
+        fi
+
+        # Compose the [Unit] section. The deps service (if enabled) is a
+        # hard requirement — without it the binary fails at dlopen with
+        # libfoo.so.N missing.
+        local unit_requires="" unit_after_deps=""
+        if [[ "$INSTALL_DEPS" -eq 1 ]]; then
+            unit_requires="Requires=ivi-homescreen-deps.service"
+            unit_after_deps=" ivi-homescreen-deps.service"
+        fi
+
+        log "writing /etc/systemd/system/ivi-homescreen.service"
+        sudo tee "$mp_root/etc/systemd/system/ivi-homescreen.service" >/dev/null <<EOF
+[Unit]
+Description=ivi-homescreen Flutter shell (kiosk)
+DefaultDependencies=no
+Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service local-fs.target${unit_after_deps}
+${unit_requires}
+# Start before getty so the homescreen owns the framebuffer / tty first.
+Before=getty.target getty@tty1.service
+ConditionPathExists=/opt/ivi-homescreen/bundle
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ivi-homescreen
+Environment=HOME=/root
+Environment=XDG_RUNTIME_DIR=/run/user/0
+ExecStartPre=/bin/mkdir -p /run/user/0
+ExecStartPre=/bin/chmod 700 /run/user/0
+ExecStart=/usr/local/bin/ivi-homescreen -b /opt/ivi-homescreen/bundle
+Restart=on-failure
+RestartSec=3
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        sudo chmod 0644 "$mp_root/etc/systemd/system/ivi-homescreen.service"
+
+        # Enable via the multi-user.target.wants symlink (avoids a
+        # `systemctl enable` chroot dance).
+        sudo mkdir -p "$mp_root/etc/systemd/system/multi-user.target.wants"
+        sudo ln -sf ../ivi-homescreen.service \
+            "$mp_root/etc/systemd/system/multi-user.target.wants/ivi-homescreen.service"
+
+        # Mask getty@tty1 so no login prompt paints over the homescreen.
+        if [[ "$MASK_GETTY" -eq 1 ]]; then
+            log "masking getty@tty1.service (no visible login prompt)"
+            sudo ln -sf /dev/null "$mp_root/etc/systemd/system/getty@tty1.service"
+        else
+            note "--no-mask-getty: leaving getty@tty1 enabled"
+        fi
+
+        # ── Runtime shared-library installer (one-shot, first boot) ──
+        #
+        # PiOS Lite is minimal; the cross-build sysroot pulled in
+        # `-dev` packages so the homescreen LINKED against libdrm /
+        # libgbm / libdisplay-info / libgstreamer / libpipewire / …,
+        # but the runtime counterparts are absent on the Lite target.
+        # Install them on first network-online boot via a sentinel-
+        # gated oneshot unit. ivi-homescreen.service Requires= this
+        # so the kiosk doesn't fail-loop on missing .so files.
+        #
+        # --no-deps-install skips this for fully-offline kiosks where
+        # the operator stages runtime libs themselves.
+        if [[ "$INSTALL_DEPS" -eq 1 ]]; then
+            # Common dependencies — linked by every backend regardless
+            # of choice. libwayland-client0 + libwayland-cursor0 are
+            # here (not under wayland-* backends) because shell/wayland/
+            # window.cc compiles into the binary unconditionally, so
+            # even drm-kms-egl + software builds pull them in at link
+            # time. The remaining libs cover plugin glue (gstreamer /
+            # glib / curl / xml / jpeg / pipewire / camera / secret) +
+            # the xkbcommon stack the input dispatcher always uses.
+            local deps_common="libwayland-client0 libwayland-cursor0 \
+libxkbcommon0 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+libpipewire-0.3-0 libcamera0.4 libcurl4t64 libsecret-1-0 \
+libjpeg62-turbo libxml2 libglib2.0-0t64"
+            # Backend-specific. dmz-cursor-theme provides DMZ-White
+            # (the default cursor theme drm-kms-egl loads via
+            # libxcursor); without it the cursor either renders empty
+            # or the homescreen falls back to no cursor.
+            local deps_backend=""
+            case "$backend" in
+                wayland-egl)
+                    deps_backend="libegl1 libgles2"
+                    ;;
+                wayland-vulkan)
+                    deps_backend="libvulkan1 mesa-vulkan-drivers"
+                    ;;
+                drm-kms-egl)
+                    deps_backend="libdrm2 libgbm1 libinput10 libdisplay-info2 \
+libxcursor1 dmz-cursor-theme libegl1 libgles2"
+                    ;;
+                software)
+                    deps_backend="libdrm2 libinput10"
+                    ;;
+            esac
+
+            log "writing /usr/lib/ivi-homescreen/install-runtime-deps.sh"
+            sudo mkdir -p "$mp_root/usr/lib/ivi-homescreen"
+            sudo tee "$mp_root/usr/lib/ivi-homescreen/install-runtime-deps.sh" >/dev/null <<EOF
+#!/bin/sh
+# Auto-generated by build_pi.sh — installs the runtime shared
+# libraries ivi-homescreen ($backend) expects to dlopen at startup.
+# Runs once on first network-online boot, then the sentinel file
+# /var/lib/ivi-homescreen/deps-installed disables further runs.
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \\
+    $deps_common $deps_backend
+EOF
+            sudo chmod 0755 "$mp_root/usr/lib/ivi-homescreen/install-runtime-deps.sh"
+
+            log "writing /etc/systemd/system/ivi-homescreen-deps.service"
+            sudo tee "$mp_root/etc/systemd/system/ivi-homescreen-deps.service" >/dev/null <<EOF
+[Unit]
+Description=Install ivi-homescreen runtime shared libraries (first boot)
+Wants=network-online.target
+After=network-online.target
+Before=ivi-homescreen.service
+ConditionPathExists=!/var/lib/ivi-homescreen/deps-installed
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ivi-homescreen/install-runtime-deps.sh
+ExecStartPost=/bin/sh -c "mkdir -p /var/lib/ivi-homescreen && touch /var/lib/ivi-homescreen/deps-installed"
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            sudo chmod 0644 "$mp_root/etc/systemd/system/ivi-homescreen-deps.service"
+            sudo ln -sf ../ivi-homescreen-deps.service \
+                "$mp_root/etc/systemd/system/multi-user.target.wants/ivi-homescreen-deps.service"
+        else
+            note "--no-deps-install: skipping runtime-deps installer unit"
+        fi
+    fi
+
+    sync
+    log "unmounting"
+    sudo umount "$mp_boot"
+    sudo umount "$mp_root"
+    rmdir "$mp_boot" "$mp_root"
+    trap - EXIT
+
+    log "provisioning complete"
+    echo
+    if [[ -n "$home_bin" ]]; then
+        echo "  Eject and boot the Pi. After firstboot the kiosk service"
+        echo "  takes over the framebuffer before any visible login."
+    else
+        echo "  Eject and boot the Pi. PiOS firstboot will apply the"
+        echo "  userconf account; the kiosk service is NOT installed"
+        echo "  (no built binary was available). Re-run with a built"
+        echo "  binary + --provision --skip-build to layer it on."
+    fi
+    echo
+    echo "  Login (SSH on the .lan / .local hostname once the Pi finishes"
+    echo "  firstboot, or serial console):"
+    echo "    user:     $FIRSTBOOT_USER"
+    echo "    password: $FIRSTBOOT_PASSWORD"
+    if [[ -n "$home_bin" ]]; then
+        echo
+        echo "  Inspect the service on the target:"
+        echo "    sudo systemctl status ivi-homescreen.service"
+        echo "    sudo journalctl -u ivi-homescreen.service -b"
+        if [[ "$INSTALL_DEPS" -eq 1 ]]; then
+            echo
+            echo "  Runtime shared libraries are installed on first network-online"
+            echo "  boot by ivi-homescreen-deps.service. If that fails (no network,"
+            echo "  apt mirror down), the kiosk won't start. Watch it via:"
+            echo "    sudo systemctl status ivi-homescreen-deps.service"
+            echo "    sudo journalctl -u ivi-homescreen-deps.service -b"
+            echo "  Force a retry: rm /var/lib/ivi-homescreen/deps-installed + reboot."
+        fi
+    fi
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 phase0_preflight
@@ -679,13 +1203,24 @@ if [[ "$BACKEND" == "all" && "$PIOS" == "bookworm" ]]; then
     log "note: skipping drm-kms-egl on bookworm (libdisplay-info 0.1.1 < drm-cxx 0.2.0)"
 fi
 
-for be in "${BUILD_BACKENDS[@]}"; do
-    if [[ "$CLEAN" -eq 1 ]]; then
-        log "wiping $(build_dir_for "$be")"
-        rm -rf "$(build_dir_for "$be")"
-    fi
-    phase3_emit_cmake "$be"
-    phase4_build "$be"
-done
+if [[ "$SKIP_BUILD" -eq 0 ]]; then
+    for be in "${BUILD_BACKENDS[@]}"; do
+        if [[ "$CLEAN" -eq 1 ]]; then
+            log "wiping $(build_dir_for "$be")"
+            rm -rf "$(build_dir_for "$be")"
+        fi
+        phase3_emit_cmake "$be"
+        phase4_build "$be"
+    done
+else
+    log "--skip-build: reusing existing build dirs"
+fi
 
 phase5_report
+
+if [[ "$IMAGE_SD" -eq 1 ]]; then
+    phase6_sd_image
+fi
+if [[ "$PROVISION" -eq 1 ]]; then
+    phase7_provision
+fi
