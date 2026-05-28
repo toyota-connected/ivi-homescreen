@@ -734,7 +734,7 @@ phase5_report() {
     echo "  cmake --build $(build_dir_for "${BUILD_BACKENDS[0]}") -j $JOBS"
     echo "Bundle (per backend):"
     echo "  FLUTTER_WORKSPACE=... ENGINE_BUNDLE=$FLUTTER_ENGINE \\"
-    echo "    scripts/build_drm_bundle.sh    (from your Flutter app dir)"
+    echo "    scripts/build_pi_bundle.sh     (from your Flutter app dir)"
 }
 
 # ── Phase 6: SD card imaging ─────────────────────────────────────────────
