@@ -81,6 +81,15 @@
 #                                     networked Pi self-completes); pass this for
 #                                     offline kiosks where the operator pre-stages
 #                                     libs themselves.
+#     --no-fullscreen               drop the -f flag from the kiosk service's
+#                                     ExecStart. Default IS fullscreen — without
+#                                     -f the embedder uses the bundle's
+#                                     configured width/height, which on a panel
+#                                     larger than the fb produces letterboxed
+#                                     scanout that the vc4 (Pi) driver renders
+#                                     as a black screen even though atomic
+#                                     commits succeed. Only useful for multi-
+#                                     view / deliberate-letterbox cases.
 #     --skip-build                  reuse an existing build dir; just provision.
 #
 #     -v / --verbose
@@ -134,6 +143,7 @@ FIRSTBOOT_USER="homescreen"
 FIRSTBOOT_PASSWORD="homescreen"
 MASK_GETTY=1
 INSTALL_DEPS=1
+FULLSCREEN=1
 SKIP_BUILD=0
 
 # ARM GNU Toolchain (x86_64 host → aarch64 Linux glibc).
@@ -205,6 +215,7 @@ while [[ $# -gt 0 ]]; do
         --password)           FIRSTBOOT_PASSWORD="$2"; shift 2 ;;
         --no-mask-getty)      MASK_GETTY=0; shift ;;
         --no-deps-install)    INSTALL_DEPS=0; shift ;;
+        --no-fullscreen)      FULLSCREEN=0; shift ;;
         --skip-build)         SKIP_BUILD=1; shift ;;
         -v|--verbose)         VERBOSE=1; shift ;;
         -h|--help)            usage 0 ;;
@@ -1013,6 +1024,17 @@ phase7_provision() {
             unit_after_deps=" ivi-homescreen-deps.service"
         fi
 
+        # Kiosk fullscreen default. Without -f, the embedder uses the
+        # bundle's configured width/height; on a panel larger than
+        # that, vc4 (Pi) renders the resulting letterboxed primary
+        # plane as black even when atomic commits succeed. -f forces
+        # the fb to native mode size and the panel lights up. Real-
+        # hardware shakedown on a 4K LG panel confirmed.
+        local exec_extra=""
+        if [[ "$FULLSCREEN" -eq 1 ]]; then
+            exec_extra=" -f"
+        fi
+
         log "writing /etc/systemd/system/ivi-homescreen.service"
         sudo tee "$mp_root/etc/systemd/system/ivi-homescreen.service" >/dev/null <<EOF
 [Unit]
@@ -1033,7 +1055,7 @@ Environment=HOME=/root
 Environment=XDG_RUNTIME_DIR=/run/user/0
 ExecStartPre=/bin/mkdir -p /run/user/0
 ExecStartPre=/bin/chmod 700 /run/user/0
-ExecStart=/usr/local/bin/ivi-homescreen -b /opt/ivi-homescreen/bundle
+ExecStart=/usr/local/bin/ivi-homescreen${exec_extra} -b /opt/ivi-homescreen/bundle
 Restart=on-failure
 RestartSec=3
 StandardInput=tty
