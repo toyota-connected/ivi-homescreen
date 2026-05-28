@@ -177,9 +177,22 @@ if [[ -n "${FLUTTER_WORKSPACE:-}" ]]; then
     [[ -d "$XC_SYSROOT" ]] \
         || die "sysroot not found: $XC_SYSROOT (run scripts/build_pi.sh --prepare-only --pios $PIOS, or set XC_SYSROOT)"
 
+    # create_aot.py needs `which flutter` to resolve (for the SDK
+    # version check) and PUB_CACHE to be set. The workspace ships its
+    # own Flutter SDK + isolated pub cache under .config/flutter_workspace
+    # — wire both up so the operator doesn't have to source setup_env.sh
+    # first.
+    AOT_PATH="$FLUTTER_WORKSPACE/flutter/bin:$PATH"
+    AOT_PUB_CACHE="${PUB_CACHE:-$FLUTTER_WORKSPACE/.config/flutter_workspace/pub_cache}"
+    [[ -x "$FLUTTER_WORKSPACE/flutter/bin/flutter" ]] \
+        || die "flutter SDK not found at $FLUTTER_WORKSPACE/flutter/bin/flutter"
+
     log "running flutter_workspace.py --create-aot"
     echo "    QEMU_LD_PREFIX=$XC_SYSROOT"
     echo "    GEN_SNAPSHOT=$GEN_SNAPSHOT"
+    echo "    PUB_CACHE=$AOT_PUB_CACHE"
+    PATH="$AOT_PATH" \
+    PUB_CACHE="$AOT_PUB_CACHE" \
     QEMU_LD_PREFIX="$XC_SYSROOT" \
     GEN_SNAPSHOT="$GEN_SNAPSHOT" \
         python3 "$WORKSPACE_PY" --create-aot --app-path "$(pwd)"
