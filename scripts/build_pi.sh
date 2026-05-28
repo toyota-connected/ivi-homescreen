@@ -883,12 +883,20 @@ phase7_provision() {
     done
     [[ -b "$p1" && -b "$p2" ]] || die "partitions not visible after partprobe: $p1, $p2"
 
-    local backend home_bin
-    backend="$(resolve_service_backend)" \
-        || die "no built homescreen binary found — build first or pass --service-backend"
-    home_bin="$(build_dir_for "$backend")/shell/homescreen"
-    [[ -x "$home_bin" ]] || die "homescreen binary missing at $home_bin"
-    log "installing $backend variant: $home_bin"
+    # Resolve a binary to install if one exists. The kiosk-service half
+    # of phase 7 is best-effort — the firstboot fixups (userconf.txt,
+    # ssh enable, quieted cmdline) run unconditionally so a card imaged
+    # without a built binary still boots into a usable PiOS.
+    local backend="" home_bin=""
+    if backend="$(resolve_service_backend 2>/dev/null)"; then
+        home_bin="$(build_dir_for "$backend")/shell/homescreen"
+        [[ -x "$home_bin" ]] || home_bin=""
+    fi
+    if [[ -n "$home_bin" ]]; then
+        log "will install $backend binary: $home_bin"
+    else
+        log "no built binary available — firstboot fixups only (no kiosk service)"
+    fi
 
     local bundle_src=""
     if [[ -n "$APP_BUNDLE" ]]; then
@@ -897,8 +905,6 @@ phase7_provision() {
             || die "bundle missing lib/libflutter_engine.so: $APP_BUNDLE"
         bundle_src="$APP_BUNDLE"
         log "bundle: $bundle_src"
-    else
-        log "no --bundle given; staging engine SDK only (service will start with no Dart app)"
     fi
 
     local mp_boot mp_root cleanup
@@ -912,26 +918,67 @@ phase7_provision() {
     sudo mount "$p1" "$mp_boot"
     sudo mount "$p2" "$mp_root"
 
-    # --- Binary + bundle install ---
-    log "installing binary → /usr/local/bin/ivi-homescreen"
-    sudo install -m0755 "$home_bin" "$mp_root/usr/local/bin/ivi-homescreen"
+    # ── Firstboot unblock (always run) ─────────────────────────────────
+    #
+    # Without these, PiOS Lite's userconfig.service fails on a headless
+    # boot (no interactive wizard target) and SSH is disabled by default,
+    # leaving the operator with no way in. Run before any kiosk-install
+    # work so a failure later doesn't leave the card stranded.
 
-    sudo mkdir -p "$mp_root/opt/ivi-homescreen/bundle"
-    if [[ -n "$bundle_src" ]]; then
-        log "installing bundle → /opt/ivi-homescreen/bundle"
-        sudo rsync -a --delete "$bundle_src/" "$mp_root/opt/ivi-homescreen/bundle/"
+    local hash
+    hash="$(hash_password "$FIRSTBOOT_PASSWORD")"
+    log "writing /boot/userconf.txt (user: $FIRSTBOOT_USER)"
+    echo "${FIRSTBOOT_USER}:${hash}" | sudo tee "$mp_boot/userconf.txt" >/dev/null
+    sudo chmod 0600 "$mp_boot/userconf.txt"
+
+    # Enable SSH on first boot — PiOS Lite refuses to start sshd unless
+    # /boot/ssh exists. Without --no-mask-getty there's literally no
+    # other way to reach the device.
+    log "enabling SSH (/boot/ssh)"
+    sudo touch "$mp_boot/ssh"
+
+    # Quiet kernel cmdline so the boot is visually clean before the
+    # homescreen takes over. cmdline.txt is a single line; append flags
+    # idempotently.
+    local cmdline="$mp_boot/cmdline.txt"
+    if [[ -f "$cmdline" ]]; then
+        log "quieting kernel cmdline (/boot/cmdline.txt)"
+        local extra=""
+        local flag
+        for flag in "quiet" "logo.nologo" "vt.global_cursor_default=0" "loglevel=3"; do
+            grep -qw "$flag" "$cmdline" || extra="$extra $flag"
+        done
+        if [[ -n "$extra" ]]; then
+            sudo sed -i "s|\$|${extra}|" "$cmdline"
+            note "appended:$extra"
+        else
+            note "cmdline already contains all flags"
+        fi
     else
-        sudo mkdir -p "$mp_root/opt/ivi-homescreen/bundle/lib" \
-                      "$mp_root/opt/ivi-homescreen/bundle/data"
-        sudo install -m0644 "$FLUTTER_ENGINE/lib/libflutter_engine.so" \
-            "$mp_root/opt/ivi-homescreen/bundle/lib/libflutter_engine.so"
-        sudo install -m0644 "$FLUTTER_ENGINE/data/icudtl.dat" \
-            "$mp_root/opt/ivi-homescreen/bundle/data/icudtl.dat"
+        note "no /boot/cmdline.txt (unexpected layout — skipping cmdline tweak)"
     fi
 
-    # --- systemd service ---
-    log "writing /etc/systemd/system/ivi-homescreen.service"
-    sudo tee "$mp_root/etc/systemd/system/ivi-homescreen.service" >/dev/null <<EOF
+    # ── Kiosk install (only when a built binary is available) ─────────
+    if [[ -n "$home_bin" ]]; then
+        log "installing binary → /usr/local/bin/ivi-homescreen"
+        sudo install -m0755 "$home_bin" "$mp_root/usr/local/bin/ivi-homescreen"
+
+        sudo mkdir -p "$mp_root/opt/ivi-homescreen/bundle"
+        if [[ -n "$bundle_src" ]]; then
+            log "installing bundle → /opt/ivi-homescreen/bundle"
+            sudo rsync -a --delete "$bundle_src/" "$mp_root/opt/ivi-homescreen/bundle/"
+        else
+            log "no --bundle given; staging engine SDK only"
+            sudo mkdir -p "$mp_root/opt/ivi-homescreen/bundle/lib" \
+                          "$mp_root/opt/ivi-homescreen/bundle/data"
+            sudo install -m0644 "$FLUTTER_ENGINE/lib/libflutter_engine.so" \
+                "$mp_root/opt/ivi-homescreen/bundle/lib/libflutter_engine.so"
+            sudo install -m0644 "$FLUTTER_ENGINE/data/icudtl.dat" \
+                "$mp_root/opt/ivi-homescreen/bundle/data/icudtl.dat"
+        fi
+
+        log "writing /etc/systemd/system/ivi-homescreen.service"
+        sudo tee "$mp_root/etc/systemd/system/ivi-homescreen.service" >/dev/null <<EOF
 [Unit]
 Description=ivi-homescreen Flutter shell (kiosk)
 DefaultDependencies=no
@@ -962,51 +1009,21 @@ TTYVHangup=yes
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo chmod 0644 "$mp_root/etc/systemd/system/ivi-homescreen.service"
+        sudo chmod 0644 "$mp_root/etc/systemd/system/ivi-homescreen.service"
 
-    # Enable via the multi-user.target.wants symlink (avoids needing a
-    # `systemctl enable` chroot dance).
-    sudo mkdir -p "$mp_root/etc/systemd/system/multi-user.target.wants"
-    sudo ln -sf ../ivi-homescreen.service \
-        "$mp_root/etc/systemd/system/multi-user.target.wants/ivi-homescreen.service"
+        # Enable via the multi-user.target.wants symlink (avoids a
+        # `systemctl enable` chroot dance).
+        sudo mkdir -p "$mp_root/etc/systemd/system/multi-user.target.wants"
+        sudo ln -sf ../ivi-homescreen.service \
+            "$mp_root/etc/systemd/system/multi-user.target.wants/ivi-homescreen.service"
 
-    # Mask getty@tty1 so no login prompt ever paints over the homescreen.
-    if [[ "$MASK_GETTY" -eq 1 ]]; then
-        log "masking getty@tty1.service (no visible login prompt)"
-        sudo ln -sf /dev/null "$mp_root/etc/systemd/system/getty@tty1.service"
-    else
-        note "--no-mask-getty: leaving getty@tty1 enabled"
-    fi
-
-    # --- Boot partition fixups ---
-
-    # PiOS firstboot reads /boot/userconf.txt as "user:hash". Without it,
-    # PiOS Lite hangs at first boot waiting for user setup over serial.
-    local hash
-    hash="$(hash_password "$FIRSTBOOT_PASSWORD")"
-    log "writing /boot/userconf.txt (user: $FIRSTBOOT_USER)"
-    echo "${FIRSTBOOT_USER}:${hash}" | sudo tee "$mp_boot/userconf.txt" >/dev/null
-    sudo chmod 0600 "$mp_boot/userconf.txt"
-
-    # Quiet kernel cmdline so the boot is visually clean before the
-    # homescreen takes over. cmdline.txt is a single line; append flags
-    # idempotently.
-    local cmdline="$mp_boot/cmdline.txt"
-    if [[ -f "$cmdline" ]]; then
-        log "quieting kernel cmdline (/boot/cmdline.txt)"
-        local extra=""
-        local flag
-        for flag in "quiet" "logo.nologo" "vt.global_cursor_default=0" "loglevel=3"; do
-            grep -qw "$flag" "$cmdline" || extra="$extra $flag"
-        done
-        if [[ -n "$extra" ]]; then
-            sudo sed -i "s|\$|${extra}|" "$cmdline"
-            note "appended:$extra"
+        # Mask getty@tty1 so no login prompt paints over the homescreen.
+        if [[ "$MASK_GETTY" -eq 1 ]]; then
+            log "masking getty@tty1.service (no visible login prompt)"
+            sudo ln -sf /dev/null "$mp_root/etc/systemd/system/getty@tty1.service"
         else
-            note "cmdline already contains all flags"
+            note "--no-mask-getty: leaving getty@tty1 enabled"
         fi
-    else
-        note "no /boot/cmdline.txt (unexpected layout — skipping cmdline tweak)"
     fi
 
     sync
@@ -1018,17 +1035,26 @@ EOF
 
     log "provisioning complete"
     echo
-    echo "  Eject and boot the Pi. The first boot will run firstboot once"
-    echo "  (resizes rootfs, applies the userconf.txt account), then comes"
-    echo "  up with no visible console output before ivi-homescreen starts."
+    if [[ -n "$home_bin" ]]; then
+        echo "  Eject and boot the Pi. After firstboot the kiosk service"
+        echo "  takes over the framebuffer before any visible login."
+    else
+        echo "  Eject and boot the Pi. PiOS firstboot will apply the"
+        echo "  userconf account; the kiosk service is NOT installed"
+        echo "  (no built binary was available). Re-run with a built"
+        echo "  binary + --provision --skip-build to layer it on."
+    fi
     echo
-    echo "  Login (over SSH or serial, if enabled):"
+    echo "  Login (SSH on the .lan / .local hostname once the Pi finishes"
+    echo "  firstboot, or serial console):"
     echo "    user:     $FIRSTBOOT_USER"
     echo "    password: $FIRSTBOOT_PASSWORD"
-    echo
-    echo "  Inspect the service from the target:"
-    echo "    sudo systemctl status ivi-homescreen.service"
-    echo "    sudo journalctl -u ivi-homescreen.service -b"
+    if [[ -n "$home_bin" ]]; then
+        echo
+        echo "  Inspect the service on the target:"
+        echo "    sudo systemctl status ivi-homescreen.service"
+        echo "    sudo journalctl -u ivi-homescreen.service -b"
+    fi
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────
