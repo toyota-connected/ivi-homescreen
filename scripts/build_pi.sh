@@ -90,6 +90,17 @@
 #                                     as a black screen even though atomic
 #                                     commits succeed. Only useful for multi-
 #                                     view / deliberate-letterbox cases.
+#     --drm-mode <WxH@R>            pass `--drm-mode <m>` to the kiosk service
+#                                     so the embedder forces a specific output
+#                                     mode rather than picking EDID-preferred.
+#                                     Format e.g. 1920x1080@120. Useful on Pi
+#                                     4 where the panel's preferred mode is
+#                                     3840x2160@30 (HDMI 2.0 ceiling) but
+#                                     1920x1080@120, 1920x1080@60, or
+#                                     2560x1440@60 are also advertised + give
+#                                     higher fps. Enumerate the panel's
+#                                     advertised modes with:
+#                                       ivi-homescreen --drm-list-modes
 #     --skip-build                  reuse an existing build dir; just provision.
 #
 #     -v / --verbose
@@ -144,6 +155,7 @@ FIRSTBOOT_PASSWORD="homescreen"
 MASK_GETTY=1
 INSTALL_DEPS=1
 FULLSCREEN=1
+DRM_MODE=""
 SKIP_BUILD=0
 
 # ARM GNU Toolchain (x86_64 host → aarch64 Linux glibc).
@@ -216,6 +228,7 @@ while [[ $# -gt 0 ]]; do
         --no-mask-getty)      MASK_GETTY=0; shift ;;
         --no-deps-install)    INSTALL_DEPS=0; shift ;;
         --no-fullscreen)      FULLSCREEN=0; shift ;;
+        --drm-mode)           DRM_MODE="$2"; shift 2 ;;
         --skip-build)         SKIP_BUILD=1; shift ;;
         -v|--verbose)         VERBOSE=1; shift ;;
         -h|--help)            usage 0 ;;
@@ -229,6 +242,11 @@ case "$SERVICE_BACKEND" in
 esac
 [[ -z "$TARGET_DEVICE" || "$TARGET_DEVICE" =~ ^/dev/(sd[a-z]+|mmcblk[0-9]+|nvme[0-9]+n[0-9]+)$ ]] \
     || die "--device $TARGET_DEVICE: not a recognised path (need /dev/sd*, /dev/mmcblk*, or /dev/nvme*n*)"
+
+# --drm-mode format: WxH@R (e.g. 1920x1080@120). The embedder's parser
+# is the source of truth — this is just a friendly typo guard.
+[[ -z "$DRM_MODE" || "$DRM_MODE" =~ ^[0-9]+x[0-9]+@[0-9]+$ ]] \
+    || die "--drm-mode $DRM_MODE: expected <WxH@R> e.g. 1920x1080@120"
 
 case "$PIOS" in bookworm|trixie) ;; *) die "--pios must be bookworm|trixie (got: $PIOS)" ;; esac
 case "$TARGET" in pi4|pi5|piz2|generic) ;; *) die "--target must be pi4|pi5|piz2|generic (got: $TARGET)" ;; esac
@@ -1032,7 +1050,16 @@ phase7_provision() {
         # hardware shakedown on a 4K LG panel confirmed.
         local exec_extra=""
         if [[ "$FULLSCREEN" -eq 1 ]]; then
-            exec_extra=" -f"
+            exec_extra="${exec_extra} -f"
+        fi
+        # --drm-mode <WxH@R> overrides the EDID-preferred mode. Pi 4
+        # HDMI 2.0 caps the pixel clock at ~600 MHz, so 4K is locked
+        # to 30Hz. 1920x1080@120 / 2560x1440@60 / 1920x1080@60 are
+        # commonly-advertised alternatives that give higher fps;
+        # operator picks per panel + bandwidth budget. Enumerate the
+        # panel's modes on-target with `ivi-homescreen --drm-list-modes`.
+        if [[ -n "$DRM_MODE" ]]; then
+            exec_extra="${exec_extra} --drm-mode ${DRM_MODE}"
         fi
 
         log "writing /etc/systemd/system/ivi-homescreen.service"
