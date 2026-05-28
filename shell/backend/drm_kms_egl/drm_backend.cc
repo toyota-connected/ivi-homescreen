@@ -20,7 +20,6 @@
 #include <linux/vt.h>
 #include <poll.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
@@ -182,11 +181,11 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   }
   const unsigned int active_vt = vtstat.v_active;
 
-  // open("/dev/tty") redirects to the process's controlling terminal; fstat
-  // on the resulting fd returns that terminal's device number. stat("/dev/tty")
-  // would always return (5, 0) — the stats of the /dev/tty device node itself
-  // — and the major check below would reject every caller, so go through the
-  // open/fstat dance instead.
+  // open("/dev/tty") redirects to the process's controlling terminal, so
+  // calling open() against the special inode is the only way to acquire
+  // an fd that *targets* the ctty rather than the /dev/tty special device
+  // itself. ENXIO from open() means the process has no ctty at all (e.g.
+  // a daemon without setsid + TIOCSCTTY).
   const int ctl_fd = ::open("/dev/tty", O_RDONLY | O_CLOEXEC | O_NOCTTY);
   if (ctl_fd < 0) {
     spdlog::error(
@@ -196,15 +195,23 @@ bool VerifyForegroundVt(const std::string& drm_device) {
         std::strerror(errno), drm_device, active_vt);
     return false;
   }
-  struct stat st{};
-  const int fstat_rc = ::fstat(ctl_fd, &st);
-  const int fstat_errno = errno;
+  // fstat() of the resulting fd does NOT return the underlying tty's
+  // device numbers — it returns /dev/tty's own (5, 0) inode metadata on
+  // every Linux kernel from 4.x onward. The earlier version of this
+  // check believed fstat would resolve through; in practice it
+  // mis-rejected every legitimate kernel-VT ctty too, including
+  // systemd-launched services attached via TTYPath=/dev/tty1. TIOCGDEV
+  // is the canonical ioctl for retrieving the actual tty device number
+  // from a /dev/tty fd; available since Linux 2.6.18.
+  unsigned int dev = 0;
+  const int ioctl_rc = ::ioctl(ctl_fd, TIOCGDEV, &dev);
+  const int ioctl_errno = errno;
   ::close(ctl_fd);
-  if (fstat_rc != 0) {
+  if (ioctl_rc != 0) {
     spdlog::error(
-        "[DrmBackend] fstat(/dev/tty): {}. Cannot drive {} without a "
-        "foreground VT — switch to the active console (tty{}) and rerun.",
-        std::strerror(fstat_errno), drm_device, active_vt);
+        "[DrmBackend] TIOCGDEV(/dev/tty): {}. Cannot drive {} without "
+        "a foreground VT — switch to the active console (tty{}) and rerun.",
+        std::strerror(ioctl_errno), drm_device, active_vt);
     return false;
   }
 
@@ -212,8 +219,8 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   // and SSH sessions give /dev/tty a pts major (136+), which is precisely
   // the case we want to refuse.
   constexpr unsigned int kTtyMajor = 4;
-  const unsigned int ctl_major = major(st.st_rdev);
-  const unsigned int ctl_minor = minor(st.st_rdev);
+  const unsigned int ctl_major = major(static_cast<dev_t>(dev));
+  const unsigned int ctl_minor = minor(static_cast<dev_t>(dev));
   if (ctl_major != kTtyMajor) {
     spdlog::error(
         "[DrmBackend] controlling terminal is not a kernel VT "
