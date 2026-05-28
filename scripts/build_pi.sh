@@ -945,6 +945,18 @@ phase7_provision() {
     log "enabling SSH (/boot/ssh)"
     sudo touch "$mp_boot/ssh"
 
+    # Mask userconfig.service. PiOS Lite ships this (from
+    # raspberrypi-sys-mods) as a GUI-fallback first-boot wizard for
+    # operators who didn't provide a userconf.txt. We DO write
+    # userconf.txt above — firstrun handles the account creation
+    # — but userconfig.service still fires on first boot from the
+    # package's preset, fails noisily on a headless system
+    # ("[FAILED] Failed to start userconfig.service - User
+    # configuration dialog.") because there's no display for the
+    # dialog. Mask via /dev/null symlink so the boot stays clean.
+    log "masking userconfig.service (account is set up via userconf.txt)"
+    sudo ln -sf /dev/null "$mp_root/etc/systemd/system/userconfig.service"
+
     # Quiet kernel cmdline so the boot is visually clean before the
     # homescreen takes over. cmdline.txt is a single line; append flags
     # idempotently.
@@ -1056,11 +1068,18 @@ EOF
         # --no-deps-install skips this for fully-offline kiosks where
         # the operator stages runtime libs themselves.
         if [[ "$INSTALL_DEPS" -eq 1 ]]; then
-            # Common dependencies — touched by every backend through
-            # the plugin layer or gstreamer/glib/curl deps.
-            local deps_common="libxkbcommon0 libgstreamer1.0-0 \
-libgstreamer-plugins-base1.0-0 libpipewire-0.3-0 libcamera0.4 \
-libcurl4t64 libsecret-1-0 libjpeg62-turbo libxml2 libglib2.0-0t64"
+            # Common dependencies — linked by every backend regardless
+            # of choice. libwayland-client0 + libwayland-cursor0 are
+            # here (not under wayland-* backends) because shell/wayland/
+            # window.cc compiles into the binary unconditionally, so
+            # even drm-kms-egl + software builds pull them in at link
+            # time. The remaining libs cover plugin glue (gstreamer /
+            # glib / curl / xml / jpeg / pipewire / camera / secret) +
+            # the xkbcommon stack the input dispatcher always uses.
+            local deps_common="libwayland-client0 libwayland-cursor0 \
+libxkbcommon0 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+libpipewire-0.3-0 libcamera0.4 libcurl4t64 libsecret-1-0 \
+libjpeg62-turbo libxml2 libglib2.0-0t64"
             # Backend-specific. dmz-cursor-theme provides DMZ-White
             # (the default cursor theme drm-kms-egl loads via
             # libxcursor); without it the cursor either renders empty
@@ -1068,10 +1087,10 @@ libcurl4t64 libsecret-1-0 libjpeg62-turbo libxml2 libglib2.0-0t64"
             local deps_backend=""
             case "$backend" in
                 wayland-egl)
-                    deps_backend="libwayland-client0 libegl1 libgles2"
+                    deps_backend="libegl1 libgles2"
                     ;;
                 wayland-vulkan)
-                    deps_backend="libwayland-client0 libvulkan1 mesa-vulkan-drivers"
+                    deps_backend="libvulkan1 mesa-vulkan-drivers"
                     ;;
                 drm-kms-egl)
                     deps_backend="libdrm2 libgbm1 libinput10 libdisplay-info2 \
