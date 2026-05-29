@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include "flutter_view.h"
+#include <filesystem>
+#include "logging/logging.h"
 
 #include <cassert>
 #include <memory>
@@ -438,7 +440,8 @@ void FlutterView::Initialize() {
   // size and never schedules a frame. Send it explicitly now that the
   // engine is running.
   {
-    const auto result = m_flutter_engine->SetWindowSize(height, width);
+    const auto result = m_flutter_engine->SetWindowSize(
+        static_cast<size_t>(height), static_cast<size_t>(width));
     spdlog::info("[DrmBackend] SendWindowMetrics {}x{} result={}", width,
                  height, static_cast<int>(result));
   }
@@ -447,7 +450,8 @@ void FlutterView::Initialize() {
   // window-metrics event. Send it explicitly here so the bundle's Dart
   // side gets a non-zero viewport on its first frame.
   {
-    const auto result = m_flutter_engine->SetWindowSize(height, width);
+    const auto result = m_flutter_engine->SetWindowSize(
+        static_cast<size_t>(height), static_cast<size_t>(width));
     spdlog::info("[SoftwareBackend] SendWindowMetrics {}x{} result={}", width,
                  height, static_cast<int>(result));
   }

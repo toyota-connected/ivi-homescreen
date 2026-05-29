@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "window.h"
+#include "logging/logging.h"
 
 #include <utility>
 

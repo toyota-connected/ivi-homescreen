@@ -15,6 +15,7 @@
  */
 
 #include "display/drm_display.h"
+#include "logging/logging.h"
 
 #include <cstring>
 #include <utility>

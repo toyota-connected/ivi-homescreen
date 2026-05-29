@@ -47,6 +47,16 @@
 #     --toolchain-version <ver>     ARM GNU Toolchain version (defaults: bookworm→12.3.rel1,
 #                                                                       trixie→15.2.rel1)
 #     --toolchain-url <url>         override toolchain tarball URL
+#     --toolchain-host <arch>       toolchain build-host arch (auto: x86_64/aarch64)
+#     --with-local-display-info     cross-build libdisplay-info >= 0.2.0 from source
+#                                   into the sysroot (static), enabling drm-kms-egl
+#                                   on distros that ship an older one (e.g. bookworm)
+#     --display-info-version <ver>  libdisplay-info source tag to build (default 0.2.0)
+#     --with-local-vulkan-headers   install newer Vulkan-Headers (header-only) into
+#                                   the sysroot, enabling wayland-vulkan on distros
+#                                   with an older Vulkan SDK (e.g. bookworm)
+#     --vulkan-headers-version <t>  Vulkan-Headers tag to install (default
+#                                   vulkan-sdk-1.4.309.0)
 #
 #   SD card imaging + device provisioning (post-build):
 #     --image-sd                    interactively detect & write the PiOS image to
@@ -142,6 +152,12 @@ PREPARE_ONLY=0
 REFRESH_SYSROOT=0
 IMAGE_URL=""
 TOOLCHAIN_URL=""
+WITH_LOCAL_DISPLAY_INFO=0
+LIBDISPLAY_INFO_VERSION="0.2.0"   # min for drm-cxx (HDR/colorimetry EDID APIs)
+LIBDISPLAY_INFO_URL=""            # derived from version unless overridden
+WITH_LOCAL_VULKAN_HEADERS=0
+VULKAN_HEADERS_VERSION="vulkan-sdk-1.4.309.0"  # VK_HEADER_VERSION 309 (matches trixie)
+VULKAN_HEADERS_URL=""             # derived from version unless overridden
 VERBOSE=0
 
 # SD imaging / provisioning state.
@@ -173,7 +189,16 @@ SKIP_BUILD=0
 #   trixie   → 15.2.rel1 (gcc 15, glibc ≥ 2.41 — matches PiOS Trixie)
 # Override with --toolchain-version (or --toolchain-url for arbitrary URLs).
 TC_TRIPLE="aarch64-none-linux-gnu"
-TC_HOST="x86_64"
+# Host arch of the cross toolchain build. ARM publishes both x86_64- and
+# aarch64-hosted variants; pick the one matching this machine so the compiler
+# runs natively (an x86_64 toolchain on an aarch64 host gets routed through
+# qemu-x86_64-static, which fails for lack of an x86_64 loader). Override with
+# --toolchain-host if needed.
+case "$(uname -m)" in
+    aarch64|arm64) TC_HOST="aarch64" ;;
+    x86_64|amd64)  TC_HOST="x86_64" ;;
+    *)             TC_HOST="x86_64" ;;
+esac
 TC_VERSION=""        # auto-derived from $PIOS unless --toolchain-version is given
 declare -A TC_VERSION_FOR_PIOS=(
     [bookworm]="12.3.rel1"
@@ -191,7 +216,7 @@ TRIXIE_IMG_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/rasp
 # enumerates available builds.
 ENGINE_DEFAULT_SHA="13e658725ddaa270601426d1485636157e38c34c"
 ENGINE_REPO="meta-flutter/flutter-engine"
-ENGINE_ARCH="arm64"  # aarch64 PiOS — host is x86_64-only, no other arch supported
+ENGINE_ARCH="arm64"  # target arch (aarch64 PiOS); independent of build-host arch
 
 # ── Argument parsing ─────────────────────────────────────────────────────
 
@@ -218,6 +243,11 @@ while [[ $# -gt 0 ]]; do
         --image-url)          IMAGE_URL="$2"; shift 2 ;;
         --toolchain-url)      TOOLCHAIN_URL="$2"; shift 2 ;;
         --toolchain-version)  TC_VERSION="$2"; shift 2 ;;
+        --toolchain-host)     TC_HOST="$2"; shift 2 ;;
+        --with-local-display-info) WITH_LOCAL_DISPLAY_INFO=1; shift ;;
+        --display-info-version)    LIBDISPLAY_INFO_VERSION="$2"; shift 2 ;;
+        --with-local-vulkan-headers) WITH_LOCAL_VULKAN_HEADERS=1; shift ;;
+        --vulkan-headers-version)    VULKAN_HEADERS_VERSION="$2"; shift 2 ;;
         --image-sd)           IMAGE_SD=1; PROVISION=1; shift ;;
         --device)             TARGET_DEVICE="$2"; IMAGE_SD=1; PROVISION=1; shift 2 ;;
         --provision)          PROVISION=1; shift ;;
@@ -254,12 +284,12 @@ case "$BACKEND" in wayland-egl|wayland-vulkan|drm-kms-egl|software|all) ;;
     *) die "--backend must be wayland-egl|wayland-vulkan|drm-kms-egl|software|all (got: $BACKEND)" ;;
 esac
 
-# Resolve which backends to actually build. drm-kms-egl is unavailable on
-# bookworm because drm-cxx requires libdisplay-info >= 0.2.0 and bookworm
-# only ships 0.1.1.
+# Resolve which backends to actually build. drm-kms-egl needs libdisplay-info
+# >= 0.2.0 (drm-cxx); bookworm only ships 0.1.1, so it's dropped from `all`
+# unless --with-local-display-info cross-builds a newer one into the sysroot.
 if [[ "$BACKEND" == "all" ]]; then
     BUILD_BACKENDS=("${ALL_BACKENDS[@]}")
-    if [[ "$PIOS" == "bookworm" ]]; then
+    if [[ "$PIOS" == "bookworm" && "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]]; then
         BUILD_BACKENDS=()
         for be in "${ALL_BACKENDS[@]}"; do
             [[ "$be" == "drm-kms-egl" ]] && continue
@@ -268,6 +298,10 @@ if [[ "$BACKEND" == "all" ]]; then
     fi
 else
     BUILD_BACKENDS=("$BACKEND")
+    if [[ "$BACKEND" == "drm-kms-egl" && "$PIOS" == "bookworm" \
+          && "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]]; then
+        die "drm-kms-egl on bookworm needs libdisplay-info >= 0.2.0 (ships 0.1.1); pass --with-local-display-info to cross-build it"
+    fi
 fi
 case "$FLUTTER_RUNTIME" in debug|debug-unopt|profile|release) ;;
     *) die "--flutter-runtime must be debug|debug-unopt|profile|release (got: $FLUTTER_RUNTIME)" ;;
@@ -304,6 +338,16 @@ TC_TARBALL="arm-gnu-toolchain-${TC_VERSION}-${TC_HOST}-${TC_TRIPLE}.tar.xz"
 TC_DIRNAME="arm-gnu-toolchain-${TC_VERSION}-${TC_HOST}-${TC_TRIPLE}"
 [[ -z "$TOOLCHAIN_URL" ]] \
     && TOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/${TC_VERSION}/binrel/${TC_TARBALL}"
+
+# libdisplay-info source archive (pinned by tag). freedesktop GitLab serves a
+# stable per-tag archive; pinning the tag is the pin (no upstream .sha256).
+LIBDISPLAY_INFO_TARBALL="libdisplay-info-${LIBDISPLAY_INFO_VERSION}.tar.gz"
+[[ -z "$LIBDISPLAY_INFO_URL" ]] \
+    && LIBDISPLAY_INFO_URL="https://gitlab.freedesktop.org/emersion/libdisplay-info/-/archive/${LIBDISPLAY_INFO_VERSION}/${LIBDISPLAY_INFO_TARBALL}"
+
+# Vulkan-Headers source archive (header-only, pinned by tag).
+[[ -z "$VULKAN_HEADERS_URL" ]] \
+    && VULKAN_HEADERS_URL="https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/${VULKAN_HEADERS_VERSION}.tar.gz"
 
 # ── Resolved sandbox paths ───────────────────────────────────────────────
 
@@ -540,27 +584,36 @@ print(linux[0]["start"])')"
 
     # Shared deps across all backends (plugins, GLES, gstreamer/glib, etc.).
     # libsystemd-dev is for sdbus-cpp inside ivi-homescreen-plugins.
+    # libwayland-dev + wayland-protocols are shared, not Wayland-backend-only:
+    # waypp is always built and unconditionally requires wayland-client /
+    # wayland-cursor / wayland-protocols, so a drm-kms-egl- or software-only
+    # build needs them too.
     local pkgs=(
         libcamera-dev libcurl4-openssl-dev libegl-dev libgles2-mesa-dev
         libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
         libjpeg-dev libpipewire-0.3-dev libsecret-1-dev libsystemd-dev
-        libudev-dev libxkbcommon-dev libxml2-dev zlib1g-dev
+        libudev-dev libwayland-dev libxkbcommon-dev libxml2-dev
+        wayland-protocols zlib1g-dev
     )
     # Backend-specific deps — union of every backend queued in BUILD_BACKENDS.
     # Duplicate package names are harmless: apt resolves them once.
     for be in "${BUILD_BACKENDS[@]}"; do
         case "$be" in
             wayland-egl)
-                pkgs+=(libwayland-dev wayland-protocols) ;;
+                : ;;  # EGL/GLES + wayland (for waypp) come from the shared list
             wayland-vulkan)
-                pkgs+=(libwayland-dev wayland-protocols libvulkan-dev mesa-vulkan-drivers) ;;
+                pkgs+=(libvulkan-dev mesa-vulkan-drivers) ;;
             drm-kms-egl)
                 # drm-cxx requires libdisplay-info >= 0.2.0 (Trixie 0.2.0;
-                # Bookworm 0.1.1 — drm-kms-egl is pre-filtered out for bookworm).
-                # libxcursor-dev gates the DRM HW cursor module; absent → leaky
-                # symbol references (~DrmCursor / DrmCursor::Move) break the link.
-                pkgs+=(libdrm-dev libgbm-dev libinput-dev libdisplay-info-dev
-                       libxcursor-dev) ;;
+                # Bookworm 0.1.1). libxcursor-dev gates the DRM HW cursor module;
+                # absent → leaky symbol references (~DrmCursor / DrmCursor::Move)
+                # break the link.
+                pkgs+=(libdrm-dev libgbm-dev libinput-dev libxcursor-dev)
+                # When we cross-build libdisplay-info ourselves, skip the apt
+                # -dev package so its libdisplay-info.so dev symlink can't shadow
+                # our static .a at link time (would re-introduce a runtime dep).
+                [[ "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]] \
+                    && pkgs+=(libdisplay-info-dev) ;;
             software)
                 pkgs+=(libdrm-dev libinput-dev) ;;
         esac
@@ -597,6 +650,152 @@ print(linux[0]["start"])')"
             note "created $ma/lib${stem}.so -> $sover"
         fi
     done
+}
+
+# ── Phase 2b: optional local libdisplay-info (>= 0.2.0, static) ──────────
+
+# Version of libdisplay-info currently visible to the cross pkg-config in the
+# sysroot ("0" if none).
+displayinfo_modversion() {
+    PKG_CONFIG_LIBDIR="$XC_SYSROOT/usr/lib/aarch64-linux-gnu/pkgconfig:$XC_SYSROOT/usr/lib/pkgconfig:$XC_SYSROOT/usr/share/pkgconfig" \
+    PKG_CONFIG_SYSROOT_DIR="$XC_SYSROOT" \
+        pkg-config --modversion libdisplay-info 2>/dev/null || echo 0
+}
+
+# True if $1 >= $LIBDISPLAY_INFO_VERSION (and not the "0" sentinel).
+displayinfo_ge_floor() {
+    [[ "$1" != "0" ]] && \
+    [[ "$(printf '%s\n%s\n' "$LIBDISPLAY_INFO_VERSION" "$1" | sort -V | head -1)" == "$LIBDISPLAY_INFO_VERSION" ]]
+}
+
+phase2b_local_display_info() {
+    [[ "$WITH_LOCAL_DISPLAY_INFO" -eq 1 ]] || return 0
+    log "Phase 2b: local libdisplay-info (>= ${LIBDISPLAY_INFO_VERSION}, static)"
+
+    # Skip when the sysroot already satisfies the floor (e.g. trixie's 0.2.0).
+    local have; have="$(displayinfo_modversion)"
+    if displayinfo_ge_floor "$have"; then
+        note "sysroot already has libdisplay-info $have; skipping local build"
+        return
+    fi
+
+    for t in meson ninja; do
+        command -v "$t" >/dev/null \
+            || die "--with-local-display-info needs '$t' on PATH"
+    done
+
+    local tarball src bld cross
+    tarball="$DOWNLOADS/$LIBDISPLAY_INFO_TARBALL"
+    src="$XC_ROOT/src/libdisplay-info-${LIBDISPLAY_INFO_VERSION}"
+    bld="$src/build-xc-${PIOS}"
+    cross="$src/.xc-cross-${PIOS}.ini"
+
+    # Integrity rests on the pinned tag fetched over HTTPS — GitLab's archive
+    # endpoint has no companion .sha256 (a ".sha256" suffix 200s with junk).
+    fetch "$LIBDISPLAY_INFO_URL" "$tarball"
+
+    if [[ ! -f "$src/meson.build" ]]; then
+        log "extracting libdisplay-info"
+        mkdir -p "$XC_ROOT/src"; rm -rf "$src"
+        # GitLab archive top dir is libdisplay-info-<tag>-<sha>; normalize.
+        local tmp; tmp="$(mktemp -d "$XC_ROOT/src/.unpack.XXXXXX")"
+        tar -xzf "$tarball" -C "$tmp"
+        mv "$tmp"/*/ "$src"; rmdir "$tmp"
+    fi
+
+    # Meson cross file mirroring .xc-toolchain.cmake: ARM toolchain + sysroot.
+    local ma_inc="$XC_SYSROOT/usr/include/aarch64-linux-gnu"
+    local ma_usr="$XC_SYSROOT/usr/lib/aarch64-linux-gnu"
+    local ma_lib="$XC_SYSROOT/lib/aarch64-linux-gnu"
+    cat > "$cross" <<EOF
+[binaries]
+c = '$CROSS_BIN/${TC_TRIPLE}-gcc'
+cpp = '$CROSS_BIN/${TC_TRIPLE}-g++'
+ar = '$CROSS_BIN/${TC_TRIPLE}-ar'
+strip = '$CROSS_BIN/${TC_TRIPLE}-strip'
+pkg-config = 'pkg-config'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+
+[built-in options]
+c_args = ['--sysroot=$XC_SYSROOT', '-isystem', '$ma_inc', '-B$ma_usr'${XC_CPU_FLAGS:+, '$XC_CPU_FLAGS'}]
+c_link_args = ['--sysroot=$XC_SYSROOT', '-B$ma_usr', '-L$ma_usr', '-L$ma_lib']
+EOF
+
+    log "configuring libdisplay-info (meson cross, static)"
+    rm -rf "$bld"
+    PKG_CONFIG_LIBDIR="$ma_usr/pkgconfig:$XC_SYSROOT/usr/lib/pkgconfig:$XC_SYSROOT/usr/share/pkgconfig" \
+    PKG_CONFIG_SYSROOT_DIR="$XC_SYSROOT" \
+        meson setup "$bld" "$src" \
+            --cross-file "$cross" \
+            --prefix /usr --libdir lib/aarch64-linux-gnu \
+            --buildtype release --default-library static
+
+    log "building + installing libdisplay-info into sysroot"
+    ninja -C "$bld"
+    DESTDIR="$XC_SYSROOT" ninja -C "$bld" install
+
+    # Force static linkage: drop any libdisplay-info.so dev symlink (from a
+    # previously apt-installed 0.1.x) so -ldisplay-info resolves to our .a.
+    rm -f "$ma_usr/libdisplay-info.so"
+
+    local now; now="$(displayinfo_modversion)"
+    displayinfo_ge_floor "$now" \
+        || die "libdisplay-info install did not yield >= $LIBDISPLAY_INFO_VERSION (got '$now')"
+    note "libdisplay-info $now installed (static) into $PIOS sysroot"
+}
+
+# ── Phase 2c: optional newer Vulkan-Headers (header-only) ────────────────
+
+# VK_HEADER_VERSION currently in the sysroot ("0" if absent).
+vulkan_header_version() {
+    local h="$XC_SYSROOT/usr/include/vulkan/vulkan_core.h"
+    if [[ -f "$h" ]]; then
+        awk '/#define VK_HEADER_VERSION /{print $3; exit}' "$h"
+    else
+        echo 0
+    fi
+}
+
+phase2c_local_vulkan_headers() {
+    [[ "$WITH_LOCAL_VULKAN_HEADERS" -eq 1 ]] || return 0
+    # Patch component of the pinned tag (vulkan-sdk-1.4.309.0 -> 309).
+    local want; want="$(echo "$VULKAN_HEADERS_VERSION" | awk -F. '{print $3}')"
+    log "Phase 2c: local Vulkan-Headers (VK_HEADER_VERSION >= ${want})"
+
+    local have; have="$(vulkan_header_version)"
+    if [[ "$have" =~ ^[0-9]+$ ]] && (( have >= want )); then
+        note "sysroot already has VK_HEADER_VERSION $have; skipping"
+        return
+    fi
+
+    local tarball src
+    tarball="$DOWNLOADS/Vulkan-Headers-${VULKAN_HEADERS_VERSION}.tar.gz"
+    src="$XC_ROOT/src/Vulkan-Headers-${VULKAN_HEADERS_VERSION}"
+    fetch "$VULKAN_HEADERS_URL" "$tarball"
+
+    if [[ ! -d "$src/include/vulkan" ]]; then
+        log "extracting Vulkan-Headers"
+        mkdir -p "$XC_ROOT/src"; rm -rf "$src"
+        local tmp; tmp="$(mktemp -d "$XC_ROOT/src/.unpack.XXXXXX")"
+        tar -xzf "$tarball" -C "$tmp"
+        mv "$tmp"/*/ "$src"; rmdir "$tmp"
+    fi
+
+    # Header-only: overlay the newer Vulkan + vk_video headers. The sysroot's
+    # libvulkan.so loader is ABI-stable, so the older runtime still serves the
+    # newer API surface (unknown instance-extension structs are ignored).
+    log "installing Vulkan-Headers into sysroot (header-only)"
+    mkdir -p "$XC_SYSROOT/usr/include/vulkan" "$XC_SYSROOT/usr/include/vk_video"
+    cp -a "$src/include/vulkan/." "$XC_SYSROOT/usr/include/vulkan/"
+    [[ -d "$src/include/vk_video" ]] \
+        && cp -a "$src/include/vk_video/." "$XC_SYSROOT/usr/include/vk_video/"
+
+    note "Vulkan-Headers now VK_HEADER_VERSION $(vulkan_header_version) in $PIOS sysroot"
 }
 
 # ── Phase 3: toolchain file + pkg-config wrapper ─────────────────────────
@@ -1246,6 +1445,8 @@ phase0_preflight
 phase1_toolchain
 phase1b_flutter_engine
 phase2_sysroot
+phase2b_local_display_info
+phase2c_local_vulkan_headers
 
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
     log "prepare-only: stopping before configure"
@@ -1255,8 +1456,8 @@ if [[ "$PREPARE_ONLY" -eq 1 ]]; then
     exit 0
 fi
 
-if [[ "$BACKEND" == "all" && "$PIOS" == "bookworm" ]]; then
-    log "note: skipping drm-kms-egl on bookworm (libdisplay-info 0.1.1 < drm-cxx 0.2.0)"
+if [[ "$BACKEND" == "all" && "$PIOS" == "bookworm" && "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]]; then
+    log "note: skipping drm-kms-egl on bookworm (libdisplay-info 0.1.1 < drm-cxx 0.2.0); pass --with-local-display-info to include it"
 fi
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then

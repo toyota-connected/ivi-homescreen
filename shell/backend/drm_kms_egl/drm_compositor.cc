@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_compositor.h"
+#include "logging/logging.h"
 
 #include <poll.h>
 #include <unistd.h>

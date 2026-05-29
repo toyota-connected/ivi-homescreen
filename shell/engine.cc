@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <utility>
 #include <vector>
+#include "logging/logging.h"
 
 #include <dlfcn.h>
 #include <cassert>

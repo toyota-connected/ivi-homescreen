@@ -37,6 +37,18 @@ cmake_policy(SET CMP0079 NEW)
 
 add_subdirectory(${_drm_cxx_src} ${CMAKE_BINARY_DIR}/third_party/drm-cxx EXCLUDE_FROM_ALL)
 
+# Treat drm-cxx as a system library (vendored submodule we keep pristine):
+# mark its interface headers SYSTEM so they're -isystem for consumers, and
+# silence its own-source warnings (-Wsign-conversion, -Wc++20-extensions, …).
+if (TARGET drm-cxx)
+    get_target_property(_drmcxx_inc drm-cxx INTERFACE_INCLUDE_DIRECTORIES)
+    if (_drmcxx_inc)
+        set_target_properties(drm-cxx PROPERTIES
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_drmcxx_inc}")
+    endif ()
+    target_compile_options(drm-cxx PRIVATE -w)
+endif ()
+
 # drm-cxx is built as a sub-project and doesn't automatically inherit the
 # `toolchain` INTERFACE library that applies `-stdlib=libc++` on clang
 # builds. Without this, drm-cxx compiles against libstdc++ and the main
