@@ -38,7 +38,7 @@ runs:
     - name: Restore cached libdisplay-info
       if: steps.probe.outputs.from-source == 'true'
       id: cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ steps.probe.outputs.prefix }}
         key: libdisplay-info-${{ inputs.pin-version }}-${{ runner.os }}-${{ runner.arch }}

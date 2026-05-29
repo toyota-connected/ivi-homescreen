@@ -26,10 +26,38 @@ endif ()
 # Suppress drm-cxx's tests, examples, install rules, and Vulkan display
 # support. ivi-homescreen owns the integration test surface; drm-cxx's
 # Vulkan path is orthogonal to the GL renderer this backend drives.
-set(DRM_CXX_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(DRM_CXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(DRM_CXX_INSTALL        OFF CACHE BOOL "" FORCE)
-set(DRM_CXX_VULKAN         OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_INSTALL          OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_VULKAN           OFF CACHE BOOL "" FORCE)
+
+# Force-on the drm-cxx modules ivi-homescreen UNCONDITIONALLY depends on,
+# so a missing system dep fails the configure step here rather than
+# silently auto-disabling the module and producing a binary that crashes
+# at first use. Today only DRM_CXX_SESSION qualifies: drm::session::Seat
+# is consumed unconditionally in backend/drm_kms_egl/drm_session.cc.
+set(DRM_CXX_SESSION ON CACHE BOOL "" FORCE)
+
+# Leave AUTO (don't FORCE) on the drm-cxx modules whose ivi-homescreen
+# consumers are themselves gated on the same system dep — shell/CMakeLists
+# .txt probes libxcursor (gates drm_cursor.cc + sets HAVE_DRM_CURSOR=1) and
+# blend2d (gates drm_capture.cc + sets HAVE_DRM_CAPTURE=1), silently
+# dropping the source file when the dep is absent. Mirroring AUTO here
+# matches that optionality: drm-cxx's cursor + capture modules build when
+# libxcursor + blend2d are present, silently drop out together when not.
+# Forcing ON here would break the configure for environments that don't
+# have libxcursor / blend2d available (CI runners without libblend2d-dev,
+# minimal embedded targets that don't want either feature).
+
+# Force-off the optional drm-cxx modules ivi-homescreen does NOT use, so
+# we don't transitively pull in their deps (e.g. csd needs Blend2D
+# independently of capture; gstreamer support pulls in GStreamer dev
+# packages we don't need on the DRM path; streams is a Tegra/L4T-only
+# concern). Flip these to ON if/when a feature lands that consumes them.
+set(DRM_CXX_CSD       OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_GSTREAMER OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_STREAMS   OFF CACHE BOOL "" FORCE)
 
 # CMP0079 NEW lets us attach link libraries to a target created in a
 # different directory (drm-cxx's own CMakeLists, processed below).
