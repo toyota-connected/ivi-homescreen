@@ -40,9 +40,10 @@ jobs:
           - pios: trixie
             args: ""
           - pios: bookworm
-            # Cross-build a static libdisplay-info >= 0.2.0 so drm-kms-egl is
-            # buildable against bookworm's 0.1.1.
-            args: "--with-local-display-info"
+            # bookworm ships an older libdisplay-info (0.1.1) and Vulkan SDK
+            # (VK_HEADER_VERSION 239); cross-build/overlay newer ones so
+            # drm-kms-egl and wayland-vulkan both build.
+            args: "--with-local-display-info --with-local-vulkan-headers"
     name: prep-${{ matrix.pios }}
     steps:
       - name: Checkout ivi-homescreen
@@ -97,7 +98,7 @@ jobs:
           - { pios: trixie, backend: software,       args: "" }
           # bookworm: drm-kms-egl needs the locally-built libdisplay-info.
           - { pios: bookworm, backend: wayland-egl,    args: "" }
-          - { pios: bookworm, backend: wayland-vulkan, args: "" }
+          - { pios: bookworm, backend: wayland-vulkan, args: "--with-local-vulkan-headers" }
           - { pios: bookworm, backend: drm-kms-egl,    args: "--with-local-display-info" }
           - { pios: bookworm, backend: software,       args: "" }
     name: build-${{ matrix.pios }}-${{ matrix.backend }}
