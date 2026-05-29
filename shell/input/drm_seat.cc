@@ -131,7 +131,7 @@ void InstallBackstop() {
   struct sigaction sa{};
   sa.sa_handler = &BackstopFatalHandler;
   sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_RESETHAND;
+  sa.sa_flags = static_cast<int>(SA_RESETHAND);
   for (const int sig : {SIGSEGV, SIGABRT, SIGILL, SIGFPE, SIGBUS}) {
     sigaction(sig, &sa, nullptr);
   }
