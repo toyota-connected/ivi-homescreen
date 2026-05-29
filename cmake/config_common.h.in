@@ -35,6 +35,9 @@
 #ifndef BUILD_BACKEND_DRM_KMS_EGL
 #cmakedefine01 BUILD_BACKEND_DRM_KMS_EGL
 #endif
+#ifndef USE_DRM_SCENE
+#cmakedefine01 USE_DRM_SCENE
+#endif
 #ifndef BUILD_BACKEND_DRM_KMS_VULKAN
 #cmakedefine01 BUILD_BACKEND_DRM_KMS_VULKAN
 #endif
