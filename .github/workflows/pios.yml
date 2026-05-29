@@ -47,13 +47,13 @@ jobs:
     name: prep-${{ matrix.pios }}
     steps:
       - name: Checkout ivi-homescreen
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: ivi-homescreen
           submodules: recursive
 
       - name: Checkout ivi-homescreen-plugins (sibling)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: toyota-connected/ivi-homescreen-plugins
           path: ivi-homescreen-plugins
@@ -67,7 +67,7 @@ jobs:
             qemu-user-static meson ninja-build libwayland-bin
 
       - name: Cache cross sandbox (toolchain + sysroot + engine)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.IVI_XC_ROOT }}
           key: xc-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/scripts/build_pi.sh') }}
@@ -104,13 +104,13 @@ jobs:
     name: build-${{ matrix.pios }}-${{ matrix.backend }}
     steps:
       - name: Checkout ivi-homescreen
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: ivi-homescreen
           submodules: recursive
 
       - name: Checkout ivi-homescreen-plugins (sibling)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: toyota-connected/ivi-homescreen-plugins
           path: ivi-homescreen-plugins
@@ -124,7 +124,7 @@ jobs:
             qemu-user-static meson ninja-build libwayland-bin
 
       - name: Restore cross sandbox
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.IVI_XC_ROOT }}
           key: xc-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/scripts/build_pi.sh') }}
