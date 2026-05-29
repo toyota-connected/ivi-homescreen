@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/input/software_seat.h"
+#include "logging/logging.h"
 
 #include <fcntl.h>
 #include <libinput.h>

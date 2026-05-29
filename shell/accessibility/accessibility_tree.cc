@@ -15,6 +15,7 @@
  */
 
 #include "accessibility_tree.h"
+#include <filesystem>
 
 #include <fstream>
 
@@ -22,8 +23,8 @@
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 
+#include "../utils.h"
 #include "logging/logging.h"
-#include "utils.h"
 
 void AccessibilityNode::AddChild(const int32_t child_id) {
   m_children.push_back(child_id);

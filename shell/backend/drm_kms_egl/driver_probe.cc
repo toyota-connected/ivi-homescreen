@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/driver_probe.h"
+#include "logging/logging.h"
 
 #include <drm_fourcc.h>
 #include <drm_mode.h>

@@ -4,6 +4,7 @@
 
 #include "flutter_desktop_plugin_registrar.h"
 #include "flutter_desktop_texture_registrar.h"
+#include "logging/logging.h"
 
 #include "flutter_homescreen.h"
 

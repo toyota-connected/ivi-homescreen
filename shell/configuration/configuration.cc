@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "configuration.h"
+#include "logging/logging.h"
 
 #include <cstdlib>
 #include <filesystem>

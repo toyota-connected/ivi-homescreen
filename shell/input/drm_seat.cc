@@ -15,6 +15,7 @@
  */
 
 #include "input/drm_seat.h"
+#include "logging/logging.h"
 
 #include <fcntl.h>
 #include <linux/input-event-codes.h>

@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "logging/logging.h"
 
 #include <fcntl.h>
 #include <linux/vt.h>

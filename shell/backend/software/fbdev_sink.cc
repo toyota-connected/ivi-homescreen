@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/fbdev_sink.h"
+#include "logging/logging.h"
 
 #include <fcntl.h>
 #include <linux/fb.h>

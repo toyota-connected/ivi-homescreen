@@ -15,6 +15,7 @@
  */
 
 #include "wayland_vulkan.h"
+#include "logging/logging.h"
 
 #include <asio/post.hpp>
 
