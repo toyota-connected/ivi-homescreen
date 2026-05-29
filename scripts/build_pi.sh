@@ -607,8 +607,10 @@ print(linux[0]["start"])')"
                 # drm-cxx requires libdisplay-info >= 0.2.0 (Trixie 0.2.0;
                 # Bookworm 0.1.1). libxcursor-dev gates the DRM HW cursor module;
                 # absent → leaky symbol references (~DrmCursor / DrmCursor::Move)
-                # break the link.
-                pkgs+=(libdrm-dev libgbm-dev libinput-dev libxcursor-dev)
+                # break the link. libseat-dev is required by drm-cxx's
+                # drm::session::Seat (DRM_CXX_SESSION=ON in cmake/drm_kms.cmake);
+                # used by shell/backend/drm_kms_egl/drm_session.cc unconditionally.
+                pkgs+=(libdrm-dev libgbm-dev libinput-dev libxcursor-dev libseat-dev)
                 # When we cross-build libdisplay-info ourselves, skip the apt
                 # -dev package so its libdisplay-info.so dev symlink can't shadow
                 # our static .a at link time (would re-introduce a runtime dep).
