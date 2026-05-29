@@ -993,19 +993,20 @@ bool DrmBackend::InitEgl() {
   if (cfg_.debug_backend) {
     spdlog::info("[DrmBackend] {} candidate EGL configs", num_configs);
     for (EGLint i = 0; i < num_configs; ++i) {
+      EGLConfig c = configs[static_cast<size_t>(i)];
       spdlog::info(
           "[DrmBackend]   [{}] visual=0x{:08x} R{}G{}B{}A{} depth={} "
           "stencil={} samples={} caveat=0x{:x} renderable=0x{:x} "
           "surface=0x{:x} conformant=0x{:x}",
-          i, static_cast<unsigned>(attr(configs[i], EGL_NATIVE_VISUAL_ID)),
-          attr(configs[i], EGL_RED_SIZE), attr(configs[i], EGL_GREEN_SIZE),
-          attr(configs[i], EGL_BLUE_SIZE), attr(configs[i], EGL_ALPHA_SIZE),
-          attr(configs[i], EGL_DEPTH_SIZE), attr(configs[i], EGL_STENCIL_SIZE),
-          attr(configs[i], EGL_SAMPLES),
-          static_cast<unsigned>(attr(configs[i], EGL_CONFIG_CAVEAT)),
-          static_cast<unsigned>(attr(configs[i], EGL_RENDERABLE_TYPE)),
-          static_cast<unsigned>(attr(configs[i], EGL_SURFACE_TYPE)),
-          static_cast<unsigned>(attr(configs[i], EGL_CONFORMANT)));
+          i, static_cast<unsigned>(attr(c, EGL_NATIVE_VISUAL_ID)),
+          attr(c, EGL_RED_SIZE), attr(c, EGL_GREEN_SIZE),
+          attr(c, EGL_BLUE_SIZE), attr(c, EGL_ALPHA_SIZE),
+          attr(c, EGL_DEPTH_SIZE), attr(c, EGL_STENCIL_SIZE),
+          attr(c, EGL_SAMPLES),
+          static_cast<unsigned>(attr(c, EGL_CONFIG_CAVEAT)),
+          static_cast<unsigned>(attr(c, EGL_RENDERABLE_TYPE)),
+          static_cast<unsigned>(attr(c, EGL_SURFACE_TYPE)),
+          static_cast<unsigned>(attr(c, EGL_CONFORMANT)));
     }
   }
 
@@ -1042,19 +1043,20 @@ bool DrmBackend::InitEgl() {
   // strict priority ordering without nested branches.
   using Score = std::tuple<EGLint, EGLint, EGLint, EGLint, EGLint>;
   auto score = [&](const EGLint i) -> Score {
+    EGLConfig c = configs[static_cast<size_t>(i)];
     return {
-        attr(configs[i], EGL_SAMPLES),                                    // 1
-        attr(configs[i], EGL_CONFIG_CAVEAT) == EGL_NONE ? 0 : 1,          // 2
-        abs_diff(attr(configs[i], EGL_ALPHA_SIZE), preferred_alpha),      // 3
-        abs_diff(attr(configs[i], EGL_STENCIL_SIZE), kPreferredStencil),  // 4
-        attr(configs[i], EGL_DEPTH_SIZE),                                 // 5
+        attr(c, EGL_SAMPLES),                                    // 1
+        attr(c, EGL_CONFIG_CAVEAT) == EGL_NONE ? 0 : 1,          // 2
+        abs_diff(attr(c, EGL_ALPHA_SIZE), preferred_alpha),      // 3
+        abs_diff(attr(c, EGL_STENCIL_SIZE), kPreferredStencil),  // 4
+        attr(c, EGL_DEPTH_SIZE),                                 // 5
     };
   };
 
   egl_config_ = nullptr;
   EGLint best_idx = -1;
   for (EGLint i = 0; i < num_configs; ++i) {
-    if (attr(configs[i], EGL_NATIVE_VISUAL_ID) !=
+    if (attr(configs[static_cast<size_t>(i)], EGL_NATIVE_VISUAL_ID) !=
         static_cast<EGLint>(resolved_->primary_format)) {
       continue;
     }

@@ -83,8 +83,10 @@ foreach (_tgt waypp wayland-gen)
     endif ()
 endforeach ()
 if (TARGET waypp)
+    # Silence waypp's own-source diagnostics (the -Wpsabi std::pair note, and
+    # -Wunused-parameter on EGL stubs when ENABLE_EGL is off) — pristine vendor.
     target_compile_options(waypp PRIVATE
-            $<$<CXX_COMPILER_ID:GNU,Clang>:-Wno-psabi>)
+            $<$<CXX_COMPILER_ID:GNU,Clang>:-w>)
 endif ()
 
 #

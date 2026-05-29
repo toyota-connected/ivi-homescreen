@@ -61,7 +61,8 @@ std::string GetDriverName(const int drm_fd) {
   if (!v) {
     return {};
   }
-  std::string name(v->name ? v->name : "", v->name_len > 0 ? v->name_len : 0);
+  std::string name(v->name ? v->name : "",
+                   static_cast<size_t>(v->name_len > 0 ? v->name_len : 0));
   drmFreeVersion(v);
   return name;
 }
