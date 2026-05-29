@@ -52,6 +52,11 @@
 #                                   into the sysroot (static), enabling drm-kms-egl
 #                                   on distros that ship an older one (e.g. bookworm)
 #     --display-info-version <ver>  libdisplay-info source tag to build (default 0.2.0)
+#     --with-local-vulkan-headers   install newer Vulkan-Headers (header-only) into
+#                                   the sysroot, enabling wayland-vulkan on distros
+#                                   with an older Vulkan SDK (e.g. bookworm)
+#     --vulkan-headers-version <t>  Vulkan-Headers tag to install (default
+#                                   vulkan-sdk-1.4.309.0)
 #
 #   SD card imaging + device provisioning (post-build):
 #     --image-sd                    interactively detect & write the PiOS image to
@@ -150,6 +155,9 @@ TOOLCHAIN_URL=""
 WITH_LOCAL_DISPLAY_INFO=0
 LIBDISPLAY_INFO_VERSION="0.2.0"   # min for drm-cxx (HDR/colorimetry EDID APIs)
 LIBDISPLAY_INFO_URL=""            # derived from version unless overridden
+WITH_LOCAL_VULKAN_HEADERS=0
+VULKAN_HEADERS_VERSION="vulkan-sdk-1.4.309.0"  # VK_HEADER_VERSION 309 (matches trixie)
+VULKAN_HEADERS_URL=""             # derived from version unless overridden
 VERBOSE=0
 
 # SD imaging / provisioning state.
@@ -238,6 +246,8 @@ while [[ $# -gt 0 ]]; do
         --toolchain-host)     TC_HOST="$2"; shift 2 ;;
         --with-local-display-info) WITH_LOCAL_DISPLAY_INFO=1; shift ;;
         --display-info-version)    LIBDISPLAY_INFO_VERSION="$2"; shift 2 ;;
+        --with-local-vulkan-headers) WITH_LOCAL_VULKAN_HEADERS=1; shift ;;
+        --vulkan-headers-version)    VULKAN_HEADERS_VERSION="$2"; shift 2 ;;
         --image-sd)           IMAGE_SD=1; PROVISION=1; shift ;;
         --device)             TARGET_DEVICE="$2"; IMAGE_SD=1; PROVISION=1; shift 2 ;;
         --provision)          PROVISION=1; shift ;;
@@ -334,6 +344,10 @@ TC_DIRNAME="arm-gnu-toolchain-${TC_VERSION}-${TC_HOST}-${TC_TRIPLE}"
 LIBDISPLAY_INFO_TARBALL="libdisplay-info-${LIBDISPLAY_INFO_VERSION}.tar.gz"
 [[ -z "$LIBDISPLAY_INFO_URL" ]] \
     && LIBDISPLAY_INFO_URL="https://gitlab.freedesktop.org/emersion/libdisplay-info/-/archive/${LIBDISPLAY_INFO_VERSION}/${LIBDISPLAY_INFO_TARBALL}"
+
+# Vulkan-Headers source archive (header-only, pinned by tag).
+[[ -z "$VULKAN_HEADERS_URL" ]] \
+    && VULKAN_HEADERS_URL="https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/${VULKAN_HEADERS_VERSION}.tar.gz"
 
 # ── Resolved sandbox paths ───────────────────────────────────────────────
 
@@ -733,6 +747,55 @@ EOF
     displayinfo_ge_floor "$now" \
         || die "libdisplay-info install did not yield >= $LIBDISPLAY_INFO_VERSION (got '$now')"
     note "libdisplay-info $now installed (static) into $PIOS sysroot"
+}
+
+# ── Phase 2c: optional newer Vulkan-Headers (header-only) ────────────────
+
+# VK_HEADER_VERSION currently in the sysroot ("0" if absent).
+vulkan_header_version() {
+    local h="$XC_SYSROOT/usr/include/vulkan/vulkan_core.h"
+    if [[ -f "$h" ]]; then
+        awk '/#define VK_HEADER_VERSION /{print $3; exit}' "$h"
+    else
+        echo 0
+    fi
+}
+
+phase2c_local_vulkan_headers() {
+    [[ "$WITH_LOCAL_VULKAN_HEADERS" -eq 1 ]] || return 0
+    # Patch component of the pinned tag (vulkan-sdk-1.4.309.0 -> 309).
+    local want; want="$(echo "$VULKAN_HEADERS_VERSION" | awk -F. '{print $3}')"
+    log "Phase 2c: local Vulkan-Headers (VK_HEADER_VERSION >= ${want})"
+
+    local have; have="$(vulkan_header_version)"
+    if [[ "$have" =~ ^[0-9]+$ ]] && (( have >= want )); then
+        note "sysroot already has VK_HEADER_VERSION $have; skipping"
+        return
+    fi
+
+    local tarball src
+    tarball="$DOWNLOADS/Vulkan-Headers-${VULKAN_HEADERS_VERSION}.tar.gz"
+    src="$XC_ROOT/src/Vulkan-Headers-${VULKAN_HEADERS_VERSION}"
+    fetch "$VULKAN_HEADERS_URL" "$tarball"
+
+    if [[ ! -d "$src/include/vulkan" ]]; then
+        log "extracting Vulkan-Headers"
+        mkdir -p "$XC_ROOT/src"; rm -rf "$src"
+        local tmp; tmp="$(mktemp -d "$XC_ROOT/src/.unpack.XXXXXX")"
+        tar -xzf "$tarball" -C "$tmp"
+        mv "$tmp"/*/ "$src"; rmdir "$tmp"
+    fi
+
+    # Header-only: overlay the newer Vulkan + vk_video headers. The sysroot's
+    # libvulkan.so loader is ABI-stable, so the older runtime still serves the
+    # newer API surface (unknown instance-extension structs are ignored).
+    log "installing Vulkan-Headers into sysroot (header-only)"
+    mkdir -p "$XC_SYSROOT/usr/include/vulkan" "$XC_SYSROOT/usr/include/vk_video"
+    cp -a "$src/include/vulkan/." "$XC_SYSROOT/usr/include/vulkan/"
+    [[ -d "$src/include/vk_video" ]] \
+        && cp -a "$src/include/vk_video/." "$XC_SYSROOT/usr/include/vk_video/"
+
+    note "Vulkan-Headers now VK_HEADER_VERSION $(vulkan_header_version) in $PIOS sysroot"
 }
 
 # ── Phase 3: toolchain file + pkg-config wrapper ─────────────────────────
@@ -1383,6 +1446,7 @@ phase1_toolchain
 phase1b_flutter_engine
 phase2_sysroot
 phase2b_local_display_info
+phase2c_local_vulkan_headers
 
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
     log "prepare-only: stopping before configure"
