@@ -32,16 +32,23 @@ set(DRM_CXX_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(DRM_CXX_INSTALL          OFF CACHE BOOL "" FORCE)
 set(DRM_CXX_VULKAN           OFF CACHE BOOL "" FORCE)
 
-# Force-on the drm-cxx modules ivi-homescreen actively depends on, so a
-# missing system dep fails the configure step here rather than silently
-# auto-disabling the module and producing a binary that crashes at first
-# use. drm::session::Seat is consumed in input/drm_seat.cc and display/
-# drm_display.cc; drm::cursor::Renderer is consumed in backend/drm_kms_
-# egl/drm_cursor.cc; drm::capture::snapshot is consumed in backend/drm_
-# kms_egl/drm_capture.cc (which transitively needs Blend2D).
+# Force-on the drm-cxx modules ivi-homescreen UNCONDITIONALLY depends on,
+# so a missing system dep fails the configure step here rather than
+# silently auto-disabling the module and producing a binary that crashes
+# at first use. Today only DRM_CXX_SESSION qualifies: drm::session::Seat
+# is consumed unconditionally in backend/drm_kms_egl/drm_session.cc.
 set(DRM_CXX_SESSION ON CACHE BOOL "" FORCE)
-set(DRM_CXX_CURSOR  ON CACHE BOOL "" FORCE)
-set(DRM_CXX_BLEND2D ON CACHE BOOL "" FORCE)
+
+# Leave AUTO (don't FORCE) on the drm-cxx modules whose ivi-homescreen
+# consumers are themselves gated on the same system dep — shell/CMakeLists
+# .txt probes libxcursor (gates drm_cursor.cc + sets HAVE_DRM_CURSOR=1) and
+# blend2d (gates drm_capture.cc + sets HAVE_DRM_CAPTURE=1), silently
+# dropping the source file when the dep is absent. Mirroring AUTO here
+# matches that optionality: drm-cxx's cursor + capture modules build when
+# libxcursor + blend2d are present, silently drop out together when not.
+# Forcing ON here would break the configure for environments that don't
+# have libxcursor / blend2d available (CI runners without libblend2d-dev,
+# minimal embedded targets that don't want either feature).
 
 # Force-off the optional drm-cxx modules ivi-homescreen does NOT use, so
 # we don't transitively pull in their deps (e.g. csd needs Blend2D
