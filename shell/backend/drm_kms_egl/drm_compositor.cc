@@ -158,14 +158,13 @@ void DumpObjectProps(const int fd,
   drmModeObjectPropertiesPtr props =
       drmModeObjectGetProperties(fd, obj_id, obj_type);
   if (props == nullptr) {
-    std::fprintf(
-        stderr,
-        "[drm-cxx] snapshot %s id=%u: getProperties failed (errno=%d)\n", label,
-        obj_id, errno);
+    spdlog::error(
+        "[DrmCompositor] snapshot {} id={}: getProperties failed (errno={})",
+        label, obj_id, errno);
     return;
   }
-  std::fprintf(stderr, "[drm-cxx] snapshot %s id=%u (%u props):\n", label,
-               obj_id, props->count_props);
+  spdlog::debug("[DrmCompositor] snapshot {} id={} ({} props):", label, obj_id,
+                props->count_props);
   for (uint32_t i = 0; i < props->count_props; ++i) {
     drmModePropertyPtr prop = drmModeGetProperty(fd, props->props[i]);
     if (prop == nullptr) {
@@ -186,9 +185,8 @@ void DumpObjectProps(const int fd,
     } else if ((prop->flags & DRM_MODE_PROP_SIGNED_RANGE) != 0U) {
       kind = "SRANGE";
     }
-    std::fprintf(stderr, "[drm-cxx]   %-20s id=%u value=%llu [%s]\n",
-                 prop->name, prop->prop_id,
-                 static_cast<unsigned long long>(value), kind);
+    spdlog::debug("[DrmCompositor]   {:<20} id={} value={} [{}]", prop->name,
+                  prop->prop_id, value, kind);
     drmModeFreeProperty(prop);
   }
   drmModeFreeObjectProperties(props);

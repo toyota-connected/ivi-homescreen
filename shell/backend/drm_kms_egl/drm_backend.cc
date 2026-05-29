@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -39,6 +40,7 @@
 #include <vector>
 
 #include <drm-cxx/core/format.hpp>
+#include <drm-cxx/log.hpp>
 #include "backend/drm_kms_egl/driver_probe.h"
 
 #include "asio/post.hpp"
@@ -411,8 +413,44 @@ void DrmBackend::MaybeCaptureSnapshot() {
 #endif
 }
 
+// Routes drm-cxx's internal diagnostics through the ivi-homescreen
+// spdlog logger so they interleave correctly with the embedder's own
+// output (and respect spdlog's level / sink config) instead of going
+// to stderr via drm-cxx's default print sink.
+//
+// Installed once on first DrmBackend construction. The drm-cxx log
+// sink is process-wide; re-installing on every ctor would be harmless
+// but pointless.
+namespace {
+void InstallDrmCxxLogSink() {
+  static std::once_flag once;
+  std::call_once(once, []() {
+    drm::set_log_sink([](const drm::LogLevel level, const std::string_view m) {
+      switch (level) {
+        case drm::LogLevel::Error:
+          spdlog::error("[drm-cxx] {}", m);
+          break;
+        case drm::LogLevel::Warn:
+          spdlog::warn("[drm-cxx] {}", m);
+          break;
+        case drm::LogLevel::Info:
+          spdlog::info("[drm-cxx] {}", m);
+          break;
+        case drm::LogLevel::Debug:
+          spdlog::debug("[drm-cxx] {}", m);
+          break;
+        case drm::LogLevel::Silent:
+          break;
+      }
+    });
+  });
+}
+}  // namespace
+
 DrmBackend::DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session)
-    : cfg_(std::move(cfg)), session_(session) {}
+    : cfg_(cfg), session_(session) {
+  InstallDrmCxxLogSink();
+}
 
 DrmBackend::~DrmBackend() {
   // Let any in-flight page flip land so we don't free a BO still being
