@@ -26,10 +26,31 @@ endif ()
 # Suppress drm-cxx's tests, examples, install rules, and Vulkan display
 # support. ivi-homescreen owns the integration test surface; drm-cxx's
 # Vulkan path is orthogonal to the GL renderer this backend drives.
-set(DRM_CXX_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(DRM_CXX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(DRM_CXX_INSTALL        OFF CACHE BOOL "" FORCE)
-set(DRM_CXX_VULKAN         OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_INSTALL          OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_VULKAN           OFF CACHE BOOL "" FORCE)
+
+# Force-on the drm-cxx modules ivi-homescreen actively depends on, so a
+# missing system dep fails the configure step here rather than silently
+# auto-disabling the module and producing a binary that crashes at first
+# use. drm::session::Seat is consumed in input/drm_seat.cc and display/
+# drm_display.cc; drm::cursor::Renderer is consumed in backend/drm_kms_
+# egl/drm_cursor.cc; drm::capture::snapshot is consumed in backend/drm_
+# kms_egl/drm_capture.cc (which transitively needs Blend2D).
+set(DRM_CXX_SESSION ON CACHE BOOL "" FORCE)
+set(DRM_CXX_CURSOR  ON CACHE BOOL "" FORCE)
+set(DRM_CXX_BLEND2D ON CACHE BOOL "" FORCE)
+
+# Force-off the optional drm-cxx modules ivi-homescreen does NOT use, so
+# we don't transitively pull in their deps (e.g. csd needs Blend2D
+# independently of capture; gstreamer support pulls in GStreamer dev
+# packages we don't need on the DRM path; streams is a Tegra/L4T-only
+# concern). Flip these to ON if/when a feature lands that consumes them.
+set(DRM_CXX_CSD       OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_GSTREAMER OFF CACHE BOOL "" FORCE)
+set(DRM_CXX_STREAMS   OFF CACHE BOOL "" FORCE)
 
 # CMP0079 NEW lets us attach link libraries to a target created in a
 # different directory (drm-cxx's own CMakeLists, processed below).
