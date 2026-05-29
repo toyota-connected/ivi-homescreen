@@ -501,10 +501,96 @@ relativize_symlinks() {
     done < <(find "$root" -type l -lname '/*')
 }
 
+# Install -dev packages into $XC_SYSROOT via qemu-aarch64-static chroot.
+# Idempotent: apt-get install is a fast no-op for already-installed packages,
+# which lets a cache-restored sysroot pick up packages added by later edits
+# to this script without forcing a full sysroot rebuild.
+sysroot_apt_install() {
+    local pkgs=("$@")
+    local qemu_bin
+    qemu_bin="$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
+    sudo cp "$qemu_bin" "$XC_SYSROOT/usr/bin/qemu-aarch64-static"
+
+    # apt/gpgv/dpkg need /dev/null, /proc, /sys inside the chroot.
+    sudo mount --bind /dev      "$XC_SYSROOT/dev"
+    sudo mount --bind /dev/pts  "$XC_SYSROOT/dev/pts"
+    sudo mount -t proc  proc    "$XC_SYSROOT/proc"
+    sudo mount -t sysfs sysfs   "$XC_SYSROOT/sys"
+    trap "sudo umount -lq '$XC_SYSROOT/sys' '$XC_SYSROOT/proc' '$XC_SYSROOT/dev/pts' '$XC_SYSROOT/dev' 2>/dev/null || true; sudo rm -f '$XC_SYSROOT/usr/bin/qemu-aarch64-static'" EXIT
+
+    # Stub out post-install hooks that assume a real running system. We never
+    # boot this sysroot — update-initramfs would try to mkinitramfs against
+    # the host's /, and policy-rc.d=101 blocks service start in maintainer scripts.
+    printf '#!/bin/sh\nexit 0\n' | sudo tee "$XC_SYSROOT/usr/sbin/update-initramfs" >/dev/null
+    sudo chmod +x "$XC_SYSROOT/usr/sbin/update-initramfs"
+    printf '#!/bin/sh\nexit 101\n' | sudo tee "$XC_SYSROOT/usr/sbin/policy-rc.d" >/dev/null
+    sudo chmod +x "$XC_SYSROOT/usr/sbin/policy-rc.d"
+
+    sudo chroot "$XC_SYSROOT" /usr/bin/qemu-aarch64-static /usr/bin/apt-get -y update
+    sudo chroot "$XC_SYSROOT" /usr/bin/qemu-aarch64-static /usr/bin/apt-get -y \
+        install --no-install-recommends "${pkgs[@]}"
+    sudo chroot "$XC_SYSROOT" /usr/bin/qemu-aarch64-static /usr/bin/apt-get -y clean
+
+    sudo umount -lq "$XC_SYSROOT/sys" "$XC_SYSROOT/proc" "$XC_SYSROOT/dev/pts" "$XC_SYSROOT/dev"
+    trap - EXIT
+    sudo rm -f "$XC_SYSROOT/usr/bin/qemu-aarch64-static"
+
+    # apt-in-chroot created root-owned dirs. Hand them back to the user so the
+    # rest of the script (and the build dir's compiler/find) can read them.
+    sudo chown -R "$(id -u):$(id -g)" "$XC_SYSROOT"
+}
+
+# Compute the union of -dev packages across the queued BUILD_BACKENDS.
+sysroot_pkg_list() {
+    # Shared deps across all backends (plugins, GLES, gstreamer/glib, etc.).
+    # libsystemd-dev is for sdbus-cpp inside ivi-homescreen-plugins.
+    # libwayland-dev + wayland-protocols are shared, not Wayland-backend-only:
+    # waypp is always built and unconditionally requires wayland-client /
+    # wayland-cursor / wayland-protocols, so a drm-kms-egl- or software-only
+    # build needs them too.
+    local pkgs=(
+        libcamera-dev libcurl4-openssl-dev libegl-dev libgles2-mesa-dev
+        libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        libjpeg-dev libpipewire-0.3-dev libsecret-1-dev libsystemd-dev
+        libudev-dev libwayland-dev libxkbcommon-dev libxml2-dev
+        wayland-protocols zlib1g-dev
+    )
+    # Backend-specific deps — union of every backend queued in BUILD_BACKENDS.
+    # Duplicate package names are harmless: apt resolves them once.
+    local be
+    for be in "${BUILD_BACKENDS[@]}"; do
+        case "$be" in
+            wayland-egl)
+                : ;;  # EGL/GLES + wayland (for waypp) come from the shared list
+            wayland-vulkan)
+                pkgs+=(libvulkan-dev mesa-vulkan-drivers) ;;
+            drm-kms-egl)
+                # drm-cxx requires libdisplay-info >= 0.2.0 (Trixie 0.2.0;
+                # Bookworm 0.1.1). libxcursor-dev gates the DRM HW cursor module;
+                # absent → leaky symbol references (~DrmCursor / DrmCursor::Move)
+                # break the link. libseat-dev is required by drm-cxx's
+                # drm::session::Seat (DRM_CXX_SESSION=ON in cmake/drm_kms.cmake);
+                # used by shell/backend/drm_kms_egl/drm_session.cc unconditionally.
+                pkgs+=(libdrm-dev libgbm-dev libinput-dev libxcursor-dev libseat-dev)
+                # When we cross-build libdisplay-info ourselves, skip the apt
+                # -dev package so its libdisplay-info.so dev symlink can't shadow
+                # our static .a at link time (would re-introduce a runtime dep).
+                [[ "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]] \
+                    && pkgs+=(libdisplay-info-dev) ;;
+            software)
+                pkgs+=(libdrm-dev libinput-dev) ;;
+        esac
+    done
+    printf '%s\n' "${pkgs[@]}"
+}
+
 phase2_sysroot() {
     log "Phase 2: sysroot ($PIOS)"
     if [[ -d "$XC_SYSROOT" && "$REFRESH_SYSROOT" -eq 0 ]]; then
-        note "sysroot present"
+        note "sysroot present; ensuring backend -dev packages are installed"
+        local pkgs=()
+        mapfile -t pkgs < <(sysroot_pkg_list)
+        sysroot_apt_install "${pkgs[@]}"
         return
     fi
     if [[ "$REFRESH_SYSROOT" -eq 1 ]]; then
@@ -563,76 +649,9 @@ print(linux[0]["start"])')"
     relativize_symlinks "$XC_SYSROOT"
 
     log "installing -dev packages via qemu-aarch64-static chroot"
-    local qemu_bin
-    qemu_bin="$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
-    sudo cp "$qemu_bin" "$XC_SYSROOT/usr/bin/qemu-aarch64-static"
-
-    # apt/gpgv/dpkg need /dev/null, /proc, /sys inside the chroot.
-    sudo mount --bind /dev      "$XC_SYSROOT/dev"
-    sudo mount --bind /dev/pts  "$XC_SYSROOT/dev/pts"
-    sudo mount -t proc  proc    "$XC_SYSROOT/proc"
-    sudo mount -t sysfs sysfs   "$XC_SYSROOT/sys"
-    trap "sudo umount -lq '$XC_SYSROOT/sys' '$XC_SYSROOT/proc' '$XC_SYSROOT/dev/pts' '$XC_SYSROOT/dev' 2>/dev/null || true; sudo rm -f '$XC_SYSROOT/usr/bin/qemu-aarch64-static'" EXIT
-
-    # Stub out post-install hooks that assume a real running system. We never
-    # boot this sysroot — update-initramfs would try to mkinitramfs against
-    # the host's /, and policy-rc.d=101 blocks service start in maintainer scripts.
-    printf '#!/bin/sh\nexit 0\n' | sudo tee "$XC_SYSROOT/usr/sbin/update-initramfs" >/dev/null
-    sudo chmod +x "$XC_SYSROOT/usr/sbin/update-initramfs"
-    printf '#!/bin/sh\nexit 101\n' | sudo tee "$XC_SYSROOT/usr/sbin/policy-rc.d" >/dev/null
-    sudo chmod +x "$XC_SYSROOT/usr/sbin/policy-rc.d"
-
-    # Shared deps across all backends (plugins, GLES, gstreamer/glib, etc.).
-    # libsystemd-dev is for sdbus-cpp inside ivi-homescreen-plugins.
-    # libwayland-dev + wayland-protocols are shared, not Wayland-backend-only:
-    # waypp is always built and unconditionally requires wayland-client /
-    # wayland-cursor / wayland-protocols, so a drm-kms-egl- or software-only
-    # build needs them too.
-    local pkgs=(
-        libcamera-dev libcurl4-openssl-dev libegl-dev libgles2-mesa-dev
-        libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-        libjpeg-dev libpipewire-0.3-dev libsecret-1-dev libsystemd-dev
-        libudev-dev libwayland-dev libxkbcommon-dev libxml2-dev
-        wayland-protocols zlib1g-dev
-    )
-    # Backend-specific deps — union of every backend queued in BUILD_BACKENDS.
-    # Duplicate package names are harmless: apt resolves them once.
-    for be in "${BUILD_BACKENDS[@]}"; do
-        case "$be" in
-            wayland-egl)
-                : ;;  # EGL/GLES + wayland (for waypp) come from the shared list
-            wayland-vulkan)
-                pkgs+=(libvulkan-dev mesa-vulkan-drivers) ;;
-            drm-kms-egl)
-                # drm-cxx requires libdisplay-info >= 0.2.0 (Trixie 0.2.0;
-                # Bookworm 0.1.1). libxcursor-dev gates the DRM HW cursor module;
-                # absent → leaky symbol references (~DrmCursor / DrmCursor::Move)
-                # break the link. libseat-dev is required by drm-cxx's
-                # drm::session::Seat (DRM_CXX_SESSION=ON in cmake/drm_kms.cmake);
-                # used by shell/backend/drm_kms_egl/drm_session.cc unconditionally.
-                pkgs+=(libdrm-dev libgbm-dev libinput-dev libxcursor-dev libseat-dev)
-                # When we cross-build libdisplay-info ourselves, skip the apt
-                # -dev package so its libdisplay-info.so dev symlink can't shadow
-                # our static .a at link time (would re-introduce a runtime dep).
-                [[ "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]] \
-                    && pkgs+=(libdisplay-info-dev) ;;
-            software)
-                pkgs+=(libdrm-dev libinput-dev) ;;
-        esac
-    done
-
-    sudo chroot "$XC_SYSROOT" /usr/bin/qemu-aarch64-static /usr/bin/apt-get -y update
-    sudo chroot "$XC_SYSROOT" /usr/bin/qemu-aarch64-static /usr/bin/apt-get -y \
-        install --no-install-recommends "${pkgs[@]}"
-    sudo chroot "$XC_SYSROOT" /usr/bin/qemu-aarch64-static /usr/bin/apt-get -y clean
-
-    sudo umount -lq "$XC_SYSROOT/sys" "$XC_SYSROOT/proc" "$XC_SYSROOT/dev/pts" "$XC_SYSROOT/dev"
-    trap - EXIT
-    sudo rm -f "$XC_SYSROOT/usr/bin/qemu-aarch64-static"
-
-    # apt-in-chroot created root-owned dirs. Hand them back to the user so the
-    # rest of the script (and the build dir's compiler/find) can read them.
-    sudo chown -R "$(id -u):$(id -g)" "$XC_SYSROOT"
+    local pkgs=()
+    mapfile -t pkgs < <(sysroot_pkg_list)
+    sysroot_apt_install "${pkgs[@]}"
 
     log "re-relativizing symlinks after apt"
     relativize_symlinks "$XC_SYSROOT"
