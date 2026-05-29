@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/software_backend.h"
+#include "logging/logging.h"
 
 #include <csignal>
 #include <cstdlib>

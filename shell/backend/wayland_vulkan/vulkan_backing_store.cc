@@ -15,6 +15,7 @@
  */
 
 #include "backend/wayland_vulkan/vulkan_backing_store.h"
+#include "logging/logging.h"
 
 #include <unistd.h>
 

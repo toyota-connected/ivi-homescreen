@@ -68,6 +68,27 @@ endif ()
 set(LOGGING_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/shell;${CMAKE_BINARY_DIR})
 add_subdirectory(waypp)
 
+# waypp is a git submodule we keep pristine, so apply the "system library"
+# treatment from here rather than editing it: mark its interface include dirs
+# SYSTEM so its headers are -isystem for consumers, and silence GCC's benign
+# -Wpsabi std::pair ABI note (seat/pointer.h get_xy()) that -isystem does not
+# suppress, emitted while compiling waypp's own sources.
+foreach (_tgt waypp wayland-gen)
+    if (TARGET ${_tgt})
+        get_target_property(_waypp_inc ${_tgt} INTERFACE_INCLUDE_DIRECTORIES)
+        if (_waypp_inc)
+            set_target_properties(${_tgt} PROPERTIES
+                    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_waypp_inc}")
+        endif ()
+    endif ()
+endforeach ()
+if (TARGET waypp)
+    # Silence waypp's own-source diagnostics (the -Wpsabi std::pair note, and
+    # -Wunused-parameter on EGL stubs when ENABLE_EGL is off) — pristine vendor.
+    target_compile_options(waypp PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang>:-w>)
+endif ()
+
 #
 # Google Test
 #

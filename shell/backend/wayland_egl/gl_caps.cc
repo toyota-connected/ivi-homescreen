@@ -15,6 +15,7 @@
  */
 
 #include "backend/wayland_egl/gl_caps.h"
+#include "logging/logging.h"
 
 #include <cstring>
 #include <string_view>

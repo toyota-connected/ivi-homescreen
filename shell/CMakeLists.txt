@@ -164,8 +164,13 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             PkgConfig::GBM
             PkgConfig::LIBINPUT
             PkgConfig::UDEV
+            # EGL/GLESv2 are listed ahead of platform_homescreen (which
+            # references glDeleteTextures et al.), so --as-needed would drop
+            # libGLESv2 before its reference is seen. Force them DT_NEEDED.
+            -Wl,--no-as-needed
             EGL
             GLESv2
+            -Wl,--as-needed
     )
 endif ()
 

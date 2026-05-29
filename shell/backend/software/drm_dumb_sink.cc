@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/drm_dumb_sink.h"
+#include "logging/logging.h"
 
 #include <drm_fourcc.h>
 #include <fcntl.h>

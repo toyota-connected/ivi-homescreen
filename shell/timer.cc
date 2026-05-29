@@ -15,6 +15,7 @@
  */
 
 #include "timer.h"
+#include "logging/logging.h"
 
 #include <cerrno>
 #include <cstring>

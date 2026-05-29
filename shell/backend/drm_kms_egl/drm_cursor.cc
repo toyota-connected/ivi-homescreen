@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_cursor.h"
+#include "logging/logging.h"
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>

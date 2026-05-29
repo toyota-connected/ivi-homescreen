@@ -15,6 +15,7 @@
  */
 
 #include "backend/wayland_egl/gl_compositor.h"
+#include "logging/logging.h"
 
 #include <array>
 

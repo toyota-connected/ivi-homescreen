@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "display.h"
+#include "logging/logging.h"
 
 #include <linux/input-event-codes.h>
 #include <sys/mman.h>
