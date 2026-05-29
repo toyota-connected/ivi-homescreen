@@ -15,6 +15,7 @@
  */
 
 #include "osmesa.h"
+#include "logging/logging.h"
 
 #include <cassert>
 

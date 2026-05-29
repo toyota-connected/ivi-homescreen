@@ -15,6 +15,7 @@
  */
 
 #include "platform_views_handler.h"
+#include "logging/logging.h"
 
 #include <generated_plugin_registrant.h>
 

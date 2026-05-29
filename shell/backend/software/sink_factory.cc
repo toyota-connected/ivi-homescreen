@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/sink_factory.h"
+#include "logging/logging.h"
 
 #include <cstdlib>
 #include <string>

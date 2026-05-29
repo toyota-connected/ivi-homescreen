@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include "flutter_view.h"
+#include <filesystem>
+#include "logging/logging.h"
 
 #include <cassert>
 #include <memory>

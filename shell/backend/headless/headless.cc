@@ -16,6 +16,7 @@
 
 #include "headless.h"
 #include "engine.h"
+#include "logging/logging.h"
 #include "osmesa.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"

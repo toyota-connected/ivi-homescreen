@@ -15,6 +15,7 @@
  */
 
 #include "wayland_egl.h"
+#include "logging/logging.h"
 
 #include <wayland-egl.h>
 

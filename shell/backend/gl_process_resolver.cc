@@ -15,6 +15,7 @@
  */
 
 #include "gl_process_resolver.h"
+#include "logging/logging.h"
 
 #include <EGL/egl.h>
 #include <dlfcn.h>

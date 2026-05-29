@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_capture.h"
+#include "logging/logging.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>

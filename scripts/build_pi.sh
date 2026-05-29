@@ -47,6 +47,7 @@
 #     --toolchain-version <ver>     ARM GNU Toolchain version (defaults: bookworm→12.3.rel1,
 #                                                                       trixie→15.2.rel1)
 #     --toolchain-url <url>         override toolchain tarball URL
+#     --toolchain-host <arch>       toolchain build-host arch (auto: x86_64/aarch64)
 #
 #   SD card imaging + device provisioning (post-build):
 #     --image-sd                    interactively detect & write the PiOS image to
@@ -173,7 +174,16 @@ SKIP_BUILD=0
 #   trixie   → 15.2.rel1 (gcc 15, glibc ≥ 2.41 — matches PiOS Trixie)
 # Override with --toolchain-version (or --toolchain-url for arbitrary URLs).
 TC_TRIPLE="aarch64-none-linux-gnu"
-TC_HOST="x86_64"
+# Host arch of the cross toolchain build. ARM publishes both x86_64- and
+# aarch64-hosted variants; pick the one matching this machine so the compiler
+# runs natively (an x86_64 toolchain on an aarch64 host gets routed through
+# qemu-x86_64-static, which fails for lack of an x86_64 loader). Override with
+# --toolchain-host if needed.
+case "$(uname -m)" in
+    aarch64|arm64) TC_HOST="aarch64" ;;
+    x86_64|amd64)  TC_HOST="x86_64" ;;
+    *)             TC_HOST="x86_64" ;;
+esac
 TC_VERSION=""        # auto-derived from $PIOS unless --toolchain-version is given
 declare -A TC_VERSION_FOR_PIOS=(
     [bookworm]="12.3.rel1"
@@ -191,7 +201,7 @@ TRIXIE_IMG_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/rasp
 # enumerates available builds.
 ENGINE_DEFAULT_SHA="13e658725ddaa270601426d1485636157e38c34c"
 ENGINE_REPO="meta-flutter/flutter-engine"
-ENGINE_ARCH="arm64"  # aarch64 PiOS — host is x86_64-only, no other arch supported
+ENGINE_ARCH="arm64"  # target arch (aarch64 PiOS); independent of build-host arch
 
 # ── Argument parsing ─────────────────────────────────────────────────────
 
@@ -218,6 +228,7 @@ while [[ $# -gt 0 ]]; do
         --image-url)          IMAGE_URL="$2"; shift 2 ;;
         --toolchain-url)      TOOLCHAIN_URL="$2"; shift 2 ;;
         --toolchain-version)  TC_VERSION="$2"; shift 2 ;;
+        --toolchain-host)     TC_HOST="$2"; shift 2 ;;
         --image-sd)           IMAGE_SD=1; PROVISION=1; shift ;;
         --device)             TARGET_DEVICE="$2"; IMAGE_SD=1; PROVISION=1; shift 2 ;;
         --provision)          PROVISION=1; shift ;;

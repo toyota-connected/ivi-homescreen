@@ -15,6 +15,7 @@
  */
 
 #include "backend/wayland_egl/egl_backing_store.h"
+#include "logging/logging.h"
 
 #include <GLES2/gl2ext.h>
 

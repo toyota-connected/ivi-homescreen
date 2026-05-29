@@ -102,6 +102,23 @@ if (ENABLE_PLUGINS)
             add_subdirectory(${EXT_PLUGINS_DIR} ${PROJECT_BINARY_DIR}/ext_plugins)
         endif ()
     endforeach ()
+
+    # Treat the vendored sdbus-c++ as a system library from our side (we don't
+    # edit that project): re-publish its interface include dirs as SYSTEM so its
+    # headers are -isystem for consumers and don't spam our build with warnings.
+    foreach (_tgt sdbus-c++ sdbus-c++-objlib)
+        if (TARGET ${_tgt})
+            get_target_property(_sdbus_inc ${_tgt} INTERFACE_INCLUDE_DIRECTORIES)
+            if (_sdbus_inc)
+                set_target_properties(${_tgt} PROPERTIES
+                        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_sdbus_inc}")
+            endif ()
+            # Also suppress warnings emitted while compiling sdbus-cpp's own
+            # sources (e.g. -Wconversion in VTableUtils.c). System includes only
+            # cover consumers, so quiet the vendored target's own build here.
+            target_compile_options(${_tgt} PRIVATE -w)
+        endif ()
+    endforeach ()
 endif ()
 
 #

@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/file_sink.h"
+#include "logging/logging.h"
 
 #include <array>
 #include <cstdio>

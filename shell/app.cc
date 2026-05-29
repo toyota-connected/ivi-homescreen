@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "app.h"
+#include "logging/logging.h"
 
 #include <cstdlib>
 #include <string_view>

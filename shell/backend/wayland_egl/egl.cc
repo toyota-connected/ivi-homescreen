@@ -15,6 +15,7 @@
  */
 
 #include "egl.h"
+#include "logging/logging.h"
 
 #include <cassert>
 #include <cstring>
