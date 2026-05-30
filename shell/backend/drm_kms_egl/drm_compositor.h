@@ -40,11 +40,18 @@
 
 #include <shell/platform/embedder/embedder.h>
 
+#include "config/common.h"
+
+#if USE_DRM_SCENE
+#include <drm-cxx/scene/layer_scene.hpp>
+#endif
+
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 
 class DrmBackend;
 class ICompositorSurface;
+class GbmBackingStoreLayerSource;
 
 // Default pool sizes used by CreateGbmStore. Flutter backing-stores
 // rotate among N=3 BOs so direct-scanout never binds the BO that's
@@ -161,6 +168,15 @@ class DrmCompositor {
   struct StoreBaton {
     DrmCompositor* owner;
     GbmBackingStore* store;
+#if USE_DRM_SCENE
+    // Borrowed LayerBufferSource adapter — owned by the LayerScene
+    // once add_layer() consumes it; nullptr after that. CreateBackingStore
+    // constructs it; PresentLayers (under USE_DRM_SCENE) moves it into
+    // the scene the first time the store appears in a FlutterLayer.
+    // CollectBackingStore destroys the wrapper if it never reached the
+    // scene (e.g. the store retired before its first Present).
+    std::unique_ptr<GbmBackingStoreLayerSource> scene_source;
+#endif
   };
 
   bool InitEglExtensions();
@@ -237,6 +253,21 @@ class DrmCompositor {
   // rejects that anyway.
   bool PresentFramed(const FlutterLayer** layers, size_t count);
 
+#if USE_DRM_SCENE
+  // Non-framed present path driven by drm::scene::LayerScene. Walks
+  // FlutterLayer[], syncs the scene's layer membership against it via
+  // find_by_identity_tag / add_layer / remove_layer keyed on the
+  // backing-store baton pointer, updates DisplayParams via
+  // set_*_if_changed setters, and runs scene_->commit() in place of
+  // the manual AtomicRequest + Allocator path. CommitReport.placements
+  // is inspected: any layer reported Composited routes the frame
+  // through PresentViaGlFallback instead (the GL composite path is
+  // materially faster than drm-cxx's CompositeCanvas over uncached
+  // GBM read-back). Platform-view layers force the same fallback —
+  // platform-view→scene plumbing is not wired in this revision.
+  bool PresentLayersViaScene(const FlutterLayer** layers, size_t count);
+#endif
+
   DrmBackend* backend_;
 
   // EGL image extensions.
@@ -299,6 +330,27 @@ class DrmCompositor {
   // Owns the MODE_ID / ACTIVE / Connector.CRTC_ID properties + mode
   // blob for atomic modesets. attach()-ed to the first commit.
   std::optional<drm::modeset::Modeset> modeset_;
+
+#if USE_DRM_SCENE
+  // LayerScene-driven non-framed present path. Constructed in
+  // InitPlaneAllocator when !framed_; null in framed mode (the
+  // primary-BG + overlay layout keeps the manual atomic path).
+  // PresentLayers's non-framed branch routes per-frame add_layer /
+  // find_by_identity_tag / commit through this scene; CreateBackingStore
+  // produces matching LayerBufferSource wrappers stashed in StoreBaton
+  // until their first Present add_layer()s them in.
+  std::unique_ptr<drm::scene::LayerScene> scene_;
+
+  // Embedder-side mirror of the scene's live layer set, keyed by
+  // baton pointer (the same pointer set as LayerDesc::identity_tag).
+  // Walked each frame to prune layers whose baton didn't appear in
+  // the current FlutterLayer[] — drm-cxx's scene retains layers
+  // across commits and exposes no iteration API beyond
+  // find_by_identity_tag, so the prune list lives here. Single-digit
+  // capacity in steady state; std::vector + linear scan is faster
+  // than any hashing for that size.
+  std::vector<StoreBaton*> scene_layer_batons_;
+#endif
 
   // Double-buffered composition buffer for layers that overflow HW planes.
   static constexpr int kNumCompBufs = 2;
