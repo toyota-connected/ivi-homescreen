@@ -83,23 +83,47 @@ int main(const int argc, char** argv) {
 
 #if BUILD_BACKEND_DRM_KMS_EGL
   // Handle --drm-list-modes[=<path>] before the main config parse so the
-  // user doesn't need to supply a bundle path just to inspect modes. Value
-  // is optional; default device is /dev/dri/card1 to match DrmConfig.
+  // user doesn't need to supply a bundle path just to inspect modes.
+  // Device resolution precedence (first match wins):
+  //   1. --drm-list-modes=<path> (explicit attached value)
+  //   2. --drm-list-modes <path> (next positional, unless it starts with -)
+  //   3. --drm-device <path> or --drm-device=<path> anywhere in argv
+  //      (the same flag the launch path consumes)
+  //   4. /dev/dri/card1 (matches the launch-path default)
+  // Step 3 is the fix for `--drm-list-modes --drm-device /dev/dri/cardN`,
+  // which previously silently fell through to /dev/dri/card1 because the
+  // next-positional check at step 2 rejects anything starting with `-`.
+  bool list_modes_requested = false;
+  std::string list_modes_dev;
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];
-    std::string dev;
     if (arg == "--drm-list-modes") {
-      dev = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
-                                                    : "/dev/dri/card1";
-      return PrintDrmModes(dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+      list_modes_requested = true;
+      if (i + 1 < argc && argv[i + 1][0] != '-') {
+        list_modes_dev = argv[i + 1];
+      }
+      continue;
     }
     if (arg.rfind("--drm-list-modes=", 0) == 0) {
-      dev = std::string(arg.substr(std::strlen("--drm-list-modes=")));
-      if (dev.empty()) {
-        dev = "/dev/dri/card1";
-      }
-      return PrintDrmModes(dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+      list_modes_requested = true;
+      list_modes_dev =
+          std::string(arg.substr(std::strlen("--drm-list-modes=")));
+      continue;
     }
+    if (!list_modes_dev.empty()) {
+      continue;
+    }
+    if (arg == "--drm-device" && i + 1 < argc) {
+      list_modes_dev = argv[i + 1];
+    } else if (arg.rfind("--drm-device=", 0) == 0) {
+      list_modes_dev = std::string(arg.substr(std::strlen("--drm-device=")));
+    }
+  }
+  if (list_modes_requested) {
+    if (list_modes_dev.empty()) {
+      list_modes_dev = "/dev/dri/card1";
+    }
+    return PrintDrmModes(list_modes_dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
   }
 #endif
 
