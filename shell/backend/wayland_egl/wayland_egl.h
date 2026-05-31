@@ -70,10 +70,6 @@ class WaylandEglBackend : public Egl, public Backend {
                     bool debug_backend,
                     int buffer_size = kEglBufferSize);
 
-#if BUILD_COMPOSITOR
-  ~WaylandEglBackend() override;
-#endif
-
   /**
    * @brief Resize Flutter engine Window size
    * @param[in] index No use
@@ -164,6 +160,13 @@ class WaylandEglBackend : public Egl, public Backend {
    * @c FlutterView::~FlutterView before the engine destructs.
    */
   void StopVsyncMonitor() override;
+
+  /**
+   * @brief Release the EGL surface, wl_egl_window and GL contexts. Called
+   * from @c FlutterView::~FlutterView after the engine has been stopped and
+   * joined, while the wl_surface / wl_display are still alive.
+   */
+  void ReleaseRenderSurfaces() override;
 
   void UpdateSize(int _width, int _height) {
     m_initial_width = static_cast<uint32_t>(_width);
@@ -356,6 +359,26 @@ class WaylandEglBackend : public Egl, public Backend {
   // Logged once at backend destruction so the user gets a session summary
   // without having to sum the per-window windows.
   FrameProfile session_totals_{};
+
+  // eglSwapBuffers self-time profile (IVI_WL_PROFILE=1). This is the metric
+  // that the swap-interval change moves: with interval 1 the swap blocks the
+  // rasterizer on the compositor throttle, with interval 0 it returns
+  // promptly. Accumulated and flushed entirely on the rasterizer thread
+  // (present_with_info), so it is kept separate from profile_ — which is
+  // written on Display's event_thread_ — to avoid a cross-thread data race.
+  struct SwapProfile {
+    uint64_t sum_ns{0};
+    uint64_t max_ns{0};
+    uint32_t samples{0};
+    uint32_t blocked{0};  // swaps slower than kSwapBlockedNs (≈ blocked)
+  };
+  static constexpr uint64_t kSwapBlockedNs = 2'000'000;  // 2ms
+  SwapProfile swap_profile_{};
+  SwapProfile swap_session_{};
+
+  // Record one eglSwapBuffers duration and flush a window every 60 swaps.
+  // Rasterizer-thread only. No-op unless IVI_WL_PROFILE is set.
+  void RecordSwapDuration(uint64_t swap_ns);
 
   // Mirrors DrmBackend::VsyncTrampoline. Flutter calls this with the
   // FlutterDesktopEngineState* as user_data plus an opaque baton; we
