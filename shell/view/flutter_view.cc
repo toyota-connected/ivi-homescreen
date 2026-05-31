@@ -43,6 +43,7 @@
 #include "configuration/configuration.h"
 #include "engine.h"
 #include "logging.h"
+#include "main_loop_waker.h"
 #include "platform/homescreen/flutter_desktop_messenger.h"
 #ifdef ENABLE_PLUGIN_GSTREAMER_EGL
 #include "plugins/gstreamer_egl/gstreamer_egl.h"
@@ -497,10 +498,21 @@ void FlutterView::RunTasks() {
   }
 #endif
 
-  m_pointer_events++;
-  if (m_pointer_events % kPointerEventModulus == 0) {
-    m_flutter_engine->SendPointerEvents();
-  }
+  // Flush any coalesced pointer events on every wake. The main loop is now
+  // event-driven (woken by Engine::CoalesceMouseEvent/CoalesceTouchEvent), so
+  // there is no per-frame busy-loop to throttle against — flushing
+  // immediately minimises input latency, and SendPointerEvents() no-ops when
+  // the queue is empty. Events that arrive in a burst are still coalesced in
+  // Engine::m_pointer_events between wakes.
+  m_flutter_engine->SendPointerEvents();
+}
+
+bool FlutterView::NeedsPeriodicPump() const {
+#ifdef ENABLE_PLUGIN_COMP_SURF
+  return !m_comp_surf.empty();
+#else
+  return false;
+#endif
 }
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
@@ -524,6 +536,10 @@ size_t FlutterView::CreateSurface(void* h_module,
       width, height, x, y);
 
   m_comp_surf[index]->InitializePlugin();
+
+  // A surface may be created while the main loop is blocked idle; wake it so
+  // it re-evaluates NeedsPeriodicPump() and starts ticking the plugin.
+  MainLoopWaker::instance().Wake();
 
   const auto tEnd = std::chrono::steady_clock::now();
   const auto tDiff =
