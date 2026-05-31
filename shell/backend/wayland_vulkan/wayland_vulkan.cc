@@ -214,14 +214,16 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   }
   if (!enabled_instance_extensions_.empty()) {
     for (const auto it : enabled_instance_extensions_) {
-      free((void*)it);
+      free((void*)it);  // strdup'd in createInstance(); owned, must be freed
     }
   }
-  if (!enabled_layer_extensions_.empty()) {
-    for (const auto it : enabled_layer_extensions_) {
-      free((void*)it);
-    }
-  }
+  // NB: enabled_layer_extensions_ is NOT freed. Unlike the instance extensions
+  // (strdup'd), its only entry is the constexpr string literal
+  // VK_LAYER_KHRONOS_VALIDATION_NAME pushed in createInstance() — not heap
+  // allocated. free()ing it aborted the process (free(): invalid size) at
+  // teardown, but only when validation layers were enabled (the sole path that
+  // populates this vector), which is why it surfaced only under -d / -d-style
+  // runs.
 }
 
 void WaylandVulkanBackend::createInstance() {
