@@ -507,6 +507,10 @@ void FlutterView::RunTasks() {
   m_flutter_engine->SendPointerEvents();
 }
 
+// Non-static by design: reads m_comp_surf when ENABLE_PLUGIN_COMP_SURF is on.
+// In builds without it the body is constant, which clang-tidy flags — suppress
+// it rather than splitting the definition per configuration.
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 bool FlutterView::NeedsPeriodicPump() const {
 #ifdef ENABLE_PLUGIN_COMP_SURF
   return !m_comp_surf.empty();
