@@ -70,10 +70,6 @@ class WaylandEglBackend : public Egl, public Backend {
                     bool debug_backend,
                     int buffer_size = kEglBufferSize);
 
-#if BUILD_COMPOSITOR
-  ~WaylandEglBackend() override;
-#endif
-
   /**
    * @brief Resize Flutter engine Window size
    * @param[in] index No use
