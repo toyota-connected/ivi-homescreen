@@ -61,7 +61,11 @@ class Display : public IDisplay {
   std::shared_ptr<EventTimer> m_repeat_timer{};
 
   [[nodiscard]] bool HasRepeatTimer() const override {
-    return static_cast<bool>(m_repeat_timer);
+    // Armed, not merely existing: the repeat timer is created once at keyboard
+    // init and lives for the session, so testing existence would keep App::Loop
+    // pacing at the refresh rate forever. Only an *armed* timer (a key is held)
+    // needs periodic servicing; otherwise the loop may idle.
+    return m_repeat_timer && m_repeat_timer->is_armed();
   }
 
   /**

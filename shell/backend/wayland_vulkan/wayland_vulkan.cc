@@ -168,17 +168,33 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   }
 
   if (device_ != nullptr) {
+    // Drain all in-flight GPU work before tearing anything down. Without this
+    // the swapchain (and the WSI's wl_buffer proxies bound to its images) can
+    // still be in use, which both the validation layers and Mesa's Wayland WSI
+    // flag ("wl_buffer still attached" / "queue destroyed while proxies still
+    // attached") and which can fault during vkDestroyDevice.
+    d.vkDeviceWaitIdle(device_);
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
 #endif
     if (swapchain_command_pool_ != nullptr) {
       d.vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
     }
-    if (present_transition_semaphore_ != nullptr) {
-      d.vkDestroySemaphore(device_, present_transition_semaphore_, nullptr);
+    for (auto sem : present_transition_semaphores_) {
+      if (sem != nullptr) {
+        d.vkDestroySemaphore(device_, sem, nullptr);
+      }
     }
+    present_transition_semaphores_.clear();
     if (image_ready_fence_ != nullptr) {
       d.vkDestroyFence(device_, image_ready_fence_, nullptr);
+    }
+    // Destroy the swapchain before the device. It is otherwise only torn down
+    // on resize (InitializeSwapChain); on shutdown it must be released here so
+    // the WSI hands its images' wl_buffers back to the compositor.
+    if (swapchain_ != nullptr) {
+      d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+      swapchain_ = VK_NULL_HANDLE;
     }
     d.vkDestroyDevice(device_, nullptr);
   }
@@ -198,14 +214,16 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   }
   if (!enabled_instance_extensions_.empty()) {
     for (const auto it : enabled_instance_extensions_) {
-      free((void*)it);
+      free((void*)it);  // strdup'd in createInstance(); owned, must be freed
     }
   }
-  if (!enabled_layer_extensions_.empty()) {
-    for (const auto it : enabled_layer_extensions_) {
-      free((void*)it);
-    }
-  }
+  // NB: enabled_layer_extensions_ is NOT freed. Unlike the instance extensions
+  // (strdup'd), its only entry is the constexpr string literal
+  // VK_LAYER_KHRONOS_VALIDATION_NAME pushed in createInstance() — not heap
+  // allocated. free()ing it aborted the process (free(): invalid size) at
+  // teardown, but only when validation layers were enabled (the sole path that
+  // populates this vector), which is why it surfaced only under -d / -d-style
+  // runs.
 }
 
 void WaylandVulkanBackend::createInstance() {
@@ -554,10 +572,21 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     resize_pending_ = false;
     d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
 
-    CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+    {
+      std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+      CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+    }
     CHECK_VK_RESULT(
         d.vkResetCommandPool(device_, swapchain_command_pool_,
                              VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
+    // The queue is idle here; tear down the old per-image present-transition
+    // semaphores so they can be recreated for the new image count below.
+    for (auto sem : present_transition_semaphores_) {
+      if (sem != nullptr) {
+        d.vkDestroySemaphore(device_, sem, nullptr);
+      }
+    }
+    present_transition_semaphores_.clear();
   }
 
   // --------------------------------------------------------------------------
@@ -789,6 +818,17 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     CHECK_VK_RESULT(d.vkEndCommandBuffer(buffer));
   }
 
+  // One present-transition semaphore per swapchain image (see header). Created
+  // here, alongside the per-image transition command buffers, so the count
+  // tracks the swapchain.
+  VkSemaphoreCreateInfo present_sem_info{};
+  present_sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  present_transition_semaphores_.resize(swapchain_images_.size());
+  for (auto& sem : present_transition_semaphores_) {
+    CHECK_VK_RESULT(
+        d.vkCreateSemaphore(device_, &present_sem_info, nullptr, &sem));
+  }
+
 #if BUILD_COMPOSITOR
   CompositorPipeliningInit();
 #endif
@@ -885,21 +925,31 @@ bool WaylandVulkanBackend::PresentCallback(
   // command buffer Record vkCmdPipelineBarrier at the end of your render pass
   // command buffer
 
-  // Submit the command buffer and signal the semaphore
+  // Submit the command buffer and signal this image's present-transition
+  // semaphore. Both the command buffer and the semaphore are indexed by
+  // image, so the next frame is free to record/submit while this frame's
+  // GPU work is still in flight — no full-queue drain is required (the
+  // resource is only reused once vkAcquireNextImageKHR hands this image
+  // back, which already implies its previous presentation completed).
+  VkSemaphore& transition_semaphore =
+      b->present_transition_semaphores_[b->last_image_index_];
   VkSubmitInfo submit_info{};
   submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers =
       &b->present_transition_buffers_[b->last_image_index_];
   submit_info.signalSemaphoreCount = 1;
-  submit_info.pSignalSemaphores = &b->present_transition_semaphore_;
-  d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+  submit_info.pSignalSemaphores = &transition_semaphore;
+  {
+    std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
+    d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+  }
 
   // Wait on the signaled semaphore in vkQueuePresentKHR
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
-  present_info.pWaitSemaphores = &b->present_transition_semaphore_;
+  present_info.pWaitSemaphores = &transition_semaphore;
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &b->swapchain_;
   present_info.pImageIndices = &b->last_image_index_;
@@ -908,14 +958,25 @@ bool WaylandVulkanBackend::PresentCallback(
   // feedback object binds to the most recent surface request prior to
   // the commit.
   b->RequestPresentationFeedback();
-  const VkResult result = d.vkQueuePresentKHR(b->queue_, &present_info);
-
-  // If the swap chain is no longer compatible with the surface, discard the
-  // swap chain and create a new one.
-  if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
-    b->InitializeSwapChain();
+  VkResult result;
+  {
+    std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
+    result = d.vkQueuePresentKHR(b->queue_, &present_info);
   }
-  d.vkQueueWaitIdle(b->queue_);
+
+  // If the swap chain is no longer compatible with the surface, defer
+  // recreation to the next GetNextImageCallback rather than rebuilding inside
+  // the present call. That path (gated on resize_pending_) idles the queue and
+  // destroys the old swapchain, command buffers and per-image semaphores
+  // before recreating them; rebuilding here would skip that teardown and leak
+  // them. Mirrors the compositor path (PresentLayersImpl).
+  if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+    b->resize_pending_ = true;
+  }
+  // No vkQueueWaitIdle here: CPU/GPU now pipeline across frames. Reuse of
+  // this image's command buffer and semaphore is gated by the next
+  // vkAcquireNextImageKHR + image_ready_fence_ wait in GetNextImageCallback,
+  // and swapchain recreation (above / on resize) drains the queue itself.
 
   b->ProfilePresent(result == VK_SUCCESS);
 
@@ -1353,10 +1414,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   f_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   d.vkCreateFence(device_, &f_info, nullptr, &image_ready_fence_);
 
-  VkSemaphoreCreateInfo s_info{};
-  s_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  d.vkCreateSemaphore(device_, &s_info, nullptr,
-                      &present_transition_semaphore_);
+  // present_transition_semaphores_ are created per swapchain image inside
+  // InitializeSwapChain (below), since their count tracks the swapchain.
 
   VkCommandPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1646,8 +1705,11 @@ void WaylandVulkanBackend::TransitionLayout(
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
-  d.vkQueueWaitIdle(queue_);
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+    d.vkQueueWaitIdle(queue_);
+  }
   d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
 }
 
@@ -1840,7 +1902,10 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   submit.pCommandBuffers = &cmd;
   submit.signalSemaphoreCount = 1;
   submit.pSignalSemaphores = &slot.render_finished;
-  d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+  }
 
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1852,7 +1917,11 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Mint wp_presentation_feedback before the commit baked into
   // vkQueuePresentKHR. See PresentCallback for rationale.
   RequestPresentationFeedback();
-  const VkResult result = d.vkQueuePresentKHR(queue_, &present_info);
+  VkResult result;
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    result = d.vkQueuePresentKHR(queue_, &present_info);
+  }
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;
   }

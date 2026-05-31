@@ -186,6 +186,12 @@ class WaylandVulkanBackend final : public Backend {
   VkDevice device_{};
   uint32_t queue_family_index_{};
   VkQueue queue_{};
+  // VkQueue access (vkQueueSubmit / vkQueuePresentKHR / vkQueueWaitIdle) must
+  // be externally synchronized per the Vulkan spec. The present/get-next-image
+  // callbacks run on the Flutter raster thread while init, swapchain
+  // (re)creation and the one-shot blit/transfer helpers can touch the same
+  // single queue from the platform thread; serialize every queue op on this.
+  std::mutex queue_mutex_{};
 
   bool debugUtilsSupported_{};
   bool enable_validation_layers_;
@@ -197,7 +203,12 @@ class WaylandVulkanBackend final : public Backend {
   VkCommandPool swapchain_command_pool_{};
   std::vector<VkImage> swapchain_images_;
   std::vector<VkCommandBuffer> present_transition_buffers_;
-  VkSemaphore present_transition_semaphore_{};
+  // One present-transition semaphore per swapchain image. Per-image (rather
+  // than a single shared semaphore) so the non-compositor present path does
+  // not need a full vkQueueWaitIdle drain every frame: a given image's
+  // semaphore is only reused once that image is re-acquired, which already
+  // implies its previous presentation completed.
+  std::vector<VkSemaphore> present_transition_semaphores_;
   VkFence image_ready_fence_{};
   uint32_t last_image_index_{};
 

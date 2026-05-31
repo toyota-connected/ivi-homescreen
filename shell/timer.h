@@ -19,6 +19,8 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
+#include <atomic>
+
 struct timer_task {
   void (*run)(timer_task const* task, uint32_t events);
   void* data;
@@ -49,6 +51,11 @@ class EventTimer {
   int m_timerfd;
   struct itimerspec m_timerspec{};
 
+  // Whether the timer is currently armed (between arm() and disarm()). Written
+  // on the input thread, read on the main loop thread (App::Loop pacing gate),
+  // hence atomic. A bare timerfd has no "is it running" query, so we track it.
+  std::atomic_bool m_armed{false};
+
   struct timer_task m_task{};
   evtimer_cb m_callback;
   void* m_callback_data;
@@ -77,14 +84,23 @@ class EventTimer {
    * @relation
    * internal
    */
-  void arm() const;
+  void arm();
   /**
    * @brief run when a timer is stopped
    * @return void
    * @relation
    * internal
    */
-  void disarm() const;
+  void disarm();
+
+  /**
+   * @brief whether the timer is currently armed (running)
+   * @return bool
+   * @retval true between arm() and disarm()
+   * @relation
+   * internal
+   */
+  [[nodiscard]] bool is_armed() const { return m_armed.load(); }
 
   /**
    * @brief register timerfd
