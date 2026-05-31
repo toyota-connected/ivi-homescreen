@@ -28,6 +28,7 @@
 #include "config/common.h"
 
 #include "engine.h"
+#include "main_loop_waker.h"
 #include "timer.h"
 #include "window.h"
 
@@ -701,6 +702,11 @@ void Display::keyboard_handle_key(void* data,
       d->m_keysym_pressed = keysym;
       set_repeat_code(d, xkb_scancode);
       d->m_repeat_timer->arm();
+      // Arming happens on the Wayland event thread; the main loop may be
+      // blocked idle (App::Loop now blocks when HasRepeatTimer() is false).
+      // Wake it so it re-evaluates and starts pacing the key-repeat promptly
+      // instead of after the idle heartbeat.
+      MainLoopWaker::instance().Wake();
     } else {
       SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
     }
