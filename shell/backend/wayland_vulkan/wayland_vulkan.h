@@ -186,6 +186,12 @@ class WaylandVulkanBackend final : public Backend {
   VkDevice device_{};
   uint32_t queue_family_index_{};
   VkQueue queue_{};
+  // VkQueue access (vkQueueSubmit / vkQueuePresentKHR / vkQueueWaitIdle) must
+  // be externally synchronized per the Vulkan spec. The present/get-next-image
+  // callbacks run on the Flutter raster thread while init, swapchain
+  // (re)creation and the one-shot blit/transfer helpers can touch the same
+  // single queue from the platform thread; serialize every queue op on this.
+  std::mutex queue_mutex_{};
 
   bool debugUtilsSupported_{};
   bool enable_validation_layers_;

@@ -570,7 +570,10 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     resize_pending_ = false;
     d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
 
-    CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+    {
+      std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+      CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+    }
     CHECK_VK_RESULT(
         d.vkResetCommandPool(device_, swapchain_command_pool_,
                              VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
@@ -935,7 +938,10 @@ bool WaylandVulkanBackend::PresentCallback(
       &b->present_transition_buffers_[b->last_image_index_];
   submit_info.signalSemaphoreCount = 1;
   submit_info.pSignalSemaphores = &transition_semaphore;
-  d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+  {
+    std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
+    d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+  }
 
   // Wait on the signaled semaphore in vkQueuePresentKHR
   VkPresentInfoKHR present_info{};
@@ -950,7 +956,11 @@ bool WaylandVulkanBackend::PresentCallback(
   // feedback object binds to the most recent surface request prior to
   // the commit.
   b->RequestPresentationFeedback();
-  const VkResult result = d.vkQueuePresentKHR(b->queue_, &present_info);
+  VkResult result;
+  {
+    std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
+    result = d.vkQueuePresentKHR(b->queue_, &present_info);
+  }
 
   // If the swap chain is no longer compatible with the surface, defer
   // recreation to the next GetNextImageCallback rather than rebuilding inside
@@ -1693,8 +1703,11 @@ void WaylandVulkanBackend::TransitionLayout(
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
-  d.vkQueueWaitIdle(queue_);
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+    d.vkQueueWaitIdle(queue_);
+  }
   d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
 }
 
@@ -1887,7 +1900,10 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   submit.pCommandBuffers = &cmd;
   submit.signalSemaphoreCount = 1;
   submit.pSignalSemaphores = &slot.render_finished;
-  d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+  }
 
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1899,7 +1915,11 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Mint wp_presentation_feedback before the commit baked into
   // vkQueuePresentKHR. See PresentCallback for rationale.
   RequestPresentationFeedback();
-  const VkResult result = d.vkQueuePresentKHR(queue_, &present_info);
+  VkResult result;
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    result = d.vkQueuePresentKHR(queue_, &present_info);
+  }
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;
   }
