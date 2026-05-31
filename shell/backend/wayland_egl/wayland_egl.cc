@@ -689,6 +689,33 @@ void WaylandEglBackend::StopVsyncMonitor() {
         sw.samples, (sw.sum_ns / sw.samples) / 1000, sw.max_ns / 1000,
         sw.blocked, 100.0 * sw.blocked / static_cast<double>(sw.samples));
   }
+
+  // Tear down the window-backed EGL surface + wl_egl_window here, not in a
+  // destructor. StopVsyncMonitor is called from FlutterView::~FlutterView
+  // while every member is still alive; the backend's own destructor runs
+  // *after* m_wayland_window (declared later, destroyed first), by which
+  // point the wl_surface the EGL surface / WSI reference is already freed —
+  // tearing them down there is a use-after-free (and leaving them for the
+  // base eglTerminate is what crashed on exit). Idempotent via the guards.
+#if BUILD_COMPOSITOR
+  // The scratch blit FBO needs a current context; delete it before the
+  // surface goes away.
+  if (m_texture_blit_fbo_) {
+    MakeCurrent();
+    glDeleteFramebuffers(1, &m_texture_blit_fbo_);
+    m_texture_blit_fbo_ = 0;
+  }
+#endif
+  // eglDestroySurface must not run on a bound surface — unbind first.
+  ClearCurrent();
+  if (m_egl_surface != EGL_NO_SURFACE) {
+    eglDestroySurface(GetDisplay(), m_egl_surface);
+    m_egl_surface = EGL_NO_SURFACE;
+  }
+  if (m_egl_window != nullptr) {
+    wl_egl_window_destroy(m_egl_window);
+    m_egl_window = nullptr;
+  }
 }
 
 void WaylandEglBackend::RecordSwapDuration(const uint64_t swap_ns) {
@@ -1258,15 +1285,6 @@ void WaylandEglBackend::ResizeCompositorSurface(
   }
   if (surface) {
     surface->OnResize(width, height);
-  }
-}
-
-WaylandEglBackend::~WaylandEglBackend() {
-  // Pools flush themselves; the scratch blit FBO needs explicit cleanup
-  // while the EGL context from the base class is still current.
-  if (m_texture_blit_fbo_) {
-    glDeleteFramebuffers(1, &m_texture_blit_fbo_);
-    m_texture_blit_fbo_ = 0;
   }
 }
 

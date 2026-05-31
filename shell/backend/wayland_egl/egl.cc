@@ -179,6 +179,23 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
 }
 
 Egl::~Egl() {
+  // Unbind and destroy the contexts before terminating the display. The
+  // window-backed surface + wl_egl_window are released earlier (by
+  // WaylandEglBackend::StopVsyncMonitor, while the wl_surface is still alive);
+  // here we own the three contexts and the display connection.
+  eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  if (m_texture_context != EGL_NO_CONTEXT) {
+    eglDestroyContext(m_dpy, m_texture_context);
+    m_texture_context = EGL_NO_CONTEXT;
+  }
+  if (m_resource_context != EGL_NO_CONTEXT) {
+    eglDestroyContext(m_dpy, m_resource_context);
+    m_resource_context = EGL_NO_CONTEXT;
+  }
+  if (m_context != EGL_NO_CONTEXT) {
+    eglDestroyContext(m_dpy, m_context);
+    m_context = EGL_NO_CONTEXT;
+  }
   eglTerminate(m_dpy);
   eglReleaseThread();
 }
