@@ -191,7 +191,7 @@ class WaylandVulkanBackend final : public Backend {
   // callbacks run on the Flutter raster thread while init, swapchain
   // (re)creation and the one-shot blit/transfer helpers can touch the same
   // single queue from the platform thread; serialize every queue op on this.
-  std::mutex queue_mutex_{};
+  mutable std::mutex queue_mutex_{};
 
   bool debugUtilsSupported_{};
   bool enable_validation_layers_;
