@@ -179,8 +179,39 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
 }
 
 Egl::~Egl() {
+  // Idempotent: ReleaseContexts() normally already ran from the controlled
+  // shutdown path (WaylandEglBackend::ReleaseRenderSurfaces, after the engine
+  // was stopped and its threads joined). This is the fallback for any Egl
+  // owner that doesn't drive that path.
+  ReleaseContexts();
+}
+
+void Egl::ReleaseContexts() {
+  if (m_dpy == EGL_NO_DISPLAY) {
+    return;  // already torn down
+  }
+  // Unbind and destroy the contexts before terminating the display. Callers
+  // must guarantee no other thread (notably the Flutter rasterizer) still has
+  // a context current — destroying a context that is live on another thread
+  // corrupts the driver's heap (observed as a SIGSEGV inside Mesa's
+  // st_destroy_context on amdgpu). The window-backed surface + wl_egl_window
+  // are released first, while the wl_surface is still alive.
+  eglMakeCurrent(m_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  if (m_texture_context != EGL_NO_CONTEXT) {
+    eglDestroyContext(m_dpy, m_texture_context);
+    m_texture_context = EGL_NO_CONTEXT;
+  }
+  if (m_resource_context != EGL_NO_CONTEXT) {
+    eglDestroyContext(m_dpy, m_resource_context);
+    m_resource_context = EGL_NO_CONTEXT;
+  }
+  if (m_context != EGL_NO_CONTEXT) {
+    eglDestroyContext(m_dpy, m_context);
+    m_context = EGL_NO_CONTEXT;
+  }
   eglTerminate(m_dpy);
   eglReleaseThread();
+  m_dpy = EGL_NO_DISPLAY;
 }
 
 bool Egl::MakeCurrent() const {

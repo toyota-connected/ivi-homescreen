@@ -167,6 +167,20 @@ class Backend {
    */
   virtual void StopVsyncMonitor() {}
 
+  /**
+   * @brief Release the backend's GPU / windowing-system resources (render
+   * surface, native window, GL contexts, display connection).
+   *
+   * Called from @c FlutterView::~FlutterView @e after the engine has been
+   * stopped and all its threads joined, but while the window/display members
+   * are still alive. Tearing these down before the rasterizer thread is
+   * joined races that thread on the GL context (driver heap corruption);
+   * tearing them down after the window member is destroyed is a use-after-free
+   * on the native surface. This hook is the one safe point between the two.
+   * Must be idempotent. Default is a no-op.
+   */
+  virtual void ReleaseRenderSurfaces() {}
+
 #if BUILD_COMPOSITOR
   /**
    * @brief Register a platform-view compositor surface.

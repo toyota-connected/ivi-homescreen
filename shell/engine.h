@@ -108,13 +108,17 @@ class Engine {
   [[nodiscard]] double GetPixelRatio() const { return m_prev_pixel_ratio; };
 
   /**
-   * @brief Shutsdown Flutter Engine Instance
-   * @return FlutterEngineResult
-   * @retval The result of shutting down the engine
+   * @brief Stop the Flutter engine and join all of its threads.
+   *
+   * This is the explicit shutdown point of control: after it returns no
+   * engine thread (platform, UI, rasterizer) is alive, so it is safe to tear
+   * down the resources those threads touch (GL contexts, render surfaces).
+   * Idempotent — a no-op if the engine was never started or is already
+   * stopped. ~Engine() calls it as a fallback.
    * @relation
    * flutter
    */
-  [[nodiscard]] FlutterEngineResult Shutdown() const;
+  void Shutdown();
 
   /**
    * @brief Check if engine is running
@@ -387,7 +391,11 @@ class Engine {
   FlutterTaskRunnerDescription m_platform_task_runner_description{};
   FlutterCustomTaskRunners m_custom_task_runners{};
 
-  FlutterEngineAOTData m_aot_data;
+  // Zero-initialized: only assigned for AOT runs (RunsAOTCompiledDartCode()).
+  // On a JIT/debug run LoadAotData() never runs, so this must be null —
+  // otherwise the `if (m_aot_data)` guard in Shutdown() reads garbage and
+  // CollectAOTData() corrupts the heap.
+  FlutterEngineAOTData m_aot_data{};
 
   // Owned by Engine so it survives FlutterEngineDeinitialize. See
   // TakeEngineState() above. ~Engine resets this between Shutdown and

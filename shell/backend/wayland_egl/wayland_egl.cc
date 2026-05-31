@@ -130,40 +130,55 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
     // THIS commit. No-op when wp_presentation isn't usable.
     b->RequestPresentationFeedback();
 
-    // Full swap if FlutterPresentInfo is invalid
-    if (info->struct_size != sizeof(FlutterPresentInfo)) {
-      return b->SwapBuffers();
-    }
+    static const bool profile_enabled =
+        std::getenv("IVI_WL_PROFILE") != nullptr;
 
-    // Existing-damage storage is held by value in m_existing_damage_map;
-    // populate_existing_damage rewrites the entry in place on every call,
-    // so no per-frame free is required here.
-
-    if (b->GetSetDamageRegion()) {
-      // Set the buffer damage as the damage region.
-      auto buffer_rects = b->RectToInts(info->buffer_damage.damage[0]);
-      b->GetSetDamageRegion()(b->GetDisplay(), b->m_egl_surface,
-                              buffer_rects.data(), 1);
-    }
-
-    if (info->frame_damage.damage) {
-      // Add frame damage to damage history
-      b->m_damage_history.push_back(info->frame_damage.damage[0]);
-      if (b->m_damage_history.size() > kMaxHistorySize) {
-        b->m_damage_history.pop_front();
+    // Decide the swap mechanism (and do the cheap damage bookkeeping) BEFORE
+    // timing, so the measured interval reflects only the swap-call block time
+    // — the quantity the swap-interval setting moves — not RectToInts / damage
+    // map work.
+    bool use_damage_swap = false;
+    std::array<EGLint, 4> frame_rects{};
+    if (info->struct_size == sizeof(FlutterPresentInfo)) {
+      // Existing-damage storage is held by value in m_existing_damage_map;
+      // populate_existing_damage rewrites the entry in place on every call,
+      // so no per-frame free is required here.
+      if (b->GetSetDamageRegion()) {
+        // Set the buffer damage as the damage region.
+        auto buffer_rects = b->RectToInts(info->buffer_damage.damage[0]);
+        b->GetSetDamageRegion()(b->GetDisplay(), b->m_egl_surface,
+                                buffer_rects.data(), 1);
       }
-
-      if (b->GetSwapBuffersWithDamage()) {
-        // Swap buffers with frame damage.
-        const auto frame_rects = b->RectToInts(info->frame_damage.damage[0]);
-        return b->GetSwapBuffersWithDamage()(
-            b->GetDisplay(), b->m_egl_surface,
-            const_cast<int*>(frame_rects.data()), 1);
+      if (info->frame_damage.damage) {
+        // Add frame damage to damage history
+        b->m_damage_history.push_back(info->frame_damage.damage[0]);
+        if (b->m_damage_history.size() > kMaxHistorySize) {
+          b->m_damage_history.pop_front();
+        }
+        if (b->GetSwapBuffersWithDamage()) {
+          frame_rects = b->RectToInts(info->frame_damage.damage[0]);
+          use_damage_swap = true;
+        }
       }
     }
-    // If the required extensions for partial repaint were not
-    // provided, do full repaint.
-    return b->SwapBuffers();
+
+    const uint64_t t0 =
+        profile_enabled ? LibFlutterEngine->GetCurrentTime() : 0;
+    bool result;
+    if (use_damage_swap) {
+      // Swap buffers with frame damage.
+      result = b->GetSwapBuffersWithDamage()(
+          b->GetDisplay(), b->m_egl_surface,
+          const_cast<int*>(frame_rects.data()), 1);
+    } else {
+      // Full repaint: invalid present info, no frame damage, or the
+      // partial-repaint extension wasn't provided.
+      result = b->SwapBuffers();
+    }
+    if (profile_enabled) {
+      b->RecordSwapDuration(LibFlutterEngine->GetCurrentTime() - t0);
+    }
+    return result;
   };
 
   config.open_gl.populate_existing_damage =
@@ -663,6 +678,81 @@ void WaylandEglBackend::StopVsyncMonitor() {
           s.bucket_idle * inv);
     }
   }
+
+  // Session-aggregate eglSwapBuffers self-time (IVI_WL_PROFILE=1). This is the
+  // metric the swap-interval setting moves: lower mean / fewer blocked swaps
+  // means the rasterizer spent less time stalled in the swap.
+  if (const auto& sw = swap_session_; sw.samples > 0) {
+    spdlog::info(
+        "[WaylandEglBackend] swap session: n={} mean={}us max={}us "
+        "blocked(>2ms)={} ({:.1f}%)",
+        sw.samples, (sw.sum_ns / sw.samples) / 1000, sw.max_ns / 1000,
+        sw.blocked, 100.0 * sw.blocked / static_cast<double>(sw.samples));
+  }
+
+  // NB: GPU / WSI resources (EGL surface, wl_egl_window, GL contexts,
+  // EGLDisplay) are NOT torn down here. StopVsyncMonitor runs before the
+  // engine is stopped, so the rasterizer thread may still be live and have a
+  // context current; destroying them now races that thread. They are released
+  // from ReleaseRenderSurfaces(), which FlutterView::~FlutterView calls after
+  // the engine has been stopped and joined.
+}
+
+void WaylandEglBackend::ReleaseRenderSurfaces() {
+  // Called from FlutterView::~FlutterView after Engine::Shutdown() has joined
+  // every engine thread (so no rasterizer thread holds a context current) but
+  // while m_wayland_window (the wl_surface) and m_display (the wl_display) are
+  // still alive (so the EGL surface / WSI objects and the EGLDisplay are still
+  // valid). This is the only safe point to release them. Idempotent via the
+  // guards below plus Egl::ReleaseContexts().
+#if BUILD_COMPOSITOR
+  // The scratch blit FBO needs a current context; delete it before the
+  // surface goes away.
+  if (m_texture_blit_fbo_) {
+    MakeCurrent();
+    glDeleteFramebuffers(1, &m_texture_blit_fbo_);
+    m_texture_blit_fbo_ = 0;
+  }
+#endif
+  // eglDestroySurface must not run on a bound surface — unbind first.
+  ClearCurrent();
+  if (m_egl_surface != EGL_NO_SURFACE) {
+    eglDestroySurface(GetDisplay(), m_egl_surface);
+    m_egl_surface = EGL_NO_SURFACE;
+  }
+  if (m_egl_window != nullptr) {
+    wl_egl_window_destroy(m_egl_window);
+    m_egl_window = nullptr;
+  }
+  // Destroy the GL contexts and terminate the display now, while no engine
+  // thread is alive. (Egl::~Egl would otherwise run at member-destruction
+  // time, after m_display has freed the wl_display the EGLDisplay wraps.)
+  ReleaseContexts();
+}
+
+void WaylandEglBackend::RecordSwapDuration(const uint64_t swap_ns) {
+  const auto accumulate = [swap_ns](SwapProfile& p) {
+    p.sum_ns += swap_ns;
+    if (swap_ns > p.max_ns) {
+      p.max_ns = swap_ns;
+    }
+    if (swap_ns > kSwapBlockedNs) {
+      ++p.blocked;
+    }
+    ++p.samples;
+  };
+  accumulate(swap_profile_);
+  accumulate(swap_session_);
+
+  // Flush a window every 60 swaps, mirroring the frame-interval profiler.
+  if (auto& w = swap_profile_; w.samples >= 60) {
+    spdlog::info(
+        "[WaylandEglBackend] swap profile (n={}): mean={}us max={}us "
+        "blocked(>2ms)={} ({:.1f}%)",
+        w.samples, (w.sum_ns / w.samples) / 1000, w.max_ns / 1000, w.blocked,
+        100.0 * w.blocked / static_cast<double>(w.samples));
+    w = SwapProfile{};
+  }
 }
 
 void WaylandEglBackend::Resize(size_t /* index */,
@@ -693,6 +783,37 @@ void WaylandEglBackend::CreateSurface(size_t /* index */,
   m_wl_surface.store(surface, std::memory_order_release);
   m_egl_window = wl_egl_window_create(surface, width, height);
   m_egl_surface = create_egl_surface(m_egl_window, nullptr);
+
+  // Frame pacing is owned by the wp_presentation_feedback ->
+  // FlutterEngineOnVsync path whenever it is active, so make eglSwapBuffers
+  // non-blocking (swap interval 0) and avoid double-throttling the rasterizer
+  // inside the swap. When that path is disabled (IVI_WL_VSYNC=0, or no
+  // compatible presentation clock) the engine falls back to its wall-clock
+  // scheduler and the swap interval is the only throttle, so keep the EGL
+  // default of 1 there. Mirrors GetVsyncCallback()'s condition exactly so the
+  // two never disagree.
+  EGLint swap_interval = GetVsyncCallback() != nullptr ? 0 : 1;
+  // IVI_WL_SWAP_INTERVAL=auto|0|1 forces the interval independent of the vsync
+  // path, so it can be A/B'd (0 vs 1 with vsync held on) when measuring the
+  // rasterizer swap-block time. "auto" (default) keeps the vsync-coupled value.
+  if (const char* env = std::getenv("IVI_WL_SWAP_INTERVAL")) {
+    if (std::string_view(env) == "0") {
+      swap_interval = 0;
+    } else if (std::string_view(env) == "1") {
+      swap_interval = 1;
+    }
+    spdlog::info("[WaylandEglBackend] IVI_WL_SWAP_INTERVAL={} -> interval {}",
+                 env, swap_interval);
+  }
+  MakeCurrent();
+  if (eglSwapInterval(GetDisplay(), swap_interval) != EGL_TRUE) {
+    spdlog::warn("[WaylandEglBackend] eglSwapInterval({}) failed",
+                 swap_interval);
+  } else {
+    SPDLOG_DEBUG("[WaylandEglBackend] eglSwapInterval set to {}",
+                 swap_interval);
+  }
+  ClearCurrent();
 }
 
 #if 0  // TODO
@@ -1176,15 +1297,6 @@ void WaylandEglBackend::ResizeCompositorSurface(
   }
   if (surface) {
     surface->OnResize(width, height);
-  }
-}
-
-WaylandEglBackend::~WaylandEglBackend() {
-  // Pools flush themselves; the scratch blit FBO needs explicit cleanup
-  // while the EGL context from the base class is still current.
-  if (m_texture_blit_fbo_) {
-    glDeleteFramebuffers(1, &m_texture_blit_fbo_);
-    m_texture_blit_fbo_ = 0;
   }
 }
 

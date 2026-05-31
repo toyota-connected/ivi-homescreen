@@ -337,15 +337,38 @@ FlutterView::~FlutterView() {
     m_state->engine_state->messenger->SetEngine(nullptr);
   }
 
-  // Tear down any backend-owned vsync/event-loop monitor before
-  // m_flutter_engine destructs. DRM's monitor is an asio async_wait on
-  // the drm fd living on the engine's platform task runner; if it's
-  // still outstanding when Engine::~Engine resets the runner,
-  // TaskRunner::~TaskRunner blocks forever joining a worker parked in
-  // epoll_wait waiting for an event that will never arrive. The default
-  // virtual is a no-op for backends without a monitor.
+  // Ordered shutdown. The three steps below must run in this order; relying
+  // on member-destruction order instead races the engine's rasterizer thread
+  // against GL/WSI teardown (SIGSEGV) or strands GPU resources behind a
+  // freed wl_surface.
+  //
+  // 1. Stop the backend's vsync/event-loop monitor while the engine and its
+  //    platform task runner are still alive. DRM's monitor is an asio
+  //    async_wait on the drm fd living on that runner; if it's still
+  //    outstanding when the runner is destroyed, TaskRunner::~TaskRunner
+  //    blocks forever joining a worker parked in epoll_wait. This does NOT
+  //    touch GL/WSI resources. No-op for backends without a monitor.
   if (m_backend) {
     m_backend->StopVsyncMonitor();
+  }
+
+  // 2. Point of control: stop the engine and join the platform, UI and
+  //    rasterizer threads. Until this returns the rasterizer can still call
+  //    into the backend (VsyncTrampoline / PresentLayers) and hold a GL
+  //    context current. Doing this explicitly here — rather than leaving it
+  //    to m_flutter_engine's destruction further down — guarantees no engine
+  //    thread is alive for step 3.
+  if (m_flutter_engine) {
+    m_flutter_engine->Shutdown();
+  }
+
+  // 3. Now that no engine thread is alive, release the backend's GL contexts
+  //    and render surfaces, while m_wayland_window (wl_surface) and m_display
+  //    (wl_display) are still alive — both are destroyed later, in member
+  //    order — so the EGL surface / EGLDisplay are still valid. No-op for
+  //    backends that don't hold such resources.
+  if (m_backend) {
+    m_backend->ReleaseRenderSurfaces();
   }
 }
 

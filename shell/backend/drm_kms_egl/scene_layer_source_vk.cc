@@ -29,7 +29,7 @@ VkBackingStoreLayerSource::create(
   auto inner = drm::scene::ExternalDmaBufSource::create(
       dev, width, height, drm_fourcc, modifier, planes);
   if (!inner) {
-    return drm::unexpected(inner.error());
+    return drm::unexpected<std::error_code>(inner.error());
   }
   return std::unique_ptr<VkBackingStoreLayerSource>(
       new VkBackingStoreLayerSource(std::move(*inner)));
