@@ -259,13 +259,9 @@ Engine::Engine(FlutterView* view,
 }
 
 Engine::~Engine() {
-  if (m_running) {
-    LibFlutterEngine->Deinitialize(m_flutter_engine);
-    LibFlutterEngine->Shutdown(m_flutter_engine);
-    if (m_aot_data) {
-      LibFlutterEngine->CollectAOTData(m_aot_data);
-    }
-  }
+  // Stop the engine (idempotent) as a fallback for owners that don't drive
+  // the explicit shutdown sequence in FlutterView::~FlutterView.
+  Shutdown();
   // Free engine_state explicitly here — after Deinitialize/Shutdown have
   // joined all engine threads and drained final callbacks (so user_data
   // dereferences in OnFlutterPlatformMessage hit live state), but before
@@ -283,11 +279,23 @@ FlutterEngineResult Engine::RunTask() {
   return kSuccess;
 }
 
-FlutterEngineResult Engine::Shutdown() const {
-  if (!m_flutter_engine) {
-    return kSuccess;
+void Engine::Shutdown() {
+  if (!m_running) {
+    return;  // never started, or already stopped — idempotent
   }
-  return LibFlutterEngine->Shutdown(m_flutter_engine);
+  m_running = false;
+  // Deinitialize stops new frame work; Shutdown joins the platform, UI and
+  // rasterizer threads. After this returns nothing in the engine touches the
+  // backend (no more VsyncTrampoline / PresentLayers), so the caller may
+  // safely release the GL contexts and render surfaces those threads used.
+  if (m_flutter_engine) {
+    LibFlutterEngine->Deinitialize(m_flutter_engine);
+    LibFlutterEngine->Shutdown(m_flutter_engine);
+  }
+  if (m_aot_data) {
+    LibFlutterEngine->CollectAOTData(m_aot_data);
+    m_aot_data = nullptr;
+  }
 }
 
 bool Engine::IsRunning() const {

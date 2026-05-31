@@ -690,13 +690,21 @@ void WaylandEglBackend::StopVsyncMonitor() {
         sw.blocked, 100.0 * sw.blocked / static_cast<double>(sw.samples));
   }
 
-  // Tear down the window-backed EGL surface + wl_egl_window here, not in a
-  // destructor. StopVsyncMonitor is called from FlutterView::~FlutterView
-  // while every member is still alive; the backend's own destructor runs
-  // *after* m_wayland_window (declared later, destroyed first), by which
-  // point the wl_surface the EGL surface / WSI reference is already freed —
-  // tearing them down there is a use-after-free (and leaving them for the
-  // base eglTerminate is what crashed on exit). Idempotent via the guards.
+  // NB: GPU / WSI resources (EGL surface, wl_egl_window, GL contexts,
+  // EGLDisplay) are NOT torn down here. StopVsyncMonitor runs before the
+  // engine is stopped, so the rasterizer thread may still be live and have a
+  // context current; destroying them now races that thread. They are released
+  // from ReleaseRenderSurfaces(), which FlutterView::~FlutterView calls after
+  // the engine has been stopped and joined.
+}
+
+void WaylandEglBackend::ReleaseRenderSurfaces() {
+  // Called from FlutterView::~FlutterView after Engine::Shutdown() has joined
+  // every engine thread (so no rasterizer thread holds a context current) but
+  // while m_wayland_window (the wl_surface) and m_display (the wl_display) are
+  // still alive (so the EGL surface / WSI objects and the EGLDisplay are still
+  // valid). This is the only safe point to release them. Idempotent via the
+  // guards below plus Egl::ReleaseContexts().
 #if BUILD_COMPOSITOR
   // The scratch blit FBO needs a current context; delete it before the
   // surface goes away.
@@ -716,6 +724,10 @@ void WaylandEglBackend::StopVsyncMonitor() {
     wl_egl_window_destroy(m_egl_window);
     m_egl_window = nullptr;
   }
+  // Destroy the GL contexts and terminate the display now, while no engine
+  // thread is alive. (Egl::~Egl would otherwise run at member-destruction
+  // time, after m_display has freed the wl_display the EGLDisplay wraps.)
+  ReleaseContexts();
 }
 
 void WaylandEglBackend::RecordSwapDuration(const uint64_t swap_ns) {

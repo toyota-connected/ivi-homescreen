@@ -161,6 +161,13 @@ class WaylandEglBackend : public Egl, public Backend {
    */
   void StopVsyncMonitor() override;
 
+  /**
+   * @brief Release the EGL surface, wl_egl_window and GL contexts. Called
+   * from @c FlutterView::~FlutterView after the engine has been stopped and
+   * joined, while the wl_surface / wl_display are still alive.
+   */
+  void ReleaseRenderSurfaces() override;
+
   void UpdateSize(int _width, int _height) {
     m_initial_width = static_cast<uint32_t>(_width);
     m_initial_height = static_cast<uint32_t>(_height);
