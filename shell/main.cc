@@ -24,6 +24,7 @@
 #include "app.h"
 #include "configuration/configuration.h"
 #include "logging/logging.h"
+#include "main_loop_waker.h"
 
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
@@ -47,6 +48,10 @@ namespace {
 // mode from K_OFF — leaving the TTY both blank and deaf to keystrokes.
 extern "C" void HandleShutdownSignal(int /*sig*/) {
   running = 0;
+  // Break the main loop out of an idle block so it re-checks `running`
+  // immediately instead of waiting for the next heartbeat. write() to the
+  // waker eventfd is async-signal-safe.
+  MainLoopWaker::SignalWake();
 }
 
 void InstallShutdownHandlers() {
@@ -105,6 +110,10 @@ int main(const int argc, char** argv) {
 
   const App app(configs);
 
+  // Construct the waker (publishing its eventfd) before installing the
+  // signal handlers, so HandleShutdownSignal's async-signal-safe wake always
+  // has a valid fd to write to.
+  (void)MainLoopWaker::instance();
   InstallShutdownHandlers();
 
   // run the application

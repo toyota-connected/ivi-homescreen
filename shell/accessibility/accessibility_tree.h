@@ -18,6 +18,7 @@
 #define SHELL_ACCESSIBILITY_ACCESSIBILITY_TREE_H_
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #if ENABLE_ACCESSKIT
@@ -153,7 +154,11 @@ class AccessibilityTree {
  private:
   bool tree_built = false;  // Flag indicating if the tree is built.
   std::vector<AccessibilityNode*> nodes;  // List of nodes in the tree.
-  int32_t focused_node;                   // ID of the currently focused node.
+  // Index from node id to node, kept in sync with `nodes` so GetNode() is
+  // O(1) instead of a linear scan (semantics updates touch many nodes per
+  // update, which would otherwise be O(n^2)).
+  std::unordered_map<int32_t, AccessibilityNode*> node_index;
+  int32_t focused_node;  // ID of the currently focused node.
 
 #if ENABLE_ACCESSKIT
   accesskit_unix_adapter* adapter{} {};  // AccessKit adapter for Unix systems.
