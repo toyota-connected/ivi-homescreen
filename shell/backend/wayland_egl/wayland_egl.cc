@@ -693,6 +693,25 @@ void WaylandEglBackend::CreateSurface(size_t /* index */,
   m_wl_surface.store(surface, std::memory_order_release);
   m_egl_window = wl_egl_window_create(surface, width, height);
   m_egl_surface = create_egl_surface(m_egl_window, nullptr);
+
+  // Frame pacing is owned by the wp_presentation_feedback ->
+  // FlutterEngineOnVsync path whenever it is active, so make eglSwapBuffers
+  // non-blocking (swap interval 0) and avoid double-throttling the rasterizer
+  // inside the swap. When that path is disabled (IVI_WL_VSYNC=0, or no
+  // compatible presentation clock) the engine falls back to its wall-clock
+  // scheduler and the swap interval is the only throttle, so keep the EGL
+  // default of 1 there. Mirrors GetVsyncCallback()'s condition exactly so the
+  // two never disagree.
+  const EGLint swap_interval = GetVsyncCallback() != nullptr ? 0 : 1;
+  MakeCurrent();
+  if (eglSwapInterval(GetDisplay(), swap_interval) != EGL_TRUE) {
+    spdlog::warn("[WaylandEglBackend] eglSwapInterval({}) failed",
+                 swap_interval);
+  } else {
+    SPDLOG_DEBUG("[WaylandEglBackend] eglSwapInterval set to {}",
+                 swap_interval);
+  }
+  ClearCurrent();
 }
 
 #if 0  // TODO
