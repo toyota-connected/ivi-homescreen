@@ -168,6 +168,12 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   }
 
   if (device_ != nullptr) {
+    // Drain all in-flight GPU work before tearing anything down. Without this
+    // the swapchain (and the WSI's wl_buffer proxies bound to its images) can
+    // still be in use, which both the validation layers and Mesa's Wayland WSI
+    // flag ("wl_buffer still attached" / "queue destroyed while proxies still
+    // attached") and which can fault during vkDestroyDevice.
+    d.vkDeviceWaitIdle(device_);
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
 #endif
@@ -182,6 +188,13 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     present_transition_semaphores_.clear();
     if (image_ready_fence_ != nullptr) {
       d.vkDestroyFence(device_, image_ready_fence_, nullptr);
+    }
+    // Destroy the swapchain before the device. It is otherwise only torn down
+    // on resize (InitializeSwapChain); on shutdown it must be released here so
+    // the WSI hands its images' wl_buffers back to the compositor.
+    if (swapchain_ != nullptr) {
+      d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+      swapchain_ = VK_NULL_HANDLE;
     }
     d.vkDestroyDevice(device_, nullptr);
   }
