@@ -93,6 +93,18 @@ class FlutterView {
   void RunTasks();
 
   /**
+   * @brief Whether this view has work that must be pumped at frame cadence.
+   *
+   * True when compositor-surface plugins are active (they drive their own
+   * rendering via RunTask each tick). Used by App::Loop to decide whether it
+   * may block idle or must keep ticking at the refresh rate.
+   * @return bool
+   * @relation
+   * flutter
+   */
+  [[nodiscard]] bool NeedsPeriodicPump() const;
+
+  /**
    * @brief Initialize
    * @return void
    * @relation
@@ -276,8 +288,6 @@ class FlutterView {
   // FlutterEngineDeinitialize. m_state->engine_state is a non-owning
   // raw pointer to the same target throughout.
   std::unique_ptr<FlutterDesktopEngineState> m_pending_engine_state;
-
-  uint64_t m_pointer_events{};
 
   static void RegisterPlugins(FlutterDesktopEngineRef engine);
 };

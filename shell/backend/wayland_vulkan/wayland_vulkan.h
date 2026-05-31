@@ -197,7 +197,12 @@ class WaylandVulkanBackend final : public Backend {
   VkCommandPool swapchain_command_pool_{};
   std::vector<VkImage> swapchain_images_;
   std::vector<VkCommandBuffer> present_transition_buffers_;
-  VkSemaphore present_transition_semaphore_{};
+  // One present-transition semaphore per swapchain image. Per-image (rather
+  // than a single shared semaphore) so the non-compositor present path does
+  // not need a full vkQueueWaitIdle drain every frame: a given image's
+  // semaphore is only reused once that image is re-acquired, which already
+  // implies its previous presentation completed.
+  std::vector<VkSemaphore> present_transition_semaphores_;
   VkFence image_ready_fence_{};
   uint32_t last_image_index_{};
 

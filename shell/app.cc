@@ -18,10 +18,10 @@
 
 #include <cstdlib>
 #include <string_view>
-#include <thread>
 
 #include "config/common.h"
 
+#include "main_loop_waker.h"
 #include "timer.h"
 #include "view/flutter_view.h"
 
@@ -46,6 +46,11 @@
 #endif
 
 namespace {
+
+// Idle wakeup cadence when the loop has no periodic work pending. Acts as a
+// liveness heartbeat / safety net in case a wake source is ever missed; the
+// loop is normally woken on demand by MainLoopWaker.
+constexpr int kIdleHeartbeatMs = 1000;
 
 std::shared_ptr<IDisplay> MakeDisplay(
     const std::vector<Configuration::Config>& configs) {
@@ -167,27 +172,50 @@ int App::Loop() const {
   if (m_display->HasRepeatTimer())
     EventTimer::wait_event();
 
-  const auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::steady_clock::now().time_since_epoch())
-                            .count();
-
-  const auto elapsed = end_time - start_time;
-
-  // Some compositors (e.g. tinywlr, virtual outputs) advertise refresh=0
-  // for their mode. Without a fallback, 1000.0 / 0 = +inf and the
-  // sleep_for below blocks the main thread forever — pointer events
-  // queued by the Wayland event thread never get flushed to Flutter.
-  const double refresh_hz = m_display->GetMaxRefreshRate();
-  const auto frame_time =
-      refresh_hz > 0.0 ? 1000.0 / refresh_hz : 1000.0 / 60.0;
-  if (const auto sleep_time = frame_time - static_cast<double>(elapsed);
-      sleep_time > 0) {
 #if BUILD_WATCHDOG
-    m_watch_dog->pet();
+  m_watch_dog->pet();
 #endif
-    std::this_thread::sleep_for(
-        std::chrono::duration<double, std::milli>(sleep_time));
+
+  // Frame production is driven entirely by each backend's own vsync source
+  // (wp_presentation feedback, KMS vblank, …) on a separate thread — App::Loop
+  // does not render. Its only periodic duties are pumping the Wayland
+  // key-repeat timer and any compositor-surface plugins. When neither is
+  // active the loop has nothing to do until an input thread coalesces a
+  // pointer event (or shutdown is requested), so it blocks on the waker
+  // instead of spinning at the refresh rate — letting the CPU reach deep
+  // idle on a static screen.
+  bool needs_periodic = m_display->HasRepeatTimer();
+  for (auto const& view : m_views) {
+    if (view->NeedsPeriodicPump()) {
+      needs_periodic = true;
+      break;
+    }
   }
+
+  int timeout_ms;
+  if (needs_periodic) {
+    // Pace at the display refresh rate, minus the work already done this
+    // iteration. Some compositors advertise refresh=0 for virtual outputs;
+    // fall back to 60 Hz so the timeout stays finite.
+    const auto end_time =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    const auto elapsed = end_time - start_time;
+    const double refresh_hz = m_display->GetMaxRefreshRate();
+    const double frame_time =
+        refresh_hz > 0.0 ? 1000.0 / refresh_hz : 1000.0 / 60.0;
+    const double remaining = frame_time - static_cast<double>(elapsed);
+    timeout_ms = remaining > 0.0 ? static_cast<int>(remaining) : 0;
+  } else {
+    // Idle: block until woken by input or shutdown. The finite heartbeat
+    // (rather than an infinite block) bounds the cost of any wake source we
+    // might have missed to one extra wakeup per second — a self-healing
+    // safety net that still cuts idle wakeups by ~98% versus per-frame.
+    timeout_ms = kIdleHeartbeatMs;
+  }
+
+  MainLoopWaker::instance().Wait(timeout_ms);
 
   return 0;
 }

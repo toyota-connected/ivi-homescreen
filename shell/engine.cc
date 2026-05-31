@@ -26,6 +26,7 @@
 #include "config/common.h"
 #include "engine.h"
 #include "hexdump.h"
+#include "main_loop_waker.h"
 #include "utils.h"
 
 #if BUILD_BACKEND_DRM_KMS_EGL
@@ -593,6 +594,10 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
   e.rotation = 0;
 
   m_pointer_events.emplace_back(e);
+
+  // Wake the main loop so it flushes this batch promptly instead of waiting
+  // for its next periodic tick (the loop blocks idle on a static screen).
+  MainLoopWaker::instance().Wake();
 }
 
 void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
@@ -624,6 +629,9 @@ void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
   e.rotation = 0;
 
   m_pointer_events.emplace_back(e);
+
+  // Wake the main loop so it flushes this batch promptly (see above).
+  MainLoopWaker::instance().Wake();
 }
 
 void Engine::SendPointerEvents() {
