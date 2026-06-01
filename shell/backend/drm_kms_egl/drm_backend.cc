@@ -1426,7 +1426,17 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
     spdlog::info("[DrmBackend] flip #{} handled (asio monitor)", n);
   }
 #if BUILD_COMPOSITOR
-  if (self->compositor_ && self->compositor_->planes_active()) {
+  // Dispatch the completion to whichever subsystem ARMED this flip, identified
+  // by its pending flag — NOT by planes_active(). planes_active() reflects who
+  // owns scanout in steady state, but when the compositor is active and a frame
+  // falls back to backend_->Present()'s legacy page flip (e.g. a backing-store
+  // layer needs composition), the completion must clear
+  // DrmBackend::flip_pending_. Routing by planes_active() cleared the
+  // compositor's (unset) flag instead, leaving DrmBackend::flip_pending_ stuck
+  // and deadlocking the next WaitForPendingFlip(). At most one flip is in
+  // flight per CRTC, so at most one flag is set; the compositor's pending flag
+  // therefore identifies its own flips.
+  if (self->compositor_ && self->compositor_->IsFlipPending()) {
     self->compositor_->OnFlipComplete();
   } else {
     self->OnLegacyFlipComplete();
