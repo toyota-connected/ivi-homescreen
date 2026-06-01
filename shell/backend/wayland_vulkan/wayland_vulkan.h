@@ -440,7 +440,6 @@ class WaylandVulkanBackend final : public Backend {
     VkCommandBuffer cmd_buffer{VK_NULL_HANDLE};
     VkFence in_flight{VK_NULL_HANDLE};
     VkSemaphore image_available{VK_NULL_HANDLE};
-    VkSemaphore render_finished{VK_NULL_HANDLE};
   };
 
   // Dedicated pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT so
@@ -448,6 +447,13 @@ class WaylandVulkanBackend final : public Backend {
   // the whole pool.
   VkCommandPool m_compositor_cmd_pool_{VK_NULL_HANDLE};
   std::vector<FrameSlot> m_compositor_slots_;
+  // render_finished is the present-wait semaphore. It must be indexed by
+  // swapchain image, NOT by frame slot: a present can't reuse the semaphore
+  // until that present completes, which the WSI tracks per image. Indexing it
+  // per slot let a slot reuse its semaphore while a prior present on the same
+  // image was still pending (VUID-vkQueuePresentKHR-pWaitSemaphores-03268 /
+  // MissingAcquireWait).
+  std::vector<VkSemaphore> m_compositor_render_finished_;
   size_t m_compositor_current_frame_{0};
 
   /// Allocate the per-slot pool, command buffers, fences, and semaphores.
