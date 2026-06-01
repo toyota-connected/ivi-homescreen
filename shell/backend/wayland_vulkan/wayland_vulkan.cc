@@ -741,7 +741,17 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   info.imageColorSpace = surface_format_.colorSpace;
   info.imageExtent = clientSize;
   info.imageArrayLayers = 1;
+  // The compositor present path (PresentLayersImpl/BlitStoreToSwapchain) blits
+  // each backing store into the swapchain image, so it must be a transfer
+  // destination — not just a color attachment. Request TRANSFER_DST_BIT in
+  // addition; gate it on the surface's advertised usage so creation can't fail
+  // on a compositor that doesn't support it (COLOR_ATTACHMENT_BIT is always
+  // supported per spec).
   info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  if (surface_capabilities.supportedUsageFlags &
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
+    info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  }
   info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   info.preTransform = surface_capabilities.currentTransform;
   info.compositeAlpha = (surface_capabilities.supportedCompositeAlpha &
@@ -1659,6 +1669,27 @@ bool WaylandVulkanBackend::CollectBackingStoreImpl(
   return true;
 }
 
+namespace {
+// Map a (single) pipeline stage to the image-access flags that stage is
+// allowed to perform, so a barrier's access masks always satisfy
+// VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819/02820. Covers the
+// stages used by TransitionLayout's callers; TOP/BOTTOM_OF_PIPE carry no
+// access.
+VkAccessFlags AccessMaskForStage(VkPipelineStageFlags stage) {
+  switch (stage) {
+    case VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT:
+      return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    case VK_PIPELINE_STAGE_TRANSFER_BIT:
+      return VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    case VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT:
+    case VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT:
+    default:
+      return 0;
+  }
+}
+}  // namespace
+
 void WaylandVulkanBackend::TransitionLayout(
     VkImage image,
     VkImageLayout from,
@@ -1691,11 +1722,13 @@ void WaylandVulkanBackend::TransitionLayout(
   barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.layerCount = 1;
-  barrier.srcAccessMask =
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
-                          VK_ACCESS_TRANSFER_READ_BIT |
-                          VK_ACCESS_TRANSFER_WRITE_BIT;
+  // Derive access masks from the stage masks so they stay spec-valid
+  // (VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819/02820): an access
+  // flag must be supported by its stage. The previous hardcoded
+  // COLOR_ATTACHMENT_WRITE|TRANSFER_WRITE / *_READ|*_WRITE masks were invalid
+  // for the only caller's TOP_OF_PIPE -> COLOR_ATTACHMENT_OUTPUT transition.
+  barrier.srcAccessMask = AccessMaskForStage(src_stage);
+  barrier.dstAccessMask = AccessMaskForStage(dst_stage);
 
   d.vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
                          1, &barrier);
@@ -1805,7 +1838,12 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   to_dst.subresourceRange.levelCount = 1;
   to_dst.subresourceRange.layerCount = 1;
   to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+  // srcStage must be TRANSFER (the stage the acquire semaphore is waited at),
+  // not TOP_OF_PIPE: that orders this layout-transition write after the
+  // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
+  // sync-validation layer flags (it explicitly suggests including the transfer
+  // stage in this barrier's srcStageMask).
+  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &to_dst);
 
@@ -1891,8 +1929,14 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Submit waits on image_available (signaled when the swapchain image is
   // presentable), signals render_finished and the slot's in_flight fence.
   // No vkQueueWaitIdle — the next frame's slot wait is the only sync point.
-  const VkPipelineStageFlags wait_stage =
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  //
+  // Wait at TRANSFER, not COLOR_ATTACHMENT_OUTPUT: the command buffer's first
+  // use of the acquired image is the UNDEFINED->TRANSFER_DST layout transition
+  // and the blit, both transfer-stage. Waiting at a later stage left the
+  // acquire unsynchronized with that first barrier
+  // (SYNC-HAZARD-WRITE-AFTER-READ vs vkAcquireNextImageKHR,
+  // MissingAcquireWait).
+  const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.waitSemaphoreCount = 1;
@@ -1900,8 +1944,11 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   submit.pWaitDstStageMask = &wait_stage;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
+  // Signal (and later present-wait on) the per-image semaphore, not a per-slot
+  // one, so it isn't reused while a prior present on this image is pending.
+  VkSemaphore& render_finished = m_compositor_render_finished_[image_index];
   submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &slot.render_finished;
+  submit.pSignalSemaphores = &render_finished;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
@@ -1910,7 +1957,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
-  present_info.pWaitSemaphores = &slot.render_finished;
+  present_info.pWaitSemaphores = &render_finished;
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &swapchain_;
   present_info.pImageIndices = &image_index;
@@ -1976,8 +2023,13 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
         d.vkCreateFence(device_, &fence_info, nullptr, &s.in_flight));
     CHECK_VK_RESULT(
         d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.image_available));
-    CHECK_VK_RESULT(
-        d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.render_finished));
+  }
+
+  // One present-wait semaphore per swapchain image (see header). Count tracks
+  // the swapchain, which here equals slot_count.
+  m_compositor_render_finished_.resize(slot_count, VK_NULL_HANDLE);
+  for (auto& sem : m_compositor_render_finished_) {
+    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr, &sem));
   }
   m_compositor_current_frame_ = 0;
 }
@@ -1995,15 +2047,18 @@ void WaylandVulkanBackend::CompositorPipeliningCleanup() {
     if (s.image_available) {
       d.vkDestroySemaphore(device_, s.image_available, nullptr);
     }
-    if (s.render_finished) {
-      d.vkDestroySemaphore(device_, s.render_finished, nullptr);
-    }
     if (s.in_flight) {
       d.vkDestroyFence(device_, s.in_flight, nullptr);
     }
     s = {};
   }
   m_compositor_slots_.clear();
+  for (auto sem : m_compositor_render_finished_) {
+    if (sem != VK_NULL_HANDLE) {
+      d.vkDestroySemaphore(device_, sem, nullptr);
+    }
+  }
+  m_compositor_render_finished_.clear();
   if (m_compositor_cmd_pool_ != VK_NULL_HANDLE) {
     d.vkDestroyCommandPool(device_, m_compositor_cmd_pool_, nullptr);
     m_compositor_cmd_pool_ = VK_NULL_HANDLE;
