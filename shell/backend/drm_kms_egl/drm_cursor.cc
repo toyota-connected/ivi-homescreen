@@ -193,6 +193,10 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
 DrmCursor::DrmCursor(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 DrmCursor::~DrmCursor() = default;
 
+uint32_t DrmCursor::plane_id() const {
+  return impl_->renderer.plane_id();
+}
+
 void DrmCursor::Move(const int fb_x, const int fb_y) {
   const int crtc_x = fb_x + impl_->letterbox_x;
   const int crtc_y = fb_y + impl_->letterbox_y;

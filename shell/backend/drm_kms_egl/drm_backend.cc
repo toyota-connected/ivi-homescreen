@@ -17,6 +17,7 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "logging/logging.h"
 
+#include <drm_fourcc.h>
 #include <fcntl.h>
 #include <linux/vt.h>
 #include <poll.h>
@@ -385,6 +386,15 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   backend->cursor_ = homescreen::DrmCursor::Create(
       *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
       backend->mode_, backend->fb_w_, backend->fb_h_);
+#if BUILD_COMPOSITOR
+  // On a CRTC with no dedicated cursor plane the cursor takes an
+  // overlay; reserve it so the scene allocator's disable-unused pass
+  // doesn't toggle it off every commit (flicker on pointer motion).
+  // plane_id()==0 (legacy cursor path) is a no-op in the compositor.
+  if (backend->cursor_ && backend->compositor_) {
+    backend->compositor_->ReserveCursorPlane(backend->cursor_->plane_id());
+  }
+#endif
 #endif
 #if HAVE_DRM_CAPTURE
   backend->capture_ = homescreen::DrmCapture::Create();
@@ -1141,13 +1151,54 @@ bool DrmBackend::InitEgl() {
 uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
   const uint32_t width = gbm_bo_get_width(bo);
   const uint32_t height = gbm_bo_get_height(bo);
-  const uint32_t stride = gbm_bo_get_stride(bo);
-  const uint32_t handle = gbm_bo_get_handle(bo).u32;
+  const uint32_t format = gbm_bo_get_format(bo);
+  const uint64_t modifier = gbm_bo_get_modifier(bo);
+  const int plane_count = gbm_bo_get_plane_count(bo);
+
+  // The gbm_surface is created with_modifiers, so on tiled/compressed
+  // allocators (e.g. the Mali blob's AFBC on rk3588) the front buffer
+  // carries a non-linear modifier. The legacy drmModeAddFB is
+  // modifier-blind and tells KMS the buffer is linear — the display
+  // controller then scans tiled data as linear and underflows
+  // (rockchip VOP2 POST_BUF_EMPTY → green/black field). Propagate the
+  // real modifier via drmModeAddFB2WithModifiers, mirroring
+  // DrmCompositor::ImportBoAsFb.
+  uint32_t handles[4] = {};
+  uint32_t pitches[4] = {};
+  uint32_t offsets[4] = {};
+  uint64_t modifiers[4] = {};
+  for (int i = 0; i < plane_count && i < 4; ++i) {
+    handles[i] = gbm_bo_get_handle_for_plane(bo, i).u32;
+    pitches[i] = gbm_bo_get_stride_for_plane(bo, i);
+    offsets[i] = gbm_bo_get_offset(bo, i);
+    modifiers[i] = modifier;
+  }
+
   uint32_t fb_id = 0;
-  if (drmModeAddFB(drm_dev_->fd(), width, height, 24, 32, stride, handle,
-                   &fb_id) != 0) {
-    spdlog::error("[DrmBackend] drmModeAddFB: {}", std::strerror(errno));
+  const bool use_modifiers = (modifier != DRM_FORMAT_MOD_INVALID) &&
+                             (modifier != DRM_FORMAT_MOD_LINEAR);
+  if (use_modifiers) {
+    if (drmModeAddFB2WithModifiers(drm_dev_->fd(), width, height, format,
+                                   handles, pitches, offsets, modifiers, &fb_id,
+                                   DRM_MODE_FB_MODIFIERS) != 0) {
+      spdlog::error(
+          "[DrmBackend] drmModeAddFB2WithModifiers({}x{}, fmt=0x{:08x}, "
+          "mod=0x{:016x}, planes={}): {}",
+          width, height, format, modifier, plane_count, std::strerror(errno));
+      return 0;
+    }
+  } else if (drmModeAddFB2(drm_dev_->fd(), width, height, format, handles,
+                           pitches, offsets, &fb_id, 0) != 0) {
+    spdlog::error("[DrmBackend] drmModeAddFB2({}x{}, fmt=0x{:08x}, linear): {}",
+                  width, height, format, std::strerror(errno));
     return 0;
+  }
+  if (cfg_.debug_backend) {
+    spdlog::debug(
+        "[DrmBackend] AddFb fb_id={} {}x{} fmt=0x{:08x} mod=0x{:016x} "
+        "planes={} ({})",
+        fb_id, width, height, format, modifier, plane_count,
+        use_modifiers ? "modifier-aware" : "linear");
   }
   return fb_id;
 }
