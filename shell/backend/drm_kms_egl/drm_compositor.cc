@@ -356,6 +356,22 @@ bool DrmCompositor::InitPlaneAllocator() {
   }
   spdlog::info("[DrmCompositor] primary plane zpos = {}", primary_zpos_);
 
+  // rockchip VOP2 advertises REFLECT_Y on its planes and even passes a
+  // TEST_ONLY atomic commit with it, but an actual reflected scanout
+  // faults the display IOMMU into a storm (rk_iommu "stall request timed
+  // out" + vop2 POST_BUF_EMPTY), wedging the pipe — a green/black screen.
+  // The TEST_ONLY probe can't catch this (it only validates state, not a
+  // live scanout), so blocklist the driver: direct-scanout needs
+  // REFLECT_Y to flip GL's bottom-up buffer, so with it gone the
+  // compositor uses the GL-composite path (Y-flip baked into the shader,
+  // scanned un-reflected) which the VOP scans cleanly.
+  if (backend_->resolved().driver_name == "rockchip") {
+    any_plane_supports_reflect_y_ = false;
+    spdlog::info(
+        "[DrmCompositor] rockchip: REFLECT_Y scanout faults the VOP IOMMU; "
+        "forcing GL composite");
+  }
+
   // Universal diagnostic kill-switch: force GL composite even when
   // REFLECT_Y is available. Useful for bisecting visual artifacts that
   // appear on the direct-scanout path.
