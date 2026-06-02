@@ -211,6 +211,34 @@ GL fallback runs and `drm_compositor.cc` is excluded.
 Output binary: `cmake-build-debug-clang/shell/homescreen` (the name is
 `EXE_OUTPUT_NAME` from `cmake/options.cmake:204` — default "homescreen").
 
+### Build matrix (compositor / scene)
+
+Two CMake options select the present path. They are independent of the
+runtime `--drm-compositor auto|planes|gl` flag (which only picks among
+what was compiled in):
+
+| Config | CMake flags | Present path compiled in |
+|--------|-------------|--------------------------|
+| **C1** | `-DBUILD_COMPOSITOR=OFF` | Legacy GL only — `eglSwapBuffers` + `drmModePageFlip`. `drm_compositor.cc` is excluded. |
+| **C2** | `-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=OFF` | Atomic plane allocator + GL composite. The drm-cxx `LayerScene` zero-copy path is excluded. |
+| **C3** | `-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON` | Full path: `LayerScene` direct-scanout when the primary supports `REFLECT_Y`, GL composite otherwise. **Recommended / canonical.** |
+
+`USE_DRM_SCENE=ON` requires `BUILD_COMPOSITOR=ON` (it has no effect
+otherwise). Any code reachable from the unconditional `BUILD_COMPOSITOR`
+API (e.g. `DrmCompositor::ReserveCursorPlane`) must compile in **all**
+three configs — C2 in particular (compositor without scene) is an easy
+one to break, so the build matrix is exercised on both x86_64 and
+aarch64.
+
+The aarch64 cross-build helper maps these as: `scripts/build_pi.sh`
+default → **C1**; `scripts/build_pi.sh --with-scene` → **C3**.
+
+Per-driver note: on **rockchip** (rk3588 VOP2) the primary advertises
+`REFLECT_Y` and passes a `TEST_ONLY` atomic commit with it, but a live
+reflected scanout faults the display IOMMU; C3 therefore force-selects
+the GL-composite sub-path on that driver (zero-copy direct-scanout is
+not usable there). vc4 and amdgpu are unaffected.
+
 ### Optional features detected at configure time
 
 - **libxcursor** missing → `HAVE_DRM_CURSOR` undefined, `drm_cursor.cc`
