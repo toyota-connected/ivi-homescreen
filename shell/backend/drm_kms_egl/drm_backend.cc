@@ -1267,10 +1267,11 @@ void DrmBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   }
   auto* runner = platform_task_runner_.load(std::memory_order_acquire);
   if (runner == nullptr || runner->GetStrandContext() == nullptr) {
-    // Plumbing not in place yet — drop. Happens between vsync_callback
-    // firing during engine bring-up and FlutterView::SetPlatformTaskRunner
-    // landing. The kick latch ensures Flutter still gets a baton from
-    // the next-frame path once the runner is wired.
+    // Runner not wired yet (the engine's first vsync request raced
+    // SetPlatformTaskRunner during bring-up). Callers leave the baton
+    // parked in vsync_baton_ in this case rather than exchanging it out,
+    // so SetPlatformTaskRunner's kick latch delivers it once the runner
+    // is wired (#210).
     return;
   }
   const uint64_t now = LibFlutterEngine->GetCurrentTime();
@@ -1308,9 +1309,20 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
     return;
   }
 
-  // Exchange to take the baton back. The asio handler may have raced
-  // us and already consumed it; exchange returning 0 means it's
-  // already on its way.
+  // Idle pipeline — kick the baton inline. Only pull it out of
+  // vsync_baton_ if the platform task runner is actually wired and can
+  // deliver it; otherwise leave it parked so SetPlatformTaskRunner's kick
+  // latch delivers it once wired. At cold start the engine's first vsync
+  // request can land before SetPlatformTaskRunner; exchanging the baton
+  // out only to drop it in PostOnVsync stranded Flutter's first frame
+  // (#210) — frame 1 was never produced (black screen + only the HW
+  // cursor). Gating here (rather than exchange-then-restore) keeps the
+  // hand-off to the kick latch race-free: the baton is taken exactly once,
+  // by whichever of this path / the latch first sees the runner wired.
+  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;  // parked in vsync_baton_; SetPlatformTaskRunner drains it
+  }
   if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
       mine != 0) {
     PostOnVsync(engine, mine);
@@ -1469,6 +1481,26 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
 void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
   platform_task_runner_.store(runner, std::memory_order_release);
   StartFlipMonitor();
+
+  // Kick latch (#210). The engine may have requested its first vsync
+  // before this runner was wired (cold-start race between Engine::Run and
+  // this call). In that case SetVsyncBaton left the baton parked in
+  // vsync_baton_ rather than dropping it. Deliver it now so Flutter
+  // renders frame 1. Storing the runner above (release) before this drain
+  // (acq_rel exchange) makes the hand-off exact: SetVsyncBaton either saw
+  // the runner wired and took the baton itself, or saw it unwired and
+  // parked the baton — in which case its release-store of the baton
+  // happens-before this exchange, so we observe and deliver it here. Without
+  // this latch the first baton is never answered and the app hangs on a
+  // black screen (only the HW cursor visible) until restart.
+  if (auto* engine = engine_handle_.load(std::memory_order_acquire);
+      engine != nullptr) {
+    if (const intptr_t baton =
+            vsync_baton_.exchange(0, std::memory_order_acq_rel);
+        baton != 0) {
+      PostOnVsync(engine, baton);
+    }
+  }
 }
 
 void DrmBackend::StartFlipMonitor() {
