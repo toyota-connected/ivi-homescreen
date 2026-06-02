@@ -2363,13 +2363,23 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
 
-  const uint32_t commit_flags =
-      DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
-  const uint64_t t2 = profile ? NsNow() : 0;
-
   // LayerScene injects ALLOW_MODESET implicitly on its first commit,
   // so the embedder doesn't manage plane_mode_set_ for this path.
   const bool was_first_commit_pre = !plane_mode_set_;
+
+  // Two-phase flags, mirroring the legacy direct-scanout path: the
+  // first commit is a blocking ALLOW_MODESET with NO PAGE_FLIP_EVENT.
+  // The kernel doesn't deliver a flip event across a modeset on most
+  // drivers (the commit returning is our signal), and combining the
+  // ALLOW_MODESET that LayerScene ORs in for first_commit_ with
+  // NONBLOCK makes rockchip's atomic path return EBUSY against the
+  // modeset's still-pending flip — wedging the CRTC. Steady state:
+  // NONBLOCK + PAGE_FLIP_EVENT for vsync-locked flips.
+  const uint32_t commit_flags =
+      was_first_commit_pre
+          ? DRM_MODE_ATOMIC_ALLOW_MODESET
+          : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+  const uint64_t t2 = profile ? NsNow() : 0;
 
   auto report = scene_->commit(commit_flags, backend_);
   if (!report) {
