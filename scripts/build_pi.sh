@@ -39,6 +39,11 @@
 #                                   (engine is dlopen'd at runtime — not linked at build)
 #     --plugins-dir <path>          default: ../ivi-homescreen-plugins/plugins
 #     --no-plugins                  build homescreen only
+#     --with-scene                  drm-kms-egl only: enable the plane
+#                                   compositor + drm-cxx LayerScene present
+#                                   path (BUILD_COMPOSITOR + USE_DRM_SCENE).
+#                                   Default off = direct DRM/KMS + GBM, no
+#                                   compositor.
 #     --jobs <N>                    default: nproc
 #     --clean                       wipe build dir before configure
 #     --prepare-only                fetch/extract toolchain, sysroot, engine, then exit
@@ -146,6 +151,7 @@ ENGINE_URL=""
 # actual CMake entry; the repo root has no CMakeLists.txt.
 PLUGINS_DIR="${REPO_DIR%/*}/ivi-homescreen-plugins/plugins"
 NO_PLUGINS=0
+WITH_SCENE=0
 JOBS="$(nproc 2>/dev/null || echo 4)"
 CLEAN=0
 PREPARE_ONLY=0
@@ -236,6 +242,7 @@ while [[ $# -gt 0 ]]; do
         --engine-url)         ENGINE_URL="$2"; shift 2 ;;
         --plugins-dir)        PLUGINS_DIR="$2"; shift 2 ;;
         --no-plugins)         NO_PLUGINS=1; shift ;;
+        --with-scene)         WITH_SCENE=1; shift ;;
         --jobs)               JOBS="$2"; shift 2 ;;
         --clean)              CLEAN=1; shift ;;
         --prepare-only)       PREPARE_ONLY=1; shift ;;
@@ -922,7 +929,13 @@ phase4_build() {
                 -DBUILD_BACKEND_WAYLAND_EGL=OFF
                 -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
                 -DBUILD_BACKEND_DRM_KMS_EGL=ON
-                -DBUILD_BACKEND_SOFTWARE=OFF) ;;
+                -DBUILD_BACKEND_SOFTWARE=OFF)
+            # --with-scene lights up the plane compositor + drm-cxx LayerScene
+            # present path (direct-scanout with GL fallback) instead of the
+            # default direct DRM/KMS + GBM path. Only meaningful for drm-kms-egl.
+            if [[ "$WITH_SCENE" -eq 1 ]]; then
+                cmake_args+=(-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON)
+            fi ;;
         software)
             cmake_args+=(
                 -DBUILD_BACKEND_WAYLAND_EGL=OFF

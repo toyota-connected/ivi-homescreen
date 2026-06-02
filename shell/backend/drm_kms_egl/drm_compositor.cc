@@ -20,6 +20,7 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -39,6 +40,9 @@
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
+#if USE_DRM_SCENE
+#include "backend/drm_kms_egl/scene_layer_source_gl.h"
+#endif
 #include "drm-cxx/src/modeset/atomic.hpp"
 #include "libflutter_engine.h"
 #include "logging.h"
@@ -301,8 +305,10 @@ bool DrmCompositor::InitPlaneAllocator() {
   plane_registry_.emplace(std::move(*reg));
 
   const auto available = plane_registry_->for_crtc(backend_->crtc_index());
-  spdlog::info("[DrmCompositor] {} planes available for CRTC {}",
-               available.size(), backend_->crtc_id());
+  spdlog::info(
+      "[DrmCompositor] {} planes available for CRTC {} (crtc_index={})",
+      available.size(), backend_->crtc_id(), backend_->crtc_index());
+  uint32_t primary_id = 0;
   for (const auto* p : available) {
     auto type_str = "?";
     switch (p->type) {
@@ -323,6 +329,14 @@ bool DrmCompositor::InitPlaneAllocator() {
       // mutable it's still the lowest slot, and we want the root Flutter
       // layer on the bottom.
       primary_zpos_ = p->zpos_min.value_or(0);
+      primary_id = static_cast<uint32_t>(p->id);
+      // Provisional: whether the primary's rotation enum advertises
+      // REFLECT_Y. This is only a hint — vc4/amdgpu DC primaries
+      // advertise it but reject it at commit (EINVAL). The non-framed
+      // branch below confirms it with a TEST_ONLY commit
+      // (ProbePrimaryReflectY) before deciding direct-overlay vs scene.
+      primary_supports_reflect_y_ = PlaneSupportsReflectY(
+          backend_->drm_fd(), static_cast<uint32_t>(p->id));
     }
     // Per-plane probe for REFLECT_Y. Direct-scanout in PresentLayers
     // sets rotation=REFLECT_Y so GL-rendered (bottom-up) bits flip to
@@ -409,6 +423,55 @@ bool DrmCompositor::InitPlaneAllocator() {
         "[DrmCompositor] framed-mode init failed; plane path disabled");
     return false;
   }
+
+#if USE_DRM_SCENE
+  // The LayerScene drives the non-framed present path, but it only pays
+  // off where the bottom-up GL backing store can reach scanout — i.e.
+  // some plane supports REFLECT_Y. On hardware where NO plane does
+  // (amdgpu DC: primary + overlays all advertise ROTATE_0 only), the
+  // scene would set REFLECT_Y on every candidate plane, fail every
+  // atomic TEST with EINVAL, and fall back to a slow CompositeCanvas
+  // read-back. Skip scene construction entirely there: scene_ stays
+  // null and PresentLayers falls through to the legacy GL-composite
+  // path (which gates direct-scanout on any_plane_supports_reflect_y_
+  // and composites with the orientation flip otherwise). Framed mode
+  // keeps its own manual primary-BG + overlay layout.
+  if (!framed_ && any_plane_supports_reflect_y_) {
+    // Confirm the primary's advertised REFLECT_Y with a TEST_ONLY commit
+    // (the enum bitmask false-positives on vc4). If the primary can't
+    // actually take REFLECT_Y but an overlay can, use zero-copy
+    // direct-overlay mode (opaque BG on the primary, BS on a REFLECT_Y
+    // overlay); otherwise drive the scene (direct-scan on the primary).
+    primary_supports_reflect_y_ =
+        ProbePrimaryReflectY(primary_id, primary_supports_reflect_y_);
+    if (!primary_supports_reflect_y_ && InitDirectOverlay()) {
+      direct_overlay_mode_ = true;
+      // Skip LayerScene construction; PresentDirectOverlay drives the
+      // atomic commit manually and never touches scene_.
+    } else {
+      drm::scene::LayerScene::Config scene_cfg{};
+      scene_cfg.crtc_id = backend_->crtc_id();
+      scene_cfg.connector_id = backend_->connector_id();
+      scene_cfg.mode = backend_->mode();
+      auto scene = drm::scene::LayerScene::create(
+          const_cast<drm::Device&>(backend_->device()), scene_cfg);
+      if (!scene) {
+        spdlog::error("[DrmCompositor] LayerScene::create: {}",
+                      scene.error().message());
+        return false;
+      }
+      scene_ = std::move(*scene);
+      spdlog::info(
+          "[DrmCompositor] LayerScene constructed (crtc={} connector={})",
+          scene_cfg.crtc_id, scene_cfg.connector_id);
+    }
+  } else if (!framed_) {
+    spdlog::info(
+        "[DrmCompositor] no plane supports REFLECT_Y; using GL-composite "
+        "path (scene direct-scanout needs the flip)");
+  }
+#endif
+
   return true;
 }
 
@@ -574,7 +637,8 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
                                    uint32_t w,
                                    uint32_t h,
                                    const uint32_t format,
-                                   const size_t pool_size) const {
+                                   const size_t pool_size,
+                                   const bool force_scanout) const {
   if (pool_size == 0 || pool_size > GbmBackingStore::kMaxPoolSize) {
     spdlog::error(
         "[DrmCompositor] CreateGbmStore: pool_size={} out of range [1, {}]",
@@ -585,7 +649,7 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
   store.height = h;
   store.format = format;
   store.pool_size = pool_size;
-  const uint32_t usage = planes_available_
+  const uint32_t usage = (planes_available_ || force_scanout)
                              ? (GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT)
                              : GBM_BO_USE_RENDERING;
 
@@ -1541,6 +1605,28 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     return PresentFramed(layers, layer_count);
   }
 
+#if USE_DRM_SCENE
+  // Zero-copy direct-overlay path (primary lacks REFLECT_Y): BG on the
+  // primary, the single Flutter BS direct-scanned on a REFLECT_Y
+  // overlay. Owns its own GL-fallback decision for multi-layer / PV
+  // frames, same as the scene path below.
+  if (direct_overlay_mode_) {
+    return PresentDirectOverlay(layers, layer_count);
+  }
+
+  // Non-framed path under USE_DRM_SCENE: route every frame through
+  // LayerScene. PresentLayersViaScene owns the fallback decision —
+  // returns true on a successful scene commit, false (after invoking
+  // PresentViaGlFallback itself) when any layer would be Composited
+  // (BS overflow), when the frame contains a platform view (not yet
+  // wired into the scene path), or on commit failure that latches
+  // fallback for the rest of the session. Also returns false on a
+  // skip-frame condition (EACCES / pause race).
+  if (scene_) {
+    return PresentLayersViaScene(layers, layer_count);
+  }
+#endif
+
   // Profile fence post t0 (entry). Same wait/compose/commit/total
   // breakdown as PresentFramed; logs every kProfileWindow frames when
   // IVI_DRM_PROFILE=1.
@@ -2107,6 +2193,769 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   return true;
 }
 
+#if USE_DRM_SCENE
+// ─── LayerScene-driven non-framed present path ───────────────────────────
+
+bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
+                                          const size_t layer_count) {
+  // Pause / fallback-latched / framed gates have already fired in
+  // PresentLayers before dispatching here. Profile fences mirror the
+  // legacy non-framed path so IVI_DRM_PROFILE output stays comparable.
+  const bool profile = ProfileEnabled();
+  const uint64_t t0 = profile ? NsNow() : 0;
+
+  if (!WaitForPendingFlip()) {
+    return PresentViaGlFallback(layers, layer_count);
+  }
+  const uint64_t t1 = profile ? NsNow() : 0;
+
+  // Pre-scan: any platform-view layer forces the whole frame through
+  // the GL composite path. Platform-view→LayerBufferSource plumbing
+  // (Tier-2 wrappers over ExternalDmaBufSource / GstAppsinkSource) is
+  // not wired in this revision; routing PVs through GL keeps the
+  // current visual behaviour intact while BS layers benefit from the
+  // scene allocator.
+  for (size_t i = 0; i < layer_count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (fl && fl->type == kFlutterLayerContentTypePlatformView) {
+      return PresentViaGlFallback(layers, layer_count);
+    }
+  }
+
+  // Walk the FlutterLayer[] in z-order (Flutter's convention: layer 0
+  // is bottom). Sync scene_'s layer set against the current frame's
+  // batons: add new, update dst_rect on existing, remove any scene
+  // layer whose baton didn't appear this frame.
+  struct FrameLayer {
+    const FlutterLayer* flutter;
+    GbmBackingStore* store;
+    StoreBaton* baton;
+  };
+  std::vector<FrameLayer> frame_layers;
+  frame_layers.reserve(layer_count);
+
+  // Track this frame's batons for the stale-layer prune below. Linear
+  // scan; engaged layer count is single-digit in practice.
+  std::vector<StoreBaton*> frame_batons;
+  frame_batons.reserve(layer_count);
+
+  for (size_t i = 0; i < layer_count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (!fl || fl->type != kFlutterLayerContentTypeBackingStore ||
+        !fl->backing_store) {
+      continue;
+    }
+    auto* baton = static_cast<StoreBaton*>(fl->backing_store->user_data);
+    if (!baton || !baton->store) {
+      continue;
+    }
+    frame_layers.push_back({fl, baton->store, baton});
+    frame_batons.push_back(baton);
+  }
+
+  // Prune scene layers whose batons are not in this frame's set. The
+  // scene retains layers across commits; without this step, a layer
+  // for a backing store Flutter dropped from its layer tree (without
+  // collecting it yet) would still be acquired by the next commit
+  // with stale dst_rect.
+  for (auto it = scene_layer_batons_.begin();
+       it != scene_layer_batons_.end();) {
+    StoreBaton* baton = *it;
+    const bool still_present =
+        std::find(frame_batons.begin(), frame_batons.end(), baton) !=
+        frame_batons.end();
+    if (!still_present) {
+      if (auto* layer = scene_->find_by_identity_tag(baton)) {
+        scene_->remove_layer(layer->handle());
+      }
+      it = scene_layer_batons_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  // Add new layers; update dst_rect on existing ones. dst_rect is in
+  // CRTC coordinates; the non-framed path has no letterbox so
+  // FlutterLayer.offset is already CRTC-relative.
+  for (auto& fl : frame_layers) {
+    drm::scene::Rect dst_rect{
+        static_cast<int32_t>(fl.flutter->offset.x),
+        static_cast<int32_t>(fl.flutter->offset.y),
+        static_cast<uint32_t>(fl.flutter->size.width),
+        static_cast<uint32_t>(fl.flutter->size.height),
+    };
+    auto* layer = scene_->find_by_identity_tag(fl.baton);
+    if (layer) {
+      layer->set_dst_rect_if_changed(dst_rect);
+      continue;
+    }
+    // First sight: hand the scene_source wrapper to the scene.
+    // CreateBackingStore pre-built it; nullptr would only happen if
+    // the store predated the scene_ construction, which can't happen
+    // on the non-framed path (scene_ is built before any Present).
+    if (!fl.baton->scene_source) {
+      spdlog::warn(
+          "[DrmCompositor] LayerScene: baton lacks scene_source; routing "
+          "frame through GL fallback");
+      return PresentViaGlFallback(layers, layer_count);
+    }
+    drm::scene::LayerDesc desc{};
+    desc.source = std::move(fl.baton->scene_source);
+    desc.display.dst_rect = dst_rect;
+    desc.display.rotation = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
+    desc.content_type = (&fl == &frame_layers.front())
+                            ? drm::planes::ContentType::UI
+                            : drm::planes::ContentType::Generic;
+    desc.identity_tag = fl.baton;
+    auto handle = scene_->add_layer(std::move(desc));
+    if (!handle) {
+      spdlog::warn("[DrmCompositor] LayerScene::add_layer: {}",
+                   handle.error().message());
+      return PresentViaGlFallback(layers, layer_count);
+    }
+    scene_layer_batons_.push_back(fl.baton);
+  }
+
+  // TEST_ONLY probe: if any layer would land in the composition
+  // bucket, route the frame through PresentViaGlFallback. The GL
+  // composite path is materially faster than drm-cxx's CompositeCanvas
+  // over uncached GBM read-back for backing-store layers, and PVs
+  // already short-circuited above.
+  auto test = scene_->test();
+  if (!test) {
+    if (test.error() == std::errc::permission_denied) {
+      if (!paused_.load(std::memory_order_acquire)) {
+        spdlog::warn(
+            "[DrmCompositor] LayerScene::test: master revoked (EACCES); "
+            "skip frame");
+      }
+      return false;
+    }
+    spdlog::warn("[DrmCompositor] LayerScene::test: {}; routing through GL",
+                 test.error().message());
+    return PresentViaGlFallback(layers, layer_count);
+  }
+  for (const auto& p : test->placements) {
+    if (p.placement == drm::scene::LayerPlacement::Composited ||
+        p.placement == drm::scene::LayerPlacement::Unassigned) {
+      if (backend_->cfg_.debug_backend) {
+        spdlog::debug(
+            "[DrmCompositor] LayerScene test: layer {} {}; routing through "
+            "GL fallback",
+            p.handle.id,
+            p.placement == drm::scene::LayerPlacement::Composited
+                ? "composited"
+                : "unassigned");
+      }
+      return PresentViaGlFallback(layers, layer_count);
+    }
+  }
+
+  // All BS layers placed on planes. Sync GPU writes before scanout —
+  // the legacy direct-scanout path uses IN_FENCE_FD when the EGL
+  // native-fence-sync extension is present; the scene path falls back
+  // to a synchronous drain for now. Correctness-equivalent at the
+  // cost of one per-frame stall on Tegra; LayerBufferSource sync
+  // hooks are a follow-on.
+  glFinish();
+
+  if (backend_->cfg_.debug_backend) {
+    backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
+  }
+
+  const uint32_t commit_flags =
+      DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
+  const uint64_t t2 = profile ? NsNow() : 0;
+
+  // LayerScene injects ALLOW_MODESET implicitly on its first commit,
+  // so the embedder doesn't manage plane_mode_set_ for this path.
+  const bool was_first_commit_pre = !plane_mode_set_;
+
+  auto report = scene_->commit(commit_flags, backend_);
+  if (!report) {
+    if (report.error() == std::errc::permission_denied) {
+      if (!paused_.load(std::memory_order_acquire)) {
+        spdlog::warn(
+            "[DrmCompositor] LayerScene::commit: master revoked (EACCES); "
+            "skip frame");
+      }
+      return false;
+    }
+    spdlog::warn(
+        "[DrmCompositor] LayerScene::commit failed ({}); latching GL "
+        "fallback for remaining session",
+        report.error().message());
+    fallback_latched_ = true;
+    return PresentViaGlFallback(layers, layer_count);
+  }
+
+  if (was_first_commit_pre) {
+    // First commit landed; LayerScene's implicit ALLOW_MODESET cycle
+    // is blocking, so no PAGE_FLIP_EVENT is in flight. Latch + verify
+    // + kick the initial vsync baton, same as the legacy path.
+    plane_mode_set_ = true;
+    flip_pending_.store(false, std::memory_order_release);
+    VerifyPipeRunning();
+    const intptr_t baton =
+        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+    if (baton != 0) {
+      if (auto engine =
+              backend_->engine_handle_.load(std::memory_order_acquire)) {
+        backend_->PostOnVsync(engine, baton);
+      }
+    }
+  } else {
+    flip_pending_.store(true, std::memory_order_release);
+  }
+
+  // Rotate every BS pool that participated. Same slot-pipeline
+  // bookkeeping as the legacy path — the scene path does not touch
+  // these data structures, so the existing in_flight_slots_ /
+  // scanning_slots_ release semantics still apply.
+  bool any_rotated = false;
+  std::vector<SlotRef> committed_this_frame;
+  for (const auto& fl : frame_layers) {
+    if (!fl.store || fl.store->pool_size <= 1) {
+      continue;
+    }
+    auto& store = *fl.store;
+    const size_t committed_idx = store.active_idx;
+    store.pool[committed_idx].state = GbmBackingStore::Slot::State::Pending;
+    committed_this_frame.push_back({&store, committed_idx});
+    store.active_idx = (store.active_idx + 1) % store.pool_size;
+    store.pool[store.active_idx].state = GbmBackingStore::Slot::State::Active;
+    glBindFramebuffer(GL_FRAMEBUFFER, store.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           store.active().color_tex, 0);
+    any_rotated = true;
+  }
+  if (any_rotated) {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  if (!committed_this_frame.empty()) {
+    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+    if (was_first_commit_pre) {
+      for (auto& ref : scanning_slots_) {
+        ref.store->pool[ref.slot_idx].state =
+            GbmBackingStore::Slot::State::Free;
+      }
+      scanning_slots_ = std::move(committed_this_frame);
+    } else {
+      in_flight_slots_.push_back(std::move(committed_this_frame));
+    }
+  }
+
+  if (backend_->cfg_.debug_backend) {
+    spdlog::debug(
+        "[DrmCompositor] LayerScene commit: total={} assigned={} "
+        "composited={} unassigned={} skipped={} props_written={} "
+        "fbs_attached={}",
+        report->layers_total, report->layers_assigned,
+        report->layers_composited, report->layers_unassigned,
+        report->layers_skipped_no_frame, report->properties_written,
+        report->fbs_attached);
+  }
+
+  if (profile && profile_) {
+    const uint64_t t3 = NsNow();
+    const uint64_t wait_ns = t1 - t0;
+    const uint64_t compose_ns = t2 - t1;
+    const uint64_t commit_ns = t3 - t2;
+    const uint64_t total_ns = t3 - t0;
+    profile_->p.account(wait_ns, compose_ns, /*test=*/0, commit_ns, total_ns);
+    if (profile_->p.frames >= kProfileWindow) {
+      const auto& s = profile_->p;
+      const auto ms = [&](uint64_t ns_sum) {
+        return static_cast<double>(ns_sum) /
+               (static_cast<double>(s.frames) * 1e6);
+      };
+      const auto ms_max = [](uint64_t ns) {
+        return static_cast<double>(ns) / 1e6;
+      };
+      spdlog::info(
+          "[DrmCompositor] scene profile (n={}): wait={:.2f}ms (max {:.2f})  "
+          "compose={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
+          "total={:.2f}ms (max {:.2f})",
+          s.frames, ms(s.wait_sum_ns), ms_max(s.wait_max_ns),
+          ms(s.compose_sum_ns), ms_max(s.compose_max_ns), ms(s.commit_sum_ns),
+          ms_max(s.commit_max_ns), ms(s.total_sum_ns), ms_max(s.total_max_ns));
+      profile_->p.reset();
+    }
+  }
+  return true;
+}
+
+// ─── Direct-overlay mode (zero-copy scene present) ───────────────────────
+
+bool DrmCompositor::ProbePrimaryReflectY(const uint32_t primary_id,
+                                         const bool enum_hint) {
+  if (primary_id == 0 || !modeset_) {
+    return enum_hint;
+  }
+
+  // Cache the primary + other non-cursor planes' property IDs locally;
+  // the probe disables the others so residual fbcon state can't taint
+  // the TEST result.
+  const int fd = backend_->drm_fd();
+  drm::PropertyStore pp;
+  if (auto r = pp.cache_properties(fd, primary_id, DRM_MODE_OBJECT_PLANE); !r) {
+    spdlog::warn("[DrmCompositor] REFLECT_Y probe: cache primary props: {}",
+                 r.error().message());
+    return enum_hint;
+  }
+  for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
+    if (p->type == drm::planes::DRMPlaneType::CURSOR || p->id == primary_id) {
+      continue;
+    }
+    (void)pp.cache_properties(fd, p->id, DRM_MODE_OBJECT_PLANE);
+  }
+
+  // The probe needs a real FB on the primary, and it must be the SAME
+  // format the direct path actually scans out: the backing-store format
+  // (bs_format, an alpha format), NOT primary_format (opaque). vc4's
+  // primary accepts XRGB+REFLECT_Y but rejects ARGB+REFLECT_Y, so a BG
+  // (XRGB) probe false-positives. Use a throwaway bs_format FB —
+  // TEST_ONLY validates config only (format/modifier/rotation/rects), so
+  // its pixels need no clear.
+  const uint32_t probe_format = backend_->resolved().bs_format;
+  GbmBackingStore probe_fb{};
+  if (!CreateGbmStore(probe_fb, backend_->mode_width(), backend_->mode_height(),
+                      probe_format, /*pool_size=*/1,
+                      /*force_scanout=*/true) ||
+      !EnsureDrmFbId(probe_fb)) {
+    spdlog::warn("[DrmCompositor] REFLECT_Y probe: test FB create failed");
+    DestroyGbmStore(probe_fb);
+    return enum_hint;
+  }
+
+  const uint32_t crtc_id = backend_->crtc_id();
+  const uint32_t mode_w = backend_->mode_width();
+  const uint32_t mode_h = backend_->mode_height();
+
+  // TEST_ONLY commit: power up the pipe (modeset), bind the probe FB to
+  // the primary at the requested rotation, disable every other non-cursor
+  // plane. Returns true iff the kernel validates the transaction. The
+  // primary's zpos is deliberately NOT written — it's a fixed slot on
+  // these drivers and writing it would EINVAL, masking the REFLECT_Y
+  // result we're actually probing for.
+  auto try_rotation = [&](const uint64_t rotation) -> bool {
+    drm::AtomicRequest req(backend_->device());
+    if (!req.valid()) {
+      return false;
+    }
+    if (auto r = modeset_->attach(req); !r) {
+      return false;
+    }
+    auto set = [&](const uint32_t obj, const char* name,
+                   const uint64_t value) -> bool {
+      auto pid = pp.property_id(obj, name);
+      return pid && req.add_property(obj, *pid, value).has_value();
+    };
+    if (!set(primary_id, "FB_ID", probe_fb.active().drm_fb_id) ||
+        !set(primary_id, "CRTC_ID", crtc_id) || !set(primary_id, "CRTC_X", 0) ||
+        !set(primary_id, "CRTC_Y", 0) || !set(primary_id, "CRTC_W", mode_w) ||
+        !set(primary_id, "CRTC_H", mode_h) || !set(primary_id, "SRC_X", 0) ||
+        !set(primary_id, "SRC_Y", 0) ||
+        !set(primary_id, "SRC_W", static_cast<uint64_t>(mode_w) << 16) ||
+        !set(primary_id, "SRC_H", static_cast<uint64_t>(mode_h) << 16) ||
+        !set(primary_id, "rotation", rotation)) {
+      return false;
+    }
+    for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
+      if (p->type == drm::planes::DRMPlaneType::CURSOR || p->id == primary_id) {
+        continue;
+      }
+      if (auto fb_pid = pp.property_id(p->id, "FB_ID")) {
+        (void)req.add_property(p->id, *fb_pid, 0);
+      }
+      if (auto crtc_pid = pp.property_id(p->id, "CRTC_ID")) {
+        (void)req.add_property(p->id, *crtc_pid, 0);
+      }
+    }
+    constexpr uint32_t test_flags =
+        DRM_MODE_ATOMIC_TEST_ONLY | DRM_MODE_ATOMIC_ALLOW_MODESET;
+    return req.test(test_flags).has_value();
+  };
+
+  // Isolate REFLECT_Y: if the primary takes the BS format with REFLECT_Y
+  // it's genuinely capable; if it rejects REFLECT_Y but accepts ROTATE_0
+  // with the same FB, REFLECT_Y is the specific culprit → route to an
+  // overlay. If both fail (primary can't scan this format at all) the
+  // probe can't isolate REFLECT_Y, so defer to the enum hint.
+  bool result = enum_hint;
+  const char* verdict = "inconclusive (both ROTATE_0 and REFLECT_Y failed)";
+  if (try_rotation(DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y)) {
+    result = true;
+    verdict = "accepts REFLECT_Y (direct scanout on primary OK)";
+  } else if (try_rotation(DRM_MODE_ROTATE_0)) {
+    result = false;
+    verdict = "rejects REFLECT_Y, accepts ROTATE_0 -> route BS to overlay";
+  }
+  DestroyGbmStore(probe_fb);
+
+  spdlog::info("[DrmCompositor] REFLECT_Y probe: primary {} {} (verdict={})",
+               primary_id, verdict, result);
+  return result;
+}
+
+bool DrmCompositor::InitDirectOverlay() {
+  // Pick the PRIMARY (the opaque-BG target) and the first OVERLAY that
+  // advertises both the backing-store scanout format and REFLECT_Y. The
+  // overlay carries the bottom-up GL-rendered BS and flips it to scanout
+  // order; the primary scans out a mode-sized opaque BG so amdgpu DC's
+  // "primary must cover the CRTC" check is satisfied. Mirrors
+  // InitFramedMode's plane selection, but the overlay format is the BS
+  // (alpha) format and the overlay must also support REFLECT_Y.
+  const uint32_t bg_format = backend_->resolved().primary_format;
+  const uint32_t bs_format = backend_->resolved().bs_format;
+  const uint64_t want_overlay_zpos = primary_zpos_ + 1;
+  const int fd = backend_->drm_fd();
+
+  for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
+    if (p->type == drm::planes::DRMPlaneType::PRIMARY &&
+        framed_primary_id_ == 0) {
+      framed_primary_id_ = p->id;
+      continue;
+    }
+    if (p->type == drm::planes::DRMPlaneType::OVERLAY &&
+        direct_overlay_id_ == 0) {
+      if (!p->supports_format(bs_format) ||
+          !PlaneSupportsReflectY(fd, static_cast<uint32_t>(p->id))) {
+        continue;
+      }
+      // Clamp the requested zpos to the advertised range; when immutable
+      // we take whatever the overlay reports (the commit still succeeds
+      // as long as primary and overlay don't collide on one zpos).
+      uint64_t zpos = want_overlay_zpos;
+      if (p->zpos_min.has_value() && zpos < *p->zpos_min) {
+        zpos = *p->zpos_min;
+      }
+      if (p->zpos_max.has_value() && zpos > *p->zpos_max) {
+        zpos = *p->zpos_max;
+      }
+      direct_overlay_id_ = p->id;
+      direct_overlay_zpos_ = zpos;
+    }
+  }
+  if (framed_primary_id_ == 0 || direct_overlay_id_ == 0) {
+    spdlog::info(
+        "[DrmCompositor] direct-overlay needs 1 primary + 1 REFLECT_Y overlay "
+        "supporting the BS format on CRTC {} (primary={}, overlay={}); using "
+        "scene path",
+        backend_->crtc_id(), framed_primary_id_, direct_overlay_id_);
+    return false;
+  }
+
+  // Cache property IDs for primary + overlay so PresentDirectOverlay
+  // builds the atomic request without per-frame kernel round-trips.
+  if (auto r = framed_props_.cache_properties(fd, framed_primary_id_,
+                                              DRM_MODE_OBJECT_PLANE);
+      !r) {
+    spdlog::error("[DrmCompositor] direct-overlay cache primary props: {}",
+                  r.error().message());
+    return false;
+  }
+  if (auto r = framed_props_.cache_properties(fd, direct_overlay_id_,
+                                              DRM_MODE_OBJECT_PLANE);
+      !r) {
+    spdlog::error("[DrmCompositor] direct-overlay cache overlay props: {}",
+                  r.error().message());
+    return false;
+  }
+  // Cache the other non-cursor planes we disable each frame so their
+  // FB_ID/CRTC_ID IDs resolve from cache.
+  for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
+    if (p->type == drm::planes::DRMPlaneType::CURSOR) {
+      continue;
+    }
+    if (p->id == framed_primary_id_ || p->id == direct_overlay_id_) {
+      continue;
+    }
+    (void)framed_props_.cache_properties(fd, p->id, DRM_MODE_OBJECT_PLANE);
+  }
+
+  // Mode-sized opaque BG pinned to the primary for the session. Filled
+  // with black once; the overlay carries all moving pixels. The GL
+  // context is current here (InitPlaneAllocator runs inside
+  // EnsureGlCapsProbed), so the clear is safe. ProbePrimaryReflectY
+  // creates this same store as its TEST FB, so reuse it when valid.
+  if (!bg_store_valid_) {
+    if (!CreateGbmStore(bg_store_, backend_->mode_width(),
+                        backend_->mode_height(), bg_format, /*pool_size=*/1,
+                        /*force_scanout=*/true) ||
+        !EnsureDrmFbId(bg_store_)) {
+      spdlog::error(
+          "[DrmCompositor] direct-overlay BG GBM store create failed");
+      return false;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, bg_store_.fbo);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glFinish();  // commit BG pixels before the first atomic scanout binds it
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    bg_store_valid_ = true;
+  }
+
+  spdlog::info(
+      "[DrmCompositor] direct-overlay mode: primary(BG)={} overlay(BS)={} "
+      "(zpos={}), CRTC {}x{}",
+      framed_primary_id_, direct_overlay_id_, direct_overlay_zpos_,
+      backend_->mode_width(), backend_->mode_height());
+  return true;
+}
+
+bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
+                                         const size_t count) {
+  const bool profile = ProfileEnabled();
+  const uint64_t t0 = profile ? NsNow() : 0;
+
+  if (!WaitForPendingFlip()) {
+    return PresentViaGlFallback(layers, count);
+  }
+  const uint64_t t1 = profile ? NsNow() : 0;
+
+  // Find the single backing-store layer. Any platform-view layer, or
+  // anything other than exactly one BS layer, forces the GL fallback —
+  // multi-layer / PV direct-overlay is a follow-on.
+  GbmBackingStore* store = nullptr;
+  size_t bs_layers = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (!fl) {
+      continue;
+    }
+    if (fl->type == kFlutterLayerContentTypePlatformView) {
+      return PresentViaGlFallback(layers, count);
+    }
+    if (fl->type == kFlutterLayerContentTypeBackingStore && fl->backing_store) {
+      ++bs_layers;
+      if (auto* baton =
+              static_cast<StoreBaton*>(fl->backing_store->user_data)) {
+        store = baton->store;
+      }
+    }
+  }
+  if (bs_layers != 1 || !store) {
+    return PresentViaGlFallback(layers, count);
+  }
+
+  // KMS framebuffer on the BS BO's active slot. Bail to GL on failure.
+  if (!EnsureDrmFbId(*store) || store->active().drm_fb_id == 0) {
+    return PresentViaGlFallback(layers, count);
+  }
+
+  // Sync Flutter's GPU writes to the BS BO before the kernel scans it.
+  // The scene path uses the same synchronous drain (IN_FENCE_FD on the
+  // overlay is a follow-on).
+  glFinish();
+
+  // ── Build the atomic request ──
+  drm::AtomicRequest req(backend_->device());
+  if (!req.valid()) {
+    spdlog::warn("[DrmCompositor] direct-overlay: AtomicRequest alloc failed");
+    fallback_latched_ = true;
+    return PresentViaGlFallback(layers, count);
+  }
+
+  const uint32_t crtc_id = backend_->crtc_id();
+  const uint32_t mode_w = backend_->mode_width();
+  const uint32_t mode_h = backend_->mode_height();
+  const bool dump = backend_->cfg_.debug_backend && !plane_mode_set_;
+
+  // First commit only: power up the pipe (MODE_ID / ACTIVE / CRTC_ID).
+  if (!plane_mode_set_ && modeset_) {
+    if (auto r = modeset_->attach(req); !r) {
+      spdlog::warn("[DrmCompositor] direct-overlay: modeset attach: {}",
+                   r.error().message());
+      return PresentViaGlFallback(layers, count);
+    }
+  }
+
+  auto set = [&](const uint32_t obj, const char* name,
+                 const uint64_t value) -> bool {
+    auto pid = framed_props_.property_id(obj, name);
+    if (!pid) {
+      spdlog::warn("[DrmCompositor] direct-overlay: property {}.{} missing: {}",
+                   obj, name, pid.error().message());
+      return false;
+    }
+    if (auto r = req.add_property(obj, *pid, value); !r) {
+      spdlog::warn("[DrmCompositor] direct-overlay: add_property {}.{}: {}",
+                   obj, name, r.error().message());
+      return false;
+    }
+    if (dump) {
+      spdlog::debug("[DrmCompositor] direct-overlay prop: obj={} pid={} {}={}",
+                    obj, *pid, name, value);
+    }
+    return true;
+  };
+
+  // Primary: persistent mode-sized opaque BG covering the whole CRTC.
+  if (!set(framed_primary_id_, "FB_ID", bg_store_.active().drm_fb_id) ||
+      !set(framed_primary_id_, "CRTC_ID", crtc_id) ||
+      !set(framed_primary_id_, "CRTC_X", 0) ||
+      !set(framed_primary_id_, "CRTC_Y", 0) ||
+      !set(framed_primary_id_, "CRTC_W", mode_w) ||
+      !set(framed_primary_id_, "CRTC_H", mode_h) ||
+      !set(framed_primary_id_, "SRC_X", 0) ||
+      !set(framed_primary_id_, "SRC_Y", 0) ||
+      !set(framed_primary_id_, "SRC_W", static_cast<uint64_t>(mode_w) << 16) ||
+      !set(framed_primary_id_, "SRC_H", static_cast<uint64_t>(mode_h) << 16)) {
+    return PresentViaGlFallback(layers, count);
+  }
+  if (auto pid = framed_props_.property_id(framed_primary_id_, "zpos")) {
+    if (const auto immut =
+            framed_props_.is_immutable(framed_primary_id_, "zpos");
+        !immut || !*immut) {
+      (void)req.add_property(framed_primary_id_, *pid, primary_zpos_);
+    }
+  }
+
+  // Overlay: the Flutter backing store, direct-scanned over the full
+  // CRTC with REFLECT_Y (the overlay supports it — that's the point).
+  const uint64_t src_w = static_cast<uint64_t>(store->width) << 16;
+  const uint64_t src_h = static_cast<uint64_t>(store->height) << 16;
+  if (!set(direct_overlay_id_, "FB_ID", store->active().drm_fb_id) ||
+      !set(direct_overlay_id_, "CRTC_ID", crtc_id) ||
+      !set(direct_overlay_id_, "CRTC_X", 0) ||
+      !set(direct_overlay_id_, "CRTC_Y", 0) ||
+      !set(direct_overlay_id_, "CRTC_W", mode_w) ||
+      !set(direct_overlay_id_, "CRTC_H", mode_h) ||
+      !set(direct_overlay_id_, "SRC_X", 0) ||
+      !set(direct_overlay_id_, "SRC_Y", 0) ||
+      !set(direct_overlay_id_, "SRC_W", src_w) ||
+      !set(direct_overlay_id_, "SRC_H", src_h) ||
+      !set(direct_overlay_id_, "rotation",
+           DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y)) {
+    return PresentViaGlFallback(layers, count);
+  }
+  if (auto pid = framed_props_.property_id(direct_overlay_id_, "zpos")) {
+    if (const auto immut =
+            framed_props_.is_immutable(direct_overlay_id_, "zpos");
+        !immut || !*immut) {
+      (void)req.add_property(direct_overlay_id_, *pid, direct_overlay_zpos_);
+    }
+  }
+
+  // Disable every other non-cursor plane so the commit doesn't inherit
+  // stale FB/CRTC/zpos from fbcon or a prior session.
+  for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
+    if (p->type == drm::planes::DRMPlaneType::CURSOR) {
+      continue;
+    }
+    if (p->id == framed_primary_id_ || p->id == direct_overlay_id_) {
+      continue;
+    }
+    if (auto fb_pid = framed_props_.property_id(p->id, "FB_ID")) {
+      (void)req.add_property(p->id, *fb_pid, 0);
+    }
+    if (auto crtc_pid = framed_props_.property_id(p->id, "CRTC_ID")) {
+      (void)req.add_property(p->id, *crtc_pid, 0);
+    }
+  }
+
+  // ── Commit ──
+  if (backend_->cfg_.debug_backend) {
+    backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
+  }
+
+  uint32_t commit_flags = 0;
+  const bool was_first_commit_pre = !plane_mode_set_;
+  if (was_first_commit_pre) {
+    commit_flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+  } else {
+    commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
+  }
+  const uint64_t t2 = profile ? NsNow() : 0;
+
+  if (auto r = req.commit(commit_flags, backend_); !r) {
+    if (r.error() == std::errc::permission_denied) {
+      if (!paused_.load(std::memory_order_acquire)) {
+        spdlog::warn(
+            "[DrmCompositor] direct-overlay commit: master revoked (EACCES); "
+            "skip frame");
+      }
+      return false;
+    }
+    spdlog::warn(
+        "[DrmCompositor] direct-overlay atomic commit failed ({}); latching GL "
+        "fallback for remaining session",
+        r.error().message());
+    fallback_latched_ = true;
+    return PresentViaGlFallback(layers, count);
+  }
+
+  if (was_first_commit_pre) {
+    plane_mode_set_ = true;
+    flip_pending_.store(false, std::memory_order_release);
+    VerifyPipeRunning();
+    const intptr_t baton =
+        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+    if (baton != 0) {
+      if (auto engine =
+              backend_->engine_handle_.load(std::memory_order_acquire)) {
+        backend_->PostOnVsync(engine, baton);
+      }
+    }
+  } else {
+    flip_pending_.store(true, std::memory_order_release);
+  }
+
+  // Rotate the BS pool slot so Flutter's next render targets a different
+  // BO than the one the kernel is scanning out. Same slot-release
+  // pipeline bookkeeping as the scene path.
+  if (store->pool_size > 1) {
+    const size_t committed_idx = store->active_idx;
+    store->pool[committed_idx].state = GbmBackingStore::Slot::State::Pending;
+    SlotRef committed{store, committed_idx};
+    store->active_idx = (store->active_idx + 1) % store->pool_size;
+    store->pool[store->active_idx].state = GbmBackingStore::Slot::State::Active;
+    glBindFramebuffer(GL_FRAMEBUFFER, store->fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           store->active().color_tex, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+    if (was_first_commit_pre) {
+      for (auto& ref : scanning_slots_) {
+        ref.store->pool[ref.slot_idx].state =
+            GbmBackingStore::Slot::State::Free;
+      }
+      scanning_slots_.assign(1, committed);
+    } else {
+      in_flight_slots_.push_back({committed});
+    }
+  }
+
+  if (profile && profile_) {
+    const uint64_t t3 = NsNow();
+    profile_->p.account(t1 - t0, t2 - t1, /*test=*/0, t3 - t2, t3 - t0);
+    if (profile_->p.frames >= kProfileWindow) {
+      const auto& s = profile_->p;
+      const auto ms = [&](uint64_t ns_sum) {
+        return static_cast<double>(ns_sum) /
+               (static_cast<double>(s.frames) * 1e6);
+      };
+      const auto ms_max = [](uint64_t ns) {
+        return static_cast<double>(ns) / 1e6;
+      };
+      spdlog::info(
+          "[DrmCompositor] direct-overlay profile (n={}): wait={:.2f}ms (max "
+          "{:.2f})  sync={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
+          "total={:.2f}ms (max {:.2f})",
+          s.frames, ms(s.wait_sum_ns), ms_max(s.wait_max_ns),
+          ms(s.compose_sum_ns), ms_max(s.compose_max_ns), ms(s.commit_sum_ns),
+          ms_max(s.commit_max_ns), ms(s.total_sum_ns), ms_max(s.total_max_ns));
+      profile_->p.reset();
+    }
+  }
+  return true;
+}
+#endif  // USE_DRM_SCENE
+
 // ─── Backing store create / collect ──────────────────────────────────────
 
 bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
@@ -2155,7 +3004,20 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
     ++store_pool_misses_;
   }
 
-  auto* baton = new StoreBaton{this, store.get()};
+  auto* baton = new StoreBaton{};
+  baton->owner = this;
+  baton->store = store.get();
+#if USE_DRM_SCENE
+  // Pre-build the LayerBufferSource wrapper for the LayerScene path.
+  // It stays in the baton until the first PresentLayers under
+  // USE_DRM_SCENE moves it into scene_->add_layer(). If the store
+  // retires (CollectBackingStore) before any Present, the wrapper is
+  // freed with the baton.
+  if (scene_) {
+    baton->scene_source = std::make_unique<GbmBackingStoreLayerSource>(
+        store.get(), [this](GbmBackingStore& s) { return EnsureDrmFbId(s); });
+  }
+#endif
 
   out->struct_size = sizeof(FlutterBackingStore);
   out->type = kFlutterBackingStoreTypeOpenGL;
@@ -2188,6 +3050,17 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
   if (!baton) {
     return false;
   }
+#if USE_DRM_SCENE
+  // If the store appeared in a Present this generation, the LayerScene
+  // owns a Layer with identity_tag == baton. Drop it before the baton
+  // disappears so the scene doesn't leave a stale layer referring to
+  // memory we're about to free.
+  if (scene_) {
+    if (auto* layer = scene_->find_by_identity_tag(baton)) {
+      scene_->remove_layer(layer->handle());
+    }
+  }
+#endif
   if (const auto it = stores_.find(baton); it != stores_.end()) {
     // Return the store to the pool instead of destroying it. Keeps the
     // GBM BO + EGLImage + GL FBO/tex/RB and (if already imported) the
@@ -2209,6 +3082,15 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
 
 void DrmCompositor::SetPaused(const bool paused) {
   paused_.store(paused, std::memory_order_release);
+#if USE_DRM_SCENE
+  // Mirror the pause edge into the scene so its layer sources can
+  // drop fd-bound state before the kernel revokes master. Idempotent
+  // and infallible per the LayerBufferSource::on_session_paused
+  // contract.
+  if (paused && scene_) {
+    scene_->on_session_paused();
+  }
+#endif
   spdlog::info("[DrmCompositor] session {}", paused ? "paused" : "resumed");
 }
 
@@ -2222,6 +3104,21 @@ void DrmCompositor::OnResume() {
   plane_mode_set_ = false;
   paused_.store(false, std::memory_order_release);
   resume_pending_logged_ = false;
+
+#if USE_DRM_SCENE
+  // Rebuild the scene's per-fd kernel state (plane registry, property
+  // caches, GEM/FB handles). DrmSession::TakeDevice opts in to
+  // preserve_fd_across_resume, so backend_->device() wraps the same
+  // fd that the seat originally handed us — the LayerScene's
+  // implementation skips fd-substitution and just re-enumerates.
+  if (scene_) {
+    auto& dev = const_cast<drm::Device&>(backend_->device());
+    if (auto r = scene_->on_session_resumed(dev); !r) {
+      spdlog::error("[DrmCompositor] LayerScene::on_session_resumed: {}",
+                    r.error().message());
+    }
+  }
+#endif
 
   // Drain the BS-slot release pipeline — any flip events that would
   // have freed slots queued before pause never fired. Promote
