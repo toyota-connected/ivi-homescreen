@@ -387,17 +387,6 @@ class DrmCompositor {
   // until their first Present add_layer()s them in.
   std::unique_ptr<drm::scene::LayerScene> scene_;
 
-  // DRM plane id of an externally-managed cursor to reserve from the
-  // scene allocator's disable-unused pass. Set by ReserveCursorPlane()
-  // (from DrmBackend, once the cursor exists); applied to scene_ each
-  // time the scene is built. 0 = none / legacy cursor path.
-  uint32_t cursor_reserved_plane_{0};
-
-  // Push cursor_reserved_plane_ into the live scene (if any). No-op
-  // when there's no scene or no cursor plane. Idempotent; called both
-  // when the reservation is set and whenever the scene is (re)built.
-  void ApplyCursorReservation();
-
   // Embedder-side mirror of the scene's live layer set, keyed by
   // baton pointer (the same pointer set as LayerDesc::identity_tag).
   // Walked each frame to prune layers whose baton didn't appear in
@@ -408,6 +397,16 @@ class DrmCompositor {
   // than any hashing for that size.
   std::vector<StoreBaton*> scene_layer_batons_;
 #endif
+
+  // DRM plane id of an externally-managed cursor to reserve from the
+  // scene allocator's disable-unused pass. Set by ReserveCursorPlane()
+  // (from DrmBackend, once the cursor exists); applied to scene_ each
+  // time the scene is built. 0 = none / legacy cursor path. Declared
+  // unconditionally (ReserveCursorPlane is part of the BUILD_COMPOSITOR
+  // API regardless of USE_DRM_SCENE); ApplyCursorReservation's body is
+  // a no-op when USE_DRM_SCENE is off (no scene to reserve from).
+  uint32_t cursor_reserved_plane_{0};
+  void ApplyCursorReservation();
 
   // Double-buffered composition buffer for layers that overflow HW planes.
   static constexpr int kNumCompBufs = 2;
