@@ -385,6 +385,15 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   backend->cursor_ = homescreen::DrmCursor::Create(
       *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
       backend->mode_, backend->fb_w_, backend->fb_h_);
+#if BUILD_COMPOSITOR
+  // On a CRTC with no dedicated cursor plane the cursor takes an
+  // overlay; reserve it so the scene allocator's disable-unused pass
+  // doesn't toggle it off every commit (flicker on pointer motion).
+  // plane_id()==0 (legacy cursor path) is a no-op in the compositor.
+  if (backend->cursor_ && backend->compositor_) {
+    backend->compositor_->ReserveCursorPlane(backend->cursor_->plane_id());
+  }
+#endif
 #endif
 #if HAVE_DRM_CAPTURE
   backend->capture_ = homescreen::DrmCapture::Create();

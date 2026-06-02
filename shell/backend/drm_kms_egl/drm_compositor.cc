@@ -461,6 +461,7 @@ bool DrmCompositor::InitPlaneAllocator() {
         return false;
       }
       scene_ = std::move(*scene);
+      ApplyCursorReservation();
       spdlog::info(
           "[DrmCompositor] LayerScene constructed (crtc={} connector={})",
           scene_cfg.crtc_id, scene_cfg.connector_id);
@@ -3079,6 +3080,27 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
 }
 
 // ─── Session pause / resume ──────────────────────────────────────────────
+
+void DrmCompositor::ReserveCursorPlane(const uint32_t plane_id) {
+  cursor_reserved_plane_ = plane_id;
+  // Apply immediately in case the scene already exists (cursor wired
+  // after the first present); otherwise the scene-build path applies it.
+  ApplyCursorReservation();
+}
+
+void DrmCompositor::ApplyCursorReservation() {
+#if USE_DRM_SCENE
+  if (!scene_ || cursor_reserved_plane_ == 0) {
+    return;
+  }
+  const uint32_t planes[] = {cursor_reserved_plane_};
+  scene_->set_external_reserved_planes(drm::span<const uint32_t>(planes, 1));
+  spdlog::info(
+      "[DrmCompositor] reserved cursor plane {} from scene allocator "
+      "(disable-unused pass will leave it alone)",
+      cursor_reserved_plane_);
+#endif
+}
 
 void DrmCompositor::SetPaused(const bool paused) {
   paused_.store(paused, std::memory_order_release);

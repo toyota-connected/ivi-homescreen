@@ -148,6 +148,16 @@ class DrmCompositor {
   void SetPaused(bool paused);
   void OnResume();
 
+  // Tell the compositor which DRM plane an externally-managed cursor
+  // (drm::cursor::Renderer) is armed on, so the scene allocator never
+  // disables it. On a CRTC with no dedicated cursor plane the cursor
+  // takes an overlay this scene would otherwise treat as unused;
+  // without the reservation the disable-unused pass turns it off every
+  // commit, fighting the cursor's own commits (flicker on motion).
+  // Stored and (re)applied to the LayerScene whenever it is built.
+  // plane_id == 0 (legacy cursor path / no cursor) is a no-op.
+  void ReserveCursorPlane(uint32_t plane_id);
+
   // Per-flip-complete work for the atomic plane path. Called by
   // DrmBackend::UnifiedPageFlipHandler on the platform task runner
   // thread when planes_active() returns true. Just clears
@@ -376,6 +386,17 @@ class DrmCompositor {
   // produces matching LayerBufferSource wrappers stashed in StoreBaton
   // until their first Present add_layer()s them in.
   std::unique_ptr<drm::scene::LayerScene> scene_;
+
+  // DRM plane id of an externally-managed cursor to reserve from the
+  // scene allocator's disable-unused pass. Set by ReserveCursorPlane()
+  // (from DrmBackend, once the cursor exists); applied to scene_ each
+  // time the scene is built. 0 = none / legacy cursor path.
+  uint32_t cursor_reserved_plane_{0};
+
+  // Push cursor_reserved_plane_ into the live scene (if any). No-op
+  // when there's no scene or no cursor plane. Idempotent; called both
+  // when the reservation is set and whenever the scene is (re)built.
+  void ApplyCursorReservation();
 
   // Embedder-side mirror of the scene's live layer set, keyed by
   // baton pointer (the same pointer set as LayerDesc::identity_tag).

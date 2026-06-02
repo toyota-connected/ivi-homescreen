@@ -86,6 +86,13 @@ class DrmCursor {
   // sprite stalls.
   void Move(int fb_x, int fb_y);
 
+  // The DRM plane id the cursor is scanned out on (0 on the legacy
+  // drmModeSetCursor path, which has no addressable plane). On a CRTC
+  // with no dedicated cursor plane the renderer takes an overlay; the
+  // compositor must reserve that plane so its scene allocator doesn't
+  // disable it every commit. Fixed for the cursor's lifetime.
+  [[nodiscard]] uint32_t plane_id() const;
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
