@@ -191,11 +191,18 @@ class DrmCompositor {
   bool InitFramedMode();
   void EnsureGlCapsProbed();
   void DestroyGbmStore(GbmBackingStore& store) const;
+  // @p force_scanout requests GBM_BO_USE_SCANOUT even before
+  // planes_available_ is set — needed for stores created during
+  // InitPlaneAllocator (the REFLECT_Y probe / direct-overlay BG), which
+  // must be KMS-importable but run before the caller flips the flag.
+  // Without it gbm may pick a render-only tiled modifier that AddFB2
+  // rejects.
   bool CreateGbmStore(GbmBackingStore& store,
                       uint32_t w,
                       uint32_t h,
                       uint32_t format,
-                      size_t pool_size = 1) const;
+                      size_t pool_size = 1,
+                      bool force_scanout = false) const;
   uint32_t ImportBoAsFb(gbm_bo* bo) const;
   // Lazily import the store's BO as a DRM framebuffer on first direct-
   // scanout use. Returns true when @c store.drm_fb_id is non-zero on
@@ -266,6 +273,35 @@ class DrmCompositor {
   // GBM read-back). Platform-view layers force the same fallback —
   // platform-view→scene plumbing is not wired in this revision.
   bool PresentLayersViaScene(const FlutterLayer** layers, size_t count);
+
+  // Direct-overlay setup: pick the REFLECT_Y-capable overlay for the
+  // backing-store scanout, cache its property IDs plus the primary
+  // plane's (the BG target), and create the mode-sized opaque BG store.
+  // Mirrors InitFramedMode's plane selection but requires the overlay
+  // to advertise both the BS format and REFLECT_Y. Returns false (→
+  // fall back to the scene_ path) if no suitable overlay exists or the
+  // BG store can't be created. See direct_overlay_mode_ / the class
+  // comment for the rationale.
+  bool InitDirectOverlay();
+
+  // Authoritative REFLECT_Y-on-primary probe. The rotation-property enum
+  // bitmask (PlaneSupportsReflectY) is unreliable: vc4 (and amdgpu DC)
+  // primaries advertise REFLECT_Y yet the kernel rejects it at commit
+  // with EINVAL. This runs a one-shot TEST_ONLY atomic commit binding
+  // the opaque BG to the primary with ROTATE_0|REFLECT_Y; if that TEST
+  // fails but the same commit with plain ROTATE_0 passes, REFLECT_Y is
+  // the culprit and the primary genuinely can't do it. Sets up bg_store_
+  // as the probe FB (reused by InitDirectOverlay). Returns the verdict;
+  // on an inconclusive probe (both variants fail) returns @p enum_hint.
+  bool ProbePrimaryReflectY(uint32_t primary_id, bool enum_hint);
+
+  // Direct-overlay present path. Zero-copy analogue of PresentFramed:
+  // pins the opaque BG to the primary (full CRTC) and atomic-commits
+  // the single Flutter backing store directly on the overlay with
+  // REFLECT_Y, no GL composite. Falls back to PresentViaGlFallback for
+  // any frame that isn't exactly one backing-store layer (multi-layer /
+  // platform-view frames are a follow-on).
+  bool PresentDirectOverlay(const FlutterLayer** layers, size_t count);
 #endif
 
   DrmBackend* backend_;
@@ -373,6 +409,23 @@ class DrmCompositor {
   uint64_t framed_overlay_zpos_{0};
   drm::PropertyStore framed_props_;
 
+  // ── Direct-overlay mode (zero-copy scene present) ─────────────────
+  // For non-framed configs on hardware whose PRIMARY plane lacks
+  // REFLECT_Y (amdgpu DC, RPi5 vc4) but whose overlays support it: pin
+  // an opaque BG to the primary (full CRTC coverage, as amdgpu DC
+  // requires) and direct-scan the single Flutter backing store on a
+  // REFLECT_Y-capable overlay so the GL-rendered (bottom-up) bits flip
+  // to scanout order without a copy. Reuses framed_primary_id_ (the BG
+  // target), framed_props_ (cached plane props), and bg_store_ (the
+  // opaque BG) — same plane shape as framed mode, but the overlay
+  // direct-scans the BS instead of carrying a composited buffer.
+  // direct_overlay_mode_ gates PresentDirectOverlay in PresentLayers;
+  // it stays false (and the scene_ path runs) when the primary already
+  // supports REFLECT_Y or no overlay qualifies.
+  bool direct_overlay_mode_{false};
+  uint32_t direct_overlay_id_{0};
+  uint64_t direct_overlay_zpos_{0};
+
   // Atomic-commit flip state. Written by
   // DrmBackend::UnifiedPageFlipHandler → OnFlipComplete on the
   // platform task runner thread (when the kernel reports flip
@@ -420,6 +473,14 @@ class DrmCompositor {
   // where overlays support rotation but primary doesn't can still
   // benefit on the layers where the allocator can use an overlay.
   bool any_plane_supports_reflect_y_{false};
+
+  // Probed once in InitPlaneAllocator: true iff the PRIMARY plane's
+  // rotation bitmask includes REFLECT_Y. When false but
+  // any_plane_supports_reflect_y_ is true, the non-framed path can't
+  // direct-scan the bottom-up BS on the primary (REFLECT_Y write →
+  // EINVAL on amdgpu DC / vc4), so it routes through direct-overlay
+  // mode (BG on primary, BS on a REFLECT_Y overlay) instead.
+  bool primary_supports_reflect_y_{false};
 
   // One-shot diagnostic: log on the first PresentLayers entry after a
   // resume so a stuck Flutter frame pacer is visible. Cleared by
