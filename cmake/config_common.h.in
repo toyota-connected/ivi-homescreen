@@ -19,10 +19,6 @@
 
 #include <array>
 
-#include <EGL/egl.h>
-
-#include <waypp/waypp.h>
-
 #ifndef BUILD_BACKEND_WAYLAND_EGL
 #cmakedefine01 BUILD_BACKEND_WAYLAND_EGL
 #endif
@@ -55,6 +51,29 @@
 #endif
 #ifndef BUILD_SOFTWARE_INPUT_LIBINPUT
 #cmakedefine01 BUILD_SOFTWARE_INPUT_LIBINPUT
+#endif
+
+// EGL is needed only by the EGL-based backends. Including <EGL/egl.h> here
+// unconditionally dragged EGL/GL headers into the DRM-Vulkan and software
+// builds, which must stay EGL/GL-free.
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL || \
+    BUILD_BACKEND_HEADLESS_EGL
+#define IVI_HAVE_EGL 1
+#include <EGL/egl.h>
+#else
+#define IVI_HAVE_EGL 0
+#endif
+
+// waypp (the Wayland C++ wrapper + generated protocol bindings) is needed
+// only by the Wayland backends (and headless, which links wayland-gen). No
+// shell/ code references waypp:: outside those backends, so the DRM EGL/Vulkan
+// and software builds drop the header — and with it the libwayland-client /
+// libwayland-cursor runtime deps. This condition MUST match the waypp build
+// gate in third_party/CMakeLists.txt: waypp's own sources include this header
+// (via logging.h), so a mismatch breaks waypp's build.
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
+#include <waypp/waypp.h>
 #endif
 
 #cmakedefine01 BUILD_EGL_TRANSPARENCY
@@ -146,6 +165,10 @@ static constexpr char kDltContextIdDescription[] = "Flutter Embedder";
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
+// EGL config arrays use EGLint / EGL_* and are consumed only by the EGL
+// backends; guard them with the same condition as the <EGL/egl.h> include so
+// non-EGL builds neither need nor reference the EGL header.
+#if IVI_HAVE_EGL
 static constexpr std::array<EGLint, 5> kEglContextAttribs = {{
     // clang-format off
     EGL_CONTEXT_MAJOR_VERSION, 3,
@@ -200,6 +223,7 @@ static constexpr std::array<EGLint, 13> kEglConfigAttribsFallBack = {{
     EGL_NONE // termination sentinel
     // clang-format on
 }};
+#endif  // IVI_HAVE_EGL
 
 
 // All vkCreate* functions take an optional allocator. For now, we select the

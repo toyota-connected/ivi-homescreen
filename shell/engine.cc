@@ -32,6 +32,11 @@
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+// The Vulkan DRM backend reuses the DRM engine-state path but not the EGL
+// backend header (which pulls in EGL/GL). Only the engine-state type is
+// needed here.
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #endif
 
 // WaylandWindow's complete type is required for the m_egl_window->

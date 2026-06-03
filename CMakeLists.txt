@@ -45,6 +45,16 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
     endif ()
 endif ()
 
+if (BUILD_BACKEND_DRM_KMS_VULKAN)
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+        BUILD_BACKEND_DRM_KMS_EGL)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_DRM_KMS_VULKAN is mutually exclusive with "
+                "BUILD_BACKEND_WAYLAND_EGL, BUILD_BACKEND_WAYLAND_VULKAN, and "
+                "BUILD_BACKEND_DRM_KMS_EGL")
+    endif ()
+endif ()
+
 # FlutterView's backend type is picked by an #if/#elif chain over the
 # BUILD_BACKEND_* flags; enabling both Wayland EGL and Wayland Vulkan
 # yields a single binary whose renderer is silently determined by
@@ -60,7 +70,8 @@ endif ()
 # incompatible with the GL/Vulkan configs the other backends produce.
 # Reject the combination at configure time.
 if (BUILD_BACKEND_SOFTWARE)
-    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_WAYLAND_EGL OR
+    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
+        BUILD_BACKEND_WAYLAND_EGL OR
         BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_HEADLESS_EGL)
         message(FATAL_ERROR
                 "BUILD_BACKEND_SOFTWARE is mutually exclusive with the "
@@ -79,7 +90,7 @@ include(compiler)
 # library (which carries -stdlib=libc++ on clang builds) exists when we
 # add_subdirectory(drm-cxx). Otherwise drm-cxx compiles against libstdc++
 # and link fails with mixed ABI symbols.
-if (BUILD_BACKEND_DRM_KMS_EGL)
+if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN)
     include(drm_kms)
 endif ()
 

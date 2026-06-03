@@ -61,6 +61,8 @@ class PlatformChannel;
 class HeadlessBackend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
 class DrmBackend;
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+class VulkanDrmBackend;
 #elif BUILD_BACKEND_SOFTWARE
 class SoftwareBackend;
 #elif BUILD_BACKEND_WAYLAND_EGL
@@ -70,8 +72,9 @@ class WaylandVulkanBackend;
 #else
 #error \
     "no Flutter backend selected: define one of BUILD_BACKEND_HEADLESS_EGL, " \
-    "BUILD_BACKEND_DRM_KMS_EGL, BUILD_BACKEND_SOFTWARE, " \
-    "BUILD_BACKEND_WAYLAND_EGL, BUILD_BACKEND_WAYLAND_VULKAN"
+    "BUILD_BACKEND_DRM_KMS_EGL, BUILD_BACKEND_DRM_KMS_VULKAN, " \
+    "BUILD_BACKEND_SOFTWARE, BUILD_BACKEND_WAYLAND_EGL, " \
+    "BUILD_BACKEND_WAYLAND_VULKAN"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
@@ -146,7 +149,7 @@ class FlutterView {
    * @relation
    * internal
    */
-#if !BUILD_BACKEND_DRM_KMS_EGL
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN
   [[nodiscard]] Display* GetDisplay() const;
 #endif
 
@@ -259,6 +262,8 @@ class FlutterView {
   std::shared_ptr<HeadlessBackend> m_backend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
   std::shared_ptr<DrmBackend> m_backend{};
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+  std::shared_ptr<VulkanDrmBackend> m_backend{};
 #elif BUILD_BACKEND_SOFTWARE
   std::shared_ptr<SoftwareBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_EGL
