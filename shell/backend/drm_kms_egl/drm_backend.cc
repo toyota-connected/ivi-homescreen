@@ -1662,8 +1662,23 @@ bool DrmBackend::WaitForPendingFlip() const {
   // it. Short sleep so a 60 Hz frame's ~16ms window has plenty of
   // resolution but we don't burn the rasterizer CPU.
   using namespace std::chrono_literals;
+  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go
+  // undelivered, and at teardown the asio monitor that would drain it
+  // is already gone — an unbounded loop then spins forever in
+  // hrtimer_nanosleep, hanging Present and (fatally) ~DrmBackend so the
+  // process never exits on SIGTERM. Cap the wait and proceed; a healthy
+  // 60Hz flip clears in ~16ms so this never fires in normal operation.
+  // Same budget as StopVsyncMonitor's drain.
+  constexpr auto kFlipWaitTimeout = 100ms;
+  const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
     if (!drm_dev_) {
+      return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      spdlog::warn(
+          "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
+          "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
     std::this_thread::sleep_for(500us);

@@ -925,6 +925,12 @@ bool DrmCompositor::WaitForPendingFlip() const {
   // UnifiedPageFlipHandler → OnFlipComplete. We just wait for it.
   // Short sleep keeps the rasterizer responsive without burning CPU.
   using namespace std::chrono_literals;
+  // Bounded wait — see DrmBackend::WaitForPendingFlip. On nvidia-drm a
+  // flip event can be lost; without a cap the destructor's wait spins
+  // forever and the process never exits on SIGTERM. A healthy 60Hz flip
+  // clears in ~16ms so the cap never fires in normal operation.
+  constexpr auto kFlipWaitTimeout = 100ms;
+  const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
     // Session went inactive between submitting the flip and the
     // kernel firing PAGE_FLIP_EVENT — the event will never come.
