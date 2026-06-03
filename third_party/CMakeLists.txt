@@ -49,8 +49,14 @@ target_compile_options(tomlplusplus_tomlplusplus INTERFACE
 #
 # Vulkan-Headers
 #
+# Expose the top-level include dir (not include/vulkan) so the canonical
+# <vulkan/vulkan.h> / <vulkan/vulkan.hpp> includes every consumer uses resolve
+# from the vendored tree. Pointing at include/vulkan only satisfied bare
+# <vulkan.h> (which nothing uses) and let <vulkan/...> silently fall back to the
+# system Vulkan SDK on desktop hosts — a source of API/ABI skew, and a hard
+# failure when cross-compiling against a sysroot with no Vulkan headers.
 add_library(vulkan_headers INTERFACE)
-target_include_directories(vulkan_headers INTERFACE Vulkan-Headers/include/vulkan)
+target_include_directories(vulkan_headers INTERFACE Vulkan-Headers/include)
 
 #
 # Flutter Common library

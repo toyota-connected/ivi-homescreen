@@ -22,15 +22,18 @@
 #     --pios <bookworm|trixie>      PiOS release (default: bookworm)
 #     --target <pi4|pi5|piz2|generic>   -mcpu tuning (default: generic)
 #                                         piz2 = Pi Zero 2 W (Cortex-A53)
-#     --backend <wayland-egl|wayland-vulkan|drm-kms-egl|software|all>
+#     --backend <wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|software|all>
 #                                   default: all
 #                                     wayland-egl    GLES2 on Wayland
 #                                     wayland-vulkan Vulkan on Wayland
 #                                     drm-kms-egl    direct DRM/KMS + GBM + GLES2 (no compositor)
+#                                     drm-kms-vulkan Flutter Vulkan renderer scanned out zero-copy
+#                                                    on KMS planes via dma-buf import (compositor)
 #                                     software       CPU rasterizer → DRM dumb buffer / fbdev
 #                                     all            build every backend in its own build dir
 #                                                    (drm-kms-egl is skipped on bookworm —
-#                                                     libdisplay-info 0.1.1 < drm-cxx's 0.2.0)
+#                                                     libdisplay-info 0.1.1 < drm-cxx's 0.2.0;
+#                                                     drm-kms-vulkan is build-only via --backend)
 #     --flutter-engine <path>       dir with lib/libflutter_engine.so + data/icudtl.dat
 #                                     (bypasses auto-fetch)
 #     --flutter-runtime <debug|debug-unopt|profile|release>   default: release
@@ -293,8 +296,9 @@ esac
 
 case "$PIOS" in bookworm|trixie) ;; *) die "--pios must be bookworm|trixie (got: $PIOS)" ;; esac
 case "$TARGET" in pi4|pi5|piz2|generic) ;; *) die "--target must be pi4|pi5|piz2|generic (got: $TARGET)" ;; esac
-case "$BACKEND" in wayland-egl|wayland-vulkan|drm-kms-egl|software|all) ;;
-    *) die "--backend must be wayland-egl|wayland-vulkan|drm-kms-egl|software|all (got: $BACKEND)" ;;
+case "$BACKEND" in
+    wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|software|all) ;;
+    *) die "--backend must be wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|software|all (got: $BACKEND)" ;;
 esac
 
 # Resolve which backends to actually build. drm-kms-egl needs libdisplay-info
@@ -311,9 +315,10 @@ if [[ "$BACKEND" == "all" ]]; then
     fi
 else
     BUILD_BACKENDS=("$BACKEND")
-    if [[ "$BACKEND" == "drm-kms-egl" && "$PIOS" == "bookworm" \
-          && "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]]; then
-        die "drm-kms-egl on bookworm needs libdisplay-info >= 0.2.0 (ships 0.1.1); pass --with-local-display-info to cross-build it"
+    # Both DRM backends pull in drm-cxx, which needs libdisplay-info >= 0.2.0.
+    if [[ ("$BACKEND" == "drm-kms-egl" || "$BACKEND" == "drm-kms-vulkan") \
+          && "$PIOS" == "bookworm" && "$WITH_LOCAL_DISPLAY_INFO" -eq 0 ]]; then
+        die "$BACKEND on bookworm needs libdisplay-info >= 0.2.0 (ships 0.1.1); pass --with-local-display-info to cross-build it"
     fi
 fi
 case "$FLUTTER_RUNTIME" in debug|debug-unopt|profile|release) ;;
@@ -577,13 +582,16 @@ sysroot_pkg_list() {
                 : ;;  # EGL/GLES + wayland (for waypp) come from the shared list
             wayland-vulkan)
                 pkgs+=(libvulkan-dev mesa-vulkan-drivers) ;;
-            drm-kms-egl)
+            drm-kms-egl|drm-kms-vulkan)
                 # drm-cxx requires libdisplay-info >= 0.2.0 (Trixie 0.2.0;
                 # Bookworm 0.1.1). libxcursor-dev gates the DRM HW cursor module;
                 # absent → leaky symbol references (~DrmCursor / DrmCursor::Move)
                 # break the link. libseat-dev is required by drm-cxx's
                 # drm::session::Seat (DRM_CXX_SESSION=ON in cmake/drm_kms.cmake);
                 # used by shell/backend/drm_kms_egl/drm_session.cc unconditionally.
+                # drm-kms-vulkan shares the same DRM/GBM/seat deps; its Vulkan
+                # entry points are dlopen'd at runtime (vulkan.hpp dynamic
+                # dispatch), so no libvulkan-dev is needed to link.
                 pkgs+=(libdrm-dev libgbm-dev libinput-dev libxcursor-dev libseat-dev)
                 # When we cross-build libdisplay-info ourselves, skip the apt
                 # -dev package so its libdisplay-info.so dev symlink can't shadow
@@ -915,6 +923,7 @@ phase4_build() {
         -DCMAKE_TOOLCHAIN_FILE="$BUILD_DIR/.xc-toolchain.cmake"
         -DCMAKE_BUILD_TYPE=Release
         -DBUILD_BACKEND_HEADLESS_EGL=OFF
+        -DBUILD_BACKEND_DRM_KMS_VULKAN=OFF
     )
     # Exactly one backend is enabled; the rest are forced OFF.
     case "$be" in
@@ -942,6 +951,19 @@ phase4_build() {
             if [[ "$WITH_SCENE" -eq 1 ]]; then
                 cmake_args+=(-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON)
             fi ;;
+        drm-kms-vulkan)
+            # Flutter Vulkan renderer scanned out zero-copy on KMS planes via
+            # dma-buf import + drm-cxx LayerScene. Requires the compositor (the
+            # engine presents through CreateBackingStore/PresentLayers); the
+            # scene path is linked unconditionally in this backend, so
+            # USE_DRM_SCENE stays off (it gates only the drm-kms-egl GL scene).
+            cmake_args+=(
+                -DBUILD_BACKEND_WAYLAND_EGL=OFF
+                -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
+                -DBUILD_BACKEND_DRM_KMS_EGL=OFF
+                -DBUILD_BACKEND_DRM_KMS_VULKAN=ON
+                -DBUILD_BACKEND_SOFTWARE=OFF
+                -DBUILD_COMPOSITOR=ON) ;;
         software)
             cmake_args+=(
                 -DBUILD_BACKEND_WAYLAND_EGL=OFF
@@ -1398,6 +1420,12 @@ libjpeg62-turbo libxml2 libglib2.0-0t64"
                 drm-kms-egl)
                     deps_backend="libdrm2 libgbm1 libinput10 libdisplay-info2 \
 libxcursor1 dmz-cursor-theme libegl1 libgles2"
+                    ;;
+                drm-kms-vulkan)
+                    # Same DRM/GBM/cursor stack as drm-kms-egl, but the Vulkan
+                    # loader + an ICD (V3DV on Pi) replace EGL/GLES at runtime.
+                    deps_backend="libdrm2 libgbm1 libinput10 libdisplay-info2 \
+libxcursor1 dmz-cursor-theme libvulkan1 mesa-vulkan-drivers"
                     ;;
                 software)
                     deps_backend="libdrm2 libinput10"
