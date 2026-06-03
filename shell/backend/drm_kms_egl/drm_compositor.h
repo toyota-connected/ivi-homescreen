@@ -51,6 +51,9 @@
 
 class DrmBackend;
 class ICompositorSurface;
+namespace homescreen {
+class DrmCursor;
+}  // namespace homescreen
 class GbmBackingStoreLayerSource;
 
 // Default pool sizes used by CreateGbmStore. Flutter backing-stores
@@ -158,6 +161,14 @@ class DrmCompositor {
   // plane_id == 0 (legacy cursor path / no cursor) is a no-op.
   void ReserveCursorPlane(uint32_t plane_id);
 
+  // Give the compositor the HW cursor so it can stage the cursor plane
+  // into its own atomic commit (DrmCursor::Stage) instead of letting the
+  // cursor self-commit. Used on drivers (nvidia-drm) where a separate
+  // cursor commit starves the compositor's PAGE_FLIP_EVENT. nullptr (the
+  // default) keeps the self-committing path. The pointer is owned by
+  // DrmBackend and outlives the compositor.
+  void SetCursor(homescreen::DrmCursor* cursor) { cursor_ = cursor; }
+
   // Per-flip-complete work for the atomic plane path. Called by
   // DrmBackend::UnifiedPageFlipHandler on the platform task runner
   // thread when planes_active() returns true. Just clears
@@ -254,6 +265,20 @@ class DrmCompositor {
   // running" case that otherwise surfaces only as a stalled PresentLayers
   // down the line.
   void VerifyPipeRunning() const;
+
+  // Stage the HW cursor plane into `req` so the cursor rides this atomic
+  // commit instead of self-committing (see DrmCompositor::SetCursor /
+  // DrmCursor::Stage). Returns true when the cursor's first plane-enable
+  // needs DRM_MODE_ATOMIC_ALLOW_MODESET this frame (caller must then
+  // commit blocking). No-op returning false when no cursor is staged.
+  bool StageCursorInto(drm::AtomicRequest& req);
+
+  // Shared post-commit settle for the atomic plane paths. A blocking
+  // commit (the initial modeset, or a cursor first-enable) produces no
+  // PAGE_FLIP_EVENT: clear flip_pending_ and return the vsync baton
+  // inline; the genuine first modeset also latches plane_mode_set_ and
+  // verifies the pipe. A steady-state nonblock flip arms flip_pending_.
+  void SettleAtomicCommit(bool blocking);
 
   // GL fallback: composites all layers into FBO 0 and calls
   // DrmBackend::Present(). Used when the plane allocator isn't
@@ -407,6 +432,10 @@ class DrmCompositor {
   // a no-op when USE_DRM_SCENE is off (no scene to reserve from).
   uint32_t cursor_reserved_plane_{0};
   void ApplyCursorReservation();
+
+  // Externally-owned HW cursor staged into each atomic commit (see
+  // SetCursor). null = self-committing cursor path (the default).
+  homescreen::DrmCursor* cursor_{nullptr};
 
   // Double-buffered composition buffer for layers that overflow HW planes.
   static constexpr int kNumCompBufs = 2;
