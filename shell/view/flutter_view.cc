@@ -236,7 +236,7 @@ FlutterView::FlutterView(Configuration::Config config,
         (m_config.view.drm_mode.has_value() && !m_config.view.drm_mode->empty())
             ? *m_config.view.drm_mode
             : std::string{};
-    m_backend = VulkanDrmBackend::Create(
+    auto vk_backend = VulkanDrmBackend::Create(
         m_config.view.drm_device.value_or("/dev/dri/card1"),
         m_config.debug_backend.value_or(false), drm_display->session(),
         drm_mode);
@@ -245,11 +245,22 @@ FlutterView::FlutterView(Configuration::Config config,
     // zero-copy scanout path). Continuing would dereference a null backend in
     // Engine::Run and SEGV; fail-fast with the same exit path the EGL DRM
     // backend uses.
-    if (!m_backend) {
+    if (!vk_backend) {
       spdlog::critical(
           "[FlutterView] DRM Vulkan backend init failed; aborting");
       exit(EXIT_FAILURE);
     }
+
+    // Wire the self-committing HW cursor (if Create opened one) to the seat
+    // dispatch thread, and clamp the pointer to the resolved scanout size. The
+    // cursor commits on its own (not staged into the per-frame scanout commit),
+    // so it stays responsive while the UI is idle. The pointer stays valid for
+    // the FlutterView's lifetime (both members, destroyed in declaration
+    // order).
+    drm_display->SetViewportSize(static_cast<int32_t>(vk_backend->width()),
+                                 static_cast<int32_t>(vk_backend->height()));
+    drm_display->SetCursor(vk_backend->drm_cursor());
+    m_backend = vk_backend;
   }
 #elif BUILD_BACKEND_WAYLAND_EGL
   {

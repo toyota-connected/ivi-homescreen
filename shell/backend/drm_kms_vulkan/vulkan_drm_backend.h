@@ -28,6 +28,7 @@
 
 namespace homescreen {
 class DrmSession;
+class DrmCursor;
 }  // namespace homescreen
 
 // DRM/KMS scanout backend that drives the Flutter Vulkan renderer and presents
@@ -79,6 +80,13 @@ class VulkanDrmBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
   [[nodiscard]] const drm_kms_vulkan::DeviceCaps& caps() const { return caps_; }
+
+  // The self-committing DRM HW cursor (null when xcursor/drm-cxx-cursor is
+  // unavailable or --disable-cursor). FlutterView forwards it to the seat via
+  // DrmDisplay::SetCursor so pointer motion drives the on-screen sprite.
+  [[nodiscard]] homescreen::DrmCursor* drm_cursor() const {
+    return cursor_.get();
+  }
 
  private:
   VulkanDrmBackend(std::string drm_device,
@@ -152,4 +160,9 @@ class VulkanDrmBackend final : public Backend {
   // FlutterView and other GL-free translation units).
   struct CompositorState;
   std::unique_ptr<CompositorState> compositor_;
+
+  // Self-committing HW cursor on the scanout CRTC's cursor plane. Created in
+  // SetupCompositor against compositor_'s DRM device; destroyed before
+  // compositor_ so it never outlives that device.
+  std::unique_ptr<homescreen::DrmCursor> cursor_;
 };
