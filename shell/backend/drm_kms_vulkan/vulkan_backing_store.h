@@ -64,6 +64,26 @@ class VulkanBackingStore {
       const std::vector<uint64_t>& allowed_modifiers,
       std::string& err);
 
+  // Import an already-allocated, display-scannable dma-buf as the render target
+  // (the inverse of Create's export path — for split GPUs whose display can't
+  // scan a GPU-exported buffer). @p dmabuf_fd is consumed: ownership transfers
+  // to the store, which dups it for Vulkan import and exposes the original via
+  // dma_buf_fd() for the scene; both are closed on destruction. @p modifier and
+  // @p planes describe the buffer's exact layout (from the allocator: CMA
+  // dma-heap LINEAR, or GBM with an explicit modifier). On failure returns
+  // nullptr, sets @p err, and closes @p dmabuf_fd.
+  static std::unique_ptr<VulkanBackingStore> CreateImported(
+      VkPhysicalDevice physical_device,
+      VkDevice device,
+      uint32_t width,
+      uint32_t height,
+      VkFormat vk_format,
+      uint32_t drm_fourcc,
+      int dmabuf_fd,
+      uint64_t modifier,
+      const std::vector<PlaneLayout>& planes,
+      std::string& err);
+
   ~VulkanBackingStore();
 
   VulkanBackingStore(const VulkanBackingStore&) = delete;

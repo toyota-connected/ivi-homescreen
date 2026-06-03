@@ -23,8 +23,12 @@
 
 #include <drm_fourcc.h>
 
+#include <gbm.h>
+#include <unistd.h>
+
 #include <array>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <unordered_map>
@@ -254,6 +258,95 @@ void WaitForFlip(int drm_fd, drmEventContext& evctx) {
   }
 }
 
+// How a backing store's scanout buffer is allocated.
+//   Export    — Vulkan allocates + exports the dma-buf (the default; works on
+//               unified-memory GPUs and displays that can address the GPU's
+//               exported buffer, e.g. amdgpu, RPi5).
+//   ImportGbm — a display-scannable buffer is allocated via GBM on the display
+//               device (a real GEM dma-buf, unlike a raw CMA-heap buffer which
+//               Mesa rejects on import) and imported into Vulkan as the render
+//               target, for displays that can't scan a GPU-exported buffer.
+enum class AllocMode { Export, ImportGbm };
+
+// Allocate one display-scannable buffer via GBM on @p gbm. @p modifiers is the
+// candidate set (plane's advertised modifiers); empty = let GBM pick with
+// SCANOUT|RENDERING usage. Fills the chosen modifier + per-plane layout and
+// returns a dma-buf fd (caller owns), or -1 with @p err set.
+int AllocateGbmScanout(gbm_device* gbm,
+                       uint32_t w,
+                       uint32_t h,
+                       uint32_t fourcc,
+                       const std::vector<uint64_t>& modifiers,
+                       uint64_t& out_modifier,
+                       std::vector<drm_kms_vulkan::PlaneLayout>& out_planes,
+                       std::string& err) {
+  // SCANOUT is what makes the buffer display-scannable; the render GPU makes it
+  // a render target when it imports the dma-buf, so RENDERING (which a
+  // display-only GBM device may not support) is not requested here.
+  gbm_bo* bo = nullptr;
+  if (!modifiers.empty()) {
+    bo = gbm_bo_create_with_modifiers2(gbm, w, h, fourcc, modifiers.data(),
+                                       static_cast<unsigned>(modifiers.size()),
+                                       GBM_BO_USE_SCANOUT);
+  }
+  if (bo == nullptr) {
+    bo = gbm_bo_create(gbm, w, h, fourcc, GBM_BO_USE_SCANOUT);
+  }
+  if (bo == nullptr) {
+    err = "gbm_bo_create failed";
+    return -1;
+  }
+  out_modifier = gbm_bo_get_modifier(bo);
+  const int planes = gbm_bo_get_plane_count(bo);
+  out_planes.clear();
+  for (int i = 0; i < planes; ++i) {
+    out_planes.push_back({gbm_bo_get_offset(bo, i), gbm_bo_get_stride_for_plane(bo, i)});
+  }
+  // The dma-buf fd holds an independent kernel ref, so the buffer survives
+  // gbm_bo_destroy; destroy the bo handle now and let the fd own the buffer.
+  const int fd = gbm_bo_get_fd(bo);
+  gbm_bo_destroy(bo);
+  if (fd < 0) {
+    err = "gbm_bo_get_fd failed";
+    return -1;
+  }
+  return fd;
+}
+
+// Build one backing store for the given allocation mode. Export uses Vulkan's
+// own exported modifier image; ImportGbm allocates a display-scannable GBM
+// buffer and imports it as the render target.
+std::unique_ptr<drm_kms_vulkan::VulkanBackingStore> MakeBackingStore(
+    VkPhysicalDevice phys,
+    VkDevice device,
+    gbm_device* gbm,
+    uint32_t w,
+    uint32_t h,
+    uint32_t fourcc,
+    const std::vector<uint64_t>& plane_modifiers,
+    AllocMode mode,
+    std::string& err) {
+  if (mode == AllocMode::ImportGbm) {
+    if (gbm == nullptr) {
+      err = "ImportGbm: no gbm_device";
+      return nullptr;
+    }
+    uint64_t modifier = 0;
+    std::vector<drm_kms_vulkan::PlaneLayout> planes;
+    const int fd = AllocateGbmScanout(gbm, w, h, fourcc, plane_modifiers,
+                                      modifier, planes, err);
+    if (fd < 0) {
+      return nullptr;
+    }
+    return drm_kms_vulkan::VulkanBackingStore::CreateImported(
+        phys, device, w, h, VK_FORMAT_B8G8R8A8_UNORM, fourcc, fd, modifier,
+        planes, err);
+  }
+  return drm_kms_vulkan::VulkanBackingStore::Create(
+      phys, device, w, h, VK_FORMAT_B8G8R8A8_UNORM, fourcc,
+      {DRM_FORMAT_MOD_LINEAR}, err);
+}
+
 }  // namespace
 
 VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
@@ -364,6 +457,9 @@ struct VulkanDrmBackend::CompositorState {
     scene.reset();
     ring_owner.reset();
     slots.clear();
+    if (gbm != nullptr) {
+      gbm_device_destroy(gbm);
+    }
     if (barrier_fence != VK_NULL_HANDLE) {
       d.vkDestroyFence(vk_device, barrier_fence, nullptr);
     }
@@ -381,6 +477,13 @@ struct VulkanDrmBackend::CompositorState {
   uint32_t fourcc = 0;
   uint32_t width = 0;
   uint32_t height = 0;
+  // How backing stores are allocated; chosen by the SetupCompositor probe.
+  AllocMode alloc_mode = AllocMode::Export;
+  // GBM device on the display DRM fd, used by ImportGbm to allocate
+  // display-scannable buffers; the candidate modifier set is the scanout plane's
+  // advertised modifiers.
+  gbm_device* gbm = nullptr;
+  std::vector<uint64_t> scanout_modifiers;
 
   // Ring of scanout buffers. The engine cycles through them
   // (avoid_backing_store_cache), rendering into a free slot while KMS scans
@@ -442,6 +545,34 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     spdlog::info("[VulkanDrmBackend] plane modifiers advertised:{}", adv);
     spdlog::info("[VulkanDrmBackend] modifiers negotiated:{}", neg);
   }
+  {
+    // Diagnostic: every modifier the GPU exposes for the format, with the
+    // feature flags. Distinguishes "no AFBC export" from "AFBC export filtered
+    // out by the TRANSFER_DST requirement" (compressed modifiers support
+    // COLOR_ATTACHMENT but usually not TRANSFER_DST).
+    VkDrmFormatModifierPropertiesListEXT list{};
+    list.sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT;
+    VkFormatProperties2 fp{};
+    fp.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
+    fp.pNext = &list;
+    d.vkGetPhysicalDeviceFormatProperties2(physical_device_,
+                                           VK_FORMAT_B8G8R8A8_UNORM, &fp);
+    std::vector<VkDrmFormatModifierPropertiesEXT> mods(
+        list.drmFormatModifierCount);
+    list.pDrmFormatModifierProperties = mods.data();
+    d.vkGetPhysicalDeviceFormatProperties2(physical_device_,
+                                           VK_FORMAT_B8G8R8A8_UNORM, &fp);
+    for (const auto& m : mods) {
+      spdlog::info(
+          "[VulkanDrmBackend] GPU modifier 0x{:016x} planes={} color_attach={} "
+          "transfer_dst={}",
+          m.drmFormatModifier, m.drmFormatModifierPlaneCount,
+          (m.drmFormatModifierTilingFeatures &
+           VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0,
+          (m.drmFormatModifierTilingFeatures &
+           VK_FORMAT_FEATURE_TRANSFER_DST_BIT) != 0);
+    }
+  }
 
   auto dev_exp = drm::Device::open(drm_device_);
   if (!dev_exp) {
@@ -466,6 +597,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   }
   state->scene = std::move(scene_exp.value());
 
+  // GBM on the display device backs the import allocation path; the candidate
+  // modifier set is the negotiated set (display-scannable + GPU-importable).
+  state->gbm = gbm_create_device(state->device.fd());
+  state->scanout_modifiers = allowed;
+
   // Probe the scanout path once: allocate a mode-sized backing store and try to
   // import it as a KMS framebuffer. On hardware whose display cannot address
   // the render GPU's exported buffer (e.g. a split render/display SoC with no
@@ -474,23 +610,50 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // probe image and its framebuffer are released immediately (ring before
   // store, so the framebuffer is gone before the memory it references).
   {
+    // Try the modes in order; the first whose buffer the display will actually
+    // scan out (allocate + import as a KMS framebuffer) wins. Export is the
+    // default; ImportGbm covers displays that can't scan a GPU-exported buffer.
+    // IVI_VK_FORCE_IMPORT skips export (to exercise the import path on hardware
+    // where export also works). The probe buffer + framebuffer are released
+    // immediately (ring before store).
+    const bool force_import = std::getenv("IVI_VK_FORCE_IMPORT") != nullptr;
+    std::array<AllocMode, 2> order = {AllocMode::Export, AllocMode::ImportGbm};
+    bool ok = false;
     std::string probe_err;
-    auto probe = drm_kms_vulkan::VulkanBackingStore::Create(
-        physical_device_, device_, state->width, state->height,
-        VK_FORMAT_B8G8R8A8_UNORM, state->fourcc, {DRM_FORMAT_MOD_LINEAR},
-        probe_err);
-    if (!probe) {
-      err = "scanout buffer allocation failed: " + probe_err;
-      return false;
+    std::string last_err;
+    for (AllocMode mode : order) {
+      if (force_import && mode == AllocMode::Export) {
+        continue;
+      }
+      if (mode == AllocMode::ImportGbm && state->gbm == nullptr) {
+        last_err = "GBM device unavailable on the display node";
+        continue;
+      }
+      auto probe = MakeBackingStore(physical_device_, device_, state->gbm,
+                                    state->width, state->height, state->fourcc,
+                                    state->scanout_modifiers, mode, probe_err);
+      if (!probe) {
+        last_err = probe_err;
+        continue;
+      }
+      VkScanoutRing probe_ring;
+      if (probe_ring.AddSlot(state->device, *probe, state->fourcc)) {
+        state->alloc_mode = mode;
+        ok = true;
+        break;
+      }
+      last_err = "KMS framebuffer import rejected the buffer";
     }
-    VkScanoutRing probe_ring;
-    if (!probe_ring.AddSlot(state->device, *probe, state->fourcc)) {
+    if (!ok) {
       err =
           "this GPU/display combination cannot zero-copy scan out the Vulkan "
-          "renderer's buffers (KMS framebuffer import failed) — use the GL "
-          "backend (drm_kms_egl) on this hardware";
+          "renderer's buffers (" +
+          last_err + ") — use the GL backend (drm_kms_egl) on this hardware";
       return false;
     }
+    spdlog::info("[VulkanDrmBackend] scanout alloc mode: {}",
+                 state->alloc_mode == AllocMode::Export ? "export"
+                                                        : "import-gbm");
   }
 
   // Command pool + fence for the per-frame scanout hand-off barriers.
@@ -620,11 +783,11 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
       return false;
     }
     std::string err;
-    // LINEAR is the modifier ExternalDmaBufSource accepts today; tiled is a
-    // follow-on once that wrapper learns multi-plane tiled modifiers.
-    auto store = drm_kms_vulkan::VulkanBackingStore::Create(
-        physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM, c.fourcc,
-        {DRM_FORMAT_MOD_LINEAR}, err);
+    // Allocate per the mode the SetupCompositor probe settled on (export, or
+    // import a display-scannable GBM buffer).
+    auto store = MakeBackingStore(physical_device_, device_, c.gbm, w, h,
+                                  c.fourcc, c.scanout_modifiers, c.alloc_mode,
+                                  err);
     if (!store) {
       spdlog::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
                     err);

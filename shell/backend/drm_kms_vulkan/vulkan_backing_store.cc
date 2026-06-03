@@ -251,6 +251,150 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   return store;
 }
 
+std::unique_ptr<VulkanBackingStore> VulkanBackingStore::CreateImported(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    uint32_t width,
+    uint32_t height,
+    VkFormat vk_format,
+    uint32_t drm_fourcc,
+    int dmabuf_fd,
+    uint64_t modifier,
+    const std::vector<PlaneLayout>& planes,
+    std::string& err) {
+  if (dmabuf_fd < 0 || planes.empty() || planes.size() > 4) {
+    if (dmabuf_fd >= 0) {
+      ::close(dmabuf_fd);
+    }
+    err = "CreateImported: invalid fd or plane count";
+    return nullptr;
+  }
+
+  std::unique_ptr<VulkanBackingStore> store(
+      new VulkanBackingStore(device, width, height));
+  store->vk_format_ = vk_format;
+  store->drm_fourcc_ = drm_fourcc;
+  store->modifier_ = modifier;
+  store->planes_ = planes;
+  // The store takes ownership of dmabuf_fd: the scene dups it via dma_buf_fd()
+  // and the dtor closes it. Vulkan's import consumes a separate dup below.
+  store->dma_buf_fd_ = dmabuf_fd;
+
+  const int import_fd = ::dup(dmabuf_fd);
+  if (import_fd < 0) {
+    err = "CreateImported: dup(dmabuf_fd) failed";
+    return nullptr;
+  }
+
+  // Describe the buffer's exact modifier + per-plane layout to the import.
+  std::array<VkSubresourceLayout, 4> layouts{};
+  for (size_t i = 0; i < planes.size(); ++i) {
+    layouts[i].offset = planes[i].offset;
+    layouts[i].rowPitch = planes[i].pitch;
+  }
+  VkImageDrmFormatModifierExplicitCreateInfoEXT mod_explicit{};
+  mod_explicit.sType =
+      VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
+  mod_explicit.drmFormatModifier = modifier;
+  mod_explicit.drmFormatModifierPlaneCount =
+      static_cast<uint32_t>(planes.size());
+  mod_explicit.pPlaneLayouts = layouts.data();
+
+  VkExternalMemoryImageCreateInfo ext{};
+  ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+  ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  ext.pNext = &mod_explicit;
+
+  VkImageCreateInfo ic{};
+  ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ic.pNext = &ext;
+  ic.imageType = VK_IMAGE_TYPE_2D;
+  ic.format = vk_format;
+  ic.extent = {width, height, 1};
+  ic.mipLevels = 1;
+  ic.arrayLayers = 1;
+  ic.samples = VK_SAMPLE_COUNT_1_BIT;
+  ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  ic.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  if (d.vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
+    ::close(import_fd);
+    err = "CreateImported: vkCreateImage (explicit modifier) failed";
+    return nullptr;
+  }
+
+  // Memory type must satisfy the image requirements AND the imported fd.
+  VkMemoryFdPropertiesKHR fdp{};
+  fdp.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
+  if (d.vkGetMemoryFdPropertiesKHR(
+          device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, import_fd,
+          &fdp) != VK_SUCCESS) {
+    ::close(import_fd);
+    err = "CreateImported: vkGetMemoryFdPropertiesKHR failed";
+    return nullptr;
+  }
+  VkMemoryRequirements req{};
+  d.vkGetImageMemoryRequirements(device, store->image_, &req);
+  const uint32_t mt =
+      PickMemoryType(physical_device, req.memoryTypeBits & fdp.memoryTypeBits,
+                     /*want=*/0);
+  if (mt == UINT32_MAX) {
+    ::close(import_fd);
+    err = "CreateImported: no memory type common to image and imported fd";
+    return nullptr;
+  }
+
+  // Imported dma-buf images need a dedicated allocation.
+  VkMemoryDedicatedAllocateInfo ded{};
+  ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+  ded.image = store->image_;
+  VkImportMemoryFdInfoKHR imp{};
+  imp.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+  imp.pNext = &ded;
+  imp.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  imp.fd = import_fd;
+  VkMemoryAllocateInfo mai{};
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.pNext = &imp;
+  mai.allocationSize = req.size;
+  mai.memoryTypeIndex = mt;
+  const VkResult ar = d.vkAllocateMemory(device, &mai, nullptr, &store->memory_);
+  if (ar != VK_SUCCESS) {
+    // On failure the app still owns import_fd.
+    ::close(import_fd);
+    err = "CreateImported: vkAllocateMemory (import) failed: VkResult=" +
+          std::to_string(static_cast<int>(ar)) +
+          " req.size=" + std::to_string(req.size) +
+          " typeBits img=" + std::to_string(req.memoryTypeBits) +
+          " fd=" + std::to_string(fdp.memoryTypeBits) +
+          " mt=" + std::to_string(mt);
+    return nullptr;
+  }
+  // On success Vulkan owns import_fd; freeing memory_ (in the dtor) releases it.
+  if (d.vkBindImageMemory(device, store->image_, store->memory_, 0) !=
+      VK_SUCCESS) {
+    err = "CreateImported: vkBindImageMemory failed";
+    return nullptr;
+  }
+
+  VkImageViewCreateInfo vci{};
+  vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  vci.image = store->image_;
+  vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  vci.format = vk_format;
+  vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  if (d.vkCreateImageView(device, &vci, nullptr, &store->view_) != VK_SUCCESS) {
+    err = "CreateImported: vkCreateImageView failed";
+    return nullptr;
+  }
+
+  store->flutter_image_.struct_size = sizeof(FlutterVulkanImage);
+  store->flutter_image_.image = reinterpret_cast<uint64_t>(store->image_);
+  store->flutter_image_.format = static_cast<uint32_t>(vk_format);
+  return store;
+}
+
 VulkanBackingStore::VulkanBackingStore(VkDevice device,
                                        uint32_t width,
                                        uint32_t height)
