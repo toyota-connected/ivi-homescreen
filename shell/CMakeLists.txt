@@ -194,6 +194,9 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_vulkan/vulkan_drm_backend.cc
             backend/drm_kms_vulkan/device_caps.cc
+            backend/drm_kms_vulkan/vulkan_backing_store.cc
+            backend/drm_kms_vulkan/drm_scanout_target.cc
+            backend/drm_kms_egl/scene_layer_source_vk.cc
             backend/drm_kms_egl/drm_session.cc
             backend/drm_kms_egl/driver_probe.cc
             display/drm_display.cc
@@ -213,7 +216,8 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
     # No EGL/GLESv2: the Vulkan backend produces no GL textures, and
     # flutter_desktop.cc's glDeleteTextures branch is compiled out for it
     # (same as the Wayland-Vulkan backend). Vulkan is resolved at runtime via
-    # vulkan.hpp's dynamic loader; only the headers are needed at build time.
+    # vulkan.hpp's dynamic loader; only the vendored headers (vulkan_headers)
+    # are needed at build time — never a Vulkan SDK in the system/sysroot.
     target_link_libraries(${PROJECT_NAME} PRIVATE
             drm-cxx::drm-cxx
             PkgConfig::DRM

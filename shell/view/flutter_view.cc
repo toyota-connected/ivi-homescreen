@@ -232,12 +232,17 @@ FlutterView::FlutterView(Configuration::Config config,
     // DrmDisplay in a DRM build, so the cast failing is programmer error.
     auto* drm_display = dynamic_cast<DrmDisplay*>(m_display.get());
     assert(drm_display != nullptr);
+    const std::string drm_mode =
+        (m_config.view.drm_mode.has_value() && !m_config.view.drm_mode->empty())
+            ? *m_config.view.drm_mode
+            : std::string{};
     m_backend = VulkanDrmBackend::Create(
         m_config.view.drm_device.value_or("/dev/dri/card1"),
-        m_config.debug_backend.value_or(false), drm_display->session());
+        m_config.debug_backend.value_or(false), drm_display->session(),
+        drm_mode);
 
-    // Create returns nullptr on any init failure or refusal (the Phase 0
-    // scaffold always refuses). Continuing would dereference a null backend in
+    // Create returns nullptr on any init failure (unsupported device, no
+    // zero-copy scanout path). Continuing would dereference a null backend in
     // Engine::Run and SEGV; fail-fast with the same exit path the EGL DRM
     // backend uses.
     if (!m_backend) {
