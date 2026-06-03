@@ -43,6 +43,7 @@
 #include <drm-cxx/scene/layer_handle.hpp>
 #include <drm-cxx/scene/layer_scene.hpp>
 
+#include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
@@ -265,6 +266,9 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
       session_(session) {}
 
 VulkanDrmBackend::~VulkanDrmBackend() {
+  // Tear the cursor down first: it commits on compositor_'s DRM device, so it
+  // must not outlive it.
+  cursor_.reset();
   // Drop master + scene + backing stores while the Vulkan device is still
   // alive (the stores free Vulkan resources in their destructors).
   compositor_.reset();
@@ -528,6 +532,21 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   spdlog::info(
       "[VulkanDrmBackend] compositor ready: {}x{}, DRM master acquired", width_,
       height_);
+
+#if HAVE_DRM_CURSOR
+  // Self-committing HW cursor on the scanout CRTC's cursor plane. It commits on
+  // its own (driven by seat pointer motion), NOT staged into the per-frame
+  // scanout commit, so it stays responsive while the UI is idle. Failure is
+  // non-fatal — the shell runs without an on-screen sprite. Built on
+  // compositor_'s DRM device (master held above), so it lives in cursor_ and is
+  // torn down before compositor_.
+  cursor_ = homescreen::DrmCursor::Create(compositor_->device, target.crtc_id,
+                                          target.connector_id, target.mode,
+                                          width_, height_);
+  if (!cursor_) {
+    spdlog::info("[VulkanDrmBackend] no HW cursor (disabled or unavailable)");
+  }
+#endif
   return true;
 }
 
