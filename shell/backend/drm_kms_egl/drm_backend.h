@@ -80,6 +80,22 @@ struct DrmConfig {
   std::optional<uint32_t> height;
   bool debug_backend{false};
 
+  // Skip HW cursor creation entirely (the global --disable-cursor /
+  // disable_cursor config). Pointer events still reach Flutter; there is
+  // just no DRM cursor sprite. Equivalent to the IVI_DRM_CURSOR=0 env.
+  bool disable_cursor{false};
+
+  // Stage the HW cursor into the compositor's atomic commit instead of
+  // letting it self-commit (DrmCursor staged mode). kAuto (the default)
+  // resolves per driver in DrmBackend::Create: enabled only on nvidia-drm,
+  // where a separate cursor commit on the CRTC starves the compositor's
+  // PAGE_FLIP_EVENT (content freezes on pointer motion). Everywhere else the
+  // self-committing cursor is used — staging it instead couples cursor motion
+  // to Flutter frame production, so the cursor stalls whenever the UI is idle.
+  // kYes forces staging, kNo forces self-commit. No effect without a
+  // compositor.
+  drm_config::TriState stage_cursor{drm_config::TriState::kAuto};
+
   // Unset = pick the highest-ranking connected connector (internal panels
   // preferred, then cable-out). Set = pick the connector whose name
   // (e.g. "eDP-1", "HDMI-A-1") matches; init fails if no such connector

@@ -62,6 +62,8 @@ class Configuration {
       //   drm_overlay_planes        : "auto" | "yes" | "no"
       //   drm_explicit_sync         : "auto" | "yes" | "no"
       //   drm_async_flip            : "auto" | "yes" | "no"
+      //   drm_stage_cursor          : "auto" | "yes" | "no"
+      //                               (auto = stage only on nvidia-drm)
       // FlutterView parses these into the DrmConfig enum fields. Anything
       // unrecognized is treated as "auto" with a warning.
       std::optional<std::string> drm_connector;
@@ -73,6 +75,7 @@ class Configuration {
       std::optional<std::string> drm_overlay_planes;
       std::optional<std::string> drm_explicit_sync;
       std::optional<std::string> drm_async_flip;
+      std::optional<std::string> drm_stage_cursor;
     } view;
   };
 

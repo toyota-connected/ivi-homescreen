@@ -20,6 +20,7 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -109,9 +110,25 @@ struct DrmCursor::Impl {
   int letterbox_x{0};
   int letterbox_y{0};
 
+  // Staged mode: the compositor drives the cursor plane via Stage()
+  // instead of the cursor self-committing. desired_pos packs fb_x:fb_y
+  // (set by the seat thread in SetPosition, read by the raster thread in
+  // Stage); have_pos gates the first stage so the plane stays off until
+  // the pointer first moves.
+  bool staged{false};
+  std::atomic<uint64_t> desired_pos{0};
+  std::atomic<bool> have_pos{false};
+
   Impl(drm::cursor::Renderer r, int lx, int ly)
       : renderer(std::move(r)), letterbox_x(lx), letterbox_y(ly) {}
 };
+
+namespace {
+constexpr uint64_t PackPos(const int fb_x, const int fb_y) {
+  return (static_cast<uint64_t>(static_cast<uint32_t>(fb_x)) << 32) |
+         static_cast<uint32_t>(fb_y);
+}
+}  // namespace
 
 std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
                                              const uint32_t crtc_id,
@@ -204,6 +221,52 @@ void DrmCursor::Move(const int fb_x, const int fb_y) {
     spdlog::warn("[DrmCursor] move_to({}, {}): {}", crtc_x, crtc_y,
                  r.error().message());
   }
+}
+
+void DrmCursor::SetStagedMode(const bool enabled) {
+  impl_->staged = enabled;
+}
+
+void DrmCursor::SetPosition(const int fb_x, const int fb_y) {
+  if (!impl_->staged) {
+    Move(fb_x, fb_y);  // legacy self-commit path (non-staging drivers)
+    return;
+  }
+  impl_->desired_pos.store(PackPos(fb_x, fb_y), std::memory_order_release);
+  impl_->have_pos.store(true, std::memory_order_release);
+}
+
+bool DrmCursor::Stage(drm::AtomicRequest& req, bool* const needs_modeset) {
+  if (needs_modeset != nullptr) {
+    *needs_modeset = false;
+  }
+  if (!impl_->have_pos.load(std::memory_order_acquire)) {
+    return false;  // no pointer motion yet — keep the cursor plane off
+  }
+  const uint64_t packed = impl_->desired_pos.load(std::memory_order_acquire);
+  const int fb_x = static_cast<int32_t>(packed >> 32);
+  const int fb_y = static_cast<int32_t>(packed & 0xffffffffU);
+  const int crtc_x = fb_x + impl_->letterbox_x;
+  const int crtc_y = fb_y + impl_->letterbox_y;
+  bool first = false;
+  if (auto r = impl_->renderer.stage(req, crtc_x, crtc_y, first); !r) {
+    spdlog::warn("[DrmCursor] stage({}, {}): {}", crtc_x, crtc_y,
+                 r.error().message());
+    return false;
+  }
+  if (needs_modeset != nullptr) {
+    *needs_modeset = first;
+  }
+  return true;
+}
+
+void DrmCursor::CommitPending() {
+  if (!impl_->staged || !impl_->have_pos.load(std::memory_order_acquire)) {
+    return;
+  }
+  const uint64_t packed = impl_->desired_pos.load(std::memory_order_acquire);
+  Move(static_cast<int32_t>(packed >> 32),
+       static_cast<int32_t>(packed & 0xffffffffU));
 }
 
 }  // namespace homescreen
