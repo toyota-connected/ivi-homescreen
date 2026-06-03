@@ -23,7 +23,8 @@
 
 namespace drm {
 class Device;
-}
+class AtomicRequest;
+}  // namespace drm
 
 namespace homescreen {
 
@@ -85,6 +86,39 @@ class DrmCursor {
   // ignored — the pointer remains usable in Flutter even if the
   // sprite stalls.
   void Move(int fb_x, int fb_y);
+
+  // Enable staged mode. In staged mode the cursor plane is driven by the
+  // compositor via Stage() instead of self-committing — used on drivers
+  // (nvidia-drm) where a separate cursor commit on the CRTC starves the
+  // compositor's PAGE_FLIP_EVENT. Must be set before the first
+  // SetPosition. The compositor must also be handed this cursor via
+  // DrmCompositor::SetCursor.
+  void SetStagedMode(bool enabled);
+
+  // Record the desired pointer position in framebuffer coordinates. In
+  // staged mode this only stores the position (an atomic, no DRM commit)
+  // for the compositor's next Stage() to apply; otherwise it forwards to
+  // Move(). Safe to call from the seat dispatch thread.
+  void SetPosition(int fb_x, int fb_y);
+
+  // Write the cursor plane state (FB_ID, CRTC, position) into the
+  // compositor's AtomicRequest so the cursor rides the same atomic flip.
+  // Returns false when there is no pending position yet (cursor not shown)
+  // or staging fails. On success, *needs_modeset (when non-null) reports
+  // whether the plane's first enable requires DRM_MODE_ATOMIC_ALLOW_MODESET
+  // — the caller must then commit that frame blocking. Drives the
+  // non-thread-safe drm-cxx Renderer, so call only from the raster
+  // (compositor commit) thread.
+  [[nodiscard]] bool Stage(drm::AtomicRequest& req, bool* needs_modeset);
+
+  // Self-commit the recorded position. Used by present paths that own
+  // their commit and can't accept a staged plane (the USE_DRM_SCENE
+  // LayerScene path) so the cursor stays visible in staged mode. No-op
+  // outside staged mode or before the first SetPosition. Raster-thread
+  // only. NOTE: this is a separate cursor commit on the CRTC and so
+  // reintroduces the flip contention on nvidia-drm — a proper fix needs
+  // LayerScene to accept the cursor plane in its own commit.
+  void CommitPending();
 
   // The DRM plane id the cursor is scanned out on (0 on the legacy
   // drmModeSetCursor path, which has no addressable plane). On a CRTC

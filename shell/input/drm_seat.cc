@@ -365,7 +365,10 @@ void DrmSeat::FlushCursorMotion() {
   }
   cursor_motion_pending_ = false;
   if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
-    c->Move(static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
+    // SetPosition records the position for the compositor to stage (staged
+    // mode) or self-commits via Move (legacy). Either way, no DRM commit
+    // here in staged mode — the compositor owns the cursor plane.
+    c->SetPosition(static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
   }
 }
 

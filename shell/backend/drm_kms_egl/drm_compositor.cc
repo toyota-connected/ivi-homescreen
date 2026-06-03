@@ -40,6 +40,7 @@
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "backend/drm_kms_egl/drm_cursor.h"
 #if USE_DRM_SCENE
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
 #endif
@@ -925,6 +926,12 @@ bool DrmCompositor::WaitForPendingFlip() const {
   // UnifiedPageFlipHandler → OnFlipComplete. We just wait for it.
   // Short sleep keeps the rasterizer responsive without burning CPU.
   using namespace std::chrono_literals;
+  // Bounded wait — see DrmBackend::WaitForPendingFlip. On nvidia-drm a
+  // flip event can be lost; without a cap the destructor's wait spins
+  // forever and the process never exits on SIGTERM. A healthy 60Hz flip
+  // clears in ~16ms so the cap never fires in normal operation.
+  constexpr auto kFlipWaitTimeout = 100ms;
+  const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
     // Session went inactive between submitting the flip and the
     // kernel firing PAGE_FLIP_EVENT — the event will never come.
@@ -932,6 +939,12 @@ bool DrmCompositor::WaitForPendingFlip() const {
     // doesn't spin forever.
     if (paused_.load(std::memory_order_acquire)) {
       return false;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      spdlog::warn(
+          "[DrmCompositor] WaitForPendingFlip: no flip completion after "
+          "100ms; proceeding (PAGE_FLIP_EVENT likely lost)");
+      return true;
     }
     std::this_thread::sleep_for(500us);
   }
@@ -1019,6 +1032,42 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   return backend_->Present();
+}
+
+// ─── Cursor staging + shared commit settle ──────────────────────────────
+
+bool DrmCompositor::StageCursorInto(drm::AtomicRequest& req) {
+  bool needs_modeset = false;
+  if (cursor_ != nullptr) {
+    (void)cursor_->Stage(req, &needs_modeset);
+  }
+  return needs_modeset;
+}
+
+void DrmCompositor::SettleAtomicCommit(const bool blocking) {
+  if (blocking) {
+    // A blocking commit (initial modeset or a cursor first-enable) lands
+    // synchronously with no PAGE_FLIP_EVENT. The genuine first modeset
+    // also latches plane_mode_set_ and verifies the pipe. Either way the
+    // baton Flutter requested while we built this frame must be returned
+    // inline (the asio flip path won't fire). PostOnVsync marshals via
+    // the platform task runner (we're on the rasterizer thread).
+    if (!plane_mode_set_) {
+      plane_mode_set_ = true;
+      VerifyPipeRunning();
+    }
+    flip_pending_.store(false, std::memory_order_release);
+    const intptr_t baton =
+        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+    if (baton != 0) {
+      if (auto engine =
+              backend_->engine_handle_.load(std::memory_order_acquire)) {
+        backend_->PostOnVsync(engine, baton);
+      }
+    }
+  } else {
+    flip_pending_.store(true, std::memory_order_release);
+  }
 }
 
 // ─── Framed-mode present (primary BG + overlay content) ─────────────────
@@ -1353,12 +1402,16 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
 
-  uint32_t commit_flags = 0;
-  if (!plane_mode_set_) {
-    commit_flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
-  } else {
-    commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
-  }
+  // Stage the HW cursor into this commit so it rides the same atomic flip
+  // instead of issuing its own (a separate cursor commit on this CRTC
+  // starves the compositor's PAGE_FLIP_EVENT on nvidia-drm). The cursor's
+  // first plane-enable needs ALLOW_MODESET, which can't be NONBLOCK on
+  // most drivers, so fold it into a blocking commit for that one frame —
+  // exactly how the initial modeset is handled.
+  const bool blocking = !plane_mode_set_ || StageCursorInto(req);
+  const uint32_t commit_flags =
+      blocking ? DRM_MODE_ATOMIC_ALLOW_MODESET
+               : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
 
   // Profile fence post: end of compose / req build, just before the
   // optional TEST_ONLY probe + the real commit.
@@ -1410,28 +1463,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, count);
   }
 
-  if (!plane_mode_set_) {
-    plane_mode_set_ = true;
-    flip_pending_.store(false, std::memory_order_release);
-    VerifyPipeRunning();
-
-    // First-commit drain: ALLOW_MODESET commits are blocking with no
-    // PAGE_FLIP_EVENT, so the baton Flutter requested while we were
-    // building this frame would otherwise sit in vsync_baton_
-    // unfired. PostOnVsync marshals via the platform task runner
-    // (we're on the rasterizer thread here; OnVsync must be on the
-    // FlutterEngineRun thread).
-    const intptr_t baton =
-        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-    if (baton != 0) {
-      if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_acquire)) {
-        backend_->PostOnVsync(engine, baton);
-      }
-    }
-  } else {
-    flip_pending_.store(true, std::memory_order_release);
-  }
+  SettleAtomicCommit(blocking);
   comp_idx_ ^= 1;
 
   if (profile && profile_) {
@@ -1998,6 +2030,9 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
 
+  // Stage the HW cursor into this commit (rides the same flip; see
+  // StageCursorInto). Its first plane-enable forces a blocking frame.
+  //
   // Two-phase flags:
   //   First frame: blocking + ALLOW_MODESET, no PAGE_FLIP_EVENT. The
   //     kernel won't deliver a flip-event on a modeset transition on
@@ -2005,13 +2040,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   //   Steady state: NONBLOCK + PAGE_FLIP_EVENT for vsync-locked flips.
   //     ALLOW_MODESET is not combined with NONBLOCK unless the driver
   //     has opted in via --drm-allow-nonblock-modeset.
-  uint32_t commit_flags = 0;
   const bool was_first_commit_pre = !plane_mode_set_;
-  if (was_first_commit_pre) {
-    commit_flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
-  } else {
-    commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
-  }
+  // `blocking` also covers a cursor first-enable; `was_first_commit_pre`
+  // stays "initial modeset" for the slot-pipeline bookkeeping below.
+  const bool blocking = was_first_commit_pre || StageCursorInto(req);
+  const uint32_t commit_flags =
+      blocking ? DRM_MODE_ATOMIC_ALLOW_MODESET
+               : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
 
   // Profile fence post: end of allocator + compose + req build, just
   // before the kernel-side commit.
@@ -2047,33 +2082,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, layer_count);
   }
 
-  if (!plane_mode_set_) {
-    // First commit landed — kernel is scanning out our composition BO.
-    // The blocking commit returned only after the modeset completed,
-    // so there's no page-flip event in flight.
-    plane_mode_set_ = true;
-    flip_pending_.store(false, std::memory_order_release);
-
-    // Readback + vblank probe to catch the "commit reported success but
-    // the pipe isn't actually running" case before Flutter stalls on the
-    // next flip wait. Costs one readback and ~2 refresh periods of sleep,
-    // once at startup.
-    VerifyPipeRunning();
-
-    // Deliver the initial vsync baton now so Flutter can schedule the
-    // next frame. Normal PAGE_FLIP_EVENT deliveries take over from here.
-    // PostOnVsync marshals via the platform task runner.
-    const intptr_t baton =
-        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-    if (baton != 0) {
-      if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_acquire)) {
-        backend_->PostOnVsync(engine, baton);
-      }
-    }
-  } else {
-    flip_pending_.store(true, std::memory_order_release);
-  }
+  SettleAtomicCommit(blocking);
   // Only advance the comp-buffer double-buffer index if we actually
   // wrote to it this frame. Direct-scanout frames don't touch comp,
   // so the next frame can keep using the same comp_idx_ if it needs
@@ -2433,6 +2442,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     }
   } else {
     flip_pending_.store(true, std::memory_order_release);
+  }
+
+  // LayerScene owns its commit and can't accept a staged cursor plane, so
+  // (in staged mode) self-commit the cursor here to keep it visible. The
+  // scene already reserves the cursor's plane (set_external_reserved_planes
+  // via ApplyCursorReservation). TODO: a LayerScene API that takes the
+  // cursor plane in its own commit would avoid this separate commit (which
+  // reintroduces the flip contention on nvidia-drm in fullscreen scene
+  // mode). No-op when no cursor is staged.
+  if (cursor_ != nullptr) {
+    cursor_->CommitPending();
   }
 
   // Rotate every BS pool that participated. Same slot-pipeline
@@ -2889,13 +2909,15 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
     backend_->flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
 
-  uint32_t commit_flags = 0;
+  // Stage the HW cursor into this commit (rides the same flip; see
+  // StageCursorInto); its first plane-enable forces a blocking frame.
   const bool was_first_commit_pre = !plane_mode_set_;
-  if (was_first_commit_pre) {
-    commit_flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
-  } else {
-    commit_flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
-  }
+  // `blocking` also covers a cursor first-enable; `was_first_commit_pre`
+  // stays "initial modeset" for the slot-pipeline bookkeeping below.
+  const bool blocking = was_first_commit_pre || StageCursorInto(req);
+  const uint32_t commit_flags =
+      blocking ? DRM_MODE_ATOMIC_ALLOW_MODESET
+               : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   const uint64_t t2 = profile ? NsNow() : 0;
 
   if (auto r = req.commit(commit_flags, backend_); !r) {
@@ -2915,21 +2937,7 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, count);
   }
 
-  if (was_first_commit_pre) {
-    plane_mode_set_ = true;
-    flip_pending_.store(false, std::memory_order_release);
-    VerifyPipeRunning();
-    const intptr_t baton =
-        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-    if (baton != 0) {
-      if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_acquire)) {
-        backend_->PostOnVsync(engine, baton);
-      }
-    }
-  } else {
-    flip_pending_.store(true, std::memory_order_release);
-  }
+  SettleAtomicCommit(blocking);
 
   // Rotate the BS pool slot so Flutter's next render targets a different
   // BO than the one the kernel is scanning out. Same slot-release
