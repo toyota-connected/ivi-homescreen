@@ -39,6 +39,10 @@
 #                                   (engine is dlopen'd at runtime — not linked at build)
 #     --plugins-dir <path>          default: ../ivi-homescreen-plugins/plugins
 #     --no-plugins                  build homescreen only
+#     --with-vk-probe               also build drm_kms_vulkan_probe, the
+#                                   standalone zero-copy capability probe (run
+#                                   it on-target to report dma-buf scanout
+#                                   support); independent of the chosen backend
 #     --with-scene                  drm-kms-egl only: enable the plane
 #                                   compositor + drm-cxx LayerScene present
 #                                   path (BUILD_COMPOSITOR + USE_DRM_SCENE).
@@ -71,7 +75,7 @@
 #                                     device name to confirm.
 #     --device <path>               non-interactive: image to this device (skips the
 #                                     plug-in detection). Still validated for
-#                                     removability + recognised path pattern.
+#                                     removability + recognized path pattern.
 #     --provision                   install homescreen as a systemd service into the
 #                                     imaged SD card. Implied by --image-sd; pass
 #                                     standalone to re-provision an already-imaged
@@ -152,6 +156,7 @@ ENGINE_URL=""
 PLUGINS_DIR="${REPO_DIR%/*}/ivi-homescreen-plugins/plugins"
 NO_PLUGINS=0
 WITH_SCENE=0
+WITH_VK_PROBE=0
 JOBS="$(nproc 2>/dev/null || echo 4)"
 CLEAN=0
 PREPARE_ONLY=0
@@ -243,6 +248,7 @@ while [[ $# -gt 0 ]]; do
         --plugins-dir)        PLUGINS_DIR="$2"; shift 2 ;;
         --no-plugins)         NO_PLUGINS=1; shift ;;
         --with-scene)         WITH_SCENE=1; shift ;;
+        --with-vk-probe)      WITH_VK_PROBE=1; shift ;;
         --jobs)               JOBS="$2"; shift 2 ;;
         --clean)              CLEAN=1; shift ;;
         --prepare-only)       PREPARE_ONLY=1; shift ;;
@@ -278,7 +284,7 @@ case "$SERVICE_BACKEND" in
     *) die "--service-backend must be wayland-egl|wayland-vulkan|drm-kms-egl|software (got: $SERVICE_BACKEND)" ;;
 esac
 [[ -z "$TARGET_DEVICE" || "$TARGET_DEVICE" =~ ^/dev/(sd[a-z]+|mmcblk[0-9]+|nvme[0-9]+n[0-9]+)$ ]] \
-    || die "--device $TARGET_DEVICE: not a recognised path (need /dev/sd*, /dev/mmcblk*, or /dev/nvme*n*)"
+    || die "--device $TARGET_DEVICE: not a recognized path (need /dev/sd*, /dev/mmcblk*, or /dev/nvme*n*)"
 
 # --drm-mode format: WxH@R (e.g. 1920x1080@120). The embedder's parser
 # is the source of truth — this is just a friendly typo guard.
@@ -944,6 +950,11 @@ phase4_build() {
                 -DBUILD_BACKEND_SOFTWARE=ON) ;;
     esac
 
+    # Standalone zero-copy capability probe, independent of the backend above.
+    if [[ "$WITH_VK_PROBE" -eq 1 ]]; then
+        cmake_args+=(-DBUILD_DRM_KMS_VULKAN_PROBE=ON)
+    fi
+
     if [[ "$NO_PLUGINS" -eq 1 ]]; then
         cmake_args+=(-DDISABLE_PLUGINS=ON)
     else
@@ -975,6 +986,9 @@ phase5_report() {
             file "$exe" | sed 's/^/      /'
         else
             echo "    (no homescreen binary produced)"
+        fi
+        if [[ -x "$BUILD_DIR/shell/drm_kms_vulkan_probe" ]]; then
+            echo "    vk-probe : $BUILD_DIR/shell/drm_kms_vulkan_probe"
         fi
     done
     echo "  sysroot       : $XC_SYSROOT"

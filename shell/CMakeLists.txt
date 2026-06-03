@@ -187,6 +187,64 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
     )
 endif ()
 
+if (BUILD_BACKEND_DRM_KMS_VULKAN)
+    # The Vulkan render/scanout sources are the new backend dir; the session /
+    # display / seat / driver-probe TUs are shared verbatim with drm_kms_egl
+    # (they sit below the pixel layer and are GL-free).
+    target_sources(${PROJECT_NAME} PRIVATE
+            backend/drm_kms_vulkan/vulkan_drm_backend.cc
+            backend/drm_kms_vulkan/device_caps.cc
+            backend/drm_kms_egl/drm_session.cc
+            backend/drm_kms_egl/driver_probe.cc
+            display/drm_display.cc
+            input/drm_seat.cc
+    )
+    # HW cursor shares drm_kms_egl's drm-cxx-backed cursor (GL-free). Mirror
+    # the EGL backend's libxcursor probe so the optionality matches.
+    pkg_check_modules(XCURSOR xcursor)
+    if (XCURSOR_FOUND)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/drm_kms_egl/drm_cursor.cc
+        )
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_DRM_CURSOR=1)
+    else ()
+        message(STATUS "libxcursor not found; DRM HW cursor disabled")
+    endif ()
+    # No EGL/GLESv2: the Vulkan backend produces no GL textures, and
+    # flutter_desktop.cc's glDeleteTextures branch is compiled out for it
+    # (same as the Wayland-Vulkan backend). Vulkan is resolved at runtime via
+    # vulkan.hpp's dynamic loader; only the headers are needed at build time.
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+            drm-cxx::drm-cxx
+            PkgConfig::DRM
+            PkgConfig::GBM
+            PkgConfig::LIBINPUT
+            PkgConfig::UDEV
+            vulkan_headers
+    )
+endif ()
+
+# Standalone zero-copy-capability probe. Builds with the DRM/KMS Vulkan backend,
+# or on its own via BUILD_DRM_KMS_VULKAN_PROBE so it can be cross-built and run
+# on a target alongside any backend to report whether the device can do
+# zero-copy dma-buf scanout. device_caps.cc has no shell/EGL/Wayland/DRM deps —
+# only the Vulkan headers + libdl (vulkan.hpp dlopens libvulkan at runtime).
+# Exit code: 0 = gate passed, 1 = refused.
+if (BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_DRM_KMS_VULKAN_PROBE)
+    add_executable(drm_kms_vulkan_probe
+            backend/drm_kms_vulkan/probe_main.cc
+            backend/drm_kms_vulkan/device_caps.cc
+    )
+    # Use the vendored Vulkan headers directly so the probe is self-contained
+    # and cross-builds without a Vulkan SDK in the target sysroot. Only the
+    # headers are needed at build time; libvulkan is dlopened at runtime.
+    target_include_directories(drm_kms_vulkan_probe PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/third_party/Vulkan-Headers/include
+    )
+    target_link_libraries(drm_kms_vulkan_probe PRIVATE ${CMAKE_DL_LIBS})
+endif ()
+
 if (ENABLE_DLT)
     target_sources(${PROJECT_NAME} PRIVATE logging/dlt/dlt.cc logging/dlt/libdlt.cc)
 endif ()
@@ -246,16 +304,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         platform_homescreen
 )
 
-# Propagate wayland-gen's include dirs unconditionally (config/common.h
-# pulls <waypp/waypp.h> regardless of backend for the AGL/XDG client
-# compile defines) but link the static library only on Wayland builds
-# so non-Wayland binaries don't drag in libwayland-client /
-# libwayland-cursor as runtime deps.
-target_include_directories(${PROJECT_NAME} PRIVATE
-        $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
-)
+# config/common.h includes <waypp/waypp.h> only on the Wayland backends, so
+# the wayland-gen protocol-header include dirs and the static library are both
+# needed only there. Non-Wayland binaries (DRM EGL/Vulkan, software) get
+# neither the headers nor the libwayland-client / libwayland-cursor deps.
 if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
     BUILD_BACKEND_HEADLESS_EGL)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+            $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
+    )
     target_link_libraries(${PROJECT_NAME} PRIVATE wayland-gen)
 endif ()
 

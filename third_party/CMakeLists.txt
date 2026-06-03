@@ -58,35 +58,43 @@ target_include_directories(vulkan_headers INTERFACE Vulkan-Headers/include/vulka
 add_subdirectory(flutter)
 
 #
-# waypp
+# waypp — the Wayland C++ wrapper. Only the Wayland backends (and headless,
+# which links wayland-gen) consume it; config/common.h includes <waypp/waypp.h>
+# under the same condition. Building it for the DRM EGL/Vulkan and software
+# backends would drag Wayland headers + libwayland into builds that must stay
+# Wayland-free, so gate the whole subproject.
 #
-if (BUILD_BACKEND_WAYLAND_EGL)
-    set(ENABLE_EGL ON)
-else ()
-    set(ENABLE_EGL OFF)
-endif ()
-set(LOGGING_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/shell;${CMAKE_BINARY_DIR})
-add_subdirectory(waypp)
-
-# waypp is a git submodule we keep pristine, so apply the "system library"
-# treatment from here rather than editing it: mark its interface include dirs
-# SYSTEM so its headers are -isystem for consumers, and silence GCC's benign
-# -Wpsabi std::pair ABI note (seat/pointer.h get_xy()) that -isystem does not
-# suppress, emitted while compiling waypp's own sources.
-foreach (_tgt waypp wayland-gen)
-    if (TARGET ${_tgt})
-        get_target_property(_waypp_inc ${_tgt} INTERFACE_INCLUDE_DIRECTORIES)
-        if (_waypp_inc)
-            set_target_properties(${_tgt} PROPERTIES
-                    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_waypp_inc}")
-        endif ()
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+    BUILD_BACKEND_HEADLESS_EGL)
+    if (BUILD_BACKEND_WAYLAND_EGL)
+        set(ENABLE_EGL ON)
+    else ()
+        set(ENABLE_EGL OFF)
     endif ()
-endforeach ()
-if (TARGET waypp)
-    # Silence waypp's own-source diagnostics (the -Wpsabi std::pair note, and
-    # -Wunused-parameter on EGL stubs when ENABLE_EGL is off) — pristine vendor.
-    target_compile_options(waypp PRIVATE
-            $<$<CXX_COMPILER_ID:GNU,Clang>:-w>)
+    set(LOGGING_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/shell;${CMAKE_BINARY_DIR})
+    add_subdirectory(waypp)
+
+    # waypp is a git submodule we keep pristine, so apply the "system library"
+    # treatment from here rather than editing it: mark its interface include
+    # dirs SYSTEM so its headers are -isystem for consumers, and silence GCC's
+    # benign -Wpsabi std::pair ABI note (seat/pointer.h get_xy()) that -isystem
+    # does not suppress, emitted while compiling waypp's own sources.
+    foreach (_tgt waypp wayland-gen)
+        if (TARGET ${_tgt})
+            get_target_property(_waypp_inc ${_tgt} INTERFACE_INCLUDE_DIRECTORIES)
+            if (_waypp_inc)
+                set_target_properties(${_tgt} PROPERTIES
+                        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_waypp_inc}")
+            endif ()
+        endif ()
+    endforeach ()
+    if (TARGET waypp)
+        # Silence waypp's own-source diagnostics (the -Wpsabi std::pair note,
+        # and -Wunused-parameter on EGL stubs when ENABLE_EGL is off) — pristine
+        # vendor.
+        target_compile_options(waypp PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang>:-w>)
+    endif ()
 endif ()
 
 #

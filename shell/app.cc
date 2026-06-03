@@ -30,7 +30,7 @@
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
-#if BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
 #include "display/drm_display.h"
 #endif
 
@@ -54,7 +54,7 @@ constexpr int kIdleHeartbeatMs = 1000;
 
 std::shared_ptr<IDisplay> MakeDisplay(
     const std::vector<Configuration::Config>& configs) {
-#if BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
   // DRM/KMS does not have a compositor-level display concept. The refresh
   // rate and mode are owned by the backend; the DrmDisplay stub answers
   // queries the shell issues (metrics, cursor activation, event loop) with

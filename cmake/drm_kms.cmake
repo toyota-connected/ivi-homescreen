@@ -6,7 +6,7 @@
 # are resolved through pkg-config.
 #
 
-if (NOT BUILD_BACKEND_DRM_KMS_EGL)
+if (NOT BUILD_BACKEND_DRM_KMS_EGL AND NOT BUILD_BACKEND_DRM_KMS_VULKAN)
     return()
 endif ()
 
