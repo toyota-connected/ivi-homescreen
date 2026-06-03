@@ -164,6 +164,7 @@ FlutterView::FlutterView(Configuration::Config config,
         fullscreen ? std::optional<uint32_t>{} : m_config.view.height,
         m_config.debug_backend.value_or(false),
     };
+    cfg.disable_cursor = m_config.disable_cursor.value_or(false);
     // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
     // `drm_connector = ""` in TOML shouldn't force a strict empty-name
     // match against zero connectors.
@@ -183,6 +184,9 @@ FlutterView::FlutterView(Configuration::Config config,
     cfg.overlay_planes = parse_tri(m_config.view.drm_overlay_planes);
     cfg.explicit_sync = parse_tri(m_config.view.drm_explicit_sync);
     cfg.async_flip = parse_tri(m_config.view.drm_async_flip);
+    // kAuto (default) resolves per driver in DrmBackend::Create — staging is
+    // enabled only on nvidia-drm; yes/no force the choice.
+    cfg.stage_cursor = parse_tri(m_config.view.drm_stage_cursor);
 
     // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
     // process-wide libseat session. Pull the raw pointer — may be null

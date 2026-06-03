@@ -383,16 +383,46 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   // sprite. Independent of the compositor: cursor commits run on
   // their own AtomicRequests on the seat dispatch thread.
 #if HAVE_DRM_CURSOR
-  backend->cursor_ = homescreen::DrmCursor::Create(
-      *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
-      backend->mode_, backend->fb_w_, backend->fb_h_);
+  if (backend->cfg_.disable_cursor) {
+    spdlog::info("[DrmBackend] HW cursor disabled (--disable-cursor)");
+  } else {
+    backend->cursor_ = homescreen::DrmCursor::Create(
+        *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
+        backend->mode_, backend->fb_w_, backend->fb_h_);
+  }
 #if BUILD_COMPOSITOR
-  // On a CRTC with no dedicated cursor plane the cursor takes an
-  // overlay; reserve it so the scene allocator's disable-unused pass
-  // doesn't toggle it off every commit (flicker on pointer motion).
-  // plane_id()==0 (legacy cursor path) is a no-op in the compositor.
+  // Decide whether to stage the cursor into the compositor's own atomic commit
+  // or let it self-commit. Staging is only a win on nvidia-drm, where a
+  // separate cursor commit on the CRTC starves the compositor's
+  // PAGE_FLIP_EVENT (the cursor's blocking commit swallows the pending flip's
+  // completion, freezing content on pointer motion). Everywhere else staging
+  // couples cursor motion to Flutter frame production, so the cursor stalls
+  // while the UI is idle — the self-committing cursor is smoother. kAuto (the
+  // default) therefore stages only on nvidia-drm; yes/no force the choice.
+  const bool stage_cursor =
+      backend->cfg_.stage_cursor == drm_config::TriState::kYes ||
+      (backend->cfg_.stage_cursor == drm_config::TriState::kAuto &&
+       backend->resolved_->driver_name == "nvidia-drm");
+  // Either way, reserve the cursor's plane so the scene allocator's
+  // disable-unused pass doesn't toggle it off every commit (flicker on
+  // motion). plane_id()==0 (legacy cursor path) is a no-op in the
+  // compositor.
   if (backend->cursor_ && backend->compositor_) {
+    if (stage_cursor) {
+      backend->cursor_->SetStagedMode(true);
+      backend->compositor_->SetCursor(backend->cursor_.get());
+    }
     backend->compositor_->ReserveCursorPlane(backend->cursor_->plane_id());
+  }
+#else
+  // No compositor to stage into: a self-committing cursor on nvidia-drm
+  // starves the legacy page flip on pointer motion. Drop the cursor on
+  // that driver (other drivers keep the self-commit path).
+  if (backend->cursor_ && backend->resolved_->driver_name == "nvidia-drm") {
+    spdlog::warn(
+        "[DrmBackend] nvidia-drm without compositor: HW cursor disabled (no "
+        "atomic commit to stage into)");
+    backend->cursor_.reset();
   }
 #endif
 #endif
@@ -1662,8 +1692,23 @@ bool DrmBackend::WaitForPendingFlip() const {
   // it. Short sleep so a 60 Hz frame's ~16ms window has plenty of
   // resolution but we don't burn the rasterizer CPU.
   using namespace std::chrono_literals;
+  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go
+  // undelivered, and at teardown the asio monitor that would drain it
+  // is already gone — an unbounded loop then spins forever in
+  // hrtimer_nanosleep, hanging Present and (fatally) ~DrmBackend so the
+  // process never exits on SIGTERM. Cap the wait and proceed; a healthy
+  // 60Hz flip clears in ~16ms so this never fires in normal operation.
+  // Same budget as StopVsyncMonitor's drain.
+  constexpr auto kFlipWaitTimeout = 100ms;
+  const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
     if (!drm_dev_) {
+      return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      spdlog::warn(
+          "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
+          "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
     std::this_thread::sleep_for(500us);

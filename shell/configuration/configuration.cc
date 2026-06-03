@@ -125,6 +125,10 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
     instance.view.drm_async_flip =
         tbl->at_path("view.drm_async_flip").as_string()->value_or("");
   }
+  if (tbl->at_path("view.drm_stage_cursor").is_string()) {
+    instance.view.drm_stage_cursor =
+        tbl->at_path("view.drm_stage_cursor").as_string()->value_or("");
+  }
 
   if (tbl->at_path("window_activation_area.x").is_integer()) {
     instance.view.activation_area_x =
@@ -240,6 +244,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (cli.view.drm_async_flip.has_value()) {
     instance.view.drm_async_flip = cli.view.drm_async_flip.value();
+  }
+  if (cli.view.drm_stage_cursor.has_value()) {
+    instance.view.drm_stage_cursor = cli.view.drm_stage_cursor.value();
   }
 }
 
@@ -401,6 +408,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>())(
             "drm-async-flip",
             "Use DRM_MODE_PAGE_FLIP_ASYNC on flip-only commits: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-stage-cursor",
+            "Stage the HW cursor into the compositor commit: auto|yes|no",
             cxxopts::value<std::string>());
 
     const auto result = allocated->parse(argc, argv);
@@ -549,6 +559,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
                 config.view.drm_explicit_sync);
     pick_string("drm-async-flip", "HOMESCREEN_DRM_ASYNC_FLIP",
                 config.view.drm_async_flip);
+    pick_string("drm-stage-cursor", "HOMESCREEN_DRM_STAGE_CURSOR",
+                config.view.drm_stage_cursor);
 
     config.view.vm_args.reserve(result.unmatched().size());
     for (const auto& option : result.unmatched()) {
