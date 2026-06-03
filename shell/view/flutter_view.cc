@@ -27,6 +27,9 @@
 #elif BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "display/drm_display.h"
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+#include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
+#include "display/drm_display.h"
 #elif BUILD_BACKEND_SOFTWARE
 #include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
@@ -218,6 +221,27 @@ FlutterView::FlutterView(Configuration::Config config,
       drm_display->SetCursor(drm_backend->drm_cursor());
     }
   }
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+  {
+    // Shares DrmDisplay (libseat session, refresh rate, cursor) with the EGL
+    // DRM backend; only the renderer differs. App::MakeDisplay always builds a
+    // DrmDisplay in a DRM build, so the cast failing is programmer error.
+    auto* drm_display = dynamic_cast<DrmDisplay*>(m_display.get());
+    assert(drm_display != nullptr);
+    m_backend = VulkanDrmBackend::Create(
+        m_config.view.drm_device.value_or("/dev/dri/card1"),
+        m_config.debug_backend.value_or(false), drm_display->session());
+
+    // Create returns nullptr on any init failure or refusal (the Phase 0
+    // scaffold always refuses). Continuing would dereference a null backend in
+    // Engine::Run and SEGV; fail-fast with the same exit path the EGL DRM
+    // backend uses.
+    if (!m_backend) {
+      spdlog::critical(
+          "[FlutterView] DRM Vulkan backend init failed; aborting");
+      exit(EXIT_FAILURE);
+    }
+  }
 #elif BUILD_BACKEND_WAYLAND_EGL
   {
     auto* wl = dynamic_cast<Display*>(display.get());
@@ -262,7 +286,8 @@ FlutterView::FlutterView(Configuration::Config config,
                m_config.view.width.value_or(kDefaultViewWidth),
                m_config.view.height.value_or(kDefaultViewWidth));
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
+    !BUILD_BACKEND_SOFTWARE
   auto* wl = dynamic_cast<Display*>(display.get());
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, std::dynamic_pointer_cast<Display>(display),
@@ -373,7 +398,8 @@ FlutterView::~FlutterView() {
   }
 }
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
+    !BUILD_BACKEND_SOFTWARE
 Display* FlutterView::GetDisplay() const {
   return dynamic_cast<Display*>(m_display.get());
 }
@@ -426,7 +452,7 @@ void FlutterView::Initialize() {
   display.single_display = true;
   display.refresh_rate =
       m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
-#if BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
   // DrmDisplay is constructed from the config-level width/height in app.cc,
   // which may still hold the TOML-specified size even when `-f` cleared those
   // values for the backend. Query the backend for the resolved FB size so
@@ -458,7 +484,7 @@ void FlutterView::Initialize() {
   // update view
   m_state->view = m_state->view_wrapper->view = this;
 
-#if BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
   // On the DRM path there is no WaylandWindow to trigger the initial
   // window-metrics event. Without it Flutter never learns the viewport
   // size and never schedules a frame. Send it explicitly now that the

@@ -44,13 +44,23 @@ class Device;
 // plane layout) tuple. That keeps the wrapper free of Vulkan headers and
 // keeps USE_DRM_SCENE off the BUILD_BACKEND_VULKAN dependency graph.
 //
-// Per the Flutter embedder contract (embedder.h:1780-1783), the engine
-// has already host-synced the VkImage before invoking present_layers,
-// so no per-frame fence import is needed. The wrapper caches one
-// ExternalDmaBufSource per VkImage; on first sight the caller constructs
-// the wrapper with the dmabuf fd (one per VkImage; the wrapper dups it
-// internally via ExternalDmaBufSource), on subsequent frames the same
-// wrapper is reused for the same VkImage.
+// Sync is an OPEN QUESTION, not a solved one. FlutterVulkanImage carries
+// only {image, format} — the embedder exposes no per-backing-store
+// render-complete fence or semaphore, and was empirically shown (issue
+// #208) to rely on shared-queue submission ordering rather than an
+// observable hand-off. Whether the exported dma-buf is safe to scan out
+// at present_layers time therefore depends on either the engine host-
+// idling its raster queue before present_layers, or the exported dma-buf
+// carrying an implicit dma_resv fence KMS auto-waits on — neither is
+// confirmed. This must be resolved by the render-complete hand-off spike
+// before relying on it. If explicit sync turns
+// out to be required, it belongs on ExternalDmaBufSource's IN_FENCE_FD
+// path, not here — this wrapper stays deliberately sync-agnostic.
+//
+// The wrapper caches one ExternalDmaBufSource per VkImage; on first sight
+// the caller constructs the wrapper with the dmabuf fd (one per VkImage;
+// the wrapper dups it internally via ExternalDmaBufSource), on subsequent
+// frames the same wrapper is reused for the same VkImage.
 class VkBackingStoreLayerSource final : public drm::scene::LayerBufferSource {
  public:
   // Construct over a caller-exported dmabuf. The wrapper builds an
