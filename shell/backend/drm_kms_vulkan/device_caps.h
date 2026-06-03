@@ -21,35 +21,53 @@
 
 namespace drm_kms_vulkan {
 
-// Capability probe result for the zero-copy scanout gate. Only the fields
-// Phase 0 needs are populated today; later phases extend this with the
-// scanout memory-type index, negotiated modifier, and per-plane layout
-// (drm_kms_vulkan plan §4). The struct stays free of Vulkan headers so it can
-// be included widely.
+// Capability summary for the DRM/KMS Vulkan scanout backend, filled at device
+// bring-up and logged. Everything platform-specific reduces to this struct so
+// nothing platform-specific is hardcoded. The struct stays free of Vulkan
+// headers so it can be included widely.
 struct DeviceCaps {
-  // Zero-copy gate (plan §4.1): true only when a non-CPU, non-llvmpipe
-  // physical device exposes the dma-buf-import extension set AND the DRM
-  // display node is openable.
+  // Zero-copy gate: true only when a non-CPU, non-software-rasterizer device
+  // exposes the dma-buf import extension set AND a DRM display node is
+  // openable. When false the backend refuses at init with a clear diagnostic
+  // instead of failing later inside framebuffer import.
   bool zero_copy_supported = false;
 
   bool has_physical_device_drm = false;  // false on Adreno & Mali blobs
-  bool has_timeline_semaphore = false;   // false on Adreno -> binary sem floor
-  bool has_global_priority = false;      // gate HIGH/REALTIME homescreen queue
-  uint32_t vendor_id = 0;                // fallback match when DRM node absent
-  uint32_t graphics_queue_count = 0;     // >1 -> async composition blit allowed
+  bool has_timeline_semaphore = false;   // false on Adreno
+  bool has_global_priority = false;      // gate a high-priority queue
+  bool has_lazy_transient = false;       // transient attachments in tile mem
+  bool has_dedicated_transfer_queue =
+      false;               // offload copies off the gfx queue
+  uint32_t vendor_id = 0;  // fallback match when no DRM node
+  uint32_t device_id = 0;
+  uint32_t api_version = 0;
+  uint32_t graphics_queue_count = 0;  // >1 allows an async composition queue
+  uint32_t max_image_2d = 0;          // clamp surface size (4096 on vc4)
   std::string device_name;
   std::string driver_name;
 };
 
-// Probe the local Vulkan + DRM stack for the zero-copy scanout gate (plan
-// §4.1). On success returns caps with @c zero_copy_supported == true. On any
-// failure returns @c zero_copy_supported == false and writes a human-readable
-// cause into @p refusal_reason — the diagnostic the backend logs before it
-// refuses, instead of crashing deep in @c drmModeAddFB2WithModifiers.
+// Probe the local Vulkan + DRM stack for the zero-copy scanout gate. On
+// success returns caps with @c zero_copy_supported == true. On any failure
+// returns @c zero_copy_supported == false and writes a human-readable cause
+// into @p refusal_reason.
+//
+// This is the lightweight check used by the drm_kms_vulkan_probe tool: it
+// creates a throwaway instance and no logical device. The backend itself does
+// a fuller bring-up (logical device + queues) rather than calling this.
 //
 // @p display_device is the DRM node intended for scanout (e.g. /dev/dri/card0);
 // it must be openable for the gate to pass.
 DeviceCaps ProbeDeviceCaps(const std::string& display_device,
                            std::string& refusal_reason);
+
+// Resolve the (major, minor) device numbers of a DRM node path so the backend
+// can match a Vulkan physical device's DRM node against the scanout device.
+// Returns false (leaving the outputs untouched) when the path cannot be
+// stat'd. Lives here so the stat/sysmacros includes stay out of the backend
+// translation unit, which pulls in spdlog.
+bool DrmNodeNumber(const std::string& path,
+                   unsigned& major_out,
+                   unsigned& minor_out);
 
 }  // namespace drm_kms_vulkan

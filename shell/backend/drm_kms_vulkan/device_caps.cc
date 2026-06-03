@@ -16,11 +16,17 @@
 
 // Use vulkan.hpp's dynamic dispatch loader, matching the Wayland-Vulkan
 // backend. The loader dlopens libvulkan at runtime, so a missing loader (the
-// misconfigured-Yocto / pre-driver-install image the §4.1 gate guards against)
+// misconfigured-Yocto / pre-driver-install image the gate guards against)
 // surfaces as a catchable failure here rather than an unresolved-symbol link
 // error. This TU owns the single dynamic-dispatcher storage definition for the
 // drm_kms_vulkan backend (Wayland-Vulkan's wayland_vulkan.cc owns the other;
 // the two backends are mutually exclusive, so exactly one is ever linked).
+//
+// System headers are included before vulkan.hpp so the stat()/sysmacros use in
+// DrmNodeNumber resolves cleanly.
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
@@ -64,8 +70,8 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
                            std::string& refusal_reason) {
   DeviceCaps caps{};
 
-  // 1. Bootstrap the loader. The no-arg init() resolves vkGetInstanceProcAddr
-  //    + the global-level entry points by dlopening libvulkan.
+  // Bootstrap the loader. The no-arg init() resolves vkGetInstanceProcAddr +
+  // the global-level entry points by dlopening libvulkan.
   try {
     VULKAN_HPP_DEFAULT_DISPATCHER.init();
   } catch (const std::exception& e) {
@@ -80,8 +86,8 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
     return caps;
   }
 
-  // 2. Minimal instance. Vulkan 1.1 gives core get_physical_device_properties2
-  //    and queue_family_foreign without instance extensions.
+  // Minimal instance. Vulkan 1.1 gives core get_physical_device_properties2 and
+  // queue_family_foreign without instance extensions.
   VkApplicationInfo app{};
   app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   app.pApplicationName = "ivi-homescreen drm_kms_vulkan probe";
@@ -97,8 +103,8 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
   }
   VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance(instance));
 
-  // 3. Walk physical devices; the first non-CPU, non-software device that
-  //    exposes the full dma-buf-import extension set wins the gate.
+  // Walk physical devices; the first non-CPU, non-software device that exposes
+  // the full dma-buf-import extension set wins the gate.
   uint32_t count = 0;
   d.vkEnumeratePhysicalDevices(instance, &count, nullptr);
   std::vector<VkPhysicalDevice> devices(count);
@@ -150,11 +156,34 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
     // below decides zero_copy_supported).
     caps.device_name = props.deviceName;
     caps.vendor_id = props.vendorID;
+    caps.device_id = props.deviceID;
+    caps.api_version = props.apiVersion;
+    caps.max_image_2d = props.limits.maxImageDimension2D;
     caps.has_physical_device_drm = HasExt(exts, "VK_EXT_physical_device_drm");
     caps.has_global_priority = HasExt(exts, "VK_EXT_global_priority") ||
                                HasExt(exts, "VK_KHR_global_priority");
-    caps.has_timeline_semaphore = props.apiVersion >= VK_API_VERSION_1_2 ||
-                                  HasExt(exts, "VK_KHR_timeline_semaphore");
+
+    // Query the actual timelineSemaphore feature bit rather than inferring it
+    // from the API version or extension list — Mesa Turnip, for one, exposes
+    // it on a device whose advertised properties would not imply it.
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
+    timeline.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &timeline;
+    d.vkGetPhysicalDeviceFeatures2(pd, &features2);
+    caps.has_timeline_semaphore = timeline.timelineSemaphore == VK_TRUE;
+
+    VkPhysicalDeviceMemoryProperties mem{};
+    d.vkGetPhysicalDeviceMemoryProperties(pd, &mem);
+    for (uint32_t i = 0; i < mem.memoryTypeCount; ++i) {
+      if (mem.memoryTypes[i].propertyFlags &
+          VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) {
+        caps.has_lazy_transient = true;
+        break;
+      }
+    }
 
     uint32_t qf_count = 0;
     d.vkGetPhysicalDeviceQueueFamilyProperties(pd, &qf_count, nullptr);
@@ -168,6 +197,16 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
         break;
       }
     }
+    for (const auto& qf : qfs) {
+      const bool transfer = (qf.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0;
+      const bool graphics = (qf.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+      const bool compute = (qf.queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+      if (transfer && !graphics && !compute) {
+        caps.has_dedicated_transfer_queue = true;
+        break;
+      }
+    }
+
     found = true;
     break;
   }
@@ -183,8 +222,8 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
     return caps;
   }
 
-  // 4. The display node must be openable — a render-only GPU with no display
-  //    DRM node cannot scan out. open()+close() is the cheapest probe.
+  // The display node must be openable — a render-only GPU with no display DRM
+  // node cannot scan out. open()+close() is the cheapest probe.
   const int fd = ::open(display_device.c_str(), O_RDWR | O_CLOEXEC);
   if (fd < 0) {
     refusal_reason = "DRM display node '" + display_device +
@@ -195,6 +234,20 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
 
   caps.zero_copy_supported = true;
   return caps;
+}
+
+bool DrmNodeNumber(const std::string& path,
+                   unsigned& major_out,
+                   unsigned& minor_out) {
+  struct stat st{};
+  if (::stat(path.c_str(), &st) != 0) {
+    return false;
+  }
+  // vulkan.hpp #undefs the major()/minor() macros (they clash with version
+  // field names), so call the underlying glibc functions directly.
+  major_out = gnu_dev_major(st.st_rdev);
+  minor_out = gnu_dev_minor(st.st_rdev);
+  return true;
 }
 
 }  // namespace drm_kms_vulkan

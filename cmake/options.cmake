@@ -106,11 +106,20 @@ option(BUILD_BACKEND_DRM_KMS_VULKAN
         OFF)
 
 # Vendor VK_LAYER_KHRONOS_validation into the Vulkan backend so -d guarantees
-# validation even on images that ship no system layer registry (plan §7). Off
-# by default; flip ON for dev/CI presets. Wiring lands with the backend's
-# device bring-up; the option is declared here so the build graph is stable.
+# validation even on images that ship no system layer registry. Off by default;
+# flip ON for dev/CI presets. The option is declared here so the build graph is
+# stable ahead of the in-process layer wiring.
 option(BUILD_VULKAN_VALIDATION
         "Vendor the Khronos Vulkan validation layer into the Vulkan backend"
+        OFF)
+
+# Standalone zero-copy-capability probe (drm_kms_vulkan_probe). Builds just the
+# probe tool without selecting the DRM/KMS Vulkan backend, so it can be
+# cross-built and run on a target — alongside any backend — to report whether
+# the device can do zero-copy dma-buf scanout. Implied ON when the DRM/KMS
+# Vulkan backend itself is built.
+option(BUILD_DRM_KMS_VULKAN_PROBE
+        "Build the standalone drm_kms_vulkan zero-copy capability probe"
         OFF)
 
 # Drive the non-framed DRM/KMS present path through drm::scene::LayerScene
