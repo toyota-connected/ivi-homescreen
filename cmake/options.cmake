@@ -101,6 +101,17 @@ option(BUILD_BACKEND_WAYLAND_LEASED_DRM "Build Wayland Leased DRM backend" OFF)
 option(BUILD_BACKEND_DRM_KMS_EGL
         "Build DRM/KMS EGL backend (mutually exclusive with EGL and Vulkan backends)"
         OFF)
+option(BUILD_BACKEND_DRM_KMS_VULKAN
+        "Build DRM/KMS Vulkan backend (mutually exclusive with the EGL and Wayland backends)"
+        OFF)
+
+# Vendor VK_LAYER_KHRONOS_validation into the Vulkan backend so -d guarantees
+# validation even on images that ship no system layer registry (plan §7). Off
+# by default; flip ON for dev/CI presets. Wiring lands with the backend's
+# device bring-up; the option is declared here so the build graph is stable.
+option(BUILD_VULKAN_VALIDATION
+        "Vendor the Khronos Vulkan validation layer into the Vulkan backend"
+        OFF)
 
 # Drive the non-framed DRM/KMS present path through drm::scene::LayerScene
 # rather than the in-tree PlaneRegistry + Allocator + AtomicRequest pipeline.
@@ -110,9 +121,10 @@ option(BUILD_BACKEND_DRM_KMS_EGL
 option(USE_DRM_SCENE
         "Drive DRM/KMS non-framed present path via drm::scene::LayerScene"
         OFF)
-if (USE_DRM_SCENE AND NOT BUILD_BACKEND_DRM_KMS_EGL)
+if (USE_DRM_SCENE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN))
     message(FATAL_ERROR
-            "USE_DRM_SCENE=ON requires BUILD_BACKEND_DRM_KMS_EGL=ON")
+            "USE_DRM_SCENE=ON requires BUILD_BACKEND_DRM_KMS_EGL=ON or "
+            "BUILD_BACKEND_DRM_KMS_VULKAN=ON")
 endif ()
 
 #

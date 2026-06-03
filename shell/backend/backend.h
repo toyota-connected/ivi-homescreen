@@ -50,6 +50,7 @@ class Backend {
     WaylandVulkan,
     WaylandLeasedDrm,
     DrmKms,
+    DrmKmsVulkan,
   };
 
   Backend() = default;
