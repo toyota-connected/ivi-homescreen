@@ -18,6 +18,8 @@
 #define CONFIG_COMMON_H_
 
 #include <array>
+#include <cstdint>  // int32_t in the constants below; was pulled in transitively
+                    // by <EGL/egl.h>/<waypp.h> before those became conditional
 
 #ifndef BUILD_BACKEND_WAYLAND_EGL
 #cmakedefine01 BUILD_BACKEND_WAYLAND_EGL
