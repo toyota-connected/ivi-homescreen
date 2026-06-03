@@ -53,7 +53,7 @@ class Device;
 // idling its raster queue before present_layers, or the exported dma-buf
 // carrying an implicit dma_resv fence KMS auto-waits on — neither is
 // confirmed. This must be resolved by the render-complete hand-off spike
-// before relying on it (drm_kms_vulkan plan §6.2). If explicit sync turns
+// before relying on it. If explicit sync turns
 // out to be required, it belongs on ExternalDmaBufSource's IN_FENCE_FD
 // path, not here — this wrapper stays deliberately sync-agnostic.
 //

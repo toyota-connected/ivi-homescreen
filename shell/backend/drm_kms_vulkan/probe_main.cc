@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// Standalone exerciser for the drm_kms_vulkan §4.1 zero-copy gate.
+// Standalone exerciser for the drm_kms_vulkan zero-copy gate.
 //
 // VulkanDrmBackend::Create() runs ProbeDeviceCaps() and refuses (logs +
 // returns nullptr -> FlutterView exit(EXIT_FAILURE)) when the gate fails. The
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
       drm_kms_vulkan::ProbeDeviceCaps(dev, refusal);
 
   if (caps.zero_copy_supported) {
-    std::printf("§4.1 GATE: PASS  (display_node=%s)\n", dev);
+    std::printf("ZERO-COPY GATE: PASS  (display_node=%s)\n", dev);
     std::printf("  device         = %s\n", caps.device_name.c_str());
     std::printf("  vendor_id      = 0x%04x\n", caps.vendor_id);
     std::printf("  phys_dev_drm   = %s\n",
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  std::printf("§4.1 GATE: REFUSE  (display_node=%s)\n", dev);
+  std::printf("ZERO-COPY GATE: REFUSE  (display_node=%s)\n", dev);
   std::printf("  reason = %s\n", refusal.c_str());
   return 1;
 }

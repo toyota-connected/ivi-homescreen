@@ -188,9 +188,9 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
 endif ()
 
 if (BUILD_BACKEND_DRM_KMS_VULKAN)
-    # Phase 0 scaffold. The Vulkan render/scanout sources are the new backend
-    # dir; the session / display / seat / driver-probe TUs are shared verbatim
-    # with drm_kms_egl (they sit below the pixel layer and are GL-free).
+    # The Vulkan render/scanout sources are the new backend dir; the session /
+    # display / seat / driver-probe TUs are shared verbatim with drm_kms_egl
+    # (they sit below the pixel layer and are GL-free).
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_vulkan/vulkan_drm_backend.cc
             backend/drm_kms_vulkan/device_caps.cc
@@ -222,21 +222,27 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             PkgConfig::UDEV
             vulkan_headers
     )
+endif ()
 
-    # Standalone exerciser for the §4.1 zero-copy gate. Calls ProbeDeviceCaps()
-    # in isolation so the pass/refuse paths can be validated without bringing up
-    # DrmDisplay/libseat. device_caps.cc has no shell/EGL/Wayland/DRM deps — only
-    # the Vulkan headers + libdl (vulkan.hpp dlopens libvulkan at runtime) — so
-    # the probe links nothing the backend itself wouldn't. Exit code: 0 = gate
-    # passed, 1 = refused (mirrors the backend's exit(EXIT_FAILURE)).
+# Standalone zero-copy-capability probe. Builds with the DRM/KMS Vulkan backend,
+# or on its own via BUILD_DRM_KMS_VULKAN_PROBE so it can be cross-built and run
+# on a target alongside any backend to report whether the device can do
+# zero-copy dma-buf scanout. device_caps.cc has no shell/EGL/Wayland/DRM deps —
+# only the Vulkan headers + libdl (vulkan.hpp dlopens libvulkan at runtime).
+# Exit code: 0 = gate passed, 1 = refused.
+if (BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_DRM_KMS_VULKAN_PROBE)
     add_executable(drm_kms_vulkan_probe
             backend/drm_kms_vulkan/probe_main.cc
             backend/drm_kms_vulkan/device_caps.cc
     )
-    target_link_libraries(drm_kms_vulkan_probe PRIVATE
-            vulkan_headers
-            ${CMAKE_DL_LIBS}
+    # Use the vendored Vulkan headers directly so the probe is self-contained
+    # and cross-builds without a Vulkan SDK in the target sysroot. Only the
+    # headers are needed at build time; libvulkan is dlopened at runtime.
+    target_include_directories(drm_kms_vulkan_probe PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/third_party/Vulkan-Headers/include
     )
+    target_link_libraries(drm_kms_vulkan_probe PRIVATE ${CMAKE_DL_LIBS})
 endif ()
 
 if (ENABLE_DLT)
