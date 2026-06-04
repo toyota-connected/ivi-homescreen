@@ -536,9 +536,13 @@ void FlutterView::Initialize() {
                  height, static_cast<int>(result));
   }
   // Match the seat's pointer-clamp viewport to the rendered size so the
-  // pointer (and the software cursor) share the framebuffer coordinate space.
+  // pointer (and the software cursor) share the framebuffer coordinate space,
+  // and hand the display's cursor to the sink (which composites it).
   if (auto* sw_display = dynamic_cast<SoftwareDisplay*>(m_display.get())) {
     sw_display->SetViewportSize(width, height);
+    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
+      sw_backend->SetCursor(sw_display->cursor());
+    }
   }
 #else
   // Engine events are decoded by surface pointer

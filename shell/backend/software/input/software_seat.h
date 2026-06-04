@@ -19,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 
 #include <xkbcommon/xkbcommon.h>
@@ -26,6 +27,8 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "input/iseat.h"
+
+class SoftwareCursor;
 
 struct libinput;
 struct libinput_event;
@@ -64,7 +67,16 @@ class SoftwareSeat final : public ISeat {
   // values without an atomic.
   void SetViewport(int32_t width, int32_t height);
 
+  // Install the shared software cursor. On pointer motion the seat updates the
+  // cursor position and schedules a frame, so the cursor tracks the mouse even
+  // when the UI is otherwise idle. Null leaves the cursor unmanaged.
+  void SetCursor(std::shared_ptr<SoftwareCursor> cursor);
+
  private:
+  // Push the current pointer position to the cursor and schedule a frame so the
+  // dumb sink repaints with the cursor at its new spot. No-op without a cursor.
+  void NotifyCursorMoved();
+
   void DispatchLoop();
   void DispatchLibinputEvents();
   void DispatchRepeatTick();
@@ -135,6 +147,11 @@ class SoftwareSeat final : public ISeat {
   double pointer_y_{0.0};
   int64_t button_mask_{0};
   bool pointer_added_{false};
+
+  // Shared software cursor (owned by SoftwareDisplay). Written here on the
+  // dispatch thread; read on the rasterizer thread in DrmDumbSink::Present.
+  // Its position/visibility are atomics, so no extra locking. Null = disabled.
+  std::shared_ptr<SoftwareCursor> cursor_;
 
   // Per-slot multi-touch state. libinput uses slot indices for
   // multi-touch; we mirror the slot directly as Flutter's `device`

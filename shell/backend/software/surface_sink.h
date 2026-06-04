@@ -18,10 +18,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <utility>
 
 class TaskRunner;
+class SoftwareCursor;
 typedef void (*VsyncCallback)(void*, intptr_t);
 
 // Pluggable output destination for SoftwareBackend's
@@ -55,6 +57,11 @@ class ISurfaceSink {
   // geometry is known) and on every Resize. Sinks that allocate their
   // own framebuffers (fbdev, drm-dumb) use this to (re)allocate.
   virtual void OnSize(uint32_t /*width*/, uint32_t /*height*/) {}
+
+  // Install the software mouse cursor (shared with the seat, which updates its
+  // position). Device sinks (drm-dumb) composite it onto each frame; the
+  // headless sinks (file/memory/none) inherit this no-op.
+  virtual void SetCursor(std::shared_ptr<SoftwareCursor> /*cursor*/) {}
 
   // The sink's native output extent (the DRM mode / fbdev virtual size),
   // when it drives a fixed-size display. The SoftwareBackend adopts this as

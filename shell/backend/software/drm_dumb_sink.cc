@@ -37,6 +37,7 @@
 #include <asio/post.hpp>
 
 #include "backend/software/pixel_swizzle.h"
+#include "backend/software/software_cursor.h"
 #include "libflutter_engine.h"
 #include "logging.h"
 #include "task_runner.h"
@@ -445,6 +446,12 @@ void DrmDumbSink::OnSize(uint32_t /*width*/, uint32_t /*height*/) {
   // Flutter's view geometry doesn't match. No-op here.
 }
 
+void DrmDumbSink::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+  cursor_ = std::move(cursor);
+  spdlog::debug("[DrmDumbSink] software cursor {}",
+                cursor_ ? "installed" : "cleared");
+}
+
 void DrmDumbSink::SwizzleInto(const size_t buffer_index,
                               const void* allocation,
                               const size_t src_row_bytes,
@@ -548,6 +555,14 @@ bool DrmDumbSink::Present(const void* allocation,
 
   const size_t back = 1 - front_buffer_;
   SwizzleInto(back, allocation, row_bytes, height);
+
+  // Composite the cursor on top of the freshly-packed frame, before the flip.
+  // The whole back buffer was just repacked, so there's nothing to restore.
+  // XRGB8888 only for now (the RGB565 blend is a follow-up).
+  if (cursor_ && format_ == Format::kXRGB8888) {
+    cursor_->BlendXRGB(buffers_[back].map, mode_width_, mode_height_,
+                       buffers_[back].pitch);
+  }
 
   // Schedule the page-flip. flip_pending_ goes high before the
   // ioctl so an out-of-band OnPageFlip can't observe the prior

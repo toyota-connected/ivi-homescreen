@@ -30,6 +30,7 @@
 
 #include <asio/dispatch.hpp>
 
+#include "backend/software/software_cursor.h"
 #include "engine.h"
 #include "libflutter_engine.h"
 #include "logging.h"
@@ -51,7 +52,15 @@ namespace {
 // puts themselves in the `input` group (or runs as root).
 int OpenRestricted(const char* path, int flags, void* /*user_data*/) {
   const int fd = ::open(path, flags | O_CLOEXEC);
-  return fd < 0 ? -errno : fd;
+  if (fd < 0) {
+    spdlog::warn(
+        "[SoftwareSeat] open('{}') failed: {} — add the user to the 'input' "
+        "group (or run on an active VT for the logind uaccess ACL)",
+        path, std::strerror(errno));
+    return -errno;
+  }
+  spdlog::debug("[SoftwareSeat] opened input device {}", path);
+  return fd;
 }
 
 void CloseRestricted(int fd, void* /*user_data*/) {
@@ -187,6 +196,33 @@ void SoftwareSeat::SetViewControllerState(
 void SoftwareSeat::SetViewport(const int32_t width, const int32_t height) {
   viewport_w_ = width;
   viewport_h_ = height;
+}
+
+void SoftwareSeat::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+  cursor_ = std::move(cursor);
+}
+
+void SoftwareSeat::NotifyCursorMoved() {
+  if (!cursor_) {
+    return;
+  }
+  static bool logged_first = false;
+  if (!logged_first) {
+    logged_first = true;
+    spdlog::debug("[SoftwareSeat] cursor tracking pointer (first motion {},{})",
+                  static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
+  }
+  // pointer_x_/y_ are in viewport (== framebuffer mode) pixels, the same space
+  // the cursor blends into.
+  cursor_->SetPosition(static_cast<int32_t>(pointer_x_),
+                       static_cast<int32_t>(pointer_y_));
+  // Flutter only presents dirty frames, so without a nudge the cursor would
+  // freeze on an idle UI. ScheduleFrame is thread-safe; the dumb sink then
+  // repaints with the cursor at its new position.
+  if (const EngineRef e = CurrentEngine(); e.engine != nullptr) {
+    LibFlutterEngine->ScheduleFrame(
+        static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(e.engine));
+  }
 }
 
 void SoftwareSeat::DispatchLoop() {
@@ -327,6 +363,7 @@ void SoftwareSeat::HandlePointerMotion(libinput_event_pointer* p) {
   batch[count].buttons = button_mask_;
   ++count;
 
+  NotifyCursorMoved();
   DispatchPointerEvents(batch, count);
 }
 
@@ -365,6 +402,7 @@ void SoftwareSeat::HandlePointerMotionAbsolute(libinput_event_pointer* p) {
   batch[count].buttons = button_mask_;
   ++count;
 
+  NotifyCursorMoved();
   DispatchPointerEvents(batch, count);
 }
 
@@ -523,6 +561,11 @@ void SoftwareSeat::FireRepeat() {
 void SoftwareSeat::HandleTouchDown(libinput_event_touch* t) {
   if (viewport_w_ <= 0 || viewport_h_ <= 0) {
     return;
+  }
+  // Touch input → hide the mouse cursor (it reappears on the next pointer
+  // motion). Matches typical desktop behaviour.
+  if (cursor_) {
+    cursor_->SetVisible(false);
   }
   const int32_t slot = libinput_event_touch_get_seat_slot(t);
   if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
