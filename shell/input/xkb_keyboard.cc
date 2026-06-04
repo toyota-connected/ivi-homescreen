@@ -126,6 +126,16 @@ uint32_t XkbKeyboard::Modifiers() const {
   return xkb_state_serialize_mods(state_, XKB_STATE_MODS_EFFECTIVE);
 }
 
+bool XkbKeyboard::CtrlActive() const {
+  return xkb_state_mod_name_is_active(state_, XKB_MOD_NAME_CTRL,
+                                      XKB_STATE_MODS_EFFECTIVE) > 0;
+}
+
+bool XkbKeyboard::AltActive() const {
+  return xkb_state_mod_name_is_active(state_, XKB_MOD_NAME_ALT,
+                                      XKB_STATE_MODS_EFFECTIVE) > 0;
+}
+
 LedState XkbKeyboard::Leds() const {
   return LedState{
       LedActive(state_, XKB_LED_NAME_CAPS),

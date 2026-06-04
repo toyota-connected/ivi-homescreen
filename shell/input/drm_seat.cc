@@ -28,9 +28,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -214,32 +216,38 @@ bool DrmSeat::Start() {
   seat_->set_event_handler(
       [this](const drm::input::InputEvent& ev) { HandleEvent(ev); });
 
-  // drm-cxx leaves KeyboardEvent::sym/utf8 zero unless the caller runs
-  // events through a Keyboard (xkbcommon state machine). Without this,
-  // every key is dropped at the sym==0 check in HandleKeyboard.
-  auto kb = drm::input::Keyboard::create();
-  if (!kb) {
-    spdlog::error("[DrmSeat] xkb keymap create failed: {}",
-                  kb.error().message());
+  // Keyboard translation comes from the backend-shared XkbKeyboard (xkbcommon
+  // state machine), the same path SoftwareSeat uses. drm::input::Seat leaves
+  // KeyboardEvent::sym/utf8 zero; HandleKeyboard fills them in, otherwise every
+  // key is dropped at the sym==0 check in DispatchKeyToFlutter.
+  keyboard_ = input::XkbKeyboard::Create();
+  if (!keyboard_) {
+    spdlog::error("[DrmSeat] XkbKeyboard::Create failed");
     return false;
   }
-  keyboard_ = std::make_unique<drm::input::Keyboard>(std::move(*kb));
 
-  // Auto-repeat for held keys. libinput doesn't repeat by design — the
-  // compositor/embedder synthesizes it. KeyRepeater is timerfd-driven and
-  // re-resolves sym/utf8 every tick so modifier changes mid-hold (Shift,
-  // AltGr) apply to the next repeat. Failure is non-fatal: zero repeat
-  // events still beats failing to start. IVI_DRM_KEY_REPEAT=0 disables.
+  // Auto-repeat for held keys (libinput doesn't repeat by design — the embedder
+  // synthesizes it). The shared KeyRepeater is timerfd-driven and re-resolves
+  // sym/utf8 every tick so modifier changes mid-hold (Shift, AltGr) apply to
+  // the next repeat. Failure is non-fatal. IVI_DRM_KEY_REPEAT=0 disables.
   const char* repeat_gate = std::getenv("IVI_DRM_KEY_REPEAT");
   if (repeat_gate == nullptr || std::string_view(repeat_gate) != "0") {
-    if (auto rep = drm::input::KeyRepeater::create(keyboard_.get())) {
-      repeater_.emplace(std::move(*rep));
-      repeater_->set_handler([this](const drm::input::KeyboardEvent& e) {
-        DispatchKeyToFlutter(e);
-      });
+    repeater_ = input::KeyRepeater::Create(keyboard_.get());
+    if (repeater_) {
+      repeater_->SetHandler(
+          [this](uint32_t key, xkb_keysym_t sym, const std::string& utf8) {
+            // Re-pack the synthesized repeat into the drm-cxx KeyboardEvent
+            // carrier that DispatchKeyToFlutter consumes.
+            drm::input::KeyboardEvent e{};
+            e.key = key;
+            e.pressed = true;
+            e.repeat = true;
+            e.sym = sym;
+            std::snprintf(e.utf8, sizeof(e.utf8), "%s", utf8.c_str());
+            DispatchKeyToFlutter(e);
+          });
     } else {
-      spdlog::warn("[DrmSeat] KeyRepeater unavailable: {}",
-                   rep.error().message());
+      spdlog::warn("[DrmSeat] KeyRepeater unavailable (timerfd_create)");
     }
   }
 
@@ -256,7 +264,7 @@ void DrmSeat::Stop() {
   }
   // Defensive: cancel any in-flight repeat before the repeater destructs.
   if (repeater_) {
-    repeater_->cancel();
+    repeater_->Cancel();
   }
   seat_.reset();
 
@@ -352,7 +360,7 @@ void DrmSeat::DispatchLoop() {
           repeater_.reset();
           repeat_fd = -1;
         } else if ((pfds[1].revents & POLLIN) != 0) {
-          repeater_->dispatch();
+          repeater_->Dispatch();
         }
       }
     }
@@ -440,18 +448,18 @@ void DrmSeat::ApplyPendingKeymap() {
   if (!cfg || !keyboard_) {
     return;
   }
-  drm::input::KeymapOptions opts;
+  input::KeymapOptions opts;
   opts.rules = cfg->rules;
   opts.model = cfg->model;
   opts.layout = cfg->layout;
   opts.variant = cfg->variant;
   opts.options = cfg->options;
-  if (auto r = keyboard_->reload(opts); !r) {
+  if (!keyboard_->Reload(opts)) {
     spdlog::warn(
         "[DrmSeat] keymap reload failed (rules='{}' model='{}' layout='{}' "
-        "variant='{}' options='{}'): {} — existing keymap kept",
+        "variant='{}' options='{}') — existing keymap kept",
         Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
-        Sanitize(cfg->variant), Sanitize(cfg->options), r.error().message());
+        Sanitize(cfg->variant), Sanitize(cfg->options));
     return;
   }
   spdlog::info(
@@ -462,14 +470,20 @@ void DrmSeat::ApplyPendingKeymap() {
   if (seat_) {
     // Push the latched Caps/Num/Scroll Lock state to physical LEDs so
     // they don't lag the freshly-rebuilt xkb state.
-    seat_->update_keyboard_leds(keyboard_->leds_state());
+    const auto leds = keyboard_->Leds();
+    seat_->update_keyboard_leds(drm::input::KeyboardLeds{
+        leds.caps_lock, leds.num_lock, leds.scroll_lock});
   }
 }
 
 void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   drm::input::KeyboardEvent resolved = ev;
   if (keyboard_) {
-    keyboard_->process_key(resolved);
+    // Fill sym/utf8 and advance modifier state (the chord check below and the
+    // repeater's per-key eligibility both rely on the updated state).
+    std::string utf8;
+    resolved.sym = keyboard_->ProcessKey(ev.key, ev.pressed, &utf8);
+    std::snprintf(resolved.utf8, sizeof(resolved.utf8), "%s", utf8.c_str());
   }
 
   // VT-switch chord interception. With K_OFF the kernel keymap layer
@@ -481,7 +495,7 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   // (Ctrl/Alt themselves) skip this entirely so they still latch the
   // keyboard_ state above.
   if (resolved.pressed && !resolved.repeat && keyboard_ &&
-      keyboard_->ctrl_active() && keyboard_->alt_active()) {
+      keyboard_->CtrlActive() && keyboard_->AltActive()) {
     int vt = 0;
     switch (resolved.key) {
       case KEY_F1:
@@ -537,11 +551,11 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
     }
   }
 
-  // Track press/release in the repeater so it arms on press of an
-  // eligible key and cancels on release. The repeater filters its own
-  // synthesized events out of on_key (event.repeat == true is dropped).
+  // Track press/release in the repeater so it arms on press of an eligible key
+  // and disarms on release. Only real events are fed here; synthesized repeats
+  // come from the repeater's own handler, never back through HandleKeyboard.
   if (repeater_) {
-    repeater_->on_key(ev);
+    repeater_->OnKey(ev.key, ev.pressed);
   }
   DispatchKeyToFlutter(resolved);
 }

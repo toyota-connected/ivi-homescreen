@@ -80,6 +80,11 @@ class XkbKeyboard {
   // xkbcommon's modifier-index bitspace — handed to the embedder.
   [[nodiscard]] uint32_t Modifiers() const;
 
+  // Whether a Ctrl / Alt modifier is currently effective — for chord detection
+  // (e.g. the VT-switch Ctrl+Alt+Fn) without decoding the raw mask.
+  [[nodiscard]] bool CtrlActive() const;
+  [[nodiscard]] bool AltActive() const;
+
   // Caps/Num/Scroll Lock latch, for drivers that surface keyboard LEDs.
   [[nodiscard]] LedState Leds() const;
 
