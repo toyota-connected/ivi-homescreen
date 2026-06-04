@@ -70,6 +70,7 @@ address translation.
 | Raspberry Pi 4 | `v3d` (V3D 4.2) → `vc4-drm`, **no display IOMMU** | **Fails** — `AddFB` EINVAL (see below) |
 | Arduino Uno Q | Turnip Adreno 702 via virtio/gfxstream → `msm_dpu` | **Fails** — device exposes Vulkan 1.0 (engine needs 1.1); virtualized GPU |
 | NanoPC-T6 (rk3588) | Mali-G610 (blob, Vulkan 1.3) → `rockchip-drm` (vop2) | **Refuses** — vop2 rejects the LINEAR import at any resolution; its planes want AFBC, which the LINEAR-only source can't produce |
+| BeaglePlay (AM625) | PowerVR AXE-1-16M (Mesa `pvr`, Vulkan 1.2) → `tidss` display | **Refuses** — Mesa `pvr` does not implement `VK_EXT_image_drm_format_modifier` (nor `synchronization2`), so there is no modifier image to export for scanout |
 
 ### Unified-memory GPUs (render device == scanout device)
 
@@ -100,6 +101,19 @@ depends on the **display** side:
   `LINEAR`, so there is no common scanout modifier. The display advertising an
   IOMMU is necessary but not sufficient — it must also accept a modifier the
   render GPU can export. The backend refuses cleanly here.
+- **BeaglePlay / AM625 (refuses).** A third, earlier failure mode: the render
+  GPU's Vulkan driver doesn't implement the modifier extension *at all*. The
+  PowerVR AXE-1-16M runs the upstream Mesa `pvr` driver — a real hardware
+  Vulkan 1.2 device that *does* expose `external_memory_dma_buf`,
+  `queue_family_foreign`, `external_memory_fd` and `timeline_semaphore` — but it
+  does **not** implement `VK_EXT_image_drm_format_modifier` (nor
+  `synchronization2`). With no modifier extension there is no explicit-modifier
+  export image to allocate, so nothing can be negotiated against the `tidss`
+  display's `IN_FORMATS` and the gate refuses before rendering. This is a
+  driver-maturity gap (Mesa `pvr` is brand new), not a hardware limit. Confirmed
+  on-target with `drm_kms_vulkan_probe`: `ZERO-COPY GATE: REFUSE … PowerVR
+  A-Series AXE-1-16M missing VK_EXT_image_drm_format_modifier`. The GL backend
+  (`drm_kms_egl`) renders fine on this board.
 
 **On the Pi 4, the `cma=` boot setting does not fix this.** CMA *size* governs
 how much contiguous memory `vc4` can allocate for its **own** buffers; it has no
