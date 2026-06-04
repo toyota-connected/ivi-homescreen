@@ -114,6 +114,19 @@ if (BUILD_BACKEND_SOFTWARE)
     endif ()
 endif ()
 
+# Shared libinput keyboard core (xkb translation + key-repeat) used by every
+# libinput-backed seat — SoftwareSeat and (DRM) DrmSeat — so keyboard behavior
+# is identical across backends. Depends only on libxkbcommon, which those seats
+# already link. Added once here to avoid duplicate sources in multi-backend
+# builds.
+if (BUILD_SOFTWARE_INPUT_LIBINPUT OR BUILD_BACKEND_DRM_KMS_EGL OR
+    BUILD_BACKEND_DRM_KMS_VULKAN)
+    target_sources(${PROJECT_NAME} PRIVATE
+            input/xkb_keyboard.cc
+            input/key_repeater.cc
+    )
+endif ()
+
 if (BUILD_BACKEND_DRM_KMS_EGL)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_egl/drm_backend.cc
