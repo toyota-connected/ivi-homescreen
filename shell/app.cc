@@ -35,6 +35,7 @@
 #endif
 
 #if BUILD_BACKEND_SOFTWARE
+#include "backend/software/software_cursor.h"
 #include "display/software_display.h"
 #if BUILD_SOFTWARE_INPUT_LIBINPUT
 #include "backend/software/input/software_seat.h"
@@ -88,6 +89,17 @@ std::shared_ptr<IDisplay> MakeDisplay(
     spdlog::info("[SoftwareBackend] IVI_SW_INPUT=none — no input seat");
   }
 #endif
+  // Software cursor, gated by --disable-cursor / IVI_SW_CURSOR=0. Owned by the
+  // display; shared with the seat (updates its position on motion) and the sink
+  // (composites it). Harmless for headless sinks — they ignore SetCursor, and
+  // the cursor stays invisible until the first pointer motion.
+  const char* cursor_env = std::getenv("IVI_SW_CURSOR");
+  const bool cursor_enabled =
+      !configs[0].disable_cursor &&
+      (cursor_env == nullptr || std::string_view(cursor_env) != "0");
+  if (cursor_enabled) {
+    display->SetCursor(std::make_shared<SoftwareCursor>());
+  }
   return display;
 #else
   return std::make_shared<Display>(!configs[0].disable_cursor,

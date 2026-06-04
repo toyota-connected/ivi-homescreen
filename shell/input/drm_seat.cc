@@ -28,23 +28,35 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
+
+#include <xkbcommon/xkbcommon-keysyms.h>
 
 #include "asio/dispatch.hpp"
 #include "asio/post.hpp"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "engine.h"
-#include "input/key_mapping.h"
 #include "libflutter_engine.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "task_runner.h"
+
+// Defined in flutter_desktop.cc. Fans a key event out to the platform
+// keyboard-hook handlers (flutter/keyevent channel + TextInputPlugin) — the
+// same entry point the Wayland and software seats dispatch through.
+extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
+                        bool released,
+                        xkb_keysym_t keysym,
+                        uint32_t xkb_scancode,
+                        uint32_t modifiers);
 
 namespace homescreen {
 namespace {
@@ -214,34 +226,44 @@ bool DrmSeat::Start() {
   seat_->set_event_handler(
       [this](const drm::input::InputEvent& ev) { HandleEvent(ev); });
 
-  // drm-cxx leaves KeyboardEvent::sym/utf8 zero unless the caller runs
-  // events through a Keyboard (xkbcommon state machine). Without this,
-  // every key is dropped at the sym==0 check in HandleKeyboard.
-  auto kb = drm::input::Keyboard::create();
-  if (!kb) {
-    spdlog::error("[DrmSeat] xkb keymap create failed: {}",
-                  kb.error().message());
+  // Keyboard translation comes from the backend-shared XkbKeyboard (xkbcommon
+  // state machine), the same path SoftwareSeat uses. drm::input::Seat leaves
+  // KeyboardEvent::sym/utf8 zero; HandleKeyboard fills them in, otherwise every
+  // key is dropped at the sym==0 check in DispatchKeyToFlutter.
+  keyboard_ = input::XkbKeyboard::Create();
+  if (!keyboard_) {
+    spdlog::error("[DrmSeat] XkbKeyboard::Create failed");
     return false;
   }
-  keyboard_ = std::make_unique<drm::input::Keyboard>(std::move(*kb));
 
-  // Auto-repeat for held keys. libinput doesn't repeat by design — the
-  // compositor/embedder synthesizes it. KeyRepeater is timerfd-driven and
-  // re-resolves sym/utf8 every tick so modifier changes mid-hold (Shift,
-  // AltGr) apply to the next repeat. Failure is non-fatal: zero repeat
-  // events still beats failing to start. IVI_DRM_KEY_REPEAT=0 disables.
+  // Auto-repeat for held keys (libinput doesn't repeat by design — the embedder
+  // synthesizes it). The shared KeyRepeater is timerfd-driven and re-resolves
+  // sym/utf8 every tick so modifier changes mid-hold (Shift, AltGr) apply to
+  // the next repeat. Failure is non-fatal. IVI_DRM_KEY_REPEAT=0 disables.
   const char* repeat_gate = std::getenv("IVI_DRM_KEY_REPEAT");
   if (repeat_gate == nullptr || std::string_view(repeat_gate) != "0") {
-    if (auto rep = drm::input::KeyRepeater::create(keyboard_.get())) {
-      repeater_.emplace(std::move(*rep));
-      repeater_->set_handler([this](const drm::input::KeyboardEvent& e) {
-        DispatchKeyToFlutter(e);
-      });
+    repeater_ = input::KeyRepeater::Create(keyboard_.get());
+    if (repeater_) {
+      repeater_->SetHandler(
+          [this](uint32_t key, xkb_keysym_t sym, const std::string& utf8) {
+            // Re-pack the synthesized repeat into the drm-cxx KeyboardEvent
+            // carrier that DispatchKeyToFlutter consumes.
+            drm::input::KeyboardEvent e{};
+            e.key = key;
+            e.pressed = true;
+            e.repeat = true;
+            e.sym = sym;
+            std::snprintf(e.utf8, sizeof(e.utf8), "%s", utf8.c_str());
+            DispatchKeyToFlutter(e);
+          });
     } else {
-      spdlog::warn("[DrmSeat] KeyRepeater unavailable: {}",
-                   rep.error().message());
+      spdlog::warn("[DrmSeat] KeyRepeater unavailable (timerfd_create)");
     }
   }
+
+  // Sync the physical LEDs to the keyboard's initial (all-off) latch so a
+  // console that left Caps/Num lit doesn't stay stuck on after we take over.
+  SyncKeyboardLeds();
 
   stop_.store(false, std::memory_order_release);
   thread_ = std::thread([this] { DispatchLoop(); });
@@ -256,7 +278,7 @@ void DrmSeat::Stop() {
   }
   // Defensive: cancel any in-flight repeat before the repeater destructs.
   if (repeater_) {
-    repeater_->cancel();
+    repeater_->Cancel();
   }
   seat_.reset();
 
@@ -352,7 +374,7 @@ void DrmSeat::DispatchLoop() {
           repeater_.reset();
           repeat_fd = -1;
         } else if ((pfds[1].revents & POLLIN) != 0) {
-          repeater_->dispatch();
+          repeater_->Dispatch();
         }
       }
     }
@@ -440,18 +462,18 @@ void DrmSeat::ApplyPendingKeymap() {
   if (!cfg || !keyboard_) {
     return;
   }
-  drm::input::KeymapOptions opts;
+  input::KeymapOptions opts;
   opts.rules = cfg->rules;
   opts.model = cfg->model;
   opts.layout = cfg->layout;
   opts.variant = cfg->variant;
   opts.options = cfg->options;
-  if (auto r = keyboard_->reload(opts); !r) {
+  if (!keyboard_->Reload(opts)) {
     spdlog::warn(
         "[DrmSeat] keymap reload failed (rules='{}' model='{}' layout='{}' "
-        "variant='{}' options='{}'): {} — existing keymap kept",
+        "variant='{}' options='{}') — existing keymap kept",
         Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
-        Sanitize(cfg->variant), Sanitize(cfg->options), r.error().message());
+        Sanitize(cfg->variant), Sanitize(cfg->options));
     return;
   }
   spdlog::info(
@@ -459,17 +481,28 @@ void DrmSeat::ApplyPendingKeymap() {
       "variant='{}' options='{}')",
       Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
       Sanitize(cfg->variant), Sanitize(cfg->options));
-  if (seat_) {
-    // Push the latched Caps/Num/Scroll Lock state to physical LEDs so
-    // they don't lag the freshly-rebuilt xkb state.
-    seat_->update_keyboard_leds(keyboard_->leds_state());
+  // Push the latched Caps/Num/Scroll Lock state to the physical LEDs so they
+  // don't lag the freshly-rebuilt xkb state.
+  SyncKeyboardLeds();
+}
+
+void DrmSeat::SyncKeyboardLeds() {
+  if (seat_ == nullptr || keyboard_ == nullptr) {
+    return;
   }
+  const auto leds = keyboard_->Leds();
+  seat_->update_keyboard_leds(drm::input::KeyboardLeds{
+      leds.caps_lock, leds.num_lock, leds.scroll_lock});
 }
 
 void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   drm::input::KeyboardEvent resolved = ev;
   if (keyboard_) {
-    keyboard_->process_key(resolved);
+    // Fill sym/utf8 and advance modifier state (the chord check below and the
+    // repeater's per-key eligibility both rely on the updated state).
+    std::string utf8;
+    resolved.sym = keyboard_->ProcessKey(ev.key, ev.pressed, &utf8);
+    std::snprintf(resolved.utf8, sizeof(resolved.utf8), "%s", utf8.c_str());
   }
 
   // VT-switch chord interception. With K_OFF the kernel keymap layer
@@ -481,7 +514,7 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
   // (Ctrl/Alt themselves) skip this entirely so they still latch the
   // keyboard_ state above.
   if (resolved.pressed && !resolved.repeat && keyboard_ &&
-      keyboard_->ctrl_active() && keyboard_->alt_active()) {
+      keyboard_->CtrlActive() && keyboard_->AltActive()) {
     int vt = 0;
     switch (resolved.key) {
       case KEY_F1:
@@ -537,67 +570,38 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
     }
   }
 
-  // Track press/release in the repeater so it arms on press of an
-  // eligible key and cancels on release. The repeater filters its own
-  // synthesized events out of on_key (event.repeat == true is dropped).
+  // Track press/release in the repeater so it arms on press of an eligible key
+  // and disarms on release. Only real events are fed here; synthesized repeats
+  // come from the repeater's own handler, never back through HandleKeyboard.
   if (repeater_) {
-    repeater_->on_key(ev);
+    repeater_->OnKey(ev.key, ev.pressed);
   }
   DispatchKeyToFlutter(resolved);
+
+  // A lock key just toggled the xkb latch — refresh the physical LEDs (the Seat
+  // doesn't track the latch itself).
+  if (resolved.sym == XKB_KEY_Caps_Lock || resolved.sym == XKB_KEY_Num_Lock ||
+      resolved.sym == XKB_KEY_Scroll_Lock) {
+    SyncKeyboardLeds();
+  }
 }
 
 void DrmSeat::DispatchKeyToFlutter(
     const drm::input::KeyboardEvent& resolved) const {
-  const uint64_t physical = keys::EvdevToPhysical(resolved.key);
-  const uint64_t logical = keys::DeriveLogicalKey(resolved.utf8, resolved.sym);
-
-  if (physical == 0 || logical == 0) {
-    spdlog::warn(
-        "[DrmSeat] dropping key={} sym=0x{:x} utf8='{}' (phys=0x{:x} "
-        "log=0x{:x})",
-        resolved.key, resolved.sym, resolved.utf8, physical, logical);
-    return;
-  }
-
   auto* s = state_.load(std::memory_order_acquire);
-  if (!s || !s->engine) {
+  if (s == nullptr) {
     return;
   }
-
-  FlutterKeyEvent ke{};
-  ke.struct_size = sizeof(FlutterKeyEvent);
-  ke.timestamp = static_cast<double>(FlutterTimestampMicros());
-  if (resolved.repeat) {
-    ke.type = kFlutterKeyEventTypeRepeat;
-  } else if (resolved.pressed) {
-    ke.type = kFlutterKeyEventTypeDown;
-  } else {
-    ke.type = kFlutterKeyEventTypeUp;
-  }
-  ke.physical = physical;
-  ke.logical = logical;
-  ke.synthesized = false;
-  ke.device_type = kFlutterKeyEventDeviceTypeKeyboard;
-
-  // Flutter's hardware_keyboard.dart asserts that `character` is null
-  // for KEY_UP, synthesized, and repeat events. Attach it only to the
-  // initial DOWN transition.
-  std::string character_owned;
-  if (resolved.pressed && !resolved.repeat && resolved.utf8[0] != '\0') {
-    character_owned = resolved.utf8;
-  }
-
-  auto* runner = s->engine->GetPlatformTaskRunner();
-  auto engine_handle = s->engine->GetFlutterEngine();
-  if (runner && engine_handle) {
-    asio::post(*runner->GetStrandContext(),
-               [engine_handle, ke, ch = std::move(character_owned)]() {
-                 FlutterKeyEvent event = ke;
-                 event.character = ch.empty() ? nullptr : ch.c_str();
-                 LibFlutterEngine->SendKeyEvent(engine_handle, &event, nullptr,
-                                                nullptr);
-               });
-  }
+  // Route through KeyCallback → the platform keyboard-hook handlers
+  // (KeyEventHandler's flutter/keyevent channel + TextInputPlugin), exactly as
+  // the Wayland and software backends do. That is the path the framework
+  // actually consumes for text editing and Tab/arrow/lock keys. The DRM backend
+  // previously used only the embedder SendKeyEvent (HardwareKeyboard) path,
+  // which this app doesn't observe — so non-printable keys were silently
+  // dropped while printable ones happened to round-trip. Going through
+  // KeyCallback makes keyboard behavior identical across all three backends.
+  const uint32_t modifiers = keyboard_ ? keyboard_->Modifiers() : 0;
+  KeyCallback(s, !resolved.pressed, resolved.sym, resolved.key + 8, modifiers);
 }
 
 void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {

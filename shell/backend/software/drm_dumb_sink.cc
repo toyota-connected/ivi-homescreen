@@ -27,6 +27,7 @@
 #include <xf86drmMode.h>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -36,6 +37,7 @@
 #include <asio/post.hpp>
 
 #include "backend/software/pixel_swizzle.h"
+#include "backend/software/software_cursor.h"
 #include "libflutter_engine.h"
 #include "logging.h"
 #include "task_runner.h"
@@ -180,23 +182,72 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   }
   connector_id_ = connector->connector_id;
 
-  // Prefer the kernel-flagged preferred mode if present, else mode 0.
-  drmModeModeInfo mode = connector->modes[0];
+  // Find the kernel-flagged preferred mode (the default pick, as before).
+  int preferred_idx = -1;
   for (int i = 0; i < connector->count_modes; ++i) {
     if ((connector->modes[i].type & DRM_MODE_TYPE_PREFERRED) != 0) {
-      mode = connector->modes[i];
+      preferred_idx = i;
       break;
     }
   }
+  int chosen_idx = preferred_idx >= 0 ? preferred_idx : 0;
+  bool mode_from_env = false;
+
+  // IVI_SW_DRM_MODE="<W>x<H>[@<R>]" selects a specific mode (refresh matched
+  // against drmModeModeInfo::vrefresh in integer Hz when the @<R> is given). No
+  // match → fall back to the preferred mode. Mirrors drm-kms-egl's --drm-mode.
+  if (const char* spec = std::getenv("IVI_SW_DRM_MODE");
+      spec != nullptr && spec[0] != '\0') {
+    unsigned want_w = 0, want_h = 0, want_r = 0;
+    const int n = std::sscanf(spec, "%ux%u@%u", &want_w, &want_h, &want_r);
+    if (n >= 2) {
+      int match = -1;
+      for (int i = 0; i < connector->count_modes; ++i) {
+        const auto& m = connector->modes[i];
+        if (m.hdisplay == want_w && m.vdisplay == want_h &&
+            (n < 3 || static_cast<unsigned>(m.vrefresh) == want_r)) {
+          match = i;
+          break;
+        }
+      }
+      if (match >= 0) {
+        chosen_idx = match;
+        mode_from_env = true;
+      } else {
+        spdlog::warn(
+            "[DrmDumbSink] IVI_SW_DRM_MODE='{}' not found on connector {}; "
+            "using the {} mode",
+            spec, connector->connector_id,
+            preferred_idx >= 0 ? "preferred" : "first");
+      }
+    } else {
+      spdlog::warn(
+          "[DrmDumbSink] IVI_SW_DRM_MODE='{}' is not <W>x<H>[@<R>]; ignoring",
+          spec);
+    }
+  }
+
+  // Mode-list log (mirrors drm-kms-egl --drm-list-modes): the preferred mode is
+  // flagged, the chosen mode gets a trailing '*'. Lets the operator see valid
+  // IVI_SW_DRM_MODE values.
+  for (int i = 0; i < connector->count_modes; ++i) {
+    const auto& m = connector->modes[i];
+    spdlog::info("[DrmDumbSink]   mode[{}] {}x{}@{}Hz{}{}", i, m.hdisplay,
+                 m.vdisplay, m.vrefresh,
+                 i == preferred_idx ? " (preferred)" : "",
+                 i == chosen_idx ? " *" : "");
+  }
+
+  const drmModeModeInfo mode = connector->modes[chosen_idx];
   mode_width_ = mode.hdisplay;
   mode_height_ = mode.vdisplay;
   refresh_rate_hz_ =
       mode.vrefresh > 0 ? static_cast<double>(mode.vrefresh) : 60.0;
   refresh_period_ns_.store(static_cast<uint64_t>(1e9 / refresh_rate_hz_),
                            std::memory_order_release);
-  spdlog::info("[DrmDumbSink] connector={} mode={}x{}@{:.2f}Hz",
+  spdlog::info("[DrmDumbSink] connector={} mode={}x{}@{:.2f}Hz{}",
                connector->connector_id, mode_width_, mode_height_,
-               refresh_rate_hz_);
+               refresh_rate_hz_, mode_from_env ? " (IVI_SW_DRM_MODE)" : "");
 
   // Pick a CRTC: prefer the connector's currently-bound encoder/CRTC
   // to avoid disturbing the existing console binding.
@@ -395,6 +446,12 @@ void DrmDumbSink::OnSize(uint32_t /*width*/, uint32_t /*height*/) {
   // Flutter's view geometry doesn't match. No-op here.
 }
 
+void DrmDumbSink::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+  cursor_ = std::move(cursor);
+  spdlog::debug("[DrmDumbSink] software cursor {}",
+                cursor_ ? "installed" : "cleared");
+}
+
 void DrmDumbSink::SwizzleInto(const size_t buffer_index,
                               const void* allocation,
                               const size_t src_row_bytes,
@@ -498,6 +555,14 @@ bool DrmDumbSink::Present(const void* allocation,
 
   const size_t back = 1 - front_buffer_;
   SwizzleInto(back, allocation, row_bytes, height);
+
+  // Composite the cursor on top of the freshly-packed frame, before the flip.
+  // The whole back buffer was just repacked, so there's nothing to restore.
+  // XRGB8888 only for now (the RGB565 blend is a follow-up).
+  if (cursor_ && format_ == Format::kXRGB8888) {
+    cursor_->BlendXRGB(buffers_[back].map, mode_width_, mode_height_,
+                       buffers_[back].pitch);
+  }
 
   // Schedule the page-flip. flip_pending_ goes high before the
   // ioctl so an out-of-band OnPageFlip can't observe the prior
@@ -705,4 +770,80 @@ void DrmDumbSink::StopVsyncMonitor() {
       flip_pending_.store(false, std::memory_order_release);
     }
   }
+}
+
+namespace {
+
+// List one card's driver + connectors/modes to stdout. Returns 0 on success,
+// non-zero if the device can't be opened or has no DRM resources (e.g. a
+// render-only node with no KMS).
+int ListCardModes(const std::string& device_path) {
+  const int fd = ::open(device_path.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    return 1;  // not present / no permission — silently skipped during a scan
+  }
+  drmModeRes* res = drmModeGetResources(fd);
+  if (res == nullptr) {
+    ::close(fd);  // render node (renderD*) or no KMS — skip
+    return 1;
+  }
+  drmVersion* ver = drmGetVersion(fd);
+  std::printf("%s  driver=%s, %d connector(s):\n", device_path.c_str(),
+              (ver != nullptr && ver->name != nullptr) ? ver->name : "?",
+              res->count_connectors);
+  if (ver != nullptr) {
+    drmFreeVersion(ver);
+  }
+  for (int i = 0; i < res->count_connectors; ++i) {
+    drmModeConnector* c = drmModeGetConnector(fd, res->connectors[i]);
+    if (c == nullptr) {
+      continue;
+    }
+    const bool connected = c->connection == DRM_MODE_CONNECTED;
+    std::printf("  connector %u: %s, %d mode(s)\n", c->connector_id,
+                connected ? "connected" : "disconnected", c->count_modes);
+    for (int m = 0; m < c->count_modes; ++m) {
+      const drmModeModeInfo& mi = c->modes[m];
+      const bool pref = (mi.type & DRM_MODE_TYPE_PREFERRED) != 0;
+      std::printf("    [%d] %ux%u@%uHz%s\n", m, mi.hdisplay, mi.vdisplay,
+                  mi.vrefresh, pref ? "  (preferred)" : "");
+    }
+    drmModeFreeConnector(c);
+  }
+  drmModeFreeResources(res);
+  ::close(fd);
+  return 0;
+}
+
+}  // namespace
+
+int PrintDumbSinkModes(const std::string& device_path) {
+  // An explicit device lists just that card; otherwise scan every
+  // /dev/dri/card* so the operator can see which card to pass to --drm-device
+  // (and which mode to IVI_SW_DRM_MODE) without hard-coding card0.
+  if (!device_path.empty()) {
+    if (ListCardModes(device_path) != 0) {
+      spdlog::error("[DrmDumbSink] {} has no DRM/KMS resources", device_path);
+      return 1;
+    }
+    return 0;
+  }
+  std::printf(
+      "DRM cards (--drm-device /dev/dri/cardN selects one; IVI_SW_DRM_MODE "
+      "picks a mode):\n");
+  int listed = 0;
+  for (int i = 0; i < 16; ++i) {
+    const std::string dev = "/dev/dri/card" + std::to_string(i);
+    if (::access(dev.c_str(), F_OK) != 0) {
+      continue;
+    }
+    if (ListCardModes(dev) == 0) {
+      ++listed;
+    }
+  }
+  if (listed == 0) {
+    spdlog::error("[DrmDumbSink] no KMS-capable /dev/dri/card* found");
+    return 1;
+  }
+  return 0;
 }

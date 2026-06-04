@@ -20,6 +20,8 @@
 
 #include "display/idisplay.h"
 
+class SoftwareCursor;
+
 namespace homescreen {
 class ISeat;
 }  // namespace homescreen
@@ -39,6 +41,20 @@ class SoftwareDisplay final : public IDisplay {
   // (fbdev / drm-dumb) the SoftwareBackend installs a SoftwareSeat so
   // pointer / keyboard events drive Flutter.
   void SetSeat(std::unique_ptr<homescreen::ISeat> seat);
+
+  // Resize the seat's pointer-clamp viewport to the backend's resolved size
+  // (the sink's native mode). Mirrors DrmDisplay::SetViewportSize; called by
+  // FlutterView once the SoftwareBackend has adopted the sink mode, so the
+  // pointer coordinate space matches the framebuffer.
+  void SetViewportSize(int32_t width, int32_t height);
+
+  // Install the shared software cursor (created in app.cc when enabled). Stored
+  // here so it outlives both the seat and the sink, and forwarded to the seat.
+  // FlutterView reads cursor() to hand it to the backend's sink.
+  void SetCursor(std::shared_ptr<SoftwareCursor> cursor);
+  [[nodiscard]] const std::shared_ptr<SoftwareCursor>& cursor() const {
+    return cursor_;
+  }
 
   void StartEvents() override;
   void StopEvents() override;
@@ -75,4 +91,5 @@ class SoftwareDisplay final : public IDisplay {
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
   std::unique_ptr<homescreen::ISeat> seat_;
+  std::shared_ptr<SoftwareCursor> cursor_;
 };

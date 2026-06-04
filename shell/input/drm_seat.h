@@ -24,13 +24,17 @@
 #include <string>
 #include <thread>
 
-#include <drm-cxx/input/key_repeater.hpp>
+// drm::input::Seat (input events + device opening + VT suspend/resume) and the
+// KeyboardEvent / KeyboardLeds data types stay; keyboard translation + repeat
+// now come from the backend-shared input core below.
 #include <drm-cxx/input/keyboard.hpp>
 #include <drm-cxx/input/seat.hpp>
 
 #include <shell/platform/embedder/embedder.h>
 
 #include "input/iseat.h"
+#include "input/key_repeater.h"
+#include "input/xkb_keyboard.h"
 
 namespace homescreen {
 
@@ -129,6 +133,10 @@ class DrmSeat final : public ISeat {
   void HandleEvent(const drm::input::InputEvent& ev);
   void HandleKeyboard(const drm::input::KeyboardEvent& ev);
   void DispatchKeyToFlutter(const drm::input::KeyboardEvent& resolved) const;
+  // Push the keyboard's current Caps/Num/Scroll latch to the physical LEDs.
+  // The Seat only re-applies LEDs on device-add, so this must be called at
+  // startup and whenever a lock key toggles.
+  void SyncKeyboardLeds();
   void HandlePointerMotion(const drm::input::PointerMotionEvent& ev);
   void HandlePointerButton(const drm::input::PointerButtonEvent& ev);
   void HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const;
@@ -152,10 +160,11 @@ class DrmSeat final : public ISeat {
   drm::input::InputDeviceOpener opener_;
 
   std::unique_ptr<drm::input::Seat> seat_;
-  std::unique_ptr<drm::input::Keyboard> keyboard_;
-  // Synthesizes auto-repeat KeyboardEvents for held keys. Absent when
-  // disabled via IVI_DRM_KEY_REPEAT=0 or when KeyRepeater::create fails.
-  std::optional<drm::input::KeyRepeater> repeater_;
+  // Backend-shared keyboard translation + auto-repeat (shell/input/), the same
+  // path SoftwareSeat uses. repeater_ is null when disabled via
+  // IVI_DRM_KEY_REPEAT=0 or when its timerfd can't be created.
+  std::unique_ptr<input::XkbKeyboard> keyboard_;
+  std::unique_ptr<input::KeyRepeater> repeater_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
 
