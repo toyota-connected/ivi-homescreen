@@ -64,6 +64,15 @@ class SoftwareBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
 
+  // Forward the shared software cursor to the sink (the dumb sink composites
+  // it). Called by FlutterView with the SoftwareDisplay-owned cursor. No-op for
+  // headless sinks. (SoftwareCursor is forward-declared via surface_sink.h.)
+  void SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+    if (sink_) {
+      sink_->SetCursor(std::move(cursor));
+    }
+  }
+
   // Vsync wiring is gated on the sink advertising a real vblank source
   // (DRM dumb buffer is the only sink that currently does) AND
   // IVI_SW_VSYNC not being "0". Sinks without a vblank source return

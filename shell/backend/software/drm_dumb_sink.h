@@ -80,6 +80,10 @@ class DrmDumbSink final : public ISurfaceSink {
                size_t row_bytes,
                size_t height) override;
   void OnSize(uint32_t width, uint32_t height) override;
+  // Composited onto each frame in Present (XRGB8888 path), after the swizzle
+  // and before the page flip — no save/restore needed since the whole back
+  // buffer is repacked every frame.
+  void SetCursor(std::shared_ptr<SoftwareCursor> cursor) override;
 
   // ISurfaceSink — vsync wiring.
   [[nodiscard]] bool SupportsVsync() const override { return true; }
@@ -181,6 +185,10 @@ class DrmDumbSink final : public ISurfaceSink {
   std::atomic<TaskRunner*> platform_task_runner_{nullptr};
   // Refresh period as nanoseconds; computed once from the picked mode.
   std::atomic<uint64_t> refresh_period_ns_{16'666'667};
+
+  // Software cursor composited onto each frame (XRGB8888 path); shared with the
+  // seat, which updates its position. Null when the cursor is disabled.
+  std::shared_ptr<SoftwareCursor> cursor_;
 
   // Tear-down latch.
   std::atomic<bool> stopped_{false};

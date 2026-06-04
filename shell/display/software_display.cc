@@ -43,6 +43,13 @@ void SoftwareDisplay::SetViewportSize(const int32_t width,
   }
 }
 
+void SoftwareDisplay::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+  cursor_ = std::move(cursor);
+  if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
+    sw_seat->SetCursor(cursor_);
+  }
+}
+
 void SoftwareDisplay::StartEvents() {
   if (seat_) {
     seat_->Start();

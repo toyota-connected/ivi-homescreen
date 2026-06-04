@@ -92,6 +92,7 @@ if (BUILD_BACKEND_SOFTWARE)
             backend/software/file_sink.cc
             backend/software/sink_factory.cc
             backend/software/software_backend.cc
+            backend/software/software_cursor.cc
             display/software_display.cc
     )
     if (BUILD_SOFTWARE_SINK_DRM)
