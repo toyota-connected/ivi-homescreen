@@ -32,8 +32,18 @@
 //
 // Unrecognized specs log a warn and return NoneSink so the embedder
 // never refuses to start because of a CI typo.
-std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(std::string_view spec);
+//
+// @p drm_device_hint supplies the device for the device-backed sinks
+// (drm-dumb / fbdev) when the spec itself names none — i.e. it lets the
+// --drm-device CLI flag (config.view.drm_device) pick the card instead of the
+// sink probing the first one. An explicit device in the spec
+// (drm-dumb:/dev/dri/cardN) always wins over the hint.
+std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
+    std::string_view spec,
+    std::string_view drm_device_hint = {});
 
 // Convenience: read IVI_SW_SINK from the environment; falls back to
-// "none" when the env var is unset or empty.
-std::unique_ptr<ISurfaceSink> MakeSinkFromEnv();
+// "none" when the env var is unset or empty. @p drm_device_hint is forwarded
+// (the --drm-device value) to select the card for device-backed sinks.
+std::unique_ptr<ISurfaceSink> MakeSinkFromEnv(
+    std::string_view drm_device_hint = {});
