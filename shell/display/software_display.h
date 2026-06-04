@@ -40,6 +40,12 @@ class SoftwareDisplay final : public IDisplay {
   // pointer / keyboard events drive Flutter.
   void SetSeat(std::unique_ptr<homescreen::ISeat> seat);
 
+  // Resize the seat's pointer-clamp viewport to the backend's resolved size
+  // (the sink's native mode). Mirrors DrmDisplay::SetViewportSize; called by
+  // FlutterView once the SoftwareBackend has adopted the sink mode, so the
+  // pointer coordinate space matches the framebuffer.
+  void SetViewportSize(int32_t width, int32_t height);
+
   void StartEvents() override;
   void StopEvents() override;
   [[nodiscard]] int PollEvents() const override { return 0; }

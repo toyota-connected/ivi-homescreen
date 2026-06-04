@@ -57,6 +57,13 @@ class SoftwareBackend final : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
 
+  // Resolved framebuffer extent. Adopted from the sink's NativeSize() (the DRM
+  // mode / fbdev virtual size) when the sink drives a fixed-size display, else
+  // the config view size. FlutterView reads these to drive the engine viewport
+  // + seat coordinate space, mirroring the DRM backends' width()/height().
+  [[nodiscard]] uint32_t width() const { return width_; }
+  [[nodiscard]] uint32_t height() const { return height_; }
+
   // Vsync wiring is gated on the sink advertising a real vblank source
   // (DRM dumb buffer is the only sink that currently does) AND
   // IVI_SW_VSYNC not being "0". Sinks without a vblank source return
@@ -94,7 +101,7 @@ class SoftwareBackend final : public Backend {
 
   // Per-frame cadence profile (IVI_SW_PROFILE=1). CLOCK_MONOTONIC
   // sampled immediately after each successful sink->Present(); the
-  // rasterizer thread is the only writer so no locks. Same bucket
+  // rasterizer thread is the only writer, so no locks. Same bucket
   // thresholds as the wayland_egl / wayland_vulkan profilers
   // (≤17ms / 18-33ms / 34-50ms / 51-100ms / >100ms) so histograms
   // line up across backends. For sinks that have no real vblank
@@ -127,7 +134,7 @@ class SoftwareBackend final : public Backend {
 
   // IVI_SW_STOP_AFTER_FRAMES=N: after N successful presents, raise
   // SIGTERM so the existing shutdown handler exits cleanly. Lets CI
-  // bound runtime by frame count instead of wall-clock. 0 disables.
+  // bound runtime by frame count instead of `wall-clock`. 0 disables.
   // Sampled once at construction; the static check in PresentFrame
   // costs one atomic load on the rasterizer thread when disabled.
   uint64_t stop_after_frames_{0};

@@ -94,6 +94,13 @@ class DrmDumbSink final : public ISurfaceSink {
   [[nodiscard]] uint32_t mode_height() const { return mode_height_; }
   [[nodiscard]] double refresh_rate_hz() const { return refresh_rate_hz_; }
 
+  // The picked connector mode's extent — the SoftwareBackend adopts this as
+  // the engine viewport so Flutter renders at the panel's native resolution.
+  [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>> NativeSize()
+      const override {
+    return std::make_pair(mode_width_, mode_height_);
+  }
+
  private:
   DrmDumbSink();
 
@@ -178,3 +185,10 @@ class DrmDumbSink final : public ISurfaceSink {
   // Tear-down latch.
   std::atomic<bool> stopped_{false};
 };
+
+// Open @p device_path, enumerate every connector's modes (flagging connected /
+// preferred), print to stdout, and return 0 (non-zero on open/query failure).
+// The dumb-sink analogue of PrintDrmModes — backs --drm-list-modes on software
+// builds so valid IVI_SW_DRM_MODE values can be discovered without launching
+// the app onto the display.
+int PrintDumbSinkModes(const std::string& device_path);

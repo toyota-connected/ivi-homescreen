@@ -36,6 +36,21 @@ SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
       height_(initial_height),
       sink_(std::move(sink)) {
   if (sink_) {
+    // Adopt the sink's native extent (the DRM mode / fbdev virtual size) so
+    // Flutter renders at the panel's resolution — the frame fills and centers,
+    // and the seat/cursor share the framebuffer coordinate space — instead of
+    // the config view size, which the swizzle would otherwise crop/letterbox
+    // from the top-left.
+    if (const auto native = sink_->NativeSize();
+        native.has_value() &&
+        (native->first != width_ || native->second != height_)) {
+      spdlog::info(
+          "[SoftwareBackend] adopting sink native mode {}x{} (config was "
+          "{}x{})",
+          native->first, native->second, width_, height_);
+      width_ = native->first;
+      height_ = native->second;
+    }
     sink_->OnSize(width_, height_);
   }
   if (const char* env = std::getenv("IVI_SW_STOP_AFTER_FRAMES");

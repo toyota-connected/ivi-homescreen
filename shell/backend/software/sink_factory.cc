@@ -33,7 +33,9 @@
 #include "backend/software/fbdev_sink.h"
 #endif
 
-std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
+std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
+    const std::string_view spec,
+    const std::string_view drm_device_hint) {
   if (spec.empty() || spec == "none") {
     spdlog::info("[SoftwareBackend] sink: none (frames discarded)");
     return std::make_unique<NoneSink>();
@@ -56,18 +58,18 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
     return std::make_unique<FileSink>(std::move(pattern));
   }
 
-  // drm-dumb:<device>  (device is optional; defaults to /dev/dri/card0)
+  // drm-dumb[:<device>]  — explicit device wins; else the --drm-device hint;
+  // else empty, which makes DrmDumbSink probe the first usable card.
   constexpr std::string_view kDrmPrefix = "drm-dumb:";
   if (spec == "drm-dumb" || spec.rfind(kDrmPrefix, 0) == 0) {
 #if BUILD_SOFTWARE_SINK_DRM
-    const std::string device(spec == "drm-dumb"
-                                 ? std::string_view{}
-                                 : spec.substr(kDrmPrefix.size()));
+    const std::string device(
+        spec == "drm-dumb" ? drm_device_hint : spec.substr(kDrmPrefix.size()));
     auto drm_sink = DrmDumbSink::Create(device);
     if (drm_sink) {
       spdlog::info(
           "[SoftwareBackend] sink: drm-dumb (device='{}', {}x{}@{:.2f}Hz)",
-          device.empty() ? std::string("/dev/dri/card0") : device,
+          device.empty() ? std::string("(probed)") : device,
           drm_sink->mode_width(), drm_sink->mode_height(),
           drm_sink->refresh_rate_hz());
       return drm_sink;
@@ -118,8 +120,10 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(const std::string_view spec) {
   return std::make_unique<NoneSink>();
 }
 
-std::unique_ptr<ISurfaceSink> MakeSinkFromEnv() {
+std::unique_ptr<ISurfaceSink> MakeSinkFromEnv(
+    const std::string_view drm_device_hint) {
   const char* env = std::getenv("IVI_SW_SINK");
-  return MakeSinkFromSpec(env != nullptr ? std::string_view(env)
-                                         : std::string_view{});
+  return MakeSinkFromSpec(
+      env != nullptr ? std::string_view(env) : std::string_view{},
+      drm_device_hint);
 }
