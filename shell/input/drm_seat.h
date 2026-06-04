@@ -133,6 +133,10 @@ class DrmSeat final : public ISeat {
   void HandleEvent(const drm::input::InputEvent& ev);
   void HandleKeyboard(const drm::input::KeyboardEvent& ev);
   void DispatchKeyToFlutter(const drm::input::KeyboardEvent& resolved) const;
+  // Push the keyboard's current Caps/Num/Scroll latch to the physical LEDs.
+  // The Seat only re-applies LEDs on device-add, so this must be called at
+  // startup and whenever a lock key toggles.
+  void SyncKeyboardLeds();
   void HandlePointerMotion(const drm::input::PointerMotionEvent& ev);
   void HandlePointerButton(const drm::input::PointerButtonEvent& ev);
   void HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const;
