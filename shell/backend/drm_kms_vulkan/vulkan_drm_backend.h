@@ -25,6 +25,7 @@
 
 #include "backend/backend.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
+#include "profiling/frame_profile.h"
 
 namespace homescreen {
 class DrmSession;
@@ -134,6 +135,9 @@ class VulkanDrmBackend final : public Backend {
   std::string drm_device_;
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
+  // Unified cadence profiler (IVI_PROFILE / legacy IVI_DRMVK_PROFILE). Written
+  // from the rasterizer thread (PresentLayersImpl) only.
+  profiling::FrameProfile frame_profile_;
   bool enable_validation_ = false;
   // Reused by the session/vsync glue in a later change; held now so Create()'s
   // signature and the FlutterView wiring are stable.

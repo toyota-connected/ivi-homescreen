@@ -27,6 +27,7 @@ add_executable(${PROJECT_NAME}
         libflutter_engine.cc
         main.cc
         main_loop_waker.cc
+        profiling/frame_profile.cc
         timer.cc
         view/flutter_view.cc
         watchdog.cc
