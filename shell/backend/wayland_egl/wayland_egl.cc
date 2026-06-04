@@ -32,6 +32,7 @@
 #include "egl.h"
 #include "engine.h"
 #include "logging.h"
+#include "profiling/frame_profile.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
@@ -131,7 +132,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
     b->RequestPresentationFeedback();
 
     static const bool profile_enabled =
-        std::getenv("IVI_WL_PROFILE") != nullptr;
+        profiling::FrameProfile::Enabled("IVI_WL_PROFILE");
 
     // Decide the swap mechanism (and do the cheap damage bookkeeping) BEFORE
     // timing, so the measured interval reflects only the swap-call block time
@@ -458,7 +459,8 @@ void WaylandEglBackend::on_feedback_presented(
   // 60 presented frames. Both this handler and on_feedback_discarded
   // fire on Display's event_thread_, so a single non-atomic block of
   // counters is safe (no concurrent writer).
-  static const bool profile_enabled = std::getenv("IVI_WL_PROFILE") != nullptr;
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_WL_PROFILE");
   if (profile_enabled) {
     auto& p = self->profile_;
     if (p.last_presented_ns != 0) {
@@ -580,7 +582,8 @@ void WaylandEglBackend::on_feedback_discarded(
   // next commit superseded it, or the surface was occluded). Flutter is
   // still waiting on a baton return either way — use the engine's wall
   // clock as the frame_start_time since we have no real timestamp.
-  static const bool profile_enabled = std::getenv("IVI_WL_PROFILE") != nullptr;
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_WL_PROFILE");
   if (profile_enabled) {
     ++self->profile_.discarded_frames;
   }

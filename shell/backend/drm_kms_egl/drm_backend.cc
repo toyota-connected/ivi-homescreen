@@ -493,6 +493,9 @@ DrmBackend::DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session)
 }
 
 DrmBackend::~DrmBackend() {
+  // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRM_PROFILE ran).
+  frame_profile_.LogSessionSummary("DrmBackend");
+
   // Let any in-flight page flip land so we don't free a BO still being
   // scanned out.
   (void)WaitForPendingFlip();
@@ -1285,6 +1288,14 @@ bool DrmBackend::TextureClearCurrent() {
 }
 
 void DrmBackend::RecordFlipComplete() {
+  // Unified cadence profile is independent of the debug_backend FPS line below:
+  // IVI_PROFILE (or legacy IVI_DRM_PROFILE) drives it without needing -d.
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_DRM_PROFILE");
+  if (profile_enabled) {
+    frame_profile_.Record("DrmBackend", /*ok=*/true,
+                          LibFlutterEngine->GetCurrentTime());
+  }
   if (!cfg_.debug_backend) {
     return;
   }
