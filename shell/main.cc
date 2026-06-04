@@ -30,6 +30,10 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #endif
 
+#if BUILD_BACKEND_SOFTWARE
+#include "backend/software/drm_dumb_sink.h"
+#endif
+
 #if BUILD_CRASH_HANDLER
 #include "crash_handler.h"
 #endif
@@ -81,9 +85,11 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
-#if BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_SOFTWARE
   // Handle --drm-list-modes[=<path>] before the main config parse so the
-  // user doesn't need to supply a bundle path just to inspect modes.
+  // user doesn't need to supply a bundle path just to inspect modes. On
+  // software builds this lists the DRM dumb-sink's modes (the values valid
+  // for IVI_SW_DRM_MODE); on drm-kms-egl it lists the scanout connector's.
   // Device resolution precedence (first match wins):
   //   1. --drm-list-modes=<path> (explicit attached value)
   //   2. --drm-list-modes <path> (next positional, unless it starts with -)
@@ -120,10 +126,17 @@ int main(const int argc, char** argv) {
     }
   }
   if (list_modes_requested) {
+#if BUILD_BACKEND_DRM_KMS_EGL
     if (list_modes_dev.empty()) {
       list_modes_dev = "/dev/dri/card1";
     }
     return PrintDrmModes(list_modes_dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+#else  // BUILD_BACKEND_SOFTWARE
+    // Empty device → PrintDumbSinkModes scans every /dev/dri/card* so the
+    // operator can discover which card to pass to --drm-device.
+    return PrintDumbSinkModes(list_modes_dev) == 0 ? EXIT_SUCCESS
+                                                   : EXIT_FAILURE;
+#endif
   }
 #endif
 

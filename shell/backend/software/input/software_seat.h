@@ -19,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 
 #include <xkbcommon/xkbcommon.h>
@@ -26,6 +27,10 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "input/iseat.h"
+#include "input/key_repeater.h"
+#include "input/xkb_keyboard.h"
+
+class SoftwareCursor;
 
 struct libinput;
 struct libinput_event;
@@ -64,10 +69,18 @@ class SoftwareSeat final : public ISeat {
   // values without an atomic.
   void SetViewport(int32_t width, int32_t height);
 
+  // Install the shared software cursor. On pointer motion the seat updates the
+  // cursor position and schedules a frame, so the cursor tracks the mouse even
+  // when the UI is otherwise idle. Null leaves the cursor unmanaged.
+  void SetCursor(std::shared_ptr<SoftwareCursor> cursor);
+
  private:
+  // Push the current pointer position to the cursor and schedule a frame so the
+  // dumb sink repaints with the cursor at its new spot. No-op without a cursor.
+  void NotifyCursorMoved();
+
   void DispatchLoop();
   void DispatchLibinputEvents();
-  void DispatchRepeatTick();
   void HandleEvent(libinput_event* ev);
   void HandlePointerMotion(libinput_event_pointer* p);
   void HandlePointerMotionAbsolute(libinput_event_pointer* p);
@@ -78,15 +91,6 @@ class SoftwareSeat final : public ISeat {
   void HandleTouchUp(libinput_event_touch* t);
   void HandleTouchMotion(libinput_event_touch* t);
   void HandleTouchCancel(libinput_event_touch* t);
-
-  // Key-repeat helpers. libinput emits a single press event per key;
-  // Flutter text inputs need repeated press events for held keys.
-  // ArmRepeat / DisarmRepeat manage a timerfd polled alongside
-  // libinput's fd; FireRepeat synthesizes the synthetic "press"
-  // event(s) the timer firing represents.
-  void ArmRepeat(uint32_t xkb_scancode, xkb_keysym_t keysym);
-  void DisarmRepeat();
-  void FireRepeat();
 
   // Dispatch a populated FlutterPointerEvent on the platform task
   // runner's strand. Copies the event by value into the lambda.
@@ -111,20 +115,13 @@ class SoftwareSeat final : public ISeat {
   ::udev* udev_{nullptr};
   ::libinput* li_{nullptr};
 
-  // xkb context / keymap / state for keysym translation. Uses the
-  // system default RMLVO (xkbcommon's compiled-in defaults, then
-  // XKB_DEFAULT_* env vars); good enough for the common case.
-  xkb_context* xkb_ctx_{nullptr};
-  xkb_keymap* xkb_keymap_{nullptr};
-  xkb_state* xkb_state_{nullptr};
-
-  // timerfd for key repeat. Polled alongside libinput's fd. Armed on
-  // press of a repeating key, disarmed on release or on press of a
-  // different key. Default delay 500 ms, interval 33 ms (~30 Hz).
-  int repeat_fd_{-1};
-  // Currently-repeating key. 0 = none. xkb scancode = evdev + 8.
-  uint32_t repeat_scancode_{0};
-  xkb_keysym_t repeat_keysym_{XKB_KEY_NoSymbol};
+  // Shared keyboard translation + auto-repeat (input::XkbKeyboard /
+  // input::KeyRepeater in shell/input/), the same path the DRM seats use, so
+  // keyboard behavior is identical across backends. repeater_ may be null if
+  // its timerfd couldn't be created (key repeat then disabled). Both live on,
+  // and are only touched by, the dispatch thread.
+  std::unique_ptr<input::XkbKeyboard> keyboard_;
+  std::unique_ptr<input::KeyRepeater> repeater_;
 
   std::thread thread_;
   std::atomic<bool> stop_{false};
@@ -135,6 +132,11 @@ class SoftwareSeat final : public ISeat {
   double pointer_y_{0.0};
   int64_t button_mask_{0};
   bool pointer_added_{false};
+
+  // Shared software cursor (owned by SoftwareDisplay). Written here on the
+  // dispatch thread; read on the rasterizer thread in DrmDumbSink::Present.
+  // Its position/visibility are atomics, so no extra locking. Null = disabled.
+  std::shared_ptr<SoftwareCursor> cursor_;
 
   // Per-slot multi-touch state. libinput uses slot indices for
   // multi-touch; we mirror the slot directly as Flutter's `device`

@@ -18,6 +18,7 @@
 
 #include <utility>
 
+#include "backend/software/input/software_seat.h"
 #include "input/iseat.h"
 
 SoftwareDisplay::SoftwareDisplay(const int32_t width,
@@ -29,6 +30,24 @@ SoftwareDisplay::~SoftwareDisplay() = default;
 
 void SoftwareDisplay::SetSeat(std::unique_ptr<homescreen::ISeat> seat) {
   seat_ = std::move(seat);
+}
+
+void SoftwareDisplay::SetViewportSize(const int32_t width,
+                                      const int32_t height) {
+  width_ = width;
+  height_ = height;
+  // SetViewport is SoftwareSeat-specific (not on ISeat), so downcast — the
+  // only seat type a SoftwareDisplay ever holds.
+  if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
+    sw_seat->SetViewport(width, height);
+  }
+}
+
+void SoftwareDisplay::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+  cursor_ = std::move(cursor);
+  if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
+    sw_seat->SetCursor(cursor_);
+  }
 }
 
 void SoftwareDisplay::StartEvents() {

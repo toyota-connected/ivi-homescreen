@@ -18,8 +18,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
+#include <utility>
 
 class TaskRunner;
+class SoftwareCursor;
 typedef void (*VsyncCallback)(void*, intptr_t);
 
 // Pluggable output destination for SoftwareBackend's
@@ -29,7 +33,7 @@ typedef void (*VsyncCallback)(void*, intptr_t);
 //
 // All Present() calls fire on Flutter's rasterizer thread. The buffer
 // pointer is only valid for the duration of the call — copy if you
-// need to retain. Pixel format is Skia's kN32_SkColorType:
+// need to retain it. Pixel format is Skia's kN32_SkColorType:
 // little-endian hosts deliver premultiplied BGRA8888 (memory bytes
 // [B, G, R, A]); big-endian hosts deliver RGBA8888. Sinks targeting a
 // named on-wire format should route through `pixel_swizzle.h` so the
@@ -54,7 +58,23 @@ class ISurfaceSink {
   // own framebuffers (fbdev, drm-dumb) use this to (re)allocate.
   virtual void OnSize(uint32_t /*width*/, uint32_t /*height*/) {}
 
-  // True when the sink has a real vblank source it can drive Flutter's
+  // Install the software mouse cursor (shared with the seat, which updates its
+  // position). Device sinks (drm-dumb) composite it onto each frame; the
+  // headless sinks (file/memory/none) inherit this no-op.
+  virtual void SetCursor(std::shared_ptr<SoftwareCursor> /*cursor*/) {}
+
+  // The sink's native output extent (the DRM mode / fbdev virtual size),
+  // when it drives a fixed-size display. The SoftwareBackend adopts this as
+  // the engine viewport + seat coordinate space so Flutter renders at the
+  // panel's native resolution (fills + centers, and the pointer/cursor share
+  // the framebuffer's coordinate space). nullopt for sinks with no inherent
+  // size (file / memory / none).
+  [[nodiscard]] virtual std::optional<std::pair<uint32_t, uint32_t>>
+  NativeSize() const {
+    return std::nullopt;
+  }
+
+  // True, when the sink has a real vblank source, it can drive Flutter's
   // vsync_callback from. SoftwareBackend's GetVsyncCallback() returns
   // a trampoline iff this is true.
   [[nodiscard]] virtual bool SupportsVsync() const { return false; }

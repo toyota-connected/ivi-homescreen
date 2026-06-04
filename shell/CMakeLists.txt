@@ -92,6 +92,7 @@ if (BUILD_BACKEND_SOFTWARE)
             backend/software/file_sink.cc
             backend/software/sink_factory.cc
             backend/software/software_backend.cc
+            backend/software/software_cursor.cc
             display/software_display.cc
     )
     if (BUILD_SOFTWARE_SINK_DRM)
@@ -111,6 +112,19 @@ if (BUILD_BACKEND_SOFTWARE)
         )
         target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::SW_LIBINPUT)
     endif ()
+endif ()
+
+# Shared libinput keyboard core (xkb translation + key-repeat) used by every
+# libinput-backed seat — SoftwareSeat and (DRM) DrmSeat — so keyboard behavior
+# is identical across backends. Depends only on libxkbcommon, which those seats
+# already link. Added once here to avoid duplicate sources in multi-backend
+# builds.
+if (BUILD_SOFTWARE_INPUT_LIBINPUT OR BUILD_BACKEND_DRM_KMS_EGL OR
+    BUILD_BACKEND_DRM_KMS_VULKAN)
+    target_sources(${PROJECT_NAME} PRIVATE
+            input/xkb_keyboard.cc
+            input/key_repeater.cc
+    )
 endif ()
 
 if (BUILD_BACKEND_DRM_KMS_EGL)

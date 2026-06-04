@@ -80,6 +80,10 @@ class DrmDumbSink final : public ISurfaceSink {
                size_t row_bytes,
                size_t height) override;
   void OnSize(uint32_t width, uint32_t height) override;
+  // Composited onto each frame in Present (XRGB8888 path), after the swizzle
+  // and before the page flip — no save/restore needed since the whole back
+  // buffer is repacked every frame.
+  void SetCursor(std::shared_ptr<SoftwareCursor> cursor) override;
 
   // ISurfaceSink — vsync wiring.
   [[nodiscard]] bool SupportsVsync() const override { return true; }
@@ -93,6 +97,13 @@ class DrmDumbSink final : public ISurfaceSink {
   [[nodiscard]] uint32_t mode_width() const { return mode_width_; }
   [[nodiscard]] uint32_t mode_height() const { return mode_height_; }
   [[nodiscard]] double refresh_rate_hz() const { return refresh_rate_hz_; }
+
+  // The picked connector mode's extent — the SoftwareBackend adopts this as
+  // the engine viewport so Flutter renders at the panel's native resolution.
+  [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>> NativeSize()
+      const override {
+    return std::make_pair(mode_width_, mode_height_);
+  }
 
  private:
   DrmDumbSink();
@@ -175,6 +186,17 @@ class DrmDumbSink final : public ISurfaceSink {
   // Refresh period as nanoseconds; computed once from the picked mode.
   std::atomic<uint64_t> refresh_period_ns_{16'666'667};
 
+  // Software cursor composited onto each frame (XRGB8888 path); shared with the
+  // seat, which updates its position. Null when the cursor is disabled.
+  std::shared_ptr<SoftwareCursor> cursor_;
+
   // Tear-down latch.
   std::atomic<bool> stopped_{false};
 };
+
+// Open @p device_path, enumerate every connector's modes (flagging connected /
+// preferred), print to stdout, and return 0 (non-zero on open/query failure).
+// The dumb-sink analogue of PrintDrmModes — backs --drm-list-modes on software
+// builds so valid IVI_SW_DRM_MODE values can be discovered without launching
+// the app onto the display.
+int PrintDumbSinkModes(const std::string& device_path);

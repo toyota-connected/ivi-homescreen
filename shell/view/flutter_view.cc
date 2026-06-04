@@ -33,6 +33,7 @@
 #elif BUILD_BACKEND_SOFTWARE
 #include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
+#include "display/software_display.h"
 #elif BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
 #elif BUILD_BACKEND_WAYLAND_VULKAN
@@ -296,9 +297,13 @@ FlutterView::FlutterView(Configuration::Config config,
     // Sink is picked at startup from IVI_SW_SINK. Default 'none' just
     // discards frames; 'memory' keeps the latest in-process; 'file:
     // <pattern>' writes PAM-format snapshots to disk.
+    // --drm-device (config.view.drm_device) selects the card for the drm-dumb
+    // sink, mirroring drm-kms-egl; empty lets the sink probe the first usable
+    // card. An explicit IVI_SW_SINK=drm-dumb:/dev/dri/cardN still overrides.
     m_backend = std::make_shared<SoftwareBackend>(
         m_config.view.width.value_or(kDefaultViewWidth),
-        m_config.view.height.value_or(kDefaultViewHeight), MakeSinkFromEnv());
+        m_config.view.height.value_or(kDefaultViewHeight),
+        MakeSinkFromEnv(m_config.view.drm_device.value_or(std::string{})));
   }
 #endif
 
@@ -480,12 +485,17 @@ void FlutterView::Initialize() {
   const auto width = static_cast<int32_t>(m_backend->width());
   const auto height = static_cast<int32_t>(m_backend->height());
 #elif BUILD_BACKEND_SOFTWARE
-  // No WaylandWindow + no DRM backend size source — use the config dims
-  // directly.
-  const auto width =
-      static_cast<int32_t>(m_config.view.width.value_or(kDefaultViewWidth));
-  const auto height =
-      static_cast<int32_t>(m_config.view.height.value_or(kDefaultViewHeight));
+  // The SoftwareBackend adopts the sink's native mode (DRM / fbdev) as its
+  // resolved extent; render the engine at that so the frame fills + centers on
+  // the panel instead of being top-left cropped from a config-sized view.
+  // Falls back to the config dims for sinks with no native size (file/memory).
+  auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get());
+  const auto width = static_cast<int32_t>(
+      sw_backend ? sw_backend->width()
+                 : m_config.view.width.value_or(kDefaultViewWidth));
+  const auto height = static_cast<int32_t>(
+      sw_backend ? sw_backend->height()
+                 : m_config.view.height.value_or(kDefaultViewHeight));
 #else
   auto [width, height] = m_wayland_window->GetSize();
 #endif
@@ -524,6 +534,15 @@ void FlutterView::Initialize() {
         static_cast<size_t>(height), static_cast<size_t>(width));
     spdlog::info("[SoftwareBackend] SendWindowMetrics {}x{} result={}", width,
                  height, static_cast<int>(result));
+  }
+  // Match the seat's pointer-clamp viewport to the rendered size so the
+  // pointer (and the software cursor) share the framebuffer coordinate space,
+  // and hand the display's cursor to the sink (which composites it).
+  if (auto* sw_display = dynamic_cast<SoftwareDisplay*>(m_display.get())) {
+    sw_display->SetViewportSize(width, height);
+    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
+      sw_backend->SetCursor(sw_display->cursor());
+    }
   }
 #else
   // Engine events are decoded by surface pointer
