@@ -47,6 +47,7 @@
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
+#include "backend/drm_kms_vulkan/modifier_format.h"
 #include "backend/drm_kms_vulkan/vulkan_backing_store.h"
 #include "logging.h"
 
@@ -70,8 +71,8 @@ constexpr std::array<const char*, 7> kRequiredDeviceExtensions = {
 };
 
 bool HasExt(const std::vector<VkExtensionProperties>& exts, const char* name) {
-  for (const auto& e : exts) {
-    if (std::strcmp(e.extensionName, name) == 0) {
+  for (const auto& [extensionName, specVersion] : exts) {
+    if (std::strcmp(extensionName, name) == 0) {
       return true;
     }
   }
@@ -202,7 +203,7 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
     return slots_.size() - 1;
   }
 
-  void SetReady(size_t slot) noexcept { ready_ = slot; }
+  void SetReady(const size_t slot) noexcept { ready_ = slot; }
   [[nodiscard]] size_t slot_count() const noexcept { return slots_.size(); }
 
   // ── LayerBufferSource — forwarded to the ready slot. ──────────────────────
@@ -247,7 +248,7 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
 // Block until one queued page-flip event drains from the DRM fd, pacing the
 // caller to vblank. Bounded by a timeout so a missed event degrades to a
 // dropped frame instead of a hang.
-void WaitForFlip(int drm_fd, drmEventContext& evctx) {
+void WaitForFlip(const int drm_fd, drmEventContext& evctx) {
   struct pollfd pfd{drm_fd, POLLIN, 0};
   if (::poll(&pfd, 1, 100) > 0 && (pfd.revents & POLLIN) != 0) {
     drmHandleEvent(drm_fd, &evctx);
@@ -257,7 +258,7 @@ void WaitForFlip(int drm_fd, drmEventContext& evctx) {
 }  // namespace
 
 VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
-                                   bool enable_validation,
+                                   const bool enable_validation,
                                    homescreen::DrmSession* session,
                                    std::string mode_spec)
     : drm_device_(std::move(drm_device)),
@@ -279,7 +280,7 @@ VulkanDrmBackend::~VulkanDrmBackend() {
 
 std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const std::string& drm_device,
-    bool enable_validation,
+    const bool enable_validation,
     homescreen::DrmSession* session,
     const std::string& mode_spec) {
   auto backend = std::shared_ptr<VulkanDrmBackend>(
@@ -435,11 +436,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   {
     std::string adv;
     for (auto m : target.plane_modifiers) {
-      adv += fmt::format(" 0x{:016x}", m);
+      adv += " " + drm_kms_vulkan::DescribeModifier(m);
     }
     std::string neg;
     for (auto m : allowed) {
-      neg += fmt::format(" 0x{:016x}", m);
+      neg += " " + drm_kms_vulkan::DescribeModifier(m);
     }
     spdlog::info("[VulkanDrmBackend] plane modifiers advertised:{}", adv);
     spdlog::info("[VulkanDrmBackend] modifiers negotiated:{}", neg);
@@ -485,8 +486,8 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       err = "scanout buffer allocation failed: " + probe_err;
       return false;
     }
-    VkScanoutRing probe_ring;
-    if (!probe_ring.AddSlot(state->device, *probe, state->fourcc)) {
+    if (VkScanoutRing probe_ring;
+        !probe_ring.AddSlot(state->device, *probe, state->fourcc)) {
       err =
           "this GPU/display combination cannot zero-copy scan out the Vulkan "
           "renderer's buffers (KMS framebuffer import failed) — use the GL "
@@ -604,10 +605,10 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
   // longer scanning or about to scan; otherwise grow the ring.
   int slot = -1;
   for (size_t i = 0; i < c.slots.size(); ++i) {
-    const auto& s = c.slots[i];
-    if (!s.engine_owned && static_cast<int>(i) != c.scanning_slot &&
-        static_cast<int>(i) != c.pending_slot && s.store->width() == w &&
-        s.store->height() == h) {
+    if (const auto& [store, engine_owned] = c.slots[i];
+        !engine_owned && static_cast<int>(i) != c.scanning_slot &&
+        static_cast<int>(i) != c.pending_slot && store->width() == w &&
+        store->height() == h) {
       slot = static_cast<int>(i);
       break;
     }
@@ -648,24 +649,24 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
                  c.slots.size(), w, h);
   }
 
-  CompositorState::Slot& s = c.slots[static_cast<size_t>(slot)];
-  s.engine_owned = true;
+  auto& [store, engine_owned] = c.slots[static_cast<size_t>(slot)];
+  engine_owned = true;
   // Hand the engine an image in the layout it renders into. UNDEFINED as the
   // old layout discards the slot's prior contents — the engine fully repaints
   // each frame (avoid_backing_store_cache), so nothing is lost.
   SubmitImageBarrier(device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
-                     ColorBarrier(s.store->image(), VK_IMAGE_LAYOUT_UNDEFINED,
+                     ColorBarrier(store->image(), VK_IMAGE_LAYOUT_UNDEFINED,
                                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0,
                                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 
-  const void* key = s.store.get();
+  const void* key = store.get();
   out->struct_size = sizeof(FlutterBackingStore);
   out->type = kFlutterBackingStoreTypeVulkan;
   out->user_data = const_cast<void*>(key);
   out->vulkan.struct_size = sizeof(FlutterVulkanBackingStore);
-  out->vulkan.image = s.store->flutter_image();
+  out->vulkan.image = store->flutter_image();
   out->vulkan.user_data = const_cast<void*>(key);
   out->vulkan.destruction_callback = [](void*) {};
   return true;
@@ -678,8 +679,8 @@ bool VulkanDrmBackend::CollectBackingStoreImpl(
   }
   // Return the slot to the free pool; its image/framebuffer stay alive for
   // reuse and are released with the whole ring at teardown.
-  auto it = compositor_->key_to_slot.find(store->user_data);
-  if (it != compositor_->key_to_slot.end()) {
+  if (const auto it = compositor_->key_to_slot.find(store->user_data);
+      it != compositor_->key_to_slot.end()) {
     compositor_->slots[it->second].engine_owned = false;
   }
   return true;
@@ -755,8 +756,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   const uint32_t flags =
       c.first_commit ? 0U
                      : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
-  auto report = c.scene->commit(flags);
-  if (!report) {
+  if (auto report = c.scene->commit(flags); !report) {
     spdlog::error("[VulkanDrmBackend] commit: {}", report.error().message());
     return false;
   }
@@ -1001,7 +1001,7 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
     sync2_enable.pNext = &timeline_enable;
   }
 
-  const float priority = 1.0f;
+  constexpr float priority = 1.0f;
   VkDeviceQueueCreateInfo queue_info{};
   queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
   queue_info.queueFamilyIndex = graphics_queue_family_;
