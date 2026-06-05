@@ -34,6 +34,7 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
+#include "profiling/frame_profile.h"
 
 class DrmCompositor;
 class TaskRunner;
@@ -353,6 +354,10 @@ class DrmBackend : public Backend {
   uint64_t flip_submit_ns_{0};
   uint32_t frame_count_{0};
   uint64_t fps_epoch_ns_{0};
+  // Unified cadence profiler (IVI_PROFILE / legacy IVI_DRM_PROFILE),
+  // independent of the debug_backend per-second FPS line above. Written from
+  // the rasterizer thread (PageFlipHandler) only.
+  profiling::FrameProfile frame_profile_;
   void RecordFlipComplete();
 
 #if BUILD_COMPOSITOR
