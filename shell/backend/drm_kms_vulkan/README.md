@@ -63,13 +63,23 @@ can address the render GPU's exported (MMU-mapped, possibly scattered) buffer �
 either because it is the same device, or because the display has its own
 address translation.
 
+All rows below were validated on real hardware. The `Works` rows were confirmed
+with a live run; the `Fails` / `Refuses` rows with `drm_kms_vulkan_probe` and/or
+a live run. The negotiated set is logged decoded (e.g. `AMD(GFX10_RBPLUS
+64K_R_X dcc=1 retile)`) — but note this lists what the plane *can* scan out, not
+what is used: the backing stores are allocated **LINEAR** by default (a tiled,
+non-DCC modifier only for a 90/270 rotation, which amdgpu requires; see
+"Rotation" below). So DCC is advertised but not yet consumed — making it real is
+a follow-on once the negotiated modifier drives allocation in the unrotated path.
+
 | Platform | Render → display | Result |
 | --- | --- | --- |
-| amdgpu (and unified-memory GPUs) | one device, unified memory + IOMMU | **Works** — validated, renders correctly, tear-free |
-| Raspberry Pi 5 | `v3d` (V3D 7.x) → `vc4-drm`, display can address V3D buffers | **Works** — validated, renders correctly, tear-free at 3840×2160 |
+| amdgpu — desktop / iGPU (RADV) | one device, unified memory + IOMMU | **Works** — validated, tear-free; scans out LINEAR (DCC advertised, not yet used) |
+| Steam Deck "Galileo" (Van Gogh, RADV) | RDNA2 APU, unified memory + IOMMU | **Works** — validated **end-to-end** (interactive, LINEAR zero-copy, triple-buffered, 1000+ frames) |
+| Raspberry Pi 5 | `v3d` (V3D 7.x) → `vc4-drm`, display can address V3D buffers | **Works** — validated, tear-free at 3840×2160; scans out `BROADCOM(VC4_T_TILED)` |
 | Raspberry Pi 4 | `v3d` (V3D 4.2) → `vc4-drm`, **no display IOMMU** | **Fails** — `AddFB` EINVAL (see below) |
-| Arduino Uno Q | Turnip Adreno 702 via virtio/gfxstream → `msm_dpu` | **Fails** — device exposes Vulkan 1.0 (engine needs 1.1); virtualized GPU |
-| NanoPC-T6 (rk3588) | Mali-G610 (blob, Vulkan 1.3) → `rockchip-drm` (vop2) | **Refuses** — vop2 rejects the LINEAR import at any resolution; its planes want AFBC, which the LINEAR-only source can't produce |
+| Arduino Uno Q | Adreno 702 via **virtio-gpu / gfxstream** (virtualized) → `msm_dpu` | **Fails** — virtgpu fails resource allocation under DRM master; Vulkan falls back to llvmpipe (see below) |
+| NanoPC-T6 (rk3588) | Mali-G610 (blob, Vulkan 1.3) → `rockchip-drm` (vop2) | **Refuses** — vop2 planes want AFBC (on their Cluster/overlay planes); the Mali-blob Vulkan exports only `LINEAR`, so no common modifier |
 | BeaglePlay (AM625) | PowerVR AXE-1-16M (Mesa `pvr`, Vulkan 1.2) → `tidss` display | **Refuses** — Mesa `pvr` does not implement `VK_EXT_image_drm_format_modifier` (nor `synchronization2`), so there is no modifier image to export for scanout |
 
 ### Unified-memory GPUs (render device == scanout device)
@@ -133,13 +143,39 @@ GBM scanout buffers) is the working path today.
 ### Vulkan version and virtualized GPUs
 
 Independent of scanout, the device must expose **Vulkan 1.1** (the engine's
-Skia backend requires it). Some stacks expose only 1.0 and are rejected at the
-gate. The confirmed example is the **Arduino Uno Q**, whose Adreno 702 is
-driven by a **virtio-gpu / gfxstream** Turnip (the board runs Linux over a
-Qualcomm hypervisor): it reports Vulkan 1.0, so the backend refuses before the
-engine starts. The scanout side there is otherwise fine — the `msm_dpu` display
-has an SMMU and advertises `LINEAR`, so a native ≥1.1 Adreno/Turnip would be
-expected to work.
+Skia backend requires it); stacks that expose only 1.0 are rejected at the gate.
+
+A **virtualized GPU** is a subtler case: it can pass a read-only capability
+check yet fail in the live backend. The confirmed example is the **Arduino
+Uno Q**, whose Adreno 702 is presented through **virtio-gpu / gfxstream** (the
+board runs Linux over a Qualcomm hypervisor). A read-only probe may enumerate a
+capable Turnip device and pass the gate — but once the backend takes **DRM
+master** and the guest tries to allocate GPU resources, virtgpu fails
+(`DRM_IOCTL_VIRTGPU_… Bad file descriptor`, `Failed to create virtgpu
+AddressSpaceStream`) and the Vulkan loader falls back to **llvmpipe** (software),
+which the gate then rejects. The scanout side is otherwise fine — the `msm_dpu`
+display has an SMMU and advertises `LINEAR` — but the virtualized render path
+cannot produce a real scanout buffer under master. Lesson: the read-only gate
+is necessary, not sufficient, on virtualized GPUs — the live master-holding run
+is the decisive test.
+
+## Rotation
+
+`--drm-rotation <0|90|180|270>` rotates the scanout. The CRTC keeps its native
+mode; for 90/270 the **render extent** (Flutter viewport + backing stores) is
+swapped, the buffer is scanned out through the plane's `rotation` property, and
+`drm_kms_vulkan_probe` / `--drm-list-modes` report which planes can rotate.
+
+A 90/270 rotation needs a **tiled, non-DCC** scanout buffer — amdgpu rejects
+both LINEAR and DCC under rotation — so the backend allocates a tiled non-DCC
+modifier (filtered from the negotiated set) for those angles, while 0/180 stay
+LINEAR. If no tiled modifier is available the rotated commit will not succeed
+and the backend says so.
+
+Input-device transforms for a rotated display (touch / pointer / HW-cursor
+sprite remapped to the rotated frame) are a **follow-up** — they are
+per-input-device (a panel can carry a touchscreen *and* trackpads in different
+physical frames), so a single rotation value does not align them all.
 
 ## Running
 

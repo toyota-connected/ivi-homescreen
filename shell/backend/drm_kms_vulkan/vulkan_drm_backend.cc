@@ -22,6 +22,7 @@
 #include "vulkan_drm_backend.h"
 
 #include <drm_fourcc.h>
+#include <drm_mode.h>  // DRM_MODE_ROTATE_*
 
 #include <array>
 #include <cerrno>
@@ -54,6 +55,40 @@
 namespace {
 
 const auto& d = vk::detail::defaultDispatchLoaderDynamic;
+
+// Map a rotation in degrees (validated to 0|90|180|270 at config time) to the
+// KMS plane rotation bitflag. drm-cxx lowers DisplayParams::rotation to the
+// plane's `rotation` property (or software pre-rotation if the plane lacks it).
+uint64_t RotationToDrmFlag(const int degrees) {
+  switch (degrees) {
+    case 90:
+      return DRM_MODE_ROTATE_90;
+    case 180:
+      return DRM_MODE_ROTATE_180;
+    case 270:
+      return DRM_MODE_ROTATE_270;
+    default:
+      return DRM_MODE_ROTATE_0;
+  }
+}
+
+// Whether the display can scan out a buffer with this modifier under a 90/270
+// rotation. amdgpu rejects both LINEAR (the rotated fetch needs a tiled read
+// pattern) and DCC (delta-color compression is incompatible with the rotated
+// read) for 90/270, so keep only tiled, non-DCC modifiers. Non-AMD tiled
+// modifiers are assumed rotatable (the kernel still validates at AddFB/commit).
+bool RotationCompatible(const uint64_t mod) {
+  if (mod == DRM_FORMAT_MOD_LINEAR) {
+    return false;
+  }
+#ifdef AMD_FMT_MOD
+  if (static_cast<uint8_t>(mod >> 56) == DRM_FORMAT_MOD_VENDOR_AMD &&
+      AMD_FMT_MOD_GET(DCC, mod) != 0U) {
+    return false;
+  }
+#endif
+  return true;
+}
 
 // Device extensions required for zero-copy dma-buf scanout and explicit
 // synchronization. The dependencies of VK_EXT_image_drm_format_modifier
@@ -187,15 +222,19 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
       info.pitch = static_cast<uint32_t>(pl.pitch);
       planes.push_back(info);
     }
+    // Import the FB with the buffer's ACTUAL modifier (LINEAR or a tiled AMD
+    // swizzle), not a hard-coded LINEAR — drm-cxx forwards it verbatim to
+    // drmModeAddFB2WithModifiers and the kernel validates the tiling. A tiled
+    // layout is what amdgpu requires to scan out a 90/270-rotated plane.
+    const uint64_t mod = store.modifier();
     auto src = drm::scene::ExternalDmaBufSource::create(
-        dev, store.width(), store.height(), fourcc, DRM_FORMAT_MOD_LINEAR,
-        planes);
+        dev, store.width(), store.height(), fourcc, mod, planes);
     if (!src) {
       spdlog::error(
           "[VulkanDrmBackend] framebuffer import ({}x{} fourcc=0x{:08x} "
           "mod=0x{:016x} planes={} offset={} pitch={}): {}",
-          store.width(), store.height(), fourcc, DRM_FORMAT_MOD_LINEAR,
-          planes.size(), planes.empty() ? 0u : planes[0].offset,
+          store.width(), store.height(), fourcc, mod, planes.size(),
+          planes.empty() ? 0u : planes[0].offset,
           planes.empty() ? 0u : planes[0].pitch, src.error().message());
       return std::nullopt;
     }
@@ -260,9 +299,11 @@ void WaitForFlip(const int drm_fd, drmEventContext& evctx) {
 VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
                                    const bool enable_validation,
                                    homescreen::DrmSession* session,
-                                   std::string mode_spec)
+                                   std::string mode_spec,
+                                   const int rotation)
     : drm_device_(std::move(drm_device)),
       mode_spec_(std::move(mode_spec)),
+      rotation_(rotation),
       enable_validation_(enable_validation),
       session_(session) {}
 
@@ -282,9 +323,10 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const std::string& drm_device,
     const bool enable_validation,
     homescreen::DrmSession* session,
-    const std::string& mode_spec) {
-  auto backend = std::shared_ptr<VulkanDrmBackend>(
-      new VulkanDrmBackend(drm_device, enable_validation, session, mode_spec));
+    const std::string& mode_spec,
+    const int rotation) {
+  auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
+      drm_device, enable_validation, session, mode_spec, rotation));
 
   std::string err;
   if (!backend->BringUp(err)) {
@@ -382,8 +424,21 @@ struct VulkanDrmBackend::CompositorState {
   std::unique_ptr<drm::scene::LayerScene> scene;
   bool have_master = false;
   uint32_t fourcc = 0;
+  // Render extent: the backing-store / Flutter-viewport size. For a 90/270
+  // rotation this is the CRTC mode with width/height swapped (the GPU renders
+  // landscape into a buffer the plane rotates onto a portrait panel).
   uint32_t width = 0;
   uint32_t height = 0;
+  // Scanout extent: the CRTC mode (the plane's dst_rect). Equals width/height
+  // when rotation is 0/180.
+  uint32_t crtc_width = 0;
+  uint32_t crtc_height = 0;
+  // Plane rotation (DRM_MODE_ROTATE_*) applied to the scanned-out buffer.
+  uint64_t rotation = 0;
+  // Modifiers the backing stores allocate against. LINEAR for an unrotated
+  // scanout (simple, universally importable); tiled non-DCC for 90/270 (amdgpu
+  // requires a tiled layout to rotate, and rejects DCC + rotation).
+  std::vector<uint64_t> scanout_modifiers;
 
   // Ring of scanout buffers. The engine cycles through them
   // (avoid_backing_store_cache), rendering into a free slot while KMS scans
@@ -455,8 +510,45 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   (void)state->device.enable_atomic();
   (void)state->device.enable_universal_planes();
   state->fourcc = DRM_FORMAT_XRGB8888;
-  state->width = target.mode_width;
-  state->height = target.mode_height;
+  // The CRTC always scans its native mode; a 90/270 rotation swaps the render
+  // extent (backing stores + Flutter viewport) so the GPU paints landscape into
+  // a buffer the plane rotates onto the portrait panel. 0/180 keep the extents
+  // equal.
+  state->crtc_width = target.mode_width;
+  state->crtc_height = target.mode_height;
+  const bool swap = (rotation_ == 90 || rotation_ == 270);
+  state->width = swap ? target.mode_height : target.mode_width;
+  state->height = swap ? target.mode_width : target.mode_height;
+  state->rotation = RotationToDrmFlag(rotation_);
+
+  // Pick the backing-store modifiers. Unrotated: LINEAR (simple, importable
+  // everywhere). 90/270: a tiled non-DCC modifier from the negotiated set —
+  // amdgpu needs tiling to rotate and rejects DCC + rotation. If the filter
+  // empties (no tiled scanout modifier), fall back to LINEAR so allocation
+  // still succeeds; the rotated commit then fails loudly rather than silently.
+  if (swap) {
+    for (const auto m : allowed) {
+      if (RotationCompatible(m)) {
+        state->scanout_modifiers.push_back(m);
+      }
+    }
+    if (state->scanout_modifiers.empty()) {
+      spdlog::warn(
+          "[VulkanDrmBackend] no tiled non-DCC modifier available for a "
+          "{}-degree rotation; the rotated scanout will not commit",
+          rotation_);
+      state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
+    } else {
+      std::string picked;
+      for (const auto m : state->scanout_modifiers) {
+        picked += " " + drm_kms_vulkan::DescribeModifier(m);
+      }
+      spdlog::info("[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
+                   rotation_, picked);
+    }
+  } else {
+    state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
+  }
 
   drm::scene::LayerScene::Config scfg{};
   scfg.crtc_id = target.crtc_id;
@@ -480,7 +572,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     std::string probe_err;
     auto probe = drm_kms_vulkan::VulkanBackingStore::Create(
         physical_device_, device_, state->width, state->height,
-        VK_FORMAT_B8G8R8A8_UNORM, state->fourcc, {DRM_FORMAT_MOD_LINEAR},
+        VK_FORMAT_B8G8R8A8_UNORM, state->fourcc, state->scanout_modifiers,
         probe_err);
     if (!probe) {
       err = "scanout buffer allocation failed: " + probe_err;
@@ -623,11 +715,13 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
       return false;
     }
     std::string err;
-    // LINEAR is the modifier ExternalDmaBufSource accepts today; tiled is a
-    // follow-on once that wrapper learns multi-plane tiled modifiers.
+    // Allocate against the negotiated modifier set chosen in SetupCompositor:
+    // LINEAR when unrotated, a tiled non-DCC modifier for 90/270. The driver
+    // picks one and exports its per-plane layout; AddSlot imports the FB with
+    // store.modifier() so the tiling is honored end to end.
     auto store = drm_kms_vulkan::VulkanBackingStore::Create(
         physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM, c.fourcc,
-        {DRM_FORMAT_MOD_LINEAR}, err);
+        c.scanout_modifiers, err);
     if (!store) {
       spdlog::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
                     err);
@@ -739,7 +833,11 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     }
     drm::scene::LayerDesc desc;
     desc.source = std::move(c.ring_owner);
-    desc.display.dst_rect = {0, 0, c.width, c.height};
+    // dst_rect is the CRTC mode; src_rect defaults to the buffer's full extent
+    // (the render size). For a 90/270 rotation the render buffer is landscape
+    // and the plane rotates it onto the portrait CRTC, so dst != src extent.
+    desc.display.dst_rect = {0, 0, c.crtc_width, c.crtc_height};
+    desc.display.rotation = c.rotation;
     auto layer = c.scene->add_layer(std::move(desc));
     if (!layer) {
       spdlog::error("[VulkanDrmBackend] add_layer: {}",

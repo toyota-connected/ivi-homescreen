@@ -240,7 +240,7 @@ FlutterView::FlutterView(Configuration::Config config,
     auto vk_backend = VulkanDrmBackend::Create(
         m_config.view.drm_device.value_or("/dev/dri/card1"),
         m_config.debug_backend.value_or(false), drm_display->session(),
-        drm_mode);
+        drm_mode, m_config.view.drm_rotation.value_or(0));
 
     // Create returns nullptr on any init failure (unsupported device, no
     // zero-copy scanout path). Continuing would dereference a null backend in
@@ -309,7 +309,7 @@ FlutterView::FlutterView(Configuration::Config config,
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
                m_config.view.width.value_or(kDefaultViewWidth),
-               m_config.view.height.value_or(kDefaultViewWidth));
+               m_config.view.height.value_or(kDefaultViewHeight));
 
 #if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
     !BUILD_BACKEND_SOFTWARE
@@ -321,7 +321,7 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.wl_output_index.value_or(0), m_config.app_id,
       m_config.view.fullscreen.value_or(false),
       m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewWidth),
+      m_config.view.height.value_or(kDefaultViewHeight),
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_config.view.activation_area_width, m_config.view.activation_area_height,
