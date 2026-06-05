@@ -30,6 +30,11 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #endif
 
+// --drm-list-modes uses the shared PrintDrmModes for both DRM backends.
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+#include "display/drm_mode_list.h"
+#endif
+
 #if BUILD_BACKEND_SOFTWARE
 #include "backend/software/drm_dumb_sink.h"
 #endif
@@ -85,7 +90,8 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>();
 #endif
 
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN || \
+    BUILD_BACKEND_SOFTWARE
   // Handle --drm-list-modes[=<path>] before the main config parse so the
   // user doesn't need to supply a bundle path just to inspect modes. On
   // software builds this lists the DRM dumb-sink's modes (the values valid
@@ -126,7 +132,7 @@ int main(const int argc, char** argv) {
     }
   }
   if (list_modes_requested) {
-#if BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
     if (list_modes_dev.empty()) {
       list_modes_dev = "/dev/dri/card1";
     }
