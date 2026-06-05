@@ -266,6 +266,8 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
       session_(session) {}
 
 VulkanDrmBackend::~VulkanDrmBackend() {
+  // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRMVK_PROFILE ran).
+  frame_profile_.LogSessionSummary("VulkanDrmBackend");
   // Tear the cursor down first: it commits on compositor_'s DRM device, so it
   // must not outlive it.
   cursor_.reset();
@@ -771,6 +773,12 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     spdlog::info(
         "[VulkanDrmBackend] presented frame {} slot {} ({}x{}); ring={}", n,
         slot, store->width(), store->height(), c.slots.size());
+  }
+
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
+  if (profile_enabled) {
+    frame_profile_.Record("VulkanDrmBackend", /*ok=*/true);
   }
   return true;
 }

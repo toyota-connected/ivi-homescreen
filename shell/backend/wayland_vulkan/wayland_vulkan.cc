@@ -28,6 +28,7 @@
 #include "config/common.h"
 #include "engine.h"
 #include "logging.h"
+#include "profiling/frame_profile.h"
 #include "task_runner.h"
 #include "wayland/display.h"
 
@@ -1005,7 +1006,8 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
 void WaylandVulkanBackend::ProfilePresent(const bool ok) {
   // Single env-var probe per process; the lookup is O(strlen) and we
   // call this on every frame.
-  static const bool profile_enabled = std::getenv("IVI_VK_PROFILE") != nullptr;
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_VK_PROFILE");
   if (!profile_enabled) {
     return;
   }
@@ -1254,7 +1256,8 @@ void WaylandVulkanBackend::on_feedback_presented(
   // Profile accumulation: flags_or only. Interval bucketing is owned by
   // ProfilePresent on the rasterizer thread; doing it twice would
   // double-count.
-  static const bool profile_enabled = std::getenv("IVI_VK_PROFILE") != nullptr;
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_VK_PROFILE");
   if (profile_enabled) {
     self->profile_.flags_or |= flags;
   }
@@ -1311,7 +1314,8 @@ void WaylandVulkanBackend::on_feedback_discarded(
   if (self == nullptr) {
     return;
   }
-  static const bool profile_enabled = std::getenv("IVI_VK_PROFILE") != nullptr;
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_VK_PROFILE");
   if (profile_enabled) {
     ++self->profile_.discarded_frames;
   }
