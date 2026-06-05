@@ -211,6 +211,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_vulkan/device_caps.cc
             backend/drm_kms_vulkan/vulkan_backing_store.cc
             backend/drm_kms_vulkan/drm_scanout_target.cc
+            backend/drm_kms_vulkan/modifier_format.cc
             backend/drm_kms_egl/scene_layer_source_vk.cc
             backend/drm_kms_egl/drm_session.cc
             backend/drm_kms_egl/driver_probe.cc
@@ -253,7 +254,14 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_DRM_KMS_VULKAN_PROBE)
     add_executable(drm_kms_vulkan_probe
             backend/drm_kms_vulkan/probe_main.cc
             backend/drm_kms_vulkan/device_caps.cc
+            backend/drm_kms_vulkan/modifier_format.cc
     )
+    # libdrm: the probe reads the primary plane's IN_FORMATS modifiers read-only
+    # to report what layouts the display can scan out. Guarded so the standalone
+    # probe build (BUILD_DRM_KMS_VULKAN_PROBE) finds it too.
+    if (NOT TARGET PkgConfig::DRM)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+    endif ()
     # Use the vendored Vulkan headers directly so the probe is self-contained
     # and cross-builds without a Vulkan SDK in the target sysroot. Only the
     # headers are needed at build time; libvulkan is dlopened at runtime.
@@ -261,7 +269,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_DRM_KMS_VULKAN_PROBE)
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/third_party/Vulkan-Headers/include
     )
-    target_link_libraries(drm_kms_vulkan_probe PRIVATE ${CMAKE_DL_LIBS})
+    target_link_libraries(drm_kms_vulkan_probe PRIVATE ${CMAKE_DL_LIBS} PkgConfig::DRM)
 endif ()
 
 if (ENABLE_DLT)
