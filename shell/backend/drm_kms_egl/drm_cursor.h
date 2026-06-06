@@ -66,12 +66,17 @@ class DrmCursor {
   // suitable plane, drm-cxx built without DRM_CXX_CURSOR, etc.) or
   // when disabled via IVI_DRM_CURSOR=0 — non-fatal: the shell continues
   // without an on-screen cursor.
+  // rotation_degrees (0|90|180|270) rotates the sprite to match a rotated
+  // scanout. The drm-cxx cursor Renderer drives the plane's rotation property
+  // when present, else pre-rotates the pixels + hotspot in software (amdgpu's
+  // cursor plane is rotate-0 only, so it takes the software path).
   static std::unique_ptr<DrmCursor> Create(drm::Device& dev,
                                            uint32_t crtc_id,
                                            uint32_t connector_id,
                                            const drmModeModeInfo& mode,
                                            uint32_t fb_w,
-                                           uint32_t fb_h);
+                                           uint32_t fb_h,
+                                           int rotation_degrees = 0);
 
   DrmCursor(const DrmCursor&) = delete;
   DrmCursor& operator=(const DrmCursor&) = delete;

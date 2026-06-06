@@ -387,10 +387,35 @@ void DrmSeat::FlushCursorMotion() {
   }
   cursor_motion_pending_ = false;
   if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
+    // The pointer lives in render (viewport) space; the cursor plane lives in
+    // panel space. For a 90/270 scanout rotation these differ (axes swapped),
+    // so rotate the position by the scanout amount before placing the sprite.
+    // 0/180 leave the extent unchanged. (Flutter pointer events keep the
+    // un-rotated render coords, so hit-testing stays correct.)
+    const int rx = static_cast<int>(pointer_x_);
+    const int ry = static_cast<int>(pointer_y_);
+    int px = rx;
+    int py = ry;
+    switch (cursor_rotation_) {
+      case 90:
+        px = ry;
+        py = viewport_w_ - 1 - rx;
+        break;
+      case 180:
+        px = viewport_w_ - 1 - rx;
+        py = viewport_h_ - 1 - ry;
+        break;
+      case 270:
+        px = viewport_h_ - 1 - ry;
+        py = rx;
+        break;
+      default:
+        break;
+    }
     // SetPosition records the position for the compositor to stage (staged
     // mode) or self-commits via Move (legacy). Either way, no DRM commit
     // here in staged mode — the compositor owns the cursor plane.
-    c->SetPosition(static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
+    c->SetPosition(px, py);
   }
 }
 
@@ -772,12 +797,53 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
       return;
   }
 
+  // ev.x/ev.y are normalized [0,1) in the device's native orientation. Scale to
+  // the render viewport, applying the INVERSE of the display rotation so a
+  // touch lands under the finger on the rotated image (the cursor uses the
+  // forward rotation; touch is its inverse).
+  const double nx = ev.x;
+  const double ny = ev.y;
+  const auto w = static_cast<double>(viewport_w_);
+  const auto h = static_cast<double>(viewport_h_);
+  double fx = nx * w;
+  double fy = ny * h;
+  switch (cursor_rotation_) {
+    case 90:
+      fx = (1.0 - ny) * w;
+      fy = nx * h;
+      break;
+    case 180:
+      fx = (1.0 - nx) * w;
+      fy = (1.0 - ny) * h;
+      break;
+    case 270:
+      fx = ny * w;
+      fy = (1.0 - nx) * h;
+      break;
+    default:
+      break;
+  }
+
+  // libinput touch-UP/CANCEL carry no coordinates (they default to 0,0, which
+  // the transform maps to a corner and snaps the gesture there — breaking
+  // swipes). Reuse the slot's last down/motion position instead; down/motion
+  // record it.
+  if (phase == kUp || phase == kCancel) {
+    if (const auto it = touch_pos_.find(ev.slot); it != touch_pos_.end()) {
+      fx = it->second.first;
+      fy = it->second.second;
+      touch_pos_.erase(it);
+    }
+  } else {
+    touch_pos_[ev.slot] = {fx, fy};
+  }
+
   FlutterPointerEvent pe{};
   pe.struct_size = sizeof(FlutterPointerEvent);
   pe.phase = phase;
   pe.timestamp = FlutterTimestampMicros();
-  pe.x = ev.x;
-  pe.y = ev.y;
+  pe.x = fx;
+  pe.y = fy;
   pe.device = ev.slot;
   pe.device_kind = kFlutterPointerDeviceKindTouch;
   pe.buttons = 0;
