@@ -54,7 +54,8 @@ class VulkanDrmBackend final : public Backend {
       const std::string& drm_device,
       bool enable_validation,
       homescreen::DrmSession* session,
-      const std::string& mode_spec);
+      const std::string& mode_spec,
+      int rotation);
 
   ~VulkanDrmBackend() override;
 
@@ -80,6 +81,10 @@ class VulkanDrmBackend final : public Backend {
 
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
+  // Scanout rotation in degrees (0|90|180|270). FlutterView forwards it to the
+  // seat so the HW cursor sprite is transformed from render space (where the
+  // pointer lives) into panel space (where the cursor plane lives).
+  [[nodiscard]] int rotation() const { return rotation_; }
   [[nodiscard]] const drm_kms_vulkan::DeviceCaps& caps() const { return caps_; }
 
   // The self-committing DRM HW cursor (null when xcursor/drm-cxx-cursor is
@@ -93,7 +98,8 @@ class VulkanDrmBackend final : public Backend {
   VulkanDrmBackend(std::string drm_device,
                    bool enable_validation,
                    homescreen::DrmSession* session,
-                   std::string mode_spec);
+                   std::string mode_spec,
+                   int rotation);
 
   // Bring-up steps. Each logs and returns false on failure; refusal_reason
   // carries the cause for gate failures.
@@ -135,6 +141,10 @@ class VulkanDrmBackend final : public Backend {
   std::string drm_device_;
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
+  // DRM scanout rotation in degrees (0|90|180|270). 90/270 swap the render /
+  // viewport extent against the CRTC mode; lowered to the plane rotation
+  // property at present time.
+  int rotation_ = 0;
   // Unified cadence profiler (IVI_PROFILE / legacy IVI_DRMVK_PROFILE). Written
   // from the rasterizer thread (PresentLayersImpl) only.
   profiling::FrameProfile frame_profile_;

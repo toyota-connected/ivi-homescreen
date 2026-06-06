@@ -135,6 +135,7 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             backend/drm_kms_egl/driver_probe.cc
             backend/gl_process_resolver.cc
             display/drm_display.cc
+            display/drm_mode_list.cc
             input/drm_seat.cc
     )
     # DRM HW cursor depends on drm-cxx's cursor module, which gates on
@@ -216,6 +217,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_egl/drm_session.cc
             backend/drm_kms_egl/driver_probe.cc
             display/drm_display.cc
+            display/drm_mode_list.cc
             input/drm_seat.cc
     )
     # HW cursor shares drm_kms_egl's drm-cxx-backed cursor (GL-free). Mirror

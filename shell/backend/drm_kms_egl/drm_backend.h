@@ -121,11 +121,8 @@ struct DrmConfig {
   drm_config::TriState async_flip{drm_config::TriState::kAuto};
 };
 
-// Probe-and-print helper: opens `device`, lists every connector's modes
-// (flagging connected vs disconnected, and the preferred mode), prints to
-// stdout. Returns 0 on success, non-zero if the device can't be opened or
-// has no resources. Intended for the --drm-list-modes CLI path.
-int PrintDrmModes(const std::string& device);
+// PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
+// --drm-list-modes path is shared verbatim with the drm_kms_vulkan backend.
 
 class DrmBackend : public Backend {
   friend class DrmCompositor;

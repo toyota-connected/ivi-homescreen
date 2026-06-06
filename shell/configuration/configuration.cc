@@ -223,6 +223,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.view.drm_mode.has_value()) {
     instance.view.drm_mode = cli.view.drm_mode.value();
   }
+  if (cli.view.drm_rotation.has_value()) {
+    instance.view.drm_rotation = cli.view.drm_rotation.value();
+  }
   if (cli.view.drm_compositor.has_value()) {
     instance.view.drm_compositor = cli.view.drm_compositor.value();
   }
@@ -390,8 +393,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             "drm-mode",
             "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
             cxxopts::value<std::string>())(
-            "drm-compositor", "DRM compositor strategy: auto|planes|gl",
-            cxxopts::value<std::string>())(
+            "drm-rotation",
+            "DRM scanout rotation in degrees: 0|90|180|270 (default 0)",
+            cxxopts::value<int>())("drm-compositor",
+                                   "DRM compositor strategy: auto|planes|gl",
+                                   cxxopts::value<std::string>())(
             "drm-modeset", "DRM modeset API: auto|legacy|atomic",
             cxxopts::value<std::string>())(
             "drm-allow-nonblock-modeset",
@@ -561,6 +567,26 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
                 config.view.drm_async_flip);
     pick_string("drm-stage-cursor", "HOMESCREEN_DRM_STAGE_CURSOR",
                 config.view.drm_stage_cursor);
+
+    // drm-rotation is an int (0|90|180|270); CLI wins, then env. Reject any
+    // other value so a typo fails loud instead of silently scanning unrotated.
+    {
+      std::optional<int> rot;
+      if (result.count("drm-rotation")) {
+        rot = result["drm-rotation"].as<int>();
+      } else if (const char* e = std::getenv("HOMESCREEN_DRM_ROTATION");
+                 e && *e) {
+        rot = static_cast<int>(std::strtol(e, nullptr, 10));
+      }
+      if (rot.has_value()) {
+        if (*rot != 0 && *rot != 90 && *rot != 180 && *rot != 270) {
+          spdlog::critical("--drm-rotation must be 0, 90, 180, or 270 (got {})",
+                           *rot);
+          exit(EXIT_FAILURE);
+        }
+        config.view.drm_rotation = *rot;
+      }
+    }
 
     config.view.vm_args.reserve(result.unmatched().size());
     for (const auto& option : result.unmatched()) {

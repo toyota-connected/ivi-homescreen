@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "display/drm_mode_list.h"  // ConnectorTypeName, PrintDrmModes (shared)
 #include "logging/logging.h"
 
 #include <drm_fourcc.h>
@@ -248,93 +249,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   return true;
 }
 
-const char* ConnectorTypeName(uint32_t type) {
-  switch (type) {
-    case DRM_MODE_CONNECTOR_Unknown:
-      return "Unknown";
-    case DRM_MODE_CONNECTOR_VGA:
-      return "VGA";
-    case DRM_MODE_CONNECTOR_DVII:
-      return "DVI-I";
-    case DRM_MODE_CONNECTOR_DVID:
-      return "DVI-D";
-    case DRM_MODE_CONNECTOR_DVIA:
-      return "DVI-A";
-    case DRM_MODE_CONNECTOR_Composite:
-      return "Composite";
-    case DRM_MODE_CONNECTOR_SVIDEO:
-      return "S-Video";
-    case DRM_MODE_CONNECTOR_LVDS:
-      return "LVDS";
-    case DRM_MODE_CONNECTOR_Component:
-      return "Component";
-    case DRM_MODE_CONNECTOR_9PinDIN:
-      return "9PinDIN";
-    case DRM_MODE_CONNECTOR_DisplayPort:
-      return "DP";
-    case DRM_MODE_CONNECTOR_HDMIA:
-      return "HDMI-A";
-    case DRM_MODE_CONNECTOR_HDMIB:
-      return "HDMI-B";
-    case DRM_MODE_CONNECTOR_TV:
-      return "TV";
-    case DRM_MODE_CONNECTOR_eDP:
-      return "eDP";
-    case DRM_MODE_CONNECTOR_VIRTUAL:
-      return "Virtual";
-    case DRM_MODE_CONNECTOR_DSI:
-      return "DSI";
-    case DRM_MODE_CONNECTOR_DPI:
-      return "DPI";
-    case DRM_MODE_CONNECTOR_WRITEBACK:
-      return "Writeback";
-    default:
-      return "?";
-  }
-}
-
 }  // namespace
-
-int PrintDrmModes(const std::string& device) {
-  const int fd = ::open(device.c_str(), O_RDWR | O_CLOEXEC);
-  if (fd < 0) {
-    std::fprintf(stderr, "open(%s): %s\n", device.c_str(),
-                 std::strerror(errno));
-    return 1;
-  }
-  drmModeRes* res = drmModeGetResources(fd);
-  if (!res) {
-    std::fprintf(stderr, "drmModeGetResources(%s): %s\n", device.c_str(),
-                 std::strerror(errno));
-    ::close(fd);
-    return 1;
-  }
-  std::printf("Device: %s\n", device.c_str());
-  std::printf("Connectors: %d\n\n", res->count_connectors);
-  for (int ci = 0; ci < res->count_connectors; ++ci) {
-    drmModeConnector* c = drmModeGetConnector(fd, res->connectors[ci]);
-    if (!c)
-      continue;
-    const char* state = (c->connection == DRM_MODE_CONNECTED) ? "connected"
-                        : (c->connection == DRM_MODE_DISCONNECTED)
-                            ? "disconnected"
-                            : "unknown";
-    std::printf("[%u] %s-%u  %s  modes=%d\n", c->connector_id,
-                ConnectorTypeName(c->connector_type), c->connector_type_id,
-                state, c->count_modes);
-    for (int mi = 0; mi < c->count_modes; ++mi) {
-      const drmModeModeInfo& m = c->modes[mi];
-      const bool preferred = (m.type & DRM_MODE_TYPE_PREFERRED) != 0;
-      std::printf("  %4dx%-4d @ %3dHz  %-20s  %s\n", m.hdisplay, m.vdisplay,
-                  m.vrefresh, m.name, preferred ? "[preferred]" : "");
-    }
-    std::printf("\n");
-    drmModeFreeConnector(c);
-  }
-  drmModeFreeResources(res);
-  ::close(fd);
-  return 0;
-}
 
 std::unique_ptr<DrmBackend> DrmBackend::Create(
     const DrmConfig& cfg,
