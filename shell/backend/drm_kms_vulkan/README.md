@@ -172,10 +172,30 @@ modifier (filtered from the negotiated set) for those angles, while 0/180 stay
 LINEAR. If no tiled modifier is available the rotated commit will not succeed
 and the backend says so.
 
-Input-device transforms for a rotated display (touch / pointer / HW-cursor
-sprite remapped to the rotated frame) are a **follow-up** — they are
-per-input-device (a panel can carry a touchscreen *and* trackpads in different
-physical frames), so a single rotation value does not align them all.
+### Input on a rotated display
+
+Touch and the HW cursor track the rotation automatically: the touchscreen
+position is scaled and inverse-rotated into the render viewport, and the cursor
+sprite + position are rotated to match (amdgpu's cursor plane is rotate-0 only,
+so the sprite is pre-rotated in software).
+
+Relative pointers are **not** rotated by default — an external mouse is
+user-relative, so its motion already matches the screen. A pointer bolted to a
+rotated chassis (a built-in trackpad) can be corrected per device with a
+repeatable flag, matched on the libinput device-name substring (first match
+wins; unmatched devices pass through):
+
+    --input-transform "<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]"
+
+This is handled in the shared DRM seat, so it applies to both DRM backends.
+
+**Steam Deck** (validated at `--drm-rotation 270`): touchscreen, HW cursor, and
+the right trackpad all work. The right trackpad (a relative pointer) needs **no**
+transform (`=0`) — its sensor is aligned to the landscape chassis. The left
+trackpad is scroll / d-pad emulation in the controller's lizard mode (it folds
+into the keyboard/scroll path, not a second pointer), so it is not separately
+addressable through libinput; per-pad control would need the Steam Input /
+hidraw protocol instead.
 
 ## Running
 

@@ -468,6 +468,57 @@ void DrmSeat::SetViewport(const int32_t width, const int32_t height) {
   pointer_y_ = viewport_h_ / 2.0;
 }
 
+void DrmSeat::SetInputTransforms(const std::vector<std::string>& specs) {
+  pointer_transforms_.clear();
+  for (const auto& spec : specs) {
+    const auto eq = spec.rfind('=');
+    if (eq == std::string::npos || eq == 0) {
+      spdlog::warn(
+          "[DrmSeat] --input-transform '{}' ignored "
+          "(expected <name>=<0|90|180|270>[,flip-x][,flip-y])",
+          Sanitize(spec));
+      continue;
+    }
+    PointerTransform t;
+    t.match = spec.substr(0, eq);
+    bool valid = true;
+    const std::string rest = spec.substr(eq + 1);
+    for (size_t start = 0; start <= rest.size();) {
+      const auto comma = rest.find(',', start);
+      const std::string tok =
+          rest.substr(start, comma == std::string::npos ? std::string::npos
+                                                        : comma - start);
+      if (tok == "flip-x") {
+        t.flip_x = true;
+      } else if (tok == "flip-y") {
+        t.flip_y = true;
+      } else if (tok == "0") {
+        t.rotation = 0;
+      } else if (tok == "90") {
+        t.rotation = 90;
+      } else if (tok == "180") {
+        t.rotation = 180;
+      } else if (tok == "270") {
+        t.rotation = 270;
+      } else {
+        spdlog::warn("[DrmSeat] --input-transform '{}': bad token '{}'",
+                     Sanitize(spec), Sanitize(tok));
+        valid = false;
+      }
+      if (comma == std::string::npos) {
+        break;
+      }
+      start = comma + 1;
+    }
+    if (valid) {
+      spdlog::info(
+          "[DrmSeat] input-transform: match='{}' rot={} flip_x={} flip_y={}",
+          Sanitize(t.match), t.rotation, t.flip_x, t.flip_y);
+      pointer_transforms_.push_back(std::move(t));
+    }
+  }
+}
+
 void DrmSeat::OnSessionPaused() {
   pending_session_action_.store(PendingSessionAction::kSuspend,
                                 std::memory_order_release);
@@ -634,10 +685,46 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
     return;
   }
 
+  // Apply a per-device delta transform when the source device matches a
+  // configured rule (e.g. the Steam Deck's right trackpad, whose deltas are in
+  // the rotated chassis frame). Unmatched devices (an external mouse) pass
+  // through. First match wins.
+  double dx = ev.dx;
+  double dy = ev.dy;
+  if (ev.device_name != nullptr && !pointer_transforms_.empty()) {
+    const std::string_view name(ev.device_name);
+    for (const auto& t : pointer_transforms_) {
+      if (name.find(t.match) == std::string_view::npos) {
+        continue;
+      }
+      double rx = dx;
+      double ry = dy;
+      switch (t.rotation) {
+        case 90:
+          rx = -dy;
+          ry = dx;
+          break;
+        case 180:
+          rx = -dx;
+          ry = -dy;
+          break;
+        case 270:
+          rx = dy;
+          ry = -dx;
+          break;
+        default:
+          break;
+      }
+      dx = t.flip_x ? -rx : rx;
+      dy = t.flip_y ? -ry : ry;
+      break;
+    }
+  }
+
   pointer_x_ =
-      std::clamp(pointer_x_ + ev.dx, 0.0, static_cast<double>(viewport_w_ - 1));
+      std::clamp(pointer_x_ + dx, 0.0, static_cast<double>(viewport_w_ - 1));
   pointer_y_ =
-      std::clamp(pointer_y_ + ev.dy, 0.0, static_cast<double>(viewport_h_ - 1));
+      std::clamp(pointer_y_ + dy, 0.0, static_cast<double>(viewport_h_ - 1));
 
   // Defer the cursor commit to FlushCursorMotion (called after the
   // dispatch batch). A blocking atomic cursor flip per libinput event

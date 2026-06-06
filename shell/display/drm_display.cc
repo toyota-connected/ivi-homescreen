@@ -129,3 +129,9 @@ void DrmDisplay::SetCursorRotation(const int32_t degrees) {
     drm_seat->SetCursorRotation(degrees);
   }
 }
+
+void DrmDisplay::SetInputTransforms(const std::vector<std::string>& specs) {
+  if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+    drm_seat->SetInputTransforms(specs);
+  }
+}

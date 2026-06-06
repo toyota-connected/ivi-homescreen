@@ -80,6 +80,12 @@ class Configuration {
       std::optional<std::string> drm_explicit_sync;
       std::optional<std::string> drm_async_flip;
       std::optional<std::string> drm_stage_cursor;
+      // Per-device relative-pointer transforms, repeatable:
+      //   "<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]"
+      // Rotates a built-in pointer's deltas to a rotated display (e.g. the
+      // Steam Deck's right trackpad) while leaving an external mouse alone.
+      // Matched by libinput device-name substring; first match wins.
+      std::vector<std::string> drm_input_transforms;
     } view;
   };
 

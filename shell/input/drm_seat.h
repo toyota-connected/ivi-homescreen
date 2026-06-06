@@ -25,6 +25,7 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 // drm::input::Seat (input events + device opening + VT suspend/resume) and the
 // KeyboardEvent / KeyboardLeds data types stay; keyboard translation + repeat
@@ -130,6 +131,14 @@ class DrmSeat final : public ISeat {
   // unaffected (the digitizer already tracks the panel). Set before Start().
   void SetCursorRotation(int32_t degrees) { cursor_rotation_ = degrees; }
 
+  // Per-device relative-pointer transforms. Each spec is
+  // "<device-name-substring>=<rot>[,flip-x][,flip-y]" (rot = 0|90|180|270). A
+  // pointer bolted to a rotated chassis (e.g. the Steam Deck's right trackpad)
+  // emits deltas in the panel's physical frame; this rotates/reflects them to
+  // match the rotated display, leaving unmatched devices (an external mouse)
+  // alone. Set before Start().
+  void SetInputTransforms(const std::vector<std::string>& specs);
+
  private:
   void DispatchLoop();
   void ApplyPendingKeymap();
@@ -162,6 +171,15 @@ class DrmSeat final : public ISeat {
   int32_t viewport_h_;
   // Scanout rotation (0|90|180|270) applied to the cursor sprite position only.
   int32_t cursor_rotation_ = 0;
+  // Per-device relative-pointer delta transforms (see SetInputTransforms).
+  // Matched by device-name substring in HandlePointerMotion; first match wins.
+  struct PointerTransform {
+    std::string match;
+    int rotation = 0;  // 0|90|180|270 applied to (dx, dy)
+    bool flip_x = false;
+    bool flip_y = false;
+  };
+  std::vector<PointerTransform> pointer_transforms_;
   // Last transformed render position per touch slot, so a touch-UP (which
   // libinput delivers with no coordinates) reuses it instead of snapping to a
   // corner. Touched only from the seat dispatch thread (HandleTouch is const).
