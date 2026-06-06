@@ -68,6 +68,10 @@ class Configuration {
       // unrecognized is treated as "auto" with a warning.
       std::optional<std::string> drm_connector;
       std::optional<std::string> drm_mode;
+      // DRM scanout rotation in degrees: 0 | 90 | 180 | 270. 90/270 swap the
+      // Flutter viewport to the rotated extent and set the plane's rotation
+      // property (the panel keeps its native mode). Default 0.
+      std::optional<int> drm_rotation;
       std::optional<std::string> drm_compositor;
       std::optional<std::string> drm_modeset;
       std::optional<std::string> drm_allow_nonblock_modeset;
