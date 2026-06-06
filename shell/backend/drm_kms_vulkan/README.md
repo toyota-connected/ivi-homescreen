@@ -75,7 +75,7 @@ a follow-on once the negotiated modifier drives allocation in the unrotated path
 | Platform | Render → display | Result |
 | --- | --- | --- |
 | amdgpu — desktop / iGPU (RADV) | one device, unified memory + IOMMU | **Works** — validated, tear-free; scans out LINEAR (DCC advertised, not yet used) |
-| Steam Deck "Galileo" (Van Gogh, RADV) | RDNA2 APU, unified memory + IOMMU | **Works** — validated **end-to-end** (interactive, LINEAR zero-copy, triple-buffered, 1000+ frames) |
+| Steam Deck "Galileo" (Van Gogh, RADV) | RDNA2 APU, unified memory + IOMMU | **Works** — validated **end-to-end** (interactive, LINEAR zero-copy, triple-buffered, 1000+ frames). **Rotation** validated at `--drm-rotation 270` (upright landscape, tiled non-DCC scanout) with touchscreen, HW cursor, and trackpad input remapped (see "Rotation" / "Input on a rotated display") |
 | Raspberry Pi 5 | `v3d` (V3D 7.x) → `vc4-drm`, display can address V3D buffers | **Works** — validated, tear-free at 3840×2160; scans out `BROADCOM(VC4_T_TILED)` |
 | Raspberry Pi 4 | `v3d` (V3D 4.2) → `vc4-drm`, **no display IOMMU** | **Fails** — `AddFB` EINVAL (see below) |
 | Arduino Uno Q | Adreno 702 via **virtio-gpu / gfxstream** (virtualized) → `msm_dpu` | **Fails** — virtgpu fails resource allocation under DRM master; Vulkan falls back to llvmpipe (see below) |
