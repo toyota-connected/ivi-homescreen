@@ -23,6 +23,8 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <utility>
 
 // drm::input::Seat (input events + device opening + VT suspend/resume) and the
 // KeyboardEvent / KeyboardLeds data types stay; keyboard translation + repeat
@@ -121,6 +123,13 @@ class DrmSeat final : public ISeat {
   // dispatch thread's pointer math reads these once on the hot path.
   void SetViewport(int32_t width, int32_t height);
 
+  // Scanout rotation in degrees (0|90|180|270). The pointer accumulates in
+  // render (viewport) space — where Flutter hit-tests, so events stay correct
+  // — but the HW cursor plane lives in panel space, so FlushCursorMotion
+  // rotates the position by this amount before placing the sprite. Touch is
+  // unaffected (the digitizer already tracks the panel). Set before Start().
+  void SetCursorRotation(int32_t degrees) { cursor_rotation_ = degrees; }
+
  private:
   void DispatchLoop();
   void ApplyPendingKeymap();
@@ -151,6 +160,12 @@ class DrmSeat final : public ISeat {
   // Start() is called, so no atomic needed.
   int32_t viewport_w_;
   int32_t viewport_h_;
+  // Scanout rotation (0|90|180|270) applied to the cursor sprite position only.
+  int32_t cursor_rotation_ = 0;
+  // Last transformed render position per touch slot, so a touch-UP (which
+  // libinput delivers with no coordinates) reuses it instead of snapping to a
+  // corner. Touched only from the seat dispatch thread (HandleTouch is const).
+  mutable std::unordered_map<int32_t, std::pair<double, double>> touch_pos_;
 
   std::atomic<FlutterDesktopViewControllerState*> state_{nullptr};
 

@@ -135,7 +135,8 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
                                              const uint32_t connector_id,
                                              const drmModeModeInfo& mode,
                                              const uint32_t fb_w,
-                                             const uint32_t fb_h) {
+                                             const uint32_t fb_h,
+                                             const int rotation_degrees) {
   if (const char* gate = std::getenv("IVI_DRM_CURSOR");
       gate != nullptr && std::string_view(gate) == "0") {
     spdlog::info("[DrmCursor] disabled via IVI_DRM_CURSOR=0");
@@ -170,6 +171,23 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
   drm::cursor::RendererConfig rcfg;
   rcfg.crtc_id = crtc_id;
   rcfg.preferred_size = sizing.buffer;
+  // drm-cxx's cursor Rotation runs opposite to the primary plane's
+  // DRM_MODE_ROTATE_* (k270 on a 270 raster points the sprite "down"), so apply
+  // the inverse here to keep the sprite visually aligned with the content.
+  switch (rotation_degrees) {
+    case 90:
+      rcfg.rotation = drm::cursor::Rotation::k270;
+      break;
+    case 180:
+      rcfg.rotation = drm::cursor::Rotation::k180;
+      break;
+    case 270:
+      rcfg.rotation = drm::cursor::Rotation::k90;
+      break;
+    default:
+      rcfg.rotation = drm::cursor::Rotation::k0;
+      break;
+  }
   auto renderer = drm::cursor::Renderer::create(dev, rcfg);
   if (!renderer) {
     spdlog::warn("[DrmCursor] renderer create: {}; no cursor sprite",

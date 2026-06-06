@@ -635,9 +635,13 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // non-fatal — the shell runs without an on-screen sprite. Built on
   // compositor_'s DRM device (master held above), so it lives in cursor_ and is
   // torn down before compositor_.
-  cursor_ = homescreen::DrmCursor::Create(compositor_->device, target.crtc_id,
-                                          target.connector_id, target.mode,
-                                          width_, height_);
+  // The cursor plane lives on the CRTC, so its bounds are the panel (mode)
+  // size, not the (possibly rotation-swapped) render size. The seat transforms
+  // pointer positions from render space into this panel space before placing
+  // the sprite.
+  cursor_ = homescreen::DrmCursor::Create(
+      compositor_->device, target.crtc_id, target.connector_id, target.mode,
+      target.mode_width, target.mode_height, rotation_);
   if (!cursor_) {
     spdlog::info("[VulkanDrmBackend] no HW cursor (disabled or unavailable)");
   }

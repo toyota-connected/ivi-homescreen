@@ -53,6 +53,10 @@ class DrmDisplay final : public IDisplay {
   // DrmCursor it owns).
   void SetCursor(homescreen::DrmCursor* cursor);
 
+  // Forward the scanout rotation to the seat so the HW cursor sprite is
+  // transformed from render space into panel space (0|90|180|270).
+  void SetCursorRotation(int32_t degrees);
+
   // Update the seat's cursor clamping rectangle to match the actual
   // backend framebuffer size. App::MakeDisplay constructs DrmDisplay
   // with the config's view.width/height (defaults 1024x768) — but
