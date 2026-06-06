@@ -226,6 +226,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.view.drm_rotation.has_value()) {
     instance.view.drm_rotation = cli.view.drm_rotation.value();
   }
+  if (!cli.view.drm_input_transforms.empty()) {
+    instance.view.drm_input_transforms = cli.view.drm_input_transforms;
+  }
   if (cli.view.drm_compositor.has_value()) {
     instance.view.drm_compositor = cli.view.drm_compositor.value();
   }
@@ -417,7 +420,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>())(
             "drm-stage-cursor",
             "Stage the HW cursor into the compositor commit: auto|yes|no",
-            cxxopts::value<std::string>());
+            cxxopts::value<std::string>())(
+            "input-transform",
+            "Per-device pointer transform (repeatable): "
+            "\"<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]\"",
+            cxxopts::value<std::vector<std::string>>());
 
     const auto result = allocated->parse(argc, argv);
 
@@ -586,6 +593,13 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         }
         config.view.drm_rotation = *rot;
       }
+    }
+
+    // Per-device pointer transforms (repeatable). Validated downstream in
+    // DrmSeat::SetInputTransforms, which warns + skips malformed specs.
+    if (result.count("input-transform")) {
+      config.view.drm_input_transforms =
+          result["input-transform"].as<std::vector<std::string>>();
     }
 
     config.view.vm_args.reserve(result.unmatched().size());

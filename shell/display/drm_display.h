@@ -17,6 +17,8 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "display/idisplay.h"
 #include "input/iseat.h"
@@ -56,6 +58,10 @@ class DrmDisplay final : public IDisplay {
   // Forward the scanout rotation to the seat so the HW cursor sprite is
   // transformed from render space into panel space (0|90|180|270).
   void SetCursorRotation(int32_t degrees);
+
+  // Forward per-device relative-pointer transforms to the seat
+  // ("<name>=<rot>[,flip-x][,flip-y]"; see DrmSeat::SetInputTransforms).
+  void SetInputTransforms(const std::vector<std::string>& specs);
 
   // Update the seat's cursor clamping rectangle to match the actual
   // backend framebuffer size. App::MakeDisplay constructs DrmDisplay
