@@ -262,6 +262,7 @@ FlutterView::FlutterView(Configuration::Config config,
                                  static_cast<int32_t>(vk_backend->height()));
     drm_display->SetCursor(vk_backend->drm_cursor());
     drm_display->SetCursorRotation(vk_backend->rotation());
+    drm_display->SetInputTransforms(m_config.view.drm_input_transforms);
     m_backend = vk_backend;
   }
 #elif BUILD_BACKEND_WAYLAND_EGL
