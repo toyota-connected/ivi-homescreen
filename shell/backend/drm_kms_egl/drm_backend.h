@@ -41,6 +41,8 @@ class TaskRunner;
 namespace homescreen {
 class DrmCapture;
 class DrmCursor;
+class GlCursor;
+class ICursorPositionSink;
 class DrmSession;
 }  // namespace homescreen
 
@@ -360,15 +362,29 @@ class DrmBackend : public Backend {
 #if BUILD_COMPOSITOR
   std::unique_ptr<DrmCompositor> compositor_{};
 #endif
+#if HAVE_DRM_CURSOR
   std::unique_ptr<homescreen::DrmCursor> cursor_{};
+#endif
+  // Composited cursor fallback, created only when no HW cursor plane is
+  // available (this display controller has none) and the cursor isn't
+  // disabled. Drawn into FBO 0 each Present.
+  std::unique_ptr<homescreen::GlCursor> gl_cursor_{};
 #if HAVE_DRM_CAPTURE
   std::unique_ptr<homescreen::DrmCapture> capture_;
 #endif
 
  public:
   [[nodiscard]] homescreen::DrmCursor* drm_cursor() const {
+#if HAVE_DRM_CURSOR
     return cursor_.get();
+#else
+    return nullptr;
+#endif
   }
+
+  // The composited cursor sink (nullptr when a HW cursor is in use or the
+  // cursor is disabled). Defined out-of-line where GlCursor is complete.
+  [[nodiscard]] homescreen::ICursorPositionSink* gl_cursor() const;
 
   // Called once per frame from both Present() (GL fallback) and
   // DrmCompositor::PresentLayers (plane path). Always defined so call
