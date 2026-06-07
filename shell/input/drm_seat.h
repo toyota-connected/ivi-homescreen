@@ -35,6 +35,7 @@
 
 #include <shell/platform/embedder/embedder.h>
 
+#include "input/cursor_position_sink.h"
 #include "input/iseat.h"
 #include "input/key_repeater.h"
 #include "input/xkb_keyboard.h"
@@ -83,6 +84,15 @@ class DrmSeat final : public ISeat {
   // pointed-to DrmCursor is destroyed.
   void SetCursor(DrmCursor* cursor) {
     cursor_.store(cursor, std::memory_order_release);
+  }
+
+  // Set (or clear) a composited cursor sink (the EGL backend's GlCursor), used
+  // when no hardware cursor plane is available. Safe to call from any thread;
+  // the dispatch loop reads via acquire and ignores nullptr. The sink receives
+  // un-rotated render/viewport coordinates (it composites into the render
+  // target; scanout rotation is applied to the whole framebuffer downstream).
+  void SetGlCursor(ICursorPositionSink* sink) {
+    gl_cursor_.store(sink, std::memory_order_release);
   }
 
   // Hot-swap the xkb keymap. Safe to call from any thread; the actual
@@ -246,6 +256,11 @@ class DrmSeat final : public ISeat {
   // forwards motion to it. Atomic because the wiring runs on a
   // different thread than the dispatch loop that reads it.
   std::atomic<DrmCursor*> cursor_{nullptr};
+
+  // Composited cursor fallback (the EGL backend's GlCursor), used when there
+  // is no hardware cursor plane. Owned by the backend; this seat forwards
+  // motion to it. Null whenever a HW cursor is in use or no cursor at all.
+  std::atomic<ICursorPositionSink*> gl_cursor_{nullptr};
 };
 
 }  // namespace homescreen

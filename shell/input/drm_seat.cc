@@ -386,14 +386,33 @@ void DrmSeat::FlushCursorMotion() {
     return;
   }
   cursor_motion_pending_ = false;
+
+  const int rx = static_cast<int>(pointer_x_);
+  const int ry = static_cast<int>(pointer_y_);
+
+  // The GL-composited cursor (fallback for no HW cursor plane) draws into the
+  // render target, so it takes un-rotated render/viewport coordinates — the
+  // display applies any scanout rotation to the whole framebuffer downstream.
+  if (auto* g = gl_cursor_.load(std::memory_order_acquire); g != nullptr) {
+    g->SetPosition(rx, ry);
+    // The composited cursor only repaints on a presented frame, and Flutter
+    // presents only dirty frames — so on an idle UI the cursor would freeze
+    // between the vsync-paced frames the app happens to produce. Nudge the
+    // engine to render so the cursor tracks the pointer. ScheduleFrame is
+    // thread-safe and coalesces to one frame per vsync. (A HW cursor plane,
+    // when present, self-commits and needs no frame — hence composited-only.)
+    if (const auto engine = CurrentEngine(); engine != nullptr) {
+      LibFlutterEngine->ScheduleFrame(engine);
+    }
+  }
+
+#if HAVE_DRM_CURSOR
   if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
-    // The pointer lives in render (viewport) space; the cursor plane lives in
-    // panel space. For a 90/270 scanout rotation these differ (axes swapped),
-    // so rotate the position by the scanout amount before placing the sprite.
-    // 0/180 leave the extent unchanged. (Flutter pointer events keep the
-    // un-rotated render coords, so hit-testing stays correct.)
-    const int rx = static_cast<int>(pointer_x_);
-    const int ry = static_cast<int>(pointer_y_);
+    // The HW cursor plane lives in panel space. For a 90/270 scanout rotation
+    // that differs from render space (axes swapped), so rotate the position by
+    // the scanout amount before placing the sprite. 0/180 leave the extent
+    // unchanged. (Flutter pointer events keep the un-rotated render coords, so
+    // hit-testing stays correct.)
     int px = rx;
     int py = ry;
     switch (cursor_rotation_) {
@@ -417,6 +436,7 @@ void DrmSeat::FlushCursorMotion() {
     // here in staged mode — the compositor owns the cursor plane.
     c->SetPosition(px, py);
   }
+#endif
 }
 
 void DrmSeat::HandleEvent(const drm::input::InputEvent& ev) {
