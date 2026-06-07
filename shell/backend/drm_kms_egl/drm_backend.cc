@@ -1594,10 +1594,7 @@ void DrmBackend::StopVsyncMonitor() {
       pollfd pfd{drm_dev_->fd(), POLLIN, 0};
       const int rc = ::poll(&pfd, 1, kPollSliceMs);
       if (rc > 0 && (pfd.revents & POLLIN)) {
-        drmEventContext ctx{};
-        ctx.version = 2;
-        ctx.page_flip_handler = &DrmBackend::UnifiedPageFlipHandler;
-        drmHandleEvent(drm_dev_->fd(), &ctx);
+        DrainFlipEvents();
       } else if (rc < 0 && errno != EINTR) {
         break;
       }
@@ -1634,41 +1631,88 @@ void DrmBackend::ArmFlipRead() {
         if (!drm_dev_.has_value()) {
           return;
         }
-        drmEventContext ctx{};
-        ctx.version = 2;
-        ctx.page_flip_handler = &DrmBackend::UnifiedPageFlipHandler;
-        drmHandleEvent(drm_dev_->fd(), &ctx);
+        DrainFlipEvents();
         ArmFlipRead();  // re-arm for the next vblank
       });
 }
 
+void DrmBackend::DrainFlipEvents() const {
+  if (!drm_dev_.has_value()) {
+    return;
+  }
+  // poll(0) + read together under the lock so the read can never block: only
+  // one thread observes POLLIN-then-consumes a given event; a loser's poll(0)
+  // afterwards shows nothing readable and it no-ops. Read-only pollers (the
+  // WaitForPendingFlip diagnostic) need no lock — poll() concurrent with
+  // another thread's read() is safe.
+  const std::lock_guard<std::mutex> lock(drm_event_mutex_);
+  pollfd pfd{drm_dev_->fd(), POLLIN, 0};
+  if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+    drmEventContext ctx{};
+    ctx.version = 2;
+    ctx.page_flip_handler = &DrmBackend::UnifiedPageFlipHandler;
+    drmHandleEvent(drm_dev_->fd(), &ctx);
+  }
+}
+
 bool DrmBackend::WaitForPendingFlip() const {
-  // The asio flip monitor (StartFlipMonitor) drains PAGE_FLIP_EVENTs
-  // on the platform task runner thread and clears flip_pending_ via
-  // UnifiedPageFlipHandler → OnLegacyFlipComplete. We just wait for
-  // it. Short sleep so a 60 Hz frame's ~16ms window has plenty of
-  // resolution but we don't burn the rasterizer CPU.
   using namespace std::chrono_literals;
-  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go
-  // undelivered, and at teardown the asio monitor that would drain it
-  // is already gone — an unbounded loop then spins forever in
-  // hrtimer_nanosleep, hanging Present and (fatally) ~DrmBackend so the
-  // process never exits on SIGTERM. Cap the wait and proceed; a healthy
-  // 60Hz flip clears in ~16ms so this never fires in normal operation.
-  // Same budget as StopVsyncMonitor's drain.
+  // Opt-in (default off). The asio flip monitor normally drains
+  // PAGE_FLIP_EVENTs on the platform task runner thread; when that thread is
+  // starved (CPU governor downclock, Dart GC), the rasterizer here would sleep
+  // out the whole 100ms deadline even though the event already arrived. With
+  // IVI_DRM_RASTER_DRAIN=1 the rasterizer drains the fd itself instead. Off by
+  // default so behavior on validated platforms is byte-for-byte unchanged; the
+  // diagnostic below reports when turning it on would help.
+  static const bool raster_drain = []() {
+    const char* env = std::getenv("IVI_DRM_RASTER_DRAIN");
+    return env != nullptr && std::string_view(env) == "1";
+  }();
+  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go undelivered,
+  // and at teardown the asio monitor that would drain it is already gone — an
+  // unbounded loop then spins forever in hrtimer_nanosleep, hanging Present and
+  // (fatally) ~DrmBackend so the process never exits on SIGTERM. Cap the wait
+  // and proceed; a healthy 60Hz flip clears in ~16ms.
   constexpr auto kFlipWaitTimeout = 100ms;
   const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
     if (!drm_dev_) {
       return true;
     }
+    if (raster_drain) {
+      // Fetch the completion ourselves rather than waiting on the (possibly
+      // starved) platform thread.
+      DrainFlipEvents();
+      if (!flip_pending_.load(std::memory_order_acquire)) {
+        break;
+      }
+    }
     if (std::chrono::steady_clock::now() >= deadline) {
+      if (!raster_drain) {
+        // Read-only probe: is the completion event sitting readable but
+        // undrained? If so the platform-thread monitor was starved and
+        // IVI_DRM_RASTER_DRAIN=1 would fix it — distinct from a genuinely late
+        // flip (driver / no vblank), where it would not. poll(0) doesn't
+        // read(), so it neither consumes the event nor races the monitor.
+        pollfd pfd{drm_dev_->fd(), POLLIN, 0};
+        if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN) &&
+            flip_pending_.load(std::memory_order_acquire)) {
+          static std::once_flag once;
+          std::call_once(once, []() {
+            spdlog::warn(
+                "[DrmBackend] page-flip event was readable but undrained at "
+                "the 100ms deadline — the flip monitor thread is being starved "
+                "(CPU governor / load). Set IVI_DRM_RASTER_DRAIN=1 to drain it "
+                "on the rasterizer thread.");
+          });
+        }
+      }
       spdlog::warn(
           "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
           "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
-    std::this_thread::sleep_for(500us);
+    std::this_thread::sleep_for(raster_drain ? 200us : 500us);
   }
   return true;
 }
