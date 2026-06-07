@@ -50,6 +50,7 @@
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/drm_session.h"
+#include "backend/drm_kms_egl/gl_cursor.h"
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
 #include "logging.h"
@@ -341,6 +342,24 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   }
 #endif
 #endif
+
+  // GL-composited cursor fallback: drawn into FBO 0 each Present, used when no
+  // hardware cursor plane is active (HAVE_DRM_CURSOR off, no cursor plane, no
+  // XCursor theme, or HW Create() returned null). Skipped under
+  // --disable-cursor. Single-plane CRTCs (i.MX LCDIF, etc.) land here.
+  {
+    bool hw_cursor_active = false;
+#if HAVE_DRM_CURSOR
+    hw_cursor_active = (backend->cursor_ != nullptr);
+#endif
+    if (!hw_cursor_active && !backend->cfg_.disable_cursor) {
+      backend->gl_cursor_ = std::make_unique<homescreen::GlCursor>();
+      spdlog::info(
+          "[DrmBackend] no HW cursor plane active — using GL-composited "
+          "cursor");
+    }
+  }
+
 #if HAVE_DRM_CAPTURE
   backend->capture_ = homescreen::DrmCapture::Create();
 #endif
@@ -407,6 +426,10 @@ DrmBackend::DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session)
   InstallDrmCxxLogSink();
 }
 
+homescreen::ICursorPositionSink* DrmBackend::gl_cursor() const {
+  return gl_cursor_.get();
+}
+
 DrmBackend::~DrmBackend() {
   // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRM_PROFILE ran).
   frame_profile_.LogSessionSummary("DrmBackend");
@@ -414,6 +437,14 @@ DrmBackend::~DrmBackend() {
   // Let any in-flight page flip land so we don't free a BO still being
   // scanned out.
   (void)WaitForPendingFlip();
+
+  // Release the GL-composited cursor's GL objects while the context is current.
+  if (gl_cursor_ && egl_display_ != EGL_NO_DISPLAY &&
+      egl_context_ != EGL_NO_CONTEXT) {
+    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+    gl_cursor_->Destroy();
+  }
+  gl_cursor_.reset();
 
 #if BUILD_COMPOSITOR
   // Release compositor GL resources while the context is still current.
@@ -1646,6 +1677,12 @@ bool DrmBackend::Present() {
   MaybeCaptureSnapshot();
   if (!WaitForPendingFlip()) {
     return false;
+  }
+
+  // Composite the cursor over the rendered Flutter scene (still in FBO 0's
+  // back buffer) before the swap. No-op until the cursor is visible / absent.
+  if (gl_cursor_) {
+    gl_cursor_->Draw(fb_w_, fb_h_);
   }
 
   if (!eglSwapBuffers(egl_display_, egl_surface_)) {

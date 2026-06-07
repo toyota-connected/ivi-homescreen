@@ -25,6 +25,7 @@
 
 namespace homescreen {
 class DrmCursor;
+class ICursorPositionSink;
 class DrmSession;
 }  // namespace homescreen
 
@@ -54,6 +55,10 @@ class DrmDisplay final : public IDisplay {
   // the sprite (used during teardown before DrmBackend destroys the
   // DrmCursor it owns).
   void SetCursor(homescreen::DrmCursor* cursor);
+
+  // Forward the composited cursor sink (the EGL backend's GlCursor, used when
+  // there's no HW cursor plane) to the seat. nullptr is safe.
+  void SetGlCursor(homescreen::ICursorPositionSink* sink);
 
   // Forward the scanout rotation to the seat so the HW cursor sprite is
   // transformed from render space into panel space (0|90|180|270).
