@@ -224,6 +224,8 @@ FlutterView::FlutterView(Configuration::Config config,
       drm_display->SetViewportSize(static_cast<int32_t>(drm_backend->width()),
                                    static_cast<int32_t>(drm_backend->height()));
       drm_display->SetCursor(drm_backend->drm_cursor());
+      // Composited cursor fallback (non-null only when no HW cursor plane).
+      drm_display->SetGlCursor(drm_backend->gl_cursor());
     }
   }
 #elif BUILD_BACKEND_DRM_KMS_VULKAN

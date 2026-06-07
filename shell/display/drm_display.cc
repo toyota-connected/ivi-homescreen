@@ -124,6 +124,12 @@ void DrmDisplay::SetCursor(homescreen::DrmCursor* cursor) {
   }
 }
 
+void DrmDisplay::SetGlCursor(homescreen::ICursorPositionSink* sink) {
+  if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+    drm_seat->SetGlCursor(sink);
+  }
+}
+
 void DrmDisplay::SetCursorRotation(const int32_t degrees) {
   if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
     drm_seat->SetCursorRotation(degrees);
