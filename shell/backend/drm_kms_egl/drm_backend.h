@@ -341,6 +341,13 @@ class DrmBackend : public Backend {
   // under it (inside drmHandleEvent), so re-locking would self-deadlock.
   mutable std::mutex drm_event_mutex_;
 
+  // Set by OnSessionPaused / cleared by OnSessionResumed (libseat VT switch).
+  // While paused, scanout is revoked and page flips never complete, so GBM
+  // buffers never free — Present() must skip eglSwapBuffers or it blocks
+  // forever in gbm_surface_get_free_buffer, wedging the rasterizer thread and
+  // hanging teardown. Mirrors DrmCompositor's own paused_ gate.
+  std::atomic<bool> session_paused_{false};
+
   // EGL
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
   EGLConfig egl_config_ = nullptr;
