@@ -932,16 +932,13 @@ bool DrmCompositor::WaitForPendingFlip() const {
   // flip event can be lost; without a cap the destructor's wait spins
   // forever and the process never exits on SIGTERM. A healthy 60Hz flip
   // clears in ~16ms so the cap never fires in normal operation.
-  // Opt-in (default off), mirrors DrmBackend::WaitForPendingFlip for the plane
-  // compositor path. When the platform-thread asio monitor that drains
-  // PAGE_FLIP_EVENTs is starved (CPU governor downclock, Dart GC), drain the fd
-  // on the rasterizer thread via the backend's shared, mutex-guarded helper
-  // (DrainFlipEvents routes the event to OnFlipComplete) instead of sleeping
-  // out the deadline. Off by default so behavior is unchanged unless asked.
-  static const bool raster_drain = []() {
-    const char* env = std::getenv("IVI_DRM_RASTER_DRAIN");
-    return env != nullptr && std::string_view(env) == "1";
-  }();
+  // Mirrors DrmBackend::WaitForPendingFlip for the plane compositor path: when
+  // the platform-thread asio monitor is starved, drain the fd on the rasterizer
+  // thread via the backend's shared, mutex-guarded helper (DrainFlipEvents
+  // routes the event to OnFlipComplete) instead of sleeping out the deadline.
+  // On by default; IVI_DRM_RASTER_DRAIN=0 opts out. Shared decision so the
+  // backend and compositor never disagree.
+  const bool raster_drain = DrmBackend::RasterDrainEnabled();
   constexpr auto kFlipWaitTimeout = 100ms;
   const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
@@ -959,23 +956,9 @@ bool DrmCompositor::WaitForPendingFlip() const {
       }
     }
     if (std::chrono::steady_clock::now() >= deadline) {
-      if (!raster_drain) {
-        // Read-only probe: event readable but undrained → the monitor was
-        // starved and IVI_DRM_RASTER_DRAIN=1 would fix it (distinct from a
-        // genuinely late flip). poll(0) doesn't read, so no race / no consume.
-        pollfd pfd{backend_->drm_fd(), POLLIN, 0};
-        if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN) &&
-            flip_pending_.load(std::memory_order_acquire)) {
-          static std::once_flag once;
-          std::call_once(once, []() {
-            spdlog::warn(
-                "[DrmCompositor] page-flip event was readable but undrained at "
-                "the 100ms deadline — the flip monitor thread is being starved "
-                "(CPU governor / load). Set IVI_DRM_RASTER_DRAIN=1 to drain it "
-                "on the rasterizer thread.");
-          });
-        }
-      }
+      // Reached only for a genuinely late/lost flip — the raster drain already
+      // handles a merely-starved monitor. Proceed; the bounded wait keeps the
+      // rasterizer and teardown from hanging.
       spdlog::warn(
           "[DrmCompositor] WaitForPendingFlip: no flip completion after "
           "100ms; proceeding (PAGE_FLIP_EVENT likely lost)");
