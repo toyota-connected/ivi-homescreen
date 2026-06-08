@@ -262,6 +262,11 @@ class DrmBackend : public Backend {
   // the read can't block: only one thread consumes a given event. Used by both
   // the asio monitor and (when IVI_DRM_RASTER_DRAIN=1) WaitForPendingFlip.
   void DrainFlipEvents() const;
+  // True unless IVI_DRM_RASTER_DRAIN=0 — the single source of truth for the
+  // raster-thread drain decision, shared by WaitForPendingFlip (both backend
+  // and compositor) and the nvidia-drm cursor-staging heuristic. Cached on
+  // first call.
+  [[nodiscard]] static bool RasterDrainEnabled();
   // Unified PAGE_FLIP_EVENT dispatcher. Registered as the
   // drmEventContext.page_flip_handler from the asio flip monitor; the
   // user_data is always a DrmBackend* (compositor commits also pass
