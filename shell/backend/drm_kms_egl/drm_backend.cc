@@ -1377,6 +1377,7 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
 
 void DrmBackend::OnSessionPaused() {
   spdlog::info("[DrmBackend] session paused (VT switch-out)");
+  session_paused_.store(true, std::memory_order_release);
 #if BUILD_COMPOSITOR
   if (compositor_) {
     compositor_->SetPaused(true);
@@ -1401,6 +1402,7 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
         drm_dev_->fd(), new_fd);
   }
   spdlog::info("[DrmBackend] session resumed (VT switch-in, fd={})", new_fd);
+  session_paused_.store(false, std::memory_order_release);
 #if BUILD_COMPOSITOR
   if (compositor_) {
     compositor_->OnResume();
@@ -1715,6 +1717,33 @@ bool DrmBackend::WaitForPendingFlip() const {
 }
 
 bool DrmBackend::Present() {
+  // Session-pause gate (mirrors DrmCompositor::PresentLayers). While the VT is
+  // switched away, scanout is revoked and page flips never complete, so the
+  // gbm_surface's buffers are never released. eglSwapBuffers would then block
+  // forever in gbm_surface_get_free_buffer, wedging the rasterizer thread —
+  // FlutterEngineShutdown can't join it and teardown hangs (SIGKILL). Ack the
+  // frame without touching GL/KMS; OnSessionResumed re-modesets and restarts
+  // the pacer.
+  if (session_paused_.load(std::memory_order_acquire)) {
+    return true;
+  }
+  // Reclaim a buffer orphaned by a flip dropped during a VT-switch pause:
+  // OnSessionPaused clears flip_pending_, but the in-flight flip's buffer stays
+  // locked (its completion event never fires). Release it before swapping, or
+  // each pause cycle leaks a locked buffer until the surface starves and
+  // eglSwapBuffers blocks forever in gbm_surface_get_free_buffer (rasterizer
+  // wedged → teardown SIGKILL). Race-free on the raster thread: flip_pending_
+  // is false here, so the platform flip-handler won't touch pending_bo_; the
+  // acquire-load pairs with OnLegacyFlipComplete's release-store so we never
+  // observe a half-updated pending_bo_.
+  if (!flip_pending_.load(std::memory_order_acquire) && pending_bo_) {
+    if (pending_fb_ != 0 && drm_dev_) {
+      drmModeRmFB(drm_dev_->fd(), pending_fb_);
+      pending_fb_ = 0;
+    }
+    gbm_surface_release_buffer(gbm_surface_, pending_bo_);
+    pending_bo_ = nullptr;
+  }
   MaybeCaptureSnapshot();
   if (!WaitForPendingFlip()) {
     return false;
@@ -1744,6 +1773,16 @@ bool DrmBackend::Present() {
   }
 
   if (!mode_set_) {
+    // A resume re-modesets from this fresh buffer (mode_set_ was cleared in
+    // OnSessionResumed). Release the pre-pause scanout buffer first, or it
+    // leaks when overwritten below — another per-cycle starvation source.
+    // Null at the first-ever modeset, so a no-op there.
+    if (current_fb_ != 0 && drm_dev_) {
+      drmModeRmFB(drm_dev_->fd(), current_fb_);
+    }
+    if (current_bo_) {
+      gbm_surface_release_buffer(gbm_surface_, current_bo_);
+    }
     current_bo_ = next_bo;
     current_fb_ = next_fb;
     if (!SetInitialMode()) {
