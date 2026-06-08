@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -255,6 +256,12 @@ class DrmBackend : public Backend {
   bool SetInitialMode();
   uint32_t AddFb(gbm_bo* bo) const;
   bool WaitForPendingFlip() const;
+  // Drain any readable PAGE_FLIP_EVENT on the drm fd (poll(0)+drmHandleEvent),
+  // serialized by drm_event_mutex_ so the rasterizer thread and the asio flip
+  // monitor never read the fd concurrently. The poll+read run under the lock so
+  // the read can't block: only one thread consumes a given event. Used by both
+  // the asio monitor and (when IVI_DRM_RASTER_DRAIN=1) WaitForPendingFlip.
+  void DrainFlipEvents() const;
   // Unified PAGE_FLIP_EVENT dispatcher. Registered as the
   // drmEventContext.page_flip_handler from the asio flip monitor; the
   // user_data is always a DrmBackend* (compositor commits also pass
@@ -320,6 +327,14 @@ class DrmBackend : public Backend {
   // next flip in Present) don't race. Same justification on the
   // compositor's mirror.
   std::atomic<bool> flip_pending_{false};
+
+  // Serializes drmHandleEvent() between the asio flip monitor (platform task
+  // runner thread) and WaitForPendingFlip()'s opt-in raster-thread drain, so
+  // the two never read the drm fd concurrently. Mutable: DrainFlipEvents() is
+  // const (called from the const WaitForPendingFlip). INVARIANT: nothing
+  // reachable from UnifiedPageFlipHandler may take this lock — the handler runs
+  // under it (inside drmHandleEvent), so re-locking would self-deadlock.
+  mutable std::mutex drm_event_mutex_;
 
   // EGL
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
