@@ -315,10 +315,18 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   // couples cursor motion to Flutter frame production, so the cursor stalls
   // while the UI is idle — the self-committing cursor is smoother. kAuto (the
   // default) therefore stages only on nvidia-drm; yes/no force the choice.
+  //
+  // The raster drain (IVI_DRM_RASTER_DRAIN, on by default) removes the very
+  // PAGE_FLIP_EVENT starvation that made staging necessary on nvidia-drm: the
+  // rasterizer drains the flip itself, so a self-committing cursor no longer
+  // swallows the pending flip. So when the drain is active, kAuto self-commits
+  // on nvidia-drm too (smooth, decoupled cursor — verified on Jetson). With the
+  // drain disabled (=0), kAuto reverts to staging there.
   const bool stage_cursor =
       backend->cfg_.stage_cursor == drm_config::TriState::kYes ||
       (backend->cfg_.stage_cursor == drm_config::TriState::kAuto &&
-       backend->resolved_->driver_name == "nvidia-drm");
+       backend->resolved_->driver_name == "nvidia-drm" &&
+       !RasterDrainEnabled());
   // Either way, reserve the cursor's plane so the scene allocator's
   // disable-unused pass doesn't toggle it off every commit (flicker on
   // motion). plane_id()==0 (legacy cursor path) is a no-op in the
@@ -1655,20 +1663,24 @@ void DrmBackend::DrainFlipEvents() const {
   }
 }
 
-bool DrmBackend::WaitForPendingFlip() const {
-  using namespace std::chrono_literals;
-  // The asio flip monitor normally drains PAGE_FLIP_EVENTs on the platform task
-  // runner thread; when that thread is starved (CPU governor downclock, Dart
-  // GC) the rasterizer would otherwise sleep out the whole 100ms deadline even
-  // though the event already arrived. So the rasterizer drains the fd itself
-  // (DrainFlipEvents, serialized with the monitor by drm_event_mutex_). On by
-  // default — validated across 6 platforms / 5 GPU vendors (no regression, no
-  // deadlock, pause/resume + teardown clean). Set IVI_DRM_RASTER_DRAIN=0 to opt
-  // out (escape hatch).
-  static const bool raster_drain = []() {
+bool DrmBackend::RasterDrainEnabled() {
+  static const bool enabled = []() {
     const char* env = std::getenv("IVI_DRM_RASTER_DRAIN");
+    // On by default — validated across 6 platforms / 5 GPU vendors (no
+    // regression, no deadlock, pause/resume + teardown clean). The only opt-out
+    // is an explicit "0"; anything else (incl. unset) enables it.
     return env == nullptr || std::string_view(env) != "0";
   }();
+  return enabled;
+}
+
+bool DrmBackend::WaitForPendingFlip() const {
+  using namespace std::chrono_literals;
+  // When the platform-thread asio monitor is starved (CPU governor downclock,
+  // Dart GC) the rasterizer drains the flip fd itself (DrainFlipEvents,
+  // serialized with the monitor by drm_event_mutex_) rather than sleeping out
+  // the 100ms deadline. On by default; IVI_DRM_RASTER_DRAIN=0 opts out.
+  const bool raster_drain = RasterDrainEnabled();
   // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go undelivered,
   // and at teardown the asio monitor that would drain it is already gone — an
   // unbounded loop then spins forever in hrtimer_nanosleep, hanging Present and

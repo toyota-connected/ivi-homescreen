@@ -932,17 +932,13 @@ bool DrmCompositor::WaitForPendingFlip() const {
   // flip event can be lost; without a cap the destructor's wait spins
   // forever and the process never exits on SIGTERM. A healthy 60Hz flip
   // clears in ~16ms so the cap never fires in normal operation.
-  // Mirrors DrmBackend::WaitForPendingFlip for the plane compositor path. When
-  // the platform-thread asio monitor that drains PAGE_FLIP_EVENTs is starved
-  // (CPU governor downclock, Dart GC), drain the fd on the rasterizer thread
-  // via the backend's shared, mutex-guarded helper (DrainFlipEvents routes the
-  // event to OnFlipComplete) instead of sleeping out the deadline. On by
-  // default (validated across 6 platforms / 5 GPU vendors incl. pause/resume +
-  // teardown); set IVI_DRM_RASTER_DRAIN=0 to opt out.
-  static const bool raster_drain = []() {
-    const char* env = std::getenv("IVI_DRM_RASTER_DRAIN");
-    return env == nullptr || std::string_view(env) != "0";
-  }();
+  // Mirrors DrmBackend::WaitForPendingFlip for the plane compositor path: when
+  // the platform-thread asio monitor is starved, drain the fd on the rasterizer
+  // thread via the backend's shared, mutex-guarded helper (DrainFlipEvents
+  // routes the event to OnFlipComplete) instead of sleeping out the deadline.
+  // On by default; IVI_DRM_RASTER_DRAIN=0 opts out. Shared decision so the
+  // backend and compositor never disagree.
+  const bool raster_drain = DrmBackend::RasterDrainEnabled();
   constexpr auto kFlipWaitTimeout = 100ms;
   const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
