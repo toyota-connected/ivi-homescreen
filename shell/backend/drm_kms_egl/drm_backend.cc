@@ -1657,16 +1657,17 @@ void DrmBackend::DrainFlipEvents() const {
 
 bool DrmBackend::WaitForPendingFlip() const {
   using namespace std::chrono_literals;
-  // Opt-in (default off). The asio flip monitor normally drains
-  // PAGE_FLIP_EVENTs on the platform task runner thread; when that thread is
-  // starved (CPU governor downclock, Dart GC), the rasterizer here would sleep
-  // out the whole 100ms deadline even though the event already arrived. With
-  // IVI_DRM_RASTER_DRAIN=1 the rasterizer drains the fd itself instead. Off by
-  // default so behavior on validated platforms is byte-for-byte unchanged; the
-  // diagnostic below reports when turning it on would help.
+  // The asio flip monitor normally drains PAGE_FLIP_EVENTs on the platform task
+  // runner thread; when that thread is starved (CPU governor downclock, Dart
+  // GC) the rasterizer would otherwise sleep out the whole 100ms deadline even
+  // though the event already arrived. So the rasterizer drains the fd itself
+  // (DrainFlipEvents, serialized with the monitor by drm_event_mutex_). On by
+  // default — validated across 6 platforms / 5 GPU vendors (no regression, no
+  // deadlock, pause/resume + teardown clean). Set IVI_DRM_RASTER_DRAIN=0 to opt
+  // out (escape hatch).
   static const bool raster_drain = []() {
     const char* env = std::getenv("IVI_DRM_RASTER_DRAIN");
-    return env != nullptr && std::string_view(env) == "1";
+    return env == nullptr || std::string_view(env) != "0";
   }();
   // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go undelivered,
   // and at teardown the asio monitor that would drain it is already gone — an
@@ -1688,25 +1689,9 @@ bool DrmBackend::WaitForPendingFlip() const {
       }
     }
     if (std::chrono::steady_clock::now() >= deadline) {
-      if (!raster_drain) {
-        // Read-only probe: is the completion event sitting readable but
-        // undrained? If so the platform-thread monitor was starved and
-        // IVI_DRM_RASTER_DRAIN=1 would fix it — distinct from a genuinely late
-        // flip (driver / no vblank), where it would not. poll(0) doesn't
-        // read(), so it neither consumes the event nor races the monitor.
-        pollfd pfd{drm_dev_->fd(), POLLIN, 0};
-        if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN) &&
-            flip_pending_.load(std::memory_order_acquire)) {
-          static std::once_flag once;
-          std::call_once(once, []() {
-            spdlog::warn(
-                "[DrmBackend] page-flip event was readable but undrained at "
-                "the 100ms deadline — the flip monitor thread is being starved "
-                "(CPU governor / load). Set IVI_DRM_RASTER_DRAIN=1 to drain it "
-                "on the rasterizer thread.");
-          });
-        }
-      }
+      // Reached only for a genuinely late/lost flip (e.g. nvidia-drm) — the
+      // raster drain already handles a merely-starved monitor. Proceed; the
+      // bounded wait keeps Present and ~DrmBackend from hanging.
       spdlog::warn(
           "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
           "proceeding (PAGE_FLIP_EVENT likely lost)");
