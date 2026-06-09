@@ -130,13 +130,15 @@ constexpr uint64_t PackPos(const int fb_x, const int fb_y) {
 }
 }  // namespace
 
-std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
-                                             const uint32_t crtc_id,
-                                             const uint32_t connector_id,
-                                             const drmModeModeInfo& mode,
-                                             const uint32_t fb_w,
-                                             const uint32_t fb_h,
-                                             const int rotation_degrees) {
+std::unique_ptr<DrmCursor> DrmCursor::Create(
+    drm::Device& dev,
+    const uint32_t crtc_id,
+    const uint32_t connector_id,
+    const drmModeModeInfo& mode,
+    const uint32_t fb_w,
+    const uint32_t fb_h,
+    const int rotation_degrees,
+    const std::string_view theme_name) {
   if (const char* gate = std::getenv("IVI_DRM_CURSOR");
       gate != nullptr && std::string_view(gate) == "0") {
     spdlog::info("[DrmCursor] disabled via IVI_DRM_CURSOR=0");
@@ -161,7 +163,10 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
     return nullptr;
   }
 
-  auto cursor = drm::cursor::Cursor::load(*theme, "default", "", sizing.sprite);
+  // theme_name (from global.cursor_theme) selects the XCursor theme; empty
+  // falls back to $XCURSOR_THEME / "default" inside the resolver.
+  auto cursor =
+      drm::cursor::Cursor::load(*theme, "default", theme_name, sizing.sprite);
   if (!cursor) {
     spdlog::warn("[DrmCursor] load 'default': {}; no cursor sprite",
                  cursor.error().message());
