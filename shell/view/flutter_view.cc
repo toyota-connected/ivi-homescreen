@@ -166,6 +166,7 @@ FlutterView::FlutterView(Configuration::Config config,
         m_config.debug_backend.value_or(false),
     };
     cfg.disable_cursor = m_config.disable_cursor.value_or(false);
+    cfg.cursor_theme = m_config.cursor_theme;
     // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
     // `drm_connector = ""` in TOML shouldn't force a strict empty-name
     // match against zero connectors.

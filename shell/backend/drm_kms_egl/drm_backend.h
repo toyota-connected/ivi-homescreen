@@ -89,6 +89,13 @@ struct DrmConfig {
   // just no DRM cursor sprite. Equivalent to the IVI_DRM_CURSOR=0 env.
   bool disable_cursor{false};
 
+  // XCursor theme name for the HW cursor sprite (global.cursor_theme). Empty =
+  // drm-cxx Theme::discover()'s default ($XCURSOR_THEME, then "default"). The
+  // Wayland backend already consumes cursor_theme; this carries it to the DRM
+  // hardware cursor so the DRM path honors the same config instead of
+  // auto-discovering whatever theme happens to be first on the search path.
+  std::string cursor_theme{};
+
   // Stage the HW cursor into the compositor's atomic commit instead of
   // letting it self-commit (DrmCursor staged mode). kAuto (the default)
   // resolves per driver in DrmBackend::Create: enabled only on nvidia-drm,
