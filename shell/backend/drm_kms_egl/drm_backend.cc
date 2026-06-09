@@ -304,7 +304,8 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(
   } else {
     backend->cursor_ = homescreen::DrmCursor::Create(
         *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
-        backend->mode_, backend->fb_w_, backend->fb_h_);
+        backend->mode_, backend->fb_w_, backend->fb_h_,
+        /*rotation_degrees=*/0, backend->cfg_.cursor_theme);
   }
 #if BUILD_COMPOSITOR
   // Decide whether to stage the cursor into the compositor's own atomic commit
