@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 #include <xf86drmMode.h>
 
@@ -76,7 +77,8 @@ class DrmCursor {
                                            const drmModeModeInfo& mode,
                                            uint32_t fb_w,
                                            uint32_t fb_h,
-                                           int rotation_degrees = 0);
+                                           int rotation_degrees = 0,
+                                           std::string_view theme_name = {});
 
   DrmCursor(const DrmCursor&) = delete;
   DrmCursor& operator=(const DrmCursor&) = delete;
