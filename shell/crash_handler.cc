@@ -12,7 +12,7 @@
 
 #include "sentry.h"
 
-auto invalid_mem = reinterpret_cast<void*>(1);
+volatile auto invalid_mem = reinterpret_cast<void*>(1);
 
 void CrashHandler::trigger_crash() {
   memset(invalid_mem, 1, 100);
@@ -48,7 +48,8 @@ CrashHandler::SentryConfig CrashHandler::LoadConfig(
   // Parse TOML file
   auto result = toml::parse_file(toml_path.string());
   if (!result) {
-    spdlog::error("TOML parsing failed: {}", toml_path.string());
+    spdlog::error("TOML parsing failed: {} — {}", toml_path.string(),
+                 result.error().description());
     return config;
   }
 
@@ -88,7 +89,18 @@ CrashHandler::SentryConfig CrashHandler::LoadConfig(
 CrashHandler::CrashHandler(const std::string& bundle_path) {
   config_ = LoadConfig(bundle_path);
 
+  if (config_.dsn.empty()) {
+    spdlog::warn("Sentry DSN is empty, crash reports will not be sent");
+    return;
+  }
+
   sentry_options_t* options = sentry_options_new();
+  if (!options) {
+    spdlog::error("Failed to create Sentry options, likely OOM");
+    spdlog::error("Crash handler will be disabled");
+    return;
+  }
+
   sentry_options_set_dsn(options, config_.dsn.c_str());
   auto home_path = Utils::GetConfigHomePath();
   std::filesystem::path db_path = home_path;
@@ -110,7 +122,11 @@ CrashHandler::CrashHandler(const std::string& bundle_path) {
   sentry_options_set_symbolize_stacktraces(options, true);
   sentry_options_set_debug(options, 0);
 
-  sentry_init(options);
+  if (sentry_init(options) != 0) {
+    spdlog::error("sentry_init() failed, crash reports will not be sent");
+    return;
+  }
+  initialized_ = true;
 
   // Apply tags (must be called after sentry_init)
   for (auto& [tag_name, tag_val] : config_.tags) {
@@ -119,5 +135,7 @@ CrashHandler::CrashHandler(const std::string& bundle_path) {
 }
 
 CrashHandler::~CrashHandler() {
-  sentry_close();
+  if (initialized_) {
+    sentry_close();
+  }
 }

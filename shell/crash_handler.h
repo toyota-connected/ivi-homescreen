@@ -28,4 +28,5 @@ class CrashHandler {
   static SentryConfig LoadConfig(const std::string& bundle_path);
 
   SentryConfig config_;
+  bool initialized_ = false;
 };
