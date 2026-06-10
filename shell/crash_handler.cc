@@ -49,7 +49,7 @@ CrashHandler::SentryConfig CrashHandler::LoadConfig(
   auto result = toml::parse_file(toml_path.string());
   if (!result) {
     spdlog::error("TOML parsing failed: {} — {}", toml_path.string(),
-                 result.error().description());
+                  result.error().description());
     return config;
   }
 
