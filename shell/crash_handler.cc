@@ -99,11 +99,6 @@ CrashHandler::CrashHandler(const std::string& bundle_path) {
   sentry_options_set_release(options, config_.release.c_str());
   sentry_options_set_environment(options, config_.env.c_str());
 
-  // Apply tags
-  for (auto& [tag_name, tag_val] : config_.tags) {
-    sentry_set_tag(tag_name.c_str(), tag_val.c_str());
-  }
-
   // Apply attachments
   for (auto& attachment : config_.attachments) {
     std::filesystem::path attachment_path(attachment);
@@ -116,6 +111,11 @@ CrashHandler::CrashHandler(const std::string& bundle_path) {
   sentry_options_set_debug(options, 0);
 
   sentry_init(options);
+
+  // Apply tags (must be called after sentry_init)
+  for (auto& [tag_name, tag_val] : config_.tags) {
+    sentry_set_tag(tag_name.c_str(), tag_val.c_str());
+  }
 }
 
 CrashHandler::~CrashHandler() {
