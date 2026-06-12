@@ -86,7 +86,19 @@ endif ()
 target_compile_options(toolchain INTERFACE -stdlib=${STDLIB} -isystem"${LLVM_INCLUDE_DIRS}/c++/v1/")
 
 if (ENABLE_STATIC_LINK)
-    target_link_options(toolchain INTERFACE -static-libstdc++ -static-libgcc -stdlib=${STDLIB} -lc -fuse-ld=lld -v)
+    if (STDLIB STREQUAL "libc++")
+        # Statically link libc++ and libc++abi using the linker's -Bstatic/-Bdynamic
+        # scoping, then restore dynamic linking for all other libraries.
+        # -static-libstdc++ / -static-libgcc must NOT be used here: -static-libgcc
+        # pulls in libgcc_eh.a which embeds _Unwind_* symbols that conflict with
+        # LLVM libunwind inside libsentry.so.
+        target_link_options(toolchain INTERFACE
+            -stdlib=${STDLIB}
+            -Wl,-Bstatic,-lc++,-lc++abi,-Bdynamic
+            -lc -fuse-ld=lld -v)
+    else ()
+        target_link_options(toolchain INTERFACE -static-libstdc++ -static-libgcc -stdlib=${STDLIB} -lc -fuse-ld=lld -v)
+    endif ()
 else ()
     target_link_options(toolchain INTERFACE -stdlib=${STDLIB} -lc -fuse-ld=lld -v)
 endif ()

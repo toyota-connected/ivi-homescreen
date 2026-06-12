@@ -232,8 +232,6 @@ if (BUILD_CRASH_HANDLER)
     endif()
     
     find_package(sentry REQUIRED)
-    find_package(PkgConfig)
-    pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)
     string(TIMESTAMP BUILD_VER "%y%m%d")
 else()
     message(STATUS "Crash Handler .......... Disabled")
