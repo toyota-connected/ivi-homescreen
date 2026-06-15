@@ -199,20 +199,38 @@ if (BUILD_CRASH_HANDLER)
 
     include(GNUInstallDirs)
 
+    # sentry-native installs its CMake package config under the GNUInstallDirs
+    # libdir of its staging prefix -- typically lib/cmake/sentry, but lib64 on
+    # some distros and a flat cmake/sentry on older layouts. Hardcoding a single
+    # suffix breaks whenever ${CMAKE_INSTALL_LIBDIR} here differs from the one
+    # sentry-native installed with (or is empty because GNUInstallDirs had not
+    # been included yet). Search the likely suffixes under the chosen base so a
+    # libdir mismatch can't break configure.
     if (SENTRY_NATIVE_LIBDIR)
-        if (NOT EXISTS ${SENTRY_NATIVE_LIBDIR}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry/sentry-config.cmake)
-            message(FATAL_ERROR "${SENTRY_NATIVE_LIBDIR}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry/sentry-config.cmake does not exist")
-        else ()
-            message(STATUS "Found libsentry at specified directory: ${SENTRY_NATIVE_LIBDIR}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry/sentry-config.cmake")
-            set(sentry_DIR ${SENTRY_NATIVE_LIBDIR}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry)
-        endif ()
+        set(_sentry_base ${SENTRY_NATIVE_LIBDIR})
     else ()
-        if (EXISTS ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry/sentry-config.cmake)
-            message(STATUS "Found sentry at default location: ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry/sentry-config.cmake")
-            set(sentry_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry)
-        else ()
-            message(FATAL_ERROR "Sentry could not be found at ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/sentry/sentry-config.cmake, please set SENTRY_NATIVE_LIBDIR")
+        set(_sentry_base ${CMAKE_INSTALL_PREFIX})
+    endif ()
+
+    set(sentry_DIR "")
+    foreach (_suffix
+            ${CMAKE_INSTALL_LIBDIR}/cmake/sentry
+            lib/cmake/sentry
+            lib64/cmake/sentry
+            cmake/sentry)
+        if (EXISTS ${_sentry_base}/${_suffix}/sentry-config.cmake)
+            set(sentry_DIR ${_sentry_base}/${_suffix})
+            break ()
         endif ()
+    endforeach ()
+
+    if (sentry_DIR)
+        message(STATUS "Found libsentry: ${sentry_DIR}/sentry-config.cmake")
+    else ()
+        message(FATAL_ERROR
+                "sentry-config.cmake not found under ${_sentry_base} "
+                "(searched */cmake/sentry). Set SENTRY_NATIVE_LIBDIR to the "
+                "sentry-native staging prefix.")
     endif ()
 
 
