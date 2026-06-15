@@ -252,7 +252,7 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
     return slots_[ready_]->acquire();
   }
   void release(drm::scene::AcquiredBuffer acquired) noexcept override {
-    slots_[last_acquired_]->release(acquired);
+    slots_[last_acquired_]->release(std::move(acquired));
   }
   [[nodiscard]] drm::scene::BindingModel binding_model()
       const noexcept override {
