@@ -33,7 +33,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
@@ -85,7 +85,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
