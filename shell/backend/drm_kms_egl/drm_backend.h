@@ -129,6 +129,13 @@ struct DrmConfig {
   drm_config::TriState overlay_planes{drm_config::TriState::kAuto};
   drm_config::TriState explicit_sync{drm_config::TriState::kAuto};
   drm_config::TriState async_flip{drm_config::TriState::kAuto};
+
+  // --drm-no-seat: the session is forced null (see DrmDisplay) so InitDrm
+  // takes the direct-open path. This additionally suppresses the
+  // foreground-VT guard there, since the operator has explicitly opted into
+  // driving the device with no seat/VT arbitration (headless/SSH/kiosk).
+  // drmSetMaster is still required and still enforced.
+  bool no_seat{false};
 };
 
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the

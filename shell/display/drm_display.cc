@@ -26,7 +26,15 @@
 
 namespace {
 
-std::unique_ptr<homescreen::DrmSession> OpenSessionOrLog() {
+std::unique_ptr<homescreen::DrmSession> OpenSessionOrLog(bool no_seat) {
+  if (no_seat) {
+    spdlog::warn(
+        "[DrmDisplay] --drm-no-seat: bypassing libseat — the backend opens "
+        "/dev/dri + input directly and self-acquires DRM master, skipping "
+        "the foreground-VT guard. No VT-switch / pause-resume; you are "
+        "responsible for ensuring nothing else holds the display.");
+    return nullptr;
+  }
   auto session = homescreen::DrmSession::Open();
   if (!session) {
     spdlog::info(
@@ -47,11 +55,14 @@ drm::input::InputDeviceOpener OpenerFrom(homescreen::DrmSession* session) {
 
 }  // namespace
 
-DrmDisplay::DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz)
+DrmDisplay::DrmDisplay(int32_t width,
+                       int32_t height,
+                       double refresh_rate_hz,
+                       bool no_seat)
     : width_(width),
       height_(height),
       refresh_rate_hz_(refresh_rate_hz),
-      session_(OpenSessionOrLog()),
+      session_(OpenSessionOrLog(no_seat)),
       seat_(std::make_unique<homescreen::DrmSeat>(width,
                                                   height,
                                                   OpenerFrom(session_.get()))) {
