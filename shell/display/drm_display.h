@@ -31,11 +31,18 @@ class DrmSession;
 
 class DrmDisplay final : public IDisplay {
  public:
-  DrmDisplay(int32_t width, int32_t height, double refresh_rate_hz);
+  // @p no_seat (--drm-no-seat / HOMESCREEN_DRM_NO_SEAT) skips opening a
+  // libseat session entirely, forcing the backend's direct-open path. See
+  // session().
+  DrmDisplay(int32_t width,
+             int32_t height,
+             double refresh_rate_hz,
+             bool no_seat = false);
   ~DrmDisplay() override;
 
   // Process-wide libseat session. Null when no seat backend is available
-  // (no logind/seatd/builtin) or when drm-cxx was built without libseat.
+  // (no logind/seatd/builtin), when drm-cxx was built without libseat, or
+  // when --drm-no-seat forced the direct-open path.
   // DrmBackend consults this to route its DRM device open through the
   // seat; when null, the backend falls back to direct open + the legacy
   // VT/master guards.
