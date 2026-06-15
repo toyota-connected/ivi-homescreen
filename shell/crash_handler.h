@@ -1,19 +1,32 @@
 #pragma once
 
+#include <map>
 #include <string>
+#include <vector>
 #include "sentry.h"
 
 class CrashHandler {
  public:
-  CrashHandler();
+  explicit CrashHandler(const std::string& bundle_path);
 
   ~CrashHandler();
 
   static void trigger_crash();
-  static const char* get_dsn();
-  static void set_sentry_attachments(sentry_options_t* options);
-  static void set_sentry_tags();
 
   CrashHandler(const CrashHandler&) = delete;
   CrashHandler& operator=(const CrashHandler&) = delete;
+
+ private:
+  struct SentryConfig {
+    std::string dsn;
+    std::string release;
+    std::string env;
+    std::map<std::string, std::string> tags;
+    std::vector<std::string> attachments;
+  };
+
+  static SentryConfig LoadConfig(const std::string& bundle_path);
+
+  SentryConfig config_;
+  bool initialized_ = false;
 };

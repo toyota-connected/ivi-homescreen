@@ -86,12 +86,19 @@ void InstallShutdownHandlers() {
  * wayland, flutter
  */
 int main(const int argc, char** argv) {
+  gLogger = std::make_unique<Logging>();
+  const auto configs = Configuration::ParseArgcArgv(argc, argv);
+  assert(!configs.empty());
+
 #if BUILD_CRASH_HANDLER
-  auto crash_handler = std::make_unique<CrashHandler>();
+  std::string first_bundle_path;
+  if (!configs.empty()) {
+    first_bundle_path = configs.front().view.bundle_path;
+  }
+  auto crash_handler = std::make_unique<CrashHandler>(first_bundle_path);
 #endif
 
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN || \
-    BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_SOFTWARE
   // Handle --drm-list-modes[=<path>] before the main config parse so the
   // user doesn't need to supply a bundle path just to inspect modes. On
   // software builds this lists the DRM dumb-sink's modes (the values valid
@@ -145,11 +152,6 @@ int main(const int argc, char** argv) {
 #endif
   }
 #endif
-
-  gLogger = std::make_unique<Logging>();
-
-  const auto configs = Configuration::ParseArgcArgv(argc, argv);
-  assert(!configs.empty());
 
   const App app(configs);
 
