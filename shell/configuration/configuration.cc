@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <string_view>
 
 #include "config/common.h"
 #include "cxxopts/include/cxxopts.hpp"
@@ -128,6 +129,10 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
   if (tbl->at_path("view.drm_stage_cursor").is_string()) {
     instance.view.drm_stage_cursor =
         tbl->at_path("view.drm_stage_cursor").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_no_seat").is_boolean()) {
+    instance.view.drm_no_seat =
+        tbl->at_path("view.drm_no_seat").value<bool>().value();
   }
 
   if (tbl->at_path("window_activation_area.x").is_integer()) {
@@ -253,6 +258,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (cli.view.drm_stage_cursor.has_value()) {
     instance.view.drm_stage_cursor = cli.view.drm_stage_cursor.value();
+  }
+  if (cli.view.drm_no_seat.has_value()) {
+    instance.view.drm_no_seat = cli.view.drm_no_seat.value();
   }
 }
 
@@ -421,6 +429,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             "drm-stage-cursor",
             "Stage the HW cursor into the compositor commit: auto|yes|no",
             cxxopts::value<std::string>())(
+            "drm-no-seat",
+            "Bypass libseat: open /dev/dri + input directly and self-acquire "
+            "DRM master, skipping the foreground-VT guard (headless/SSH/kiosk "
+            "bring-up; you must ensure nothing else holds the display)",
+            cxxopts::value<bool>())(
             "input-transform",
             "Per-device pointer transform (repeatable): "
             "\"<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]\"",
@@ -574,6 +587,16 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
                 config.view.drm_async_flip);
     pick_string("drm-stage-cursor", "HOMESCREEN_DRM_STAGE_CURSOR",
                 config.view.drm_stage_cursor);
+
+    // --drm-no-seat (bool flag) / HOMESCREEN_DRM_NO_SEAT (env). CLI wins;
+    // env fills only when the flag is absent. Env is truthy on
+    // 1 / true / yes (case-sensitive); anything else (incl. empty) = unset.
+    if (result.count("drm-no-seat")) {
+      config.view.drm_no_seat = result["drm-no-seat"].as<bool>();
+    } else if (const char* e = std::getenv("HOMESCREEN_DRM_NO_SEAT"); e && *e) {
+      const std::string_view v(e);
+      config.view.drm_no_seat = (v == "1" || v == "true" || v == "yes");
+    }
 
     // drm-rotation is an int (0|90|180|270); CLI wins, then env. Reject any
     // other value so a typo fails loud instead of silently scanning unrotated.

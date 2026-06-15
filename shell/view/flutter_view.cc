@@ -189,6 +189,9 @@ FlutterView::FlutterView(Configuration::Config config,
     // kAuto (default) resolves per driver in DrmBackend::Create — staging is
     // enabled only on nvidia-drm; yes/no force the choice.
     cfg.stage_cursor = parse_tri(m_config.view.drm_stage_cursor);
+    // --drm-no-seat: DrmDisplay forced the session null; tell DrmBackend to
+    // also skip the foreground-VT guard on its direct-open path.
+    cfg.no_seat = m_config.view.drm_no_seat.value_or(false);
 
     // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
     // process-wide libseat session. Pull the raw pointer — may be null

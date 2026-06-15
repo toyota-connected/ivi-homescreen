@@ -537,11 +537,20 @@ bool DrmBackend::InitDrm() {
     spdlog::info("[DrmBackend] opened {} via libseat (fd={})", cfg_.drm_device,
                  fd);
   } else {
-    // Fallback path: no seat backend available. Refuse up-front if we're
-    // not on the active VT — prevents the "master acquired, commits
-    // return success, but scanout stays on the other VT" trap where
-    // drmSetMaster succeeds but PAGE_FLIP_EVENT never fires.
-    if (!VerifyForegroundVt(cfg_.drm_device)) {
+    // Fallback path: no seat backend available (or --drm-no-seat). Refuse
+    // up-front if we're not on the active VT — prevents the "master
+    // acquired, commits return success, but scanout stays on the other VT"
+    // trap where drmSetMaster succeeds but PAGE_FLIP_EVENT never fires.
+    // --drm-no-seat opts out of this guard: the operator has taken
+    // responsibility for the display (e.g. headless / SSH with nothing else
+    // holding master), where there is no foreground kernel VT to be on.
+    if (cfg_.no_seat) {
+      spdlog::warn(
+          "[DrmBackend] --drm-no-seat: skipping the foreground-VT guard on "
+          "{}. If the screen stays black, another DRM master holds the "
+          "device or scanout is owned by a different VT.",
+          cfg_.drm_device);
+    } else if (!VerifyForegroundVt(cfg_.drm_device)) {
       return false;
     }
 
