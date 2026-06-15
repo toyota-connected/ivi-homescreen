@@ -3,92 +3,139 @@
 
 #include "utils.h"
 
+#include <config/common.h>
+#include <cstdlib>
 #include <cstring>
-#include <fstream>
+
+#define TOML_EXCEPTIONS 0
+#include <tomlplusplus/toml.hpp>
 
 #include "sentry.h"
 
-auto invalid_mem = reinterpret_cast<void*>(1);
+volatile auto invalid_mem = reinterpret_cast<void*>(1);
 
 void CrashHandler::trigger_crash() {
   memset(invalid_mem, 1, 100);
 }
 
-const char* CrashHandler::get_dsn() {
-  const auto dsn_env = getenv("SENTRY_DSN");
-  const char* dsn;
+CrashHandler::SentryConfig CrashHandler::LoadConfig(
+    const std::string& bundle_path) {
+  SentryConfig config;
 
-  if (dsn_env && *dsn_env) {
-    dsn = dsn_env;
-  } else {
-    dsn = kCrashHandlerDsn;
+  // Defaults
+  config.release = "";
+  config.env = kSentryEnvDefault;
+
+  // DSN from environment variable
+  const char* dsn_env = std::getenv("SENTRY_DSN");
+  config.dsn = dsn_env ? dsn_env : "";
+
+  std::filesystem::path toml_path;
+  if (bundle_path.empty()) {
+    spdlog::warn("Bundle path is empty, using defaults");
+    return config;
   }
 
-  return dsn;
-}
+  toml_path = bundle_path;
+  toml_path /= kViewConfigToml;
 
-void CrashHandler::set_sentry_attachments(sentry_options_t* options) {
-  const auto attachment_env = getenv("SENTRY_ATTACHMENTS");
-  std::string attachments(kCrashpadAttachments);
-  if (attachment_env && *attachment_env) {
-    attachments.append(",");
-    attachments.append(attachment_env);
+  if (!std::filesystem::exists(toml_path)) {
+    spdlog::warn("Global config file not found at {}, using defaults",
+                 toml_path.string());
+    return config;
   }
-  std::stringstream ss(attachments);
-  std::string attachment;
 
-  while (getline(ss, attachment, ',')) {
-    std::filesystem::path attachment_path(attachment);
-    if (exists(attachment_path)) {
-      sentry_options_add_attachment(options, attachment_path.c_str());
+  // Parse TOML file
+  auto result = toml::parse_file(toml_path.string());
+  if (!result) {
+    spdlog::error("TOML parsing failed: {} — {}", toml_path.string(),
+                  result.error().description());
+    return config;
+  }
+
+  auto& tbl = result.table();
+
+  // Extract [sentry] section
+  if (auto* sentry_section = tbl.get("sentry")) {
+    if (auto* release = sentry_section->as_table()->get("release"))
+      config.release = release->value_or("");
+    if (auto* env = sentry_section->as_table()->get("env"))
+      config.env = env->value_or(kSentryEnvDefault);
+
+    // Extract [sentry.tags] subsection
+    if (auto* tags_node = sentry_section->as_table()->get("tags")) {
+      if (auto* tags_tbl = tags_node->as_table()) {
+        for (auto& [key, val] : *tags_tbl) {
+          if (auto str_val = val.value<std::string>())
+            config.tags[std::string(key)] = *str_val;
+        }
+      }
+    }
+
+    // Extract [sentry] attachments array
+    if (auto* arr_node = sentry_section->as_table()->get("attachments")) {
+      if (auto* arr = arr_node->as_array()) {
+        for (auto& val : *arr) {
+          if (auto str_val = val.value<std::string>())
+            config.attachments.push_back(*str_val);
+        }
+      }
     }
   }
+
+  return config;
 }
 
-void CrashHandler::set_sentry_tags() {
-  const auto tags_env = getenv("SENTRY_TAGS");
-  std::string tags(kCrashpadTags);
+CrashHandler::CrashHandler(const std::string& bundle_path) {
+  config_ = LoadConfig(bundle_path);
 
-  if (tags_env && *tags_env) {
-    tags.append(",");
-    tags.append(tags_env);
+  if (config_.dsn.empty()) {
+    spdlog::warn("Sentry DSN is empty, crash reports will not be sent");
+    return;
   }
-  std::stringstream ss(tags);
-  std::string tag;
-  while (getline(ss, tag, ',')) {
-    size_t del = tag.find("=", 0);
-    std::string tag_name = tag.substr(0, del);
-    size_t tag_val_size = tag.size() - tag_name.size() - 1;
-    std::string tag_val = tag.substr(del + 1, tag_val_size);
-    sentry_set_tag(tag_name.c_str(), tag_val.c_str());
-  }
-}
 
-CrashHandler::CrashHandler() {
   sentry_options_t* options = sentry_options_new();
-  sentry_options_set_dsn(options, get_dsn());
+  if (!options) {
+    spdlog::error("Failed to create Sentry options, likely OOM");
+    spdlog::error("Crash handler will be disabled");
+    return;
+  }
+
+  sentry_options_set_dsn(options, config_.dsn.c_str());
   auto home_path = Utils::GetConfigHomePath();
   std::filesystem::path db_path = home_path;
   db_path /= ".sentry";
   sentry_options_set_handler_path(options, kCrashpadBinaryPath);
   sentry_options_set_database_path(options, db_path.c_str());
 
-  const auto release_env = getenv("SENTRY_RELEASE");
-  if (release_env && *release_env) {
-    sentry_options_set_release(options, release_env);
-  } else {
-    sentry_options_set_release(options, kCrashHandlerRelease);
-  }
+  sentry_options_set_release(options, config_.release.c_str());
+  sentry_options_set_environment(options, config_.env.c_str());
 
-  set_sentry_attachments(options);
+  // Apply attachments
+  for (auto& attachment : config_.attachments) {
+    std::filesystem::path attachment_path(attachment);
+    if (exists(attachment_path)) {
+      sentry_options_add_attachment(options, attachment_path.c_str());
+    }
+  }
 
   sentry_options_set_symbolize_stacktraces(options, true);
   sentry_options_set_debug(options, 0);
 
-  sentry_init(options);
-  set_sentry_tags();
+  if (sentry_init(options) != 0) {
+    spdlog::error("sentry_init() failed, crash reports will not be sent");
+    return;
+  }
+  initialized_ = true;
+
+  // Apply tags (must be called after sentry_init)
+  for (auto& [tag_name, tag_val] : config_.tags) {
+    sentry_set_tag(tag_name.c_str(), tag_val.c_str());
+  }
 }
 
 CrashHandler::~CrashHandler() {
-  sentry_close();
+  if (initialized_) {
+    sentry_close();
+  }
 }
