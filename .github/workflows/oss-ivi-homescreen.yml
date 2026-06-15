@@ -177,3 +177,25 @@ jobs:
           # sentry-native version is pinned in the setup-workspace action (@v2.0),
           # so bump this suffix if that pin or the action ref changes.
           cache-key: crash-handler-${{ runner.os }}-wsa-v2.0
+
+  # Aggregate gate so crash-handler can be a required status check even though
+  # it is path-gated (skipped on docs/asset-only PRs). This job always runs and
+  # passes when crash-handler succeeded OR was skipped, and fails only when
+  # crash-handler actually failed/was cancelled. Branch protection requires
+  # THIS context instead of crash-handler so a legitimate skip never blocks a
+  # PR while a real failure still does.
+  crash-handler-gate:
+    needs: crash-handler
+    if: ${{ always() && github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require crash-handler to pass or be skipped
+        shell: bash
+        run: |
+          result="${{ needs.crash-handler.result }}"
+          echo "crash-handler result: ${result}"
+          if [ "${result}" = "success" ] || [ "${result}" = "skipped" ]; then
+            exit 0
+          fi
+          echo "::error::crash-handler did not pass (result=${result})"
+          exit 1
