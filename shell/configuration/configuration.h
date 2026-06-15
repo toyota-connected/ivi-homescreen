@@ -80,6 +80,14 @@ class Configuration {
       std::optional<std::string> drm_explicit_sync;
       std::optional<std::string> drm_async_flip;
       std::optional<std::string> drm_stage_cursor;
+      // Bypass libseat entirely (--drm-no-seat / HOMESCREEN_DRM_NO_SEAT): the
+      // DRM backend opens /dev/dri + /dev/input directly via group permissions
+      // and becomes DRM master itself, also skipping the foreground-VT guard.
+      // An opt-in escape hatch for headless / SSH / single-session kiosk
+      // bring-up where no seat manager (logind/seatd) is running and the
+      // operator guarantees nothing else holds the display. Gives up
+      // VT-switch handling and session pause/resume. Unset = false.
+      std::optional<bool> drm_no_seat;
       // Per-device relative-pointer transforms, repeatable:
       //   "<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]"
       // Rotates a built-in pointer's deltas to a rotated display (e.g. the

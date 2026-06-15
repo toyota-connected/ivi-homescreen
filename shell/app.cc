@@ -62,8 +62,9 @@ std::shared_ptr<IDisplay> MakeDisplay(
   // safe defaults. Backend-side hooks can refine the refresh rate later.
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
-                                      static_cast<int32_t>(h), 60.0);
+                                      static_cast<int32_t>(h), 60.0, no_seat);
 #elif BUILD_BACKEND_SOFTWARE
   // No compositor, no Wayland, no DRM — just an IDisplay that owns
   // (a) a refresh-rate denominator for App::Loop and (b) an optional
