@@ -92,7 +92,7 @@ class VkBackingStoreLayerSource final : public drm::scene::LayerBufferSource {
     return inner_->acquire();
   }
   void release(drm::scene::AcquiredBuffer acquired) noexcept override {
-    inner_->release(acquired);
+    inner_->release(std::move(acquired));
   }
   [[nodiscard]] drm::scene::BindingModel binding_model()
       const noexcept override {
