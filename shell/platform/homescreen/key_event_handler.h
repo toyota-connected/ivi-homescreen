@@ -7,6 +7,8 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 
 #include <xkbcommon/xkbcommon-names.h>
@@ -85,13 +87,22 @@ class KeyEventHandler final : public KeyboardHookHandler {
 
   // Modifier bitmasks computed from the active XKB keymap in KeymapChanged().
   // Defaults match the standard Linux/XKB layout (Shift=0, Ctrl=2, Alt=3).
-  uint32_t ctrl_mask_ = 0x4u;
-  uint32_t alt_mask_ = 0x8u;
+  // Atomic because KeymapChanged() writes them on the platform strand while
+  // KeyboardHook() reads them on the input thread (Wayland event thread, or
+  // the main thread for key-repeat) — see pressed_keys_mutex_.
+  std::atomic<uint32_t> ctrl_mask_{0x4u};
+  std::atomic<uint32_t> alt_mask_{0x8u};
 
   // Track the logical key used on key-down so that the matching key-up sends
   // the same logical key (utf32 is 0 on release, which would produce a
   // different value). Indexed by physical key code.
-  mutable std::unordered_map<uint64_t, uint64_t> pressed_logical_keys_;
+  //
+  // KeyboardHook() may run concurrently on two threads on the Wayland backend:
+  // real key events arrive on the Wayland event thread while key-repeat events
+  // are driven from the main thread's EventTimer. Guard the map so the
+  // read-modify-write below is not a concurrent-mutation data race.
+  std::mutex pressed_keys_mutex_;
+  std::unordered_map<uint64_t, uint64_t> pressed_logical_keys_;
 
   // In-process clipboard: persists across text-field switches so that text
   // copied from one field can be pasted into another.

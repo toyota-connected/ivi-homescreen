@@ -216,30 +216,37 @@ void KeyEventHandler::KeyboardHook(const bool released,
   FlutterKeyEventType type;
   uint64_t logical;
 
-  if (!released) {
-    const bool already_pressed = pressed_logical_keys_.count(physical) > 0;
-    type =
-        already_pressed ? kFlutterKeyEventTypeRepeat : kFlutterKeyEventTypeDown;
-    logical = key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
-    pressed_logical_keys_[physical] = logical;
-  } else {
-    type = kFlutterKeyEventTypeUp;
-    const auto it = pressed_logical_keys_.find(physical);
-    logical = (it != pressed_logical_keys_.end())
-                  ? it->second
-                  : key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
-    pressed_logical_keys_.erase(physical);
+  // pressed_logical_keys_ is touched from the input thread (real key events)
+  // and, on the Wayland backend, the main thread (key-repeat via EventTimer),
+  // so the read-modify-write must be serialised.
+  {
+    const std::lock_guard<std::mutex> lk(pressed_keys_mutex_);
+    if (!released) {
+      const bool already_pressed = pressed_logical_keys_.count(physical) > 0;
+      type = already_pressed ? kFlutterKeyEventTypeRepeat
+                             : kFlutterKeyEventTypeDown;
+      logical = key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
+      pressed_logical_keys_[physical] = logical;
+    } else {
+      type = kFlutterKeyEventTypeUp;
+      const auto it = pressed_logical_keys_.find(physical);
+      const bool was_pressed = it != pressed_logical_keys_.end();
+      logical = was_pressed
+                    ? it->second
+                    : key_mapping::KeysymToLogicalKey(keysym, utf32, physical);
+      pressed_logical_keys_.erase(physical);
 
-    // If this is a key release for a key we haven't seen pressed,
-    // do not send the event.
-    //
-    // Eg. occurs when Alt+Tab'ing into the app
-    if (it == pressed_logical_keys_.end()) {
-      spdlog::debug(
-          "[key] ignoring key-up for unpressed key "
-          "(keysym=0x{:08x} scan={} mods=0x{:02x} physical=0x{:016x})",
-          keysym, xkb_scancode, modifiers, physical);
-      return;
+      // If this is a key release for a key we haven't seen pressed,
+      // do not send the event.
+      //
+      // Eg. occurs when Alt+Tab'ing into the app
+      if (!was_pressed) {
+        spdlog::debug(
+            "[key] ignoring key-up for unpressed key "
+            "(keysym=0x{:08x} scan={} mods=0x{:02x} physical=0x{:016x})",
+            keysym, xkb_scancode, modifiers, physical);
+        return;
+      }
     }
   }
 
