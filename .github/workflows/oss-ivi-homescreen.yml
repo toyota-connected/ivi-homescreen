@@ -13,13 +13,15 @@ on:
 
 jobs:
   ivi-homescreen:
-    # matrix for build flags
+    # matrix for build flags. suffix disambiguates the per-leg artifact names
+    # (artifact names must be unique within a run).
     strategy:
-       matrix:
-         flags: [
-            "ENABLE_LEGACY_KEYBOARD=ON",
-            "ENABLE_LEGACY_KEYBOARD=OFF"
-         ]
+      matrix:
+        include:
+          - flags: "ENABLE_LEGACY_KEYBOARD=ON"
+            suffix: legacy-on
+          - flags: "ENABLE_LEGACY_KEYBOARD=OFF"
+            suffix: legacy-off
 
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && always() }}
     runs-on: ubuntu-22.04
@@ -59,21 +61,21 @@ jobs:
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v4
         with:
-          name: homescreen-dbg.${{ job.check_run_id }}.Linux.tar.gz.zip
+          name: homescreen-dbg.${{ matrix.suffix }}.Linux.tar.gz.zip
           path: |
             build/debug/_packages/homescreen-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
         uses: actions/upload-artifact@v4
         with:
-          name: homescreen-dbg.${{ job.check_run_id }}.amd64.deb.zip
+          name: homescreen-dbg.${{ matrix.suffix }}.amd64.deb.zip
           path: |
             build/debug/_packages/homescreen-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
         uses: actions/upload-artifact@v4
         with:
-          name: homescreen-dbg.${{ job.check_run_id }}.x86_64.rpm.zip
+          name: homescreen-dbg.${{ matrix.suffix }}.x86_64.rpm.zip
           path: |
             build/debug/_packages/homescreen-dbg-*.x86_64.rpm
 
@@ -105,21 +107,21 @@ jobs:
       - name: Publish Release Artifact TGZ
         uses: actions/upload-artifact@v4
         with:
-          name: homescreen-${{ job.check_run_id }}.Linux.tar.gz.zip
+          name: homescreen-${{ matrix.suffix }}.Linux.tar.gz.zip
           path: |
             build/release/_packages/homescreen-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
         uses: actions/upload-artifact@v4
         with:
-          name: homescreen-${{ job.check_run_id }}.amd64.deb.zip
+          name: homescreen-${{ matrix.suffix }}.amd64.deb.zip
           path: |
             build/release/_packages/homescreen_*_amd64.deb
 
       - name: Publish Release Artifact RPM
         uses: actions/upload-artifact@v4
         with:
-          name: homescreen-${{ job.check_run_id }}.x86_64.rpm.zip
+          name: homescreen-${{ matrix.suffix }}.x86_64.rpm.zip
           path: |
             build/release/_packages/homescreen-*.x86_64.rpm
 
