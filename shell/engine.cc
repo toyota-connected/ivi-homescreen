@@ -13,9 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <pthread.h>
+#include <sched.h>
 #include <filesystem>
 #include <utility>
 #include <vector>
+#include "logging/logging.h"
 
 #include <dlfcn.h>
 #include <cassert>
@@ -23,11 +26,95 @@
 #include "config/common.h"
 #include "engine.h"
 #include "hexdump.h"
+#include "main_loop_waker.h"
 #include "utils.h"
+
+#if BUILD_BACKEND_DRM_KMS_EGL
+#include "backend/drm_kms_egl/drm_backend.h"
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+// The Vulkan DRM backend reuses the DRM engine-state path but not the EGL
+// backend header (which pulls in EGL/GL). Only the engine-state type is
+// needed here.
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#endif
+
+// WaylandWindow's complete type is required for the m_egl_window->
+// ActivateSystemCursor() call in this TU (and for the shared_ptr
+// constructor in the initializer list). flutter_view.h
+// forward-declares WaylandWindow unconditionally so the header
+// compiles without Wayland; the .cc needs the real definition only
+// when Wayland is selected.
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
+#include "wayland/window.h"
+#endif
 
 extern void EngineOnFlutterPlatformMessage(
     const FlutterPlatformMessage* engine_message,
     void* user_data);
+
+namespace {
+
+// Wired into FlutterCustomTaskRunners.thread_priority_setter. Flutter
+// calls this from each of its internal threads (raster, UI, IO) on
+// thread startup, AND from the platform thread hosting the embedder-
+// provided task runner — so we can target the threads that actually
+// need to hit vblank deadlines (raster, display, platform-runner host)
+// without touching DrmSession / DrmSeat / other infrastructure.
+//
+// Gated by IVI_DRM_RT (set to anything non-empty to enable). Default
+// off because a SCHED_FIFO thread that spins is unrecoverable without
+// a hard reset — dev-time safety. Once the code earns trust, flip the
+// default by changing the env check.
+//
+// Requires CAP_SYS_NICE for the SCHED_FIFO paths. Grant it once on
+// the binary:
+//
+//   sudo setcap cap_sys_nice=eip <binary>
+//
+// Without the capability pthread_setschedparam returns EPERM and the
+// thread silently stays at SCHED_OTHER nice 0. Read the README if
+// your IVI_DRM_RT flag isn't visibly helping.
+extern "C" void EngineThreadPrioritySetter(FlutterThreadPriority prio) {
+  static const bool enabled = std::getenv("IVI_DRM_RT") != nullptr;
+  if (!enabled) {
+    return;
+  }
+  struct sched_param p{};
+  switch (prio) {
+    case kRaster:
+      // Builds frames + calls present_layers. Misses vblank → dropped
+      // frame. Highest of our RT prios so it preempts the display
+      // thread if they ever contend.
+      //
+      // Why prio 2 specifically — testing at prio 10 regressed 240Hz
+      // cadence from 98% to 41% on amdgpu: raster preempted the
+      // GPU-fence completion kthreads it was waiting on, so glFinish
+      // spun on a fence that couldn't fire. Prio 2 lets ksoftirqd and
+      // amdgpu kthreads (typically lower-RT or SCHED_OTHER) preempt
+      // us, which is exactly what we want during glFinish.
+      p.sched_priority = 2;
+      pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
+      break;
+    case kDisplay:
+      // UI / Dart thread. RT-class but one prio below raster.
+      p.sched_priority = 1;
+      pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
+      break;
+    case kBackground:
+      // Cleanup / async work. SCHED_BATCH tells the kernel "don't
+      // pick me for interactive responsiveness." No privilege needed.
+      pthread_setschedparam(pthread_self(), SCHED_BATCH, &p);
+      break;
+    case kNormal:
+    default:
+      // Leave at SCHED_OTHER nice 0.
+      break;
+  }
+}
+
+}  // namespace
 
 Engine::Engine(FlutterView* view,
                const size_t index,
@@ -58,6 +145,16 @@ Engine::Engine(FlutterView* view,
   m_args.log_message_callback = onLogMessageCallback;
   m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
   m_args.log_tag = "flutter";
+
+  // Optional per-backend vsync_callback. nullptr (the default for
+  // headless / wayland_egl / wayland_vulkan) leaves the field unset
+  // and Flutter falls back to its internal wall-clock scheduler.
+  // DrmBackend overrides this to deliver vblank-locked OnVsync via
+  // DRM PAGE_FLIP_EVENT (env-gated by IVI_DRM_VSYNC; set to 0 to
+  // force wall-clock pacing for diagnostics).
+  if (auto* vsync_cb = m_backend->GetVsyncCallback(); vsync_cb != nullptr) {
+    m_args.vsync_callback = vsync_cb;
+  }
 
   /// Task Runner
   m_platform_task_runner =
@@ -158,6 +255,9 @@ Engine::Engine(FlutterView* view,
   m_custom_task_runners.struct_size = sizeof(FlutterCustomTaskRunners);
   m_custom_task_runners.platform_task_runner =
       &m_platform_task_runner_description;
+  // Per-thread priority setter (opt-in via IVI_DRM_RT=1). See
+  // EngineThreadPrioritySetter for the mapping rationale.
+  m_custom_task_runners.thread_priority_setter = &EngineThreadPrioritySetter;
 
   m_args.custom_task_runners = &m_custom_task_runners;
 
@@ -165,13 +265,15 @@ Engine::Engine(FlutterView* view,
 }
 
 Engine::~Engine() {
-  if (m_running) {
-    LibFlutterEngine->Deinitialize(m_flutter_engine);
-    LibFlutterEngine->Shutdown(m_flutter_engine);
-    if (m_aot_data) {
-      LibFlutterEngine->CollectAOTData(m_aot_data);
-    }
-  }
+  // Stop the engine (idempotent) as a fallback for owners that don't drive
+  // the explicit shutdown sequence in FlutterView::~FlutterView.
+  Shutdown();
+  // Free engine_state explicitly here — after Deinitialize/Shutdown have
+  // joined all engine threads and drained final callbacks (so user_data
+  // dereferences in OnFlutterPlatformMessage hit live state), but before
+  // m_platform_task_runner.reset() destroys the task runner that
+  // engine_state→messenger holds pointers into.
+  m_engine_state.reset();
   m_platform_task_runner.reset();
 }
 
@@ -183,11 +285,23 @@ FlutterEngineResult Engine::RunTask() {
   return kSuccess;
 }
 
-FlutterEngineResult Engine::Shutdown() const {
-  if (!m_flutter_engine) {
-    return kSuccess;
+void Engine::Shutdown() {
+  if (!m_running) {
+    return;  // never started, or already stopped — idempotent
   }
-  return LibFlutterEngine->Shutdown(m_flutter_engine);
+  m_running = false;
+  // Deinitialize stops new frame work; Shutdown joins the platform, UI and
+  // rasterizer threads. After this returns nothing in the engine touches the
+  // backend (no more VsyncTrampoline / PresentLayers), so the caller may
+  // safely release the GL contexts and render surfaces those threads used.
+  if (m_flutter_engine) {
+    LibFlutterEngine->Deinitialize(m_flutter_engine);
+    LibFlutterEngine->Shutdown(m_flutter_engine);
+  }
+  if (m_aot_data) {
+    LibFlutterEngine->CollectAOTData(m_aot_data);
+    m_aot_data = nullptr;
+  }
 }
 
 bool Engine::IsRunning() const {
@@ -495,6 +609,10 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
   e.rotation = 0;
 
   m_pointer_events.emplace_back(e);
+
+  // Wake the main loop so it flushes this batch promptly instead of waiting
+  // for its next periodic tick (the loop blocks idle on a static screen).
+  MainLoopWaker::instance().Wake();
 }
 
 void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
@@ -526,6 +644,9 @@ void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
   e.rotation = 0;
 
   m_pointer_events.emplace_back(e);
+
+  // Wake the main loop so it flushes this batch promptly (see above).
+  MainLoopWaker::instance().Wake();
 }
 
 void Engine::SendPointerEvents() {
@@ -562,7 +683,20 @@ FlutterEngineAOTData Engine::LoadAotData(const std::string& bundle_path) const {
 
 bool Engine::ActivateSystemCursor(const int32_t device,
                                   const std::string& kind) const {
+  if (!m_egl_window) {
+    return true;
+  }
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
   return m_egl_window->ActivateSystemCursor(device, kind);
+#else
+  // Forward-declaration only on non-Wayland builds; m_egl_window is
+  // always null here, so this branch is unreachable at runtime. The
+  // unused parameter cast keeps the signature stable.
+  (void)device;
+  (void)kind;
+  return true;
+#endif
 }
 
 void Engine::OnFlutterPlatformMessage(

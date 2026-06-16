@@ -92,13 +92,49 @@ option(BUILD_COMPOSITOR "Enable FlutterCompositor backing store API" OFF)
 # falls back to a non-exportable allocation if unavailable.
 #
 option(BUILD_COMPOSITOR_DMABUF_EXPORT
-       "Export Vulkan backing stores as DMA-BUF for zero-copy plugins" OFF)
+        "Export Vulkan backing stores as DMA-BUF for zero-copy plugins" OFF)
 
 #
 # DRM
 #
-option(BUILD_BACKEND_DRM "Build DRM backend" OFF)
 option(BUILD_BACKEND_WAYLAND_LEASED_DRM "Build Wayland Leased DRM backend" OFF)
+option(BUILD_BACKEND_DRM_KMS_EGL
+        "Build DRM/KMS EGL backend (mutually exclusive with EGL and Vulkan backends)"
+        OFF)
+option(BUILD_BACKEND_DRM_KMS_VULKAN
+        "Build DRM/KMS Vulkan backend (mutually exclusive with the EGL and Wayland backends)"
+        OFF)
+
+# Vendor VK_LAYER_KHRONOS_validation into the Vulkan backend so -d guarantees
+# validation even on images that ship no system layer registry. Off by default;
+# flip ON for dev/CI presets. The option is declared here so the build graph is
+# stable ahead of the in-process layer wiring.
+option(BUILD_VULKAN_VALIDATION
+        "Vendor the Khronos Vulkan validation layer into the Vulkan backend"
+        OFF)
+
+# Standalone zero-copy-capability probe (drm_kms_vulkan_probe). Builds just the
+# probe tool without selecting the DRM/KMS Vulkan backend, so it can be
+# cross-built and run on a target — alongside any backend — to report whether
+# the device can do zero-copy dma-buf scanout. Implied ON when the DRM/KMS
+# Vulkan backend itself is built.
+option(BUILD_DRM_KMS_VULKAN_PROBE
+        "Build the standalone drm_kms_vulkan zero-copy capability probe"
+        OFF)
+
+# Drive the non-framed DRM/KMS present path through drm::scene::LayerScene
+# rather than the in-tree PlaneRegistry + Allocator + AtomicRequest pipeline.
+# Off-by-default while the integration is bedding in; flip to ON to exercise
+# LayerScene-managed plane allocation, composition fallback, and session
+# pause/resume forwarding. The framed-mode path is unaffected by this flag.
+option(USE_DRM_SCENE
+        "Drive DRM/KMS non-framed present path via drm::scene::LayerScene"
+        OFF)
+if (USE_DRM_SCENE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN))
+    message(FATAL_ERROR
+            "USE_DRM_SCENE=ON requires BUILD_BACKEND_DRM_KMS_EGL=ON or "
+            "BUILD_BACKEND_DRM_KMS_VULKAN=ON")
+endif ()
 
 #
 # Headless
@@ -109,6 +145,49 @@ if (BUILD_BACKEND_HEADLESS_EGL)
     pkg_check_modules(OSMESA osmesa glesv2 egl IMPORTED_TARGET REQUIRED)
 endif ()
 
+#
+# Software (CPU rendering; no GPU, no display server)
+#
+option(BUILD_BACKEND_SOFTWARE
+        "Build software (CPU) backend — kSoftware renderer, no GPU/display required"
+        OFF)
+if (BUILD_BACKEND_SOFTWARE)
+    # Optional DRM dumb-buffer sink. Defaults ON when libdrm is
+    # available (typical Linux dev/CI host) so the sink is reachable
+    # without an explicit cmake flag. Auto-disables on systems
+    # without libdrm; can also be force-OFF for a minimal CI image.
+    find_package(PkgConfig)
+    pkg_check_modules(DRM_DUMB libdrm IMPORTED_TARGET)
+    option(BUILD_SOFTWARE_SINK_DRM
+            "Build the DRM dumb-buffer sink for the software backend"
+            ${DRM_DUMB_FOUND})
+    if (BUILD_SOFTWARE_SINK_DRM AND NOT DRM_DUMB_FOUND)
+        message(FATAL_ERROR
+                "BUILD_SOFTWARE_SINK_DRM=ON but pkg-config libdrm was not found")
+    endif ()
+    # Optional /dev/fb* sink. Linux-only, no library dependency beyond
+    # the kernel uapi headers (linux/fb.h) which ship with every libc.
+    # Default ON when targeting Linux; the build hosts targeting other
+    # OSes (the embedder targets Linux today, but defensive) can flip
+    # it off via -DBUILD_SOFTWARE_SINK_FBDEV=OFF.
+    option(BUILD_SOFTWARE_SINK_FBDEV
+            "Build the fbdev (/dev/fb*) sink for the software backend"
+            ON)
+    # Optional libinput-backed seat for keyboard / pointer events.
+    # Auto-on if pkg-config finds libinput + libudev + xkbcommon (the
+    # universal Linux desktop input stack). Force-on without the deps
+    # is a fatal configure error.
+    pkg_check_modules(SW_LIBINPUT libinput libudev xkbcommon IMPORTED_TARGET)
+    option(BUILD_SOFTWARE_INPUT_LIBINPUT
+            "Build the libinput-backed input seat for the software backend"
+            ${SW_LIBINPUT_FOUND})
+    if (BUILD_SOFTWARE_INPUT_LIBINPUT AND NOT SW_LIBINPUT_FOUND)
+        message(FATAL_ERROR
+                "BUILD_SOFTWARE_INPUT_LIBINPUT=ON but pkg-config could not "
+                "find libinput / libudev / xkbcommon")
+    endif ()
+endif ()
+
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
 
 #
@@ -116,29 +195,51 @@ option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
 #
 option(BUILD_CRASH_HANDLER "Build Crash Handler" OFF)
 if (BUILD_CRASH_HANDLER)
+    message(STATUS "Crash Handler .......... Enabled")
+
+    include(GNUInstallDirs)
+
+    # sentry-native installs its CMake package config under the GNUInstallDirs
+    # libdir of its staging prefix -- typically lib/cmake/sentry, but lib64 on
+    # some distros and a flat cmake/sentry on older layouts. Hardcoding a single
+    # suffix breaks whenever ${CMAKE_INSTALL_LIBDIR} here differs from the one
+    # sentry-native installed with (or is empty because GNUInstallDirs had not
+    # been included yet). Search the likely suffixes under the chosen base so a
+    # libdir mismatch can't break configure.
     if (SENTRY_NATIVE_LIBDIR)
-        if (NOT EXISTS ${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake)
-            message(FATAL_ERROR "${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake does not exist")
-        else ()
-            message(STATUS "Found libsentry at specified directory: ${SENTRY_NATIVE_LIBDIR}/cmake/sentry/sentry-config.cmake")
-            set(sentry_DIR ${SENTRY_NATIVE_LIBDIR}/cmake/sentry)
-        endif ()
+        set(_sentry_base ${SENTRY_NATIVE_LIBDIR})
     else ()
-        if (EXISTS ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake)
-            message(STATUS "Found sentry at default location: ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake")
-            set(sentry_DIR {CMAKE_INSTALL_PREFIX}/lib/cmake/sentry)
-        else ()
-            message(FATAL_ERROR "Sentry could not be found at ${CMAKE_INSTALL_PREFIX}/lib/cmake/sentry/sentry-config.cmake, please set SENTRY_NATIVE_LIBDIR")
-        endif()
+        set(_sentry_base ${CMAKE_INSTALL_PREFIX})
     endif ()
 
-    
+    set(sentry_DIR "")
+    foreach (_suffix
+            ${CMAKE_INSTALL_LIBDIR}/cmake/sentry
+            lib/cmake/sentry
+            lib64/cmake/sentry
+            cmake/sentry)
+        if (EXISTS ${_sentry_base}/${_suffix}/sentry-config.cmake)
+            set(sentry_DIR ${_sentry_base}/${_suffix})
+            break ()
+        endif ()
+    endforeach ()
+
+    if (sentry_DIR)
+        message(STATUS "Found libsentry: ${sentry_DIR}/sentry-config.cmake")
+    else ()
+        message(FATAL_ERROR
+                "sentry-config.cmake not found under ${_sentry_base} "
+                "(searched */cmake/sentry). Set SENTRY_NATIVE_LIBDIR to the "
+                "sentry-native staging prefix.")
+    endif ()
+
+
     if (CRASHPAD_BINARY_DIR)
         if (NOT EXISTS ${CRASHPAD_BINARY_DIR}/crashpad_handler)
             message(FATAL_ERROR "${CRASHPAD_BINARY_DIR}/crashpad_handler does not exist")
-        else()
+        else ()
             message(STATUS "Using crashpad_handler at specified directory: ${CRASHPAD_BINARY_DIR}")
-        endif()
+        endif ()
     else ()
         if (EXISTS ${CMAKE_INSTALL_PREFIX}/bin/crashpad_handler)
             message(STATUS "Defaulting to system crashpad_handler at ${CMAKE_INSTALL_PREFIX}")
@@ -147,15 +248,11 @@ if (BUILD_CRASH_HANDLER)
             message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
         endif()
     endif()
-
-    if (NOT CRASH_HANDLER_DSN)
-        message(STATUS "Sentry DSN not set, use environment variable SENTRY_DSN to direct coredumps")
-    endif ()
     
     find_package(sentry REQUIRED)
-    find_package(PkgConfig)
-    pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind)
     string(TIMESTAMP BUILD_VER "%y%m%d")
+else()
+    message(STATUS "Crash Handler .......... Disabled")
 endif ()
 
 #

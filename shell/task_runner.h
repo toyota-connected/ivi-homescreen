@@ -59,6 +59,16 @@ class TaskRunner {
     return strand_.get();
   }
 
+  // Raw io_context for callers that need to construct asio I/O objects
+  // (e.g. posix::stream_descriptor) bound to this runner's executor.
+  // The single worker thread inside TaskRunner drives the context, so
+  // any async completion handler armed against it runs on the same
+  // thread that processes Flutter tasks — useful for callbacks that
+  // must run on the FlutterEngineRun thread.
+  [[nodiscard]] asio::io_context* GetIoContext() const {
+    return io_context_.get();
+  }
+
  private:
   std::string name_;
   FlutterEngine& engine_;

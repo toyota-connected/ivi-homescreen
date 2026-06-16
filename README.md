@@ -566,22 +566,36 @@ For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
 
 Sentry-native support is available for Crash Handling. This pushes a mini-dump to the cloud for triage and tracking.
 
-To create user account and get DNS See https://sentry.io/welcome/
+> To create user account and get a DSN
+> see https://sentry.io/welcome/
 
-CMake Variables
+### Configuration
+
+1. Specify your DSN via environment variable `SENTRY_DSN`
+
+2. Add the following sections to your `config.toml` file with the following structure:
+
+```toml
+[sentry]
+release = "homescreen-1.0.0"
+env = "production"
+attachments = [
+    "/path/to/crash.log",
+    "/path/to/config.toml"
+]
+
+[sentry.tags]
+platform = "linux"
+device = "ivi"
+```
+
+### CMake Variables
+
+To enable crash handler support:
 
     -DBUILD_CRASH_HANDLER=ON
-    -DCRASH_HANDLER_DSN="dsn from your account.  If not defined, can be set at runtime via environment variable"
     -DSENTRY_NATIVE_LIBDIR="directory where sentry native is installed, will look in CMAKE_INSTALL_PREFIX directory if not defined"
     -DCRASHPAD_BINARY_DIR="directory where crashpad_handler executable is installed, will look in CMAKE_INSTALL_PREFIX directory if not defined"
-    -DCRASH_HANDLER_ATTACHMENTS="paths to files you'd like to attach to coredump reports, separated by commas (,)"
-    -DCRASH_HANDLER_TAGS="tags to accompany Sentry coredump report in the style of "TAG_NAME=tagvalue", multiple tags can be defined separated by commas (,)"
-
-Optional Environment Variables
-
-    SENTRY_DSN -- Overrides CMake CRASH_HANDLER_DSN value
-    SENTRY_ATTACHMENTS -- Additional file attachments to add to Sentry crash reports (Appended to those defined in CRASH_HANDLER_ATTACHMENTS), multiple files can be defined, separated by commas (,)
-    SENTRY_TAGS -- Additional tags to accompany Sentry crash reports (Appended to those defined in CRASH_HANDLER_TAGS), multiple tags can be defined, separated by commas (,)
 
 To resolve crash dump stack trace, debug binaries and symbols need to be uploaded to Sentry via sentry-cli tool: https://docs.sentry.io/cli/installation/
 
@@ -591,18 +605,22 @@ Required source repo:  https://github.com/getsentry/sentry-native
 
 sentry build
 
-    git clone https://github.com/getsentry/sentry-native
-    mkdir build && cd build
-    cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_STAGING_PREFIX=`pwd`/out/usr
-    make install
+```bash
+git clone https://github.com/getsentry/sentry-native
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_STAGING_PREFIX=`pwd`/out/usr
+make install
+```
 
 ivi-homescreen build
 
-    git clone https://github.com/toyota-connected/ivi-homescreen
-    mkdir build && cd build
-    cmake .. -DBUILD_CRASH_HANDLER=ON -DCRASH_HANDLER_DSN="dsn from your account"
-    make -j
-    LD_LIBRARY_PATH=<sentry staged sysroot install path>/lib homescreen --b=<your bundle folder> --f
+```bash
+git clone https://github.com/toyota-connected/ivi-homescreen
+mkdir build && cd build
+cmake .. -DBUILD_CRASH_HANDLER=ON -DSENTRY_NATIVE_LIBDIR=`pwd`/../sentry-native/build/out/usr/lib -DCRASHPAD_BINARY_DIR=`pwd`/../sentry-native/build/out/usr/bin
+make -j
+SENTRY_DSN=<your DSN> homescreen --b=<your bundle folder> --f
+```
 
 ## Yocto recipes
 

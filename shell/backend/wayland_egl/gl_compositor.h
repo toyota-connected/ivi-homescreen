@@ -42,14 +42,18 @@ class GlCompositor {
   GlCompositor& operator=(const GlCompositor&) = delete;
 
   /**
-   * @brief Composite the given backing store onto the default framebuffer.
+   * @brief Composite the given backing store into @p dst_fbo.
    *
-   * @param src_fbo         Source framebuffer containing @p src_color_texture.
-   *                        Used by the blit path.
+   * @param dst_fbo         Destination framebuffer; 0 selects the default
+   *                        framebuffer.
+   * @param src_fbo         Source framebuffer containing @p src_color_tex.
+   *                        Used by the blit path. Pass 0 to force the quad
+   *                        path (e.g. raw platform-view textures with no
+   *                        associated FBO).
    * @param src_color_tex   Source color texture. Used by the quad path.
    * @param src_w,src_h     Source dimensions in pixels.
-   * @param dst_x,dst_y     Destination origin on the default framebuffer,
-   *                        in OpenGL coordinates (origin bottom-left).
+   * @param dst_x,dst_y     Destination origin in @p dst_fbo, in OpenGL
+   *                        coordinates (origin bottom-left).
    * @param dst_w,dst_h     Destination dimensions in pixels.
    * @param blend           When true, force the quad path with premultiplied
    *                        alpha blending so transparent pixels preserve the
@@ -59,6 +63,19 @@ class GlCompositor {
    *                        textures drawn in GL-native (bottom-left) origin
    *                        that need to land in Flutter's top-down layout.
    */
+  void CompositeToFbo(GLuint dst_fbo,
+                      GLuint src_fbo,
+                      GLuint src_color_tex,
+                      GLsizei src_w,
+                      GLsizei src_h,
+                      GLint dst_x,
+                      GLint dst_y,
+                      GLsizei dst_w,
+                      GLsizei dst_h,
+                      bool blend = false,
+                      bool flip_y = false);
+
+  // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,
                           GLuint src_color_tex,
                           GLsizei src_w,
@@ -68,7 +85,26 @@ class GlCompositor {
                           GLsizei dst_w,
                           GLsizei dst_h,
                           bool blend = false,
-                          bool flip_y = false);
+                          bool flip_y = false) {
+    CompositeToFbo(0, src_fbo, src_color_tex, src_w, src_h, dst_x, dst_y, dst_w,
+                   dst_h, blend, flip_y);
+  }
+
+  /**
+   * @brief Mark the start/end of a sequence of composite calls.
+   *
+   * Between BeginFrame and EndFrame the persistent GL quad state
+   * (program, VBO, vertex-attrib pointers, depth/stencil/scissor/cull
+   * disables, sampler uniform) is emitted once for the first quad-path
+   * composite and torn down on EndFrame, so subsequent quad composites
+   * within the frame skip ~13 redundant GL calls each. If BeginFrame is
+   * not called, CompositeToDefault keeps its per-call setup+teardown
+   * behaviour for one-off compositions.
+   *
+   * Calls must be balanced. Re-entrancy is not supported.
+   */
+  void BeginFrame();
+  void EndFrame();
 
  private:
   const GlCaps* caps_;
@@ -81,6 +117,15 @@ class GlCompositor {
   GLint attr_uv_{-1};
   GLint uni_tex_{-1};
 
+  // Per-frame batching state. frame_open_ is toggled by BeginFrame/EndFrame;
+  // persistent_state_emitted_ tracks whether the once-per-frame setup has
+  // actually been issued (deferred until the first quad-path composite, so
+  // a frame composed entirely of blit-path layers pays nothing).
+  bool frame_open_{false};
+  bool persistent_state_emitted_{false};
+  bool blend_enabled_{false};
+  GLuint bound_tex_{0};
+
   bool EnsureQuad();
   void CompositeViaQuad(GLuint src_color_tex,
                         GLint dst_x,
@@ -89,6 +134,8 @@ class GlCompositor {
                         GLsizei dst_h,
                         bool blend,
                         bool flip_y);
+  void EmitPersistentQuadState();
+  void TearDownPersistentQuadState();
 
   GLint uni_uv_y_scale_{-1};
   GLint uni_uv_y_offset_{-1};

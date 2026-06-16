@@ -1,5 +1,6 @@
 
 #include "compositor_surface.h"
+#include "logging/logging.h"
 
 #include <filesystem>
 

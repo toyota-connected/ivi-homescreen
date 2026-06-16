@@ -14,37 +14,131 @@
 // limitations under the License.
 
 #include "app.h"
+#include "logging/logging.h"
 
-#include <thread>
+#include <cstdlib>
+#include <string_view>
 
 #include "config/common.h"
 
+#include "main_loop_waker.h"
+#include "timer.h"
 #include "view/flutter_view.h"
+
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
 #include "wayland/display.h"
+#include "wayland/window.h"
+#endif
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+#include "display/drm_display.h"
+#endif
+
+#if BUILD_BACKEND_SOFTWARE
+#include "backend/software/software_cursor.h"
+#include "display/software_display.h"
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
+#include "backend/software/input/software_seat.h"
+#endif
+#endif
 
 #if BUILD_BACKEND_HEADLESS_EGL
 #include "backend/headless/headless.h"
 #endif
 
+namespace {
+
+// Idle wakeup cadence when the loop has no periodic work pending. Acts as a
+// liveness heartbeat / safety net in case a wake source is ever missed; the
+// loop is normally woken on demand by MainLoopWaker.
+constexpr int kIdleHeartbeatMs = 1000;
+
+std::shared_ptr<IDisplay> MakeDisplay(
+    const std::vector<Configuration::Config>& configs) {
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+  // DRM/KMS does not have a compositor-level display concept. The refresh
+  // rate and mode are owned by the backend; the DrmDisplay stub answers
+  // queries the shell issues (metrics, cursor activation, event loop) with
+  // safe defaults. Backend-side hooks can refine the refresh rate later.
+  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
+  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
+  return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
+                                      static_cast<int32_t>(h), 60.0, no_seat);
+#elif BUILD_BACKEND_SOFTWARE
+  // No compositor, no Wayland, no DRM — just an IDisplay that owns
+  // (a) a refresh-rate denominator for App::Loop and (b) an optional
+  // libinput-backed seat. 60 Hz default; a sink with a real vblank
+  // can override later.
+  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
+  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  auto display = std::make_shared<SoftwareDisplay>(
+      static_cast<int32_t>(w), static_cast<int32_t>(h), 60.0);
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
+  // IVI_SW_INPUT controls whether the seat is wired:
+  //   "none"     — skip; engine runs without input (CI default).
+  //   anything else (including unset / "libinput" / "auto") — wire
+  //   the libinput seat.
+  // Default-wire matches operator expectations on device targets and
+  // is a no-op on CI hosts that lack /dev/input/event* anyway.
+  const char* mode = std::getenv("IVI_SW_INPUT");
+  const bool want_input = mode == nullptr || std::string_view(mode) != "none";
+  if (want_input) {
+    display->SetSeat(std::make_unique<homescreen::SoftwareSeat>(
+        static_cast<int32_t>(w), static_cast<int32_t>(h)));
+  } else {
+    spdlog::info("[SoftwareBackend] IVI_SW_INPUT=none — no input seat");
+  }
+#endif
+  // Software cursor, gated by --disable-cursor / IVI_SW_CURSOR=0. Owned by the
+  // display; shared with the seat (updates its position on motion) and the sink
+  // (composites it). Harmless for headless sinks — they ignore SetCursor, and
+  // the cursor stays invisible until the first pointer motion.
+  const char* cursor_env = std::getenv("IVI_SW_CURSOR");
+  const bool cursor_enabled =
+      !configs[0].disable_cursor &&
+      (cursor_env == nullptr || std::string_view(cursor_env) != "0");
+  if (cursor_enabled) {
+    display->SetCursor(std::make_shared<SoftwareCursor>());
+  }
+  return display;
+#else
+  return std::make_shared<Display>(!configs[0].disable_cursor,
+                                   configs[0].wayland_event_mask,
+                                   configs[0].cursor_theme, configs);
+#endif
+}
+
+}  // namespace
+
 App::App(const std::vector<Configuration::Config>& configs)
-    : m_wayland_display(std::make_shared<Display>(!configs[0].disable_cursor,
-                                                  configs[0].wayland_event_mask,
-                                                  configs[0].cursor_theme,
-                                                  configs)) {
+    : m_display(MakeDisplay(configs)) {
   SPDLOG_DEBUG("+App::App");
-#if ENABLE_AGL_SHELL_CLIENT
+// AGL Shell needs a Wayland backend — its WaylandWindow / Display
+// usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
+// defaults ON in waypp's CMake regardless of backend, so combine
+// with a Wayland-backend gate here.
+#if ENABLE_AGL_SHELL_CLIENT &&                                    \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+     BUILD_BACKEND_HEADLESS_EGL)
   bool found_view_with_bg = false;
 #endif
 
   size_t index = 0;
   m_views.reserve(configs.size());
   for (auto const& cfg : configs) {
-    auto view = std::make_unique<FlutterView>(cfg, index, m_wayland_display);
+    auto view = std::make_unique<FlutterView>(cfg, index, m_display);
     view->Initialize();
     m_views.emplace_back(std::move(view));
     index++;
 
-#if ENABLE_AGL_SHELL_CLIENT
+// AGL Shell needs a Wayland backend — its WaylandWindow / Display
+// usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
+// defaults ON in waypp's CMake regardless of backend, so combine
+// with a Wayland-backend gate here.
+#if ENABLE_AGL_SHELL_CLIENT &&                                    \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+     BUILD_BACKEND_HEADLESS_EGL)
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
         WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
@@ -52,24 +146,30 @@ App::App(const std::vector<Configuration::Config>& configs)
 #endif
   }
 
-#if ENABLE_AGL_SHELL_CLIENT
+// AGL Shell needs a Wayland backend — its WaylandWindow / Display
+// usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
+// defaults ON in waypp's CMake regardless of backend, so combine
+// with a Wayland-backend gate here.
+#if ENABLE_AGL_SHELL_CLIENT &&                                    \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+     BUILD_BACKEND_HEADLESS_EGL)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
-    m_wayland_display->AglShellDoReady();
+    dynamic_cast<Display*>(m_display.get())->AglShellDoReady();
 #endif
 
 #if BUILD_WATCHDOG
   m_watch_dog = std::make_unique<Watchdog>();
 #endif
 
-  m_wayland_display->StartEvents();
+  m_display->StartEvents();
 
   SPDLOG_DEBUG("-App::App");
 }
 
 App::~App() {
-  m_wayland_display->StopEvents();
+  m_display->StopEvents();
 }
 
 int App::Loop() const {
@@ -82,24 +182,53 @@ int App::Loop() const {
     view->RunTasks();
   }
 
-  if (m_wayland_display->m_repeat_timer)
+  if (m_display->HasRepeatTimer())
     EventTimer::wait_event();
 
-  const auto end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::steady_clock::now().time_since_epoch())
-                            .count();
-
-  const auto elapsed = end_time - start_time;
-
-  const auto frame_time = 1000.0 / m_wayland_display->GetMaxRefreshRate();
-  if (const auto sleep_time = frame_time - static_cast<double>(elapsed);
-      sleep_time > 0) {
 #if BUILD_WATCHDOG
-    m_watch_dog->pet();
+  m_watch_dog->pet();
 #endif
-    std::this_thread::sleep_for(
-        std::chrono::duration<double, std::milli>(sleep_time));
+
+  // Frame production is driven entirely by each backend's own vsync source
+  // (wp_presentation feedback, KMS vblank, …) on a separate thread — App::Loop
+  // does not render. Its only periodic duties are pumping the Wayland
+  // key-repeat timer and any compositor-surface plugins. When neither is
+  // active the loop has nothing to do until an input thread coalesces a
+  // pointer event (or shutdown is requested), so it blocks on the waker
+  // instead of spinning at the refresh rate — letting the CPU reach deep
+  // idle on a static screen.
+  bool needs_periodic = m_display->HasRepeatTimer();
+  for (auto const& view : m_views) {
+    if (view->NeedsPeriodicPump()) {
+      needs_periodic = true;
+      break;
+    }
   }
+
+  int timeout_ms;
+  if (needs_periodic) {
+    // Pace at the display refresh rate, minus the work already done this
+    // iteration. Some compositors advertise refresh=0 for virtual outputs;
+    // fall back to 60 Hz so the timeout stays finite.
+    const auto end_time =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    const auto elapsed = end_time - start_time;
+    const double refresh_hz = m_display->GetMaxRefreshRate();
+    const double frame_time =
+        refresh_hz > 0.0 ? 1000.0 / refresh_hz : 1000.0 / 60.0;
+    const double remaining = frame_time - static_cast<double>(elapsed);
+    timeout_ms = remaining > 0.0 ? static_cast<int>(remaining) : 0;
+  } else {
+    // Idle: block until woken by input or shutdown. The finite heartbeat
+    // (rather than an infinite block) bounds the cost of any wake source we
+    // might have missed to one extra wakeup per second — a self-healing
+    // safety net that still cuts idle wakeups by ~98% versus per-frame.
+    timeout_ms = kIdleHeartbeatMs;
+  }
+
+  MainLoopWaker::instance().Wait(timeout_ms);
 
   return 0;
 }

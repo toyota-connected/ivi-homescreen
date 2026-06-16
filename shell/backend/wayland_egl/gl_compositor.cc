@@ -15,6 +15,7 @@
  */
 
 #include "backend/wayland_egl/gl_compositor.h"
+#include "logging/logging.h"
 
 #include <array>
 
@@ -150,6 +151,71 @@ bool GlCompositor::EnsureQuad() {
   return true;
 }
 
+void GlCompositor::EmitPersistentQuadState() {
+  // Once-per-frame setup. Establishes a known baseline (blend disabled,
+  // bound_tex_ cleared) so per-call deltas can be tracked accurately.
+  glDisable(GL_BLEND);
+  blend_enabled_ = false;
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_CULL_FACE);
+
+  glUseProgram(program_);
+  glActiveTexture(GL_TEXTURE0);
+  if (uni_tex_ >= 0) {
+    glUniform1i(uni_tex_, 0);
+  }
+
+  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+  if (attr_pos_ >= 0) {
+    glEnableVertexAttribArray(static_cast<GLuint>(attr_pos_));
+    glVertexAttribPointer(static_cast<GLuint>(attr_pos_), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(GLfloat), nullptr);
+  }
+  if (attr_uv_ >= 0) {
+    glEnableVertexAttribArray(static_cast<GLuint>(attr_uv_));
+    // glVertexAttribPointer takes the buffer offset as a void* by historic
+    // GL convention — there's no arithmetic on the pointer. Suppress the
+    // "integer to pointer cast" lint.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    glVertexAttribPointer(static_cast<GLuint>(attr_uv_), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(GLfloat),
+                          reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+  }
+  bound_tex_ = 0;
+}
+
+void GlCompositor::TearDownPersistentQuadState() {
+  if (blend_enabled_) {
+    glDisable(GL_BLEND);
+    blend_enabled_ = false;
+  }
+  if (attr_pos_ >= 0) {
+    glDisableVertexAttribArray(static_cast<GLuint>(attr_pos_));
+  }
+  if (attr_uv_ >= 0) {
+    glDisableVertexAttribArray(static_cast<GLuint>(attr_uv_));
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glUseProgram(0);
+  bound_tex_ = 0;
+}
+
+void GlCompositor::BeginFrame() {
+  frame_open_ = true;
+  persistent_state_emitted_ = false;
+}
+
+void GlCompositor::EndFrame() {
+  if (persistent_state_emitted_) {
+    TearDownPersistentQuadState();
+    persistent_state_emitted_ = false;
+  }
+  frame_open_ = false;
+}
+
 void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
                                     GLint dst_x,
                                     GLint dst_y,
@@ -161,11 +227,41 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
     return;
   }
 
-  // Snapshot minimal state: we don't implement full state save/restore,
-  // but we set everything we rely on so the engine's next render isn't
-  // surprised. Flutter resets its own GL state on entry.
+  // Frame-batched fast path: emit the persistent state once on the first
+  // quad call inside Begin/EndFrame and only the changed delta thereafter.
+  // Every other layer's composite drops from ~25 GL calls to ~5.
+  if (frame_open_) {
+    if (!persistent_state_emitted_) {
+      EmitPersistentQuadState();
+      persistent_state_emitted_ = true;
+    }
+    if (blend && !blend_enabled_) {
+      // Flutter / Skia backing stores are premultiplied alpha.
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+      blend_enabled_ = true;
+    } else if (!blend && blend_enabled_) {
+      glDisable(GL_BLEND);
+      blend_enabled_ = false;
+    }
+    glViewport(dst_x, dst_y, dst_w, dst_h);
+    if (bound_tex_ != src_color_tex) {
+      glBindTexture(GL_TEXTURE_2D, src_color_tex);
+      bound_tex_ = src_color_tex;
+    }
+    if (uni_uv_y_scale_ >= 0) {
+      glUniform1f(uni_uv_y_scale_, flip_y ? -1.0f : 1.0f);
+    }
+    if (uni_uv_y_offset_ >= 0) {
+      glUniform1f(uni_uv_y_offset_, flip_y ? 1.0f : 0.0f);
+    }
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    return;
+  }
+
+  // One-off path (no Begin/End wrapping the call): full setup + teardown
+  // per call so the engine's next render isn't surprised by leftover state.
   if (blend) {
-    // Flutter / Skia backing stores are premultiplied alpha.
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   } else {
@@ -199,9 +295,6 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   }
   if (attr_uv_ >= 0) {
     glEnableVertexAttribArray(static_cast<GLuint>(attr_uv_));
-    // glVertexAttribPointer takes the buffer offset as a void* by historic
-    // GL convention — there's no arithmetic on the pointer. Suppress the
-    // "integer to pointer cast" lint.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     glVertexAttribPointer(static_cast<GLuint>(attr_uv_), 2, GL_FLOAT, GL_FALSE,
                           4 * sizeof(GLfloat),
@@ -221,23 +314,27 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   glUseProgram(0);
 }
 
-void GlCompositor::CompositeToDefault(GLuint src_fbo,
-                                      GLuint src_color_tex,
-                                      GLsizei src_w,
-                                      GLsizei src_h,
-                                      GLint dst_x,
-                                      GLint dst_y,
-                                      GLsizei dst_w,
-                                      GLsizei dst_h,
-                                      bool blend,
-                                      bool flip_y) {
+void GlCompositor::CompositeToFbo(GLuint dst_fbo,
+                                  GLuint src_fbo,
+                                  GLuint src_color_tex,
+                                  GLsizei src_w,
+                                  GLsizei src_h,
+                                  GLint dst_x,
+                                  GLint dst_y,
+                                  GLsizei dst_w,
+                                  GLsizei dst_h,
+                                  bool blend,
+                                  bool flip_y) {
   // Blit can't alpha-blend, so overlay layers must take the quad path.
+  // Also skip blit when there is no source FBO to read from (e.g. raw
+  // platform-view textures with no associated FBO) — falling through to
+  // the quad path handles that case via sampler.
   // glBlitFramebuffer flips vertically when dstY1 < dstY0; we use that for
   // GL-native-origin sources that need to land top-down.
-  if (!blend && caps_ && caps_->has_blit_framebuffer &&
+  if (!blend && src_fbo != 0 && caps_ && caps_->has_blit_framebuffer &&
       caps_->blit_framebuffer) {
     glBindFramebuffer(kReadFramebuffer, src_fbo);
-    glBindFramebuffer(kDrawFramebuffer, 0);
+    glBindFramebuffer(kDrawFramebuffer, dst_fbo);
     const GLint dst_y0 = flip_y ? dst_y + dst_h : dst_y;
     const GLint dst_y1 = flip_y ? dst_y : dst_y + dst_h;
     caps_->blit_framebuffer(0, 0, src_w, src_h, dst_x, dst_y0, dst_x + dst_w,
@@ -245,5 +342,8 @@ void GlCompositor::CompositeToDefault(GLuint src_fbo,
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return;
   }
+  // Quad path draws into whatever FBO is currently bound.
+  glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
   CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend, flip_y);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }

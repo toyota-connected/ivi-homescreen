@@ -15,6 +15,7 @@
  */
 
 #include "accessibility_tree.h"
+#include <filesystem>
 
 #include <fstream>
 
@@ -22,8 +23,8 @@
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 
+#include "../utils.h"
 #include "logging/logging.h"
-#include "utils.h"
 
 void AccessibilityNode::AddChild(const int32_t child_id) {
   m_children.push_back(child_id);
@@ -114,18 +115,17 @@ void AccessibilityTree::HandleFlutterUpdate(
 
 AccessibilityNode* AccessibilityTree::GetNode(
     const FlutterSemanticsNode2& fl_node) {
-  // Determine if node already created and return it
-  for (const auto& node : nodes) {
-    if (node->GetId() == fl_node.id) {
-      return node;
-    }
+  // Determine if node already created and return it (O(1) via the index).
+  if (const auto it = node_index.find(fl_node.id); it != node_index.end()) {
+    return it->second;
   }
 
   auto new_node = new AccessibilityNode(fl_node);
   nodes.emplace_back(new_node);
+  node_index.emplace(new_node->GetId(), new_node);
   SPDLOG_TRACE("New AccessibilityNode created with ID: {}, number of nodes: {}",
                new_node->GetId(), nodes.size());
-  return nodes.back();
+  return new_node;
 }
 
 void AccessibilityTree::DumpTree(const char* target_file) const {
