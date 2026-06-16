@@ -527,6 +527,11 @@ class Display : public IDisplay {
 
   xkb_keysym_t m_keysym_pressed{};
 
+  // Serialized modifier mask cached in keyboard_handle_modifiers so that
+  // keyboard_handle_key and keyboard_repeat_func can read it without calling
+  // xkb_state_serialize_mods on every event.
+  uint32_t m_mods_effective{};
+
   std::mutex m_lock;
   uint32_t m_repeat_code{};
 

@@ -27,6 +27,14 @@ class KeyboardHookHandler {
 
   // A function for hooking into unicode code point input.
   virtual void CharHook(unsigned int code_point) = 0;
+
+  // Called when the window loses keyboard focus so that handlers can clear any
+  // pressed-key state.  Default is a no-op.
+  virtual void FocusLost() {}
+
+  // Called whenever the XKB keymap changes so that handlers can recompute
+  // modifier bitmasks.  Default is a no-op.
+  virtual void KeymapChanged(xkb_keymap* /* keymap */) {}
 };
 
 }  // namespace flutter

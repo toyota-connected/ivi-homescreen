@@ -27,6 +27,7 @@
 
 #include "config/common.h"
 
+#include "asio/post.hpp"
 #include "engine.h"
 #include "main_loop_waker.h"
 #include "timer.h"
@@ -37,6 +38,11 @@ extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
                         xkb_keysym_t keysym,
                         uint32_t xkb_scancode,
                         uint32_t modifiers);
+
+extern void FocusLostCallback(FlutterDesktopViewControllerState* view_state);
+
+extern void KeymapChangedCallback(FlutterDesktopViewControllerState* view_state,
+                                  xkb_keymap* keymap);
 
 Display::Display(const bool enable_cursor,
                  const std::string& ignore_wayland_event,
@@ -635,6 +641,15 @@ void Display::keyboard_handle_leave(void* data,
   d->m_repeat_timer->disarm();
   set_repeat_code(d, XKB_KEY_NoSymbol);
   SPDLOG_TRACE("- Display::keyboard_handle_leave()");
+  // Post FocusLostCallback onto the platform strand so that all
+  // TextInputPlugin state mutations are serialised with key-event callbacks.
+  if (d->m_view_controller_state) {
+    auto* vcs = d->m_view_controller_state;
+    if (vcs->engine && vcs->engine->GetPlatformTaskRunner()) {
+      asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+                 [vcs]() { FocusLostCallback(vcs); });
+    }
+  }
 }
 
 void Display::keyboard_handle_keymap(void* data,
@@ -651,8 +666,26 @@ void Display::keyboard_handle_keymap(void* data,
                                            XKB_KEYMAP_COMPILE_NO_FLAGS);
   munmap(keymap_string, size);
   close(fd);
+  // Disarm the repeat timer before swapping xkb_state so that the repeat
+  // callback cannot read the old (about-to-be-freed) xkb_state.
+  d->m_repeat_timer->disarm();
+  set_repeat_code(d, XKB_KEY_NoSymbol);
   xkb_state_unref(d->m_xkb_state);
   d->m_xkb_state = xkb_state_new(d->m_keymap);
+  // Post KeymapChangedCallback onto the platform strand.
+  // Refcount the keymap so it stays alive until the lambda fires.
+  if (d->m_view_controller_state && d->m_keymap) {
+    auto* vcs = d->m_view_controller_state;
+    if (vcs->engine && vcs->engine->GetPlatformTaskRunner()) {
+      xkb_keymap_ref(d->m_keymap);
+      auto* km = d->m_keymap;
+      asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+                 [vcs, km]() {
+                   KeymapChangedCallback(vcs, km);
+                   xkb_keymap_unref(km);
+                 });
+    }
+  }
 }
 
 void Display::keyboard_handle_key(void* data,
@@ -677,6 +710,8 @@ void Display::keyboard_handle_key(void* data,
   // XKB_KEY_NoSymbol
   //
   xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, xkb_scancode);
+  const uint32_t modifiers = d->m_mods_effective;
+
   if (keysym == XKB_KEY_NoSymbol) {
     const xkb_keysym_t* key_symbols;
     const int res =
@@ -693,8 +728,11 @@ void Display::keyboard_handle_key(void* data,
     }
   }
 
-  KeyCallback(d->m_view_controller_state,
-              state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode, 0);
+  if (d->m_view_controller_state) {
+    KeyCallback(d->m_view_controller_state,
+                state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode,
+                modifiers);
+  }
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
     if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
@@ -726,9 +764,13 @@ void Display::keyboard_handle_modifiers(void* data,
                                         uint32_t mods_latched,
                                         uint32_t mods_locked,
                                         uint32_t group) {
-  const auto* d = static_cast<Display*>(data);
+  auto* d = static_cast<Display*>(data);
   xkb_state_update_mask(d->m_xkb_state, mods_depressed, mods_latched,
                         mods_locked, 0, 0, group);
+  // Cache the effective modifier mask so key and repeat callbacks can
+  // read it without calling xkb_state_serialize_mods themselves.
+  d->m_mods_effective =
+      xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
 }
 
 void Display::keyboard_handle_repeat_info(void* data,
@@ -752,8 +794,10 @@ const wl_keyboard_listener Display::keyboard_listener = {
 void Display::keyboard_repeat_func(void* data) {
   if (auto d = static_cast<Display*>(data);
       XKB_KEY_NoSymbol != d->m_repeat_code) {
-    KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
-                d->m_repeat_code, 0);
+    if (d->m_view_controller_state) {
+      KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
+                  d->m_repeat_code, d->m_mods_effective);
+    }
   }
 }
 

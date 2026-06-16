@@ -185,6 +185,17 @@ class TextInputModel {
   // Gets the current text as UTF-8.
   std::string GetText() const;
 
+  // Gets the currently selected text as UTF-8.
+  //
+  // Returns an empty string if the selection is collapsed (no text selected).
+  std::string GetSelectedText() const;
+
+  // Replaces the current selection with |text| (UTF-8), or inserts at the
+  // cursor position if the selection is collapsed.
+  //
+  // Equivalent to AddText but named for clipboard-paste semantics.
+  void SetSelectedText(const std::string& text);
+
   // Gets the cursor position as a byte offset in UTF-8 string returned from
   // GetText().
   int GetCursorOffset() const;
