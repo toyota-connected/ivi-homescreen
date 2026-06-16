@@ -4,6 +4,7 @@
 
 #include "flutter_desktop_plugin_registrar.h"
 #include "flutter_desktop_texture_registrar.h"
+#include "logging/logging.h"
 
 #include "flutter_homescreen.h"
 
@@ -104,7 +105,7 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
 
 FlutterDesktopEngineRef FlutterDesktopGetEngine(
     FlutterDesktopWindowControllerRef controller) {
-  return controller->engine_state.get();
+  return controller->engine_state;
 }
 
 FlutterDesktopPluginRegistrarRef FlutterDesktopGetPluginRegistrar(
@@ -205,7 +206,24 @@ bool FlutterDesktopMessengerSendWithReply(FlutterDesktopMessengerRef messenger,
                                           const size_t message_size,
                                           const FlutterDesktopBinaryReply reply,
                                           void* user_data) {
-  if (const auto task_runner = messenger->GetEngine()->platform_task_runner;
+  // The singleton plugin_common_glib::MainLoop outlives the engine; its
+  // glib thread can dispatch a pending gst bus message to OnBusMessage
+  // on a freed VideoPlayer after teardown, which lands here via
+  // EventSink::Success → BinaryMessenger::Send. ~FlutterView calls
+  // SetEngine(nullptr) on the messenger before m_state destructs; we
+  // bail on null engine here so that late callbacks don't deref freed
+  // state. The lock is held only for the read — releasing it before
+  // f.wait() below, otherwise SetEngine(nullptr) and the wait deadlock
+  // each other (wait can't complete during shutdown).
+  FlutterDesktopEngineState* engine = nullptr;
+  {
+    std::scoped_lock lock(messenger->GetMutex());
+    engine = messenger->GetEngine();
+  }
+  if (engine == nullptr || engine->platform_task_runner == nullptr) {
+    return false;
+  }
+  if (const auto task_runner = engine->platform_task_runner;
       task_runner->IsThreadEqual(pthread_self())) {
     FlutterPlatformMessageResponseHandle* response_handle = nullptr;
     if (reply != nullptr && user_data != nullptr) {
@@ -429,7 +447,15 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     // Pixel-buffer textures: the embedder owns the GL texture, so free it
     // under a currently-made texture context. Guard the full backend chain
     // in case the engine is mid-teardown.
+    //
+    // GLESv2 is only linked into the final binary when a GL-based backend
+    // is enabled (Wayland EGL, DRM KMS EGL, Headless EGL). Wayland Vulkan
+    // builds don't link it and don't produce GL pixel-buffer textures at
+    // runtime — but the linker still needs the glDeleteTextures symbol
+    // unless we compile this branch out.
     if (removed->pixel_buffer_callback && removed->name != 0) {
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL || \
+    BUILD_BACKEND_HEADLESS_EGL
       Backend* backend = nullptr;
       if (texture_registrar->engine &&
           texture_registrar->engine->view_controller &&
@@ -447,6 +473,11 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
             "GL texture {} leaked",
             removed->name);
       }
+#else
+      // No GL backend in this configuration; the texture was never
+      // actually backed by a live GLuint. Nothing to free.
+      (void)texture_registrar;
+#endif
     }
     if (removed->release_callback != nullptr) {
       removed->release_callback(removed->release_context);
@@ -460,6 +491,9 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
 bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
     FlutterDesktopTextureRegistrarRef texture_registrar,
     int64_t texture_id) {
+  if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+    return false;
+  }
   SPDLOG_TRACE("MarkExternalTextureFrameAvailable: {}, {}",
                fmt::ptr(texture_registrar->engine->flutter_engine), texture_id);
   const auto result = LibFlutterEngine->MarkExternalTextureFrameAvailable(
@@ -469,6 +503,9 @@ bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
 
 bool FlutterDesktopTextureMakeCurrent(
     FlutterDesktopTextureRegistrarRef texture_registrar) {
+  if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+    return false;
+  }
   const auto backend =
       texture_registrar->engine->view_controller->view->GetBackend();
   SPDLOG_TRACE("TextureMakeCurrent: {}", fmt::ptr(backend));
@@ -477,6 +514,9 @@ bool FlutterDesktopTextureMakeCurrent(
 
 bool FlutterDesktopTextureClearCurrent(
     FlutterDesktopTextureRegistrarRef texture_registrar) {
+  if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+    return false;
+  }
   const auto backend =
       texture_registrar->engine->view_controller->view->GetBackend();
   SPDLOG_TRACE("TextureClearCurrent: {}", fmt::ptr(backend));

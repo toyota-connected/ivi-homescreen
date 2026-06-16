@@ -1,0 +1,640 @@
+/*
+ * Copyright 2026 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "backend/software/input/software_seat.h"
+#include "logging/logging.h"
+
+#include <fcntl.h>
+#include <libinput.h>
+#include <libudev.h>
+#include <linux/input-event-codes.h>
+#include <poll.h>
+#include <sys/timerfd.h>
+#include <unistd.h>
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+
+#include <asio/dispatch.hpp>
+
+#include "backend/software/software_cursor.h"
+#include "engine.h"
+#include "libflutter_engine.h"
+#include "logging.h"
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "task_runner.h"
+
+extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
+                        bool released,
+                        xkb_keysym_t keysym,
+                        uint32_t xkb_scancode,
+                        uint32_t modifiers);
+
+namespace homescreen {
+
+namespace {
+
+// libinput's open/close hooks. With no libseat in the picture we just
+// run open()/close() under the calling process's creds — operator
+// puts themselves in the `input` group (or runs as root).
+int OpenRestricted(const char* path, int flags, void* /*user_data*/) {
+  const int fd = ::open(path, flags | O_CLOEXEC);
+  if (fd < 0) {
+    spdlog::warn(
+        "[SoftwareSeat] open('{}') failed: {} — add the user to the 'input' "
+        "group (or run on an active VT for the logind uaccess ACL)",
+        path, std::strerror(errno));
+    return -errno;
+  }
+  spdlog::debug("[SoftwareSeat] opened input device {}", path);
+  return fd;
+}
+
+void CloseRestricted(int fd, void* /*user_data*/) {
+  ::close(fd);
+}
+
+constexpr libinput_interface kLibinputInterface = {
+    .open_restricted = OpenRestricted,
+    .close_restricted = CloseRestricted,
+};
+
+// linux/input-event-codes BTN_* → Flutter button bit
+int64_t MapMouseButton(const uint32_t button) {
+  switch (button) {
+    case BTN_LEFT:
+      return kFlutterPointerButtonMousePrimary;
+    case BTN_RIGHT:
+      return kFlutterPointerButtonMouseSecondary;
+    case BTN_MIDDLE:
+      return kFlutterPointerButtonMouseMiddle;
+    case BTN_SIDE:
+      return kFlutterPointerButtonMouseBack;
+    case BTN_EXTRA:
+      return kFlutterPointerButtonMouseForward;
+    default:
+      return 0;
+  }
+}
+
+uint64_t FlutterTimestampMicros() {
+  // Flutter timestamps are µs since some epoch; FlutterEngineGetCurrentTime
+  // is the engine's clock (CLOCK_MONOTONIC in ns).
+  return LibFlutterEngine->GetCurrentTime() / 1000;
+}
+
+}  // namespace
+
+SoftwareSeat::SoftwareSeat(const int32_t viewport_width,
+                           const int32_t viewport_height)
+    : viewport_w_(viewport_width), viewport_h_(viewport_height) {}
+
+SoftwareSeat::~SoftwareSeat() {
+  Stop();
+  // keyboard_ / repeater_ are RAII (reset in Stop, after the dispatch thread
+  // joins). xkb + the repeat timerfd are owned by those now.
+  if (li_ != nullptr) {
+    libinput_unref(li_);
+    li_ = nullptr;
+  }
+  if (udev_ != nullptr) {
+    udev_unref(udev_);
+    udev_ = nullptr;
+  }
+}
+
+bool SoftwareSeat::Start() {
+  udev_ = udev_new();
+  if (udev_ == nullptr) {
+    spdlog::error("[SoftwareSeat] udev_new failed");
+    return false;
+  }
+  li_ = libinput_udev_create_context(&kLibinputInterface, this, udev_);
+  if (li_ == nullptr) {
+    spdlog::error("[SoftwareSeat] libinput_udev_create_context failed");
+    return false;
+  }
+  if (libinput_udev_assign_seat(li_, "seat0") != 0) {
+    spdlog::error("[SoftwareSeat] libinput_udev_assign_seat('seat0') failed");
+    return false;
+  }
+
+  // Shared keyboard translation + auto-repeat — the same input::XkbKeyboard /
+  // input::KeyRepeater path the DRM seats use, so keyboard behavior (including
+  // 25 Hz repeat with per-tick sym re-resolution + modifiers) is identical
+  // across backends. xkb picks up RMLVO from XKB_DEFAULT_* / built-in defaults.
+  keyboard_ = input::XkbKeyboard::Create();
+  if (!keyboard_) {
+    spdlog::error("[SoftwareSeat] XkbKeyboard::Create failed");
+    return false;
+  }
+  repeater_ = input::KeyRepeater::Create(keyboard_.get());
+  if (repeater_) {
+    // A repeat tick re-resolves the held key against the current xkb state and
+    // re-dispatches it as a press with the live modifier mask.
+    repeater_->SetHandler([this](uint32_t evdev_keycode, xkb_keysym_t sym,
+                                 const std::string& /*utf8*/) {
+      if (auto* s = state_.load(std::memory_order_acquire); s != nullptr) {
+        KeyCallback(s, /*released=*/false, sym, evdev_keycode + 8,
+                    keyboard_->Modifiers());
+      }
+    });
+  } else {
+    spdlog::warn("[SoftwareSeat] key repeat unavailable (timerfd_create)");
+  }
+
+  stop_.store(false, std::memory_order_release);
+  thread_ = std::thread([this]() { DispatchLoop(); });
+  spdlog::info("[SoftwareSeat] started ({}x{} viewport)", viewport_w_,
+               viewport_h_);
+  return true;
+}
+
+void SoftwareSeat::Stop() {
+  stop_.store(true, std::memory_order_release);
+  if (thread_.joinable()) {
+    thread_.join();
+  }
+  // Safe to drop the keyboard + repeater now the dispatch thread has joined
+  // (it is their only user). RAII closes the xkb state + the repeat timerfd.
+  repeater_.reset();
+  keyboard_.reset();
+}
+
+void SoftwareSeat::SetViewControllerState(
+    FlutterDesktopViewControllerState* state) {
+  state_.store(state, std::memory_order_release);
+}
+
+void SoftwareSeat::SetViewport(const int32_t width, const int32_t height) {
+  viewport_w_ = width;
+  viewport_h_ = height;
+}
+
+void SoftwareSeat::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
+  cursor_ = std::move(cursor);
+}
+
+void SoftwareSeat::NotifyCursorMoved() {
+  if (!cursor_) {
+    return;
+  }
+  static bool logged_first = false;
+  if (!logged_first) {
+    logged_first = true;
+    spdlog::debug("[SoftwareSeat] cursor tracking pointer (first motion {},{})",
+                  static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
+  }
+  // pointer_x_/y_ are in viewport (== framebuffer mode) pixels, the same space
+  // the cursor blends into.
+  cursor_->SetPosition(static_cast<int32_t>(pointer_x_),
+                       static_cast<int32_t>(pointer_y_));
+  // Flutter only presents dirty frames, so without a nudge the cursor would
+  // freeze on an idle UI. ScheduleFrame is thread-safe; the dumb sink then
+  // repaints with the cursor at its new position.
+  if (const EngineRef e = CurrentEngine(); e.engine != nullptr) {
+    LibFlutterEngine->ScheduleFrame(
+        static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(e.engine));
+  }
+}
+
+void SoftwareSeat::DispatchLoop() {
+  // libinput's fd is the readiness gate for input events; the
+  // timerfd fires the key-repeat ticks. We still need to call
+  // libinput_dispatch() before draining events on POLLIN. Short
+  // timeout gives Stop() a worst-case wakeup latency comparable to
+  // one vblank.
+  const int li_fd = libinput_get_fd(li_);
+  const int repeat_fd = repeater_ ? repeater_->fd() : -1;
+  pollfd fds[2];
+  fds[0] = pollfd{li_fd, static_cast<short>(POLLIN), 0};
+  fds[1] =
+      pollfd{repeat_fd, static_cast<short>(repeat_fd >= 0 ? POLLIN : 0), 0};
+  // 16 ms poll cap means a repeat tick scheduled mid-interval is
+  // delivered up to 16 ms late — at the 33 ms (~30 Hz) repeat
+  // cadence that's tolerable jitter for held keys; matches the
+  // worst-case Stop() wakeup latency.
+  while (!stop_.load(std::memory_order_acquire)) {
+    const int rc = ::poll(fds, 2, 16);
+    if (rc < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      spdlog::error("[SoftwareSeat] poll: {}", std::strerror(errno));
+      break;
+    }
+    if (rc == 0) {
+      continue;
+    }
+    if ((fds[0].revents & POLLIN) != 0) {
+      DispatchLibinputEvents();
+    }
+    if (repeat_fd >= 0 && (fds[1].revents & POLLIN) != 0) {
+      repeater_->Dispatch();
+    }
+  }
+}
+
+void SoftwareSeat::DispatchLibinputEvents() {
+  if (libinput_dispatch(li_) != 0) {
+    // Non-fatal: libinput logs the underlying error itself.
+    return;
+  }
+  while (libinput_event* ev = libinput_get_event(li_)) {
+    HandleEvent(ev);
+    libinput_event_destroy(ev);
+  }
+}
+
+void SoftwareSeat::HandleEvent(libinput_event* ev) {
+  switch (libinput_event_get_type(ev)) {
+    case LIBINPUT_EVENT_POINTER_MOTION:
+      HandlePointerMotion(libinput_event_get_pointer_event(ev));
+      break;
+    case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE:
+      HandlePointerMotionAbsolute(libinput_event_get_pointer_event(ev));
+      break;
+    case LIBINPUT_EVENT_POINTER_BUTTON:
+      HandlePointerButton(libinput_event_get_pointer_event(ev));
+      break;
+    case LIBINPUT_EVENT_POINTER_AXIS:
+      HandlePointerAxis(libinput_event_get_pointer_event(ev));
+      break;
+    case LIBINPUT_EVENT_KEYBOARD_KEY:
+      HandleKeyboardKey(libinput_event_get_keyboard_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_DOWN:
+      HandleTouchDown(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_UP:
+      HandleTouchUp(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_MOTION:
+      HandleTouchMotion(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_CANCEL:
+      HandleTouchCancel(libinput_event_get_touch_event(ev));
+      break;
+    case LIBINPUT_EVENT_TOUCH_FRAME:
+    default:
+      // TOUCH_FRAME is a batch-boundary marker; we dispatch events as
+      // they arrive, so no accumulation to flush. Falls through into
+      // the default no-op alongside gesture / switch events that
+      // aren't wired yet.
+      break;
+  }
+}
+
+void SoftwareSeat::HandlePointerMotion(libinput_event_pointer* p) {
+  // Guard against degenerate viewport — a sink that hasn't reported
+  // its mode yet (or a CI run with width/height=0) would otherwise
+  // hit std::clamp(x, 0.0, -1.0), which is UB.
+  if (viewport_w_ <= 0 || viewport_h_ <= 0) {
+    return;
+  }
+  const double dx = libinput_event_pointer_get_dx(p);
+  const double dy = libinput_event_pointer_get_dy(p);
+  pointer_x_ =
+      std::clamp(pointer_x_ + dx, 0.0, static_cast<double>(viewport_w_ - 1));
+  pointer_y_ =
+      std::clamp(pointer_y_ + dy, 0.0, static_cast<double>(viewport_h_ - 1));
+
+  FlutterPointerEvent batch[2];
+  size_t count = 0;
+  const uint64_t ts = FlutterTimestampMicros();
+  if (!pointer_added_) {
+    batch[count] = FlutterPointerEvent{};
+    batch[count].struct_size = sizeof(FlutterPointerEvent);
+    batch[count].phase = kAdd;
+    batch[count].timestamp = ts;
+    batch[count].x = pointer_x_;
+    batch[count].y = pointer_y_;
+    batch[count].device = 0;
+    batch[count].device_kind = kFlutterPointerDeviceKindMouse;
+    pointer_added_ = true;
+    ++count;
+  }
+  batch[count] = FlutterPointerEvent{};
+  batch[count].struct_size = sizeof(FlutterPointerEvent);
+  batch[count].phase = button_mask_ != 0 ? kMove : kHover;
+  batch[count].timestamp = ts;
+  batch[count].x = pointer_x_;
+  batch[count].y = pointer_y_;
+  batch[count].device = 0;
+  batch[count].device_kind = kFlutterPointerDeviceKindMouse;
+  batch[count].buttons = button_mask_;
+  ++count;
+
+  NotifyCursorMoved();
+  DispatchPointerEvents(batch, count);
+}
+
+void SoftwareSeat::HandlePointerMotionAbsolute(libinput_event_pointer* p) {
+  if (viewport_w_ <= 0 || viewport_h_ <= 0) {
+    return;
+  }
+  pointer_x_ = libinput_event_pointer_get_absolute_x_transformed(
+      p, static_cast<uint32_t>(viewport_w_));
+  pointer_y_ = libinput_event_pointer_get_absolute_y_transformed(
+      p, static_cast<uint32_t>(viewport_h_));
+
+  FlutterPointerEvent batch[2];
+  size_t count = 0;
+  const uint64_t ts = FlutterTimestampMicros();
+  if (!pointer_added_) {
+    batch[count] = FlutterPointerEvent{};
+    batch[count].struct_size = sizeof(FlutterPointerEvent);
+    batch[count].phase = kAdd;
+    batch[count].timestamp = ts;
+    batch[count].x = pointer_x_;
+    batch[count].y = pointer_y_;
+    batch[count].device = 0;
+    batch[count].device_kind = kFlutterPointerDeviceKindMouse;
+    pointer_added_ = true;
+    ++count;
+  }
+  batch[count] = FlutterPointerEvent{};
+  batch[count].struct_size = sizeof(FlutterPointerEvent);
+  batch[count].phase = button_mask_ != 0 ? kMove : kHover;
+  batch[count].timestamp = ts;
+  batch[count].x = pointer_x_;
+  batch[count].y = pointer_y_;
+  batch[count].device = 0;
+  batch[count].device_kind = kFlutterPointerDeviceKindMouse;
+  batch[count].buttons = button_mask_;
+  ++count;
+
+  NotifyCursorMoved();
+  DispatchPointerEvents(batch, count);
+}
+
+void SoftwareSeat::HandlePointerButton(libinput_event_pointer* p) {
+  const uint32_t button = libinput_event_pointer_get_button(p);
+  const auto state = libinput_event_pointer_get_button_state(p);
+  const int64_t bit = MapMouseButton(button);
+  if (bit == 0) {
+    return;
+  }
+  const int64_t prev_mask = button_mask_;
+  const bool pressed = state == LIBINPUT_BUTTON_STATE_PRESSED;
+  if (pressed) {
+    button_mask_ |= bit;
+  } else {
+    button_mask_ &= ~bit;
+  }
+
+  FlutterPointerPhase phase;
+  if (pressed) {
+    phase = (prev_mask == 0) ? kDown : kMove;
+  } else {
+    phase = (button_mask_ == 0) ? kUp : kMove;
+  }
+
+  FlutterPointerEvent pe{};
+  pe.struct_size = sizeof(FlutterPointerEvent);
+  pe.phase = phase;
+  pe.timestamp = FlutterTimestampMicros();
+  pe.x = pointer_x_;
+  pe.y = pointer_y_;
+  pe.device = 0;
+  pe.device_kind = kFlutterPointerDeviceKindMouse;
+  pe.buttons = button_mask_;
+  DispatchPointerEvent(pe);
+}
+
+void SoftwareSeat::HandlePointerAxis(libinput_event_pointer* p) {
+  // libinput separates horizontal and vertical scroll axes. Both
+  // arrive in the same event for a typical wheel/touchpad scroll.
+  double dx = 0.0;
+  double dy = 0.0;
+  if (libinput_event_pointer_has_axis(
+          p, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL) != 0) {
+    dx = libinput_event_pointer_get_axis_value(
+        p, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+  }
+  if (libinput_event_pointer_has_axis(
+          p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL) != 0) {
+    dy = libinput_event_pointer_get_axis_value(
+        p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+  }
+  if (dx == 0.0 && dy == 0.0) {
+    return;
+  }
+  FlutterPointerEvent pe{};
+  pe.struct_size = sizeof(FlutterPointerEvent);
+  pe.phase = button_mask_ != 0 ? kMove : kHover;
+  pe.timestamp = FlutterTimestampMicros();
+  pe.x = pointer_x_;
+  pe.y = pointer_y_;
+  pe.device = 0;
+  pe.device_kind = kFlutterPointerDeviceKindMouse;
+  pe.buttons = button_mask_;
+  pe.signal_kind = kFlutterPointerSignalKindScroll;
+  pe.scroll_delta_x = dx;
+  pe.scroll_delta_y = dy;
+  DispatchPointerEvent(pe);
+}
+
+void SoftwareSeat::HandleKeyboardKey(libinput_event_keyboard* k) {
+  const uint32_t key = libinput_event_keyboard_get_key(k);
+  const bool pressed =
+      libinput_event_keyboard_get_key_state(k) == LIBINPUT_KEY_STATE_PRESSED;
+  // The shared keyboard resolves the keysym and advances modifier state (it
+  // applies the universal evdev->xkb +8 offset internally).
+  const xkb_keysym_t keysym = keyboard_->ProcessKey(key, pressed);
+  if (auto* s = state_.load(std::memory_order_acquire); s != nullptr) {
+    KeyCallback(s, !pressed, keysym, key + 8, keyboard_->Modifiers());
+  }
+  // Feed the shared repeater — it owns per-key eligibility, most-recent-wins
+  // arming, and the timerfd polled in DispatchLoop.
+  if (repeater_) {
+    repeater_->OnKey(key, pressed);
+  }
+}
+
+void SoftwareSeat::HandleTouchDown(libinput_event_touch* t) {
+  if (viewport_w_ <= 0 || viewport_h_ <= 0) {
+    return;
+  }
+  // Touch input → hide the mouse cursor (it reappears on the next pointer
+  // motion). Matches typical desktop behaviour.
+  if (cursor_) {
+    cursor_->SetVisible(false);
+  }
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  s.x = libinput_event_touch_get_x_transformed(
+      t, static_cast<uint32_t>(viewport_w_));
+  s.y = libinput_event_touch_get_y_transformed(
+      t, static_cast<uint32_t>(viewport_h_));
+  s.down = true;
+
+  // Each touch slot gets its own Flutter device id so multi-touch
+  // sequences don't collide. kAdd + kDown in a single batch — Flutter
+  // requires kAdd before any phase on a previously-unseen device.
+  FlutterPointerEvent batch[2];
+  const uint64_t ts = FlutterTimestampMicros();
+  batch[0] = FlutterPointerEvent{};
+  batch[0].struct_size = sizeof(FlutterPointerEvent);
+  batch[0].phase = kAdd;
+  batch[0].timestamp = ts;
+  batch[0].x = s.x;
+  batch[0].y = s.y;
+  batch[0].device = slot;
+  batch[0].device_kind = kFlutterPointerDeviceKindTouch;
+  batch[1] = FlutterPointerEvent{};
+  batch[1].struct_size = sizeof(FlutterPointerEvent);
+  batch[1].phase = kDown;
+  batch[1].timestamp = ts;
+  batch[1].x = s.x;
+  batch[1].y = s.y;
+  batch[1].device = slot;
+  batch[1].device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvents(batch, 2);
+}
+
+void SoftwareSeat::HandleTouchMotion(libinput_event_touch* t) {
+  if (viewport_w_ <= 0 || viewport_h_ <= 0) {
+    return;
+  }
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  if (!s.down) {
+    return;  // motion without prior down — drop, don't fabricate state
+  }
+  s.x = libinput_event_touch_get_x_transformed(
+      t, static_cast<uint32_t>(viewport_w_));
+  s.y = libinput_event_touch_get_y_transformed(
+      t, static_cast<uint32_t>(viewport_h_));
+
+  FlutterPointerEvent pe{};
+  pe.struct_size = sizeof(FlutterPointerEvent);
+  pe.phase = kMove;
+  pe.timestamp = FlutterTimestampMicros();
+  pe.x = s.x;
+  pe.y = s.y;
+  pe.device = slot;
+  pe.device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvent(pe);
+}
+
+void SoftwareSeat::HandleTouchUp(libinput_event_touch* t) {
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  if (!s.down) {
+    return;
+  }
+  s.down = false;
+
+  // kUp + kRemove paired so Flutter retires the device id. Same
+  // (x, y) as the most recent motion — libinput's TOUCH_UP doesn't
+  // carry coordinates, so we keep the last-known position.
+  FlutterPointerEvent batch[2];
+  const uint64_t ts = FlutterTimestampMicros();
+  batch[0] = FlutterPointerEvent{};
+  batch[0].struct_size = sizeof(FlutterPointerEvent);
+  batch[0].phase = kUp;
+  batch[0].timestamp = ts;
+  batch[0].x = s.x;
+  batch[0].y = s.y;
+  batch[0].device = slot;
+  batch[0].device_kind = kFlutterPointerDeviceKindTouch;
+  batch[1] = FlutterPointerEvent{};
+  batch[1].struct_size = sizeof(FlutterPointerEvent);
+  batch[1].phase = kRemove;
+  batch[1].timestamp = ts;
+  batch[1].x = s.x;
+  batch[1].y = s.y;
+  batch[1].device = slot;
+  batch[1].device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvents(batch, 2);
+}
+
+void SoftwareSeat::HandleTouchCancel(libinput_event_touch* t) {
+  const int32_t slot = libinput_event_touch_get_seat_slot(t);
+  if (slot < 0 || static_cast<size_t>(slot) >= kMaxTouchSlots) {
+    return;
+  }
+  auto& s = touch_[static_cast<size_t>(slot)];
+  if (!s.down) {
+    return;
+  }
+  s.down = false;
+
+  FlutterPointerEvent batch[2];
+  const uint64_t ts = FlutterTimestampMicros();
+  batch[0] = FlutterPointerEvent{};
+  batch[0].struct_size = sizeof(FlutterPointerEvent);
+  batch[0].phase = kCancel;
+  batch[0].timestamp = ts;
+  batch[0].x = s.x;
+  batch[0].y = s.y;
+  batch[0].device = slot;
+  batch[0].device_kind = kFlutterPointerDeviceKindTouch;
+  batch[1] = FlutterPointerEvent{};
+  batch[1].struct_size = sizeof(FlutterPointerEvent);
+  batch[1].phase = kRemove;
+  batch[1].timestamp = ts;
+  batch[1].x = s.x;
+  batch[1].y = s.y;
+  batch[1].device = slot;
+  batch[1].device_kind = kFlutterPointerDeviceKindTouch;
+  DispatchPointerEvents(batch, 2);
+}
+
+SoftwareSeat::EngineRef SoftwareSeat::CurrentEngine() const {
+  auto* s = state_.load(std::memory_order_acquire);
+  if (s == nullptr || s->engine == nullptr) {
+    return {};
+  }
+  EngineRef out;
+  out.engine = static_cast<void*>(s->engine->GetFlutterEngine());
+  out.platform_runner = static_cast<void*>(s->engine->GetPlatformTaskRunner());
+  return out;
+}
+
+void SoftwareSeat::DispatchPointerEvent(const FlutterPointerEvent& pe) {
+  DispatchPointerEvents(&pe, 1);
+}
+
+void SoftwareSeat::DispatchPointerEvents(const FlutterPointerEvent* pe,
+                                         const size_t count) {
+  const EngineRef ref = CurrentEngine();
+  if (ref.engine == nullptr || ref.platform_runner == nullptr) {
+    return;
+  }
+  auto* runner = static_cast<TaskRunner*>(ref.platform_runner);
+  auto* strand = runner->GetStrandContext();
+  if (strand == nullptr) {
+    return;
+  }
+  auto* engine = static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(ref.engine);
+  std::vector<FlutterPointerEvent> events(pe, pe + count);
+  asio::dispatch(*strand, [engine, events = std::move(events)]() {
+    LibFlutterEngine->SendPointerEvent(engine, events.data(), events.size());
+  });
+}
+
+}  // namespace homescreen

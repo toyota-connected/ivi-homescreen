@@ -152,6 +152,15 @@ class Egl {
  protected:
   EGLSurface m_egl_surface{};
 
+  /**
+   * @brief Unbind and destroy the three EGL contexts and terminate the
+   * display. Idempotent: safe to call more than once and a no-op once the
+   * display has been terminated. Must run only after every thread that could
+   * have a context current (notably the Flutter rasterizer) has been joined.
+   * @relation wayland
+   */
+  void ReleaseContexts();
+
  private:
   EGLConfig m_config{};
   EGLContext m_texture_context{};

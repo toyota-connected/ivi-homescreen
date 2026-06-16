@@ -14,8 +14,11 @@
 // limitations under the License.
 
 #include "configuration.h"
+#include "logging/logging.h"
 
+#include <cstdlib>
 #include <filesystem>
+#include <string_view>
 
 #include "config/common.h"
 #include "cxxopts/include/cxxopts.hpp"
@@ -78,6 +81,58 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
   if (tbl->at_path("view.fullscreen").is_boolean()) {
     instance.view.fullscreen =
         tbl->at_path("view.fullscreen").value<bool>().value();
+  }
+
+  // ── DRM backend knobs (all strings; see configuration.h) ───────────────
+  if (tbl->at_path("view.drm_device").is_string()) {
+    instance.view.drm_device =
+        tbl->at_path("view.drm_device").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_connector").is_string()) {
+    instance.view.drm_connector =
+        tbl->at_path("view.drm_connector").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_mode").is_string()) {
+    instance.view.drm_mode =
+        tbl->at_path("view.drm_mode").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_compositor").is_string()) {
+    instance.view.drm_compositor =
+        tbl->at_path("view.drm_compositor").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_modeset").is_string()) {
+    instance.view.drm_modeset =
+        tbl->at_path("view.drm_modeset").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_allow_nonblock_modeset").is_string()) {
+    instance.view.drm_allow_nonblock_modeset =
+        tbl->at_path("view.drm_allow_nonblock_modeset")
+            .as_string()
+            ->value_or("");
+  }
+  if (tbl->at_path("view.drm_primary_format").is_string()) {
+    instance.view.drm_primary_format =
+        tbl->at_path("view.drm_primary_format").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_overlay_planes").is_string()) {
+    instance.view.drm_overlay_planes =
+        tbl->at_path("view.drm_overlay_planes").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_explicit_sync").is_string()) {
+    instance.view.drm_explicit_sync =
+        tbl->at_path("view.drm_explicit_sync").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_async_flip").is_string()) {
+    instance.view.drm_async_flip =
+        tbl->at_path("view.drm_async_flip").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_stage_cursor").is_string()) {
+    instance.view.drm_stage_cursor =
+        tbl->at_path("view.drm_stage_cursor").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.drm_no_seat").is_boolean()) {
+    instance.view.drm_no_seat =
+        tbl->at_path("view.drm_no_seat").value<bool>().value();
   }
 
   if (tbl->at_path("window_activation_area.x").is_integer()) {
@@ -163,6 +218,49 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (cli.view.fullscreen.has_value()) {
     instance.view.fullscreen = cli.view.fullscreen.value();
+  }
+  if (cli.view.drm_device.has_value()) {
+    instance.view.drm_device = cli.view.drm_device.value();
+  }
+  if (cli.view.drm_connector.has_value()) {
+    instance.view.drm_connector = cli.view.drm_connector.value();
+  }
+  if (cli.view.drm_mode.has_value()) {
+    instance.view.drm_mode = cli.view.drm_mode.value();
+  }
+  if (cli.view.drm_rotation.has_value()) {
+    instance.view.drm_rotation = cli.view.drm_rotation.value();
+  }
+  if (!cli.view.drm_input_transforms.empty()) {
+    instance.view.drm_input_transforms = cli.view.drm_input_transforms;
+  }
+  if (cli.view.drm_compositor.has_value()) {
+    instance.view.drm_compositor = cli.view.drm_compositor.value();
+  }
+  if (cli.view.drm_modeset.has_value()) {
+    instance.view.drm_modeset = cli.view.drm_modeset.value();
+  }
+  if (cli.view.drm_allow_nonblock_modeset.has_value()) {
+    instance.view.drm_allow_nonblock_modeset =
+        cli.view.drm_allow_nonblock_modeset.value();
+  }
+  if (cli.view.drm_primary_format.has_value()) {
+    instance.view.drm_primary_format = cli.view.drm_primary_format.value();
+  }
+  if (cli.view.drm_overlay_planes.has_value()) {
+    instance.view.drm_overlay_planes = cli.view.drm_overlay_planes.value();
+  }
+  if (cli.view.drm_explicit_sync.has_value()) {
+    instance.view.drm_explicit_sync = cli.view.drm_explicit_sync.value();
+  }
+  if (cli.view.drm_async_flip.has_value()) {
+    instance.view.drm_async_flip = cli.view.drm_async_flip.value();
+  }
+  if (cli.view.drm_stage_cursor.has_value()) {
+    instance.view.drm_stage_cursor = cli.view.drm_stage_cursor.value();
+  }
+  if (cli.view.drm_no_seat.has_value()) {
+    instance.view.drm_no_seat = cli.view.drm_no_seat.value();
   }
 }
 
@@ -297,7 +395,49 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.app_id))(
             "wayland-event-mask", "Wayland Events to mask",
             cxxopts::value<std::string>(config.wayland_event_mask))(
-            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>());
+            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>())(
+            "drm-device", "DRM device path (e.g. /dev/dri/card0)",
+            cxxopts::value<std::string>())(
+            "drm-connector",
+            "DRM connector to drive (e.g. eDP-1, HDMI-A-1); default rank-picks",
+            cxxopts::value<std::string>())(
+            "drm-mode",
+            "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
+            cxxopts::value<std::string>())(
+            "drm-rotation",
+            "DRM scanout rotation in degrees: 0|90|180|270 (default 0)",
+            cxxopts::value<int>())("drm-compositor",
+                                   "DRM compositor strategy: auto|planes|gl",
+                                   cxxopts::value<std::string>())(
+            "drm-modeset", "DRM modeset API: auto|legacy|atomic",
+            cxxopts::value<std::string>())(
+            "drm-allow-nonblock-modeset",
+            "Allow NONBLOCK | ALLOW_MODESET atomic commits: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-primary-format",
+            "Primary plane format: auto|xrgb8888|xbgr8888|argb8888|abgr8888|"
+            "rgb565",
+            cxxopts::value<std::string>())("drm-overlay-planes",
+                                           "Use overlay planes: auto|yes|no",
+                                           cxxopts::value<std::string>())(
+            "drm-explicit-sync",
+            "Use IN_FENCE_FD / OUT_FENCE_PTR on commits: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-async-flip",
+            "Use DRM_MODE_PAGE_FLIP_ASYNC on flip-only commits: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-stage-cursor",
+            "Stage the HW cursor into the compositor commit: auto|yes|no",
+            cxxopts::value<std::string>())(
+            "drm-no-seat",
+            "Bypass libseat: open /dev/dri + input directly and self-acquire "
+            "DRM master, skipping the foreground-VT guard (headless/SSH/kiosk "
+            "bring-up; you must ensure nothing else holds the display)",
+            cxxopts::value<bool>())(
+            "input-transform",
+            "Per-device pointer transform (repeatable): "
+            "\"<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]\"",
+            cxxopts::value<std::vector<std::string>>());
 
     const auto result = allocated->parse(argc, argv);
 
@@ -409,6 +549,80 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
     if (result.count("ivi-surface-id")) {
       config.view.ivi_surface_id = result["ivi-surface-id"].as<uint32_t>();
+    }
+
+    // DRM knobs. CLI wins; env (HOMESCREEN_DRM_*) fills only when the
+    // matching CLI flag was absent. Empty string is treated as unset.
+    auto pick_string = [&](const char* cli_name, const char* env_name,
+                           std::optional<std::string>& out) {
+      if (result.count(cli_name)) {
+        const auto v = result[cli_name].as<std::string>();
+        if (!v.empty()) {
+          out = v;
+          return;
+        }
+      }
+      if (const char* e = std::getenv(env_name); e && *e) {
+        out = std::string(e);
+      }
+    };
+    pick_string("drm-device", "HOMESCREEN_DRM_DEVICE", config.view.drm_device);
+    pick_string("drm-connector", "HOMESCREEN_DRM_CONNECTOR",
+                config.view.drm_connector);
+    pick_string("drm-mode", "HOMESCREEN_DRM_MODE", config.view.drm_mode);
+    pick_string("drm-compositor", "HOMESCREEN_DRM_COMPOSITOR",
+                config.view.drm_compositor);
+    pick_string("drm-modeset", "HOMESCREEN_DRM_MODESET",
+                config.view.drm_modeset);
+    pick_string("drm-allow-nonblock-modeset",
+                "HOMESCREEN_DRM_ALLOW_NONBLOCK_MODESET",
+                config.view.drm_allow_nonblock_modeset);
+    pick_string("drm-primary-format", "HOMESCREEN_DRM_PRIMARY_FORMAT",
+                config.view.drm_primary_format);
+    pick_string("drm-overlay-planes", "HOMESCREEN_DRM_OVERLAY_PLANES",
+                config.view.drm_overlay_planes);
+    pick_string("drm-explicit-sync", "HOMESCREEN_DRM_EXPLICIT_SYNC",
+                config.view.drm_explicit_sync);
+    pick_string("drm-async-flip", "HOMESCREEN_DRM_ASYNC_FLIP",
+                config.view.drm_async_flip);
+    pick_string("drm-stage-cursor", "HOMESCREEN_DRM_STAGE_CURSOR",
+                config.view.drm_stage_cursor);
+
+    // --drm-no-seat (bool flag) / HOMESCREEN_DRM_NO_SEAT (env). CLI wins;
+    // env fills only when the flag is absent. Env is truthy on
+    // 1 / true / yes (case-sensitive); anything else (incl. empty) = unset.
+    if (result.count("drm-no-seat")) {
+      config.view.drm_no_seat = result["drm-no-seat"].as<bool>();
+    } else if (const char* e = std::getenv("HOMESCREEN_DRM_NO_SEAT"); e && *e) {
+      const std::string_view v(e);
+      config.view.drm_no_seat = (v == "1" || v == "true" || v == "yes");
+    }
+
+    // drm-rotation is an int (0|90|180|270); CLI wins, then env. Reject any
+    // other value so a typo fails loud instead of silently scanning unrotated.
+    {
+      std::optional<int> rot;
+      if (result.count("drm-rotation")) {
+        rot = result["drm-rotation"].as<int>();
+      } else if (const char* e = std::getenv("HOMESCREEN_DRM_ROTATION");
+                 e && *e) {
+        rot = static_cast<int>(std::strtol(e, nullptr, 10));
+      }
+      if (rot.has_value()) {
+        if (*rot != 0 && *rot != 90 && *rot != 180 && *rot != 270) {
+          spdlog::critical("--drm-rotation must be 0, 90, 180, or 270 (got {})",
+                           *rot);
+          exit(EXIT_FAILURE);
+        }
+        config.view.drm_rotation = *rot;
+      }
+    }
+
+    // Per-device pointer transforms (repeatable). Validated downstream in
+    // DrmSeat::SetInputTransforms, which warns + skips malformed specs.
+    if (result.count("input-transform")) {
+      config.view.drm_input_transforms =
+          result["input-transform"].as<std::vector<std::string>>();
     }
 
     config.view.vm_args.reserve(result.unmatched().size());

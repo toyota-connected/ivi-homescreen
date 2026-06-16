@@ -45,8 +45,11 @@ void PresentLayerSequencer::Present(const FlutterLayer** layers,
                                     size_t count,
                                     wl_surface* root_surface,
                                     const MissingHandler& on_missing) {
-  std::vector<FlutterPlatformViewIdentifier> desired;
-  desired.reserve(count);
+  // Reuse the member vector's storage across frames: clear() preserves
+  // capacity, and reserve() is a no-op once the high-water mark is set.
+  // Eliminates the per-Present allocation+free pair.
+  last_order_.clear();
+  last_order_.reserve(count);
 
   wl_surface* sibling_surface = root_surface;
 
@@ -82,8 +85,6 @@ void PresentLayerSequencer::Present(const FlutterLayer** layers,
     }
 
     sibling_surface = e.surface;
-    desired.push_back(id);
+    last_order_.push_back(id);
   }
-
-  last_order_ = std::move(desired);
 }

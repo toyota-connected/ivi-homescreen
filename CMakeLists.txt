@@ -37,12 +37,62 @@ project(ivi-homescreen
 include(git)
 include(options)
 
+if (BUILD_BACKEND_DRM_KMS_EGL)
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_DRM_KMS_EGL is mutually exclusive with "
+                "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN")
+    endif ()
+endif ()
+
+if (BUILD_BACKEND_DRM_KMS_VULKAN)
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+        BUILD_BACKEND_DRM_KMS_EGL)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_DRM_KMS_VULKAN is mutually exclusive with "
+                "BUILD_BACKEND_WAYLAND_EGL, BUILD_BACKEND_WAYLAND_VULKAN, and "
+                "BUILD_BACKEND_DRM_KMS_EGL")
+    endif ()
+endif ()
+
+# FlutterView's backend type is picked by an #if/#elif chain over the
+# BUILD_BACKEND_* flags; enabling both Wayland EGL and Wayland Vulkan
+# yields a single binary whose renderer is silently determined by
+# header order rather than user intent. Reject the combination loudly.
+if (BUILD_BACKEND_WAYLAND_EGL AND BUILD_BACKEND_WAYLAND_VULKAN)
+    message(FATAL_ERROR
+            "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN "
+            "are mutually exclusive — pick exactly one Wayland backend")
+endif ()
+
+# Software backend is a pure-CPU presenter with no GPU or display-server
+# dependencies; the renderer config is FlutterRendererType.kSoftware,
+# incompatible with the GL/Vulkan configs the other backends produce.
+# Reject the combination at configure time.
+if (BUILD_BACKEND_SOFTWARE)
+    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
+        BUILD_BACKEND_WAYLAND_EGL OR
+        BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_HEADLESS_EGL)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_SOFTWARE is mutually exclusive with the "
+                "DRM/Wayland/Headless EGL/Vulkan backends — pick exactly one")
+    endif ()
+endif ()
+
 message(STATUS "Project ................ ${PROJECT_NAME}")
 message(STATUS "Version ................ ${PROJECT_VERSION}")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
+
+# drm_kms.cmake must run after compiler.cmake so the `toolchain` INTERFACE
+# library (which carries -stdlib=libc++ on clang builds) exists when we
+# add_subdirectory(drm-cxx). Otherwise drm-cxx compiles against libstdc++
+# and link fails with mixed ABI symbols.
+if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN)
+    include(drm_kms)
+endif ()
 
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
@@ -61,6 +111,23 @@ if (ENABLE_PLUGINS)
     foreach (EXT_PLUGINS_DIR ${EXT_PLUGINS_DIRS})
         if (EXISTS ${EXT_PLUGINS_DIR})
             add_subdirectory(${EXT_PLUGINS_DIR} ${PROJECT_BINARY_DIR}/ext_plugins)
+        endif ()
+    endforeach ()
+
+    # Treat the vendored sdbus-c++ as a system library from our side (we don't
+    # edit that project): re-publish its interface include dirs as SYSTEM so its
+    # headers are -isystem for consumers and don't spam our build with warnings.
+    foreach (_tgt sdbus-c++ sdbus-c++-objlib)
+        if (TARGET ${_tgt})
+            get_target_property(_sdbus_inc ${_tgt} INTERFACE_INCLUDE_DIRECTORIES)
+            if (_sdbus_inc)
+                set_target_properties(${_tgt} PROPERTIES
+                        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_sdbus_inc}")
+            endif ()
+            # Also suppress warnings emitted while compiling sdbus-cpp's own
+            # sources (e.g. -Wconversion in VTableUtils.c). System includes only
+            # cover consumers, so quiet the vendored target's own build here.
+            target_compile_options(${_tgt} PRIVATE -w)
         endif ()
     endforeach ()
 endif ()

@@ -19,10 +19,14 @@
 #include <memory>
 
 #include "configuration/configuration.h"
+#include "display/idisplay.h"
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "shell/accessibility/accessibility_tree.h"
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
 #include "wayland/window.h"
+#endif
 
 #include <flutter_homescreen.h>
 
@@ -37,23 +41,43 @@
 #include "view/compositor_surface_interface.h"
 #endif
 
+class IDisplay;
+// WaylandWindow / Display are forward-declared unconditionally so
+// shared_ptr<WaylandWindow> members and the GetWindow() accessor
+// compile across all backends. The class definitions are only
+// available when a Wayland backend is selected (wayland/window.h
+// is conditionally included above); make_shared<WaylandWindow> +
+// any method call require the complete type, so those sites are
+// guarded with #if BUILD_BACKEND_WAYLAND_EGL || …_VULKAN. The
+// non-Wayland binaries hold a default-null shared_ptr; callers
+// (engine.cc, mouse_cursor_handler.cc) already null-check.
 class Display;
+class WaylandWindow;
 class Engine;
 class Backend;
 class PlatformHandler;
 class PlatformChannel;
-class WaylandWindow;
 namespace flutter {
 class KeyEventHandler;
 }
 #if BUILD_BACKEND_HEADLESS_EGL
 class HeadlessBackend;
-#elif BUILD_BACKEND_WAYLAND_DRM
-class WaylandDrmBackend;
+#elif BUILD_BACKEND_DRM_KMS_EGL
+class DrmBackend;
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+class VulkanDrmBackend;
+#elif BUILD_BACKEND_SOFTWARE
+class SoftwareBackend;
 #elif BUILD_BACKEND_WAYLAND_EGL
 class WaylandEglBackend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN
 class WaylandVulkanBackend;
+#else
+#error \
+    "no Flutter backend selected: define one of BUILD_BACKEND_HEADLESS_EGL, " \
+    "BUILD_BACKEND_DRM_KMS_EGL, BUILD_BACKEND_DRM_KMS_VULKAN, " \
+    "BUILD_BACKEND_SOFTWARE, BUILD_BACKEND_WAYLAND_EGL, " \
+    "BUILD_BACKEND_WAYLAND_VULKAN"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
@@ -63,7 +87,7 @@ class FlutterView {
  public:
   FlutterView(Configuration::Config config,
               size_t index,
-              const std::shared_ptr<Display>& display);
+              const std::shared_ptr<IDisplay>& display);
   ~FlutterView();
 
   /**
@@ -75,6 +99,18 @@ class FlutterView {
   void RunTasks();
 
   /**
+   * @brief Whether this view has work that must be pumped at frame cadence.
+   *
+   * True when compositor-surface plugins are active (they drive their own
+   * rendering via RunTask each tick). Used by App::Loop to decide whether it
+   * may block idle or must keep ticking at the refresh rate.
+   * @return bool
+   * @relation
+   * flutter
+   */
+  [[nodiscard]] bool NeedsPeriodicPump() const;
+
+  /**
    * @brief Initialize
    * @return void
    * @relation
@@ -83,11 +119,10 @@ class FlutterView {
   void Initialize();
 
   /**
-   * @brief Get Egl Window
-   * @return shared_ptr<WaylandWindow>
-   * @retval Egl Window
-   * @relation
-   * wayland, flutter
+   * @brief Get the WaylandWindow associated with this view.
+   * @return The shared_ptr; default-constructed null on the DRM and
+   *         software backends (no Wayland surface). Callers must
+   *         null-check before dereferencing.
    */
   std::shared_ptr<WaylandWindow> GetWindow() { return m_wayland_window; }
 
@@ -117,7 +152,9 @@ class FlutterView {
    * @relation
    * internal
    */
-  [[nodiscard]] Display* GetDisplay() const { return m_wayland_display.get(); }
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN
+  [[nodiscard]] Display* GetDisplay() const;
+#endif
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
   /**
@@ -226,14 +263,22 @@ class FlutterView {
  private:
 #if BUILD_BACKEND_HEADLESS_EGL
   std::shared_ptr<HeadlessBackend> m_backend;
-#elif BUILD_BACKEND_WAYLAND_DRM
-  std::shared_ptr<WaylandDrmBackend> m_backend;
+#elif BUILD_BACKEND_DRM_KMS_EGL
+  std::shared_ptr<DrmBackend> m_backend{};
+#elif BUILD_BACKEND_DRM_KMS_VULKAN
+  std::shared_ptr<VulkanDrmBackend> m_backend{};
+#elif BUILD_BACKEND_SOFTWARE
+  std::shared_ptr<SoftwareBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_EGL
   std::shared_ptr<WaylandEglBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN
   std::shared_ptr<WaylandVulkanBackend> m_backend;
+#else
+#error "no Flutter backend selected (see forward-decl block above)"
 #endif
-  std::shared_ptr<Display> m_wayland_display;
+  std::shared_ptr<IDisplay> m_display;
+  // Default-null on non-Wayland backends (only assigned under the
+  // BUILD_BACKEND_WAYLAND_* gate in flutter_view.cc::Initialize).
   std::shared_ptr<WaylandWindow> m_wayland_window;
   std::shared_ptr<Engine> m_flutter_engine;
   std::shared_ptr<AccessibilityTree> m_accessibility_tree;
@@ -251,6 +296,15 @@ class FlutterView {
   flutter::KeyEventHandler* m_key_event_handler{};
 
   uint64_t m_pointer_events{};
+
+  // Temporary owner of FlutterDesktopEngineState between FlutterView
+  // construction (where engine_state is allocated and populated) and
+  // Initialize() (where it's moved into m_flutter_engine via
+  // Engine::TakeEngineState). After the move this is null; lifetime
+  // belongs to m_flutter_engine so engine_state outlives
+  // FlutterEngineDeinitialize. m_state->engine_state is a non-owning
+  // raw pointer to the same target throughout.
+  std::unique_ptr<FlutterDesktopEngineState> m_pending_engine_state;
 
   static void RegisterPlugins(FlutterDesktopEngineRef engine);
 };

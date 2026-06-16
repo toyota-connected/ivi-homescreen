@@ -1,6 +1,7 @@
 #pragma once
 
 #include <GLES2/gl2.h>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -43,6 +44,14 @@ struct FlutterDesktopTextureRegistrar {
 
   std::unordered_map<int64_t, std::unique_ptr<GL_TEXTURE_2D_DESC>>
       texture_registry;
+
+  // Latched by ~FlutterView before m_state destructs. Plugin streaming
+  // threads (e.g. video_player gstreamer handoff) keep firing texture
+  // callbacks past the point where m_state (and the engine_state /
+  // view_controller this registrar points at) have been freed; without
+  // this gate they deref dangling pointers and SEGV. Texture-callback
+  // entry points in flutter_desktop.cc check this flag and return early.
+  std::atomic<bool> shutting_down{false};
 };
 
 // Resolve a registered external texture for the Flutter engine's

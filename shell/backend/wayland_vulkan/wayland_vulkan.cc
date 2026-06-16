@@ -15,15 +15,22 @@
  */
 
 #include "wayland_vulkan.h"
+#include "logging/logging.h"
+
+#include <asio/post.hpp>
 
 #include <cassert>
 #include <cstdlib>
 #include <optional>
 #include <queue>
+#include <string_view>
 
 #include "config/common.h"
 #include "engine.h"
 #include "logging.h"
+#include "profiling/frame_profile.h"
+#include "task_runner.h"
+#include "wayland/display.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -38,7 +45,8 @@ const auto& d = vk::detail::defaultDispatchLoaderDynamic;
     vk::detail::resultCheck(static_cast<vk::Result>(x), LOCATION); \
   } while (0)
 
-WaylandVulkanBackend::WaylandVulkanBackend(wl_display* display,
+WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
+                                           wl_display* display,
                                            const uint32_t width,
                                            const uint32_t height,
                                            const bool enable_validation_layers)
@@ -48,6 +56,29 @@ WaylandVulkanBackend::WaylandVulkanBackend(wl_display* display,
       wl_display_(display),
       width_(width),
       height_(height) {
+  if (shell_display != nullptr) {
+    wp_presentation_ = shell_display->GetWpPresentation();
+    presentation_clock_id_ = shell_display->GetPresentationClockId();
+    // FlutterEngineGetCurrentTime() returns CLOCK_MONOTONIC ns; only when
+    // the compositor announced the same domain can we hand its presented
+    // timestamps to OnVsync without a cross-clock translation. Mainline
+    // compositors all use CLOCK_MONOTONIC; anything else falls back to
+    // the engine wall-clock scheduler.
+    clock_compatible_ = (presentation_clock_id_ == CLOCK_MONOTONIC);
+    if (wp_presentation_ == nullptr) {
+      spdlog::info(
+          "[WaylandVulkanBackend] wp_presentation not advertised — "
+          "vsync_callback disabled, falling back to engine wall-clock "
+          "scheduler");
+    } else if (!clock_compatible_) {
+      spdlog::warn(
+          "[WaylandVulkanBackend] wp_presentation clock_id={} != "
+          "CLOCK_MONOTONIC ({}); vsync_callback disabled (cross-clock "
+          "translation NYI)",
+          static_cast<int>(presentation_clock_id_),
+          static_cast<int>(CLOCK_MONOTONIC));
+    }
+  }
   VULKAN_HPP_DEFAULT_DISPATCHER.init();
   createInstance();
   setupDebugMessenger();
@@ -100,18 +131,71 @@ FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
 }
 
 WaylandVulkanBackend::~WaylandVulkanBackend() {
+  // Session-aggregate profile summary (IVI_VK_PROFILE=1). Logged from
+  // the dtor so it captures the whole run regardless of which present
+  // path was active. No-op when the env-var was unset (counters never
+  // accumulated).
+  const auto& s = session_totals_;
+  if (s.presented_frames > 0) {
+    const uint32_t samples =
+        (s.interval_sum_ns > 0) ? s.presented_frames - 1 : s.presented_frames;
+    const uint64_t mean_ns = samples > 0 ? s.interval_sum_ns / samples : 0;
+    const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
+    const uint32_t total = s.bucket_60hz + s.bucket_30hz + s.bucket_20hz +
+                           s.bucket_slow + s.bucket_idle;
+    const uint64_t s_lat_mean_us =
+        s.pipeline_latency_samples > 0
+            ? (s.pipeline_latency_sum_ns / s.pipeline_latency_samples) / 1000
+            : 0;
+    spdlog::info(
+        "[WaylandVulkanBackend] session summary: frames={} fps={:.2f} "
+        "mean_interval={}us max_interval={}us present_failures={} "
+        "discarded={} flags=0x{:x} pipeline_mean={}us pipeline_max={}us",
+        s.presented_frames, fps, mean_ns / 1000, s.interval_max_ns / 1000,
+        s.present_failures, s.discarded_frames, s.flags_or, s_lat_mean_us,
+        s.pipeline_latency_max_ns / 1000);
+    if (total > 0) {
+      const double inv = 100.0 / static_cast<double>(total);
+      spdlog::info(
+          "[WaylandVulkanBackend] session buckets: "
+          "60Hz(≤17ms)={} ({:.1f}%) 30Hz(18-33ms)={} ({:.1f}%) "
+          "20Hz(34-50ms)={} ({:.1f}%) slow(51-100ms)={} ({:.1f}%) "
+          "idle(>100ms)={} ({:.1f}%)",
+          s.bucket_60hz, s.bucket_60hz * inv, s.bucket_30hz,
+          s.bucket_30hz * inv, s.bucket_20hz, s.bucket_20hz * inv,
+          s.bucket_slow, s.bucket_slow * inv, s.bucket_idle,
+          s.bucket_idle * inv);
+    }
+  }
+
   if (device_ != nullptr) {
+    // Drain all in-flight GPU work before tearing anything down. Without this
+    // the swapchain (and the WSI's wl_buffer proxies bound to its images) can
+    // still be in use, which both the validation layers and Mesa's Wayland WSI
+    // flag ("wl_buffer still attached" / "queue destroyed while proxies still
+    // attached") and which can fault during vkDestroyDevice.
+    d.vkDeviceWaitIdle(device_);
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
 #endif
     if (swapchain_command_pool_ != nullptr) {
       d.vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
     }
-    if (present_transition_semaphore_ != nullptr) {
-      d.vkDestroySemaphore(device_, present_transition_semaphore_, nullptr);
+    for (auto sem : present_transition_semaphores_) {
+      if (sem != nullptr) {
+        d.vkDestroySemaphore(device_, sem, nullptr);
+      }
     }
+    present_transition_semaphores_.clear();
     if (image_ready_fence_ != nullptr) {
       d.vkDestroyFence(device_, image_ready_fence_, nullptr);
+    }
+    // Destroy the swapchain before the device. It is otherwise only torn down
+    // on resize (InitializeSwapChain); on shutdown it must be released here so
+    // the WSI hands its images' wl_buffers back to the compositor.
+    if (swapchain_ != nullptr) {
+      d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+      swapchain_ = VK_NULL_HANDLE;
     }
     d.vkDestroyDevice(device_, nullptr);
   }
@@ -131,14 +215,16 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   }
   if (!enabled_instance_extensions_.empty()) {
     for (const auto it : enabled_instance_extensions_) {
-      free((void*)it);
+      free((void*)it);  // strdup'd in createInstance(); owned, must be freed
     }
   }
-  if (!enabled_layer_extensions_.empty()) {
-    for (const auto it : enabled_layer_extensions_) {
-      free((void*)it);
-    }
-  }
+  // NB: enabled_layer_extensions_ is NOT freed. Unlike the instance extensions
+  // (strdup'd), its only entry is the constexpr string literal
+  // VK_LAYER_KHRONOS_VALIDATION_NAME pushed in createInstance() — not heap
+  // allocated. free()ing it aborted the process (free(): invalid size) at
+  // teardown, but only when validation layers were enabled (the sole path that
+  // populates this vector), which is why it surfaced only under -d / -d-style
+  // runs.
 }
 
 void WaylandVulkanBackend::createInstance() {
@@ -487,10 +573,21 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     resize_pending_ = false;
     d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
 
-    CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+    {
+      std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+      CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+    }
     CHECK_VK_RESULT(
         d.vkResetCommandPool(device_, swapchain_command_pool_,
                              VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
+    // The queue is idle here; tear down the old per-image present-transition
+    // semaphores so they can be recreated for the new image count below.
+    for (auto sem : present_transition_semaphores_) {
+      if (sem != nullptr) {
+        d.vkDestroySemaphore(device_, sem, nullptr);
+      }
+    }
+    present_transition_semaphores_.clear();
   }
 
   // --------------------------------------------------------------------------
@@ -499,8 +596,22 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // --------------------------------------------------------------------------
 
   uint32_t format_count;
-  CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
-      physical_device_, surface_, &format_count, nullptr));
+  // First touch on the Wayland-backed VkSurfaceKHR. Mesa's WSI surfaces a
+  // missing GPU-buffer-allocation protocol (zwp_linux_dmabuf_v1 / wl_drm)
+  // as VK_ERROR_SURFACE_LOST_KHR on this call — that's the root cause when
+  // the compositor was launched without dmabuf support. Soft-fail rather
+  // than asserting so CreateSurface can exit cleanly with a clear message.
+  if (const auto r =
+          static_cast<vk::Result>(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
+              physical_device_, surface_, &format_count, nullptr));
+      r != vk::Result::eSuccess) {
+    spdlog::critical(
+        "vkGetPhysicalDeviceSurfaceFormatsKHR failed: {}. On Wayland this "
+        "usually means the compositor exposes neither zwp_linux_dmabuf_v1 "
+        "nor wl_drm — Mesa Vulkan WSI cannot back the swapchain.",
+        vk::to_string(r));
+    return false;
+  }
   std::vector<VkSurfaceFormatKHR> formats(format_count);
   CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
       physical_device_, surface_, &format_count, formats.data()));
@@ -571,14 +682,54 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
       physical_device_, surface_, &mode_count, modes.data()));
   assert(!formats.empty());  // Shouldn't be possible.
 
-  // If the preferred mode isn't available, just choose the first one.
+  // Default = FIFO (strict vblank gating, the spec-mandated mode). Env
+  // override IVI_VK_PRESENT_MODE picks an alternative IFF the compositor
+  // advertises it; otherwise warn and fall back to FIFO. MAILBOX is the
+  // interesting case for vsync_callback profiling: it lets the rasterizer
+  // outpace scanout, weakening Mesa's WSI backpressure so Flutter's
+  // own scheduling drift becomes visible at the present-interval layer.
+  VkPresentModeKHR requested_mode = kPreferredPresentMode;
+  if (const char* env = std::getenv("IVI_VK_PRESENT_MODE"); env != nullptr) {
+    const std::string_view name(env);
+    if (name == "mailbox") {
+      requested_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+    } else if (name == "fifo_relaxed") {
+      requested_mode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    } else if (name == "immediate") {
+      requested_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    } else if (name != "fifo") {
+      spdlog::warn(
+          "[WaylandVulkanBackend] IVI_VK_PRESENT_MODE='{}' unrecognized; "
+          "valid: fifo|fifo_relaxed|mailbox|immediate. Falling back to fifo.",
+          env);
+    }
+  }
   VkPresentModeKHR present_mode = modes[0];
+  bool got_requested = false;
   for (const auto& mode : modes) {
-    if (mode == kPreferredPresentMode) {
+    if (mode == requested_mode) {
       present_mode = mode;
+      got_requested = true;
       break;
     }
   }
+  if (!got_requested && requested_mode != kPreferredPresentMode) {
+    // Requested mode wasn't advertised — fall back to FIFO if present
+    // (it's required by the spec for any compositor that supports a
+    // swapchain at all), else first available.
+    for (const auto& mode : modes) {
+      if (mode == kPreferredPresentMode) {
+        present_mode = mode;
+        break;
+      }
+    }
+    spdlog::warn(
+        "[WaylandVulkanBackend] requested present mode {} not advertised "
+        "by compositor; using {}.",
+        static_cast<int>(requested_mode), static_cast<int>(present_mode));
+  }
+  spdlog::info("[WaylandVulkanBackend] present mode: {}",
+               static_cast<int>(present_mode));
 
   // --------------------------------------------------------------------------
   // Create the swap chain.
@@ -591,7 +742,17 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   info.imageColorSpace = surface_format_.colorSpace;
   info.imageExtent = clientSize;
   info.imageArrayLayers = 1;
+  // The compositor present path (PresentLayersImpl/BlitStoreToSwapchain) blits
+  // each backing store into the swapchain image, so it must be a transfer
+  // destination — not just a color attachment. Request TRANSFER_DST_BIT in
+  // addition; gate it on the surface's advertised usage so creation can't fail
+  // on a compositor that doesn't support it (COLOR_ATTACHMENT_BIT is always
+  // supported per spec).
   info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  if (surface_capabilities.supportedUsageFlags &
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
+    info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  }
   info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   info.preTransform = surface_capabilities.currentTransform;
   info.compositeAlpha = (surface_capabilities.supportedCompositeAlpha &
@@ -666,6 +827,17 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
                            0, nullptr, 1, &barrier);
 
     CHECK_VK_RESULT(d.vkEndCommandBuffer(buffer));
+  }
+
+  // One present-transition semaphore per swapchain image (see header). Created
+  // here, alongside the per-image transition command buffers, so the count
+  // tracks the swapchain.
+  VkSemaphoreCreateInfo present_sem_info{};
+  present_sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  present_transition_semaphores_.resize(swapchain_images_.size());
+  for (auto& sem : present_transition_semaphores_) {
+    CHECK_VK_RESULT(
+        d.vkCreateSemaphore(device_, &present_sem_info, nullptr, &sem));
   }
 
 #if BUILD_COMPOSITOR
@@ -764,32 +936,60 @@ bool WaylandVulkanBackend::PresentCallback(
   // command buffer Record vkCmdPipelineBarrier at the end of your render pass
   // command buffer
 
-  // Submit the command buffer and signal the semaphore
+  // Submit the command buffer and signal this image's present-transition
+  // semaphore. Both the command buffer and the semaphore are indexed by
+  // image, so the next frame is free to record/submit while this frame's
+  // GPU work is still in flight — no full-queue drain is required (the
+  // resource is only reused once vkAcquireNextImageKHR hands this image
+  // back, which already implies its previous presentation completed).
+  VkSemaphore& transition_semaphore =
+      b->present_transition_semaphores_[b->last_image_index_];
   VkSubmitInfo submit_info{};
   submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers =
       &b->present_transition_buffers_[b->last_image_index_];
   submit_info.signalSemaphoreCount = 1;
-  submit_info.pSignalSemaphores = &b->present_transition_semaphore_;
-  d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+  submit_info.pSignalSemaphores = &transition_semaphore;
+  {
+    std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
+    d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+  }
 
   // Wait on the signaled semaphore in vkQueuePresentKHR
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
-  present_info.pWaitSemaphores = &b->present_transition_semaphore_;
+  present_info.pWaitSemaphores = &transition_semaphore;
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &b->swapchain_;
   present_info.pImageIndices = &b->last_image_index_;
-  const VkResult result = d.vkQueuePresentKHR(b->queue_, &present_info);
-
-  // If the swap chain is no longer compatible with the surface, discard the
-  // swap chain and create a new one.
-  if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
-    b->InitializeSwapChain();
+  // Mint the wp_presentation_feedback BEFORE vkQueuePresentKHR — Mesa's
+  // Wayland WSI does wl_surface.commit inside that call, and the
+  // feedback object binds to the most recent surface request prior to
+  // the commit.
+  b->RequestPresentationFeedback();
+  VkResult result;
+  {
+    std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
+    result = d.vkQueuePresentKHR(b->queue_, &present_info);
   }
-  d.vkQueueWaitIdle(b->queue_);
+
+  // If the swap chain is no longer compatible with the surface, defer
+  // recreation to the next GetNextImageCallback rather than rebuilding inside
+  // the present call. That path (gated on resize_pending_) idles the queue and
+  // destroys the old swapchain, command buffers and per-image semaphores
+  // before recreating them; rebuilding here would skip that teardown and leak
+  // them. Mirrors the compositor path (PresentLayersImpl).
+  if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+    b->resize_pending_ = true;
+  }
+  // No vkQueueWaitIdle here: CPU/GPU now pipeline across frames. Reuse of
+  // this image's command buffer and semaphore is gated by the next
+  // vkAcquireNextImageKHR + image_ready_fence_ wait in GetNextImageCallback,
+  // and swapchain recreation (above / on resize) drains the queue itself.
+
+  b->ProfilePresent(result == VK_SUCCESS);
 
   return result == VK_SUCCESS;
 }
@@ -801,6 +1001,375 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
   auto* proc =
       d.vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname);
   return reinterpret_cast<void*>(proc);
+}
+
+void WaylandVulkanBackend::ProfilePresent(const bool ok) {
+  // Single env-var probe per process; the lookup is O(strlen) and we
+  // call this on every frame.
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_VK_PROFILE");
+  if (!profile_enabled) {
+    return;
+  }
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                          static_cast<uint64_t>(ts.tv_nsec);
+
+  auto& p = profile_;
+  if (!ok) {
+    ++p.present_failures;
+    return;
+  }
+  if (p.last_present_ns != 0) {
+    const uint64_t dt = now_ns - p.last_present_ns;
+    p.interval_sum_ns += dt;
+    if (dt > p.interval_max_ns) {
+      p.interval_max_ns = dt;
+    }
+    // Same bucket thresholds as wayland_egl so histograms line up.
+    if (dt <= 17'000'000ULL) {
+      ++p.bucket_60hz;
+    } else if (dt <= 33'000'000ULL) {
+      ++p.bucket_30hz;
+    } else if (dt <= 50'000'000ULL) {
+      ++p.bucket_20hz;
+    } else if (dt <= 100'000'000ULL) {
+      ++p.bucket_slow;
+    } else {
+      ++p.bucket_idle;
+    }
+  }
+  p.last_present_ns = now_ns;
+  ++p.presented_frames;
+
+  // beginFrame-to-present latency. last_begin_frame_ns_ is 0 when
+  // vsync_callback isn't wired; in that case we have no Flutter-scheduled
+  // start time to compare against, so skip. Pipelining (multiple frames
+  // in flight) means a given present may not correspond to the *most
+  // recent* OnVsync — the running mean still tracks the difference
+  // between vsync-aware and wall-clock scheduling under load.
+  const uint64_t begin = last_begin_frame_ns_.load(std::memory_order_acquire);
+  if (begin > 0 && now_ns > begin) {
+    const uint64_t latency = now_ns - begin;
+    p.pipeline_latency_sum_ns += latency;
+    if (latency > p.pipeline_latency_max_ns) {
+      p.pipeline_latency_max_ns = latency;
+    }
+    ++p.pipeline_latency_samples;
+  }
+
+  constexpr uint32_t kProfileWindow = 60;
+  if (p.presented_frames < kProfileWindow) {
+    return;
+  }
+  const uint32_t samples =
+      (p.interval_sum_ns > 0) ? p.presented_frames - 1 : p.presented_frames;
+  const uint64_t mean_ns = samples > 0 ? p.interval_sum_ns / samples : 0;
+  const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
+  const uint64_t lat_mean_us =
+      p.pipeline_latency_samples > 0
+          ? (p.pipeline_latency_sum_ns / p.pipeline_latency_samples) / 1000
+          : 0;
+  spdlog::info(
+      "[WaylandVulkanBackend] profile (n={}): fps={:.2f} mean_interval={}us "
+      "max_interval={}us present_failures={} discarded={} "
+      "refresh={}us flags=0x{:x} pipeline_mean={}us pipeline_max={}us "
+      "buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
+      p.presented_frames, fps, mean_ns / 1000, p.interval_max_ns / 1000,
+      p.present_failures, p.discarded_frames,
+      last_refresh_ns_.load(std::memory_order_relaxed) / 1000, p.flags_or,
+      lat_mean_us, p.pipeline_latency_max_ns / 1000, p.bucket_60hz,
+      p.bucket_30hz, p.bucket_20hz, p.bucket_slow, p.bucket_idle);
+
+  auto& s = session_totals_;
+  s.presented_frames += p.presented_frames;
+  s.present_failures += p.present_failures;
+  s.discarded_frames += p.discarded_frames;
+  s.flags_or |= p.flags_or;
+  s.interval_sum_ns += p.interval_sum_ns;
+  if (p.interval_max_ns > s.interval_max_ns) {
+    s.interval_max_ns = p.interval_max_ns;
+  }
+  s.bucket_60hz += p.bucket_60hz;
+  s.bucket_30hz += p.bucket_30hz;
+  s.bucket_20hz += p.bucket_20hz;
+  s.bucket_slow += p.bucket_slow;
+  s.bucket_idle += p.bucket_idle;
+  s.pipeline_latency_sum_ns += p.pipeline_latency_sum_ns;
+  s.pipeline_latency_samples += p.pipeline_latency_samples;
+  if (p.pipeline_latency_max_ns > s.pipeline_latency_max_ns) {
+    s.pipeline_latency_max_ns = p.pipeline_latency_max_ns;
+  }
+  p = FrameProfile{.last_present_ns = p.last_present_ns};
+}
+
+// -----------------------------------------------------------------------------
+// wp_presentation-driven vsync. Mirrors WaylandEglBackend; the only path
+// differences are (a) the present-path hook fires before vkQueuePresentKHR
+// instead of eglSwapBuffers, and (b) the Vulkan backend has no
+// `clock_compatible_` shortcut in the present path because there's
+// nothing equivalent to EGL's MakeCurrent/dispatch interleaving.
+// -----------------------------------------------------------------------------
+
+VsyncCallback WaylandVulkanBackend::GetVsyncCallback() const {
+  static const bool env_disabled = []() {
+    const char* env = std::getenv("IVI_VK_VSYNC");
+    return env != nullptr && std::string_view(env) == "0";
+  }();
+  if (env_disabled) {
+    spdlog::info(
+        "[WaylandVulkanBackend] IVI_VK_VSYNC=0 — wall-clock scheduler");
+    return nullptr;
+  }
+  if (wp_presentation_ == nullptr || !clock_compatible_) {
+    return nullptr;
+  }
+  return &VsyncTrampoline;
+}
+
+void WaylandVulkanBackend::VsyncTrampoline(void* user_data,
+                                           const intptr_t baton) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->view_controller == nullptr ||
+      state->view_controller->engine == nullptr) {
+    return;
+  }
+  auto* engine_obj = state->view_controller->engine;
+  auto* backend = dynamic_cast<WaylandVulkanBackend*>(engine_obj->GetBackend());
+  if (backend == nullptr) {
+    return;
+  }
+  backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
+}
+
+void WaylandVulkanBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                                       const intptr_t baton) const {
+  if (engine == nullptr || baton == 0) {
+    return;
+  }
+  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;
+  }
+  const uint64_t now = LibFlutterEngine->GetCurrentTime();
+  const uint64_t period_ns = last_refresh_ns_.load(std::memory_order_acquire);
+  last_begin_frame_ns_.store(now, std::memory_order_release);
+  asio::post(*runner->GetStrandContext(), [engine, baton, now, period_ns]() {
+    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+  });
+}
+
+void WaylandVulkanBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine)
+                                             engine,
+                                         const intptr_t baton) {
+  engine_handle_.store(engine, std::memory_order_release);
+  vsync_baton_.store(baton, std::memory_order_release);
+
+  if (feedback_pending_.load(std::memory_order_acquire)) {
+    return;
+  }
+  // Pipeline idle: drain the baton ourselves so Flutter doesn't sit
+  // forever waiting for a present that never schedules.
+  if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
+      mine != 0) {
+    PostOnVsync(engine, mine);
+  }
+}
+
+void WaylandVulkanBackend::RequestPresentationFeedback() {
+  static const bool env_disabled = []() {
+    const char* env = std::getenv("IVI_VK_VSYNC");
+    return env != nullptr && std::string_view(env) == "0";
+  }();
+  if (env_disabled || wp_presentation_ == nullptr || !clock_compatible_) {
+    return;
+  }
+  auto* surface = wl_surface_.load(std::memory_order_acquire);
+  if (surface == nullptr) {
+    return;
+  }
+  constexpr size_t kFeedbackInFlightCap = 16;
+  {
+    std::lock_guard<std::mutex> lock(m_feedback_mu_);
+    if (feedback_in_flight_.size() >= kFeedbackInFlightCap) {
+      spdlog::warn(
+          "[WaylandVulkanBackend] feedback_in_flight_ saturated at {} — "
+          "compositor is silently dropping wp_presentation_feedback "
+          "requests; skipping",
+          feedback_in_flight_.size());
+      return;
+    }
+  }
+  struct wp_presentation_feedback* fb =
+      wp_presentation_feedback(wp_presentation_, surface);
+  if (fb == nullptr) {
+    spdlog::warn(
+        "[WaylandVulkanBackend] wp_presentation_feedback() returned null");
+    return;
+  }
+  wp_presentation_feedback_add_listener(fb, &feedback_listener_, this);
+  {
+    std::lock_guard<std::mutex> lock(m_feedback_mu_);
+    feedback_in_flight_.push_back(fb);
+  }
+  feedback_pending_.store(true, std::memory_order_release);
+}
+
+void WaylandVulkanBackend::on_feedback_sync_output(
+    void* /*data*/,
+    struct wp_presentation_feedback* /*fb*/,
+    struct wl_output* /*output*/) {
+  // Informational; ignored for the single-surface case.
+}
+
+void WaylandVulkanBackend::on_feedback_presented(
+    void* data,
+    struct wp_presentation_feedback* fb,
+    const uint32_t tv_sec_hi,
+    const uint32_t tv_sec_lo,
+    const uint32_t tv_nano_sec,
+    const uint32_t refresh,
+    uint32_t /*seq_hi*/,
+    uint32_t /*seq_lo*/,
+    const uint32_t flags) {
+  auto* self = static_cast<WaylandVulkanBackend*>(data);
+  if (self == nullptr) {
+    return;
+  }
+  constexpr uint64_t kMaxPlausibleRefreshNs = 100'000'000;  // 10Hz floor
+  if (refresh > 0 && refresh <= kMaxPlausibleRefreshNs) {
+    self->last_refresh_ns_.store(refresh, std::memory_order_release);
+  }
+  if (tv_sec_hi != 0) {
+    spdlog::warn(
+        "[WaylandVulkanBackend] feedback.presented tv_sec_hi={} (expected 0); "
+        "dropping baton with wall-clock fallback",
+        tv_sec_hi);
+    WaylandVulkanBackend::on_feedback_discarded(data, fb);
+    return;
+  }
+  const auto tv_sec = static_cast<uint64_t>(tv_sec_lo);
+  const uint64_t tv_ns =
+      tv_sec * 1'000'000'000ULL + static_cast<uint64_t>(tv_nano_sec);
+
+  // Profile accumulation: flags_or only. Interval bucketing is owned by
+  // ProfilePresent on the rasterizer thread; doing it twice would
+  // double-count.
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_VK_PROFILE");
+  if (profile_enabled) {
+    self->profile_.flags_or |= flags;
+  }
+
+  // Race-safe destroy: only the path that successfully removed `fb` from
+  // feedback_in_flight_ owns its destruction. If StopVsyncMonitor swapped
+  // the vector out from under us, `fb` is in StopVsyncMonitor's drained
+  // copy and IT will destroy it.
+  bool removed_one = false;
+  bool empty = false;
+  {
+    std::lock_guard<std::mutex> lock(self->m_feedback_mu_);
+    auto& vec = self->feedback_in_flight_;
+    auto it = std::find(vec.begin(), vec.end(), fb);
+    if (it != vec.end()) {
+      vec.erase(it);
+      removed_one = true;
+    }
+    empty = vec.empty();
+  }
+  if (removed_one) {
+    wp_presentation_feedback_destroy(fb);
+  }
+  if (empty) {
+    self->feedback_pending_.store(false, std::memory_order_release);
+  }
+
+  // Hand the baton back to Flutter with the presentation timestamp.
+  const intptr_t baton =
+      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+  if (baton == 0) {
+    return;
+  }
+  auto* engine = self->engine_handle_.load(std::memory_order_acquire);
+  if (engine == nullptr) {
+    return;
+  }
+  auto* runner = self->platform_task_runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;
+  }
+  const uint64_t period_ns =
+      self->last_refresh_ns_.load(std::memory_order_acquire);
+  self->last_begin_frame_ns_.store(tv_ns, std::memory_order_release);
+  asio::post(*runner->GetStrandContext(), [engine, baton, tv_ns, period_ns]() {
+    LibFlutterEngine->OnVsync(engine, baton, tv_ns, tv_ns + period_ns);
+  });
+}
+
+void WaylandVulkanBackend::on_feedback_discarded(
+    void* data,
+    struct wp_presentation_feedback* fb) {
+  auto* self = static_cast<WaylandVulkanBackend*>(data);
+  if (self == nullptr) {
+    return;
+  }
+  static const bool profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_VK_PROFILE");
+  if (profile_enabled) {
+    ++self->profile_.discarded_frames;
+  }
+  bool removed_one = false;
+  bool empty = false;
+  {
+    std::lock_guard<std::mutex> lock(self->m_feedback_mu_);
+    auto& vec = self->feedback_in_flight_;
+    auto it = std::find(vec.begin(), vec.end(), fb);
+    if (it != vec.end()) {
+      vec.erase(it);
+      removed_one = true;
+    }
+    empty = vec.empty();
+  }
+  if (removed_one) {
+    wp_presentation_feedback_destroy(fb);
+  }
+  if (empty) {
+    self->feedback_pending_.store(false, std::memory_order_release);
+  }
+
+  const intptr_t baton =
+      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
+  if (baton == 0) {
+    return;
+  }
+  auto* engine = self->engine_handle_.load(std::memory_order_acquire);
+  if (engine == nullptr) {
+    return;
+  }
+  self->PostOnVsync(engine, baton);
+}
+
+const wp_presentation_feedback_listener
+    WaylandVulkanBackend::feedback_listener_ = {
+        .sync_output = WaylandVulkanBackend::on_feedback_sync_output,
+        .presented = WaylandVulkanBackend::on_feedback_presented,
+        .discarded = WaylandVulkanBackend::on_feedback_discarded,
+};
+
+void WaylandVulkanBackend::StopVsyncMonitor() {
+  std::vector<struct wp_presentation_feedback*> drained;
+  {
+    std::lock_guard<std::mutex> lock(m_feedback_mu_);
+    drained.swap(feedback_in_flight_);
+  }
+  for (auto* fb : drained) {
+    wp_presentation_feedback_destroy(fb);
+  }
+  feedback_pending_.store(false, std::memory_order_release);
+  vsync_baton_.store(0, std::memory_order_release);
+  engine_handle_.store(nullptr, std::memory_order_release);
+  platform_task_runner_.store(nullptr, std::memory_order_release);
 }
 
 void WaylandVulkanBackend::Resize(size_t /* index */,
@@ -833,6 +1402,12 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 
   surface_ = VK_NULL_HANDLE;
 
+  // Stash for wp_presentation_feedback. Released-acquire so the
+  // rasterizer-thread RequestPresentationFeedback path sees it the next
+  // time it's called after CreateSurface (which always runs on the
+  // platform thread before any frames present).
+  wl_surface_.store(surface, std::memory_order_release);
+
   VkWaylandSurfaceCreateInfoKHR createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
   createInfo.display = wl_display_;
@@ -853,10 +1428,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   f_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   d.vkCreateFence(device_, &f_info, nullptr, &image_ready_fence_);
 
-  VkSemaphoreCreateInfo s_info{};
-  s_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  d.vkCreateSemaphore(device_, &s_info, nullptr,
-                      &present_transition_semaphore_);
+  // present_transition_semaphores_ are created per swapchain image inside
+  // InitializeSwapChain (below), since their count tracks the swapchain.
 
   VkCommandPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -872,9 +1445,12 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 bool WaylandVulkanBackend::CollectBackingStore(const FlutterBackingStore* store,
                                                void* user_data) {
 #if BUILD_COMPOSITOR
-  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  // user_data is `this` per FlutterCompositor.user_data set in
+  // GetCompositorConfig(). The prior code treated it as a
+  // FlutterDesktopEngineState* and walked view_controller->view->GetBackend
+  // — that read garbage offsets off the backend instance and SEGV'd at
+  // first use, leaving the Vulkan backend non-functional.
+  auto* b = static_cast<WaylandVulkanBackend*>(user_data);
   return b->CollectBackingStoreImpl(store);
 #else
   (void)store;
@@ -889,9 +1465,9 @@ bool WaylandVulkanBackend::CreateBackingStore(
     FlutterBackingStore* backing_store_out,
     void* user_data) {
 #if BUILD_COMPOSITOR
-  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  // user_data is `this` per FlutterCompositor.user_data — see
+  // CollectBackingStore above for the prior-bug context.
+  auto* b = static_cast<WaylandVulkanBackend*>(user_data);
   return b->CreateBackingStoreImpl(config, backing_store_out);
 #else
   (void)config;
@@ -976,9 +1552,9 @@ bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
                                          size_t layers_count,
                                          void* user_data) {
 #if BUILD_COMPOSITOR
-  const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
-  auto* b = reinterpret_cast<WaylandVulkanBackend*>(
-      state->view_controller->view->GetBackend());
+  // user_data is `this` per FlutterCompositor.user_data — see
+  // CollectBackingStore above for the prior-bug context.
+  auto* b = static_cast<WaylandVulkanBackend*>(user_data);
   return b->PresentLayersImpl(layers, layers_count);
 #else
   (void)layers;
@@ -1040,8 +1616,8 @@ void WaylandVulkanBackend::ResizeCompositorSurface(
 bool WaylandVulkanBackend::CreateBackingStoreImpl(
     const FlutterBackingStoreConfig* config,
     FlutterBackingStore* store_out) {
-  const int32_t w = static_cast<int32_t>(config->size.width);
-  const int32_t h = static_cast<int32_t>(config->size.height);
+  const auto w = static_cast<int32_t>(config->size.width);
+  const auto h = static_cast<int32_t>(config->size.height);
 
   const bool want_dma_buf = BUILD_COMPOSITOR_DMABUF_EXPORT != 0;
   auto store =
@@ -1097,6 +1673,27 @@ bool WaylandVulkanBackend::CollectBackingStoreImpl(
   return true;
 }
 
+namespace {
+// Map a (single) pipeline stage to the image-access flags that stage is
+// allowed to perform, so a barrier's access masks always satisfy
+// VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819/02820. Covers the
+// stages used by TransitionLayout's callers; TOP/BOTTOM_OF_PIPE carry no
+// access.
+VkAccessFlags AccessMaskForStage(VkPipelineStageFlags stage) {
+  switch (stage) {
+    case VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT:
+      return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    case VK_PIPELINE_STAGE_TRANSFER_BIT:
+      return VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    case VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT:
+    case VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT:
+    default:
+      return 0;
+  }
+}
+}  // namespace
+
 void WaylandVulkanBackend::TransitionLayout(
     VkImage image,
     VkImageLayout from,
@@ -1129,11 +1726,13 @@ void WaylandVulkanBackend::TransitionLayout(
   barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.layerCount = 1;
-  barrier.srcAccessMask =
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
-                          VK_ACCESS_TRANSFER_READ_BIT |
-                          VK_ACCESS_TRANSFER_WRITE_BIT;
+  // Derive access masks from the stage masks so they stay spec-valid
+  // (VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819/02820): an access
+  // flag must be supported by its stage. The previous hardcoded
+  // COLOR_ATTACHMENT_WRITE|TRANSFER_WRITE / *_READ|*_WRITE masks were invalid
+  // for the only caller's TOP_OF_PIPE -> COLOR_ATTACHMENT_OUTPUT transition.
+  barrier.srcAccessMask = AccessMaskForStage(src_stage);
+  barrier.dstAccessMask = AccessMaskForStage(dst_stage);
 
   d.vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
                          1, &barrier);
@@ -1143,8 +1742,11 @@ void WaylandVulkanBackend::TransitionLayout(
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
-  d.vkQueueWaitIdle(queue_);
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+    d.vkQueueWaitIdle(queue_);
+  }
   d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
 }
 
@@ -1154,7 +1756,7 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
                                                 int32_t dst_x,
                                                 int32_t dst_y,
                                                 int32_t dst_w,
-                                                int32_t dst_h) const {
+                                                int32_t dst_h) {
   // Transition source -> TRANSFER_SRC_OPTIMAL.
   VkImageMemoryBarrier src_to_xfer{};
   src_to_xfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1240,18 +1842,29 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   to_dst.subresourceRange.levelCount = 1;
   to_dst.subresourceRange.layerCount = 1;
   to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+  // srcStage must be TRANSFER (the stage the acquire semaphore is waited at),
+  // not TOP_OF_PIPE: that orders this layout-transition write after the
+  // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
+  // sync-validation layer flags (it explicitly suggests including the transfer
+  // stage in this barrier's srcStageMask).
+  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &to_dst);
 
   // Sequence platform-view subsurface Z-order for this frame.
-  m_sequencer.Present(layers, count, nullptr,
-                      [](FlutterPlatformViewIdentifier id) {
-                        spdlog::warn(
-                            "Vulkan compositor: platform view {} has no "
-                            "registered subsurface",
-                            id);
-                      });
+  m_sequencer.Present(
+      layers, count, nullptr, [this](FlutterPlatformViewIdentifier id) {
+        // PVs may choose the wl_subsurface route (sequencer)
+        // or the ICompositorSurface texture route (below).
+        // Only warn when *neither* is registered.
+        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+        if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
+          spdlog::warn(
+              "Vulkan compositor: platform view {} has no "
+              "registered subsurface or compositor surface",
+              id);
+        }
+      });
 
   bool ok = true;
   for (size_t i = 0; i < count; ++i) {
@@ -1320,8 +1933,14 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Submit waits on image_available (signaled when the swapchain image is
   // presentable), signals render_finished and the slot's in_flight fence.
   // No vkQueueWaitIdle — the next frame's slot wait is the only sync point.
-  const VkPipelineStageFlags wait_stage =
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  //
+  // Wait at TRANSFER, not COLOR_ATTACHMENT_OUTPUT: the command buffer's first
+  // use of the acquired image is the UNDEFINED->TRANSFER_DST layout transition
+  // and the blit, both transfer-stage. Waiting at a later stage left the
+  // acquire unsynchronized with that first barrier
+  // (SYNC-HAZARD-WRITE-AFTER-READ vs vkAcquireNextImageKHR,
+  // MissingAcquireWait).
+  const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.waitSemaphoreCount = 1;
@@ -1329,21 +1948,36 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   submit.pWaitDstStageMask = &wait_stage;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
+  // Signal (and later present-wait on) the per-image semaphore, not a per-slot
+  // one, so it isn't reused while a prior present on this image is pending.
+  VkSemaphore& render_finished = m_compositor_render_finished_[image_index];
   submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &slot.render_finished;
-  d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+  submit.pSignalSemaphores = &render_finished;
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+  }
 
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present_info.waitSemaphoreCount = 1;
-  present_info.pWaitSemaphores = &slot.render_finished;
+  present_info.pWaitSemaphores = &render_finished;
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &swapchain_;
   present_info.pImageIndices = &image_index;
-  const VkResult result = d.vkQueuePresentKHR(queue_, &present_info);
+  // Mint wp_presentation_feedback before the commit baked into
+  // vkQueuePresentKHR. See PresentCallback for rationale.
+  RequestPresentationFeedback();
+  VkResult result;
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    result = d.vkQueuePresentKHR(queue_, &present_info);
+  }
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;
   }
+
+  ProfilePresent(result == VK_SUCCESS);
 
   ++m_compositor_current_frame_;
   return ok;
@@ -1393,8 +2027,13 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
         d.vkCreateFence(device_, &fence_info, nullptr, &s.in_flight));
     CHECK_VK_RESULT(
         d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.image_available));
-    CHECK_VK_RESULT(
-        d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.render_finished));
+  }
+
+  // One present-wait semaphore per swapchain image (see header). Count tracks
+  // the swapchain, which here equals slot_count.
+  m_compositor_render_finished_.resize(slot_count, VK_NULL_HANDLE);
+  for (auto& sem : m_compositor_render_finished_) {
+    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr, &sem));
   }
   m_compositor_current_frame_ = 0;
 }
@@ -1412,15 +2051,18 @@ void WaylandVulkanBackend::CompositorPipeliningCleanup() {
     if (s.image_available) {
       d.vkDestroySemaphore(device_, s.image_available, nullptr);
     }
-    if (s.render_finished) {
-      d.vkDestroySemaphore(device_, s.render_finished, nullptr);
-    }
     if (s.in_flight) {
       d.vkDestroyFence(device_, s.in_flight, nullptr);
     }
     s = {};
   }
   m_compositor_slots_.clear();
+  for (auto sem : m_compositor_render_finished_) {
+    if (sem != VK_NULL_HANDLE) {
+      d.vkDestroySemaphore(device_, sem, nullptr);
+    }
+  }
+  m_compositor_render_finished_.clear();
   if (m_compositor_cmd_pool_ != VK_NULL_HANDLE) {
     d.vkDestroyCommandPool(device_, m_compositor_cmd_pool_, nullptr);
     m_compositor_cmd_pool_ = VK_NULL_HANDLE;

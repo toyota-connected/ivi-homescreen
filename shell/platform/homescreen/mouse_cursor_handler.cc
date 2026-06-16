@@ -19,6 +19,15 @@
 
 #include "engine.h"
 
+// Complete WaylandWindow type required at line ~69 for the
+// window->ActivateSystemCursor() call. Forward-decl in flutter_view.h
+// is enough for everything else (GetWindow's return type, the
+// `if (!window)` null check).
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
+#include "wayland/window.h"
+#endif
+
 static constexpr char kNoWindowError[] = "Missing window error";
 
 MouseCursorHandler::MouseCursorHandler(flutter::BinaryMessenger* messenger,
@@ -60,9 +69,26 @@ void MouseCursorHandler::HandleMethodCall(
       return;
     }
     auto window = view_->GetWindow();
+    if (!window) {
+      // DRM/KMS + software paths have no WaylandWindow; cursor is
+      // handled at the KMS plane level (or not at all). Same
+      // behaviour on non-Wayland builds where GetWindow() is
+      // always null and WaylandWindow is forward-declared only.
+      result->Success(flutter::EncodableValue(true));
+      return;
+    }
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
+    BUILD_BACKEND_HEADLESS_EGL
     auto res = window->ActivateSystemCursor(device, kind);
-
     result->Success(flutter::EncodableValue(res));
+#else
+    // Unreachable — window is always null without a Wayland backend
+    // (see the early return above). The branch exists only so the
+    // compiler doesn't need WaylandWindow's complete type here.
+    (void)device;
+    (void)kind;
+    result->Success(flutter::EncodableValue(true));
+#endif
   } else {
     result->NotImplemented();
   }

@@ -15,6 +15,7 @@
  */
 
 #include "osmesa.h"
+#include "logging/logging.h"
 
 #include <cassert>
 
@@ -50,7 +51,23 @@ OSMesaHeadless::OSMesaHeadless(const int32_t initial_width,
 }
 
 OSMesaHeadless::~OSMesaHeadless() {
-  OSMesaDestroyContext(m_context);
+  // The original only destroyed m_context, leaking the resource and texture
+  // contexts and the malloc'd framebuffer. OSMesa contexts have no external
+  // surface binding (unlike the EGL/Wayland backend), so they can be destroyed
+  // directly; free the backing buffer last.
+  if (m_texture_context != nullptr) {
+    OSMesaDestroyContext(m_texture_context);
+    m_texture_context = nullptr;
+  }
+  if (m_resource_context != nullptr) {
+    OSMesaDestroyContext(m_resource_context);
+    m_resource_context = nullptr;
+  }
+  if (m_context != nullptr) {
+    OSMesaDestroyContext(m_context);
+    m_context = nullptr;
+  }
+  free_buffer();
 }
 
 bool OSMesaHeadless::MakeCurrent() const {

@@ -47,6 +47,53 @@ class Configuration {
       std::optional<bool> fullscreen;
       std::optional<double> pixel_ratio;
       std::optional<uint32_t> ivi_surface_id;
+      std::optional<std::string> drm_device;
+
+      // DRM backend knobs — all strings so Configuration stays decoupled
+      // from the DRM headers. Valid values:
+      //   drm_connector             : "<TypeName>-<id>" (e.g. "eDP-1",
+      //                               "HDMI-A-1"); unset = rank-pick
+      //   drm_mode                  : "<W>x<H>@<R>" (e.g. "1920x1080@120");
+      //                               unset = preferred mode from EDID
+      //   drm_compositor            : "auto" | "planes" | "gl"
+      //   drm_modeset               : "auto" | "legacy" | "atomic"
+      //   drm_allow_nonblock_modeset: "auto" | "yes" | "no"
+      //   drm_primary_format        : "auto" | "xrgb8888" | "argb8888"
+      //   drm_overlay_planes        : "auto" | "yes" | "no"
+      //   drm_explicit_sync         : "auto" | "yes" | "no"
+      //   drm_async_flip            : "auto" | "yes" | "no"
+      //   drm_stage_cursor          : "auto" | "yes" | "no"
+      //                               (auto = stage only on nvidia-drm)
+      // FlutterView parses these into the DrmConfig enum fields. Anything
+      // unrecognized is treated as "auto" with a warning.
+      std::optional<std::string> drm_connector;
+      std::optional<std::string> drm_mode;
+      // DRM scanout rotation in degrees: 0 | 90 | 180 | 270. 90/270 swap the
+      // Flutter viewport to the rotated extent and set the plane's rotation
+      // property (the panel keeps its native mode). Default 0.
+      std::optional<int> drm_rotation;
+      std::optional<std::string> drm_compositor;
+      std::optional<std::string> drm_modeset;
+      std::optional<std::string> drm_allow_nonblock_modeset;
+      std::optional<std::string> drm_primary_format;
+      std::optional<std::string> drm_overlay_planes;
+      std::optional<std::string> drm_explicit_sync;
+      std::optional<std::string> drm_async_flip;
+      std::optional<std::string> drm_stage_cursor;
+      // Bypass libseat entirely (--drm-no-seat / HOMESCREEN_DRM_NO_SEAT): the
+      // DRM backend opens /dev/dri + /dev/input directly via group permissions
+      // and becomes DRM master itself, also skipping the foreground-VT guard.
+      // An opt-in escape hatch for headless / SSH / single-session kiosk
+      // bring-up where no seat manager (logind/seatd) is running and the
+      // operator guarantees nothing else holds the display. Gives up
+      // VT-switch handling and session pause/resume. Unset = false.
+      std::optional<bool> drm_no_seat;
+      // Per-device relative-pointer transforms, repeatable:
+      //   "<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]"
+      // Rotates a built-in pointer's deltas to a rotated display (e.g. the
+      // Steam Deck's right trackpad) while leaving an external mouse alone.
+      // Matched by libinput device-name substring; first match wins.
+      std::vector<std::string> drm_input_transforms;
     } view;
   };
 

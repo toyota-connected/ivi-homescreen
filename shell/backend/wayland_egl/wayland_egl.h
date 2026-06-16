@@ -16,8 +16,13 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+#include <ctime>
 #include <list>
+#include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <wayland-egl.h>
 
@@ -25,6 +30,12 @@
 
 #include "backend/backend.h"
 #include "egl.h"
+
+struct wl_output;
+struct wp_presentation;
+struct wp_presentation_feedback;
+class Display;
+class TaskRunner;
 
 #if BUILD_COMPOSITOR
 #include <memory>
@@ -49,15 +60,15 @@ class WaylandEglBackend : public Egl, public Backend {
   // last two frames.
   static constexpr int kMaxHistorySize = 10;
 
-  WaylandEglBackend(struct wl_display* display,
+  // @p shell_display is the @c Display owning the wp_presentation global.
+  // May be nullptr (e.g., for tests that don't construct a Display); the
+  // backend then falls back to the wall-clock vsync scheduler.
+  WaylandEglBackend(Display* shell_display,
+                    struct wl_display* display,
                     uint32_t initial_width,
                     uint32_t initial_height,
                     bool debug_backend,
                     int buffer_size = kEglBufferSize);
-
-#if BUILD_COMPOSITOR
-  ~WaylandEglBackend() override;
-#endif
 
   /**
    * @brief Resize Flutter engine Window size
@@ -113,6 +124,50 @@ class WaylandEglBackend : public Egl, public Backend {
    */
   FlutterCompositor GetCompositorConfig() override;
 
+  /**
+   * @brief Per-backend FlutterVsyncCallback.
+   *
+   * Returns @c &VsyncTrampoline iff (a) the compositor advertised
+   * wp_presentation, (b) the announced clock_id is CLOCK_MONOTONIC,
+   * and (c) @c IVI_WL_VSYNC is not @c 0. Otherwise returns nullptr and
+   * Flutter falls back to its internal wall-clock scheduler.
+   */
+  [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
+
+  /**
+   * @brief Stash the engine handle for the wp_presentation_feedback
+   * path. Captured atomically because dispatch may read it from a
+   * thread other than the caller (event_thread_ when the listener fires).
+   */
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
+    engine_handle_.store(engine, std::memory_order_release);
+  }
+
+  /**
+   * @brief Stash the platform task runner so @c FlutterEngineOnVsync
+   * can be marshalled onto its strand. Required because the listener
+   * for @c wp_presentation_feedback.presented fires on Display's
+   * event_thread_, and Flutter rejects @c OnVsync from any thread
+   * other than the engine's run thread.
+   */
+  void SetPlatformTaskRunner(TaskRunner* runner) override {
+    platform_task_runner_.store(runner, std::memory_order_release);
+  }
+
+  /**
+   * @brief Cancel outstanding wp_presentation_feedback objects so
+   * listeners can't fire after the engine has destructed. Called from
+   * @c FlutterView::~FlutterView before the engine destructs.
+   */
+  void StopVsyncMonitor() override;
+
+  /**
+   * @brief Release the EGL surface, wl_egl_window and GL contexts. Called
+   * from @c FlutterView::~FlutterView after the engine has been stopped and
+   * joined, while the wl_surface / wl_display are still alive.
+   */
+  void ReleaseRenderSurfaces() override;
+
   void UpdateSize(int _width, int _height) {
     m_initial_width = static_cast<uint32_t>(_width);
     m_initial_height = static_cast<uint32_t>(_height);
@@ -138,11 +193,21 @@ class WaylandEglBackend : public Egl, public Backend {
 
  private:
   struct wl_egl_window* m_egl_window{};
+  // wl_surface backing m_egl_window. We stash it from CreateSurface so
+  // wp_presentation_feedback() can mint a feedback object per commit.
+  // Atomic because CreateSurface (platform thread, during init/resize)
+  // and RequestPresentationFeedback (rasterizer thread) can otherwise
+  // race during a window resize.
+  std::atomic<struct wl_surface*> m_wl_surface{nullptr};
   uint32_t m_initial_width;
   uint32_t m_initial_height;
 
-  // Keeps track of the existing damage associated with each FBO ID
-  std::unordered_map<intptr_t, FlutterRect*> m_existing_damage_map;
+  // Keeps track of the existing damage associated with each FBO ID.
+  // Storing the rect by value (not via heap) so populate_existing_damage
+  // doesn't malloc/free per frame; std::unordered_map keeps element
+  // addresses stable across insertions, so handing &map[fbo_id] to the
+  // engine is safe across frames.
+  std::unordered_map<intptr_t, FlutterRect> m_existing_damage_map;
 
   // Keeps track of the most recent frame damages so that existing damage can
   // be easily computed.
@@ -222,4 +287,135 @@ class WaylandEglBackend : public Egl, public Backend {
            height == static_cast<int32_t>(m_initial_height);
   }
 #endif
+
+  // wp_presentation-driven vsync plumbing.
+  //
+  // The producer (FlutterEngine.vsync_callback → VsyncTrampoline) parks
+  // a baton in vsync_baton_; the consumer (on_feedback_presented running
+  // on Display's event_thread_) exchanges it back and posts OnVsync onto
+  // the platform task runner's strand. Mirrors DrmBackend's atomic baton
+  // dance.
+  std::atomic<intptr_t> vsync_baton_{0};
+  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_handle_{nullptr};
+  std::atomic<TaskRunner*> platform_task_runner_{nullptr};
+
+  // Set when a wp_presentation_feedback has been requested for a commit
+  // but the compositor has not yet emitted presented/discarded. The idle-
+  // wake kick path checks this to decide whether to drain the baton
+  // inline (no feedback in flight → pipeline idle) or park it (let the
+  // upcoming presented event drive OnVsync).
+  std::atomic<bool> feedback_pending_{false};
+
+  // Owned wp_presentation_feedback objects awaiting presented/discarded.
+  // Display's event_thread_ drives wl_display_dispatch, so listener
+  // callbacks fire there while PresentLayers (rasterizer thread) creates
+  // new feedback objects and StopVsyncMonitor (main thread, ~FlutterView)
+  // drains at shutdown. m_feedback_mu_ serialises all three.
+  std::mutex m_feedback_mu_;
+  std::vector<struct wp_presentation_feedback*> feedback_in_flight_;
+
+  // wp_presentation global + announced clock domain. Populated from
+  // Display::GetWpPresentation()/GetPresentationClockId() at backend
+  // construction. clock_compatible_ becomes true only when
+  // presentation_clock_id_ == CLOCK_MONOTONIC, which matches
+  // FlutterEngineGetCurrentTime's domain — otherwise we refuse
+  // vsync_callback and fall back to the wall-clock scheduler.
+  struct wp_presentation* wp_presentation_{nullptr};
+  clockid_t presentation_clock_id_{CLOCK_MONOTONIC};
+  bool clock_compatible_{false};
+
+  // Last refresh period reported by wp_presentation_feedback.presented.
+  // Defaults to ~60Hz so the frame_target_time math has a reasonable
+  // seed for the first OnVsync call before any feedback has fired.
+  // Atomic because the writer (on_feedback_presented on event_thread_)
+  // races with the reader (PostOnVsync, called from rasterizer or
+  // engine threads via SetVsyncBaton's idle-kick).
+  std::atomic<uint64_t> last_refresh_ns_{16'666'667};
+
+  // Per-frame cadence profile (IVI_WL_PROFILE=1). Updated by
+  // on_feedback_presented / on_feedback_discarded — both fire on
+  // Display's event_thread_, so a single non-atomic block of counters
+  // is fine (no concurrent writer).
+  //
+  // Buckets categorize per-frame inter-presented intervals at a 60Hz
+  // baseline (one vblank ≈ 16.67ms). Lets the README produce the same
+  // shape of histogram the DRM benchmark uses.
+  struct FrameProfile {
+    uint64_t last_presented_ns{0};
+    uint64_t interval_sum_ns{0};
+    uint64_t interval_max_ns{0};
+    uint32_t presented_frames{0};
+    uint32_t discarded_frames{0};
+    uint32_t flags_or{0};     // OR of all 'presented' flags this window
+    uint32_t bucket_60hz{0};  // ≤17ms (1 vblank @ 60Hz)
+    uint32_t bucket_30hz{0};  // 18–33ms (2 vblanks)
+    uint32_t bucket_20hz{0};  // 34–50ms (3 vblanks)
+    uint32_t bucket_slow{0};  // 51–100ms (4–6 vblanks)
+    uint32_t bucket_idle{0};  // >100ms (treated as paused / load stall)
+  };
+  FrameProfile profile_{};
+
+  // Cumulative bucket counts across the entire session (IVI_WL_PROFILE=1).
+  // Logged once at backend destruction so the user gets a session summary
+  // without having to sum the per-window windows.
+  FrameProfile session_totals_{};
+
+  // eglSwapBuffers self-time profile (IVI_WL_PROFILE=1). This is the metric
+  // that the swap-interval change moves: with interval 1 the swap blocks the
+  // rasterizer on the compositor throttle, with interval 0 it returns
+  // promptly. Accumulated and flushed entirely on the rasterizer thread
+  // (present_with_info), so it is kept separate from profile_ — which is
+  // written on Display's event_thread_ — to avoid a cross-thread data race.
+  struct SwapProfile {
+    uint64_t sum_ns{0};
+    uint64_t max_ns{0};
+    uint32_t samples{0};
+    uint32_t blocked{0};  // swaps slower than kSwapBlockedNs (≈ blocked)
+  };
+  static constexpr uint64_t kSwapBlockedNs = 2'000'000;  // 2ms
+  SwapProfile swap_profile_{};
+  SwapProfile swap_session_{};
+
+  // Record one eglSwapBuffers duration and flush a window every 60 swaps.
+  // Rasterizer-thread only. No-op unless IVI_WL_PROFILE is set.
+  void RecordSwapDuration(uint64_t swap_ns);
+
+  // Mirrors DrmBackend::VsyncTrampoline. Flutter calls this with the
+  // FlutterDesktopEngineState* as user_data plus an opaque baton; we
+  // recover the backend instance and forward to SetVsyncBaton.
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
+
+  // Stash the baton; if no feedback is in flight (idle pipeline), kick
+  // the baton ourselves via PostOnVsync — otherwise Flutter sits forever
+  // waiting for OnVsync from a commit that never happens.
+  void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
+
+  // Marshal FlutterEngineOnVsync onto the platform task runner's strand.
+  // Flutter rejects OnVsync from any other thread.
+  void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                   intptr_t baton) const;
+
+  // Per-commit feedback request — called from PresentLayers /
+  // BlitBackingStoreToWindow / the renderer-config present callbacks
+  // BEFORE eglSwapBuffers (which is what mints the wl_surface.commit
+  // the feedback binds to). No-op when wp_presentation isn't usable.
+  void RequestPresentationFeedback();
+
+  // wp_presentation_feedback listener entry points.
+  static void on_feedback_sync_output(void* data,
+                                      struct wp_presentation_feedback* fb,
+                                      struct wl_output* output);
+  static void on_feedback_presented(void* data,
+                                    struct wp_presentation_feedback* fb,
+                                    uint32_t tv_sec_hi,
+                                    uint32_t tv_sec_lo,
+                                    uint32_t tv_nano_sec,
+                                    uint32_t refresh,
+                                    uint32_t seq_hi,
+                                    uint32_t seq_lo,
+                                    uint32_t flags);
+  static void on_feedback_discarded(void* data,
+                                    struct wp_presentation_feedback* fb);
+
+  static const struct wp_presentation_feedback_listener feedback_listener_;
 };

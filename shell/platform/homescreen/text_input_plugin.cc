@@ -8,6 +8,8 @@
 
 #include "flutter/shell/platform/common/json_method_codec.h"
 
+#include "logging/logging.h"
+
 static constexpr char kSetEditingStateMethod[] = "TextInput.setEditingState";
 static constexpr char kClearClientMethod[] = "TextInput.clearClient";
 static constexpr char kSetClientMethod[] = "TextInput.setClient";

@@ -15,6 +15,7 @@
  */
 
 #include "timer.h"
+#include "logging/logging.h"
 
 #include <cerrno>
 #include <cstring>
@@ -111,19 +112,21 @@ void EventTimer::_arm(const int fd, itimerspec const* timerspec) {
   }
 }
 
-void EventTimer::arm() const {
+void EventTimer::arm() {
   SPDLOG_TRACE("+ EventTimer::arm()");
 
   _arm(m_timerfd, &m_timerspec);
+  m_armed.store(true);
 
   SPDLOG_TRACE("- EventTimer::arm()");
 }
 
-void EventTimer::disarm() const {
+void EventTimer::disarm() {
   SPDLOG_TRACE("+ EventTimer::disarm()");
 
   constexpr itimerspec timerspec{};
   _arm(m_timerfd, &timerspec);
+  m_armed.store(false);
 
   SPDLOG_TRACE("- EventTimer::disarm()");
 }
