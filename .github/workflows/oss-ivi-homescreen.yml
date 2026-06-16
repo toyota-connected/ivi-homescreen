@@ -37,6 +37,10 @@ jobs:
       - name: Install runtime packages
         run: |
           echo ${{ github.server_url }}
+          # Refresh the index first: the runner image's cached apt lists can
+          # reference superseded package versions (e.g. mesa security bumps),
+          # which 404 on the mirror and fail a bare `apt-get install`.
+          sudo apt-get update
           sudo apt-get -y install ninja-build \
           libwayland-dev wayland-protocols libxkbcommon-dev \
           mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
