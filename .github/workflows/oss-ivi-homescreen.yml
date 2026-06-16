@@ -13,6 +13,9 @@ on:
 
 jobs:
   ivi-homescreen:
+    # Stable check-context name (omits the artifact suffix so branch-protection
+    # required-check names stay clean): "ivi-homescreen (ENABLE_LEGACY_KEYBOARD=ON)".
+    name: ivi-homescreen (${{ matrix.flags }})
     # matrix for build flags. suffix disambiguates the per-leg artifact names
     # (artifact names must be unique within a run).
     strategy:
