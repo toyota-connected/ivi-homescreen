@@ -308,6 +308,16 @@ bool Engine::IsRunning() const {
   return m_running;
 }
 
+FlutterEngineResult Engine::SendKeyEvent(const FlutterKeyEvent& event,
+                                         FlutterKeyEventCallback callback,
+                                         void* user_data) const {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  return LibFlutterEngine->SendKeyEvent(m_flutter_engine, &event, callback,
+                                        user_data);
+}
+
 FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   SPDLOG_TRACE("({}) +Engine::Run", m_index);
 
