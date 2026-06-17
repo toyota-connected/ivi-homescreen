@@ -48,6 +48,20 @@ static constexpr char kInternalConsistencyError[] =
 
 namespace flutter {
 
+// Byte length (1–4) of the UTF-8 sequence whose leading byte is |c|.
+static size_t Utf8SeqLen(const unsigned char c) {
+  if (c < 0x80) {
+    return 1;
+  }
+  if (c < 0xe0) {
+    return 2;
+  }
+  if (c < 0xf0) {
+    return 3;
+  }
+  return 4;  // supplementary plane → surrogate pair → 2 UTF-16 units
+}
+
 // Converts a UTF-8 byte offset into the corresponding UTF-16 code-unit index.
 // A BMP character (1–3 UTF-8 bytes) occupies 1 UTF-16 unit; a supplementary
 // character (4 UTF-8 bytes) occupies 2 UTF-16 units (surrogate pair).
@@ -58,34 +72,56 @@ static size_t Utf8PosToUtf16Index(const std::string& utf8, size_t utf8_pos) {
   size_t u16 = 0;
   size_t i = 0;
   while (i < utf8_pos) {
-    const auto c = static_cast<unsigned char>(utf8[i]);
-    size_t seq_len;
-    if (c < 0x80) {
-      seq_len = 1;
-    } else if (c < 0xe0) {
-      seq_len = 2;
-    } else if (c < 0xf0) {
-      seq_len = 3;
-    } else {
-      seq_len = 4;  // supplementary plane → surrogate pair → 2 UTF-16 units
-    }
+    const size_t seq_len = Utf8SeqLen(static_cast<unsigned char>(utf8[i]));
     u16 += (seq_len == 4) ? 2u : 1u;
     i += seq_len;
   }
   return u16;
 }
 
-// Returns the byte offset that is |col| columns into the line starting at
-// |line_start| in |text|, clamped to the line end (the '\n' or end of string).
-static size_t ClampedColumn(const std::string& text,
-                            size_t line_start,
-                            size_t col) {
-  const size_t line_end = text.find('\n', line_start);
-  const size_t line_len = (line_end == std::string::npos)
-                              ? text.size() - line_start
-                              : line_end - line_start;
+// Inverse of Utf8PosToUtf16Index: UTF-16 code-unit index → UTF-8 byte offset.
+// Clamped to the end of the string. Lets the arrow-key handlers derive the
+// cursor byte offset from the already-fetched text instead of paying a second
+// full UTF-16→UTF-8 conversion via TextInputModel::GetCursorOffset().
+static size_t Utf16IndexToUtf8Pos(const std::string& utf8, size_t u16_index) {
+  size_t u16 = 0;
+  size_t i = 0;
+  while (i < utf8.size() && u16 < u16_index) {
+    const size_t seq_len = std::min(
+        Utf8SeqLen(static_cast<unsigned char>(utf8[i])), utf8.size() - i);
+    u16 += (seq_len == 4) ? 2u : 1u;
+    i += seq_len;
+  }
+  return i;
+}
 
-  return line_start + std::min(col, line_len);
+// Number of Unicode codepoints in utf8[begin, end).
+static size_t Utf8CodepointCount(const std::string& utf8,
+                                 size_t begin,
+                                 const size_t end) {
+  size_t n = 0;
+  for (size_t i = begin; i < end; ++n) {
+    i += std::min(Utf8SeqLen(static_cast<unsigned char>(utf8[i])), end - i);
+  }
+  return n;
+}
+
+// Returns the byte offset that is |col| *codepoints* into the line starting at
+// |line_start| in |text|, clamped to the line end (the '\n' or end of string).
+// Counting in codepoints (not bytes) keeps the visual column stable across
+// lines with multi-byte characters and guarantees the result lands on a
+// codepoint boundary (so Utf8PosToUtf16Index never sees a partial sequence).
+static size_t ClampedColumn(const std::string& text,
+                            const size_t line_start,
+                            const size_t col) {
+  size_t i = line_start;
+  for (size_t c = 0; c < col && i < text.size() && text[i] != '\n'; ++c) {
+    // A '\n' is a single byte and never appears inside a multi-byte sequence,
+    // so advancing a whole codepoint here can't step over the line end.
+    i += std::min(Utf8SeqLen(static_cast<unsigned char>(text[i])),
+                  text.size() - i);
+  }
+  return i;
 }
 
 // Returns the cursor position for moving up one line, preserving column.
@@ -100,7 +136,7 @@ static size_t PreviousLinePosition(const std::string& text, size_t pos) {
   }
   // Start of current line (one past the '\n' we found).
   const size_t cur_line_start = prev_nl + 1;
-  const size_t col = pos - cur_line_start;
+  const size_t col = Utf8CodepointCount(text, cur_line_start, pos);
 
   // Find start of the previous line.
   const size_t prev_line_start = (prev_nl == 0) ? 0 : [&] {
@@ -126,7 +162,7 @@ static size_t NextLinePosition(const std::string& text, size_t pos) {
     const size_t pp = text.rfind('\n', pos - 1);
     return (pp == std::string::npos) ? 0 : pp + 1;
   }();
-  const size_t col = pos - cur_line_start;
+  const size_t col = Utf8CodepointCount(text, cur_line_start, pos);
   const size_t next_line_start = cur_nl + 1;
 
   return ClampedColumn(text, next_line_start, col);
@@ -285,12 +321,13 @@ void TextInputPlugin::KeyboardHook(bool released,
         break;
       case XKB_KEY_Up:
       case XKB_KEY_KP_Up: {
-        // GetCursorOffset() returns the UTF-8 byte offset of
-        // selection.extent(). PreviousLinePosition works in UTF-8 byte space.
-        // Convert the result back to a UTF-16 code-unit index for SetSelection.
+        // Work in UTF-8 byte space (PreviousLinePosition), deriving the cursor
+        // byte offset from the cursor's UTF-16 extent against the text we
+        // already fetched, then convert the result back to a UTF-16 code-unit
+        // index for SetSelection.
         const std::string text = active_model_->GetText();
-        const auto utf8_pos =
-            static_cast<size_t>(active_model_->GetCursorOffset());
+        const size_t utf8_pos =
+            Utf16IndexToUtf8Pos(text, active_model_->selection().extent());
         const size_t new_utf8_pos = PreviousLinePosition(text, utf8_pos);
         const size_t new_u16_pos = Utf8PosToUtf16Index(text, new_utf8_pos);
         if (new_u16_pos != active_model_->selection().extent()) {
@@ -304,8 +341,8 @@ void TextInputPlugin::KeyboardHook(bool released,
       case XKB_KEY_Down:
       case XKB_KEY_KP_Down: {
         const std::string text = active_model_->GetText();
-        const auto utf8_pos =
-            static_cast<size_t>(active_model_->GetCursorOffset());
+        const size_t utf8_pos =
+            Utf16IndexToUtf8Pos(text, active_model_->selection().extent());
         const size_t new_utf8_pos = NextLinePosition(text, utf8_pos);
         const size_t new_u16_pos = Utf8PosToUtf16Index(text, new_utf8_pos);
         if (new_u16_pos != active_model_->selection().extent()) {
