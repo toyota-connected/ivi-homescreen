@@ -138,7 +138,7 @@ jobs:
             --backend ${{ matrix.backend }} ${{ matrix.args }}
 
       - name: Upload homescreen binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-${{ matrix.pios }}-${{ matrix.backend }}
           path: ivi-homescreen/cmake-build-xc-pi-${{ matrix.pios }}-${{ matrix.backend }}/shell/homescreen

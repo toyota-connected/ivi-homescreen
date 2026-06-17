@@ -66,21 +66,21 @@ jobs:
           ls -la _packages
 
       - name: Publish Debug Artifact TGZ
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-dbg.${{ matrix.suffix }}.Linux.tar.gz.zip
           path: |
             build/debug/_packages/homescreen-dbg-*-Linux.tar.gz
 
       - name: Publish Debug Artifact Debian
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-dbg.${{ matrix.suffix }}.amd64.deb.zip
           path: |
             build/debug/_packages/homescreen-dbg*_amd64.*deb
 
       - name: Publish Debug Artifact RPM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-dbg.${{ matrix.suffix }}.x86_64.rpm.zip
           path: |
@@ -112,28 +112,64 @@ jobs:
           ldd shell/homescreen
 
       - name: Publish Release Artifact TGZ
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-${{ matrix.suffix }}.Linux.tar.gz.zip
           path: |
             build/release/_packages/homescreen-*-Linux.tar.gz
 
       - name: Publish Release Artifact Debian
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-${{ matrix.suffix }}.amd64.deb.zip
           path: |
             build/release/_packages/homescreen_*_amd64.deb
 
       - name: Publish Release Artifact RPM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homescreen-${{ matrix.suffix }}.x86_64.rpm.zip
           path: |
             build/release/_packages/homescreen-*.x86_64.rpm
 
+  # Path-gate the (expensive) crash-handler build: it is a full
+  # BUILD_CRASH_HANDLER=ON compile, so it only needs to run when build inputs
+  # change. Docs/asset-only PRs skip it. Non-PR events (schedule / release /
+  # workflow_dispatch) always run it.
+  changes:
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      crash: ${{ steps.filter.outputs.crash }}
+    steps:
+      - name: Detect crash-handler-relevant changes
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Non-PR event (${{ github.event_name }}) — running crash-handler."
+            echo "crash=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          echo "Changed files:"; echo "$files"
+          if echo "$files" | grep -qE '(^cmake/|\.cmake$|CMakeLists\.txt$|^shell/|^plugins/|^third_party/|^\.github/workflows/oss-ivi-homescreen\.yml$)'; then
+            echo "crash=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only docs/assets changed — skipping crash-handler."
+            echo "crash=false" >> "$GITHUB_OUTPUT"
+          fi
+
   crash-handler:
-    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && always() }}
+    needs: changes
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.crash == 'true' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check Environment
@@ -154,5 +190,37 @@ jobs:
           args: --disable=rive-text --enable=sentry-native --override-repo=https://github.com/toyota-connected/ivi-homescreen.git#${{ github.event.pull_request.head.ref || github.sha }}
           user: ${{ steps.check_environment.outputs.user }}
           ref: v2.0
-          cache: false
-          cache-key: crash-handler-pr${{ github.event.pull_request.number }}
+          cache: true
+          # cache-whole caches the entire workspace (the extracted LLVM
+          # toolchain under .tmp/ and the sentry-native build under
+          # app/sentry-native/build/), not just <workspace>/.cache. Without it
+          # the expensive toolchain extract + sentry build run on every job;
+          # the default .cache-only scope wouldn't reuse them.
+          cache-whole: true
+          # Stable key shared across PRs so the toolchain + sentry-native build
+          # are reused (the per-PR key meant every PR started cold). The
+          # sentry-native version is pinned in the setup-workspace action (@v2.0),
+          # so bump this suffix if that pin or the action ref changes.
+          cache-key: crash-handler-${{ runner.os }}-wsa-v2.0
+
+  # Aggregate gate so crash-handler can be a required status check even though
+  # it is path-gated (skipped on docs/asset-only PRs). This job always runs and
+  # passes when crash-handler succeeded OR was skipped, and fails only when
+  # crash-handler actually failed/was cancelled. Branch protection requires
+  # THIS context instead of crash-handler so a legitimate skip never blocks a
+  # PR while a real failure still does.
+  crash-handler-gate:
+    needs: crash-handler
+    if: ${{ always() && github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require crash-handler to pass or be skipped
+        shell: bash
+        run: |
+          result="${{ needs.crash-handler.result }}"
+          echo "crash-handler result: ${result}"
+          if [ "${result}" = "success" ] || [ "${result}" = "skipped" ]; then
+            exit 0
+          fi
+          echo "::error::crash-handler did not pass (result=${result})"
+          exit 1
