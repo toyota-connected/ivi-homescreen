@@ -24,6 +24,11 @@
 #include "cxxopts/include/cxxopts.hpp"
 #include "utils.h"
 
+// Overlays the values found in a parsed TOML document onto |instance|. Each
+// block below maps one TOML key (under the [global], [view], or
+// [window_activation_area] tables) to its Config field, copying it only when
+// the key is present and of the expected type so that unset keys preserve any
+// defaults or command-line values already held by |instance|.
 void Configuration::get_parameters(toml::table* tbl, Config& instance) {
   if (tbl->at_path("global.app_id").is_string()) {
     instance.app_id = tbl->at_path("global.app_id").as_string()->value_or("");

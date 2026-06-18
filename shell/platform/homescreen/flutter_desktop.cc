@@ -364,9 +364,8 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
       texture_registrar->texture_registry.erase(id);
     }
   } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
-    auto [struct_size, type, callback, user_data] =
-        texture_info->gpu_surface_config;
-    if (type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
+    const auto& gpu_surface_config = texture_info->gpu_surface_config;
+    if (gpu_surface_config.type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
       spdlog::error(
           "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeGlTexture2D "
           "is only supported at this time");
@@ -375,7 +374,7 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
 
     // get the client defined descriptor
     const auto descriptor =
-        callback(0, 0, texture_info->gpu_surface_config.user_data);
+        gpu_surface_config.callback(0, 0, gpu_surface_config.user_data);
 
     if (!descriptor->handle) {
       spdlog::critical(
