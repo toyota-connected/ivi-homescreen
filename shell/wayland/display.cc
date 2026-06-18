@@ -1212,7 +1212,10 @@ void Display::processAppStatusEvent(const char* app_id,
   } else if (event_type == "terminated") {
     deactivateApp(std::string(app_id));
   } else if (event_type == "deactivated") {
-    // not handled
+    // The AGL shell emits "deactivated" as the counterpart to activation; we
+    // intentionally take no action on it here.
+    spdlog::trace("Ignoring deactivated app status event for app_id {}",
+                  app_id);
   }
 }
 

@@ -131,15 +131,6 @@ class Engine {
   [[maybe_unused]] [[nodiscard]] bool IsRunning() const;
 
   /**
-   * @brief Run flutter tasks
-   * @return FlutterEngineResult
-   * @retval The result of the run flutter tasks
-   * @relation
-   * flutter
-   */
-  FlutterEngineResult RunTask();
-
-  /**
    * @brief Get persistent cache path
    * @param[in] index Index of path (for log)
    * @return std::string

@@ -25,6 +25,14 @@
 
 #include "logging.h"
 
+// Brings up the EGL display for |native_display| and the GLES contexts the
+// renderer needs. The sequence is: initialize the display and bind the GLES
+// API; choose an EGLConfig matching |buffer_size| (falling back to a relaxed
+// attribute set, aborting only if neither matches); create the render,
+// resource, and texture contexts that share resources; then probe the optional
+// damage-region / buffer-age extensions used by the swap path. A failure to
+// create a context leaves the object partially constructed and is logged
+// rather than fatal. |debug| additionally dumps the GLES/EGL attributes.
 Egl::Egl(void* native_display, const int buffer_size, const bool debug)
     : m_buffer_size(buffer_size),
       m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))) {

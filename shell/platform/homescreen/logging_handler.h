@@ -25,12 +25,11 @@ class FlutterView;
 
 class LoggingHandler {
  public:
- public:
   explicit LoggingHandler(flutter::BinaryMessenger* messenger,
                           FlutterView* view);
 
  private:
-  // Called when a method is called on |channel_|;
+  // Handles a method invocation received on channel_.
   static void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
