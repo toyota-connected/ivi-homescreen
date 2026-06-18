@@ -277,14 +277,6 @@ Engine::~Engine() {
   m_platform_task_runner.reset();
 }
 
-FlutterEngineResult Engine::RunTask() {
-  if (!m_flutter_engine) {
-    return kSuccess;
-  }
-
-  return kSuccess;
-}
-
 void Engine::Shutdown() {
   if (!m_running) {
     return;  // never started, or already stopped — idempotent

@@ -577,8 +577,9 @@ void FlutterView::Initialize() {
 }
 
 void FlutterView::RunTasks() {
-  m_flutter_engine->RunTask();
-
+  // The Flutter platform task runner drains expired engine tasks on its own
+  // asio strand (see TaskRunner::QueueFlutterTask), so there is nothing to pump
+  // for the engine here.
 #ifdef ENABLE_PLUGIN_COMP_SURF
   for (auto const& surface : m_comp_surf) {
     surface.second->RunTask();
