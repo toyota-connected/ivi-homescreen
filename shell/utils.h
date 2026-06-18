@@ -113,13 +113,39 @@ class Utils {
       auto config_env_raw = std::string(config_env);
       auto clean = trim(config_env_raw, "\"");
       std::filesystem::path path(clean);
-      path /= kXdgConfigDir;
-      path /= kApplicationName;
-      config_home_dir = strdup(path.c_str());
+      // Per the XDG Base Directory spec a relative XDG_CONFIG_HOME "must be
+      // ignored". We also reject any ".." traversal component so a hostile
+      // environment cannot redirect the files we write (engine state, crash
+      // dumps, accessibility tree) outside the intended config directory.
+      if (IsSafeBasePath(path)) {
+        path /= kXdgConfigDir;
+        path /= kApplicationName;
+        config_home_dir = strdup(path.lexically_normal().c_str());
+      } else {
+        config_home_dir = GetHomePath();
+      }
     } else {
       config_home_dir = GetHomePath();
     }
     return config_home_dir;
+  }
+
+  /**
+   * @brief Validate a directory supplied via the environment as a write base
+   * @param[in] p Candidate base path
+   * @return bool
+   * @retval true If p is absolute and contains no ".." traversal component
+   * @retval false Otherwise (path is untrusted and must not be used)
+   * @relation
+   * internal
+   */
+  static bool IsSafeBasePath(const std::filesystem::path& p) {
+    if (!p.is_absolute()) {
+      return false;
+    }
+    return std::none_of(p.begin(), p.end(), [](const std::filesystem::path& e) {
+      return e == "..";
+    });
   }
 
   /**

@@ -200,6 +200,13 @@ void TextInputPlugin::CharHook(const unsigned int code_point) {
   SendStateUpdate(*active_model_);
 }
 
+// Applies one physical key event from the seat to the active text-input model.
+// It first runs the compose/Unicode state machine (Ctrl+Shift+U hex entry and
+// dead-key composition), then handles editing keys (arrows, Home/End,
+// Backspace, Delete, Enter) with optional Shift-selection and Ctrl
+// word-granularity, and finally inserts printable code points. Only key presses
+// mutate state; key releases return early. Each mutation ends with
+// SendStateUpdate so the Flutter framework sees the new selection and text.
 void TextInputPlugin::KeyboardHook(bool released,
                                    xkb_keysym_t keysym,
                                    uint32_t /* xkb_scancode */,
@@ -555,6 +562,13 @@ void TextInputPlugin::CancelUnicodeInput() {
   compose_base_utf16_ = compose_extent_utf16_ = -1;
 }
 
+// Dispatches calls on the flutter/textinput method channel. TextInput.show and
+// TextInput.hide toggle the (no-op) on-screen keyboard; TextInput.setClient
+// records the connection id and input configuration; TextInput.setEditingState
+// rebuilds active_model_ from the framework's text/selection/composing range;
+// and TextInput.clearClient drops the active connection. Unknown methods are
+// answered with NotImplemented and every handled call sends an empty success
+// reply unless noted otherwise.
 void TextInputPlugin::HandleMethodCall(
     const flutter::MethodCall<rapidjson::Document>& method_call,
     const std::unique_ptr<flutter::MethodResult<rapidjson::Document>>& result) {
