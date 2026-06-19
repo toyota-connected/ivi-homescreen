@@ -280,6 +280,20 @@ else ()
 endif ()
 
 #
+# Accessibility semantics tree
+#
+# When enabled, Flutter semantics updates are mirrored into an in-process
+# accessibility tree and a JSON snapshot is written under the user's config
+# directory. Off by default: it is a diagnostic feature and the snapshot file
+# path is derived from the environment.
+option(BUILD_ACCESSIBILITY "Build accessibility semantics tree" OFF)
+if (BUILD_ACCESSIBILITY)
+    MESSAGE(STATUS "Accessibility ........... Enabled")
+else ()
+    MESSAGE(STATUS "Accessibility ........... Disabled")
+endif ()
+
+#
 # Static linking
 #
 option(ENABLE_STATIC_LINK "Link stdlib with static libs" OFF)

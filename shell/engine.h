@@ -29,7 +29,9 @@
 #include "backend/backend.h"
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
+#if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
+#endif
 #include "task_runner.h"
 #include "view/flutter_view.h"
 
@@ -327,9 +329,11 @@ class Engine {
                                    const char* message,
                                    void* user_data);
 
+#if BUILD_ACCESSIBILITY
   static void onSemanticsUpdateCallback(
       const FlutterSemanticsUpdate2* /* semantics update */,
       void* /* user data*/);
+#endif
 
   [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) GetFlutterEngine() const {
     return m_flutter_engine;

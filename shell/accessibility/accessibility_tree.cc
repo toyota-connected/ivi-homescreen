@@ -85,13 +85,27 @@ void AccessibilityTree::HandleFlutterUpdate(
         }
       }
       SetTreeBuilt(true);
-      std::filesystem::path path = Utils::GetConfigHomePath();
-      path /= "accessibility";
-      if (!std::filesystem::exists(path)) {
-        std::filesystem::create_directories(path);
+      std::filesystem::path dir = Utils::GetConfigHomePath();
+      dir /= "accessibility";
+      std::error_code ec;
+      if (!std::filesystem::exists(dir)) {
+        std::filesystem::create_directories(dir, ec);
       }
-      path /= "semantic_tree_init.json";
-      DumpTree(path.c_str());
+      // Confirm the dump file resolves to a location inside the accessibility
+      // directory before opening it for writing. weakly_canonical collapses any
+      // ".." segments a crafted XDG_CONFIG_HOME might inject, and the prefix
+      // check rejects a target that would escape the intended directory.
+      const std::string base =
+          std::filesystem::weakly_canonical(dir, ec).string();
+      const std::string target =
+          std::filesystem::weakly_canonical(dir / "semantic_tree_init.json", ec)
+              .string();
+      if (!base.empty() && target.rfind(base, 0) == 0) {
+        DumpTree(target.c_str());
+      } else {
+        spdlog::error("Refusing to write accessibility tree dump outside {}",
+                      base);
+      }
 #if ENABLE_ACCESSKIT
       Init_AccessKit();
 #endif
