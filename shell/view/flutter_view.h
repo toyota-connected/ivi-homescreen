@@ -22,7 +22,9 @@
 #include "display/idisplay.h"
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
+#if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
+#endif
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
     BUILD_BACKEND_HEADLESS_EGL
 #include "wayland/window.h"
@@ -281,7 +283,9 @@ class FlutterView {
   // BUILD_BACKEND_WAYLAND_* gate in flutter_view.cc::Initialize).
   std::shared_ptr<WaylandWindow> m_wayland_window;
   std::shared_ptr<Engine> m_flutter_engine;
+#if BUILD_ACCESSIBILITY
   std::shared_ptr<AccessibilityTree> m_accessibility_tree;
+#endif
   const Configuration::Config m_config;
   std::shared_ptr<PlatformChannel> m_platform_channel;
   size_t m_index;

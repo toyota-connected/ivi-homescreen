@@ -453,9 +453,10 @@ void FlutterView::Initialize() {
     m_command_line_args_c.push_back(arg.c_str());
   }
 
-  /// AccessKit Wrapper
+#if BUILD_ACCESSIBILITY
   m_accessibility_tree = std::make_shared<AccessibilityTree>();
   m_state->engine_state->accessibility_tree = m_accessibility_tree.get();
+#endif
 
   m_flutter_engine = std::make_shared<Engine>(
       this, m_index, m_command_line_args_c, m_config.view.bundle_path,

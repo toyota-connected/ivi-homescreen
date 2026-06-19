@@ -47,9 +47,12 @@ jobs:
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
-        # paths-ignore (third_party submodules, build tree) lives in the config
-        # file so it applies to every run; the query suite is declared there too.
-        config-file: ./.github/codeql/codeql-config.yml
+        # security-and-quality keeps the maintainability queries on our own
+        # code. third_party submodules are compiled into the build, so CodeQL
+        # extracts and reports them regardless of paths-ignore (a known
+        # compiled-language limitation); their alerts are dismissed as
+        # "won't fix" in the security dashboard rather than filtered here.
+        queries: +security-and-quality
 
     - name: Configure
       run: |

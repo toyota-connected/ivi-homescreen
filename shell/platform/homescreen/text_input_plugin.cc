@@ -192,7 +192,6 @@ void TextInputPlugin::DeleteSelectedText() {
 }
 
 void TextInputPlugin::CharHook(const unsigned int code_point) {
-  // SPDLOG_DEBUG("TextInputPlugin::CharHook: code_point: {}", code_point);
   if (active_model_ == nullptr) {
     return;
   }

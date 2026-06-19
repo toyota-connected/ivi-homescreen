@@ -38,6 +38,7 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
       m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))) {
   assert(m_dpy);
 
+  // Initialize the display connection and bind the GLES client API.
   EGLBoolean ret = eglInitialize(m_dpy, &m_major, &m_minor);
   assert(ret == EGL_TRUE);
   SPDLOG_DEBUG("EGL {}.{}", m_major, m_minor);
@@ -62,6 +63,8 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
 
   configs.clear();
 
+  // Create the render context, plus resource and texture contexts that share
+  // objects with it (used off the render thread for uploads).
   m_context = eglCreateContext(m_dpy, m_config, EGL_NO_CONTEXT,
                                kEglContextAttribs.data());
   if (!m_context) {
