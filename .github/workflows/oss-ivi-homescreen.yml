@@ -118,6 +118,40 @@ jobs:
           path: |
             build/release/_packages/homescreen-*.x86_64.rpm
 
+  # The accessibility semantics tree is off by default (BUILD_ACCESSIBILITY).
+  # Compile it here so the opt-in path -- the AccessibilityTree subsystem and
+  # its engine/view wiring -- does not bit-rot. No extra dependencies, so this
+  # reuses the lightweight ninja build rather than the workspace action.
+  accessibility:
+    name: accessibility (BUILD_ACCESSIBILITY=ON)
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && always() }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: 'true'
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install ninja-build \
+          libwayland-dev wayland-protocols libxkbcommon-dev \
+          mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+
+      - name: Configure (accessibility enabled)
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build/accessibility \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D BUILD_ACCESSIBILITY=ON \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Build
+        working-directory: ${{github.workspace}}/build/accessibility
+        run: ninja -C . homescreen
+
   # Path-gate the (expensive) crash-handler build: it is a full
   # BUILD_CRASH_HANDLER=ON compile, so it only needs to run when build inputs
   # change. Docs/asset-only PRs skip it. Non-PR events (schedule / release /
