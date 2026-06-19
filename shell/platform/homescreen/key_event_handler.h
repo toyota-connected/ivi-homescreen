@@ -17,11 +17,9 @@
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/binary_messenger.h"
 #include "shell/platform/homescreen/keyboard_hook_handler.h"
 
-#ifdef ENABLE_LEGACY_KEYBOARD
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/basic_message_channel.h"
 #include "rapidjson/document.h"
 #include "rapidjson/rapidjson.h"
-#endif
 
 class Engine;
 
@@ -35,7 +33,10 @@ class TextInputPlugin;
 // Key events are dispatched via both:
 //   1. FlutterEngineSendKeyEvent (embedder API) for HardwareKeyboard/Focus
 //      (primary path).
-//   2. flutter/keyevent channel (legacy RawKeyboard / Shortcuts).
+//   2. flutter/keyevent channel — REQUIRED, not optional: the framework's
+//      KeyEventManager queues the modern KeyData from (1) and only flushes it
+//      to HardwareKeyboard when a raw flutter/keyevent message arrives. It also
+//      drives the legacy RawKeyboard / Shortcuts path.
 //      The channel send is sequenced *after* SendKeyEvent, inside the same
 //      asio post, so the two dispatches always arrive in order.
 class KeyEventHandler final : public KeyboardHookHandler {
@@ -109,14 +110,17 @@ class KeyEventHandler final : public KeyboardHookHandler {
   // TODO: integrate with the system clipboard
   std::string clipboard_;
 
-#ifdef ENABLE_LEGACY_KEYBOARD
-  // The Flutter system channel for key event messages (legacy RawKeyboard).
+  // The Flutter system channel for key event messages (flutter/keyevent).
+  // ALWAYS sent — it is the framework's flush trigger for the modern
+  // HardwareKeyboard path: KeyEventManager queues non-synthesized KeyData
+  // (from FlutterEngineSendKeyEvent) and only dispatches it to HardwareKeyboard
+  // when a raw flutter/keyevent message arrives. Gating this send out silently
+  // dropped all real hardware keys.
   std::unique_ptr<flutter::BasicMessageChannel<rapidjson::Document>> channel_;
-  // Reused document for legacy flutter/keyevent channel sends.
-  // Avoids a fresh allocator-chunk heap allocation per keystroke.
-  // Accessed only from the platform strand.
+  // Reused document for flutter/keyevent channel sends. Avoids a fresh
+  // allocator-chunk heap allocation per keystroke. Accessed only from the
+  // platform strand.
   rapidjson::Document legacy_event_doc_;
-#endif
 };
 
 }  // namespace flutter

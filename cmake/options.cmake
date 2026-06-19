@@ -269,17 +269,6 @@ if (BUILD_WATCHDOG)
 endif ()
 
 #
-# legacy keyboard support
-#
-option(ENABLE_LEGACY_KEYBOARD "Enable legacy keyboard support" ON)
-if (ENABLE_LEGACY_KEYBOARD)
-    MESSAGE(STATUS "Legacy Keyboard Support .. Enabled")
-    add_compile_definitions(ENABLE_LEGACY_KEYBOARD)
-else ()
-    MESSAGE(STATUS "Legacy Keyboard Support .. Disabled")
-endif ()
-
-#
 # Accessibility semantics tree
 #
 # When enabled, Flutter semantics updates are mirrored into an in-process
