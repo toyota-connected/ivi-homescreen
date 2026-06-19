@@ -143,7 +143,9 @@ Engine::Engine(FlutterView* view,
   m_args.persistent_cache_path = m_cache_path.c_str();
   m_args.is_persistent_cache_read_only = false;
   m_args.log_message_callback = onLogMessageCallback;
+#if BUILD_ACCESSIBILITY
   m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
+#endif
   m_args.log_tag = "flutter";
 
   // Optional per-backend vsync_callback. nullptr (the default for
@@ -340,8 +342,10 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
       m_flutter_engine,
       static_cast<FlutterAccessibilityFeature>(m_accessibility_features));
 
+#if BUILD_ACCESSIBILITY
   // Enable Semantics
   LibFlutterEngine->UpdateSemanticsEnabled(m_flutter_engine, true);
+#endif
 
   SPDLOG_TRACE("({}) -Engine::Run", m_index);
   return result;
@@ -737,6 +741,7 @@ void Engine::onLogMessageCallback(const char* tag,
   spdlog::info("{}: {}", tag, message);
 }
 
+#if BUILD_ACCESSIBILITY
 void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
                                        void* user_data) {
   FlutterDesktopEngineState const* engine_state =
@@ -750,3 +755,4 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
 
   accessibility_tree->HandleFlutterUpdate(update);
 }
+#endif

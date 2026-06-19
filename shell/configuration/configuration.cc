@@ -30,6 +30,7 @@
 // the key is present and of the expected type so that unset keys preserve any
 // defaults or command-line values already held by |instance|.
 void Configuration::get_parameters(toml::table* tbl, Config& instance) {
+  // [global] table — application-wide settings.
   if (tbl->at_path("global.app_id").is_string()) {
     instance.app_id = tbl->at_path("global.app_id").as_string()->value_or("");
   }
@@ -50,6 +51,7 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
         tbl->at_path("global.debug_backend").value<bool>().value();
   }
 
+  // [view] table — window geometry and Flutter view settings.
   if (tbl->at_path("view.window_type").is_string()) {
     instance.view.window_type =
         tbl->at_path("view.window_type").as_string()->value_or("");
@@ -140,6 +142,7 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
         tbl->at_path("view.drm_no_seat").value<bool>().value();
   }
 
+  // [window_activation_area] table — AGL shell activation-area rectangle.
   if (tbl->at_path("window_activation_area.x").is_integer()) {
     instance.view.activation_area_x =
         tbl->at_path("window_activation_area.x").value<uint32_t>().value();

@@ -17,6 +17,7 @@
 struct FlutterDesktopViewControllerState;
 struct FlutterDesktopMessenger;
 
+class AccessibilityTree;
 class Engine;
 class PlatformHandler;
 class PlatformViewsHandler;

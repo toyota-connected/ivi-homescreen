@@ -32,8 +32,11 @@ add_executable(${PROJECT_NAME}
         view/flutter_view.cc
         watchdog.cc
         task_runner.cc
-        accessibility/accessibility_tree.cc
 )
+
+if (BUILD_ACCESSIBILITY)
+    target_sources(${PROJECT_NAME} PRIVATE accessibility/accessibility_tree.cc)
+endif ()
 
 # Wayland-specific TUs:
 #   - wayland/display.cc + wayland/window.cc            — Display/Window
