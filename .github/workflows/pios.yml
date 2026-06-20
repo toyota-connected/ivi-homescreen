@@ -162,3 +162,24 @@ jobs:
           name: homescreen-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
           path: /emb/.config/flutter_workspace/cross-build-*/build-${{ matrix.backend }}/shell/homescreen
           if-no-files-found: error
+
+  # Single stable status for branch protection: aggregates the publish + build
+  # matrix into one `pios` check, so required-checks don't have to enumerate
+  # every board×os×backend job (which would re-break on any matrix change).
+  # Passes on success or skipped (e.g. the github.com guard); fails if any
+  # publish/build job failed or was cancelled.
+  pios:
+    needs: [publish, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Gate on publish + build
+        run: |
+          for r in "${{ needs.publish.result }}" "${{ needs.build.result }}"; do
+            case "$r" in
+              failure|cancelled)
+                echo "pios gate: a required job result was '$r'"; exit 1 ;;
+            esac
+          done
+          echo "pios gate ok: publish=${{ needs.publish.result }} \
+            build=${{ needs.build.result }}"
