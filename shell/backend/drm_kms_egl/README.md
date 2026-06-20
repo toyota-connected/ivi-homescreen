@@ -230,8 +230,9 @@ three configs — C2 in particular (compositor without scene) is an easy
 one to break, so the build matrix is exercised on both x86_64 and
 aarch64.
 
-The aarch64 cross-build helper maps these as: `scripts/build_pi.sh`
-default → **C1**; `scripts/build_pi.sh --with-scene` → **C3**.
+The aarch64 cross-build maps these as: emb's `drm-kms-egl` backend → **C1**
+(default direct DRM/KMS + GBM); adding `USE_DRM_SCENE=ON` (with
+`BUILD_COMPOSITOR=ON`) to that backend's `defines` → **C3**.
 
 Per-driver note: on **rockchip** (rk3588 VOP2) the primary advertises
 `REFLECT_Y` and passes a `TEST_ONLY` atomic commit with it, but a live
