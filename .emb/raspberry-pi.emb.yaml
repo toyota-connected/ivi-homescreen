@@ -10,7 +10,7 @@
 #   emb cross raspberry-pi.emb.yaml --target rpi5-bookworm --build --backend drm-kms-egl -w /emb
 #
 # Backends: rpi5 builds all five (incl. drm-kms-vulkan); rpi4 and zero-2w build
-# the four without it. Plugins on (PLUGINS_DIR=../ivi-homescreen-plugins).
+# the four without it. Plugins on (PLUGINS_DIR=../ivi-homescreen-plugins/plugins).
 # bookworm cross-builds libdisplay-info 0.2.0 (ships 0.1.1; drm-cxx needs >=0.2.0)
 # and omits apt libdisplay-info-dev so the static .a isn't shadowed; trixie ships
 # 0.2.0 and adds it. Vulkan headers are vendored, so neither OS stages them.
@@ -29,7 +29,7 @@ cross:
   defines:
     BUILD_BACKEND_HEADLESS_EGL: 'OFF'
     DISABLE_PLUGINS: 'OFF'
-    PLUGINS_DIR: '../ivi-homescreen-plugins'
+    PLUGINS_DIR: '../ivi-homescreen-plugins/plugins'
 
   package:
     name: ivi-homescreen
