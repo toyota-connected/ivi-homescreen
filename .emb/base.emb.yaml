@@ -1,0 +1,53 @@
+# Shared base for the ivi-homescreen board manifests in this .emb/ directory.
+#
+# emb (emb_cli) auto-discovers `.emb/` when you run `emb cross` against the
+# project root and deep-merges each <board>.emb.yaml over this base. Each board
+# file's target name is its filename (e.g. zero3.emb.yaml -> `--target zero3`),
+# or a `cross.targets` key. Build from the repo root (the directory that holds
+# CMakeLists.txt), which is what emb uses as the CMake source:
+#
+#   emb cross . --list-targets
+#   emb cross . --target zero3 --build --backend software \
+#       --app ../micro_cluster --mode release --deploy radxa@radxa-zero3.lan
+#   emb cross . --build                 # native host build of every backend below
+#
+# `base.emb.yaml` is the reserved base filename and is never itself a target.
+id: ivi-homescreen
+type: app
+supported_archs: [arm64, x86_64]
+supported_host_types: [fedora, ubuntu]
+
+cross:
+  # `provider` is required only to parse this block; it is ignored for the
+  # native (`--target local`, the default) build, which uses the host toolchain.
+  # Every board target overrides it with its own provider.
+  provider: arm-gnu
+  defines:
+    DISABLE_PLUGINS: 'ON'              # shared by the native build and the boards
+  # Native host backend matrix: `emb cross . --build` (no --target) compiles
+  # every backend with the host toolchain — the dev compile smoke-test. A board
+  # target declares its own cross.backends, which REPLACES this set (it does not
+  # union), so a board never inherits these host-only entries.
+  backends:
+    wayland-egl:
+      BUILD_BACKEND_WAYLAND_EGL: 'ON'
+      BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+    wayland-vulkan:
+      BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+      BUILD_BACKEND_WAYLAND_VULKAN: 'ON'
+    drm-kms-egl:
+      BUILD_BACKEND_DRM_KMS_EGL: 'ON'
+      BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+      BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+    drm-kms-vulkan:
+      BUILD_BACKEND_DRM_KMS_VULKAN: 'ON'
+      BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+      BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+    software:
+      BUILD_BACKEND_SOFTWARE: 'ON'
+      BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+      BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+    headless-egl:
+      BUILD_BACKEND_HEADLESS_EGL: 'ON'
+      BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+      BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'

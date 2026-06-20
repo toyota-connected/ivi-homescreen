@@ -1,14 +1,19 @@
 ---
-# Cross-compiled PiOS (aarch64) artifacts via scripts/build_pi.sh.
+# Cross-compiled PiOS (aarch64) artifacts via emb + a prebuilt toolchain image.
 #
-# Runs on x86_64 GitHub runners on purpose: the pinned ARM toolchains link
-# against the matching PiOS glibc only when hosted on x86_64 (bookworm's
-# GCC 12 has no aarch64-hosted build, and the aarch64-hosted GCC 14/15 link
-# against glibc >= 2.38, which bookworm's 2.36 can't satisfy).
+# Two phases:
+#   publish-<os>  (per PiOS variant) — emb resolves the toolchain + sysroot and
+#                 publishes a content-addressed OCI image to GHCR. The emb cross
+#                 sandbox is cached, and `emb cross --publish` skips the build
+#                 when the image (keyed by the manifest's sysroot_key) already
+#                 exists, so this is a near-no-op once warm.
+#   build-...     (per board x os x backend) — runs INSIDE the published image,
+#                 where `emb cross --build -w /emb` is a pure cache hit on the
+#                 baked toolchain + sysroot. No per-run toolchain/sysroot fetch.
 #
-# A per-PiOS "prep" job warms the cache (toolchain + sysroot + engine, and
-# the from-source libdisplay-info on bookworm) once; the build matrix then
-# fans out per backend, restoring that cache and compiling a single backend.
+# Runs on x86_64 runners: the pinned ARM toolchains cross-compile aarch64 (no
+# emulation). Hardware facts live in emb's board library; this repo's
+# raspberry-pi.emb.yaml `extends` it with ivi-homescreen's backends + plugins.
 name: pios
 
 on:
@@ -23,28 +28,23 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Everything build_pi.sh downloads/derives lives here so one cache covers
-  # toolchain, sysroot, engine SDK, and the local libdisplay-info build.
-  IVI_XC_ROOT: ${{ github.workspace }}/.ivi-xc
+  EMB_REPO: https://github.com/toyota-connected/emb_cli.git
+  IMAGE: ghcr.io/${{ github.repository_owner }}/emb-cross-aarch64-none-linux-gnu
+  # emb cross sandbox (toolchain + sysroot) for the publish phase — cached.
+  EMB_WS: ${{ github.workspace }}/.emb-ws
 
 jobs:
-  prep:
+  publish:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - pios: trixie
-            args: ""
-          - pios: bookworm
-            # bookworm ships an older libdisplay-info (0.1.1) and Vulkan SDK
-            # (VK_HEADER_VERSION 239); cross-build/overlay newer ones so
-            # drm-kms-egl and wayland-vulkan both build.
-            args: "--with-local-display-info --with-local-vulkan-headers"
-    name: prep-${{ matrix.pios }}
+        pios: [bookworm, trixie]
+    name: publish-${{ matrix.pios }}
     steps:
       - name: Checkout ivi-homescreen
         uses: actions/checkout@v5
@@ -52,56 +52,65 @@ jobs:
           path: ivi-homescreen
           submodules: recursive
 
-      - name: Checkout ivi-homescreen-plugins (sibling)
-        uses: actions/checkout@v5
-        with:
-          repository: toyota-connected/ivi-homescreen-plugins
-          path: ivi-homescreen-plugins
-          submodules: recursive
-
-      - name: Install host build tools
+      - name: Install emb resolve host tools
         run: |
           sudo apt-get update
-          sudo apt-get -y install --no-install-recommends \
-            curl xz-utils tar fdisk rsync cmake pkg-config \
-            qemu-user-static meson ninja-build libwayland-bin
+          sudo apt-get install -y --no-install-recommends \
+            tar xz-utils rsync curl ca-certificates
 
-      - name: Cache cross sandbox (toolchain + sysroot + engine)
+      - name: Fetch emb
+        run: git clone --depth 1 "$EMB_REPO" emb_cli
+
+      - name: Cache cross sandbox (toolchain + sysroot)
         uses: actions/cache@v5
         with:
-          path: ${{ env.IVI_XC_ROOT }}
-          key: xc-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/scripts/build_pi.sh') }}
+          path: ${{ env.EMB_WS }}
+          key: emb-xc-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml', 'emb_cli/boards/raspberry-pi.emb.yaml') }}
           restore-keys: |
-            xc-${{ matrix.pios }}-
+            emb-xc-${{ matrix.pios }}-
 
-      - name: Prepare (fetch toolchain, sysroot, engine; build libdisplay-info)
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # rpi5-<os> is the canonical publish target: the sysroot (and thus the
+      # image) is model-independent, so one image per OS serves rpi4/zero-2w
+      # too. --tag <os> is the stable alias the build matrix consumes; the
+      # immutable sysroot_key tag is always pushed + skip-checked.
+      - name: Publish toolchain image (${{ matrix.pios }})
         working-directory: ivi-homescreen
         run: |
-          ./scripts/build_pi.sh --pios ${{ matrix.pios }} \
-            --backend all ${{ matrix.args }} --prepare-only
+          eval "$(../emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          emb cross . \
+            --target "rpi5-${{ matrix.pios }}" \
+            --publish --image "$IMAGE" --tag "${{ matrix.pios }}" \
+            -w "$EMB_WS"
 
   build:
-    needs: prep
+    needs: publish
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      packages: read
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/emb-cross-aarch64-none-linux-gnu:${{ matrix.pios }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # trixie ships libdisplay-info >= 0.2.0, so all four backends build
-          # without the local libdisplay-info workaround.
-          - { pios: trixie, backend: wayland-egl,    args: "" }
-          - { pios: trixie, backend: wayland-vulkan, args: "" }
-          - { pios: trixie, backend: drm-kms-egl,    args: "" }
-          - { pios: trixie, backend: software,       args: "" }
-          # bookworm: drm-kms-egl needs the locally-built libdisplay-info.
-          - { pios: bookworm, backend: wayland-egl,    args: "" }
-          - { pios: bookworm, backend: wayland-vulkan, args: "--with-local-vulkan-headers" }
-          - { pios: bookworm, backend: drm-kms-egl,    args: "--with-local-display-info" }
-          - { pios: bookworm, backend: software,       args: "" }
-    name: build-${{ matrix.pios }}-${{ matrix.backend }}
+        pios: [bookworm, trixie]
+        board: [rpi5, rpi4, rpi-zero-2w]
+        backend: [wayland-egl, wayland-vulkan, drm-kms-egl, drm-kms-vulkan, software]
+        # drm-kms-vulkan is rpi5-only.
+        exclude:
+          - { board: rpi4, backend: drm-kms-vulkan }
+          - { board: rpi-zero-2w, backend: drm-kms-vulkan }
+    name: build-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
     steps:
       - name: Checkout ivi-homescreen
         uses: actions/checkout@v5
@@ -116,30 +125,40 @@ jobs:
           path: ivi-homescreen-plugins
           submodules: recursive
 
-      - name: Install host build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get -y install --no-install-recommends \
-            curl xz-utils tar fdisk rsync cmake pkg-config \
-            qemu-user-static meson ninja-build libwayland-bin
+      - name: Fetch emb
+        run: git clone --depth 1 "$EMB_REPO" emb_cli
 
-      - name: Restore cross sandbox
-        uses: actions/cache@v5
-        with:
-          path: ${{ env.IVI_XC_ROOT }}
-          key: xc-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/scripts/build_pi.sh') }}
-          restore-keys: |
-            xc-${{ matrix.pios }}-
-
-      - name: Build
+      # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
+      # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
+      # meson, wayland-scanner) are baked too; only the augment libs rebuild.
+      - name: Build ${{ matrix.backend }}
         working-directory: ivi-homescreen
+        # Container jobs default to dash (sh); pipefail/SECONDS need bash.
+        shell: bash
         run: |
-          ./scripts/build_pi.sh --pios ${{ matrix.pios }} \
-            --backend ${{ matrix.backend }} ${{ matrix.args }}
+          set -o pipefail
+          eval "$(../emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          start=$SECONDS
+          emb cross . \
+            --target "${{ matrix.board }}-${{ matrix.pios }}" \
+            --build --backend "${{ matrix.backend }}" \
+            --no-verify -w /emb | tee /tmp/emb-build.log
+          dur=$(( SECONDS - start ))
+          # Per-job timing summary: the cache-hit consume should resolve in
+          # seconds (no toolchain/sysroot fetch). emb prints resolve/augment/
+          # build phase times; capture them plus the wall-clock total.
+          {
+            echo "### ${{ matrix.board }}-${{ matrix.pios }} · ${{ matrix.backend }}"
+            echo ""
+            echo "- total: ${dur}s (cache-hit consume — no toolchain/sysroot fetch)"
+            grep -aE "Resolved|augment +:|build +:" /tmp/emb-build.log \
+              | sed -E 's/^[[:space:]]*[^A-Za-z]*/- /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
         with:
-          name: homescreen-${{ matrix.pios }}-${{ matrix.backend }}
-          path: ivi-homescreen/cmake-build-xc-pi-${{ matrix.pios }}-${{ matrix.backend }}/shell/homescreen
+          name: homescreen-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
+          path: /emb/.config/flutter_workspace/cross-build-*/build-${{ matrix.backend }}/shell/homescreen
           if-no-files-found: error

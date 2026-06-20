@@ -1,0 +1,130 @@
+# ivi-homescreen on Raspberry Pi (PiOS aarch64) — the project layer.
+#
+# Hardware/OS facts (toolchain, sysroot image, partition, cpu tuning, base GUI
+# stack) come from emb's shipped board library (boards/raspberry-pi.emb.yaml);
+# each target `extends` a board and overlays this embedder's backends, augment,
+# and plugin packages. Driven by .github/workflows/pios.yml:
+#
+#   emb cross raspberry-pi.emb.yaml --list-targets
+#   emb cross raspberry-pi.emb.yaml --target rpi5-bookworm --publish --image <reg>
+#   emb cross raspberry-pi.emb.yaml --target rpi5-bookworm --build --backend drm-kms-egl -w /emb
+#
+# Backends: rpi5 builds all five (incl. drm-kms-vulkan); rpi4 and zero-2w build
+# the four without it. Plugins on (PLUGINS_DIR=../ivi-homescreen-plugins/plugins).
+# bookworm cross-builds libdisplay-info 0.2.0 (ships 0.1.1; drm-cxx needs >=0.2.0)
+# and omits apt libdisplay-info-dev so the static .a isn't shadowed; trixie ships
+# 0.2.0 and adds it. Vulkan headers are vendored, so neither OS stages them.
+id: ivi-homescreen
+type: app
+supported_archs: [arm64]
+supported_host_types: [ubuntu, fedora]
+
+build:
+  app_path: .
+  archs: [arm64]
+  modes: [release]
+  output: bundles
+
+cross:
+  defines:
+    BUILD_BACKEND_HEADLESS_EGL: 'OFF'
+    DISABLE_PLUGINS: 'OFF'
+    PLUGINS_DIR: '../ivi-homescreen-plugins/plugins'
+
+  package:
+    name: ivi-homescreen
+    version: 1.0.0
+    maintainer: "Joel Winarske <joel.winarske@gmail.com>"
+    description: "IVI Flutter Shell, cross-built by emb"
+    section: utils
+    bin: shell/homescreen
+    install_dir: /usr/bin
+
+  targets:
+    # -- Raspberry Pi 5 (Cortex-A76) — all five backends -----------------
+    rpi5-bookworm:
+      extends: rpi5-bookworm
+      sysroot:
+        dev_packages: &proj_packages_bookworm
+          - libcamera-dev
+          - libcurl4-openssl-dev
+          - libgstreamer1.0-dev
+          - libgstreamer-plugins-base1.0-dev
+          - libjpeg-dev
+          - libpipewire-0.3-dev
+          - libsecret-1-dev
+          - libxml2-dev
+      augment: &augment_bookworm
+        - pkg: libdisplay-info
+          min: "0.2.0"
+          url: https://gitlab.freedesktop.org/emersion/libdisplay-info/-/archive/0.2.0/libdisplay-info-0.2.0.tar.gz
+          build: meson
+          static: true
+      backends: &backends_rpi5
+        wayland-egl: &be_wayland_egl
+          BUILD_BACKEND_WAYLAND_EGL: 'ON'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+        wayland-vulkan: &be_wayland_vulkan
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'ON'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+        drm-kms-egl: &be_drm_kms_egl
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'ON'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+        drm-kms-vulkan:
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_DRM_KMS_VULKAN: 'ON'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+          BUILD_COMPOSITOR: 'ON'
+        software: &be_software
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'ON'
+    rpi5-trixie:
+      extends: rpi5-trixie
+      sysroot:
+        dev_packages: &proj_packages_trixie
+          - libcamera-dev
+          - libcurl4-openssl-dev
+          - libgstreamer1.0-dev
+          - libgstreamer-plugins-base1.0-dev
+          - libjpeg-dev
+          - libpipewire-0.3-dev
+          - libsecret-1-dev
+          - libxml2-dev
+          - libdisplay-info-dev
+      backends: *backends_rpi5
+
+    # -- Raspberry Pi 4 (Cortex-A72) — four backends --------------------
+    rpi4-bookworm:
+      extends: rpi4-bookworm
+      sysroot: {dev_packages: *proj_packages_bookworm}
+      augment: *augment_bookworm
+      backends: &backends_four
+        wayland-egl: *be_wayland_egl
+        wayland-vulkan: *be_wayland_vulkan
+        drm-kms-egl: *be_drm_kms_egl
+        software: *be_software
+    rpi4-trixie:
+      extends: rpi4-trixie
+      sysroot: {dev_packages: *proj_packages_trixie}
+      backends: *backends_four
+
+    # -- Raspberry Pi Zero 2 W (Cortex-A53) — four backends -------------
+    rpi-zero-2w-bookworm:
+      extends: rpi-zero-2w-bookworm
+      sysroot: {dev_packages: *proj_packages_bookworm}
+      augment: *augment_bookworm
+      backends: *backends_four
+    rpi-zero-2w-trixie:
+      extends: rpi-zero-2w-trixie
+      sysroot: {dev_packages: *proj_packages_trixie}
+      backends: *backends_four
