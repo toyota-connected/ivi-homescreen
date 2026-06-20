@@ -133,6 +133,8 @@ jobs:
       # meson, wayland-scanner) are baked too; only the augment libs rebuild.
       - name: Build ${{ matrix.backend }}
         working-directory: ivi-homescreen
+        # Container jobs default to dash (sh); pipefail/SECONDS need bash.
+        shell: bash
         run: |
           set -o pipefail
           eval "$(../emb_cli/bootstrap.sh --shellenv)"
