@@ -230,10 +230,11 @@ loader is dlopen'd, never linked).
 
 ## Cross-compiling for the Raspberry Pi
 
-`scripts/build_pi.sh` builds the backend for aarch64:
+emb cross-compiles the backend for aarch64 from the project's `.emb/`
+(drm-kms-vulkan is the rpi5 backend set):
 
 ```sh
-scripts/build_pi.sh --backend drm-kms-vulkan --pios trixie --target generic
+emb cross . --target rpi5-trixie --build --backend drm-kms-vulkan
 ```
 
 It reuses the `drm-kms-egl` sysroot/toolchain (same DRM/GBM/seat deps; the
