@@ -134,12 +134,25 @@ jobs:
       - name: Build ${{ matrix.backend }}
         working-directory: ivi-homescreen
         run: |
+          set -o pipefail
           eval "$(../emb_cli/bootstrap.sh --shellenv)"
           emb --version
+          start=$SECONDS
           emb cross . \
             --target "${{ matrix.board }}-${{ matrix.pios }}" \
             --build --backend "${{ matrix.backend }}" \
-            --no-verify -w /emb
+            --no-verify -w /emb | tee /tmp/emb-build.log
+          dur=$(( SECONDS - start ))
+          # Per-job timing summary: the cache-hit consume should resolve in
+          # seconds (no toolchain/sysroot fetch). emb prints resolve/augment/
+          # build phase times; capture them plus the wall-clock total.
+          {
+            echo "### ${{ matrix.board }}-${{ matrix.pios }} · ${{ matrix.backend }}"
+            echo ""
+            echo "- total: ${dur}s (cache-hit consume — no toolchain/sysroot fetch)"
+            grep -aE "Resolved|augment +:|build +:" /tmp/emb-build.log \
+              | sed -E 's/^[[:space:]]*[^A-Za-z]*/- /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
