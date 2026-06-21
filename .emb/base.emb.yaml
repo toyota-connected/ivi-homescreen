@@ -22,6 +22,12 @@ cross:
   # native (`--target local`, the default) build, which uses the host toolchain.
   # Every board target overrides it with its own provider.
   provider: arm-gnu
+  # Embedder binary, relative to each backend build dir. Setting it explicitly
+  # lets --run/--deploy/--deb locate `homescreen` directly instead of scanning
+  # the build tree (which can otherwise hit a CMake compiler-probe binary).
+  package:
+    name: ivi-homescreen
+    bin: shell/homescreen
   defines:
     DISABLE_PLUGINS: 'ON'              # shared by the native build and the boards
   # Native host backend matrix: `emb cross . --build` (no --target) compiles
