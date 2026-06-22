@@ -504,7 +504,16 @@ void FlutterView::Initialize() {
 #else
   auto [width, height] = m_wayland_window->GetSize();
 #endif
-  auto pixel_ratio = m_flutter_engine->GetPixelRatio();
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  // Derive the true effective pixel ratio from the configured per-surface
+  // ratio and the integer wl_output scale reported by the compositor.
+  const auto pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) *
+      static_cast<double>(dynamic_cast<Display*>(m_display.get())
+                              ->GetBufferScale(m_wayland_window->GetOutputIndex()));
+#else
+  constexpr double pixel_ratio = 1;
+#endif
   display.width = static_cast<size_t>(width * pixel_ratio);
   display.height = static_cast<size_t>(height * pixel_ratio);
   display.device_pixel_ratio = pixel_ratio;
@@ -576,7 +585,10 @@ void FlutterView::UpdateDisplayMetadata() const {
   display.refresh_rate =
       m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
   auto [width, height] = m_wayland_window->GetSize();
-  auto pixel_ratio = m_flutter_engine->GetPixelRatio();
+  const auto pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) *
+      static_cast<double>(dynamic_cast<Display*>(m_display.get())
+                              ->GetBufferScale(m_wayland_window->GetOutputIndex()));
   display.width = static_cast<size_t>(width * pixel_ratio);
   display.height = static_cast<size_t>(height * pixel_ratio);
   display.device_pixel_ratio = pixel_ratio;

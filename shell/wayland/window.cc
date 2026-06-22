@@ -138,8 +138,13 @@ WaylandWindow::WaylandWindow(const size_t index,
       continue;
   }
 
-  m_backend->CreateSurface(m_index, m_base_surface, m_geometry.width,
-                           m_geometry.height);
+  {
+    const auto buf_scale = m_display->GetBufferScale(m_output_index);
+    wl_surface_set_buffer_scale(m_base_surface, buf_scale);
+    m_backend->CreateSurface(m_index, m_base_surface,
+                             m_geometry.width * buf_scale,
+                             m_geometry.height * buf_scale);
+  }
 
   // Register *after* initial geometry has settled so the event-thread
   // OnOutputResized path never observes a partially-constructed window.
@@ -185,6 +190,15 @@ void WaylandWindow::handle_base_surface_enter(void* data,
   auto const* d = static_cast<WaylandWindow*>(data);
 
   const auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
+
+  // Update the compositor's buffer-scale hint and resize the EGL window to
+  // the physical dimensions for the new output's scale factor.
+  wl_surface_set_buffer_scale(d->m_base_surface, buffer_scale);
+  if (d->m_flutter_engine) {
+    d->m_backend->Resize(d->m_index, d->m_flutter_engine.get(),
+                         d->m_geometry.width * buffer_scale,
+                         d->m_geometry.height * buffer_scale);
+  }
 
   const auto result =
       d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
@@ -251,8 +265,12 @@ void WaylandWindow::handle_ivi_surface_configure(
     w->m_geometry.height = height;
   }
 
-  w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
-                       w->m_geometry.width, w->m_geometry.height);
+  {
+    const auto buf_scale = w->m_display->GetBufferScale(w->m_output_index);
+    w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
+                         w->m_geometry.width * buf_scale,
+                         w->m_geometry.height * buf_scale);
+  }
 
   w->m_wait_for_configure = false;
 }
@@ -325,8 +343,12 @@ void WaylandWindow::handle_toplevel_configure(
     w->m_geometry.height = target_h;
   }
 
-  w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
-                       w->m_geometry.width, w->m_geometry.height);
+  {
+    const auto buf_scale = w->m_display->GetBufferScale(w->m_output_index);
+    w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
+                         w->m_geometry.width * buf_scale,
+                         w->m_geometry.height * buf_scale);
+  }
 }
 
 void WaylandWindow::handle_toplevel_configure_bounds(
@@ -367,7 +389,11 @@ void WaylandWindow::OnOutputResized(const size_t output_index,
   }
   m_geometry.width = target_w;
   m_geometry.height = target_h;
-  m_backend->Resize(m_index, m_flutter_engine.get(), target_w, target_h);
+  {
+    const auto buf_scale = m_display->GetBufferScale(m_output_index);
+    m_backend->Resize(m_index, m_flutter_engine.get(),
+                      target_w * buf_scale, target_h * buf_scale);
+  }
 }
 
 void WaylandWindow::handle_toplevel_close(
@@ -397,14 +423,14 @@ bool WaylandWindow::ActivateSystemCursor(int32_t device,
 void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
   m_flutter_engine = engine;
   if (m_flutter_engine) {
-    auto result =
-        m_flutter_engine->SetWindowSize(static_cast<size_t>(m_geometry.height),
-                                        static_cast<size_t>(m_geometry.width));
+    const auto buffer_scale = m_display->GetBufferScale(m_output_index);
+
+    auto result = m_flutter_engine->SetWindowSize(
+        static_cast<size_t>(m_geometry.height * buffer_scale),
+        static_cast<size_t>(m_geometry.width  * buffer_scale));
     if (result != kSuccess) {
       spdlog::error("Failed to set Flutter Engine Window Size");
     }
-
-    const auto buffer_scale = m_display->GetBufferScale(m_output_index);
 
     result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * buffer_scale);
     if (result != kSuccess) {

@@ -132,6 +132,8 @@ public:
     return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
   }
 
+  [[nodiscard]] uint32_t GetOutputIndex() const { return m_output_index; }
+
   // Called from Display::NotifyOutputResized when wl_output.mode reports
   // new dimensions for output index @p output_index. Runs on the
   // wayland event thread. If this window is bound to that output and
