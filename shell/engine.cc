@@ -585,12 +585,12 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
 #elif ENV32BIT
   e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-  e.x = x;
-  e.y = y;
+  e.x = x * m_prev_pixel_ratio;
+  e.y = y * m_prev_pixel_ratio;
   e.device = 0;
   e.signal_kind = signal;
-  e.scroll_delta_x = scroll_delta_x;
-  e.scroll_delta_y = scroll_delta_y;
+  e.scroll_delta_x = scroll_delta_x * m_prev_pixel_ratio;
+  e.scroll_delta_y = scroll_delta_y * m_prev_pixel_ratio;
   e.device_kind = kFlutterPointerDeviceKindMouse;
   e.buttons = buttons;
   e.pan_x = 0;
@@ -620,8 +620,8 @@ void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
 #elif ENV32BIT
   e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-  e.x = x;
-  e.y = y;
+  e.x = x * m_prev_pixel_ratio;
+  e.y = y * m_prev_pixel_ratio;
   e.device = device;
   e.signal_kind = kFlutterPointerSignalKindNone;
   e.scroll_delta_x = 0.0;
