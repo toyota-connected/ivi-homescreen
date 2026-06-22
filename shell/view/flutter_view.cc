@@ -584,11 +584,29 @@ void FlutterView::UpdateDisplayMetadata() const {
   display.single_display = true;
   display.refresh_rate =
       m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+  const auto width = static_cast<int32_t>(m_backend->width());
+  const auto height = static_cast<int32_t>(m_backend->height());
+  const auto pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
+#elif BUILD_BACKEND_SOFTWARE
+  auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get());
+  const auto width = static_cast<int32_t>(
+      sw_backend ? sw_backend->width()
+                 : m_config.view.width.value_or(kDefaultViewWidth));
+  const auto height = static_cast<int32_t>(
+      sw_backend ? sw_backend->height()
+                 : m_config.view.height.value_or(kDefaultViewHeight));
+  const auto pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
+#else
   auto [width, height] = m_wayland_window->GetSize();
   const auto pixel_ratio =
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) *
       static_cast<double>(dynamic_cast<Display*>(m_display.get())
                               ->GetBufferScale(m_wayland_window->GetOutputIndex()));
+#endif
+
   display.width = static_cast<size_t>(width * pixel_ratio);
   display.height = static_cast<size_t>(height * pixel_ratio);
   display.device_pixel_ratio = pixel_ratio;
