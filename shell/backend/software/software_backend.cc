@@ -17,6 +17,8 @@
 #include "backend/software/software_backend.h"
 #include "logging/logging.h"
 
+#include "backend/software/none_sink.h"
+
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -30,11 +32,29 @@
 
 SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
                                  const uint32_t initial_height,
-                                 std::unique_ptr<ISurfaceSink> sink)
+                                 std::unique_ptr<ISurfaceSink> sink,
+                                 const bool is_headless)
     : Backend(),
+      is_headless_(is_headless),
       width_(initial_width),
       height_(initial_height),
       sink_(std::move(sink)) {
+  if (is_headless_) {
+    // In headless mode hardware sinks (DRM dumb / fbdev) are meaningless —
+    // there is no display to scan out to. If the caller passed one (e.g. via
+    // a stale IVI_SW_SINK env var), swap it for a NoneSink so the process
+    // never tries to open /dev/dri/* or /dev/fb*.
+    if (sink_ && sink_->NativeSize().has_value()) {
+      spdlog::warn(
+          "[SoftwareBackend] headless mode: hardware sink ignored; "
+          "falling back to NoneSink");
+      sink_ = std::make_unique<NoneSink>();
+    }
+    spdlog::info(
+        "[SoftwareBackend] headless mode (kSoftware renderer, no GPU/Wayland)");
+  } else {
+    spdlog::info("[SoftwareBackend] software mode");
+  }
   if (sink_) {
     // Adopt the sink's native extent (the DRM mode / fbdev virtual size) so
     // Flutter renders at the panel's resolution — the frame fills and centers,
@@ -97,6 +117,9 @@ void SoftwareBackend::CreateSurface(size_t /* index */,
                                     wl_surface* /* unused */,
                                     const int32_t width,
                                     const int32_t height) {
+  if (is_headless_) {
+    SPDLOG_TRACE("[SoftwareBackend] CreateSurface no-op (headless mode)");
+  }
   width_ = static_cast<uint32_t>(width);
   height_ = static_cast<uint32_t>(height);
   if (sink_) {
@@ -114,6 +137,11 @@ FlutterRendererConfig SoftwareBackend::GetRenderConfig() {
 }
 
 VsyncCallback SoftwareBackend::GetVsyncCallback() const {
+  // Headless mode has no display vblank source; always use the wall-clock
+  // Flutter scheduler regardless of sink or env-var setting.
+  if (is_headless_) {
+    return nullptr;
+  }
   static const bool env_disabled = []() {
     const char* env = std::getenv("IVI_SW_VSYNC");
     return env != nullptr && std::string_view(env) == "0";

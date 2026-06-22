@@ -32,7 +32,8 @@ class SoftwareBackend final : public Backend {
  public:
   SoftwareBackend(uint32_t initial_width,
                   uint32_t initial_height,
-                  std::unique_ptr<ISurfaceSink> sink);
+                  std::unique_ptr<ISurfaceSink> sink,
+                  bool is_headless = false);
 
   // dtor emits the IVI_SW_PROFILE session summary when the env var is
   // set. Order matters: backend destructs before the sink so the
@@ -65,13 +66,19 @@ class SoftwareBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
 
+  // Exposes the active sink for in-process inspection (e.g. MemorySink pixel
+  // capture in headless test fixtures). Returns nullptr when no sink is set.
+  [[nodiscard]] ISurfaceSink* GetSink() const { return sink_.get(); }
+
   // Forward the shared software cursor to the sink (the dumb sink composites
-  // it). Called by FlutterView with the SoftwareDisplay-owned cursor. No-op for
-  // headless sinks. (SoftwareCursor is forward-declared via surface_sink.h.)
+  // it). Called by FlutterView with the SoftwareDisplay-owned cursor. No-op in
+  // headless mode (no display, no cursor compositing) and for headless sinks.
+  // (SoftwareCursor is forward-declared via surface_sink.h.)
   void SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
-    if (sink_) {
-      sink_->SetCursor(std::move(cursor));
+    if (is_headless_ || !sink_) {
+      return;
     }
+    sink_->SetCursor(std::move(cursor));
   }
 
   // Vsync wiring is gated on the sink advertising a real vblank source
@@ -121,6 +128,7 @@ class SoftwareBackend final : public Backend {
   // is disabled. Window log every 60 frames, session summary emitted from dtor.
   void ProfilePresent(bool ok);
 
+  const bool is_headless_;
   uint32_t width_;
   uint32_t height_;
   std::unique_ptr<ISurfaceSink> sink_;

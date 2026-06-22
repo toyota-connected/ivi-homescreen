@@ -72,10 +72,19 @@ endif ()
 if (BUILD_BACKEND_SOFTWARE)
     if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
         BUILD_BACKEND_WAYLAND_EGL OR
-        BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_HEADLESS_EGL)
+        BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_HEADLESS_SOFTWARE)
         message(FATAL_ERROR
                 "BUILD_BACKEND_SOFTWARE is mutually exclusive with the "
-                "DRM/Wayland/Headless EGL/Vulkan backends — pick exactly one")
+                "DRM/Wayland/Headless Software/Vulkan backends — pick exactly one")
+    endif ()
+endif ()
+if (BUILD_BACKEND_HEADLESS_SOFTWARE)
+    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
+        BUILD_BACKEND_WAYLAND_EGL OR
+        BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_SOFTWARE)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_HEADLESS_SOFTWARE is mutually exclusive with the "
+                "DRM/Wayland/Software/Vulkan backends — pick exactly one")
     endif ()
 endif ()
 

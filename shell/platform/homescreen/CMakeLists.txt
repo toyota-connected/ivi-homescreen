@@ -44,8 +44,7 @@ target_link_libraries(platform_homescreen PUBLIC
 # the wayland-gen protocol-header include dirs and the static library are both
 # scoped to those builds. Non-Wayland backends get neither the headers nor the
 # libwayland-client / libwayland-cursor runtime deps.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     target_include_directories(platform_homescreen PUBLIC
             $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
     )

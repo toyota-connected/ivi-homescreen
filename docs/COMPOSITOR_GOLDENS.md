@@ -9,21 +9,9 @@ Both run against software rasterizers so they're CI-friendly.
 
 ## Prerequisites
 
-### OSMesa (headless OpenGL)
+### Headless software backend
 
-Required for any EGL-side golden. The host's existing `BUILD_BACKEND_HEADLESS_EGL` already targets OSMesa.
-
-Fedora:
-
-```bash
-sudo dnf install mesa-compat-libOSMesa mesa-compat-libOSMesa-devel
-```
-
-Ubuntu/Debian:
-
-```bash
-sudo apt install libosmesa6 libosmesa6-dev
-```
+`BUILD_BACKEND_HEADLESS_SOFTWARE` uses Flutter's `kSoftware` CPU renderer — no EGL or GPU required. No additional packages are needed beyond a standard build environment.
 
 ### lavapipe (headless Vulkan)
 
@@ -73,7 +61,7 @@ Configure with both flags on, point at the bundle:
 ```bash
 cmake -S . -B build-goldens \
     -DBUILD_UNIT_TESTS=ON \
-    -DBUILD_BACKEND_HEADLESS_EGL=ON \
+    -DBUILD_BACKEND_HEADLESS_SOFTWARE=ON \
     -DBUILD_COMPOSITOR=ON \
     -DUNIT_TEST_APP_BUNDLE=/path/to/flutter/build/linux/x64/release/bundle \
     -DBUILD_NUMBER=1
@@ -114,11 +102,10 @@ VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
     homescreen -b "$BUNDLE" --window-type=BG
 ```
 
-There is no native headless-Vulkan backend in this repo today (the existing `HeadlessBackend` is OSMesa/EGL only). Adding one would mean a fourth backend implementation along the lines of `WaylandVulkanBackend` but using `VK_EXT_headless_surface` + a memory-image swapchain — substantial, not on this branch. Until then, Vulkan goldens go through the weston-headless pairing above.
+There is no native headless-Vulkan backend in this repo today (the existing `HeadlessBackend` is Software-only). Adding one would mean a fourth backend implementation along the lines of `WaylandVulkanBackend` but using `VK_EXT_headless_surface` + a memory-image swapchain — substantial, not on this branch. Until then, Vulkan goldens go through the weston-headless pairing above.
 
 ## What's deferred
 
-- **HeadlessBackend compositor wiring.** `HeadlessBackend::GetCompositorConfig()` returns null callbacks today. `BUILD_COMPOSITOR=ON` with the headless backend currently falls back to direct rendering — i.e. the parity test verifies "compositor build doesn't break Flutter-only frames" but doesn't yet exercise the create/collect/present callbacks. Wiring requires either porting `GlCompositor` / `EglFboBackingStore` to desktop GL headers (OSMesa is desktop GL, not GLES) or templating those primitives over the GL header set.
 - **Native headless Vulkan backend.** See above.
 - **Multi-layer goldens.** Need a Dart bundle that emits a `PlatformViewLayer`; the renderer will then exercise `WaylandEglBackend::PresentLayers`'s general path and the new GL-texture composite step from the plugin migrations.
 

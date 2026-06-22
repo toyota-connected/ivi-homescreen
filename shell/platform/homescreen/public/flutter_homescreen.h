@@ -76,7 +76,7 @@ typedef struct {
 // |kFlutterDesktopGpuSurfaceTypeGlTexture2D| external textures.
 //
 // Returns false if the embedder's current backend is not EGL-based
-// (e.g. headless OSMesa, Vulkan) or the handles are not yet initialized.
+// (e.g. headless Software, Vulkan) or the handles are not yet initialized.
 FLUTTER_EXPORT bool FlutterDesktopPluginRegistrarGetEglContext(
     FlutterDesktopPluginRegistrarRef registrar,
     FlutterDesktopEglContext* out);

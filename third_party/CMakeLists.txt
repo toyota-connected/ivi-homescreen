@@ -70,8 +70,7 @@ add_subdirectory(flutter)
 # backends would drag Wayland headers + libwayland into builds that must stay
 # Wayland-free, so gate the whole subproject.
 #
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     if (BUILD_BACKEND_WAYLAND_EGL)
         set(ENABLE_EGL ON)
     else ()

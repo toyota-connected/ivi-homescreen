@@ -25,8 +25,7 @@
 #include "timer.h"
 #include "view/flutter_view.h"
 
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
@@ -34,7 +33,7 @@
 #include "display/drm_display.h"
 #endif
 
-#if BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_SOFTWARE || BUILD_BACKEND_HEADLESS_SOFTWARE
 #include "backend/software/software_cursor.h"
 #include "display/software_display.h"
 #if BUILD_SOFTWARE_INPUT_LIBINPUT
@@ -42,8 +41,9 @@
 #endif
 #endif
 
-#if BUILD_BACKEND_HEADLESS_EGL
-#include "backend/headless/headless.h"
+#if BUILD_BACKEND_HEADLESS_SOFTWARE
+#include "backend/software/memory_sink.h"
+#include "backend/software/software_backend.h"
 #endif
 
 namespace {
@@ -65,7 +65,7 @@ std::shared_ptr<IDisplay> MakeDisplay(
   const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
                                       static_cast<int32_t>(h), 60.0, no_seat);
-#elif BUILD_BACKEND_SOFTWARE
+#elif BUILD_BACKEND_SOFTWARE || BUILD_BACKEND_HEADLESS_SOFTWARE
   // No compositor, no Wayland, no DRM — just an IDisplay that owns
   // (a) a refresh-rate denominator for App::Loop and (b) an optional
   // libinput-backed seat. 60 Hz default; a sink with a real vblank
@@ -118,9 +118,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON in waypp's CMake regardless of backend, so combine
 // with a Wayland-backend gate here.
-#if ENABLE_AGL_SHELL_CLIENT &&                                    \
-    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-     BUILD_BACKEND_HEADLESS_EGL)
+#if ENABLE_AGL_SHELL_CLIENT && \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN)
   bool found_view_with_bg = false;
 #endif
 
@@ -136,9 +135,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON in waypp's CMake regardless of backend, so combine
 // with a Wayland-backend gate here.
-#if ENABLE_AGL_SHELL_CLIENT &&                                    \
-    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-     BUILD_BACKEND_HEADLESS_EGL)
+#if ENABLE_AGL_SHELL_CLIENT && \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN)
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
         WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
@@ -150,9 +148,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON in waypp's CMake regardless of backend, so combine
 // with a Wayland-backend gate here.
-#if ENABLE_AGL_SHELL_CLIENT &&                                    \
-    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-     BUILD_BACKEND_HEADLESS_EGL)
+#if ENABLE_AGL_SHELL_CLIENT && \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   if (found_view_with_bg)
@@ -233,12 +230,33 @@ int App::Loop() const {
   return 0;
 }
 
-#if BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_HEADLESS_SOFTWARE
 
-GLubyte* App::getViewRenderBuf(const int i) const {
-  return reinterpret_cast<HeadlessBackend*>(
-             m_views[static_cast<unsigned long>(i)]->GetBackend())
-      ->getHeadlessBuffer();
+std::vector<uint8_t> App::getViewRenderBuf(const int i,
+                                           size_t* row_bytes,
+                                           size_t* height) const {
+  auto* sw_backend = dynamic_cast<SoftwareBackend*>(
+      m_views[static_cast<size_t>(i)]->GetBackend());
+  if (sw_backend == nullptr) {
+    if (row_bytes != nullptr)
+      *row_bytes = 0;
+    if (height != nullptr)
+      *height = 0;
+    return {};
+  }
+  // Obtain the MemorySink from the backend. The SoftwareBackend was
+  // constructed with is_headless=true so IVI_SW_SINK defaults to
+  // "memory" in headless test fixtures; callers that want pixel access
+  // must ensure IVI_SW_SINK=memory at startup.
+  auto* sink = dynamic_cast<MemorySink*>(sw_backend->GetSink());
+  if (sink == nullptr) {
+    if (row_bytes != nullptr)
+      *row_bytes = 0;
+    if (height != nullptr)
+      *height = 0;
+    return {};
+  }
+  return sink->SnapshotLatest(row_bytes, height);
 }
 
 #endif

@@ -27,7 +27,7 @@ build:
 
 cross:
   defines:
-    BUILD_BACKEND_HEADLESS_EGL: 'OFF'
+    BUILD_BACKEND_HEADLESS_SOFTWARE: 'OFF'
     DISABLE_PLUGINS: 'OFF'
     PLUGINS_DIR: '../ivi-homescreen-plugins/plugins'
 

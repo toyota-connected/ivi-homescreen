@@ -18,8 +18,10 @@
 
 #include <utility>
 
-#include "backend/software/input/software_seat.h"
 #include "input/iseat.h"
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
+#include "backend/software/input/software_seat.h"
+#endif
 
 SoftwareDisplay::SoftwareDisplay(const int32_t width,
                                  const int32_t height,
@@ -37,17 +39,22 @@ void SoftwareDisplay::SetViewportSize(const int32_t width,
   width_ = width;
   height_ = height;
   // SetViewport is SoftwareSeat-specific (not on ISeat), so downcast — the
-  // only seat type a SoftwareDisplay ever holds.
+  // only seat type a SoftwareDisplay ever holds. No-op when libinput is
+  // disabled (no seat is ever set in that configuration).
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
   if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
     sw_seat->SetViewport(width, height);
   }
+#endif
 }
 
 void SoftwareDisplay::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
   cursor_ = std::move(cursor);
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
   if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
     sw_seat->SetCursor(cursor_);
   }
+#endif
 }
 
 void SoftwareDisplay::StartEvents() {

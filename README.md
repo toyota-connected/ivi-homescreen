@@ -305,7 +305,7 @@ All other parameters get assigned using the following ordering:
 
 `BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan. Defaults to OFF
 
-`BUILD_BACKEND_HEADLESS_EGL` - Build Headless backend for EGL (OSMesa). Defaults to OFF
+`BUILD_BACKEND_HEADLESS_SOFTWARE` - Build headless backend using the kSoftware CPU renderer (no EGL or GPU required). Defaults to OFF
 
 `BUILD_COMPOSITOR` - Enable the `FlutterCompositor` backing-store API so platform-view layers can be interleaved with Flutter UI. See [Platform View Plugins](#platform-view-plugins). Defaults to OFF.
 

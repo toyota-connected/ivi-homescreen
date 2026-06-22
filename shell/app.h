@@ -16,8 +16,10 @@
 
 #pragma once
 
-#include <EGL/egl.h>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "configuration/configuration.h"
 #include "view/flutter_view.h"
@@ -45,8 +47,13 @@ class App final {
    */
   [[nodiscard]] int Loop() const;
 
-#if BUILD_BACKEND_HEADLESS_EGL
-  uint8_t* getViewRenderBuf(int i) const;
+#if BUILD_BACKEND_HEADLESS_SOFTWARE
+  // Returns a snapshot of the most recent rendered frame from the MemorySink.
+  // row_bytes and height receive the buffer geometry; both are 0 before the
+  // first frame presents. The returned vector owns its copy of the pixels.
+  std::vector<uint8_t> getViewRenderBuf(int i,
+                                        size_t* row_bytes,
+                                        size_t* height) const;
 #endif
 
  private:

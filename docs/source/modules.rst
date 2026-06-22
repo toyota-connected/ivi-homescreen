@@ -325,15 +325,6 @@ key_event_handler.h
    :private-members:
    :undoc-members:
 
-osmesa.h
---------
-
-.. doxygenclass:: OSMesaHeadless
-   :project: ivi-homescreen
-   :members:
-   :private-members:
-   :undoc-members:
-
 display.cc
 ----------
 

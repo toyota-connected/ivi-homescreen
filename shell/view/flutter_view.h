@@ -25,8 +25,7 @@
 #if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
 #endif
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/window.h"
 #endif
 
@@ -62,23 +61,21 @@ class PlatformChannel;
 namespace flutter {
 class KeyEventHandler;
 }
-#if BUILD_BACKEND_HEADLESS_EGL
-class HeadlessBackend;
+#if BUILD_BACKEND_HEADLESS_SOFTWARE || BUILD_BACKEND_SOFTWARE
+class SoftwareBackend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
 class DrmBackend;
 #elif BUILD_BACKEND_DRM_KMS_VULKAN
 class VulkanDrmBackend;
-#elif BUILD_BACKEND_SOFTWARE
-class SoftwareBackend;
 #elif BUILD_BACKEND_WAYLAND_EGL
 class WaylandEglBackend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN
 class WaylandVulkanBackend;
 #else
 #error \
-    "no Flutter backend selected: define one of BUILD_BACKEND_HEADLESS_EGL, " \
-    "BUILD_BACKEND_DRM_KMS_EGL, BUILD_BACKEND_DRM_KMS_VULKAN, " \
-    "BUILD_BACKEND_SOFTWARE, BUILD_BACKEND_WAYLAND_EGL, " \
+    "no Flutter backend selected: define one of BUILD_BACKEND_HEADLESS_SOFTWARE, " \
+    "BUILD_BACKEND_SOFTWARE, BUILD_BACKEND_DRM_KMS_EGL, " \
+    "BUILD_BACKEND_DRM_KMS_VULKAN, BUILD_BACKEND_WAYLAND_EGL, " \
     "BUILD_BACKEND_WAYLAND_VULKAN"
 #endif
 #ifdef ENABLE_PLUGIN_COMP_SURF
@@ -263,14 +260,12 @@ class FlutterView {
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:
-#if BUILD_BACKEND_HEADLESS_EGL
-  std::shared_ptr<HeadlessBackend> m_backend;
+#if BUILD_BACKEND_HEADLESS_SOFTWARE || BUILD_BACKEND_SOFTWARE
+  std::shared_ptr<SoftwareBackend> m_backend;
 #elif BUILD_BACKEND_DRM_KMS_EGL
   std::shared_ptr<DrmBackend> m_backend{};
 #elif BUILD_BACKEND_DRM_KMS_VULKAN
   std::shared_ptr<VulkanDrmBackend> m_backend{};
-#elif BUILD_BACKEND_SOFTWARE
-  std::shared_ptr<SoftwareBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_EGL
   std::shared_ptr<WaylandEglBackend> m_backend;
 #elif BUILD_BACKEND_WAYLAND_VULKAN

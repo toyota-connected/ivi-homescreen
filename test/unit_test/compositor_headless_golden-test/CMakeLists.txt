@@ -1,10 +1,10 @@
-# Compositor-mode parity gate against the OSMesa headless backend.
+# Compositor-mode parity gate against the headless software backend.
 # Builds only when both flags are on; the existing test infrastructure
-# already requires BUILD_BACKEND_HEADLESS_EGL.
+# already requires BUILD_BACKEND_HEADLESS_SOFTWARE.
 if (NOT BUILD_COMPOSITOR)
     return()
 endif ()
-if (NOT BUILD_BACKEND_HEADLESS_EGL)
+if (NOT BUILD_BACKEND_HEADLESS_SOFTWARE)
     return()
 endif ()
 

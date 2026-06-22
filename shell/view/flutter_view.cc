@@ -22,8 +22,11 @@
 
 #include "app.h"
 
-#if BUILD_BACKEND_HEADLESS_EGL
-#include "backend/headless/headless.h"
+#if BUILD_BACKEND_HEADLESS_SOFTWARE
+#include "backend/software/memory_sink.h"
+#include "backend/software/none_sink.h"
+#include "backend/software/sink_factory.h"
+#include "backend/software/software_backend.h"
 #elif BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "display/drm_display.h"
@@ -60,9 +63,9 @@
 extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE && \
+    !BUILD_BACKEND_HEADLESS_SOFTWARE
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
@@ -75,12 +78,7 @@ FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<IDisplay>& display)
     : m_display(display), m_config(std::move(config)), m_index(index) {
-#if BUILD_BACKEND_HEADLESS_EGL
-  m_backend = std::make_shared<HeadlessBackend>(
-      m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewHeight),
-      m_config.debug_backend.value_or(false), kEglBufferSize);
-#elif BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL
   {
     auto parse_tri = [](const std::optional<std::string>& s,
                         drm_config::TriState def =
@@ -313,6 +311,17 @@ FlutterView::FlutterView(Configuration::Config config,
         m_config.view.height.value_or(kDefaultViewHeight),
         MakeSinkFromEnv(m_config.view.drm_device.value_or(std::string{})));
   }
+#elif BUILD_BACKEND_HEADLESS_SOFTWARE
+  {
+    // In headless mode the default sink is NoneSink (frames discarded).
+    // Test fixtures that need pixel access should set IVI_SW_SINK=memory
+    // at launch; MakeSinkFromEnv() will pick it up.
+    m_backend = std::make_shared<SoftwareBackend>(
+        m_config.view.width.value_or(kDefaultViewWidth),
+        m_config.view.height.value_or(kDefaultViewHeight),
+        MakeSinkFromEnv(m_config.view.drm_device.value_or(std::string{})),
+        /*is_headless=*/true);
+  }
 #endif
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
@@ -320,7 +329,7 @@ FlutterView::FlutterView(Configuration::Config config,
                m_config.view.height.value_or(kDefaultViewHeight));
 
 #if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
-    !BUILD_BACKEND_SOFTWARE
+    !BUILD_BACKEND_SOFTWARE && !BUILD_BACKEND_HEADLESS_SOFTWARE
   auto* wl = dynamic_cast<Display*>(display.get());
   m_wayland_window = std::make_shared<WaylandWindow>(
       m_index, std::dynamic_pointer_cast<Display>(display),
@@ -439,7 +448,7 @@ FlutterView::~FlutterView() {
 }
 
 #if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
-    !BUILD_BACKEND_SOFTWARE
+    !BUILD_BACKEND_SOFTWARE && !BUILD_BACKEND_HEADLESS_SOFTWARE
 Display* FlutterView::GetDisplay() const {
   return dynamic_cast<Display*>(m_display.get());
 }
@@ -500,11 +509,12 @@ void FlutterView::Initialize() {
   // fullscreen actually gets mode dims here instead of a stale 1024x768 etc.
   const auto width = static_cast<int32_t>(m_backend->width());
   const auto height = static_cast<int32_t>(m_backend->height());
-#elif BUILD_BACKEND_SOFTWARE
+#elif BUILD_BACKEND_SOFTWARE || BUILD_BACKEND_HEADLESS_SOFTWARE
   // The SoftwareBackend adopts the sink's native mode (DRM / fbdev) as its
   // resolved extent; render the engine at that so the frame fills + centers on
   // the panel instead of being top-left cropped from a config-sized view.
-  // Falls back to the config dims for sinks with no native size (file/memory).
+  // Falls back to the config dims for sinks with no native size
+  // (file/memory/none).
   auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get());
   const auto width = static_cast<int32_t>(
       sw_backend ? sw_backend->width()
@@ -563,9 +573,18 @@ void FlutterView::Initialize() {
   // and hand the display's cursor to the sink (which composites it).
   if (auto* sw_display = dynamic_cast<SoftwareDisplay*>(m_display.get())) {
     sw_display->SetViewportSize(width, height);
-    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
-      sw_backend->SetCursor(sw_display->cursor());
+    if (auto* sw_backend_ptr =
+            dynamic_cast<SoftwareBackend*>(m_backend.get())) {
+      sw_backend_ptr->SetCursor(sw_display->cursor());
     }
+  }
+#elif BUILD_BACKEND_HEADLESS_SOFTWARE
+  // No WaylandWindow, no SoftwareDisplay: send window metrics explicitly.
+  {
+    const auto result = m_flutter_engine->SetWindowSize(
+        static_cast<size_t>(height), static_cast<size_t>(width));
+    spdlog::info("[SoftwareBackend/headless] SendWindowMetrics {}x{} result={}",
+                 width, height, static_cast<int>(result));
   }
 #else
   // Engine events are decoded by surface pointer

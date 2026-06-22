@@ -46,8 +46,7 @@ endif ()
 # #if-gated on a Wayland backend. Skipping these for non-Wayland
 # binaries drops the libwayland-client + libwayland-cursor link/runtime
 # deps; drm-kms-egl and software builds become truly Wayland-free.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE
             wayland/display.cc
             wayland/window.cc
@@ -83,22 +82,22 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     endif ()
 endif ()
 
-if (BUILD_BACKEND_HEADLESS_EGL)
-    target_sources(${PROJECT_NAME} PRIVATE
-            backend/headless/headless.cc
-            backend/headless/osmesa.cc
-            backend/gl_process_resolver.cc
-    )
-endif ()
-
-if (BUILD_BACKEND_SOFTWARE)
+if (BUILD_BACKEND_HEADLESS_SOFTWARE OR BUILD_BACKEND_SOFTWARE)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/software/file_sink.cc
             backend/software/sink_factory.cc
             backend/software/software_backend.cc
             backend/software/software_cursor.cc
+    )
+endif ()
+
+if (BUILD_BACKEND_HEADLESS_SOFTWARE OR BUILD_BACKEND_SOFTWARE)
+    target_sources(${PROJECT_NAME} PRIVATE
             display/software_display.cc
     )
+endif ()
+
+if (BUILD_BACKEND_SOFTWARE)
     if (BUILD_SOFTWARE_SINK_DRM)
         target_sources(${PROJECT_NAME} PRIVATE
                 backend/software/drm_dumb_sink.cc
@@ -121,10 +120,10 @@ endif ()
 # Shared libinput keyboard core (xkb translation + key-repeat) used by every
 # libinput-backed seat — SoftwareSeat and (DRM) DrmSeat — so keyboard behavior
 # is identical across backends. Depends only on libxkbcommon, which those seats
-# already link. Added once here to avoid duplicate sources in multi-backend
-# builds.
+# already link. Also compiled for headless software so platform_homescreen's
+# key event handler can resolve xkb symbols without the Wayland/waypp stack.
 if (BUILD_SOFTWARE_INPUT_LIBINPUT OR BUILD_BACKEND_DRM_KMS_EGL OR
-    BUILD_BACKEND_DRM_KMS_VULKAN)
+    BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_BACKEND_HEADLESS_SOFTWARE)
     target_sources(${PROJECT_NAME} PRIVATE
             input/xkb_keyboard.cc
             input/key_repeater.cc
@@ -316,9 +315,14 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers)
 endif ()
-if (BUILD_BACKEND_HEADLESS_EGL)
-    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::OSMESA)
+if (BUILD_BACKEND_HEADLESS_SOFTWARE)
+    # xkb_keyboard.cc (compiled above) calls libxkbcommon directly; link it
+    # explicitly since neither waypp nor SW_LIBINPUT bring it in for this path.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(HEADLESS_XKBCOMMON xkbcommon IMPORTED_TARGET REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::HEADLESS_XKBCOMMON)
 endif ()
+
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry)
 endif ()
@@ -341,8 +345,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # the wayland-gen protocol-header include dirs and the static library are both
 # needed only there. Non-Wayland binaries (DRM EGL/Vulkan, software) get
 # neither the headers nor the libwayland-client / libwayland-cursor deps.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     target_include_directories(${PROJECT_NAME} PRIVATE
             $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
     )

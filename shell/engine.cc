@@ -45,8 +45,7 @@
 // forward-declares WaylandWindow unconditionally so the header
 // compiles without Wayland; the .cc needs the real definition only
 // when Wayland is selected.
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/window.h"
 #endif
 
@@ -682,8 +681,7 @@ bool Engine::ActivateSystemCursor(const int32_t device,
   if (!m_egl_window) {
     return true;
   }
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   return m_egl_window->ActivateSystemCursor(device, kind);
 #else
   // Forward-declaration only on non-Wayland builds; m_egl_window is

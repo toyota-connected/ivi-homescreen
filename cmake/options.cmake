@@ -137,12 +137,17 @@ if (USE_DRM_SCENE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VU
 endif ()
 
 #
-# Headless
+# Headless (software / CPU renderer — no GPU or Wayland)
 #
-option(BUILD_BACKEND_HEADLESS_EGL "Build Headless EGL Backend" OFF)
-if (BUILD_BACKEND_HEADLESS_EGL)
-    find_package(PkgConfig)
-    pkg_check_modules(OSMESA osmesa glesv2 egl IMPORTED_TARGET REQUIRED)
+option(BUILD_BACKEND_HEADLESS_SOFTWARE
+        "Build headless backend using kSoftware renderer — no GPU or Wayland required"
+        OFF)
+if (BUILD_BACKEND_HEADLESS_SOFTWARE)
+    # Force all hardware sinks and libinput off: headless has no display
+    # device to scan out to and no /dev/input/event* to listen on.
+    set(BUILD_SOFTWARE_SINK_DRM OFF CACHE BOOL "" FORCE)
+    set(BUILD_SOFTWARE_SINK_FBDEV OFF CACHE BOOL "" FORCE)
+    set(BUILD_SOFTWARE_INPUT_LIBINPUT OFF CACHE BOOL "" FORCE)
 endif ()
 
 #

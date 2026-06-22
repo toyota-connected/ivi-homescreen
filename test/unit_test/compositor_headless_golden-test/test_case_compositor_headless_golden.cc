@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// Compositor-mode golden frame test running against the OSMesa headless
+// Compositor-mode golden frame test running against the headless software
 // backend. Same harness as test_case_app_headless.cc but compiled with
 // BUILD_COMPOSITOR on. Establishes a parity gate: the single-layer fast
 // path through the compositor must produce the same pixels as the
