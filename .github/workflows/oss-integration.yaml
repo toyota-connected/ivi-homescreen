@@ -15,6 +15,8 @@ jobs:
   crash-handler:
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
     runs-on: ubuntu-22.04
+    env:
+      PREFER_LLVM: 19
     steps:
       - name: Check Environment
         id: check_environment
