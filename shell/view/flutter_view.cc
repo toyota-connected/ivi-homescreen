@@ -509,8 +509,8 @@ void FlutterView::Initialize() {
   // ratio and the integer wl_output scale reported by the compositor.
   const auto pixel_ratio =
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) *
-      static_cast<double>(dynamic_cast<Display*>(m_display.get())
-                              ->GetBufferScale(m_wayland_window->GetOutputIndex()));
+      static_cast<double>(
+          m_display->GetBufferScale(m_wayland_window->GetOutputIndex()));
 #else
   constexpr double pixel_ratio = 1;
 #endif
@@ -521,7 +521,7 @@ void FlutterView::Initialize() {
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
 
-  SPDLOG_DEBUG(
+  spdlog::info(
       "Display metadata: {}x{} (logical) -> {}x{} (physical), pixel_ratio={}",
       width, height, display.width, display.height, pixel_ratio);
 
@@ -603,8 +603,7 @@ void FlutterView::UpdateDisplayMetadata() const {
   auto [width, height] = m_wayland_window->GetSize();
   const auto pixel_ratio =
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) *
-      static_cast<double>(dynamic_cast<Display*>(m_display.get())
-                              ->GetBufferScale(m_wayland_window->GetOutputIndex()));
+      m_display->GetBufferScale(m_wayland_window->GetOutputIndex());
 #endif
 
   display.width = static_cast<size_t>(width * pixel_ratio);
