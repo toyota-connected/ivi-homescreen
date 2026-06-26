@@ -24,7 +24,8 @@ IVI_SRC="${FLUTTER_WORKSPACE}/app/ivi-homescreen"
 IVI_BUILD="${IVI_SRC}/build"
 SENTRY_LIBDIR="${FLUTTER_WORKSPACE}/app/sentry-native/build/release/staging"
 CRASHPAD_BINDIR="${FLUTTER_WORKSPACE}/app/sentry-native/build/release/crashpad_build/handler"
-SAMPLES_DIR="${FLUTTER_WORKSPACE}/app/samples/material_3_demo"
+SAMPLES_DIR="${FLUTTER_WORKSPACE}/app/flutter-samples/material_3_demo"
+BUNDLE_DIR="${SAMPLES_DIR}/.desktop-homescreen"
 
 KENT_PID=""
 
@@ -35,9 +36,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+_dir=$(pwd)
+
+# ---------------------------------------------------------------------------
+# Prepare test app
+# ---------------------------------------------------------------------------
+cd "${SAMPLES_DIR}"
+# this is required to make sure a `.desktop-homescreen` bundle is generated
+flutter pub get
+flutter build bundle
+flutter install -d desktop-homescreen
+cd "${_dir}"
+
 # ---------------------------------------------------------------------------
 # Configure
 # ---------------------------------------------------------------------------
+
 cmake \
   -S "${IVI_SRC}" \
   -B "${IVI_BUILD}" \
@@ -61,29 +75,53 @@ kent-server run --host "${KENT_HOST}" --port "${KENT_PORT}" &
 KENT_PID=$!
 sleep 2
 
-# ---------------------------------------------------------------------------
-# Run homescreen (expected to crash)
-# ---------------------------------------------------------------------------
-set +e
-SENTRY_DSN="http://public@${KENT_HOST}:${KENT_PORT}/1" \
-  "${IVI_BUILD}/shell/homescreen" -b "${SAMPLES_DIR}"
-HOMESCREEN_EXIT_CODE=$?
-set -e
+run_and_verify_crash() {
+  # ---------------------------------------------------------------------------
+  # Run homescreen (expected to crash)
+  # ---------------------------------------------------------------------------
+  set +e
+  SENTRY_DSN="http://public@${KENT_HOST}:${KENT_PORT}/1" \
+    "${IVI_BUILD}/shell/homescreen" -b "${BUNDLE_DIR}"
+  HOMESCREEN_EXIT_CODE=$?
+  set -e
 
-if [[ "${HOMESCREEN_EXIT_CODE}" == "0" ]]; then
-  echo "error: homescreen exited with 0 — expected a crash (non-zero exit)" >&2
-fi
-echo "homescreen exited with code ${HOMESCREEN_EXIT_CODE} as expected"
+  if [[ "${HOMESCREEN_EXIT_CODE}" == "0" ]]; then
+    echo "error: homescreen exited with 0 — expected a crash (non-zero exit)" >&2
+    return 1
+  fi
 
-# ---------------------------------------------------------------------------
-# Wait for crash report delivery, then verify Kent received it
-# ---------------------------------------------------------------------------
-sleep 10
+  _expected_exit_code=139
+  if [[ "${HOMESCREEN_EXIT_CODE}" != "${_expected_exit_code}" ]]; then
+    echo "error: homescreen exited with ${HOMESCREEN_EXIT_CODE} — expected ${_expected_exit_code}" >&2
+    return 1
+  else
+    echo "homescreen exited with expected crash code ${_expected_exit_code}"
+  fi
 
-response=$(curl -sf "http://${KENT_HOST}:${KENT_PORT}/api/eventlist/")
-echo "Kent event list: ${response}"
-if [[ "${response}" == "[]" || -z "${response}" ]]; then
-  echo "error: Kent received no crash reports — sentry-native did not submit the crash" >&2
-  exit 1
-fi
-echo "Crash report successfully received by Kent"
+  # ---------------------------------------------------------------------------
+  # Wait for crash report delivery, then verify Kent received it
+  # ---------------------------------------------------------------------------
+  sleep 10
+
+  response=$(curl -sf "http://${KENT_HOST}:${KENT_PORT}/api/eventlist/")
+  echo "Kent event list: ${response}"
+  # response = { "events" : [ { "event_id" : "..." }, ... ] }
+  # use jq to get length of events array
+  event_count=$(echo "${response}" | jq '.events | length' || echo "0")
+  if [[ "${event_count}" == "0" ]]; then
+    echo "error: no crash reports received by Kent" >&2
+    return 1
+  fi
+  echo "Kent received ${event_count} crash report(s) as expected"
+}
+
+for attempt in 1 2; do
+  if run_and_verify_crash; then
+    break
+  fi
+  if [[ "${attempt}" == "2" ]]; then
+    echo "error: crash handler verification failed after ${attempt} attempts" >&2
+    exit 1
+  fi
+  echo "Attempt ${attempt} failed, retrying..."
+done
