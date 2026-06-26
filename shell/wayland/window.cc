@@ -37,22 +37,22 @@ WaylandWindow::WaylandWindow(const size_t index,
                              Backend* backend,
                              const uint32_t ivi_surface_id,
                              FlutterView* view)
-  : m_index(index),
-    m_display(std::move(display)),
-    m_wl_output(output),
-    m_output_index(output_index),
-    m_flutter_engine(nullptr),
-    m_pixel_ratio(pixel_ratio),
-    m_view(view),
-    m_backend(backend),
-    m_ivi_surface_id(ivi_surface_id),
-    m_fullscreen(fullscreen),
-    m_geometry({width, height}),
-    m_activation_area({activation_area_x, activation_area_y,
-                       activation_area_width, activation_area_height}),
-    m_window_size({width, height}),
-    m_type(get_window_type(type)),
-    m_app_id(std::move(app_id)) {
+    : m_index(index),
+      m_display(std::move(display)),
+      m_wl_output(output),
+      m_output_index(output_index),
+      m_flutter_engine(nullptr),
+      m_pixel_ratio(pixel_ratio),
+      m_view(view),
+      m_backend(backend),
+      m_ivi_surface_id(ivi_surface_id),
+      m_fullscreen(fullscreen),
+      m_geometry({width, height}),
+      m_activation_area({activation_area_x, activation_area_y,
+                         activation_area_width, activation_area_height}),
+      m_window_size({width, height}),
+      m_type(get_window_type(type)),
+      m_app_id(std::move(app_id)) {
   // disable vsync
   SPDLOG_TRACE("({}) + WaylandWindow()", m_index);
 
@@ -308,7 +308,7 @@ void WaylandWindow::handle_toplevel_configure(
       case XDG_TOPLEVEL_STATE_ACTIVATED:
         w->m_activated = true;
         break;
-      default: ;
+      default:;
     }
   }
 
@@ -391,8 +391,8 @@ void WaylandWindow::OnOutputResized(const size_t output_index,
   m_geometry.height = target_h;
   {
     const auto buf_scale = m_display->GetBufferScale(m_output_index);
-    m_backend->Resize(m_index, m_flutter_engine.get(),
-                      target_w * buf_scale, target_h * buf_scale);
+    m_backend->Resize(m_index, m_flutter_engine.get(), target_w * buf_scale,
+                      target_h * buf_scale);
   }
 }
 
@@ -426,8 +426,7 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
     const auto buffer_scale = m_display->GetBufferScale(m_output_index);
 
     auto result = m_flutter_engine->SetWindowSize(
-        static_cast<size_t>(m_geometry.height * buffer_scale),
-        static_cast<size_t>(m_geometry.width  * buffer_scale));
+        m_geometry.height * buffer_scale, m_geometry.width * buffer_scale);
     if (result != kSuccess) {
       spdlog::error("Failed to set Flutter Engine Window Size");
     }

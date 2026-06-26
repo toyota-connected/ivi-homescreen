@@ -35,14 +35,12 @@ class Engine;
 
 class FlutterView;
 
-class WaylandWindow
-{
-public:
+class WaylandWindow {
+ public:
   // a normal surface role is a regular application; a window_bg, window_panel
   // are part of the client shell UI for AGL; for window_panel only the height
   // has any meaning, while window_bg will literally be the entire output
-  enum window_type
-  {
+  enum window_type {
     WINDOW_NORMAL,
     WINDOW_BG,
     WINDOW_PANEL_TOP,
@@ -127,8 +125,7 @@ public:
    * @relation
    * wayland
    */
-  std::pair<int32_t, int32_t> GetSize()
-  {
+  std::pair<int32_t, int32_t> GetSize() {
     return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
   }
 
@@ -160,22 +157,19 @@ public:
   bool m_activated{};
   bool m_running{};
 
-  struct
-  {
+  struct {
     int32_t width;
     int32_t height;
   } m_geometry;
 
-  struct
-  {
+  struct {
     uint32_t x;
     uint32_t y;
     uint32_t width;
     uint32_t height;
   } m_activation_area;
 
-  struct
-  {
+  struct {
     int32_t width;
     int32_t height;
   } m_window_size{};
