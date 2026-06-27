@@ -109,7 +109,8 @@ class XdgShellSurface final : public ShellSurface {
   // ack_configure already sent by XdgSurfaceHandler before this fires.
   void OnXdgSurfaceConfigure(uint32_t /*serial*/) {}
 
-  void OnToplevelConfigure(int32_t width, int32_t height, wl_array* states) {
+  void OnToplevelConfigure(int32_t width, int32_t height, wl_array* states)
+      const {
     // Always notify (even on a 0x0 "pick your own size" configure) so the
     // window can clear its wait-for-configure gate and refresh its state flags.
     SurfaceConfigure c;
@@ -142,7 +143,7 @@ class XdgShellSurface final : public ShellSurface {
     }
   }
 
-  void OnToplevelClose() {
+  void OnToplevelClose() const {
     if (config_.on_close) {
       config_.on_close();
     }
