@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <set>
 #include <string>
 
 #include "backend/backend.h"
@@ -158,6 +159,20 @@ class WaylandWindow {
   uint32_t m_ivi_surface_id;
   bool m_fullscreen{};
   bool m_maximized{};
+
+  // Indices of every wl_output the surface currently overlaps, maintained by
+  // handle_base_surface_enter / handle_base_surface_leave. ApplyBestScale()
+  // picks the highest scale in this set so the surface is always sharp on the
+  // densest display it touches, without reacting to spurious enter events from
+  // outputs the window is only grazing.
+  std::set<uint32_t> m_entered_outputs;
+
+  // Reads m_entered_outputs, picks the output with the highest wl_output
+  // buffer scale, and (if it differs from the current configuration) calls
+  // wl_surface_set_buffer_scale, Resize, SetPixelRatio, and
+  // UpdateDisplayMetadata. Returns the chosen output index, or m_output_index
+  // unchanged if the set is empty.
+  void ApplyBestScale();
   bool m_resize{};
   bool m_activated{};
   bool m_running{};

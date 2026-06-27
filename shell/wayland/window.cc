@@ -184,74 +184,96 @@ WaylandWindow::~WaylandWindow() {
   SPDLOG_TRACE("({}) - ~WaylandWindow()", m_index);
 }
 
-void WaylandWindow::handle_base_surface_enter(void* data,
-                                              struct wl_surface* /* surface */,
-                                              struct wl_output* output) {
-  // Option A: resize to match the entering output's scale on every
-  // wl_surface.enter event. This is the standard Wayland client contract —
-  // the compositor issues surface.enter to tell the client which output it
-  // now occupies so it can re-render at that output's native density.
-  //
-  // Alternatives considered:
-  //   B) Render at the maximum output scale from startup — wastes GPU fill
-  //      rate on 1× displays and is unreliable when output metadata arrives
-  //      asynchronously after WaylandWindow construction.
-  //   C) Track all overlapping outputs and use the highest active scale —
-  //      correct for a general-purpose desktop client that straddles two
-  //      monitors, but over-engineering for an IVI single-window embedder.
-  //
-  // Option A gives sharp rendering with minimal complexity. The one-frame
-  // resize artifact during an output transition is acceptable in this context.
-  auto* d = static_cast<WaylandWindow*>(data);
-
-  // Resolve the compositor-provided wl_output* to our numeric index so we
-  // can call GetBufferScale() and keep m_output_index in sync for future
-  // OnOutputScaleChanged() calls. If the output isn't found (e.g. hotplug
-  // race before the global is fully bound), fall back to the stored index
-  // so behaviour is unchanged.
-  const size_t new_idx = d->m_display->GetOutputIndexByHandle(output);
-  if (new_idx < d->m_display->OutputCount()) {
-    d->m_output_index = static_cast<uint32_t>(new_idx);
+void WaylandWindow::ApplyBestScale() {
+  // Pick the output with the highest buffer scale among all outputs the
+  // surface currently overlaps. Using the maximum ensures the framebuffer is
+  // always large enough for the sharpest display in the overlap set, at the
+  // cost of a small amount of extra GPU fill on lower-density outputs.
+  // This is the correct behaviour for Option A (react on enter/leave) while
+  // avoiding spurious reconfigures: enter fires for every overlapping output,
+  // so naively reconfiguring on every event causes the scale to flicker
+  // between outputs when a surface straddles two displays.
+  if (m_entered_outputs.empty()) {
+    return;
   }
 
-  const auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
+  uint32_t best_idx = m_output_index;
+  int32_t best_scale = 0;
+  for (const uint32_t idx : m_entered_outputs) {
+    const int32_t s = m_display->GetBufferScale(idx);
+    if (s > best_scale) {
+      best_scale = s;
+      best_idx = idx;
+    }
+  }
+
+  // Update the tracked primary output.
+  m_output_index = best_idx;
 
   spdlog::debug(
-      "({}) handle_base_surface_enter: output_idx={}, scale={}, "
+      "({}) ApplyBestScale: best_output_idx={}, scale={}, "
       "logical={}x{}, physical={}x{}",
-      d->m_index, d->m_output_index, buffer_scale, d->m_geometry.width,
-      d->m_geometry.height, d->m_geometry.width * buffer_scale,
-      d->m_geometry.height * buffer_scale);
+      m_index, best_idx, best_scale, m_geometry.width, m_geometry.height,
+      m_geometry.width * best_scale, m_geometry.height * best_scale);
 
-  // Update the compositor's buffer-scale hint and resize the EGL window to
-  // the physical dimensions for the new output's scale factor.
-  wl_surface_set_buffer_scale(d->m_base_surface, buffer_scale);
-  if (d->m_flutter_engine) {
-    d->m_backend->Resize(d->m_index, d->m_flutter_engine.get(),
-                         d->m_geometry.width * buffer_scale,
-                         d->m_geometry.height * buffer_scale);
+  wl_surface_set_buffer_scale(m_base_surface, best_scale);
+  if (m_flutter_engine) {
+    m_backend->Resize(m_index, m_flutter_engine.get(),
+                      m_geometry.width * best_scale,
+                      m_geometry.height * best_scale);
+    m_flutter_engine->SetPixelRatio(m_pixel_ratio * best_scale);
+    m_flutter_engine->SetPointerScale(static_cast<double>(best_scale));
   }
-
-  const auto result =
-      d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
-  d->m_flutter_engine->SetPointerScale(static_cast<double>(buffer_scale));
-  if (result != kSuccess) {
-    spdlog::error("Failed to set Flutter Engine Pixel Ratio");
-  } else {
-    if (d->m_view) {
-      d->m_view->UpdateDisplayMetadata();
-    } else {
-      spdlog::warn(
-          "WaylandWindow::handle_base_surface_enter: no FlutterView to update "
-          "display metadata");
-    }
+  if (m_view) {
+    m_view->UpdateDisplayMetadata();
   }
 }
 
-void WaylandWindow::handle_base_surface_leave(void* /* data */,
+void WaylandWindow::handle_base_surface_enter(void* data,
                                               struct wl_surface* /* surface */,
-                                              struct wl_output* /* output */) {
-  SPDLOG_TRACE("Leaving output");
+                                              struct wl_output* output) {
+  // The compositor sends wl_surface.enter for every output the surface
+  // overlaps — including outputs the window is only grazing. Reacting to
+  // each event independently would cause the scale to flip back and forth
+  // as the surface straddles two displays. Instead, maintain a set of all
+  // currently-entered outputs and always configure for the highest scale in
+  // that set (ApplyBestScale), so the framebuffer is sharp on every output
+  // the surface touches.
+  auto* d = static_cast<WaylandWindow*>(data);
+
+  const size_t new_idx = d->m_display->GetOutputIndexByHandle(output);
+  if (new_idx < d->m_display->OutputCount()) {
+    d->m_entered_outputs.insert(static_cast<uint32_t>(new_idx));
+    spdlog::debug(
+        "({}) handle_base_surface_enter: output_idx={} (entered set size={})",
+        d->m_index, new_idx, d->m_entered_outputs.size());
+  } else {
+    spdlog::warn(
+        "({}) handle_base_surface_enter: unknown output handle, ignoring",
+        d->m_index);
+    return;
+  }
+
+  d->ApplyBestScale();
+}
+
+void WaylandWindow::handle_base_surface_leave(void* data,
+                                              struct wl_surface* /* surface */,
+                                              struct wl_output* output) {
+  auto* d = static_cast<WaylandWindow*>(data);
+
+  const size_t idx = d->m_display->GetOutputIndexByHandle(output);
+  if (idx < d->m_display->OutputCount()) {
+    d->m_entered_outputs.erase(static_cast<uint32_t>(idx));
+    spdlog::debug(
+        "({}) handle_base_surface_leave: output_idx={} (entered set size={})",
+        d->m_index, idx, d->m_entered_outputs.size());
+  }
+
+  // Re-evaluate scale with this output removed. If the set is now empty
+  // (surface left all known outputs), leave the current configuration in
+  // place — it will be corrected by the next enter event.
+  d->ApplyBestScale();
 }
 
 const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
