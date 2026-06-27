@@ -28,6 +28,9 @@ add_executable(${PROJECT_NAME}
         main.cc
         main_loop_waker.cc
         profiling/frame_profile.cc
+        # Backend-spanning vsync baton machinery (Wayland/DRM/software providers
+        # inherit it). Source-agnostic, so always compiled.
+        vsync/ivsync_provider.cc
         timer.cc
         view/flutter_view.cc
         watchdog.cc
@@ -46,13 +49,28 @@ endif ()
 # #if-gated on a Wayland backend. Skipping these for non-Wayland
 # binaries drops the libwayland-client + libwayland-cursor link/runtime
 # deps; drm-kms-egl and software builds become truly Wayland-free.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE
             wayland/display.cc
             wayland/window.cc
             view/present_layer_sequencer.cc
+            # Compositor-protocol shell layer (xdg/agl/ivi/simple) + factory.
+            wayland/shell/shells.cc
+            # wp_presentation vsync provider (scanner presentation-time C++).
+            vsync/wayland_vsync_provider.cc
     )
+    if (ENABLE_XDG_CLIENT OR ENABLE_AGL_SHELL_CLIENT)
+        target_sources(${PROJECT_NAME} PRIVATE wayland/shell/xdg_shell.cc)
+    endif ()
+    if (ENABLE_AGL_SHELL_CLIENT)
+        target_sources(${PROJECT_NAME} PRIVATE wayland/shell/agl_shell.cc)
+    endif ()
+    if (ENABLE_IVI_SHELL_CLIENT)
+        target_sources(${PROJECT_NAME} PRIVATE wayland/shell/ivi_shell.cc)
+    endif ()
+    if (ENABLE_SIMPLE_SHELL_CLIENT)
+        target_sources(${PROJECT_NAME} PRIVATE wayland/shell/simple_shell.cc)
+    endif ()
 endif ()
 set_target_properties(${PROJECT_NAME}
         PROPERTIES OUTPUT_NAME "${EXE_OUTPUT_NAME}"
@@ -81,14 +99,6 @@ if (BUILD_BACKEND_WAYLAND_EGL)
                 backend/wayland_egl/gl_compositor.cc
         )
     endif ()
-endif ()
-
-if (BUILD_BACKEND_HEADLESS_EGL)
-    target_sources(${PROJECT_NAME} PRIVATE
-            backend/headless/headless.cc
-            backend/headless/osmesa.cc
-            backend/gl_process_resolver.cc
-    )
 endif ()
 
 if (BUILD_BACKEND_SOFTWARE)
@@ -316,9 +326,6 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers)
 endif ()
-if (BUILD_BACKEND_HEADLESS_EGL)
-    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::OSMESA)
-endif ()
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry)
 endif ()
@@ -337,16 +344,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         platform_homescreen
 )
 
-# config/common.h includes <waypp/waypp.h> only on the Wayland backends, so
-# the wayland-gen protocol-header include dirs and the static library are both
-# needed only there. Non-Wayland binaries (DRM EGL/Vulkan, software) get
-# neither the headers nor the libwayland-client / libwayland-cursor deps.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
-    target_include_directories(${PROJECT_NAME} PRIVATE
-            $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
-    )
-    target_link_libraries(${PROJECT_NAME} PRIVATE wayland-gen)
+# Wayland backends: generate the C++ protocol headers (wayland-cxx-scanner) and
+# link the wl/ framework + libwayland runtime onto the shell binary. Both helpers
+# are defined in cmake/wayland_cxx.cmake. Non-Wayland binaries (DRM EGL/Vulkan,
+# software) get neither the headers nor the libwayland-client / -cursor deps.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+    ivi_wayland_protocols(${PROJECT_NAME})
+    ivi_wayland_link(${PROJECT_NAME})
 endif ()
 
 target_link_directories(${PROJECT_NAME} PRIVATE

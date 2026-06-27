@@ -28,7 +28,7 @@ class Engine;
 
 // CPU-rendering backend. Wires Flutter's kSoftware renderer config to
 // a pluggable ISurfaceSink. No GPU, no display server, no Wayland.
-class SoftwareBackend final : public Backend {
+class SoftwareBackend final : public Shell {
  public:
   SoftwareBackend(uint32_t initial_width,
                   uint32_t initial_height,
@@ -45,7 +45,7 @@ class SoftwareBackend final : public Backend {
               int32_t width,
               int32_t height) override;
 
-  // wl_surface argument is inherited from the Backend interface; ignored
+  // wl_surface argument is inherited from the Shell interface; ignored
   // here — there is no Wayland surface in this backend.
   void CreateSurface(size_t index,
                      wl_surface* surface,

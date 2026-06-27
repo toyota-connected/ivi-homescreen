@@ -45,7 +45,6 @@
 #include <drm-cxx/log.hpp>
 #include "backend/drm_kms_egl/driver_probe.h"
 
-#include "asio/post.hpp"
 #include "backend/drm_kms_egl/drm_capture.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
@@ -54,6 +53,7 @@
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
 #include "logging.h"
+#include "profiling/frame_profile.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "task_runner.h"
@@ -433,6 +433,11 @@ void InstallDrmCxxLogSink() {
 DrmBackend::DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session)
     : cfg_(cfg), session_(session) {
   InstallDrmCxxLogSink();
+  // Unified scanout-cadence profiling, shared var with the other backends.
+  // Distinct from the cfg_.debug_backend per-second FPS line in
+  // RecordFlipComplete(). Enabled() also honors the umbrella IVI_PROFILE.
+  vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
+                       "DrmVsync");
 }
 
 homescreen::ICursorPositionSink* DrmBackend::gl_cursor() const {
@@ -440,8 +445,9 @@ homescreen::ICursorPositionSink* DrmBackend::gl_cursor() const {
 }
 
 DrmBackend::~DrmBackend() {
-  // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRM_PROFILE ran).
-  frame_profile_.LogSessionSummary("DrmBackend");
+  // The vsync provider's session summary (IVI_VSYNC_PROFILE) is logged from
+  // vsync_.Stop() in StopVsyncMonitor, which FlutterView calls before the
+  // engine destructs.
 
   // Let any in-flight page flip land so we don't free a BO still being
   // scanned out.
@@ -1252,14 +1258,9 @@ bool DrmBackend::TextureClearCurrent() {
 }
 
 void DrmBackend::RecordFlipComplete() {
-  // Unified cadence profile is independent of the debug_backend FPS line below:
-  // IVI_PROFILE (or legacy IVI_DRM_PROFILE) drives it without needing -d.
-  static const bool profile_enabled =
-      profiling::FrameProfile::Enabled("IVI_DRM_PROFILE");
-  if (profile_enabled) {
-    frame_profile_.Record("DrmBackend", /*ok=*/true,
-                          LibFlutterEngine->GetCurrentTime());
-  }
+  // Scanout-cadence profiling now lives in vsync_ (recorded per page flip via
+  // DeliverVsync under IVI_VSYNC_PROFILE). This is just the debug_backend
+  // per-second FPS line.
   if (!cfg_.debug_backend) {
     return;
   }
@@ -1316,73 +1317,35 @@ void DrmBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
   backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
 }
 
-void DrmBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                             const intptr_t baton) const {
-  if (engine == nullptr || baton == 0) {
-    return;
+bool DrmBackend::DrmVsyncProvider::IsSourcePending() const {
+  // Mirror the pre-fold flip-in-flight test: the legacy page-flip latch,
+  // unless an active compositor owns scanout — then its commit latch is
+  // authoritative (a backing-store fallback frame still flips through the
+  // legacy path, but planes_active() gates which latch to trust).
+  bool flip = backend_->flip_pending_.load(std::memory_order_acquire);
+#if BUILD_COMPOSITOR
+  if (backend_->compositor_ && backend_->compositor_->planes_active()) {
+    flip = backend_->compositor_->IsFlipPending();
   }
-  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
-  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
-    // Runner not wired yet (the engine's first vsync request raced
-    // SetPlatformTaskRunner during bring-up). Callers leave the baton
-    // parked in vsync_baton_ in this case rather than exchanging it out,
-    // so SetPlatformTaskRunner's kick latch delivers it once the runner
-    // is wired (#210).
-    return;
-  }
-  const uint64_t now = LibFlutterEngine->GetCurrentTime();
-  const uint64_t period_ns =
-      mode_.vrefresh > 0 ? 1000000000ULL / static_cast<uint64_t>(mode_.vrefresh)
-                         : 16666667ULL;
-  asio::post(*runner->GetStrandContext(), [engine, baton, now, period_ns]() {
-    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
-  });
+#endif
+  return flip;
+}
+
+uint32_t DrmBackend::DrmVsyncProvider::PeriodNs() const {
+  const uint32_t vr = backend_->mode_.vrefresh;
+  return vr > 0 ? static_cast<uint32_t>(1000000000ULL / vr) : 16666667U;
 }
 
 void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                                const intptr_t baton) {
+  // Cache the engine handle for OnSessionResumed (which needs it to
+  // ScheduleFrame), then hand the baton to the provider. SubmitBaton stores
+  // it, and — via our IsSourcePending() override — either waits for the
+  // in-flight page flip to return it or drains it inline for an idle pipeline
+  // (first frame / post-resume / waking on input), leaving it parked if the
+  // runner isn't wired yet so the #210 kick latch delivers it (SetEngine).
   engine_handle_.store(engine, std::memory_order_release);
-
-  // Store the baton first so that if the asio flip monitor races us
-  // (PAGE_FLIP_EVENT arrives between our flip-pending check and
-  // store), it picks up the baton and we don't double-deliver.
-  vsync_baton_.store(baton, std::memory_order_release);
-
-  // If a flip is in flight, the asio handler will fire OnVsync when
-  // PAGE_FLIP_EVENT lands. If not, the pipeline is idle (first frame,
-  // post-resume, or Flutter waking from idle on input) and there's
-  // nothing to feed the asio handler — we have to kick the baton
-  // ourselves or Flutter will sit forever waiting for OnVsync that
-  // never comes. Check both flip latches: backend's is set by the
-  // legacy Present, compositor's is set by atomic commits.
-  bool flip_in_flight = flip_pending_.load(std::memory_order_acquire);
-#if BUILD_COMPOSITOR
-  if (compositor_ && compositor_->planes_active()) {
-    flip_in_flight = compositor_->IsFlipPending();
-  }
-#endif
-  if (flip_in_flight) {
-    return;
-  }
-
-  // Idle pipeline — kick the baton inline. Only pull it out of
-  // vsync_baton_ if the platform task runner is actually wired and can
-  // deliver it; otherwise leave it parked so SetPlatformTaskRunner's kick
-  // latch delivers it once wired. At cold start the engine's first vsync
-  // request can land before SetPlatformTaskRunner; exchanging the baton
-  // out only to drop it in PostOnVsync stranded Flutter's first frame
-  // (#210) — frame 1 was never produced (black screen + only the HW
-  // cursor). Gating here (rather than exchange-then-restore) keeps the
-  // hand-off to the kick latch race-free: the baton is taken exactly once,
-  // by whichever of this path / the latch first sees the runner wired.
-  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
-  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
-    return;  // parked in vsync_baton_; SetPlatformTaskRunner drains it
-  }
-  if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
-      mine != 0) {
-    PostOnVsync(engine, mine);
-  }
+  vsync_.SubmitBaton(engine, baton);
 }
 
 void DrmBackend::OnSessionPaused() {
@@ -1442,11 +1405,8 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
   //  - No pending baton (wall-clock pacer, or no in-flight vsync request):
   //    ScheduleFrame to prompt Flutter into a new frame request, which
   //    our reset kick will deliver as the first-baton inline-fire.
-  if (const intptr_t pending =
-          vsync_baton_.exchange(0, std::memory_order_acq_rel);
-      pending != 0) {
-    PostOnVsync(engine, pending);
-    spdlog::info("[DrmBackend] resume: drained pending baton via PostOnVsync");
+  if (vsync_.DeliverParkedBaton()) {
+    spdlog::info("[DrmBackend] resume: drained pending baton");
   } else {
     const FlutterEngineResult r = LibFlutterEngine->ScheduleFrame(engine);
     if (r != kSuccess) {
@@ -1477,8 +1437,8 @@ void DrmBackend::OnLegacyFlipComplete() {
 
 void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
                                         unsigned int /*sequence*/,
-                                        unsigned int /*tv_sec*/,
-                                        unsigned int /*tv_usec*/,
+                                        unsigned int tv_sec,
+                                        unsigned int tv_usec,
                                         void* user_data) {
   // Always cast to DrmBackend* — both legacy Present and compositor
   // commits register `this`/`backend_` as user_data with that type.
@@ -1515,50 +1475,28 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
   self->OnLegacyFlipComplete();
 #endif
 
-  // Return the vsync baton to the engine if one is pending. We're on
-  // the platform task runner thread already (asio dispatched the
-  // async_wait completion here), so OnVsync can be called directly —
-  // no PostOnVsync round-trip needed.
-  const intptr_t baton =
-      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-  if (baton == 0) {
-    return;
-  }
-  const auto engine = self->engine_handle_.load(std::memory_order_acquire);
-  if (engine == nullptr) {
-    return;
-  }
-  const uint64_t now = LibFlutterEngine->GetCurrentTime();
-  const uint64_t period_ns =
-      self->mode_.vrefresh > 0
-          ? 1000000000ULL / static_cast<uint64_t>(self->mode_.vrefresh)
-          : 16666667ULL;
-  LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
+  // A real frame just scanned out — record the present cadence and return the
+  // vsync baton, stamped with the kernel-provided scanout time (tv_sec/tv_usec
+  // from the PAGE_FLIP_EVENT) rather than the handler-dispatch wall clock, so
+  // the [DrmVsync] cadence isn't inflated by asio scheduling jitter (matches
+  // the software sink). We're already on the platform task runner thread, but
+  // DeliverVsync still marshals OnVsync onto the runner strand for uniformity
+  // with the other backends; the one extra task hop is harmless.
+  const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
+                         static_cast<uint64_t>(tv_usec) * 1000ULL;
+  self->vsync_.DeliverVsync(tv_ns);
 }
 
 void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
   platform_task_runner_.store(runner, std::memory_order_release);
   StartFlipMonitor();
 
-  // Kick latch (#210). The engine may have requested its first vsync
-  // before this runner was wired (cold-start race between Engine::Run and
-  // this call). In that case SetVsyncBaton left the baton parked in
-  // vsync_baton_ rather than dropping it. Deliver it now so Flutter
-  // renders frame 1. Storing the runner above (release) before this drain
-  // (acq_rel exchange) makes the hand-off exact: SetVsyncBaton either saw
-  // the runner wired and took the baton itself, or saw it unwired and
-  // parked the baton — in which case its release-store of the baton
-  // happens-before this exchange, so we observe and deliver it here. Without
-  // this latch the first baton is never answered and the app hangs on a
-  // black screen (only the HW cursor visible) until restart.
-  if (auto* engine = engine_handle_.load(std::memory_order_acquire);
-      engine != nullptr) {
-    if (const intptr_t baton =
-            vsync_baton_.exchange(0, std::memory_order_acq_rel);
-        baton != 0) {
-      PostOnVsync(engine, baton);
-    }
-  }
+  // Wire engine+runner into the provider. SetEngine's #210 kick latch drains
+  // any baton parked before the runner came up (the engine's first vsync
+  // request can race this call at cold start; SubmitBaton parks it when the
+  // runner is unwired). Without that drain the first baton is never answered
+  // and the app hangs on a black screen (only the HW cursor) until restart.
+  vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
 }
 
 void DrmBackend::StartFlipMonitor() {
@@ -1595,6 +1533,11 @@ void DrmBackend::StopVsyncMonitor() {
     flip_descriptor_.reset();
   }
   platform_task_runner_.store(nullptr, std::memory_order_release);
+
+  // Drop any parked baton, clear engine/runner, and log the IVI_VSYNC_PROFILE
+  // session summary. Any page-flip event drained below then finds the provider
+  // cleared and no-ops its DeliverVsync — correct, we're tearing down.
+  vsync_.Stop();
 
   // Synchronously drain any in-flight PAGE_FLIP_EVENT. Without this,
   // ~DrmCompositor → WaitForPendingFlip spins forever: the async flip
@@ -1799,19 +1742,11 @@ bool DrmBackend::Present() {
       return false;
     }
     RecordFlipComplete();
-    // Mirror the compositor's first-commit drain: drmModeSetCrtc
-    // produces no PAGE_FLIP_EVENT, so the second baton (Flutter
-    // requested it after the first OnVsync) would sit in vsync_baton_
-    // unfired. Drain it now via the platform task runner; subsequent
-    // batons go through the normal PageFlipHandler path.
-    if (auto* engine = engine_handle_.load(std::memory_order_acquire);
-        engine != nullptr) {
-      if (const intptr_t baton =
-              vsync_baton_.exchange(0, std::memory_order_acq_rel);
-          baton != 0) {
-        PostOnVsync(engine, baton);
-      }
-    }
+    // Mirror the compositor's first-commit drain: drmModeSetCrtc produces no
+    // PAGE_FLIP_EVENT, so the next baton (Flutter requested it after the first
+    // OnVsync) would sit parked unfired. Drain it now via the provider;
+    // subsequent batons go through the normal PageFlipHandler path.
+    (void)vsync_.DeliverParkedBaton();
     return true;
   }
 

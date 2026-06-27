@@ -20,6 +20,7 @@
 #include <string>
 
 #include "backend/backend.h"
+#include "wayland/shell/wayland_shell.h"
 
 // workaround for Wayland macro not compiling in C++
 #define WL_ARRAY_FOR_EACH(pos, array, type)                             \
@@ -27,7 +28,7 @@
        (const char*)pos < ((const char*)(array)->data + (array)->size); \
        (pos)++)
 
-class Backend;
+class Shell;
 
 class Display;
 
@@ -61,7 +62,7 @@ class WaylandWindow {
                 uint32_t activation_area_y,
                 uint32_t activation_area_width,
                 uint32_t activation_area_height,
-                Backend* backend,
+                Shell* backend,
                 uint32_t ivi_surface_id);
 
   ~WaylandWindow();
@@ -141,7 +142,7 @@ class WaylandWindow {
   std::shared_ptr<Engine> m_flutter_engine;
   double m_pixel_ratio;
   struct wl_surface* m_base_surface{};
-  std::shared_ptr<Backend> m_backend;
+  std::shared_ptr<Shell> m_backend;
   bool m_wait_for_configure{};
 
   uint32_t m_ivi_surface_id;
@@ -175,12 +176,10 @@ class WaylandWindow {
   enum window_type m_type;
   std::string m_app_id;
 
-  struct xdg_surface* m_xdg_surface{};
-  struct xdg_toplevel* m_xdg_toplevel{};
-  static const struct xdg_surface_listener xdg_surface_listener;
-
-  struct ivi_surface* m_ivi_surface{};
-  static const struct ivi_surface_listener ivi_surface_listener;
+  // The surface's role (xdg toplevel / ivi surface / simple-shell surface),
+  // created and owned by the active compositor-protocol shell. Its internal
+  // listener forwards configure/close through the WindowConfig callbacks.
+  std::unique_ptr<ivi::ShellSurface> m_shell_surface;
 
   struct wl_callback* m_base_frame_callback{};
 
@@ -211,72 +210,6 @@ class WaylandWindow {
   static void handle_base_surface_leave(void* data,
                                         struct wl_surface* surface,
                                         struct wl_output* output);
-
-  /**
-   * @brief Response to configure event
-   * @param[in] data Pointer to WaylandWindow type
-   * @param[in] xdg_surface Surfaces in the domain of xdg-shell
-   * @param[in] serial Serial of the configure event
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void handle_xdg_surface_configure(void* data,
-                                           struct xdg_surface* xdg_surface,
-                                           uint32_t serial);
-
-  static const struct xdg_toplevel_listener xdg_toplevel_listener;
-
-  /**
-   * @brief Response to configure event
-   * @param[in] data Pointer to WaylandWindow type
-   * @param[in] ivi_surface Surfaces in the domain of ivi-shell
-   * @param[in] width width of the surface
-   * @param[in] height height of the surface
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void handle_ivi_surface_configure(void* data,
-                                           struct ivi_surface* ivi_surface,
-                                           int32_t width,
-                                           int32_t height);
-
-  /**
-   * @brief Response to configure event
-   * @param[in] data Pointer to WaylandWindow type
-   * @param[in] toplevel No use
-   * @param[in] width Width
-   * @param[in] height Height
-   * @param[in] states Dynamic array for checking xdg_toplevel_state
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void handle_toplevel_configure(void* data,
-                                        struct xdg_toplevel* toplevel,
-                                        int32_t width,
-                                        int32_t height,
-                                        struct wl_array* states);
-
-  /**
-   * @brief Close event
-   * @param[in] data Pointer to WaylandWindow type
-   * @param[in] xdg_toplevel No use
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void handle_toplevel_close(void* data,
-                                    struct xdg_toplevel* xdg_toplevel);
-
-  // xdg-shell v4: compositor hint for the maximum surface size that fits
-  // the available output area (output minus panels/struts). Stored so the
-  // (0,0)-configure path can downsize the client-requested geometry.
-  static void handle_toplevel_configure_bounds(void* data,
-                                               struct xdg_toplevel* toplevel,
-                                               int32_t width,
-                                               int32_t height);
 
   /**
    * @brief handler for frame event of a base surface

@@ -19,7 +19,7 @@
 
 #include <array>
 #include <cstdint>  // int32_t in the constants below; was pulled in transitively
-                    // by <EGL/egl.h>/<waypp.h> before those became conditional
+                    // by <EGL/egl.h> before that became conditional
 
 #ifndef BUILD_BACKEND_WAYLAND_EGL
 #cmakedefine01 BUILD_BACKEND_WAYLAND_EGL
@@ -39,9 +39,6 @@
 #ifndef BUILD_BACKEND_DRM_KMS_VULKAN
 #cmakedefine01 BUILD_BACKEND_DRM_KMS_VULKAN
 #endif
-#ifndef BUILD_BACKEND_HEADLESS_EGL
-#cmakedefine01 BUILD_BACKEND_HEADLESS_EGL
-#endif
 #ifndef BUILD_BACKEND_SOFTWARE
 #cmakedefine01 BUILD_BACKEND_SOFTWARE
 #endif
@@ -58,26 +55,12 @@
 // EGL is needed only by the EGL-based backends. Including <EGL/egl.h> here
 // unconditionally dragged EGL/GL headers into the DRM-Vulkan and software
 // builds, which must stay EGL/GL-free.
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL
 #define IVI_HAVE_EGL 1
 #include <EGL/egl.h>
 #else
 #define IVI_HAVE_EGL 0
 #endif
-
-// waypp (the Wayland C++ wrapper + generated protocol bindings) is needed
-// only by the Wayland backends (and headless, which links wayland-gen). No
-// shell/ code references waypp:: outside those backends, so the DRM EGL/Vulkan
-// and software builds drop the header — and with it the libwayland-client /
-// libwayland-cursor runtime deps. This condition MUST match the waypp build
-// gate in third_party/CMakeLists.txt: waypp's own sources include this header
-// (via logging.h), so a mismatch breaks waypp's build.
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
-#include <waypp/waypp.h>
-#endif
-
 #cmakedefine01 BUILD_EGL_TRANSPARENCY
 #cmakedefine01 BUILD_EGL_ENABLE_3D
 #cmakedefine01 BUILD_EGL_ENABLE_MULTISAMPLE

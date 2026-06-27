@@ -890,7 +890,6 @@ phase5_build() {
         -S "$REPO_DIR" -B "$BUILD_DIR"
         -DCMAKE_TOOLCHAIN_FILE="$BUILD_DIR/.xc-toolchain.cmake"
         -DCMAKE_BUILD_TYPE=Release
-        -DBUILD_BACKEND_HEADLESS_EGL=OFF
     )
     case "$be" in
         wayland-egl)

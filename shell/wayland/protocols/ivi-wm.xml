@@ -1,0 +1,608 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="ivi_wm">
+
+    <copyright>
+        Copyright (C) 2017 Advanced Driver Information Technology Joint Venture GmbH
+
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in
+        all copies or substantial portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+        THE SOFTWARE.
+    </copyright>
+
+    <interface name="ivi_wm_screen" version="1">
+        <description summary="controller interface to screen in ivi compositor"/>
+
+        <request name="destroy" type="destructor">
+            <description summary="destroy ivi_wm_screen">
+                Request to destroy the ivi_wm_screen.
+            </description>
+        </request>
+
+        <request name="clear">
+            <description summary="remove all layers from screen render order">
+                A screen has no content assigned to itself, it is a container for layers.
+                This request removes all layers from the screen render order.
+                Note: the layers are not destroyed, they are just no longer contained by
+                the screen.
+            </description>
+        </request>
+
+        <request name="add_layer">
+            <description summary="add a layer to screen render order at nearest z-position">
+                A screen has no content assigned to itself, it is a container for layers.
+                This request adds a layers to the topmost position of the screen render order.
+                The added layer will cover all other layers of the screen.
+            </description>
+            <arg name="layer_id" type="uint"/>
+        </request>
+
+        <request name="remove_layer">
+            <description summary="remove a layer to screen render order">
+                A screen has no content assigned to itself, it is a container for layers.
+                This request removes a layer.
+            </description>
+            <arg name="layer_id" type="uint"/>
+        </request>
+
+        <request name="screenshot">
+            <description summary="take screenshot of screen">
+                An ivi_screenshot object is created which will receive the screenshot
+                data of the specified output.
+            </description>
+            <arg name="screenshot" type="new_id" interface="ivi_screenshot"/>
+        </request>
+
+        <request name="get">
+            <description summary="get a parameter of a screen in ivi compositor">
+                After this request, compositor sends the requested parameter.
+            </description>
+            <arg name="param" type="int"/>
+        </request>
+
+        <event name="screen_id">
+            <description summary="advertise server side id of the ivi-screen">
+                Sent immediately after creating the ivi_wm_screen object.
+            </description>
+            <arg name="id" type="uint"/>
+        </event>
+
+        <event name="layer_added">
+            <description summary="update render order of the screen">
+                A layer is added to the render order lisf of the screen
+            </description>
+            <arg name="layer_id" type="uint"/>
+        </event>
+
+        <event name="connector_name">
+            <description summary="advertise connector name of the corresponding output">
+                Sent immediately after creating the ivi_wm_screen object.
+            </description>
+            <arg name="process_name" type="string"/>
+        </event>
+
+        <enum name="error">
+            <entry name="no_layer" value="0"
+                   summary="the layer with given id does not exist"/>
+            <entry name="no_screen" value="1"
+                   summary="the output is already destroyed"/>
+            <entry name="bad_param" value="2"
+                   summary="the given parameter is not valid"/>
+        </enum>
+
+        <event name="error">
+            <description summary="error event">
+                The error event is sent out when an error has occurred.
+            </description>
+            <arg name="error" type="uint" summary="error code"/>
+            <arg name="message" type="string" summary="error description"/>
+        </event>
+    </interface>
+
+    <interface name="ivi_screenshot" version="1">
+        <description summary="screenshot of an output or a surface">
+            An ivi_screenshot object receives a single "done" or "error" event.
+            The server will destroy this resource after the event has been send,
+            so the client shall then destroy its proxy too.
+        </description>
+
+        <event name="done">
+            <description summary="screenshot finished">
+                This event contains a filedescriptor for a file with raw image data.
+                Furthermore size, stride, format and timestamp of screenshot are
+                provided.
+            </description>
+            <arg name="fd" type="fd" summary="fd for file containing image data"/>
+            <arg name="width" type="int" summary="image width in pixels"/>
+            <arg name="height" type="int" summary="image height in pixels"/>
+            <arg name="stride" type="int" summary="number of bytes per pixel row"/>
+            <arg name="format" type="uint" summary="image format of type wl_shm.format"/>
+            <arg name="timestamp" type="uint" summary="timestamp in milliseconds"/>
+        </event>
+
+        <enum name="error">
+            <entry name="io_error" value="0"
+                   summary="screenshot file could not be created"/>
+            <entry name="not_supported" value="1"
+                   summary="screenshot can not be read"/>
+            <entry name="no_output" value="2"
+                   summary="output has been destroyed"/>
+            <entry name="no_surface" value="3"
+                   summary="surface has been destroyed"/>
+            <entry name="no_content" value="4"
+                   summary="surface has no content"/>
+        </enum>
+
+        <event name="error">
+            <description summary="error event">
+                The error event is sent when the screenshot could not be created.
+            </description>
+            <arg name="error" type="uint" enum="error" summary="error code"/>
+            <arg name="message" type="string" summary="error description"/>
+        </event>
+    </interface>
+
+    <interface name="ivi_wm" version="1">
+        <description summary="interface for ivi managers to use ivi compositor features"/>
+
+        <request name="commit_changes">
+            <description summary="commit all changes requested by client">
+                All requests are not applied directly to scene object, so a controller
+                can set different properties and apply the changes all at once.
+                Note: there's an exception to this. Creation and destruction of
+                scene objects is executed immediately.
+            </description>
+        </request>
+
+        <request name="create_screen">
+            <description summary="create a screen in ivi-compositor">
+                Ask the ivi-wm to create a ivi-screen for given wl_output.
+            </description>
+            <arg name="output" type="object" interface="wl_output"/>
+            <arg name="id" type="new_id" interface="ivi_wm_screen" summary="the new ivi-screen"/>
+        </request>
+
+        <request name="set_surface_visibility">
+            <description summary="set the visibility of a surface in ivi compositor">
+                If visibility argument is 0, the surface in the ivi compositor is set to invisible.
+                If visibility argument is not 0, the surface in the ivi compositor is set to visible.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="visibility" type="uint"/>
+        </request>
+
+        <request name="set_layer_visibility">
+            <description summary="set visibility of layer in ivi compositor">
+                If visibility argument is 0, the layer in the ivi compositor is set to invisible.
+                If visibility argument is not 0, the layer in the ivi compositor is set to visible.
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="visibility" type="uint"/>
+        </request>
+
+        <request name="set_surface_opacity">
+            <description summary="set the opacity of a surface in ivi compositor">
+                The valid range for opacity is 0.0 (fully transparent) to 1.0 (fully opaque).
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="opacity" type="fixed"/>
+        </request>
+
+        <request name="set_layer_opacity">
+            <description summary="set opacity of layer in ivi compositor">
+                The valid range for opacity is 0.0 (fully transparent) to 1.0 (fully opaque).
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="opacity" type="fixed"/>
+        </request>
+
+        <request name="set_surface_source_rectangle">
+            <description summary="set the scanout area of a surface in ivi compositor">
+                The source rectangle defines the part of the surface content, that is used for
+                compositing the surface. It can be used, if valid content of the surface is smaller
+                than the surface. Effectively it can be used to zoom the content of the surface.
+                If a parameter is less than 0, that value is not changed.
+                x: horizontal start position of scanout area within the surface
+                y: vertical start position of scanout area within the surface
+                width: width of scanout area within the surface
+                height: height of scanout area within the surface
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </request>
+
+        <request name="set_layer_source_rectangle">
+            <description summary="set the scanout area of a layer in ivi compositor">
+                The source rectangle defines the part of the layer content, that is used for
+                compositing the screen. It can be used, if valid content of the layer is smaller
+                than the layer. Effectively it can be used to zoom the content of the layer.
+                If a parameter is less than 0, that value is not changed.
+                x: horizontal start position of scanout area within the layer
+                y: vertical start position of scanout area within the layer
+                width: width of scanout area within the layer
+                height: height of scanout area within the layer
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </request>
+
+        <request name="set_surface_destination_rectangle">
+            <description summary="Set the destination area of a surface within a layer">
+                The destination rectangle defines the position and size of a surface on a layer.
+                The surface will be scaled to this rectangle for rendering.
+                If a parameter is less than 0, that value is not changed.
+                x: horizontal start position of surface within the layer
+                y: vertical start position of surface within the layer
+                width : width of surface within the layer
+                height: height of surface within the layer
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </request>
+
+        <request name="set_layer_destination_rectangle">
+            <description summary="Set the destination area of a layer within a screen">
+                The destination rectangle defines the position and size of a layer on a screen.
+                The layer will be scaled to this rectangle for rendering.
+                If a parameter is less than 0, that value is not changed.
+                x: horizontal start position of layer within the screen
+                y: vertical start position of layer within the screen
+                width : width of surface within the screen
+                height: height of surface within the screen
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </request>
+
+        <enum name="sync">
+            <description summary="sync request states">
+            </description>
+            <entry name="add" value="0"/>
+            <entry name="remove" value="1"/>
+        </enum>
+
+        <request name="surface_sync">
+            <description summary="request to synchronize of a surface in ivi compositor">
+                After this request, compositor sends the properties of the surface.
+                If sync_state argument is 0, compositor sends the properties continously.
+                If sync_state argument is not 0, compositor stops sending the properties
+                continously.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="sync_state" type="int"/>
+        </request>
+
+        <request name="layer_sync">
+            <description summary="request to synchronize of a layer in ivi compositor">
+                After this request, compositor sends the properties of the layer.
+                If sync_state argument is 0, compositor sends the properties continously.
+                If sync_state argument is not 0, compositor stops sending the properties
+                continously.
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="sync_state" type="int"/>
+        </request>
+
+        <enum name="param" bitfield="true">
+            <description summary="parameter types">
+                The HMI controller can request different types of parameters of an
+                ivi-object.
+            </description>
+            <entry name="opacity" value="1"/>
+            <entry name="visibility" value="2"/>
+            <entry name="size" value="4"/>
+            <entry name="render_order" value="8"/>
+        </enum>
+
+        <request name="surface_get">
+            <description summary="get a parameter of an ivi_layout_surface in ivi compositor">
+                After this request, compositor sends the requested parameter.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="param" type="int"/>
+        </request>
+
+        <request name="layer_get">
+            <description summary="get a parameter of an ivi_layout_layer in ivi compositor">
+                After this request, compositor sends the requested parameter.
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="param" type="int"/>
+        </request>
+
+        <request name="surface_screenshot">
+            <description summary="take screenshot of surface">
+                An ivi_screenshot object is created which will receive an image of the
+                buffer currently attached to the surface with the given id. If there
+                is no surface with such name the server will respond with an
+                ivi_screenshot.error event.
+            </description>
+            <arg name="screenshot" type="new_id" interface="ivi_screenshot"/>
+            <arg name="surface_id" type="uint"/>
+        </request>
+
+        <enum name="surface_type">
+            <description summary="hint for the compositor">
+                If a surface is restricted type, visible contents of the surface is strictly
+                controlled by the compositor. Its content is not allowed to be go out of
+                its destination region. If the application resizes its buffers or uses
+                wp_viewporter protocol to scale its contents, the old destination region
+                would causes visible glitches.
+                To avoid these issues, the controller process mark a surface as desktop
+                compatible. Source and destination regions of a desktop compatible
+                surface will be modified accordingly,when application sends a request
+                for resizing or scaling its contents. Therefore, applications contents
+                will be drawn according to application's wishes.
+                On the other hand, source and destination regions will be strictly
+                enforced, when the surface's type is restricted. The default type for
+                a surface is ivi.
+            </description>
+            <entry name="restricted" value="0" summary="strictly controlled"/>
+            <entry name="desktop" value="1" summary="free to resize and scale"/>
+        </enum>
+
+        <request name="set_surface_type">
+            <description summary="request to set a type for the surface in ivi compositor">
+                After this request, compositor changes the type of the surface.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="type" type="int"/>
+        </request>
+
+        <request name="layer_clear">
+            <description summary="remove all surfaces from layer render order">
+                A layer has no content assigned to itself, it is a container for surfaces.
+                This request removes all surfaces from the layer render order.
+            </description>
+            <arg name="layer_id" type="uint"/>
+        </request>
+
+        <request name="layer_add_surface">
+            <description summary="add a surface to layer render order at nearest z-position">
+                A layer has no content assigned to itself, it is a container for surfaces.
+                This request adds a surface to the topmost position of the layer render order.
+                The added surface will cover all other surfaces of the layer.
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="surface_id" type="uint"/>
+        </request>
+
+        <request name="layer_remove_surface">
+            <description summary="remove a surface from layer render order">
+                A layer has no content assigned to itself, it is a container for surfaces.
+                This request removes one surfaces from the layer render order.
+                Note: the surface is not destroyed, it is just no longer contained by
+                the layer.
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="surface_id" type="uint"/>
+        </request>
+
+        <request name="create_layout_layer">
+            <description summary="create an ivi_layout_layer in ivi compositor">
+                After this request, compositor creates an ivi_layout_layer
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </request>
+
+        <request name="destroy_layout_layer">
+            <description summary="destroy an ivi_layout_layer in ivi compositor">
+                After this request, compositor destroyes an existing ivi_layout_layer.
+            </description>
+            <arg name="layer_id" type="uint"/>
+        </request>
+
+        <event name="surface_visibility">
+            <description summary="the visibility of the surface in ivi compositor has changed">
+                The new visibility state is provided in argument visibility.
+                If visibility is 0, the surface has become invisible.
+                If visibility is not 0, the surface has become visible.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="visibility" type="int"/>
+        </event>
+
+        <event name="layer_visibility">
+            <description summary="the visibility of the layer in ivi compositor has changed">
+                The new visibility state is provided in argument visibility.
+                If visibility is 0, the layer has become invisible.
+                If visibility is not 0, the layer has become visible.
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="visibility" type="int"/>
+        </event>
+
+        <event name="surface_opacity">
+            <description summary="the opacity of surface in ivi compositor has changed">
+                The new opacity state is provided in argument opacity.
+                The valid range for opactiy is 0.0 (fully transparent) to 1.0 (fully opaque).
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="opacity" type="fixed"/>
+        </event>
+
+        <event name="layer_opacity">
+            <description summary="the opacity of layer in ivi compositor has changed">
+                The new opacity state is provided in argument opacity.
+                The valid range for opactiy is 0.0 (fully transparent) to 1.0 (fully opaque).
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="opacity" type="fixed"/>
+        </event>
+
+        <event name="surface_source_rectangle">
+            <description summary="the source rectangle of surface in ivi compositor has changed">
+                The scanout region of the surface content has changed.
+                The new values for source rectangle are provided by
+                x: new horizontal start position of scanout area within the surface
+                y: new vertical start position of scanout area within the surface
+                width: new width of scanout area within the surface
+                height: new height of scanout area within the surface
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </event>
+
+        <event name="layer_source_rectangle">
+            <description summary="the source rectangle of layer in ivi compositor has changed">
+                The scanout region of the layer content has changed.
+                The new values for source rectangle are provided by
+                x: new horizontal start position of scanout area within the layer
+                y: new vertical start position of scanout area within the layer
+                width: new width of scanout area within the layer
+                height: new height of scanout area within the layer
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </event>
+
+        <event name="surface_destination_rectangle">
+            <description summary="the destination rectangle of surface in ivi compositor has changed">
+                The new values for source rectangle are provided by
+                x: new horizontal start position of surface within the layer
+                y: new vertical start position of surface within the layer
+                width : new width of surface within the layer
+                height: new height of surface within the layer
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </event>
+
+        <event name="layer_destination_rectangle">
+            <description summary="the destination rectangle of layer in ivi compositor has changed">
+                The new values for source rectangle are provided by
+                x: new horizontal start position of layer within the screen
+                y: new vertical start position of layer within the screen
+                width : new width of layer within the screen
+                height: new height of layer within the screen
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="x" type="int"/>
+            <arg name="y" type="int"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </event>
+
+        <event name="surface_created">
+            <description summary="ivi_layout_surface was created"/>
+            <arg name="surface_id" type="uint"/>
+        </event>
+
+        <event name="layer_created">
+            <description summary="ivi_layout_layer was created"/>
+            <arg name="layer_id" type="uint"/>
+        </event>
+
+        <event name="surface_destroyed">
+            <description summary="ivi_layout_surface was destroyed"/>
+            <arg name="surface_id" type="uint"/>
+        </event>
+
+        <event name="layer_destroyed">
+            <description summary="ivi_layout_layer was destroyed"/>
+            <arg name="layer_id" type="uint"/>
+        </event>
+
+        <enum name="surface_error">
+            <entry name="no_surface" value="0"
+                   summary="the surface with given id does not exist"/>
+            <entry name="bad_param" value="1"
+                   summary="the given parameter is not valid"/>
+            <entry name="not_supported" value="2"
+                   summary="the request is not supported"/>
+        </enum>
+
+        <event name="surface_error">
+            <description summary="error event">
+                The error event is sent out when an error has occurred.
+            </description>
+            <arg name="object_id" type="uint" summary="id of a layer or surface"/>
+            <arg name="error" type="uint" summary="error code"/>
+            <arg name="message" type="string" summary="error description"/>
+        </event>
+
+        <enum name="layer_error">
+            <entry name="no_surface" value="0"
+                   summary="the surface with given id does not exist"/>
+            <entry name="no_layer" value="1"
+                   summary="the layer with given id does not exist"/>
+            <entry name="bad_param" value="2"
+                   summary="the given parameter is not valid"/>
+        </enum>
+
+        <event name="layer_error">
+            <description summary="error event">
+                The error event is sent out when an error has occurred.
+            </description>
+            <arg name="object_id" type="uint" summary="id of a layer or surface"/>
+            <arg name="error" type="uint" summary="error code"/>
+            <arg name="message" type="string" summary="error description"/>
+        </event>
+
+        <event name="surface_size">
+            <description summary="the surface size in ivi compositor has changed">
+                The client providing content for this surface modified size of the surface.
+                The modified surface size is provided by arguments width and height.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="width" type="int"/>
+            <arg name="height" type="int"/>
+        </event>
+
+        <event name="surface_stats">
+            <description summary="receive updated statistics for surface in ivi compositor">
+                The information contained in this event is essential for monitoring, debugging,
+                logging and tracing support in IVI systems.
+            </description>
+            <arg name="surface_id" type="uint"/>
+            <arg name="frame_count" type="uint"/>
+            <arg name="pid" type="uint"/>
+        </event>
+
+        <event name="layer_surface_added">
+            <description summary="update render order of the layer">
+                A surface is added to the render order of the layer
+            </description>
+            <arg name="layer_id" type="uint"/>
+            <arg name="surface_id" type="uint"/>
+        </event>
+    </interface>
+
+</protocol>
+

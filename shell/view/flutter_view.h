@@ -25,8 +25,7 @@
 #if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
 #endif
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/window.h"
 #endif
 
@@ -56,31 +55,15 @@ class IDisplay;
 class Display;
 class WaylandWindow;
 class Engine;
-class Backend;
+class Shell;
 class PlatformHandler;
 class PlatformChannel;
 namespace flutter {
 class KeyEventHandler;
 }
-#if BUILD_BACKEND_HEADLESS_EGL
-class HeadlessBackend;
-#elif BUILD_BACKEND_DRM_KMS_EGL
-class DrmBackend;
-#elif BUILD_BACKEND_DRM_KMS_VULKAN
-class VulkanDrmBackend;
-#elif BUILD_BACKEND_SOFTWARE
-class SoftwareBackend;
-#elif BUILD_BACKEND_WAYLAND_EGL
-class WaylandEglBackend;
-#elif BUILD_BACKEND_WAYLAND_VULKAN
-class WaylandVulkanBackend;
-#else
-#error \
-    "no Flutter backend selected: define one of BUILD_BACKEND_HEADLESS_EGL, " \
-    "BUILD_BACKEND_DRM_KMS_EGL, BUILD_BACKEND_DRM_KMS_VULKAN, " \
-    "BUILD_BACKEND_SOFTWARE, BUILD_BACKEND_WAYLAND_EGL, " \
-    "BUILD_BACKEND_WAYLAND_VULKAN"
-#endif
+// m_backend is a polymorphic std::shared_ptr<Shell> (built by Shell::Create);
+// concrete backend types are no longer named here.
+class Shell;
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
 #endif
@@ -129,15 +112,13 @@ class FlutterView {
   std::shared_ptr<WaylandWindow> GetWindow() { return m_wayland_window; }
 
   /**
-   * @brief Get Backend
-   * @return Backend*
-   * @retval Backend pointer
+   * @brief Get Shell
+   * @return Shell*
+   * @retval Shell pointer
    * @relation
    * wayland, flutter
    */
-  [[nodiscard]] Backend* GetBackend() const {
-    return reinterpret_cast<Backend*>(m_backend.get());
-  }
+  [[nodiscard]] Shell* GetBackend() const { return m_backend.get(); }
 
   /**
    * @brief Get an index of flutter views
@@ -263,21 +244,9 @@ class FlutterView {
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:
-#if BUILD_BACKEND_HEADLESS_EGL
-  std::shared_ptr<HeadlessBackend> m_backend;
-#elif BUILD_BACKEND_DRM_KMS_EGL
-  std::shared_ptr<DrmBackend> m_backend{};
-#elif BUILD_BACKEND_DRM_KMS_VULKAN
-  std::shared_ptr<VulkanDrmBackend> m_backend{};
-#elif BUILD_BACKEND_SOFTWARE
-  std::shared_ptr<SoftwareBackend> m_backend;
-#elif BUILD_BACKEND_WAYLAND_EGL
-  std::shared_ptr<WaylandEglBackend> m_backend;
-#elif BUILD_BACKEND_WAYLAND_VULKAN
-  std::shared_ptr<WaylandVulkanBackend> m_backend;
-#else
-#error "no Flutter backend selected (see forward-decl block above)"
-#endif
+  // One polymorphic Shell, built by Shell::Create(). Backend-specific
+  // operations are reached via dynamic_cast where still needed.
+  std::shared_ptr<Shell> m_backend;
   std::shared_ptr<IDisplay> m_display;
   // Default-null on non-Wayland backends (only assigned under the
   // BUILD_BACKEND_WAYLAND_* gate in flutter_view.cc::Initialize).

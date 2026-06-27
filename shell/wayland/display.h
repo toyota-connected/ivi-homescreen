@@ -25,7 +25,6 @@
 #include <string>
 #include <vector>
 
-#include <presentation-time-client-protocol.h>
 #include <shell/platform/embedder/embedder.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
@@ -39,6 +38,8 @@
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
 #include "timer.h"
+#include "vsync/wayland_vsync_provider.h"
+#include "wayland/shell/wayland_shell.h"
 
 class Engine;
 class WaylandWindow;
@@ -105,31 +106,11 @@ class Display : public IDisplay {
   }
 
   /**
-   * @brief Get XDG WM base
-   * @return xdg_wm_base*
-   * @retval Pointer to XDG WM base
-   * @relation
-   * wayland
+   * @brief The active compositor-protocol shell (xdg / agl / ivi / simple) —
+   * the first one that bound its mandatory global. WaylandWindow uses it to
+   * assign each surface its role.
    */
-#if ENABLE_XDG_CLIENT
-  [[nodiscard]] xdg_wm_base* GetXdgWmBase() const {
-    assert(m_xdg_wm_base);
-    return m_xdg_wm_base;
-  }
-#endif
-
-  /**
-   * @brief Get ivi_application instance
-   * @return ivi_application*
-   * @retval Pointer to IVI Application
-   * @relation
-   * ivi-shell
-   */
-#if ENABLE_IVI_SHELL_CLIENT
-  [[nodiscard]] ivi_application* GetIviApplication() const {
-    return m_ivi_shell.application;
-  }
-#endif
+  [[nodiscard]] ivi::WaylandShell& ActiveShell() const;
 
   /**
    * @brief Get shared memory
@@ -144,26 +125,14 @@ class Display : public IDisplay {
   }
 
   /**
-   * @brief Get wp_presentation global, if the compositor advertised one.
-   * @return wp_presentation* or nullptr if the global is not present.
-   *
-   * Used by WaylandEglBackend to request per-commit presentation feedback
-   * for vsync_callback. Caller must null-check.
+   * @brief The wp_presentation vsync provider. Owns the wp_presentation global
+   * (bound during registry enumeration) and drives FlutterEngineOnVsync from
+   * per-commit feedback. The Wayland backends route their vsync through it.
+   * Always non-null; the provider's Usable() reports whether the compositor
+   * actually advertised wp_presentation.
    */
-  [[nodiscard]] wp_presentation* GetWpPresentation() const {
-    return m_wp_presentation;
-  }
-
-  /**
-   * @brief Compositor-announced presentation clock domain.
-   *
-   * Valid only when GetWpPresentation() is non-null AND wp_presentation
-   * has emitted its clock_id event (the compositor sends it once at bind
-   * time, before any feedback objects exist). Defaults to CLOCK_MONOTONIC
-   * which matches what every mainline compositor announces in practice.
-   */
-  [[nodiscard]] clockid_t GetPresentationClockId() const {
-    return m_presentation_clock_id;
+  [[nodiscard]] ivi::WaylandVsyncProvider* GetVsyncProvider() {
+    return &m_vsync;
   }
 
   /**
@@ -191,73 +160,8 @@ class Display : public IDisplay {
    */
   void StopEvents() override;
 
-#if ENABLE_AGL_SHELL_CLIENT
-  /**
-   * @brief AglShell: Do background
-   * @param[in] surface Image
-   * @param[in] index Output index
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   */
-  void AglShellDoBackground(wl_surface* surface, size_t index) const;
-
-  /**
-   * @brief AglShell: Do panel
-   * @param[in] surface Image
-   * @param[in] mode Mode
-   * @param[in] index Output index
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   */
-  void AglShellDoPanel(struct wl_surface* surface,
-                       enum agl_shell_edge mode,
-                       size_t index) const;
-
-  /**
-   * @brief AglShell: Do ready
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   */
-  void AglShellDoReady() const;
-
-  /**
-   * @brief AglShell: Set up an activation area where to display the client's
-   * window
-   * @return void
-   * @param[in] x the x position for the activation rectangle
-   * @param[in] y the y position for the activation rectangle
-   * @param[in] width the width position for the activation rectangle
-   * @param[in] height the height position for the activation rectangle
-   * @param[in] index the output, as a number
-   * @relation
-   *
-   * see agl-shell::set_activate_region request for more information. The x and
-   * y values are the position of an activation rectangle, with the width and
-   * height grabbed from the output itself. This would specify the area where
-   * the client's window will be displayed.
-   *
-   * --------------------
-   * |                  |
-   * |  (x, y)          |
-   * |  +--------       |
-   * |  |       |       |
-   * |  |       | height|
-   * |  |       |       |
-   * |  ---------       |
-   * |    width		|
-   * .			|
-   * |			|
-   * --------------------
-   */
-  void AglShellDoSetupActivationArea(uint32_t x,
-                                     uint32_t y,
-                                     uint32_t width,
-                                     uint32_t height,
-                                     uint32_t index) const;
-#endif
+  // AGL window-management (set_background / set_panel / activation region) now
+  // lives on AglShell, reached via ActiveShell().WindowManager().
 
   /**
    * @brief Set Engine
@@ -349,44 +253,8 @@ class Display : public IDisplay {
    */
   [[nodiscard]] double GetMaxRefreshRate() const override;
 
-  /**
-   * @brief deactivate/hide the application pointed by app_id
-   * @param[in] app_id the app_id
-   * @relation
-   * agl_shell
-   */
-  void deactivateApp(const std::string& app_id);
-  /**
-   * @brief activate/show the application pointed by app_id
-   * @param[in] app_id the app_id
-   * @relation
-   * agl_shell
-   */
-  void activateApp(std::string app_id);
-  /**
-   * @brief Add app_id to a list of list applications
-   * @param[in] app_id the app_id
-   * @relation
-   * agl_shell
-   */
-  void addAppToStack(const std::string& app_id);
-  /**
-   * @brief Helper to retrieve the output using its output_name
-   * @param[in] output_name a std::string representing the output
-   * @retval an integer that can used to get the proper output
-   * @relation
-   * agl_sell
-   */
-  int find_output_by_name(const std::string& output_name);
-  /**
-   * @brief helper to process the application status
-   * @param[in] app_id an array of char
-   * @param[in] event_type a std::string representing the type of event
-   * (started/stopped/terminated)
-   * @relation
-   * agl_shell
-   */
-  void processAppStatusEvent(const char* app_id, const std::string& event_type);
+  // The AGL application stack (activate/deactivate/app-state) moved to AglShell
+  // along with the rest of the AGL window-management surface.
 
  private:
   std::thread event_thread_;
@@ -411,31 +279,15 @@ class Display : public IDisplay {
   struct wl_seat* m_seat{};
   struct wl_keyboard* m_keyboard{};
 
-  struct xdg_wm_base* m_xdg_wm_base{};
+  // Compositor-protocol shells (xdg / agl / ivi / simple), built by
+  // WaylandShell::Create in priority order. The active one is the first that
+  // bound its mandatory global (ActiveShell()). Each shell owns its own
+  // protocol state — no per-shell members live on Display anymore.
+  std::vector<std::unique_ptr<ivi::WaylandShell>> shells_;
 
-  // wp_presentation_time global + announced clock domain. m_wp_presentation
-  // is nullptr when the compositor does not advertise the protocol;
-  // m_presentation_clock_id is only meaningful once the clock_id event has
-  // fired (defaulted to CLOCK_MONOTONIC to keep the value sane until then).
-  struct wp_presentation* m_wp_presentation{};
-  clockid_t m_presentation_clock_id{CLOCK_MONOTONIC};
-
-  struct agl {
-    bool bind_to_agl_shell = false;
-    struct agl_shell* shell{};
-
-    bool wait_for_bound = true;
-    bool bound_ok{};
-    uint32_t version = 0;
-  } m_agl;
-
-  std::list<std::string> apps_stack;
-  std::list<std::pair<const std::string, const std::string>> pending_app_list;
-
-  struct ivi_shell {
-    struct ivi_application* application = nullptr;
-    struct ivi_wm* ivi_wm = nullptr;
-  } m_ivi_shell;
+  // wp_presentation vsync provider (owns the wp_presentation global + clock,
+  // drives FlutterEngineOnVsync from per-commit feedback).
+  ivi::WaylandVsyncProvider m_vsync;
 
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};
@@ -1110,341 +962,4 @@ class Display : public IDisplay {
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
 
   static const wl_touch_listener touch_listener;
-
-  /**
-   * @brief AGL bound ok
-   * @param[in,out] data Data of type Display
-   * @param[in] shell No use
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   * @note Do nothing
-   */
-  static void agl_shell_bound_ok(void* data, struct agl_shell* shell);
-
-  /**
-   * @brief AGL bound fail
-   * @param[in,out] data Data of type Display
-   * @param[in] shell No use
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   * @note Do nothing
-   */
-  static void agl_shell_bound_fail(void* data, struct agl_shell* shell);
-
-  /**
-   * @brief AGL app_state event
-   * @param[in,out] data Data of type Display
-   * @param[in] agl_shell No use
-   * @param[in] app_id the application id for which this event was sent
-   * @param[in] state the state: CREATED/TERMINATED/ACTIVATED/DEACTIVATED
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   * @note Do nothing
-   */
-  static void agl_shell_app_state(void* data,
-                                  struct agl_shell* agl_shell,
-                                  const char* app_id,
-                                  uint32_t state);
-
-  /**
-   * @brief AGL app_app_on_output event
-   * @param[in,out] data Data of type Display
-   * @param[in] shell No use
-   * @param[in] app_id the application id for which this event was sent
-   * @param[in] state the state: CREATED/TERMINATED/ACTIVATED/DEACTIVATED
-   * @return void
-   * @relation
-   * wayland, agl-shell
-   * @note Do nothing
-   */
-  static void agl_shell_app_on_output(void* data,
-                                      struct agl_shell* agl_shell,
-                                      const char* app_id,
-                                      const char* output_name);
-
-  static const struct agl_shell_listener agl_shell_listener;
-
-  /**
-   * @brief handler of a visibility of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @param[in] visibility visibility
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_visibility(void* data,
-                                        struct ivi_wm* ivi_wm,
-                                        uint32_t surface_id,
-                                        int32_t visibility);
-  /**
-   * @brief handler of a visibility of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @param[in] visibility visibility
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_visibility(void* data,
-                                      struct ivi_wm* ivi_wm,
-                                      uint32_t layer_id,
-                                      int32_t visibility);
-  /**
-   * @brief handler of an opacity of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @param[in] opacity opacity
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_opacity(void* data,
-                                     struct ivi_wm* ivi_wm,
-                                     uint32_t surface_id,
-                                     wl_fixed_t opacity);
-  /**
-   * @brief handler of an opacity of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @param[in] opacity opacity
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_opacity(void* data,
-                                   struct ivi_wm* ivi_wm,
-                                   uint32_t layer_id,
-                                   wl_fixed_t opacity);
-  /**
-   * @brief handler of a source rectangle of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @param[in] x x position of source rectangle
-   * @param[in] y y position of source rectangle
-   * @param[in] width width of source rectangle
-   * @param[in] height height of source rectangle
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_source_rectangle(void* data,
-                                              struct ivi_wm* ivi_wm,
-                                              uint32_t surface_id,
-                                              int32_t x,
-                                              int32_t y,
-                                              int32_t width,
-                                              int32_t height);
-  /**
-   * @brief handler of a source rectangle of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @param[in] x x position of source rectangle
-   * @param[in] y y position of source rectangle
-   * @param[in] width width of source rectangle
-   * @param[in] height height of source rectangle
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_source_rectangle(void* data,
-                                            struct ivi_wm* ivi_wm,
-                                            uint32_t layer_id,
-                                            int32_t x,
-                                            int32_t y,
-                                            int32_t width,
-                                            int32_t height);
-  /**
-   * @brief handler of a destination rectangle of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @param[in] x x position of destination rectangle
-   * @param[in] y y position of destination rectangle
-   * @param[in] width width of destination rectangle
-   * @param[in] height height of destination rectangle
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_destination_rectangle(void* data,
-                                                   struct ivi_wm* ivi_wm,
-                                                   uint32_t surface_id,
-                                                   int32_t x,
-                                                   int32_t y,
-                                                   int32_t width,
-                                                   int32_t height);
-  /**
-   * @brief handler of a destination rectangle of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @param[in] x x position of destination rectangle
-   * @param[in] y y position of destination rectangle
-   * @param[in] width width of destination rectangle
-   * @param[in] height height of destination rectangle
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_destination_rectangle(void* data,
-                                                 struct ivi_wm* ivi_wm,
-                                                 uint32_t layer_id,
-                                                 int32_t x,
-                                                 int32_t y,
-                                                 int32_t width,
-                                                 int32_t height);
-  /**
-   * @brief handler for created event of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_created(void* data,
-                                     struct ivi_wm* ivi_wm,
-                                     uint32_t surface_id);
-  /**
-   * @brief handler for created event of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_created(void* data,
-                                   struct ivi_wm* ivi_wm,
-                                   uint32_t layer_id);
-  /**
-   * @brief handler for destroyed event of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_destroyed(void* data,
-                                       struct ivi_wm* ivi_wm,
-                                       uint32_t surface_id);
-  /**
-   * @brief handler for destroyed event of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_destroyed(void* data,
-                                     struct ivi_wm* ivi_wm,
-                                     uint32_t layer_id);
-  /**
-   * @brief handler for error event of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] object_id wayland object id
-   * @param[in] error error code
-   * @param[in] message error message
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_error(void* data,
-                                   struct ivi_wm* ivi_wm,
-                                   uint32_t object_id,
-                                   uint32_t error,
-                                   const char* message);
-  /**
-   * @brief handler for error event of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] object_id wayland object id
-   * @param[in] error error code
-   * @param[in] message error message
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_error(void* data,
-                                 struct ivi_wm* ivi_wm,
-                                 uint32_t object_id,
-                                 uint32_t error,
-                                 const char* message);
-  /**
-   * @brief handler for a size of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @param[in] width width of a surface
-   * @param[in] height height of a surface
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_size(void* data,
-                                  struct ivi_wm* ivi_wm,
-                                  uint32_t surface_id,
-                                  int32_t width,
-                                  int32_t height);
-  /**
-   * @brief handler for stats of a ivi shell surface
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] surface_id surface id
-   * @param[in] frame_count frame count
-   * @param[in] pid process id
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_surface_stats(void* data,
-                                   struct ivi_wm* ivi_wm,
-                                   uint32_t surface_id,
-                                   uint32_t frame_count,
-                                   uint32_t pid);
-  /**
-   * @brief handler for surface added event of a ivi shell layer
-   * @param[in,out] data Data of type Display
-   * @param[in] ivi_wm ivi shell window manager
-   * @param[in] layer_id layer id
-   * @param[in] surface_id surface id
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void ivi_wm_layer_surface_added(void* data,
-                                         struct ivi_wm* ivi_wm,
-                                         uint32_t layer_id,
-                                         uint32_t surface_id);
-
-  static const struct ivi_wm_listener ivi_wm_listener;
-
-  /**
-   * @brief wp_presentation clock_id event handler.
-   *
-   * Compositors emit this once at bind time announcing the clock domain
-   * for all subsequent wp_presentation_feedback timestamps. We capture it
-   * into m_presentation_clock_id; WaylandEglBackend reads the value via
-   * GetPresentationClockId() to decide whether timestamps can be passed
-   * to FlutterEngineOnVsync without translation.
-   */
-  static void wp_presentation_handle_clock_id(
-      void* data,
-      struct wp_presentation* presentation,
-      uint32_t clk_id);
-
-  static const struct wp_presentation_listener wp_presentation_listener;
 };

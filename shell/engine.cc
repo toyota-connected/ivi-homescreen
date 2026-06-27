@@ -45,8 +45,7 @@
 // forward-declares WaylandWindow unconditionally so the header
 // compiles without Wayland; the .cc needs the real definition only
 // when Wayland is selected.
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/window.h"
 #endif
 
@@ -149,7 +148,7 @@ Engine::Engine(FlutterView* view,
   m_args.log_tag = "flutter";
 
   // Optional per-backend vsync_callback. nullptr (the default for
-  // headless / wayland_egl / wayland_vulkan) leaves the field unset
+  // wayland_egl / wayland_vulkan) leaves the field unset
   // and Flutter falls back to its internal wall-clock scheduler.
   // DrmBackend overrides this to deliver vblank-locked OnVsync via
   // DRM PAGE_FLIP_EVENT (env-gated by IVI_DRM_VSYNC; set to 0 to
@@ -682,8 +681,7 @@ bool Engine::ActivateSystemCursor(const int32_t device,
   if (!m_egl_window) {
     return true;
   }
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   return m_egl_window->ActivateSystemCursor(device, kind);
 #else
   // Forward-declaration only on non-Wayland builds; m_egl_window is

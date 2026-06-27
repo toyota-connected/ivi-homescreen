@@ -34,7 +34,7 @@ WaylandWindow::WaylandWindow(const size_t index,
                              const uint32_t activation_area_y,
                              const uint32_t activation_area_width,
                              const uint32_t activation_area_height,
-                             Backend* backend,
+                             Shell* backend,
                              const uint32_t ivi_surface_id)
     : m_index(index),
       m_display(std::move(display)),
@@ -56,73 +56,119 @@ WaylandWindow::WaylandWindow(const size_t index,
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
   wl_surface_add_listener(m_base_surface, &m_base_surface_listener, this);
 
-#if ENABLE_IVI_SHELL_CLIENT
-  auto ivi_application = m_display->GetIviApplication();
-  if (ivi_application) {
-    if (m_ivi_surface_id == 0) {
-      spdlog::critical("IVI Surface ID not set");
-      exit(EXIT_FAILURE);
+  // Assign the surface its role via the active compositor-protocol shell
+  // (xdg / agl / ivi / simple).
+  ivi::WindowConfig cfg;
+  switch (m_type) {
+    case WINDOW_BG:
+      cfg.role = ivi::SurfaceRole::kBackground;
+      break;
+    case WINDOW_PANEL_TOP:
+      cfg.role = ivi::SurfaceRole::kPanelTop;
+      break;
+    case WINDOW_PANEL_BOTTOM:
+      cfg.role = ivi::SurfaceRole::kPanelBottom;
+      break;
+    case WINDOW_PANEL_LEFT:
+      cfg.role = ivi::SurfaceRole::kPanelLeft;
+      break;
+    case WINDOW_PANEL_RIGHT:
+      cfg.role = ivi::SurfaceRole::kPanelRight;
+      break;
+    case WINDOW_NORMAL:
+    default:
+      cfg.role = ivi::SurfaceRole::kNormal;
+      break;
+  }
+  cfg.app_id = m_app_id;
+  cfg.output = m_wl_output;
+  cfg.output_index = m_output_index;
+  cfg.fullscreen = m_fullscreen;
+  cfg.width = m_geometry.width;
+  cfg.height = m_geometry.height;
+  cfg.ivi_surface_id = m_ivi_surface_id;
+  cfg.on_configure = [this](const ivi::SurfaceConfigure& c) {
+    // Refresh window-state flags from the compositor's configure (xdg only;
+    // ivi/simple report all-false). These gate the sizing decision below.
+    m_fullscreen = c.fullscreen;
+    m_maximized = c.maximized;
+    m_resize = c.resizing;
+    m_activated = c.activated;
+    const int32_t w = c.width;
+    const int32_t h = c.height;
+    if (w > 0 && h > 0) {
+      if (!m_fullscreen && !m_maximized) {
+        m_window_size.width = w;
+        m_window_size.height = h;
+      }
+      m_geometry.width = w;
+      m_geometry.height = h;
+    } else if (!m_fullscreen && !m_maximized) {
+      // (0,0) configure = "client picks size". Cap to the compositor's
+      // configure_bounds hint (if known) or the output mode so we don't render
+      // off-screen.
+      int32_t cap_w = m_configure_bounds.width;
+      int32_t cap_h = m_configure_bounds.height;
+      if (cap_w <= 0 || cap_h <= 0) {
+        const auto out = m_display->GetVideoModeSize(m_output_index);
+        cap_w = out.first;
+        cap_h = out.second;
+      }
+      int32_t target_w = m_window_size.width;
+      int32_t target_h = m_window_size.height;
+      if (cap_w > 0 && target_w > cap_w) {
+        target_w = cap_w;
+      }
+      if (cap_h > 0 && target_h > cap_h) {
+        target_h = cap_h;
+      }
+      m_geometry.width = target_w;
+      m_geometry.height = target_h;
     }
-    m_ivi_surface = ivi_application_surface_create(
-        ivi_application, m_ivi_surface_id, m_base_surface);
-    if (m_ivi_surface == nullptr) {
-      spdlog::error("Failed to create ivi_client_surface");
-    }
-    ivi_surface_add_listener(m_ivi_surface, &ivi_surface_listener, this);
-
     m_wait_for_configure = false;
-  }
-#elif defined(ENABLE_XDG_CLIENT)
-  {
-    m_xdg_surface =
-        xdg_wm_base_get_xdg_surface(m_display->GetXdgWmBase(), m_base_surface);
+    m_backend->Resize(m_index, m_flutter_engine.get(), m_geometry.width,
+                      m_geometry.height);
+  };
+  cfg.on_close = [this]() { m_running = false; };
 
-    xdg_surface_add_listener(m_xdg_surface, &xdg_surface_listener, this);
-    m_xdg_toplevel = xdg_surface_get_toplevel(m_xdg_surface);
+  auto& shell = m_display->ActiveShell();
+  m_shell_surface = shell.CreateSurface(m_base_surface, cfg);
 
-    xdg_toplevel_add_listener(m_xdg_toplevel, &xdg_toplevel_listener, this);
-
-    xdg_toplevel_set_app_id(m_xdg_toplevel, m_app_id.c_str());
-    xdg_toplevel_set_title(m_xdg_toplevel, m_app_id.c_str());
-
-    if (m_fullscreen)
-      xdg_toplevel_set_fullscreen(m_xdg_toplevel, m_wl_output);
-
-    m_wait_for_configure = true;
-  }
-#endif
+  // xdg-family surfaces gate startup on the first configure; ivi/simple do not.
+  const auto shell_name = shell.Name();
+  m_wait_for_configure = (shell_name == "xdg" || shell_name == "agl");
 
   wl_surface_commit(m_base_surface);
 
-#if ENABLE_AGL_SHELL_CLIENT
-  switch (m_type) {
-    case WINDOW_NORMAL:
-      break;
-    case WINDOW_BG:
-      m_display->AglShellDoBackground(m_base_surface, 0);
-      if (m_activation_area.x || m_activation_area.y ||
-          m_activation_area.width || m_activation_area.height)
-        m_display->AglShellDoSetupActivationArea(
-            m_activation_area.x, m_activation_area.y, m_activation_area.width,
-            m_activation_area.height, 0);
-      break;
-    case WINDOW_PANEL_TOP:
-      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_TOP, 0);
-      break;
-    case WINDOW_PANEL_BOTTOM:
-      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_BOTTOM, 0);
-      break;
-    case WINDOW_PANEL_LEFT:
-      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_LEFT, 0);
-      break;
-    case WINDOW_PANEL_RIGHT:
-      m_display->AglShellDoPanel(m_base_surface, AGL_SHELL_EDGE_RIGHT, 0);
-      break;
-    default:
-      spdlog::critical("Invalid surface role type supplied");
-      assert(false);
+  // AGL window management (set_background / set_panel / activation region) must
+  // follow the first commit. Only AglShell exposes a WindowManager facet.
+  if (auto* wm = shell.WindowManager()) {
+    switch (m_type) {
+      case WINDOW_BG:
+        wm->SetBackground(m_base_surface, 0);
+        if (m_activation_area.x || m_activation_area.y ||
+            m_activation_area.width || m_activation_area.height) {
+          wm->SetActivationArea(m_activation_area.x, m_activation_area.y,
+                                m_activation_area.width,
+                                m_activation_area.height, 0);
+        }
+        break;
+      case WINDOW_PANEL_TOP:
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelTop, 0);
+        break;
+      case WINDOW_PANEL_BOTTOM:
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelBottom, 0);
+        break;
+      case WINDOW_PANEL_LEFT:
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelLeft, 0);
+        break;
+      case WINDOW_PANEL_RIGHT:
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelRight, 0);
+        break;
+      default:
+        break;
+    }
   }
-#endif
 
   // this makes the start-up from the beginning with the correction dimensions
   // like starting as maximized/fullscreen, rather than starting up as floating
@@ -158,18 +204,9 @@ WaylandWindow::~WaylandWindow() {
   if (m_base_frame_callback)
     wl_callback_destroy(m_base_frame_callback);
 
-#if ENABLE_IVI_SHELL_CLIENT
-  if (m_ivi_surface)
-    ivi_surface_destroy(m_ivi_surface);
-#endif
-
-#if ENABLE_XDG_CLIENT
-  if (m_xdg_surface)
-    xdg_surface_destroy(m_xdg_surface);
-
-  if (m_xdg_toplevel)
-    xdg_toplevel_destroy(m_xdg_toplevel);
-#endif
+  // The role (xdg_surface/toplevel, ivi_surface, ...) is destroyed by
+  // m_shell_surface's destructor.
+  m_shell_surface.reset();
 
   wl_surface_destroy(m_base_surface);
 
@@ -207,132 +244,6 @@ const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
 #endif
 };
 
-#if ENABLE_XDG_CLIENT
-void WaylandWindow::handle_xdg_surface_configure(
-    void* data,
-    struct xdg_surface* xdg_surface,
-    uint32_t serial) {
-  auto* w = static_cast<WaylandWindow*>(data);
-  xdg_surface_ack_configure(xdg_surface, serial);
-  w->m_wait_for_configure = false;
-}
-
-const struct xdg_surface_listener WaylandWindow::xdg_surface_listener = {
-    .configure = handle_xdg_surface_configure};
-#endif
-
-#if ENABLE_IVI_SHELL_CLIENT
-void WaylandWindow::handle_ivi_surface_configure(
-    void* data,
-    struct ivi_surface* /* ivi_surface */,
-    int32_t width,
-    int32_t height) {
-  auto* w = static_cast<WaylandWindow*>(data);
-
-  if (width > 0 && height > 0) {
-    if (w->m_fullscreen) {
-      SPDLOG_DEBUG("Setting Fullscreen");
-      const auto extents = w->m_display->GetVideoModeSize(w->m_output_index);
-      width = extents.first;
-      height = extents.second;
-    }
-    if (!w->m_fullscreen && !w->m_maximized) {
-      w->m_window_size.width = width;
-      w->m_window_size.height = height;
-    }
-    w->m_geometry.width = width;
-    w->m_geometry.height = height;
-  }
-
-  w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
-                       w->m_geometry.width, w->m_geometry.height);
-
-  w->m_wait_for_configure = false;
-}
-
-const struct ivi_surface_listener WaylandWindow::ivi_surface_listener = {
-    .configure = handle_ivi_surface_configure};
-#endif
-
-#if ENABLE_XDG_CLIENT
-void WaylandWindow::handle_toplevel_configure(
-    void* data,
-    struct xdg_toplevel* /* toplevel */,
-    int32_t width,
-    int32_t height,
-    struct wl_array* states) {
-  auto* w = static_cast<WaylandWindow*>(data);
-
-  w->m_fullscreen = false;
-  w->m_maximized = false;
-  w->m_resize = false;
-  w->m_activated = false;
-
-  const uint32_t* state;
-  WL_ARRAY_FOR_EACH(state, states, const uint32_t*) {
-    switch (*state) {
-      case XDG_TOPLEVEL_STATE_FULLSCREEN:
-        w->m_fullscreen = true;
-        break;
-      case XDG_TOPLEVEL_STATE_MAXIMIZED:
-        w->m_maximized = true;
-        break;
-      case XDG_TOPLEVEL_STATE_RESIZING:
-        w->m_resize = true;
-        break;
-      case XDG_TOPLEVEL_STATE_ACTIVATED:
-        w->m_activated = true;
-        break;
-      default:;
-    }
-  }
-
-  if (width > 0 && height > 0) {
-    if (!w->m_fullscreen && !w->m_maximized) {
-      w->m_window_size.width = width;
-      w->m_window_size.height = height;
-    }
-    w->m_geometry.width = width;
-    w->m_geometry.height = height;
-
-  } else if (!w->m_fullscreen && !w->m_maximized) {
-    // (0,0) configure = "client picks size". Downsize the client request
-    // to fit the compositor's hint (configure_bounds if known, else the
-    // output mode) so we don't render off-screen or get clipped on
-    // compositors like tinywlr that don't enforce bounds at commit time.
-    int32_t cap_w = w->m_configure_bounds.width;
-    int32_t cap_h = w->m_configure_bounds.height;
-    if (cap_w <= 0 || cap_h <= 0) {
-      const auto out = w->m_display->GetVideoModeSize(w->m_output_index);
-      cap_w = out.first;
-      cap_h = out.second;
-    }
-    int32_t target_w = w->m_window_size.width;
-    int32_t target_h = w->m_window_size.height;
-    if (cap_w > 0 && target_w > cap_w) {
-      target_w = cap_w;
-    }
-    if (cap_h > 0 && target_h > cap_h) {
-      target_h = cap_h;
-    }
-    w->m_geometry.width = target_w;
-    w->m_geometry.height = target_h;
-  }
-
-  w->m_backend->Resize(w->m_index, w->m_flutter_engine.get(),
-                       w->m_geometry.width, w->m_geometry.height);
-}
-
-void WaylandWindow::handle_toplevel_configure_bounds(
-    void* data,
-    struct xdg_toplevel* /* toplevel */,
-    int32_t width,
-    int32_t height) {
-  auto* w = static_cast<WaylandWindow*>(data);
-  w->m_configure_bounds.width = width;
-  w->m_configure_bounds.height = height;
-}
-
 void WaylandWindow::OnOutputResized(const size_t output_index,
                                     const int32_t new_w,
                                     const int32_t new_h) {
@@ -363,25 +274,6 @@ void WaylandWindow::OnOutputResized(const size_t output_index,
   m_geometry.height = target_h;
   m_backend->Resize(m_index, m_flutter_engine.get(), target_w, target_h);
 }
-
-void WaylandWindow::handle_toplevel_close(
-    void* data,
-    struct xdg_toplevel* /* xdg_toplevel */) {
-  auto* w = static_cast<WaylandWindow*>(data);
-  w->m_running = false;
-}
-
-const struct xdg_toplevel_listener WaylandWindow::xdg_toplevel_listener = {
-    .configure = handle_toplevel_configure,
-    .close = handle_toplevel_close,
-#if defined(XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION)
-    .configure_bounds = handle_toplevel_configure_bounds,
-#endif
-#if defined(XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION)
-    .wm_capabilities = nullptr,
-#endif
-};
-#endif
 
 bool WaylandWindow::ActivateSystemCursor(int32_t device,
                                          const std::string& kind) const {

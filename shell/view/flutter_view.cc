@@ -22,24 +22,27 @@
 
 #include "app.h"
 
-#if BUILD_BACKEND_HEADLESS_EGL
-#include "backend/headless/headless.h"
-#elif BUILD_BACKEND_DRM_KMS_EGL
+// Independent guards so several backends can be compiled into one binary
+// (Shell::Create selects per view at runtime). Header guards make the repeated
+// drm_display.h include harmless.
+#if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "display/drm_display.h"
-#elif BUILD_BACKEND_DRM_KMS_VULKAN
+#endif
+#if BUILD_BACKEND_DRM_KMS_VULKAN
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
 #include "display/drm_display.h"
-#elif BUILD_BACKEND_SOFTWARE
+#endif
+#if BUILD_BACKEND_SOFTWARE
 #include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
 #include "display/software_display.h"
-#elif BUILD_BACKEND_WAYLAND_EGL
+#endif
+#if BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
-#elif BUILD_BACKEND_WAYLAND_VULKAN
+#endif
+#if BUILD_BACKEND_WAYLAND_VULKAN
 #include "backend/wayland_vulkan/wayland_vulkan.h"
-#else
-#error "no Flutter backend selected (see flutter_view.h)"
 #endif
 #include <key_event_handler.h>
 #include <text_input_plugin.h>
@@ -61,8 +64,7 @@ extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
 #if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
@@ -71,16 +73,14 @@ extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                                    FlutterView* view);
 
-FlutterView::FlutterView(Configuration::Config config,
-                         const size_t index,
-                         const std::shared_ptr<IDisplay>& display)
-    : m_display(display), m_config(std::move(config)), m_index(index) {
-#if BUILD_BACKEND_HEADLESS_EGL
-  m_backend = std::make_shared<HeadlessBackend>(
-      m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewHeight),
-      m_config.debug_backend.value_or(false), kEglBufferSize);
-#elif BUILD_BACKEND_DRM_KMS_EGL
+// The single per-view Shell factory (declared in backend/backend.h). Selects
+// the concrete backend from the compiled-in set + config and performs any
+// backend-specific post-creation wiring. Extracted verbatim from the old
+// FlutterView constructor body.
+std::shared_ptr<Shell> Shell::Create(const Configuration::Config& config,
+                                     const std::shared_ptr<IDisplay>& display) {
+  std::shared_ptr<Shell> m_backend;
+#if BUILD_BACKEND_DRM_KMS_EGL
   {
     auto parse_tri = [](const std::optional<std::string>& s,
                         drm_config::TriState def =
@@ -158,40 +158,39 @@ FlutterView::FlutterView(Configuration::Config config,
     // cfg_.width.value_or(mode_.hdisplay), i.e. the native mode. When -f
     // is combined with explicit width/height, -f wins — matches how most
     // CLI tools handle a scalar "use native" flag vs. explicit sizing.
-    const bool fullscreen = m_config.view.fullscreen.value_or(false);
+    const bool fullscreen = config.view.fullscreen.value_or(false);
     DrmConfig cfg{
-        m_config.view.drm_device.value_or("/dev/dri/card1"),
-        fullscreen ? std::optional<uint32_t>{} : m_config.view.width,
-        fullscreen ? std::optional<uint32_t>{} : m_config.view.height,
-        m_config.debug_backend.value_or(false),
+        config.view.drm_device.value_or("/dev/dri/card1"),
+        fullscreen ? std::optional<uint32_t>{} : config.view.width,
+        fullscreen ? std::optional<uint32_t>{} : config.view.height,
+        config.debug_backend.value_or(false),
     };
-    cfg.disable_cursor = m_config.disable_cursor.value_or(false);
-    cfg.cursor_theme = m_config.cursor_theme;
+    cfg.disable_cursor = config.disable_cursor.value_or(false);
+    cfg.cursor_theme = config.cursor_theme;
     // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
     // `drm_connector = ""` in TOML shouldn't force a strict empty-name
     // match against zero connectors.
-    if (m_config.view.drm_connector.has_value() &&
-        !m_config.view.drm_connector->empty()) {
-      cfg.connector_name = m_config.view.drm_connector;
+    if (config.view.drm_connector.has_value() &&
+        !config.view.drm_connector->empty()) {
+      cfg.connector_name = config.view.drm_connector;
     }
-    if (m_config.view.drm_mode.has_value() &&
-        !m_config.view.drm_mode->empty()) {
-      cfg.mode_spec = m_config.view.drm_mode;
+    if (config.view.drm_mode.has_value() && !config.view.drm_mode->empty()) {
+      cfg.mode_spec = config.view.drm_mode;
     }
-    cfg.compositor = parse_compositor(m_config.view.drm_compositor);
-    cfg.modeset = parse_modeset(m_config.view.drm_modeset);
+    cfg.compositor = parse_compositor(config.view.drm_compositor);
+    cfg.modeset = parse_modeset(config.view.drm_modeset);
     cfg.allow_nonblock_modeset =
-        parse_tri(m_config.view.drm_allow_nonblock_modeset);
-    cfg.primary_format = parse_format(m_config.view.drm_primary_format);
-    cfg.overlay_planes = parse_tri(m_config.view.drm_overlay_planes);
-    cfg.explicit_sync = parse_tri(m_config.view.drm_explicit_sync);
-    cfg.async_flip = parse_tri(m_config.view.drm_async_flip);
+        parse_tri(config.view.drm_allow_nonblock_modeset);
+    cfg.primary_format = parse_format(config.view.drm_primary_format);
+    cfg.overlay_planes = parse_tri(config.view.drm_overlay_planes);
+    cfg.explicit_sync = parse_tri(config.view.drm_explicit_sync);
+    cfg.async_flip = parse_tri(config.view.drm_async_flip);
     // kAuto (default) resolves per driver in DrmBackend::Create — staging is
     // enabled only on nvidia-drm; yes/no force the choice.
-    cfg.stage_cursor = parse_tri(m_config.view.drm_stage_cursor);
+    cfg.stage_cursor = parse_tri(config.view.drm_stage_cursor);
     // --drm-no-seat: DrmDisplay forced the session null; tell DrmBackend to
     // also skip the foreground-VT guard on its direct-open path.
-    cfg.no_seat = m_config.view.drm_no_seat.value_or(false);
+    cfg.no_seat = config.view.drm_no_seat.value_or(false);
 
     // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
     // process-wide libseat session. Pull the raw pointer — may be null
@@ -199,7 +198,7 @@ FlutterView::FlutterView(Configuration::Config config,
     // the legacy direct-open path. In a DRM build, MakeDisplay always
     // returns a DrmDisplay, so dynamic_cast fails only on programmer
     // error; assert keeps the invariant loud.
-    auto* drm_display = dynamic_cast<DrmDisplay*>(m_display.get());
+    auto* drm_display = dynamic_cast<DrmDisplay*>(display.get());
     assert(drm_display != nullptr);
     m_backend = DrmBackend::Create(cfg, drm_display->session());
 
@@ -237,16 +236,16 @@ FlutterView::FlutterView(Configuration::Config config,
     // Shares DrmDisplay (libseat session, refresh rate, cursor) with the EGL
     // DRM backend; only the renderer differs. App::MakeDisplay always builds a
     // DrmDisplay in a DRM build, so the cast failing is programmer error.
-    auto* drm_display = dynamic_cast<DrmDisplay*>(m_display.get());
+    auto* drm_display = dynamic_cast<DrmDisplay*>(display.get());
     assert(drm_display != nullptr);
     const std::string drm_mode =
-        (m_config.view.drm_mode.has_value() && !m_config.view.drm_mode->empty())
-            ? *m_config.view.drm_mode
+        (config.view.drm_mode.has_value() && !config.view.drm_mode->empty())
+            ? *config.view.drm_mode
             : std::string{};
     auto vk_backend = VulkanDrmBackend::Create(
-        m_config.view.drm_device.value_or("/dev/dri/card1"),
-        m_config.debug_backend.value_or(false), drm_display->session(),
-        drm_mode, m_config.view.drm_rotation.value_or(0));
+        config.view.drm_device.value_or("/dev/dri/card1"),
+        config.debug_backend.value_or(false), drm_display->session(), drm_mode,
+        config.view.drm_rotation.value_or(0));
 
     // Create returns nullptr on any init failure (unsupported device, no
     // zero-copy scanout path). Continuing would dereference a null backend in
@@ -268,37 +267,46 @@ FlutterView::FlutterView(Configuration::Config config,
                                  static_cast<int32_t>(vk_backend->height()));
     drm_display->SetCursor(vk_backend->drm_cursor());
     drm_display->SetCursorRotation(vk_backend->rotation());
-    drm_display->SetInputTransforms(m_config.view.drm_input_transforms);
+    drm_display->SetInputTransforms(config.view.drm_input_transforms);
     m_backend = vk_backend;
   }
-#elif BUILD_BACKEND_WAYLAND_EGL
+#elif BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   {
     auto* wl = dynamic_cast<Display*>(display.get());
-    m_backend = std::make_shared<WaylandEglBackend>(
-        wl, wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
-        m_config.view.height.value_or(kDefaultViewHeight),
-        m_config.debug_backend.value_or(false), kEglBufferSize);
-  }
-#elif BUILD_BACKEND_WAYLAND_VULKAN
-  {
-    auto* wl = dynamic_cast<Display*>(display.get());
-    // Mesa's Vulkan WSI on Wayland needs zwp_linux_dmabuf_v1 (modern) or
-    // wl_drm (legacy) to allocate GPU buffers. Without one of these,
-    // vkGetPhysicalDeviceSurfaceFormatsKHR returns SURFACE_LOST on the
-    // first surface call and the swapchain init bails. Warn loudly here so
-    // the user has a one-line root cause instead of a deep VK abort.
-    if (!wl->HasLinuxDmabuf() && !wl->HasWlDrm()) {
-      spdlog::warn(
-          "[WaylandVulkanBackend] compositor advertises neither "
-          "zwp_linux_dmabuf_v1 nor wl_drm — Mesa Vulkan WSI cannot "
-          "allocate swapchain images. Swapchain init will fail; fix on the "
-          "compositor side (e.g. Weston needs --backend=drm-backend or its "
-          "linux-dmabuf support built in).");
+    // Per-view renderer pick when both Wayland backends are compiled in:
+    // view.backend == "vulkan" selects Vulkan, otherwise EGL. If only one is
+    // compiled in, that one is used regardless.
+    bool use_vulkan = config.view.backend.value_or("") == "vulkan";
+#if !BUILD_BACKEND_WAYLAND_EGL
+    use_vulkan = true;  // Vulkan is the only Wayland backend available
+#endif
+    (void)use_vulkan;
+#if BUILD_BACKEND_WAYLAND_VULKAN
+    if (use_vulkan) {
+      // Mesa's Vulkan WSI on Wayland needs zwp_linux_dmabuf_v1 (modern) or
+      // wl_drm (legacy) to allocate GPU buffers; warn loudly if absent.
+      if (!wl->HasLinuxDmabuf() && !wl->HasWlDrm()) {
+        spdlog::warn(
+            "[WaylandVulkanBackend] compositor advertises neither "
+            "zwp_linux_dmabuf_v1 nor wl_drm — Mesa Vulkan WSI cannot "
+            "allocate swapchain images. Swapchain init will fail; fix on the "
+            "compositor side (e.g. Weston needs --backend=drm-backend or its "
+            "linux-dmabuf support built in).");
+      }
+      m_backend = std::make_shared<WaylandVulkanBackend>(
+          wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
+          config.view.height.value_or(kDefaultViewHeight),
+          config.debug_backend.value_or(false));
     }
-    m_backend = std::make_shared<WaylandVulkanBackend>(
-        wl, wl->GetDisplay(), m_config.view.width.value_or(kDefaultViewWidth),
-        m_config.view.height.value_or(kDefaultViewHeight),
-        m_config.debug_backend.value_or(false));
+#endif
+#if BUILD_BACKEND_WAYLAND_EGL
+    if (!m_backend) {
+      m_backend = std::make_shared<WaylandEglBackend>(
+          wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
+          config.view.height.value_or(kDefaultViewHeight),
+          config.debug_backend.value_or(false), kEglBufferSize);
+    }
+#endif
   }
 #elif BUILD_BACKEND_SOFTWARE
   {
@@ -309,11 +317,19 @@ FlutterView::FlutterView(Configuration::Config config,
     // sink, mirroring drm-kms-egl; empty lets the sink probe the first usable
     // card. An explicit IVI_SW_SINK=drm-dumb:/dev/dri/cardN still overrides.
     m_backend = std::make_shared<SoftwareBackend>(
-        m_config.view.width.value_or(kDefaultViewWidth),
-        m_config.view.height.value_or(kDefaultViewHeight),
-        MakeSinkFromEnv(m_config.view.drm_device.value_or(std::string{})));
+        config.view.width.value_or(kDefaultViewWidth),
+        config.view.height.value_or(kDefaultViewHeight),
+        MakeSinkFromEnv(config.view.drm_device.value_or(std::string{})));
   }
 #endif
+  return m_backend;
+}
+
+FlutterView::FlutterView(Configuration::Config config,
+                         const size_t index,
+                         const std::shared_ptr<IDisplay>& display)
+    : m_display(display), m_config(std::move(config)), m_index(index) {
+  m_backend = Shell::Create(m_config, display);
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
                m_config.view.width.value_or(kDefaultViewWidth),
@@ -480,7 +496,7 @@ void FlutterView::Initialize() {
   // post-Engine::Run lifecycle hooks (DRM's OnSessionResumed →
   // ScheduleFrame; WaylandEgl's wp_presentation_feedback dispatch) can
   // marshal back to the FlutterEngineRun thread without a dynamic_cast.
-  // Backends that don't need either inherit no-op defaults from Backend.
+  // Backends that don't need either inherit no-op defaults from Shell.
   if (m_backend) {
     m_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
     m_backend->SetPlatformTaskRunner(m_flutter_engine->GetPlatformTaskRunner());
@@ -498,8 +514,15 @@ void FlutterView::Initialize() {
   // which may still hold the TOML-specified size even when `-f` cleared those
   // values for the backend. Query the backend for the resolved FB size so
   // fullscreen actually gets mode dims here instead of a stale 1024x768 etc.
-  const auto width = static_cast<int32_t>(m_backend->width());
-  const auto height = static_cast<int32_t>(m_backend->height());
+#if BUILD_BACKEND_DRM_KMS_EGL
+  auto* drm = dynamic_cast<DrmBackend*>(m_backend.get());
+#else
+  auto* drm = dynamic_cast<VulkanDrmBackend*>(m_backend.get());
+#endif
+  const auto width = static_cast<int32_t>(
+      drm ? drm->width() : m_config.view.width.value_or(kDefaultViewWidth));
+  const auto height = static_cast<int32_t>(
+      drm ? drm->height() : m_config.view.height.value_or(kDefaultViewHeight));
 #elif BUILD_BACKEND_SOFTWARE
   // The SoftwareBackend adopts the sink's native mode (DRM / fbdev) as its
   // resolved extent; render the engine at that so the frame fills + centers on
