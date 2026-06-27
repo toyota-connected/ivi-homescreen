@@ -66,6 +66,7 @@ void SoftwareCursor::BlendXRGB(uint8_t* map,
   if (map == nullptr || !visible_.load(std::memory_order_acquire)) {
     return;
   }
+  const std::lock_guard<std::mutex> lock(bitmap_mtx_);
   const int32_t ox = x_.load(std::memory_order_relaxed) - hot_x_;
   const int32_t oy = y_.load(std::memory_order_relaxed) - hot_y_;
 
@@ -98,4 +99,20 @@ void SoftwareCursor::BlendXRGB(uint8_t* map,
       // d[3] (X) left unchanged.
     }
   }
+}
+
+void SoftwareCursor::SetShape(const uint32_t* const argb,
+                              const uint32_t width,
+                              const uint32_t height,
+                              const int32_t hot_x,
+                              const int32_t hot_y) {
+  if (argb == nullptr || width == 0 || height == 0) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(bitmap_mtx_);
+  pixels_.assign(argb, argb + static_cast<size_t>(width) * height);
+  width_ = width;
+  height_ = height;
+  hot_x_ = hot_x;
+  hot_y_ = hot_y;
 }

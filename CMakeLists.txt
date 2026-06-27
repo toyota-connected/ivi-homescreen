@@ -96,6 +96,12 @@ if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     include(wayland_cxx)
 endif ()
 
+# The software backend resolves XCursor themes via drm-cxx's loader sources
+# built in-tree (no display deps); see cmake/drm_cxx_cursor_load.cmake.
+if (BUILD_BACKEND_SOFTWARE)
+    include(drm_cxx_cursor_load)
+endif ()
+
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
 #

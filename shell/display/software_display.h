@@ -78,10 +78,8 @@ class SoftwareDisplay final : public IDisplay {
   }
 
   [[nodiscard]] bool ActivateSystemCursor(
-      int32_t /*device*/,
-      const std::string& /*kind*/) const override {
-    return true;
-  }
+      int32_t device,
+      const std::string& kind) const override;
 
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
