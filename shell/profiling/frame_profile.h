@@ -27,10 +27,10 @@ namespace profiling {
 //
 //   * a window line every kWindow presents:
 //       [<label>] profile (n=N): fps=.. mean_interval=..us max_interval=..us
-//       present_failures=.. buckets[60Hz/30Hz/20Hz/slow/idle]=../../../../..
+//       discarded=.. buckets[60Hz/30Hz/20Hz/slow/idle]=../../../../..
 //   * a session summary on teardown (folds the trailing partial window):
 //       [<label>] session summary: frames=N fps=.. mean_interval=..us
-//       max_interval=..us present_failures=..
+//       max_interval=..us discarded=..
 //       [<label>] session buckets: 60Hz=.. (..%) 30Hz=.. (..%) ...
 //
 // The interval histogram uses fixed thresholds (<=17 / <=33 / <=50 / <=100 ms,
@@ -46,9 +46,10 @@ class FrameProfile {
   // True when IVI_PROFILE is set, or (when non-null) the legacy gate is set.
   static bool Enabled(const char* legacy_env = nullptr);
 
-  // Record one present. When ok is false it counts a present failure and
-  // contributes no interval. now_ns is a CLOCK_MONOTONIC timestamp; pass 0 to
-  // sample it internally. label is the backend tag for the window log line.
+  // Record one present. When ok is false the frame is counted as discarded
+  // (superseded / not scanned out) and contributes no interval. now_ns is a
+  // CLOCK_MONOTONIC timestamp; pass 0 to sample it internally. label is the
+  // backend tag for the window log line.
   void Record(std::string_view label, bool ok, uint64_t now_ns = 0);
 
   // Emit the session-aggregate summary. No-op when no frames were recorded.
@@ -61,7 +62,7 @@ class FrameProfile {
     uint64_t interval_sum_ns{0};
     uint64_t interval_max_ns{0};
     uint32_t frames{0};
-    uint32_t failures{0};
+    uint32_t discarded{0};
     uint32_t b60{0};    // <= 17ms  (60Hz)
     uint32_t b30{0};    // 18-33ms  (30Hz)
     uint32_t b20{0};    // 34-50ms  (20Hz)

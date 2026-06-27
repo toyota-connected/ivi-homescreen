@@ -483,8 +483,9 @@ sysroot_apt_install() {
 # -dev packages across the queued backends. The Vulkan entry points are
 # dlopen'd (vulkan.hpp) and the Vulkan headers are vendored, so drm-kms-vulkan
 # needs no libvulkan-dev — only the DRM/GBM/seat/input stack (same as
-# drm-kms-egl). libwayland-dev + wayland-protocols are shared (waypp is always
-# built). Debian trixie ships libdisplay-info 0.2.0 (>= drm-cxx's floor).
+# drm-kms-egl). libwayland-dev + wayland-protocols are shared (the
+# wayland-cxx-scanner binding layer needs them). Debian trixie ships
+# libdisplay-info 0.2.0 (>= drm-cxx's floor).
 sysroot_pkg_list() {
     local pkgs=(
         libcamera-dev libcurl4-openssl-dev libegl-dev libgles2-mesa-dev
@@ -653,7 +654,6 @@ phase4_build() {
         -S "$REPO_DIR" -B "$BUILD_DIR"
         -DCMAKE_TOOLCHAIN_FILE="$BUILD_DIR/.xc-toolchain.cmake"
         -DCMAKE_BUILD_TYPE=Release
-        -DBUILD_BACKEND_HEADLESS_EGL=OFF
         -DBUILD_BACKEND_DRM_KMS_VULKAN=OFF
     )
     case "$be" in

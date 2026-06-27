@@ -40,7 +40,7 @@ echo "Using: $(command -v "${CLANG_TIDY}")"
 
 # Only lint files actually compiled in this build configuration (those
 # present in compile_commands.json). Files belonging to optional backends
-# (osmesa, vulkan, dlt, ...) or plugin-only sources are skipped when the
+# (vulkan, dlt, ...) or plugin-only sources are skipped when the
 # corresponding feature is off, avoiding spurious errors from unavailable
 # headers and mis-resolved compilation flags.
 #

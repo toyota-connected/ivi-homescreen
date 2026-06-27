@@ -49,6 +49,7 @@
 #include "drm-cxx/src/modeset/atomic.hpp"
 #include "libflutter_engine.h"
 #include "logging.h"
+#include "profiling/frame_profile.h"
 #include "view/compositor_surface_interface.h"
 
 namespace {
@@ -58,14 +59,16 @@ bool AllocDebug() {
   return enabled;
 }
 
-// Per-frame composite profiling (IVI_DRM_PROFILE=1). When enabled, the
-// PresentFramed hot path samples a few fence-post timestamps and
-// accumulates per-stage means/maxes; every kProfileWindow frames the
-// rolling stats get logged and the accumulators reset. clock_gettime
-// is single-digit-ns on modern x86 so the overhead is negligible
-// relative to the work being measured.
+// Per-frame composite profiling (IVI_DRM_PROFILE, or the IVI_PROFILE umbrella).
+// When enabled, the PresentFramed hot path samples a few fence-post timestamps
+// and accumulates per-stage means/maxes; every kProfileWindow frames the
+// rolling stats get logged and the accumulators reset. clock_gettime is
+// single-digit-ns on modern x86 so the overhead is negligible relative to the
+// work being measured. Gated via FrameProfile::Enabled so IVI_PROFILE turns it
+// on alongside every other backend's profile (IVI_WL/VK/SW/VSYNC_PROFILE).
 bool ProfileEnabled() {
-  static const bool enabled = std::getenv("IVI_DRM_PROFILE") != nullptr;
+  static const bool enabled =
+      profiling::FrameProfile::Enabled("IVI_DRM_PROFILE");
   return enabled;
 }
 
@@ -1068,21 +1071,14 @@ void DrmCompositor::SettleAtomicCommit(const bool blocking) {
     // synchronously with no PAGE_FLIP_EVENT. The genuine first modeset
     // also latches plane_mode_set_ and verifies the pipe. Either way the
     // baton Flutter requested while we built this frame must be returned
-    // inline (the asio flip path won't fire). PostOnVsync marshals via
+    // inline (the asio flip path won't fire). DeliverParkedBaton marshals via
     // the platform task runner (we're on the rasterizer thread).
     if (!plane_mode_set_) {
       plane_mode_set_ = true;
       VerifyPipeRunning();
     }
     flip_pending_.store(false, std::memory_order_release);
-    const intptr_t baton =
-        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-    if (baton != 0) {
-      if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_acquire)) {
-        backend_->PostOnVsync(engine, baton);
-      }
-    }
+    (void)backend_->vsync_.DeliverParkedBaton();
   } else {
     flip_pending_.store(true, std::memory_order_release);
   }
@@ -1639,7 +1635,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // Session-pause gate. While inactive, any atomic commit returns
   // EACCES and any flip event never fires. Ack the frame to Flutter
   // (return true) without touching the kernel. The vsync baton stays
-  // pending in vsync_baton_; OnResume() fires a synthetic OnVsync to
+  // parked in the provider; the backend's OnSessionResumed drains it to
   // restart the pacer, after which the next Present does a full
   // re-modeset (plane_mode_set_ is cleared in OnResume).
   if (paused_.load(std::memory_order_acquire)) {
@@ -2450,14 +2446,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     plane_mode_set_ = true;
     flip_pending_.store(false, std::memory_order_release);
     VerifyPipeRunning();
-    const intptr_t baton =
-        backend_->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-    if (baton != 0) {
-      if (auto engine =
-              backend_->engine_handle_.load(std::memory_order_acquire)) {
-        backend_->PostOnVsync(engine, baton);
-      }
-    }
+    (void)backend_->vsync_.DeliverParkedBaton();
   } else {
     flip_pending_.store(true, std::memory_order_release);
   }

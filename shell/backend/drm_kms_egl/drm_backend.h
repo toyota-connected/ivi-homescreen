@@ -35,7 +35,7 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
-#include "profiling/frame_profile.h"
+#include "vsync/ivsync_provider.h"
 
 class DrmCompositor;
 class TaskRunner;
@@ -141,7 +141,7 @@ struct DrmConfig {
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
 // --drm-list-modes path is shared verbatim with the drm_kms_vulkan backend.
 
-class DrmBackend : public Backend {
+class DrmBackend : public Shell {
   friend class DrmCompositor;
 
  public:
@@ -189,17 +189,11 @@ class DrmBackend : public Backend {
   bool MakeResourceCurrent() const;
   bool Present();
 
+  // Park the engine's vsync baton (from VsyncTrampoline) into the shared
+  // provider, which returns it when the next page flip completes or — for an
+  // idle pipeline — drains it inline. Also caches the engine handle for the
+  // session-resume path below.
   void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
-
-  // Schedule OnVsync(engine, baton) on the platform task runner. Used by
-  // every site that needs to return a baton (SetVsyncBaton's first-baton
-  // kick, the legacy Present's post-SetInitialMode kick, both
-  // PageFlipHandlers, the compositor's first-commit drains). Marshalling
-  // through the runner satisfies Flutter's "OnVsync on the
-  // FlutterEngineRun thread only" rule (embedder.h:2285). No-op when
-  // either the engine handle or the platform runner is unset.
-  void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                   intptr_t baton) const;
 
   // Set the running engine handle so OnSessionResumed can call
   // FlutterEngineScheduleFrame. Wired by FlutterView after Engine::Run
@@ -207,6 +201,11 @@ class DrmBackend : public Backend {
   // dispatch thread.
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
     engine_handle_.store(engine, std::memory_order_release);
+    // Re-pass engine+runner to the provider. If the runner isn't wired yet
+    // this stores a null runner; SetPlatformTaskRunner re-pumps SetEngine
+    // once it is, and the provider's #210 kick latch drains any parked baton.
+    vsync_.SetEngine(engine,
+                     platform_task_runner_.load(std::memory_order_acquire));
   }
 
   // Hand over the platform task runner so PostOnVsync can marshal back
@@ -372,7 +371,26 @@ class DrmBackend : public Backend {
 
   bool mode_set_ = false;
 
-  std::atomic<intptr_t> vsync_baton_{0};
+  // Shared baton park/drain/marshal (#10 vsync fold). DRM's two source-state
+  // inputs are dynamic — the legacy flip latch vs. the active compositor's flip
+  // latch for IsSourcePending(), and mode_.vrefresh for the refresh period — so
+  // we subclass and override the two hooks to read live backend state rather
+  // than driving the base's SetSourcePending/SetPeriodNs setters. A nested
+  // class so the overrides can reach DrmBackend's private members directly; the
+  // bodies live in the .cc where DrmCompositor is a complete type.
+  class DrmVsyncProvider final : public ivi::IVsyncProvider {
+   public:
+    explicit DrmVsyncProvider(DrmBackend* backend) : backend_(backend) {}
+
+   protected:
+    [[nodiscard]] bool IsSourcePending() const override;
+    [[nodiscard]] uint32_t PeriodNs() const override;
+
+   private:
+    DrmBackend* backend_;
+  };
+  DrmVsyncProvider vsync_{this};
+
   // FlutterEngine handle. Installed by FlutterView via SetEngineHandle
   // after Engine::Run; also updated defensively by SetVsyncBaton so the
   // vsync_callback path stays consistent. Read by OnSessionResumed and
@@ -394,10 +412,9 @@ class DrmBackend : public Backend {
   uint64_t flip_submit_ns_{0};
   uint32_t frame_count_{0};
   uint64_t fps_epoch_ns_{0};
-  // Unified cadence profiler (IVI_PROFILE / legacy IVI_DRM_PROFILE),
-  // independent of the debug_backend per-second FPS line above. Written from
-  // the rasterizer thread (PageFlipHandler) only.
-  profiling::FrameProfile frame_profile_;
+  // Per-second FPS line, active only under cfg_.debug_backend. The unified
+  // cadence profile (IVI_VSYNC_PROFILE, "[DrmVsync]") now lives in vsync_,
+  // recorded on every page flip via DeliverVsync.
   void RecordFlipComplete();
 
 #if BUILD_COMPOSITOR

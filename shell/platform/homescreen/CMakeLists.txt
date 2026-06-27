@@ -18,9 +18,8 @@ target_include_directories(platform_homescreen PUBLIC
         client_wrapper/include
         public
         # config/common.h is generated at ${PROJECT_BINARY_DIR}/config/common.h
-        # and pulled in via logging.h / backend.h. Add the binary root directly
-        # rather than relying on wayland-gen's exported include dirs (which are
-        # only present on Wayland/Headless builds).
+        # and pulled in via logging.h / backend.h, so add the binary root and the
+        # shell binary dir directly.
         ${CMAKE_BINARY_DIR}
         ${CMAKE_BINARY_DIR}/shell
 )
@@ -40,17 +39,9 @@ target_link_libraries(platform_homescreen PUBLIC
         tomlplusplus::tomlplusplus
 )
 
-# config/common.h includes <waypp/waypp.h> only on the Wayland backends, so
-# the wayland-gen protocol-header include dirs and the static library are both
-# scoped to those builds. Non-Wayland backends get neither the headers nor the
-# libwayland-client / libwayland-cursor runtime deps.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
-    target_include_directories(platform_homescreen PUBLIC
-            $<TARGET_PROPERTY:wayland-gen,INTERFACE_INCLUDE_DIRECTORIES>
-    )
-    target_link_libraries(platform_homescreen PUBLIC wayland-gen)
-endif ()
+# platform_homescreen needs no Wayland binding dependency: it includes no
+# Wayland protocol headers directly. The generated protocol headers attach to
+# the shell binary in shell/CMakeLists.txt.
 
 find_package(ACCESSKIT QUIET)
 if (ACCESSKIT_FOUND)
