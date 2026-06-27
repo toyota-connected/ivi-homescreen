@@ -59,7 +59,7 @@ std::shared_ptr<IDisplay> MakeDisplay(
   // DRM/KMS does not have a compositor-level display concept. The refresh
   // rate and mode are owned by the backend; the DrmDisplay stub answers
   // queries the shell issues (metrics, cursor activation, event loop) with
-  // safe defaults. Backend-side hooks can refine the refresh rate later.
+  // safe defaults. Shell-side hooks can refine the refresh rate later.
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
   const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
@@ -116,8 +116,8 @@ App::App(const std::vector<Configuration::Config>& configs)
   SPDLOG_DEBUG("+App::App");
 // AGL Shell needs a Wayland backend — its WaylandWindow / Display
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
-// defaults ON in waypp's CMake regardless of backend, so combine
-// with a Wayland-backend gate here.
+// defaults ON regardless of backend, so combine with a Wayland-backend
+// gate here.
 #if ENABLE_AGL_SHELL_CLIENT &&                                    \
     (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
      BUILD_BACKEND_HEADLESS_EGL)
@@ -134,8 +134,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 
 // AGL Shell needs a Wayland backend — its WaylandWindow / Display
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
-// defaults ON in waypp's CMake regardless of backend, so combine
-// with a Wayland-backend gate here.
+// defaults ON regardless of backend, so combine with a Wayland-backend
+// gate here.
 #if ENABLE_AGL_SHELL_CLIENT &&                                    \
     (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
      BUILD_BACKEND_HEADLESS_EGL)
@@ -148,15 +148,17 @@ App::App(const std::vector<Configuration::Config>& configs)
 
 // AGL Shell needs a Wayland backend — its WaylandWindow / Display
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
-// defaults ON in waypp's CMake regardless of backend, so combine
-// with a Wayland-backend gate here.
+// defaults ON regardless of backend, so combine with a Wayland-backend
+// gate here.
 #if ENABLE_AGL_SHELL_CLIENT &&                                    \
     (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
      BUILD_BACKEND_HEADLESS_EGL)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
+  // OnClientReady maps to agl_shell.ready() on AglShell and is a no-op on the
+  // other shells.
   if (found_view_with_bg)
-    dynamic_cast<Display*>(m_display.get())->AglShellDoReady();
+    dynamic_cast<Display*>(m_display.get())->ActiveShell().OnClientReady();
 #endif
 
 #if BUILD_WATCHDOG

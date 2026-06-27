@@ -55,15 +55,10 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
     endif ()
 endif ()
 
-# FlutterView's backend type is picked by an #if/#elif chain over the
-# BUILD_BACKEND_* flags; enabling both Wayland EGL and Wayland Vulkan
-# yields a single binary whose renderer is silently determined by
-# header order rather than user intent. Reject the combination loudly.
-if (BUILD_BACKEND_WAYLAND_EGL AND BUILD_BACKEND_WAYLAND_VULKAN)
-    message(FATAL_ERROR
-            "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN "
-            "are mutually exclusive — pick exactly one Wayland backend")
-endif ()
+# Wayland EGL + Wayland Vulkan may now coexist in one binary: both share the
+# same Wayland Display, and Shell::Create selects the renderer per view at
+# runtime from `view.backend` ("egl" | "vulkan"). (The former #if/#elif chain
+# that forced a single choice has been replaced by runtime selection.)
 
 # Software backend is a pure-CPU presenter with no GPU or display-server
 # dependencies; the renderer config is FlutterRendererType.kSoftware,
@@ -92,6 +87,15 @@ include(compiler)
 # and link fails with mixed ABI symbols.
 if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN)
     include(drm_kms)
+endif ()
+
+# wayland_cxx.cmake (like drm_kms) must run after compiler.cmake so the
+# `toolchain` INTERFACE library exists when we add_subdirectory the
+# wayland-cxx-scanner subproject on clang/libc++ builds. Gated internally on the
+# Wayland/Headless backends.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+    BUILD_BACKEND_HEADLESS_EGL)
+    include(wayland_cxx)
 endif ()
 
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)

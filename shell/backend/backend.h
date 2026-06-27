@@ -19,6 +19,7 @@
 #include <memory>
 
 #include "config/common.h"
+#include "configuration/configuration.h"
 
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
@@ -29,6 +30,7 @@
 
 class Engine;
 class TaskRunner;
+class IDisplay;
 
 // Carries an EGL context handle set that lets a plugin create its own EGL
 // context sharing GL objects with the embedder's raster context. All handles
@@ -42,7 +44,14 @@ struct BackendEglContext {
                         // visible on the raster thread.
 };
 
-class Backend {
+// The unified display-target interface: a Shell owns surface lifecycle, the
+// Flutter renderer/compositor config, and vsync for one presentation target
+// (Wayland compositor, DRM-KMS, software dumb buffer, headless). The intent is
+// that one factory builds the right Shell per FlutterView and each instance is
+// isolated so heterogeneous shells can run concurrently. The concrete
+// implementations are the *Backend classes (WaylandEglBackend, DrmBackend,
+// SoftwareBackend, ...), pending a cosmetic rename to *Shell.
+class Shell {
  public:
   enum Type {
     Headless,
@@ -53,11 +62,24 @@ class Backend {
     DrmKmsVulkan,
   };
 
-  Backend() = default;
-  virtual ~Backend() = default;
+  Shell() = default;
+  virtual ~Shell() = default;
 
-  Backend(const Backend&) = delete;
-  const Backend& operator=(const Backend&) = delete;
+  Shell(const Shell&) = delete;
+  const Shell& operator=(const Shell&) = delete;
+
+  /**
+   * @brief The single factory for a per-view Shell. Selects the concrete
+   * implementation (Wayland-EGL/-Vulkan, DRM-KMS-EGL/-Vulkan, software,
+   * headless) from the compiled-in backends + @p config, constructs an isolated
+   * instance, and performs any backend-specific post-creation wiring (e.g. DRM
+   * cursor/viewport). Replaces the #if/#elif chain that used to live inline in
+   * FlutterView. Calls exit() on a hard backend-init failure. Defined in
+   * backend/shell_factory.cc.
+   */
+  [[nodiscard]] static std::shared_ptr<Shell> Create(
+      const Configuration::Config& config,
+      const std::shared_ptr<IDisplay>& display);
 
   /**
    * @brief Execute the callback function for window resizing

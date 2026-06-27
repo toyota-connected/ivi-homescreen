@@ -69,7 +69,7 @@ void FrameProfile::Stats::Merge(const Stats& other) {
     interval_max_ns = other.interval_max_ns;
   }
   frames += other.frames;
-  failures += other.failures;
+  discarded += other.discarded;
   b60 += other.b60;
   b30 += other.b30;
   b20 += other.b20;
@@ -88,7 +88,7 @@ void FrameProfile::Record(const std::string_view label,
                           const bool ok,
                           uint64_t now_ns) {
   if (!ok) {
-    ++window_.failures;
+    ++window_.discarded;
     return;
   }
   if (now_ns == 0) {
@@ -107,9 +107,9 @@ void FrameProfile::Record(const std::string_view label,
       MeanIntervalNs(window_.interval_sum_ns, window_.frames);
   spdlog::info(
       "[{}] profile (n={}): fps={:.2f} mean_interval={}us max_interval={}us "
-      "present_failures={} buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
+      "discarded={} buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
       label, window_.frames, FpsFromMean(mean_ns), mean_ns / 1000,
-      window_.interval_max_ns / 1000, window_.failures, window_.b60,
+      window_.interval_max_ns / 1000, window_.discarded, window_.b60,
       window_.b30, window_.b20, window_.bslow, window_.bidle);
 
   session_.Merge(window_);
@@ -127,9 +127,9 @@ void FrameProfile::LogSessionSummary(const std::string_view label) const {
   const uint64_t mean_ns = MeanIntervalNs(s.interval_sum_ns, s.frames);
   spdlog::info(
       "[{}] session summary: frames={} fps={:.2f} mean_interval={}us "
-      "max_interval={}us present_failures={}",
+      "max_interval={}us discarded={}",
       label, s.frames, FpsFromMean(mean_ns), mean_ns / 1000,
-      s.interval_max_ns / 1000, s.failures);
+      s.interval_max_ns / 1000, s.discarded);
 
   if (const uint32_t total = s.b60 + s.b30 + s.b20 + s.bslow + s.bidle;
       total > 0) {

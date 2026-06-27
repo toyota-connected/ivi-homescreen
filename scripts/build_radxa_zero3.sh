@@ -618,8 +618,9 @@ sysroot_apt_install() {
 # dlopen'd (vulkan.hpp) and the Vulkan headers are vendored, so the Vulkan
 # backends need no libvulkan-dev for the SHELL itself — only the DRM/GBM/seat/
 # input stack (same as drm-kms-egl). libwayland-dev + wayland-protocols are
-# shared (waypp is always built). On Bookworm libdisplay-info-dev is 0.1.1; it
-# is only apt-installed when NOT cross-building a newer one (--with-local-...).
+# shared (the wayland-cxx-scanner binding layer needs them). On Bookworm
+# libdisplay-info-dev is 0.1.1; it is only apt-installed when NOT cross-building
+# a newer one (--with-local-...).
 sysroot_pkg_list() {
     local pkgs=(
         libcamera-dev libcurl4-openssl-dev libegl-dev libgles2-mesa-dev

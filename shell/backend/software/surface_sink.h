@@ -85,7 +85,7 @@ class ISurfaceSink {
   // handler. Default no-op.
   virtual void SubmitBaton(void* /*engine*/, intptr_t /*baton*/) {}
 
-  // Backend handle / runner plumbing. SoftwareBackend forwards these
+  // Shell handle / runner plumbing. SoftwareBackend forwards these
   // unconditionally; sinks that don't need them inherit no-ops.
   virtual void SetEngineHandle(void* /*engine*/) {}
   virtual void SetPlatformTaskRunner(TaskRunner* /*runner*/) {}

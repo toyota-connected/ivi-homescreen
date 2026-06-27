@@ -27,6 +27,7 @@
 #include <asio/posix/stream_descriptor.hpp>
 
 #include "backend/software/surface_sink.h"
+#include "vsync/ivsync_provider.h"
 
 class TaskRunner;
 
@@ -139,10 +140,6 @@ class DrmDumbSink final : public ISurfaceSink {
   void ArmFlipRead();
   void OnPageFlip(uint64_t tv_ns);
 
-  // PostOnVsync mirrors drm_kms_egl's strand-marshalled
-  // FlutterEngineOnVsync. now/period in CLOCK_MONOTONIC ns.
-  void PostOnVsync(void* engine, intptr_t baton, uint64_t now_ns) const;
-
   int drm_fd_{-1};
   uint32_t connector_id_{0};
   uint32_t crtc_id_{0};
@@ -179,8 +176,11 @@ class DrmDumbSink final : public ISurfaceSink {
   // True between drmModePageFlip and the corresponding flip event.
   std::atomic<bool> flip_pending_{false};
 
-  // Vsync baton plumbing — mirrors drm_kms_egl exactly.
-  std::atomic<intptr_t> vsync_baton_{0};
+  // Shared baton machinery (park/drain/marshal + #210 cold-start safety). The
+  // page-flip handler drives it: SetSourcePending() at the flip transitions and
+  // DeliverVsync() on completion. engine_handle_/platform_task_runner_ are
+  // cached only to re-pass both to vsync_.SetEngine() from the separate hooks.
+  ivi::IVsyncProvider vsync_;
   std::atomic<void*> engine_handle_{nullptr};
   std::atomic<TaskRunner*> platform_task_runner_{nullptr};
   // Refresh period as nanoseconds; computed once from the picked mode.

@@ -54,7 +54,7 @@ jobs:
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev ${{ matrix.extra_pkgs }}
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev ${{ matrix.extra_pkgs }}
           version: 1.0
 
       - name: Configure
@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
           version: 1.0
 
       - name: Configure
