@@ -516,7 +516,7 @@ class WaylandVulkanBackend final : public Shell {
   // the backend forwards to it. Same pattern as WaylandEglBackend. The
   // engine/runner are re-passed to the provider via SetEngine when both known.
   ivi::WaylandVsyncProvider* vsync_{nullptr};
-  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_{nullptr};
+  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
   TaskRunner* platform_task_runner_{nullptr};
 
   // frame_start_time most recently handed to FlutterEngineOnVsync.

@@ -121,7 +121,8 @@ void AglShell::SetActivationArea(const uint32_t x,
   if (!agl_shell_) {
     return;
   }
-  spdlog::debug("[AglShell] activation area [{}x{}+{}x{}]", width, height, x, y);
+  spdlog::debug("[AglShell] activation area [{}x{}+{}x{}]", width, height, x,
+                y);
   agl_shell_.Get()->SetActivateRegion(
       reinterpret_cast<wl_proxy*>(ResolveOutput(output_index)),
       static_cast<int32_t>(x), static_cast<int32_t>(y),

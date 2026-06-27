@@ -46,8 +46,9 @@ class WaylandVsyncProvider;
 
 /// wp_presentation_feedback handler — one per commit; forwards presented /
 /// discarded to the provider (method bodies in the .cc, where the provider is
-/// complete). Defined here (not hidden in the .cc) so unique_ptr<WpFeedbackHandler>
-/// is destructible in any TU that owns a provider by value (e.g. Display).
+/// complete). Defined here (not hidden in the .cc) so
+/// unique_ptr<WpFeedbackHandler> is destructible in any TU that owns a provider
+/// by value (e.g. Display).
 class WpFeedbackHandler final
     : public presentation_time::client::CWpPresentationFeedback<
           WpFeedbackHandler> {
@@ -133,7 +134,8 @@ class WaylandVsyncProvider : public IVsyncProvider {
   // --- called by WpFeedbackHandler (event thread) --------------------------
 
   /// presented: record refresh period, hand the baton back via PostOnVsync.
-  void OnPresented(uint64_t present_ns, uint32_t refresh_ns,
+  void OnPresented(uint64_t present_ns,
+                   uint32_t refresh_ns,
                    WpFeedbackHandler* fb);
   /// discarded: still hand the baton back so Flutter keeps scheduling.
   void OnDiscarded(WpFeedbackHandler* fb);

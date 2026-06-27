@@ -244,8 +244,6 @@ const struct wl_surface_listener WaylandWindow::m_base_surface_listener = {
 #endif
 };
 
-
-
 void WaylandWindow::OnOutputResized(const size_t output_index,
                                     const int32_t new_w,
                                     const int32_t new_h) {
@@ -276,7 +274,6 @@ void WaylandWindow::OnOutputResized(const size_t output_index,
   m_geometry.height = target_h;
   m_backend->Resize(m_index, m_flutter_engine.get(), target_w, target_h);
 }
-
 
 bool WaylandWindow::ActivateSystemCursor(int32_t device,
                                          const std::string& kind) const {

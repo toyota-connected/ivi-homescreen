@@ -33,13 +33,13 @@
 #include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
-#include "vsync/wayland_vsync_provider.h"
-#include "wayland/shell/wayland_shell.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
 #include "timer.h"
+#include "vsync/wayland_vsync_provider.h"
+#include "wayland/shell/wayland_shell.h"
 
 class Engine;
 class WaylandWindow;
@@ -962,5 +962,4 @@ class Display : public IDisplay {
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
 
   static const wl_touch_listener touch_listener;
-
 };

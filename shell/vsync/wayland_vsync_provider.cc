@@ -47,7 +47,8 @@ constexpr uint32_t kMaxPlausibleRefreshNs = 100'000'000;
 // Handler method bodies — the classes are defined in the header so unique_ptr
 // members are destructible in any TU; the bodies live here where the provider
 // is complete.
-void WaylandVsyncProvider::PresentationHandler::OnClockId(const uint32_t clk_id) {
+void WaylandVsyncProvider::PresentationHandler::OnClockId(
+    const uint32_t clk_id) {
   owner_->clock_id_.store(static_cast<clockid_t>(clk_id),
                           std::memory_order_release);
   // FlutterEngineGetCurrentTime is CLOCK_MONOTONIC; only then are the
@@ -100,9 +101,8 @@ bool WaylandVsyncProvider::TryBindGlobal(wl_registry* registry,
   // Cap at v2 (zero_copy feedback flag); we use no v2-only request.
   const uint32_t bind_ver =
       std::min(version, std::min(2u, ptc::wp_presentation_traits::version));
-  auto* raw = wl_registry_bind(registry, name,
-                               &ptc::wp_presentation_traits::wl_iface(),
-                               bind_ver);
+  auto* raw = wl_registry_bind(
+      registry, name, &ptc::wp_presentation_traits::wl_iface(), bind_ver);
   presentation_ = std::make_unique<PresentationHandler>(this);
   // _SetProxy adopts the proxy AND installs the static event listener
   // (clock_id) with this handler as the listener target.
@@ -172,9 +172,10 @@ void WaylandVsyncProvider::RetireFeedback(WpFeedbackHandler* fb) {
   {
     std::lock_guard<std::mutex> lock(feedback_mu_);
     auto& vec = feedback_in_flight_;
-    auto it = std::find_if(
-        vec.begin(), vec.end(),
-        [fb](const std::unique_ptr<WpFeedbackHandler>& h) { return h.get() == fb; });
+    auto it = std::find_if(vec.begin(), vec.end(),
+                           [fb](const std::unique_ptr<WpFeedbackHandler>& h) {
+                             return h.get() == fb;
+                           });
     if (it != vec.end()) {
       owned = std::move(*it);  // hold past the lock; destroy outside
       vec.erase(it);
@@ -193,7 +194,8 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
   if (refresh_ns > 0 && refresh_ns <= kMaxPlausibleRefreshNs) {
     last_refresh_ns_.store(refresh_ns, std::memory_order_release);
   }
-  RetireFeedback(fb);  // clears feedback_pending_ once the last feedback retires
+  RetireFeedback(
+      fb);  // clears feedback_pending_ once the last feedback retires
   // Base records the present (cadence profile) + hands the parked baton back
   // with the compositor's real presented timestamp.
   DeliverVsync(present_ns);
@@ -201,7 +203,8 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
 
 void WaylandVsyncProvider::OnDiscarded(WpFeedbackHandler* fb) {
   RetireFeedback(fb);
-  DeliverDiscard();  // base records the discard + returns the baton (wall clock)
+  DeliverDiscard();  // base records the discard + returns the baton (wall
+                     // clock)
 }
 
 void WaylandVsyncProvider::Stop() {

@@ -1065,10 +1065,11 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
       "buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
       p.presented_frames, fps, mean_ns / 1000, p.interval_max_ns / 1000,
       p.present_failures, p.discarded_frames,
-      // refresh period now lives in WaylandVsyncProvider; 0 = "not tracked here"
-      0, p.flags_or,
-      lat_mean_us, p.pipeline_latency_max_ns / 1000, p.bucket_60hz,
-      p.bucket_30hz, p.bucket_20hz, p.bucket_slow, p.bucket_idle);
+      // refresh period now lives in WaylandVsyncProvider; 0 = "not tracked
+      // here"
+      0, p.flags_or, lat_mean_us, p.pipeline_latency_max_ns / 1000,
+      p.bucket_60hz, p.bucket_30hz, p.bucket_20hz, p.bucket_slow,
+      p.bucket_idle);
 
   auto& s = session_totals_;
   s.presented_frames += p.presented_frames;
@@ -1122,7 +1123,8 @@ void WaylandVulkanBackend::VsyncTrampoline(void* user_data,
   backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
 }
 
-void WaylandVulkanBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+void WaylandVulkanBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine)
+                                             engine,
                                          const intptr_t baton) {
   if (vsync_ != nullptr) {
     vsync_->SubmitBaton(engine, baton);

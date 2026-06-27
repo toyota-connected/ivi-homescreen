@@ -245,8 +245,8 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
       mode.vrefresh > 0 ? static_cast<double>(mode.vrefresh) : 60.0;
   refresh_period_ns_.store(static_cast<uint64_t>(1e9 / refresh_rate_hz_),
                            std::memory_order_release);
-  vsync_.SetPeriodNs(
-      static_cast<uint32_t>(refresh_period_ns_.load(std::memory_order_acquire)));
+  vsync_.SetPeriodNs(static_cast<uint32_t>(
+      refresh_period_ns_.load(std::memory_order_acquire)));
   // Vsync-path cadence diagnostics (page-flip scanout intervals), gated on the
   // shared IVI_VSYNC_PROFILE. Distinct from IVI_SW_PROFILE (the SoftwareBackend
   // present-call cadence); the "SoftwareVsync" label names this source.
@@ -593,7 +593,8 @@ bool DrmDumbSink::Present(const void* allocation,
 
 void DrmDumbSink::SetEngineHandle(void* engine) {
   engine_handle_.store(engine, std::memory_order_release);
-  // Re-pass both to the provider; the base drains only once the runner is wired.
+  // Re-pass both to the provider; the base drains only once the runner is
+  // wired.
   vsync_.SetEngine(static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(engine),
                    platform_task_runner_.load(std::memory_order_acquire));
 }

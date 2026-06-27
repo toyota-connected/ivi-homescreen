@@ -74,7 +74,7 @@ struct SurfaceConfigure {
 struct WindowConfig {
   SurfaceRole role{SurfaceRole::kNormal};
   std::string app_id;
-  wl_output* output{};       // target output (fullscreen / background / panel)
+  wl_output* output{};  // target output (fullscreen / background / panel)
   std::size_t output_index{};
   bool fullscreen{};
   int32_t width{};
@@ -162,8 +162,8 @@ class WaylandShell {
   virtual void OnClientReady() {}
 
   /// Install a resolver mapping an output index to its wl_output*. Only AGL's
-  /// window-management facet needs it (set_background/set_panel take an output);
-  /// the Display sets it after registry enumeration. Default no-op.
+  /// window-management facet needs it (set_background/set_panel take an
+  /// output); the Display sets it after registry enumeration. Default no-op.
   virtual void SetOutputResolver(std::function<wl_output*(std::size_t)>) {}
 
   /// Optional AGL-style window-management facet (set_background / set_panel /

@@ -278,7 +278,6 @@ void WaylandEglBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
   backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
 }
 
-
 void WaylandEglBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                                       const intptr_t baton) {
   if (vsync_ != nullptr) {
@@ -294,7 +293,6 @@ void WaylandEglBackend::RequestPresentationFeedback() {
     vsync_->RequestFeedback();
   }
 }
-
 
 void WaylandEglBackend::StopVsyncMonitor() {
   // Called from FlutterView::~FlutterView before the engine destructs. The
