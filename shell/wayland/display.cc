@@ -376,6 +376,11 @@ void Display::display_handle_done(void* data,
                                   struct wl_output* /* wl_output */) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->done = true;
+  spdlog::debug("[Display] output done: scale={} ({}x{})", oi->scale, oi->width,
+                oi->height);
+  if (oi->display) {
+    oi->display->NotifyOutputScaleChanged(oi);
+  }
 }
 
 void Display::display_handle_name(void* data,
@@ -960,6 +965,24 @@ void Display::NotifyOutputResized(const output_info_t* oi) {
   }
   for (auto* w : snapshot) {
     w->OnOutputResized(idx, width, height);
+  }
+}
+
+void Display::NotifyOutputScaleChanged(const output_info_t* oi) {
+  const size_t idx = IndexOfOutput(oi);
+  if (idx >= m_all_outputs.size()) {
+    return;
+  }
+  const auto scale = oi->scale > 0 ? oi->scale : 1;
+  spdlog::debug("[Display] NotifyOutputScaleChanged: output_idx={}, scale={}",
+                idx, scale);
+  std::vector<WaylandWindow*> snapshot;
+  {
+    std::lock_guard lock(m_windows_lock);
+    snapshot = m_windows;
+  }
+  for (auto* w : snapshot) {
+    w->OnOutputScaleChanged(idx, scale);
   }
 }
 

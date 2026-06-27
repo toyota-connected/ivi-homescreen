@@ -396,6 +396,26 @@ void WaylandWindow::OnOutputResized(const size_t output_index,
   }
 }
 
+void WaylandWindow::OnOutputScaleChanged(const size_t output_index,
+                                         const int32_t new_scale) {
+  if (output_index != m_output_index || !m_flutter_engine) {
+    return;
+  }
+  spdlog::debug(
+      "({}) OnOutputScaleChanged: output={}, scale={}, "
+      "logical={}x{}, physical={}x{}",
+      m_index, output_index, new_scale, m_geometry.width, m_geometry.height,
+      m_geometry.width * new_scale, m_geometry.height * new_scale);
+  wl_surface_set_buffer_scale(m_base_surface, new_scale);
+  m_backend->Resize(m_index, m_flutter_engine.get(),
+                    m_geometry.width * new_scale,
+                    m_geometry.height * new_scale);
+  m_flutter_engine->SetPixelRatio(m_pixel_ratio * new_scale);
+  if (m_view) {
+    m_view->UpdateDisplayMetadata();
+  }
+}
+
 void WaylandWindow::handle_toplevel_close(
     void* data,
     struct xdg_toplevel* /* xdg_toplevel */) {

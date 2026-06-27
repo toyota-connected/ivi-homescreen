@@ -561,6 +561,12 @@ class Display : public IDisplay {
   // updated. Fans the new width/height out to any WaylandWindow whose
   // m_output_index matches; the window decides whether to shrink.
   void NotifyOutputResized(const output_info_t* oi);
+
+  // Called from display_handle_done after any wl_output event batch that
+  // may have changed the scale factor. Fans the new scale out to every
+  // registered WaylandWindow bound to that output so they can resize the
+  // EGL surface, update wl_surface_set_buffer_scale, and inform Flutter.
+  void NotifyOutputScaleChanged(const output_info_t* oi);
   bool m_buffer_scale_enable{};
 
   // Tracks whether the compositor advertised a GPU buffer-allocation

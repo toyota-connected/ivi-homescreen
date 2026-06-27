@@ -138,6 +138,11 @@ class WaylandWindow {
   // re-Resize the backend.
   void OnOutputResized(size_t output_index, int32_t new_w, int32_t new_h);
 
+  // Called from Display::NotifyOutputScaleChanged when the wl_output scale
+  // factor changes. Updates wl_surface_set_buffer_scale, resizes the EGL
+  // surface to physical pixel dimensions, and notifies Flutter.
+  void OnOutputScaleChanged(size_t output_index, int32_t new_scale);
+
  private:
   size_t m_index;
   std::shared_ptr<Display> m_display;
