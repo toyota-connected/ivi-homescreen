@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <mutex>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -119,8 +121,28 @@ struct DrmCursor::Impl {
   std::atomic<uint64_t> desired_pos{0};
   std::atomic<bool> have_pos{false};
 
-  Impl(drm::cursor::Renderer r, int lx, int ly)
-      : renderer(std::move(r)), letterbox_x(lx), letterbox_y(ly) {}
+  // Sprite state. theme + theme_name + sprite_size let SetShape reload a named
+  // cursor at runtime; pending_shape is written under shape_mtx by the platform
+  // thread (SetShape) and consumed by the render thread (ApplyPendingShape).
+  drm::cursor::Theme theme;
+  std::string theme_name;
+  uint32_t sprite_size{0};
+  std::mutex shape_mtx;
+  std::string pending_shape;
+  bool shape_dirty{false};
+
+  Impl(drm::cursor::Renderer r,
+       drm::cursor::Theme t,
+       std::string tn,
+       const uint32_t ss,
+       const int lx,
+       const int ly)
+      : renderer(std::move(r)),
+        letterbox_x(lx),
+        letterbox_y(ly),
+        theme(std::move(t)),
+        theme_name(std::move(tn)),
+        sprite_size(ss) {}
 };
 
 namespace {
@@ -226,8 +248,9 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
       sizing.sprite, sizing.buffer, PlanePathName(renderer->path()),
       renderer->plane_id(), letterbox_x, letterbox_y);
 
-  return std::unique_ptr<DrmCursor>(new DrmCursor(
-      std::make_unique<Impl>(std::move(*renderer), letterbox_x, letterbox_y)));
+  return std::unique_ptr<DrmCursor>(new DrmCursor(std::make_unique<Impl>(
+      std::move(*renderer), std::move(*theme), std::string(theme_name),
+      sizing.sprite, letterbox_x, letterbox_y)));
 }
 
 DrmCursor::DrmCursor(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -238,6 +261,7 @@ uint32_t DrmCursor::plane_id() const {
 }
 
 void DrmCursor::Move(const int fb_x, const int fb_y) {
+  ApplyPendingShape();
   const int crtc_x = fb_x + impl_->letterbox_x;
   const int crtc_y = fb_y + impl_->letterbox_y;
   if (auto r = impl_->renderer.move_to(crtc_x, crtc_y); !r) {
@@ -260,6 +284,7 @@ void DrmCursor::SetPosition(const int fb_x, const int fb_y) {
 }
 
 bool DrmCursor::Stage(drm::AtomicRequest& req, bool* const needs_modeset) {
+  ApplyPendingShape();
   if (needs_modeset != nullptr) {
     *needs_modeset = false;
   }
@@ -290,6 +315,40 @@ void DrmCursor::CommitPending() {
   const uint64_t packed = impl_->desired_pos.load(std::memory_order_acquire);
   Move(static_cast<int32_t>(packed >> 32),
        static_cast<int32_t>(packed & 0xffffffffU));
+}
+
+bool DrmCursor::SetShape(const char* const xcursor_name) {
+  if (xcursor_name == nullptr) {
+    // "none": the HW cursor's visibility is gated by pointer motion, not the
+    // sprite, so leave the current sprite in place.
+    return true;
+  }
+  const std::lock_guard<std::mutex> lock(impl_->shape_mtx);
+  impl_->pending_shape.assign(xcursor_name);
+  impl_->shape_dirty = true;
+  return true;
+}
+
+void DrmCursor::ApplyPendingShape() {
+  std::string name;
+  {
+    const std::lock_guard<std::mutex> lock(impl_->shape_mtx);
+    if (!impl_->shape_dirty) {
+      return;
+    }
+    name = impl_->pending_shape;
+    impl_->shape_dirty = false;
+  }
+  auto cursor = drm::cursor::Cursor::load(impl_->theme, name, impl_->theme_name,
+                                          impl_->sprite_size);
+  if (!cursor) {
+    spdlog::warn("[DrmCursor] load '{}': {}; keeping current sprite", name,
+                 cursor.error().message());
+    return;
+  }
+  if (auto r = impl_->renderer.set_cursor(std::move(*cursor)); !r) {
+    spdlog::warn("[DrmCursor] set_cursor '{}': {}", name, r.error().message());
+  }
 }
 
 }  // namespace homescreen

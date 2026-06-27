@@ -27,9 +27,11 @@
 // drm_display.h include harmless.
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "backend/drm_kms_egl/drm_cursor.h"  // DrmCursor -> ICursorShapeSink*
 #include "display/drm_display.h"
 #endif
 #if BUILD_BACKEND_DRM_KMS_VULKAN
+#include "backend/drm_kms_egl/drm_cursor.h"  // DrmCursor -> ICursorShapeSink*
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
 #include "display/drm_display.h"
 #endif
@@ -229,6 +231,9 @@ std::shared_ptr<Shell> Shell::Create(const Configuration::Config& config,
       drm_display->SetCursor(drm_backend->drm_cursor());
       // Composited cursor fallback (non-null only when no HW cursor plane).
       drm_display->SetGlCursor(drm_backend->gl_cursor());
+      // Retarget the cursor sprite on activateSystemCursor. The HW cursor is
+      // the shape sink; null (no HW plane) leaves it a no-op.
+      drm_display->SetCursorShapeSink(drm_backend->drm_cursor());
     }
   }
 #elif BUILD_BACKEND_DRM_KMS_VULKAN
@@ -266,6 +271,7 @@ std::shared_ptr<Shell> Shell::Create(const Configuration::Config& config,
     drm_display->SetViewportSize(static_cast<int32_t>(vk_backend->width()),
                                  static_cast<int32_t>(vk_backend->height()));
     drm_display->SetCursor(vk_backend->drm_cursor());
+    drm_display->SetCursorShapeSink(vk_backend->drm_cursor());
     drm_display->SetCursorRotation(vk_backend->rotation());
     drm_display->SetInputTransforms(config.view.drm_input_transforms);
     m_backend = vk_backend;

@@ -21,6 +21,8 @@
 #include <utility>
 
 #include "backend/drm_kms_egl/drm_session.h"
+#include "cursor_kind.h"
+#include "display/icursor_shape_sink.h"
 #include "input/drm_seat.h"
 #include "logging.h"
 
@@ -145,6 +147,18 @@ void DrmDisplay::SetCursorRotation(const int32_t degrees) {
   if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
     drm_seat->SetCursorRotation(degrees);
   }
+}
+
+void DrmDisplay::SetCursorShapeSink(homescreen::ICursorShapeSink* sink) {
+  shape_sink_ = sink;
+}
+
+bool DrmDisplay::ActivateSystemCursor(const int32_t /*device*/,
+                                      const std::string& kind) const {
+  if (shape_sink_ == nullptr) {
+    return true;
+  }
+  return shape_sink_->SetShape(homescreen::CursorKindToXcursorName(kind));
 }
 
 void DrmDisplay::SetInputTransforms(const std::vector<std::string>& specs) {
