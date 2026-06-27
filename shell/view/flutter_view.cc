@@ -621,8 +621,8 @@ void FlutterView::UpdateDisplayMetadata() const {
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
 
-  SPDLOG_DEBUG(
-      "Updated display metadata: {}x{} (logical) -> {}x{} (physical), "
+  spdlog::debug(
+      "Updated display metadata: {}x{} (logical) -> {}x{} (synthetic physical), "
       "pixel_ratio={}",
       width, height, display.width, display.height, display.device_pixel_ratio);
 }

@@ -1037,6 +1037,15 @@ bool Display::ActivateSystemCursor(const int32_t device,
   return true;
 }
 
+size_t Display::GetOutputIndexByHandle(struct wl_output* output) const {
+  for (size_t i = 0; i < m_all_outputs.size(); ++i) {
+    if (m_all_outputs[i]->output == output) {
+      return i;
+    }
+  }
+  return m_all_outputs.size();  // sentinel: not found
+}
+
 int32_t Display::GetBufferScale(uint32_t index) const {
   if (index < m_all_outputs.size()) {
     if (m_buffer_scale_enable) {

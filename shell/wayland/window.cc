@@ -186,10 +186,42 @@ WaylandWindow::~WaylandWindow() {
 
 void WaylandWindow::handle_base_surface_enter(void* data,
                                               struct wl_surface* /* surface */,
-                                              struct wl_output* /* output */) {
-  auto const* d = static_cast<WaylandWindow*>(data);
+                                              struct wl_output* output) {
+  // Option A: resize to match the entering output's scale on every
+  // wl_surface.enter event. This is the standard Wayland client contract —
+  // the compositor issues surface.enter to tell the client which output it
+  // now occupies so it can re-render at that output's native density.
+  //
+  // Alternatives considered:
+  //   B) Render at the maximum output scale from startup — wastes GPU fill
+  //      rate on 1× displays and is unreliable when output metadata arrives
+  //      asynchronously after WaylandWindow construction.
+  //   C) Track all overlapping outputs and use the highest active scale —
+  //      correct for a general-purpose desktop client that straddles two
+  //      monitors, but over-engineering for an IVI single-window embedder.
+  //
+  // Option A gives sharp rendering with minimal complexity. The one-frame
+  // resize artifact during an output transition is acceptable in this context.
+  auto* d = static_cast<WaylandWindow*>(data);
+
+  // Resolve the compositor-provided wl_output* to our numeric index so we
+  // can call GetBufferScale() and keep m_output_index in sync for future
+  // OnOutputScaleChanged() calls. If the output isn't found (e.g. hotplug
+  // race before the global is fully bound), fall back to the stored index
+  // so behaviour is unchanged.
+  const size_t new_idx = d->m_display->GetOutputIndexByHandle(output);
+  if (new_idx < d->m_display->OutputCount()) {
+    d->m_output_index = static_cast<uint32_t>(new_idx);
+  }
 
   const auto buffer_scale = d->m_display->GetBufferScale(d->m_output_index);
+
+  spdlog::debug(
+      "({}) handle_base_surface_enter: output_idx={}, scale={}, "
+      "logical={}x{}, physical={}x{}",
+      d->m_index, d->m_output_index, buffer_scale, d->m_geometry.width,
+      d->m_geometry.height, d->m_geometry.width * buffer_scale,
+      d->m_geometry.height * buffer_scale);
 
   // Update the compositor's buffer-scale hint and resize the EGL window to
   // the physical dimensions for the new output's scale factor.

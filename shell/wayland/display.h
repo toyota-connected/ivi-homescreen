@@ -319,6 +319,16 @@ class Display : public IDisplay {
    */
   [[nodiscard]] int32_t GetBufferScale(uint32_t index) const override;
 
+  // Returns the numeric index of the output whose wl_output handle matches
+  // @p output, or OutputCount() as a not-found sentinel. Used by
+  // handle_base_surface_enter to resolve a compositor-provided wl_output*
+  // to the same index space as m_output_index.
+  [[nodiscard]] size_t GetOutputIndexByHandle(struct wl_output* output) const;
+
+  // Number of outputs currently known to the display. Use as the sentinel
+  // value returned by GetOutputIndexByHandle when no match is found.
+  [[nodiscard]] size_t OutputCount() const { return m_all_outputs.size(); }
+
   /**
    * @brief Get a video mode size of a specified index of a view
    * @param[in] index Index of a view
