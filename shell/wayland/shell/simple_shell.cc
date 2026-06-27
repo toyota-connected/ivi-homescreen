@@ -105,7 +105,8 @@ void SimpleShell::OnSimpleShellSurfaceId(wl_proxy* surface,
         return reinterpret_cast<wl_proxy*>(s->surface()) == surface;
       });
   if (it == surfaces_.end()) {
-    spdlog::debug("[SimpleShell] surface_id {} for unknown surface", surface_id);
+    spdlog::debug("[SimpleShell] surface_id {} for unknown surface",
+                  surface_id);
     return;
   }
   SimpleShellSurface* s = *it;

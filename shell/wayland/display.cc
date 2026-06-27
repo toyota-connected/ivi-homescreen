@@ -109,7 +109,8 @@ ivi::WaylandShell& Display::ActiveShell() const {
       return *s;
     }
   }
-  spdlog::critical("[Display] no compositor shell bound (no xdg/agl/ivi/simple)");
+  spdlog::critical(
+      "[Display] no compositor shell bound (no xdg/agl/ivi/simple)");
   exit(EXIT_FAILURE);
 }
 
@@ -141,7 +142,6 @@ Display::~Display() {
 
   SPDLOG_TRACE("- ~Display()");
 }
-
 
 void Display::registry_handle_global(void* data,
                                      struct wl_registry* registry,
@@ -183,8 +183,7 @@ void Display::registry_handle_global(void* data,
     d->m_subcompositor = static_cast<wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
-  }
-  else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface,
                          std::min(static_cast<uint32_t>(1), version)));
@@ -250,7 +249,6 @@ const wl_registry_listener Display::registry_listener = {
     registry_handle_global,
     registry_handle_global_remove,
 };
-
 
 void Display::display_handle_geometry(void* data,
                                       struct wl_output* /* wl_output */,
@@ -841,7 +839,6 @@ void Display::StopEvents() {
   }
 }
 
-
 void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
   m_active_surface = surface;
@@ -976,8 +973,6 @@ double Display::GetMaxRefreshRate() const {
   }
   return max_refresh_rate;
 }
-
-
 
 void Display::wayland_event_mask_print(struct wayland_event_mask const& mask) {
   const std::string out;

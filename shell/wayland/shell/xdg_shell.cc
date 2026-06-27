@@ -109,8 +109,9 @@ class XdgShellSurface final : public ShellSurface {
   // ack_configure already sent by XdgSurfaceHandler before this fires.
   void OnXdgSurfaceConfigure(uint32_t /*serial*/) {}
 
-  void OnToplevelConfigure(int32_t width, int32_t height, wl_array* states)
-      const {
+  void OnToplevelConfigure(int32_t width,
+                           int32_t height,
+                           wl_array* states) const {
     // Always notify (even on a 0x0 "pick your own size" configure) so the
     // window can clear its wait-for-configure gate and refresh its state flags.
     SurfaceConfigure c;
@@ -176,8 +177,7 @@ bool XdgShell::TryBindGlobal(wl_registry* registry,
   if (interface != xc::xdg_wm_base_traits::wl_iface().name) {
     return false;
   }
-  const uint32_t bind_ver =
-      std::min(version, xc::xdg_wm_base_traits::version);
+  const uint32_t bind_ver = std::min(version, xc::xdg_wm_base_traits::version);
   auto* raw = wl_registry_bind(registry, name,
                                &xc::xdg_wm_base_traits::wl_iface(), bind_ver);
   if (!wl::SetupHandler(xdg_wm_base_, reinterpret_cast<wl_proxy*>(raw))) {
@@ -195,7 +195,8 @@ std::unique_ptr<ShellSurface> XdgShell::CreateSurface(
     spdlog::error("[XdgShell] CreateSurface called before xdg_wm_base bound");
     return nullptr;
   }
-  return std::make_unique<XdgShellSurface>(*xdg_wm_base_.Get(), surface, config);
+  return std::make_unique<XdgShellSurface>(*xdg_wm_base_.Get(), surface,
+                                           config);
 }
 
 }  // namespace ivi

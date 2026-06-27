@@ -301,7 +301,7 @@ class WaylandEglBackend : public Egl, public Shell {
   // StopVsyncMonitor → vsync_->Stop. The engine/runner are re-passed to the
   // provider via SetEngine when both are known.
   ivi::WaylandVsyncProvider* vsync_{nullptr};
-  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_{nullptr};
+  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
   TaskRunner* platform_task_runner_{nullptr};
 
   // eglSwapBuffers self-time profile (IVI_WL_PROFILE=1). This is the metric

@@ -104,7 +104,8 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
         tbl->at_path("view.drm_mode").as_string()->value_or("");
   }
   if (tbl->at_path("view.backend").is_string()) {
-    instance.view.backend = tbl->at_path("view.backend").as_string()->value_or("");
+    instance.view.backend =
+        tbl->at_path("view.backend").as_string()->value_or("");
   }
   if (tbl->at_path("view.shell").is_string()) {
     instance.view.shell = tbl->at_path("view.shell").as_string()->value_or("");
@@ -411,9 +412,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.view.window_type))(
             "shell",
             "Wayland compositor shell: auto|xdg|agl|ivi|simple (default auto)",
-            cxxopts::value<std::string>())(
-            "o,output-index", "Wayland output index",
-            cxxopts::value<uint32_t>())(
+            cxxopts::value<std::string>())("o,output-index",
+                                           "Wayland output index",
+                                           cxxopts::value<uint32_t>())(
             "xdg-shell-app-id", "XDG shell app id",
             cxxopts::value<std::string>(config.app_id))(
             "wayland-event-mask", "Wayland Events to mask",

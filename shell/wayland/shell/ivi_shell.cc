@@ -99,7 +99,8 @@ bool IviShell::TryBindGlobal(wl_registry* registry,
         std::min(version, iac::ivi_application_traits::version);
     auto* raw = wl_registry_bind(
         registry, name, &iac::ivi_application_traits::wl_iface(), bind_ver);
-    ivi_app_.Attach(reinterpret_cast<wl_proxy*>(raw));  // no events on this iface
+    ivi_app_.Attach(
+        reinterpret_cast<wl_proxy*>(raw));  // no events on this iface
     spdlog::debug("[IviShell] bound ivi_application v{}", bind_ver);
     return true;
   }
