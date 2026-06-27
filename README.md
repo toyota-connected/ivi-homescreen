@@ -305,8 +305,6 @@ All other parameters get assigned using the following ordering:
 
 `BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan. Defaults to OFF
 
-`BUILD_BACKEND_HEADLESS_EGL` - Build Headless backend for EGL (OSMesa). Defaults to OFF
-
 `BUILD_COMPOSITOR` - Enable the `FlutterCompositor` backing-store API so platform-view layers can be interleaved with Flutter UI. See [Platform View Plugins](#platform-view-plugins). Defaults to OFF.
 
 `BUILD_COMPOSITOR_DMABUF_EXPORT` - When the Vulkan backend is active and `BUILD_COMPOSITOR=ON`, export each `VulkanBackingStore`'s memory as a DMA-BUF fd so plugins can import it zero-copy (requires `VK_KHR_external_memory_fd` at runtime; silently falls back to a plain allocation if unavailable). Defaults to OFF.

@@ -654,7 +654,6 @@ phase4_build() {
         -S "$REPO_DIR" -B "$BUILD_DIR"
         -DCMAKE_TOOLCHAIN_FILE="$BUILD_DIR/.xc-toolchain.cmake"
         -DCMAKE_BUILD_TYPE=Release
-        -DBUILD_BACKEND_HEADLESS_EGL=OFF
         -DBUILD_BACKEND_DRM_KMS_VULKAN=OFF
     )
     case "$be" in

@@ -25,8 +25,7 @@
 #include "timer.h"
 #include "view/flutter_view.h"
 
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
@@ -40,10 +39,6 @@
 #if BUILD_SOFTWARE_INPUT_LIBINPUT
 #include "backend/software/input/software_seat.h"
 #endif
-#endif
-
-#if BUILD_BACKEND_HEADLESS_EGL
-#include "backend/headless/headless.h"
 #endif
 
 namespace {
@@ -118,9 +113,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON regardless of backend, so combine with a Wayland-backend
 // gate here.
-#if ENABLE_AGL_SHELL_CLIENT &&                                    \
-    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-     BUILD_BACKEND_HEADLESS_EGL)
+#if ENABLE_AGL_SHELL_CLIENT && \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN)
   bool found_view_with_bg = false;
 #endif
 
@@ -136,9 +130,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON regardless of backend, so combine with a Wayland-backend
 // gate here.
-#if ENABLE_AGL_SHELL_CLIENT &&                                    \
-    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-     BUILD_BACKEND_HEADLESS_EGL)
+#if ENABLE_AGL_SHELL_CLIENT && \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN)
     if (WaylandWindow::get_window_type(cfg.view.window_type) ==
         WaylandWindow::WINDOW_BG) {
       found_view_with_bg = true;
@@ -150,9 +143,8 @@ App::App(const std::vector<Configuration::Config>& configs)
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON regardless of backend, so combine with a Wayland-backend
 // gate here.
-#if ENABLE_AGL_SHELL_CLIENT &&                                    \
-    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-     BUILD_BACKEND_HEADLESS_EGL)
+#if ENABLE_AGL_SHELL_CLIENT && \
+    (BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   // OnClientReady maps to agl_shell.ready() on AglShell and is a no-op on the
@@ -234,13 +226,3 @@ int App::Loop() const {
 
   return 0;
 }
-
-#if BUILD_BACKEND_HEADLESS_EGL
-
-GLubyte* App::getViewRenderBuf(const int i) const {
-  return reinterpret_cast<HeadlessBackend*>(
-             m_views[static_cast<unsigned long>(i)]->GetBackend())
-      ->getHeadlessBuffer();
-}
-
-#endif

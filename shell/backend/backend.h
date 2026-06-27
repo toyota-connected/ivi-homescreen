@@ -46,7 +46,7 @@ struct BackendEglContext {
 
 // The unified display-target interface: a Shell owns surface lifecycle, the
 // Flutter renderer/compositor config, and vsync for one presentation target
-// (Wayland compositor, DRM-KMS, software dumb buffer, headless). The intent is
+// (Wayland compositor, DRM-KMS, software dumb buffer). The intent is
 // that one factory builds the right Shell per FlutterView and each instance is
 // isolated so heterogeneous shells can run concurrently. The concrete
 // implementations are the *Backend classes (WaylandEglBackend, DrmBackend,
@@ -54,7 +54,6 @@ struct BackendEglContext {
 class Shell {
  public:
   enum Type {
-    Headless,
     WaylandEgl,
     WaylandVulkan,
     WaylandLeasedDrm,
@@ -70,8 +69,8 @@ class Shell {
 
   /**
    * @brief The single factory for a per-view Shell. Selects the concrete
-   * implementation (Wayland-EGL/-Vulkan, DRM-KMS-EGL/-Vulkan, software,
-   * headless) from the compiled-in backends + @p config, constructs an isolated
+   * implementation (Wayland-EGL/-Vulkan, DRM-KMS-EGL/-Vulkan, software)
+   * from the compiled-in backends + @p config, constructs an isolated
    * instance, and performs any backend-specific post-creation wiring (e.g. DRM
    * cursor/viewport). Replaces the #if/#elif chain that used to live inline in
    * FlutterView. Calls exit() on a hard backend-init failure. Defined in

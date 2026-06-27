@@ -25,8 +25,7 @@
 #if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
 #endif
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/window.h"
 #endif
 
