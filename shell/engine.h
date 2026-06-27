@@ -37,7 +37,6 @@
 
 class App;
 class Shell;
-class WaylandWindow;
 class FlutterView;
 struct FlutterDesktopEngineState;
 
@@ -295,19 +294,6 @@ class Engine {
   void SendPointerEvents();
 
   /**
-   * @brief Activate system cursor
-   * @param[in] device No use
-   * @param[in] kind Cursor kind
-   * @return bool
-   * @retval true Normal end
-   * @retval false Abnormal end
-   * @relation
-   * wayland
-   */
-  [[nodiscard]] bool ActivateSystemCursor(int32_t device,
-                                          const std::string& kind) const;
-
-  /**
    * @brief Get backend of view
    * @return Shell*
    * @retval Shell pointer
@@ -374,7 +360,6 @@ class Engine {
   bool m_running;
 
   Shell* m_backend;
-  std::shared_ptr<WaylandWindow> m_egl_window;
   FlutterView* m_view;
 
   std::filesystem::path m_assets_path;
