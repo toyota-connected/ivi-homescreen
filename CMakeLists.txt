@@ -66,11 +66,10 @@ endif ()
 # Reject the combination at configure time.
 if (BUILD_BACKEND_SOFTWARE)
     if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
-        BUILD_BACKEND_WAYLAND_EGL OR
-        BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_HEADLESS_EGL)
+        BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
         message(FATAL_ERROR
                 "BUILD_BACKEND_SOFTWARE is mutually exclusive with the "
-                "DRM/Wayland/Headless EGL/Vulkan backends — pick exactly one")
+                "DRM/Wayland EGL/Vulkan backends — pick exactly one")
     endif ()
 endif ()
 
@@ -92,9 +91,8 @@ endif ()
 # wayland_cxx.cmake (like drm_kms) must run after compiler.cmake so the
 # `toolchain` INTERFACE library exists when we add_subdirectory the
 # wayland-cxx-scanner subproject on clang/libc++ builds. Gated internally on the
-# Wayland/Headless backends.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-    BUILD_BACKEND_HEADLESS_EGL)
+# Wayland backends.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     include(wayland_cxx)
 endif ()
 

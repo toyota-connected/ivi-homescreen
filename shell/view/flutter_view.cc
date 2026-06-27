@@ -25,9 +25,6 @@
 // Independent guards so several backends can be compiled into one binary
 // (Shell::Create selects per view at runtime). Header guards make the repeated
 // drm_display.h include harmless.
-#if BUILD_BACKEND_HEADLESS_EGL
-#include "backend/headless/headless.h"
-#endif
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "display/drm_display.h"
@@ -67,8 +64,7 @@ extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
 #if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
 #endif
@@ -81,16 +77,10 @@ extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
 // the concrete backend from the compiled-in set + config and performs any
 // backend-specific post-creation wiring. Extracted verbatim from the old
 // FlutterView constructor body.
-std::shared_ptr<Shell> Shell::Create(
-    const Configuration::Config& config,
-    const std::shared_ptr<IDisplay>& display) {
+std::shared_ptr<Shell> Shell::Create(const Configuration::Config& config,
+                                     const std::shared_ptr<IDisplay>& display) {
   std::shared_ptr<Shell> m_backend;
-#if BUILD_BACKEND_HEADLESS_EGL
-  m_backend = std::make_shared<HeadlessBackend>(
-      config.view.width.value_or(kDefaultViewWidth),
-      config.view.height.value_or(kDefaultViewHeight),
-      config.debug_backend.value_or(false), kEglBufferSize);
-#elif BUILD_BACKEND_DRM_KMS_EGL
+#if BUILD_BACKEND_DRM_KMS_EGL
   {
     auto parse_tri = [](const std::optional<std::string>& s,
                         drm_config::TriState def =
@@ -184,8 +174,7 @@ std::shared_ptr<Shell> Shell::Create(
         !config.view.drm_connector->empty()) {
       cfg.connector_name = config.view.drm_connector;
     }
-    if (config.view.drm_mode.has_value() &&
-        !config.view.drm_mode->empty()) {
+    if (config.view.drm_mode.has_value() && !config.view.drm_mode->empty()) {
       cfg.mode_spec = config.view.drm_mode;
     }
     cfg.compositor = parse_compositor(config.view.drm_compositor);
@@ -255,8 +244,8 @@ std::shared_ptr<Shell> Shell::Create(
             : std::string{};
     auto vk_backend = VulkanDrmBackend::Create(
         config.view.drm_device.value_or("/dev/dri/card1"),
-        config.debug_backend.value_or(false), drm_display->session(),
-        drm_mode, config.view.drm_rotation.value_or(0));
+        config.debug_backend.value_or(false), drm_display->session(), drm_mode,
+        config.view.drm_rotation.value_or(0));
 
     // Create returns nullptr on any init failure (unsupported device, no
     // zero-copy scanout path). Continuing would dereference a null backend in

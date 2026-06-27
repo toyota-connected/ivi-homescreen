@@ -23,8 +23,7 @@
 // window->ActivateSystemCursor() call. Forward-decl in flutter_view.h
 // is enough for everything else (GetWindow's return type, the
 // `if (!window)` null check).
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/window.h"
 #endif
 
@@ -77,8 +76,7 @@ void MouseCursorHandler::HandleMethodCall(
       result->Success(flutter::EncodableValue(true));
       return;
     }
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
     auto res = window->ActivateSystemCursor(device, kind);
     result->Success(flutter::EncodableValue(res));
 #else

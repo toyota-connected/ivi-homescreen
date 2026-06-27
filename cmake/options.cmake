@@ -139,15 +139,6 @@ else ()
 endif ()
 
 #
-# Headless
-#
-option(BUILD_BACKEND_HEADLESS_EGL "Build Headless EGL Backend" OFF)
-if (BUILD_BACKEND_HEADLESS_EGL)
-    find_package(PkgConfig)
-    pkg_check_modules(OSMESA osmesa glesv2 egl IMPORTED_TARGET REQUIRED)
-endif ()
-
-#
 # Software (CPU rendering; no GPU, no display server)
 #
 option(BUILD_BACKEND_SOFTWARE

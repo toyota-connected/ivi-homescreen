@@ -448,13 +448,12 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     // in case the engine is mid-teardown.
     //
     // GLESv2 is only linked into the final binary when a GL-based backend
-    // is enabled (Wayland EGL, DRM KMS EGL, Headless EGL). Wayland Vulkan
+    // is enabled (Wayland EGL, DRM KMS EGL). Wayland Vulkan
     // builds don't link it and don't produce GL pixel-buffer textures at
     // runtime — but the linker still needs the glDeleteTextures symbol
     // unless we compile this branch out.
     if (removed->pixel_buffer_callback && removed->name != 0) {
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL || \
-    BUILD_BACKEND_HEADLESS_EGL
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL
       Shell* backend = nullptr;
       if (texture_registrar->engine &&
           texture_registrar->engine->view_controller &&
