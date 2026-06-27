@@ -139,6 +139,17 @@ class FlutterView {
   [[nodiscard]] Display* GetDisplay() const;
 #endif
 
+  /**
+   * @brief Get the view's display as the backend-agnostic IDisplay.
+   * @return IDisplay* — set at construction (never null); valid on every
+   *         backend (Wayland Display, DrmDisplay, SoftwareDisplay). Use this
+   *         for backend-neutral display calls (e.g. ActivateSystemCursor)
+   *         instead of reaching through a concrete window type.
+   * @relation
+   * internal
+   */
+  [[nodiscard]] IDisplay* GetIDisplay() const { return m_display.get(); }
+
 #ifdef ENABLE_PLUGIN_COMP_SURF
   /**
    * @brief Create a surface ofr a compositor surface plugin

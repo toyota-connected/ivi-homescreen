@@ -17,17 +17,11 @@
 
 #include <flutter/standard_method_codec.h>
 
+#include "display/idisplay.h"
 #include "engine.h"
+#include "view/flutter_view.h"
 
-// Complete WaylandWindow type required at line ~69 for the
-// window->ActivateSystemCursor() call. Forward-decl in flutter_view.h
-// is enough for everything else (GetWindow's return type, the
-// `if (!window)` null check).
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-#include "wayland/window.h"
-#endif
-
-static constexpr char kNoWindowError[] = "Missing window error";
+static constexpr char kNoViewError[] = "Missing view error";
 
 MouseCursorHandler::MouseCursorHandler(flutter::BinaryMessenger* messenger,
                                        FlutterView* view)
@@ -64,29 +58,16 @@ void MouseCursorHandler::HandleMethodCall(
       }
     }
     if (!view_) {
-      result->Error(kNoWindowError, "View is not set.");
+      result->Error(kNoViewError, "View is not set.");
       return;
     }
-    auto window = view_->GetWindow();
-    if (!window) {
-      // DRM/KMS + software paths have no WaylandWindow; cursor is
-      // handled at the KMS plane level (or not at all). Same
-      // behaviour on non-Wayland builds where GetWindow() is
-      // always null and WaylandWindow is forward-declared only.
-      result->Success(flutter::EncodableValue(true));
-      return;
-    }
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-    auto res = window->ActivateSystemCursor(device, kind);
+    // Route through the backend-agnostic IDisplay: every backend (Wayland
+    // Display, DrmDisplay, SoftwareDisplay) implements ActivateSystemCursor.
+    // The Wayland path used to hop through WaylandWindow, which merely
+    // forwarded to this same display call — going direct drops the
+    // Wayland-only gate so DRM and software receive the cursor kind too.
+    const bool res = view_->GetIDisplay()->ActivateSystemCursor(device, kind);
     result->Success(flutter::EncodableValue(res));
-#else
-    // Unreachable — window is always null without a Wayland backend
-    // (see the early return above). The branch exists only so the
-    // compiler doesn't need WaylandWindow's complete type here.
-    (void)device;
-    (void)kind;
-    result->Success(flutter::EncodableValue(true));
-#endif
   } else {
     result->NotImplemented();
   }
