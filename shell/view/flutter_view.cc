@@ -330,7 +330,7 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
       m_config.view.activation_area_x, m_config.view.activation_area_y,
       m_config.view.activation_area_width, m_config.view.activation_area_height,
-      m_backend.get(), m_config.view.ivi_surface_id.value_or(0));
+      m_backend.get(), m_config.view.ivi_surface_id.value_or(0), this);
 #endif
 
   m_state = std::make_unique<FlutterDesktopViewControllerState>();
@@ -575,6 +575,8 @@ void FlutterView::Initialize() {
 
 void FlutterView::UpdateDisplayMetadata() const {
   if (!m_flutter_engine || !m_flutter_engine->IsRunning()) {
+    spdlog::warn(
+        "[FlutterView] UpdateDisplayMetadata called on a non-running engine");
     return;
   }
 

@@ -239,6 +239,10 @@ void WaylandWindow::handle_base_surface_enter(void* data,
   } else {
     if (d->m_view) {
       d->m_view->UpdateDisplayMetadata();
+    } else {
+      spdlog::warn(
+          "WaylandWindow::handle_base_surface_enter: no FlutterView to update "
+          "display metadata");
     }
   }
 }
