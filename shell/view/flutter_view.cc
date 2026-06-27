@@ -589,8 +589,7 @@ void FlutterView::UpdateDisplayMetadata() const {
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
   const auto width = static_cast<int32_t>(m_backend->width());
   const auto height = static_cast<int32_t>(m_backend->height());
-  const auto pixel_ratio =
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
+  const auto buffer_scale = 1.0;  // No Wayland output scale on DRM
 #elif BUILD_BACKEND_SOFTWARE
   auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get());
   const auto width = static_cast<int32_t>(
@@ -599,25 +598,24 @@ void FlutterView::UpdateDisplayMetadata() const {
   const auto height = static_cast<int32_t>(
       sw_backend ? sw_backend->height()
                  : m_config.view.height.value_or(kDefaultViewHeight));
-  const auto pixel_ratio =
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
+  const auto buffer_scale = 1.0;  // No Wayland output scale on Software
 #else
   auto [width, height] = m_wayland_window->GetSize();
-  /// Scaling factor for the UI
-  const auto synthetic_pixel_ratio =
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
   /// Scaling factor of the backing buffer (e.g. Wayland output scale)
-  const auto physical_pixel_ratio =
+  const auto buffer_scale =
       m_display->GetBufferScale(m_wayland_window->GetOutputIndex());
 #endif
+  /// Scaling factor for the UI
+  const auto ui_pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
 
-  display.width = static_cast<size_t>(width * physical_pixel_ratio);
-  display.height = static_cast<size_t>(height * physical_pixel_ratio);
+  display.width = static_cast<size_t>(width * buffer_scale);
+  display.height = static_cast<size_t>(height * buffer_scale);
   // The effective pixel ratio is the product of the synthetic UI scale and the
   // physical output scale so Flutter can:
-  // - correctly scale the UI for high-DPI displays (physical_pixel_ratio)
-  // - correctly handle user-defined output scaling (synthetic_pixel_ratio)
-  display.device_pixel_ratio = synthetic_pixel_ratio * physical_pixel_ratio;
+  // - correctly scale the UI for high-DPI displays (buffer_scale)
+  // - correctly handle user-defined output scaling (ui_pixel_ratio)
+  display.device_pixel_ratio = ui_pixel_ratio * buffer_scale;
 
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
