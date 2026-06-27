@@ -59,11 +59,15 @@ set(WAYLAND_CXX_WERROR                 OFF CACHE BOOL "" FORCE)
 # a silent project default. Honor an integrator-supplied value; only default for
 # local dev, and warn loudly under cross where the recipe should have set it (a
 # wrong backend fails silently at runtime as dead text input).
+#
+# Default to text-input-v3: the protocol the mainstream desktop compositors
+# (GNOME/Mutter, KDE) implement, so IME works out of the box for local dev on a
+# GNOME session. AGL/weston builds that speak text-input-v1 set it explicitly.
 if (NOT WAYLAND_CXX_IME_BACKEND)
-    set(WAYLAND_CXX_IME_BACKEND "text-input-v1" CACHE STRING "IME protocol backend")
+    set(WAYLAND_CXX_IME_BACKEND "text-input-v3" CACHE STRING "IME protocol backend")
     if (CMAKE_CROSSCOMPILING)
         message(WARNING
-            "WAYLAND_CXX_IME_BACKEND unset; defaulting to 'text-input-v1'. Set it "
+            "WAYLAND_CXX_IME_BACKEND unset; defaulting to 'text-input-v3'. Set it "
             "from the compositor/BSP layer (-DWAYLAND_CXX_IME_BACKEND=...): the IME "
             "backend is a compositor capability and a wrong value fails at runtime "
             "as dead text input, not at build.")
