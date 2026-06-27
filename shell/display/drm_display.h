@@ -26,6 +26,7 @@
 namespace homescreen {
 class DrmCursor;
 class ICursorPositionSink;
+class ICursorShapeSink;
 class DrmSession;
 }  // namespace homescreen
 
@@ -67,6 +68,11 @@ class DrmDisplay final : public IDisplay {
   // there's no HW cursor plane) to the seat. nullptr is safe.
   void SetGlCursor(homescreen::ICursorPositionSink* sink);
 
+  // Register the active cursor (HW DrmCursor or GL-composited GlCursor) so
+  // ActivateSystemCursor can retarget its sprite. nullptr disables the
+  // retargeting (e.g. during teardown). The pointee is owned by DrmBackend.
+  void SetCursorShapeSink(homescreen::ICursorShapeSink* sink);
+
   // Forward the scanout rotation to the seat so the HW cursor sprite is
   // transformed from render space into panel space (0|90|180|270).
   void SetCursorRotation(int32_t degrees);
@@ -99,10 +105,8 @@ class DrmDisplay final : public IDisplay {
   }
 
   [[nodiscard]] bool ActivateSystemCursor(
-      int32_t /*device*/,
-      const std::string& /*kind*/) const override {
-    return true;
-  }
+      int32_t device,
+      const std::string& kind) const override;
 
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
@@ -111,6 +115,10 @@ class DrmDisplay final : public IDisplay {
   int32_t height_;
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
+
+  // Active cursor sprite retargeting sink (set by FlutterView after the
+  // backend creates its cursor). Owned by DrmBackend; null when no cursor.
+  homescreen::ICursorShapeSink* shape_sink_ = nullptr;
 
   // Seat session must outlive seat_ (DrmSeat's libinput_opener captures
   // into the session's internal state). Declare it first so it's
