@@ -601,14 +601,21 @@ void FlutterView::UpdateDisplayMetadata() const {
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
 #else
   auto [width, height] = m_wayland_window->GetSize();
-  const auto pixel_ratio =
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) *
+  /// Scaling factor for the UI
+  const auto synthetic_pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
+  /// Scaling factor of the backing buffer (e.g. Wayland output scale)
+  const auto physical_pixel_ratio =
       m_display->GetBufferScale(m_wayland_window->GetOutputIndex());
 #endif
 
-  display.width = static_cast<size_t>(width * pixel_ratio);
-  display.height = static_cast<size_t>(height * pixel_ratio);
-  display.device_pixel_ratio = pixel_ratio;
+  display.width = static_cast<size_t>(width * physical_pixel_ratio);
+  display.height = static_cast<size_t>(height * physical_pixel_ratio);
+  // The effective pixel ratio is the product of the synthetic UI scale and the
+  // physical output scale so Flutter can:
+  // - correctly scale the UI for high-DPI displays (physical_pixel_ratio)
+  // - correctly handle user-defined output scaling (synthetic_pixel_ratio)
+  display.device_pixel_ratio = synthetic_pixel_ratio * physical_pixel_ratio;
 
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
@@ -617,7 +624,7 @@ void FlutterView::UpdateDisplayMetadata() const {
   SPDLOG_DEBUG(
       "Updated display metadata: {}x{} (logical) -> {}x{} (physical), "
       "pixel_ratio={}",
-      width, height, display.width, display.height, pixel_ratio);
+      width, height, display.width, display.height, display.device_pixel_ratio);
 }
 
 void FlutterView::RunTasks() {
