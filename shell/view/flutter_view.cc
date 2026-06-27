@@ -609,8 +609,8 @@ void FlutterView::UpdateDisplayMetadata() const {
   const auto ui_pixel_ratio =
       m_config.view.pixel_ratio.value_or(kDefaultPixelRatio);
 
-  display.width = static_cast<size_t>(width * buffer_scale);
-  display.height = static_cast<size_t>(height * buffer_scale);
+  display.width = width * buffer_scale;
+  display.height = height * buffer_scale;
   // The effective pixel ratio is the product of the synthetic UI scale and the
   // physical output scale so Flutter can:
   // - correctly scale the UI for high-DPI displays (buffer_scale)
