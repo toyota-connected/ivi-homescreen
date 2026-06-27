@@ -39,16 +39,6 @@
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #endif
 
-// WaylandWindow's complete type is required for the m_egl_window->
-// ActivateSystemCursor() call in this TU (and for the shared_ptr
-// constructor in the initializer list). flutter_view.h
-// forward-declares WaylandWindow unconditionally so the header
-// compiles without Wayland; the .cc needs the real definition only
-// when Wayland is selected.
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-#include "wayland/window.h"
-#endif
-
 extern void EngineOnFlutterPlatformMessage(
     const FlutterPlatformMessage* engine_message,
     void* user_data);
@@ -123,7 +113,6 @@ Engine::Engine(FlutterView* view,
     : m_index(index),
       m_running(false),
       m_backend(view->GetBackend()),
-      m_egl_window(view->GetWindow()),
       m_view(view),
       m_cache_path(GetFilePath(index)),
       m_prev_height(0),
@@ -674,23 +663,6 @@ FlutterEngineAOTData Engine::LoadAotData(const std::string& bundle_path) const {
     return nullptr;
   }
   return data;
-}
-
-bool Engine::ActivateSystemCursor(const int32_t device,
-                                  const std::string& kind) const {
-  if (!m_egl_window) {
-    return true;
-  }
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  return m_egl_window->ActivateSystemCursor(device, kind);
-#else
-  // Forward-declaration only on non-Wayland builds; m_egl_window is
-  // always null here, so this branch is unreachable at runtime. The
-  // unused parameter cast keeps the signature stable.
-  (void)device;
-  (void)kind;
-  return true;
-#endif
 }
 
 void Engine::OnFlutterPlatformMessage(
