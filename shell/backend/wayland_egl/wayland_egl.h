@@ -32,10 +32,10 @@
 #include "egl.h"
 
 struct wl_output;
-struct wp_presentation;
-struct wp_presentation_feedback;
 class Display;
 class TaskRunner;
+
+#include "vsync/wayland_vsync_provider.h"
 
 #if BUILD_COMPOSITOR
 #include <memory>
@@ -50,11 +50,11 @@ class TaskRunner;
 #include "view/present_layer_sequencer.h"
 #endif
 
-class Backend;
+class Shell;
 
 class Engine;
 
-class WaylandEglBackend : public Egl, public Backend {
+class WaylandEglBackend : public Egl, public Shell {
  public:
   // Maximum damage history - for triple buffering we need to store damage for
   // last two frames.
@@ -140,7 +140,10 @@ class WaylandEglBackend : public Egl, public Backend {
    * thread other than the caller (event_thread_ when the listener fires).
    */
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
-    engine_handle_.store(engine, std::memory_order_release);
+    engine_handle_ = engine;
+    if (vsync_) {
+      vsync_->SetEngine(engine_handle_, platform_task_runner_);
+    }
   }
 
   /**
@@ -151,7 +154,10 @@ class WaylandEglBackend : public Egl, public Backend {
    * other than the engine's run thread.
    */
   void SetPlatformTaskRunner(TaskRunner* runner) override {
-    platform_task_runner_.store(runner, std::memory_order_release);
+    platform_task_runner_ = runner;
+    if (vsync_) {
+      vsync_->SetEngine(engine_handle_, platform_task_runner_);
+    }
   }
 
   /**
@@ -288,77 +294,15 @@ class WaylandEglBackend : public Egl, public Backend {
   }
 #endif
 
-  // wp_presentation-driven vsync plumbing.
-  //
-  // The producer (FlutterEngine.vsync_callback → VsyncTrampoline) parks
-  // a baton in vsync_baton_; the consumer (on_feedback_presented running
-  // on Display's event_thread_) exchanges it back and posts OnVsync onto
-  // the platform task runner's strand. Mirrors DrmBackend's atomic baton
-  // dance.
-  std::atomic<intptr_t> vsync_baton_{0};
-  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_handle_{nullptr};
-  std::atomic<TaskRunner*> platform_task_runner_{nullptr};
-
-  // Set when a wp_presentation_feedback has been requested for a commit
-  // but the compositor has not yet emitted presented/discarded. The idle-
-  // wake kick path checks this to decide whether to drain the baton
-  // inline (no feedback in flight → pipeline idle) or park it (let the
-  // upcoming presented event drive OnVsync).
-  std::atomic<bool> feedback_pending_{false};
-
-  // Owned wp_presentation_feedback objects awaiting presented/discarded.
-  // Display's event_thread_ drives wl_display_dispatch, so listener
-  // callbacks fire there while PresentLayers (rasterizer thread) creates
-  // new feedback objects and StopVsyncMonitor (main thread, ~FlutterView)
-  // drains at shutdown. m_feedback_mu_ serialises all three.
-  std::mutex m_feedback_mu_;
-  std::vector<struct wp_presentation_feedback*> feedback_in_flight_;
-
-  // wp_presentation global + announced clock domain. Populated from
-  // Display::GetWpPresentation()/GetPresentationClockId() at backend
-  // construction. clock_compatible_ becomes true only when
-  // presentation_clock_id_ == CLOCK_MONOTONIC, which matches
-  // FlutterEngineGetCurrentTime's domain — otherwise we refuse
-  // vsync_callback and fall back to the wall-clock scheduler.
-  struct wp_presentation* wp_presentation_{nullptr};
-  clockid_t presentation_clock_id_{CLOCK_MONOTONIC};
-  bool clock_compatible_{false};
-
-  // Last refresh period reported by wp_presentation_feedback.presented.
-  // Defaults to ~60Hz so the frame_target_time math has a reasonable
-  // seed for the first OnVsync call before any feedback has fired.
-  // Atomic because the writer (on_feedback_presented on event_thread_)
-  // races with the reader (PostOnVsync, called from rasterizer or
-  // engine threads via SetVsyncBaton's idle-kick).
-  std::atomic<uint64_t> last_refresh_ns_{16'666'667};
-
-  // Per-frame cadence profile (IVI_WL_PROFILE=1). Updated by
-  // on_feedback_presented / on_feedback_discarded — both fire on
-  // Display's event_thread_, so a single non-atomic block of counters
-  // is fine (no concurrent writer).
-  //
-  // Buckets categorize per-frame inter-presented intervals at a 60Hz
-  // baseline (one vblank ≈ 16.67ms). Lets the README produce the same
-  // shape of histogram the DRM benchmark uses.
-  struct FrameProfile {
-    uint64_t last_presented_ns{0};
-    uint64_t interval_sum_ns{0};
-    uint64_t interval_max_ns{0};
-    uint32_t presented_frames{0};
-    uint32_t discarded_frames{0};
-    uint32_t flags_or{0};     // OR of all 'presented' flags this window
-    uint32_t bucket_60hz{0};  // ≤17ms (1 vblank @ 60Hz)
-    uint32_t bucket_30hz{0};  // 18–33ms (2 vblanks)
-    uint32_t bucket_20hz{0};  // 34–50ms (3 vblanks)
-    uint32_t bucket_slow{0};  // 51–100ms (4–6 vblanks)
-    uint32_t bucket_idle{0};  // >100ms (treated as paused / load stall)
-  };
-  FrameProfile profile_{};
-
-  // Cumulative bucket counts across the entire session (IVI_WL_PROFILE=1).
-  // Logged once at backend destruction so the user gets a session summary
-  // without having to sum the per-window windows.
-  FrameProfile session_totals_{};
+  // wp_presentation-driven vsync now lives in WaylandVsyncProvider (owned by
+  // Display). The backend just forwards: GetVsyncCallback gates on
+  // vsync_->Usable(), VsyncTrampoline → SetVsyncBaton → vsync_->SubmitBaton,
+  // RequestPresentationFeedback → vsync_->RequestFeedback,
+  // StopVsyncMonitor → vsync_->Stop. The engine/runner are re-passed to the
+  // provider via SetEngine when both are known.
+  ivi::WaylandVsyncProvider* vsync_{nullptr};
+  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_{nullptr};
+  TaskRunner* platform_task_runner_{nullptr};
 
   // eglSwapBuffers self-time profile (IVI_WL_PROFILE=1). This is the metric
   // that the swap-interval change moves: with interval 1 the swap blocks the
@@ -385,37 +329,11 @@ class WaylandEglBackend : public Egl, public Backend {
   // recover the backend instance and forward to SetVsyncBaton.
   static void VsyncTrampoline(void* user_data, intptr_t baton);
 
-  // Stash the baton; if no feedback is in flight (idle pipeline), kick
-  // the baton ourselves via PostOnVsync — otherwise Flutter sits forever
-  // waiting for OnVsync from a commit that never happens.
+  // Forward the parked baton to the provider (which drains it on the next
+  // presented/discarded, or immediately if the pipeline is idle).
   void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
 
-  // Marshal FlutterEngineOnVsync onto the platform task runner's strand.
-  // Flutter rejects OnVsync from any other thread.
-  void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                   intptr_t baton) const;
-
-  // Per-commit feedback request — called from PresentLayers /
-  // BlitBackingStoreToWindow / the renderer-config present callbacks
-  // BEFORE eglSwapBuffers (which is what mints the wl_surface.commit
-  // the feedback binds to). No-op when wp_presentation isn't usable.
+  // Per-commit feedback request — called BEFORE eglSwapBuffers (which mints
+  // the wl_surface.commit the feedback binds to). Delegates to the provider.
   void RequestPresentationFeedback();
-
-  // wp_presentation_feedback listener entry points.
-  static void on_feedback_sync_output(void* data,
-                                      struct wp_presentation_feedback* fb,
-                                      struct wl_output* output);
-  static void on_feedback_presented(void* data,
-                                    struct wp_presentation_feedback* fb,
-                                    uint32_t tv_sec_hi,
-                                    uint32_t tv_sec_lo,
-                                    uint32_t tv_nano_sec,
-                                    uint32_t refresh,
-                                    uint32_t seq_hi,
-                                    uint32_t seq_lo,
-                                    uint32_t flags);
-  static void on_feedback_discarded(void* data,
-                                    struct wp_presentation_feedback* fb);
-
-  static const struct wp_presentation_feedback_listener feedback_listener_;
 };

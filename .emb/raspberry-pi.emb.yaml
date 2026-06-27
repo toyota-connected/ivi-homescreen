@@ -60,6 +60,22 @@ cross:
           url: https://gitlab.freedesktop.org/emersion/libdisplay-info/-/archive/0.2.0/libdisplay-info-0.2.0.tar.gz
           build: meson
           static: true
+        # Host codegen tool: ivi's cmake/wayland_cxx.cmake resolves the scanner
+        # under cross via find_program, so emb builds it host-native (host: true)
+        # and puts it on the cross build's PATH. TOOL_ONLY ships just the exe.
+        # Anchored so the trixie targets (no libdisplay-info augment) reuse it.
+        - &augment_scanner
+          pkg: wayland-cxx-scanner
+          url: https://github.com/jwinarske/wayland-cxx-scanner/archive/d0f2b05cd413ce9e7644ce7c8ea952b36773f444.tar.gz
+          build: cmake
+          host: true
+          defines:
+            WAYLAND_CXX_SCANNER_BUILD_TOOL: 'ON'
+            WAYLAND_CXX_SCANNER_TOOL_ONLY: 'ON'
+      # Host build dep of the host-native wayland-cxx-scanner (every target
+      # builds a wayland backend, so all of them resolve the host scanner).
+      host_dev_packages: &host_dev_pugixml
+        - libpugixml-dev
       backends: &backends_rpi5
         wayland-egl: &be_wayland_egl
           BUILD_BACKEND_WAYLAND_EGL: 'ON'
@@ -101,6 +117,8 @@ cross:
           - libsecret-1-dev
           - libxml2-dev
           - libdisplay-info-dev
+      augment: [*augment_scanner]
+      host_dev_packages: *host_dev_pugixml
       backends: *backends_rpi5
 
     # -- Raspberry Pi 4 (Cortex-A72) — four backends --------------------
@@ -108,6 +126,7 @@ cross:
       extends: rpi4-bookworm
       sysroot: {dev_packages: *proj_packages_bookworm}
       augment: *augment_bookworm
+      host_dev_packages: *host_dev_pugixml
       backends: &backends_four
         wayland-egl: *be_wayland_egl
         wayland-vulkan: *be_wayland_vulkan
@@ -116,6 +135,8 @@ cross:
     rpi4-trixie:
       extends: rpi4-trixie
       sysroot: {dev_packages: *proj_packages_trixie}
+      augment: [*augment_scanner]
+      host_dev_packages: *host_dev_pugixml
       backends: *backends_four
 
     # -- Raspberry Pi Zero 2 W (Cortex-A53) — four backends -------------
@@ -123,8 +144,11 @@ cross:
       extends: rpi-zero-2w-bookworm
       sysroot: {dev_packages: *proj_packages_bookworm}
       augment: *augment_bookworm
+      host_dev_packages: *host_dev_pugixml
       backends: *backends_four
     rpi-zero-2w-trixie:
       extends: rpi-zero-2w-trixie
       sysroot: {dev_packages: *proj_packages_trixie}
+      augment: [*augment_scanner]
+      host_dev_packages: *host_dev_pugixml
       backends: *backends_four

@@ -124,16 +124,18 @@ option(BUILD_DRM_KMS_VULKAN_PROBE
 
 # Drive the non-framed DRM/KMS present path through drm::scene::LayerScene
 # rather than the in-tree PlaneRegistry + Allocator + AtomicRequest pipeline.
-# Off-by-default while the integration is bedding in; flip to ON to exercise
-# LayerScene-managed plane allocation, composition fallback, and session
-# pause/resume forwarding. The framed-mode path is unaffected by this flag.
-option(USE_DRM_SCENE
-        "Drive DRM/KMS non-framed present path via drm::scene::LayerScene"
-        OFF)
-if (USE_DRM_SCENE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN))
-    message(FATAL_ERROR
-            "USE_DRM_SCENE=ON requires BUILD_BACKEND_DRM_KMS_EGL=ON or "
-            "BUILD_BACKEND_DRM_KMS_VULKAN=ON")
+# Scoped to the DRM backends: the option only exists (and defaults ON) when a
+# DRM backend is built — it is the same path the Vulkan DRM backend always
+# uses. Set OFF to fall back to the in-tree pipeline, which is slated for
+# removal. The framed-mode path is unaffected by this flag. A non-DRM build
+# (wayland / software only) never sees the option: USE_DRM_SCENE is forced OFF
+# so config_common.h's #cmakedefine01 resolves and nothing else is impacted.
+if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN)
+    option(USE_DRM_SCENE
+            "Drive DRM/KMS non-framed present path via drm::scene::LayerScene"
+            ON)
+else ()
+    set(USE_DRM_SCENE OFF)
 endif ()
 
 #

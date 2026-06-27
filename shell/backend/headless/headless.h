@@ -21,11 +21,11 @@
 #include "../backend.h"
 #include "osmesa.h"
 
-class Backend;
+class Shell;
 
 class Engine;
 
-class HeadlessBackend final : public OSMesaHeadless, public Backend {
+class HeadlessBackend final : public OSMesaHeadless, public Shell {
  public:
   HeadlessBackend(uint32_t initial_width,
                   uint32_t initial_height,

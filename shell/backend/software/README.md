@@ -64,7 +64,8 @@ scheduler.
 | `IVI_SW_SINK` | `none` | Pick the active sink at startup. Syntax above. Unrecognized specs log a warn and fall back to `NoneSink` so a CI typo never refuses to start. |
 | `IVI_SW_STOP_AFTER_FRAMES` | (off) | Raise `SIGTERM` after N successful presents. Lets CI bound runtime by frame count instead of wall-clock. Bare integer ≥ 1; leading `-`/`+` is rejected and logged. First crosser latches via `compare_exchange` so the signal fires exactly once. |
 | `IVI_SW_VSYNC` | `1` (on) | `0` forces Flutter onto its wall-clock scheduler regardless of whether the active sink advertises `SupportsVsync()`. Useful for A/B benchmarking the vsync_callback contribution (see benchmarks section). |
-| `IVI_SW_PROFILE` | (off) | Enable per-frame cadence profiling. Every 60 frames logs `profile (n=60): fps=X mean_interval=Yus max_interval=Zus present_failures=N buckets[60Hz/30Hz/20Hz/slow/idle]=…`. Session summary on clean dtor. Same shape as `IVI_VK_PROFILE` / `IVI_WL_PROFILE` for cross-backend comparison. |
+| `IVI_SW_PROFILE` | (off) | Enable `SoftwareBackend` **present-call** cadence profiling (when Flutter hands the backend a rendered frame). Every 60 frames logs `[SoftwareBackend] profile (n=60): fps=X mean_interval=Yus max_interval=Zus discarded=N buckets[60Hz/30Hz/20Hz/slow/idle]=…`. Session summary on clean dtor. Same shape as `IVI_VK_PROFILE` / `IVI_WL_PROFILE` for cross-backend comparison. |
+| `IVI_VSYNC_PROFILE` | (off) | Enable **vsync/scanout** cadence profiling for the shared `IVsyncProvider` (drm-dumb sink: from the kernel page-flip timestamp). Logs under the `[SoftwareVsync]` label, same window/bucket shape. Display-side companion to `IVI_SW_PROFILE`'s rasterizer-side numbers; the same var also gates `[WaylandVsync]` / `[DrmVsync]` on those backends. |
 | `IVI_SW_INPUT` | `auto` | Wires the libinput-backed `SoftwareSeat` for device targets. Set to `none` to skip — useful for CI runs that lack `/dev/input/event*` or want pure engine-only smoke. |
 | `IVI_SW_DRM_FORMAT` | `xrgb8888` | Pick the `DrmDumbSink` buffer format. `rgb565` halves framebuffer footprint and CRTC scanout bandwidth (the real bottleneck on legacy SoCs like TI AM335x / STM32MP1). If the picked CRTC's planes don't advertise RGB565, the sink warns and falls back to XRGB. Unrecognized values warn and fall back. Has no effect on `fbdev:` (auto-detected from the panel) or the other sinks. |
 | `IVI_SW_DRM_DITHER` | `0` (off) | `1` enables Bayer 4×4 ordered dithering on the RGB565 pack path in both `drm-dumb` and `fbdev` sinks. Hides the banding that pure truncation produces on smooth gradients at the cost of bit-exact goldens. No-op when the active sink's format is BGRX8888 — there's no precision loss to hide. |
@@ -259,7 +260,7 @@ the same `drmModePageFlip` path it would use on a real panel.
 ### Methodology
 
 `IVI_SW_PROFILE=1` adds a log line every 60 presented frames with
-mean / max interval, present-failure count, and a 5-bucket histogram
+mean / max interval, discarded-frame count, and a 5-bucket histogram
 of per-frame intervals against a 60 Hz baseline (≤17 ms = on-vblank,
 18-33 ms = 1 vblank missed, 34-50 ms = 2 vblanks missed, 51-100 ms =
 slow, >100 ms = idle / pause). Identical bucket thresholds to the

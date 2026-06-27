@@ -19,7 +19,6 @@
 
 #include <wayland-egl.h>
 
-#include <presentation-time-client-protocol.h>
 #include <asio/post.hpp>
 
 #include <algorithm>
@@ -51,28 +50,19 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
                                      const bool debug_backend,
                                      const int buffer_size)
     : Egl(display, buffer_size, debug_backend),
-      Backend(),
+      Shell(),
       m_initial_width(initial_width),
       m_initial_height(initial_height) {
   if (shell_display != nullptr) {
-    wp_presentation_ = shell_display->GetWpPresentation();
-    presentation_clock_id_ = shell_display->GetPresentationClockId();
-    // FlutterEngineGetCurrentTime() returns CLOCK_MONOTONIC ns; only when
-    // the compositor announced the same domain can we hand its presented
-    // timestamps to OnVsync without a cross-clock translation. Mutter,
-    // weston, kwin, sway all use CLOCK_MONOTONIC. Anything else falls
-    // back to the wall-clock scheduler (GetVsyncCallback returns nullptr).
-    clock_compatible_ = (presentation_clock_id_ == CLOCK_MONOTONIC);
-    if (wp_presentation_ == nullptr) {
+    // The wp_presentation global + vsync feedback machinery live in the
+    // Display-owned provider; the backend forwards to it. Usable() reports
+    // whether the compositor advertised wp_presentation with a compatible
+    // clock.
+    vsync_ = shell_display->GetVsyncProvider();
+    if (vsync_ != nullptr && !vsync_->Usable()) {
       spdlog::info(
-          "[WaylandEglBackend] wp_presentation not advertised — vsync_callback "
+          "[WaylandEglBackend] wp_presentation unusable — vsync_callback "
           "disabled, falling back to engine wall-clock scheduler");
-    } else if (!clock_compatible_) {
-      spdlog::warn(
-          "[WaylandEglBackend] wp_presentation clock_id={} != CLOCK_MONOTONIC "
-          "({}); vsync_callback disabled (cross-clock translation NYI)",
-          static_cast<int>(presentation_clock_id_),
-          static_cast<int>(CLOCK_MONOTONIC));
     }
   }
 }
@@ -261,20 +251,10 @@ FlutterCompositor WaylandEglBackend::GetCompositorConfig() {
 }
 
 VsyncCallback WaylandEglBackend::GetVsyncCallback() const {
-  // Wall-clock fallback unless the compositor advertises wp_presentation
-  // AND announces a clock domain compatible with FlutterEngineGetCurrentTime
-  // (CLOCK_MONOTONIC). IVI_WL_VSYNC=0 forces fallback regardless — useful
-  // when bisecting pacing regressions or running under a compositor whose
-  // feedback events are unreliable.
-  static const bool env_disabled = []() {
-    const char* env = std::getenv("IVI_WL_VSYNC");
-    return env != nullptr && std::string_view(env) == "0";
-  }();
-  if (env_disabled) {
-    spdlog::info("[WaylandEglBackend] IVI_WL_VSYNC=0 — wall-clock scheduler");
-    return nullptr;
-  }
-  if (wp_presentation_ == nullptr || !clock_compatible_) {
+  // The provider gates on wp_presentation being advertised, its clock being
+  // CLOCK_MONOTONIC-compatible, and the IVI_WL_VSYNC=0 kill-switch. When not
+  // usable, Flutter falls back to its internal wall-clock scheduler.
+  if (vsync_ == nullptr || !vsync_->Usable()) {
     return nullptr;
   }
   return &VsyncTrampoline;
@@ -298,388 +278,31 @@ void WaylandEglBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
   backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
 }
 
-void WaylandEglBackend::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
-                                    const intptr_t baton) const {
-  if (engine == nullptr || baton == 0) {
-    return;
-  }
-  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
-  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
-    // Plumbing not in place yet (vsync_callback fired during engine
-    // bring-up before FlutterView::Initialize installed the runner) or
-    // already torn down. Drop — the next baton from Flutter will be
-    // handled once the runner is wired.
-    return;
-  }
-  const uint64_t now = LibFlutterEngine->GetCurrentTime();
-  const uint64_t period_ns = last_refresh_ns_.load(std::memory_order_acquire);
-  asio::post(*runner->GetStrandContext(), [engine, baton, now, period_ns]() {
-    LibFlutterEngine->OnVsync(engine, baton, now, now + period_ns);
-  });
-}
 
 void WaylandEglBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                                       const intptr_t baton) {
-  engine_handle_.store(engine, std::memory_order_release);
-
-  // Park the baton first — if the dispatch thread is about to fire the
-  // listener for an in-flight feedback object, it picks the baton up
-  // there instead of leaving us racing the exchange.
-  vsync_baton_.store(baton, std::memory_order_release);
-
-  if (feedback_pending_.load(std::memory_order_acquire)) {
-    // A commit is in flight; the upcoming presented/discarded event will
-    // exchange the baton out and call OnVsync. Nothing else to do.
-    return;
-  }
-
-  // Pipeline idle: first frame, post-resume, or Flutter waking from
-  // idle on input. Drain the baton ourselves — otherwise Flutter sits
-  // forever waiting for OnVsync from a commit that will never happen
-  // because no PresentLayers call is scheduled.
-  if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
-      mine != 0) {
-    PostOnVsync(engine, mine);
+  if (vsync_ != nullptr) {
+    vsync_->SubmitBaton(engine, baton);
   }
 }
 
 void WaylandEglBackend::RequestPresentationFeedback() {
-  // Caller is on the rasterizer thread (Flutter's presenter). Skip when
-  // wp_presentation isn't usable, or when no wl_surface is yet attached
-  // (CreateSurface hasn't run during early bring-up). Also honor the
-  // IVI_WL_VSYNC=0 kill-switch so the entire wp_presentation_feedback
-  // path is bypassed for bisection — must mirror GetVsyncCallback's
-  // gate exactly, otherwise feedback objects would accumulate without
-  // a baton to drain them.
-  static const bool env_disabled = []() {
-    const char* env = std::getenv("IVI_WL_VSYNC");
-    return env != nullptr && std::string_view(env) == "0";
-  }();
-  if (env_disabled || wp_presentation_ == nullptr || !clock_compatible_) {
-    return;
+  // Rasterizer thread, BEFORE eglSwapBuffers (which mints the wl_surface.commit
+  // the feedback binds to). The provider no-ops when wp_presentation isn't
+  // usable or no surface is attached yet.
+  if (vsync_ != nullptr) {
+    vsync_->RequestFeedback();
   }
-  auto* surface = m_wl_surface.load(std::memory_order_acquire);
-  if (surface == nullptr) {
-    return;
-  }
-  // Defense in depth against a misbehaving compositor that never sends
-  // presented/discarded: cap the outstanding-feedback count. Flutter
-  // pipelines ≤4 commits in practice, so 16 is comfortably above any
-  // honest workload; passing it means the compositor is silently
-  // dropping our requests and unbounded growth would otherwise leak
-  // wl_proxy ids forever.
-  constexpr size_t kFeedbackInFlightCap = 16;
-  {
-    std::lock_guard<std::mutex> lock(m_feedback_mu_);
-    if (feedback_in_flight_.size() >= kFeedbackInFlightCap) {
-      spdlog::warn(
-          "[WaylandEglBackend] feedback_in_flight_ saturated at {} — "
-          "compositor "
-          "is silently dropping wp_presentation_feedback requests; skipping",
-          feedback_in_flight_.size());
-      return;
-    }
-  }
-  // wp_presentation_feedback() must be issued BEFORE the wl_surface.commit
-  // that submits this content update. EGL hides the commit inside
-  // eglSwapBuffers, so the call ordering is: RequestPresentationFeedback()
-  // → eglSwapBuffers (which commits + feedback gets bound to that commit).
-  struct wp_presentation_feedback* fb =
-      wp_presentation_feedback(wp_presentation_, surface);
-  if (fb == nullptr) {
-    spdlog::warn(
-        "[WaylandEglBackend] wp_presentation_feedback() returned null");
-    return;
-  }
-  wp_presentation_feedback_add_listener(fb, &feedback_listener_, this);
-  {
-    std::lock_guard<std::mutex> lock(m_feedback_mu_);
-    feedback_in_flight_.push_back(fb);
-  }
-  feedback_pending_.store(true, std::memory_order_release);
 }
 
-void WaylandEglBackend::on_feedback_sync_output(
-    void* /*data*/,
-    struct wp_presentation_feedback* /*fb*/,
-    struct wl_output* /*output*/) {
-  // Informational only — tells us which output will present this commit.
-  // For multi-output Flutter views this is the right signal to switch
-  // refresh-rate tracking; for the single-surface case ignore.
-}
-
-void WaylandEglBackend::on_feedback_presented(
-    void* data,
-    struct wp_presentation_feedback* fb,
-    const uint32_t tv_sec_hi,
-    const uint32_t tv_sec_lo,
-    const uint32_t tv_nano_sec,
-    const uint32_t refresh,
-    uint32_t /*seq_hi*/,
-    uint32_t /*seq_lo*/,
-    const uint32_t flags) {
-  auto* self = static_cast<WaylandEglBackend*>(data);
-  if (self == nullptr) {
-    return;
-  }
-  // Refresh of 0 means the compositor doesn't know the cadence (virtual
-  // output, etc.); keep the previous value rather than overwriting with
-  // garbage that would skew frame_target_time. Also clamp at 100ms
-  // (10Hz) — a misbehaving or hostile compositor could otherwise send
-  // refresh=UINT32_MAX (~4.3s/frame), wedging the engine on a far-future
-  // frame_target_time.
-  constexpr uint64_t kMaxPlausibleRefreshNs = 100'000'000;  // 10Hz floor
-  if (refresh > 0 && refresh <= kMaxPlausibleRefreshNs) {
-    self->last_refresh_ns_.store(refresh, std::memory_order_release);
-  }
-  // Reject malformed tv_sec_hi: CLOCK_MONOTONIC counts seconds since
-  // boot, which has never reached 2^32 (~136 years) on any extant
-  // system. A non-zero tv_sec_hi indicates either a malicious compositor
-  // or a protocol-level bug — combined with the *1e9 multiplication
-  // below it would overflow uint64_t and feed garbage to OnVsync.
-  if (tv_sec_hi != 0) {
-    spdlog::warn(
-        "[WaylandEglBackend] feedback.presented tv_sec_hi={} (expected 0); "
-        "dropping baton with wall-clock fallback",
-        tv_sec_hi);
-    // Fall through to the discarded-path baton drain below by clearing
-    // the timestamp; the if(tv_sec_hi)-skip is structured so the
-    // feedback object still gets destroyed and the baton returned.
-    WaylandEglBackend::on_feedback_discarded(data, fb);
-    return;
-  }
-  // Combine the split tv_sec components into nanoseconds in the same
-  // clock domain as FlutterEngineGetCurrentTime (verified compatible
-  // via clock_compatible_ at construction time).
-  const auto tv_sec = static_cast<uint64_t>(tv_sec_lo);
-  const uint64_t tv_ns =
-      tv_sec * 1'000'000'000ULL + static_cast<uint64_t>(tv_nano_sec);
-
-  // IVI_WL_PROFILE=1 accumulates frame-interval stats and flushes every
-  // 60 presented frames. Both this handler and on_feedback_discarded
-  // fire on Display's event_thread_, so a single non-atomic block of
-  // counters is safe (no concurrent writer).
-  static const bool profile_enabled =
-      profiling::FrameProfile::Enabled("IVI_WL_PROFILE");
-  if (profile_enabled) {
-    auto& p = self->profile_;
-    if (p.last_presented_ns != 0) {
-      const uint64_t dt = tv_ns - p.last_presented_ns;
-      p.interval_sum_ns += dt;
-      if (dt > p.interval_max_ns) {
-        p.interval_max_ns = dt;
-      }
-      // Bucket per-frame interval against a 60Hz baseline. Thresholds
-      // are picked just past N vblank periods to absorb compositor
-      // jitter (e.g. 17ms allows a hair of slop above the 16.67ms
-      // budget; matches DRM's bucket philosophy at its native rate).
-      if (dt <= 17'000'000ULL) {
-        ++p.bucket_60hz;
-      } else if (dt <= 33'000'000ULL) {
-        ++p.bucket_30hz;
-      } else if (dt <= 50'000'000ULL) {
-        ++p.bucket_20hz;
-      } else if (dt <= 100'000'000ULL) {
-        ++p.bucket_slow;
-      } else {
-        ++p.bucket_idle;
-      }
-    }
-    p.last_presented_ns = tv_ns;
-    p.flags_or |= flags;
-    ++p.presented_frames;
-    constexpr uint32_t kProfileWindow = 60;
-    if (p.presented_frames >= kProfileWindow) {
-      // First interval in a fresh stream has no predecessor; sample
-      // count is one less than the frame count for the very first
-      // window, identical thereafter.
-      const uint32_t samples =
-          (p.interval_sum_ns > 0) ? p.presented_frames - 1 : p.presented_frames;
-      const uint64_t mean_ns = samples > 0 ? p.interval_sum_ns / samples : 0;
-      const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
-      spdlog::info(
-          "[WaylandEglBackend] profile (n={}): fps={:.2f} mean_interval={}us "
-          "max_interval={}us discarded={} refresh={}us flags=0x{:x} "
-          "buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
-          p.presented_frames, fps, mean_ns / 1000, p.interval_max_ns / 1000,
-          p.discarded_frames,
-          self->last_refresh_ns_.load(std::memory_order_relaxed) / 1000,
-          p.flags_or, p.bucket_60hz, p.bucket_30hz, p.bucket_20hz,
-          p.bucket_slow, p.bucket_idle);
-      // Roll window totals into the session aggregate before reset.
-      auto& s = self->session_totals_;
-      s.presented_frames += p.presented_frames;
-      s.discarded_frames += p.discarded_frames;
-      s.interval_sum_ns += p.interval_sum_ns;
-      if (p.interval_max_ns > s.interval_max_ns) {
-        s.interval_max_ns = p.interval_max_ns;
-      }
-      s.flags_or |= p.flags_or;
-      s.bucket_60hz += p.bucket_60hz;
-      s.bucket_30hz += p.bucket_30hz;
-      s.bucket_20hz += p.bucket_20hz;
-      s.bucket_slow += p.bucket_slow;
-      s.bucket_idle += p.bucket_idle;
-      p = FrameProfile{.last_presented_ns = p.last_presented_ns};
-    }
-  }
-
-  // Race-safe destroy: only the path that successfully removed `fb` from
-  // feedback_in_flight_ owns its destruction. If StopVsyncMonitor swapped
-  // the vector out from under us, `fb` is in StopVsyncMonitor's drained
-  // copy and IT will destroy it — destroying here would double-free
-  // libwayland's id table entry.
-  bool removed_one = false;
-  bool empty = false;
-  {
-    std::lock_guard<std::mutex> lock(self->m_feedback_mu_);
-    auto& vec = self->feedback_in_flight_;
-    auto it = std::find(vec.begin(), vec.end(), fb);
-    if (it != vec.end()) {
-      vec.erase(it);
-      removed_one = true;
-    }
-    empty = vec.empty();
-  }
-  if (removed_one) {
-    wp_presentation_feedback_destroy(fb);
-  }
-
-  if (empty) {
-    self->feedback_pending_.store(false, std::memory_order_release);
-  }
-
-  // Hand the baton back to Flutter with the presentation timestamp.
-  // Cross-thread (this fires on Display's event_thread_) → PostOnVsync.
-  const intptr_t baton =
-      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-  if (baton == 0) {
-    return;
-  }
-  auto* engine = self->engine_handle_.load(std::memory_order_acquire);
-  if (engine == nullptr) {
-    return;
-  }
-  auto* runner = self->platform_task_runner_.load(std::memory_order_acquire);
-  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
-    return;
-  }
-  const uint64_t period_ns =
-      self->last_refresh_ns_.load(std::memory_order_acquire);
-  asio::post(*runner->GetStrandContext(), [engine, baton, tv_ns, period_ns]() {
-    LibFlutterEngine->OnVsync(engine, baton, tv_ns, tv_ns + period_ns);
-  });
-}
-
-void WaylandEglBackend::on_feedback_discarded(
-    void* data,
-    struct wp_presentation_feedback* fb) {
-  auto* self = static_cast<WaylandEglBackend*>(data);
-  if (self == nullptr) {
-    return;
-  }
-  // 'discarded' means the compositor never scanned this commit out (the
-  // next commit superseded it, or the surface was occluded). Flutter is
-  // still waiting on a baton return either way — use the engine's wall
-  // clock as the frame_start_time since we have no real timestamp.
-  static const bool profile_enabled =
-      profiling::FrameProfile::Enabled("IVI_WL_PROFILE");
-  if (profile_enabled) {
-    ++self->profile_.discarded_frames;
-  }
-  // Race-safe destroy: see on_feedback_presented for the rationale.
-  bool removed_one = false;
-  bool empty = false;
-  {
-    std::lock_guard<std::mutex> lock(self->m_feedback_mu_);
-    auto& vec = self->feedback_in_flight_;
-    auto it = std::find(vec.begin(), vec.end(), fb);
-    if (it != vec.end()) {
-      vec.erase(it);
-      removed_one = true;
-    }
-    empty = vec.empty();
-  }
-  if (removed_one) {
-    wp_presentation_feedback_destroy(fb);
-  }
-
-  if (empty) {
-    self->feedback_pending_.store(false, std::memory_order_release);
-  }
-
-  const intptr_t baton =
-      self->vsync_baton_.exchange(0, std::memory_order_acq_rel);
-  if (baton == 0) {
-    return;
-  }
-  auto* engine = self->engine_handle_.load(std::memory_order_acquire);
-  if (engine == nullptr) {
-    return;
-  }
-  self->PostOnVsync(engine, baton);
-}
-
-const wp_presentation_feedback_listener WaylandEglBackend::feedback_listener_ =
-    {
-        .sync_output = WaylandEglBackend::on_feedback_sync_output,
-        .presented = WaylandEglBackend::on_feedback_presented,
-        .discarded = WaylandEglBackend::on_feedback_discarded,
-};
 
 void WaylandEglBackend::StopVsyncMonitor() {
-  // Called from FlutterView::~FlutterView before the engine destructs.
-  // After this returns the listener data pointer (this) may dangle if a
-  // dispatch is in flight; destroying the feedback objects synchronously
-  // cancels their listener registration so the compositor's events land
-  // on dead memory only if they were already queued — and even those
-  // are silently dropped by libwayland because the object id is gone.
-  std::vector<struct wp_presentation_feedback*> drained;
-  {
-    std::lock_guard<std::mutex> lock(m_feedback_mu_);
-    drained.swap(feedback_in_flight_);
-  }
-  for (auto* fb : drained) {
-    wp_presentation_feedback_destroy(fb);
-  }
-  feedback_pending_.store(false, std::memory_order_release);
-
-  // The baton (if any) is dropped — by contract, an unresponded baton
-  // is a leak rather than a crash. Flutter has already initiated
-  // shutdown so it won't notice.
-  vsync_baton_.store(0, std::memory_order_release);
-  engine_handle_.store(nullptr, std::memory_order_release);
-  platform_task_runner_.store(nullptr, std::memory_order_release);
-
-  // Session-aggregate profile summary (IVI_WL_PROFILE=1). Logged from
-  // the shutdown latch so it captures the entire run, not just whatever
-  // happened to land in the last 60-frame window. No-op when the profile
-  // env-var was unset (counters never accumulated).
-  const auto& s = session_totals_;
-  if (s.presented_frames > 0) {
-    const uint32_t samples =
-        (s.interval_sum_ns > 0) ? s.presented_frames - 1 : s.presented_frames;
-    const uint64_t mean_ns = samples > 0 ? s.interval_sum_ns / samples : 0;
-    const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
-    const uint32_t total = s.bucket_60hz + s.bucket_30hz + s.bucket_20hz +
-                           s.bucket_slow + s.bucket_idle;
-    spdlog::info(
-        "[WaylandEglBackend] session summary: frames={} fps={:.2f} "
-        "mean_interval={}us max_interval={}us discarded={} flags=0x{:x}",
-        s.presented_frames, fps, mean_ns / 1000, s.interval_max_ns / 1000,
-        s.discarded_frames, s.flags_or);
-    if (total > 0) {
-      const double inv = 100.0 / static_cast<double>(total);
-      spdlog::info(
-          "[WaylandEglBackend] session buckets: "
-          "60Hz(≤17ms)={} ({:.1f}%) 30Hz(18-33ms)={} ({:.1f}%) "
-          "20Hz(34-50ms)={} ({:.1f}%) slow(51-100ms)={} ({:.1f}%) "
-          "idle(>100ms)={} ({:.1f}%)",
-          s.bucket_60hz, s.bucket_60hz * inv, s.bucket_30hz,
-          s.bucket_30hz * inv, s.bucket_20hz, s.bucket_20hz * inv,
-          s.bucket_slow, s.bucket_slow * inv, s.bucket_idle,
-          s.bucket_idle * inv);
-    }
+  // Called from FlutterView::~FlutterView before the engine destructs. The
+  // provider cancels + drains any in-flight presentation feedback and drops the
+  // parked baton (an unresponded baton is a documented leak, not a crash —
+  // Flutter has already begun shutdown).
+  if (vsync_ != nullptr) {
+    vsync_->Stop();
   }
 
   // Session-aggregate eglSwapBuffers self-time (IVI_WL_PROFILE=1). This is the
@@ -784,6 +407,9 @@ void WaylandEglBackend::CreateSurface(size_t /* index */,
   // EGL takes a reference internally via wl_egl_window_create — the
   // surface stays valid for the lifetime of the egl_window.
   m_wl_surface.store(surface, std::memory_order_release);
+  if (vsync_ != nullptr) {
+    vsync_->SetSurface(surface);
+  }
   m_egl_window = wl_egl_window_create(surface, width, height);
   m_egl_surface = create_egl_surface(m_egl_window, nullptr);
 

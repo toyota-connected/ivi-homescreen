@@ -29,7 +29,7 @@ HeadlessBackend::HeadlessBackend(const uint32_t initial_width,
                                  const int /* buffer_size */)
     : OSMesaHeadless(static_cast<int32_t>(initial_width),
                      static_cast<int32_t>(initial_height)),
-      Backend(),
+      Shell(),
       m_prev_width(initial_width),
       m_width(initial_width),
       m_prev_height(initial_height),

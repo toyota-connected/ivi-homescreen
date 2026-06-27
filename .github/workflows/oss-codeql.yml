@@ -37,7 +37,7 @@ jobs:
         echo ${{ github.server_url }}
         sudo apt-get update
         sudo apt-get -y install ninja-build \
-        libwayland-dev wayland-protocols libxkbcommon-dev \
+        libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev \
         mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
         cmake --version
         gcc --version

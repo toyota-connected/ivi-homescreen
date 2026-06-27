@@ -103,6 +103,12 @@ void Configuration::get_parameters(toml::table* tbl, Config& instance) {
     instance.view.drm_mode =
         tbl->at_path("view.drm_mode").as_string()->value_or("");
   }
+  if (tbl->at_path("view.backend").is_string()) {
+    instance.view.backend = tbl->at_path("view.backend").as_string()->value_or("");
+  }
+  if (tbl->at_path("view.shell").is_string()) {
+    instance.view.shell = tbl->at_path("view.shell").as_string()->value_or("");
+  }
   if (tbl->at_path("view.drm_compositor").is_string()) {
     instance.view.drm_compositor =
         tbl->at_path("view.drm_compositor").as_string()->value_or("");
@@ -204,6 +210,12 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (!cli.view.window_type.empty()) {
     instance.view.window_type = cli.view.window_type;
+  }
+  if (cli.view.shell.has_value()) {
+    instance.view.shell = cli.view.shell.value();
+  }
+  if (cli.view.backend.has_value()) {
+    instance.view.backend = cli.view.backend.value();
   }
   if (cli.view.wl_output_index.has_value()) {
     instance.view.wl_output_index = cli.view.wl_output_index.value();
@@ -327,7 +339,7 @@ void Configuration::PrintConfig(const Config& config) {
   if (!config.wayland_event_mask.empty()) {
     spdlog::info("Wayland Event Mask: ...... {}", config.wayland_event_mask);
   }
-  spdlog::info("Debug Backend: ........... {}",
+  spdlog::info("Debug Shell: ........... {}",
                (config.debug_backend.value_or(false) ? "true" : "false"));
   spdlog::info("********");
   spdlog::info("* View *");
@@ -397,6 +409,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.cursor_theme))(
             "window-type", "AGL window type (only applies to AGL-compositor)",
             cxxopts::value<std::string>(config.view.window_type))(
+            "shell",
+            "Wayland compositor shell: auto|xdg|agl|ivi|simple (default auto)",
+            cxxopts::value<std::string>())(
             "o,output-index", "Wayland output index",
             cxxopts::value<uint32_t>())(
             "xdg-shell-app-id", "XDG shell app id",
@@ -557,6 +572,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
     if (result.count("ivi-surface-id")) {
       config.view.ivi_surface_id = result["ivi-surface-id"].as<uint32_t>();
+    }
+    if (result.count("shell")) {
+      config.view.shell = result["shell"].as<std::string>();
     }
 
     // DRM knobs. CLI wins; env (HOMESCREEN_DRM_*) fills only when the

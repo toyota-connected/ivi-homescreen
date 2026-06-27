@@ -57,14 +57,16 @@ Display::Display(const bool enable_cursor,
 
   wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
 
-  for (auto const& cfg : configs) {
-    // check if we actually need to bind to agl-shell
-    if (WaylandWindow::WINDOW_NORMAL !=
-        WaylandWindow::get_window_type(cfg.view.window_type)) {
-      m_agl.bind_to_agl_shell = true;
-      break;
-    }
-  }
+  // Build the compositor-protocol shells (xdg / agl / ivi / simple) in priority
+  // order BEFORE registry enumeration so registry_handle_global can offer each
+  // unclaimed global to them. The active shell is the first to bind (see
+  // ActiveShell()). The selection ("auto" | "xdg" | "agl" | "ivi" | "simple")
+  // comes from the first view's --shell / view.shell config; the Wayland
+  // connection is shared, so one selection drives all views.
+  const std::string shell_sel =
+      configs.empty() ? std::string("auto")
+                      : configs.front().view.shell.value_or("auto");
+  shells_ = ivi::WaylandShell::Create(shell_sel);
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
@@ -75,58 +77,51 @@ Display::Display(const bool enable_cursor,
 
   m_registry = wl_display_get_registry(m_display);
   wl_registry_add_listener(m_registry, &registry_listener, this);
-  // First dispatch picks up registry globals (synchronous: the server
-  // emits them immediately after we bind the registry). The roundtrip
-  // that follows pulls in events the server emits ONLY in response to
-  // our binds — notably wp_presentation.clock_id, which arrives in a
-  // second round-trip. Without this, WaylandEglBackend's clock_compatible_
-  // check could read the default-initialized CLOCK_MONOTONIC value
-  // before the compositor's announcement arrives.
+  // First dispatch picks up registry globals (synchronous: the server emits
+  // them immediately after we bind the registry). The roundtrip that follows
+  // pulls in events the server emits ONLY in response to our binds — notably
+  // wp_presentation.clock_id (now handled by the vsync provider).
   wl_display_dispatch(m_display);
   wl_display_roundtrip(m_display);
 
-  if (m_agl.shell && m_agl.bind_to_agl_shell && m_agl.version >= 2) {
-    int ret = 0;
-    while (ret != -1 && m_agl.wait_for_bound) {
-      ret = wl_display_dispatch(m_display);
-      if (m_agl.wait_for_bound)
-        continue;
-    }
-    if (!m_agl.bound_ok) {
-      spdlog::critical(
-          "agl_shell extension already in use by other shell client.");
-      exit(EXIT_FAILURE);
-    }
+  // AGL's window-management facet maps output indices to wl_outputs owned here.
+  for (auto& s : shells_) {
+    s->SetOutputResolver([this](std::size_t i) -> wl_output* {
+      return i < m_all_outputs.size() ? m_all_outputs[i]->output : nullptr;
+    });
   }
 
-  if (!m_agl.shell && m_agl.bind_to_agl_shell) {
-    spdlog::debug("agl_shell extension not present");
+  // Post-registry handshake (AGL roundtrips for agl_shell.bound_ok/bound_fail;
+  // others are no-ops).
+  for (auto& s : shells_) {
+    if (!s->Sync(m_display)) {
+      spdlog::critical("[Display] shell '{}' handshake failed", s->Name());
+      exit(EXIT_FAILURE);
+    }
   }
 
   SPDLOG_TRACE("- Display()");
 }
 
+ivi::WaylandShell& Display::ActiveShell() const {
+  for (const auto& s : shells_) {
+    if (s->IsBound()) {
+      return *s;
+    }
+  }
+  spdlog::critical("[Display] no compositor shell bound (no xdg/agl/ivi/simple)");
+  exit(EXIT_FAILURE);
+}
+
 Display::~Display() {
   SPDLOG_TRACE("+ ~Display()");
 
-  if (m_wp_presentation)
-    wp_presentation_destroy(m_wp_presentation);
+  // The shells (xdg/agl/ivi/simple) and the vsync provider own their protocol
+  // objects and tear them down in their own destructors.
+  shells_.clear();
 
   if (m_shm)
     wl_shm_destroy(m_shm);
-
-#if ENABLE_AGL_SHELL_CLIENT
-  if (m_agl.shell)
-    agl_shell_destroy(m_agl.shell);
-#endif
-
-#if ENABLE_IVI_SHELL_CLIENT
-  if (m_ivi_shell.application)
-    ivi_application_destroy(m_ivi_shell.application);
-
-  if (m_ivi_shell.ivi_wm)
-    ivi_wm_destroy(m_ivi_shell.ivi_wm);
-#endif
 
   if (m_subcompositor)
     wl_subcompositor_destroy(m_subcompositor);
@@ -140,11 +135,6 @@ Display::~Display() {
   if (m_cursor_surface)
     wl_surface_destroy(m_cursor_surface);
 
-#if ENABLE_XDG_CLIENT
-  if (m_xdg_wm_base)
-    xdg_wm_base_destroy(m_xdg_wm_base);
-#endif
-
   wl_registry_destroy(m_registry);
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
@@ -152,26 +142,6 @@ Display::~Display() {
   SPDLOG_TRACE("- ~Display()");
 }
 
-#if ENABLE_XDG_CLIENT
-/**
- * @brief Respond to a ping event with a pong request
- * @param[in] data No use
- * @param[in] xdg_wm_base Pointer to xdg_shell interface
- * @param[in] serial Serial of pointer
- * @return void
- * @relation
- * wayland
- */
-static void xdg_wm_base_ping(void* /* data */,
-                             struct xdg_wm_base* xdg_wm_base,
-                             uint32_t serial) {
-  xdg_wm_base_pong(xdg_wm_base, serial);
-}
-
-static constexpr xdg_wm_base_listener xdg_wm_base_listener = {
-    .ping = xdg_wm_base_ping,
-};
-#endif
 
 void Display::registry_handle_global(void* data,
                                      struct wl_registry* registry,
@@ -214,26 +184,7 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
   }
-#if ENABLE_XDG_CLIENT
-  else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
-    d->m_xdg_wm_base = static_cast<xdg_wm_base*>(
-        wl_registry_bind(registry, name, &xdg_wm_base_interface,
-                         std::min(static_cast<uint32_t>(3), version)));
-    xdg_wm_base_add_listener(d->m_xdg_wm_base, &xdg_wm_base_listener, d);
-  }
-#endif
-  else if (strcmp(interface, wp_presentation_interface.name) == 0) {
-    // wp_presentation v2 added the presentation_feedback.kind 'zero_copy' flag
-    // and is supported by every mainline compositor. Cap at 2 so older
-    // compositors advertising v1 still work — we don't use any v2-only
-    // request/event from the wp_presentation interface itself.
-    d->m_wp_presentation = static_cast<wp_presentation*>(
-        wl_registry_bind(registry, name, &wp_presentation_interface,
-                         std::min(static_cast<uint32_t>(2), version)));
-    wp_presentation_add_listener(d->m_wp_presentation,
-                                 &wp_presentation_listener, d);
-    spdlog::debug("Wayland: wp_presentation version: {}", version);
-  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  else if (strcmp(interface, wl_shm_interface.name) == 0) {
     d->m_shm = static_cast<wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface,
                          std::min(static_cast<uint32_t>(1), version)));
@@ -277,35 +228,18 @@ void Display::registry_handle_global(void* data,
         std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
     d->m_repeat_timer->set_timerspec(40, 400);
   }
-#if ENABLE_AGL_SHELL_CLIENT
-  else if (strcmp(interface, agl_shell_interface.name) == 0 &&
-           d->m_agl.bind_to_agl_shell) {
-    if (version >= 2) {
-      d->m_agl.shell = static_cast<struct agl_shell*>(
-          wl_registry_bind(registry, name, &agl_shell_interface,
-                           std::min(static_cast<uint32_t>(8), version)));
-      agl_shell_add_listener(d->m_agl.shell, &agl_shell_listener, data);
-    } else {
-      d->m_agl.shell = static_cast<struct agl_shell*>(
-          wl_registry_bind(registry, name, &agl_shell_interface,
-                           std::min(static_cast<uint32_t>(1), version)));
+  // wp_presentation is owned by the vsync provider.
+  else if (d->m_vsync.TryBindGlobal(registry, name, interface, version)) {
+  }
+  // Everything else: offer the global to each compositor-protocol shell
+  // (xdg/agl/ivi/simple); the first that claims it wins.
+  else {
+    for (auto& s : d->shells_) {
+      if (s->TryBindGlobal(registry, name, interface, version)) {
+        break;
+      }
     }
-    d->m_agl.version = version;
-    spdlog::debug("Wayland: agl_shell version: {}", version);
   }
-#endif
-#if ENABLE_IVI_SHELL_CLIENT
-  else if (strcmp(interface, ivi_application_interface.name) == 0) {
-    d->m_ivi_shell.application = static_cast<struct ivi_application*>(
-        wl_registry_bind(registry, name, &ivi_application_interface, 1));
-    spdlog::debug("Wayland: ivi_application version: {}", version);
-  } else if (strcmp(interface, ivi_wm_interface.name) == 0) {
-    d->m_ivi_shell.ivi_wm = static_cast<struct ivi_wm*>(
-        wl_registry_bind(registry, name, &ivi_wm_interface, 1));
-    ivi_wm_add_listener(d->m_ivi_shell.ivi_wm, &ivi_wm_listener, data);
-    spdlog::debug("Wayland: ivi_wm version: {}", version);
-  }
-#endif
 }
 
 void Display::registry_handle_global_remove(void* /* data */,
@@ -317,18 +251,6 @@ const wl_registry_listener Display::registry_listener = {
     registry_handle_global_remove,
 };
 
-void Display::wp_presentation_handle_clock_id(
-    void* data,
-    struct wp_presentation* /*presentation*/,
-    uint32_t clk_id) {
-  auto* d = static_cast<Display*>(data);
-  d->m_presentation_clock_id = static_cast<clockid_t>(clk_id);
-  spdlog::debug("Wayland: wp_presentation clock_id={}", clk_id);
-}
-
-const struct wp_presentation_listener Display::wp_presentation_listener = {
-    .clock_id = wp_presentation_handle_clock_id,
-};
 
 void Display::display_handle_geometry(void* data,
                                       struct wl_output* /* wl_output */,
@@ -919,47 +841,6 @@ void Display::StopEvents() {
   }
 }
 
-#if ENABLE_AGL_SHELL_CLIENT
-void Display::AglShellDoBackground(struct wl_surface* surface,
-                                   const size_t index) const {
-  if (m_agl.shell) {
-    agl_shell_set_background(m_agl.shell, surface,
-                             m_all_outputs[index]->output);
-  }
-}
-
-void Display::AglShellDoPanel(struct wl_surface* surface,
-                              const enum agl_shell_edge mode,
-                              const size_t index) const {
-  if (m_agl.shell) {
-    agl_shell_set_panel(m_agl.shell, surface, m_all_outputs[index]->output,
-                        mode);
-  }
-}
-
-void Display::AglShellDoReady() const {
-  if (m_agl.shell) {
-    agl_shell_ready(m_agl.shell);
-  }
-}
-
-void Display::AglShellDoSetupActivationArea(uint32_t x,
-                                            uint32_t y,
-                                            uint32_t width,
-                                            uint32_t height,
-                                            const uint32_t index) const {
-  if (!m_agl.shell)
-    return;
-
-  SPDLOG_DEBUG("Using custom rectangle [{}x{}+{}x{}] for activation", width,
-               height, x, y);
-
-  agl_shell_set_activate_region(
-      m_agl.shell, m_all_outputs[index]->output, static_cast<int32_t>(x),
-      static_cast<int32_t>(y), static_cast<int32_t>(width),
-      static_cast<int32_t>(height));
-}
-#endif
 
 void Display::SetEngine(wl_surface* surface, Engine* engine) {
   m_active_engine = engine;
@@ -1096,421 +977,7 @@ double Display::GetMaxRefreshRate() const {
   return max_refresh_rate;
 }
 
-#if ENABLE_AGL_SHELL_CLIENT
-void Display::agl_shell_bound_ok(void* data, struct agl_shell* shell) {
-  (void)shell;
-  auto* d = static_cast<Display*>(data);
-  d->m_agl.wait_for_bound = false;
-  d->m_agl.bound_ok = true;
-}
 
-void Display::agl_shell_bound_fail(void* data, struct agl_shell* shell) {
-  (void)shell;
-  auto* d = static_cast<Display*>(data);
-  d->m_agl.wait_for_bound = false;
-  d->m_agl.bound_ok = false;
-}
-
-void Display::addAppToStack(const std::string& app_id) {
-  if (app_id == "homescreen")
-    return;
-
-  bool found_app = false;
-  for (auto& i : apps_stack) {
-    if (i == app_id) {
-      found_app = true;
-      break;
-    }
-  }
-
-  if (!found_app) {
-    apps_stack.push_back(app_id);
-  } else {
-    // fixme
-  }
-}
-
-int Display::find_output_by_name(const std::string& output_name) {
-  int index = 0;
-  for (auto& i : m_all_outputs) {
-    if (i->name == output_name) {
-      return index;
-    }
-    index++;
-  }
-
-  return -1;
-}
-
-void Display::activateApp(std::string app_id) {
-  int default_output_index = 0;
-
-  spdlog::debug("got app_id {}", app_id);
-
-  // search for a pending application which might have a different output
-  auto iter = pending_app_list.begin();
-  bool found_pending_app = false;
-  while (iter != pending_app_list.end()) {
-    auto app_to_search = iter->first;
-    spdlog::debug("searching for {}", app_to_search);
-
-    if (app_to_search == app_id) {
-      found_pending_app = true;
-      break;
-    }
-
-    iter++;
-  }
-
-  if (found_pending_app) {
-    auto output_name = iter->second;
-    default_output_index = find_output_by_name(output_name);
-
-    spdlog::debug("Found app_id {} at all", app_id);
-
-    if (default_output_index < 0) {
-      // try with remoting-remote-X which is the streaming
-      std::string new_remote_output = "remoting-" + output_name;
-
-      default_output_index = find_output_by_name(new_remote_output);
-      if (default_output_index < 0) {
-        spdlog::debug("Not activating app_id {} at all", app_id);
-        return;
-      }
-    }
-
-    pending_app_list.erase(iter);
-  }
-
-  spdlog::debug("Activating app_id {} on output {}", app_id,
-                default_output_index);
-  agl_shell_activate_app(
-      m_agl.shell, app_id.c_str(),
-      m_all_outputs[static_cast<size_t>(default_output_index)]->output);
-  wl_display_flush(m_display);
-}
-
-void Display::deactivateApp(const std::string& app_id) {
-  for (auto& i : apps_stack) {
-    if (i == app_id) {
-      // remove it from apps_stack
-      apps_stack.remove(i);
-      if (!apps_stack.empty())
-        activateApp(apps_stack.back());
-      break;
-    }
-  }
-}
-
-void Display::processAppStatusEvent(const char* app_id,
-                                    const std::string& event_type) {
-  if (!m_agl.shell)
-    return;
-
-  if (event_type == "started") {
-    activateApp(std::string(app_id));
-  } else if (event_type == "terminated") {
-    deactivateApp(std::string(app_id));
-  } else if (event_type == "deactivated") {
-    // The AGL shell emits "deactivated" as the counterpart to activation; we
-    // intentionally take no action on it here.
-    spdlog::trace("Ignoring deactivated app status event for app_id {}",
-                  app_id);
-  }
-}
-
-void Display::agl_shell_app_on_output(void* data,
-                                      struct agl_shell* /* agl_shell */,
-                                      const char* app_id,
-                                      const char* output_name) {
-  auto* d = static_cast<Display*>(data);
-
-  spdlog::debug("Gove event app_on_out app_id {} output name {}", app_id,
-                output_name);
-
-  // a couple of use-cases, if there is no app_id in the app_list then it
-  // means this is a request to map the application, from the start to a
-  // different output that the default one. We'd get an
-  // AGL_SHELL_APP_STATE_STARTED which will handle activation.
-  //
-  // if there's an app_id then it means we might have gotten an event to
-  // move the application to another output; so we'd need to process it
-  // by explicitly calling processAppStatusEvent() which would ultimately
-  // activate the application on other output. We'd have to pick-up the
-  // last activated window and activate the default output.
-  //
-  // finally if the outputs are identical probably that's an user-error -
-  // but the compositor won't activate it again, so we don't handle that.
-  d->pending_app_list.emplace_back(std::string(app_id),
-                                   std::string(output_name));
-
-  auto iter = d->apps_stack.begin();
-  while (iter != d->apps_stack.end()) {
-    if (*iter == std::string(app_id)) {
-      spdlog::debug("Gove event to move {} to another output {}", app_id,
-                    output_name);
-      d->processAppStatusEvent(app_id, std::string("started"));
-      break;
-    }
-    iter++;
-  }
-}
-
-void Display::agl_shell_app_state(void* data,
-                                  struct agl_shell* /* agl_shell */,
-                                  const char* app_id,
-                                  uint32_t state) {
-  auto* d = static_cast<Display*>(data);
-
-  switch (state) {
-    case AGL_SHELL_APP_STATE_STARTED:
-      spdlog::debug("Got AGL_SHELL_APP_STATE_STARTED for app_id {}", app_id);
-
-      if (d->m_agl.shell) {
-        d->processAppStatusEvent(app_id, std::string("started"));
-      }
-
-      break;
-    case AGL_SHELL_APP_STATE_TERMINATED:
-      spdlog::debug("Got AGL_SHELL_APP_STATE_TERMINATED for app_id {}", app_id);
-      break;
-    case AGL_SHELL_APP_STATE_ACTIVATED:
-      spdlog::debug("Got AGL_SHELL_APP_STATE_ACTIVATED for app_id {}", app_id);
-      d->addAppToStack(std::string(app_id));
-      break;
-    case AGL_SHELL_APP_STATE_DEACTIVATED:
-      d->processAppStatusEvent(app_id, std::string("deactivated"));
-      break;
-    default:
-      break;
-  }
-}
-
-const struct agl_shell_listener Display::agl_shell_listener = {
-    .bound_ok = agl_shell_bound_ok,
-    .bound_fail = agl_shell_bound_fail,
-    .app_state = agl_shell_app_state,
-#if AGL_SHELL_APP_ON_OUTPUT_SINCE_VERSION
-    .app_on_output = agl_shell_app_on_output,
-#endif
-};
-#endif
-
-#if ENABLE_IVI_SHELL_CLIENT
-void Display::ivi_wm_surface_visibility(void* /* data */,
-                                        struct ivi_wm* /* ivi_wm */,
-                                        uint32_t surface_id,
-                                        int32_t visibility) {
-  (void)surface_id;
-  (void)visibility;
-  SPDLOG_DEBUG("ivi_wm_surface_visibility: {}, visibility: {}", surface_id,
-               visibility);
-}
-
-void Display::ivi_wm_layer_visibility(void* /* data */,
-                                      struct ivi_wm* /* ivi_wm */,
-                                      uint32_t layer_id,
-                                      int32_t visibility) {
-  (void)layer_id;
-  (void)visibility;
-  SPDLOG_DEBUG("ivi_wm_layer_visibility: {}, visibility: {}", layer_id,
-               visibility);
-}
-
-void Display::ivi_wm_surface_opacity(void* /* data */,
-                                     struct ivi_wm* /* ivi_wm */,
-                                     uint32_t surface_id,
-                                     wl_fixed_t opacity) {
-  (void)surface_id;
-  (void)opacity;
-  SPDLOG_DEBUG("ivi_wm_surface_opacity: {}, opacity: {}", surface_id, opacity);
-}
-
-void Display::ivi_wm_layer_opacity(void* /* data */,
-                                   struct ivi_wm* /* ivi_wm */,
-                                   uint32_t layer_id,
-                                   wl_fixed_t opacity) {
-  (void)layer_id;
-  (void)opacity;
-  SPDLOG_DEBUG("ivi_wm_layer_opacity: {}, opacity: {}", layer_id, opacity);
-}
-
-void Display::ivi_wm_surface_source_rectangle(void* /* data */,
-                                              struct ivi_wm* /* ivi_wm */,
-                                              uint32_t surface_id,
-                                              int32_t x,
-                                              int32_t y,
-                                              int32_t width,
-                                              int32_t height) {
-  (void)surface_id;
-  (void)x;
-  (void)y;
-  (void)width;
-  (void)height;
-  SPDLOG_DEBUG(
-      "ivi_wm_surface_source_rectangle: {}, x: {}, y: {}, width: {}, height: "
-      "{}",
-      surface_id, x, y, width, height);
-}
-
-void Display::ivi_wm_layer_source_rectangle(void* /* data */,
-                                            struct ivi_wm* /* ivi_wm */,
-                                            uint32_t layer_id,
-                                            int32_t x,
-                                            int32_t y,
-                                            int32_t width,
-                                            int32_t height) {
-  (void)layer_id;
-  (void)x;
-  (void)y;
-  (void)width;
-  (void)height;
-  SPDLOG_DEBUG(
-      "ivi_wm_layer_source_rectangle: {}, x: {}, y: {}, width: {}, height: {}",
-      layer_id, x, y, width, height);
-}
-
-void Display::ivi_wm_surface_destination_rectangle(void* /* data */,
-                                                   struct ivi_wm* /* ivi_wm */,
-                                                   uint32_t surface_id,
-                                                   int32_t x,
-                                                   int32_t y,
-                                                   int32_t width,
-                                                   int32_t height) {
-  (void)surface_id;
-  (void)x;
-  (void)y;
-  (void)width;
-  (void)height;
-  SPDLOG_DEBUG(
-      "ivi_wm_surface_destination_rectangle: {}, x: {}, y: {}, width: {}, "
-      "height: {}",
-      surface_id, x, y, width, height);
-}
-
-void Display::ivi_wm_layer_destination_rectangle(void* /* data */,
-                                                 struct ivi_wm* /* ivi_wm */,
-                                                 uint32_t layer_id,
-                                                 int32_t x,
-                                                 int32_t y,
-                                                 int32_t width,
-                                                 int32_t height) {
-  (void)layer_id;
-  (void)x;
-  (void)y;
-  (void)width;
-  (void)height;
-  SPDLOG_DEBUG(
-      "ivi_wm_surface_destination_rectangle: {}, , x: {}, y: {}, width: {}, "
-      "height: {}",
-      layer_id, x, y, width, height);
-}
-
-void Display::ivi_wm_surface_created(void* /* data */,
-                                     struct ivi_wm* /* ivi_wm */,
-                                     uint32_t surface_id) {
-  (void)surface_id;
-  SPDLOG_DEBUG("ivi_wm_surface_created: {}", surface_id);
-}
-
-void Display::ivi_wm_layer_created(void* /* data */,
-                                   struct ivi_wm* /* ivi_wm */,
-                                   uint32_t layer_id) {
-  (void)layer_id;
-  SPDLOG_DEBUG("ivi_wm_layer_created: {}", layer_id);
-}
-
-void Display::ivi_wm_surface_destroyed(void* /* data */,
-                                       struct ivi_wm* /* ivi_wm */,
-                                       uint32_t surface_id) {
-  (void)surface_id;
-  SPDLOG_DEBUG("ivi_wm_surface_destroyed: {}", surface_id);
-}
-
-void Display::ivi_wm_layer_destroyed(void* /* data */,
-                                     struct ivi_wm* /* ivi_wm */,
-                                     uint32_t layer_id) {
-  (void)layer_id;
-  SPDLOG_DEBUG("ivi_wm_layer_destroyed: {}", layer_id);
-}
-
-void Display::ivi_wm_surface_error(void* /* data */,
-                                   struct ivi_wm* /* ivi_wm */,
-                                   uint32_t object_id,
-                                   uint32_t error,
-                                   const char* message) {
-  (void)object_id;
-  (void)error;
-  (void)message;
-  SPDLOG_DEBUG("ivi_wm_surface_error: {}, error ({}), {}", object_id, error,
-               message);
-}
-
-void Display::ivi_wm_layer_error(void* /* data */,
-                                 struct ivi_wm* /* ivi_wm */,
-                                 uint32_t object_id,
-                                 uint32_t error,
-                                 const char* message) {
-  (void)object_id;
-  (void)error;
-  (void)message;
-  SPDLOG_DEBUG("ivi_wm_layer_error: {}, error ({}), {}", object_id, error,
-               message);
-}
-
-void Display::ivi_wm_surface_size(void* /* data */,
-                                  struct ivi_wm* /* ivi_wm */,
-                                  uint32_t surface_id,
-                                  int32_t width,
-                                  int32_t height) {
-  (void)surface_id;
-  (void)width;
-  (void)height;
-  SPDLOG_DEBUG("ivi_wm_surface_size: {}, width {}, height {}", surface_id,
-               width, height);
-}
-
-void Display::ivi_wm_surface_stats(void* /* data */,
-                                   struct ivi_wm* /* ivi_wm */,
-                                   uint32_t surface_id,
-                                   uint32_t frame_count,
-                                   uint32_t pid) {
-  (void)surface_id;
-  (void)frame_count;
-  (void)pid;
-  SPDLOG_DEBUG("ivi_wm_surface_stats: {}, frame_count {}, pid {}", surface_id,
-               frame_count, pid);
-}
-
-void Display::ivi_wm_layer_surface_added(void* /* data */,
-                                         struct ivi_wm* /* ivi_wm */,
-                                         uint32_t layer_id,
-                                         uint32_t surface_id) {
-  (void)layer_id;
-  (void)surface_id;
-  SPDLOG_DEBUG("ivi_wm_layer_surface_added: {}, {}", layer_id, surface_id);
-}
-
-const struct ivi_wm_listener Display::ivi_wm_listener = {
-    .surface_visibility = ivi_wm_surface_visibility,
-    .layer_visibility = ivi_wm_layer_visibility,
-    .surface_opacity = ivi_wm_surface_opacity,
-    .layer_opacity = ivi_wm_layer_opacity,
-    .surface_source_rectangle = ivi_wm_surface_source_rectangle,
-    .layer_source_rectangle = ivi_wm_layer_source_rectangle,
-    .surface_destination_rectangle = ivi_wm_surface_destination_rectangle,
-    .layer_destination_rectangle = ivi_wm_layer_destination_rectangle,
-    .surface_created = ivi_wm_surface_created,
-    .layer_created = ivi_wm_layer_created,
-    .surface_destroyed = ivi_wm_surface_destroyed,
-    .layer_destroyed = ivi_wm_layer_destroyed,
-    .surface_error = ivi_wm_surface_error,
-    .layer_error = ivi_wm_layer_error,
-    .surface_size = ivi_wm_surface_size,
-    .surface_stats = ivi_wm_surface_stats,
-    .layer_surface_added = ivi_wm_layer_surface_added,
-};
-#endif
 
 void Display::wayland_event_mask_print(struct wayland_event_mask const& mask) {
   const std::string out;

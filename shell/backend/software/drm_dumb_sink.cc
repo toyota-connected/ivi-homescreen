@@ -245,6 +245,13 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
       mode.vrefresh > 0 ? static_cast<double>(mode.vrefresh) : 60.0;
   refresh_period_ns_.store(static_cast<uint64_t>(1e9 / refresh_rate_hz_),
                            std::memory_order_release);
+  vsync_.SetPeriodNs(
+      static_cast<uint32_t>(refresh_period_ns_.load(std::memory_order_acquire)));
+  // Vsync-path cadence diagnostics (page-flip scanout intervals), gated on the
+  // shared IVI_VSYNC_PROFILE. Distinct from IVI_SW_PROFILE (the SoftwareBackend
+  // present-call cadence); the "SoftwareVsync" label names this source.
+  vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
+                       "SoftwareVsync");
   spdlog::info("[DrmDumbSink] connector={} mode={}x{}@{:.2f}Hz{}",
                connector->connector_id, mode_width_, mode_height_,
                refresh_rate_hz_, mode_from_env ? " (IVI_SW_DRM_MODE)" : "");
@@ -569,27 +576,15 @@ bool DrmDumbSink::Present(const void* allocation,
   // state. Flutter's rasterizer is single-threaded so Present is
   // never re-entered concurrently.
   flip_pending_.store(true, std::memory_order_release);
+  vsync_.SetSourcePending(true);  // a present is now in flight
   if (drmModePageFlip(drm_fd_, crtc_id_, buffers_[back].fb_id,
                       DRM_MODE_PAGE_FLIP_EVENT, this) != 0) {
     spdlog::warn("[DrmDumbSink] drmModePageFlip: {}", std::strerror(errno));
     flip_pending_.store(false, std::memory_order_release);
-
-    // Drain the parked baton (if any) inline so Flutter doesn't sit
-    // waiting on an OnVsync from a flip that never queued. No real
-    // vblank timestamp here — use the engine clock so frame_target_
-    // time math has a usable seed.
-    const intptr_t baton = vsync_baton_.exchange(0, std::memory_order_acq_rel);
-    if (baton != 0) {
-      void* engine = engine_handle_.load(std::memory_order_acquire);
-      if (engine != nullptr) {
-        timespec ts{};
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        const uint64_t now_ns =
-            static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
-            static_cast<uint64_t>(ts.tv_nsec);
-        PostOnVsync(engine, baton, now_ns);
-      }
-    }
+    vsync_.SetSourcePending(false);
+    // No flip queued — count a discard and hand the baton back so Flutter
+    // doesn't sit waiting on an OnVsync that never comes.
+    vsync_.DeliverDiscard();
     return false;
   }
   front_buffer_ = back;
@@ -598,10 +593,16 @@ bool DrmDumbSink::Present(const void* allocation,
 
 void DrmDumbSink::SetEngineHandle(void* engine) {
   engine_handle_.store(engine, std::memory_order_release);
+  // Re-pass both to the provider; the base drains only once the runner is wired.
+  vsync_.SetEngine(static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(engine),
+                   platform_task_runner_.load(std::memory_order_acquire));
 }
 
 void DrmDumbSink::SetPlatformTaskRunner(TaskRunner* runner) {
   platform_task_runner_.store(runner, std::memory_order_release);
+  vsync_.SetEngine(static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(
+                       engine_handle_.load(std::memory_order_acquire)),
+                   runner);
   if (runner == nullptr || runner->GetIoContext() == nullptr || drm_fd_ < 0) {
     return;
   }
@@ -672,59 +673,18 @@ void DrmDumbSink::OnPageFlip(const uint64_t tv_ns) {
   // joined by FlutterEngine teardown, which precedes this sink's
   // dtor per the lifetime contract).
   flip_pending_.store(false, std::memory_order_release);
-  // Drain the parked baton, if any, and hand it back with the
-  // kernel-provided scanout timestamp.
-  const intptr_t baton = vsync_baton_.exchange(0, std::memory_order_acq_rel);
-  if (baton == 0) {
-    return;
-  }
-  void* engine = engine_handle_.load(std::memory_order_acquire);
-  if (engine == nullptr) {
-    return;
-  }
-  PostOnVsync(engine, baton, tv_ns);
+  vsync_.SetSourcePending(false);
+  // Hand the parked baton back with the kernel-provided scanout timestamp.
+  vsync_.DeliverVsync(tv_ns);
 }
 
 void DrmDumbSink::SubmitBaton(void* engine, const intptr_t baton) {
   engine_handle_.store(engine, std::memory_order_release);
-  vsync_baton_.store(baton, std::memory_order_release);
-
-  // Idle-kick: if no flip is in flight (first frame, post-resume),
-  // drain the baton inline. Otherwise the next page-flip event picks
-  // it up.
-  if (flip_pending_.load(std::memory_order_acquire)) {
-    return;
-  }
-  if (const intptr_t mine = vsync_baton_.exchange(0, std::memory_order_acq_rel);
-      mine != 0) {
-    timespec ts{};
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    const uint64_t now_ns =
-        static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
-        static_cast<uint64_t>(ts.tv_nsec);
-    PostOnVsync(engine, mine, now_ns);
-  }
-}
-
-void DrmDumbSink::PostOnVsync(void* engine,
-                              const intptr_t baton,
-                              const uint64_t now_ns) const {
-  if (engine == nullptr || baton == 0) {
-    return;
-  }
-  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
-  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
-    return;
-  }
-  const uint64_t period_ns = refresh_period_ns_.load(std::memory_order_acquire);
-  // Flutter's OnVsync takes the strongly-typed engine handle; the
-  // sink stored it as void* to keep the ISurfaceSink interface
-  // header-only. Cast back at the call site.
-  auto* engine_typed = static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(engine);
-  asio::post(*runner->GetStrandContext(), [engine_typed, baton, now_ns,
-                                           period_ns]() {
-    LibFlutterEngine->OnVsync(engine_typed, baton, now_ns, now_ns + period_ns);
-  });
+  // The base parks the baton and, when no flip is in flight (source_pending_
+  // false: first frame / post-resume), drains it inline; otherwise the next
+  // page-flip event delivers it.
+  vsync_.SubmitBaton(static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(engine),
+                     baton);
 }
 
 void DrmDumbSink::StopVsyncMonitor() {
@@ -738,8 +698,8 @@ void DrmDumbSink::StopVsyncMonitor() {
     flip_descriptor_.reset();
   }
   platform_task_runner_.store(nullptr, std::memory_order_release);
-  vsync_baton_.store(0, std::memory_order_release);
   engine_handle_.store(nullptr, std::memory_order_release);
+  vsync_.Stop();  // drop parked baton + clear engine/runner + session summary
 
   // Drain a lingering page-flip event synchronously — mirrors
   // drm_kms_egl's tear-down so destructors don't race with an
@@ -768,6 +728,7 @@ void DrmDumbSink::StopVsyncMonitor() {
           "[DrmDumbSink] StopVsyncMonitor: flip never arrived; "
           "force-clearing flip_pending_");
       flip_pending_.store(false, std::memory_order_release);
+      vsync_.SetSourcePending(false);
     }
   }
 }

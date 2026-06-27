@@ -31,7 +31,7 @@
 SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
                                  const uint32_t initial_height,
                                  std::unique_ptr<ISurfaceSink> sink)
-    : Backend(),
+    : Shell(),
       width_(initial_width),
       height_(initial_height),
       sink_(std::move(sink)) {
