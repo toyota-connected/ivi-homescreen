@@ -585,12 +585,19 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
 #elif ENV32BIT
   e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-  e.x = x * m_prev_pixel_ratio;
-  e.y = y * m_prev_pixel_ratio;
+  // Convert surface-local Wayland coords to physical pixels using only the
+  // wl_output buffer scale (m_pointer_scale), NOT the full m_prev_pixel_ratio.
+  // m_prev_pixel_ratio = config.pixel_ratio * wl_output.scale; the
+  // config.pixel_ratio part is purely a Flutter rendering scale and must not
+  // be applied to input coordinates — Flutter already divides physical pointer
+  // coords by pixel_ratio to reach logical space, so using the full ratio
+  // would shift hit targets by the extra config.pixel_ratio factor.
+  e.x = x * m_pointer_scale;
+  e.y = y * m_pointer_scale;
   e.device = 0;
   e.signal_kind = signal;
-  e.scroll_delta_x = scroll_delta_x * m_prev_pixel_ratio;
-  e.scroll_delta_y = scroll_delta_y * m_prev_pixel_ratio;
+  e.scroll_delta_x = scroll_delta_x * m_pointer_scale;
+  e.scroll_delta_y = scroll_delta_y * m_pointer_scale;
   e.device_kind = kFlutterPointerDeviceKindMouse;
   e.buttons = buttons;
   e.pan_x = 0;
@@ -620,8 +627,8 @@ void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
 #elif ENV32BIT
   e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-  e.x = x * m_prev_pixel_ratio;
-  e.y = y * m_prev_pixel_ratio;
+  e.x = x * m_pointer_scale;  // see CoalesceMouseEvent for scaling rationale
+  e.y = y * m_pointer_scale;
   e.device = device;
   e.signal_kind = kFlutterPointerSignalKindNone;
   e.scroll_delta_x = 0.0;

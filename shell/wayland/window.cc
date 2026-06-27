@@ -234,6 +234,7 @@ void WaylandWindow::handle_base_surface_enter(void* data,
 
   const auto result =
       d->m_flutter_engine->SetPixelRatio(d->m_pixel_ratio * buffer_scale);
+  d->m_flutter_engine->SetPointerScale(static_cast<double>(buffer_scale));
   if (result != kSuccess) {
     spdlog::error("Failed to set Flutter Engine Pixel Ratio");
   } else {
@@ -447,6 +448,7 @@ void WaylandWindow::OnOutputScaleChanged(const size_t output_index,
                     m_geometry.width * new_scale,
                     m_geometry.height * new_scale);
   m_flutter_engine->SetPixelRatio(m_pixel_ratio * new_scale);
+  m_flutter_engine->SetPointerScale(static_cast<double>(new_scale));
   if (m_view) {
     m_view->UpdateDisplayMetadata();
   }
@@ -491,6 +493,10 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
     if (result != kSuccess) {
       spdlog::error("Failed to set Flutter Engine Pixel Ratio");
     }
+
+    // Keep the pointer scale in sync: only the wl_output buffer scale,
+    // not the full pixel_ratio. See Engine::SetPointerScale() for rationale.
+    m_flutter_engine->SetPointerScale(static_cast<double>(buffer_scale));
   }
 }
 
