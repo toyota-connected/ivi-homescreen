@@ -18,6 +18,14 @@
 
 #include <array>
 #include <cstring>
+#include <mutex>
+#include <utility>
+#include <vector>
+
+#ifdef HAVE_DRM_CURSOR
+#include <drm-cxx/cursor/cursor.hpp>
+#include <drm-cxx/cursor/theme.hpp>
+#endif
 
 #include "logging.h"
 
@@ -103,6 +111,76 @@ GlCursor::GlCursor() : w_(kCursorW), h_(kCursorH) {
 
 GlCursor::~GlCursor() = default;
 
+bool GlCursor::SetShape(const char* const xcursor_name) {
+#ifdef HAVE_DRM_CURSOR
+  if (xcursor_name == nullptr) {
+    SetVisible(false);
+    return true;
+  }
+  // XCURSOR_SIZE convention is 24 logical px; the theme resolver scales to the
+  // nearest available size.
+  constexpr uint32_t kThemeLogicalSize = 24;
+  static auto theme = drm::cursor::Theme::discover();
+  if (!theme) {
+    return false;
+  }
+  auto cursor =
+      drm::cursor::Cursor::load(*theme, xcursor_name, {}, kThemeLogicalSize);
+  if (!cursor) {
+    return false;
+  }
+  const auto& f = cursor->first();
+  // drm::cursor frames are premultiplied ARGB8888 (0xAARRGGBB); the GL texture
+  // wants premultiplied RGBA bytes [R,G,B,A].
+  const auto count = static_cast<size_t>(f.width) * f.height;
+  std::vector<uint8_t> rgba(count * 4);
+  for (size_t i = 0; i < count; ++i) {
+    const uint32_t px = f.pixels[i];
+    rgba[i * 4 + 0] = static_cast<uint8_t>((px >> 16) & 0xFF);
+    rgba[i * 4 + 1] = static_cast<uint8_t>((px >> 8) & 0xFF);
+    rgba[i * 4 + 2] = static_cast<uint8_t>(px & 0xFF);
+    rgba[i * 4 + 3] = static_cast<uint8_t>((px >> 24) & 0xFF);
+  }
+  {
+    const std::lock_guard<std::mutex> lock(shape_mtx_);
+    pending_rgba_ = std::move(rgba);
+    pending_w_ = f.width;
+    pending_h_ = f.height;
+    pending_hot_x_ = f.xhot;
+    pending_hot_y_ = f.yhot;
+    shape_dirty_ = true;
+  }
+  SetVisible(true);
+  return true;
+#else
+  (void)xcursor_name;
+  return false;
+#endif
+}
+
+void GlCursor::ApplyPendingShape() {
+  const std::lock_guard<std::mutex> lock(shape_mtx_);
+  if (!shape_dirty_) {
+    return;
+  }
+  rgba_ = std::move(pending_rgba_);
+  w_ = pending_w_;
+  h_ = pending_h_;
+  hot_x_ = pending_hot_x_;
+  hot_y_ = pending_hot_y_;
+  // Themed cursors are full-size; drop the integer upscale that only exists to
+  // make the tiny embedded fallback arrow visible.
+  scale_ = 1;
+  shape_dirty_ = false;
+  if (texture_ != 0) {
+    glBindTexture(GL_TEXTURE_2D, texture_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(w_),
+                 static_cast<GLsizei>(h_), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 rgba_.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+}
+
 bool GlCursor::EnsureGl() {
   if (gl_ready_) {
     return true;
@@ -178,6 +256,7 @@ void GlCursor::Draw(const uint32_t fb_w, const uint32_t fb_h) {
   if (fb_w == 0 || fb_h == 0 || !EnsureGl()) {
     return;
   }
+  ApplyPendingShape();
 
   const auto fw = static_cast<float>(fb_w);
   const auto fh = static_cast<float>(fb_h);
