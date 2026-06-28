@@ -19,3 +19,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: AppText
+      fonts:
+        - asset: fonts/DejaVuSans.ttf
+    - family: AppMono
+      fonts:
+        - asset: fonts/DejaVuSansMono.ttf
+    - family: NotoColorEmoji
+      fonts:
+        - asset: fonts/NotoColorEmoji.ttf
