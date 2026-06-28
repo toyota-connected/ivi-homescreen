@@ -19,9 +19,15 @@
 #include <EGL/egl.h>
 #include <memory>
 
+#include "config/common.h"
 #include "configuration/configuration.h"
 #include "view/flutter_view.h"
 #include "watchdog.h"
+
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+#include "asio/executor_work_guard.hpp"
+#include "asio/io_context.hpp"
+#endif
 
 class IDisplay;
 
@@ -45,8 +51,32 @@ class App final {
    */
   [[nodiscard]] int Loop() const;
 
+  /**
+   * @brief Run the application until shutdown is requested.
+   *
+   * On the Wayland backend this runs the display reactor (a single asio
+   * io_context) on the calling thread: the Wayland fd, keyboard repeat timerfd
+   * and the shutdown waker are all serviced event-driven, with periodic plugin
+   * pumping paced by a refresh-rate timer only while a view needs it. Other
+   * backends fall back to the Loop()-per-iteration model.
+   *
+   * @return 0 on a clean exit, -1 on fatal error.
+   * @relation wayland, flutter
+   */
+  int Run();
+
  private:
   std::shared_ptr<IDisplay> m_display;
   std::vector<std::unique_ptr<FlutterView>> m_views;
   std::unique_ptr<Watchdog> m_watch_dog;
+
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  // The single shared reactor (the "primary" io_context). Run() runs it on the
+  // main thread; every Wayland Display connection registers its {wl-fd,
+  // repeat-fd} onto it, so all connections stay single-threaded with no
+  // per-connection strand. The work guard keeps run() alive across idle gaps.
+  asio::io_context primary_ioc_;
+  asio::executor_work_guard<asio::io_context::executor_type> primary_work_{
+      asio::make_work_guard(primary_ioc_)};
+#endif
 };
