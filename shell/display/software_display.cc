@@ -16,10 +16,18 @@
 
 #include "display/software_display.h"
 
+#include <cstdint>
 #include <utility>
 
 #include "backend/software/input/software_seat.h"
+#include "backend/software/software_cursor.h"
+#include "cursor_kind.h"
 #include "input/iseat.h"
+
+#ifdef HAVE_SW_CURSOR_THEME
+#include "cursor/cursor.hpp"
+#include "cursor/theme.hpp"
+#endif
 
 SoftwareDisplay::SoftwareDisplay(const int32_t width,
                                  const int32_t height,
@@ -48,6 +56,37 @@ void SoftwareDisplay::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
   if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
     sw_seat->SetCursor(cursor_);
   }
+}
+
+bool SoftwareDisplay::ActivateSystemCursor(const int32_t /*device*/,
+                                           const std::string& kind) const {
+  if (!cursor_) {
+    return true;
+  }
+  const char* const name = homescreen::CursorKindToXcursorName(kind);
+  if (name == nullptr) {  // "none" — hide the cursor.
+    cursor_->SetVisible(false);
+    return true;
+  }
+#ifdef HAVE_SW_CURSOR_THEME
+  // XCURSOR_SIZE convention is 24 logical px; the resolver scales to the
+  // nearest available size. The theme is resolved once (process-global).
+  constexpr uint32_t kThemeLogicalSize = 24;
+  static auto theme = drm::cursor::Theme::discover();
+  if (theme) {
+    auto cursor =
+        drm::cursor::Cursor::load(*theme, name, {}, kThemeLogicalSize);
+    if (cursor) {
+      const auto& f = cursor->first();
+      cursor_->SetShape(f.pixels.data(), f.width, f.height, f.xhot, f.yhot);
+      cursor_->SetVisible(true);
+      return true;
+    }
+  }
+#endif
+  // No theme available or shape not found: keep the current sprite visible.
+  cursor_->SetVisible(true);
+  return true;
 }
 
 void SoftwareDisplay::StartEvents() {
