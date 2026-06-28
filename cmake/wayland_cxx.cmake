@@ -32,6 +32,12 @@ pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.22)
 pkg_get_variable(_wlcxx_proto_base wayland-protocols pkgdatadir)
 set(IVI_WL_PROTOCOLS_BASE "${_wlcxx_proto_base}" CACHE INTERNAL "wayland-protocols pkgdatadir")
 
+# Core Wayland protocol XML (wl_seat / wl_keyboard / …) ships with
+# wayland-scanner. The generated wayland_client.hpp backs wl::KeyboardHandler;
+# its core wl_interface tables come from libwayland (no --emit-interface-tables).
+pkg_get_variable(_wlcxx_core_base wayland-scanner pkgdatadir)
+set(IVI_WL_CORE_XML "${_wlcxx_core_base}/wayland.xml" CACHE INTERNAL "core wayland.xml")
+
 # --- Shell client options --------------------------------------------------
 # xdg + agl on by default; ivi + simple are opt-in.
 option(ENABLE_XDG_CLIENT          "Enable XDG shell client"               ON)
@@ -139,6 +145,11 @@ function(ivi_wayland_protocols target)
     set(_pres "${IVI_WL_PROTOCOLS_BASE}/stable/presentation-time/presentation-time.xml")
     set(_bund "${IVI_WL_CXX_SRC}/protocols")
     set(_loc  "${CMAKE_SOURCE_DIR}/shell/wayland/protocols")
+
+    # core wayland — always (wl::KeyboardHandler needs wayland::client::CWlKeyboard);
+    # core wl_interface tables come from libwayland, so do NOT emit tables.
+    wayland_cxx_generate(PROTOCOL "${IVI_WL_CORE_XML}" MODE client-header
+        OUTPUT wayland-protocols/wayland_client.hpp TARGET ${target})
 
     # presentation-time — always (IVsyncProvider); no shipped header -> emit tables.
     wayland_cxx_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES

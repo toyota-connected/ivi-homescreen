@@ -49,6 +49,11 @@ class MainLoopWaker {
   /// to the (already-created) eventfd; does no allocation or locking.
   static void SignalWake();
 
+  /// The backing eventfd. The Wayland reactor registers it on its io_context
+  /// (as a non-owning descriptor) so a Wake() breaks the loop out of an idle
+  /// block. -1 if the eventfd could not be created.
+  [[nodiscard]] int fd() const { return fd_; }
+
  private:
   MainLoopWaker();
   ~MainLoopWaker();
