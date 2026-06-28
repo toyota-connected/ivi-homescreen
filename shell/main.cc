@@ -153,7 +153,7 @@ int main(const int argc, char** argv) {
   }
 #endif
 
-  const App app(configs);
+  App app(configs);
 
   // Construct the waker (publishing its eventfd) before installing the
   // signal handlers, so HandleShutdownSignal's async-signal-safe wake always
@@ -163,9 +163,16 @@ int main(const int argc, char** argv) {
 
   // run the application
   int ret = 0;
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  // The Wayland backend runs its display reactor on this (main) thread; Run()
+  // blocks until the shutdown signal stops the io_context.
+  ret = app.Run();
+#else
   while (running && ret != -1) {
     ret = app.Loop();
   }
+#endif
+  (void)ret;
 
   gLogger.reset();
 

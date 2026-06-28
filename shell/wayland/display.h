@@ -22,6 +22,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,21 @@
 #include <wayland-cursor.h>
 #include <cassert>
 
+#include "asio/io_context.hpp"
+#include "asio/posix/stream_descriptor.hpp"
+
+// Core Wayland C++ proxies (wayland::client::CWlKeyboard) and the header-only
+// CRTP keyboard handler. wayland_client.hpp (generated from wayland.xml) must
+// precede <wl/seat.hpp>, which supplies the wl_seat/wl_keyboard wl_iface()
+// definitions and pulls in <wl/keyboard.hpp> (wl::KeyboardHandler). The order
+// is load-bearing, so keep clang-format from re-sorting it.
+// clang-format off
+#include "wayland_client.hpp"
+#include <wl/seat.hpp>
+#include <wl/client_helpers.hpp>
+#include <wl/wl_ptr.hpp>
+// clang-format on
+
 #include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
@@ -37,7 +53,6 @@
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
-#include "timer.h"
 #include "vsync/wayland_vsync_provider.h"
 #include "wayland/shell/wayland_shell.h"
 
@@ -59,15 +74,39 @@ class Display : public IDisplay {
 
   const Display& operator=(const Display&) = delete;
 
-  std::shared_ptr<EventTimer> m_repeat_timer{};
+  // Key repeat is event-driven: wl::KeyboardHandler owns a CLOCK_MONOTONIC
+  // timerfd that is registered on the display reactor (repeat_fd_), so the
+  // main loop never has to pace it. Always false; the interface keeps the
+  // method for the non-Wayland backends whose loop still consults it.
+  [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
-  [[nodiscard]] bool HasRepeatTimer() const override {
-    // Armed, not merely existing: the repeat timer is created once at keyboard
-    // init and lives for the session, so testing existence would keep App::Loop
-    // pacing at the refresh rate forever. Only an *armed* timer (a key is held)
-    // needs periodic servicing; otherwise the loop may idle.
-    return m_repeat_timer && m_repeat_timer->is_armed();
-  }
+  /**
+   * @brief Register the shared reactor (App-owned primary io_context) this
+   * connection multiplexes its Wayland fd + keyboard repeat timerfd onto. Must
+   * be called before StartEvents(). The reactor is single-threaded, so every
+   * connection's xkb_state stays single-threaded with no per-connection strand.
+   */
+  void SetEventLoop(asio::io_context& ioc) { ioc_ = &ioc; }
+
+  /**
+   * @brief Key-event sink for wl::KeyboardHandler. Runs on the reactor thread;
+   * forwards to KeyCallback (which posts to the engine strand).
+   */
+  void OnKey(const wl::KeyEvent& ev);
+
+  /**
+   * @brief Keymap sink for wl::KeyboardHandler. Posts KeymapChangedCallback
+   * onto the engine platform strand with the keymap ref'd.
+   */
+  void OnKeymap(xkb_keymap* keymap);
+
+  /**
+   * @brief Keyboard-focus-leave sink for wl::KeyboardHandler. Posts
+   * FocusLostCallback onto the engine platform strand so TextInputPlugin
+   * preedit state resets in order with the key-event callbacks. (The handler
+   * stops key-repeat internally; this does not touch repeat.)
+   */
+  void OnKeyboardLeave();
 
   /**
    * @brief Get compositor
@@ -257,9 +296,16 @@ class Display : public IDisplay {
   // along with the rest of the AGL window-management surface.
 
  private:
-  std::thread event_thread_;
-  std::atomic<bool> stop_events_flag_;
-  std::atomic<bool> event_thread_active_;
+  // The shared reactor, owned by App (the primary io_context). This connection
+  // registers its fds onto it; it does not own or run it. Single-threaded, so
+  // the keyboard's xkb_state (read in OnKey / DispatchRepeat) needs no locking.
+  asio::io_context* ioc_{};
+  // Non-owning async descriptors over the Wayland display fd and the keyboard
+  // repeat timerfd. Both fds are owned elsewhere (libwayland / the handler), so
+  // these must release() — never close() — them on teardown.
+  std::optional<asio::posix::stream_descriptor> wl_fd_;
+  std::optional<asio::posix::stream_descriptor> repeat_fd_;
+
   std::shared_ptr<Engine> m_flutter_engine;
 
   struct wl_display* m_display{};
@@ -277,7 +323,38 @@ class Display : public IDisplay {
   struct FlutterDesktopViewControllerState* m_view_controller_state{};
 
   struct wl_seat* m_seat{};
-  struct wl_keyboard* m_keyboard{};
+  // wl_keyboard wrapped in the scanner's CRTP handler: owns its own xkb
+  // context/keymap/state and the repeat timerfd. Bound off the shared wl_seat
+  // in seat_handle_capabilities (pointer + touch stay raw).
+  wl::WlPtr<wl::KeyboardHandler<Display>> keyboard_;
+
+  /**
+   * @brief Arm the Wayland display fd on the reactor (prepare_read / flush /
+   * async_wait, re-arming itself on each readable edge).
+   */
+  void ArmWaylandRead();
+
+  /**
+   * @brief Register the keyboard handler's repeat timerfd on the reactor (after
+   * the keyboard is set up). No-op if the timerfd is unavailable.
+   */
+  void ArmRepeatFd();
+
+  /**
+   * @brief (Re-)arm the wait on the repeat timerfd; on fire, drains it and
+   * dispatches one repeat KeyEvent on the reactor thread.
+   */
+  void ArmRepeatWait();
+
+  /**
+   * @brief Cancel + release (never close) the repeat timerfd descriptor.
+   */
+  void ReleaseRepeatFd();
+
+  /**
+   * @brief Cancel + release (never close) the Wayland display fd descriptor.
+   */
+  void ReleaseWaylandFd();
 
   // Compositor-protocol shells (xdg / agl / ivi / simple), built by
   // WaylandShell::Create in priority order. The active one is the first that
@@ -372,34 +449,6 @@ class Display : public IDisplay {
 
   // for cursor
   struct wl_cursor_theme* m_cursor_theme{};
-
-  struct xkb_context* m_xkb_context;
-  struct xkb_keymap* m_keymap{};
-  struct xkb_state* m_xkb_state{};
-
-  xkb_keysym_t m_keysym_pressed{};
-
-  // Serialized modifier mask cached in keyboard_handle_modifiers so that
-  // keyboard_handle_key and keyboard_repeat_func can read it without calling
-  // xkb_state_serialize_mods on every event.
-  uint32_t m_mods_effective{};
-
-  std::mutex m_lock;
-  uint32_t m_repeat_code{};
-
-  /**
-   * @brief set repeat code
-   * @param[in] display
-   * @param[in] repeat_code a repeat code
-   * @return void
-   * @relation
-   * internal
-   */
-  static inline void set_repeat_code(Display* display,
-                                     const uint32_t repeat_code) {
-    std::lock_guard lock(display->m_lock);
-    display->m_repeat_code = repeat_code;
-  }
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
 
@@ -766,120 +815,9 @@ class Display : public IDisplay {
 
   static const wl_pointer_listener pointer_listener;
 
-  /**
-   * @brief Set keymap
-   * @param[in,out] data Data of type Display
-   * @param[in] keyboard No use
-   * @param[in] format No use
-   * @param[in] fd File descriptor
-   * @param[in] size Mapping region length
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_handle_keymap(void* data,
-                                     struct wl_keyboard* keyboard,
-                                     uint32_t format,
-                                     int fd,
-                                     uint32_t size);
-
-  /**
-   * @brief Keyboard input event
-   * @param[in,out] data Data of type Display
-   * @param[in] keyboard No use
-   * @param[in] serial No use
-   * @param[in] surface Cursor image of keyboard
-   * @param[in] keys No use
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_handle_enter(void* data,
-                                    struct wl_keyboard* keyboard,
-                                    uint32_t serial,
-                                    struct wl_surface* surface,
-                                    struct wl_array* keys);
-
-  /**
-   * @brief Keyboard leaves the surface
-   * @param[in,out] data No use
-   * @param[in] keyboard No use
-   * @param[in] serial No use
-   * @param[in] surface No use
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_handle_leave(void* data,
-                                    struct wl_keyboard* keyboard,
-                                    uint32_t serial,
-                                    struct wl_surface* surface);
-
-  /**
-   * @brief Key pressed/released
-   * @param[in,out] data Data of type Display
-   * @param[in] keyboard No use
-   * @param[in] serial No use
-   * @param[in] time No use
-   * @param[in] key Key number
-   * @param[in] state Key state released/pressed
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_handle_key(void* data,
-                                  struct wl_keyboard* keyboard,
-                                  uint32_t serial,
-                                  uint32_t time,
-                                  uint32_t key,
-                                  uint32_t state);
-
-  /**
-   * @brief Event when the state of the modifier key changes and lock
-   * @param[in,out] data Data of type Display
-   * @param[in] keyboard No use
-   * @param[in] serial No use
-   * @param[in] mods_depressed Flag of modifiers being pushed
-   * @param[in] mods_latched Latched modifiers
-   * @param[in] mods_locked Locked modifiers
-   * @param[in] group Keyboard layout
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_handle_modifiers(void* data,
-                                        struct wl_keyboard* keyboard,
-                                        uint32_t serial,
-                                        uint32_t mods_depressed,
-                                        uint32_t mods_latched,
-                                        uint32_t mods_locked,
-                                        uint32_t group);
-
-  /**
-   * @brief Keyboard repeat info
-   * @param[in,out] data No use
-   * @param[in] wl_keyboard No use
-   * @param[in] rate Rate
-   * @param[in] delay Delay
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_handle_repeat_info(void* data,
-                                          struct wl_keyboard* wl_keyboard,
-                                          int32_t rate,
-                                          int32_t delay);
-
-  static const wl_keyboard_listener keyboard_listener;
-
-  /**
-   * @brief a callback for key repeat behavior
-   * @param[in] data Data of type Display
-   * @return void
-   * @relation
-   * wayland
-   */
-  static void keyboard_repeat_func(void* data);
+  // The keyboard is no longer a raw wl_keyboard listener: wl::KeyboardHandler
+  // owns the wl_keyboard events, xkb processing and repeat timerfd, calling
+  // back into Display::OnKey / Display::OnKeymap.
 
   /**
    * @brief Touch event down
