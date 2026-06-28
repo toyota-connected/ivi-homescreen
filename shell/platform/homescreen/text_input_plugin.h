@@ -5,7 +5,10 @@
 #ifndef FLUTTER_SHELL_PLATFORM_HOMESCREEN_TEXT_INPUT_PLUGIN_H
 #define FLUTTER_SHELL_PLATFORM_HOMESCREEN_TEXT_INPUT_PLUGIN_H
 
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
 
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/binary_messenger.h"
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/method_channel.h"
@@ -70,6 +73,52 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // No-op when no text field is active or the selection is collapsed.
   void DeleteSelectedText();
 
+  // ── Compositor IME (zwp_text_input_v3) seam ──────────────────────────────
+  // The platform layer (FlutterView, on Wayland) wires these to the Display's
+  // text-input drivers. Left unset on backends without a compositor IME, in
+  // which case show/hide/cursor-rect updates are silently dropped.
+  //
+  // |activate| receives (content_hint, content_purpose, x, y, width, height):
+  // the hint/purpose are wl::ime::ContentHint / ContentPurpose values (passed
+  // as their underlying integers so this header needs no Wayland dependency).
+  using ImeActivateFn = std::function<
+      void(uint32_t, uint32_t, int32_t, int32_t, int32_t, int32_t)>;
+  using ImeDeactivateFn = std::function<void()>;
+  using ImeCursorRectFn =
+      std::function<void(int32_t, int32_t, int32_t, int32_t)>;
+  // |surrounding| receives (committed UTF-8 text, cursor byte offset, anchor
+  // byte offset) for zwp_text_input_v3's set_surrounding_text.
+  using ImeUpdateSurroundingFn =
+      std::function<void(const std::string&, uint32_t, uint32_t)>;
+
+  void SetImeActivate(ImeActivateFn fn) { ime_activate_ = std::move(fn); }
+  void SetImeDeactivate(ImeDeactivateFn fn) { ime_deactivate_ = std::move(fn); }
+  void SetImeUpdateCursorRect(ImeCursorRectFn fn) {
+    ime_update_cursor_rect_ = std::move(fn);
+  }
+  void SetImeUpdateSurrounding(ImeUpdateSurroundingFn fn) {
+    ime_update_surrounding_ = std::move(fn);
+  }
+
+  // ── Inbound IME edits — invoked from the engine platform strand ──────────
+  // (Display's TextInputListener callbacks post onto that strand, so these run
+  // serialized with the key-event path.)
+
+  // Commits |utf8| into the active model: ends any composing run, inserts the
+  // text (replacing the selection), and pushes the new editing state.
+  void CommitString(const std::string& utf8);
+
+  // Sets the IME preedit (composing) region to |utf8|. An empty string clears
+  // composing. |cursor_begin| / |cursor_end| are the preedit-relative cursor
+  // byte offsets the IME reports (advisory; the model places the cursor at the
+  // end of the composing run).
+  void SetPreeditString(const std::string& utf8,
+                        int cursor_begin,
+                        int cursor_end);
+
+  // Deletes |before| code units before and |after| after the cursor.
+  void DeleteSurrounding(int before, int after);
+
  private:
   // State for GTK-style Ctrl+Shift+U Unicode input.
   enum class UnicodeInputState { kNormal, kPendingHex };
@@ -89,8 +138,42 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // Sends the current state of the given model to the Flutter engine.
   void SendStateUpdate(const TextInputModel& model) const;
 
+  // Sends the committed surrounding text (the active preedit/composing run
+  // excluded) together with the UTF-8 byte offsets of the cursor (selection
+  // extent) and anchor (selection base) to the compositor IME via
+  // |ime_update_surrounding_|. This is what lets the IME issue
+  // delete_surrounding_text against already-committed text (e.g. backspace).
+  // No-op when no model is active or no compositor IME is wired.
+  void SendSurroundingToIme() const;
+
+  // Pushes |text|/|cursor|/|anchor| to the IME via |ime_update_surrounding_|,
+  // but suppresses a send identical to the previous one. The IME re-evaluates
+  // on every set_surrounding_text and may answer with a preedit, so echoing an
+  // unchanged surrounding text loops endlessly. The cache is invalidated on
+  // (re)activation so the first send after focus always goes through.
+  void EmitSurrounding(const std::string& text,
+                       uint32_t cursor,
+                       uint32_t anchor) const;
+
+  // Pushes the cursor/anchor rectangle to the IME, suppressing a send identical
+  // to the previous one. Flutter re-sends the editable transform every frame,
+  // and an unchanged set_cursor_rectangle+commit makes the IME re-emit its
+  // preedit, which loops. Invalidated on (re)activation.
+  void EmitCursorRect() const;
+
+  // Convenience chokepoint: pushes the model's editing state to the framework
+  // and the committed surrounding text to the compositor IME together. Used by
+  // the inbound IME and physical-key edit paths that change committed text or
+  // move the cursor.
+  void UpdateClientAndIme() const;
+
   // Sends an action triggered by the Enter key to the Flutter engine.
   void EnterPressed(TextInputModel* model) const;
+
+  // Derives content_hint_ / content_purpose_ (wl::ime::ContentHint /
+  // ContentPurpose underlying values) from the current input_type_ + obscure
+  // flag so a subsequent TextInput.show activates the IME appropriately.
+  void DeriveContentType(bool obscure_text);
 
   // Called when a method is called on |channel_|;
   void HandleMethodCall(
@@ -133,6 +216,42 @@ class TextInputPlugin final : public KeyboardHookHandler {
   // 'u' + hex digits while in kPendingHex state. -1 when inactive.
   int compose_base_utf16_ = -1;
   int compose_extent_utf16_ = -1;
+
+  // Content hint/purpose derived from the active client's input type, as
+  // wl::ime::ContentHint / ContentPurpose underlying values. Sent to the
+  // compositor IME on TextInput.show. Defaults: kNone / kNormal.
+  uint32_t content_hint_ = 0;
+  uint32_t content_purpose_ = 0;
+
+  // Last cursor / editable-box rectangle (logical pixels) reported by the
+  // framework via setEditableSizeAndTransform / setMarkedTextRect; forwarded to
+  // the IME so it can anchor its candidate window. Defaults to the origin.
+  int32_t cursor_rect_x_ = 0;
+  int32_t cursor_rect_y_ = 0;
+  int32_t cursor_rect_w_ = 0;
+  int32_t cursor_rect_h_ = 0;
+
+  // Compositor IME drivers (unset on backends without one).
+  ImeActivateFn ime_activate_;
+  ImeDeactivateFn ime_deactivate_;
+  ImeCursorRectFn ime_update_cursor_rect_;
+  ImeUpdateSurroundingFn ime_update_surrounding_;
+
+  // Last surrounding text/cursor/anchor sent to the IME, used by
+  // EmitSurrounding() to drop redundant set_surrounding_text sends. Invalidated
+  // on (re)activation.
+  mutable std::string last_surrounding_text_;
+  mutable uint32_t last_surrounding_cursor_ = 0;
+  mutable uint32_t last_surrounding_anchor_ = 0;
+  mutable bool last_surrounding_valid_ = false;
+
+  // Last cursor/anchor rectangle sent to the IME, used by EmitCursorRect() to
+  // drop redundant set_cursor_rectangle sends. Invalidated on (re)activation.
+  mutable int32_t last_cursor_rect_x_ = 0;
+  mutable int32_t last_cursor_rect_y_ = 0;
+  mutable int32_t last_cursor_rect_w_ = 0;
+  mutable int32_t last_cursor_rect_h_ = 0;
+  mutable bool last_cursor_rect_valid_ = false;
 };
 
 }  // namespace flutter

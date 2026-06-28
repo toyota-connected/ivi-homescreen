@@ -53,7 +53,7 @@ Display::Display(const bool enable_cursor,
   wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
 
   // Build the compositor-protocol shells (xdg / agl / ivi / simple) in priority
-  // order BEFORE registry enumeration so registry_handle_global can offer each
+  // order BEFORE registry enumeration so HandleGlobal can offer each
   // unclaimed global to them. The active shell is the first to bind (see
   // ActiveShell()). The selection ("auto" | "xdg" | "agl" | "ivi" | "simple")
   // comes from the first view's --shell / view.shell config; the Wayland
@@ -70,14 +70,30 @@ Display::Display(const bool enable_cursor,
     exit(-1);
   }
 
-  m_registry = wl_display_get_registry(m_display);
-  wl_registry_add_listener(m_registry, &registry_listener, this);
+  // Own the registry as a wl::CRegistry so the text-input backend (which binds
+  // through it) can share it; the per-global binds below stay raw via
+  // reg.Get().
+  if (!registry_.Create(m_display)) {
+    spdlog::critical("Failed to create Wayland registry.");
+    exit(-1);
+  }
+  registry_.OnGlobal(
+      [this](wl::CRegistry& reg, uint32_t name, std::string_view iface,
+             uint32_t ver) { HandleGlobal(reg, name, iface, ver); });
   // First dispatch picks up registry globals (synchronous: the server emits
   // them immediately after we bind the registry). The roundtrip that follows
   // pulls in events the server emits ONLY in response to our binds — notably
   // wp_presentation.clock_id (now handled by the vsync provider).
   wl_display_dispatch(m_display);
   wl_display_roundtrip(m_display);
+
+  // Adopt the text-input backend now that the seat (if any) is bound. Bind is a
+  // graceful no-op returning true when zwp_text_input_manager_v3 was never
+  // advertised; it creates the per-seat text_input from m_seat otherwise.
+  if (m_seat &&
+      !text_input_.Bind(registry_, this, reinterpret_cast<wl_proxy*>(m_seat))) {
+    spdlog::warn("[Display] text-input manager advertised but bind failed");
+  }
 
   // AGL's window-management facet maps output indices to wl_outputs owned here.
   for (auto& s : shells_) {
@@ -118,6 +134,8 @@ Display::~Display() {
   // release() — never close() — them before the optionals are destroyed.
   ReleaseRepeatFd();
   ReleaseWaylandFd();
+  // Tear down the text_input/manager proxies before the seat + display go away.
+  text_input_.Release();
   // Send wl_keyboard teardown + free the handler's xkb objects/timerfd.
   keyboard_.Reset();
 
@@ -140,34 +158,40 @@ Display::~Display() {
   if (m_cursor_surface)
     wl_surface_destroy(m_cursor_surface);
 
-  wl_registry_destroy(m_registry);
+  // Destroy the registry before wl_display_disconnect: wl_registry_destroy
+  // touches the display mutex inside libwayland.
+  registry_.Reset();
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
 
   SPDLOG_TRACE("- ~Display()");
 }
 
-void Display::registry_handle_global(void* data,
-                                     struct wl_registry* registry,
-                                     uint32_t name,
-                                     const char* interface,
-                                     uint32_t version) {
-  auto* d = static_cast<Display*>(data);
+void Display::HandleGlobal(wl::CRegistry& reg,
+                           uint32_t name,
+                           std::string_view iface,
+                           uint32_t version) {
+  auto* d = this;
+  // The raw wl_registry* the per-global binds + the vsync/shells chain bind
+  // through (they take the C handle; CRegistry owns it).
+  wl_registry* registry = reg.Get();
+  // C-string view for the strcmp-based comparisons retained below.
+  const char* interface = iface.data();
 
-  SPDLOG_DEBUG("Wayland: {} version {}", interface, version);
+  SPDLOG_DEBUG("Wayland: {} version {}", iface, version);
 
   // Note when GPU-buffer-allocation protocols are advertised. Mesa's
   // Vulkan WSI Wayland implementation needs one of these to back the
   // swapchain; vkGetPhysicalDeviceSurfaceFormatsKHR returns
   // VK_ERROR_SURFACE_LOST_KHR when both are absent. The flags let the
   // backend pre-flight and emit a clear error rather than asserting.
-  if (strcmp(interface, "zwp_linux_dmabuf_v1") == 0) {
+  if (iface == "zwp_linux_dmabuf_v1") {
     d->m_has_linux_dmabuf = true;
-  } else if (strcmp(interface, "wl_drm") == 0) {
+  } else if (iface == "wl_drm") {
     d->m_has_wl_drm = true;
   }
 
-  if (strcmp(interface, wl_compositor_interface.name) == 0) {
+  if (iface == wl_compositor_interface.name) {
     if (version >= 3) {
       d->m_compositor = static_cast<wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
@@ -183,11 +207,11 @@ void Display::registry_handle_global(void* data,
                            std::min(static_cast<uint32_t>(2), version)));
     }
     d->m_base_surface = wl_compositor_create_surface(d->m_compositor);
-  } else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
+  } else if (iface == wl_subcompositor_interface.name) {
     d->m_subcompositor = static_cast<wl_subcompositor*>(
         wl_registry_bind(registry, name, &wl_subcompositor_interface,
                          std::min(static_cast<uint32_t>(1), version)));
-  } else if (strcmp(interface, wl_shm_interface.name) == 0) {
+  } else if (iface == wl_shm_interface.name) {
     d->m_shm = static_cast<wl_shm*>(
         wl_registry_bind(registry, name, &wl_shm_interface,
                          std::min(static_cast<uint32_t>(1), version)));
@@ -200,7 +224,7 @@ void Display::registry_handle_global(void* data,
     if (d->m_compositor) {
       d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
     }
-  } else if (strcmp(interface, wl_output_interface.name) == 0) {
+  } else if (iface == wl_output_interface.name) {
     const auto oi = std::make_shared<output_info_t>();
     std::fill_n(oi.get(), 1, output_info_t{});
     oi->global_id = name;
@@ -221,11 +245,17 @@ void Display::registry_handle_global(void* data,
     wl_output_add_listener(oi->output, &output_listener, oi.get());
     SPDLOG_DEBUG("Wayland: Output [{}]", d->m_all_outputs.size());
     d->m_all_outputs.push_back(oi);
-  } else if (strcmp(interface, wl_seat_interface.name) == 0) {
+  } else if (iface == wl_seat_interface.name) {
     d->m_seat = static_cast<wl_seat*>(
         wl_registry_bind(registry, name, &wl_seat_interface,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
+  }
+  // zwp_text_input_manager_v3 — recorded for text_input_.Bind() after the
+  // startup roundtrip (the per-seat text_input needs m_seat). If the compositor
+  // never advertises it, text_input_ stays unbound and all IME paths no-op.
+  else if (iface == "zwp_text_input_manager_v3") {
+    d->text_input_.Record(name, version);
   }
   // wp_presentation is owned by the vsync provider.
   else if (d->m_vsync.TryBindGlobal(registry, name, interface, version)) {
@@ -240,15 +270,6 @@ void Display::registry_handle_global(void* data,
     }
   }
 }
-
-void Display::registry_handle_global_remove(void* /* data */,
-                                            struct wl_registry* /* reg */,
-                                            uint32_t /* id */) {}
-
-const wl_registry_listener Display::registry_listener = {
-    registry_handle_global,
-    registry_handle_global_remove,
-};
 
 void Display::display_handle_geometry(void* data,
                                       struct wl_output* /* wl_output */,
@@ -591,6 +612,142 @@ void Display::OnKeyboardLeave() {
     asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
                [vcs]() { FocusLostCallback(vcs); });
   }
+}
+
+// ── wl::ime::TextInputListener — compositor IME events (reactor thread)
+// ───────
+//
+// Each callback posts onto the engine platform strand and drives the
+// TextInputPlugin, mirroring OnKeyboardLeave so IME edits serialize with the
+// key-event path. The plugin is owned by the view-controller state and only
+// touched on that strand.
+
+void Display::OnEnter() {
+  // The field gained IME focus. Activation intent is driven from the plugin
+  // (TextInput.show), and the backend auto-enables on enter; nothing to do.
+}
+
+void Display::OnLeave() {
+  // The field lost IME focus. Clear any in-progress preedit so a stale
+  // composing run doesn't linger; post onto the engine strand.
+  if (!m_view_controller_state) {
+    return;
+  }
+  auto* vcs = m_view_controller_state;
+  if (vcs->engine && vcs->engine->GetPlatformTaskRunner() &&
+      vcs->text_input_plugin) {
+    auto* plugin = vcs->text_input_plugin.get();
+    asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+               [plugin]() { plugin->SetPreeditString(std::string{}, 0, 0); });
+  }
+}
+
+void Display::OnCommitString(std::string_view utf8) {
+  if (!m_view_controller_state) {
+    return;
+  }
+  auto* vcs = m_view_controller_state;
+  if (vcs->engine && vcs->engine->GetPlatformTaskRunner() &&
+      vcs->text_input_plugin) {
+    auto* plugin = vcs->text_input_plugin.get();
+    std::string text(utf8);
+    asio::post(
+        *vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+        [plugin, text = std::move(text)]() { plugin->CommitString(text); });
+  }
+}
+
+void Display::OnPreeditString(std::string_view utf8,
+                              int32_t cursor_begin,
+                              int32_t cursor_end) {
+  if (!m_view_controller_state) {
+    return;
+  }
+  auto* vcs = m_view_controller_state;
+  if (vcs->engine && vcs->engine->GetPlatformTaskRunner() &&
+      vcs->text_input_plugin) {
+    auto* plugin = vcs->text_input_plugin.get();
+    std::string text(utf8);
+    asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+               [plugin, text = std::move(text), cursor_begin, cursor_end]() {
+                 plugin->SetPreeditString(text, cursor_begin, cursor_end);
+               });
+  }
+}
+
+void Display::OnDeleteSurroundingText(uint32_t before_bytes,
+                                      uint32_t after_bytes) {
+  if (!m_view_controller_state) {
+    return;
+  }
+  auto* vcs = m_view_controller_state;
+  if (vcs->engine && vcs->engine->GetPlatformTaskRunner() &&
+      vcs->text_input_plugin) {
+    auto* plugin = vcs->text_input_plugin.get();
+    asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+               [plugin, before_bytes, after_bytes]() {
+                 plugin->DeleteSurrounding(static_cast<int>(before_bytes),
+                                           static_cast<int>(after_bytes));
+               });
+  }
+}
+
+// ── Text-input drivers (engine strand -> reactor thread) ─────────────────────
+//
+// Posted onto the reactor io_context so the text_input_ proxy is only mutated
+// on the reactor thread. All are graceful no-ops while text_input_ is unbound.
+
+void Display::ActivateTextInput(uint32_t hint,
+                                uint32_t purpose,
+                                int32_t x,
+                                int32_t y,
+                                int32_t width,
+                                int32_t height) {
+  if (!ioc_) {
+    return;
+  }
+  asio::post(*ioc_, [this, hint, purpose, x, y, width, height]() {
+    text_input_.SetContentType(static_cast<wl::ime::ContentHint>(hint),
+                               static_cast<wl::ime::ContentPurpose>(purpose));
+    text_input_.SetCursorRectangle(x, y, width, height);
+    text_input_.Activate();
+    text_input_.Commit();
+  });
+}
+
+void Display::DeactivateTextInput() {
+  if (!ioc_) {
+    return;
+  }
+  asio::post(*ioc_, [this]() {
+    text_input_.Deactivate();
+    text_input_.Commit();
+  });
+}
+
+void Display::UpdateTextInputCursorRect(int32_t x,
+                                        int32_t y,
+                                        int32_t width,
+                                        int32_t height) {
+  if (!ioc_) {
+    return;
+  }
+  asio::post(*ioc_, [this, x, y, width, height]() {
+    text_input_.SetCursorRectangle(x, y, width, height);
+    text_input_.Commit();
+  });
+}
+
+void Display::UpdateTextInputSurrounding(const std::string& utf8,
+                                         uint32_t cursor,
+                                         uint32_t anchor) {
+  if (!ioc_) {
+    return;
+  }
+  asio::post(*ioc_, [this, utf8, cursor, anchor]() {
+    text_input_.SetSurroundingText(utf8, cursor, anchor);
+    text_input_.Commit();
+  });
 }
 
 void Display::touch_handle_down(void* data,
