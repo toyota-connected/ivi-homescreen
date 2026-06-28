@@ -17,20 +17,18 @@
 #include "logging/logging.h"
 
 #include <linux/input-event-codes.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon.h>
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <system_error>
 #include <utility>
 
 #include "config/common.h"
 
 #include "asio/post.hpp"
 #include "engine.h"
-#include "main_loop_waker.h"
-#include "timer.h"
 #include "window.h"
 
 extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
@@ -39,20 +37,17 @@ extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
                         uint32_t xkb_scancode,
                         uint32_t modifiers);
 
-extern void FocusLostCallback(FlutterDesktopViewControllerState* view_state);
-
 extern void KeymapChangedCallback(FlutterDesktopViewControllerState* view_state,
                                   xkb_keymap* keymap);
+
+extern void FocusLostCallback(FlutterDesktopViewControllerState* view_state);
 
 Display::Display(const bool enable_cursor,
                  const std::string& ignore_wayland_event,
                  std::string cursor_theme_name,
                  const std::vector<Configuration::Config>& configs)
-    : stop_events_flag_(false),
-      event_thread_active_(false),
-      m_enable_cursor(enable_cursor),
-      m_cursor_theme_name(std::move(cursor_theme_name)),
-      m_xkb_context(xkb_context_new(XKB_CONTEXT_NO_FLAGS)) {
+    : m_enable_cursor(enable_cursor),
+      m_cursor_theme_name(std::move(cursor_theme_name)) {
   SPDLOG_TRACE("+ Display()");
 
   wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
@@ -116,6 +111,15 @@ ivi::WaylandShell& Display::ActiveShell() const {
 
 Display::~Display() {
   SPDLOG_TRACE("+ ~Display()");
+
+  // Detach the async descriptors from the fds they were watching. App owns and
+  // has already stopped the shared reactor; both fds are owned elsewhere (the
+  // repeat timerfd by the keyboard handler, the display fd by libwayland), so
+  // release() — never close() — them before the optionals are destroyed.
+  ReleaseRepeatFd();
+  ReleaseWaylandFd();
+  // Send wl_keyboard teardown + free the handler's xkb objects/timerfd.
+  keyboard_.Reset();
 
   // The shells (xdg/agl/ivi/simple) and the vsync provider own their protocol
   // objects and tear them down in their own destructors.
@@ -222,10 +226,6 @@ void Display::registry_handle_global(void* data,
         wl_registry_bind(registry, name, &wl_seat_interface,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
-
-    d->m_repeat_timer =
-        std::make_shared<EventTimer>(CLOCK_MONOTONIC, keyboard_repeat_func, d);
-    d->m_repeat_timer->set_timerspec(40, 400);
   }
   // wp_presentation is owned by the vsync provider.
   else if (d->m_vsync.TryBindGlobal(registry, name, interface, version)) {
@@ -354,13 +354,21 @@ void Display::seat_handle_capabilities(void* data,
   }
 
   if (!d->m_wayland_event_mask.keyboard) {
-    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->m_keyboard) {
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->keyboard_.IsNull()) {
       spdlog::debug("Keyboard Present");
-      d->m_keyboard = wl_seat_get_keyboard(seat);
-      wl_keyboard_add_listener(d->m_keyboard, &keyboard_listener, d);
-    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard) {
-      wl_keyboard_release(d->m_keyboard);
-      d->m_keyboard = nullptr;
+      // Wrap the raw wl_keyboard in the scanner's CRTP handler (installs its
+      // listener); set the back-pointer and register its repeat timerfd on the
+      // reactor. This runs on the reactor thread during wl dispatch, so OnKey,
+      // the keyboard events and DispatchRepeat all share one thread.
+      wl_keyboard* raw = wl_seat_get_keyboard(seat);
+      if (wl::SetupHandler(d->keyboard_, reinterpret_cast<wl_proxy*>(raw))) {
+        d->keyboard_.Get()->app_ = d;
+        d->ArmRepeatFd();
+      }
+    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) &&
+               !d->keyboard_.IsNull()) {
+      d->ReleaseRepeatFd();
+      d->keyboard_.Reset();
     }
   }
 
@@ -539,185 +547,49 @@ const wl_pointer_listener Display::pointer_listener = {
 #endif
 };
 
-void Display::keyboard_handle_enter(void* data,
-                                    struct wl_keyboard* /* keyboard */,
-                                    uint32_t /* serial */,
-                                    struct wl_surface* surface,
-                                    struct wl_array* /* keys */) {
-  SPDLOG_TRACE("+ Display::keyboard_handle_enter()");
-  auto* d = static_cast<Display*>(data);
-  d->m_active_surface = surface;
-  d->m_active_engine = d->m_surface_engine_map[surface];
-  SPDLOG_TRACE("- Display::keyboard_handle_enter()");
-}
-
-void Display::keyboard_handle_leave(void* data,
-                                    struct wl_keyboard* /* keyboard */,
-                                    uint32_t /* serial */,
-                                    struct wl_surface* /* surface */) {
-  SPDLOG_TRACE("+ Display::keyboard_handle_leave()");
-  auto* d = static_cast<Display*>(data);
-
-  d->m_repeat_timer->disarm();
-  set_repeat_code(d, XKB_KEY_NoSymbol);
-  SPDLOG_TRACE("- Display::keyboard_handle_leave()");
-  // Post FocusLostCallback onto the platform strand so that all
-  // TextInputPlugin state mutations are serialised with key-event callbacks.
-  if (d->m_view_controller_state) {
-    auto* vcs = d->m_view_controller_state;
-    if (vcs->engine && vcs->engine->GetPlatformTaskRunner()) {
-      asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
-                 [vcs]() { FocusLostCallback(vcs); });
-    }
-  }
-}
-
-void Display::keyboard_handle_keymap(void* data,
-                                     struct wl_keyboard* /* keyboard */,
-                                     uint32_t /* format */,
-                                     int fd,
-                                     uint32_t size) {
-  auto* d = static_cast<Display*>(data);
-  const auto keymap_string =
-      static_cast<char*>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
-  xkb_keymap_unref(d->m_keymap);
-  d->m_keymap = xkb_keymap_new_from_string(d->m_xkb_context, keymap_string,
-                                           XKB_KEYMAP_FORMAT_TEXT_V1,
-                                           XKB_KEYMAP_COMPILE_NO_FLAGS);
-  munmap(keymap_string, size);
-  close(fd);
-  // Disarm the repeat timer before swapping xkb_state so that the repeat
-  // callback cannot read the old (about-to-be-freed) xkb_state.
-  d->m_repeat_timer->disarm();
-  set_repeat_code(d, XKB_KEY_NoSymbol);
-  xkb_state_unref(d->m_xkb_state);
-  d->m_xkb_state = xkb_state_new(d->m_keymap);
-  // Post KeymapChangedCallback onto the platform strand.
-  // Refcount the keymap so it stays alive until the lambda fires.
-  if (d->m_view_controller_state && d->m_keymap) {
-    auto* vcs = d->m_view_controller_state;
-    if (vcs->engine && vcs->engine->GetPlatformTaskRunner()) {
-      xkb_keymap_ref(d->m_keymap);
-      auto* km = d->m_keymap;
-      asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
-                 [vcs, km]() {
-                   KeymapChangedCallback(vcs, km);
-                   xkb_keymap_unref(km);
-                 });
-    }
-  }
-}
-
-void Display::keyboard_handle_key(void* data,
-                                  struct wl_keyboard* /* keyboard */,
-                                  uint32_t /* serial */,
-                                  uint32_t /* time */,
-                                  uint32_t key,
-                                  uint32_t state) {
-  auto* d = static_cast<Display*>(data);
-
-  if (!d->m_xkb_state)
+void Display::OnKey(const wl::KeyEvent& ev) {
+  // Runs on the reactor thread for both real key events and repeat ticks. The
+  // handler already resolved keysym + effective modifiers from its xkb_state;
+  // mirror the old keyboard_handle_key dispatch exactly (evdev → XKB scancode
+  // is ev.key + 8). KeyCallback re-posts onto the engine strand.
+  if (!m_view_controller_state) {
     return;
-
-  //
-  // Important: the scancode from this event is the Linux evdev scancode.
-  // To translate this to an XKB scancode, you must add 8 to the evdev scancode.
-  //
-  uint32_t xkb_scancode = key + 8;
-  //
-  // Gets the single keysym obtained from pressing a particular key in a given
-  // keyboard state. If the key does not have exactly one keysym, returns
-  // XKB_KEY_NoSymbol
-  //
-  xkb_keysym_t keysym = xkb_state_key_get_one_sym(d->m_xkb_state, xkb_scancode);
-  const uint32_t modifiers = d->m_mods_effective;
-
-  if (keysym == XKB_KEY_NoSymbol) {
-    const xkb_keysym_t* key_symbols;
-    const int res =
-        xkb_state_key_get_syms(d->m_xkb_state, xkb_scancode, &key_symbols);
-    if (res == 0) {
-      spdlog::debug("xkb_scancode has no key symbols: 0x{:x}", xkb_scancode);
-      keysym = XKB_KEY_NoSymbol;
-    } else {
-      // only use the first symbol until the use case for two is clarified
-      keysym = key_symbols[0];
-      for (int i = 0; i < res; i++) {
-        spdlog::debug("xkb keysym: 0x{:x}", key_symbols[i]);
-      }
-    }
   }
+  KeyCallback(m_view_controller_state,
+              ev.state == WL_KEYBOARD_KEY_STATE_RELEASED, ev.keysym,
+              ev.key + 8u, ev.modifiers);
+}
 
-  if (d->m_view_controller_state) {
-    KeyCallback(d->m_view_controller_state,
-                state == WL_KEYBOARD_KEY_STATE_RELEASED, keysym, xkb_scancode,
-                modifiers);
+void Display::OnKeymap(xkb_keymap* keymap) {
+  // The handler owns the compiled keymap/xkb_state; we only forward a ref to
+  // the engine. Post KeymapChangedCallback onto the platform strand so the
+  // TextInputPlugin state mutation is serialized with the key-event callbacks;
+  // ref the keymap so it outlives the post.
+  if (!m_view_controller_state || !keymap) {
+    return;
   }
-
-  if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-    if (xkb_keymap_key_repeats(d->m_keymap, xkb_scancode)) {
-      SPDLOG_DEBUG("xkb_keymap_key_repeats: 0x{:x}", xkb_scancode);
-      d->m_keysym_pressed = keysym;
-      set_repeat_code(d, xkb_scancode);
-      d->m_repeat_timer->arm();
-      // Arming happens on the Wayland event thread; the main loop may be
-      // blocked idle (App::Loop now blocks when HasRepeatTimer() is false).
-      // Wake it so it re-evaluates and starts pacing the key-repeat promptly
-      // instead of after the idle heartbeat.
-      MainLoopWaker::instance().Wake();
-    } else {
-      SPDLOG_DEBUG("key does not repeat: 0x{:x}", xkb_scancode);
-    }
-
-  } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
-    if (d->m_repeat_code == xkb_scancode) {
-      d->m_repeat_timer->disarm();
-      set_repeat_code(d, XKB_KEY_NoSymbol);
-    }
+  auto* vcs = m_view_controller_state;
+  if (vcs->engine && vcs->engine->GetPlatformTaskRunner()) {
+    xkb_keymap_ref(keymap);
+    asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+               [vcs, keymap]() {
+                 KeymapChangedCallback(vcs, keymap);
+                 xkb_keymap_unref(keymap);
+               });
   }
 }
 
-void Display::keyboard_handle_modifiers(void* data,
-                                        struct wl_keyboard* /* keyboard */,
-                                        uint32_t /* serial */,
-                                        uint32_t mods_depressed,
-                                        uint32_t mods_latched,
-                                        uint32_t mods_locked,
-                                        uint32_t group) {
-  auto* d = static_cast<Display*>(data);
-  xkb_state_update_mask(d->m_xkb_state, mods_depressed, mods_latched,
-                        mods_locked, 0, 0, group);
-  // Cache the effective modifier mask so key and repeat callbacks can
-  // read it without calling xkb_state_serialize_mods themselves.
-  d->m_mods_effective =
-      xkb_state_serialize_mods(d->m_xkb_state, XKB_STATE_MODS_EFFECTIVE);
-}
-
-void Display::keyboard_handle_repeat_info(void* data,
-                                          struct wl_keyboard* /* wl_keyboard */,
-                                          int32_t rate,
-                                          int32_t delay) {
-  const auto d = static_cast<Display*>(data);
-  d->m_repeat_timer->set_timerspec(rate, delay);
-  SPDLOG_DEBUG("[keyboard repeat info] rate: {}, delay: {}", rate, delay);
-}
-
-const wl_keyboard_listener Display::keyboard_listener = {
-    .keymap = keyboard_handle_keymap,
-    .enter = keyboard_handle_enter,
-    .leave = keyboard_handle_leave,
-    .key = keyboard_handle_key,
-    .modifiers = keyboard_handle_modifiers,
-    .repeat_info = keyboard_handle_repeat_info,
-};
-
-void Display::keyboard_repeat_func(void* data) {
-  if (auto d = static_cast<Display*>(data);
-      XKB_KEY_NoSymbol != d->m_repeat_code) {
-    if (d->m_view_controller_state) {
-      KeyCallback(d->m_view_controller_state, false, d->m_keysym_pressed,
-                  d->m_repeat_code, d->m_mods_effective);
-    }
+void Display::OnKeyboardLeave() {
+  // Keyboard focus left the surface. Post FocusLostCallback onto the platform
+  // strand so the TextInputPlugin preedit reset is serialized with the
+  // key-event callbacks. (wl::KeyboardHandler already stopped key-repeat.)
+  if (!m_view_controller_state) {
+    return;
+  }
+  auto* vcs = m_view_controller_state;
+  if (vcs->engine && vcs->engine->GetPlatformTaskRunner()) {
+    asio::post(*vcs->engine->GetPlatformTaskRunner()->GetStrandContext(),
+               [vcs]() { FocusLostCallback(vcs); });
   }
 }
 
@@ -811,32 +683,106 @@ int Display::PollEvents() const {
   return wl_display_dispatch_pending(m_display);
 }
 
-void Display::StartEvents() {
-  if (event_thread_active_)
-    return;
+void Display::ArmWaylandRead() {
+  // Canonical libwayland + reactor integration: prepare a read on the calling
+  // (reactor) thread, flush outbound requests, then wait for the display fd to
+  // become readable. The handler reads + dispatches and re-arms itself, so the
+  // io_context never returns from run() until the descriptor is cancelled.
+  while (wl_display_prepare_read(m_display) != 0) {
+    wl_display_dispatch_pending(m_display);
+  }
+  wl_display_flush(m_display);
 
-  event_thread_ = std::thread([this] {
-    event_thread_active_ = true;
-    while (!stop_events_flag_) {
-      const int count = wl_display_dispatch(m_display);
-      if (count == -1) {
-        spdlog::error("Wayland Dispatch Error: {}", strerror(errno));
-        break;
-      }
-      SPDLOG_TRACE("Wayland Event Count: {}", count);
-    }
-    event_thread_active_ = false;
-  });
+  wl_fd_->async_wait(asio::posix::stream_descriptor::wait_read,
+                     [this](const std::error_code& ec) {
+                       if (ec) {
+                         // Cancelled (teardown) — undo the pending
+                         // prepare_read.
+                         wl_display_cancel_read(m_display);
+                         return;
+                       }
+                       wl_display_read_events(m_display);
+                       wl_display_dispatch_pending(m_display);
+                       ArmWaylandRead();
+                     });
+}
+
+void Display::ArmRepeatFd() {
+  // ioc_ is wired by App after construction; the constructor's seat enumeration
+  // can create the keyboard before then, so defer arming until StartEvents.
+  if (!ioc_ || keyboard_.IsNull()) {
+    return;
+  }
+  const int fd = keyboard_.Get()->GetRepeatFd();
+  if (fd < 0) {
+    return;
+  }
+  // The timerfd is owned by the keyboard handler; the descriptor must not close
+  // it (released in ReleaseRepeatFd). Registered on the App-owned reactor.
+  repeat_fd_.emplace(*ioc_, fd);
+  ArmRepeatWait();
+}
+
+void Display::ArmRepeatWait() {
+  repeat_fd_->async_wait(asio::posix::stream_descriptor::wait_read,
+                         [this](const std::error_code& ec) {
+                           if (ec) {
+                             return;
+                           }
+                           // Re-resolves keysym/modifiers from the handler's
+                           // xkb_state on this (reactor) thread, then re-arms.
+                           if (!keyboard_.IsNull()) {
+                             keyboard_.Get()->DispatchRepeat();
+                           }
+                           ArmRepeatWait();
+                         });
+}
+
+void Display::ReleaseRepeatFd() {
+  if (!repeat_fd_) {
+    return;
+  }
+  std::error_code ec;
+  repeat_fd_->cancel(ec);
+  repeat_fd_->release();  // detach without closing the handler's timerfd
+  repeat_fd_.reset();
+}
+
+void Display::ReleaseWaylandFd() {
+  if (!wl_fd_) {
+    return;
+  }
+  std::error_code ec;
+  wl_fd_->cancel(ec);
+  wl_fd_->release();  // detach without closing libwayland's display fd
+  wl_fd_.reset();
+}
+
+void Display::StartEvents() {
+  if (wl_fd_) {
+    return;  // already armed
+  }
+  // App must have wired the shared reactor first.
+  assert(ioc_ && "Display::SetEventLoop must precede StartEvents");
+  // Registry/seat enumeration already ran (synchronously) in the constructor;
+  // arm the display fd on the App-owned reactor. Construct the descriptor over
+  // the wl fd (libwayland owns it; released in ~Display / StopEvents).
+  wl_fd_.emplace(*ioc_, wl_display_get_fd(m_display));
+  ArmWaylandRead();
+  // A keyboard bound during the constructor's seat enumeration deferred its
+  // repeat-fd arming (no reactor yet); arm it now that ioc_ is wired.
+  if (!keyboard_.IsNull()) {
+    ArmRepeatFd();
+  }
 }
 
 void Display::StopEvents() {
-  if (!event_thread_active_)
-    return;
-
-  stop_events_flag_ = true;
-  if (event_thread_.joinable()) {
-    event_thread_.join();
-  }
+  // App owns and stops the reactor; this connection only detaches its own
+  // descriptors from the (libwayland / handler) fds. Called from ~App after the
+  // reactor has stopped, so no concurrent reactor access — cancel + release
+  // directly (release() never closes the borrowed fds).
+  ReleaseRepeatFd();
+  ReleaseWaylandFd();
 }
 
 void Display::SetEngine(wl_surface* surface, Engine* engine) {
