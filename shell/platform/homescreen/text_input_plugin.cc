@@ -15,8 +15,45 @@ static constexpr char kClearClientMethod[] = "TextInput.clearClient";
 static constexpr char kSetClientMethod[] = "TextInput.setClient";
 static constexpr char kShowMethod[] = "TextInput.show";
 static constexpr char kHideMethod[] = "TextInput.hide";
+static constexpr char kSetEditableSizeAndTransformMethod[] =
+    "TextInput.setEditableSizeAndTransform";
+static constexpr char kSetMarkedTextRectMethod[] =
+    "TextInput.setMarkedTextRect";
 
 static constexpr char kMultilineInputType[] = "TextInputType.multiline";
+
+// Keys used by the IME-positioning method calls.
+static constexpr char kTransformKey[] = "transform";
+static constexpr char kWidthKey[] = "width";
+static constexpr char kHeightKey[] = "height";
+static constexpr char kXKey[] = "x";
+static constexpr char kYKey[] = "y";
+
+// TextInputType.name values that map to a non-default IME content type.
+static constexpr char kNumberInputType[] = "TextInputType.number";
+static constexpr char kPhoneInputType[] = "TextInputType.phone";
+static constexpr char kUrlInputType[] = "TextInputType.url";
+static constexpr char kEmailInputType[] = "TextInputType.emailAddress";
+static constexpr char kVisiblePasswordInputType[] =
+    "TextInputType.visiblePassword";
+
+static constexpr char kObscureTextKey[] = "obscureText";
+
+// wl::ime::ContentHint underlying values (kept in sync with
+// <wl/ime/text_input_receiver.hpp>; not included here to avoid a Wayland
+// dependency in this otherwise backend-agnostic plugin).
+static constexpr uint32_t kHintNone = 0x0;
+static constexpr uint32_t kHintHiddenText = 0x40;
+static constexpr uint32_t kHintSensitiveData = 0x80;
+static constexpr uint32_t kHintMultiline = 0x200;
+
+// wl::ime::ContentPurpose underlying values.
+static constexpr uint32_t kPurposeNormal = 0;
+static constexpr uint32_t kPurposeNumber = 3;
+static constexpr uint32_t kPurposePhone = 4;
+static constexpr uint32_t kPurposeUrl = 5;
+static constexpr uint32_t kPurposeEmail = 6;
+static constexpr uint32_t kPurposePassword = 8;
 
 static constexpr char kUpdateEditingStateMethod[] =
     "TextInputClient.updateEditingState";
@@ -191,12 +228,105 @@ void TextInputPlugin::DeleteSelectedText() {
   SendStateUpdate(*active_model_);
 }
 
+void TextInputPlugin::DeriveContentType(const bool obscure_text) {
+  uint32_t hint = kHintNone;
+  uint32_t purpose = kPurposeNormal;
+
+  if (input_type_ == kMultilineInputType) {
+    hint |= kHintMultiline;
+  } else if (input_type_ == kNumberInputType) {
+    purpose = kPurposeNumber;
+  } else if (input_type_ == kPhoneInputType) {
+    purpose = kPurposePhone;
+  } else if (input_type_ == kUrlInputType) {
+    purpose = kPurposeUrl;
+  } else if (input_type_ == kEmailInputType) {
+    purpose = kPurposeEmail;
+  } else if (input_type_ == kVisiblePasswordInputType) {
+    purpose = kPurposePassword;
+  } else {
+    // kTextInputTypeText and any unrecognized type map to the normal purpose.
+    purpose = kPurposeNormal;
+  }
+
+  // obscureText (or an explicit password type) hides the text and marks it
+  // sensitive so the IME suppresses learning/suggestions.
+  if (obscure_text || purpose == kPurposePassword) {
+    purpose = kPurposePassword;
+    hint |= kHintHiddenText | kHintSensitiveData;
+  }
+
+  content_hint_ = hint;
+  content_purpose_ = purpose;
+}
+
+void TextInputPlugin::CommitString(const std::string& utf8) {
+  if (active_model_ == nullptr || utf8.empty()) {
+    return;
+  }
+  // zwp_text_input_v3: a commit_string replaces any active preedit. The preedit
+  // is discarded (not committed) and the commit text is inserted as committed
+  // text. Erase the composing run first -- AddText() on an active composing run
+  // would re-mark the inserted text as composing instead of committing it.
+  if (active_model_->composing()) {
+    active_model_->UpdateComposingText(std::string{});
+    active_model_->EndComposing();
+  }
+  compose_base_utf16_ = compose_extent_utf16_ = -1;
+  active_model_->AddText(utf8);
+  UpdateClientAndIme();
+}
+
+void TextInputPlugin::SetPreeditString(const std::string& utf8,
+                                       int /* cursor_begin */,
+                                       int /* cursor_end */) {
+  if (active_model_ == nullptr) {
+    return;
+  }
+  if (utf8.empty()) {
+    // Empty preedit clears any active composing run without committing it.
+    if (active_model_->composing()) {
+      active_model_->UpdateComposingText(std::string{});
+      active_model_->CommitComposing();
+      active_model_->EndComposing();
+    }
+    compose_base_utf16_ = compose_extent_utf16_ = -1;
+  } else {
+    if (!active_model_->composing()) {
+      active_model_->BeginComposing();
+    }
+    active_model_->UpdateComposingText(utf8);
+    const TextRange composing = active_model_->composing_range();
+    compose_base_utf16_ = static_cast<int>(composing.base());
+    compose_extent_utf16_ = static_cast<int>(composing.extent());
+  }
+  UpdateClientAndIme();
+}
+
+void TextInputPlugin::DeleteSurrounding(const int before, const int after) {
+  if (active_model_ == nullptr) {
+    return;
+  }
+  bool changed = false;
+  // Delete the trailing region first so the leading deletion's negative offset
+  // stays anchored to the original cursor position.
+  if (after > 0) {
+    changed |= active_model_->DeleteSurrounding(0, after);
+  }
+  if (before > 0) {
+    changed |= active_model_->DeleteSurrounding(-before, before);
+  }
+  if (changed) {
+    UpdateClientAndIme();
+  }
+}
+
 void TextInputPlugin::CharHook(const unsigned int code_point) {
   if (active_model_ == nullptr) {
     return;
   }
   active_model_->AddCodePoint(code_point);
-  SendStateUpdate(*active_model_);
+  UpdateClientAndIme();
 }
 
 // Applies one physical key event from the seat to the active text-input model.
@@ -288,7 +418,7 @@ void TextInputPlugin::KeyboardHook(bool released,
     switch (keysym) {
       case XKB_KEY_BackSpace:
         if (active_model_->Backspace()) {
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         }
         break;
       // Arrow selection and movement keys. See:
@@ -305,9 +435,9 @@ void TextInputPlugin::KeyboardHook(bool released,
           active_model_->MoveCursorBack();
           active_model_->SetSelection(
               TextRange(old_base, active_model_->selection().position()));
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         } else if (active_model_->MoveCursorBack()) {
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         }
         break;
       case XKB_KEY_Right:
@@ -320,9 +450,9 @@ void TextInputPlugin::KeyboardHook(bool released,
           active_model_->MoveCursorForward();
           active_model_->SetSelection(
               TextRange(old_base, active_model_->selection().position()));
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         } else if (active_model_->MoveCursorForward()) {
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         }
         break;
       case XKB_KEY_Up:
@@ -340,7 +470,7 @@ void TextInputPlugin::KeyboardHook(bool released,
           active_model_->SetSelection(
               shift ? TextRange(active_model_->selection().base(), new_u16_pos)
                     : TextRange(new_u16_pos));
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         }
         break;
       }
@@ -355,7 +485,7 @@ void TextInputPlugin::KeyboardHook(bool released,
           active_model_->SetSelection(
               shift ? TextRange(active_model_->selection().base(), new_u16_pos)
                     : TextRange(new_u16_pos));
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         }
         break;
       }
@@ -366,7 +496,7 @@ void TextInputPlugin::KeyboardHook(bool released,
         } else {
           active_model_->MoveCursorToEnd();
         }
-        SendStateUpdate(*active_model_);
+        UpdateClientAndIme();
         break;
       case XKB_KEY_Home:
       case XKB_KEY_KP_Home:
@@ -375,12 +505,12 @@ void TextInputPlugin::KeyboardHook(bool released,
         } else {
           active_model_->MoveCursorToBeginning();
         }
-        SendStateUpdate(*active_model_);
+        UpdateClientAndIme();
         break;
       case XKB_KEY_Delete:
       case XKB_KEY_KP_Delete:
         if (active_model_->Delete()) {
-          SendStateUpdate(*active_model_);
+          UpdateClientAndIme();
         }
         break;
       case XKB_KEY_Return:
@@ -454,7 +584,7 @@ void TextInputPlugin::KeyboardHook(bool released,
         const char32_t utf32 = xkb_keysym_to_utf32(keysym);
         if (utf32 >= 0x20 && utf32 != 0x7f && (modifiers & ctrl_mask_) == 0) {
           active_model_->AddCodePoint(utf32);
-          SendStateUpdate(*(active_model_));
+          UpdateClientAndIme();
         }
         break;
     }
@@ -573,10 +703,69 @@ void TextInputPlugin::HandleMethodCall(
     const std::unique_ptr<flutter::MethodResult<rapidjson::Document>>& result) {
   const std::string& method = method_call.method_name();
 
-  if (method == kShowMethod || method == kHideMethod) {
-    // These methods are no-ops.
+  if (method == kShowMethod) {
+    // A text field requested the keyboard: enable the compositor IME with the
+    // content type derived at setClient time and the last-known cursor rect.
+    if (ime_activate_) {
+      ime_activate_(content_hint_, content_purpose_, cursor_rect_x_,
+                    cursor_rect_y_, cursor_rect_w_, cursor_rect_h_);
+    }
+    // Seed the IME with the field's current committed text + cursor so it can
+    // delete surrounding text from the first keystroke. Invalidate the dedupe
+    // cache first so the seed always goes through on (re)focus.
+    last_surrounding_valid_ = false;
+    last_cursor_rect_valid_ = false;
+    SendSurroundingToIme();
+  } else if (method == kHideMethod) {
+    if (ime_deactivate_) {
+      ime_deactivate_();
+    }
+  } else if (method == kSetEditableSizeAndTransformMethod) {
+    // Flutter sends the editable box size + a column-major 4x4 transform; the
+    // translation (elements 12/13) is the on-screen origin. Use that box as the
+    // IME anchor rectangle.
+    if (method_call.arguments() && !method_call.arguments()->IsNull()) {
+      const rapidjson::Document& args = *method_call.arguments();
+      const auto width = args.FindMember(kWidthKey);
+      const auto height = args.FindMember(kHeightKey);
+      const auto transform = args.FindMember(kTransformKey);
+      if (width != args.MemberEnd() && width->value.IsNumber() &&
+          height != args.MemberEnd() && height->value.IsNumber()) {
+        cursor_rect_w_ = static_cast<int32_t>(width->value.GetDouble());
+        cursor_rect_h_ = static_cast<int32_t>(height->value.GetDouble());
+      }
+      if (transform != args.MemberEnd() && transform->value.IsArray() &&
+          transform->value.Size() >= 14) {
+        cursor_rect_x_ = static_cast<int32_t>(transform->value[12].GetDouble());
+        cursor_rect_y_ = static_cast<int32_t>(transform->value[13].GetDouble());
+      }
+      EmitCursorRect();
+    }
+  } else if (method == kSetMarkedTextRectMethod) {
+    // A marked-text (composing) rectangle in logical pixels; anchor the IME
+    // candidate window here.
+    if (method_call.arguments() && !method_call.arguments()->IsNull()) {
+      const rapidjson::Document& args = *method_call.arguments();
+      const auto x = args.FindMember(kXKey);
+      const auto y = args.FindMember(kYKey);
+      const auto width = args.FindMember(kWidthKey);
+      const auto height = args.FindMember(kHeightKey);
+      if (x != args.MemberEnd() && x->value.IsNumber() &&
+          y != args.MemberEnd() && y->value.IsNumber() &&
+          width != args.MemberEnd() && width->value.IsNumber() &&
+          height != args.MemberEnd() && height->value.IsNumber()) {
+        cursor_rect_x_ = static_cast<int32_t>(x->value.GetDouble());
+        cursor_rect_y_ = static_cast<int32_t>(y->value.GetDouble());
+        cursor_rect_w_ = static_cast<int32_t>(width->value.GetDouble());
+        cursor_rect_h_ = static_cast<int32_t>(height->value.GetDouble());
+        EmitCursorRect();
+      }
+    }
   } else if (method == kClearClientMethod) {
     CancelUnicodeInput();
+    if (ime_deactivate_) {
+      ime_deactivate_();
+    }
     active_model_ = nullptr;
   } else if (method == kSetClientMethod) {
     if (!method_call.arguments() || method_call.arguments()->IsNull()) {
@@ -622,6 +811,15 @@ void TextInputPlugin::HandleMethodCall(
         input_type_ = input_type_json->value.GetString();
       }
     }
+    // Derive the compositor IME content hint/purpose from the input type and
+    // the obscureText flag so a subsequent TextInput.show activates correctly.
+    bool obscure_text = false;
+    const auto obscure_json = client_config.FindMember(kObscureTextKey);
+    if (obscure_json != client_config.MemberEnd() &&
+        obscure_json->value.IsBool()) {
+      obscure_text = obscure_json->value.GetBool();
+    }
+    DeriveContentType(obscure_text);
     // Reset any in-progress Unicode input state from the previous client.
     unicode_state_ = UnicodeInputState::kNormal;
     unicode_hex_.clear();
@@ -680,6 +878,9 @@ void TextInputPlugin::HandleMethodCall(
         std::min(static_cast<size_t>(extent), utf16_len);
     active_model_->SetText(text_str);
     active_model_->SetSelection(TextRange(clamped_base, clamped_extent));
+    // The framework rebuilt the field's committed text + selection; keep the
+    // compositor IME's surrounding-text view in sync.
+    SendSurroundingToIme();
     // Reset the state machine here if the framework calls
     // setEditingState while Unicode input is in progress.  This can happen if
     // the framework tries to Prevents Commit/CancelUnicodeInput corruption of
@@ -716,6 +917,131 @@ void TextInputPlugin::SendStateUpdate(const TextInputModel& model) const {
   args->PushBack(editing_state, allocator);
 
   channel_->InvokeMethod(kUpdateEditingStateMethod, std::move(args));
+}
+
+void TextInputPlugin::SendSurroundingToIme() const {
+  if (active_model_ == nullptr || !ime_update_surrounding_) {
+    return;
+  }
+
+  // GetText() returns the full UTF-8 text *including* the active preedit
+  // (composing) substring. zwp_text_input_v3's set_surrounding_text must carry
+  // only the committed text, so excise the composing run before sending.
+  const std::string full = active_model_->GetText();
+
+  // selection() base/extent and composing_range() are UTF-16 code-unit indices.
+  // Convert each to a UTF-8 byte offset within |full|: Utf16IndexToUtf8Pos
+  // converts the UTF-16 prefix [0, index) to UTF-8 and yields its byte length,
+  // which is exactly the byte offset of that index.
+  size_t cursor_bytes =
+      Utf16IndexToUtf8Pos(full, active_model_->selection().extent());
+  size_t anchor_bytes =
+      Utf16IndexToUtf8Pos(full, active_model_->selection().base());
+
+  std::string committed = full;
+  if (active_model_->composing()) {
+    const TextRange composing = active_model_->composing_range();
+    if (!composing.collapsed()) {
+      const size_t comp_begin = Utf16IndexToUtf8Pos(full, composing.start());
+      const size_t comp_end = Utf16IndexToUtf8Pos(full, composing.end());
+      if (comp_end > comp_begin && comp_end <= full.size()) {
+        const size_t comp_len = comp_end - comp_begin;
+        committed.erase(comp_begin, comp_len);
+        // Shift offsets that fall after the removed region back by its length;
+        // an offset inside the region collapses to its start.
+        const auto adjust = [&](size_t off) -> size_t {
+          if (off >= comp_end) {
+            return off - comp_len;
+          }
+          if (off > comp_begin) {
+            return comp_begin;
+          }
+          return off;
+        };
+        cursor_bytes = adjust(cursor_bytes);
+        anchor_bytes = adjust(anchor_bytes);
+      }
+    }
+  }
+
+  cursor_bytes = std::min(cursor_bytes, committed.size());
+  anchor_bytes = std::min(anchor_bytes, committed.size());
+
+  // zwp_text_input_v3 limits set_surrounding_text to 4000 bytes. The common
+  // case (a short field) sends the whole committed text; only when it grows
+  // large do we send a window centered on the cursor, which is all the IME
+  // needs to delete characters adjacent to the caret. The window is snapped to
+  // UTF-8 codepoint boundaries so a multi-byte sequence is never split.
+  static constexpr size_t kMaxSurroundingBytes = 3000;
+  if (committed.size() > kMaxSurroundingBytes) {
+    const size_t half = kMaxSurroundingBytes / 2;
+    size_t begin = cursor_bytes > half ? cursor_bytes - half : 0;
+    size_t end = std::min(begin + kMaxSurroundingBytes, committed.size());
+    const auto is_continuation = [&](size_t i) {
+      return (static_cast<unsigned char>(committed[i]) & 0xC0) == 0x80;
+    };
+    while (begin < end && is_continuation(begin)) {
+      ++begin;
+    }
+    while (end < committed.size() && is_continuation(end)) {
+      ++end;
+    }
+    std::string window = committed.substr(begin, end - begin);
+    const size_t cursor_w = cursor_bytes >= begin
+                                ? std::min(cursor_bytes - begin, window.size())
+                                : 0;
+    const size_t anchor_w = anchor_bytes >= begin
+                                ? std::min(anchor_bytes - begin, window.size())
+                                : 0;
+    EmitSurrounding(window, static_cast<uint32_t>(cursor_w),
+                    static_cast<uint32_t>(anchor_w));
+    return;
+  }
+
+  EmitSurrounding(committed, static_cast<uint32_t>(cursor_bytes),
+                  static_cast<uint32_t>(anchor_bytes));
+}
+
+void TextInputPlugin::EmitSurrounding(const std::string& text,
+                                      uint32_t cursor,
+                                      uint32_t anchor) const {
+  if (last_surrounding_valid_ && text == last_surrounding_text_ &&
+      cursor == last_surrounding_cursor_ &&
+      anchor == last_surrounding_anchor_) {
+    return;
+  }
+  last_surrounding_text_ = text;
+  last_surrounding_cursor_ = cursor;
+  last_surrounding_anchor_ = anchor;
+  last_surrounding_valid_ = true;
+  ime_update_surrounding_(text, cursor, anchor);
+}
+
+void TextInputPlugin::EmitCursorRect() const {
+  if (!ime_update_cursor_rect_) {
+    return;
+  }
+  // Flutter re-sends setEditableSizeAndTransform every frame; the IME
+  // re-evaluates on each set_cursor_rectangle+commit and answers with a
+  // preedit, so an unchanged rectangle loops. Send only when it changes.
+  if (last_cursor_rect_valid_ && cursor_rect_x_ == last_cursor_rect_x_ &&
+      cursor_rect_y_ == last_cursor_rect_y_ &&
+      cursor_rect_w_ == last_cursor_rect_w_ &&
+      cursor_rect_h_ == last_cursor_rect_h_) {
+    return;
+  }
+  last_cursor_rect_x_ = cursor_rect_x_;
+  last_cursor_rect_y_ = cursor_rect_y_;
+  last_cursor_rect_w_ = cursor_rect_w_;
+  last_cursor_rect_h_ = cursor_rect_h_;
+  last_cursor_rect_valid_ = true;
+  ime_update_cursor_rect_(cursor_rect_x_, cursor_rect_y_, cursor_rect_w_,
+                          cursor_rect_h_);
+}
+
+void TextInputPlugin::UpdateClientAndIme() const {
+  SendStateUpdate(*active_model_);
+  SendSurroundingToIme();
 }
 
 void TextInputPlugin::EnterPressed(TextInputModel* model) const {

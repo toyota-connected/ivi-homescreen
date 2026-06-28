@@ -44,7 +44,17 @@
 #include <wl/seat.hpp>
 #include <wl/client_helpers.hpp>
 #include <wl/wl_ptr.hpp>
+#include <wl/registry.hpp>
 // clang-format on
+
+// Text-input (IME) backend, selected at build time (default text-input-v3).
+// <wl/ime/backend.hpp> resolves the WL_IME_BACKEND_* compile define to one
+// concrete backend aliased as wl::ime::SelectedTextInput; the v3 backend pulls
+// in the generated text_input_v3_client.hpp (emitted by ivi_wayland_protocols)
+// by its fixed name. text_input_receiver.hpp supplies the TextInputListener
+// contract Display implements.
+#include <wl/ime/backend.hpp>
+#include <wl/ime/text_input_receiver.hpp>
 
 #include "config/common.h"
 #include "configuration/configuration.h"
@@ -61,7 +71,7 @@ class WaylandWindow;
 
 struct FlutterDesktopViewControllerState;
 
-class Display : public IDisplay {
+class Display : public IDisplay, public wl::ime::TextInputListener {
  public:
   explicit Display(bool enable_cursor,
                    const std::string& ignore_wayland_event,
@@ -107,6 +117,58 @@ class Display : public IDisplay {
    * stops key-repeat internally; this does not touch repeat.)
    */
   void OnKeyboardLeave();
+
+  // ── wl::ime::TextInputListener — events from the compositor's IME ──────────
+  // These fire on the reactor thread (Wayland dispatch). Each posts onto the
+  // engine platform strand and drives the TextInputPlugin, mirroring the
+  // OnKeyboardLeave post pattern so IME edits serialize with the key path.
+  void OnEnter() override;
+  void OnLeave() override;
+  void OnCommitString(std::string_view utf8) override;
+  void OnPreeditString(std::string_view utf8,
+                       int32_t cursor_begin,
+                       int32_t cursor_end) override;
+  void OnDeleteSurroundingText(uint32_t before_bytes,
+                               uint32_t after_bytes) override;
+
+  // ── Text-input drivers, called FROM the engine platform strand ────────────
+  // (TextInputPlugin -> Display). Each posts onto the reactor io_context so the
+  // text_input_ proxy is only ever touched on the reactor thread. All no-op
+  // gracefully when zwp_text_input_manager_v3 was never advertised (the backend
+  // guards on its proxy being bound).
+
+  /**
+   * @brief Enable text-input for the focused field: set content type + cursor
+   * rectangle, then enable + commit. @p hint / @p purpose are the
+   * wl::ime::ContentHint / ContentPurpose values (passed as their underlying
+   * integer so the engine side needs no Wayland headers).
+   */
+  void ActivateTextInput(uint32_t hint,
+                         uint32_t purpose,
+                         int32_t x,
+                         int32_t y,
+                         int32_t width,
+                         int32_t height);
+
+  /**
+   * @brief Disable text-input (field blurred / client cleared) + commit.
+   */
+  void DeactivateTextInput();
+
+  /**
+   * @brief Update the IME candidate-window anchor rectangle + commit.
+   */
+  void UpdateTextInputCursorRect(int32_t x,
+                                 int32_t y,
+                                 int32_t width,
+                                 int32_t height);
+
+  /**
+   * @brief Push the surrounding text + cursor/anchor to the IME + commit.
+   */
+  void UpdateTextInputSurrounding(const std::string& utf8,
+                                  uint32_t cursor,
+                                  uint32_t anchor);
 
   /**
    * @brief Get compositor
@@ -309,7 +371,8 @@ class Display : public IDisplay {
   std::shared_ptr<Engine> m_flutter_engine;
 
   struct wl_display* m_display{};
-  struct wl_registry* m_registry{};
+  // Owns wl_registry; CRegistry::Reset() must run before wl_display_disconnect.
+  wl::CRegistry registry_;
   struct wl_compositor* m_compositor{};
   struct wl_subcompositor* m_subcompositor{};
   struct wl_shm* m_shm{};
@@ -327,6 +390,12 @@ class Display : public IDisplay {
   // context/keymap/state and the repeat timerfd. Bound off the shared wl_seat
   // in seat_handle_capabilities (pointer + touch stay raw).
   wl::WlPtr<wl::KeyboardHandler<Display>> keyboard_;
+
+  // Text-input backend (selected at build time): owns the per-seat
+  // zwp_text_input_v3 + manager proxies. Bound after the startup registry
+  // roundtrip once m_seat exists; touched only on the reactor thread. A no-op
+  // (unbound) when the compositor never advertised the manager global.
+  wl::ime::SelectedTextInput text_input_;
 
   /**
    * @brief Arm the Wayland display fd on the reactor (prepare_read / flush /
@@ -471,7 +540,7 @@ class Display : public IDisplay {
 
   // Tracks whether the compositor advertised a GPU buffer-allocation
   // protocol that Mesa's Vulkan WSI can use. Set from
-  // registry_handle_global; consumed by the Vulkan backend pre-flight.
+  // HandleGlobal; consumed by the Vulkan backend pre-flight.
   bool m_has_linux_dmabuf{false};
   bool m_has_wl_drm{false};
 
@@ -486,38 +555,24 @@ class Display : public IDisplay {
 
   static void wayland_event_mask_print(struct wayland_event_mask const& mask);
 
-  static const struct wl_registry_listener registry_listener;
-
   /**
-   * @brief Receive wl_registry events from Wayland server
-   * @param[in,out] data Pointer to scatter Display type data
-   * @param[in,out] registry Pointer to receive wl_registry event
-   * @param[in] name Identifier ID on Wayland server
-   * @param[in] interface Wayland interface
-   * @param[in] version Interface version
-   * @return void
+   * @brief Handle one wl_registry.global advertisement (member form, driven by
+   * CRegistry::OnGlobal). Keeps the existing per-global raw binds (compositor /
+   * shm / subcompositor / output / seat + their listeners), the dmabuf/wl_drm
+   * capability flags, and the vsync + shells TryBindGlobal chain; additionally
+   * records the text-input manager global for text_input_.Bind().
+   * @param[in,out] reg The owning registry; reg.Get() yields the raw
+   * wl_registry* the shells/vsync still bind through.
+   * @param[in] name Identifier ID on the Wayland server.
+   * @param[in] iface Advertised interface name.
+   * @param[in] ver Advertised interface version.
    * @relation
    * wayland
    */
-  static void registry_handle_global(void* data,
-                                     struct wl_registry* registry,
-                                     uint32_t name,
-                                     const char* interface,
-                                     uint32_t version);
-
-  /**
-   * @brief Remove wl_registry events from Wayland server
-   * @param[in] data No use
-   * @param[in] reg No use
-   * @param[in] id No use
-   * @return void
-   * @relation
-   * wayland
-   * @note Do nothing
-   */
-  static void registry_handle_global_remove(void* data,
-                                            struct wl_registry* reg,
-                                            uint32_t id);
+  void HandleGlobal(wl::CRegistry& reg,
+                    uint32_t name,
+                    std::string_view iface,
+                    uint32_t ver);
 
   static const wl_output_listener output_listener;
 

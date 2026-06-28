@@ -394,6 +394,35 @@ FlutterView::FlutterView(Configuration::Config config,
   m_state->text_input_plugin =
       std::make_unique<flutter::TextInputPlugin>(internal_plugin_messenger);
 
+#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
+    !BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  // Wire the compositor IME (zwp_text_input_v3) seam: the plugin drives the
+  // Wayland Display's text-input on show/hide/cursor-rect, and Display posts
+  // the IME's commit/preedit edits back onto the engine strand. A no-op when
+  // the compositor never advertised the text-input manager.
+  if (auto* wl_display = dynamic_cast<Display*>(m_display.get())) {
+    auto* plugin = m_state->text_input_plugin.get();
+    plugin->SetImeActivate([wl_display](uint32_t hint, uint32_t purpose,
+                                        int32_t x, int32_t y, int32_t w,
+                                        int32_t h) {
+      wl_display->ActivateTextInput(hint, purpose, x, y, w, h);
+    });
+    plugin->SetImeDeactivate(
+        [wl_display]() { wl_display->DeactivateTextInput(); });
+    plugin->SetImeUpdateCursorRect(
+        [wl_display](int32_t x, int32_t y, int32_t w, int32_t h) {
+          wl_display->UpdateTextInputCursorRect(x, y, w, h);
+        });
+    plugin->SetImeUpdateSurrounding([wl_display](const std::string& utf8,
+                                                 uint32_t cursor,
+                                                 uint32_t anchor) {
+      wl_display->UpdateTextInputSurrounding(utf8, cursor, anchor);
+    });
+  }
+#endif
+#endif
+
   // Create KeyEventHandler and register it.
   auto keh_owned =
       std::make_unique<flutter::KeyEventHandler>(internal_plugin_messenger);
