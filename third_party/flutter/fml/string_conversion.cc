@@ -33,15 +33,31 @@ std::string Join(const std::vector<std::string>& vec, const char* delimiter) {
 
 std::string Utf16ToUtf8(const std::u16string_view& string) {
   std::string result;
-  result.reserve(string.size() * 2);  // Reserve enough space for the conversion
-  for (const char16_t ch : string) {
+  result.reserve(string.size() * 3);  // Reserve enough space for the conversion
+  for (size_t i = 0; i < string.size(); ++i) {
+    char32_t ch = string[i];
+    // Combine a surrogate pair into a single supplementary-plane code point so
+    // it encodes as a four-byte UTF-8 sequence rather than two malformed
+    // three-byte sequences.
+    if (ch >= 0xD800 && ch <= 0xDBFF && i + 1 < string.size()) {
+      const char16_t low = string[i + 1];
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        ch = 0x10000 + ((ch - 0xD800) << 10) + (low - 0xDC00);
+        ++i;
+      }
+    }
     if (ch <= 0x7F) {
       result.push_back(static_cast<char>(ch));
     } else if (ch <= 0x7FF) {
       result.push_back(static_cast<char>(0xC0 | (ch >> 6)));
       result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
-    } else {
+    } else if (ch <= 0xFFFF) {
       result.push_back(static_cast<char>(0xE0 | (ch >> 12)));
+      result.push_back(static_cast<char>(0x80 | ((ch >> 6) & 0x3F)));
+      result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
+    } else {
+      result.push_back(static_cast<char>(0xF0 | (ch >> 18)));
+      result.push_back(static_cast<char>(0x80 | ((ch >> 12) & 0x3F)));
       result.push_back(static_cast<char>(0x80 | ((ch >> 6) & 0x3F)));
       result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
     }
@@ -63,6 +79,17 @@ std::u16string Utf8ToUtf16(const std::string_view& string) {
       ch = static_cast<char16_t>((string[i] & 0x0F) << 12);
       ch = ch | static_cast<char16_t>((string[++i] & 0x3F) << 6);
       ch = ch | static_cast<char16_t>(string[++i] & 0x3F);
+    } else if ((string[i] & 0xF8) == 0xF0) {
+      // Four-byte sequence: a supplementary-plane code point that must be
+      // emitted as a UTF-16 surrogate pair.
+      char32_t cp = static_cast<char32_t>(string[i] & 0x07) << 18;
+      cp |= static_cast<char32_t>(string[++i] & 0x3F) << 12;
+      cp |= static_cast<char32_t>(string[++i] & 0x3F) << 6;
+      cp |= static_cast<char32_t>(string[++i] & 0x3F);
+      cp -= 0x10000;
+      result.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
+      result.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
+      continue;
     }
     result.push_back(ch);
   }

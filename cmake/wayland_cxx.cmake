@@ -155,6 +155,23 @@ function(ivi_wayland_protocols target)
     wayland_cxx_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/presentation_time_client.hpp TARGET ${target})
 
+    # text-input (IME) — the build-selected backend's client header. The
+    # wl::ime backend header (<wl/ime/backends/text_input_v{1,3}.hpp>) includes
+    # the generated header by its fixed name with --emit-interface-tables, so it
+    # is self-contained. Only the text-input-v1/v3 backends have a generated
+    # protocol header; the other IME selections (and 'none') generate nothing.
+    if (WAYLAND_CXX_IME_BACKEND STREQUAL "text-input-v3")
+        wayland_cxx_generate(PROTOCOL
+            "${IVI_WL_PROTOCOLS_BASE}/unstable/text-input/text-input-unstable-v3.xml"
+            MODE client-header EMIT_INTERFACE_TABLES
+            OUTPUT wayland-protocols/text_input_v3_client.hpp TARGET ${target})
+    elseif (WAYLAND_CXX_IME_BACKEND STREQUAL "text-input-v1")
+        wayland_cxx_generate(PROTOCOL
+            "${IVI_WL_PROTOCOLS_BASE}/unstable/text-input/text-input-unstable-v1.xml"
+            MODE client-header EMIT_INTERFACE_TABLES
+            OUTPUT wayland-protocols/text_input_v1_client.hpp TARGET ${target})
+    endif ()
+
     if (ENABLE_XDG_CLIENT)
         wayland_cxx_generate(PROTOCOL "${_xdg}" MODE client-header
             OUTPUT wayland-protocols/xdg_shell_client.hpp TARGET ${target})

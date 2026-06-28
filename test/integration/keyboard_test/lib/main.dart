@@ -46,6 +46,11 @@ class KeyboardTestApp extends StatelessWidget {
         colorSchemeSeed: Colors.indigo,
         brightness: Brightness.dark,
         useMaterial3: true,
+        // Bundled Latin primary so text is legible regardless of system fonts,
+        // with the color-emoji font as a fallback so IME-committed emoji render
+        // as glyphs (color where the engine paints COLRv1).
+        fontFamily: 'AppText',
+        fontFamilyFallback: const ['NotoColorEmoji'],
       ),
       home: const _Home(),
     );
@@ -301,7 +306,8 @@ class _HomeState extends State<_Home> {
 
     // Detect Up/Down by line change without text change.
     if (selection.isCollapsed && _previousMultiSelection.isCollapsed) {
-      final prevLine = _lineOfOffset(_previousMulti, _previousMultiSelection.baseOffset);
+      final prevLine =
+          _lineOfOffset(_previousMulti, _previousMultiSelection.baseOffset);
       final newLine = _lineOfOffset(text, selection.baseOffset);
       if (prevLine != newLine && text == _previousMulti) {
         _coverage.mark(Mode.arrowUpDownAcrossLines);
@@ -448,14 +454,13 @@ class _LiveLogPanel extends StatelessWidget {
               itemBuilder: (context, i) {
                 final r = events[i];
                 final ev = r.event;
-                final char = (ev.character?.isNotEmpty ?? false)
-                    ? ev.character
-                    : '—';
+                final char =
+                    (ev.character?.isNotEmpty ?? false) ? ev.character : '—';
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: DefaultTextStyle.merge(
                     style: const TextStyle(
-                      fontFamily: 'monospace',
+                      fontFamily: 'AppMono',
                       fontSize: 12,
                     ),
                     child: Text(
@@ -509,7 +514,8 @@ class _TextInputPanel extends StatelessWidget {
             child: TextField(
               controller: multiLineController,
               decoration: const InputDecoration(
-                labelText: 'Multi-line — Enter inserts newline; Up/Down navigate',
+                labelText:
+                    'Multi-line — Enter inserts newline; Up/Down navigate',
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),

@@ -13,3 +13,6 @@ pubspec.lock
 .idea/
 *.iml
 .vscode/
+
+# Fonts are fetched by fetch_fonts.sh, not committed.
+fonts/
