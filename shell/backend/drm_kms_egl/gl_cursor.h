@@ -18,10 +18,12 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 #include <GLES2/gl2.h>
 
+#include "display/icursor_shape_sink.h"
 #include "input/cursor_position_sink.h"
 
 namespace homescreen {
@@ -38,8 +40,10 @@ namespace homescreen {
 // thread (position + visibility are atomics). EnsureGl()/Draw()/Destroy() run
 // on the rasterizer thread with the EGL context current — Draw() from the
 // backend's Present() just before eglSwapBuffers, Destroy() from the backend
-// teardown while the context is still current.
-class GlCursor final : public ICursorPositionSink {
+// teardown while the context is still current. SetShape() is called from the
+// platform thread and only records the requested sprite under a lock; the GL
+// texture re-upload happens on the next Draw() (rasterizer thread).
+class GlCursor final : public ICursorPositionSink, public ICursorShapeSink {
  public:
   GlCursor();
   ~GlCursor() override;
@@ -59,6 +63,13 @@ class GlCursor final : public ICursorPositionSink {
     visible_.store(visible, std::memory_order_release);
   }
 
+  // ICursorShapeSink: retarget the sprite to an XCursor name. Loads the named
+  // cursor from the system theme, converts it to RGBA, and queues it under a
+  // lock; the GL texture is re-uploaded on the next Draw(). A null name hides
+  // the cursor. Returns false when no theme is available (HAVE_DRM_CURSOR off)
+  // or the shape couldn't be loaded; the current sprite then stays.
+  bool SetShape(const char* xcursor_name) override;
+
   // Rasterizer thread, EGL context current, FBO 0 holding the rendered frame.
   // Composites the cursor over it. No-op until the cursor is visible.
   void Draw(uint32_t fb_w, uint32_t fb_h);
@@ -69,6 +80,11 @@ class GlCursor final : public ICursorPositionSink {
  private:
   bool EnsureGl();
 
+  // Apply a queued SetShape() on the rasterizer thread (EGL context current):
+  // swap in the pending sprite and re-upload the GL texture. No-op when no
+  // shape change is pending.
+  void ApplyPendingShape();
+
   // Sprite: premultiplied RGBA8888 bytes, row-major, w_ * h_ texels.
   std::vector<uint8_t> rgba_;
   uint32_t w_{0};
@@ -76,6 +92,16 @@ class GlCursor final : public ICursorPositionSink {
   int32_t hot_x_{0};
   int32_t hot_y_{0};
   uint32_t scale_{2};  // integer upscale so a 12x19 arrow is visible at 1080p
+
+  // SetShape() queue. pending_* is filled under shape_mtx_ on the platform
+  // thread; ApplyPendingShape() consumes it on the rasterizer thread.
+  std::mutex shape_mtx_;
+  std::vector<uint8_t> pending_rgba_;
+  uint32_t pending_w_{0};
+  uint32_t pending_h_{0};
+  int32_t pending_hot_x_{0};
+  int32_t pending_hot_y_{0};
+  bool shape_dirty_{false};
 
   std::atomic<int32_t> x_{0};
   std::atomic<int32_t> y_{0};

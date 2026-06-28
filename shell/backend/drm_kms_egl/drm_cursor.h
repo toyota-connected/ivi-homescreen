@@ -22,6 +22,8 @@
 
 #include <xf86drmMode.h>
 
+#include "display/icursor_shape_sink.h"
+
 namespace drm {
 class Device;
 class AtomicRequest;
@@ -44,12 +46,15 @@ namespace homescreen {
 // DrmDisplay/DrmSeat are handed a raw pointer for the seat-thread
 // HandlePointerMotion path.
 //
-// Single-thread by ownership: every public method must be called from
-// the seat dispatch thread. The compositor's atomic commits race
-// harmlessly against the cursor's own atomic commits at the kernel
-// boundary (the kernel serializes), but the Renderer itself is not
-// thread-safe.
-class DrmCursor {
+// Single-thread by ownership: Move/SetPosition/Stage/CommitPending must be
+// called from the seat dispatch / raster thread. The compositor's atomic
+// commits race harmlessly against the cursor's own atomic commits at the
+// kernel boundary (the kernel serializes), but the Renderer itself is not
+// thread-safe. SetShape is the exception: it is called from the platform
+// thread (ActivateSystemCursor) and only records the requested shape under a
+// lock; the sprite swap is applied on the render-owning thread at the next
+// Stage()/Move().
+class DrmCursor final : public ICursorShapeSink {
  public:
   // Construct the cursor on the given CRTC for the active mode.
   // `fb_w` / `fb_h` are the framebuffer dimensions the seat clamps the
@@ -82,7 +87,7 @@ class DrmCursor {
 
   DrmCursor(const DrmCursor&) = delete;
   DrmCursor& operator=(const DrmCursor&) = delete;
-  ~DrmCursor();
+  ~DrmCursor() override;
 
   // Move the sprite. Coordinates are in framebuffer space (i.e. the
   // same range the seat clamps pointer events to); the letterbox
@@ -93,6 +98,13 @@ class DrmCursor {
   // ignored — the pointer remains usable in Flutter even if the
   // sprite stalls.
   void Move(int fb_x, int fb_y);
+
+  // ICursorShapeSink: retarget the sprite to an XCursor name (resolved against
+  // the theme picked at Create). Records the request under a lock and returns
+  // true; the actual Cursor::load + Renderer::set_cursor runs on the next
+  // Stage()/Move() (the render-owning thread). A null name is a no-op for the
+  // HW cursor (visibility is gated by pointer motion, not the sprite).
+  bool SetShape(const char* xcursor_name) override;
 
   // Enable staged mode. In staged mode the cursor plane is driven by the
   // compositor via Stage() instead of self-committing — used on drivers
@@ -137,6 +149,10 @@ class DrmCursor {
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
+
+  // Apply a pending SetShape() request on the render-owning thread. Called at
+  // the head of Stage()/Move(); no-op when no shape change is queued.
+  void ApplyPendingShape();
 
   explicit DrmCursor(std::unique_ptr<Impl> impl);
 };

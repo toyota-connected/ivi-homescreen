@@ -126,6 +126,13 @@ if (BUILD_BACKEND_SOFTWARE)
         )
         target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::SW_LIBINPUT)
     endif ()
+    # Themed software cursor via the in-tree drm-cxx cursor loader (no display
+    # deps; defined in cmake/drm_cxx_cursor_load.cmake). Absent when the drm-cxx
+    # submodule isn't checked out — the cursor then stays the embedded arrow.
+    if (TARGET drm_cxx_cursor_load)
+        target_link_libraries(${PROJECT_NAME} PRIVATE drm_cxx_cursor_load)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_SW_CURSOR_THEME=1)
+    endif ()
 endif ()
 
 # Shared libinput keyboard core (xkb translation + key-repeat) used by every
