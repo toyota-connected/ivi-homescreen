@@ -22,6 +22,11 @@ include(FindThreads)
 
 add_executable(${PROJECT_NAME}
         app.cc
+        # Runtime backend registry + the compiled-in backend registration. The
+        # registration TU gates each backend body behind its own BUILD_BACKEND_*
+        # guard, so single-backend builds still pull in only one backend.
+        backend/backend_registry.cc
+        backend/register_backends.cc
         configuration/configuration.cc
         engine.cc
         libflutter_engine.cc
