@@ -28,7 +28,7 @@
        (const char*)pos < ((const char*)(array)->data + (array)->size); \
        (pos)++)
 
-class Shell;
+class Backend;
 
 class Display;
 
@@ -62,7 +62,7 @@ class WaylandWindow {
                 uint32_t activation_area_y,
                 uint32_t activation_area_width,
                 uint32_t activation_area_height,
-                Shell* backend,
+                Backend* backend,
                 uint32_t ivi_surface_id);
 
   ~WaylandWindow();
@@ -142,7 +142,7 @@ class WaylandWindow {
   std::shared_ptr<Engine> m_flutter_engine;
   double m_pixel_ratio;
   struct wl_surface* m_base_surface{};
-  std::shared_ptr<Shell> m_backend;
+  std::shared_ptr<Backend> m_backend;
   bool m_wait_for_configure{};
 
   uint32_t m_ivi_surface_id;

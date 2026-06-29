@@ -23,8 +23,8 @@
 #include "app.h"
 
 // Independent guards so several backends can be compiled into one binary
-// (Shell::Create selects per view at runtime). Header guards make the repeated
-// drm_display.h include harmless.
+// (Backend::Create selects per view at runtime). Header guards make the
+// repeated drm_display.h include harmless.
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"  // DrmCursor -> ICursorShapeSink*
@@ -76,13 +76,14 @@ extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                                    FlutterView* view);
 
-// The single per-view Shell factory (declared in backend/backend.h). Selects
+// The single per-view Backend factory (declared in backend/backend.h). Selects
 // the concrete backend from the compiled-in set + config and performs any
 // backend-specific post-creation wiring. Extracted verbatim from the old
 // FlutterView constructor body.
-std::shared_ptr<Shell> Shell::Create(const Configuration::Config& config,
-                                     const std::shared_ptr<IDisplay>& display) {
-  std::shared_ptr<Shell> m_backend;
+std::shared_ptr<Backend> Backend::Create(
+    const Configuration::Config& config,
+    const std::shared_ptr<IDisplay>& display) {
+  std::shared_ptr<Backend> m_backend;
 #if BUILD_BACKEND_DRM_KMS_EGL
   {
     auto parse_tri = [](const std::optional<std::string>& s,
@@ -344,7 +345,7 @@ FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<IDisplay>& display)
     : m_display(display), m_config(std::move(config)), m_index(index) {
-  m_backend = Shell::Create(m_config, display);
+  m_backend = Backend::Create(m_config, display);
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
                m_config.view.width.value_or(kDefaultViewWidth),
@@ -540,7 +541,7 @@ void FlutterView::Initialize() {
   // post-Engine::Run lifecycle hooks (DRM's OnSessionResumed →
   // ScheduleFrame; WaylandEgl's wp_presentation_feedback dispatch) can
   // marshal back to the FlutterEngineRun thread without a dynamic_cast.
-  // Backends that don't need either inherit no-op defaults from Shell.
+  // Backends that don't need either inherit no-op defaults from Backend.
   if (m_backend) {
     m_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
     m_backend->SetPlatformTaskRunner(m_flutter_engine->GetPlatformTaskRunner());

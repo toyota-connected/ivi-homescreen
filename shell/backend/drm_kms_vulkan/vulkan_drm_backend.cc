@@ -1223,7 +1223,7 @@ void VulkanDrmBackend::Teardown() {
   }
 }
 
-// ── Shell interface ──────────────────────────────────────────────────────
+// ── Backend interface ──────────────────────────────────────────────────────
 // The Flutter Vulkan renderer drives a fixed-size scanout target, so resize is
 // driven by the discovered mode rather than these call sites; they satisfy the
 // vtable and the FlutterView wiring.

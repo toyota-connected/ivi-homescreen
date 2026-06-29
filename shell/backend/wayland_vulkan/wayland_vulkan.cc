@@ -50,7 +50,7 @@ WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
                                            const uint32_t width,
                                            const uint32_t height,
                                            const bool enable_validation_layers)
-    : Shell(),
+    : Backend(),
       enable_validation_layers_(enable_validation_layers),
       resize_pending_(false),
       wl_display_(display),
