@@ -142,7 +142,11 @@ class WaylandWindow {
   std::shared_ptr<Engine> m_flutter_engine;
   double m_pixel_ratio;
   struct wl_surface* m_base_surface{};
-  std::shared_ptr<Backend> m_backend;
+  // Non-owning. The backend (Backend) is owned by the FlutterView that created
+  // this window and outlives it; the ctor receives a raw Backend*. Storing it
+  // in a shared_ptr here would create a SECOND, independent ownership of the
+  // same object (FlutterView owns the first) and double-free it on teardown.
+  Backend* m_backend{};
   bool m_wait_for_configure{};
 
   uint32_t m_ivi_surface_id;
