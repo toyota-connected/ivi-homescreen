@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,7 +35,13 @@ class Configuration {
 
     struct {
       std::string bundle_path;
-      std::vector<std::string> vm_args;
+      // Engine / Dart VM switches -> FlutterProjectArgs.command_line_argv
+      // (app_id is prepended as argv[0] downstream). Unmatched CLI options land
+      // here too.
+      std::vector<std::string> engine_args;
+      // Arguments to the Dart entrypoint main(List<String>) ->
+      // FlutterProjectArgs.dart_entrypoint_argv (no argv[0]).
+      std::vector<std::string> dart_args;
       std::string window_type;
       std::optional<uint32_t> wl_output_index;
       std::optional<int32_t> accessibility_features;
@@ -106,6 +113,13 @@ class Configuration {
       // Matched by libinput device-name substring; first match wins.
       std::vector<std::string> drm_input_transforms;
     } view;
+
+    // Path to a master config.toml passed via --config. Process-level: it can
+    // describe many [[view]] entries (each with its own bundle) and supplies
+    // the process [global]/[sentry] tables. Empty/unset = legacy per-bundle
+    // mode driven by -b. Declared last so existing structured bindings of
+    // Config keep their member positions.
+    std::optional<std::string> config_file;
   };
 
   /**
@@ -142,14 +156,24 @@ class Configuration {
   static std::vector<Config> parse_config(const Config& cli_config);
 
   /**
-   * @brief Get parameters from TOML configuration file
-   * @param[in] tbl TOML table
+   * @brief Apply the [global] (process-level) table onto a config
+   * @param[in] root parsed TOML document root
    * @param[in,out] instance config
    * @return void
    * @relation
    * internal
    */
-  static void get_parameters(toml::table* tbl, Config& instance);
+  static void get_global_parameters(toml::table* root, Config& instance);
+
+  /**
+   * @brief Apply a single [[view]] table onto a config
+   * @param[in] view_tbl one [[view]] (or singular [view]) table
+   * @param[in,out] instance config
+   * @return void
+   * @relation
+   * internal
+   */
+  static void get_view_parameters(toml::table* view_tbl, Config& instance);
 
   /**
    * @brief Get Doc parameters set to View config

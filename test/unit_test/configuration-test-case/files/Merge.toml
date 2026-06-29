@@ -1,0 +1,12 @@
+# Master --config overriding merge_bundle/config.toml. Overrides app_id (global),
+# height and window type; leaves width and the activation area to fall through
+# from the bundle's own config.
+[global]
+app_id = 'from-master'
+
+[[view]]
+bundle = 'merge_bundle'
+height = 1200
+
+  [view.shell.window]
+  type = 'BG'

@@ -122,9 +122,13 @@ App::App(const std::vector<Configuration::Config>& configs)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   // OnClientReady maps to agl_shell.ready() on AglShell and is a no-op on the
-  // other shells.
-  if (found_view_with_bg)
-    dynamic_cast<Display*>(m_display.get())->ActiveShell().OnClientReady();
+  // other shells. Null-check the cast: in a multi-backend binary the active
+  // display may be DRM/software (not a Wayland Display).
+  if (found_view_with_bg) {
+    if (auto* d = dynamic_cast<Display*>(m_display.get())) {
+      d->ActiveShell().OnClientReady();
+    }
+  }
 #endif
 
 #if BUILD_WATCHDOG

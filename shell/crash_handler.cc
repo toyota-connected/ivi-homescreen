@@ -19,7 +19,7 @@ void CrashHandler::trigger_crash() {
 }
 
 CrashHandler::SentryConfig CrashHandler::LoadConfig(
-    const std::string& bundle_path) {
+    const std::string& config_path) {
   SentryConfig config;
 
   // Defaults
@@ -30,14 +30,12 @@ CrashHandler::SentryConfig CrashHandler::LoadConfig(
   const char* dsn_env = std::getenv("SENTRY_DSN");
   config.dsn = dsn_env ? dsn_env : "";
 
-  std::filesystem::path toml_path;
-  if (bundle_path.empty()) {
-    spdlog::warn("Bundle path is empty, using defaults");
+  if (config_path.empty()) {
+    spdlog::warn("Config path is empty, using defaults");
     return config;
   }
 
-  toml_path = bundle_path;
-  toml_path /= kViewConfigToml;
+  const std::filesystem::path toml_path(config_path);
 
   if (!std::filesystem::exists(toml_path)) {
     spdlog::warn("Global config file not found at {}, using defaults",
@@ -86,8 +84,8 @@ CrashHandler::SentryConfig CrashHandler::LoadConfig(
   return config;
 }
 
-CrashHandler::CrashHandler(const std::string& bundle_path) {
-  config_ = LoadConfig(bundle_path);
+CrashHandler::CrashHandler(const std::string& config_path) {
+  config_ = LoadConfig(config_path);
 
   if (config_.dsn.empty()) {
     spdlog::warn("Sentry DSN is empty, crash reports will not be sent");

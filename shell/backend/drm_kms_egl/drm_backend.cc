@@ -430,8 +430,8 @@ void InstallDrmCxxLogSink() {
 }
 }  // namespace
 
-DrmBackend::DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session)
-    : cfg_(cfg), session_(session) {
+DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
+    : cfg_(std::move(cfg)), session_(session) {
   InstallDrmCxxLogSink();
   // Unified scanout-cadence profiling, shared var with the other backends.
   // Distinct from the cfg_.debug_backend per-second FPS line in

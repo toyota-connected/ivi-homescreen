@@ -18,6 +18,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -48,7 +49,9 @@
 #include "display/drm_mode_list.h"  // PrintDrmModes for --drm-list-modes
 #endif
 #if BUILD_BACKEND_SOFTWARE
+#if BUILD_SOFTWARE_SINK_DRM
 #include "backend/software/drm_dumb_sink.h"  // PrintDumbSinkModes
+#endif
 #include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
 #include "backend/software/software_cursor.h"
@@ -414,9 +417,11 @@ static int DrmListModes(const std::string& device) {
   return PrintDrmModes(device.empty() ? "/dev/dri/card1" : device);
 }
 #endif
-#if BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_SOFTWARE && BUILD_SOFTWARE_SINK_DRM
 // --drm-list-modes for the software backend: list the dumb-sink modes. An empty
 // device scans every /dev/dri/card* so the operator can discover the card.
+// Only available when the DRM dumb sink is built; without it the software
+// backend has no scanout device to enumerate.
 static int SoftwareListModes(const std::string& device) {
   return PrintDumbSinkModes(device);
 }
@@ -442,7 +447,11 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 #if BUILD_BACKEND_SOFTWARE
   registry.Register({"software", backend::LoopMode::kLegacy,
                      MakeSoftwareDisplay, MakeSoftwareBackend,
+#if BUILD_SOFTWARE_SINK_DRM
                      SoftwareListModes});
+#else
+                     nullptr});
+#endif
 #endif
 }
 
@@ -450,6 +459,26 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 // Wayland EGL+Vulkan build the view.backend hint ("vulkan" vs other) selects
 // the renderer. Returns an empty string when nothing resolves (caller
 // fail-fasts).
+// A live Wayland session = WAYLAND_DISPLAY set AND the socket actually exists
+// (the env var alone can be stale). WAYLAND_DISPLAY is either an absolute path
+// or a name resolved under XDG_RUNTIME_DIR (matching libwayland).
+static bool WaylandSessionAvailable() {
+  const char* wl = std::getenv("WAYLAND_DISPLAY");
+  if (wl == nullptr || *wl == '\0') {
+    return false;
+  }
+  std::error_code ec;
+  const std::filesystem::path sock(wl);
+  if (sock.is_absolute()) {
+    return std::filesystem::exists(sock, ec);
+  }
+  const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+  if (xdg == nullptr || *xdg == '\0') {
+    return true;  // can't resolve the socket path; trust the env var
+  }
+  return std::filesystem::exists(std::filesystem::path(xdg) / sock, ec);
+}
+
 static std::string ResolveActiveKey(
     const backend::BackendRegistry& reg,
     const std::vector<Configuration::Config>& configs) {
@@ -476,28 +505,52 @@ static std::string ResolveActiveKey(
     return keys.front();
   }
 
-  // Several backends and no exact key: fall back to the legacy egl/vulkan
-  // renderer-family hint (picks within whichever family is registered).
-  const auto ends_with = [](std::string_view s, std::string_view suffix) {
-    return s.size() >= suffix.size() &&
-           s.substr(s.size() - suffix.size()) == suffix;
-  };
-
-  const bool want_vulkan = hint == "vulkan";
-  const std::string* egl_key = nullptr;
-  const std::string* vulkan_key = nullptr;
-  for (const auto& key : keys) {
-    if (ends_with(key, "-vulkan")) {
-      vulkan_key = &key;
-    } else if (ends_with(key, "-egl")) {
-      egl_key = &key;
+  // Several backends and no exact key. Pick by environment, honoring the legacy
+  // egl/vulkan renderer-family hint within the chosen family:
+  //   - a live Wayland session -> a wayland-* backend (we run as a client);
+  //   - otherwise              -> KMS-direct (drm-kms-* / software).
+  const bool want_vulkan = (hint == "vulkan");
+  const auto has = [&](std::string_view k) -> const std::string* {
+    for (const auto& key : keys) {
+      if (key == k) {
+        return &key;
+      }
     }
+    return nullptr;
+  };
+  const std::string* wl_egl = has("wayland-egl");
+  const std::string* wl_vk = has("wayland-vulkan");
+  const std::string* drm_egl = has("drm-kms-egl");
+  const std::string* drm_vk = has("drm-kms-vulkan");
+  const std::string* sw = has("software");
+
+  if (WaylandSessionAvailable() && (wl_egl != nullptr || wl_vk != nullptr)) {
+    if (want_vulkan && wl_vk != nullptr) {
+      return *wl_vk;
+    }
+    return wl_egl != nullptr ? *wl_egl : *wl_vk;
   }
-  if (want_vulkan && vulkan_key != nullptr) {
-    return *vulkan_key;
+
+  // No (usable) Wayland session: prefer KMS-direct, then software.
+  if (want_vulkan && drm_vk != nullptr) {
+    return *drm_vk;
   }
-  if (egl_key != nullptr) {
-    return *egl_key;
+  if (drm_egl != nullptr) {
+    return *drm_egl;
+  }
+  if (drm_vk != nullptr) {
+    return *drm_vk;
+  }
+  if (sw != nullptr) {
+    return *sw;
+  }
+  // Only Wayland backends compiled but no session detected; return one anyway
+  // (it will fail loudly at connect if truly headless).
+  if (wl_egl != nullptr) {
+    return *wl_egl;
+  }
+  if (wl_vk != nullptr) {
+    return *wl_vk;
   }
   return std::string{};
 }

@@ -1,0 +1,17 @@
+# Exercises the [view.backend] / [view.backend.drm] nesting.
+[global]
+app_id = 'gallery'
+
+[view]
+width = 1920
+height = 1080
+
+  [view.backend]
+  type = 'drm-kms-vulkan'
+
+    [view.backend.drm]
+    device = '/dev/dri/card0'
+    connector = 'eDP-1'
+    mode = '1920x1080@60'
+    rotation = 90
+    no_seat = true

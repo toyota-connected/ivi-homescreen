@@ -20,8 +20,8 @@ TEST(HomescreenConfigurationPrintConfig, Lv1Normal001) {
   config.disable_cursor = true;
   config.wayland_event_mask = "keyboard";
   config.debug_backend = true;
-  config.view.vm_args.push_back("--enable-asserts");
-  config.view.vm_args.push_back("--pause-isolates-on-start");
+  config.view.engine_args.push_back("--enable-asserts");
+  config.view.engine_args.push_back("--pause-isolates-on-start");
   config.view.bundle_path = "/home/";
   config.view.window_type = "NORMAL";
   config.view.wl_output_index = 1;
@@ -58,7 +58,7 @@ TEST(HomescreenConfigurationPrintConfig, Lv1Normal001) {
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] ********" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] * View *" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] ********" << std::endl;
-  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] VM Args:" << std::endl;
+  std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] Engine Args:" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] --enable-asserts" << std::endl;
   std::cout << "[20xx-xx-xx xx:xx:xx.xxx] [info] --pause-isolates-on-start"
             << std::endl;

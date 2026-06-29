@@ -78,11 +78,19 @@ int main(const int argc, char** argv) {
   assert(!configs.empty());
 
 #if BUILD_CRASH_HANDLER
-  std::string first_bundle_path;
+  // [sentry] is process-level: read it from the --config master file when
+  // given, otherwise from the first bundle's config.toml.
+  std::string sentry_config_path;
   if (!configs.empty()) {
-    first_bundle_path = configs.front().view.bundle_path;
+    const auto& front = configs.front();
+    if (front.config_file && !front.config_file->empty()) {
+      sentry_config_path = *front.config_file;
+    } else if (!front.view.bundle_path.empty()) {
+      sentry_config_path =
+          front.view.bundle_path + "/" + std::string(kViewConfigToml);
+    }
   }
-  auto crash_handler = std::make_unique<CrashHandler>(first_bundle_path);
+  auto crash_handler = std::make_unique<CrashHandler>(sentry_config_path);
 #endif
 
   // Handle --drm-list-modes[=<path>] as an early exit so the user doesn't need

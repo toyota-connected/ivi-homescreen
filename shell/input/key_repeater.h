@@ -81,8 +81,8 @@ class KeyRepeater {
 
  private:
   KeyRepeater(const XkbKeyboard* keyboard, RepeatConfig cfg, int timer_fd);
-  void Arm();
-  void Disarm();
+  void Arm() const;
+  void Disarm() const;
 
   const XkbKeyboard* kb_;
   RepeatConfig cfg_;

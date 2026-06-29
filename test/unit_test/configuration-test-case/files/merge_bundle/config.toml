@@ -1,0 +1,16 @@
+# Per-bundle base config, overridden by a master --config file in the merge test.
+[global]
+app_id = 'from-bundle'
+
+[view]
+width = 800
+height = 600
+
+  [view.shell.window]
+  type = 'PANEL_TOP'
+
+    [view.shell.window.activation_area]
+    x = 1
+    y = 2
+    width = 3
+    height = 4

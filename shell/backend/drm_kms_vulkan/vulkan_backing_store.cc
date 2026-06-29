@@ -32,13 +32,17 @@ namespace {
 // The dynamic dispatcher; storage is defined in device_caps.cc. It is init'd to
 // the instance and device by the backend before any backing store is created,
 // so the device-level modifier/external-memory entry points are resolved here.
-const auto& d = vk::detail::defaultDispatchLoaderDynamic;
+// An accessor (not a namespace-scope reference) so there is no
+// static-init-order dependency on that other TU's global.
+const auto& d() {
+  return vk::detail::defaultDispatchLoaderDynamic;
+}
 
 uint32_t PickMemoryType(VkPhysicalDevice phys,
                         uint32_t type_bits,
                         VkMemoryPropertyFlags want) {
   VkPhysicalDeviceMemoryProperties mp{};
-  d.vkGetPhysicalDeviceMemoryProperties(phys, &mp);
+  d().vkGetPhysicalDeviceMemoryProperties(phys, &mp);
   for (uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
     if ((type_bits & (1u << i)) &&
         (mp.memoryTypes[i].propertyFlags & want) == want) {
@@ -57,11 +61,11 @@ uint32_t PlaneCountForModifier(VkPhysicalDevice phys,
   VkFormatProperties2 fp{};
   fp.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
   fp.pNext = &list;
-  d.vkGetPhysicalDeviceFormatProperties2(phys, vk_format, &fp);
+  d().vkGetPhysicalDeviceFormatProperties2(phys, vk_format, &fp);
   std::vector<VkDrmFormatModifierPropertiesEXT> mods(
       list.drmFormatModifierCount);
   list.pDrmFormatModifierProperties = mods.data();
-  d.vkGetPhysicalDeviceFormatProperties2(phys, vk_format, &fp);
+  d().vkGetPhysicalDeviceFormatProperties2(phys, vk_format, &fp);
   for (const auto& m : mods) {
     if (m.drmFormatModifier == modifier) {
       return m.drmFormatModifierPlaneCount;
@@ -82,11 +86,11 @@ std::vector<uint64_t> NegotiateModifiers(
   VkFormatProperties2 fp{};
   fp.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
   fp.pNext = &list;
-  d.vkGetPhysicalDeviceFormatProperties2(physical_device, vk_format, &fp);
+  d().vkGetPhysicalDeviceFormatProperties2(physical_device, vk_format, &fp);
   std::vector<VkDrmFormatModifierPropertiesEXT> mods(
       list.drmFormatModifierCount);
   list.pDrmFormatModifierProperties = mods.data();
-  d.vkGetPhysicalDeviceFormatProperties2(physical_device, vk_format, &fp);
+  d().vkGetPhysicalDeviceFormatProperties2(physical_device, vk_format, &fp);
 
   const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
   std::set<uint64_t> exportable;
@@ -162,15 +166,15 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   ic.usage =
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  if (d.vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
+  if (d().vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
     err = "vkCreateImage with modifier list failed";
     return nullptr;
   }
 
   VkImageDrmFormatModifierPropertiesEXT mp{};
   mp.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT;
-  if (d.vkGetImageDrmFormatModifierPropertiesEXT(device, store->image_, &mp) !=
-      VK_SUCCESS) {
+  if (d().vkGetImageDrmFormatModifierPropertiesEXT(device, store->image_,
+                                                   &mp) != VK_SUCCESS) {
     err = "vkGetImageDrmFormatModifierPropertiesEXT failed";
     return nullptr;
   }
@@ -184,7 +188,7 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   }
 
   VkMemoryRequirements req{};
-  d.vkGetImageMemoryRequirements(device, store->image_, &req);
+  d().vkGetImageMemoryRequirements(device, store->image_, &req);
   const uint32_t mt = PickMemoryType(physical_device, req.memoryTypeBits,
                                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (mt == UINT32_MAX) {
@@ -199,12 +203,12 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   mai.pNext = &emai;
   mai.allocationSize = req.size;
   mai.memoryTypeIndex = mt;
-  if (d.vkAllocateMemory(device, &mai, nullptr, &store->memory_) !=
+  if (d().vkAllocateMemory(device, &mai, nullptr, &store->memory_) !=
       VK_SUCCESS) {
     err = "vkAllocateMemory (exported) failed";
     return nullptr;
   }
-  if (d.vkBindImageMemory(device, store->image_, store->memory_, 0) !=
+  if (d().vkBindImageMemory(device, store->image_, store->memory_, 0) !=
       VK_SUCCESS) {
     err = "vkBindImageMemory failed";
     return nullptr;
@@ -221,7 +225,7 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
     VkImageSubresource sub{};
     sub.aspectMask = kMemPlane[i];
     VkSubresourceLayout sl{};
-    d.vkGetImageSubresourceLayout(device, store->image_, &sub, &sl);
+    d().vkGetImageSubresourceLayout(device, store->image_, &sub, &sl);
     store->planes_[i] = {sl.offset, sl.rowPitch};
   }
 
@@ -229,7 +233,7 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   gfi.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
   gfi.memory = store->memory_;
   gfi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
-  if (d.vkGetMemoryFdKHR(device, &gfi, &store->dma_buf_fd_) != VK_SUCCESS) {
+  if (d().vkGetMemoryFdKHR(device, &gfi, &store->dma_buf_fd_) != VK_SUCCESS) {
     err = "vkGetMemoryFdKHR failed";
     return nullptr;
   }
@@ -240,7 +244,8 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
   vci.format = vk_format;
   vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  if (d.vkCreateImageView(device, &vci, nullptr, &store->view_) != VK_SUCCESS) {
+  if (d().vkCreateImageView(device, &vci, nullptr, &store->view_) !=
+      VK_SUCCESS) {
     err = "vkCreateImageView failed";
     return nullptr;
   }
@@ -258,13 +263,13 @@ VulkanBackingStore::VulkanBackingStore(VkDevice device,
 
 VulkanBackingStore::~VulkanBackingStore() {
   if (view_ != VK_NULL_HANDLE) {
-    d.vkDestroyImageView(device_, view_, nullptr);
+    d().vkDestroyImageView(device_, view_, nullptr);
   }
   if (image_ != VK_NULL_HANDLE) {
-    d.vkDestroyImage(device_, image_, nullptr);
+    d().vkDestroyImage(device_, image_, nullptr);
   }
   if (memory_ != VK_NULL_HANDLE) {
-    d.vkFreeMemory(device_, memory_, nullptr);
+    d().vkFreeMemory(device_, memory_, nullptr);
   }
   if (dma_buf_fd_ >= 0) {
     ::close(dma_buf_fd_);
