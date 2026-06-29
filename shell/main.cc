@@ -85,6 +85,61 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>(first_bundle_path);
 #endif
 
+  // Handle --drm-list-modes[=<path>] as an early exit so the user doesn't need
+  // to supply a bundle just to inspect modes. It is dispatched to the active
+  // backend's mode lister (DRM lists the scanout connector's modes; software
+  // the DRM dumb-sink's, the values valid for IVI_SW_DRM_MODE); backends with
+  // no DRM device report it unsupported. Device resolution precedence (first
+  // match wins):
+  //   1. --drm-list-modes=<path> (explicit attached value)
+  //   2. --drm-list-modes <path> (next positional, unless it starts with -)
+  //   3. --drm-device <path> or --drm-device=<path> anywhere in argv
+  //      (the same flag the launch path consumes)
+  //   4. the backend's default (e.g. /dev/dri/card1 for DRM)
+  // Step 3 is the fix for `--drm-list-modes --drm-device /dev/dri/cardN`,
+  // which previously silently fell through because the next-positional check at
+  // step 2 rejects anything starting with `-`.
+  bool list_modes_requested = false;
+  std::string list_modes_dev;
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--drm-list-modes") {
+      list_modes_requested = true;
+      if (i + 1 < argc && argv[i + 1][0] != '-') {
+        list_modes_dev = argv[i + 1];
+      }
+      continue;
+    }
+    if (arg.rfind("--drm-list-modes=", 0) == 0) {
+      list_modes_requested = true;
+      list_modes_dev =
+          std::string(arg.substr(std::strlen("--drm-list-modes=")));
+      continue;
+    }
+    if (!list_modes_dev.empty()) {
+      continue;
+    }
+    if (arg == "--drm-device" && i + 1 < argc) {
+      list_modes_dev = argv[i + 1];
+    } else if (arg.rfind("--drm-device=", 0) == 0) {
+      list_modes_dev = std::string(arg.substr(std::strlen("--drm-device=")));
+    }
+  }
+  if (list_modes_requested) {
+    auto& reg = backend::BackendRegistry::Instance();
+    if (!EnsureActiveBackend(reg, configs)) {
+      return EXIT_FAILURE;
+    }
+    const backend::BackendDescriptor& active = reg.Active();
+    if (!active.list_modes) {
+      spdlog::critical(
+          "[main] the '{}' backend does not support --drm-list-modes",
+          active.key);
+      return EXIT_FAILURE;
+    }
+    return active.list_modes(list_modes_dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
+
   // Construct the App. It populates the runtime backend registry and resolves
   // the active backend from its configs on first display creation, so it is
   // self-contained (e.g. the app unit test constructs App without main()).

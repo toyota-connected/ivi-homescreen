@@ -44,7 +44,11 @@
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
 #include "display/drm_display.h"
 #endif
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+#include "display/drm_mode_list.h"  // PrintDrmModes for --drm-list-modes
+#endif
 #if BUILD_BACKEND_SOFTWARE
+#include "backend/software/drm_dumb_sink.h"  // PrintDumbSinkModes
 #include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
 #include "backend/software/software_cursor.h"
@@ -403,26 +407,42 @@ std::shared_ptr<Backend> MakeSoftwareBackend(
 
 }  // namespace
 
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+// --drm-list-modes for the DRM backends: list the KMS device's connector modes.
+// An empty device defaults to card1.
+static int DrmListModes(const std::string& device) {
+  return PrintDrmModes(device.empty() ? "/dev/dri/card1" : device);
+}
+#endif
+#if BUILD_BACKEND_SOFTWARE
+// --drm-list-modes for the software backend: list the dumb-sink modes. An empty
+// device scans every /dev/dri/card* so the operator can discover the card.
+static int SoftwareListModes(const std::string& device) {
+  return PrintDumbSinkModes(device);
+}
+#endif
+
 void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 #if BUILD_BACKEND_WAYLAND_EGL
   registry.Register({"wayland-egl", backend::LoopMode::kReactor,
-                     MakeWaylandDisplay, MakeWaylandEglBackend});
+                     MakeWaylandDisplay, MakeWaylandEglBackend, nullptr});
 #endif
 #if BUILD_BACKEND_WAYLAND_VULKAN
   registry.Register({"wayland-vulkan", backend::LoopMode::kReactor,
-                     MakeWaylandDisplay, MakeWaylandVulkanBackend});
+                     MakeWaylandDisplay, MakeWaylandVulkanBackend, nullptr});
 #endif
 #if BUILD_BACKEND_DRM_KMS_EGL
   registry.Register({"drm-kms-egl", backend::LoopMode::kLegacy, MakeDrmDisplay,
-                     MakeDrmEglBackend});
+                     MakeDrmEglBackend, DrmListModes});
 #endif
 #if BUILD_BACKEND_DRM_KMS_VULKAN
   registry.Register({"drm-kms-vulkan", backend::LoopMode::kLegacy,
-                     MakeDrmDisplay, MakeDrmVulkanBackend});
+                     MakeDrmDisplay, MakeDrmVulkanBackend, DrmListModes});
 #endif
 #if BUILD_BACKEND_SOFTWARE
   registry.Register({"software", backend::LoopMode::kLegacy,
-                     MakeSoftwareDisplay, MakeSoftwareBackend});
+                     MakeSoftwareDisplay, MakeSoftwareBackend,
+                     SoftwareListModes});
 #endif
 }
 
