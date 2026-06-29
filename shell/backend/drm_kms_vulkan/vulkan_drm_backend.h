@@ -43,7 +43,7 @@ class DrmCursor;
 // builds the LayerScene the present path commits onto. The Flutter compositor
 // callbacks back each backing store with an exported modifier VkImage and scan
 // it out zero-copy on the primary plane.
-class VulkanDrmBackend final : public Shell {
+class VulkanDrmBackend final : public Backend {
  public:
   // Bring up the device and the present path. Returns nullptr on failure: the
   // caller treats null as a hard init failure and aborts, exactly as the
@@ -62,7 +62,7 @@ class VulkanDrmBackend final : public Shell {
   VulkanDrmBackend(const VulkanDrmBackend&) = delete;
   VulkanDrmBackend& operator=(const VulkanDrmBackend&) = delete;
 
-  // ── Shell interface ──────────────────────────────────────────────────────
+  // ── Backend interface ──────────────────────────────────────────────────────
   // Present runs through the Flutter compositor callbacks
   // (GetCompositorConfig), so these size/surface/texture entry points are no-op
   // stubs that satisfy the vtable and the FlutterView call sites.

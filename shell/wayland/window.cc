@@ -34,7 +34,7 @@ WaylandWindow::WaylandWindow(const size_t index,
                              const uint32_t activation_area_y,
                              const uint32_t activation_area_width,
                              const uint32_t activation_area_height,
-                             Shell* backend,
+                             Backend* backend,
                              const uint32_t ivi_surface_id)
     : m_index(index),
       m_display(std::move(display)),

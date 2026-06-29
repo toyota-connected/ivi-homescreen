@@ -50,7 +50,7 @@
 class Display;
 class TaskRunner;
 
-class WaylandVulkanBackend final : public Shell {
+class WaylandVulkanBackend final : public Backend {
  public:
   // @p shell_display may be null in headless / test contexts; the
   // wp_presentation handle for vsync_callback is read from it at

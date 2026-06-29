@@ -36,7 +36,7 @@
 #include "view/flutter_view.h"
 
 class App;
-class Shell;
+class Backend;
 class FlutterView;
 struct FlutterDesktopEngineState;
 
@@ -295,12 +295,12 @@ class Engine {
 
   /**
    * @brief Get backend of view
-   * @return Shell*
-   * @retval Shell pointer
+   * @return Backend*
+   * @retval Backend pointer
    * @relation
    * wayland, flutter
    */
-  [[nodiscard]] Shell* GetBackend() const { return m_backend; }
+  [[nodiscard]] Backend* GetBackend() const { return m_backend; }
 
   [[nodiscard]] FlutterView* GetView() const { return m_view; }
 
@@ -359,7 +359,7 @@ class Engine {
   size_t m_index;
   bool m_running;
 
-  Shell* m_backend;
+  Backend* m_backend;
   FlutterView* m_view;
 
   std::filesystem::path m_assets_path;

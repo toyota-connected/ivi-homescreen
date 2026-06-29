@@ -454,7 +454,7 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
     // unless we compile this branch out.
     if (removed->pixel_buffer_callback && removed->name != 0) {
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_DRM_KMS_EGL
-      Shell* backend = nullptr;
+      Backend* backend = nullptr;
       if (texture_registrar->engine &&
           texture_registrar->engine->view_controller &&
           texture_registrar->engine->view_controller->view) {

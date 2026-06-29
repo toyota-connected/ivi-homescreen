@@ -73,7 +73,7 @@ std::shared_ptr<IDisplay> MakeDisplay(
   // DRM/KMS does not have a compositor-level display concept. The refresh
   // rate and mode are owned by the backend; the DrmDisplay stub answers
   // queries the shell issues (metrics, cursor activation, event loop) with
-  // safe defaults. Shell-side hooks can refine the refresh rate later.
+  // safe defaults. Backend-side hooks can refine the refresh rate later.
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
   const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
