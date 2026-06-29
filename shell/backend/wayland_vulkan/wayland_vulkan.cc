@@ -32,7 +32,16 @@
 #include "task_runner.h"
 #include "wayland/display.h"
 
+// The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
+// TU per binary. When the drm-kms-vulkan backend is also compiled in, that
+// backend's device_caps.cc owns the single definition (it must, since the
+// standalone vulkan probe compiles device_caps.cc but not this TU). Suppress
+// our copy in that case to avoid a duplicate symbol; vulkan.hpp still declares
+// vk::detail::defaultDispatchLoaderDynamic extern, so the reference below
+// resolves against device_caps.cc's definition.
+#if !BUILD_BACKEND_DRM_KMS_VULKAN
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+#endif
 
 const auto& d = vk::detail::defaultDispatchLoaderDynamic;
 
