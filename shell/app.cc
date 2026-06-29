@@ -39,10 +39,13 @@
 #include "asio/steady_timer.hpp"
 #endif
 
-// Process-wide shutdown flag, owned by main.cc and flipped by the signal
-// handler. The reactor watches the MainLoopWaker eventfd (which the handler
-// writes async-signal-safely) and checks this flag to stop the loop.
-extern volatile sig_atomic_t running;
+#include "shutdown_flag.h"
+
+// Process-wide shutdown flag. Declared in shutdown_flag.h and DEFINED here (in
+// the shell library) rather than in main.cc so the library is self-contained:
+// main.cc's signal handler clears it, and the reactor / legacy loop re-check it
+// (woken via the MainLoopWaker eventfd).
+volatile sig_atomic_t running = 1;
 
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
