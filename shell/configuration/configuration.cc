@@ -353,6 +353,9 @@ void Configuration::PrintConfig(const Config& config) {
   }
   spdlog::info("Bundle Path: .............. {}", config.view.bundle_path);
   spdlog::info("Window Type: .............. {}", config.view.window_type);
+  if (config.view.backend.has_value() && !config.view.backend->empty()) {
+    spdlog::info("Backend: .................. {}", config.view.backend.value());
+  }
   spdlog::info("Output Index: ............. {}",
                config.view.wl_output_index.value_or(0));
   spdlog::info("Size: ..................... {} x {}",
@@ -412,6 +415,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
             cxxopts::value<std::string>(config.view.window_type))(
             "shell",
             "Wayland compositor shell: auto|xdg|agl|ivi|simple (default auto)",
+            cxxopts::value<std::string>())(
+            "backend",
+            "Active backend (multi-backend builds): wayland-egl|wayland-vulkan|"
+            "drm-kms-egl|drm-kms-vulkan|software (default: the sole compiled "
+            "backend, or the egl/vulkan renderer hint)",
             cxxopts::value<std::string>())("o,output-index",
                                            "Wayland output index",
                                            cxxopts::value<uint32_t>())(
@@ -573,6 +581,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
     if (result.count("ivi-surface-id")) {
       config.view.ivi_surface_id = result["ivi-surface-id"].as<uint32_t>();
+    }
+    if (result.count("backend")) {
+      config.view.backend = result["backend"].as<std::string>();
     }
     if (result.count("shell")) {
       config.view.shell = result["shell"].as<std::string>();

@@ -454,16 +454,35 @@ static std::string ResolveActiveKey(
     const backend::BackendRegistry& reg,
     const std::vector<Configuration::Config>& configs) {
   const auto keys = reg.Keys();
+  std::string hint = configs[0].view.backend.value_or("");
+
+  // An exact registry key (the bundle's [view] backend, or --backend) selects
+  // that backend directly -- the primary runtime-selection path.
+  if (!hint.empty() && reg.Resolve(hint) != nullptr) {
+    return hint;
+  }
+
   if (keys.size() == 1) {
+    // Only one backend is compiled in, so it is the only choice. Warn if the
+    // operator explicitly asked for a different one (a full key, not the legacy
+    // egl/vulkan renderer hint) so a typo or wrong-build isn't silent.
+    if (!hint.empty() && hint != "egl" && hint != "vulkan" &&
+        hint != keys.front()) {
+      spdlog::warn(
+          "[backend] requested backend '{}' is not compiled into this build; "
+          "using the only available backend '{}'",
+          hint, keys.front());
+    }
     return keys.front();
   }
 
+  // Several backends and no exact key: fall back to the legacy egl/vulkan
+  // renderer-family hint (picks within whichever family is registered).
   const auto ends_with = [](std::string_view s, std::string_view suffix) {
     return s.size() >= suffix.size() &&
            s.substr(s.size() - suffix.size()) == suffix;
   };
 
-  const std::string hint = configs[0].view.backend.value_or("");
   const bool want_vulkan = hint == "vulkan";
   const std::string* egl_key = nullptr;
   const std::string* vulkan_key = nullptr;
@@ -505,6 +524,23 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
         key, available);
     return false;
   }
+
+  // One process drives one backend (a single display) today, so the active
+  // backend comes from the first bundle. Per-bundle backend selection isn't
+  // independently honored yet -- warn if a later bundle asks for a different,
+  // valid backend so the ignored request isn't silent.
+  for (size_t i = 1; i < configs.size(); ++i) {
+    const auto& want = configs[i].view.backend;
+    if (want.has_value() && !want->empty() && *want != key &&
+        registry.Resolve(*want) != nullptr) {
+      spdlog::warn(
+          "[backend] bundle {} requests backend '{}', but the process uses "
+          "'{}' "
+          "(per-bundle backend selection is not yet supported)",
+          i, *want, key);
+    }
+  }
+
   registry.SetActive(active);
   return true;
 }
