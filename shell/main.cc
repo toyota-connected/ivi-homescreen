@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <algorithm>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -22,22 +21,10 @@
 #include "config/common.h"
 
 #include "app.h"
+#include "backend/register_backends.h"
 #include "configuration/configuration.h"
 #include "logging/logging.h"
 #include "main_loop_waker.h"
-
-#if BUILD_BACKEND_DRM_KMS_EGL
-#include "backend/drm_kms_egl/drm_backend.h"
-#endif
-
-// --drm-list-modes uses the shared PrintDrmModes for both DRM backends.
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-#include "display/drm_mode_list.h"
-#endif
-
-#if BUILD_BACKEND_SOFTWARE
-#include "backend/software/drm_dumb_sink.h"
-#endif
 
 #if BUILD_CRASH_HANDLER
 #include "crash_handler.h"
@@ -98,61 +85,9 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>(first_bundle_path);
 #endif
 
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_SOFTWARE
-  // Handle --drm-list-modes[=<path>] before the main config parse so the
-  // user doesn't need to supply a bundle path just to inspect modes. On
-  // software builds this lists the DRM dumb-sink's modes (the values valid
-  // for IVI_SW_DRM_MODE); on drm-kms-egl it lists the scanout connector's.
-  // Device resolution precedence (first match wins):
-  //   1. --drm-list-modes=<path> (explicit attached value)
-  //   2. --drm-list-modes <path> (next positional, unless it starts with -)
-  //   3. --drm-device <path> or --drm-device=<path> anywhere in argv
-  //      (the same flag the launch path consumes)
-  //   4. /dev/dri/card1 (matches the launch-path default)
-  // Step 3 is the fix for `--drm-list-modes --drm-device /dev/dri/cardN`,
-  // which previously silently fell through to /dev/dri/card1 because the
-  // next-positional check at step 2 rejects anything starting with `-`.
-  bool list_modes_requested = false;
-  std::string list_modes_dev;
-  for (int i = 1; i < argc; ++i) {
-    const std::string_view arg = argv[i];
-    if (arg == "--drm-list-modes") {
-      list_modes_requested = true;
-      if (i + 1 < argc && argv[i + 1][0] != '-') {
-        list_modes_dev = argv[i + 1];
-      }
-      continue;
-    }
-    if (arg.rfind("--drm-list-modes=", 0) == 0) {
-      list_modes_requested = true;
-      list_modes_dev =
-          std::string(arg.substr(std::strlen("--drm-list-modes=")));
-      continue;
-    }
-    if (!list_modes_dev.empty()) {
-      continue;
-    }
-    if (arg == "--drm-device" && i + 1 < argc) {
-      list_modes_dev = argv[i + 1];
-    } else if (arg.rfind("--drm-device=", 0) == 0) {
-      list_modes_dev = std::string(arg.substr(std::strlen("--drm-device=")));
-    }
-  }
-  if (list_modes_requested) {
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-    if (list_modes_dev.empty()) {
-      list_modes_dev = "/dev/dri/card1";
-    }
-    return PrintDrmModes(list_modes_dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-#else  // BUILD_BACKEND_SOFTWARE
-    // Empty device → PrintDumbSinkModes scans every /dev/dri/card* so the
-    // operator can discover which card to pass to --drm-device.
-    return PrintDumbSinkModes(list_modes_dev) == 0 ? EXIT_SUCCESS
-                                                   : EXIT_FAILURE;
-#endif
-  }
-#endif
-
+  // Construct the App. It populates the runtime backend registry and resolves
+  // the active backend from its configs on first display creation, so it is
+  // self-contained (e.g. the app unit test constructs App without main()).
   App app(configs);
 
   // Construct the waker (publishing its eventfd) before installing the
@@ -161,17 +96,20 @@ int main(const int argc, char** argv) {
   (void)MainLoopWaker::instance();
   InstallShutdownHandlers();
 
-  // run the application
+  // run the application — the active backend's loop mode (resolved by App)
+  // selects the reactor vs legacy dispatch.
   int ret = 0;
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  // The Wayland backend runs its display reactor on this (main) thread; Run()
-  // blocks until the shutdown signal stops the io_context.
-  ret = app.Run();
-#else
-  while (running && ret != -1) {
-    ret = app.Loop();
+  auto& reg = backend::BackendRegistry::Instance();
+  if (reg.Active().loop_mode == backend::LoopMode::kReactor) {
+    // Reactor backends (Wayland) run their display reactor on this (main)
+    // thread; Run() blocks until the shutdown signal stops the io_context.
+    ret = app.Run();
+  } else {
+    // Legacy backends (DRM, software) spin the per-iteration loop.
+    while (running && ret != -1) {
+      ret = app.Loop();
+    }
   }
-#endif
   (void)ret;
 
   gLogger.reset();
