@@ -43,7 +43,7 @@
 #include "crash_handler.h"
 #endif
 
-volatile sig_atomic_t running = 1;
+#include "shutdown_flag.h"
 
 std::unique_ptr<Logging> gLogger;
 
