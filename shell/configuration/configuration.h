@@ -72,8 +72,13 @@ class Configuration {
       // Flutter viewport to the rotated extent and set the plane's rotation
       // property (the panel keeps its native mode). Default 0.
       std::optional<int> drm_rotation;
-      // Per-view renderer selection when multiple backends are compiled in
-      // (e.g. "egl" | "vulkan" for Wayland). Empty/unset = the build default.
+      // Backend selection when several backends are compiled into one binary.
+      // Accepts a full registry key (wayland-egl | wayland-vulkan | drm-kms-egl
+      // | drm-kms-vulkan | software) or, for back-compat, an "egl" | "vulkan"
+      // renderer-family hint. Empty/unset = the sole compiled backend. Set per
+      // bundle under [view] in the bundle's TOML, or process-wide via
+      // --backend. One process drives one backend today, so the first bundle's
+      // value wins.
       std::optional<std::string> backend;
       // Wayland compositor-protocol shell selection: "auto" (default) | "xdg" |
       // "agl" | "ivi" | "simple". The Display reads it from the first view.
