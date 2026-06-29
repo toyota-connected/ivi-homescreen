@@ -55,6 +55,12 @@ struct BackendDescriptor {
   std::function<std::shared_ptr<Backend>(const Configuration::Config&,
                                          IDisplay*)>
       make_backend;
+
+  // Optional: print the available DRM modes for --drm-list-modes. Set for the
+  // DRM and software backends (which scan out to a DRM device); null for
+  // backends with no DRM device (e.g. Wayland). @p device may be empty (the
+  // hook applies a sensible default). Returns 0 on success.
+  std::function<int(const std::string& device)> list_modes;
 };
 
 // Process-wide table of the compiled-in backends. Populated once at startup by
