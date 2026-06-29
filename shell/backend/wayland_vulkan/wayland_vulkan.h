@@ -365,7 +365,7 @@ class WaylandVulkanBackend final : public Backend {
    * @relation
    * internal
    */
-  static bool CollectBackingStore(const FlutterBackingStore* renderer,
+  static bool CollectBackingStore(const FlutterBackingStore* store,
                                   void* user_data);
 
   /**

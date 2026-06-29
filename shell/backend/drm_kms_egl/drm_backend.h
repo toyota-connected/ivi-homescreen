@@ -262,7 +262,7 @@ class DrmBackend : public Backend {
   }
 
  private:
-  DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session);
+  DrmBackend(DrmConfig cfg, homescreen::DrmSession* session);
   bool InitDrm();
   bool InitGbm();
   bool InitEgl();

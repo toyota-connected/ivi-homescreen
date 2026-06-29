@@ -83,10 +83,12 @@ class AglShell final : public XdgShell, public IShellWindowManager {
   // --- wl::AglShellHandler<AglShell> callbacks -----------------------------
   void OnAglBoundOk() {
     bound_pending_ = false;
+    bound_received_ = true;
     bound_ok_ = true;
   }
   void OnAglBoundFail() {
     bound_pending_ = false;
+    bound_received_ = true;
     bound_ok_ = false;
   }
   void OnAglAppState(const char* /*app_id*/, uint32_t /*state*/) {}
@@ -100,6 +102,10 @@ class AglShell final : public XdgShell, public IShellWindowManager {
   OutputResolver output_resolver_;
   uint32_t agl_version_{0};
   bool bound_pending_{false};
+  // bound_ok/bound_fail can arrive during display-init roundtrips, before
+  // Sync() runs. This latches that it was seen so Sync() doesn't then wait for
+  // a second event that never comes.
+  bool bound_received_{false};
   bool bound_ok_{false};
 };
 

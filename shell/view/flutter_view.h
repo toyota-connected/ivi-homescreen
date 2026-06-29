@@ -135,7 +135,7 @@ class FlutterView {
    * @relation
    * internal
    */
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   [[nodiscard]] Display* GetDisplay() const;
 #endif
 

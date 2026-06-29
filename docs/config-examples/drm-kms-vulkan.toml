@@ -1,0 +1,34 @@
+# drm-kms-vulkan: KMS-direct Vulkan backend (zero-copy dma-buf scanout).
+# No Wayland compositor, so no [view.shell]. The GL-only compositor knobs
+# (compositor/overlay_planes) do not apply to the Vulkan path.
+[global]
+app_id = 'homescreen'
+disable_cursor = false
+
+[[view]]
+fullscreen = true
+pixel_ratio = 1.0
+
+  [view.args]
+  engine = ['--enable-asserts']
+
+  [view.backend]
+  type = 'drm-kms-vulkan'
+
+    [view.backend.drm]
+    device = '/dev/dri/card0'
+    connector = 'eDP-1'          # unset = rank-pick
+    mode = '1920x1080@60'        # unset = preferred mode from EDID
+    rotation = 0                 # 0|90|180|270
+    modeset = 'atomic'           # auto|legacy|atomic
+    explicit_sync = 'auto'       # auto|yes|no
+    no_seat = false              # true = bypass libseat (headless/SSH/kiosk)
+
+# [sentry] — optional, process-level crash reporting (shared by all views).
+# The DSN comes from the SENTRY_DSN environment variable; this table only adds
+# metadata. Omit the whole table to disable.
+[sentry]
+release = '1.0.0'
+env = 'production'
+tags = { board = 'dev-board' }
+attachments = []

@@ -39,6 +39,15 @@ target_link_libraries(platform_homescreen PUBLIC
         tomlplusplus::tomlplusplus
 )
 
+# key_event_handler.cc / text_input_plugin.cc always use libxkbcommon (xkb_*
+# symbols), independent of the input seat or backend. The Wayland / DRM /
+# software-input paths each happen to pull it in, but a build with none of
+# those (e.g. software backend with BUILD_SOFTWARE_INPUT_LIBINPUT=OFF) would
+# leave these symbols undefined — so link it directly here.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(XKBCOMMON_PLATFORM REQUIRED IMPORTED_TARGET xkbcommon)
+target_link_libraries(platform_homescreen PUBLIC PkgConfig::XKBCOMMON_PLATFORM)
+
 # platform_homescreen needs no Wayland binding dependency: it includes no
 # Wayland protocol headers directly. The generated protocol headers attach to
 # the shell binary in shell/CMakeLists.txt.

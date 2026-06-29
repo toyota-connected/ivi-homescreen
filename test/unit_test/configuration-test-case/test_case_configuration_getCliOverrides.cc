@@ -22,8 +22,8 @@ TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal001) {
   input_cfg.disable_cursor = true;
   input_cfg.wayland_event_mask = "keyboard";
   input_cfg.debug_backend = true;
-  input_cfg.view.vm_args.push_back("--enable-asserts");
-  input_cfg.view.vm_args.push_back("--pause-isolates-on-start");
+  input_cfg.view.engine_args.push_back("--enable-asserts");
+  input_cfg.view.engine_args.push_back("--pause-isolates-on-start");
   input_cfg.view.bundle_path = "files";
   input_cfg.view.window_type = "NORMAL";
   input_cfg.view.wl_output_index = 1;
@@ -42,8 +42,8 @@ TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal001) {
   EXPECT_EQ("DMZ-White", config.cursor_theme);
   EXPECT_EQ(true, config.disable_cursor);
   EXPECT_EQ(true, config.debug_backend);
-  EXPECT_EQ("--enable-asserts", config.view.vm_args[0]);
-  EXPECT_EQ("--pause-isolates-on-start", config.view.vm_args[1]);
+  EXPECT_EQ("--enable-asserts", config.view.engine_args[0]);
+  EXPECT_EQ("--pause-isolates-on-start", config.view.engine_args[1]);
   EXPECT_EQ("keyboard", config.wayland_event_mask);
 
   EXPECT_EQ("NORMAL", config.view.window_type);
@@ -76,7 +76,7 @@ TEST(HomescreenConfigurationGetCliOverrides, Lv1Normal002) {
   EXPECT_EQ("", config.cursor_theme);
   EXPECT_EQ(false, config.disable_cursor.value_or(false));
   EXPECT_EQ(false, config.debug_backend.value_or(false));
-  EXPECT_EQ(true, config.view.vm_args.empty());
+  EXPECT_EQ(true, config.view.engine_args.empty());
   EXPECT_EQ("", config.wayland_event_mask);
 
   EXPECT_EQ("/home", config.view.bundle_path);

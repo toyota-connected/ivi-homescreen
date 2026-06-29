@@ -1,0 +1,40 @@
+# wayland-egl + agl shell.
+# AGL is the only shell that uses a window role + activation area.
+[global]
+app_id = 'homescreen'
+cursor_theme = 'DMZ-White'
+disable_cursor = false
+
+[[view]]
+width = 1920
+height = 1080
+output_index = 0
+pixel_ratio = 1.0
+
+  [view.args]
+  engine = ['--enable-asserts']   # -> command_line_argv
+  dart = ['--route=/home']        # -> dart_entrypoint_argv (Dart main args)
+
+  [view.shell]
+  type = 'agl'
+
+    [view.shell.window]
+    type = 'BG'               # BG|PANEL_TOP|PANEL_BOTTOM|PANEL_LEFT|PANEL_RIGHT|NORMAL
+
+      [view.shell.window.activation_area]
+      x = 0
+      y = 0
+      width = 1920
+      height = 1080
+
+  [view.backend]
+  type = 'wayland-egl'
+
+# [sentry] — optional, process-level crash reporting (shared by all views).
+# The DSN comes from the SENTRY_DSN environment variable; this table only adds
+# metadata. Omit the whole table to disable.
+[sentry]
+release = '1.0.0'
+env = 'production'
+tags = { board = 'dev-board' }
+attachments = []

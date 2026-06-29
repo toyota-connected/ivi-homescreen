@@ -1,0 +1,31 @@
+# Master --config file: two views, each pointing at its own bundle, with
+# distinct activation areas. viewB omits the activation area to exercise the
+# full-view-extent default.
+[global]
+app_id = 'cluster-suite'
+
+[[view]]
+bundle = 'viewA'
+width = 1920
+height = 1080
+
+  [view.shell]
+  type = 'agl'
+
+    [view.shell.window]
+    type = 'BG'
+
+      [view.shell.window.activation_area]
+      x = 0
+      y = 60
+      width = 1920
+      height = 1020
+
+[[view]]
+bundle = 'viewB'
+width = 1280
+height = 720
+
+  [view.shell.window]
+  type = 'BG'
+  # no activation_area -> defaults to full view (1280x720)
