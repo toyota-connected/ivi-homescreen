@@ -79,6 +79,45 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
     instance.view.wl_output_index =
         v->at_path("output_index").value<uint32_t>().value();
   }
+  // [view.output] — pin this view to a physical output (see
+  // homescreen::ResolveOutput). `name` is the cross-backend convenience: it
+  // fills both the wl_output and DRM connector fields so one config works on
+  // either backend. wl_name / drm_connector override per backend; serial is a
+  // DRM-only EDID refinement.
+  if (v->at_path("output.name").is_string()) {
+    const std::string name =
+        v->at_path("output.name").as_string()->value_or("");
+    instance.view.output.wl_name = name;
+    instance.view.output.drm_connector = name;
+  }
+  if (v->at_path("output.wl_name").is_string()) {
+    instance.view.output.wl_name =
+        v->at_path("output.wl_name").as_string()->value_or("");
+  }
+  if (v->at_path("output.drm_connector").is_string()) {
+    instance.view.output.drm_connector =
+        v->at_path("output.drm_connector").as_string()->value_or("");
+  }
+  if (v->at_path("output.serial").is_string()) {
+    instance.view.output.edid_serial =
+        v->at_path("output.serial").as_string()->value_or("");
+  }
+  if (v->at_path("output.index").is_integer()) {
+    instance.view.output.index =
+        v->at_path("output.index").value<uint32_t>().value();
+  }
+  if (v->at_path("output.preload").is_boolean()) {
+    instance.view.output.preload =
+        v->at_path("output.preload").value<bool>().value();
+  }
+  if (v->at_path("output.on_disconnect").is_string()) {
+    const std::string policy =
+        v->at_path("output.on_disconnect").as_string()->value_or("");
+    instance.view.output.on_disconnect =
+        (policy == "teardown")
+            ? homescreen::OutputMatch::OnDisconnect::kTeardown
+            : homescreen::OutputMatch::OnDisconnect::kSuspend;
+  }
   if (v->at_path("width").is_integer()) {
     instance.view.width = v->at_path("width").value<uint32_t>().value();
   }
@@ -496,6 +535,19 @@ void Configuration::PrintConfig(const Config& config) {
   }
   spdlog::info("Output Index: ............. {}",
                config.view.wl_output_index.value_or(0));
+  if (!config.view.output.empty()) {
+    spdlog::info(
+        "Output Match: ............. wl='{}' drm='{}' serial='{}' preload={} "
+        "on_disconnect={}",
+        config.view.output.wl_name.value_or("-"),
+        config.view.output.drm_connector.value_or("-"),
+        config.view.output.edid_serial.value_or("-"),
+        config.view.output.preload,
+        config.view.output.on_disconnect ==
+                homescreen::OutputMatch::OnDisconnect::kTeardown
+            ? "teardown"
+            : "suspend");
+  }
   spdlog::info("Size: ..................... {} x {}",
                config.view.width.value_or(kDefaultViewWidth),
                config.view.height.value_or(kDefaultViewHeight));

@@ -80,6 +80,9 @@ Display::Display(const bool enable_cursor,
   registry_.OnGlobal(
       [this](wl::CRegistry& reg, uint32_t name, std::string_view iface,
              uint32_t ver) { HandleGlobal(reg, name, iface, ver); });
+  registry_.OnRemove([this](wl::CRegistry& /* reg */, const uint32_t name) {
+    HandleGlobalRemove(name);
+  });
   // First dispatch picks up registry globals (synchronous: the server emits
   // them immediately after we bind the registry). The roundtrip that follows
   // pulls in events the server emits ONLY in response to our binds — notably
@@ -323,6 +326,7 @@ void Display::display_handle_done(void* data,
                                   struct wl_output* /* wl_output */) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->done = true;
+  oi->display->EmitOutputDone(oi);
 }
 
 void Display::display_handle_name(void* data,
@@ -985,6 +989,63 @@ void Display::NotifyOutputResized(const output_info_t* oi) {
   }
   for (auto* w : snapshot) {
     w->OnOutputResized(idx, width, height);
+  }
+}
+
+homescreen::OutputInfo Display::ToOutputInfo(const output_info_t& oi) {
+  homescreen::OutputInfo info;
+  info.name = oi.name;
+  info.width_px = static_cast<int32_t>(oi.width);
+  info.height_px = static_cast<int32_t>(oi.height);
+  info.mm_width = static_cast<int32_t>(oi.physical_width);
+  info.mm_height = static_cast<int32_t>(oi.physical_height);
+  info.refresh_hz = oi.refresh_rate;
+  // A wl_output a client can see is by definition live. Wayland exposes no EDID
+  // serial to clients, and make/model are not retained here.
+  info.connected = true;
+  info.handle = reinterpret_cast<uint64_t>(oi.output);
+  return info;
+}
+
+std::vector<homescreen::OutputInfo> Display::EnumerateOutputs() const {
+  std::vector<homescreen::OutputInfo> outputs;
+  outputs.reserve(m_all_outputs.size());
+  for (const auto& oi : m_all_outputs) {
+    if (oi && oi->done) {
+      outputs.push_back(ToOutputInfo(*oi));
+    }
+  }
+  return outputs;
+}
+
+void Display::SetOutputListener(homescreen::IOutputListener* listener) {
+  m_output_listener = listener;
+}
+
+void Display::EmitOutputDone(output_info_t* oi) {
+  if (m_output_listener == nullptr || oi == nullptr) {
+    return;
+  }
+  if (oi->announced) {
+    m_output_listener->OnOutputChanged(ToOutputInfo(*oi));
+  } else {
+    oi->announced = true;
+    m_output_listener->OnOutputAdded(ToOutputInfo(*oi));
+  }
+}
+
+void Display::HandleGlobalRemove(const uint32_t global_name) {
+  // global_remove fires for every global; act only on a matching wl_output.
+  for (auto it = m_all_outputs.begin(); it != m_all_outputs.end(); ++it) {
+    const auto& oi = *it;
+    if (!oi || oi->global_id != global_name) {
+      continue;
+    }
+    if (m_output_listener != nullptr && oi->announced) {
+      m_output_listener->OnOutputRemoved(oi->name);
+    }
+    m_all_outputs.erase(it);
+    return;
   }
 }
 
