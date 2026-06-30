@@ -16,6 +16,7 @@
 #include "app.h"
 #include "logging/logging.h"
 
+#include <algorithm>
 #include <csignal>
 #include <cstdlib>
 #include <functional>
@@ -81,7 +82,7 @@ std::shared_ptr<IDisplay> MakeDisplay(
 }  // namespace
 
 App::App(const std::vector<Configuration::Config>& configs)
-    : m_display(MakeDisplay(configs)) {
+    : m_displays{MakeDisplay(configs)} {
   SPDLOG_DEBUG("+App::App");
 // AGL Shell needs a Wayland backend — its WaylandWindow / Display
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
@@ -95,7 +96,7 @@ App::App(const std::vector<Configuration::Config>& configs)
   size_t index = 0;
   m_views.reserve(configs.size());
   for (auto const& cfg : configs) {
-    auto view = std::make_unique<FlutterView>(cfg, index, m_display);
+    auto view = std::make_unique<FlutterView>(cfg, index, m_displays.front());
     view->Initialize();
     m_views.emplace_back(std::move(view));
     index++;
@@ -125,8 +126,10 @@ App::App(const std::vector<Configuration::Config>& configs)
   // other shells. Null-check the cast: in a multi-backend binary the active
   // display may be DRM/software (not a Wayland Display).
   if (found_view_with_bg) {
-    if (auto* d = dynamic_cast<Display*>(m_display.get())) {
-      d->ActiveShell().OnClientReady();
+    for (const auto& display : m_displays) {
+      if (auto* d = dynamic_cast<Display*>(display.get())) {
+        d->ActiveShell().OnClientReady();
+      }
     }
   }
 #endif
@@ -139,18 +142,41 @@ App::App(const std::vector<Configuration::Config>& configs)
   // Wire the App-owned shared reactor onto the Wayland connection before it
   // arms its display fd. Multiple connections would each register onto the same
   // primary_ioc_.
-  if (auto* d = dynamic_cast<Display*>(m_display.get())) {
-    d->SetEventLoop(primary_ioc_);
+  for (const auto& display : m_displays) {
+    if (auto* d = dynamic_cast<Display*>(display.get())) {
+      d->SetEventLoop(primary_ioc_);
+    }
   }
 #endif
 
-  m_display->StartEvents();
+  for (const auto& display : m_displays) {
+    display->StartEvents();
+  }
 
   SPDLOG_DEBUG("-App::App");
 }
 
 App::~App() {
-  m_display->StopEvents();
+  for (const auto& display : m_displays) {
+    display->StopEvents();
+  }
+}
+
+bool App::AnyHasRepeatTimer() const {
+  return std::any_of(
+      m_displays.begin(), m_displays.end(),
+      [](const auto& display) { return display->HasRepeatTimer(); });
+}
+
+double App::MaxRefreshRate() const {
+  double hz = 0.0;
+  for (const auto& display : m_displays) {
+    const double r = display->GetMaxRefreshRate();
+    if (r > hz) {
+      hz = r;
+    }
+  }
+  return hz;
 }
 
 int App::Loop() const {
@@ -163,7 +189,7 @@ int App::Loop() const {
     view->RunTasks();
   }
 
-  if (m_display->HasRepeatTimer())
+  if (AnyHasRepeatTimer())
     EventTimer::wait_event();
 
 #if BUILD_WATCHDOG
@@ -178,7 +204,7 @@ int App::Loop() const {
   // pointer event (or shutdown is requested), so it blocks on the waker
   // instead of spinning at the refresh rate — letting the CPU reach deep
   // idle on a static screen.
-  bool needs_periodic = m_display->HasRepeatTimer();
+  bool needs_periodic = AnyHasRepeatTimer();
   for (auto const& view : m_views) {
     if (view->NeedsPeriodicPump()) {
       needs_periodic = true;
@@ -196,7 +222,7 @@ int App::Loop() const {
             std::chrono::steady_clock::now().time_since_epoch())
             .count();
     const auto elapsed = end_time - start_time;
-    const double refresh_hz = m_display->GetMaxRefreshRate();
+    const double refresh_hz = MaxRefreshRate();
     const double frame_time =
         refresh_hz > 0.0 ? 1000.0 / refresh_hz : 1000.0 / 60.0;
     const double remaining = frame_time - static_cast<double>(elapsed);
@@ -223,7 +249,7 @@ int App::Run() {
   // Refresh-rate frame interval (fallback 60 Hz for virtual outputs that
   // advertise refresh=0).
   auto frame_interval = [this]() -> std::chrono::nanoseconds {
-    const double hz = m_display->GetMaxRefreshRate();
+    const double hz = MaxRefreshRate();
     const double ms = hz > 0.0 ? 1000.0 / hz : 1000.0 / 60.0;
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::duration<double, std::milli>(ms));
