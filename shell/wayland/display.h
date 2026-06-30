@@ -59,6 +59,7 @@
 #include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
+#include "display/output_provider.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
@@ -71,7 +72,9 @@ class WaylandWindow;
 
 struct FlutterDesktopViewControllerState;
 
-class Display : public IDisplay, public wl::ime::TextInputListener {
+class Display : public IDisplay,
+                public wl::ime::TextInputListener,
+                public homescreen::IOutputProvider {
  public:
   explicit Display(bool enable_cursor,
                    const std::string& ignore_wayland_event,
@@ -89,6 +92,18 @@ class Display : public IDisplay, public wl::ime::TextInputListener {
   // main loop never has to pace it. Always false; the interface keeps the
   // method for the non-Wayland backends whose loop still consults it.
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
+
+  // The Wayland Display is its own output provider: it already tracks the
+  // wl_output globals this enumerates.
+  [[nodiscard]] homescreen::IOutputProvider* GetOutputProvider() override {
+    return this;
+  }
+
+  // homescreen::IOutputProvider.
+  [[nodiscard]] std::vector<homescreen::OutputInfo> EnumerateOutputs()
+      const override;
+  void SetOutputListener(homescreen::IOutputListener* listener) override;
+  [[nodiscard]] bool SupportsHotplug() const override { return true; }
 
   /**
    * @brief Register the shared reactor (App-owned primary io_context) this
@@ -458,6 +473,9 @@ class Display : public IDisplay, public wl::ime::TextInputListener {
     double refresh_rate;
     int32_t scale;
     bool done;
+    // True once OnOutputAdded has been emitted for this output, so a later
+    // `done` batch reports OnOutputChanged instead.
+    bool announced = false;
     int transform;
     std::string name;
     std::string desc;
@@ -521,6 +539,10 @@ class Display : public IDisplay, public wl::ime::TextInputListener {
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
 
+  // The output manager's listener for output add/remove/change; nullptr until
+  // SetOutputListener wires it. Notified on the reactor thread.
+  homescreen::IOutputListener* m_output_listener = nullptr;
+
   // Registered WaylandWindows (raw, non-owning). Mutated from the wayland
   // event thread (display_handle_mode callback) and the main thread
   // (WaylandWindow ctor/dtor) so guarded by a mutex.
@@ -536,6 +558,16 @@ class Display : public IDisplay, public wl::ime::TextInputListener {
   // updated. Fans the new width/height out to any WaylandWindow whose
   // m_output_index matches; the window decides whether to shrink.
   void NotifyOutputResized(const output_info_t* oi);
+
+  // Notify the output listener when a wl_output's `done` event closes its
+  // event batch: OnOutputAdded the first time, OnOutputChanged after.
+  void EmitOutputDone(output_info_t* oi);
+  // Handle a wl_registry.global_remove naming a wl_output: notify the listener
+  // and drop it from m_all_outputs.
+  void HandleGlobalRemove(uint32_t global_name);
+  // Backend-agnostic snapshot of a live wl_output.
+  static homescreen::OutputInfo ToOutputInfo(const output_info_t& oi);
+
   bool m_buffer_scale_enable{};
 
   // Tracks whether the compositor advertised a GPU buffer-allocation
