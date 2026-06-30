@@ -173,3 +173,32 @@
   # Stage HW cursor into the compositor commit (auto = nvidia-drm only).
   # type=string default=auto values=auto|yes|no applies=drm
   stage_cursor =
+
+[view.output]
+  # DRM: match this connector name (overrides output.name).
+  # type=string default=(none) values=e.g. HDMI-A-1 applies=drm
+  drm_connector =
+
+  # Deprecated: match the Nth connected output (prefer a name).
+  # type=int default=(none) values=int applies=all
+  index =
+
+  # Pin the view to this output by name (fills both the wl_output and DRM connector match).
+  # type=string default=(primary) values=e.g. DP-1, HDMI-A-1 applies=all
+  name =
+
+  # What to do with the view when its output disappears.
+  # type=string default=suspend values=suspend|teardown applies=all
+  on_disconnect =
+
+  # Warm the engine (suspended) at startup even if the output is absent.
+  # type=bool default=false values=true|false applies=all
+  preload =
+
+  # DRM: refine the match to this EDID serial when it is unique.
+  # type=string default=(none) values=EDID serial applies=drm
+  serial =
+
+  # Wayland: match this wl_output name (overrides output.name).
+  # type=string default=(none) values=e.g. DP-1 applies=wayland
+  wl_name =

@@ -201,6 +201,29 @@ TEST(HomescreenConfigurationGetTomlConfig, Backend) {
 }
 
 /****************************************************************
+Test Case Name.Test Name： HomescreenConfigurationGetTomlConfig_Output
+Use Case Name: Initialization
+Test Summary：[view.output] — the `name` convenience fills both the wl_output
+and DRM connector fields; serial / preload / on_disconnect parse.
+***************************************************************/
+TEST(HomescreenConfigurationGetTomlConfig, Output) {
+  Configuration::Config config{};
+  std::filesystem::path config_toml_path = kSourceRoot;
+  config_toml_path /= "files/GetTomlConfig_Output.toml";
+
+  Configuration::get_toml_config(config_toml_path.c_str(), config);
+
+  // `name` fills both backend name fields.
+  EXPECT_EQ("DP-2", config.view.output.wl_name.value_or(""));
+  EXPECT_EQ("DP-2", config.view.output.drm_connector.value_or(""));
+  EXPECT_EQ("SN-1234", config.view.output.edid_serial.value_or(""));
+  EXPECT_TRUE(config.view.output.preload);
+  EXPECT_EQ(homescreen::OutputMatch::OnDisconnect::kTeardown,
+            config.view.output.on_disconnect);
+  EXPECT_FALSE(config.view.output.empty());
+}
+
+/****************************************************************
 Test Case Name.Test Name： HomescreenConfigurationParseConfig_MultiView
 Use Case Name: Initialization
 Test Summary：A --config master file yields one Config per [[view]], each with

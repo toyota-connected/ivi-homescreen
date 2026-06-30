@@ -28,6 +28,9 @@ add_executable(${PROJECT_NAME}
         backend/backend_registry.cc
         backend/register_backends.cc
         configuration/configuration.cc
+        # Backend-agnostic output resolver (pure name/serial matching); the
+        # per-backend output providers feed it via the IDisplay seam.
+        display/output.cc
         engine.cc
         libflutter_engine.cc
         main.cc

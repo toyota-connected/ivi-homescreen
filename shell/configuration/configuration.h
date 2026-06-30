@@ -21,6 +21,7 @@
 #define TOML_EXCEPTIONS 0
 #include <tomlplusplus/toml.hpp>
 
+#include "display/output.h"
 #include "utils.h"
 
 class Configuration {
@@ -112,6 +113,9 @@ class Configuration {
       // Steam Deck's right trackpad) while leaving an external mouse alone.
       // Matched by libinput device-name substring; first match wins.
       std::vector<std::string> drm_input_transforms;
+      // Pin this view to a physical output by stable name (see
+      // homescreen::ResolveOutput). Empty → binds to the primary output.
+      homescreen::OutputMatch output;
     } view;
 
     // Path to a master config.toml passed via --config. Process-level: it can

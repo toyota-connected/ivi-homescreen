@@ -310,6 +310,13 @@ annotated all-keys file see
 | `[view.backend.drm]` | `primary_format` | `string` | `auto` | `auto\|xrgb8888\|xbgr8888\|argb8888\|abgr8888\|rgb565` | drm |
 | `[view.backend.drm]` | `rotation` | `int` | `0` | `0\|90\|180\|270` | drm |
 | `[view.backend.drm]` | `stage_cursor` | `string` | `auto` | `auto\|yes\|no` | drm |
+| `[view.output]` | `drm_connector` | `string` | `(none)` | `e.g. HDMI-A-1` | drm |
+| `[view.output]` | `index` | `int` | `(none)` | `int` | all |
+| `[view.output]` | `name` | `string` | `(primary)` | `e.g. DP-1, HDMI-A-1` | all |
+| `[view.output]` | `on_disconnect` | `string` | `suspend` | `suspend\|teardown` | all |
+| `[view.output]` | `preload` | `bool` | `false` | `true\|false` | all |
+| `[view.output]` | `serial` | `string` | `(none)` | `EDID serial` | drm |
+| `[view.output]` | `wl_name` | `string` | `(none)` | `e.g. DP-1` | wayland |
 
 <!-- END CONFIG-REFERENCE -->
 
