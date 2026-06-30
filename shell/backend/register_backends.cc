@@ -46,7 +46,8 @@
 #include "display/drm_display.h"
 #endif
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-#include "display/drm_mode_list.h"  // PrintDrmModes for --drm-list-modes
+#include "display/drm_device_resolver.h"  // ResolveDrmDevice
+#include "display/drm_mode_list.h"        // PrintDrmModes for --drm-list-modes
 #endif
 #if BUILD_BACKEND_SOFTWARE
 #if BUILD_SOFTWARE_SINK_DRM
@@ -83,8 +84,16 @@ std::shared_ptr<IDisplay> MakeDrmDisplay(
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
   const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
+  // Resolve the card once here; the DRM backend reads it back from the display
+  // (device_path()) so both agree. ResolveDrmDevice logs the choice / the
+  // reason it could not pick one.
+  auto device = homescreen::ResolveDrmDevice(configs[0].view.drm_device);
+  if (!device) {
+    std::exit(EXIT_FAILURE);
+  }
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
-                                      static_cast<int32_t>(h), 60.0, no_seat);
+                                      static_cast<int32_t>(h), 60.0,
+                                      std::move(*device), no_seat);
 }
 #endif
 
@@ -218,9 +227,16 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // cfg_.width.value_or(mode_.hdisplay), i.e. the native mode. When -f
   // is combined with explicit width/height, -f wins — matches how most
   // CLI tools handle a scalar "use native" flag vs. explicit sizing.
+  // DrmDisplay (built first by App::BuildDisplays) resolved and owns the card;
+  // read it back so the backend and display target the same device. In a DRM
+  // build MakeDrmDisplay always returns a DrmDisplay, so the cast fails only on
+  // programmer error.
+  auto* drm_display = dynamic_cast<DrmDisplay*>(display);
+  assert(drm_display != nullptr);
+
   const bool fullscreen = config.view.fullscreen.value_or(false);
   DrmConfig cfg{
-      config.view.drm_device.value_or("/dev/dri/card1"),
+      drm_display->device_path(),
       fullscreen ? std::optional<uint32_t>{} : config.view.width,
       fullscreen ? std::optional<uint32_t>{} : config.view.height,
       config.debug_backend.value_or(false),
@@ -252,14 +268,9 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // also skip the foreground-VT guard on its direct-open path.
   cfg.no_seat = config.view.drm_no_seat.value_or(false);
 
-  // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
-  // process-wide libseat session. Pull the raw pointer — may be null
-  // when no seat backend is available, in which case DrmBackend takes
-  // the legacy direct-open path. In a DRM build, MakeDisplay always
-  // returns a DrmDisplay, so dynamic_cast fails only on programmer
-  // error; assert keeps the invariant loud.
-  auto* drm_display = dynamic_cast<DrmDisplay*>(display);
-  assert(drm_display != nullptr);
+  // drm_display (resolved above) owns the process-wide libseat session — it may
+  // be null when no seat backend is available, in which case DrmBackend takes
+  // the legacy direct-open path.
   m_backend = DrmBackend::Create(cfg, drm_display->session());
 
   // DrmBackend::Create returns nullptr on any init failure (libseat
@@ -320,9 +331,8 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
           ? *config.view.drm_mode
           : std::string{};
   auto vk_backend = VulkanDrmBackend::Create(
-      config.view.drm_device.value_or("/dev/dri/card1"),
-      config.debug_backend.value_or(false), drm_display->session(), drm_mode,
-      config.view.drm_rotation.value_or(0));
+      drm_display->device_path(), config.debug_backend.value_or(false),
+      drm_display->session(), drm_mode, config.view.drm_rotation.value_or(0));
 
   // Create returns nullptr on any init failure (unsupported device, no
   // zero-copy scanout path). Continuing would dereference a null backend in
