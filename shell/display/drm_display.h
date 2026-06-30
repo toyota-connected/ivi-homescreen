@@ -17,8 +17,11 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+#include <drm-cxx/core/device.hpp>
 
 #include "display/drm_output_provider.h"
 #include "display/idisplay.h"
@@ -54,6 +57,15 @@ class DrmDisplay final : public IDisplay {
   [[nodiscard]] homescreen::DrmSession* session() const {
     return session_.get();
   }
+
+  // The card opened once and held master, shared by every backend that scans
+  // out to this device (the device-context owns the master, not the per-view
+  // backend). Acquired lazily on the first call: via the libseat session when
+  // present, else a direct open + drmSetMaster behind the foreground-VT guard
+  // (unless --drm-no-seat). Returns null when the card could not be opened or
+  // master could not be taken (the caller fail-fasts). The pointee outlives the
+  // backends (this display is shared and destroyed after them).
+  [[nodiscard]] drm::Device* SharedDevice();
 
   void StartEvents() override;
   void StopEvents() override;
@@ -134,6 +146,10 @@ class DrmDisplay final : public IDisplay {
   // so it can seed it.
   std::string device_path_;
 
+  // --drm-no-seat: skip the foreground-VT guard on the direct-open path when
+  // SharedDevice() falls back (no libseat session).
+  bool no_seat_;
+
   // Enumerates this card's connectors as outputs (libdrm only, no master).
   homescreen::DrmOutputProvider output_provider_;
 
@@ -150,4 +166,10 @@ class DrmDisplay final : public IDisplay {
   // is there so a Wayland-client + DRM-rendering configuration can swap in
   // a WaylandSeat without changing this class.
   std::unique_ptr<homescreen::ISeat> seat_;
+
+  // The shared card + master (see SharedDevice). Declared last so it is
+  // destroyed first -- master is dropped and the fd closed before the seat and
+  // session tear down. drm::Device is RAII (closes the fd on destruction).
+  std::optional<drm::Device> drm_dev_{};
+  bool drm_master_ = false;  // true after this display took master on drm_dev_
 };

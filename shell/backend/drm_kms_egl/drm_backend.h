@@ -151,8 +151,12 @@ class DrmBackend : public Backend {
   // master handoff on VT switch so both are skipped. The caller retains
   // ownership of the session; it must
   // outlive the backend.
+  // @p shared_device is the card opened + held at master by the device-context
+  // (DrmDisplay::SharedDevice); the backend scans out through it without taking
+  // master itself. It is non-owning and must outlive the backend.
   static std::unique_ptr<DrmBackend> Create(const DrmConfig& cfg,
-                                            homescreen::DrmSession* session);
+                                            homescreen::DrmSession* session,
+                                            drm::Device* shared_device);
   ~DrmBackend() override;
 
   DrmBackend(const DrmBackend&) = delete;
@@ -312,10 +316,10 @@ class DrmBackend : public Backend {
   DrmConfig cfg_;
   homescreen::DrmSession* session_ = nullptr;
 
-  // DRM — drm::Device is RAII (closes fd on destruction), unless
-  // constructed via Device::from_fd (libseat-owned fd path).
-  std::optional<drm::Device> drm_dev_{};
-  bool drm_master_ = false;  // true after a successful drmSetMaster
+  // The shared card (opened + held at master by DrmDisplay::SharedDevice).
+  // Non-owning: the device-context owns it and outlives this backend, so the
+  // backend neither takes master nor closes the fd.
+  drm::Device* drm_dev_ = nullptr;
   uint32_t connector_id_ = 0;
   uint32_t crtc_id_ = 0;
   uint32_t crtc_index_ = 0;
