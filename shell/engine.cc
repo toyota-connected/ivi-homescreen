@@ -107,7 +107,8 @@ extern "C" void EngineThreadPrioritySetter(FlutterThreadPriority prio) {
 
 Engine::Engine(FlutterView* view,
                const size_t index,
-               const std::vector<const char*>& vm_args_c,
+               const std::vector<const char*>& command_line_args_c,
+               const std::vector<const char*>& dart_entrypoint_args_c,
                const std::string& bundle_path,
                const int32_t accessibility_features)
     : m_index(index),
@@ -123,10 +124,10 @@ Engine::Engine(FlutterView* view,
   SPDLOG_TRACE("({}) +Engine::Engine", m_index);
 
   m_args.struct_size = sizeof(FlutterProjectArgs);
-  m_args.command_line_argc = static_cast<int>(vm_args_c.size());
-  m_args.command_line_argv = vm_args_c.data();
-  m_args.dart_entrypoint_argc = static_cast<int>(vm_args_c.size());
-  m_args.dart_entrypoint_argv = vm_args_c.data();
+  m_args.command_line_argc = static_cast<int>(command_line_args_c.size());
+  m_args.command_line_argv = command_line_args_c.data();
+  m_args.dart_entrypoint_argc = static_cast<int>(dart_entrypoint_args_c.size());
+  m_args.dart_entrypoint_argv = dart_entrypoint_args_c.data();
   m_args.platform_message_callback = OnFlutterPlatformMessage;
   m_args.persistent_cache_path = m_cache_path.c_str();
   m_args.is_persistent_cache_read_only = false;

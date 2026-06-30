@@ -50,11 +50,11 @@ class TaskRunner;
 #include "view/present_layer_sequencer.h"
 #endif
 
-class Shell;
+class Backend;
 
 class Engine;
 
-class WaylandEglBackend : public Egl, public Shell {
+class WaylandEglBackend : public Egl, public Backend {
  public:
   // Maximum damage history - for triple buffering we need to store damage for
   // last two frames.

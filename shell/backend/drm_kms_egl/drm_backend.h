@@ -141,7 +141,7 @@ struct DrmConfig {
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
 // --drm-list-modes path is shared verbatim with the drm_kms_vulkan backend.
 
-class DrmBackend : public Shell {
+class DrmBackend : public Backend {
   friend class DrmCompositor;
 
  public:
@@ -262,7 +262,7 @@ class DrmBackend : public Shell {
   }
 
  private:
-  DrmBackend(const DrmConfig& cfg, homescreen::DrmSession* session);
+  DrmBackend(DrmConfig cfg, homescreen::DrmSession* session);
   bool InitDrm();
   bool InitGbm();
   bool InitEgl();

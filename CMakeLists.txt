@@ -37,40 +37,24 @@ project(ivi-homescreen
 include(git)
 include(options)
 
-if (BUILD_BACKEND_DRM_KMS_EGL)
-    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
-        message(FATAL_ERROR
-                "BUILD_BACKEND_DRM_KMS_EGL is mutually exclusive with "
-                "BUILD_BACKEND_WAYLAND_EGL and BUILD_BACKEND_WAYLAND_VULKAN")
-    endif ()
-endif ()
-
-if (BUILD_BACKEND_DRM_KMS_VULKAN)
-    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
-        BUILD_BACKEND_DRM_KMS_EGL)
-        message(FATAL_ERROR
-                "BUILD_BACKEND_DRM_KMS_VULKAN is mutually exclusive with "
-                "BUILD_BACKEND_WAYLAND_EGL, BUILD_BACKEND_WAYLAND_VULKAN, and "
-                "BUILD_BACKEND_DRM_KMS_EGL")
-    endif ()
-endif ()
-
-# Wayland EGL + Wayland Vulkan may now coexist in one binary: both share the
-# same Wayland Display, and Shell::Create selects the renderer per view at
-# runtime from `view.backend` ("egl" | "vulkan"). (The former #if/#elif chain
-# that forced a single choice has been replaced by runtime selection.)
-
-# Software backend is a pure-CPU presenter with no GPU or display-server
-# dependencies; the renderer config is FlutterRendererType.kSoftware,
-# incompatible with the GL/Vulkan configs the other backends produce.
-# Reject the combination at configure time.
-if (BUILD_BACKEND_SOFTWARE)
-    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
-        BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
-        message(FATAL_ERROR
-                "BUILD_BACKEND_SOFTWARE is mutually exclusive with the "
-                "DRM/Wayland EGL/Vulkan backends — pick exactly one")
-    endif ()
+# Backend selection is no longer mutually exclusive: every BUILD_BACKEND_* may
+# be ON together and all selected backends link into one binary. The active
+# backend is resolved at runtime via backend::ShellRegistry (see
+# shell/backend/register_backends.cc + main.cc) rather than chosen at compile
+# time. Each backend contributes its own renderer config (Backend::GetRenderConfig
+# is virtual: kOpenGL / kVulkan / kSoftware) and its own App loop mode, so the
+# former three #if/#elif chains and the configure-time FATAL_ERROR guards that
+# enforced a single choice have both been removed.
+#
+# At least one backend must still be selected, otherwise the registry is empty
+# and main() has nothing to run.
+if (NOT (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
+         BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
+         BUILD_BACKEND_SOFTWARE))
+    message(FATAL_ERROR
+            "No backend selected — enable at least one BUILD_BACKEND_* "
+            "(WAYLAND_EGL, WAYLAND_VULKAN, DRM_KMS_EGL, DRM_KMS_VULKAN, "
+            "SOFTWARE)")
 endif ()
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
@@ -97,8 +81,13 @@ if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
 endif ()
 
 # The software backend resolves XCursor themes via drm-cxx's loader sources
-# built in-tree (no display deps); see cmake/drm_cxx_cursor_load.cmake.
-if (BUILD_BACKEND_SOFTWARE)
+# built in-tree (no display deps); see cmake/drm_cxx_cursor_load.cmake. When a
+# DRM backend is ALSO compiled in, it already links drm-cxx::drm-cxx — which
+# contains the very same drm::cursor::{Theme,Cursor} objects — so building the
+# standalone loader too would duplicate those symbols at link. In that case the
+# software backend reuses drm-cxx::drm-cxx instead (see shell/CMakeLists.txt).
+if (BUILD_BACKEND_SOFTWARE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR
+        BUILD_BACKEND_DRM_KMS_VULKAN))
     include(drm_cxx_cursor_load)
 endif ()
 

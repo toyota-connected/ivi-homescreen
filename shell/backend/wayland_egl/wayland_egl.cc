@@ -50,7 +50,7 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
                                      const bool debug_backend,
                                      const int buffer_size)
     : Egl(display, buffer_size, debug_backend),
-      Shell(),
+      Backend(),
       m_initial_width(initial_width),
       m_initial_height(initial_height) {
   if (shell_display != nullptr) {

@@ -13,7 +13,7 @@
 # device (no physical display required) and sanity-checks the run:
 #
 #   1. vkms module is loaded and /dev/dri/cardN for it exists.
-#   2. A bundle copy is prepared with drm_device pinned to the vkms node.
+#   2. A bundle copy is prepared; the vkms node is selected via --drm-device.
 #   3. homescreen is launched; after a startup grace period we confirm the
 #      process is still alive.
 #   4. Optional strace sampling counts DRM page-flip ioctls to verify that
@@ -124,47 +124,6 @@ ensure_bundle_copy() {
     [[ -f "$dst/config.toml" ]] || die "bundle has no config.toml"
 }
 
-# Non-destructively edit the copied config.toml to pin drm_device. Adds a
-# [view] table if missing; replaces any existing drm_device line within
-# [view]; otherwise appends it. awk does the parsing — sed is too blunt
-# with nested tables.
-pin_drm_device() {
-    local cfg="$1" card="$2"
-    awk -v card="$card" '
-        BEGIN {
-            in_view = 0
-            wrote = 0
-            saw_view = 0
-        }
-        /^\[view\]/ {
-            print
-            print "drm_device = \"" card "\""
-            in_view = 1
-            saw_view = 1
-            wrote = 1
-            next
-        }
-        /^\[/ {
-            in_view = 0
-            print
-            next
-        }
-        in_view && /^[[:space:]]*drm_device[[:space:]]*=/ {
-            # Drop any prior override; the injected line above wins.
-            next
-        }
-        { print }
-        END {
-            if (!saw_view) {
-                print ""
-                print "[view]"
-                print "drm_device = \"" card "\""
-            }
-        }
-    ' "$cfg" > "$cfg.new"
-    mv "$cfg.new" "$cfg"
-}
-
 check_ptrace_scope() {
     local scope
     if [[ -r /proc/sys/kernel/yama/ptrace_scope ]]; then
@@ -221,7 +180,6 @@ trap 'rm -rf "$TMPDIR"' EXIT
 BUNDLE_COPY="$TMPDIR/bundle"
 mkdir -p "$BUNDLE_COPY"
 ensure_bundle_copy "$BUNDLE_COPY"
-pin_drm_device "$BUNDLE_COPY/config.toml" "$VKMS_CARD"
 log "prepared bundle copy at $BUNDLE_COPY"
 
 # ─── Launch ──────────────────────────────────────────────────────────────
@@ -234,8 +192,9 @@ if [[ "$SOFTWARE_RENDER" == "1" ]]; then
     log "software rendering: LIBGL_ALWAYS_SOFTWARE=1"
 fi
 
-log "launching $HOMESCREEN -b $BUNDLE_COPY -d"
-env "${LAUNCH_ENV[@]}" "$HOMESCREEN" -b "$BUNDLE_COPY" -d >"$LOG" 2>&1 &
+log "launching $HOMESCREEN -b $BUNDLE_COPY --drm-device $VKMS_CARD -d"
+env "${LAUNCH_ENV[@]}" "$HOMESCREEN" -b "$BUNDLE_COPY" \
+    --drm-device "$VKMS_CARD" -d >"$LOG" 2>&1 &
 HS_PID=$!
 
 cleanup_hs() {

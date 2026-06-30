@@ -19,8 +19,9 @@
 // misconfigured-Yocto / pre-driver-install image the gate guards against)
 // surfaces as a catchable failure here rather than an unresolved-symbol link
 // error. This TU owns the single dynamic-dispatcher storage definition for the
-// drm_kms_vulkan backend (Wayland-Vulkan's wayland_vulkan.cc owns the other;
-// the two backends are mutually exclusive, so exactly one is ever linked).
+// drm_kms_vulkan backend; when the Wayland-Vulkan backend is also compiled into
+// the same binary it suppresses its own copy (see below) so exactly one
+// definition survives.
 //
 // System headers are included before vulkan.hpp so the stat()/sysmacros use in
 // DrmNodeNumber resolves cleanly.
@@ -29,6 +30,13 @@
 
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
+// This TU owns the single vulkan.hpp dynamic-dispatcher storage definition for
+// the drm_kms_vulkan backend AND for the standalone drm_kms_vulkan_probe (which
+// compiles this TU but never wayland_vulkan.cc). It is therefore unconditional
+// here; when the Wayland-Vulkan backend is ALSO compiled into the main binary,
+// wayland_vulkan.cc suppresses ITS copy (gated on
+// !BUILD_BACKEND_DRM_KMS_VULKAN) so exactly one definition survives in every
+// binary.
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #include "device_caps.h"

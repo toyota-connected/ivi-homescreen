@@ -7,7 +7,10 @@
 
 class CrashHandler {
  public:
-  explicit CrashHandler(const std::string& bundle_path);
+  // |config_path| is the full path to the config.toml holding the process-level
+  // [sentry] table (the --config master file when given, else the first
+  // bundle's config.toml).
+  explicit CrashHandler(const std::string& config_path);
 
   ~CrashHandler();
 
@@ -25,7 +28,7 @@ class CrashHandler {
     std::vector<std::string> attachments;
   };
 
-  static SentryConfig LoadConfig(const std::string& bundle_path);
+  static SentryConfig LoadConfig(const std::string& config_path);
 
   SentryConfig config_;
   bool initialized_ = false;

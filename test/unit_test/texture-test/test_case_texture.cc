@@ -36,9 +36,11 @@ FlutterView* createFlutterViewInstance() {
 Engine* createEngineInstance() {
   // setup parameter
   FlutterView* view = createFlutterViewInstance();
-  std::vector<const char*> vm_args_c;
+  std::vector<const char*> command_line_args_c;
+  std::vector<const char*> dart_entrypoint_args_c;
 
-  Engine* engine = new Engine(view, 1, vm_args_c, kBundlePath, 1);
+  Engine* engine = new Engine(view, 1, command_line_args_c,
+                              dart_entrypoint_args_c, kBundlePath, 1);
   return engine;
 }
 

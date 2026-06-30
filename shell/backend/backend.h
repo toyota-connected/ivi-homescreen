@@ -44,14 +44,15 @@ struct BackendEglContext {
                         // visible on the raster thread.
 };
 
-// The unified display-target interface: a Shell owns surface lifecycle, the
+// The unified display-target interface: a Backend owns surface lifecycle, the
 // Flutter renderer/compositor config, and vsync for one presentation target
-// (Wayland compositor, DRM-KMS, software dumb buffer). The intent is
-// that one factory builds the right Shell per FlutterView and each instance is
-// isolated so heterogeneous shells can run concurrently. The concrete
-// implementations are the *Backend classes (WaylandEglBackend, DrmBackend,
-// SoftwareBackend, ...), pending a cosmetic rename to *Shell.
-class Shell {
+// (Wayland compositor, DRM-KMS, software dumb buffer). One factory
+// (Backend::Create) builds the right concrete backend per FlutterView, and each
+// instance is isolated so heterogeneous backends can run concurrently. The
+// concrete implementations are the *Backend classes (WaylandEglBackend,
+// DrmBackend, SoftwareBackend, ...). Distinct from the Wayland
+// compositor-protocol shells in wayland/shell/ (the --shell option).
+class Backend {
  public:
   enum Type {
     WaylandEgl,
@@ -61,14 +62,14 @@ class Shell {
     DrmKmsVulkan,
   };
 
-  Shell() = default;
-  virtual ~Shell() = default;
+  Backend() = default;
+  virtual ~Backend() = default;
 
-  Shell(const Shell&) = delete;
-  const Shell& operator=(const Shell&) = delete;
+  Backend(const Backend&) = delete;
+  const Backend& operator=(const Backend&) = delete;
 
   /**
-   * @brief The single factory for a per-view Shell. Selects the concrete
+   * @brief The single factory for a per-view Backend. Selects the concrete
    * implementation (Wayland-EGL/-Vulkan, DRM-KMS-EGL/-Vulkan, software)
    * from the compiled-in backends + @p config, constructs an isolated
    * instance, and performs any backend-specific post-creation wiring (e.g. DRM
@@ -76,7 +77,7 @@ class Shell {
    * FlutterView. Calls exit() on a hard backend-init failure. Defined in
    * backend/shell_factory.cc.
    */
-  [[nodiscard]] static std::shared_ptr<Shell> Create(
+  [[nodiscard]] static std::shared_ptr<Backend> Create(
       const Configuration::Config& config,
       const std::shared_ptr<IDisplay>& display);
 

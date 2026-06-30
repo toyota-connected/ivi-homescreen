@@ -21,10 +21,11 @@
 #include <utility>
 
 #include "app.h"
+#include "backend/backend_registry.h"
 
 // Independent guards so several backends can be compiled into one binary
-// (Shell::Create selects per view at runtime). Header guards make the repeated
-// drm_display.h include harmless.
+// (Backend::Create selects per view at runtime). Header guards make the
+// repeated drm_display.h include harmless.
 #if BUILD_BACKEND_DRM_KMS_EGL
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"  // DrmCursor -> ICursorShapeSink*
@@ -66,305 +67,57 @@
 extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 #endif
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_SOFTWARE
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
-#endif
 #endif
 
 extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                                    FlutterView* view);
 
-// The single per-view Shell factory (declared in backend/backend.h). Selects
-// the concrete backend from the compiled-in set + config and performs any
-// backend-specific post-creation wiring. Extracted verbatim from the old
-// FlutterView constructor body.
-std::shared_ptr<Shell> Shell::Create(const Configuration::Config& config,
-                                     const std::shared_ptr<IDisplay>& display) {
-  std::shared_ptr<Shell> m_backend;
-#if BUILD_BACKEND_DRM_KMS_EGL
-  {
-    auto parse_tri = [](const std::optional<std::string>& s,
-                        drm_config::TriState def =
-                            drm_config::TriState::kAuto) {
-      if (!s.has_value() || s->empty() || *s == "auto") {
-        return def;
-      }
-      if (*s == "yes" || *s == "true" || *s == "on") {
-        return drm_config::TriState::kYes;
-      }
-      if (*s == "no" || *s == "false" || *s == "off") {
-        return drm_config::TriState::kNo;
-      }
-      spdlog::warn("[FlutterView] drm tri-state '{}' unrecognized; using auto",
-                   *s);
-      return drm_config::TriState::kAuto;
-    };
-    auto parse_compositor = [](const std::optional<std::string>& s) {
-      if (!s.has_value() || s->empty() || *s == "auto") {
-        return drm_config::Compositor::kAuto;
-      }
-      if (*s == "planes") {
-        return drm_config::Compositor::kPlanes;
-      }
-      if (*s == "gl") {
-        return drm_config::Compositor::kGl;
-      }
-      spdlog::warn("[FlutterView] drm-compositor '{}' unrecognized; using auto",
-                   *s);
-      return drm_config::Compositor::kAuto;
-    };
-    auto parse_modeset = [](const std::optional<std::string>& s) {
-      if (!s.has_value() || s->empty() || *s == "auto") {
-        return drm_config::Modeset::kAuto;
-      }
-      if (*s == "legacy") {
-        return drm_config::Modeset::kLegacy;
-      }
-      if (*s == "atomic") {
-        return drm_config::Modeset::kAtomic;
-      }
-      spdlog::warn("[FlutterView] drm-modeset '{}' unrecognized; using auto",
-                   *s);
-      return drm_config::Modeset::kAuto;
-    };
-    auto parse_format = [](const std::optional<std::string>& s) {
-      if (!s.has_value() || s->empty() || *s == "auto") {
-        return drm_config::PrimaryFormat::kAuto;
-      }
-      if (*s == "xrgb8888") {
-        return drm_config::PrimaryFormat::kXrgb8888;
-      }
-      if (*s == "xbgr8888") {
-        return drm_config::PrimaryFormat::kXbgr8888;
-      }
-      if (*s == "argb8888") {
-        return drm_config::PrimaryFormat::kArgb8888;
-      }
-      if (*s == "abgr8888") {
-        return drm_config::PrimaryFormat::kAbgr8888;
-      }
-      if (*s == "rgb565") {
-        return drm_config::PrimaryFormat::kRgb565;
-      }
-      spdlog::warn(
-          "[FlutterView] drm-primary-format '{}' unrecognized "
-          "(expected auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565); "
-          "using auto",
-          *s);
-      return drm_config::PrimaryFormat::kAuto;
-    };
-
-    // --fullscreen on DRM = drive the panel at its preferred mode with no
-    // framing. Clearing width/height here lets DrmBackend fall through to
-    // cfg_.width.value_or(mode_.hdisplay), i.e. the native mode. When -f
-    // is combined with explicit width/height, -f wins — matches how most
-    // CLI tools handle a scalar "use native" flag vs. explicit sizing.
-    const bool fullscreen = config.view.fullscreen.value_or(false);
-    DrmConfig cfg{
-        config.view.drm_device.value_or("/dev/dri/card1"),
-        fullscreen ? std::optional<uint32_t>{} : config.view.width,
-        fullscreen ? std::optional<uint32_t>{} : config.view.height,
-        config.debug_backend.value_or(false),
-    };
-    cfg.disable_cursor = config.disable_cursor.value_or(false);
-    cfg.cursor_theme = config.cursor_theme;
-    // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
-    // `drm_connector = ""` in TOML shouldn't force a strict empty-name
-    // match against zero connectors.
-    if (config.view.drm_connector.has_value() &&
-        !config.view.drm_connector->empty()) {
-      cfg.connector_name = config.view.drm_connector;
-    }
-    if (config.view.drm_mode.has_value() && !config.view.drm_mode->empty()) {
-      cfg.mode_spec = config.view.drm_mode;
-    }
-    cfg.compositor = parse_compositor(config.view.drm_compositor);
-    cfg.modeset = parse_modeset(config.view.drm_modeset);
-    cfg.allow_nonblock_modeset =
-        parse_tri(config.view.drm_allow_nonblock_modeset);
-    cfg.primary_format = parse_format(config.view.drm_primary_format);
-    cfg.overlay_planes = parse_tri(config.view.drm_overlay_planes);
-    cfg.explicit_sync = parse_tri(config.view.drm_explicit_sync);
-    cfg.async_flip = parse_tri(config.view.drm_async_flip);
-    // kAuto (default) resolves per driver in DrmBackend::Create — staging is
-    // enabled only on nvidia-drm; yes/no force the choice.
-    cfg.stage_cursor = parse_tri(config.view.drm_stage_cursor);
-    // --drm-no-seat: DrmDisplay forced the session null; tell DrmBackend to
-    // also skip the foreground-VT guard on its direct-open path.
-    cfg.no_seat = config.view.drm_no_seat.value_or(false);
-
-    // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
-    // process-wide libseat session. Pull the raw pointer — may be null
-    // when no seat backend is available, in which case DrmBackend takes
-    // the legacy direct-open path. In a DRM build, MakeDisplay always
-    // returns a DrmDisplay, so dynamic_cast fails only on programmer
-    // error; assert keeps the invariant loud.
-    auto* drm_display = dynamic_cast<DrmDisplay*>(display.get());
-    assert(drm_display != nullptr);
-    m_backend = DrmBackend::Create(cfg, drm_display->session());
-
-    // DrmBackend::Create returns nullptr on any init failure (libseat
-    // take_device, drmSetMaster, no usable connector, GBM/EGL setup,
-    // …). Continuing would dereference a null backend in Engine::Run
-    // and SEGV; fail-fast with the same exit path as a missing bundle.
-    if (!m_backend) {
-      spdlog::critical("[FlutterView] DRM backend init failed; aborting");
-      exit(EXIT_FAILURE);
-    }
-
-    // Wire the HW cursor (if Create succeeded in opening one) to the
-    // seat dispatch thread so pointer events move the on-screen sprite.
-    // The pointer stays valid for the FlutterView's lifetime — both
-    // m_backend and drm_display are members destroyed in declaration
-    // order during ~FlutterView.
-    if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get());
-        drm_backend != nullptr) {
-      // Push the resolved framebuffer dimensions into the seat's
-      // cursor-clamp viewport. App::MakeDisplay seeds DrmDisplay with
-      // the config's view.width/height (defaults 1024x768) before the
-      // backend has resolved the actual mode — `-f` then promotes the
-      // FB to the full mode dimensions, leaving the seat's pointer
-      // clamp stuck at the config size unless we update it here.
-      drm_display->SetViewportSize(static_cast<int32_t>(drm_backend->width()),
-                                   static_cast<int32_t>(drm_backend->height()));
-      drm_display->SetCursor(drm_backend->drm_cursor());
-      // Composited cursor fallback (non-null only when no HW cursor plane).
-      drm_display->SetGlCursor(drm_backend->gl_cursor());
-      // Retarget the cursor sprite on activateSystemCursor: the HW cursor when
-      // a cursor plane exists, else the GL-composited fallback. gl_cursor() is
-      // typed as ICursorPositionSink*; cross-cast to the sibling shape-sink
-      // interface (GlCursor implements both).
-      if (auto* hw = drm_backend->drm_cursor()) {
-        drm_display->SetCursorShapeSink(hw);
-      } else {
-        drm_display->SetCursorShapeSink(
-            dynamic_cast<homescreen::ICursorShapeSink*>(
-                drm_backend->gl_cursor()));
-      }
-    }
-  }
-#elif BUILD_BACKEND_DRM_KMS_VULKAN
-  {
-    // Shares DrmDisplay (libseat session, refresh rate, cursor) with the EGL
-    // DRM backend; only the renderer differs. App::MakeDisplay always builds a
-    // DrmDisplay in a DRM build, so the cast failing is programmer error.
-    auto* drm_display = dynamic_cast<DrmDisplay*>(display.get());
-    assert(drm_display != nullptr);
-    const std::string drm_mode =
-        (config.view.drm_mode.has_value() && !config.view.drm_mode->empty())
-            ? *config.view.drm_mode
-            : std::string{};
-    auto vk_backend = VulkanDrmBackend::Create(
-        config.view.drm_device.value_or("/dev/dri/card1"),
-        config.debug_backend.value_or(false), drm_display->session(), drm_mode,
-        config.view.drm_rotation.value_or(0));
-
-    // Create returns nullptr on any init failure (unsupported device, no
-    // zero-copy scanout path). Continuing would dereference a null backend in
-    // Engine::Run and SEGV; fail-fast with the same exit path the EGL DRM
-    // backend uses.
-    if (!vk_backend) {
-      spdlog::critical(
-          "[FlutterView] DRM Vulkan backend init failed; aborting");
-      exit(EXIT_FAILURE);
-    }
-
-    // Wire the self-committing HW cursor (if Create opened one) to the seat
-    // dispatch thread, and clamp the pointer to the resolved scanout size. The
-    // cursor commits on its own (not staged into the per-frame scanout commit),
-    // so it stays responsive while the UI is idle. The pointer stays valid for
-    // the FlutterView's lifetime (both members, destroyed in declaration
-    // order).
-    drm_display->SetViewportSize(static_cast<int32_t>(vk_backend->width()),
-                                 static_cast<int32_t>(vk_backend->height()));
-    drm_display->SetCursor(vk_backend->drm_cursor());
-    drm_display->SetCursorShapeSink(vk_backend->drm_cursor());
-    drm_display->SetCursorRotation(vk_backend->rotation());
-    drm_display->SetInputTransforms(config.view.drm_input_transforms);
-    m_backend = vk_backend;
-  }
-#elif BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  {
-    auto* wl = dynamic_cast<Display*>(display.get());
-    // Per-view renderer pick when both Wayland backends are compiled in:
-    // view.backend == "vulkan" selects Vulkan, otherwise EGL. If only one is
-    // compiled in, that one is used regardless.
-    bool use_vulkan = config.view.backend.value_or("") == "vulkan";
-#if !BUILD_BACKEND_WAYLAND_EGL
-    use_vulkan = true;  // Vulkan is the only Wayland backend available
-#endif
-    (void)use_vulkan;
-#if BUILD_BACKEND_WAYLAND_VULKAN
-    if (use_vulkan) {
-      // Mesa's Vulkan WSI on Wayland needs zwp_linux_dmabuf_v1 (modern) or
-      // wl_drm (legacy) to allocate GPU buffers; warn loudly if absent.
-      if (!wl->HasLinuxDmabuf() && !wl->HasWlDrm()) {
-        spdlog::warn(
-            "[WaylandVulkanBackend] compositor advertises neither "
-            "zwp_linux_dmabuf_v1 nor wl_drm — Mesa Vulkan WSI cannot "
-            "allocate swapchain images. Swapchain init will fail; fix on the "
-            "compositor side (e.g. Weston needs --backend=drm-backend or its "
-            "linux-dmabuf support built in).");
-      }
-      m_backend = std::make_shared<WaylandVulkanBackend>(
-          wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
-          config.view.height.value_or(kDefaultViewHeight),
-          config.debug_backend.value_or(false));
-    }
-#endif
-#if BUILD_BACKEND_WAYLAND_EGL
-    if (!m_backend) {
-      m_backend = std::make_shared<WaylandEglBackend>(
-          wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
-          config.view.height.value_or(kDefaultViewHeight),
-          config.debug_backend.value_or(false), kEglBufferSize);
-    }
-#endif
-  }
-#elif BUILD_BACKEND_SOFTWARE
-  {
-    // Sink is picked at startup from IVI_SW_SINK. Default 'none' just
-    // discards frames; 'memory' keeps the latest in-process; 'file:
-    // <pattern>' writes PAM-format snapshots to disk.
-    // --drm-device (config.view.drm_device) selects the card for the drm-dumb
-    // sink, mirroring drm-kms-egl; empty lets the sink probe the first usable
-    // card. An explicit IVI_SW_SINK=drm-dumb:/dev/dri/cardN still overrides.
-    m_backend = std::make_shared<SoftwareBackend>(
-        config.view.width.value_or(kDefaultViewWidth),
-        config.view.height.value_or(kDefaultViewHeight),
-        MakeSinkFromEnv(config.view.drm_device.value_or(std::string{})));
-  }
-#endif
-  return m_backend;
+// The single per-view Backend factory (declared in backend/backend.h).
+// Delegates to the runtime BackendRegistry: the active descriptor's
+// make_backend holds the concrete-backend construction + post-creation wiring
+// that used to live here as an #if/#elif chain (now in
+// backend/register_backends.cc). The active descriptor is resolved once in
+// main(), before App is constructed.
+std::shared_ptr<Backend> Backend::Create(
+    const Configuration::Config& config,
+    const std::shared_ptr<IDisplay>& display) {
+  return backend::BackendRegistry::Instance().Active().make_backend(
+      config, display.get());
 }
 
 FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
                          const std::shared_ptr<IDisplay>& display)
     : m_display(display), m_config(std::move(config)), m_index(index) {
-  m_backend = Shell::Create(m_config, display);
+  m_backend = Backend::Create(m_config, display);
 
   SPDLOG_DEBUG("Width: {}, Height: {}",
                m_config.view.width.value_or(kDefaultViewWidth),
                m_config.view.height.value_or(kDefaultViewHeight));
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
-    !BUILD_BACKEND_SOFTWARE
-  auto* wl = dynamic_cast<Display*>(display.get());
-  m_wayland_window = std::make_shared<WaylandWindow>(
-      m_index, std::dynamic_pointer_cast<Display>(display),
-      m_config.view.window_type,
-      wl->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
-      m_config.view.wl_output_index.value_or(0), m_config.app_id,
-      m_config.view.fullscreen.value_or(false),
-      m_config.view.width.value_or(kDefaultViewWidth),
-      m_config.view.height.value_or(kDefaultViewHeight),
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
-      m_config.view.activation_area_x, m_config.view.activation_area_y,
-      m_config.view.activation_area_width, m_config.view.activation_area_height,
-      m_backend.get(), m_config.view.ivi_surface_id.value_or(0));
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  // Construct the WaylandWindow only when the active backend drives a Wayland
+  // Display. In a multi-backend binary the DRM/software backends are compiled
+  // in too; their IDisplay is not a wayland Display, so the cast is null and we
+  // skip (those backends render without a WaylandWindow).
+  if (auto* wl = dynamic_cast<Display*>(display.get())) {
+    m_wayland_window = std::make_shared<WaylandWindow>(
+        m_index, std::dynamic_pointer_cast<Display>(display),
+        m_config.view.window_type,
+        wl->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
+        m_config.view.wl_output_index.value_or(0), m_config.app_id,
+        m_config.view.fullscreen.value_or(false),
+        m_config.view.width.value_or(kDefaultViewWidth),
+        m_config.view.height.value_or(kDefaultViewHeight),
+        m_config.view.pixel_ratio.value_or(kDefaultPixelRatio),
+        m_config.view.activation_area_x, m_config.view.activation_area_y,
+        m_config.view.activation_area_width,
+        m_config.view.activation_area_height, m_backend.get(),
+        m_config.view.ivi_surface_id.value_or(0));
+  }
 #endif
 
   m_state = std::make_unique<FlutterDesktopViewControllerState>();
@@ -394,8 +147,6 @@ FlutterView::FlutterView(Configuration::Config config,
   m_state->text_input_plugin =
       std::make_unique<flutter::TextInputPlugin>(internal_plugin_messenger);
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
-    !BUILD_BACKEND_SOFTWARE
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   // Wire the compositor IME (zwp_text_input_v3) seam: the plugin drives the
   // Wayland Display's text-input on show/hide/cursor-rect, and Display posts
@@ -420,7 +171,6 @@ FlutterView::FlutterView(Configuration::Config config,
       wl_display->UpdateTextInputSurrounding(utf8, cursor, anchor);
     });
   }
-#endif
 #endif
 
   // Create KeyEventHandler and register it.
@@ -498,19 +248,27 @@ FlutterView::~FlutterView() {
   }
 }
 
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN && \
-    !BUILD_BACKEND_SOFTWARE
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 Display* FlutterView::GetDisplay() const {
   return dynamic_cast<Display*>(m_display.get());
 }
 #endif
 
 void FlutterView::Initialize() {
+  // Engine / Dart VM switches -> command_line_argv. argv[0] is the app id.
   std::vector<const char*> m_command_line_args_c;
-  m_command_line_args_c.reserve(m_config.view.vm_args.size());
+  m_command_line_args_c.reserve(m_config.view.engine_args.size() + 1);
   m_command_line_args_c.push_back(m_config.app_id.c_str());
-  for (const auto& arg : m_config.view.vm_args) {
+  for (const auto& arg : m_config.view.engine_args) {
     m_command_line_args_c.push_back(arg.c_str());
+  }
+
+  // Arguments to the Dart entrypoint main(List<String>) -> dart_entrypoint_argv
+  // (no argv[0] convention).
+  std::vector<const char*> m_dart_entrypoint_args_c;
+  m_dart_entrypoint_args_c.reserve(m_config.view.dart_args.size());
+  for (const auto& arg : m_config.view.dart_args) {
+    m_dart_entrypoint_args_c.push_back(arg.c_str());
   }
 
 #if BUILD_ACCESSIBILITY
@@ -519,7 +277,8 @@ void FlutterView::Initialize() {
 #endif
 
   m_flutter_engine = std::make_shared<Engine>(
-      this, m_index, m_command_line_args_c, m_config.view.bundle_path,
+      this, m_index, m_command_line_args_c, m_dart_entrypoint_args_c,
+      m_config.view.bundle_path,
       m_config.view.accessibility_features.value_or(0));
 
   m_state->engine = m_flutter_engine.get();
@@ -540,7 +299,7 @@ void FlutterView::Initialize() {
   // post-Engine::Run lifecycle hooks (DRM's OnSessionResumed →
   // ScheduleFrame; WaylandEgl's wp_presentation_feedback dispatch) can
   // marshal back to the FlutterEngineRun thread without a dynamic_cast.
-  // Backends that don't need either inherit no-op defaults from Shell.
+  // Backends that don't need either inherit no-op defaults from Backend.
   if (m_backend) {
     m_backend->SetEngineHandle(m_flutter_engine->GetFlutterEngine());
     m_backend->SetPlatformTaskRunner(m_flutter_engine->GetPlatformTaskRunner());
@@ -553,35 +312,53 @@ void FlutterView::Initialize() {
   display.single_display = true;
   display.refresh_rate =
       m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-  // DrmDisplay is constructed from the config-level width/height in app.cc,
-  // which may still hold the TOML-specified size even when `-f` cleared those
-  // values for the backend. Query the backend for the resolved FB size so
-  // fullscreen actually gets mode dims here instead of a stale 1024x768 etc.
+  // Resolve the engine's render extent from whichever backend is active at
+  // RUNTIME. Each compiled backend gets a chance to report its resolved size
+  // (DRM/software adopt the panel's native mode so fullscreen gets mode dims;
+  // Wayland uses the window size); fall back to the configured dims. Runtime
+  // dispatch so any combination of backends compiled into one binary works.
+  int32_t width = 0;
+  int32_t height = 0;
+  bool size_resolved = false;
 #if BUILD_BACKEND_DRM_KMS_EGL
-  auto* drm = dynamic_cast<DrmBackend*>(m_backend.get());
-#else
-  auto* drm = dynamic_cast<VulkanDrmBackend*>(m_backend.get());
+  if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
+    width = static_cast<int32_t>(drm->width());
+    height = static_cast<int32_t>(drm->height());
+    size_resolved = true;
+  }
 #endif
-  const auto width = static_cast<int32_t>(
-      drm ? drm->width() : m_config.view.width.value_or(kDefaultViewWidth));
-  const auto height = static_cast<int32_t>(
-      drm ? drm->height() : m_config.view.height.value_or(kDefaultViewHeight));
-#elif BUILD_BACKEND_SOFTWARE
-  // The SoftwareBackend adopts the sink's native mode (DRM / fbdev) as its
-  // resolved extent; render the engine at that so the frame fills + centers on
-  // the panel instead of being top-left cropped from a config-sized view.
-  // Falls back to the config dims for sinks with no native size (file/memory).
-  auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get());
-  const auto width = static_cast<int32_t>(
-      sw_backend ? sw_backend->width()
-                 : m_config.view.width.value_or(kDefaultViewWidth));
-  const auto height = static_cast<int32_t>(
-      sw_backend ? sw_backend->height()
-                 : m_config.view.height.value_or(kDefaultViewHeight));
-#else
-  auto [width, height] = m_wayland_window->GetSize();
+#if BUILD_BACKEND_DRM_KMS_VULKAN
+  if (!size_resolved) {
+    if (auto* drm = dynamic_cast<VulkanDrmBackend*>(m_backend.get())) {
+      width = static_cast<int32_t>(drm->width());
+      height = static_cast<int32_t>(drm->height());
+      size_resolved = true;
+    }
+  }
 #endif
+#if BUILD_BACKEND_SOFTWARE
+  if (!size_resolved) {
+    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
+      width = static_cast<int32_t>(sw_backend->width());
+      height = static_cast<int32_t>(sw_backend->height());
+      size_resolved = true;
+    }
+  }
+#endif
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  if (!size_resolved && m_wayland_window) {
+    const auto sz = m_wayland_window->GetSize();
+    width = static_cast<int32_t>(sz.first);
+    height = static_cast<int32_t>(sz.second);
+    size_resolved = true;
+  }
+#endif
+  if (!size_resolved) {
+    width =
+        static_cast<int32_t>(m_config.view.width.value_or(kDefaultViewWidth));
+    height =
+        static_cast<int32_t>(m_config.view.height.value_or(kDefaultViewHeight));
+  }
   display.width = static_cast<size_t>(width);
   display.height = static_cast<size_t>(height);
   display.device_pixel_ratio = m_flutter_engine->GetPixelRatio();
@@ -604,42 +381,38 @@ void FlutterView::Initialize() {
   // update view
   m_state->view = m_state->view_wrapper->view = this;
 
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-  // On the DRM path there is no WaylandWindow to trigger the initial
-  // window-metrics event. Without it Flutter never learns the viewport
-  // size and never schedules a frame. Send it explicitly now that the
-  // engine is running.
-  {
-    const auto result = m_flutter_engine->SetWindowSize(
-        static_cast<size_t>(height), static_cast<size_t>(width));
-    spdlog::info("[DrmBackend] SendWindowMetrics {}x{} result={}", width,
-                 height, static_cast<int>(result));
-  }
-#elif BUILD_BACKEND_SOFTWARE
-  // Same reason as DRM: no WaylandWindow to trigger the initial
-  // window-metrics event. Send it explicitly here so the bundle's Dart
-  // side gets a non-zero viewport on its first frame.
-  {
-    const auto result = m_flutter_engine->SetWindowSize(
-        static_cast<size_t>(height), static_cast<size_t>(width));
-    spdlog::info("[SoftwareBackend] SendWindowMetrics {}x{} result={}", width,
-                 height, static_cast<int>(result));
-  }
-  // Match the seat's pointer-clamp viewport to the rendered size so the
-  // pointer (and the software cursor) share the framebuffer coordinate space,
-  // and hand the display's cursor to the sink (which composites it).
-  if (auto* sw_display = dynamic_cast<SoftwareDisplay*>(m_display.get())) {
-    sw_display->SetViewportSize(width, height);
-    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
-      sw_backend->SetCursor(sw_display->cursor());
+  // Runtime backend dispatch for first-frame wiring. Wayland: the
+  // WaylandWindow's xdg configure triggers the initial window-metrics event, so
+  // just route engine events by surface pointer. DRM/software: there is no
+  // WaylandWindow, so Flutter never learns the viewport size on its own — send
+  // the window metrics explicitly or the first frame is never scheduled.
+  bool handled_by_wayland = false;
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  if (m_wayland_window) {
+    if (auto* wl = dynamic_cast<Display*>(m_display.get())) {
+      wl->SetEngine(m_wayland_window->GetBaseSurface(), m_flutter_engine.get());
     }
+    m_wayland_window->SetEngine(m_flutter_engine);
+    handled_by_wayland = true;
   }
-#else
-  // Engine events are decoded by surface pointer
-  dynamic_cast<Display*>(m_display.get())
-      ->SetEngine(m_wayland_window->GetBaseSurface(), m_flutter_engine.get());
-  m_wayland_window->SetEngine(m_flutter_engine);
 #endif
+  if (!handled_by_wayland) {
+    const auto result = m_flutter_engine->SetWindowSize(
+        static_cast<size_t>(height), static_cast<size_t>(width));
+    spdlog::info("[FlutterView] SendWindowMetrics {}x{} result={}", width,
+                 height, static_cast<int>(result));
+#if BUILD_BACKEND_SOFTWARE
+    // Match the seat's pointer-clamp viewport to the rendered size so the
+    // pointer (and the software cursor) share the framebuffer coordinate space,
+    // and hand the display's cursor to the sink (which composites it).
+    if (auto* sw_display = dynamic_cast<SoftwareDisplay*>(m_display.get())) {
+      sw_display->SetViewportSize(width, height);
+      if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
+        sw_backend->SetCursor(sw_display->cursor());
+      }
+    }
+#endif
+  }
 
   SPDLOG_DEBUG("({}) Engine running...", m_index);
 }

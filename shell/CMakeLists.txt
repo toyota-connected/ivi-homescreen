@@ -22,6 +22,11 @@ include(FindThreads)
 
 add_executable(${PROJECT_NAME}
         app.cc
+        # Runtime backend registry + the compiled-in backend registration. The
+        # registration TU gates each backend body behind its own BUILD_BACKEND_*
+        # guard, so single-backend builds still pull in only one backend.
+        backend/backend_registry.cc
+        backend/register_backends.cc
         configuration/configuration.cc
         engine.cc
         libflutter_engine.cc
@@ -126,10 +131,17 @@ if (BUILD_BACKEND_SOFTWARE)
         )
         target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::SW_LIBINPUT)
     endif ()
-    # Themed software cursor via the in-tree drm-cxx cursor loader (no display
-    # deps; defined in cmake/drm_cxx_cursor_load.cmake). Absent when the drm-cxx
-    # submodule isn't checked out — the cursor then stays the embedded arrow.
-    if (TARGET drm_cxx_cursor_load)
+    # Themed software cursor via drm-cxx's drm::cursor loader.
+    #   - A DRM backend is on: it already links drm-cxx::drm-cxx, which carries
+    #     the same drm::cursor::{Theme,Cursor} objects + headers (drm-cxx/src is
+    #     on the include path). Reuse it — linking the standalone loader too
+    #     would duplicate those symbols. Just enable the code path.
+    #   - Otherwise: the in-tree drm_cxx_cursor_load target (no display deps;
+    #     cmake/drm_cxx_cursor_load.cmake), absent when the drm-cxx submodule
+    #     isn't checked out — the cursor then stays the embedded arrow.
+    if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_SW_CURSOR_THEME=1)
+    elseif (TARGET drm_cxx_cursor_load)
         target_link_libraries(${PROJECT_NAME} PRIVATE drm_cxx_cursor_load)
         target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_SW_CURSOR_THEME=1)
     endif ()
@@ -332,6 +344,19 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers)
+    # When the Wayland-Vulkan backend coexists with another Vulkan backend
+    # (DRM-KMS-Vulkan) in one binary, several TUs include <vulkan/vulkan.h>
+    # (register_backends.cc / flutter_view.cc pull in both backend headers).
+    # The first include wins via the header guard, so the Wayland WSI platform
+    # must be configured globally: otherwise a TU that reaches the DRM backend
+    # header (plain <vulkan/vulkan.h>) first locks vulkan.h WITHOUT
+    # VK_KHR_wayland_surface, and wayland_vulkan.h's later vulkan.hpp then
+    # references the now-absent VkWaylandSurfaceCreateInfoKHR. Defining the
+    # macro on the target keeps every TU's vulkan.h configuration consistent.
+    # VkWaylandSurfaceCreateInfoKHR uses opaque struct wl_display* / wl_surface*
+    # so this pulls in no wayland-client.h dependency.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+            VK_USE_PLATFORM_WAYLAND_KHR=1)
 endif ()
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry)

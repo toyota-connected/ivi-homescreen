@@ -32,9 +32,23 @@
 #include "task_runner.h"
 #include "wayland/display.h"
 
+// The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
+// TU per binary. When the drm-kms-vulkan backend is also compiled in, that
+// backend's device_caps.cc owns the single definition (it must, since the
+// standalone vulkan probe compiles device_caps.cc but not this TU). Suppress
+// our copy in that case to avoid a duplicate symbol; vulkan.hpp still declares
+// vk::detail::defaultDispatchLoaderDynamic extern, so the reference below
+// resolves against device_caps.cc's definition.
+#if !BUILD_BACKEND_DRM_KMS_VULKAN
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+#endif
 
-const auto& d = vk::detail::defaultDispatchLoaderDynamic;
+// Accessor for the dynamic dispatcher (storage in device_caps.cc). A function
+// rather than a namespace-scope reference so there is no static-init-order
+// dependency on that other TU's global.
+static const auto& d() {
+  return vk::detail::defaultDispatchLoaderDynamic;
+}
 
 #define S1(x) #x
 #define S2(x) S1(x)
@@ -50,7 +64,7 @@ WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
                                            const uint32_t width,
                                            const uint32_t height,
                                            const bool enable_validation_layers)
-    : Shell(),
+    : Backend(),
       enable_validation_layers_(enable_validation_layers),
       resize_pending_(false),
       wl_display_(display),
@@ -161,44 +175,44 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // still be in use, which both the validation layers and Mesa's Wayland WSI
     // flag ("wl_buffer still attached" / "queue destroyed while proxies still
     // attached") and which can fault during vkDestroyDevice.
-    d.vkDeviceWaitIdle(device_);
+    d().vkDeviceWaitIdle(device_);
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
 #endif
     if (swapchain_command_pool_ != nullptr) {
-      d.vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
+      d().vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
     }
     for (auto sem : present_transition_semaphores_) {
       if (sem != nullptr) {
-        d.vkDestroySemaphore(device_, sem, nullptr);
+        d().vkDestroySemaphore(device_, sem, nullptr);
       }
     }
     present_transition_semaphores_.clear();
     if (image_ready_fence_ != nullptr) {
-      d.vkDestroyFence(device_, image_ready_fence_, nullptr);
+      d().vkDestroyFence(device_, image_ready_fence_, nullptr);
     }
     // Destroy the swapchain before the device. It is otherwise only torn down
     // on resize (InitializeSwapChain); on shutdown it must be released here so
     // the WSI hands its images' wl_buffers back to the compositor.
     if (swapchain_ != nullptr) {
-      d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+      d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
       swapchain_ = VK_NULL_HANDLE;
     }
-    d.vkDestroyDevice(device_, nullptr);
+    d().vkDestroyDevice(device_, nullptr);
   }
   if (surface_ != nullptr) {
-    d.vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    d().vkDestroySurfaceKHR(instance_, surface_, nullptr);
   }
   if (enable_validation_layers_) {
     if (mDebugCallback) {
-      d.vkDestroyDebugReportCallbackEXT(instance_, mDebugCallback, VKALLOC);
+      d().vkDestroyDebugReportCallbackEXT(instance_, mDebugCallback, VKALLOC);
     }
     if (mDebugMessenger) {
-      d.vkDestroyDebugUtilsMessengerEXT(instance_, mDebugMessenger, VKALLOC);
+      d().vkDestroyDebugUtilsMessengerEXT(instance_, mDebugMessenger, VKALLOC);
     }
   }
   if (instance_ != nullptr) {
-    d.vkDestroyInstance(instance_, nullptr);
+    d().vkDestroyInstance(instance_, nullptr);
   }
   if (!enabled_instance_extensions_.empty()) {
     for (const auto it : enabled_instance_extensions_) {
@@ -345,7 +359,8 @@ void WaylandVulkanBackend::createInstance() {
       static_cast<uint32_t>(enabled_layer_extensions_.size());
   info.ppEnabledLayerNames = enabled_layer_extensions_.data();
 
-  CHECK_VK_RESULT(d.vkCreateInstance(&info, nullptr, &instance_) != VK_SUCCESS);
+  CHECK_VK_RESULT(d().vkCreateInstance(&info, nullptr, &instance_) !=
+                  VK_SUCCESS);
 
   VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance(instance_));
 }
@@ -365,16 +380,16 @@ void WaylandVulkanBackend::setupDebugMessenger() {
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = debugUtilsCallback;
 
-    CHECK_VK_RESULT(d.vkCreateDebugUtilsMessengerEXT(
+    CHECK_VK_RESULT(d().vkCreateDebugUtilsMessengerEXT(
                         instance_, &createInfo, VKALLOC, &mDebugMessenger) !=
                     VK_SUCCESS);
-  } else if (d.vkCreateDebugReportCallbackEXT) {
+  } else if (d().vkCreateDebugReportCallbackEXT) {
     VkDebugReportCallbackCreateInfoEXT cb_info{};
     cb_info.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
     cb_info.flags =
         VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_ERROR_BIT_EXT;
     cb_info.pfnCallback = debugReportCallback;
-    CHECK_VK_RESULT(d.vkCreateDebugReportCallbackEXT(
+    CHECK_VK_RESULT(d().vkCreateDebugReportCallbackEXT(
                         instance_, &cb_info, VKALLOC, &mDebugCallback) !=
                     VK_SUCCESS);
   }
@@ -382,10 +397,10 @@ void WaylandVulkanBackend::setupDebugMessenger() {
 
 void WaylandVulkanBackend::findPhysicalDevice() {
   uint32_t count;
-  CHECK_VK_RESULT(d.vkEnumeratePhysicalDevices(instance_, &count, nullptr));
+  CHECK_VK_RESULT(d().vkEnumeratePhysicalDevices(instance_, &count, nullptr));
   std::vector<VkPhysicalDevice> physical_devices(count);
-  CHECK_VK_RESULT(
-      d.vkEnumeratePhysicalDevices(instance_, &count, physical_devices.data()));
+  CHECK_VK_RESULT(d().vkEnumeratePhysicalDevices(instance_, &count,
+                                                 physical_devices.data()));
 
   SPDLOG_DEBUG("Enumerating {} physical device(s).", count);
 
@@ -393,8 +408,8 @@ void WaylandVulkanBackend::findPhysicalDevice() {
   for (const auto& physical_device : physical_devices) {
     VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceFeatures features;
-    d.vkGetPhysicalDeviceProperties(physical_device, &properties);
-    d.vkGetPhysicalDeviceFeatures(physical_device, &features);
+    d().vkGetPhysicalDeviceProperties(physical_device, &properties);
+    d().vkGetPhysicalDeviceFeatures(physical_device, &features);
 
     SPDLOG_DEBUG("Checking device: {}", properties.deviceName);
 
@@ -402,18 +417,18 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     std::vector<const char*> supported_extensions;
 
     uint32_t qfp_count;
-    d.vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &qfp_count,
-                                               nullptr);
+    d().vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &qfp_count,
+                                                 nullptr);
     std::vector<VkQueueFamilyProperties> qfp(qfp_count);
-    d.vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &qfp_count,
-                                               qfp.data());
+    d().vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &qfp_count,
+                                                 qfp.data());
     std::optional<uint32_t> graphics_queue_family;
     for (uint32_t i = 0; i < qfp.size(); i++) {
       // Only pick graphics queues that can also present to the surface.
       // Graphics queues that can't present are rare if not nonexistent, but
       // the spec allows for this, so check it anyhow.
       VkBool32 surface_present_supported;
-      CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceSupportKHR(
+      CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfaceSupportKHR(
           physical_device, i, surface_, &surface_present_supported));
 
       if (!graphics_queue_family.has_value() &&
@@ -435,10 +450,10 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     }
 
     uint32_t extension_count;
-    CHECK_VK_RESULT(d.vkEnumerateDeviceExtensionProperties(
+    CHECK_VK_RESULT(d().vkEnumerateDeviceExtensionProperties(
         physical_device, nullptr, &extension_count, nullptr));
     std::vector<VkExtensionProperties> available_extensions(extension_count);
-    CHECK_VK_RESULT(d.vkEnumerateDeviceExtensionProperties(
+    CHECK_VK_RESULT(d().vkEnumerateDeviceExtensionProperties(
         physical_device, nullptr, &extension_count,
         available_extensions.data()));
 
@@ -483,13 +498,13 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
       // Bingo, we finally found a physical device that supports everything we
       // need.
-      d.vkGetPhysicalDeviceFeatures(physical_device,
-                                    &physical_device_features_);
-      d.vkGetPhysicalDeviceMemoryProperties(
+      d().vkGetPhysicalDeviceFeatures(physical_device,
+                                      &physical_device_features_);
+      d().vkGetPhysicalDeviceMemoryProperties(
           physical_device, &physical_device_memory_properties_);
 
       // Print some driver or MoltenVK information if it is available.
-      if (d.vkGetPhysicalDeviceProperties2KHR) {
+      if (d().vkGetPhysicalDeviceProperties2KHR) {
         VkPhysicalDeviceDriverProperties driverProperties{};
         driverProperties.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
@@ -499,8 +514,8 @@ void WaylandVulkanBackend::findPhysicalDevice() {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
         physicalDeviceProperties2.pNext = &driverProperties;
 
-        d.vkGetPhysicalDeviceProperties2KHR(physical_device_,
-                                            &physicalDeviceProperties2);
+        d().vkGetPhysicalDeviceProperties2KHR(physical_device_,
+                                              &physicalDeviceProperties2);
         spdlog::info("Vulkan device driver: {} {}", driverProperties.driverName,
                      driverProperties.driverInfo);
       }
@@ -550,28 +565,28 @@ void WaylandVulkanBackend::createLogicalDevice() {
   device_info.pEnabledFeatures = &device_features;
 
   CHECK_VK_RESULT(
-      d.vkCreateDevice(physical_device_, &device_info, nullptr, &device_));
+      d().vkCreateDevice(physical_device_, &device_info, nullptr, &device_));
 
-  d.vkGetDeviceQueue(device_, queue_family_index_, 0, &queue_);
+  d().vkGetDeviceQueue(device_, queue_family_index_, 0, &queue_);
 }
 
 bool WaylandVulkanBackend::InitializeSwapChain() {
   if (resize_pending_) {
     resize_pending_ = false;
-    d.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+    d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
 
     {
       std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-      CHECK_VK_RESULT(d.vkQueueWaitIdle(queue_));
+      CHECK_VK_RESULT(d().vkQueueWaitIdle(queue_));
     }
     CHECK_VK_RESULT(
-        d.vkResetCommandPool(device_, swapchain_command_pool_,
-                             VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
+        d().vkResetCommandPool(device_, swapchain_command_pool_,
+                               VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
     // The queue is idle here; tear down the old per-image present-transition
     // semaphores so they can be recreated for the new image count below.
     for (auto sem : present_transition_semaphores_) {
       if (sem != nullptr) {
-        d.vkDestroySemaphore(device_, sem, nullptr);
+        d().vkDestroySemaphore(device_, sem, nullptr);
       }
     }
     present_transition_semaphores_.clear();
@@ -589,7 +604,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // the compositor was launched without dmabuf support. Soft-fail rather
   // than asserting so CreateSurface can exit cleanly with a clear message.
   if (const auto r =
-          static_cast<vk::Result>(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
+          static_cast<vk::Result>(d().vkGetPhysicalDeviceSurfaceFormatsKHR(
               physical_device_, surface_, &format_count, nullptr));
       r != vk::Result::eSuccess) {
     spdlog::critical(
@@ -600,7 +615,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     return false;
   }
   std::vector<VkSurfaceFormatKHR> formats(format_count);
-  CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceFormatsKHR(
+  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfaceFormatsKHR(
       physical_device_, surface_, &format_count, formats.data()));
 
   surface_format_ = formats[0];
@@ -620,7 +635,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   VkExtent2D clientSize;
 
   VkSurfaceCapabilitiesKHR surface_capabilities;
-  CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
       physical_device_, surface_, &surface_capabilities));
 
   if (surface_capabilities.currentExtent.width != UINT32_MAX) {
@@ -662,10 +677,10 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // --------------------------------------------------------------------------
 
   uint32_t mode_count;
-  CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfacePresentModesKHR(
+  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfacePresentModesKHR(
       physical_device_, surface_, &mode_count, nullptr));
   std::vector<VkPresentModeKHR> modes(mode_count);
-  CHECK_VK_RESULT(d.vkGetPhysicalDeviceSurfacePresentModesKHR(
+  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfacePresentModesKHR(
       physical_device_, surface_, &mode_count, modes.data()));
   assert(!formats.empty());  // Shouldn't be possible.
 
@@ -749,7 +764,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   info.presentMode = present_mode;
   info.clipped = VK_TRUE;
 
-  auto result = d.vkCreateSwapchainKHR(device_, &info, VKALLOC, &swapchain_);
+  auto result = d().vkCreateSwapchainKHR(device_, &info, VKALLOC, &swapchain_);
   CHECK_VK_RESULT(result);
   if (result != VK_SUCCESS) {
     return false;
@@ -761,10 +776,10 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
 
   uint32_t image_count;
   CHECK_VK_RESULT(
-      d.vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, nullptr));
+      d().vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, nullptr));
   swapchain_images_.resize(image_count);
-  CHECK_VK_RESULT(d.vkGetSwapchainImagesKHR(device_, swapchain_, &image_count,
-                                            swapchain_images_.data()));
+  CHECK_VK_RESULT(d().vkGetSwapchainImagesKHR(device_, swapchain_, &image_count,
+                                              swapchain_images_.data()));
 
   // --------------------------------------------------------------------------
   // Record a command buffer for each of the images to be executed prior to
@@ -780,7 +795,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   buffers_info.commandBufferCount =
       static_cast<uint32_t>(present_transition_buffers_.size());
 
-  CHECK_VK_RESULT(d.vkAllocateCommandBuffers(
+  CHECK_VK_RESULT(d().vkAllocateCommandBuffers(
       device_, &buffers_info, present_transition_buffers_.data()));
 
   for (size_t i = 0; i < swapchain_images_.size(); i++) {
@@ -789,7 +804,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
 
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    CHECK_VK_RESULT(d.vkBeginCommandBuffer(buffer, &begin_info));
+    CHECK_VK_RESULT(d().vkBeginCommandBuffer(buffer, &begin_info));
 
     // Filament Engine hands back the image after writing to it
     VkImageMemoryBarrier barrier{};
@@ -808,12 +823,12 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
         .baseArrayLayer = 0,
         .layerCount = 1,
     };
-    d.vkCmdPipelineBarrier(buffer,
-                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &barrier);
+    d().vkCmdPipelineBarrier(buffer,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &barrier);
 
-    CHECK_VK_RESULT(d.vkEndCommandBuffer(buffer));
+    CHECK_VK_RESULT(d().vkEndCommandBuffer(buffer));
   }
 
   // One present-transition semaphore per swapchain image (see header). Created
@@ -824,7 +839,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   present_transition_semaphores_.resize(swapchain_images_.size());
   for (auto& sem : present_transition_semaphores_) {
     CHECK_VK_RESULT(
-        d.vkCreateSemaphore(device_, &present_sem_info, nullptr, &sem));
+        d().vkCreateSemaphore(device_, &present_sem_info, nullptr, &sem));
   }
 
 #if BUILD_COMPOSITOR
@@ -848,9 +863,8 @@ VKAPI_ATTR VkBool32
         void* /* pUserData */) {
   if (flags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
     spdlog::info("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
-  } else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT) {
-    spdlog::warn("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
-  } else if (flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) {
+  } else if (flags & (VK_DEBUG_REPORT_WARNING_BIT_EXT |
+                      VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT)) {
     spdlog::warn("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
   } else if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
     spdlog::error("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
@@ -865,13 +879,9 @@ VKAPI_ATTR VkBool32 VKAPI_CALL WaylandVulkanBackend::debugUtilsCallback(
     const VkDebugUtilsMessageTypeFlagsEXT /* types */,
     const VkDebugUtilsMessengerCallbackDataEXT* cb_data,
     void* /* pUserData */) {
-  if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
-    spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
-                 cb_data->pMessage);
-  } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-    spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
-                 cb_data->pMessage);
-  } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+  if (severity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) {
     spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
                  cb_data->pMessage);
   } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
@@ -896,13 +906,13 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
     b->InitializeSwapChain();
   }
 
-  CHECK_VK_RESULT(d.vkAcquireNextImageKHR(
+  CHECK_VK_RESULT(d().vkAcquireNextImageKHR(
       b->device_, b->swapchain_, 1'000'000'000,  // timeout (ns) 1000ms
       nullptr, b->image_ready_fence_, &b->last_image_index_));
 
-  CHECK_VK_RESULT(d.vkWaitForFences(b->device_, 1, &b->image_ready_fence_, true,
-                                    UINT64_MAX));
-  CHECK_VK_RESULT(d.vkResetFences(b->device_, 1, &b->image_ready_fence_));
+  CHECK_VK_RESULT(d().vkWaitForFences(b->device_, 1, &b->image_ready_fence_,
+                                      true, UINT64_MAX));
+  CHECK_VK_RESULT(d().vkResetFences(b->device_, 1, &b->image_ready_fence_));
 
   return {
       .struct_size = sizeof(FlutterVulkanImage),
@@ -940,7 +950,7 @@ bool WaylandVulkanBackend::PresentCallback(
   submit_info.pSignalSemaphores = &transition_semaphore;
   {
     std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
-    d.vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
+    d().vkQueueSubmit(b->queue_, 1, &submit_info, nullptr);
   }
 
   // Wait on the signaled semaphore in vkQueuePresentKHR
@@ -959,7 +969,7 @@ bool WaylandVulkanBackend::PresentCallback(
   VkResult result;
   {
     std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
-    result = d.vkQueuePresentKHR(b->queue_, &present_info);
+    result = d().vkQueuePresentKHR(b->queue_, &present_info);
   }
 
   // If the swap chain is no longer compatible with the surface, defer
@@ -986,7 +996,7 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
     FlutterVulkanInstanceHandle instance,
     const char* procname) {
   auto* proc =
-      d.vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname);
+      d().vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname);
   return reinterpret_cast<void*>(proc);
 }
 
@@ -1190,8 +1200,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   createInfo.display = wl_display_;
   createInfo.surface = surface;
 
-  CHECK_VK_RESULT(
-      d.vkCreateWaylandSurfaceKHR(instance_, &createInfo, nullptr, &surface_));
+  CHECK_VK_RESULT(d().vkCreateWaylandSurfaceKHR(instance_, &createInfo, nullptr,
+                                                &surface_));
 
   findPhysicalDevice();
   createLogicalDevice();
@@ -1203,7 +1213,7 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 
   VkFenceCreateInfo f_info{};
   f_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  d.vkCreateFence(device_, &f_info, nullptr, &image_ready_fence_);
+  d().vkCreateFence(device_, &f_info, nullptr, &image_ready_fence_);
 
   // present_transition_semaphores_ are created per swapchain image inside
   // InitializeSwapChain (below), since their count tracks the swapchain.
@@ -1211,7 +1221,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   VkCommandPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   pool_info.queueFamilyIndex = queue_family_index_;
-  d.vkCreateCommandPool(device_, &pool_info, nullptr, &swapchain_command_pool_);
+  d().vkCreateCommandPool(device_, &pool_info, nullptr,
+                          &swapchain_command_pool_);
 
   if (!InitializeSwapChain()) {
     spdlog::critical("Failed to create swap chain.");
@@ -1483,7 +1494,7 @@ void WaylandVulkanBackend::TransitionLayout(
   alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   alloc.commandBufferCount = 1;
   VkCommandBuffer cmd{};
-  if (d.vkAllocateCommandBuffers(device_, &alloc, &cmd) != VK_SUCCESS) {
+  if (d().vkAllocateCommandBuffers(device_, &alloc, &cmd) != VK_SUCCESS) {
     spdlog::error("TransitionLayout: vkAllocateCommandBuffers failed");
     return;
   }
@@ -1491,7 +1502,7 @@ void WaylandVulkanBackend::TransitionLayout(
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  d.vkBeginCommandBuffer(cmd, &begin);
+  d().vkBeginCommandBuffer(cmd, &begin);
 
   VkImageMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1511,9 +1522,9 @@ void WaylandVulkanBackend::TransitionLayout(
   barrier.srcAccessMask = AccessMaskForStage(src_stage);
   barrier.dstAccessMask = AccessMaskForStage(dst_stage);
 
-  d.vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
-                         1, &barrier);
-  d.vkEndCommandBuffer(cmd);
+  d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
+                           1, &barrier);
+  d().vkEndCommandBuffer(cmd);
 
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1521,10 +1532,10 @@ void WaylandVulkanBackend::TransitionLayout(
   submit.pCommandBuffers = &cmd;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-    d.vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
-    d.vkQueueWaitIdle(queue_);
+    d().vkQueueSubmit(queue_, 1, &submit, VK_NULL_HANDLE);
+    d().vkQueueWaitIdle(queue_);
   }
-  d.vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
+  d().vkFreeCommandBuffers(device_, swapchain_command_pool_, 1, &cmd);
 }
 
 void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
@@ -1547,9 +1558,9 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
   src_to_xfer.subresourceRange.layerCount = 1;
   src_to_xfer.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   src_to_xfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &src_to_xfer);
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &src_to_xfer);
 
   VkImageBlit region{};
   region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -1558,9 +1569,9 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
   region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
   region.dstOffsets[0] = {dst_x, dst_y, 0};
   region.dstOffsets[1] = {dst_x + dst_w, dst_y + dst_h, 1};
-  d.vkCmdBlitImage(cmd, src.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
-                   VK_FILTER_LINEAR);
+  d().vkCmdBlitImage(cmd, src.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                     VK_FILTER_LINEAR);
 
   // Transition source back to COLOR_ATTACHMENT_OPTIMAL for the next frame.
   VkImageMemoryBarrier xfer_to_color = src_to_xfer;
@@ -1568,9 +1579,9 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
   xfer_to_color.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   xfer_to_color.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   xfer_to_color.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
-                         nullptr, 0, nullptr, 1, &xfer_to_color);
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                           nullptr, 0, nullptr, 1, &xfer_to_color);
   src.SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 }
 
@@ -1589,23 +1600,23 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   const FrameSlot& slot = m_compositor_slots_[m_compositor_current_frame_ %
                                               m_compositor_slots_.size()];
   CHECK_VK_RESULT(
-      d.vkWaitForFences(device_, 1, &slot.in_flight, VK_TRUE, UINT64_MAX));
-  CHECK_VK_RESULT(d.vkResetFences(device_, 1, &slot.in_flight));
+      d().vkWaitForFences(device_, 1, &slot.in_flight, VK_TRUE, UINT64_MAX));
+  CHECK_VK_RESULT(d().vkResetFences(device_, 1, &slot.in_flight));
 
   uint32_t image_index = 0;
-  CHECK_VK_RESULT(d.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000,
-                                          slot.image_available, VK_NULL_HANDLE,
-                                          &image_index));
+  CHECK_VK_RESULT(d().vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000,
+                                            slot.image_available,
+                                            VK_NULL_HANDLE, &image_index));
   last_image_index_ = image_index;
 
   VkImage dst = swapchain_images_[image_index];
 
   VkCommandBuffer cmd = slot.cmd_buffer;
-  d.vkResetCommandBuffer(cmd, 0);
+  d().vkResetCommandBuffer(cmd, 0);
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  d.vkBeginCommandBuffer(cmd, &begin);
+  d().vkBeginCommandBuffer(cmd, &begin);
 
   // Transition swapchain image UNDEFINED/PRESENT_SRC -> TRANSFER_DST_OPTIMAL.
   VkImageMemoryBarrier to_dst{};
@@ -1624,9 +1635,9 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
   // sync-validation layer flags (it explicitly suggests including the transfer
   // stage in this barrier's srcStageMask).
-  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &to_dst);
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &to_dst);
 
   // Sequence platform-view subsurface Z-order for this frame.
   m_sequencer.Present(
@@ -1701,11 +1712,11 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   to_present.subresourceRange.layerCount = 1;
   to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-  d.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &to_present);
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &to_present);
 
-  d.vkEndCommandBuffer(cmd);
+  d().vkEndCommandBuffer(cmd);
 
   // Submit waits on image_available (signaled when the swapchain image is
   // presentable), signals render_finished and the slot's in_flight fence.
@@ -1732,7 +1743,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   submit.pSignalSemaphores = &render_finished;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-    d.vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+    d().vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
   }
 
   VkPresentInfoKHR present_info{};
@@ -1748,7 +1759,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   VkResult result;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-    result = d.vkQueuePresentKHR(queue_, &present_info);
+    result = d().vkQueuePresentKHR(queue_, &present_info);
   }
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;
@@ -1771,8 +1782,8 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
   pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   pool_info.queueFamilyIndex = queue_family_index_;
-  if (d.vkCreateCommandPool(device_, &pool_info, nullptr,
-                            &m_compositor_cmd_pool_) != VK_SUCCESS) {
+  if (d().vkCreateCommandPool(device_, &pool_info, nullptr,
+                              &m_compositor_cmd_pool_) != VK_SUCCESS) {
     spdlog::error("Vulkan compositor: failed to create cmd pool");
     return;
   }
@@ -1786,7 +1797,8 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
   cb_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cb_alloc.commandBufferCount = static_cast<uint32_t>(slot_count);
   std::vector<VkCommandBuffer> cmds(slot_count);
-  CHECK_VK_RESULT(d.vkAllocateCommandBuffers(device_, &cb_alloc, cmds.data()));
+  CHECK_VK_RESULT(
+      d().vkAllocateCommandBuffers(device_, &cb_alloc, cmds.data()));
 
   // Fences start signaled so the first wait in PresentLayersImpl returns
   // immediately for every slot.
@@ -1801,16 +1813,16 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
     auto& s = m_compositor_slots_[i];
     s.cmd_buffer = cmds[i];
     CHECK_VK_RESULT(
-        d.vkCreateFence(device_, &fence_info, nullptr, &s.in_flight));
+        d().vkCreateFence(device_, &fence_info, nullptr, &s.in_flight));
     CHECK_VK_RESULT(
-        d.vkCreateSemaphore(device_, &sem_info, nullptr, &s.image_available));
+        d().vkCreateSemaphore(device_, &sem_info, nullptr, &s.image_available));
   }
 
   // One present-wait semaphore per swapchain image (see header). Count tracks
   // the swapchain, which here equals slot_count.
   m_compositor_render_finished_.resize(slot_count, VK_NULL_HANDLE);
   for (auto& sem : m_compositor_render_finished_) {
-    CHECK_VK_RESULT(d.vkCreateSemaphore(device_, &sem_info, nullptr, &sem));
+    CHECK_VK_RESULT(d().vkCreateSemaphore(device_, &sem_info, nullptr, &sem));
   }
   m_compositor_current_frame_ = 0;
 }
@@ -1822,26 +1834,26 @@ void WaylandVulkanBackend::CompositorPipeliningCleanup() {
   // Make sure no slot's resources are still in flight before tearing them
   // down. Cheap: only fires at swapchain recreation or backend shutdown.
   if (!m_compositor_slots_.empty()) {
-    d.vkDeviceWaitIdle(device_);
+    d().vkDeviceWaitIdle(device_);
   }
   for (auto& s : m_compositor_slots_) {
     if (s.image_available) {
-      d.vkDestroySemaphore(device_, s.image_available, nullptr);
+      d().vkDestroySemaphore(device_, s.image_available, nullptr);
     }
     if (s.in_flight) {
-      d.vkDestroyFence(device_, s.in_flight, nullptr);
+      d().vkDestroyFence(device_, s.in_flight, nullptr);
     }
     s = {};
   }
   m_compositor_slots_.clear();
   for (auto sem : m_compositor_render_finished_) {
     if (sem != VK_NULL_HANDLE) {
-      d.vkDestroySemaphore(device_, sem, nullptr);
+      d().vkDestroySemaphore(device_, sem, nullptr);
     }
   }
   m_compositor_render_finished_.clear();
   if (m_compositor_cmd_pool_ != VK_NULL_HANDLE) {
-    d.vkDestroyCommandPool(device_, m_compositor_cmd_pool_, nullptr);
+    d().vkDestroyCommandPool(device_, m_compositor_cmd_pool_, nullptr);
     m_compositor_cmd_pool_ = VK_NULL_HANDLE;
   }
   m_compositor_current_frame_ = 0;

@@ -1,0 +1,30 @@
+# wayland-vulkan + simple shell.
+# Minimal surface; no role, no activation area, no surface id.
+[global]
+app_id = 'homescreen'
+cursor_theme = 'DMZ-White'
+disable_cursor = false
+
+[[view]]
+width = 1920
+height = 1080
+output_index = 0
+pixel_ratio = 1.0
+
+  [view.args]
+  engine = ['--enable-asserts']
+
+  [view.shell]
+  type = 'simple'
+
+  [view.backend]
+  type = 'wayland-vulkan'
+
+# [sentry] — optional, process-level crash reporting (shared by all views).
+# The DSN comes from the SENTRY_DSN environment variable; this table only adds
+# metadata. Omit the whole table to disable.
+[sentry]
+release = '1.0.0'
+env = 'production'
+tags = { board = 'dev-board' }
+attachments = []

@@ -55,15 +55,15 @@ class IDisplay;
 class Display;
 class WaylandWindow;
 class Engine;
-class Shell;
+class Backend;
 class PlatformHandler;
 class PlatformChannel;
 namespace flutter {
 class KeyEventHandler;
 }
-// m_backend is a polymorphic std::shared_ptr<Shell> (built by Shell::Create);
-// concrete backend types are no longer named here.
-class Shell;
+// m_backend is a polymorphic std::shared_ptr<Backend> (built by
+// Backend::Create); concrete backend types are no longer named here.
+class Backend;
 #ifdef ENABLE_PLUGIN_COMP_SURF
 class CompositorSurface;
 #endif
@@ -112,13 +112,13 @@ class FlutterView {
   std::shared_ptr<WaylandWindow> GetWindow() { return m_wayland_window; }
 
   /**
-   * @brief Get Shell
-   * @return Shell*
-   * @retval Shell pointer
+   * @brief Get Backend
+   * @return Backend*
+   * @retval Backend pointer
    * @relation
    * wayland, flutter
    */
-  [[nodiscard]] Shell* GetBackend() const { return m_backend.get(); }
+  [[nodiscard]] Backend* GetBackend() const { return m_backend.get(); }
 
   /**
    * @brief Get an index of flutter views
@@ -135,7 +135,7 @@ class FlutterView {
    * @relation
    * internal
    */
-#if !BUILD_BACKEND_DRM_KMS_EGL && !BUILD_BACKEND_DRM_KMS_VULKAN
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   [[nodiscard]] Display* GetDisplay() const;
 #endif
 
@@ -255,9 +255,9 @@ class FlutterView {
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:
-  // One polymorphic Shell, built by Shell::Create(). Backend-specific
+  // One polymorphic Backend, built by Backend::Create(). Backend-specific
   // operations are reached via dynamic_cast where still needed.
-  std::shared_ptr<Shell> m_backend;
+  std::shared_ptr<Backend> m_backend;
   std::shared_ptr<IDisplay> m_display;
   // Default-null on non-Wayland backends (only assigned under the
   // BUILD_BACKEND_WAYLAND_* gate in flutter_view.cc::Initialize).

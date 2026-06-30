@@ -269,7 +269,7 @@ std::optional<drm::display::ConnectorInfo> ProbeConnectorInfo(
   if (!parsed) {
     return std::nullopt;
   }
-  return std::optional<drm::display::ConnectorInfo>(std::move(*parsed));
+  return {std::move(*parsed)};
 }
 
 }  // namespace
