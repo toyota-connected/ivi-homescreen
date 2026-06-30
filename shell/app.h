@@ -67,7 +67,14 @@ class App final {
   int Run();
 
  private:
-  // The displays the App drives. One entry per distinct (backend, device); a
+  // Builds one display per device-context across @p configs, appends the
+  // distinct displays to m_displays, and returns the per-config assignment
+  // (parallel to configs): every view runs on the display for its (backend,
+  // device). A homogeneous config set yields a single shared display.
+  std::vector<std::shared_ptr<IDisplay>> BuildDisplays(
+      const std::vector<Configuration::Config>& configs);
+
+  // The displays the App drives. One entry per distinct device-context; a
   // homogeneous config set yields a single shared display.
   std::vector<std::shared_ptr<IDisplay>> m_displays;
   std::vector<std::unique_ptr<FlutterView>> m_views;

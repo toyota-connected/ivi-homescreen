@@ -20,8 +20,10 @@
 #include <csignal>
 #include <cstdlib>
 #include <functional>
+#include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 
 #include <unistd.h>
 
@@ -61,27 +63,82 @@ namespace {
 // loop is normally woken on demand by MainLoopWaker.
 constexpr int kIdleHeartbeatMs = 1000;
 
-std::shared_ptr<IDisplay> MakeDisplay(
+// The device-context key for a view: the set of views sharing one display.
+// All Wayland views share the single compositor connection (device-less); each
+// DRM GPU / drm-dumb device is its own context. The output layer (multiple
+// connectors per GPU, multiple wl_outputs per connection) is resolved within a
+// context, not here.
+std::string ContextKey(const backend::BackendRegistry& reg,
+                       const Configuration::Config& config) {
+  const std::string key = ResolveKeyForConfig(reg, config);
+  if (key.rfind("wayland-", 0) == 0) {
+    return "wayland";
+  }
+  return key + "|" + config.view.drm_device.value_or("");
+}
+
+}  // namespace
+
+std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
     const std::vector<Configuration::Config>& configs) {
   // App is self-contained: ensure the runtime registry has an active backend
   // (registering the compiled-in backends + resolving from configs on first
-  // use, or respecting one main() set explicitly) before creating its display.
-  // The active descriptor owns the display-creation body that used to live here
-  // as an #if chain (the bodies now live in backend/register_backends.cc).
-  // Fail-fast: a null backend would crash the engine init.
+  // use, or respecting one main() set explicitly) before creating any display.
+  // The active backend backs the first bundle and process-level queries; each
+  // view independently resolves its own backend (ResolveKeyForConfig) below.
   auto& reg = backend::BackendRegistry::Instance();
   if (!EnsureActiveBackend(reg, configs)) {
     spdlog::critical("[App] no usable backend available; aborting");
     std::exit(EXIT_FAILURE);
   }
-  return reg.Active().make_display(configs);
+
+  // Group config indices by device-context, preserving first-seen order so the
+  // primary bundle's display stays first (it backs process-level wiring).
+  std::vector<std::string> order;
+  std::unordered_map<std::string, std::vector<size_t>> groups;
+  for (size_t i = 0; i < configs.size(); ++i) {
+    const std::string ck = ContextKey(reg, configs[i]);
+    auto it = groups.find(ck);
+    if (it == groups.end()) {
+      order.push_back(ck);
+      groups.emplace(ck, std::vector<size_t>{i});
+    } else {
+      it->second.push_back(i);
+    }
+  }
+
+  // Create one display per context from that context's configs (a group
+  // member's backend descriptor owns the creation body), and record each view's
+  // display so FlutterView is placed on the display for its (backend, device).
+  std::vector<std::shared_ptr<IDisplay>> per_config(configs.size());
+  for (const std::string& ck : order) {
+    const std::vector<size_t>& members = groups[ck];
+    std::vector<Configuration::Config> group_configs;
+    group_configs.reserve(members.size());
+    for (const size_t idx : members) {
+      group_configs.push_back(configs[idx]);
+    }
+    const std::string key = ResolveKeyForConfig(reg, group_configs.front());
+    const backend::BackendDescriptor* descriptor = reg.Resolve(key);
+    if (descriptor == nullptr) {
+      spdlog::critical("[App] no backend resolved for context '{}'", ck);
+      std::exit(EXIT_FAILURE);
+    }
+    auto display = descriptor->make_display(group_configs);
+    m_displays.push_back(display);
+    for (const size_t idx : members) {
+      per_config[idx] = display;
+    }
+  }
+  return per_config;
 }
 
-}  // namespace
-
-App::App(const std::vector<Configuration::Config>& configs)
-    : m_displays{MakeDisplay(configs)} {
+App::App(const std::vector<Configuration::Config>& configs) {
   SPDLOG_DEBUG("+App::App");
+  // One display per device-context; view_display[i] is the display config i
+  // runs on (views sharing a context share a display).
+  const std::vector<std::shared_ptr<IDisplay>> view_display =
+      BuildDisplays(configs);
 // AGL Shell needs a Wayland backend — its WaylandWindow / Display
 // usage is meaningless on DRM / software. ENABLE_AGL_SHELL_CLIENT
 // defaults ON regardless of backend, so combine with a Wayland-backend
@@ -94,7 +151,7 @@ App::App(const std::vector<Configuration::Config>& configs)
   size_t index = 0;
   m_views.reserve(configs.size());
   for (auto const& cfg : configs) {
-    auto view = std::make_unique<FlutterView>(cfg, index, m_displays.front());
+    auto view = std::make_unique<FlutterView>(cfg, index, view_display[index]);
     view->Initialize();
     m_views.emplace_back(std::move(view));
     index++;
