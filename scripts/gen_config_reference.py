@@ -91,12 +91,20 @@ META = {
     "backend.drm.stage_cursor": ("auto", "auto|yes|no", "drm", "Stage HW cursor into the compositor commit (auto = nvidia-drm only)."),
     "backend.drm.no_seat": ("false", "true|false", "drm/sw", "Bypass libseat (headless/SSH/kiosk)."),
     "backend.drm.input_transforms": ("[]", "array<string>", "drm/sw", "Per-device pointer transforms '<name>=<0|90|180|270>[,flip-x][,flip-y]'."),
+    # [view.output] — pin the view to a physical output
+    "output.name": ("(primary)", "e.g. DP-1, HDMI-A-1", "all", "Pin the view to this output by name (fills both the wl_output and DRM connector match)."),
+    "output.wl_name": ("(none)", "e.g. DP-1", "wayland", "Wayland: match this wl_output name (overrides output.name)."),
+    "output.drm_connector": ("(none)", "e.g. HDMI-A-1", "drm", "DRM: match this connector name (overrides output.name)."),
+    "output.serial": ("(none)", "EDID serial", "drm", "DRM: refine the match to this EDID serial when it is unique."),
+    "output.index": ("(none)", "int", "all", "Deprecated: match the Nth connected output (prefer a name)."),
+    "output.preload": ("false", "true|false", "all", "Warm the engine (suspended) at startup even if the output is absent."),
+    "output.on_disconnect": ("suspend", "suspend|teardown", "all", "What to do with the view when its output disappears."),
 }
 
 TABLE_ORDER = [
     "[global]", "[sentry]", "[[view]]", "[view.args]", "[view.shell]",
     "[view.shell.window]", "[view.shell.window.activation_area]",
-    "[view.backend]", "[view.backend.drm]",
+    "[view.backend]", "[view.backend.drm]", "[view.output]",
 ]
 
 
@@ -119,6 +127,8 @@ def classify(key):
         return "[view.backend.drm]", key.rsplit(".", 1)[1]
     if key.startswith("backend."):
         return "[view.backend]", key.rsplit(".", 1)[1]
+    if key.startswith("output."):
+        return "[view.output]", key.split(".", 1)[1]
     return "[[view]]", key
 
 
