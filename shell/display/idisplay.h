@@ -22,6 +22,10 @@
 
 struct FlutterDesktopViewControllerState;
 
+namespace homescreen {
+class IOutputProvider;
+}
+
 class IDisplay {
  public:
   virtual ~IDisplay() = default;
@@ -47,6 +51,13 @@ class IDisplay {
       const std::string& kind) const = 0;
 
   [[nodiscard]] virtual bool HasRepeatTimer() const = 0;
+
+  // The source of physical outputs for this display (the wl_registry on
+  // Wayland, the card fd on DRM), or nullptr when the backend has no output
+  // model. Borrowed — owned by the display.
+  [[nodiscard]] virtual homescreen::IOutputProvider* GetOutputProvider() {
+    return nullptr;
+  }
 
  protected:
   IDisplay() = default;
