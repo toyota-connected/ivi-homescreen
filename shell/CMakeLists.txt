@@ -31,6 +31,9 @@ add_executable(${PROJECT_NAME}
         # Backend-agnostic output resolver (pure name/serial matching); the
         # per-backend output providers feed it via the IDisplay seam.
         display/output.cc
+        # Binds each view to an output by name across backends (resolver +
+        # provider); feeds the resolved connector / wl_output to the backend.
+        display/output_manager.cc
         engine.cc
         libflutter_engine.cc
         main.cc

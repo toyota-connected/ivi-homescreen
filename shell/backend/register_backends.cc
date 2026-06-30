@@ -29,6 +29,7 @@
 #include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
+#include "display/output_manager.h"
 #include "logging/logging.h"
 
 // Independent guards so several backends can be compiled into one binary. The
@@ -246,8 +247,14 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
   // `drm_connector = ""` in TOML shouldn't force a strict empty-name
   // match against zero connectors.
-  if (config.view.drm_connector.has_value() &&
-      !config.view.drm_connector->empty()) {
+  // [view.output] (validated against the card's live connectors via the output
+  // provider) selects the connector; fall back to the raw [view.backend.drm]
+  // connector when no [view.output] match applies.
+  if (auto resolved = homescreen::OutputManager::ResolveForView(
+          config, display, homescreen::BackendFamily::kDrm)) {
+    cfg.connector_name = std::move(resolved);
+  } else if (config.view.drm_connector.has_value() &&
+             !config.view.drm_connector->empty()) {
     cfg.connector_name = config.view.drm_connector;
   }
   if (config.view.drm_mode.has_value() && !config.view.drm_mode->empty()) {
