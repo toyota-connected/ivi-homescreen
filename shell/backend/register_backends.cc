@@ -278,7 +278,10 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // drm_display (resolved above) owns the process-wide libseat session — it may
   // be null when no seat backend is available, in which case DrmBackend takes
   // the legacy direct-open path.
-  m_backend = DrmBackend::Create(cfg, drm_display->session());
+  // The device-context (DrmDisplay) owns the card open + master; every backend
+  // scanning out to this card shares it. Acquired lazily here on first use.
+  m_backend = DrmBackend::Create(cfg, drm_display->session(),
+                                 drm_display->SharedDevice());
 
   // DrmBackend::Create returns nullptr on any init failure (libseat
   // take_device, drmSetMaster, no usable connector, GBM/EGL setup,

@@ -156,106 +156,13 @@ DrmBackend* BackendFromState(void* user_data) {
       state->view_controller->engine->GetBackend());
 }
 
-// Refuse to run unless our controlling terminal is the *foreground* VT on
-// the kernel console. Rationale: drmSetMaster can succeed from a non-
-// foreground VT (e.g. a terminal emulator, SSH, or an inactive text VT)
-// when no compositor currently holds master, but the GPU keeps scanning
-// out whatever the foreground VT owns. Atomic commits get silently
-// accepted and no PAGE_FLIP_EVENT ever fires, so PresentLayers stalls on
-// the next flip wait — the "master-acquired but black screen" pathology
-// we kept hitting. Fail fast with an actionable message instead.
-//
-// Returns true if it's safe to proceed, false with a logged error if not.
-// A missing /dev/tty0 (container / headless service) is not fatal —
-// those cases are outside the scope of this check.
-bool VerifyForegroundVt(const std::string& drm_device) {
-  const int tty0 = ::open("/dev/tty0", O_RDONLY | O_CLOEXEC);
-  if (tty0 < 0) {
-    spdlog::warn(
-        "[DrmBackend] open(/dev/tty0): {} — skipping foreground-VT check",
-        std::strerror(errno));
-    return true;
-  }
-  struct vt_stat vtstat{};
-  const bool got_state = ::ioctl(tty0, VT_GETSTATE, &vtstat) == 0;
-  const int vt_errno = errno;
-  ::close(tty0);
-  if (!got_state) {
-    spdlog::warn("[DrmBackend] VT_GETSTATE: {} — skipping foreground-VT check",
-                 std::strerror(vt_errno));
-    return true;
-  }
-  const unsigned int active_vt = vtstat.v_active;
-
-  // open("/dev/tty") redirects to the process's controlling terminal, so
-  // calling open() against the special inode is the only way to acquire
-  // an fd that *targets* the ctty rather than the /dev/tty special device
-  // itself. ENXIO from open() means the process has no ctty at all (e.g.
-  // a daemon without setsid + TIOCSCTTY).
-  const int ctl_fd = ::open("/dev/tty", O_RDONLY | O_CLOEXEC | O_NOCTTY);
-  if (ctl_fd < 0) {
-    spdlog::error(
-        "[DrmBackend] no controlling terminal (open /dev/tty: {}). Cannot "
-        "drive {} without a foreground VT — switch to the active console "
-        "(tty{}) and rerun.",
-        std::strerror(errno), drm_device, active_vt);
-    return false;
-  }
-  // fstat() of the resulting fd does NOT return the underlying tty's
-  // device numbers — it returns /dev/tty's own (5, 0) inode metadata on
-  // every Linux kernel from 4.x onward. The earlier version of this
-  // check believed fstat would resolve through; in practice it
-  // mis-rejected every legitimate kernel-VT ctty too, including
-  // systemd-launched services attached via TTYPath=/dev/tty1. TIOCGDEV
-  // is the canonical ioctl for retrieving the actual tty device number
-  // from a /dev/tty fd; available since Linux 2.6.18.
-  unsigned int dev = 0;
-  const int ioctl_rc = ::ioctl(ctl_fd, TIOCGDEV, &dev);
-  const int ioctl_errno = errno;
-  ::close(ctl_fd);
-  if (ioctl_rc != 0) {
-    spdlog::error(
-        "[DrmBackend] TIOCGDEV(/dev/tty): {}. Cannot drive {} without "
-        "a foreground VT — switch to the active console (tty{}) and rerun.",
-        std::strerror(ioctl_errno), drm_device, active_vt);
-    return false;
-  }
-
-  // TTY_MAJOR is 4 on Linux; /dev/ttyN lives at (4, N). Terminal emulators
-  // and SSH sessions give /dev/tty a pts major (136+), which is precisely
-  // the case we want to refuse.
-  constexpr unsigned int kTtyMajor = 4;
-  const unsigned int ctl_major = major(static_cast<dev_t>(dev));
-  const unsigned int ctl_minor = minor(static_cast<dev_t>(dev));
-  if (ctl_major != kTtyMajor) {
-    spdlog::error(
-        "[DrmBackend] controlling terminal is not a kernel VT "
-        "(major={}, minor={}) — you're running from a terminal emulator or "
-        "SSH. Active VT is tty{}. Switch to tty{} (Ctrl+Alt+F{}) and rerun, "
-        "or `sudo systemctl isolate multi-user.target` first. Refusing to "
-        "drive {}.",
-        ctl_major, ctl_minor, active_vt, active_vt, active_vt, drm_device);
-    return false;
-  }
-  if (ctl_minor != active_vt) {
-    spdlog::error(
-        "[DrmBackend] controlling VT is tty{} but foreground VT is tty{} — "
-        "scanout goes to the foreground. Switch to tty{} (Ctrl+Alt+F{}) and "
-        "rerun. Refusing to drive {}.",
-        ctl_minor, active_vt, ctl_minor, ctl_minor, drm_device);
-    return false;
-  }
-  spdlog::info("[DrmBackend] foreground VT check: on tty{} (active)",
-               active_vt);
-  return true;
-}
-
 }  // namespace
 
-std::unique_ptr<DrmBackend> DrmBackend::Create(
-    const DrmConfig& cfg,
-    homescreen::DrmSession* session) {
+std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
+                                               homescreen::DrmSession* session,
+                                               drm::Device* shared_device) {
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
+  backend->drm_dev_ = shared_device;
   if (!backend->InitDrm()) {
     return nullptr;
   }
@@ -513,83 +420,19 @@ DrmBackend::~DrmBackend() {
     gbm_device_destroy(gbm_device_);
   }
 
-  // Release DRM master so whoever takes over next (fbcon, getty, the
-  // greeter coming back up) can drive the display. Must happen last,
-  // after all our atomic work is done — drm::Device's destructor closes
-  // the fd, which also drops master, but being explicit keeps the log
-  // honest.
-  if (drm_master_ && drm_dev_) {
-    drmDropMaster(drm_dev_->fd());
-    drm_master_ = false;
-  }
-  // drm_dev_ destructor closes the fd automatically.
+  // The shared card + master are owned by DrmDisplay (the device-context),
+  // which outlives this backend and drops master / closes the fd on its own
+  // teardown. The backend holds only a non-owning pointer.
 }
 
 bool DrmBackend::InitDrm() {
-  if (session_ != nullptr) {
-    // libseat path: the seat provider (logind/seatd/builtin) owns VT
-    // activation and master handoff. Skip the foreground-VT check
-    // (logind activates us only when the VT is ours) and drmSetMaster
-    // (libseat_open_device returns a master-capable fd while we hold
-    // the seat). The seat provider also releases the session cleanly
-    // on socket drop (SIGKILL included), restoring TTY state externally.
-    const int fd = session_->TakeDevice(cfg_.drm_device);
-    if (fd < 0) {
-      spdlog::error("[DrmBackend] session take_device({}): failed",
-                    cfg_.drm_device);
-      return false;
-    }
-    drm_dev_.emplace(drm::Device::from_fd(fd));
-    spdlog::info("[DrmBackend] opened {} via libseat (fd={})", cfg_.drm_device,
-                 fd);
-  } else {
-    // Fallback path: no seat backend available (or --drm-no-seat). Refuse
-    // up-front if we're not on the active VT — prevents the "master
-    // acquired, commits return success, but scanout stays on the other VT"
-    // trap where drmSetMaster succeeds but PAGE_FLIP_EVENT never fires.
-    // --drm-no-seat opts out of this guard: the operator has taken
-    // responsibility for the display (e.g. headless / SSH with nothing else
-    // holding master), where there is no foreground kernel VT to be on.
-    if (cfg_.no_seat) {
-      spdlog::warn(
-          "[DrmBackend] --drm-no-seat: skipping the foreground-VT guard on "
-          "{}. If the screen stays black, another DRM master holds the "
-          "device or scanout is owned by a different VT.",
-          cfg_.drm_device);
-    } else if (!VerifyForegroundVt(cfg_.drm_device)) {
-      return false;
-    }
-
-    auto dev = drm::Device::open(cfg_.drm_device);
-    if (!dev) {
-      spdlog::error("[DrmBackend] open({}): {}", cfg_.drm_device,
-                    dev.error().message());
-      return false;
-    }
-    drm_dev_.emplace(std::move(*dev));
-
-    // Acquire DRM master. Required for modeset/atomic commits. Atomic
-    // writes from a non-master fd are silently accepted by some drivers
-    // (amdgpu in particular) as no-ops — the commit returns success, but
-    // nothing actually changes on screen, which is exactly the "blank
-    // panel, no PAGE_FLIP_EVENT" pathology. Refuse to run in that state.
-    if (drmSetMaster(drm_dev_->fd()) != 0) {
-      if (const int err = errno;
-          err == EBUSY || err == EACCES || err == EPERM) {
-        spdlog::error(
-            "[DrmBackend] cannot acquire DRM master on {} ({}). Another "
-            "display server (gdm / gnome-shell / sddm / Xorg / a Wayland "
-            "compositor) is already holding the device. Stop it or run from "
-            "a bare TTY (e.g. `sudo systemctl isolate multi-user.target`).",
-            cfg_.drm_device, std::strerror(err));
-      } else {
-        spdlog::error("[DrmBackend] drmSetMaster({}): {}", cfg_.drm_device,
-                      std::strerror(err));
-      }
-      return false;
-    }
-    drm_master_ = true;
-    spdlog::info("[DrmBackend] DRM master on {}", cfg_.drm_device);
+  // The card is opened and held at master by the device-context
+  // (DrmDisplay::SharedDevice); Create stored the non-owning pointer. The
+  // backend neither opens the device nor takes master -- one card, one master,
+  // shared by every view that scans out to it.
+  if (drm_dev_ == nullptr) {
+    spdlog::error("[DrmBackend] no shared DRM device provided");
+    return false;
   }
 
   if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) !=
@@ -1505,7 +1348,7 @@ void DrmBackend::StartFlipMonitor() {
   }
   auto* runner = platform_task_runner_.load(std::memory_order_acquire);
   if (runner == nullptr || runner->GetIoContext() == nullptr ||
-      !drm_dev_.has_value()) {
+      drm_dev_ == nullptr) {
     return;
   }
   // assign() makes asio take ownership of the fd — StopVsyncMonitor must
@@ -1548,7 +1391,7 @@ void DrmBackend::StopVsyncMonitor() {
   // If the flag is still set after the poll loop bails (commit was
   // dropped, session paused, etc.), force-clear it so destructors can
   // make progress instead of hanging.
-  if (drm_dev_.has_value() && flip_pending_.load(std::memory_order_acquire)) {
+  if (drm_dev_ != nullptr && flip_pending_.load(std::memory_order_acquire)) {
     constexpr int kDrainTimeoutMs = 100;
     constexpr int kPollSliceMs = 10;
     int elapsed_ms = 0;
@@ -1591,7 +1434,7 @@ void DrmBackend::ArmFlipRead() {
           }
           return;
         }
-        if (!drm_dev_.has_value()) {
+        if (drm_dev_ == nullptr) {
           return;
         }
         DrainFlipEvents();
@@ -1600,7 +1443,7 @@ void DrmBackend::ArmFlipRead() {
 }
 
 void DrmBackend::DrainFlipEvents() const {
-  if (!drm_dev_.has_value()) {
+  if (drm_dev_ == nullptr) {
     return;
   }
   // poll(0) + read together under the lock so the read can never block: only
