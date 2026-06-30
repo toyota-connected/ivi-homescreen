@@ -478,11 +478,10 @@ static bool WaylandSessionAvailable() {
   return std::filesystem::exists(std::filesystem::path(xdg) / sock, ec);
 }
 
-static std::string ResolveActiveKey(
-    const backend::BackendRegistry& reg,
-    const std::vector<Configuration::Config>& configs) {
+std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
+                                const Configuration::Config& config) {
   const auto keys = reg.Keys();
-  std::string hint = configs[0].view.backend.value_or("");
+  std::string hint = config.view.backend.value_or("");
 
   // An exact registry key (the bundle's [view] backend, or --backend) selects
   // that backend directly -- the primary runtime-selection path.
@@ -562,7 +561,7 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
   if (registry.Keys().empty()) {
     RegisterCompiledBackends(registry);
   }
-  const std::string key = ResolveActiveKey(registry, configs);
+  const std::string key = ResolveKeyForConfig(registry, configs[0]);
   const backend::BackendDescriptor* active = registry.Resolve(key);
   if (active == nullptr) {
     std::string available;
@@ -577,22 +576,11 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
     return false;
   }
 
-  // One process drives one backend (a single display) today, so the active
-  // backend comes from the first bundle. Per-bundle backend selection isn't
-  // independently honored yet -- warn if a later bundle asks for a different,
-  // valid backend so the ignored request isn't silent.
-  for (size_t i = 1; i < configs.size(); ++i) {
-    const auto& want = configs[i].view.backend;
-    if (want.has_value() && !want->empty() && *want != key &&
-        registry.Resolve(*want) != nullptr) {
-      spdlog::warn(
-          "[backend] bundle {} requests backend '{}', but the process uses "
-          "'{}' "
-          "(per-bundle backend selection is not yet supported)",
-          i, *want, key);
-    }
-  }
-
+  // The "active" backend is the process-wide default: it backs the first
+  // bundle and answers process-level queries (e.g. --drm-list-modes). Each view
+  // independently resolves its own backend via ResolveKeyForConfig when its
+  // display and Backend are built, so a later bundle naming a different backend
+  // is honored rather than coerced onto this one.
   registry.SetActive(active);
   return true;
 }
