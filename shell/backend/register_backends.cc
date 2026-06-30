@@ -429,24 +429,23 @@ static int SoftwareListModes(const std::string& device) {
 
 void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 #if BUILD_BACKEND_WAYLAND_EGL
-  registry.Register({"wayland-egl", backend::LoopMode::kReactor,
-                     MakeWaylandDisplay, MakeWaylandEglBackend, nullptr});
+  registry.Register(
+      {"wayland-egl", MakeWaylandDisplay, MakeWaylandEglBackend, nullptr});
 #endif
 #if BUILD_BACKEND_WAYLAND_VULKAN
-  registry.Register({"wayland-vulkan", backend::LoopMode::kReactor,
-                     MakeWaylandDisplay, MakeWaylandVulkanBackend, nullptr});
+  registry.Register({"wayland-vulkan", MakeWaylandDisplay,
+                     MakeWaylandVulkanBackend, nullptr});
 #endif
 #if BUILD_BACKEND_DRM_KMS_EGL
-  registry.Register({"drm-kms-egl", backend::LoopMode::kLegacy, MakeDrmDisplay,
-                     MakeDrmEglBackend, DrmListModes});
+  registry.Register(
+      {"drm-kms-egl", MakeDrmDisplay, MakeDrmEglBackend, DrmListModes});
 #endif
 #if BUILD_BACKEND_DRM_KMS_VULKAN
-  registry.Register({"drm-kms-vulkan", backend::LoopMode::kLegacy,
-                     MakeDrmDisplay, MakeDrmVulkanBackend, DrmListModes});
+  registry.Register(
+      {"drm-kms-vulkan", MakeDrmDisplay, MakeDrmVulkanBackend, DrmListModes});
 #endif
 #if BUILD_BACKEND_SOFTWARE
-  registry.Register({"software", backend::LoopMode::kLegacy,
-                     MakeSoftwareDisplay, MakeSoftwareBackend,
+  registry.Register({"software", MakeSoftwareDisplay, MakeSoftwareBackend,
 #if BUILD_SOFTWARE_SINK_DRM
                      SoftwareListModes});
 #else

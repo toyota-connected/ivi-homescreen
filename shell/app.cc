@@ -31,14 +31,12 @@
 #include "timer.h"
 #include "view/flutter_view.h"
 
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include <chrono>
 
 #include "asio/io_context.hpp"
 #include "asio/posix/stream_descriptor.hpp"
 #include "asio/post.hpp"
 #include "asio/steady_timer.hpp"
-#endif
 
 #include "shutdown_flag.h"
 
@@ -241,9 +239,13 @@ int App::Loop() const {
 }
 
 int App::Run() {
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  // The shared reactor is owned by App; the Wayland connection(s) already armed
-  // their fds onto it (App ctor: SetEventLoop + StartEvents).
+  // The shared reactor is owned by App and drives every backend. Reactor
+  // backends (Wayland) armed their display fds onto it in the ctor
+  // (SetEventLoop
+  // + StartEvents); self-driving backends (DRM, software) run their own
+  // seat/flip threads, so for them the reactor only services the refresh-rate
+  // pump (periodic RunTasks) and the shutdown/wake eventfd — the same duties
+  // the legacy per-iteration loop carried.
   asio::io_context& ioc = primary_ioc_;
 
   // Refresh-rate frame interval (fallback 60 Hz for virtual outputs that
@@ -347,11 +349,4 @@ int App::Run() {
   waker.cancel(ec);
   waker.release();
   return 0;
-#else
-  int ret = 0;
-  while (running && ret != -1) {
-    ret = Loop();
-  }
-  return ret;
-#endif
 }

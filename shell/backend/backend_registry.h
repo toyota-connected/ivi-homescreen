@@ -29,12 +29,6 @@ class Backend;
 
 namespace backend {
 
-// How App drives the backend after construction:
-//   kReactor — App::Run() runs the shared asio reactor on the main thread
-//              (the Wayland backends).
-//   kLegacy  — main spins `while (running) App::Loop()` (DRM and software).
-enum class LoopMode { kReactor, kLegacy };
-
 // One compiled-in backend's runtime identity plus the two factory callables
 // that used to live in the App::MakeDisplay / Backend::Create #if chains. The
 // pair is cohesive: make_backend expects the concrete IDisplay that
@@ -42,7 +36,6 @@ enum class LoopMode { kReactor, kLegacy };
 struct BackendDescriptor {
   std::string key;  // "wayland-egl","wayland-vulkan","drm-kms-egl",
                     // "drm-kms-vulkan","software"
-  LoopMode loop_mode;
 
   // Creates the IDisplay for this backend (the MakeDisplay branch body).
   std::function<std::shared_ptr<IDisplay>(
