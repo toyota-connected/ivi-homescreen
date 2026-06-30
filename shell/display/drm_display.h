@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "display/drm_output_provider.h"
 #include "display/idisplay.h"
 #include "input/iseat.h"
 
@@ -32,12 +33,15 @@ class DrmSession;
 
 class DrmDisplay final : public IDisplay {
  public:
+  // @p device_path is the card this display's outputs are enumerated from (its
+  // master domain); it is the same card the backend scans out to.
   // @p no_seat (--drm-no-seat / HOMESCREEN_DRM_NO_SEAT) skips opening a
   // libseat session entirely, forcing the backend's direct-open path. See
   // session().
   DrmDisplay(int32_t width,
              int32_t height,
              double refresh_rate_hz,
+             std::string device_path,
              bool no_seat = false);
   ~DrmDisplay() override;
 
@@ -110,11 +114,28 @@ class DrmDisplay final : public IDisplay {
 
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
+  // The card's connectors, enumerated as outputs (the master domain's output
+  // set). Always non-null for a DRM display.
+  [[nodiscard]] homescreen::IOutputProvider* GetOutputProvider() override {
+    return &output_provider_;
+  }
+
+  // The resolved card this display owns. The backend reads it from here so the
+  // display and its backend always scan out to / enumerate the same device.
+  [[nodiscard]] const std::string& device_path() const { return device_path_; }
+
  private:
   int32_t width_;
   int32_t height_;
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
+
+  // The resolved card (e.g. "/dev/dri/card1"). Declared before output_provider_
+  // so it can seed it.
+  std::string device_path_;
+
+  // Enumerates this card's connectors as outputs (libdrm only, no master).
+  homescreen::DrmOutputProvider output_provider_;
 
   // Active cursor sprite retargeting sink (set by FlutterView after the
   // backend creates its cursor). Owned by DrmBackend; null when no cursor.

@@ -60,10 +60,13 @@ drm::input::InputDeviceOpener OpenerFrom(homescreen::DrmSession* session) {
 DrmDisplay::DrmDisplay(int32_t width,
                        int32_t height,
                        double refresh_rate_hz,
+                       std::string device_path,
                        bool no_seat)
     : width_(width),
       height_(height),
       refresh_rate_hz_(refresh_rate_hz),
+      device_path_(std::move(device_path)),
+      output_provider_(device_path_),
       session_(OpenSessionOrLog(no_seat)),
       seat_(std::make_unique<homescreen::DrmSeat>(width,
                                                   height,
