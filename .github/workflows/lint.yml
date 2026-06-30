@@ -49,7 +49,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
@@ -82,15 +82,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
           version: 1.0
 
-      - name: Configure
+      - name: Setup libdisplay-info (system or from-source)
+        uses: ./.github/actions/setup-libdisplay-info
+
+      # Configure with ALL backends + the compositor enabled so
+      # compile_commands.json contains every backend's sources. clang-tidy lints
+      # whatever is in compile_commands.json, so this gives full coverage in a
+      # single pass (instead of one tidy run per backend combination).
+      - name: Configure (all backends)
         env:
           CC: clang-19
           CXX: clang++-19
@@ -99,6 +106,12 @@ jobs:
             -B ${{github.workspace}}/build \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -D BUILD_BACKEND_WAYLAND_EGL=ON \
+            -D BUILD_BACKEND_WAYLAND_VULKAN=ON \
+            -D BUILD_BACKEND_DRM_KMS_EGL=ON \
+            -D BUILD_BACKEND_DRM_KMS_VULKAN=ON \
+            -D BUILD_BACKEND_SOFTWARE=ON \
+            -D BUILD_COMPOSITOR=ON \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
       - name: Build (generate compile_commands.json)
@@ -109,3 +122,6 @@ jobs:
 
       - name: clang-format
         run: scripts/format.sh --check
+
+      - name: config reference (parser table + --help in sync)
+        run: python3 scripts/gen_config_reference.py --check

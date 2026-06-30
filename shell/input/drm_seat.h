@@ -203,7 +203,7 @@ class DrmSeat final : public ISeat {
   drm::input::InputDeviceOpener opener_;
 
   std::unique_ptr<drm::input::Seat> seat_;
-  // Shell-shared keyboard translation + auto-repeat (shell/input/), the same
+  // Backend-shared keyboard translation + auto-repeat (shell/input/), the same
   // path SoftwareSeat uses. repeater_ is null when disabled via
   // IVI_DRM_KEY_REPEAT=0 or when its timerfd can't be created.
   std::unique_ptr<input::XkbKeyboard> keyboard_;

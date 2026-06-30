@@ -36,7 +36,7 @@
 #include "view/flutter_view.h"
 
 class App;
-class Shell;
+class Backend;
 class FlutterView;
 struct FlutterDesktopEngineState;
 
@@ -46,7 +46,10 @@ class Engine {
    * @brief Constructor of engine
    * @param[in] view Pointer to Flutter view
    * @param[in] index an index of Flutter view
-   * @param[in] vm_args_c Command line arguments
+   * @param[in] command_line_args_c Engine / Dart VM switches
+   *            (FlutterProjectArgs.command_line_argv; argv[0] is the app id)
+   * @param[in] dart_entrypoint_args_c Arguments to the Dart entrypoint
+   *            main(List<String>) (FlutterProjectArgs.dart_entrypoint_argv)
    * @param[in] bundle_path Path to bundle
    * @param[in] accessibility_features Accessibility Features
    * @return Engine
@@ -56,7 +59,8 @@ class Engine {
    */
   Engine(FlutterView* view,
          size_t index,
-         const std::vector<const char*>& vm_args_c,
+         const std::vector<const char*>& command_line_args_c,
+         const std::vector<const char*>& dart_entrypoint_args_c,
          const std::string& bundle_path,
          int32_t accessibility_features);
 
@@ -295,12 +299,12 @@ class Engine {
 
   /**
    * @brief Get backend of view
-   * @return Shell*
-   * @retval Shell pointer
+   * @return Backend*
+   * @retval Backend pointer
    * @relation
    * wayland, flutter
    */
-  [[nodiscard]] Shell* GetBackend() const { return m_backend; }
+  [[nodiscard]] Backend* GetBackend() const { return m_backend; }
 
   [[nodiscard]] FlutterView* GetView() const { return m_view; }
 
@@ -359,7 +363,7 @@ class Engine {
   size_t m_index;
   bool m_running;
 
-  Shell* m_backend;
+  Backend* m_backend;
   FlutterView* m_view;
 
   std::filesystem::path m_assets_path;

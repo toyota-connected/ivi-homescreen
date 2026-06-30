@@ -24,147 +24,193 @@
 #include "cxxopts/include/cxxopts.hpp"
 #include "utils.h"
 
-// Overlays the values found in a parsed TOML document onto |instance|. Each
-// block below maps one TOML key (under the [global], [view], or
-// [window_activation_area] tables) to its Config field, copying it only when
-// the key is present and of the expected type so that unset keys preserve any
-// defaults or command-line values already held by |instance|.
-void Configuration::get_parameters(toml::table* tbl, Config& instance) {
-  // [global] table — application-wide settings.
-  if (tbl->at_path("global.app_id").is_string()) {
-    instance.app_id = tbl->at_path("global.app_id").as_string()->value_or("");
+namespace {
+// Resolve the view tables of a parsed document. Accepts both the
+// array-of-tables form `[[view]]` (one element per view) and a singular
+// `[view]` table (treated as a one-element list) so per-bundle files can keep
+// the terser singular form.
+std::vector<toml::table*> collect_view_tables(toml::table* root) {
+  std::vector<toml::table*> views;
+  auto node = root->at_path("view");
+  if (auto* arr = node.as_array()) {
+    for (auto&& el : *arr) {
+      if (auto* t = el.as_table()) {
+        views.emplace_back(t);
+      }
+    }
+  } else if (auto* t = node.as_table()) {
+    views.emplace_back(t);
   }
-  if (tbl->at_path("global.cursor_theme").is_string()) {
-    instance.cursor_theme =
-        tbl->at_path("global.cursor_theme").as_string()->value_or("");
-  }
-  if (tbl->at_path("global.disable_cursor").is_boolean()) {
-    instance.disable_cursor =
-        tbl->at_path("global.disable_cursor").value<bool>().value();
-  }
-  if (tbl->at_path("global.wayland_event_mask").is_string()) {
-    instance.wayland_event_mask =
-        tbl->at_path("global.wayland_event_mask").as_string()->value_or("");
-  }
-  if (tbl->at_path("global.debug_backend").is_boolean()) {
-    instance.debug_backend =
-        tbl->at_path("global.debug_backend").value<bool>().value();
-  }
+  return views;
+}
+}  // namespace
 
-  // [view] table — window geometry and Flutter view settings.
-  if (tbl->at_path("view.window_type").is_string()) {
-    instance.view.window_type =
-        tbl->at_path("view.window_type").as_string()->value_or("");
+// Overlays the [global] (process-level) table onto |instance|, copying each key
+// only when present and of the expected type so unset keys preserve any
+// defaults or command-line values already held by |instance|.
+void Configuration::get_global_parameters(toml::table* root, Config& instance) {
+  if (root->at_path("global.app_id").is_string()) {
+    instance.app_id = root->at_path("global.app_id").as_string()->value_or("");
   }
-  if (tbl->at_path("view.output_index").is_integer()) {
+  if (root->at_path("global.cursor_theme").is_string()) {
+    instance.cursor_theme =
+        root->at_path("global.cursor_theme").as_string()->value_or("");
+  }
+  if (root->at_path("global.disable_cursor").is_boolean()) {
+    instance.disable_cursor =
+        root->at_path("global.disable_cursor").value<bool>().value();
+  }
+  if (root->at_path("global.wayland_event_mask").is_string()) {
+    instance.wayland_event_mask =
+        root->at_path("global.wayland_event_mask").as_string()->value_or("");
+  }
+  if (root->at_path("global.debug_backend").is_boolean()) {
+    instance.debug_backend =
+        root->at_path("global.debug_backend").value<bool>().value();
+  }
+}
+
+// Overlays a single [[view]] table onto |instance|. Paths are relative to the
+// view table, so AGL shell knobs live under shell.window[.activation_area] and
+// backend knobs under backend[.drm], each ignored unless present.
+void Configuration::get_view_parameters(toml::table* v, Config& instance) {
+  // Plain view geometry / Flutter settings.
+  if (v->at_path("output_index").is_integer()) {
     instance.view.wl_output_index =
-        tbl->at_path("view.output_index").value<uint32_t>().value();
+        v->at_path("output_index").value<uint32_t>().value();
   }
-  if (tbl->at_path("view.width").is_integer()) {
-    instance.view.width = tbl->at_path("view.width").value<uint32_t>().value();
+  if (v->at_path("width").is_integer()) {
+    instance.view.width = v->at_path("width").value<uint32_t>().value();
   }
-  if (tbl->at_path("view.height").is_integer()) {
-    instance.view.height =
-        tbl->at_path("view.height").value<uint32_t>().value();
+  if (v->at_path("height").is_integer()) {
+    instance.view.height = v->at_path("height").value<uint32_t>().value();
   }
-  if (tbl->at_path("view.pixel_ratio").is_floating_point()) {
+  if (v->at_path("pixel_ratio").is_floating_point()) {
     instance.view.pixel_ratio =
-        tbl->at_path("view.pixel_ratio").value<double>().value();
+        v->at_path("pixel_ratio").value<double>().value();
   }
-  if (tbl->at_path("view.ivi_surface_id").is_integer()) {
-    instance.view.ivi_surface_id =
-        tbl->at_path("view.ivi_surface_id").value<uint32_t>().value();
-  }
-  if (tbl->at_path("view.accessibility_features").is_integer()) {
+  if (v->at_path("accessibility_features").is_integer()) {
     instance.view.accessibility_features =
-        tbl->at_path("view.accessibility_features").value<int32_t>().value();
+        v->at_path("accessibility_features").value<int32_t>().value();
   }
-  if (tbl->at_path("view.vm_args").is_array()) {
-    const auto vm_args = tbl->at_path("view.vm_args").as_array();
-    for (auto& arg : *vm_args) {
-      instance.view.vm_args.emplace_back(arg.as_string()->value_or(""));
+  // [view.args] — engine -> command_line_argv, dart -> dart_entrypoint_argv.
+  if (v->at_path("args.engine").is_array()) {
+    const auto engine_args = v->at_path("args.engine").as_array();
+    for (auto& arg : *engine_args) {
+      instance.view.engine_args.emplace_back(arg.as_string()->value_or(""));
     }
   }
-  if (tbl->at_path("view.fullscreen").is_boolean()) {
-    instance.view.fullscreen =
-        tbl->at_path("view.fullscreen").value<bool>().value();
+  if (v->at_path("args.dart").is_array()) {
+    const auto dart_args = v->at_path("args.dart").as_array();
+    for (auto& arg : *dart_args) {
+      instance.view.dart_args.emplace_back(arg.as_string()->value_or(""));
+    }
+  }
+  if (v->at_path("fullscreen").is_boolean()) {
+    instance.view.fullscreen = v->at_path("fullscreen").value<bool>().value();
   }
 
-  // ── DRM backend knobs (all strings; see configuration.h) ───────────────
-  if (tbl->at_path("view.drm_device").is_string()) {
-    instance.view.drm_device =
-        tbl->at_path("view.drm_device").as_string()->value_or("");
+  // [view.shell] — shell selector + shell-specific knobs (AGL window role /
+  // activation area; ivi surface id).
+  if (v->at_path("shell.type").is_string()) {
+    instance.view.shell = v->at_path("shell.type").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_connector").is_string()) {
-    instance.view.drm_connector =
-        tbl->at_path("view.drm_connector").as_string()->value_or("");
+  // ivi-shell addresses surfaces by numeric id (ivi-only).
+  if (v->at_path("shell.surface_id").is_integer()) {
+    instance.view.ivi_surface_id =
+        v->at_path("shell.surface_id").value<uint32_t>().value();
   }
-  if (tbl->at_path("view.drm_mode").is_string()) {
-    instance.view.drm_mode =
-        tbl->at_path("view.drm_mode").as_string()->value_or("");
+  if (v->at_path("shell.window.type").is_string()) {
+    instance.view.window_type =
+        v->at_path("shell.window.type").as_string()->value_or("");
   }
-  if (tbl->at_path("view.backend").is_string()) {
+  if (v->at_path("shell.window.activation_area.x").is_integer()) {
+    instance.view.activation_area_x =
+        v->at_path("shell.window.activation_area.x").value<uint32_t>().value();
+  }
+  if (v->at_path("shell.window.activation_area.y").is_integer()) {
+    instance.view.activation_area_y =
+        v->at_path("shell.window.activation_area.y").value<uint32_t>().value();
+  }
+  if (v->at_path("shell.window.activation_area.width").is_integer()) {
+    instance.view.activation_area_width =
+        v->at_path("shell.window.activation_area.width")
+            .value<uint32_t>()
+            .value();
+  }
+  if (v->at_path("shell.window.activation_area.height").is_integer()) {
+    instance.view.activation_area_height =
+        v->at_path("shell.window.activation_area.height")
+            .value<uint32_t>()
+            .value();
+  }
+
+  // [view.backend] — backend selector + DRM-only knobs (see configuration.h).
+  if (v->at_path("backend.type").is_string()) {
     instance.view.backend =
-        tbl->at_path("view.backend").as_string()->value_or("");
+        v->at_path("backend.type").as_string()->value_or("");
   }
-  if (tbl->at_path("view.shell").is_string()) {
-    instance.view.shell = tbl->at_path("view.shell").as_string()->value_or("");
+  if (v->at_path("backend.drm.device").is_string()) {
+    instance.view.drm_device =
+        v->at_path("backend.drm.device").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_compositor").is_string()) {
+  if (v->at_path("backend.drm.connector").is_string()) {
+    instance.view.drm_connector =
+        v->at_path("backend.drm.connector").as_string()->value_or("");
+  }
+  if (v->at_path("backend.drm.mode").is_string()) {
+    instance.view.drm_mode =
+        v->at_path("backend.drm.mode").as_string()->value_or("");
+  }
+  if (v->at_path("backend.drm.rotation").is_integer()) {
+    instance.view.drm_rotation =
+        v->at_path("backend.drm.rotation").value<int>().value();
+  }
+  if (v->at_path("backend.drm.compositor").is_string()) {
     instance.view.drm_compositor =
-        tbl->at_path("view.drm_compositor").as_string()->value_or("");
+        v->at_path("backend.drm.compositor").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_modeset").is_string()) {
+  if (v->at_path("backend.drm.modeset").is_string()) {
     instance.view.drm_modeset =
-        tbl->at_path("view.drm_modeset").as_string()->value_or("");
+        v->at_path("backend.drm.modeset").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_allow_nonblock_modeset").is_string()) {
+  if (v->at_path("backend.drm.allow_nonblock_modeset").is_string()) {
     instance.view.drm_allow_nonblock_modeset =
-        tbl->at_path("view.drm_allow_nonblock_modeset")
+        v->at_path("backend.drm.allow_nonblock_modeset")
             .as_string()
             ->value_or("");
   }
-  if (tbl->at_path("view.drm_primary_format").is_string()) {
+  if (v->at_path("backend.drm.primary_format").is_string()) {
     instance.view.drm_primary_format =
-        tbl->at_path("view.drm_primary_format").as_string()->value_or("");
+        v->at_path("backend.drm.primary_format").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_overlay_planes").is_string()) {
+  if (v->at_path("backend.drm.overlay_planes").is_string()) {
     instance.view.drm_overlay_planes =
-        tbl->at_path("view.drm_overlay_planes").as_string()->value_or("");
+        v->at_path("backend.drm.overlay_planes").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_explicit_sync").is_string()) {
+  if (v->at_path("backend.drm.explicit_sync").is_string()) {
     instance.view.drm_explicit_sync =
-        tbl->at_path("view.drm_explicit_sync").as_string()->value_or("");
+        v->at_path("backend.drm.explicit_sync").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_async_flip").is_string()) {
+  if (v->at_path("backend.drm.async_flip").is_string()) {
     instance.view.drm_async_flip =
-        tbl->at_path("view.drm_async_flip").as_string()->value_or("");
+        v->at_path("backend.drm.async_flip").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_stage_cursor").is_string()) {
+  if (v->at_path("backend.drm.stage_cursor").is_string()) {
     instance.view.drm_stage_cursor =
-        tbl->at_path("view.drm_stage_cursor").as_string()->value_or("");
+        v->at_path("backend.drm.stage_cursor").as_string()->value_or("");
   }
-  if (tbl->at_path("view.drm_no_seat").is_boolean()) {
+  if (v->at_path("backend.drm.no_seat").is_boolean()) {
     instance.view.drm_no_seat =
-        tbl->at_path("view.drm_no_seat").value<bool>().value();
+        v->at_path("backend.drm.no_seat").value<bool>().value();
   }
-
-  // [window_activation_area] table — AGL shell activation-area rectangle.
-  if (tbl->at_path("window_activation_area.x").is_integer()) {
-    instance.view.activation_area_x =
-        tbl->at_path("window_activation_area.x").value<uint32_t>().value();
-  }
-  if (tbl->at_path("window_activation_area.y").is_integer()) {
-    instance.view.activation_area_y =
-        tbl->at_path("window_activation_area.y").value<uint32_t>().value();
-  }
-  if (tbl->at_path("window_activation_area.width").is_integer()) {
-    instance.view.activation_area_width =
-        tbl->at_path("window_activation_area.width").value<uint32_t>().value();
-  }
-  if (tbl->at_path("window_activation_area.height").is_integer()) {
-    instance.view.activation_area_height =
-        tbl->at_path("window_activation_area.height").value<uint32_t>().value();
+  if (v->at_path("backend.drm.input_transforms").is_array()) {
+    const auto arr = v->at_path("backend.drm.input_transforms").as_array();
+    instance.view.drm_input_transforms.clear();
+    for (auto& t : *arr) {
+      instance.view.drm_input_transforms.emplace_back(
+          t.as_string()->value_or(""));
+    }
   }
 }
 
@@ -181,7 +227,13 @@ void Configuration::get_toml_config(const char* config_toml_path,
   }
 
   auto tbl = result.table();
-  get_parameters(&tbl, instance);
+  get_global_parameters(&tbl, instance);
+  // A per-bundle config.toml describes a single view; apply the first (or only)
+  // [[view]]/[view] table.
+  const auto views = collect_view_tables(&tbl);
+  if (!views.empty()) {
+    get_view_parameters(views.front(), instance);
+  }
 }
 
 void Configuration::get_cli_override(const std::string& bundle_path,
@@ -204,9 +256,14 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.debug_backend.has_value()) {
     instance.debug_backend = cli.debug_backend.value();
   }
-  if (!cli.view.vm_args.empty()) {
-    for (auto const& arg : cli.view.vm_args) {
-      instance.view.vm_args.emplace_back(arg);
+  if (!cli.view.engine_args.empty()) {
+    for (auto const& arg : cli.view.engine_args) {
+      instance.view.engine_args.emplace_back(arg);
+    }
+  }
+  if (!cli.view.dart_args.empty()) {
+    for (auto const& arg : cli.view.dart_args) {
+      instance.view.dart_args.emplace_back(arg);
     }
   }
   if (!cli.view.window_type.empty()) {
@@ -287,18 +344,82 @@ void Configuration::get_cli_override(const std::string& bundle_path,
 
 std::vector<Configuration::Config> Configuration::parse_config(
     const Config& cli_config) {
-  const auto view_count = cli_config.bundle_paths.size();
+  // One descriptor per view: its bundle directory plus, when driven by a master
+  // --config file, the [[view]] table that overrides the bundle's own config.
+  struct ViewDescriptor {
+    std::string bundle_path;
+    toml::table* master_view = nullptr;  // null in legacy (-b) mode
+  };
+  std::vector<ViewDescriptor> descriptors;
+
+  // Parse the master --config document once and keep it alive for the whole
+  // function so the table pointers handed to get_*_parameters stay valid.
+  toml::parse_result master_doc;
+  toml::table* master_root = nullptr;
+  if (cli_config.config_file && !cli_config.config_file->empty()) {
+    const auto& path = *cli_config.config_file;
+    if (!std::filesystem::exists(path)) {
+      spdlog::critical("--config file not found: {}", path);
+      exit(EXIT_FAILURE);
+    }
+    master_doc = toml::parse_file(path);
+    if (!master_doc) {
+      spdlog::critical("TOML parsing failed: {} — {}", path,
+                       master_doc.error().description());
+      exit(EXIT_FAILURE);
+    }
+    master_root = &master_doc.table();
+
+    // Resolve each view's bundle, relative paths against the file's directory.
+    const std::filesystem::path base =
+        std::filesystem::path(path).parent_path();
+    for (auto* v : collect_view_tables(master_root)) {
+      std::string bundle;
+      if (v->at_path("bundle").is_string()) {
+        bundle = v->at_path("bundle").as_string()->value_or("");
+      }
+      if (bundle.empty()) {
+        spdlog::critical("--config: every [[view]] requires a 'bundle' path");
+        exit(EXIT_FAILURE);
+      }
+      std::filesystem::path bp(bundle);
+      if (bp.is_relative()) {
+        bp = base / bp;
+      }
+      descriptors.push_back({bp.string(), v});
+    }
+    if (!cli_config.bundle_paths.empty()) {
+      spdlog::warn("--config provided; ignoring -b/--bundle argument(s)");
+    }
+  } else {
+    for (const auto& bundle_path : cli_config.bundle_paths) {
+      descriptors.push_back({bundle_path, nullptr});
+    }
+  }
 
   std::vector<Config> res;
-  res.reserve(view_count);
+  res.reserve(descriptors.size());
 
-  for (const auto& bundle_path : cli_config.bundle_paths) {
+  for (const auto& d : descriptors) {
     Config cfg{};
+    // Propagate the master path so the crash handler can source [sentry] from
+    // it (process-level), not from the first bundle.
+    cfg.config_file = cli_config.config_file;
 
-    const auto config_toml_path =
-        std::string(bundle_path) + "/" + kViewConfigToml;
+    // 1. The bundle's own config.toml (base layer): its [global] + single view.
+    const auto config_toml_path = d.bundle_path + "/" + kViewConfigToml;
     get_toml_config(config_toml_path.c_str(), cfg);
-    get_cli_override(bundle_path, cfg, cli_config);
+
+    // 2. The master --config overrides: process [global] then this view entry.
+    if (master_root) {
+      get_global_parameters(master_root, cfg);
+      if (d.master_view) {
+        get_view_parameters(d.master_view, cfg);
+      }
+    }
+
+    // 3. CLI flags win.
+    get_cli_override(d.bundle_path, cfg, cli_config);
 
     if (cfg.view.window_type.empty()) {
       cfg.view.window_type = "NORMAL";
@@ -316,9 +437,20 @@ std::vector<Configuration::Config> Configuration::parse_config(
       cfg.app_id = kApplicationName;
     }
 
+    // An omitted/zero activation area covers the full view extent. TOML has no
+    // value references, so "same as the view" is resolved here rather than in
+    // the file. x/y already default to 0.
+    const uint32_t view_w = cfg.view.width.value_or(kDefaultViewWidth);
+    const uint32_t view_h = cfg.view.height.value_or(kDefaultViewHeight);
+    if (cfg.view.activation_area_width == 0) {
+      cfg.view.activation_area_width = view_w;
+    }
+    if (cfg.view.activation_area_height == 0) {
+      cfg.view.activation_area_height = view_h;
+    }
+
     res.emplace_back(cfg);
   }
-  assert(res.capacity() == view_count);
 
   return res;
 }
@@ -345,14 +477,23 @@ void Configuration::PrintConfig(const Config& config) {
   spdlog::info("********");
   spdlog::info("* View *");
   spdlog::info("********");
-  if (!config.view.vm_args.empty()) {
-    spdlog::info("VM Args:");
-    for (auto const& arg : config.view.vm_args) {
+  if (!config.view.engine_args.empty()) {
+    spdlog::info("Engine Args:");
+    for (auto const& arg : config.view.engine_args) {
+      spdlog::info(arg);
+    }
+  }
+  if (!config.view.dart_args.empty()) {
+    spdlog::info("Dart Entrypoint Args:");
+    for (auto const& arg : config.view.dart_args) {
       spdlog::info(arg);
     }
   }
   spdlog::info("Bundle Path: .............. {}", config.view.bundle_path);
   spdlog::info("Window Type: .............. {}", config.view.window_type);
+  if (config.view.backend.has_value() && !config.view.backend->empty()) {
+    spdlog::info("Backend: .................. {}", config.view.backend.value());
+  }
   spdlog::info("Output Index: ............. {}",
                config.view.wl_output_index.value_or(0));
   spdlog::info("Size: ..................... {} x {}",
@@ -392,96 +533,138 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     const std::unique_ptr<cxxopts::Options> allocated(
         new cxxopts::Options(kApplicationName, "Toyota Flutter Embedder"));
 
-    allocated->set_width(80)
-        .set_tab_expansion()
-        .allow_unrecognised_options()
-        .add_options()("help", "Print help")(
-            "b,bundle", "Path to a bundle directory (required)",
-            cxxopts::value<std::vector<std::string>>(config.bundle_paths))(
-            "a,accessibility-flags", "Accessibility feature flag(s)",
-            cxxopts::value<std::string>(accessibility_feature_flag_str))(
-            "c,disable-cursor", "Disable cursor", cxxopts::value<bool>())(
-            "d,debug-backend", "Debug backend", cxxopts::value<bool>())(
-            "f,fullscreen", "Full screen", cxxopts::value<bool>())(
-            "w,width", "Width", cxxopts::value<uint32_t>())(
-            "h,height", "Height", cxxopts::value<uint32_t>())(
-            "p,pixel-ratio", "Pixel Ratio", cxxopts::value<double>())(
-            "t,cursor-theme", "Cursor Theme Name",
-            cxxopts::value<std::string>(config.cursor_theme))(
-            "window-type", "AGL window type (only applies to AGL-compositor)",
-            cxxopts::value<std::string>(config.view.window_type))(
-            "shell",
-            "Wayland compositor shell: auto|xdg|agl|ivi|simple (default auto)",
-            cxxopts::value<std::string>())("o,output-index",
-                                           "Wayland output index",
-                                           cxxopts::value<uint32_t>())(
-            "xdg-shell-app-id", "XDG shell app id",
-            cxxopts::value<std::string>(config.app_id))(
-            "wayland-event-mask", "Wayland Events to mask",
-            cxxopts::value<std::string>(config.wayland_event_mask))(
-            "ivi-surface-id", "IVI Surface ID", cxxopts::value<uint32_t>())(
-            "drm-device", "DRM device path (e.g. /dev/dri/card0)",
-            cxxopts::value<std::string>())(
-            "drm-connector",
-            "DRM connector to drive (e.g. eDP-1, HDMI-A-1); default rank-picks",
-            cxxopts::value<std::string>())(
-            "drm-mode",
-            "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
-            cxxopts::value<std::string>())(
-            "drm-rotation",
-            "DRM scanout rotation in degrees: 0|90|180|270 (default 0)",
-            cxxopts::value<int>())("drm-compositor",
-                                   "DRM compositor strategy: auto|planes|gl",
-                                   cxxopts::value<std::string>())(
-            "drm-modeset", "DRM modeset API: auto|legacy|atomic",
-            cxxopts::value<std::string>())(
-            "drm-allow-nonblock-modeset",
-            "Allow NONBLOCK | ALLOW_MODESET atomic commits: auto|yes|no",
-            cxxopts::value<std::string>())(
-            "drm-primary-format",
-            "Primary plane format: auto|xrgb8888|xbgr8888|argb8888|abgr8888|"
-            "rgb565",
-            cxxopts::value<std::string>())("drm-overlay-planes",
-                                           "Use overlay planes: auto|yes|no",
-                                           cxxopts::value<std::string>())(
-            "drm-explicit-sync",
-            "Use IN_FENCE_FD / OUT_FENCE_PTR on commits: auto|yes|no",
-            cxxopts::value<std::string>())(
-            "drm-async-flip",
-            "Use DRM_MODE_PAGE_FLIP_ASYNC on flip-only commits: auto|yes|no",
-            cxxopts::value<std::string>())(
-            "drm-stage-cursor",
-            "Stage the HW cursor into the compositor commit: auto|yes|no",
-            cxxopts::value<std::string>())(
-            "drm-no-seat",
-            "Bypass libseat: open /dev/dri + input directly and self-acquire "
-            "DRM master, skipping the foreground-VT guard (headless/SSH/kiosk "
-            "bring-up; you must ensure nothing else holds the display)",
-            cxxopts::value<bool>())(
-            "input-transform",
-            "Per-device pointer transform (repeatable): "
-            "\"<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]\"",
-            cxxopts::value<std::vector<std::string>>());
+    allocated->set_width(80).set_tab_expansion().allow_unrecognised_options();
+
+    // Core
+    allocated->add_options()("h,help", "Print this help and exit")(
+        "b,bundle",
+        "Path to a bundle directory (repeatable; required unless --config "
+        "is given)",
+        cxxopts::value<std::vector<std::string>>(config.bundle_paths))(
+        "config",
+        "Path to a master config.toml defining one or more [[view]] entries "
+        "(each with its own 'bundle'); overrides per-bundle config.toml",
+        cxxopts::value<std::string>());
+
+    // [global] (process-level)
+    allocated->add_options("Global")(
+        "app-id", "Application id (sets [global].app_id; used by all shells)",
+        cxxopts::value<std::string>(config.app_id))(
+        "xdg-shell-app-id", "Deprecated alias for --app-id",
+        cxxopts::value<std::string>(config.app_id))(
+        "t,cursor-theme", "Cursor theme name (e.g. DMZ-White)",
+        cxxopts::value<std::string>(config.cursor_theme))(
+        "c,disable-cursor", "Hide the pointer cursor",
+        cxxopts::value<bool>()->implicit_value("true"))(
+        "d,debug-backend", "Enable backend debug logging",
+        cxxopts::value<bool>()->implicit_value("true"))(
+        "wayland-event-mask",
+        "Wayland input events to mask (e.g. pointer-axis,keyboard)",
+        cxxopts::value<std::string>(config.wayland_event_mask));
+
+    // [[view]] (geometry / Flutter)
+    allocated->add_options("View")("w,width", "View width in px",
+                                   cxxopts::value<uint32_t>())(
+        "height", "View height in px", cxxopts::value<uint32_t>())(
+        "o,output-index", "wl_output index to place the view on",
+        cxxopts::value<uint32_t>())("p,pixel-ratio", "Device pixel ratio",
+                                    cxxopts::value<double>())(
+        "f,fullscreen", "Start fullscreen",
+        cxxopts::value<bool>()->implicit_value("true"))(
+        "a,accessibility-flags",
+        "Accessibility feature bit mask (decimal / 0x.. / 0..)",
+        cxxopts::value<std::string>(accessibility_feature_flag_str))(
+        "engine-arg",
+        "Engine / Dart VM switch -> command_line_argv (repeatable). "
+        "Unrecognized options are also forwarded here.",
+        cxxopts::value<std::vector<std::string>>())(
+        "dart-arg",
+        "Argument to the Dart entrypoint main(List<String>) -> "
+        "dart_entrypoint_argv (repeatable)",
+        cxxopts::value<std::vector<std::string>>());
+
+    // [view.shell]
+    allocated->add_options("Shell")(
+        "shell",
+        "Wayland compositor-protocol shell: auto|xdg|agl|ivi|simple "
+        "(default auto)",
+        cxxopts::value<std::string>())(
+        "window-type", "AGL window role: BG|PANEL_*|NORMAL (AGL shell only)",
+        cxxopts::value<std::string>(config.view.window_type))(
+        "ivi-surface-id", "ivi-shell numeric surface id",
+        cxxopts::value<uint32_t>());
+
+    // [view.backend]
+    allocated->add_options("Backend")(
+        "backend",
+        "Active backend: wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|"
+        "software (default: env-aware -- a Wayland session selects "
+        "wayland-egl, else drm-kms-egl)",
+        cxxopts::value<std::string>());
+
+    // [view.backend.drm] (also settable via HOMESCREEN_DRM_* env)
+    allocated->add_options("DRM")(
+        "drm-list-modes",
+        "List the active backend's scanout modes and exit (optional device "
+        "path; defaults to --drm-device or the backend default)",
+        cxxopts::value<std::string>()->implicit_value(""))(
+        "drm-device", "DRM device path (e.g. /dev/dri/card0)",
+        cxxopts::value<std::string>())(
+        "drm-connector",
+        "DRM connector to drive (e.g. eDP-1, HDMI-A-1); default rank-picks",
+        cxxopts::value<std::string>())(
+        "drm-mode",
+        "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
+        cxxopts::value<std::string>())(
+        "drm-rotation",
+        "DRM scanout rotation in degrees: 0|90|180|270 (default 0)",
+        cxxopts::value<int>())("drm-compositor",
+                               "DRM compositor strategy: auto|planes|gl",
+                               cxxopts::value<std::string>())(
+        "drm-modeset", "DRM modeset API: auto|legacy|atomic",
+        cxxopts::value<std::string>())(
+        "drm-allow-nonblock-modeset",
+        "Allow NONBLOCK | ALLOW_MODESET atomic commits: auto|yes|no",
+        cxxopts::value<std::string>())(
+        "drm-primary-format",
+        "Primary plane format: auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565",
+        cxxopts::value<std::string>())("drm-overlay-planes",
+                                       "Use overlay planes: auto|yes|no",
+                                       cxxopts::value<std::string>())(
+        "drm-explicit-sync",
+        "Use IN_FENCE_FD / OUT_FENCE_PTR on commits: auto|yes|no",
+        cxxopts::value<std::string>())(
+        "drm-async-flip",
+        "Use DRM_MODE_PAGE_FLIP_ASYNC on flip-only commits: auto|yes|no",
+        cxxopts::value<std::string>())(
+        "drm-stage-cursor",
+        "Stage the HW cursor into the compositor commit: auto|yes|no",
+        cxxopts::value<std::string>())(
+        "drm-no-seat",
+        "Bypass libseat: open /dev/dri + input directly and self-acquire "
+        "DRM master, skipping the foreground-VT guard (headless/SSH/kiosk; "
+        "you must ensure nothing else holds the display)",
+        cxxopts::value<bool>()->implicit_value("true"))(
+        "input-transform",
+        "Per-device pointer transform (repeatable): "
+        "\"<device-name-substring>=<0|90|180|270>[,flip-x][,flip-y]\"",
+        cxxopts::value<std::vector<std::string>>());
 
     const auto result = allocated->parse(argc, argv);
 
     if (result.count("help")) {
-      spdlog::info("{}", allocated->help({"", "Group"}));
+      spdlog::info("{}", allocated->help({"", "Global", "View", "Shell",
+                                          "Backend", "DRM"}));
       exit(EXIT_SUCCESS);
     }
 
-    if (config.bundle_paths.empty()) {
-      spdlog::critical(
-          "-b (Bundle Path) option requires at least one directory path "
-          "argument (e.g. -b /usr/share/gallery)");
-      exit(EXIT_FAILURE);
+    if (result.count("config")) {
+      config.config_file = result["config"].as<std::string>();
     }
-    for (const auto& path : config.bundle_paths) {
-      if (!std::filesystem::is_directory(path)) {
-        spdlog::critical("Bundle path is not a directory: {}", path);
-        exit(EXIT_FAILURE);
-      }
-    }
+
+    // Bundle-directory validation happens after parse_config(), since with
+    // --config the bundle paths come from the file's [[view]] entries rather
+    // than from -b.
 
     if (result.count("accessibility-flags")) {
       if (accessibility_feature_flag_str.empty()) {
@@ -520,13 +703,10 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
       }
     }
 
-    if (result.count("xdg-shell-app-id")) {
-      if (config.app_id.empty()) {
-        spdlog::critical(
-            "-xdg-shell-app-id option requires an argument "
-            "(e.g. -xdg-shell-app-id gallery)");
-        exit(EXIT_FAILURE);
-      }
+    if ((result.count("app-id") || result.count("xdg-shell-app-id")) &&
+        config.app_id.empty()) {
+      spdlog::critical("--app-id requires an argument (e.g. --app-id gallery)");
+      exit(EXIT_FAILURE);
     }
 
     if (result.count("cursor-theme")) {
@@ -539,9 +719,20 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     if (result.count("window-type")) {
       if (config.view.window_type.empty()) {
         spdlog::critical(
-            "-window-type option requires an argument (e.g. "
-            "-window-type BG)");
+            "--window-type requires an argument (e.g. --window-type BG)");
         exit(EXIT_FAILURE);
+      }
+    }
+
+    if (result.count("engine-arg")) {
+      for (const auto& a :
+           result["engine-arg"].as<std::vector<std::string>>()) {
+        config.view.engine_args.emplace_back(a);
+      }
+    }
+    if (result.count("dart-arg")) {
+      for (const auto& a : result["dart-arg"].as<std::vector<std::string>>()) {
+        config.view.dart_args.emplace_back(a);
       }
     }
 
@@ -573,6 +764,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
     if (result.count("ivi-surface-id")) {
       config.view.ivi_surface_id = result["ivi-surface-id"].as<uint32_t>();
+    }
+    if (result.count("backend")) {
+      config.view.backend = result["backend"].as<std::string>();
     }
     if (result.count("shell")) {
       config.view.shell = result["shell"].as<std::string>();
@@ -652,9 +846,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
           result["input-transform"].as<std::vector<std::string>>();
     }
 
-    config.view.vm_args.reserve(result.unmatched().size());
+    // Unrecognized CLI options are forwarded as engine / Dart VM switches
+    // (command_line_argv).
+    config.view.engine_args.reserve(result.unmatched().size());
     for (const auto& option : result.unmatched()) {
-      config.view.vm_args.emplace_back(option.c_str());
+      config.view.engine_args.emplace_back(option.c_str());
     }
 
   } catch (const cxxopts::exceptions::exception& e) {
@@ -663,6 +859,22 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
   }
 
   auto configs = parse_config(config);
+
+  // Validate the resolved view list: at least one view, and every bundle must
+  // be an existing directory (paths may originate from -b or from a --config
+  // file's [[view]] entries).
+  if (configs.empty()) {
+    spdlog::critical(
+        "No views configured: provide -b <bundle> or --config <file>");
+    exit(EXIT_FAILURE);
+  }
+  for (const auto& c : configs) {
+    if (!std::filesystem::is_directory(c.view.bundle_path)) {
+      spdlog::critical("Bundle path is not a directory: {}",
+                       c.view.bundle_path);
+      exit(EXIT_FAILURE);
+    }
+  }
 
   if (!config.view.fullscreen) {
     if (config.view.width == 0) {

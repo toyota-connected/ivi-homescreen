@@ -34,7 +34,7 @@ WaylandWindow::WaylandWindow(const size_t index,
                              const uint32_t activation_area_y,
                              const uint32_t activation_area_width,
                              const uint32_t activation_area_height,
-                             Shell* backend,
+                             Backend* backend,
                              const uint32_t ivi_surface_id)
     : m_index(index),
       m_display(std::move(display)),
@@ -145,25 +145,29 @@ WaylandWindow::WaylandWindow(const size_t index,
   if (auto* wm = shell.WindowManager()) {
     switch (m_type) {
       case WINDOW_BG:
-        wm->SetBackground(m_base_surface, 0);
+        wm->SetBackground(m_base_surface, m_output_index);
         if (m_activation_area.x || m_activation_area.y ||
             m_activation_area.width || m_activation_area.height) {
           wm->SetActivationArea(m_activation_area.x, m_activation_area.y,
                                 m_activation_area.width,
-                                m_activation_area.height, 0);
+                                m_activation_area.height, m_output_index);
         }
         break;
       case WINDOW_PANEL_TOP:
-        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelTop, 0);
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelTop,
+                     m_output_index);
         break;
       case WINDOW_PANEL_BOTTOM:
-        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelBottom, 0);
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelBottom,
+                     m_output_index);
         break;
       case WINDOW_PANEL_LEFT:
-        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelLeft, 0);
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelLeft,
+                     m_output_index);
         break;
       case WINDOW_PANEL_RIGHT:
-        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelRight, 0);
+        wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelRight,
+                     m_output_index);
         break;
       default:
         break;

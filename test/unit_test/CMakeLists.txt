@@ -43,6 +43,15 @@ include (TestBigEndian)
 TEST_BIG_ENDIAN(IS_BIG_ENDIAN)
 list(APPEND TYPICAL_TEST_DEFINITIONS IS_ARCH_BIG_ENDIAN=${IS_BIG_ENDIAN})
 
+# Match the shell target: when the Wayland-Vulkan backend is built (and so may
+# coexist with DRM-KMS-Vulkan), configure <vulkan/vulkan.h> with the Wayland WSI
+# so the shell sources reused here as TYPICAL_TEST_SOURCES (register_backends.cc
+# / flutter_view.cc reach both Vulkan backend headers) see
+# VkWaylandSurfaceCreateInfoKHR. Mirrors shell/CMakeLists.txt.
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    list(APPEND TYPICAL_TEST_DEFINITIONS VK_USE_PLATFORM_WAYLAND_KHR=1)
+endif ()
+
 get_target_property(TYPICAL_TEST_INC_DIRS ${PROJECT_NAME} INCLUDE_DIRECTORIES)
 list(APPEND TYPICAL_TEST_INC_DIRS ${CMAKE_BINARY_DIR}/shell)
 list(APPEND TYPICAL_TEST_INC_DIRS ${PROJECT_SOURCE_DIR}/test/unit_test/unit_test_utils)

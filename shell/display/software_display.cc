@@ -19,7 +19,10 @@
 #include <cstdint>
 #include <utility>
 
+#include "config/common.h"  // BUILD_SOFTWARE_INPUT_LIBINPUT
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
 #include "backend/software/input/software_seat.h"
+#endif
 #include "backend/software/software_cursor.h"
 #include "cursor_kind.h"
 #include "input/iseat.h"
@@ -45,17 +48,22 @@ void SoftwareDisplay::SetViewportSize(const int32_t width,
   width_ = width;
   height_ = height;
   // SetViewport is SoftwareSeat-specific (not on ISeat), so downcast — the
-  // only seat type a SoftwareDisplay ever holds.
+  // only seat type a SoftwareDisplay ever holds. SoftwareSeat exists only with
+  // the libinput seat; without it there is no seat to size.
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
   if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
     sw_seat->SetViewport(width, height);
   }
+#endif
 }
 
 void SoftwareDisplay::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
   cursor_ = std::move(cursor);
+#if BUILD_SOFTWARE_INPUT_LIBINPUT
   if (auto* sw_seat = dynamic_cast<homescreen::SoftwareSeat*>(seat_.get())) {
     sw_seat->SetCursor(cursor_);
   }
+#endif
 }
 
 bool SoftwareDisplay::ActivateSystemCursor(const int32_t /*device*/,

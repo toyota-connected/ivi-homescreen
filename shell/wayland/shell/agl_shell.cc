@@ -72,11 +72,17 @@ bool AglShell::Sync(wl_display* display) {
   if (!agl_shell_ || agl_version_ < 2) {
     return true;
   }
-  bound_pending_ = true;
-  while (bound_pending_) {
-    if (wl_display_roundtrip(display) < 0) {
-      spdlog::error("[AglShell] roundtrip failed waiting for agl_shell.bound");
-      return false;
+  // bound_ok/bound_fail may have already arrived during earlier display-init
+  // roundtrips. Only block if we have not seen it yet, otherwise we would wait
+  // for a second event that the compositor never sends.
+  if (!bound_received_) {
+    bound_pending_ = true;
+    while (bound_pending_) {
+      if (wl_display_roundtrip(display) < 0) {
+        spdlog::error(
+            "[AglShell] roundtrip failed waiting for agl_shell.bound");
+        return false;
+      }
     }
   }
   if (!bound_ok_) {

@@ -54,7 +54,12 @@
 
 namespace {
 
-const auto& d = vk::detail::defaultDispatchLoaderDynamic;
+// Accessor for the dynamic dispatcher (storage in device_caps.cc). A function
+// rather than a namespace-scope reference so there is no static-init-order
+// dependency on that other TU's global.
+const auto& d() {
+  return vk::detail::defaultDispatchLoaderDynamic;
+}
 
 // Map a rotation in degrees (validated to 0|90|180|270 at config time) to the
 // KMS plane rotation bitflag. drm-cxx lowers DisplayParams::rotation to the
@@ -142,7 +147,7 @@ void* GetInstanceProcAddressCallback(void* /*user_data*/,
                                      void* instance,
                                      const char* procname) {
   return reinterpret_cast<void*>(
-      d.vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname));
+      d().vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname));
 }
 
 // Build a whole-color-aspect image-memory barrier.
@@ -181,25 +186,25 @@ void SubmitImageBarrier(VkDevice device,
   cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cbai.commandBufferCount = 1;
   VkCommandBuffer cmd = VK_NULL_HANDLE;
-  if (d.vkAllocateCommandBuffers(device, &cbai, &cmd) != VK_SUCCESS) {
+  if (d().vkAllocateCommandBuffers(device, &cbai, &cmd) != VK_SUCCESS) {
     return;
   }
   VkCommandBufferBeginInfo bi{};
   bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  d.vkBeginCommandBuffer(cmd, &bi);
-  d.vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
-                         1, &barrier);
-  d.vkEndCommandBuffer(cmd);
+  d().vkBeginCommandBuffer(cmd, &bi);
+  d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
+                           1, &barrier);
+  d().vkEndCommandBuffer(cmd);
 
   VkSubmitInfo si{};
   si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   si.commandBufferCount = 1;
   si.pCommandBuffers = &cmd;
-  d.vkResetFences(device, 1, &fence);
-  d.vkQueueSubmit(queue, 1, &si, fence);
-  d.vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
-  d.vkFreeCommandBuffers(device, pool, 1, &cmd);
+  d().vkResetFences(device, 1, &fence);
+  d().vkQueueSubmit(queue, 1, &si, fence);
+  d().vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+  d().vkFreeCommandBuffers(device, pool, 1, &cmd);
 }
 
 // One layer, many buffers: a LayerBufferSource that owns a ring of
@@ -353,7 +358,7 @@ bool VulkanDrmBackend::BringUp(std::string& refusal_reason) {
                      e.what();
     return false;
   }
-  if (d.vkCreateInstance == nullptr) {
+  if (d().vkCreateInstance == nullptr) {
     refusal_reason = "Vulkan loader present but vkCreateInstance unresolved";
     return false;
   }
@@ -402,7 +407,7 @@ struct VulkanDrmBackend::CompositorState {
       WaitForFlip(device.fd(), evctx);
     }
     if (vk_device != VK_NULL_HANDLE) {
-      d.vkDeviceWaitIdle(vk_device);
+      d().vkDeviceWaitIdle(vk_device);
     }
     // Order matters: drop the scene (and the ring source's framebuffers) before
     // freeing the images/dma-bufs the framebuffers reference.
@@ -410,10 +415,10 @@ struct VulkanDrmBackend::CompositorState {
     ring_owner.reset();
     slots.clear();
     if (barrier_fence != VK_NULL_HANDLE) {
-      d.vkDestroyFence(vk_device, barrier_fence, nullptr);
+      d().vkDestroyFence(vk_device, barrier_fence, nullptr);
     }
     if (barrier_pool != VK_NULL_HANDLE) {
-      d.vkDestroyCommandPool(vk_device, barrier_pool, nullptr);
+      d().vkDestroyCommandPool(vk_device, barrier_pool, nullptr);
     }
     if (have_master) {
       drmDropMaster(device.fd());
@@ -594,14 +599,14 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   pci.queueFamilyIndex = graphics_queue_family_;
-  if (d.vkCreateCommandPool(device_, &pci, nullptr, &state->barrier_pool) !=
+  if (d().vkCreateCommandPool(device_, &pci, nullptr, &state->barrier_pool) !=
       VK_SUCCESS) {
     err = "vkCreateCommandPool for scanout hand-off failed";
     return false;
   }
   VkFenceCreateInfo fci{};
   fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  if (d.vkCreateFence(device_, &fci, nullptr, &state->barrier_fence) !=
+  if (d().vkCreateFence(device_, &fci, nullptr, &state->barrier_fence) !=
       VK_SUCCESS) {
     err = "vkCreateFence for scanout hand-off failed";
     return false;
@@ -893,10 +898,10 @@ bool VulkanDrmBackend::CreateInstance(std::string& refusal_reason) {
 
   if (enable_validation_) {
     uint32_t layer_count = 0;
-    d.vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+    d().vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
     std::vector<VkLayerProperties> layers(layer_count);
     if (layer_count > 0) {
-      d.vkEnumerateInstanceLayerProperties(&layer_count, layers.data());
+      d().vkEnumerateInstanceLayerProperties(&layer_count, layers.data());
     }
     constexpr const char* kValidation = "VK_LAYER_KHRONOS_validation";
     for (const auto& l : layers) {
@@ -925,7 +930,7 @@ bool VulkanDrmBackend::CreateInstance(std::string& refusal_reason) {
       static_cast<uint32_t>(enabled_instance_extensions_.size());
   info.ppEnabledExtensionNames = enabled_instance_extensions_.data();
 
-  if (d.vkCreateInstance(&info, nullptr, &instance_) != VK_SUCCESS) {
+  if (d().vkCreateInstance(&info, nullptr, &instance_) != VK_SUCCESS) {
     refusal_reason = "vkCreateInstance failed";
     return false;
   }
@@ -935,7 +940,7 @@ bool VulkanDrmBackend::CreateInstance(std::string& refusal_reason) {
 
 void VulkanDrmBackend::SetupDebugMessenger() {
   if (enabled_instance_layers_.empty() ||
-      d.vkCreateDebugUtilsMessengerEXT == nullptr) {
+      d().vkCreateDebugUtilsMessengerEXT == nullptr) {
     return;
   }
   VkDebugUtilsMessengerCreateInfoEXT info{};
@@ -946,16 +951,16 @@ void VulkanDrmBackend::SetupDebugMessenger() {
                      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
   info.pfnUserCallback = DebugUtilsCallback;
-  d.vkCreateDebugUtilsMessengerEXT(instance_, &info, nullptr,
-                                   &debug_messenger_);
+  d().vkCreateDebugUtilsMessengerEXT(instance_, &info, nullptr,
+                                     &debug_messenger_);
 }
 
 bool VulkanDrmBackend::SelectPhysicalDevice(std::string& refusal_reason) {
   uint32_t count = 0;
-  d.vkEnumeratePhysicalDevices(instance_, &count, nullptr);
+  d().vkEnumeratePhysicalDevices(instance_, &count, nullptr);
   std::vector<VkPhysicalDevice> devices(count);
   if (count > 0) {
-    d.vkEnumeratePhysicalDevices(instance_, &count, devices.data());
+    d().vkEnumeratePhysicalDevices(instance_, &count, devices.data());
   }
 
   unsigned disp_major = 0;
@@ -966,7 +971,7 @@ bool VulkanDrmBackend::SelectPhysicalDevice(std::string& refusal_reason) {
   std::string last_miss;
   for (VkPhysicalDevice pd : devices) {
     VkPhysicalDeviceProperties props{};
-    d.vkGetPhysicalDeviceProperties(pd, &props);
+    d().vkGetPhysicalDeviceProperties(pd, &props);
 
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU ||
         LooksLikeSoftware(props.deviceName)) {
@@ -987,11 +992,11 @@ bool VulkanDrmBackend::SelectPhysicalDevice(std::string& refusal_reason) {
     }
 
     uint32_t ext_count = 0;
-    d.vkEnumerateDeviceExtensionProperties(pd, nullptr, &ext_count, nullptr);
+    d().vkEnumerateDeviceExtensionProperties(pd, nullptr, &ext_count, nullptr);
     std::vector<VkExtensionProperties> exts(ext_count);
     if (ext_count > 0) {
-      d.vkEnumerateDeviceExtensionProperties(pd, nullptr, &ext_count,
-                                             exts.data());
+      d().vkEnumerateDeviceExtensionProperties(pd, nullptr, &ext_count,
+                                               exts.data());
     }
     bool has_all = true;
     for (const char* req : kRequiredDeviceExtensions) {
@@ -1006,10 +1011,10 @@ bool VulkanDrmBackend::SelectPhysicalDevice(std::string& refusal_reason) {
     }
 
     uint32_t qf_count = 0;
-    d.vkGetPhysicalDeviceQueueFamilyProperties(pd, &qf_count, nullptr);
+    d().vkGetPhysicalDeviceQueueFamilyProperties(pd, &qf_count, nullptr);
     std::vector<VkQueueFamilyProperties> qfs(qf_count);
     if (qf_count > 0) {
-      d.vkGetPhysicalDeviceQueueFamilyProperties(pd, &qf_count, qfs.data());
+      d().vkGetPhysicalDeviceQueueFamilyProperties(pd, &qf_count, qfs.data());
     }
     uint32_t gfx_family = UINT32_MAX;
     for (uint32_t i = 0; i < qfs.size(); ++i) {
@@ -1034,7 +1039,7 @@ bool VulkanDrmBackend::SelectPhysicalDevice(std::string& refusal_reason) {
       VkPhysicalDeviceProperties2 p2{};
       p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
       p2.pNext = &drm;
-      d.vkGetPhysicalDeviceProperties2(pd, &p2);
+      d().vkGetPhysicalDeviceProperties2(pd, &p2);
       const bool primary_match =
           drm.hasPrimary &&
           static_cast<unsigned>(drm.primaryMajor) == disp_major &&
@@ -1084,7 +1089,7 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   VkPhysicalDeviceFeatures2 features2{};
   features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
   features2.pNext = &sync2_supported;
-  d.vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
+  d().vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
 
   if (sync2_supported.synchronization2 != VK_TRUE) {
     refusal_reason = "selected device does not support synchronization2";
@@ -1121,19 +1126,19 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   device_info.ppEnabledExtensionNames = enabled_device_extensions_.data();
   device_info.pEnabledFeatures = &device_features;
 
-  if (d.vkCreateDevice(physical_device_, &device_info, nullptr, &device_) !=
+  if (d().vkCreateDevice(physical_device_, &device_info, nullptr, &device_) !=
       VK_SUCCESS) {
     refusal_reason = "vkCreateDevice failed";
     return false;
   }
   VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device(device_));
-  d.vkGetDeviceQueue(device_, graphics_queue_family_, 0, &graphics_queue_);
+  d().vkGetDeviceQueue(device_, graphics_queue_family_, 0, &graphics_queue_);
   return true;
 }
 
 void VulkanDrmBackend::PopulateCaps() {
   VkPhysicalDeviceProperties props{};
-  d.vkGetPhysicalDeviceProperties(physical_device_, &props);
+  d().vkGetPhysicalDeviceProperties(physical_device_, &props);
   caps_.device_name = props.deviceName;
   caps_.vendor_id = props.vendorID;
   caps_.device_id = props.deviceID;
@@ -1141,12 +1146,12 @@ void VulkanDrmBackend::PopulateCaps() {
   caps_.max_image_2d = props.limits.maxImageDimension2D;
 
   uint32_t ext_count = 0;
-  d.vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &ext_count,
-                                         nullptr);
+  d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                           &ext_count, nullptr);
   std::vector<VkExtensionProperties> exts(ext_count);
   if (ext_count > 0) {
-    d.vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
-                                           &ext_count, exts.data());
+    d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                             &ext_count, exts.data());
   }
   caps_.has_physical_device_drm =
       HasExt(exts, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME);
@@ -1162,7 +1167,7 @@ void VulkanDrmBackend::PopulateCaps() {
   VkPhysicalDeviceFeatures2 timeline_features2{};
   timeline_features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
   timeline_features2.pNext = &timeline;
-  d.vkGetPhysicalDeviceFeatures2(physical_device_, &timeline_features2);
+  d().vkGetPhysicalDeviceFeatures2(physical_device_, &timeline_features2);
   caps_.has_timeline_semaphore = timeline.timelineSemaphore == VK_TRUE;
 
   VkPhysicalDeviceDriverProperties driver{};
@@ -1170,11 +1175,11 @@ void VulkanDrmBackend::PopulateCaps() {
   VkPhysicalDeviceProperties2 p2{};
   p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   p2.pNext = &driver;
-  d.vkGetPhysicalDeviceProperties2(physical_device_, &p2);
+  d().vkGetPhysicalDeviceProperties2(physical_device_, &p2);
   caps_.driver_name = driver.driverName;
 
   VkPhysicalDeviceMemoryProperties mem{};
-  d.vkGetPhysicalDeviceMemoryProperties(physical_device_, &mem);
+  d().vkGetPhysicalDeviceMemoryProperties(physical_device_, &mem);
   for (uint32_t i = 0; i < mem.memoryTypeCount; ++i) {
     if (mem.memoryTypes[i].propertyFlags &
         VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) {
@@ -1184,12 +1189,12 @@ void VulkanDrmBackend::PopulateCaps() {
   }
 
   uint32_t qf_count = 0;
-  d.vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &qf_count,
-                                             nullptr);
+  d().vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &qf_count,
+                                               nullptr);
   std::vector<VkQueueFamilyProperties> qfs(qf_count);
   if (qf_count > 0) {
-    d.vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &qf_count,
-                                               qfs.data());
+    d().vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &qf_count,
+                                                 qfs.data());
   }
   if (graphics_queue_family_ < qfs.size()) {
     caps_.graphics_queue_count = qfs[graphics_queue_family_].queueCount;
@@ -1209,21 +1214,21 @@ void VulkanDrmBackend::PopulateCaps() {
 
 void VulkanDrmBackend::Teardown() {
   if (device_ != VK_NULL_HANDLE) {
-    d.vkDestroyDevice(device_, nullptr);
+    d().vkDestroyDevice(device_, nullptr);
     device_ = VK_NULL_HANDLE;
   }
   if (debug_messenger_ != VK_NULL_HANDLE &&
-      d.vkDestroyDebugUtilsMessengerEXT != nullptr) {
-    d.vkDestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
+      d().vkDestroyDebugUtilsMessengerEXT != nullptr) {
+    d().vkDestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
     debug_messenger_ = VK_NULL_HANDLE;
   }
   if (instance_ != VK_NULL_HANDLE) {
-    d.vkDestroyInstance(instance_, nullptr);
+    d().vkDestroyInstance(instance_, nullptr);
     instance_ = VK_NULL_HANDLE;
   }
 }
 
-// ── Shell interface ──────────────────────────────────────────────────────
+// ── Backend interface ──────────────────────────────────────────────────────
 // The Flutter Vulkan renderer drives a fixed-size scanout target, so resize is
 // driven by the discovered mode rather than these call sites; they satisfy the
 // vtable and the FlutterView wiring.

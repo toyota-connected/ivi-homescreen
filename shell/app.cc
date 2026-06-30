@@ -39,25 +39,20 @@
 #include "asio/steady_timer.hpp"
 #endif
 
-// Process-wide shutdown flag, owned by main.cc and flipped by the signal
-// handler. The reactor watches the MainLoopWaker eventfd (which the handler
-// writes async-signal-safely) and checks this flag to stop the loop.
-extern volatile sig_atomic_t running;
+#include "shutdown_flag.h"
+
+// Process-wide shutdown flag. Declared in shutdown_flag.h and DEFINED here (in
+// the shell library) rather than in main.cc so the library is self-contained:
+// main.cc's signal handler clears it, and the reactor / legacy loop re-check it
+// (woken via the MainLoopWaker eventfd).
+volatile sig_atomic_t running = 1;
+
+#include "backend/backend_registry.h"
+#include "backend/register_backends.h"
 
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
 #include "wayland/window.h"
-#endif
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-#include "display/drm_display.h"
-#endif
-
-#if BUILD_BACKEND_SOFTWARE
-#include "backend/software/software_cursor.h"
-#include "display/software_display.h"
-#if BUILD_SOFTWARE_INPUT_LIBINPUT
-#include "backend/software/input/software_seat.h"
-#endif
 #endif
 
 namespace {
@@ -69,58 +64,18 @@ constexpr int kIdleHeartbeatMs = 1000;
 
 std::shared_ptr<IDisplay> MakeDisplay(
     const std::vector<Configuration::Config>& configs) {
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-  // DRM/KMS does not have a compositor-level display concept. The refresh
-  // rate and mode are owned by the backend; the DrmDisplay stub answers
-  // queries the shell issues (metrics, cursor activation, event loop) with
-  // safe defaults. Shell-side hooks can refine the refresh rate later.
-  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
-  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
-  const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
-  return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
-                                      static_cast<int32_t>(h), 60.0, no_seat);
-#elif BUILD_BACKEND_SOFTWARE
-  // No compositor, no Wayland, no DRM — just an IDisplay that owns
-  // (a) a refresh-rate denominator for App::Loop and (b) an optional
-  // libinput-backed seat. 60 Hz default; a sink with a real vblank
-  // can override later.
-  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
-  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
-  auto display = std::make_shared<SoftwareDisplay>(
-      static_cast<int32_t>(w), static_cast<int32_t>(h), 60.0);
-#if BUILD_SOFTWARE_INPUT_LIBINPUT
-  // IVI_SW_INPUT controls whether the seat is wired:
-  //   "none"     — skip; engine runs without input (CI default).
-  //   anything else (including unset / "libinput" / "auto") — wire
-  //   the libinput seat.
-  // Default-wire matches operator expectations on device targets and
-  // is a no-op on CI hosts that lack /dev/input/event* anyway.
-  const char* mode = std::getenv("IVI_SW_INPUT");
-  const bool want_input = mode == nullptr || std::string_view(mode) != "none";
-  if (want_input) {
-    display->SetSeat(std::make_unique<homescreen::SoftwareSeat>(
-        static_cast<int32_t>(w), static_cast<int32_t>(h)));
-  } else {
-    spdlog::info("[SoftwareBackend] IVI_SW_INPUT=none — no input seat");
+  // App is self-contained: ensure the runtime registry has an active backend
+  // (registering the compiled-in backends + resolving from configs on first
+  // use, or respecting one main() set explicitly) before creating its display.
+  // The active descriptor owns the display-creation body that used to live here
+  // as an #if chain (the bodies now live in backend/register_backends.cc).
+  // Fail-fast: a null backend would crash the engine init.
+  auto& reg = backend::BackendRegistry::Instance();
+  if (!EnsureActiveBackend(reg, configs)) {
+    spdlog::critical("[App] no usable backend available; aborting");
+    std::exit(EXIT_FAILURE);
   }
-#endif
-  // Software cursor, gated by --disable-cursor / IVI_SW_CURSOR=0. Owned by the
-  // display; shared with the seat (updates its position on motion) and the sink
-  // (composites it). Harmless for headless sinks — they ignore SetCursor, and
-  // the cursor stays invisible until the first pointer motion.
-  const char* cursor_env = std::getenv("IVI_SW_CURSOR");
-  const bool cursor_enabled =
-      !configs[0].disable_cursor &&
-      (cursor_env == nullptr || std::string_view(cursor_env) != "0");
-  if (cursor_enabled) {
-    display->SetCursor(std::make_shared<SoftwareCursor>());
-  }
-  return display;
-#else
-  return std::make_shared<Display>(!configs[0].disable_cursor,
-                                   configs[0].wayland_event_mask,
-                                   configs[0].cursor_theme, configs);
-#endif
+  return reg.Active().make_display(configs);
 }
 
 }  // namespace
@@ -167,9 +122,13 @@ App::App(const std::vector<Configuration::Config>& configs)
   // check that if we had a BG type and issue a ready() request for it,
   // otherwise we're going to assume that this is a NORMAL/REGULAR application.
   // OnClientReady maps to agl_shell.ready() on AglShell and is a no-op on the
-  // other shells.
-  if (found_view_with_bg)
-    dynamic_cast<Display*>(m_display.get())->ActiveShell().OnClientReady();
+  // other shells. Null-check the cast: in a multi-backend binary the active
+  // display may be DRM/software (not a Wayland Display).
+  if (found_view_with_bg) {
+    if (auto* d = dynamic_cast<Display*>(m_display.get())) {
+      d->ActiveShell().OnClientReady();
+    }
+  }
 #endif
 
 #if BUILD_WATCHDOG

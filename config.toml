@@ -1,0 +1,90 @@
+# ivi-homescreen bundle config.
+#
+# ivi-homescreen runs as a Wayland client; this file configures the client.
+# Place it at the root of the bundle directory you pass with `-b <bundle>` (it
+# must be named exactly `config.toml`). A single master file passed with
+# `--config <file>` may instead define several [[view]] entries, each with its
+# own `bundle` — see the multi-view example at the bottom. CLI flags override
+# anything here.
+#
+# Tables:
+#   [global]  process-level settings (app_id, cursor, sentry) shared by all views
+#   [[view]]  one per view: geometry + Flutter + shell + backend
+#             (a singular [view] is also accepted for a single-view bundle file)
+
+[global]
+# Process-level. app_id, cursor and the [sentry] table apply to the whole
+# process, not per view.
+app_id = 'homescreen'
+cursor_theme = 'DMZ-White'
+disable_cursor = false
+wayland_event_mask = ''
+debug_backend = false
+
+# [sentry] is optional and process-level (crash reporting). The DSN comes from
+# the SENTRY_DSN environment variable; this table only adds metadata. Omit the
+# whole table to disable.
+# [sentry]
+# release = '1.0.0'
+# env = 'production'
+# tags = { board = 'dev-board' }
+# attachments = []
+
+[[view]]
+width = 1920
+height = 1080
+output_index = 0
+pixel_ratio = 1.0
+fullscreen = false
+# accessibility_features is a FlutterAccessibilityFeature bit mask (0 = none).
+accessibility_features = 0
+
+  # Process arguments split by destination:
+  #   engine -> FlutterProjectArgs.command_line_argv (engine / Dart VM switches)
+  #   dart   -> FlutterProjectArgs.dart_entrypoint_argv (args to Dart main())
+  [view.args]
+  engine = ['--enable-asserts']
+  dart = []
+
+  # Wayland compositor-protocol shell. Window role + activation area are AGL-only
+  # and ignored by the other shells.
+  [view.shell]
+  type = 'agl'                # auto|xdg|agl|ivi|simple
+
+    [view.shell.window]
+    type = 'BG'               # BG|PANEL_TOP|PANEL_BOTTOM|PANEL_LEFT|PANEL_RIGHT|NORMAL
+
+      # The rectangle the compositor reserves for activated (launched) apps,
+      # sent via agl_shell.set_activate_region. Output-relative pixels. If this
+      # table is omitted, it defaults to the full view extent (x=0 y=0
+      # width=view.width height=view.height).
+      [view.shell.window.activation_area]
+      x = 0
+      y = 0
+      width = 1920
+      height = 1080
+
+  # Renderer backend. The [view.backend.drm] knobs apply only to the DRM/KMS
+  # backends and are ignored by the Wayland and software backends.
+  [view.backend]
+  type = 'wayland-egl'        # wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|software
+
+  # Example DRM knobs (uncomment for a drm-kms-* backend):
+  #   [view.backend.drm]
+  #   device = '/dev/dri/card0'
+  #   connector = 'eDP-1'
+  #   mode = '1920x1080@60'
+  #   rotation = 0            # 0|90|180|270
+  #   compositor = 'auto'     # auto|planes|gl
+  #   modeset = 'auto'        # auto|legacy|atomic
+  #   no_seat = false
+
+# ── Multi-view master file (use with: homescreen --config config.toml) ────────
+# Uncomment to drive several views from one file; each needs its own bundle.
+#
+# [[view]]
+# bundle = '/usr/share/cluster'
+# width = 1280
+# height = 720
+#   [view.shell.window]
+#   type = 'BG'

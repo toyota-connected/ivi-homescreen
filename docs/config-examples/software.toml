@@ -1,0 +1,31 @@
+# software: CPU raster to a KMS dumb buffer (no GPU). No Wayland compositor, so
+# no [view.shell]; the GL/sync DRM knobs do not apply.
+[global]
+app_id = 'homescreen'
+disable_cursor = false
+
+[[view]]
+fullscreen = true
+pixel_ratio = 1.0
+
+  [view.args]
+  engine = ['--enable-asserts']
+
+  [view.backend]
+  type = 'software'
+
+    [view.backend.drm]
+    device = '/dev/dri/card0'
+    connector = 'HDMI-A-1'       # unset = rank-pick
+    mode = '1280x720@60'         # unset = native mode
+    no_seat = false              # SoftwareSeat opens /dev/input directly; needs
+                                 # the 'input' group regardless of this flag
+
+# [sentry] — optional, process-level crash reporting (shared by all views).
+# The DSN comes from the SENTRY_DSN environment variable; this table only adds
+# metadata. Omit the whole table to disable.
+[sentry]
+release = '1.0.0'
+env = 'production'
+tags = { board = 'dev-board' }
+attachments = []

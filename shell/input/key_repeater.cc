@@ -74,7 +74,7 @@ void KeyRepeater::OnKey(const uint32_t evdev_keycode, const bool pressed) {
   }
 }
 
-void KeyRepeater::Arm() {
+void KeyRepeater::Arm() const {
   if (timer_fd_ < 0) {
     return;
   }
@@ -84,7 +84,7 @@ void KeyRepeater::Arm() {
   ::timerfd_settime(timer_fd_, 0, &its, nullptr);
 }
 
-void KeyRepeater::Disarm() {
+void KeyRepeater::Disarm() const {
   if (timer_fd_ < 0) {
     return;
   }

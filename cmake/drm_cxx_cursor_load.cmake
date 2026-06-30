@@ -69,6 +69,14 @@ add_library(drm-cxx::cursor-load ALIAS drm_cxx_cursor_load)
 set_target_properties(drm_cxx_cursor_load PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(drm_cxx_cursor_load PUBLIC cxx_std_17)
 
+# Inherit the project toolchain (stdlib selection — e.g. -stdlib=libc++ on
+# clang) so this in-tree lib's C++ ABI matches the rest of the build. Without
+# it a clang+libc++ build compiles these sources against the default libstdc++
+# and the link fails with std::__cxx11 / std::__1 symbol mismatches (the
+# software backend pulls this in directly when no DRM backend supplies the full
+# drm-cxx). Mirrors drm-cxx's own target, which links toolchain::toolchain.
+target_link_libraries(drm_cxx_cursor_load PRIVATE toolchain::toolchain)
+
 # Vendored submodule sources: suppress their warnings under ivi's strict flags.
 target_compile_options(drm_cxx_cursor_load PRIVATE -w)
 

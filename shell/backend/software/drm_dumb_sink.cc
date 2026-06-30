@@ -198,14 +198,37 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   // match → fall back to the preferred mode. Mirrors drm-kms-egl's --drm-mode.
   if (const char* spec = std::getenv("IVI_SW_DRM_MODE");
       spec != nullptr && spec[0] != '\0') {
+    // Parse "<W>x<H>[@<R>]" with strtoul (sscanf does not report conversion
+    // errors such as overflow). have_wh: W and H present; have_r: @<R> present.
     unsigned want_w = 0, want_h = 0, want_r = 0;
-    const int n = std::sscanf(spec, "%ux%u@%u", &want_w, &want_h, &want_r);
-    if (n >= 2) {
+    bool have_wh = false, have_r = false;
+    {
+      char* end = nullptr;
+      const unsigned long w = std::strtoul(spec, &end, 10);
+      if (end != spec && *end == 'x') {
+        const char* const hpos = end + 1;
+        const unsigned long h = std::strtoul(hpos, &end, 10);
+        if (end != hpos) {
+          want_w = static_cast<unsigned>(w);
+          want_h = static_cast<unsigned>(h);
+          have_wh = true;
+          if (*end == '@') {
+            const char* const rpos = end + 1;
+            const unsigned long r = std::strtoul(rpos, &end, 10);
+            if (end != rpos) {
+              want_r = static_cast<unsigned>(r);
+              have_r = true;
+            }
+          }
+        }
+      }
+    }
+    if (have_wh) {
       int match = -1;
       for (int i = 0; i < connector->count_modes; ++i) {
         const auto& m = connector->modes[i];
         if (m.hdisplay == want_w && m.vdisplay == want_h &&
-            (n < 3 || static_cast<unsigned>(m.vrefresh) == want_r)) {
+            (!have_r || static_cast<unsigned>(m.vrefresh) == want_r)) {
           match = i;
           break;
         }
