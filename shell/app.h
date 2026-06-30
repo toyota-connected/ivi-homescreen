@@ -66,9 +66,15 @@ class App final {
   int Run();
 
  private:
-  std::shared_ptr<IDisplay> m_display;
+  // The displays the App drives. One entry per distinct (backend, device); a
+  // homogeneous config set yields a single shared display.
+  std::vector<std::shared_ptr<IDisplay>> m_displays;
   std::vector<std::unique_ptr<FlutterView>> m_views;
   std::unique_ptr<Watchdog> m_watch_dog;
+
+  // Reductions across the owned displays.
+  [[nodiscard]] bool AnyHasRepeatTimer() const;
+  [[nodiscard]] double MaxRefreshRate() const;
 
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   // The single shared reactor (the "primary" io_context). Run() runs it on the
