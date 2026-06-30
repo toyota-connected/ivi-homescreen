@@ -1,0 +1,15 @@
+# Exercises the [view.output] match: the cross-backend `name` convenience
+# (fills both the wl_output and DRM connector fields), the EDID serial
+# refinement, preload, and the on-disconnect policy.
+[global]
+app_id = 'gallery'
+
+[view]
+width = 1920
+height = 1080
+
+  [view.output]
+  name = 'DP-2'
+  serial = 'SN-1234'
+  preload = true
+  on_disconnect = 'teardown'
