@@ -199,7 +199,20 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
     return nullptr;
   }
 #if BUILD_COMPOSITOR
-  backend->compositor_ = std::make_unique<DrmCompositor>(backend.get());
+  // Snapshot this backend's resolved output geometry into the compositor's
+  // context (InitDrm above has selected connector/CRTC/mode). Additional
+  // outputs get their own context + compositor sharing this backend's
+  // EGL/GBM.
+  backend->compositor_ = std::make_unique<DrmCompositor>(
+      backend.get(),
+      DrmOutputContext(backend->crtc_id_, backend->crtc_index_,
+                       backend->connector_id_, backend->mode_, backend->fb_w_,
+                       backend->fb_h_, &backend->resolved()));
+  // The implicit view (id 0) scans out on this backend's own CRTC.
+  backend->view_outputs_[0] = backend->compositor_.get();
+  // Claim the primary CRTC so additional outputs (AddOutput) pick distinct
+  // ones.
+  backend->used_crtcs_.push_back(backend->crtc_id_);
 #endif
 
   // HW cursor on the CRTC's cursor plane (or legacy drmModeSetCursor
@@ -1285,9 +1298,6 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
                                         unsigned int tv_sec,
                                         unsigned int tv_usec,
                                         void* user_data) {
-  // Always cast to DrmBackend* — both legacy Present and compositor
-  // commits register `this`/`backend_` as user_data with that type.
-  auto* self = static_cast<DrmBackend*>(user_data);
   // Diagnostic: log every Nth flip to see the asio monitor cadence.
   // Set IVI_DRM_FLIP_TRACE=1 to log every flip (very chatty); unset or
   // anything else logs every 60th (≈ once per second at 60Hz).
@@ -1300,36 +1310,34 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
   if (flip_trace || (n % 60) == 0) {
     spdlog::info("[DrmBackend] flip #{} handled (asio monitor)", n);
   }
-#if BUILD_COMPOSITOR
-  // Dispatch the completion to whichever subsystem ARMED this flip, identified
-  // by its pending flag — NOT by planes_active(). planes_active() reflects who
-  // owns scanout in steady state, but when the compositor is active and a frame
-  // falls back to backend_->Present()'s legacy page flip (e.g. a backing-store
-  // layer needs composition), the completion must clear
-  // DrmBackend::flip_pending_. Routing by planes_active() cleared the
-  // compositor's (unset) flag instead, leaving DrmBackend::flip_pending_ stuck
-  // and deadlocking the next WaitForPendingFlip(). At most one flip is in
-  // flight per CRTC, so at most one flag is set; the compositor's pending flag
-  // therefore identifies its own flips.
-  if (self->compositor_ && self->compositor_->IsFlipPending()) {
-    self->compositor_->OnFlipComplete();
-  } else {
-    self->OnLegacyFlipComplete();
-  }
-#else
-  self->OnLegacyFlipComplete();
-#endif
+  // Route the completion to the exact committer: the backend for a legacy
+  // Present() page flip, or a compositor for a scene/atomic commit — each
+  // registered itself as the flip's IFlipSink. The sink records the flip and,
+  // for the vsync-driving output, returns the baton (see DeliverVsyncFromFlip).
+  // This lets one backend's flip reader serve several compositors (one per
+  // output) without a CRTC id in the v2 event.
+  static_cast<IFlipSink*>(user_data)->OnFlipEvent(tv_sec, tv_usec);
+}
 
-  // A real frame just scanned out — record the present cadence and return the
-  // vsync baton, stamped with the kernel-provided scanout time (tv_sec/tv_usec
-  // from the PAGE_FLIP_EVENT) rather than the handler-dispatch wall clock, so
-  // the [DrmVsync] cadence isn't inflated by asio scheduling jitter (matches
-  // the software sink). We're already on the platform task runner thread, but
-  // DeliverVsync still marshals OnVsync onto the runner strand for uniformity
-  // with the other backends; the one extra task hop is harmless.
+void DrmBackend::DeliverVsyncFromFlip(const unsigned int tv_sec,
+                                      const unsigned int tv_usec) {
+  // Return the vsync baton stamped with the kernel-provided scanout time
+  // (tv_sec/tv_usec from the PAGE_FLIP_EVENT) rather than the handler-dispatch
+  // wall clock, so the [DrmVsync] cadence isn't inflated by asio scheduling
+  // jitter (matches the software sink). Already on the platform task runner
+  // thread, but DeliverVsync still marshals OnVsync onto the runner strand for
+  // uniformity; the one extra task hop is harmless.
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
-  self->vsync_.DeliverVsync(tv_ns);
+  vsync_.DeliverVsync(tv_ns);
+}
+
+void DrmBackend::OnFlipEvent(const unsigned int tv_sec,
+                             const unsigned int tv_usec) {
+  OnLegacyFlipComplete();
+  // A legacy Present() flip belongs to this backend's own (primary) output, so
+  // it always drives vsync.
+  DeliverVsyncFromFlip(tv_sec, tv_usec);
 }
 
 void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
@@ -1500,7 +1508,8 @@ bool DrmBackend::Present() {
     flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
   if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
-                      DRM_MODE_PAGE_FLIP_EVENT, this) != 0) {
+                      DRM_MODE_PAGE_FLIP_EVENT,
+                      static_cast<IFlipSink*>(this)) != 0) {
     spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
     drmModeRmFB(drm_dev_->fd(), next_fb);
     gbm_surface_release_buffer(gbm_surface_, next_bo);
@@ -1581,24 +1590,173 @@ FlutterCompositor DrmBackend::GetCompositorConfig() {
   compositor.create_backing_store_callback =
       [](const FlutterBackingStoreConfig* config, FlutterBackingStore* out,
          void* user_data) -> bool {
-    return static_cast<DrmBackend*>(user_data)->compositor_->CreateBackingStore(
-        config, out);
+    auto* self = static_cast<DrmBackend*>(user_data);
+    return self->CompositorForView(config->view_id)
+        ->CreateBackingStore(config, out);
   };
   compositor.collect_backing_store_callback =
       [](const FlutterBackingStore* store, void* user_data) -> bool {
-    return static_cast<DrmBackend*>(user_data)
-        ->compositor_->CollectBackingStore(store);
+    // Route to the compositor that created the store (each output owns its
+    // pool); fall back to the primary if the store carries no owner.
+    auto* self = static_cast<DrmBackend*>(user_data);
+    DrmCompositor* owner = DrmCompositor::OwnerOf(store);
+    return (owner != nullptr ? owner : self->compositor_.get())
+        ->CollectBackingStore(store);
   };
-  compositor.present_layers_callback =
-      [](const FlutterLayer** layers, size_t count, void* user_data) -> bool {
-    return static_cast<DrmBackend*>(user_data)->compositor_->PresentLayers(
-        layers, count);
+  // Multi-view present: route per view_id. present_view_callback is
+  // mutually exclusive with the deprecated present_layers_callback and is
+  // required before FlutterEngineAddView may be used; it also serves the single
+  // implicit view (id 0) unchanged.
+  compositor.present_view_callback =
+      [](const FlutterPresentViewInfo* info) -> bool {
+    auto* self = static_cast<DrmBackend*>(info->user_data);
+    return self->CompositorForView(info->view_id)
+        ->PresentView(info->view_id, info->layers, info->layers_count);
   };
 #else
   compositor.avoid_backing_store_cache = true;
 #endif
   return compositor;
 }
+
+#if BUILD_COMPOSITOR
+DrmCompositor* DrmBackend::CompositorForView(const int64_t view_id) const {
+  if (const auto it = view_outputs_.find(view_id); it != view_outputs_.end()) {
+    return it->second;
+  }
+  // Unknown view id -> the implicit view's compositor on this backend. Keeps a
+  // stray present/backing-store call rendering rather than dereferencing null.
+  return compositor_.get();
+}
+
+void DrmBackend::RegisterViewOutput(const int64_t view_id,
+                                    DrmCompositor* compositor) {
+  view_outputs_[view_id] = compositor;
+}
+
+bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
+                                      DrmOutputContext& out) {
+  drmModeRes* res = drmModeGetResources(drm_dev_->fd());
+  if (res == nullptr) {
+    spdlog::error("[DrmBackend] drmModeGetResources failed: {}",
+                  std::strerror(errno));
+    return false;
+  }
+  const auto name_of = [](const drmModeConnector* c) {
+    return std::string(ConnectorTypeName(c->connector_type)) + "-" +
+           std::to_string(c->connector_type_id);
+  };
+
+  drmModeConnector* connector = nullptr;
+  for (int i = 0; i < res->count_connectors; ++i) {
+    drmModeConnector* c =
+        drmModeGetConnector(drm_dev_->fd(), res->connectors[i]);
+    if (c != nullptr && c->connection == DRM_MODE_CONNECTED &&
+        c->count_modes > 0 && name_of(c) == connector_name) {
+      connector = c;
+      break;
+    }
+    if (c != nullptr) {
+      drmModeFreeConnector(c);
+    }
+  }
+  if (connector == nullptr) {
+    spdlog::error(
+        "[DrmBackend] additional output connector '{}' not found or not "
+        "connected",
+        connector_name);
+    drmModeFreeResources(res);
+    return false;
+  }
+
+  drmModeModeInfo mode{};
+  for (int i = 0; i < connector->count_modes; ++i) {
+    if ((connector->modes[i].type & DRM_MODE_TYPE_PREFERRED) != 0) {
+      mode = connector->modes[i];
+      break;
+    }
+  }
+  if (mode.clock == 0) {
+    mode = connector->modes[0];
+  }
+
+  // Pick a CRTC this connector can drive that no other output has claimed.
+  uint32_t crtc_id = 0;
+  uint32_t crtc_index = 0;
+  for (int e = 0; e < connector->count_encoders && crtc_id == 0; ++e) {
+    drmModeEncoder* enc =
+        drmModeGetEncoder(drm_dev_->fd(), connector->encoders[e]);
+    if (enc == nullptr) {
+      continue;
+    }
+    for (int c = 0; c < res->count_crtcs; ++c) {
+      if ((enc->possible_crtcs & (1u << c)) != 0 &&
+          std::find(used_crtcs_.begin(), used_crtcs_.end(), res->crtcs[c]) ==
+              used_crtcs_.end()) {
+        crtc_id = res->crtcs[c];
+        crtc_index = static_cast<uint32_t>(c);
+        break;
+      }
+    }
+    drmModeFreeEncoder(enc);
+  }
+
+  const uint32_t connector_id = connector->connector_id;
+  drmModeFreeConnector(connector);
+  drmModeFreeResources(res);
+
+  if (crtc_id == 0) {
+    spdlog::error("[DrmBackend] no free CRTC for additional output '{}'",
+                  connector_name);
+    return false;
+  }
+  used_crtcs_.push_back(crtc_id);
+  out = DrmOutputContext(crtc_id, crtc_index, connector_id, mode, mode.hdisplay,
+                         mode.vdisplay, &resolved());
+  spdlog::info(
+      "[DrmBackend] additional output '{}': connector={} crtc={} mode={}x{}@{}",
+      connector_name, connector_id, crtc_id, mode.hdisplay, mode.vdisplay,
+      mode.vrefresh);
+  return true;
+}
+
+bool DrmBackend::AddOutput(const std::string& connector_name,
+                           const int64_t view_id) {
+  DrmOutputContext ctx;
+  if (!ResolveOutputContext(connector_name, ctx)) {
+    return false;
+  }
+  auto compositor = std::make_unique<DrmCompositor>(this, ctx);
+  // Additional outputs do not drive the engine's single vsync (view 0 does).
+  compositor->SetDrivesVsync(false);
+  DrmCompositor* raw = compositor.get();
+  extra_outputs_.push_back(
+      ExtraOutput{view_id, std::move(compositor), ctx.width(), ctx.height()});
+  view_outputs_[view_id] = raw;
+  return true;
+}
+
+std::vector<DrmBackend::ViewOutputSpec> DrmBackend::AdditionalViews() const {
+  std::vector<ViewOutputSpec> specs;
+  specs.reserve(extra_outputs_.size());
+  for (const auto& o : extra_outputs_) {
+    specs.push_back(ViewOutputSpec{o.view_id, o.width, o.height});
+  }
+  return specs;
+}
+#else
+bool DrmBackend::AddOutput(const std::string& /*connector_name*/,
+                           int64_t /*view_id*/) {
+  return false;
+}
+
+std::vector<DrmBackend::ViewOutputSpec> DrmBackend::AdditionalViews() const {
+  return {};
+}
+
+void DrmBackend::RegisterViewOutput(int64_t /*view_id*/,
+                                    DrmCompositor* /*compositor*/) {}
+#endif
 
 #if BUILD_COMPOSITOR
 void DrmBackend::RegisterCompositorSurface(

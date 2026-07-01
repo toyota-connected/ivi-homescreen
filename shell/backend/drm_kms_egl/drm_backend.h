@@ -17,10 +17,13 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -35,6 +38,8 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
+#include "backend/drm_kms_egl/drm_output_context.h"
+#include "backend/drm_kms_egl/flip_sink.h"
 #include "vsync/ivsync_provider.h"
 
 class DrmCompositor;
@@ -142,7 +147,7 @@ struct DrmConfig {
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
 // --drm-list-modes path is shared verbatim with the drm_kms_vulkan backend.
 
-class DrmBackend : public Backend {
+class DrmBackend : public Backend, public IFlipSink {
   friend class DrmCompositor;
 
  public:
@@ -177,6 +182,27 @@ class DrmBackend : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
   bool GetEglContext(BackendEglContext* out) const override;
+
+  // bind a view id to the compositor that scans it out to its output
+  // (a sibling backend's CRTC on the same card). Called by App when it attaches
+  // additional views to the one engine whose compositor callbacks live on this
+  // (primary) backend. No-op when BUILD_COMPOSITOR is off.
+  void RegisterViewOutput(int64_t view_id, DrmCompositor* compositor);
+
+  // resolve a named connector to a distinct (unused) CRTC on this card,
+  // build a compositor for it that shares this backend's EGL/GBM, and bind it
+  // to view_id (which becomes an added Flutter view). Returns false if the
+  // connector isn't connected or no free CRTC remains. No-op / false when
+  // BUILD_COMPOSITOR is off.
+  bool AddOutput(const std::string& connector_name, int64_t view_id);
+
+  // Geometry FlutterView needs to FlutterEngineAddView each additional output.
+  struct ViewOutputSpec {
+    int64_t view_id;
+    uint32_t width;
+    uint32_t height;
+  };
+  [[nodiscard]] std::vector<ViewOutputSpec> AdditionalViews() const;
   // vblank-locked OnVsync via DRM PAGE_FLIP_EVENT. Returns nullptr (so
   // Flutter falls back to its wall-clock scheduler) when the user opts
   // out via IVI_DRM_VSYNC=0 — useful for diagnosing pacing regressions
@@ -305,6 +331,14 @@ class DrmBackend : public Backend {
   // flip_pending_, record frame stats. Called by UnifiedPageFlipHandler
   // when planes are not active.
   void OnLegacyFlipComplete();
+  // IFlipSink: this backend armed a legacy Present() page flip and registered
+  // itself as the flip's user_data. Routes to the legacy completion.
+  void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec) override;
+  // Return the vsync baton stamped with a flip's scanout time. Called by the
+  // vsync-driving output (this backend for legacy, or its primary compositor)
+  // from a PAGE_FLIP_EVENT. Secondary outputs do not call this — one
+  // engine has one vsync source.
+  void DeliverVsyncFromFlip(unsigned int tv_sec, unsigned int tv_usec);
   // FlutterProjectArgs.vsync_callback trampoline. Resolves the
   // FlutterDesktopEngineState user_data back to this backend + the
   // engine handle, then forwards to SetVsyncBaton.
@@ -410,6 +444,28 @@ class DrmBackend : public Backend {
 
 #if BUILD_COMPOSITOR
   std::unique_ptr<DrmCompositor> compositor_{};
+  // view_id -> the compositor that scans that view out to its output.
+  // Seeded {0 -> compositor_} (the implicit view on this backend's CRTC); App
+  // registers additional views on sibling backends' compositors via
+  // RegisterViewOutput. The present/backing-store callbacks route by view_id.
+  std::unordered_map<int64_t, DrmCompositor*> view_outputs_;
+  [[nodiscard]] DrmCompositor* CompositorForView(int64_t view_id) const;
+
+  // Additional outputs this backend drives for one engine: each owns a
+  // compositor bound to its own CRTC, sharing this backend's EGL/GBM. Built by
+  // AddOutput; destroyed with the backend.
+  struct ExtraOutput {
+    int64_t view_id;
+    std::unique_ptr<DrmCompositor> compositor;
+    uint32_t width;
+    uint32_t height;
+  };
+  std::vector<ExtraOutput> extra_outputs_;
+  // CRTCs already claimed (primary + each AddOutput) so additional outputs pick
+  // a distinct one. Seeded with the primary CRTC after InitDrm.
+  std::vector<uint32_t> used_crtcs_;
+  bool ResolveOutputContext(const std::string& connector_name,
+                            DrmOutputContext& out);
 #endif
 #if HAVE_DRM_CURSOR
   std::unique_ptr<homescreen::DrmCursor> cursor_{};
