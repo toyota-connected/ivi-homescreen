@@ -110,7 +110,8 @@ Engine::Engine(FlutterView* view,
                const std::vector<const char*>& command_line_args_c,
                const std::vector<const char*>& dart_entrypoint_args_c,
                const std::string& bundle_path,
-               const int32_t accessibility_features)
+               const int32_t accessibility_features,
+               const bool merge_render_platform)
     : m_index(index),
       m_running(false),
       m_backend(view->GetBackend()),
@@ -246,6 +247,24 @@ Engine::Engine(FlutterView* view,
   m_custom_task_runners.struct_size = sizeof(FlutterCustomTaskRunners);
   m_custom_task_runners.platform_task_runner =
       &m_platform_task_runner_description;
+
+  // Optionally run the raster thread on the platform thread: a render task
+  // runner whose identifier matches the platform one makes the engine collapse
+  // them (embedder_thread_host identifier equality), so the rasterizer + GL /
+  // compositor callbacks run on the platform thread. UI and IO stay separate.
+  // The present path must stay non-blocking on the platform thread for this to
+  // be safe (an independent per-card flip reader delivers completion).
+  m_merge_render_platform = merge_render_platform;
+  if (m_merge_render_platform) {
+    constexpr size_t kMergedRunnerId = 1;
+    m_platform_task_runner_description.identifier = kMergedRunnerId;
+    m_render_task_runner_description = m_platform_task_runner_description;
+    m_custom_task_runners.render_task_runner =
+        &m_render_task_runner_description;
+    spdlog::info("({}) engine: raster thread merged onto the platform thread",
+                 m_index);
+  }
+
   // Per-thread priority setter (opt-in via IVI_DRM_RT=1). See
   // EngineThreadPrioritySetter for the mapping rationale.
   m_custom_task_runners.thread_priority_setter = &EngineThreadPrioritySetter;

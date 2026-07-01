@@ -149,6 +149,13 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
     instance.view.fullscreen = v->at_path("fullscreen").value<bool>().value();
   }
 
+  // [view.engine] — engine threading knobs. merge_render_platform runs the
+  // raster thread on the platform thread (one task-runner identifier for both).
+  if (v->at_path("engine.merge_render_platform").is_boolean()) {
+    instance.view.merge_render_platform =
+        v->at_path("engine.merge_render_platform").value<bool>().value();
+  }
+
   // [view.shell] — shell selector + shell-specific knobs (AGL window role /
   // activation area; ivi surface id).
   if (v->at_path("shell.type").is_string()) {

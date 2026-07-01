@@ -99,12 +99,15 @@ META = {
     "output.index": ("(none)", "int", "all", "Deprecated: match the Nth connected output (prefer a name)."),
     "output.preload": ("false", "true|false", "all", "Warm the engine (suspended) at startup even if the output is absent."),
     "output.on_disconnect": ("suspend", "suspend|teardown", "all", "What to do with the view when its output disappears."),
+
+    # [view.engine] — engine threading knobs
+    "engine.merge_render_platform": ("false", "true|false", "all", "Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing)."),
 }
 
 TABLE_ORDER = [
     "[global]", "[sentry]", "[[view]]", "[view.args]", "[view.shell]",
     "[view.shell.window]", "[view.shell.window.activation_area]",
-    "[view.backend]", "[view.backend.drm]", "[view.output]",
+    "[view.backend]", "[view.backend.drm]", "[view.output]", "[view.engine]",
 ]
 
 
@@ -129,6 +132,8 @@ def classify(key):
         return "[view.backend]", key.rsplit(".", 1)[1]
     if key.startswith("output."):
         return "[view.output]", key.split(".", 1)[1]
+    if key.startswith("engine."):
+        return "[view.engine]", key.rsplit(".", 1)[1]
     return "[[view]]", key
 
 

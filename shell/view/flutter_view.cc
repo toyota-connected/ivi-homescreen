@@ -288,7 +288,8 @@ void FlutterView::Initialize() {
   m_flutter_engine = std::make_shared<Engine>(
       this, m_index, m_command_line_args_c, m_dart_entrypoint_args_c,
       m_config.view.bundle_path,
-      m_config.view.accessibility_features.value_or(0));
+      m_config.view.accessibility_features.value_or(0),
+      m_config.view.merge_render_platform.value_or(false));
 
   m_state->engine = m_flutter_engine.get();
 
