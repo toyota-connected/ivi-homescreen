@@ -274,6 +274,27 @@ void DrmCursor::SetStagedMode(const bool enabled) {
   impl_->staged = enabled;
 }
 
+void DrmCursor::Hide() {
+  // In staged mode the compositor drives the plane; a self-commit here would
+  // race it. Multi-display cursor coordination on staged drivers is a separate
+  // pass — no-op for now (the reported case is self-committing amdgpu).
+  if (impl_->staged) {
+    return;
+  }
+  if (auto r = impl_->renderer.hide(); !r) {
+    spdlog::warn("[DrmCursor] hide: {}", r.error().message());
+  }
+}
+
+void DrmCursor::Show() {
+  if (impl_->staged) {
+    return;
+  }
+  if (auto r = impl_->renderer.show(); !r) {
+    spdlog::warn("[DrmCursor] show: {}", r.error().message());
+  }
+}
+
 void DrmCursor::SetPosition(const int fb_x, const int fb_y) {
   if (!impl_->staged) {
     Move(fb_x, fb_y);  // legacy self-commit path (non-staging drivers)

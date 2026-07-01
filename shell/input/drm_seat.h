@@ -78,22 +78,25 @@ class DrmSeat final : public ISeat {
   void SetViewControllerState(
       FlutterDesktopViewControllerState* state) override;
 
-  // Set (or clear) the DRM hardware cursor this seat moves. Safe to
-  // call from any thread; the dispatch loop reads via acquire and
-  // ignores nullptr. Caller must clear (pass nullptr) before the
-  // pointed-to DrmCursor is destroyed.
-  void SetCursor(DrmCursor* cursor) {
-    cursor_.store(cursor, std::memory_order_release);
-  }
+  // Set the DRM hardware cursor for the view under construction (the region
+  // committed by the next SetViewControllerState). Call before Start(); region
+  // registration is single-threaded during view construction, which completes
+  // before the dispatch thread starts.
+  void SetCursor(DrmCursor* cursor) { pending_.cursor = cursor; }
 
-  // Set (or clear) a composited cursor sink (the EGL backend's GlCursor), used
-  // when no hardware cursor plane is available. Safe to call from any thread;
-  // the dispatch loop reads via acquire and ignores nullptr. The sink receives
-  // un-rotated render/viewport coordinates (it composites into the render
-  // target; scanout rotation is applied to the whole framebuffer downstream).
-  void SetGlCursor(ICursorPositionSink* sink) {
-    gl_cursor_.store(sink, std::memory_order_release);
-  }
+  // Set the composited cursor sink (the EGL backend's GlCursor) for the view
+  // under construction, used when no hardware cursor plane is available. Call
+  // before Start(). The sink receives un-rotated render/viewport coordinates
+  // (it composites into the render target; scanout rotation is applied to the
+  // whole framebuffer downstream).
+  void SetGlCursor(ICursorPositionSink* sink) { pending_.gl_cursor = sink; }
+
+  // Position of the view under construction in the combined pointer space
+  // (from [view.output] x/y). Multiple views sharing one seat (several
+  // displays on one DRM card) each declare where their render surface sits so
+  // the pointer moves between them as laid out. Defaults to (0,0). Call before
+  // Start(); committed by the next SetViewControllerState.
+  void SetRegionLayout(int32_t x, int32_t y);
 
   // Hot-swap the xkb keymap. Safe to call from any thread; the actual
   // reload runs on the dispatch thread on the next poll iteration.
@@ -126,12 +129,13 @@ class DrmSeat final : public ISeat {
   void OnSessionPaused();
   void OnSessionResumed();
 
-  // Update the cursor clamping rectangle. Called by FlutterView after
-  // DrmBackend::Create resolves the actual framebuffer dimensions
-  // (which can differ from the config's view.width/height when `-f`
-  // promoted the FB to the full mode). Must be called before Start()
-  // so the dispatch thread sees the final values without atomics; the
-  // dispatch thread's pointer math reads these once on the hot path.
+  // Set the render extent of the view under construction. Called after
+  // DrmBackend::Create resolves the actual framebuffer dimensions (which can
+  // differ from the config's view.width/height when `-f` promoted the FB to
+  // the full mode). Sizes the region's rectangle in combined pointer space.
+  // Must be called before Start() (region registration is single-threaded and
+  // completes before the dispatch thread starts); the pointer math reads it on
+  // the hot path.
   void SetViewport(int32_t width, int32_t height);
 
   // Scanout rotation in degrees (0|90|180|270). The pointer accumulates in
@@ -139,7 +143,9 @@ class DrmSeat final : public ISeat {
   // — but the HW cursor plane lives in panel space, so FlushCursorMotion
   // rotates the position by this amount before placing the sprite. Touch is
   // unaffected (the digitizer already tracks the panel). Set before Start().
-  void SetCursorRotation(int32_t degrees) { cursor_rotation_ = degrees; }
+  void SetCursorRotation(int32_t degrees) {
+    pending_.cursor_rotation = degrees;
+  }
 
   // Per-device relative-pointer transforms. Each spec is
   // "<device-name-substring>=<rot>[,flip-x][,flip-y]" (rot = 0|90|180|270). A
@@ -150,6 +156,24 @@ class DrmSeat final : public ISeat {
   void SetInputTransforms(const std::vector<std::string>& specs);
 
  private:
+  // A rendered view occupying a rectangle of the combined pointer space. One
+  // per Flutter view sharing this seat (multiple displays on one DRM card).
+  // The pointer accumulates in combined space; the region under it receives
+  // events in its own local (render) coordinates and owns the sprite that
+  // tracks it. pointer_added tracks whether this view's engine has seen the
+  // pointer device yet -- each engine needs its own kAdd before kMove/kHover.
+  struct ViewRegion {
+    FlutterDesktopViewControllerState* state = nullptr;
+    int32_t layout_x = 0;  // top-left in combined pointer space
+    int32_t layout_y = 0;
+    int32_t width = 0;            // render/viewport extent
+    int32_t height = 0;           // render/viewport extent
+    int32_t cursor_rotation = 0;  // scanout rotation for the sprite (0|90|…)
+    DrmCursor* cursor = nullptr;  // HW cursor plane (this CRTC)
+    ICursorPositionSink* gl_cursor = nullptr;  // composited fallback
+    bool pointer_added = false;
+  };
+
   void DispatchLoop();
   void ApplyPendingKeymap();
   // If pointer motion accumulated during the previous dispatch batch,
@@ -172,15 +196,53 @@ class DrmSeat final : public ISeat {
 
   [[nodiscard]] FLUTTER_API_SYMBOL(FlutterEngine) CurrentEngine() const;
 
-  // Mutable so FlutterView can rewrite them in SetViewport after
-  // DrmBackend::Create has resolved the actual framebuffer size
-  // (e.g. when `-f` promoted the FB to the full mode). Read on the
-  // dispatch thread; SetViewport runs on the main thread before
-  // Start() is called, so no atomic needed.
-  int32_t viewport_w_;
-  int32_t viewport_h_;
-  // Scanout rotation (0|90|180|270) applied to the cursor sprite position only.
-  int32_t cursor_rotation_ = 0;
+  // Resolve which region the (global) pointer is over after a motion delta,
+  // clamping it back into the region set if the delta pushed it into a gap or
+  // past the outer edge. Updates active_region_ and pointer_x_/pointer_y_.
+  // No-op when regions_ is empty.
+  void ResolveActiveRegion();
+  // True when two regions are views of the same Flutter engine (one engine
+  // spanning multiple displays). A drag may cross freely between such regions
+  // as one continuous gesture; a drag between regions of DIFFERENT engines is
+  // confined to the origin engine (engine isolation).
+  [[nodiscard]] bool RegionsShareEngine(size_t a, size_t b) const;
+  // Marshal a batch of pointer events to a region's engine on its platform
+  // strand. No-op if the region has no live engine yet. Static: it works
+  // entirely off the region and the events, touching no seat state.
+  static void DispatchToRegion(const ViewRegion& region,
+                               const FlutterPointerEvent* events,
+                               size_t count);
+
+  // Committed view regions, built by the per-view Set* setters before Start()
+  // and read-only on the dispatch thread thereafter (registration is
+  // single-threaded during view construction, which completes before
+  // StartEvents() spawns the dispatch thread). Index 0 is the primary/first
+  // view. A single-view seat has exactly one region at (0,0), so behavior is
+  // unchanged from before the multi-region rework.
+  std::vector<ViewRegion> regions_;
+  // The region currently under the pointer; index into regions_. Updated by
+  // HandlePointerMotion, read by the button/axis/cursor/keyboard paths.
+  size_t active_region_ = 0;
+  // Implicit pointer grab: on the first button-down the view under the pointer
+  // captures the pointer until every button releases, so a drag keeps routing
+  // to that view even if the cursor wanders onto another display. The cursor
+  // itself still follows the hand across displays (no clamp), so releasing the
+  // button never snaps the pointer -- it is already where the hand is.
+  bool grab_active_ = false;
+  size_t grab_region_ = 0;
+  // The region whose HW cursor sprite is currently shown. When the active
+  // region changes, FlushCursorMotion hides this one's sprite and shows the
+  // new one's, so exactly one cursor is visible across the displays. Starts at
+  // kNoRegion (nothing shown yet).
+  static constexpr size_t kNoRegion = static_cast<size_t>(-1);
+  // [[maybe_unused]]: only read/written under HAVE_DRM_CURSOR (the sprite
+  // hide/show path); a build of drm-cxx without the cursor leaves it dormant.
+  [[maybe_unused]] size_t cursor_shown_region_ = kNoRegion;
+  // Region under construction: the per-view setters (SetViewport, SetCursor,
+  // SetGlCursor, SetCursorRotation, SetRegionLayout) accumulate here, and
+  // SetViewControllerState commits it into regions_ and resets it for the next
+  // view.
+  ViewRegion pending_;
   // Per-device relative-pointer delta transforms (see SetInputTransforms).
   // Matched by device-name substring in HandlePointerMotion; first match wins.
   struct PointerTransform {
@@ -194,8 +256,6 @@ class DrmSeat final : public ISeat {
   // libinput delivers with no coordinates) reuses it instead of snapping to a
   // corner. Touched only from the seat dispatch thread (HandleTouch is const).
   mutable std::unordered_map<int32_t, std::pair<double, double>> touch_pos_;
-
-  std::atomic<FlutterDesktopViewControllerState*> state_{nullptr};
 
   // Caller-supplied hook for libinput's privileged device opens. Empty
   // when there's no libseat session (falls back to ::open/::close inside
@@ -242,25 +302,16 @@ class DrmSeat final : public ISeat {
   int tty_fd_ = -1;
   int saved_kb_mode_ = 0;
 
-  // Accessed only from the dispatch thread.
+  // Accessed only from the dispatch thread. pointer_x_/pointer_y_ are in
+  // combined (global) pointer space -- ResolveActiveRegion maps them to a
+  // region and its local render coordinates.
   double pointer_x_ = 0.0;
   double pointer_y_ = 0.0;
   int64_t button_mask_ = 0;
-  bool pointer_added_ = false;
   // Set by HandlePointerMotion, cleared by FlushCursorMotion. Lets the
   // dispatch loop coalesce a batch of motion events into one cursor
   // commit at the end of seat_->dispatch().
   bool cursor_motion_pending_ = false;
-
-  // KMS hardware cursor target. Owned by DrmBackend; this seat just
-  // forwards motion to it. Atomic because the wiring runs on a
-  // different thread than the dispatch loop that reads it.
-  std::atomic<DrmCursor*> cursor_{nullptr};
-
-  // Composited cursor fallback (the EGL backend's GlCursor), used when there
-  // is no hardware cursor plane. Owned by the backend; this seat forwards
-  // motion to it. Null whenever a HW cursor is in use or no cursor at all.
-  std::atomic<ICursorPositionSink*> gl_cursor_{nullptr};
 };
 
 }  // namespace homescreen

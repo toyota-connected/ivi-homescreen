@@ -314,6 +314,10 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     // clamp stuck at the config size unless we update it here.
     drm_display->SetViewportSize(static_cast<int32_t>(drm_backend->width()),
                                  static_cast<int32_t>(drm_backend->height()));
+    // Place this view in the combined pointer space so, when several views
+    // share the card's seat, the pointer routes to the display it is over.
+    drm_display->SetRegionLayout(config.view.output.layout_x.value_or(0),
+                                 config.view.output.layout_y.value_or(0));
     drm_display->SetCursor(drm_backend->drm_cursor());
     // Composited cursor fallback (non-null only when no HW cursor plane).
     drm_display->SetGlCursor(drm_backend->gl_cursor());
@@ -368,6 +372,10 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
   // order).
   drm_display->SetViewportSize(static_cast<int32_t>(vk_backend->width()),
                                static_cast<int32_t>(vk_backend->height()));
+  // Place this view in the combined pointer space so, when several views share
+  // the card's seat, the pointer routes to the display it is over.
+  drm_display->SetRegionLayout(config.view.output.layout_x.value_or(0),
+                               config.view.output.layout_y.value_or(0));
   drm_display->SetCursor(vk_backend->drm_cursor());
   drm_display->SetCursorShapeSink(vk_backend->drm_cursor());
   drm_display->SetCursorRotation(vk_backend->rotation());

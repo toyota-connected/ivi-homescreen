@@ -445,3 +445,9 @@ void DrmDisplay::SetInputTransforms(const std::vector<std::string>& specs) {
     drm_seat->SetInputTransforms(specs);
   }
 }
+
+void DrmDisplay::SetRegionLayout(const int32_t x, const int32_t y) {
+  if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+    drm_seat->SetRegionLayout(x, y);
+  }
+}
