@@ -98,6 +98,11 @@ class DrmSeat final : public ISeat {
   // Start(); committed by the next SetViewControllerState.
   void SetRegionLayout(int32_t x, int32_t y);
 
+  // Bind a touch panel (libinput device-name substring) to the view under
+  // construction, so its touches route to this view instead of the primary.
+  // Call before Start(); committed by the next SetViewControllerState.
+  void SetRegionTouchDevice(std::string name);
+
   // Hot-swap the xkb keymap. Safe to call from any thread; the actual
   // reload runs on the dispatch thread on the next poll iteration.
   // Held keys and lock latches are preserved across the swap. On
@@ -172,6 +177,10 @@ class DrmSeat final : public ISeat {
     DrmCursor* cursor = nullptr;  // HW cursor plane (this CRTC)
     ICursorPositionSink* gl_cursor = nullptr;  // composited fallback
     bool pointer_added = false;
+    // libinput device-name substring of the touch panel bonded to this view's
+    // display; empty when none is configured. Touch is absolute (no cursor), so
+    // it routes by device, not by pointer position.
+    std::string touch_match;
   };
 
   void DispatchLoop();

@@ -222,6 +222,10 @@ void DrmSeat::SetRegionLayout(const int32_t x, const int32_t y) {
   pending_.layout_y = y;
 }
 
+void DrmSeat::SetRegionTouchDevice(std::string name) {
+  pending_.touch_match = std::move(name);
+}
+
 void DrmSeat::ResolveActiveRegion() {
   if (regions_.empty()) {
     return;
@@ -1094,14 +1098,30 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   if (ev.type == drm::input::TouchEvent::Type::Frame) {
     return;
   }
-  // Touchscreen-to-display association isn't modeled yet, so touch is routed to
-  // the primary region (index 0). A single-display seat has only that region;
-  // multi-display touch mapping is a follow-up.
   if (regions_.empty()) {
     return;
   }
-  const ViewRegion& region = regions_.front();
-  if (region.state == nullptr || region.state->engine == nullptr) {
+  // A touchscreen reports absolute coordinates in its own space with no cursor,
+  // so it can't be routed by pointer position like a mouse. Route by device:
+  // the region whose configured touch_match ([view.output] touch_device) is a
+  // substring of this event's libinput device name. With none configured (or no
+  // match) touch falls back to the primary region, preserving single-display
+  // behavior.
+  const ViewRegion* region = nullptr;
+  if (ev.device_name != nullptr) {
+    const std::string_view name(ev.device_name);
+    for (const auto& r : regions_) {
+      if (!r.touch_match.empty() &&
+          name.find(r.touch_match) != std::string_view::npos) {
+        region = &r;
+        break;
+      }
+    }
+  }
+  if (region == nullptr) {
+    region = &regions_.front();
+  }
+  if (region->state == nullptr || region->state->engine == nullptr) {
     return;
   }
 
@@ -1129,11 +1149,11 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   // forward rotation; touch is its inverse).
   const double nx = ev.x;
   const double ny = ev.y;
-  const auto w = static_cast<double>(region.width);
-  const auto h = static_cast<double>(region.height);
+  const auto w = static_cast<double>(region->width);
+  const auto h = static_cast<double>(region->height);
   double fx = nx * w;
   double fy = ny * h;
-  switch (region.cursor_rotation) {
+  switch (region->cursor_rotation) {
     case 90:
       fx = (1.0 - ny) * w;
       fy = nx * h;
@@ -1174,6 +1194,6 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   pe.device_kind = kFlutterPointerDeviceKindTouch;
   pe.buttons = 0;
 
-  DispatchToRegion(region, &pe, 1);
+  DispatchToRegion(*region, &pe, 1);
 }
 }  // namespace homescreen

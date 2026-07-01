@@ -199,6 +199,10 @@
   # type=string default=(none) values=EDID serial applies=drm
   serial =
 
+  # Route touch from this panel (libinput device-name substring) to this view; unset sends touch to the primary view.
+  # type=string default=(primary) values=device-name substring applies=all
+  touch_device =
+
   # Wayland: match this wl_output name (overrides output.name).
   # type=string default=(none) values=e.g. DP-1 applies=wayland
   wl_name =

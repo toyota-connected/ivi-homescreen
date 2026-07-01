@@ -451,3 +451,9 @@ void DrmDisplay::SetRegionLayout(const int32_t x, const int32_t y) {
     drm_seat->SetRegionLayout(x, y);
   }
 }
+
+void DrmDisplay::SetRegionTouchDevice(const std::string& name) {
+  if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
+    drm_seat->SetRegionTouchDevice(name);
+  }
+}

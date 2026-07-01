@@ -101,6 +101,7 @@ META = {
     "output.on_disconnect": ("suspend", "suspend|teardown", "all", "What to do with the view when its output disappears."),
     "output.x": ("0", "int (px)", "all", "This display's X position in the combined desktop space (multi-display input layout)."),
     "output.y": ("0", "int (px)", "all", "This display's Y position in the combined desktop space (multi-display input layout)."),
+    "output.touch_device": ("(primary)", "device-name substring", "all", "Route touch from this panel (libinput device-name substring) to this view; unset sends touch to the primary view."),
 
     # [view.engine] — engine threading knobs
     "engine.merge_render_platform": ("false", "true|false", "all", "Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing)."),
