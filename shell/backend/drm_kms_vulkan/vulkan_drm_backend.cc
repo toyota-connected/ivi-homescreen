@@ -620,8 +620,19 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
          unsigned int /*tv_usec*/, void* /*user_data*/) {};
 
   if (drmSetMaster(state->device.fd()) != 0) {
-    err = std::string("drmSetMaster: ") + std::strerror(errno) +
-          " (run from a free VT / stop the active compositor)";
+    if (const int set_err = errno;
+        set_err == EBUSY || set_err == EACCES || set_err == EPERM) {
+      // Read-only enumeration (DrmOutputProvider / ResolveDrmDevice) succeeds
+      // without master, so a card can resolve here yet refuse master because
+      // another DRM master already holds it.
+      err = std::string("cannot acquire DRM master (") +
+            std::strerror(set_err) +
+            "): another display server (gdm / gnome-shell / sddm / Xorg / a "
+            "Wayland compositor) already holds this card. Stop it or run from "
+            "a bare TTY.";
+    } else {
+      err = std::string("drmSetMaster: ") + std::strerror(set_err);
+    }
     return false;
   }
   state->have_master = true;

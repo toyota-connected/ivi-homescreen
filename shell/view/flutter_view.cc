@@ -22,6 +22,7 @@
 
 #include "app.h"
 #include "backend/backend_registry.h"
+#include "backend/register_backends.h"
 
 // Independent guards so several backends can be compiled into one binary
 // (Backend::Create selects per view at runtime). Header guards make the
@@ -76,16 +77,24 @@ extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                                    FlutterView* view);
 
 // The single per-view Backend factory (declared in backend/backend.h).
-// Delegates to the runtime BackendRegistry: the active descriptor's
+// Delegates to the runtime BackendRegistry: the resolved descriptor's
 // make_backend holds the concrete-backend construction + post-creation wiring
 // that used to live here as an #if/#elif chain (now in
-// backend/register_backends.cc). The active descriptor is resolved once in
-// main(), before App is constructed.
+// backend/register_backends.cc). The backend is resolved per view from its own
+// config (ResolveKeyForConfig), so each view runs the renderer its bundle asked
+// for -- matching the device-context display App placed it on.
 std::shared_ptr<Backend> Backend::Create(
     const Configuration::Config& config,
     const std::shared_ptr<IDisplay>& display) {
-  return backend::BackendRegistry::Instance().Active().make_backend(
-      config, display.get());
+  auto& registry = backend::BackendRegistry::Instance();
+  const std::string key = ResolveKeyForConfig(registry, config);
+  const backend::BackendDescriptor* descriptor = registry.Resolve(key);
+  if (descriptor == nullptr) {
+    spdlog::critical("[FlutterView] no backend resolved for view (key='{}')",
+                     key);
+    return nullptr;
+  }
+  return descriptor->make_backend(config, display.get());
 }
 
 FlutterView::FlutterView(Configuration::Config config,
@@ -279,7 +288,8 @@ void FlutterView::Initialize() {
   m_flutter_engine = std::make_shared<Engine>(
       this, m_index, m_command_line_args_c, m_dart_entrypoint_args_c,
       m_config.view.bundle_path,
-      m_config.view.accessibility_features.value_or(0));
+      m_config.view.accessibility_features.value_or(0),
+      m_config.view.merge_render_platform.value_or(false));
 
   m_state->engine = m_flutter_engine.get();
 

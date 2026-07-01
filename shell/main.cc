@@ -159,20 +159,9 @@ int main(const int argc, char** argv) {
   (void)MainLoopWaker::instance();
   InstallShutdownHandlers();
 
-  // run the application — the active backend's loop mode (resolved by App)
-  // selects the reactor vs legacy dispatch.
-  int ret = 0;
-  auto& reg = backend::BackendRegistry::Instance();
-  if (reg.Active().loop_mode == backend::LoopMode::kReactor) {
-    // Reactor backends (Wayland) run their display reactor on this (main)
-    // thread; Run() blocks until the shutdown signal stops the io_context.
-    ret = app.Run();
-  } else {
-    // Legacy backends (DRM, software) spin the per-iteration loop.
-    while (running && ret != -1) {
-      ret = app.Loop();
-    }
-  }
+  // Run the application: the shared reactor drives every backend on this (main)
+  // thread and blocks until the shutdown signal stops the io_context.
+  const int ret = app.Run();
   (void)ret;
 
   gLogger.reset();

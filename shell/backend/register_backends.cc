@@ -29,6 +29,7 @@
 #include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
+#include "display/output_manager.h"
 #include "logging/logging.h"
 
 // Independent guards so several backends can be compiled into one binary. The
@@ -46,7 +47,8 @@
 #include "display/drm_display.h"
 #endif
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-#include "display/drm_mode_list.h"  // PrintDrmModes for --drm-list-modes
+#include "display/drm_device_resolver.h"  // ResolveDrmDevice
+#include "display/drm_mode_list.h"        // PrintDrmModes for --drm-list-modes
 #endif
 #if BUILD_BACKEND_SOFTWARE
 #if BUILD_SOFTWARE_SINK_DRM
@@ -83,8 +85,16 @@ std::shared_ptr<IDisplay> MakeDrmDisplay(
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
   const bool no_seat = configs[0].view.drm_no_seat.value_or(false);
+  // Resolve the card once here; the DRM backend reads it back from the display
+  // (device_path()) so both agree. ResolveDrmDevice logs the choice / the
+  // reason it could not pick one.
+  auto device = homescreen::ResolveDrmDevice(configs[0].view.drm_device);
+  if (!device) {
+    std::exit(EXIT_FAILURE);
+  }
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
-                                      static_cast<int32_t>(h), 60.0, no_seat);
+                                      static_cast<int32_t>(h), 60.0,
+                                      std::move(*device), no_seat);
 }
 #endif
 
@@ -218,9 +228,16 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // cfg_.width.value_or(mode_.hdisplay), i.e. the native mode. When -f
   // is combined with explicit width/height, -f wins — matches how most
   // CLI tools handle a scalar "use native" flag vs. explicit sizing.
+  // DrmDisplay (built first by App::BuildDisplays) resolved and owns the card;
+  // read it back so the backend and display target the same device. In a DRM
+  // build MakeDrmDisplay always returns a DrmDisplay, so the cast fails only on
+  // programmer error.
+  auto* drm_display = dynamic_cast<DrmDisplay*>(display);
+  assert(drm_display != nullptr);
+
   const bool fullscreen = config.view.fullscreen.value_or(false);
   DrmConfig cfg{
-      config.view.drm_device.value_or("/dev/dri/card1"),
+      drm_display->device_path(),
       fullscreen ? std::optional<uint32_t>{} : config.view.width,
       fullscreen ? std::optional<uint32_t>{} : config.view.height,
       config.debug_backend.value_or(false),
@@ -230,8 +247,14 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // Treat empty TOML/env/CLI string as "unset" — operator-friendly:
   // `drm_connector = ""` in TOML shouldn't force a strict empty-name
   // match against zero connectors.
-  if (config.view.drm_connector.has_value() &&
-      !config.view.drm_connector->empty()) {
+  // [view.output] (validated against the card's live connectors via the output
+  // provider) selects the connector; fall back to the raw [view.backend.drm]
+  // connector when no [view.output] match applies.
+  if (auto resolved = homescreen::OutputManager::ResolveForView(
+          config, display, homescreen::BackendFamily::kDrm)) {
+    cfg.connector_name = std::move(resolved);
+  } else if (config.view.drm_connector.has_value() &&
+             !config.view.drm_connector->empty()) {
     cfg.connector_name = config.view.drm_connector;
   }
   if (config.view.drm_mode.has_value() && !config.view.drm_mode->empty()) {
@@ -252,15 +275,13 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // also skip the foreground-VT guard on its direct-open path.
   cfg.no_seat = config.view.drm_no_seat.value_or(false);
 
-  // DrmDisplay (constructed by App::MakeDisplay, before us) owns the
-  // process-wide libseat session. Pull the raw pointer — may be null
-  // when no seat backend is available, in which case DrmBackend takes
-  // the legacy direct-open path. In a DRM build, MakeDisplay always
-  // returns a DrmDisplay, so dynamic_cast fails only on programmer
-  // error; assert keeps the invariant loud.
-  auto* drm_display = dynamic_cast<DrmDisplay*>(display);
-  assert(drm_display != nullptr);
-  m_backend = DrmBackend::Create(cfg, drm_display->session());
+  // drm_display (resolved above) owns the process-wide libseat session — it may
+  // be null when no seat backend is available, in which case DrmBackend takes
+  // the legacy direct-open path.
+  // The device-context (DrmDisplay) owns the card open + master; every backend
+  // scanning out to this card shares it. Acquired lazily here on first use.
+  m_backend = DrmBackend::Create(cfg, drm_display->session(),
+                                 drm_display->SharedDevice(), drm_display);
 
   // DrmBackend::Create returns nullptr on any init failure (libseat
   // take_device, drmSetMaster, no usable connector, GBM/EGL setup,
@@ -270,6 +291,13 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     spdlog::critical("[FlutterView] DRM backend init failed; aborting");
     exit(EXIT_FAILURE);
   }
+
+  // Start the card's single PAGE_FLIP_EVENT reader (owned by the device-context
+  // so it outlives every backend on the card). The dispatcher routes each flip
+  // to the committing backend by user_data, so N views on one card share one
+  // reader. Idempotent across backends on the same card.
+  drm_display->SetFlipHandler(&DrmBackend::UnifiedPageFlipHandler);
+  drm_display->StartFlipReader();
 
   // Wire the HW cursor (if Create succeeded in opening one) to the
   // seat dispatch thread so pointer events move the on-screen sprite.
@@ -320,9 +348,8 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
           ? *config.view.drm_mode
           : std::string{};
   auto vk_backend = VulkanDrmBackend::Create(
-      config.view.drm_device.value_or("/dev/dri/card1"),
-      config.debug_backend.value_or(false), drm_display->session(), drm_mode,
-      config.view.drm_rotation.value_or(0));
+      drm_display->device_path(), config.debug_backend.value_or(false),
+      drm_display->session(), drm_mode, config.view.drm_rotation.value_or(0));
 
   // Create returns nullptr on any init failure (unsupported device, no
   // zero-copy scanout path). Continuing would dereference a null backend in
@@ -429,24 +456,23 @@ static int SoftwareListModes(const std::string& device) {
 
 void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 #if BUILD_BACKEND_WAYLAND_EGL
-  registry.Register({"wayland-egl", backend::LoopMode::kReactor,
-                     MakeWaylandDisplay, MakeWaylandEglBackend, nullptr});
+  registry.Register(
+      {"wayland-egl", MakeWaylandDisplay, MakeWaylandEglBackend, nullptr});
 #endif
 #if BUILD_BACKEND_WAYLAND_VULKAN
-  registry.Register({"wayland-vulkan", backend::LoopMode::kReactor,
-                     MakeWaylandDisplay, MakeWaylandVulkanBackend, nullptr});
+  registry.Register({"wayland-vulkan", MakeWaylandDisplay,
+                     MakeWaylandVulkanBackend, nullptr});
 #endif
 #if BUILD_BACKEND_DRM_KMS_EGL
-  registry.Register({"drm-kms-egl", backend::LoopMode::kLegacy, MakeDrmDisplay,
-                     MakeDrmEglBackend, DrmListModes});
+  registry.Register(
+      {"drm-kms-egl", MakeDrmDisplay, MakeDrmEglBackend, DrmListModes});
 #endif
 #if BUILD_BACKEND_DRM_KMS_VULKAN
-  registry.Register({"drm-kms-vulkan", backend::LoopMode::kLegacy,
-                     MakeDrmDisplay, MakeDrmVulkanBackend, DrmListModes});
+  registry.Register(
+      {"drm-kms-vulkan", MakeDrmDisplay, MakeDrmVulkanBackend, DrmListModes});
 #endif
 #if BUILD_BACKEND_SOFTWARE
-  registry.Register({"software", backend::LoopMode::kLegacy,
-                     MakeSoftwareDisplay, MakeSoftwareBackend,
+  registry.Register({"software", MakeSoftwareDisplay, MakeSoftwareBackend,
 #if BUILD_SOFTWARE_SINK_DRM
                      SoftwareListModes});
 #else
@@ -479,11 +505,10 @@ static bool WaylandSessionAvailable() {
   return std::filesystem::exists(std::filesystem::path(xdg) / sock, ec);
 }
 
-static std::string ResolveActiveKey(
-    const backend::BackendRegistry& reg,
-    const std::vector<Configuration::Config>& configs) {
+std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
+                                const Configuration::Config& config) {
   const auto keys = reg.Keys();
-  std::string hint = configs[0].view.backend.value_or("");
+  std::string hint = config.view.backend.value_or("");
 
   // An exact registry key (the bundle's [view] backend, or --backend) selects
   // that backend directly -- the primary runtime-selection path.
@@ -563,7 +588,7 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
   if (registry.Keys().empty()) {
     RegisterCompiledBackends(registry);
   }
-  const std::string key = ResolveActiveKey(registry, configs);
+  const std::string key = ResolveKeyForConfig(registry, configs[0]);
   const backend::BackendDescriptor* active = registry.Resolve(key);
   if (active == nullptr) {
     std::string available;
@@ -578,22 +603,11 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
     return false;
   }
 
-  // One process drives one backend (a single display) today, so the active
-  // backend comes from the first bundle. Per-bundle backend selection isn't
-  // independently honored yet -- warn if a later bundle asks for a different,
-  // valid backend so the ignored request isn't silent.
-  for (size_t i = 1; i < configs.size(); ++i) {
-    const auto& want = configs[i].view.backend;
-    if (want.has_value() && !want->empty() && *want != key &&
-        registry.Resolve(*want) != nullptr) {
-      spdlog::warn(
-          "[backend] bundle {} requests backend '{}', but the process uses "
-          "'{}' "
-          "(per-bundle backend selection is not yet supported)",
-          i, *want, key);
-    }
-  }
-
+  // The "active" backend is the process-wide default: it backs the first
+  // bundle and answers process-level queries (e.g. --drm-list-modes). Each view
+  // independently resolves its own backend via ResolveKeyForConfig when its
+  // display and Backend are built, so a later bundle naming a different backend
+  // is honored rather than coerced onto this one.
   registry.SetActive(active);
   return true;
 }

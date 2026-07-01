@@ -317,6 +317,7 @@ annotated all-keys file see
 | `[view.output]` | `preload` | `bool` | `false` | `true\|false` | all |
 | `[view.output]` | `serial` | `string` | `(none)` | `EDID serial` | drm |
 | `[view.output]` | `wl_name` | `string` | `(none)` | `e.g. DP-1` | wayland |
+| `[view.engine]` | `merge_render_platform` | `bool` | `false` | `true\|false` | all |
 
 <!-- END CONFIG-REFERENCE -->
 

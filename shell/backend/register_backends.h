@@ -35,3 +35,15 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry);
 [[nodiscard]] bool EnsureActiveBackend(
     backend::BackendRegistry& registry,
     const std::vector<Configuration::Config>& configs);
+
+// Resolves the backend registry key for a single view @p config: an exact
+// [view] backend / --backend key when it names a compiled-in backend, else the
+// sole compiled backend, else an environment heuristic (a live Wayland session
+// -> wayland-*, otherwise KMS-direct -> drm-kms-* / software), honoring the
+// legacy egl/vulkan renderer hint within the chosen family. Returns an empty
+// string when nothing resolves. This is the per-view counterpart to the
+// process-wide active backend: App uses it to place each view on the right
+// device-context display, and FlutterView to build that view's Backend.
+[[nodiscard]] std::string ResolveKeyForConfig(
+    const backend::BackendRegistry& registry,
+    const Configuration::Config& config);

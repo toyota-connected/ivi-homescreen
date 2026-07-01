@@ -16,10 +16,21 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include <drm-cxx/core/device.hpp>
+
+#include "asio/executor_work_guard.hpp"
+#include "asio/io_context.hpp"
+#include "asio/posix/stream_descriptor.hpp"
+
+#include "display/drm_output_provider.h"
 #include "display/idisplay.h"
 #include "input/iseat.h"
 
@@ -32,12 +43,15 @@ class DrmSession;
 
 class DrmDisplay final : public IDisplay {
  public:
+  // @p device_path is the card this display's outputs are enumerated from (its
+  // master domain); it is the same card the backend scans out to.
   // @p no_seat (--drm-no-seat / HOMESCREEN_DRM_NO_SEAT) skips opening a
   // libseat session entirely, forcing the backend's direct-open path. See
   // session().
   DrmDisplay(int32_t width,
              int32_t height,
              double refresh_rate_hz,
+             std::string device_path,
              bool no_seat = false);
   ~DrmDisplay() override;
 
@@ -50,6 +64,41 @@ class DrmDisplay final : public IDisplay {
   [[nodiscard]] homescreen::DrmSession* session() const {
     return session_.get();
   }
+
+  // The card opened once and held master, shared by every backend that scans
+  // out to this device (the device-context owns the master, not the per-view
+  // backend). Acquired lazily on the first call: via the libseat session when
+  // present, else a direct open + drmSetMaster behind the foreground-VT guard
+  // (unless --drm-no-seat). Returns null when the card could not be opened or
+  // master could not be taken (the caller fail-fasts). The pointee outlives the
+  // backends (this display is shared and destroyed after them).
+  [[nodiscard]] drm::Device* SharedDevice();
+
+  // drmModeEventContext.page_flip_handler signature. Each backend registers its
+  // dispatcher (DrmBackend::UnifiedPageFlipHandler) here; user_data carries the
+  // committing backend, so a single reader on the shared fd routes every flip.
+  using PageFlipHandler = void (*)(int fd,
+                                   unsigned int sequence,
+                                   unsigned int tv_sec,
+                                   unsigned int tv_usec,
+                                   void* user_data);
+
+  // Register the flip dispatcher (idempotent; all backends on a card share one
+  // dispatcher that routes by user_data). Must be set before StartFlipReader.
+  void SetFlipHandler(PageFlipHandler handler);
+
+  // Start the per-card PAGE_FLIP_EVENT reader: a dedicated thread + io_context
+  // that is the single reader of the shared fd (DRM's one-reader-per-fd rule),
+  // draining flips and dispatching each to its backend off the rasterizer /
+  // platform thread. Idempotent; a no-op until SharedDevice + SetFlipHandler.
+  void StartFlipReader();
+
+  // Per-card plane coordination: overlay/cursor planes on a card may be valid
+  // for several CRTCs, so independent per-view backends would otherwise pick
+  // the same one and collide. A backend records the planes it owns here; the
+  // next backend on the card excludes them from its own selection.
+  void ReservePlanes(const std::vector<uint32_t>& planes);
+  [[nodiscard]] std::vector<uint32_t> ReservedPlanes() const;
 
   void StartEvents() override;
   void StopEvents() override;
@@ -110,11 +159,32 @@ class DrmDisplay final : public IDisplay {
 
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
+  // The card's connectors, enumerated as outputs (the master domain's output
+  // set). Always non-null for a DRM display.
+  [[nodiscard]] homescreen::IOutputProvider* GetOutputProvider() override {
+    return &output_provider_;
+  }
+
+  // The resolved card this display owns. The backend reads it from here so the
+  // display and its backend always scan out to / enumerate the same device.
+  [[nodiscard]] const std::string& device_path() const { return device_path_; }
+
  private:
   int32_t width_;
   int32_t height_;
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
+
+  // The resolved card (e.g. "/dev/dri/card1"). Declared before output_provider_
+  // so it can seed it.
+  std::string device_path_;
+
+  // --drm-no-seat: skip the foreground-VT guard on the direct-open path when
+  // SharedDevice() falls back (no libseat session).
+  bool no_seat_;
+
+  // Enumerates this card's connectors as outputs (libdrm only, no master).
+  homescreen::DrmOutputProvider output_provider_;
 
   // Active cursor sprite retargeting sink (set by FlutterView after the
   // backend creates its cursor). Owned by DrmBackend; null when no cursor.
@@ -129,4 +199,35 @@ class DrmDisplay final : public IDisplay {
   // is there so a Wayland-client + DRM-rendering configuration can swap in
   // a WaylandSeat without changing this class.
   std::unique_ptr<homescreen::ISeat> seat_;
+
+  // Arm the async_wait for the next PAGE_FLIP_EVENT; re-armed after every
+  // drain.
+  void ArmFlipRead();
+  // Drain readable flip events on the reader thread (poll(0)+drmHandleEvent).
+  void DrainFlip();
+  // Stop + join the reader thread and detach the fd (drm_dev_ still owns it).
+  void StopFlipReader();
+
+  // The shared card + master (see SharedDevice). Declared last so it is
+  // destroyed first -- master is dropped and the fd closed before the seat and
+  // session tear down. drm::Device is RAII (closes the fd on destruction).
+  std::optional<drm::Device> drm_dev_{};
+  bool drm_master_ = false;  // true after this display took master on drm_dev_
+
+  // Per-card PAGE_FLIP_EVENT reader. Its own thread + io_context so it is the
+  // single reader of drm_dev_'s fd. flip_descriptor_ wraps the shared fd and is
+  // released (not closed) on teardown -- drm_dev_ owns the fd.
+  PageFlipHandler flip_handler_ = nullptr;
+  std::unique_ptr<asio::io_context> flip_ioc_;
+  std::optional<asio::executor_work_guard<asio::io_context::executor_type>>
+      flip_work_;
+  std::optional<asio::posix::stream_descriptor> flip_descriptor_;
+  std::thread flip_thread_;
+  bool flip_reader_running_ = false;
+
+  // Planes claimed by the backends on this card (see ReservePlanes). Guarded
+  // because ReservePlanes/ReservedPlanes could be called from per-view setup
+  // paths on different threads.
+  mutable std::mutex reserved_planes_mu_;
+  std::vector<uint32_t> reserved_planes_;
 };

@@ -31,6 +31,9 @@ add_executable(${PROJECT_NAME}
         # Backend-agnostic output resolver (pure name/serial matching); the
         # per-backend output providers feed it via the IDisplay seam.
         display/output.cc
+        # Binds each view to an output by name across backends (resolver +
+        # provider); feeds the resolved connector / wl_output to the backend.
+        display/output_manager.cc
         engine.cc
         libflutter_engine.cc
         main.cc
@@ -171,6 +174,8 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             backend/drm_kms_egl/gl_cursor.cc
             backend/gl_process_resolver.cc
             display/drm_display.cc
+            display/drm_output_provider.cc
+            display/drm_device_resolver.cc
             display/drm_mode_list.cc
             input/drm_seat.cc
     )
@@ -253,6 +258,8 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_egl/drm_session.cc
             backend/drm_kms_egl/driver_probe.cc
             display/drm_display.cc
+            display/drm_output_provider.cc
+            display/drm_device_resolver.cc
             display/drm_mode_list.cc
             input/drm_seat.cc
     )
