@@ -70,6 +70,53 @@ void Configuration::get_global_parameters(toml::table* root, Config& instance) {
   }
 }
 
+namespace {
+// Fill an OutputMatch from one output table (keys relative to that table). Used
+// for both a single [view.output] table and each element of a [[view.output]]
+// array.
+void ParseOutputMatch(const toml::table& t, homescreen::OutputMatch& out) {
+  if (t["name"].is_string()) {
+    // Convenience: `name` fills both the wl_output and DRM connector fields so
+    // one config works on either backend.
+    const std::string name = t["name"].as_string()->value_or("");
+    out.wl_name = name;
+    out.drm_connector = name;
+  }
+  if (t["wl_name"].is_string()) {
+    out.wl_name = t["wl_name"].as_string()->value_or("");
+  }
+  if (t["drm_connector"].is_string()) {
+    out.drm_connector = t["drm_connector"].as_string()->value_or("");
+  }
+  if (t["serial"].is_string()) {
+    out.edid_serial = t["serial"].as_string()->value_or("");
+  }
+  if (t["index"].is_integer()) {
+    out.index = t["index"].value<uint32_t>().value();
+  }
+  if (t["preload"].is_boolean()) {
+    out.preload = t["preload"].value<bool>().value();
+  }
+  if (t["on_disconnect"].is_string()) {
+    const std::string policy = t["on_disconnect"].as_string()->value_or("");
+    out.on_disconnect = (policy == "teardown")
+                            ? homescreen::OutputMatch::OnDisconnect::kTeardown
+                            : homescreen::OutputMatch::OnDisconnect::kSuspend;
+  }
+  // Position of this output in the combined desktop space (input layout).
+  if (t["x"].is_integer()) {
+    out.layout_x = t["x"].value<int32_t>();
+  }
+  if (t["y"].is_integer()) {
+    out.layout_y = t["y"].value<int32_t>();
+  }
+  // Touch panel bonded to this output (libinput device-name substring).
+  if (t["touch_device"].is_string()) {
+    out.touch_device = t["touch_device"].as_string()->value_or("");
+  }
+}
+}  // namespace
+
 // Overlays a single [[view]] table onto |instance|. Paths are relative to the
 // view table, so AGL shell knobs live under shell.window[.activation_area] and
 // backend knobs under backend[.drm], each ignored unless present.
@@ -84,52 +131,28 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
   // fills both the wl_output and DRM connector fields so one config works on
   // either backend. wl_name / drm_connector override per backend; serial is a
   // DRM-only EDID refinement.
-  if (v->at_path("output.name").is_string()) {
-    const std::string name =
-        v->at_path("output.name").as_string()->value_or("");
-    instance.view.output.wl_name = name;
-    instance.view.output.drm_connector = name;
-  }
-  if (v->at_path("output.wl_name").is_string()) {
-    instance.view.output.wl_name =
-        v->at_path("output.wl_name").as_string()->value_or("");
-  }
-  if (v->at_path("output.drm_connector").is_string()) {
-    instance.view.output.drm_connector =
-        v->at_path("output.drm_connector").as_string()->value_or("");
-  }
-  if (v->at_path("output.serial").is_string()) {
-    instance.view.output.edid_serial =
-        v->at_path("output.serial").as_string()->value_or("");
-  }
-  if (v->at_path("output.index").is_integer()) {
-    instance.view.output.index =
-        v->at_path("output.index").value<uint32_t>().value();
-  }
-  if (v->at_path("output.preload").is_boolean()) {
-    instance.view.output.preload =
-        v->at_path("output.preload").value<bool>().value();
-  }
-  if (v->at_path("output.on_disconnect").is_string()) {
-    const std::string policy =
-        v->at_path("output.on_disconnect").as_string()->value_or("");
-    instance.view.output.on_disconnect =
-        (policy == "teardown")
-            ? homescreen::OutputMatch::OnDisconnect::kTeardown
-            : homescreen::OutputMatch::OnDisconnect::kSuspend;
-  }
-  // Position of this view's display in the combined desktop space
-  // (multi-display input layout).
-  if (v->at_path("output.x").is_integer()) {
-    instance.view.output.layout_x = v->at_path("output.x").value<int32_t>();
-  }
-  if (v->at_path("output.y").is_integer()) {
-    instance.view.output.layout_y = v->at_path("output.y").value<int32_t>();
-  }
-  // Touch panel bonded to this view's display (libinput device-name substring).
-  if (v->at_path("output.touch_device").is_string()) {
-    instance.view.output.touch_device =
-        v->at_path("output.touch_device").as_string()->value_or("");
+  // A single [view.output] table binds one output. An array [[view.output]]
+  // binds one engine to several outputs: the first entry is the
+  // primary (implicit view / vsync driver), the rest become added views on
+  // their own connectors.
+  if (const auto node = v->at_path("output"); node.is_array()) {
+    bool first = true;
+    for (auto&& element : *node.as_array()) {
+      const auto* t = element.as_table();
+      if (t == nullptr) {
+        continue;
+      }
+      if (first) {
+        ParseOutputMatch(*t, instance.view.output);
+        first = false;
+      } else {
+        homescreen::OutputMatch extra;
+        ParseOutputMatch(*t, extra);
+        instance.view.additional_outputs.push_back(std::move(extra));
+      }
+    }
+  } else if (const auto* t = node.as_table()) {
+    ParseOutputMatch(*t, instance.view.output);
   }
   if (v->at_path("width").is_integer()) {
     instance.view.width = v->at_path("width").value<uint32_t>().value();

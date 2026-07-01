@@ -156,6 +156,23 @@ def extract():
         if k == "sentry":
             continue
         keys.setdefault("sentry." + k, "string")
+    # [view.output] entries are read through a table helper (ParseOutputMatch
+    # reads t["<field>"]), and [[view.output]] arrays iterate the node, so the
+    # at_path() scraper above can't see the leaf keys. List them here so they
+    # stay in the reference table.
+    for k, t in (
+        ("output.name", "string"),
+        ("output.wl_name", "string"),
+        ("output.drm_connector", "string"),
+        ("output.serial", "string"),
+        ("output.index", "int"),
+        ("output.preload", "bool"),
+        ("output.on_disconnect", "string"),
+        ("output.x", "int"),
+        ("output.y", "int"),
+        ("output.touch_device", "string"),
+    ):
+        keys.setdefault(k, t)
     return keys
 
 
