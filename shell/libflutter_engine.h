@@ -65,6 +65,11 @@ struct LibFlutterEngineExports {
   FlutterEngineNotifyDisplayUpdateFnPtr NotifyDisplayUpdate = nullptr;
   FlutterEngineScheduleFrameFnPtr ScheduleFrame = nullptr;
   FlutterEngineSetNextFrameCallbackFnPtr SetNextFrameCallback = nullptr;
+  // Multi-view. Both are async; the
+  // add/remove callbacks in FlutterAddViewInfo/FlutterRemoveViewInfo report
+  // completion. May be null on an engine .so too old to export them.
+  FlutterEngineAddViewFnPtr AddView = nullptr;
+  FlutterEngineRemoveViewFnPtr RemoveView = nullptr;
 };
 
 class LibFlutterEngine {
