@@ -17,6 +17,7 @@
 #include "display/drm_display.h"
 #include "logging/logging.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <optional>
@@ -360,6 +361,21 @@ void DrmDisplay::StopFlipReader() {
   }
   flip_ioc_.reset();
   flip_reader_running_ = false;
+}
+
+void DrmDisplay::ReservePlanes(const std::vector<uint32_t>& planes) {
+  const std::lock_guard<std::mutex> lock(reserved_planes_mu_);
+  for (const uint32_t id : planes) {
+    if (std::find(reserved_planes_.begin(), reserved_planes_.end(), id) ==
+        reserved_planes_.end()) {
+      reserved_planes_.push_back(id);
+    }
+  }
+}
+
+std::vector<uint32_t> DrmDisplay::ReservedPlanes() const {
+  const std::lock_guard<std::mutex> lock(reserved_planes_mu_);
+  return reserved_planes_;
 }
 
 void DrmDisplay::StartEvents() {

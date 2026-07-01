@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -90,6 +92,13 @@ class DrmDisplay final : public IDisplay {
   // draining flips and dispatching each to its backend off the rasterizer /
   // platform thread. Idempotent; a no-op until SharedDevice + SetFlipHandler.
   void StartFlipReader();
+
+  // Per-card plane coordination: overlay/cursor planes on a card may be valid
+  // for several CRTCs, so independent per-view backends would otherwise pick
+  // the same one and collide. A backend records the planes it owns here; the
+  // next backend on the card excludes them from its own selection.
+  void ReservePlanes(const std::vector<uint32_t>& planes);
+  [[nodiscard]] std::vector<uint32_t> ReservedPlanes() const;
 
   void StartEvents() override;
   void StopEvents() override;
@@ -215,4 +224,10 @@ class DrmDisplay final : public IDisplay {
   std::optional<asio::posix::stream_descriptor> flip_descriptor_;
   std::thread flip_thread_;
   bool flip_reader_running_ = false;
+
+  // Planes claimed by the backends on this card (see ReservePlanes). Guarded
+  // because ReservePlanes/ReservedPlanes could be called from per-view setup
+  // paths on different threads.
+  mutable std::mutex reserved_planes_mu_;
+  std::vector<uint32_t> reserved_planes_;
 };

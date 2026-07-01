@@ -38,6 +38,7 @@
 #include "vsync/ivsync_provider.h"
 
 class DrmCompositor;
+class DrmDisplay;
 class TaskRunner;
 namespace homescreen {
 class DrmCapture;
@@ -154,9 +155,16 @@ class DrmBackend : public Backend {
   // @p shared_device is the card opened + held at master by the device-context
   // (DrmDisplay::SharedDevice); the backend scans out through it without taking
   // master itself. It is non-owning and must outlive the backend.
+  // @p display is the device-context; the compositor uses it to reserve/exclude
+  // planes so co-tenant views on the same card don't collide on a shared
+  // overlay. Non-owning; outlives the backend.
   static std::unique_ptr<DrmBackend> Create(const DrmConfig& cfg,
                                             homescreen::DrmSession* session,
-                                            drm::Device* shared_device);
+                                            drm::Device* shared_device,
+                                            DrmDisplay* display);
+
+  // The device-context this backend scans out through (plane reservation).
+  [[nodiscard]] DrmDisplay* display() const { return drm_display_; }
   ~DrmBackend() override;
 
   DrmBackend(const DrmBackend&) = delete;
@@ -304,6 +312,9 @@ class DrmBackend : public Backend {
 
   DrmConfig cfg_;
   homescreen::DrmSession* session_ = nullptr;
+  // Device-context (non-owning). Used for cross-view plane reservation on the
+  // shared card.
+  DrmDisplay* drm_display_ = nullptr;
 
   // The shared card (opened + held at master by DrmDisplay::SharedDevice).
   // Non-owning: the device-context owns it and outlives this backend, so the
