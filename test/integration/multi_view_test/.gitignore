@@ -1,0 +1,4 @@
+# Build artifacts and assembled bundles (regenerated via `emb bundle`).
+/build/
+/bundle/
+/.dart_tool/
