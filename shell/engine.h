@@ -62,7 +62,8 @@ class Engine {
          const std::vector<const char*>& command_line_args_c,
          const std::vector<const char*>& dart_entrypoint_args_c,
          const std::string& bundle_path,
-         int32_t accessibility_features);
+         int32_t accessibility_features,
+         bool merge_render_platform);
 
   ~Engine();
 
@@ -384,7 +385,15 @@ class Engine {
 
   std::shared_ptr<TaskRunner> m_platform_task_runner;
   FlutterTaskRunnerDescription m_platform_task_runner_description{};
+  // Populated + wired only when m_merge_render_platform: a copy of the platform
+  // description with the same identifier, so the engine runs raster on the
+  // platform thread. Must outlive FlutterEngineRun (custom_task_runners holds
+  // the pointer).
+  FlutterTaskRunnerDescription m_render_task_runner_description{};
   FlutterCustomTaskRunners m_custom_task_runners{};
+
+  // Run the raster thread on the platform thread (see the ctor / config).
+  bool m_merge_render_platform = false;
 
   // Zero-initialized: only assigned for AOT runs (RunsAOTCompiledDartCode()).
   // On a JIT/debug run LoadAotData() never runs, so this must be null —
