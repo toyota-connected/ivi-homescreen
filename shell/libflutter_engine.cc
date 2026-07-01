@@ -82,6 +82,8 @@ LibFlutterEngineExports::LibFlutterEngineExports(void* lib) {
     ShellGetFuncAddress(lib, "FlutterEngineScheduleFrame", &ScheduleFrame);
     ShellGetFuncAddress(lib, "FlutterEngineSetNextFrameCallback",
                         &SetNextFrameCallback);
+    ShellGetFuncAddress(lib, "FlutterEngineAddView", &AddView);
+    ShellGetFuncAddress(lib, "FlutterEngineRemoveView", &RemoveView);
   }
 }
 

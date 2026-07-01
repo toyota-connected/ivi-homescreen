@@ -335,6 +335,24 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
           dynamic_cast<homescreen::ICursorShapeSink*>(
               drm_backend->gl_cursor()));
     }
+
+    // this one engine also drives the additional outputs listed in
+    // [[view.output]] (entries 2..N). Each becomes a compositor on its own CRTC
+    // (sharing this backend's EGL/GBM) bound to view id 1..N; FlutterView
+    // FlutterEngineAddView's them once the engine is running.
+    int64_t next_view_id = 1;
+    for (const auto& extra : config.view.additional_outputs) {
+      const std::string connector = extra.drm_connector.value_or("");
+      if (connector.empty()) {
+        spdlog::warn(
+            "[FlutterView] additional [[view.output]] has no drm_connector; "
+            "skipping");
+        continue;
+      }
+      if (drm_backend->AddOutput(connector, next_view_id)) {
+        ++next_view_id;
+      }
+    }
   }
   return m_backend;
 }

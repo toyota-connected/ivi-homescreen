@@ -122,7 +122,14 @@ class Configuration {
       std::vector<std::string> drm_input_transforms;
       // Pin this view to a physical output by stable name (see
       // homescreen::ResolveOutput). Empty → binds to the primary output.
+      // With an array [[view.output]], this is the FIRST entry (the primary
+      // output / implicit view); the rest go in additional_outputs.
       homescreen::OutputMatch output;
+      // extra outputs this ONE engine also drives (entries 2..N of a
+      // [[view.output]] array). Empty for the common single-output view. Each
+      // becomes an added Flutter view scanned out to its own connector on the
+      // same card.
+      std::vector<homescreen::OutputMatch> additional_outputs;
     } view;
 
     // Path to a master config.toml passed via --config. Process-level: it can

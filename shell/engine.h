@@ -95,6 +95,28 @@ class Engine {
   FlutterEngineResult SetWindowSize(size_t height, size_t width);
 
   /**
+   * @brief Attach an additional view to this engine, so one engine can drive
+   * several outputs. view_id must be unique and non-zero (0 is the
+   * implicit view). Asynchronous -- the engine reports completion via an
+   * internal callback; the caller must not present to the view until it
+   * succeeds. Sized to the target output. Returns an error without calling the
+   * engine when the loaded engine library predates the multi-view API.
+   * @relation flutter
+   */
+  FlutterEngineResult AddView(int64_t view_id,
+                              size_t width,
+                              size_t height,
+                              double pixel_ratio,
+                              uint64_t display_id);
+
+  /**
+   * @brief Detach a previously added view. The implicit view (0) cannot be
+   * removed. Asynchronous (internal completion callback).
+   * @relation flutter
+   */
+  FlutterEngineResult RemoveView(int64_t view_id);
+
+  /**
    * @brief Set pixel ratio of flutter
    * @param[in] pixel_ratio Pixel ratio of flutter window
    * @return FlutterEngineResult
@@ -319,6 +341,11 @@ class Engine {
   static void onLogMessageCallback(const char* tag,
                                    const char* message,
                                    void* user_data);
+
+  // Completion callbacks for the async AddView/RemoveView; invoked on an
+  // engine-managed thread. user_data is the Engine* baton.
+  static void OnAddViewComplete(const FlutterAddViewResult* result);
+  static void OnRemoveViewComplete(const FlutterRemoveViewResult* result);
 
 #if BUILD_ACCESSIBILITY
   static void onSemanticsUpdateCallback(
