@@ -57,6 +57,13 @@ class Configuration {
       std::optional<uint32_t> ivi_surface_id;
       std::optional<std::string> drm_device;
 
+      // [view.engine] merge_render_platform: run the engine's raster thread on
+      // the platform thread (one FlutterCustomTaskRunners identifier for both).
+      // Gives native/Dart-FFI code single-thread aliasing; the present path
+      // must be merge-agnostic (non-blocking on the platform thread). Off by
+      // default.
+      std::optional<bool> merge_render_platform;
+
       // DRM backend knobs — all strings so Configuration stays decoupled
       // from the DRM headers. Valid values:
       //   drm_connector             : "<TypeName>-<id>" (e.g. "eDP-1",

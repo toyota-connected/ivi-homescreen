@@ -202,3 +202,8 @@
   # Wayland: match this wl_output name (overrides output.name).
   # type=string default=(none) values=e.g. DP-1 applies=wayland
   wl_name =
+
+[view.engine]
+  # Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing).
+  # type=bool default=false values=true|false applies=all
+  merge_render_platform =
