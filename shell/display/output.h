@@ -66,8 +66,25 @@ struct OutputMatch {
   };
   OnDisconnect on_disconnect = OnDisconnect::kSuspend;
 
+  // Position of this view's display in the combined pointer/desktop space, for
+  // multi-display input routing. Unset = origin (0,0). Only meaningful when
+  // several views share one input seat (multiple displays on one card): the
+  // config declares each display's placement so the pointer moves between them
+  // as laid out. Not a match field -- excluded from empty().
+  std::optional<int32_t> layout_x;
+  std::optional<int32_t> layout_y;
+
+  // Touch device bonded to this view's display, matched by libinput
+  // device-name substring. A touchscreen reports absolute coordinates in its
+  // own space with no cursor, so unlike a mouse it can't be routed by pointer
+  // position -- this names which panel feeds this view. Unset routes touch to
+  // the primary view (preserving single-display behavior). Not a match field --
+  // excluded from empty().
+  std::optional<std::string> touch_device;
+
   // True when no match field is set: the bundle binds to the primary output
-  // immediately (preserves single-view behavior).
+  // immediately (preserves single-view behavior). Layout position is not a
+  // match constraint, so it does not affect this.
   [[nodiscard]] bool empty() const {
     return !wl_name && !drm_connector && !edid_serial && !index;
   }

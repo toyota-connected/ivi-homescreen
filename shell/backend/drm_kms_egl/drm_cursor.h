@@ -139,6 +139,15 @@ class DrmCursor final : public ICursorShapeSink {
   // LayerScene to accept the cursor plane in its own commit.
   void CommitPending();
 
+  // Detach / re-attach the sprite from its cursor plane without destroying
+  // state, so a multi-display seat can show exactly one cursor: hide the
+  // sprite on the display the pointer left, show it on the one it entered.
+  // Hide() commits FB_ID/CRTC_ID = 0; Show() re-commits at the last position.
+  // Both are no-ops if already in the requested state, and no-ops in staged
+  // mode (the compositor owns the plane there). Seat dispatch thread only.
+  void Hide();
+  void Show();
+
   // The DRM plane id the cursor is scanned out on (0 on the legacy
   // drmModeSetCursor path, which has no addressable plane). On a CRTC
   // with no dedicated cursor plane the renderer takes an overlay; the

@@ -130,6 +130,17 @@ class DrmDisplay final : public IDisplay {
   // ("<name>=<rot>[,flip-x][,flip-y]"; see DrmSeat::SetInputTransforms).
   void SetInputTransforms(const std::vector<std::string>& specs);
 
+  // Position this view's render surface in the combined pointer space (from
+  // [view.output] x/y). When several views share this display's seat (multiple
+  // displays on one DRM card), each declares its placement so the pointer
+  // moves between them as laid out. See DrmSeat::SetRegionLayout.
+  void SetRegionLayout(int32_t x, int32_t y);
+
+  // Bind a touch panel (libinput device-name substring) to this view so its
+  // touches route here instead of the primary view. See
+  // DrmSeat::SetRegionTouchDevice.
+  void SetRegionTouchDevice(const std::string& name);
+
   // Update the seat's cursor clamping rectangle to match the actual
   // backend framebuffer size. App::MakeDisplay constructs DrmDisplay
   // with the config's view.width/height (defaults 1024x768) — but

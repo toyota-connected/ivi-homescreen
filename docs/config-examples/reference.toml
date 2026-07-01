@@ -199,9 +199,21 @@
   # type=string default=(none) values=EDID serial applies=drm
   serial =
 
+  # Route touch from this panel (libinput device-name substring) to this view; unset sends touch to the primary view.
+  # type=string default=(primary) values=device-name substring applies=all
+  touch_device =
+
   # Wayland: match this wl_output name (overrides output.name).
   # type=string default=(none) values=e.g. DP-1 applies=wayland
   wl_name =
+
+  # This display's X position in the combined desktop space (multi-display input layout).
+  # type=int default=0 values=int (px) applies=all
+  x =
+
+  # This display's Y position in the combined desktop space (multi-display input layout).
+  # type=int default=0 values=int (px) applies=all
+  y =
 
 [view.engine]
   # Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing).
