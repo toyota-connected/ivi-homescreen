@@ -43,6 +43,7 @@
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
+#include "display/drm_display.h"
 #if USE_DRM_SCENE
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
 #endif
@@ -508,6 +509,16 @@ bool DrmCompositor::InitFramedMode() {
   const uint32_t comp_format = backend_->resolved().primary_format;
   const uint64_t want_overlay_zpos = primary_zpos_ + 1;
 
+  // Overlay planes on a card can be valid for several CRTCs, so a co-tenant
+  // view may already own the first one. Skip planes the device-context reports
+  // reserved so two views on one card don't collide on a shared overlay.
+  const std::vector<uint32_t> reserved =
+      backend_->display() != nullptr ? backend_->display()->ReservedPlanes()
+                                     : std::vector<uint32_t>{};
+  const auto is_reserved = [&reserved](uint32_t id) {
+    return std::find(reserved.begin(), reserved.end(), id) != reserved.end();
+  };
+
   for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
     if (p->type == drm::planes::DRMPlaneType::PRIMARY &&
         framed_primary_id_ == 0) {
@@ -516,7 +527,7 @@ bool DrmCompositor::InitFramedMode() {
     }
     if (p->type == drm::planes::DRMPlaneType::OVERLAY &&
         framed_overlay_id_ == 0) {
-      if (!p->supports_format(comp_format)) {
+      if (!p->supports_format(comp_format) || is_reserved(p->id)) {
         continue;
       }
       // Clamp to the advertised zpos range. When the overlay zpos is
@@ -540,6 +551,12 @@ bool DrmCompositor::InitFramedMode() {
         "CRTC {} (primary={}, overlay={})",
         backend_->crtc_id(), framed_primary_id_, framed_overlay_id_);
     return false;
+  }
+
+  // Claim these planes so the next view on this card excludes them.
+  if (backend_->display() != nullptr) {
+    backend_->display()->ReservePlanes(
+        {framed_primary_id_, framed_overlay_id_});
   }
 
   // Cache property IDs for both planes so PresentFramed can build the
@@ -1378,12 +1395,22 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   }
 
   // Disable every other non-cursor plane on this CRTC so the commit
-  // doesn't inherit stale FB/CRTC/zpos from fbcon or a prior session.
+  // doesn't inherit stale FB/CRTC/zpos from fbcon or a prior session --
+  // except planes another view on this card owns. Shared overlays are valid
+  // for our CRTC too, so disabling one would blank the co-tenant view. Checked
+  // at commit (both views have reserved by steady state; a co-tenant that has
+  // not reserved yet is not scanning out, so disabling it is harmless).
+  const std::vector<uint32_t> reserved =
+      backend_->display() != nullptr ? backend_->display()->ReservedPlanes()
+                                     : std::vector<uint32_t>{};
   for (const auto* p : plane_registry_->for_crtc(backend_->crtc_index())) {
     if (p->type == drm::planes::DRMPlaneType::CURSOR) {
       continue;
     }
     if (p->id == framed_primary_id_ || p->id == framed_overlay_id_) {
+      continue;
+    }
+    if (std::find(reserved.begin(), reserved.end(), p->id) != reserved.end()) {
       continue;
     }
     if (auto fb_pid = framed_props_.property_id(p->id, "FB_ID")) {

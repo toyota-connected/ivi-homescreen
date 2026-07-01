@@ -281,7 +281,7 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // The device-context (DrmDisplay) owns the card open + master; every backend
   // scanning out to this card shares it. Acquired lazily here on first use.
   m_backend = DrmBackend::Create(cfg, drm_display->session(),
-                                 drm_display->SharedDevice());
+                                 drm_display->SharedDevice(), drm_display);
 
   // DrmBackend::Create returns nullptr on any init failure (libseat
   // take_device, drmSetMaster, no usable connector, GBM/EGL setup,

@@ -160,9 +160,11 @@ DrmBackend* BackendFromState(void* user_data) {
 
 std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
                                                homescreen::DrmSession* session,
-                                               drm::Device* shared_device) {
+                                               drm::Device* shared_device,
+                                               DrmDisplay* display) {
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
   backend->drm_dev_ = shared_device;
+  backend->drm_display_ = display;
   if (!backend->InitDrm()) {
     return nullptr;
   }
