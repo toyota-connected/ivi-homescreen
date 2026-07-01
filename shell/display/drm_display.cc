@@ -24,12 +24,16 @@
 
 #include <fcntl.h>
 #include <linux/vt.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 #include <xf86drm.h>
+#include <xf86drmMode.h>
 
 #include <drm-cxx/core/device.hpp>
+
+#include "asio/error.hpp"
 
 #include "backend/drm_kms_egl/drm_session.h"
 #include "cursor_kind.h"
@@ -204,6 +208,9 @@ DrmDisplay::DrmDisplay(int32_t width,
 }
 
 DrmDisplay::~DrmDisplay() {
+  // Stop the per-card flip reader first -- it runs its own thread and holds the
+  // fd via flip_descriptor_, so it must be torn down before the fd is closed.
+  StopFlipReader();
   // Drop master (and let drm_dev_'s destructor close the fd) once the backends
   // that scanned out through it are gone. This display is shared and destroyed
   // after them, so master is released last -- whoever takes over next (fbcon,
@@ -276,6 +283,83 @@ drm::Device* DrmDisplay::SharedDevice() {
     spdlog::info("[DrmDisplay] DRM master on {}", device_path_);
   }
   return &*drm_dev_;
+}
+
+void DrmDisplay::SetFlipHandler(PageFlipHandler handler) {
+  flip_handler_ = handler;
+}
+
+void DrmDisplay::StartFlipReader() {
+  if (flip_reader_running_ || !drm_dev_.has_value() ||
+      flip_handler_ == nullptr) {
+    return;
+  }
+  flip_ioc_ = std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1);
+  flip_work_.emplace(asio::make_work_guard(*flip_ioc_));
+  flip_descriptor_.emplace(*flip_ioc_);
+  // assign() makes asio own the fd; StopFlipReader releases it before reset so
+  // drm_dev_ (the fd owner) is not double-closed.
+  flip_descriptor_->assign(drm_dev_->fd());
+  ArmFlipRead();
+  flip_thread_ = std::thread([this]() { flip_ioc_->run(); });
+  flip_reader_running_ = true;
+  spdlog::info("[DrmDisplay] flip reader started on fd={}", drm_dev_->fd());
+}
+
+void DrmDisplay::ArmFlipRead() {
+  if (!flip_descriptor_.has_value()) {
+    return;
+  }
+  flip_descriptor_->async_wait(
+      asio::posix::stream_descriptor::wait_read,
+      [this](const std::error_code& ec) {
+        if (ec) {
+          // operation_aborted fires on cancel() at teardown -- quiet path.
+          if (ec != asio::error::operation_aborted) {
+            spdlog::warn("[DrmDisplay] flip reader wait: {}", ec.message());
+          }
+          return;
+        }
+        DrainFlip();
+        ArmFlipRead();  // re-arm for the next vblank
+      });
+}
+
+void DrmDisplay::DrainFlip() {
+  if (!drm_dev_.has_value() || flip_handler_ == nullptr) {
+    return;
+  }
+  // Single reader thread, so no lock: poll(0) then read only if readable. The
+  // handler (user_data == the committing DrmBackend*) routes each flip to its
+  // backend, clears that backend's flip_pending_, and returns its vsync baton.
+  pollfd pfd{drm_dev_->fd(), POLLIN, 0};
+  if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+    drmEventContext ctx{};
+    ctx.version = 2;
+    ctx.page_flip_handler = flip_handler_;
+    drmHandleEvent(drm_dev_->fd(), &ctx);
+  }
+}
+
+void DrmDisplay::StopFlipReader() {
+  if (!flip_reader_running_) {
+    return;
+  }
+  if (flip_descriptor_.has_value()) {
+    std::error_code ec;
+    flip_descriptor_->cancel(ec);       // wake the reader out of epoll_wait
+    (void)flip_descriptor_->release();  // detach the fd; drm_dev_ closes it
+    flip_descriptor_.reset();
+  }
+  flip_work_.reset();  // drop the work guard so run() can return
+  if (flip_ioc_) {
+    flip_ioc_->stop();
+  }
+  if (flip_thread_.joinable()) {
+    flip_thread_.join();
+  }
+  flip_ioc_.reset();
+  flip_reader_running_ = false;
 }
 
 void DrmDisplay::StartEvents() {

@@ -926,48 +926,34 @@ void DrmCompositor::OnFlipComplete() {
 }
 
 bool DrmCompositor::WaitForPendingFlip() const {
-  // The asio flip monitor in DrmBackend drains PAGE_FLIP_EVENTs on the
-  // platform task runner thread and clears flip_pending_ via
-  // UnifiedPageFlipHandler → OnFlipComplete. We just wait for it.
-  // Short sleep keeps the rasterizer responsive without burning CPU.
+  // The card's flip reader (owned by DrmDisplay, on its own thread) is the
+  // single reader of the shared fd: it drains PAGE_FLIP_EVENTs and clears
+  // flip_pending_ via UnifiedPageFlipHandler → OnFlipComplete. We only wait for
+  // the flag -- we must NOT read the fd here (a second reader would race the
+  // reader thread). Waiting on the flag is also what makes a merged
+  // raster+platform thread safe: an independent thread delivers the completion,
+  // so blocking here can never deadlock the thread that must drain it.
   using namespace std::chrono_literals;
-  // Bounded wait — see DrmBackend::WaitForPendingFlip. On nvidia-drm a
-  // flip event can be lost; without a cap the destructor's wait spins
-  // forever and the process never exits on SIGTERM. A healthy 60Hz flip
-  // clears in ~16ms so the cap never fires in normal operation.
-  // Mirrors DrmBackend::WaitForPendingFlip for the plane compositor path: when
-  // the platform-thread asio monitor is starved, drain the fd on the rasterizer
-  // thread via the backend's shared, mutex-guarded helper (DrainFlipEvents
-  // routes the event to OnFlipComplete) instead of sleeping out the deadline.
-  // On by default; IVI_DRM_RASTER_DRAIN=0 opts out. Shared decision so the
-  // backend and compositor never disagree.
-  const bool raster_drain = DrmBackend::RasterDrainEnabled();
+  // Bounded wait: on nvidia-drm a flip event can be lost; without a cap the
+  // destructor's wait spins forever and the process never exits on SIGTERM. A
+  // healthy 60Hz flip clears in ~16ms so the cap never fires in normal
+  // operation.
   constexpr auto kFlipWaitTimeout = 100ms;
   const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
-    // Session went inactive between submitting the flip and the
-    // kernel firing PAGE_FLIP_EVENT — the event will never come.
-    // OnResume() will clear flip_pending_; bail now so the rasterizer
-    // doesn't spin forever.
+    // Session went inactive between submitting the flip and the kernel firing
+    // PAGE_FLIP_EVENT — the event will never come. OnResume() clears
+    // flip_pending_; bail now so the rasterizer doesn't spin forever.
     if (paused_.load(std::memory_order_acquire)) {
       return false;
     }
-    if (raster_drain) {
-      backend_->DrainFlipEvents();  // clears flip_pending_ via OnFlipComplete
-      if (!flip_pending_.load(std::memory_order_acquire)) {
-        break;
-      }
-    }
     if (std::chrono::steady_clock::now() >= deadline) {
-      // Reached only for a genuinely late/lost flip — the raster drain already
-      // handles a merely-starved monitor. Proceed; the bounded wait keeps the
-      // rasterizer and teardown from hanging.
       spdlog::warn(
           "[DrmCompositor] WaitForPendingFlip: no flip completion after "
           "100ms; proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
-    std::this_thread::sleep_for(raster_drain ? 200us : 500us);
+    std::this_thread::sleep_for(200us);
   }
   return true;
 }

@@ -229,6 +229,20 @@ class DrmBackend : public Backend {
   // asio work, so run_one() never returns even after work_.reset()).
   void StopVsyncMonitor() override;
 
+  // Unified PAGE_FLIP_EVENT dispatcher (drmModeEventContext.page_flip_handler
+  // signature). The card's flip-reader thread (owned by DrmDisplay) registers
+  // this as the handler; user_data is always a DrmBackend*, so a single reader
+  // on the shared fd routes each flip to the backend that committed it. Clears
+  // that backend's flip_pending_ and returns its vsync baton (DeliverVsync
+  // marshals OnVsync onto the platform runner, so running on the reader thread
+  // is safe). Public so DrmDisplay can register it without depending on this
+  // (EGL-only) type.
+  static void UnifiedPageFlipHandler(int fd,
+                                     unsigned int sequence,
+                                     unsigned int tv_sec,
+                                     unsigned int tv_usec,
+                                     void* user_data);
+
   // Session lifecycle hooks, called from DrmSession's dispatch thread by
   // the libseat trampoline. OnSessionPaused gates the compositor's
   // Present paths and lets the rasterizer drop any flip it had pending;
@@ -273,30 +287,11 @@ class DrmBackend : public Backend {
   bool SetInitialMode();
   uint32_t AddFb(gbm_bo* bo) const;
   bool WaitForPendingFlip() const;
-  // Drain any readable PAGE_FLIP_EVENT on the drm fd (poll(0)+drmHandleEvent),
-  // serialized by drm_event_mutex_ so the rasterizer thread and the asio flip
-  // monitor never read the fd concurrently. The poll+read run under the lock so
-  // the read can't block: only one thread consumes a given event. Used by both
-  // the asio monitor and (when IVI_DRM_RASTER_DRAIN=1) WaitForPendingFlip.
-  void DrainFlipEvents() const;
   // True unless IVI_DRM_RASTER_DRAIN=0 — the single source of truth for the
   // raster-thread drain decision, shared by WaitForPendingFlip (both backend
   // and compositor) and the nvidia-drm cursor-staging heuristic. Cached on
   // first call.
   [[nodiscard]] static bool RasterDrainEnabled();
-  // Unified PAGE_FLIP_EVENT dispatcher. Registered as the
-  // drmEventContext.page_flip_handler from the asio flip monitor; the
-  // user_data is always a DrmBackend* (compositor commits also pass
-  // `backend_` instead of `this`, so the dispatcher can branch on
-  // compositor_->planes_active() to route the per-frame state work to
-  // the right place). Returning a pending vsync baton happens here
-  // too — we're already on the platform task runner thread, so
-  // OnVsync can be called directly without re-posting.
-  static void UnifiedPageFlipHandler(int fd,
-                                     unsigned int sequence,
-                                     unsigned int tv_sec,
-                                     unsigned int tv_usec,
-                                     void* user_data);
   // Per-flip-complete work for the legacy (non-compositor) path:
   // promote pending→current, drmModeRmFB the previous scanout, clear
   // flip_pending_, record frame stats. Called by UnifiedPageFlipHandler
@@ -306,12 +301,6 @@ class DrmBackend : public Backend {
   // FlutterDesktopEngineState user_data back to this backend + the
   // engine handle, then forwards to SetVsyncBaton.
   static void VsyncTrampoline(void* user_data, intptr_t baton);
-  // Bind the drm fd to the platform task runner's io_context and
-  // arm the first async_wait for POLLIN. Re-armed inside the
-  // completion handler so flip events keep flowing without rasterizer
-  // involvement.
-  void StartFlipMonitor();
-  void ArmFlipRead();
 
   DrmConfig cfg_;
   homescreen::DrmSession* session_ = nullptr;
@@ -349,14 +338,6 @@ class DrmBackend : public Backend {
   // next flip in Present) don't race. Same justification on the
   // compositor's mirror.
   std::atomic<bool> flip_pending_{false};
-
-  // Serializes drmHandleEvent() between the asio flip monitor (platform task
-  // runner thread) and WaitForPendingFlip()'s opt-in raster-thread drain, so
-  // the two never read the drm fd concurrently. Mutable: DrainFlipEvents() is
-  // const (called from the const WaitForPendingFlip). INVARIANT: nothing
-  // reachable from UnifiedPageFlipHandler may take this lock — the handler runs
-  // under it (inside drmHandleEvent), so re-locking would self-deadlock.
-  mutable std::mutex drm_event_mutex_;
 
   // Set by OnSessionPaused / cleared by OnSessionResumed (libseat VT switch).
   // While paused, scanout is revoked and page flips never complete, so GBM
@@ -404,11 +385,6 @@ class DrmBackend : public Backend {
   // back to the FlutterEngineRun thread. nullptr until FlutterView
   // wires it after Engine::Run; PostOnVsync no-ops in that window.
   std::atomic<TaskRunner*> platform_task_runner_{nullptr};
-  // asio-managed drm fd reader. Bound to the platform task runner's
-  // io_context in SetPlatformTaskRunner; async_wait(POLLIN) re-arms
-  // itself after every drmHandleEvent so PAGE_FLIP_EVENTs are drained
-  // independently of the rasterizer's Present cadence.
-  std::optional<asio::posix::stream_descriptor> flip_descriptor_;
 
   // Frame stats — only active when cfg_.debug_backend is set. Accessed
   // from the rasterizer thread only (Present / PageFlipHandler), so no
