@@ -203,6 +203,14 @@
   # type=string default=(none) values=e.g. DP-1 applies=wayland
   wl_name =
 
+  # This display's X position in the combined desktop space (multi-display input layout).
+  # type=int default=0 values=int (px) applies=all
+  x =
+
+  # This display's Y position in the combined desktop space (multi-display input layout).
+  # type=int default=0 values=int (px) applies=all
+  y =
+
 [view.engine]
   # Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing).
   # type=bool default=false values=true|false applies=all

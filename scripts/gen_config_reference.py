@@ -99,6 +99,8 @@ META = {
     "output.index": ("(none)", "int", "all", "Deprecated: match the Nth connected output (prefer a name)."),
     "output.preload": ("false", "true|false", "all", "Warm the engine (suspended) at startup even if the output is absent."),
     "output.on_disconnect": ("suspend", "suspend|teardown", "all", "What to do with the view when its output disappears."),
+    "output.x": ("0", "int (px)", "all", "This display's X position in the combined desktop space (multi-display input layout)."),
+    "output.y": ("0", "int (px)", "all", "This display's Y position in the combined desktop space (multi-display input layout)."),
 
     # [view.engine] — engine threading knobs
     "engine.merge_render_platform": ("false", "true|false", "all", "Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing)."),
