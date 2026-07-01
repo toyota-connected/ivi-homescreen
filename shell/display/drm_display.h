@@ -136,6 +136,11 @@ class DrmDisplay final : public IDisplay {
   // moves between them as laid out. See DrmSeat::SetRegionLayout.
   void SetRegionLayout(int32_t x, int32_t y);
 
+  // Bind a touch panel (libinput device-name substring) to this view so its
+  // touches route here instead of the primary view. See
+  // DrmSeat::SetRegionTouchDevice.
+  void SetRegionTouchDevice(const std::string& name);
+
   // Update the seat's cursor clamping rectangle to match the actual
   // backend framebuffer size. App::MakeDisplay constructs DrmDisplay
   // with the config's view.width/height (defaults 1024x768) — but

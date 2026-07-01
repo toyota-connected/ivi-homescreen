@@ -318,6 +318,9 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     // share the card's seat, the pointer routes to the display it is over.
     drm_display->SetRegionLayout(config.view.output.layout_x.value_or(0),
                                  config.view.output.layout_y.value_or(0));
+    if (config.view.output.touch_device.has_value()) {
+      drm_display->SetRegionTouchDevice(*config.view.output.touch_device);
+    }
     drm_display->SetCursor(drm_backend->drm_cursor());
     // Composited cursor fallback (non-null only when no HW cursor plane).
     drm_display->SetGlCursor(drm_backend->gl_cursor());
@@ -376,6 +379,9 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
   // the card's seat, the pointer routes to the display it is over.
   drm_display->SetRegionLayout(config.view.output.layout_x.value_or(0),
                                config.view.output.layout_y.value_or(0));
+  if (config.view.output.touch_device.has_value()) {
+    drm_display->SetRegionTouchDevice(*config.view.output.touch_device);
+  }
   drm_display->SetCursor(vk_backend->drm_cursor());
   drm_display->SetCursorShapeSink(vk_backend->drm_cursor());
   drm_display->SetCursorRotation(vk_backend->rotation());

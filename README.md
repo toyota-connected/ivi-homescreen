@@ -316,6 +316,7 @@ annotated all-keys file see
 | `[view.output]` | `on_disconnect` | `string` | `suspend` | `suspend\|teardown` | all |
 | `[view.output]` | `preload` | `bool` | `false` | `true\|false` | all |
 | `[view.output]` | `serial` | `string` | `(none)` | `EDID serial` | drm |
+| `[view.output]` | `touch_device` | `string` | `(primary)` | `device-name substring` | all |
 | `[view.output]` | `wl_name` | `string` | `(none)` | `e.g. DP-1` | wayland |
 | `[view.output]` | `x` | `int` | `0` | `int (px)` | all |
 | `[view.output]` | `y` | `int` | `0` | `int (px)` | all |
