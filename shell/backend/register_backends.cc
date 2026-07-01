@@ -292,6 +292,13 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     exit(EXIT_FAILURE);
   }
 
+  // Start the card's single PAGE_FLIP_EVENT reader (owned by the device-context
+  // so it outlives every backend on the card). The dispatcher routes each flip
+  // to the committing backend by user_data, so N views on one card share one
+  // reader. Idempotent across backends on the same card.
+  drm_display->SetFlipHandler(&DrmBackend::UnifiedPageFlipHandler);
+  drm_display->StartFlipReader();
+
   // Wire the HW cursor (if Create succeeded in opening one) to the
   // seat dispatch thread so pointer events move the on-screen sprite.
   // The pointer stays valid for the FlutterView's lifetime — both

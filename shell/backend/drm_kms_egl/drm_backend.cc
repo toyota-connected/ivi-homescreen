@@ -1332,7 +1332,6 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
 
 void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
   platform_task_runner_.store(runner, std::memory_order_release);
-  StartFlipMonitor();
 
   // Wire engine+runner into the provider. SetEngine's #210 kick latch drains
   // any baton parked before the runner came up (the engine's first vsync
@@ -1342,68 +1341,28 @@ void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
   vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
 }
 
-void DrmBackend::StartFlipMonitor() {
-  if (flip_descriptor_.has_value()) {
-    return;  // already started
-  }
-  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
-  if (runner == nullptr || runner->GetIoContext() == nullptr ||
-      drm_dev_ == nullptr) {
-    return;
-  }
-  // assign() makes asio take ownership of the fd — StopVsyncMonitor must
-  // call release() before reset() so drm_dev_'s close on its own fd
-  // isn't a double-close.
-  flip_descriptor_.emplace(*runner->GetIoContext());
-  flip_descriptor_->assign(drm_dev_->fd());
-  ArmFlipRead();
-  spdlog::info("[DrmBackend] flip monitor armed on fd={}", drm_dev_->fd());
-}
-
 void DrmBackend::StopVsyncMonitor() {
-  if (flip_descriptor_.has_value()) {
-    std::error_code ec;
-    // cancel() wakes the worker thread out of epoll_wait — the pending
-    // async_wait completion fires with operation_aborted, asio's
-    // outstanding-work count drops to zero, and the TaskRunner worker
-    // loop's run_one() can finally return.
-    flip_descriptor_->cancel(ec);
-    // release() detaches the fd so the descriptor's destructor doesn't
-    // close it (drm_dev_ owns the fd lifetime). Takes no args, returns
-    // the native handle which we deliberately discard — drm_dev_ closes
-    // it later.
-    (void)flip_descriptor_->release();
-    flip_descriptor_.reset();
-  }
   platform_task_runner_.store(nullptr, std::memory_order_release);
 
   // Drop any parked baton, clear engine/runner, and log the IVI_VSYNC_PROFILE
-  // session summary. Any page-flip event drained below then finds the provider
-  // cleared and no-ops its DeliverVsync — correct, we're tearing down.
+  // session summary. Any page-flip event the reader drains after this finds the
+  // provider cleared and no-ops its DeliverVsync — correct, we're tearing down.
   vsync_.Stop();
 
-  // Synchronously drain any in-flight PAGE_FLIP_EVENT. Without this,
-  // ~DrmCompositor → WaitForPendingFlip spins forever: the async flip
-  // monitor was what called drmHandleEvent to clear flip_pending_, and
-  // we just shut it down. The kernel typically fires the event within
-  // one vblank period (~16ms at 60Hz); poll briefly with a margin and
-  // dispatch via the same UnifiedPageFlipHandler the async path used.
-  // If the flag is still set after the poll loop bails (commit was
-  // dropped, session paused, etc.), force-clear it so destructors can
-  // make progress instead of hanging.
-  if (drm_dev_ != nullptr && flip_pending_.load(std::memory_order_acquire)) {
+  // Wait for any in-flight PAGE_FLIP_EVENT to be drained by the card's flip
+  // reader (owned by DrmDisplay, still running through our teardown) so
+  // ~DrmCompositor → WaitForPendingFlip does not spin. The backend must NOT
+  // read the fd itself -- the reader is the single reader for the shared card.
+  // Poll the flag with a one-vblank margin, then force-clear if the kernel
+  // never fired the event (commit dropped, session paused, ...) so destructors
+  // make progress.
+  if (flip_pending_.load(std::memory_order_acquire)) {
     constexpr int kDrainTimeoutMs = 100;
-    constexpr int kPollSliceMs = 10;
+    constexpr int kPollSliceMs = 2;
     int elapsed_ms = 0;
     while (elapsed_ms < kDrainTimeoutMs &&
            flip_pending_.load(std::memory_order_acquire)) {
-      pollfd pfd{drm_dev_->fd(), POLLIN, 0};
-      const int rc = ::poll(&pfd, 1, kPollSliceMs);
-      if (rc > 0 && (pfd.revents & POLLIN)) {
-        DrainFlipEvents();
-      } else if (rc < 0 && errno != EINTR) {
-        break;
-      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(kPollSliceMs));
       elapsed_ms += kPollSliceMs;
     }
     if (flip_pending_.load(std::memory_order_acquire)) {
@@ -1420,47 +1379,6 @@ void DrmBackend::StopVsyncMonitor() {
   }
 }
 
-void DrmBackend::ArmFlipRead() {
-  if (!flip_descriptor_.has_value()) {
-    return;
-  }
-  flip_descriptor_->async_wait(
-      asio::posix::stream_descriptor::wait_read,
-      [this](const std::error_code& ec) {
-        if (ec) {
-          // operation_aborted fires on shutdown/cancellation; quiet path.
-          if (ec != asio::error::operation_aborted) {
-            spdlog::warn("[DrmBackend] flip monitor wait: {}", ec.message());
-          }
-          return;
-        }
-        if (drm_dev_ == nullptr) {
-          return;
-        }
-        DrainFlipEvents();
-        ArmFlipRead();  // re-arm for the next vblank
-      });
-}
-
-void DrmBackend::DrainFlipEvents() const {
-  if (drm_dev_ == nullptr) {
-    return;
-  }
-  // poll(0) + read together under the lock so the read can never block: only
-  // one thread observes POLLIN-then-consumes a given event; a loser's poll(0)
-  // afterwards shows nothing readable and it no-ops. Read-only pollers (the
-  // WaitForPendingFlip diagnostic) need no lock — poll() concurrent with
-  // another thread's read() is safe.
-  const std::lock_guard<std::mutex> lock(drm_event_mutex_);
-  pollfd pfd{drm_dev_->fd(), POLLIN, 0};
-  if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
-    drmEventContext ctx{};
-    ctx.version = 2;
-    ctx.page_flip_handler = &DrmBackend::UnifiedPageFlipHandler;
-    drmHandleEvent(drm_dev_->fd(), &ctx);
-  }
-}
-
 bool DrmBackend::RasterDrainEnabled() {
   static const bool enabled = []() {
     const char* env = std::getenv("IVI_DRM_RASTER_DRAIN");
@@ -1474,40 +1392,23 @@ bool DrmBackend::RasterDrainEnabled() {
 
 bool DrmBackend::WaitForPendingFlip() const {
   using namespace std::chrono_literals;
-  // When the platform-thread asio monitor is starved (CPU governor downclock,
-  // Dart GC) the rasterizer drains the flip fd itself (DrainFlipEvents,
-  // serialized with the monitor by drm_event_mutex_) rather than sleeping out
-  // the 100ms deadline. On by default; IVI_DRM_RASTER_DRAIN=0 opts out.
-  const bool raster_drain = RasterDrainEnabled();
-  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go undelivered,
-  // and at teardown the asio monitor that would drain it is already gone — an
-  // unbounded loop then spins forever in hrtimer_nanosleep, hanging Present and
-  // (fatally) ~DrmBackend so the process never exits on SIGTERM. Cap the wait
-  // and proceed; a healthy 60Hz flip clears in ~16ms.
+  // The card's flip reader (DrmDisplay, its own thread) is the single reader of
+  // the shared fd; it drains PAGE_FLIP_EVENTs and clears flip_pending_. We only
+  // wait for the flag -- reading the fd here would race the reader thread.
+  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go undelivered, so
+  // an unbounded loop would spin forever in hrtimer_nanosleep, hanging Present
+  // and ~DrmBackend so the process never exits on SIGTERM. Cap the wait and
+  // proceed; a healthy 60Hz flip clears in ~16ms.
   constexpr auto kFlipWaitTimeout = 100ms;
   const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
-    if (!drm_dev_) {
-      return true;
-    }
-    if (raster_drain) {
-      // Fetch the completion ourselves rather than waiting on the (possibly
-      // starved) platform thread.
-      DrainFlipEvents();
-      if (!flip_pending_.load(std::memory_order_acquire)) {
-        break;
-      }
-    }
     if (std::chrono::steady_clock::now() >= deadline) {
-      // Reached only for a genuinely late/lost flip (e.g. nvidia-drm) — the
-      // raster drain already handles a merely-starved monitor. Proceed; the
-      // bounded wait keeps Present and ~DrmBackend from hanging.
       spdlog::warn(
           "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
           "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
-    std::this_thread::sleep_for(raster_drain ? 200us : 500us);
+    std::this_thread::sleep_for(200us);
   }
   return true;
 }
