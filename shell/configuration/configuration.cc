@@ -118,6 +118,19 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
             ? homescreen::OutputMatch::OnDisconnect::kTeardown
             : homescreen::OutputMatch::OnDisconnect::kSuspend;
   }
+  // Position of this view's display in the combined desktop space
+  // (multi-display input layout).
+  if (v->at_path("output.x").is_integer()) {
+    instance.view.output.layout_x = v->at_path("output.x").value<int32_t>();
+  }
+  if (v->at_path("output.y").is_integer()) {
+    instance.view.output.layout_y = v->at_path("output.y").value<int32_t>();
+  }
+  // Touch panel bonded to this view's display (libinput device-name substring).
+  if (v->at_path("output.touch_device").is_string()) {
+    instance.view.output.touch_device =
+        v->at_path("output.touch_device").as_string()->value_or("");
+  }
   if (v->at_path("width").is_integer()) {
     instance.view.width = v->at_path("width").value<uint32_t>().value();
   }

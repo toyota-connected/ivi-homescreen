@@ -153,13 +153,12 @@ void InstallBackstop() {
 DrmSeat::DrmSeat(const int32_t viewport_width,
                  const int32_t viewport_height,
                  drm::input::InputDeviceOpener opener)
-    : viewport_w_(viewport_width),
-      viewport_h_(viewport_height),
-      opener_(std::move(opener)) {
-  // Start the pointer in the middle of the viewport so the first hover is
-  // visible before the user moves the mouse.
-  pointer_x_ = viewport_w_ / 2.0;
-  pointer_y_ = viewport_h_ / 2.0;
+    : opener_(std::move(opener)) {
+  // Seed the region-under-construction with the initial viewport. The first
+  // SetViewControllerState commits it as the primary region and centers the
+  // pointer on it.
+  pending_.width = viewport_width;
+  pending_.height = viewport_height;
 }
 
 DrmSeat::~DrmSeat() {
@@ -167,15 +166,147 @@ DrmSeat::~DrmSeat() {
 }
 
 void DrmSeat::SetViewControllerState(FlutterDesktopViewControllerState* state) {
-  state_.store(state, std::memory_order_release);
+  // A null state is the teardown clear; DRM views always register a non-null
+  // controller, so there is nothing to commit for null.
+  if (state == nullptr) {
+    return;
+  }
+  // Commit the region accumulated by the per-view setters (SetViewport,
+  // SetCursor, SetGlCursor, SetCursorRotation, SetRegionLayout) into the
+  // region set, then reset the builder for the next view. Registration runs on
+  // the main thread during view construction, before Start() spawns the
+  // dispatch thread, so no lock is needed.
+  pending_.state = state;
+  // If this region's origin collides with an existing one -- e.g. two bundles
+  // launched without explicit [view.output] x/y, so both defaulted to (0,0) --
+  // tile it to the right of the current set. Otherwise the regions would stack
+  // and only the first would ever be under the pointer. Explicit,
+  // non-overlapping layouts never collide, so they pass through untouched.
+  for (const auto& r : regions_) {
+    if (r.layout_x == pending_.layout_x && r.layout_y == pending_.layout_y) {
+      int32_t right = 0;
+      for (const auto& e : regions_) {
+        right = std::max(right, e.layout_x + e.width);
+      }
+      pending_.layout_x = right;
+      pending_.layout_y = 0;
+      break;
+    }
+  }
+  const bool first = regions_.empty();
+  regions_.push_back(pending_);
+  if (first) {
+    // Center the global pointer on the primary region so the first hover is
+    // visible before the user moves the mouse.
+    const auto& r = regions_.front();
+    pointer_x_ = r.layout_x + r.width / 2.0;
+    pointer_y_ = r.layout_y + r.height / 2.0;
+    active_region_ = 0;
+  }
+  pending_ = ViewRegion{};
 }
 
 FLUTTER_API_SYMBOL(FlutterEngine) DrmSeat::CurrentEngine() const {
-  const auto* state = state_.load(std::memory_order_acquire);
+  if (regions_.empty() || active_region_ >= regions_.size()) {
+    return nullptr;
+  }
+  const auto* state = regions_[active_region_].state;
   if (!state || !state->engine) {
     return nullptr;
   }
   return state->engine->GetFlutterEngine();
+}
+
+void DrmSeat::SetRegionLayout(const int32_t x, const int32_t y) {
+  pending_.layout_x = x;
+  pending_.layout_y = y;
+}
+
+void DrmSeat::SetRegionTouchDevice(std::string name) {
+  pending_.touch_match = std::move(name);
+}
+
+void DrmSeat::ResolveActiveRegion() {
+  if (regions_.empty()) {
+    return;
+  }
+  const auto contains = [](const ViewRegion& r, double x, double y) {
+    return x >= r.layout_x && x < r.layout_x + r.width && y >= r.layout_y &&
+           y < r.layout_y + r.height;
+  };
+  // Fast path: still inside the current region.
+  if (active_region_ < regions_.size() &&
+      contains(regions_[active_region_], pointer_x_, pointer_y_)) {
+    return;
+  }
+  // Crossed into another region?
+  for (size_t i = 0; i < regions_.size(); ++i) {
+    if (contains(regions_[i], pointer_x_, pointer_y_)) {
+      active_region_ = i;
+      return;
+    }
+  }
+  // In a gap or past the outer edge: clamp to the union bounding box, then
+  // re-test so an overshoot at a shared border still lands in the neighbor.
+  int32_t min_x = regions_[0].layout_x;
+  int32_t min_y = regions_[0].layout_y;
+  int32_t max_x = regions_[0].layout_x + regions_[0].width;
+  int32_t max_y = regions_[0].layout_y + regions_[0].height;
+  for (const auto& r : regions_) {
+    min_x = std::min(min_x, r.layout_x);
+    min_y = std::min(min_y, r.layout_y);
+    max_x = std::max(max_x, r.layout_x + r.width);
+    max_y = std::max(max_y, r.layout_y + r.height);
+  }
+  pointer_x_ = std::clamp(pointer_x_, static_cast<double>(min_x),
+                          static_cast<double>(max_x - 1));
+  pointer_y_ = std::clamp(pointer_y_, static_cast<double>(min_y),
+                          static_cast<double>(max_y - 1));
+  for (size_t i = 0; i < regions_.size(); ++i) {
+    if (contains(regions_[i], pointer_x_, pointer_y_)) {
+      active_region_ = i;
+      return;
+    }
+  }
+  // Still in a dead zone (non-contiguous layout with mismatched extents): keep
+  // the pointer inside the current region so it can't get stuck between
+  // displays.
+  const size_t keep = active_region_ < regions_.size() ? active_region_ : 0;
+  const auto& r = regions_[keep];
+  pointer_x_ = std::clamp(pointer_x_, static_cast<double>(r.layout_x),
+                          static_cast<double>(r.layout_x + r.width - 1));
+  pointer_y_ = std::clamp(pointer_y_, static_cast<double>(r.layout_y),
+                          static_cast<double>(r.layout_y + r.height - 1));
+  active_region_ = keep;
+}
+
+bool DrmSeat::RegionsShareEngine(const size_t a, const size_t b) const {
+  if (a >= regions_.size() || b >= regions_.size()) {
+    return false;
+  }
+  const auto* sa = regions_[a].state;
+  const auto* sb = regions_[b].state;
+  return sa != nullptr && sb != nullptr && sa->engine == sb->engine;
+}
+
+void DrmSeat::DispatchToRegion(const ViewRegion& region,
+                               const FlutterPointerEvent* events,
+                               const size_t count) {
+  const auto* s = region.state;
+  if (s == nullptr || s->engine == nullptr) {
+    return;
+  }
+  const auto* runner = s->engine->GetPlatformTaskRunner();
+  auto engine_handle = s->engine->GetFlutterEngine();
+  if (runner == nullptr || engine_handle == nullptr) {
+    return;
+  }
+  std::vector<FlutterPointerEvent> batch(events, events + count);
+  asio::dispatch(*runner->GetStrandContext(),
+                 [engine_handle, batch = std::move(batch)]() {
+                   LibFlutterEngine->SendPointerEvent(
+                       engine_handle, batch.data(), batch.size());
+                 });
 }
 
 bool DrmSeat::Start() {
@@ -382,18 +513,22 @@ void DrmSeat::DispatchLoop() {
 }
 
 void DrmSeat::FlushCursorMotion() {
-  if (!cursor_motion_pending_) {
+  if (!cursor_motion_pending_ || regions_.empty() ||
+      active_region_ >= regions_.size()) {
     return;
   }
   cursor_motion_pending_ = false;
 
-  const int rx = static_cast<int>(pointer_x_);
-  const int ry = static_cast<int>(pointer_y_);
+  // The sprite lives on the display the pointer is over; drive it in that
+  // region's local (render) coordinates.
+  const ViewRegion& region = regions_[active_region_];
+  const int rx = static_cast<int>(pointer_x_ - region.layout_x);
+  const int ry = static_cast<int>(pointer_y_ - region.layout_y);
 
   // The GL-composited cursor (fallback for no HW cursor plane) draws into the
   // render target, so it takes un-rotated render/viewport coordinates — the
   // display applies any scanout rotation to the whole framebuffer downstream.
-  if (auto* g = gl_cursor_.load(std::memory_order_acquire); g != nullptr) {
+  if (auto* g = region.gl_cursor; g != nullptr) {
     g->SetPosition(rx, ry);
     // The composited cursor only repaints on a presented frame, and Flutter
     // presents only dirty frames — so on an idle UI the cursor would freeze
@@ -407,7 +542,25 @@ void DrmSeat::FlushCursorMotion() {
   }
 
 #if HAVE_DRM_CURSOR
-  if (auto* c = cursor_.load(std::memory_order_acquire); c != nullptr) {
+  // The pointer changed displays: hide the sprite on the one it left and show
+  // the one it entered, so exactly one cursor is ever visible. Without this a
+  // fast cross leaves the departed plane committed at its last (mid-screen)
+  // position -- a second, frozen cursor. (The composited gl_cursor fallback
+  // path has the same issue on HW without a cursor plane; hiding it needs a
+  // repaint and is a separate pass.)
+  if (cursor_shown_region_ != active_region_) {
+    if (cursor_shown_region_ != kNoRegion &&
+        cursor_shown_region_ < regions_.size()) {
+      if (auto* prev = regions_[cursor_shown_region_].cursor; prev != nullptr) {
+        prev->Hide();
+      }
+    }
+    if (region.cursor != nullptr) {
+      region.cursor->Show();  // no-op if it was never hidden
+    }
+    cursor_shown_region_ = active_region_;
+  }
+  if (auto* c = region.cursor; c != nullptr) {
     // The HW cursor plane lives in panel space. For a 90/270 scanout rotation
     // that differs from render space (axes swapped), so rotate the position by
     // the scanout amount before placing the sprite. 0/180 leave the extent
@@ -415,17 +568,17 @@ void DrmSeat::FlushCursorMotion() {
     // hit-testing stays correct.)
     int px = rx;
     int py = ry;
-    switch (cursor_rotation_) {
+    switch (region.cursor_rotation) {
       case 90:
         px = ry;
-        py = viewport_w_ - 1 - rx;
+        py = region.width - 1 - rx;
         break;
       case 180:
-        px = viewport_w_ - 1 - rx;
-        py = viewport_h_ - 1 - ry;
+        px = region.width - 1 - rx;
+        py = region.height - 1 - ry;
         break;
       case 270:
-        px = viewport_h_ - 1 - ry;
+        px = region.height - 1 - ry;
         py = rx;
         break;
       default:
@@ -480,12 +633,10 @@ void DrmSeat::SetVtSwitchHandler(VtSwitchHandler handler) {
 }
 
 void DrmSeat::SetViewport(const int32_t width, const int32_t height) {
-  viewport_w_ = width;
-  viewport_h_ = height;
-  // Re-center the cursor so the user starts in a sane place after a
-  // viewport change (typically once, at startup, before Start()).
-  pointer_x_ = viewport_w_ / 2.0;
-  pointer_y_ = viewport_h_ / 2.0;
+  // Sizes the region-under-construction; the pointer is centered on the
+  // primary region when it commits (see SetViewControllerState).
+  pending_.width = width;
+  pending_.height = height;
 }
 
 void DrmSeat::SetInputTransforms(const std::vector<std::string>& specs) {
@@ -684,7 +835,12 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
 
 void DrmSeat::DispatchKeyToFlutter(
     const drm::input::KeyboardEvent& resolved) const {
-  auto* s = state_.load(std::memory_order_acquire);
+  // Focus-follows-mouse: the keyboard goes to whichever view the pointer is
+  // over. A single-view seat has one region, so this is the only view.
+  if (regions_.empty() || active_region_ >= regions_.size()) {
+    return;
+  }
+  auto* s = regions_[active_region_].state;
   if (s == nullptr) {
     return;
   }
@@ -701,8 +857,8 @@ void DrmSeat::DispatchKeyToFlutter(
 }
 
 void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
-  if (const auto engine = CurrentEngine(); !engine) {
-    return;
+  if (regions_.empty()) {
+    return;  // no view has committed a region yet
   }
 
   // Apply a per-device delta transform when the source device matches a
@@ -741,10 +897,34 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
     }
   }
 
-  pointer_x_ =
-      std::clamp(pointer_x_ + dx, 0.0, static_cast<double>(viewport_w_ - 1));
-  pointer_y_ =
-      std::clamp(pointer_y_ + dy, 0.0, static_cast<double>(viewport_h_ - 1));
+  // Accumulate in combined (global) pointer space. The cursor moves freely
+  // across displays -- even during a drag -- so it always tracks the hand;
+  // ResolveActiveRegion clamps it to the display set and picks the region it
+  // is physically over (which drives the sprite).
+  pointer_x_ += dx;
+  pointer_y_ += dy;
+
+  const size_t prev = active_region_;
+  ResolveActiveRegion();
+
+  // Boundary decision during a drag: is the display the pointer is crossing
+  // into part of the SAME engine (single engine spanning monitors -> let the
+  // gesture cross freely) or a DIFFERENT engine (multi-engine -> isolate the
+  // gesture to the origin engine by confining the cursor to its region)?
+  if (grab_active_ && grab_region_ < regions_.size() &&
+      !RegionsShareEngine(active_region_, grab_region_)) {
+    const ViewRegion& g = regions_[grab_region_];
+    pointer_x_ = std::clamp(pointer_x_, static_cast<double>(g.layout_x),
+                            static_cast<double>(g.layout_x + g.width - 1));
+    pointer_y_ = std::clamp(pointer_y_, static_cast<double>(g.layout_y),
+                            static_cast<double>(g.layout_y + g.height - 1));
+    active_region_ = grab_region_;
+    // Known rough edge: the pointer stays pinned at the boundary during the
+    // isolated drag, so if the mouse still carries an acceleration vector when
+    // the button releases, the first free motion overshoots into the neighbor
+    // display (a "bounce"). Damping that residual velocity on release is left
+    // for a later refinement.
+  }
 
   // Defer the cursor commit to FlushCursorMotion (called after the
   // dispatch batch). A blocking atomic cursor flip per libinput event
@@ -752,21 +932,53 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
   // events/s, well under what a 125–1000Hz mouse delivers.
   cursor_motion_pending_ = true;
 
-  FlutterPointerEvent pe[2];
-  size_t count = 0;
   const auto ts = FlutterTimestampMicros();
 
-  if (!pointer_added_) {
+  // Hover focus only changes when NOT dragging. During an implicit grab the
+  // pointer belongs to the grabbed view even while the cursor is over another
+  // display, so we don't hand focus off. Otherwise the view the pointer left
+  // needs a kRemove (its hover clears) and the one it entered a fresh kAdd.
+  if (!grab_active_ && active_region_ != prev && prev < regions_.size() &&
+      regions_[prev].pointer_added) {
+    ViewRegion& old = regions_[prev];
+    FlutterPointerEvent rm{};
+    rm.struct_size = sizeof(FlutterPointerEvent);
+    rm.phase = kRemove;
+    rm.timestamp = ts;
+    rm.x = pointer_x_ - old.layout_x;
+    rm.y = pointer_y_ - old.layout_y;
+    rm.device = 0;
+    rm.device_kind = kFlutterPointerDeviceKindMouse;
+    rm.buttons = 0;
+    DispatchToRegion(old, &rm, 1);
+    old.pointer_added = false;
+  }
+
+  // Events route to the grabbed view during a drag, else to the view under the
+  // pointer. Coordinates are relative to the target view and may fall outside
+  // its bounds mid-drag -- that is correct for a drag that left the window.
+  const size_t target_idx = (grab_active_ && grab_region_ < regions_.size())
+                                ? grab_region_
+                                : active_region_;
+  ViewRegion& target = regions_[target_idx];
+  const double lx = pointer_x_ - target.layout_x;
+  const double ly = pointer_y_ - target.layout_y;
+
+  FlutterPointerEvent pe[2];
+  size_t count = 0;
+
+  if (!grab_active_ && !target.pointer_added) {
+    // This view's engine must see the pointer device before any move/hover.
     pe[count] = FlutterPointerEvent{};
     pe[count].struct_size = sizeof(FlutterPointerEvent);
     pe[count].phase = kAdd;
     pe[count].timestamp = ts;
-    pe[count].x = pointer_x_;
-    pe[count].y = pointer_y_;
+    pe[count].x = lx;
+    pe[count].y = ly;
     pe[count].device = 0;
     pe[count].device_kind = kFlutterPointerDeviceKindMouse;
     pe[count].buttons = 0;
-    pointer_added_ = true;
+    target.pointer_added = true;
     ++count;
   }
 
@@ -774,33 +986,18 @@ void DrmSeat::HandlePointerMotion(const drm::input::PointerMotionEvent& ev) {
   pe[count].struct_size = sizeof(FlutterPointerEvent);
   pe[count].phase = button_mask_ ? kMove : kHover;
   pe[count].timestamp = ts;
-  pe[count].x = pointer_x_;
-  pe[count].y = pointer_y_;
+  pe[count].x = lx;
+  pe[count].y = ly;
   pe[count].device = 0;
   pe[count].device_kind = kFlutterPointerDeviceKindMouse;
   pe[count].buttons = button_mask_;
   ++count;
 
-  const auto* s = state_.load(std::memory_order_acquire);
-  if (!s || !s->engine) {
-    return;
-  }
-  const auto* runner = s->engine->GetPlatformTaskRunner();
-  if (auto engine_handle = s->engine->GetFlutterEngine();
-      runner && engine_handle) {
-    std::vector events(pe, pe + count);
-    asio::dispatch(*runner->GetStrandContext(),
-                   [engine_handle, events = std::move(events)]() {
-                     LibFlutterEngine->SendPointerEvent(
-                         engine_handle, events.data(), events.size());
-                   });
-  }
+  DispatchToRegion(target, pe, count);
 }
 
 void DrmSeat::HandlePointerButton(const drm::input::PointerButtonEvent& ev) {
-  // CurrentEngine() is only for the null-check; actual dispatch goes via
-  // state_.
-  if (!CurrentEngine()) {
+  if (regions_.empty() || active_region_ >= regions_.size()) {
     return;
   }
 
@@ -815,6 +1012,12 @@ void DrmSeat::HandlePointerButton(const drm::input::PointerButtonEvent& ev) {
     button_mask_ &= ~bit;
   }
 
+  // First button down starts the implicit grab on the view under the pointer.
+  if (prev_mask == 0 && button_mask_ != 0) {
+    grab_active_ = true;
+    grab_region_ = active_region_;
+  }
+
   FlutterPointerPhase phase;
   if (ev.pressed) {
     // A press while another button is already held becomes kMove; kDown is
@@ -824,40 +1027,63 @@ void DrmSeat::HandlePointerButton(const drm::input::PointerButtonEvent& ev) {
     phase = (button_mask_ == 0) ? kUp : kMove;
   }
 
+  // While grabbed, button events (including the release) go to the grabbed
+  // view even if the cursor has drifted onto another display; else to the view
+  // under the pointer. Coordinates are relative to that view.
+  const size_t target_idx = (grab_active_ && grab_region_ < regions_.size())
+                                ? grab_region_
+                                : active_region_;
+  const ViewRegion& region = regions_[target_idx];
   FlutterPointerEvent pe{};
   pe.struct_size = sizeof(FlutterPointerEvent);
   pe.phase = phase;
   pe.timestamp = FlutterTimestampMicros();
-  pe.x = pointer_x_;
-  pe.y = pointer_y_;
+  pe.x = pointer_x_ - region.layout_x;
+  pe.y = pointer_y_ - region.layout_y;
   pe.device = 0;
   pe.device_kind = kFlutterPointerDeviceKindMouse;
   pe.buttons = button_mask_;
 
-  auto* s = state_.load(std::memory_order_acquire);
-  if (!s || !s->engine) {
-    return;
-  }
-  const auto* runner = s->engine->GetPlatformTaskRunner();
-  if (auto engine_handle = s->engine->GetFlutterEngine();
-      runner && engine_handle) {
-    asio::dispatch(*runner->GetStrandContext(), [engine_handle, pe]() {
-      LibFlutterEngine->SendPointerEvent(engine_handle, &pe, 1);
-    });
+  DispatchToRegion(region, &pe, 1);
+
+  // The grab ends when the last button releases. If the cursor drifted onto a
+  // different display during the drag, clear the grabbed view's now-stale hover
+  // so focus (and the next kAdd) can move to the display the pointer sits on.
+  if (button_mask_ == 0 && grab_active_) {
+    if (active_region_ != grab_region_ && grab_region_ < regions_.size() &&
+        regions_[grab_region_].pointer_added) {
+      ViewRegion& g = regions_[grab_region_];
+      FlutterPointerEvent rm{};
+      rm.struct_size = sizeof(FlutterPointerEvent);
+      rm.phase = kRemove;
+      rm.timestamp = FlutterTimestampMicros();
+      rm.x = pointer_x_ - g.layout_x;
+      rm.y = pointer_y_ - g.layout_y;
+      rm.device = 0;
+      rm.device_kind = kFlutterPointerDeviceKindMouse;
+      rm.buttons = 0;
+      DispatchToRegion(g, &rm, 1);
+      g.pointer_added = false;
+    }
+    grab_active_ = false;
   }
 }
 
 void DrmSeat::HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const {
-  if (!CurrentEngine()) {
+  if (regions_.empty() || active_region_ >= regions_.size()) {
     return;
   }
 
+  const size_t target_idx = (grab_active_ && grab_region_ < regions_.size())
+                                ? grab_region_
+                                : active_region_;
+  const ViewRegion& region = regions_[target_idx];
   FlutterPointerEvent pe{};
   pe.struct_size = sizeof(FlutterPointerEvent);
   pe.phase = button_mask_ ? kMove : kHover;
   pe.timestamp = FlutterTimestampMicros();
-  pe.x = pointer_x_;
-  pe.y = pointer_y_;
+  pe.x = pointer_x_ - region.layout_x;
+  pe.y = pointer_y_ - region.layout_y;
   pe.device = 0;
   pe.device_kind = kFlutterPointerDeviceKindMouse;
   pe.buttons = button_mask_;
@@ -865,24 +1091,37 @@ void DrmSeat::HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const {
   pe.scroll_delta_x = ev.horizontal;
   pe.scroll_delta_y = ev.vertical;
 
-  auto* s = state_.load(std::memory_order_acquire);
-  if (!s || !s->engine) {
-    return;
-  }
-  const auto* runner = s->engine->GetPlatformTaskRunner();
-  if (auto engine_handle = s->engine->GetFlutterEngine();
-      runner && engine_handle) {
-    asio::dispatch(*runner->GetStrandContext(), [engine_handle, pe]() {
-      LibFlutterEngine->SendPointerEvent(engine_handle, &pe, 1);
-    });
-  }
+  DispatchToRegion(region, &pe, 1);
 }
 
 void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   if (ev.type == drm::input::TouchEvent::Type::Frame) {
     return;
   }
-  if (!CurrentEngine()) {
+  if (regions_.empty()) {
+    return;
+  }
+  // A touchscreen reports absolute coordinates in its own space with no cursor,
+  // so it can't be routed by pointer position like a mouse. Route by device:
+  // the region whose configured touch_match ([view.output] touch_device) is a
+  // substring of this event's libinput device name. With none configured (or no
+  // match) touch falls back to the primary region, preserving single-display
+  // behavior.
+  const ViewRegion* region = nullptr;
+  if (ev.device_name != nullptr) {
+    const std::string_view name(ev.device_name);
+    for (const auto& r : regions_) {
+      if (!r.touch_match.empty() &&
+          name.find(r.touch_match) != std::string_view::npos) {
+        region = &r;
+        break;
+      }
+    }
+  }
+  if (region == nullptr) {
+    region = &regions_.front();
+  }
+  if (region->state == nullptr || region->state->engine == nullptr) {
     return;
   }
 
@@ -910,11 +1149,11 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   // forward rotation; touch is its inverse).
   const double nx = ev.x;
   const double ny = ev.y;
-  const auto w = static_cast<double>(viewport_w_);
-  const auto h = static_cast<double>(viewport_h_);
+  const auto w = static_cast<double>(region->width);
+  const auto h = static_cast<double>(region->height);
   double fx = nx * w;
   double fy = ny * h;
-  switch (cursor_rotation_) {
+  switch (region->cursor_rotation) {
     case 90:
       fx = (1.0 - ny) * w;
       fy = nx * h;
@@ -955,16 +1194,6 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   pe.device_kind = kFlutterPointerDeviceKindTouch;
   pe.buttons = 0;
 
-  const auto* s = state_.load(std::memory_order_acquire);
-  if (!s || !s->engine) {
-    return;
-  }
-  const auto* runner = s->engine->GetPlatformTaskRunner();
-  if (auto engine_handle = s->engine->GetFlutterEngine();
-      runner && engine_handle) {
-    asio::dispatch(*runner->GetStrandContext(), [engine_handle, pe]() {
-      LibFlutterEngine->SendPointerEvent(engine_handle, &pe, 1);
-    });
-  }
+  DispatchToRegion(*region, &pe, 1);
 }
 }  // namespace homescreen
