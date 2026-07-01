@@ -46,6 +46,8 @@
 #include <drm-cxx/scene/layer_scene.hpp>
 #endif
 
+#include "backend/drm_kms_egl/drm_output_context.h"
+#include "backend/drm_kms_egl/flip_sink.h"
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 
@@ -122,10 +124,12 @@ struct GbmBackingStore {
 // PresentLayers builds a drm::planes::Output, runs the Allocator to assign
 // layers to planes, GL-composites any overflow into a double-buffered
 // composition GBM BO, and atomic-commits the result.
-class DrmCompositor {
+class DrmCompositor : public IFlipSink {
  public:
-  explicit DrmCompositor(DrmBackend* backend);
-  ~DrmCompositor();
+  // `out` carries the geometry of the single output this compositor scans to
+  // (its CRTC/connector/mode); the shared EGL/GBM/device come from `backend`.
+  DrmCompositor(DrmBackend* backend, DrmOutputContext out);
+  ~DrmCompositor() override;
 
   DrmCompositor(const DrmCompositor&) = delete;
   DrmCompositor& operator=(const DrmCompositor&) = delete;
@@ -133,7 +137,24 @@ class DrmCompositor {
   bool CreateBackingStore(const FlutterBackingStoreConfig* config,
                           FlutterBackingStore* out);
   bool CollectBackingStore(const FlutterBackingStore* store);
+
+  // The compositor that created a backing store (from the store's baton), so
+  // CollectBackingStore routes back to it -- each compositor owns its own store
+  // pool. Null if the store carries no baton. Static: reads only the store.
+  static DrmCompositor* OwnerOf(const FlutterBackingStore* store);
   bool PresentLayers(const FlutterLayer** layers, size_t layer_count);
+
+  // additional outputs (not the primary) must not drive the engine's
+  // single vsync. Set false on every compositor except view 0's.
+  void SetDrivesVsync(bool drives) { drives_vsync_ = drives; }
+
+  // Multi-view present entry. The engine calls this once per view per
+  // tick via present_view_callback. Today there is one output, so every view
+  // routes to the single CRTC; per-view routing to distinct outputs lands with
+  // the view_id -> Output map.
+  bool PresentView(int64_t view_id,
+                   const FlutterLayer** layers,
+                   size_t layer_count);
 
   void RegisterSurface(FlutterPlatformViewIdentifier id,
                        std::shared_ptr<ICompositorSurface> surface);
@@ -175,6 +196,10 @@ class DrmCompositor {
   // flip_pending_ and records the frame completion; baton return
   // happens in the unified handler.
   void OnFlipComplete();
+  // IFlipSink: this compositor armed the flip (a scene/atomic commit registered
+  // it as user_data). Routes to its own completion so one backend's flip reader
+  // can serve several compositors (one per output).
+  void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec) override;
 
   // Queried by DrmBackend::SetVsyncBaton to decide whether a baton
   // arriving from Flutter can wait for the asio flip monitor to
@@ -340,6 +365,17 @@ class DrmCompositor {
 #endif
 
   DrmBackend* backend_;
+
+  // Geometry of the output this compositor scans out to (CRTC/connector/mode).
+  // Read for every per-output value instead of backend_ (which knows only one
+  // output), so N compositors can share one backend's EGL/GBM across N CRTCs.
+  DrmOutputContext out_;
+
+  // Whether this output's flips drive the engine's vsync. One engine has one
+  // vsync source, so the primary output (view 0) drives it and additional
+  // outputs do not, to avoid double-delivering the baton. Default true
+  // (the sole compositor of a single-output view).
+  bool drives_vsync_ = true;
 
   // EGL image extensions.
   PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ = nullptr;
