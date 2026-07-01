@@ -398,6 +398,87 @@ FlutterEngineResult Engine::SetWindowSize(const size_t height,
   return kSuccess;
 }
 
+void Engine::OnAddViewComplete(const FlutterAddViewResult* result) {
+  if (result == nullptr) {
+    return;
+  }
+  const auto* self = static_cast<const Engine*>(result->user_data);
+  const size_t idx = self != nullptr ? self->m_index : 0;
+  if (!result->added) {
+    spdlog::error("({}) FlutterEngineAddView failed", idx);
+  } else {
+    spdlog::debug("({}) view added", idx);
+  }
+}
+
+void Engine::OnRemoveViewComplete(const FlutterRemoveViewResult* result) {
+  if (result == nullptr) {
+    return;
+  }
+  const auto* self = static_cast<const Engine*>(result->user_data);
+  const size_t idx = self != nullptr ? self->m_index : 0;
+  if (!result->removed) {
+    spdlog::error("({}) FlutterEngineRemoveView failed", idx);
+  } else {
+    spdlog::debug("({}) view removed", idx);
+  }
+}
+
+FlutterEngineResult Engine::AddView(const int64_t view_id,
+                                    const size_t width,
+                                    const size_t height,
+                                    const double pixel_ratio,
+                                    const uint64_t display_id) {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  if (LibFlutterEngine->AddView == nullptr) {
+    spdlog::error(
+        "({}) engine library has no FlutterEngineAddView; multi-view "
+        " is unavailable",
+        m_index);
+    return kInternalInconsistency;
+  }
+  // view_metrics is copied synchronously inside FlutterEngineAddView (the info
+  // may be freed once it returns), so a local is safe. The metric's view_id
+  // must match the info's view_id.
+  const FlutterWindowMetricsEvent metrics = {
+      .struct_size = sizeof(FlutterWindowMetricsEvent),
+      .width = width,
+      .height = height,
+      .pixel_ratio = pixel_ratio,
+      .left = 0,
+      .top = 0,
+      .physical_view_inset_top = 0,
+      .physical_view_inset_right = 0,
+      .physical_view_inset_bottom = 0,
+      .physical_view_inset_left = 0,
+      .display_id = display_id,
+      .view_id = view_id};
+  const FlutterAddViewInfo info = {
+      .struct_size = sizeof(FlutterAddViewInfo),
+      .view_id = view_id,
+      .view_metrics = &metrics,
+      .user_data = this,
+      .add_view_callback = &Engine::OnAddViewComplete};
+  return LibFlutterEngine->AddView(m_flutter_engine, &info);
+}
+
+FlutterEngineResult Engine::RemoveView(const int64_t view_id) {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  if (LibFlutterEngine->RemoveView == nullptr) {
+    return kInternalInconsistency;
+  }
+  const FlutterRemoveViewInfo info = {
+      .struct_size = sizeof(FlutterRemoveViewInfo),
+      .view_id = view_id,
+      .user_data = this,
+      .remove_view_callback = &Engine::OnRemoveViewComplete};
+  return LibFlutterEngine->RemoveView(m_flutter_engine, &info);
+}
+
 FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   if (!m_running) {
     return kInternalInconsistency;

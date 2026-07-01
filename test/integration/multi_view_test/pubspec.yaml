@@ -1,0 +1,20 @@
+name: multi_view_test
+description: >
+  Multi-monitor single-engine integration test for ivi-homescreen. One Flutter
+  engine renders to N views (one per output); a shared tick counter proves a
+  single engine drives every monitor.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: false

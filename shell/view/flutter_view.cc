@@ -424,6 +424,23 @@ void FlutterView::Initialize() {
 #endif
   }
 
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // this one engine drives additional outputs on the same DRM card.
+  // Each was set up as a compositor bound to view id 1..N in the backend; now
+  // that the engine is running, attach those views so Flutter builds and
+  // presents them. The backend's present_view_callback routes each view to its
+  // compositor/CRTC.
+  if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
+    const double pixel_ratio = m_flutter_engine->GetPixelRatio();
+    for (const auto& v : drm->AdditionalViews()) {
+      const auto r = m_flutter_engine->AddView(v.view_id, v.width, v.height,
+                                               pixel_ratio, /*display_id=*/0);
+      spdlog::info("[FlutterView] AddView id={} {}x{} result={}", v.view_id,
+                   v.width, v.height, static_cast<int>(r));
+    }
+  }
+#endif
+
   SPDLOG_DEBUG("({}) Engine running...", m_index);
 }
 

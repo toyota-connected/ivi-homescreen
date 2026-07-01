@@ -18,11 +18,19 @@ Flutter Linux CPP Embedder
     * Video Player first party compatible
 * Platform View Framework
     * AndroidView widget compatible
-* Backend Support
-    * EGL
-    * Vulkan (first Flutter embedder to support this)
-    * Wayland Leased DRM (coming soon)
-    * DRM/KMS (coming soon)
+* Backend Support (any subset builds into one binary; the active backend is
+  selected at runtime — process-wide via `--backend`, or per view via
+  `[view.backend]`)
+    * Wayland EGL
+    * Wayland Vulkan
+    * DRM/KMS EGL (direct-to-display, no compositor)
+    * DRM/KMS Vulkan (zero-copy dma-buf scanout)
+    * Software (CPU renderer, no GPU or display-server dependency)
+* Multi-display
+    * Multiple views across multiple outputs from one process
+    * Per-view output binding by connector / `wl_output` name (`[view.output]`)
+    * Combined-space pointer routing, per-display touch, and a single cursor
+      that follows the pointer across displays
 * Same source code runs on Desktop and embedded Linux image
     * Ubuntu 18+
     * Fedora 33+
@@ -94,23 +102,24 @@ simply just be ignored.
 
 ## Backend Support
 
-### EGL Backend
+Any subset of backends can be compiled into a single binary; they are no longer
+mutually exclusive. The active backend is resolved at runtime — process-wide via
+`--backend`, or per view via `[view.backend] type` in the bundle's config.toml
+(CLI overrides config). A single-backend build simply registers one backend and
+uses it.
 
-This is the default build configuration. To manually build EGL Backend use
+| Backend | Registry key | CMake option | Notes |
+|---|---|---|---|
+| Wayland EGL | `wayland-egl` | `BUILD_BACKEND_WAYLAND_EGL` | GL renderer on a Wayland compositor (default ON) |
+| Wayland Vulkan | `wayland-vulkan` | `BUILD_BACKEND_WAYLAND_VULKAN` | Vulkan renderer on a Wayland compositor |
+| DRM/KMS EGL | `drm-kms-egl` | `BUILD_BACKEND_DRM_KMS_EGL` | Direct-to-display GL on bare KMS (no compositor) |
+| DRM/KMS Vulkan | `drm-kms-vulkan` | `BUILD_BACKEND_DRM_KMS_VULKAN` | Zero-copy dma-buf scanout on bare KMS |
+| Software | `software` | `BUILD_BACKEND_SOFTWARE` | CPU renderer; no GPU or display server |
 
-```
--DBUILD_BACKEND_WAYLAND_EGL=ON -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
-```
+With no explicit selection, the resolver is environment-aware: a live Wayland
+session picks `wayland-egl`, otherwise `drm-kms-egl`.
 
-### Vulkan Backend
-
-To build Vulkan Backend use
-
-```
--DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON
-```
-
-Running Vulkan requires an engine version that supports Vulkan. Stable does not yet support Vulkan.
+Running a Vulkan backend requires an engine build that supports Vulkan.
 
 ## Bundle File Override Logic
 
@@ -340,7 +349,10 @@ The schema is grouped by table:
     (→ Dart `main()` args),
   - `[view.shell]` — `type`; for AGL, `[view.shell.window]` (role) and
     `[view.shell.window.activation_area]`; for ivi, `surface_id`,
-  - `[view.backend]` — `type`; for DRM/software, the `[view.backend.drm]` knobs.
+  - `[view.backend]` — `type`; for DRM/software, the `[view.backend.drm]` knobs,
+  - `[view.output]` — pin the view to a physical output by connector /
+    `wl_output` name, place its display in the combined pointer space (`x`/`y`),
+    and bind a touch panel (`touch_device`).
 
 Every key (type, default, valid values, applies-to) is in the
 [Configuration reference](#configuration-reference-all-options) above — that
@@ -372,6 +384,43 @@ height = 1080
   [view.backend]
   type = 'wayland-egl'
 ```
+
+### Multiple displays
+
+Drive several displays from one process by launching one view per output — a
+repeated `-b <bundle>` on the command line, or several `[[view]]` entries in a
+`--config` master file — each pinned to a connector with `[view.output]`. On a
+DRM card with two monitors:
+
+```toml
+[global]
+app_id = 'homescreen'
+
+[[view]]
+bundle = '/usr/share/gallery'
+  [view.backend]
+  type = 'drm-kms-egl'
+    [view.backend.drm]
+    device = '/dev/dri/card1'
+  [view.output]
+  drm_connector = 'HDMI-A-1'
+  x = 0            # position in the combined pointer space
+
+[[view]]
+bundle = '/usr/share/cluster'
+  [view.backend]
+  type = 'drm-kms-egl'
+    [view.backend.drm]
+    device = '/dev/dri/card1'
+  [view.output]
+  drm_connector = 'DP-1'
+  x = 1920         # placed to the right of HDMI-A-1
+```
+
+The `x`/`y` values lay the displays out in a shared pointer space so the cursor
+crosses between them as arranged, and a single cursor is shown on whichever
+display the pointer is over. `touch_device` binds a touch panel (by libinput
+device-name substring) to the view on its display.
 
 > Breaking change vs. earlier releases: the flat `[window_activation_area]`
 > table, `view.window_type`, `view.shell`/`view.backend` strings, `view.vm_args`,
@@ -468,7 +517,9 @@ Resolved per view; later layers override earlier ones key-by-key. Only
 
 `BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW` - Includes WebView View Plugin. Defaults to OFF
 
-_**Backend selections (Vulkan, EGL/GLESv2) are mutually exclusive by design.**_
+Each `BUILD_BACKEND_*` option gates whether that backend is compiled in; any
+subset may be enabled together and the active one is chosen at runtime (see
+[Backend Support](#backend-support)).
 
 ## Platform View Plugins
 
