@@ -381,7 +381,12 @@ FlutterEngineResult Engine::SetWindowSize(const size_t height,
       .physical_view_inset_bottom = 0,
       .physical_view_inset_left = 0,
       .display_id = 0,  // TODO display index
-      .view_id = static_cast<int64_t>(m_index)};
+      // Each bundle is a discrete engine whose implicit view is id 0. m_index
+      // identifies the view within App, not within this engine -- sending it as
+      // view_id targeted a non-existent view on every engine past the first, so
+      // that engine never scheduled a frame. One engine driving multiple views
+      // (FlutterEngineAddView) would use the real per-view ids here.
+      .view_id = 0};
 
   if (LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme) !=
       kSuccess) {
@@ -416,7 +421,12 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
       .physical_view_inset_bottom = 0,
       .physical_view_inset_left = 0,
       .display_id = 0,  // TODO display index
-      .view_id = static_cast<int64_t>(m_index)};
+      // Each bundle is a discrete engine whose implicit view is id 0. m_index
+      // identifies the view within App, not within this engine -- sending it as
+      // view_id targeted a non-existent view on every engine past the first, so
+      // that engine never scheduled a frame. One engine driving multiple views
+      // (FlutterEngineAddView) would use the real per-view ids here.
+      .view_id = 0};
 
   const auto result =
       LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
