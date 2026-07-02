@@ -334,6 +334,29 @@ class Display : public IDisplay,
   }
 
   /**
+   * @brief Index in m_all_outputs of the wl_output with the given name
+   *
+   * Maps a wl_output name resolved by OutputManager::ResolveForView (the
+   * IOutputProvider match against [view.output]) back to the numeric index a
+   * WaylandWindow stores as m_output_index and GetWlOutput() takes. Returns
+   * nullopt when no live output carries that name.
+   *
+   * @param[in] name wl_output v4 name (OutputInfo::name)
+   * @return std::optional<uint32_t>
+   * @relation
+   * wayland, flutter
+   */
+  [[nodiscard]] std::optional<uint32_t> WlOutputIndexForName(
+      const std::string& name) const {
+    for (size_t i = 0; i < m_all_outputs.size(); ++i) {
+      if (m_all_outputs[i] && m_all_outputs[i]->name == name) {
+        return static_cast<uint32_t>(i);
+      }
+    }
+    return std::nullopt;
+  }
+
+  /**
    * @brief Get a buffer scale of a specified index of a view
    * @param[in] index Index of a view
    * @return int32_t
