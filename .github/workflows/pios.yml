@@ -128,6 +128,17 @@ jobs:
       - name: Fetch emb
         run: git clone --depth 1 "$EMB_REPO" emb_cli
 
+      # emb_cli extracts a sysroot rootlessly when sfdisk (fdisk) and debugfs
+      # (e2fsprogs) are present; without them it falls back to `sudo losetup`,
+      # which a non-privileged container can't run (no loop devices) and which
+      # fails to even spawn here. The build should hit the baked /emb sysroot as
+      # a cache hit and not extract at all, but on a cache miss it re-extracts —
+      # keep that path rootless so it succeeds instead of dying on losetup.
+      - name: Ensure rootless sysroot-extract tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends fdisk e2fsprogs
+
       # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
       # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
       # meson, wayland-scanner) are baked too; only the augment libs rebuild.
