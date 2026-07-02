@@ -714,33 +714,51 @@ void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
                                 const double x,
                                 const double y,
                                 const int32_t device) {
-  auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
+  const TouchEvent e{phase, x, y, device};
+  CoalesceTouchFrame(&e, 1);
+}
+
+void Engine::CoalesceTouchFrame(const TouchEvent* events, const size_t count) {
+  if (events == nullptr || count == 0) {
+    return;
+  }
+
+  // One timestamp for the whole frame: the contacts in a touch frame are
+  // logically simultaneous (wl_touch.frame / libinput TOUCH_FRAME group one
+  // hardware scan), and a shared timestamp keeps the engine's pointer
+  // resampler from interpolating skew between fingers that moved together.
+  const auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
+
   std::scoped_lock lock(m_pointer_mutex);
-
-  FlutterPointerEvent e{};
-  e.struct_size = sizeof(FlutterPointerEvent);
-  e.phase = phase;
+  for (size_t i = 0; i < count; ++i) {
+    FlutterPointerEvent e{};
+    e.struct_size = sizeof(FlutterPointerEvent);
+    e.phase = events[i].phase;
 #if ENV64BIT
-  e.timestamp = timestamp;
+    e.timestamp = timestamp;
 #elif ENV32BIT
-  e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
+    e.timestamp = static_cast<size_t>(timestamp & 0xFFFFFFFFULL);
 #endif
-  e.x = x;
-  e.y = y;
-  e.device = device;
-  e.signal_kind = kFlutterPointerSignalKindNone;
-  e.scroll_delta_x = 0.0;
-  e.scroll_delta_y = 0.0;
-  e.device_kind = kFlutterPointerDeviceKindTouch;
-  e.buttons = 0;
-  e.pan_x = 0;
-  e.pan_y = 0;
-  e.scale = 0;
-  e.rotation = 0;
+    e.x = events[i].x;
+    e.y = events[i].y;
+    e.device = events[i].device;
+    e.signal_kind = kFlutterPointerSignalKindNone;
+    e.scroll_delta_x = 0.0;
+    e.scroll_delta_y = 0.0;
+    e.device_kind = kFlutterPointerDeviceKindTouch;
+    e.buttons = 0;
+    e.pan_x = 0;
+    e.pan_y = 0;
+    e.scale = 0;
+    e.rotation = 0;
 
-  m_pointer_events.emplace_back(e);
+    m_pointer_events.emplace_back(e);
+  }
 
-  // Wake the main loop so it flushes this batch promptly (see above).
+  // Wake the main loop once per frame so it flushes this batch promptly
+  // instead of waiting for its next periodic tick (the loop blocks idle on a
+  // static screen). Per-event wakes on a 10-finger controller would be ten
+  // eventfd writes per hardware scan for one flush.
   MainLoopWaker::instance().Wake();
 }
 

@@ -15,6 +15,8 @@
  */
 
 #include "input/drm_seat.h"
+
+#include "config/common.h"
 #include "logging/logging.h"
 
 #include <fcntl.h>
@@ -1094,8 +1096,23 @@ void DrmSeat::HandlePointerAxis(const drm::input::PointerAxisEvent& ev) const {
   DispatchToRegion(region, &pe, 1);
 }
 
+void DrmSeat::FlushTouchBatch() const {
+  if (touch_batch_.empty() || touch_batch_region_ == nullptr) {
+    touch_batch_.clear();
+    touch_batch_region_ = nullptr;
+    return;
+  }
+  DispatchToRegion(*touch_batch_region_, touch_batch_.data(),
+                   touch_batch_.size());
+  touch_batch_.clear();
+  touch_batch_region_ = nullptr;
+}
+
 void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   if (ev.type == drm::input::TouchEvent::Type::Frame) {
+    // Frame marker: everything since the previous marker is one hardware
+    // scan — hand it to the engine as one batch.
+    FlushTouchBatch();
     return;
   }
   if (regions_.empty()) {
@@ -1194,6 +1211,19 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   pe.device_kind = kFlutterPointerDeviceKindTouch;
   pe.buttons = 0;
 
-  DispatchToRegion(*region, &pe, 1);
+  // Contacts must not straddle regions within one batch (multi-panel setups
+  // route by device); flush the previous region's batch first.
+  if (touch_batch_region_ != nullptr && touch_batch_region_ != region) {
+    FlushTouchBatch();
+  }
+  touch_batch_region_ = region;
+  touch_batch_.push_back(pe);
+
+  // Backstops: cancel ends the session with no guaranteed trailing frame
+  // marker, and a runaway stream without markers must not grow unbounded.
+  if (phase == kCancel ||
+      touch_batch_.size() >= static_cast<size_t>(kMaxPointerEvent)) {
+    FlushTouchBatch();
+  }
 }
 }  // namespace homescreen

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #include <xkbcommon/xkbcommon.h>
 
@@ -92,6 +93,19 @@ class SoftwareSeat final : public ISeat {
   void HandleTouchMotion(libinput_event_touch* t);
   void HandleTouchCancel(libinput_event_touch* t);
 
+  // Hand everything accumulated since the last LIBINPUT_EVENT_TOUCH_FRAME to
+  // the engine as one batch: one shared timestamp, one strand post, one
+  // FlutterEngineSendPointerEvent (= one UI-thread task in the engine) per
+  // hardware scan instead of one per contact. No-op when nothing is pending.
+  void FlushTouchBatch();
+
+  // Append an event to the pending touch frame. The timestamp is stamped for
+  // the whole group in FlushTouchBatch — contacts within one frame are
+  // logically simultaneous. Flushes early as a backstop if the batch would
+  // exceed kMaxPointerEvent (a runaway stream without frame markers must not
+  // grow unbounded).
+  void QueueTouchEvent(const FlutterPointerEvent& pe);
+
   // Dispatch a populated FlutterPointerEvent on the platform task
   // runner's strand. Copies the event by value into the lambda.
   void DispatchPointerEvent(const FlutterPointerEvent& pe);
@@ -150,6 +164,11 @@ class SoftwareSeat final : public ISeat {
     double y{0.0};
   };
   std::array<TouchSlot, kMaxTouchSlots> touch_{};
+
+  // Touch events accumulated since the last LIBINPUT_EVENT_TOUCH_FRAME.
+  // libinput groups the per-slot updates of one hardware scan between frame
+  // markers; see FlushTouchBatch. Touched only on the libinput worker thread.
+  std::vector<FlutterPointerEvent> touch_batch_;
 };
 
 }  // namespace homescreen
