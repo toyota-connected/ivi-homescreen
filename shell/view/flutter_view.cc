@@ -53,6 +53,8 @@
 #include <text_input_plugin.h>
 
 #include "configuration/configuration.h"
+#include "display/output.h"          // homescreen::BackendFamily
+#include "display/output_manager.h"  // homescreen::OutputManager
 #include "engine.h"
 #include "logging.h"
 #include "main_loop_waker.h"
@@ -113,11 +115,29 @@ FlutterView::FlutterView(Configuration::Config config,
   // in too; their IDisplay is not a wayland Display, so the cast is null and we
   // skip (those backends render without a WaylandWindow).
   if (auto* wl = dynamic_cast<Display*>(display.get())) {
+    // Pin the view to a physical output by name when [view.output] names one:
+    // OutputManager applies the view's OutputMatch through the Display's
+    // IOutputProvider (the same resolver the DRM path uses for connectors) and
+    // returns the wl_output name, which maps back to the index a WaylandWindow
+    // targets. Fall back to the explicit wl_output_index when no [view.output]
+    // constraint is set or the named output is not live -- preserving
+    // single-output behavior.
+    uint32_t wl_output_index = m_config.view.wl_output_index.value_or(0);
+    if (const auto resolved = homescreen::OutputManager::ResolveForView(
+            m_config, display.get(), homescreen::BackendFamily::kWayland)) {
+      if (const auto idx = wl->WlOutputIndexForName(*resolved)) {
+        wl_output_index = *idx;
+      } else {
+        spdlog::warn(
+            "[FlutterView] resolved wl_output '{}' is not live; using "
+            "wl_output_index {}",
+            *resolved, wl_output_index);
+      }
+    }
     m_wayland_window = std::make_shared<WaylandWindow>(
         m_index, std::dynamic_pointer_cast<Display>(display),
-        m_config.view.window_type,
-        wl->GetWlOutput(m_config.view.wl_output_index.value_or(0)),
-        m_config.view.wl_output_index.value_or(0), m_config.app_id,
+        m_config.view.window_type, wl->GetWlOutput(wl_output_index),
+        wl_output_index, m_config.app_id,
         m_config.view.fullscreen.value_or(false),
         m_config.view.width.value_or(kDefaultViewWidth),
         m_config.view.height.value_or(kDefaultViewHeight),
