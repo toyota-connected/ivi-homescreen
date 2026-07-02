@@ -266,6 +266,17 @@ class DrmSeat final : public ISeat {
   // corner. Touched only from the seat dispatch thread (HandleTouch is const).
   mutable std::unordered_map<int32_t, std::pair<double, double>> touch_pos_;
 
+  // Touch events accumulated since the last TOUCH_FRAME marker, and the
+  // region they route to. libinput groups the per-slot updates of one
+  // hardware scan between frame markers; dispatching the group as one batch
+  // means one strand task and one FlutterEngineSendPointerEvent (= one
+  // UI-thread task post in the engine) per scan, instead of one per contact
+  // — a 10-finger drag at a 250 Hz scan rate is 250 posts/s instead of
+  // 2500/s. Touched only from the seat dispatch thread.
+  mutable std::vector<FlutterPointerEvent> touch_batch_;
+  mutable const ViewRegion* touch_batch_region_ = nullptr;
+  void FlushTouchBatch() const;
+
   // Caller-supplied hook for libinput's privileged device opens. Empty
   // when there's no libseat session (falls back to ::open/::close inside
   // drm::input::Seat).

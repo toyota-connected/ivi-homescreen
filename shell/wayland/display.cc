@@ -754,6 +754,15 @@ void Display::UpdateTextInputSurrounding(const std::string& utf8,
   });
 }
 
+// All wl_touch handlers run on the wayland event thread, so m_touch needs no
+// locking. down/up/motion only accumulate into m_touch.frame; the batch is
+// handed to the engine on wl_touch.frame — the protocol's atomicity boundary
+// (everything between two frame events is one logically-simultaneous hardware
+// scan). A 10-finger update therefore reaches the engine as one group (one
+// lock, one main-loop wake, one FlutterEngineSendPointerEvent call → one
+// UI-thread task in the engine) instead of ten independent submissions that
+// can be split across flushes mid-scan.
+
 void Display::touch_handle_down(void* data,
                                 struct wl_touch* /* wl_touch */,
                                 uint32_t /* serial */,
@@ -764,16 +773,19 @@ void Display::touch_handle_down(void* data,
                                 wl_fixed_t y_w) {
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.surface_x[id] = x_w;
-  d->m_touch.surface_y[id] = y_w;
-
-  d->m_active_surface = surface;
-  d->m_touch_engine = d->m_surface_engine_map[surface];
-  if (d->m_touch_engine) {
-    d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kDown,
-                                          wl_fixed_to_double(x_w),
-                                          wl_fixed_to_double(y_w), id);
+  // Contacts must not straddle engines within one batch: if a new contact
+  // lands on a different surface, flush what belongs to the previous engine
+  // first.
+  Engine* engine = d->m_surface_engine_map[surface];
+  if (engine != d->m_touch_engine) {
+    touch_flush_frame(d);
   }
+  d->m_active_surface = surface;
+  d->m_touch_engine = engine;
+
+  d->m_touch.points[id] = {x_w, y_w};
+  touch_push(d, {FlutterPointerPhase::kDown, wl_fixed_to_double(x_w),
+                 wl_fixed_to_double(y_w), id});
 }
 
 void Display::touch_handle_up(void* data,
@@ -781,13 +793,18 @@ void Display::touch_handle_up(void* data,
                               uint32_t /* serial */,
                               uint32_t /* time */,
                               int32_t id) {
-  const auto* d = static_cast<Display*>(data);
+  auto* d = static_cast<Display*>(data);
 
-  if (d->m_touch_engine) {
-    d->m_touch_engine->CoalesceTouchEvent(
-        kUp, wl_fixed_to_double(d->m_touch.surface_x[id]),
-        wl_fixed_to_double(d->m_touch.surface_y[id]), id);
+  // wl_touch.up carries no coordinates; reuse the contact's last position.
+  // Unknown id (no prior down seen, e.g. attach mid-session) is dropped —
+  // the engine was never told this device went down.
+  const auto it = d->m_touch.points.find(id);
+  if (it == d->m_touch.points.end()) {
+    return;
   }
+  touch_push(d, {kUp, wl_fixed_to_double(it->second.first),
+                 wl_fixed_to_double(it->second.second), id});
+  d->m_touch.points.erase(it);
 }
 
 void Display::touch_handle_motion(void* data,
@@ -798,27 +815,60 @@ void Display::touch_handle_motion(void* data,
                                   wl_fixed_t y_w) {
   auto* d = static_cast<Display*>(data);
 
-  d->m_touch.surface_x[id] = x_w;
-  d->m_touch.surface_y[id] = y_w;
-
-  if (d->m_touch_engine) {
-    d->m_touch_engine->CoalesceTouchEvent(FlutterPointerPhase::kMove,
-                                          wl_fixed_to_double(x_w),
-                                          wl_fixed_to_double(y_w), id);
+  const auto it = d->m_touch.points.find(id);
+  if (it == d->m_touch.points.end()) {
+    return;
   }
+  it->second = {x_w, y_w};
+  touch_push(d, {FlutterPointerPhase::kMove, wl_fixed_to_double(x_w),
+                 wl_fixed_to_double(y_w), id});
 }
 
 void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
-  const auto* d = static_cast<Display*>(data);
-  if (d->m_touch_engine) {
-    SPDLOG_DEBUG("touch_handle_cancel");
-    d->m_touch_engine->CoalesceTouchEvent(kCancel, d->m_pointer.event.surface_x,
-                                          d->m_pointer.event.surface_y, 0);
+  auto* d = static_cast<Display*>(data);
+  SPDLOG_DEBUG("touch_handle_cancel");
+
+  // The compositor cancelled the whole touch session (e.g. it recognized a
+  // system gesture). Every active contact must be cancelled in the engine —
+  // a contact left in the down phase trips
+  // FML_DCHECK(!state.is_down) in the engine's PointerDataPacketConverter on
+  // the next session's down for that device, and leaks its gesture-arena
+  // entry in the framework. Cancel each contact at its last known position
+  // (the previous code cancelled only device 0, at the *mouse* position).
+  d->m_touch.frame.clear();  // pending updates for this session are moot
+  for (const auto& [id, pos] : d->m_touch.points) {
+    d->m_touch.frame.push_back({kCancel, wl_fixed_to_double(pos.first),
+                                wl_fixed_to_double(pos.second), id});
   }
+  d->m_touch.points.clear();
+  // The protocol does not guarantee a frame event after cancel; flush now.
+  touch_flush_frame(d);
 }
 
-void Display::touch_handle_frame(void* /* data */,
-                                 struct wl_touch* /* wl_touch */) {}
+void Display::touch_handle_frame(void* data, struct wl_touch* /* wl_touch */) {
+  touch_flush_frame(static_cast<Display*>(data));
+}
+
+void Display::touch_flush_frame(Display* d) {
+  if (d->m_touch.frame.empty()) {
+    return;
+  }
+  if (d->m_touch_engine) {
+    d->m_touch_engine->CoalesceTouchFrame(d->m_touch.frame.data(),
+                                          d->m_touch.frame.size());
+  }
+  d->m_touch.frame.clear();
+}
+
+void Display::touch_push(Display* d, const Engine::TouchEvent& ev) {
+  d->m_touch.frame.push_back(ev);
+  // wl_touch.frame is the normal flush boundary, but the protocol can't force
+  // a compositor to send it; cap the batch so a stream without frame markers
+  // can't grow the accumulator unbounded (parity with the drm/software seats).
+  if (d->m_touch.frame.size() >= static_cast<size_t>(kMaxPointerEvent)) {
+    touch_flush_frame(d);
+  }
+}
 
 constexpr wl_touch_listener Display::touch_listener = {
     .down = touch_handle_down,
