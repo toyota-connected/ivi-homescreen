@@ -15,6 +15,8 @@
  */
 
 #include "backend/software/input/software_seat.h"
+
+#include "config/common.h"
 #include "logging/logging.h"
 
 #include <fcntl.h>
@@ -289,11 +291,15 @@ void SoftwareSeat::HandleEvent(libinput_event* ev) {
       HandleTouchCancel(libinput_event_get_touch_event(ev));
       break;
     case LIBINPUT_EVENT_TOUCH_FRAME:
+      // Frame marker: everything since the previous marker is one hardware
+      // scan — hand it to the engine as one batch (one strand post, one
+      // FlutterEngineSendPointerEvent, one UI-thread task) instead of one
+      // submission per contact. A 10-finger drag at a 250 Hz scan rate is
+      // 250 posts/s instead of 2500/s.
+      FlushTouchBatch();
+      break;
     default:
-      // TOUCH_FRAME is a batch-boundary marker; we dispatch events as
-      // they arrive, so no accumulation to flush. Falls through into
-      // the default no-op alongside gesture / switch events that
-      // aren't wired yet.
+      // No-op alongside gesture / switch events that aren't wired yet.
       break;
   }
 }
@@ -506,7 +512,8 @@ void SoftwareSeat::HandleTouchDown(libinput_event_touch* t) {
   batch[1].y = s.y;
   batch[1].device = slot;
   batch[1].device_kind = kFlutterPointerDeviceKindTouch;
-  DispatchPointerEvents(batch, 2);
+  QueueTouchEvent(batch[0]);
+  QueueTouchEvent(batch[1]);
 }
 
 void SoftwareSeat::HandleTouchMotion(libinput_event_touch* t) {
@@ -534,7 +541,7 @@ void SoftwareSeat::HandleTouchMotion(libinput_event_touch* t) {
   pe.y = s.y;
   pe.device = slot;
   pe.device_kind = kFlutterPointerDeviceKindTouch;
-  DispatchPointerEvent(pe);
+  QueueTouchEvent(pe);
 }
 
 void SoftwareSeat::HandleTouchUp(libinput_event_touch* t) {
@@ -569,7 +576,8 @@ void SoftwareSeat::HandleTouchUp(libinput_event_touch* t) {
   batch[1].y = s.y;
   batch[1].device = slot;
   batch[1].device_kind = kFlutterPointerDeviceKindTouch;
-  DispatchPointerEvents(batch, 2);
+  QueueTouchEvent(batch[0]);
+  QueueTouchEvent(batch[1]);
 }
 
 void SoftwareSeat::HandleTouchCancel(libinput_event_touch* t) {
@@ -601,7 +609,34 @@ void SoftwareSeat::HandleTouchCancel(libinput_event_touch* t) {
   batch[1].y = s.y;
   batch[1].device = slot;
   batch[1].device_kind = kFlutterPointerDeviceKindTouch;
-  DispatchPointerEvents(batch, 2);
+  QueueTouchEvent(batch[0]);
+  QueueTouchEvent(batch[1]);
+  // Not every stack guarantees a TOUCH_FRAME after cancel; flush now so the
+  // engine's per-device state is terminated promptly.
+  FlushTouchBatch();
+}
+
+void SoftwareSeat::QueueTouchEvent(const FlutterPointerEvent& pe) {
+  touch_batch_.push_back(pe);
+  if (touch_batch_.size() >= static_cast<size_t>(kMaxPointerEvent)) {
+    FlushTouchBatch();
+  }
+}
+
+void SoftwareSeat::FlushTouchBatch() {
+  if (touch_batch_.empty()) {
+    return;
+  }
+  // One timestamp for the whole frame: the contacts in a touch frame are
+  // logically simultaneous (one hardware scan), and a shared timestamp keeps
+  // the framework's pointer resampler from interpolating skew between fingers
+  // that moved together.
+  const uint64_t ts = FlutterTimestampMicros();
+  for (auto& e : touch_batch_) {
+    e.timestamp = ts;
+  }
+  DispatchPointerEvents(touch_batch_.data(), touch_batch_.size());
+  touch_batch_.clear();
 }
 
 SoftwareSeat::EngineRef SoftwareSeat::CurrentEngine() const {

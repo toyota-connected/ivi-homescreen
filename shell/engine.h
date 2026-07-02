@@ -313,6 +313,35 @@ class Engine {
                           int32_t device);
 
   /**
+   * @brief One touch contact update within a hardware scan (touch frame)
+   */
+  struct TouchEvent {
+    FlutterPointerPhase phase;
+    double x;
+    double y;
+    int32_t device;
+  };
+
+  /**
+   * @brief Coalesce one complete touch frame (a group of logically
+   * simultaneous per-contact updates, e.g. everything between two
+   * wl_touch.frame events or two libinput TOUCH_FRAME markers).
+   *
+   * The whole group is appended to the pointer queue under a single lock,
+   * stamped with a single timestamp (the contacts moved at the same instant),
+   * and the main loop is woken once — so a 10-finger update costs one wake
+   * and reaches the engine as one FlutterEngineSendPointerEvent batch, i.e.
+   * one UI-thread task post instead of ten.
+   *
+   * @param[in] events First event of the frame
+   * @param[in] count Number of events in the frame
+   * @return void
+   * @relation
+   * flutter
+   */
+  void CoalesceTouchFrame(const TouchEvent* events, size_t count);
+
+  /**
    * @brief Send coalesced Pointer events
    * @return void
    * @relation
