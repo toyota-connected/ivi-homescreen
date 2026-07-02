@@ -144,15 +144,23 @@ WaylandWindow::WaylandWindow(const size_t index,
   // follow the first commit. Only AglShell exposes a WindowManager facet.
   if (auto* wm = shell.WindowManager()) {
     switch (m_type) {
-      case WINDOW_BG:
+      case WINDOW_BG: {
         wm->SetBackground(m_base_surface, m_output_index);
-        if (m_activation_area.x || m_activation_area.y ||
-            m_activation_area.width || m_activation_area.height) {
-          wm->SetActivationArea(m_activation_area.x, m_activation_area.y,
-                                m_activation_area.width,
-                                m_activation_area.height, m_output_index);
-        }
+        // The activation area is the region the compositor reserves for app
+        // content on the background; the AGL shell wants it set before `ready`.
+        // An unset (0x0) area defaults to the full view extent so the whole
+        // surface is usable rather than a zero-size region the compositor
+        // ignores.
+        const auto aw = m_activation_area.width != 0
+                            ? m_activation_area.width
+                            : static_cast<uint32_t>(m_geometry.width);
+        const auto ah = m_activation_area.height != 0
+                            ? m_activation_area.height
+                            : static_cast<uint32_t>(m_geometry.height);
+        wm->SetActivationArea(m_activation_area.x, m_activation_area.y, aw, ah,
+                              m_output_index);
         break;
+      }
       case WINDOW_PANEL_TOP:
         wm->SetPanel(m_base_surface, ivi::SurfaceRole::kPanelTop,
                      m_output_index);

@@ -71,7 +71,8 @@
 #cmakedefine01 BUILD_CRASH_HANDLER
 #if BUILD_CRASH_HANDLER
 static constexpr char kSentryEnvDefault[] = "@CMAKE_BUILD_TYPE@";
-static constexpr char kCrashpadBinaryPath[] = "@CRASHPAD_BINARY_DIR@/crashpad_handler";
+static constexpr char kCrashpadBinaryPath[] =
+    "@CRASHPAD_BINARY_DIR@/crashpad_handler";
 #endif
 
 #cmakedefine01 BUILD_ACCESSIBILITY
@@ -137,7 +138,13 @@ constexpr char kSystemIcudtl[] = "share/flutter/icudtl.dat";
 
 // Install path constants
 static constexpr char kApplicationName[] = "@EXE_OUTPUT_NAME@";
-static constexpr char kXdgApplicationDir[] = "." "@EXE_OUTPUT_NAME@";
+// Default Wayland/xdg app_id when [global].app_id is unset. Reverse-DNS so it
+// matches an AGL compositor's per-app config (which keys placement on app_id);
+// distinct from kApplicationName (the binary name, used for install paths).
+static constexpr char kDefaultAppId[] = "com.toyotaconnected.homescreen";
+static constexpr char kXdgApplicationDir[] =
+    "."
+    "@EXE_OUTPUT_NAME@";
 static constexpr char kXdgConfigDir[] = ".config";
 
 // DLT Logging
@@ -194,7 +201,6 @@ static constexpr std::array<EGLint, 27> kEglConfigAttribs = {{
     // clang-format on
 }};
 
-
 static constexpr std::array<EGLint, 13> kEglConfigAttribsFallBack = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -209,7 +215,6 @@ static constexpr std::array<EGLint, 13> kEglConfigAttribsFallBack = {{
 }};
 #endif  // IVI_HAVE_EGL
 
-
 // All vkCreate* functions take an optional allocator. For now, we select the
 // default allocator by passing in a null pointer, and we highlight the argument
 // by using the VKALLOC constant.
@@ -218,4 +223,4 @@ constexpr struct VkAllocationCallbacks* VKALLOC = nullptr;
 #cmakedefine01 ENV32BIT
 #cmakedefine01 ENV64BIT
 
-#endif //CONFIG_COMMON_H_
+#endif  // CONFIG_COMMON_H_
