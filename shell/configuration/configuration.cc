@@ -136,6 +136,12 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
   // primary (implicit view / vsync driver), the rest become added views on
   // their own connectors.
   if (const auto node = v->at_path("output"); node.is_array()) {
+    // A later config layer's [[view.output]] replaces the prior layer's extra
+    // outputs, it does not append to them: the bundle's own config.toml is the
+    // base layer and the master --config overrides it, so without clearing here
+    // the two arrays would concatenate (each element past the first
+    // push_backs).
+    instance.view.additional_outputs.clear();
     bool first = true;
     for (auto&& element : *node.as_array()) {
       const auto* t = element.as_table();
@@ -152,6 +158,9 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
       }
     }
   } else if (const auto* t = node.as_table()) {
+    // A single [view.output] in a later layer likewise supersedes any array a
+    // prior layer set — this view binds one output, not that array plus one.
+    instance.view.additional_outputs.clear();
     ParseOutputMatch(*t, instance.view.output);
   }
   if (v->at_path("width").is_integer()) {
