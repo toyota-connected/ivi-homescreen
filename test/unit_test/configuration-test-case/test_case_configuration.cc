@@ -224,6 +224,35 @@ TEST(HomescreenConfigurationGetTomlConfig, Output) {
 }
 
 /****************************************************************
+Test Case Name.Test Name： HomescreenConfigurationGetTomlConfig_OutputArray
+Use Case Name: Initialization
+Test Summary：A [[view.output]] array binds the first entry as the primary and
+the rest as additional_outputs. Applying the same file twice to one Config (as
+a bundle config.toml layered under a master --config) must replace the extras,
+not concatenate them.
+***************************************************************/
+TEST(HomescreenConfigurationGetTomlConfig, OutputArray) {
+  Configuration::Config config{};
+  std::filesystem::path config_toml_path = kSourceRoot;
+  config_toml_path /= "files/GetTomlConfig_OutputArray.toml";
+
+  Configuration::get_toml_config(config_toml_path.c_str(), config);
+
+  // Primary = first entry; one extra = second entry.
+  EXPECT_EQ("DP-1", config.view.output.wl_name.value_or(""));
+  ASSERT_EQ(1u, config.view.additional_outputs.size());
+  EXPECT_EQ("HDMI-1",
+            config.view.additional_outputs.front().wl_name.value_or(""));
+
+  // Layering a second time (a later config layer) replaces the extras rather
+  // than appending — the count stays 1, it does not grow to 2.
+  Configuration::get_toml_config(config_toml_path.c_str(), config);
+  ASSERT_EQ(1u, config.view.additional_outputs.size());
+  EXPECT_EQ("HDMI-1",
+            config.view.additional_outputs.front().wl_name.value_or(""));
+}
+
+/****************************************************************
 Test Case Name.Test Name： HomescreenConfigurationParseConfig_MultiView
 Use Case Name: Initialization
 Test Summary：A --config master file yields one Config per [[view]], each with
