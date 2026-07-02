@@ -115,6 +115,18 @@ FlutterView::FlutterView(Configuration::Config config,
   // in too; their IDisplay is not a wayland Display, so the cast is null and we
   // skip (those backends render without a WaylandWindow).
   if (auto* wl = dynamic_cast<Display*>(display.get())) {
+    // A [[view.output]] array binds one engine to several outputs, but the
+    // one-engine -> N-outputs present router is drm-kms-egl only (the Wayland
+    // backend has no per-output surface / present_view path). Drive the primary
+    // output here and say so, rather than dropping the rest silently: use one
+    // view per output (a bundle each) on Wayland, or the DRM backend for a
+    // single engine spanning outputs.
+    if (!m_config.view.additional_outputs.empty()) {
+      spdlog::warn(
+          "[FlutterView] additional [[view.output]] entries are ignored: the "
+          "Wayland backend drives one output per view. Use one view/bundle per "
+          "output, or the drm-kms-egl backend for one engine across outputs.");
+    }
     // Pin the view to a physical output by name when [view.output] names one:
     // OutputManager applies the view's OutputMatch through the Display's
     // IOutputProvider (the same resolver the DRM path uses for connectors) and
