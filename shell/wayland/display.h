@@ -56,10 +56,14 @@
 #include <wl/ime/backend.hpp>
 #include <wl/ime/text_input_receiver.hpp>
 
+#include <unordered_map>
+#include <utility>
+
 #include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
 #include "display/output_provider.h"
+#include "engine.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
@@ -528,8 +532,20 @@ class Display : public IDisplay,
   struct touch_ {
     struct wl_touch* touch;
     struct touch_event event;
-    wl_fixed_t surface_x[kMaxTouchFinger];
-    wl_fixed_t surface_y[kMaxTouchFinger];
+    // Active contacts: wl_touch id -> last surface position. Replaces the
+    // former fixed surface_x/surface_y[kMaxTouchFinger] arrays: compositor
+    // assigned touch ids are only guaranteed unique per session, not bounded
+    // by kMaxTouchFinger, so indexing an array by id was an out-of-bounds
+    // write waiting for an id >= 10 (finger churn on a 10-slot controller,
+    // or any >10-slot panel). The map also lets wl_touch.cancel terminate
+    // every active contact instead of just device 0.
+    std::unordered_map<int32_t, std::pair<wl_fixed_t, wl_fixed_t>> points;
+    // Per-contact updates accumulated since the last wl_touch.frame. The
+    // frame event is the protocol's atomicity boundary: everything between
+    // two frames is one logically-simultaneous hardware scan, so it is
+    // handed to the engine as one batch (one lock, one main-loop wake, one
+    // FlutterEngineSendPointerEvent group).
+    std::vector<Engine::TouchEvent> frame;
     uint32_t state;
     FlutterPointerPhase phase;
   } m_touch{};
@@ -985,6 +1001,31 @@ class Display : public IDisplay,
    * @note Do nothing
    */
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
+
+  /**
+   * @brief Hand the touch updates accumulated since the last wl_touch.frame
+   * to the active engine as one batch, then reset the accumulator. No-op
+   * when nothing is pending.
+   * @param[in] d Display instance
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void touch_flush_frame(Display* d);
+
+  /**
+   * @brief Append one contact update to the pending touch frame, flushing
+   * early if the batch would exceed kMaxPointerEvent. wl_touch.frame is the
+   * normal flush boundary, but a broken or hostile compositor could stream
+   * down/motion without ever sending it; the cap keeps the accumulator from
+   * growing unbounded (parity with the drm/software seats).
+   * @param[in] d Display instance
+   * @param[in] ev Contact update to queue
+   * @return void
+   * @relation
+   * wayland, flutter
+   */
+  static void touch_push(Display* d, const Engine::TouchEvent& ev);
 
   static const wl_touch_listener touch_listener;
 };
