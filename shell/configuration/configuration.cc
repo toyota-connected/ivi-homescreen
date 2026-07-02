@@ -504,7 +504,12 @@ std::vector<Configuration::Config> Configuration::parse_config(
     get_cli_override(d.bundle_path, cfg, cli_config);
 
     if (cfg.view.window_type.empty()) {
-      cfg.view.window_type = "NORMAL";
+      // The AGL shell requires a real surface role (BG / PANEL_*); NORMAL has
+      // no AGL window-management meaning, so an unset type would never be
+      // shown. Default an AGL view to the background role; every other shell
+      // keeps NORMAL.
+      cfg.view.window_type =
+          (cfg.view.shell.value_or("") == "agl") ? "BG" : "NORMAL";
     }
     if (cfg.view.width == 0) {
       cfg.view.width = kDefaultViewWidth;
@@ -516,7 +521,7 @@ std::vector<Configuration::Config> Configuration::parse_config(
       cfg.view.pixel_ratio = kDefaultPixelRatio;
     }
     if (cfg.app_id.empty()) {
-      cfg.app_id = kApplicationName;
+      cfg.app_id = kDefaultAppId;
     }
 
     // An omitted/zero activation area covers the full view extent. TOML has no
