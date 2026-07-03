@@ -32,6 +32,11 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/emb-cross-aarch64-none-linux-gnu
   # emb cross sandbox (toolchain + sysroot) for the publish phase — cached.
   EMB_WS: ${{ github.workspace }}/.emb-ws
+  # Content-addressed store cache (oras/OCI): the publish phase pushes the
+  # resolved sysroot base + toolchain here, and the build phase pulls them so
+  # it resolves as a cache hit instead of re-downloading + re-extracting. Repo
+  # defaults to `emb-cache`, so entries land at <registry>/emb-cache:<tag>.
+  EMB_CACHE_REGISTRY: ghcr.io/${{ github.repository_owner }}
 
 jobs:
   publish:
@@ -73,6 +78,17 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # oras uploads the resolved store entries to the OCI cache in the publish
+      # step below (EMB_CACHE_REGISTRY). Pinned; installed to /usr/local/bin.
+      - name: Install + log in oras
+        run: |
+          ORAS_VERSION=1.2.0
+          curl -fsSL \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xzf - -C /usr/local/bin oras
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # rpi5-<os> is the canonical publish target: the sysroot (and thus the
       # image) is model-independent, so one image per OS serves rpi4/zero-2w
@@ -128,16 +144,28 @@ jobs:
       - name: Fetch emb
         run: git clone --depth 1 "$EMB_REPO" emb_cli
 
+      # The sysroot base + toolchain are pulled from the OCI cache below, so the
+      # build normally does no extraction. These tools are the miss fallback:
       # emb_cli extracts a sysroot rootlessly when sfdisk (fdisk) and debugfs
       # (e2fsprogs) are present; without them it falls back to `sudo losetup`,
-      # which a non-privileged container can't run (no loop devices) and which
-      # fails to even spawn here. The build should hit the baked /emb sysroot as
-      # a cache hit and not extract at all, but on a cache miss it re-extracts —
-      # keep that path rootless so it succeeds instead of dying on losetup.
+      # which a non-privileged container can't run (no loop devices). Keep the
+      # fallback rootless so a cache miss re-extracts instead of dying.
       - name: Ensure rootless sysroot-extract tools
         run: |
           apt-get update
           apt-get install -y --no-install-recommends fdisk e2fsprogs
+
+      # oras pulls the resolved store entries (sysroot base + toolchain) from the
+      # OCI cache in the Build step (EMB_CACHE_REGISTRY), so the resolve is a
+      # cache hit. Root in-container; the image ships curl.
+      - name: Install + log in oras
+        run: |
+          ORAS_VERSION=1.2.0
+          curl -fsSL \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+            | tar -xzf - -C /usr/local/bin oras
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
       # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
