@@ -179,7 +179,9 @@ jobs:
           eval "$(../emb_cli/bootstrap.sh --shellenv)"
           emb --version
           start=$SECONDS
-          emb cross . \
+          # -v streams the toolchain/compile output line-prefixed into the log
+          # (tee'd below) so every build leaves a full record, not just spinners.
+          emb -v cross . \
             --target "${{ matrix.board }}-${{ matrix.pios }}" \
             --build --backend "${{ matrix.backend }}" \
             --no-verify -w /emb | tee /tmp/emb-build.log
