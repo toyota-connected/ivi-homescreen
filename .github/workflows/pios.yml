@@ -30,7 +30,8 @@ concurrency:
 env:
   EMB_REPO: https://github.com/toyota-connected/emb_cli.git
   IMAGE: ghcr.io/${{ github.repository_owner }}/emb-cross-aarch64-none-linux-gnu
-  # emb cross sandbox (toolchain + sysroot) for the publish phase — cached.
+  # emb cross workspace (-w) for the publish phase. The heavy artifacts live in
+  # the content-addressed store (cached separately), not here.
   EMB_WS: ${{ github.workspace }}/.emb-ws
   # Content-addressed store cache (oras/OCI): the publish phase pushes the
   # resolved sysroot base + toolchain here, and the build phase pulls them so
@@ -66,13 +67,19 @@ jobs:
       - name: Fetch emb
         run: git clone --depth 1 "$EMB_REPO" emb_cli
 
-      - name: Cache cross sandbox (toolchain + sysroot)
+      # Cache emb's content-addressed store, not the -w workspace: the workspace
+      # only holds symlinks into the store, so caching it restored dangling
+      # links and re-resolved. Caching store/ (the extracted sysroot base +
+      # toolchain trees, keyed by the sysroot inputs) makes the resolve a hit.
+      # store/ only — not all of ~/.cache/emb — to skip the multi-GB image/CAS
+      # downloads and stay under the repo cache limit.
+      - name: Cache emb store (extracted sysroot + toolchain)
         uses: actions/cache@v5
         with:
-          path: ${{ env.EMB_WS }}
-          key: emb-xc-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml', 'emb_cli/boards/raspberry-pi.emb.yaml') }}
+          path: ~/.cache/emb/store
+          key: emb-store-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml', 'emb_cli/boards/raspberry-pi.emb.yaml') }}
           restore-keys: |
-            emb-xc-${{ matrix.pios }}-
+            emb-store-${{ matrix.pios }}-
 
       - name: Log in to GHCR
         run: |
