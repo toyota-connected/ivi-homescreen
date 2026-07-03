@@ -120,6 +120,11 @@ class FlutterView {
    */
   [[nodiscard]] Backend* GetBackend() const { return m_backend.get(); }
 
+  // Re-send FlutterEngineDisplay metadata (physical px + effective pixel
+  // ratio) to a running engine. Called by WaylandWindow::ApplyScale when the
+  // surface scale changes; safe no-op before the engine runs.
+  void UpdateDisplayMetadata() const;
+
   /**
    * @brief Get an index of flutter views
    * @return uint64_t
