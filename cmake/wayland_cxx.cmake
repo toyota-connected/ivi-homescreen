@@ -28,7 +28,7 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 
 # Protocol XML base — xdg-shell + presentation-time ship with wayland-protocols.
-pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.22)
+pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.20)
 pkg_get_variable(_wlcxx_proto_base wayland-protocols pkgdatadir)
 set(IVI_WL_PROTOCOLS_BASE "${_wlcxx_proto_base}" CACHE INTERNAL "wayland-protocols pkgdatadir")
 
@@ -154,6 +154,21 @@ function(ivi_wayland_protocols target)
     # presentation-time — always (IVsyncProvider); no shipped header -> emit tables.
     wayland_cxx_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/presentation_time_client.hpp TARGET ${target})
+
+    # viewporter — always (per-surface scaling; stable since wayland-protocols
+    # 1.4, so present on Dunfell's 1.20). No shipped header -> emit tables.
+    wayland_cxx_generate(PROTOCOL
+        "${IVI_WL_PROTOCOLS_BASE}/stable/viewporter/viewporter.xml"
+        MODE client-header EMIT_INTERFACE_TABLES
+        OUTPUT wayland-protocols/viewporter_client.hpp TARGET ${target})
+
+    # fractional-scale-v1 — always. Vendored: the XML only ships with
+    # wayland-protocols >= 1.31, which Dunfell/Ubuntu-20.04 hosts predate.
+    # Both protocols are gated at runtime on the compositor advertising the
+    # global, so generating unconditionally costs nothing on old stacks.
+    wayland_cxx_generate(PROTOCOL "${_loc}/fractional-scale-v1.xml"
+        MODE client-header EMIT_INTERFACE_TABLES
+        OUTPUT wayland-protocols/fractional_scale_v1_client.hpp TARGET ${target})
 
     # text-input (IME) — the build-selected backend's client header. The
     # wl::ime backend header (<wl/ime/backends/text_input_v{1,3}.hpp>) includes

@@ -27,6 +27,9 @@
 
 #include "config/common.h"
 
+#include "fractional_scale_v1_client.hpp"
+#include "viewporter_client.hpp"
+
 #include "asio/post.hpp"
 #include "engine.h"
 #include "window.h"
@@ -253,6 +256,21 @@ void Display::HandleGlobal(wl::CRegistry& reg,
         wl_registry_bind(registry, name, &wl_seat_interface,
                          std::min(static_cast<uint32_t>(5), version)));
     wl_seat_add_listener(d->m_seat, &seat_listener, d);
+  } else if (iface ==
+             viewporter::client::wp_viewporter_traits::interface_name) {
+    d->m_viewporter = static_cast<wl_proxy*>(wl_registry_bind(
+        registry, name, &viewporter::client::wp_viewporter_traits::wl_iface(),
+        std::min(viewporter::client::wp_viewporter_traits::version, version)));
+  } else if (iface ==
+             fractional_scale_v1::client::
+                 wp_fractional_scale_manager_v1_traits::interface_name) {
+    d->m_fractional_scale_manager = static_cast<wl_proxy*>(wl_registry_bind(
+        registry, name,
+        &fractional_scale_v1::client::wp_fractional_scale_manager_v1_traits::
+            wl_iface(),
+        std::min(fractional_scale_v1::client::
+                     wp_fractional_scale_manager_v1_traits::version,
+                 version)));
   }
   // zwp_text_input_manager_v3 — recorded for text_input_.Bind() after the
   // startup roundtrip (the per-seat text_input needs m_seat). If the compositor
@@ -326,6 +344,7 @@ void Display::display_handle_done(void* data,
                                   struct wl_output* /* wl_output */) {
   auto* oi = static_cast<output_info_t*>(data);
   oi->done = true;
+  oi->display->NotifyOutputScaleChanged(oi);
   oi->display->EmitOutputDone(oi);
 }
 
@@ -1019,6 +1038,52 @@ void Display::UnregisterWindow(WaylandWindow* window) {
 size_t Display::IndexOfOutput(const output_info_t* oi) const {
   for (size_t i = 0; i < m_all_outputs.size(); ++i) {
     if (m_all_outputs[i].get() == oi) {
+      return i;
+    }
+  }
+  return m_all_outputs.size();
+}
+
+void Display::NotifyOutputScaleChanged(const output_info_t* oi) {
+  const size_t idx = IndexOfOutput(oi);
+  if (idx >= m_all_outputs.size()) {
+    return;
+  }
+  const int32_t scale = GetBufferScale(static_cast<uint32_t>(idx));
+  std::vector<WaylandWindow*> snapshot;
+  {
+    std::lock_guard lock(m_windows_lock);
+    snapshot = m_windows;
+  }
+  for (auto* w : snapshot) {
+    w->OnOutputScaleChanged(idx, scale);
+  }
+}
+
+wl_proxy* Display::CreateViewport(struct wl_surface* surface) const {
+  namespace vp = viewporter::client;
+  if (m_viewporter == nullptr || surface == nullptr) {
+    return nullptr;
+  }
+  return wl_proxy_marshal_constructor(
+      m_viewporter, vp::wp_viewporter_traits::Op::GetViewport,
+      &vp::wp_viewport_traits::wl_iface(), nullptr, surface);
+}
+
+wl_proxy* Display::CreateFractionalScale(struct wl_surface* surface) const {
+  namespace fs = fractional_scale_v1::client;
+  if (m_fractional_scale_manager == nullptr || surface == nullptr) {
+    return nullptr;
+  }
+  return wl_proxy_marshal_constructor(
+      m_fractional_scale_manager,
+      fs::wp_fractional_scale_manager_v1_traits::Op::GetFractionalScale,
+      &fs::wp_fractional_scale_v1_traits::wl_iface(), nullptr, surface);
+}
+
+size_t Display::GetOutputIndexByHandle(struct wl_output* output) const {
+  for (size_t i = 0; i < m_all_outputs.size(); ++i) {
+    if (m_all_outputs[i]->output == output) {
       return i;
     }
   }
