@@ -197,6 +197,9 @@ class WaylandVulkanBackend final : public Backend {
   // callbacks run on the Flutter raster thread while init, swapchain
   // (re)creation and the one-shot blit/transfer helpers can touch the same
   // single queue from the platform thread; serialize every queue op on this.
+  // The Flutter engine's own submissions on queue_ (raster thread) take this
+  // same mutex via the vkQueue* trampolines installed by
+  // GetInstanceProcAddressCallback / QueueInterposer (issue #208).
   mutable std::mutex queue_mutex_{};
 
   bool debugUtilsSupported_{};
