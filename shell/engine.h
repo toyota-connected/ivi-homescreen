@@ -291,6 +291,11 @@ class Engine {
    * @param[in] scroll_delta_x X offset of the scroll
    * @param[in] scroll_delta_y Y offset of the scroll
    * @param[in] buttons Buttons currently pressed, if any
+   * @param[in] timestamp_us Event timestamp in microseconds in the engine
+   * clock domain (CLOCK_MONOTONIC), e.g. from zwp_input_timestamps_v1. 0 (the
+   * default) stamps the event with the arrival time instead — the historical
+   * behavior, and the fallback whenever no high-resolution source is
+   * available.
    * @return void
    * @relation
    * flutter
@@ -301,7 +306,8 @@ class Engine {
                           double y,
                           double scroll_delta_x,
                           double scroll_delta_y,
-                          int64_t buttons);
+                          int64_t buttons,
+                          uint64_t timestamp_us = 0);
 
   /**
    * @brief Coalesce touch event
@@ -341,11 +347,18 @@ class Engine {
    *
    * @param[in] events First event of the frame
    * @param[in] count Number of events in the frame
+   * @param[in] timestamp_us Shared frame timestamp in microseconds in the
+   * engine clock domain (CLOCK_MONOTONIC), e.g. from
+   * zwp_input_timestamps_v1. 0 (the default) stamps the frame with the
+   * arrival time instead — the historical behavior, and the fallback
+   * whenever no high-resolution source is available.
    * @return void
    * @relation
    * flutter
    */
-  void CoalesceTouchFrame(const TouchEvent* events, size_t count);
+  void CoalesceTouchFrame(const TouchEvent* events,
+                          size_t count,
+                          uint64_t timestamp_us = 0);
 
   /**
    * @brief Send coalesced Pointer events

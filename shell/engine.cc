@@ -678,8 +678,15 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
                                 const double y,
                                 const double scroll_delta_x,
                                 const double scroll_delta_y,
-                                const int64_t buttons) {
-  auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
+                                const int64_t buttons,
+                                const uint64_t timestamp_us) {
+  // 0 = no high-resolution source; stamp with the arrival time (the engine
+  // clock is CLOCK_MONOTONIC, so a caller-supplied kernel input timestamp in
+  // the same domain slots in directly and predates this by the input path's
+  // latency — better data for the framework's velocity tracker/resampler).
+  const auto timestamp = timestamp_us != 0
+                             ? timestamp_us
+                             : LibFlutterEngine->GetCurrentTime() / 1000;
   std::scoped_lock lock(m_pointer_mutex);
 
   FlutterPointerEvent e{};
@@ -718,7 +725,9 @@ void Engine::CoalesceTouchEvent(const FlutterPointerPhase phase,
   CoalesceTouchFrame(&e, 1);
 }
 
-void Engine::CoalesceTouchFrame(const TouchEvent* events, const size_t count) {
+void Engine::CoalesceTouchFrame(const TouchEvent* events,
+                                const size_t count,
+                                const uint64_t timestamp_us) {
   if (events == nullptr || count == 0) {
     return;
   }
@@ -727,7 +736,10 @@ void Engine::CoalesceTouchFrame(const TouchEvent* events, const size_t count) {
   // logically simultaneous (wl_touch.frame / libinput TOUCH_FRAME group one
   // hardware scan), and a shared timestamp keeps the engine's pointer
   // resampler from interpolating skew between fingers that moved together.
-  const auto timestamp = LibFlutterEngine->GetCurrentTime() / 1000;
+  // 0 = no high-resolution source; stamp with the arrival time.
+  const auto timestamp = timestamp_us != 0
+                             ? timestamp_us
+                             : LibFlutterEngine->GetCurrentTime() / 1000;
 
   std::scoped_lock lock(m_pointer_mutex);
   for (size_t i = 0; i < count; ++i) {
