@@ -32,6 +32,8 @@
 #include "task_runner.h"
 #include "wayland/display.h"
 
+#include "vulkan_queue_interposer.h"
+
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
 // TU per binary. When the drm-kms-vulkan backend is also compiled in, that
 // backend's device_caps.cc owns the single definition (it must, since the
@@ -198,6 +200,12 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
       d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
       swapchain_ = VK_NULL_HANDLE;
     }
+    // The engine has been shut down and the queue drained
+    // (vkDeviceWaitIdle above); drop the interposer registration before the
+    // queue's device — and with it the queue handle — goes away. Any
+    // stale-handle call after this point (there should be none) passes
+    // through unlocked rather than dereferencing a dead mutex mapping.
+    wayland_vulkan::QueueInterposer::UnregisterQueue(queue_);
     d().vkDestroyDevice(device_, nullptr);
   }
   if (surface_ != nullptr) {
@@ -568,6 +576,14 @@ void WaylandVulkanBackend::createLogicalDevice() {
       d().vkCreateDevice(physical_device_, &device_info, nullptr, &device_));
 
   d().vkGetDeviceQueue(device_, queue_family_index_, 0, &queue_);
+
+  // GetRenderConfig() hands queue_ to the Flutter engine, whose raster
+  // thread submits on it concurrently with this backend's platform-thread
+  // present/transfer paths. Register the queue so the interposed vkQueue*
+  // entry points handed out by GetInstanceProcAddressCallback serialize the
+  // engine's submissions on the same queue_mutex_ the backend already
+  // takes. See issue #208.
+  wayland_vulkan::QueueInterposer::RegisterQueue(queue_, &queue_mutex_);
 }
 
 bool WaylandVulkanBackend::InitializeSwapChain() {
@@ -995,8 +1011,19 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
     void* /* user_data */,
     FlutterVulkanInstanceHandle instance,
     const char* procname) {
-  auto* proc =
-      d().vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname);
+  auto* vk_instance = static_cast<VkInstance>(instance);
+  // Per the embedder API contract (embedder.h,
+  // get_instance_proc_address_callback), swap out vkQueue* entry points for
+  // locking variants: the engine's raster thread and this backend's
+  // present/transfer paths share the single graphics queue, and host access
+  // to a VkQueue must be externally synchronized. Also shims
+  // vkGetDeviceProcAddr so device-level resolution (Skia VulkanProcTable
+  // path) is covered. See issue #208.
+  if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
+          vk_instance, procname, d().vkGetInstanceProcAddr)) {
+    return reinterpret_cast<void*>(interposed);
+  }
+  auto* proc = d().vkGetInstanceProcAddr(vk_instance, procname);
   return reinterpret_cast<void*>(proc);
 }
 
