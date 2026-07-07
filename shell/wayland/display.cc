@@ -144,6 +144,9 @@ Display::~Display() {
   text_input_.Release();
   // Send wl_keyboard teardown + free the handler's xkb objects/timerfd.
   keyboard_.Reset();
+  // Destroy the zwp_input_timestamps_v1 subscriptions + manager while the
+  // display connection is still alive.
+  input_timestamps_.Reset();
 
   // The shells (xdg/agl/ivi/simple) and the vsync provider own their protocol
   // objects and tear them down in their own destructors.
@@ -278,8 +281,13 @@ void Display::HandleGlobal(wl::CRegistry& reg,
   else if (iface == "zwp_text_input_manager_v3") {
     d->text_input_.Record(name, version);
   }
-  // wp_presentation is owned by the vsync provider.
-  else if (d->m_vsync.TryBindGlobal(registry, name, interface, version)) {
+  // wp_presentation is owned by the vsync provider;
+  // zwp_input_timestamps_manager_v1 by the input-timestamps provider (which
+  // subscribes any devices the seat has already announced). Short-circuit ||:
+  // each global is offered to at most one owner.
+  else if (d->m_vsync.TryBindGlobal(registry, name, interface, version) ||
+           d->input_timestamps_.TryBindGlobal(registry, name, interface,
+                                              version)) {
   }
   // Everything else: offer the global to each compositor-protocol shell
   // (xdg/agl/ivi/simple); the first that claims it wins.
@@ -390,8 +398,12 @@ void Display::seat_handle_capabilities(void* data,
       spdlog::debug("Pointer Present");
       d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
       wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
+      d->input_timestamps_.AttachPointer(d->m_pointer.wl_pointer);
     } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) &&
                d->m_pointer.wl_pointer) {
+      // Detach (destroys the subscription proxy) before releasing the device
+      // it references.
+      d->input_timestamps_.AttachPointer(nullptr);
       wl_pointer_release(d->m_pointer.wl_pointer);
       d->m_pointer.wl_pointer = nullptr;
     }
@@ -422,7 +434,11 @@ void Display::seat_handle_capabilities(void* data,
       d->m_touch.touch = wl_seat_get_touch(seat);
       wl_touch_set_user_data(d->m_touch.touch, d);
       wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
+      d->input_timestamps_.AttachTouch(d->m_touch.touch);
     } else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch.touch) {
+      // Detach (destroys the subscription proxy) before releasing the device
+      // it references.
+      d->input_timestamps_.AttachTouch(nullptr);
       wl_touch_release(d->m_touch.touch);
       d->m_touch.touch = nullptr;
     }
@@ -487,6 +503,11 @@ void Display::pointer_handle_motion(void* data,
                                     wl_fixed_t sx,
                                     wl_fixed_t sy) {
   auto* d = static_cast<Display*>(data);
+  // Take BEFORE the mask gate: motion carries a wl timestamp, so a
+  // zwp_input_timestamps_v1 stamp may be pending for it. Consuming it even
+  // when the event is dropped keeps a stale stamp from attaching to a later
+  // event.
+  const uint64_t ts_us = d->input_timestamps_.TakePointerTimeUs();
 
   if (!d->m_wayland_event_mask.pointer_motion) {
     d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
@@ -497,7 +518,7 @@ void Display::pointer_handle_motion(void* data,
           pointerButtonStatePressed(&d->m_pointer) ? kMove : kHover;
       d->m_active_engine->CoalesceMouseEvent(
           kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
-          d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+          d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons, ts_us);
     }
   }
 }
@@ -509,6 +530,8 @@ void Display::pointer_handle_button(void* data,
                                     uint32_t button,
                                     uint32_t state) {
   auto* d = static_cast<Display*>(data);
+  // Take before the mask gate (see pointer_handle_motion).
+  const uint64_t ts_us = d->input_timestamps_.TakePointerTimeUs();
   if (!d->m_wayland_event_mask.pointer_buttons) {
     d->m_pointer.event.button = button;
     d->m_pointer.event.state = state;
@@ -531,7 +554,7 @@ void Display::pointer_handle_button(void* data,
     if (d->m_active_engine) {
       d->m_active_engine->CoalesceMouseEvent(
           kFlutterPointerSignalKindNone, phase, d->m_pointer.event.surface_x,
-          d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons);
+          d->m_pointer.event.surface_y, 0.0, 0.0, d->m_pointer.buttons, ts_us);
     }
   }
 }
@@ -541,8 +564,10 @@ void Display::pointer_handle_axis(void* data,
                                   uint32_t time,
                                   uint32_t axis,
                                   wl_fixed_t value) {
-  if (auto* d = static_cast<Display*>(data);
-      !d->m_wayland_event_mask.pointer_axis) {
+  auto* d = static_cast<Display*>(data);
+  // Take before the mask gate (see pointer_handle_motion).
+  const uint64_t ts_us = d->input_timestamps_.TakePointerTimeUs();
+  if (!d->m_wayland_event_mask.pointer_axis) {
     d->m_pointer.event.time = time;
     d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
 
@@ -551,7 +576,7 @@ void Display::pointer_handle_axis(void* data,
           kFlutterPointerSignalKindScroll, FlutterPointerPhase::kMove,
           d->m_pointer.event.surface_x, d->m_pointer.event.surface_y,
           d->m_pointer.event.axes[1].value, d->m_pointer.event.axes[0].value,
-          d->m_pointer.buttons);
+          d->m_pointer.buttons, ts_us);
     }
   }
 }
@@ -563,10 +588,15 @@ void Display::pointer_handle_axis_source(void* /* data */,
                                          struct wl_pointer* /* wl_pointer */,
                                          uint32_t /* axis_source */) {}
 
-void Display::pointer_handle_axis_stop(void* /* data */,
+void Display::pointer_handle_axis_stop(void* data,
                                        struct wl_pointer* /* wl_pointer */,
                                        uint32_t /* time */,
-                                       uint32_t /* axis */) {}
+                                       uint32_t /* axis */) {
+  // axis_stop carries a wl timestamp, so a high-resolution stamp may be
+  // pending for it even though the event itself is not forwarded; discard it
+  // so it can't attach to the next motion/button/axis.
+  (void)static_cast<Display*>(data)->input_timestamps_.TakePointerTimeUs();
+}
 
 void Display::pointer_handle_axis_discrete(void* /* data */,
                                            struct wl_pointer* /* wl_pointer */,
@@ -791,6 +821,9 @@ void Display::touch_handle_down(void* data,
                                 wl_fixed_t x_w,
                                 wl_fixed_t y_w) {
   auto* d = static_cast<Display*>(data);
+  // Take FIRST: the pending high-res stamp belongs to this event, not to the
+  // frame a possible engine-switch flush below sends out.
+  const uint64_t ts_us = d->input_timestamps_.TakeTouchTimeUs();
 
   // Contacts must not straddle engines within one batch: if a new contact
   // lands on a different surface, flush what belongs to the previous engine
@@ -803,8 +836,10 @@ void Display::touch_handle_down(void* data,
   d->m_touch_engine = engine;
 
   d->m_touch.points[id] = {x_w, y_w};
-  touch_push(d, {FlutterPointerPhase::kDown, wl_fixed_to_double(x_w),
-                 wl_fixed_to_double(y_w), id});
+  touch_push(d,
+             {FlutterPointerPhase::kDown, wl_fixed_to_double(x_w),
+              wl_fixed_to_double(y_w), id},
+             ts_us);
 }
 
 void Display::touch_handle_up(void* data,
@@ -813,6 +848,9 @@ void Display::touch_handle_up(void* data,
                               uint32_t /* time */,
                               int32_t id) {
   auto* d = static_cast<Display*>(data);
+  // Take before the unknown-id early return: up carries a wl timestamp, so a
+  // pending stamp must be consumed even for dropped events.
+  const uint64_t ts_us = d->input_timestamps_.TakeTouchTimeUs();
 
   // wl_touch.up carries no coordinates; reuse the contact's last position.
   // Unknown id (no prior down seen, e.g. attach mid-session) is dropped —
@@ -821,8 +859,10 @@ void Display::touch_handle_up(void* data,
   if (it == d->m_touch.points.end()) {
     return;
   }
-  touch_push(d, {kUp, wl_fixed_to_double(it->second.first),
-                 wl_fixed_to_double(it->second.second), id});
+  touch_push(d,
+             {kUp, wl_fixed_to_double(it->second.first),
+              wl_fixed_to_double(it->second.second), id},
+             ts_us);
   d->m_touch.points.erase(it);
 }
 
@@ -833,14 +873,18 @@ void Display::touch_handle_motion(void* data,
                                   wl_fixed_t x_w,
                                   wl_fixed_t y_w) {
   auto* d = static_cast<Display*>(data);
+  // Take before the unknown-id early return (see touch_handle_up).
+  const uint64_t ts_us = d->input_timestamps_.TakeTouchTimeUs();
 
   const auto it = d->m_touch.points.find(id);
   if (it == d->m_touch.points.end()) {
     return;
   }
   it->second = {x_w, y_w};
-  touch_push(d, {FlutterPointerPhase::kMove, wl_fixed_to_double(x_w),
-                 wl_fixed_to_double(y_w), id});
+  touch_push(d,
+             {FlutterPointerPhase::kMove, wl_fixed_to_double(x_w),
+              wl_fixed_to_double(y_w), id},
+             ts_us);
 }
 
 void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
@@ -855,6 +899,10 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   // entry in the framework. Cancel each contact at its last known position
   // (the previous code cancelled only device 0, at the *mouse* position).
   d->m_touch.frame.clear();  // pending updates for this session are moot
+  // The synthesized cancels have no hardware moment; drop any latched
+  // high-res stamp so the flush uses arrival time (cancel itself carries no
+  // wl timestamp, so no stamp is pending for it).
+  d->m_touch.frame_time_us = 0;
   for (const auto& [id, pos] : d->m_touch.points) {
     d->m_touch.frame.push_back({kCancel, wl_fixed_to_double(pos.first),
                                 wl_fixed_to_double(pos.second), id});
@@ -874,12 +922,21 @@ void Display::touch_flush_frame(Display* d) {
   }
   if (d->m_touch_engine) {
     d->m_touch_engine->CoalesceTouchFrame(d->m_touch.frame.data(),
-                                          d->m_touch.frame.size());
+                                          d->m_touch.frame.size(),
+                                          d->m_touch.frame_time_us);
   }
   d->m_touch.frame.clear();
+  d->m_touch.frame_time_us = 0;
 }
 
-void Display::touch_push(Display* d, const Engine::TouchEvent& ev) {
+void Display::touch_push(Display* d,
+                         const Engine::TouchEvent& ev,
+                         const uint64_t ts_us) {
+  // Latch the frame's shared stamp from the first contact event that carried
+  // one (contacts in a frame are one hardware scan; see touch_.frame_time_us).
+  if (d->m_touch.frame_time_us == 0) {
+    d->m_touch.frame_time_us = ts_us;
+  }
   d->m_touch.frame.push_back(ev);
   // wl_touch.frame is the normal flush boundary, but the protocol can't force
   // a compositor to send it; cap the batch so a stream without frame markers
