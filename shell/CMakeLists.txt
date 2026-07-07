@@ -69,6 +69,8 @@ if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
             wayland/shell/shells.cc
             # wp_presentation vsync provider (scanner presentation-time C++).
             vsync/wayland_vsync_provider.cc
+            # zwp_input_timestamps_v1 provider (scanner input-timestamps C++).
+            wayland/input_timestamps.cc
     )
     if (ENABLE_XDG_CLIENT OR ENABLE_AGL_SHELL_CLIENT)
         target_sources(${PROJECT_NAME} PRIVATE wayland/shell/xdg_shell.cc)
