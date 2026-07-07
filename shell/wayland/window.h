@@ -21,6 +21,7 @@
 #include <string>
 
 #include "backend/backend.h"
+#include "display/scale_policy.h"
 #include "wayland/shell/wayland_shell.h"
 
 // workaround for Wayland macro not compiling in C++
@@ -167,7 +168,13 @@ class WaylandWindow {
   struct wl_surface* m_base_surface{};
 
   // --- surface scaling -------------------------------------------------
-  // Current effective scale; buffer size is round(logical * m_scale).
+  // Current scale in 1/120 units — the source of truth (wp_fractional_scale
+  // delivers it directly; integer wl_output.scale N maps to N*120). Buffer
+  // size is ScalePolicy::ToBuffer(logical, m_scale_120): exact integer
+  // round-half-up, the project's single normative rounding.
+  int32_t m_scale_120{ivi::ScalePolicy::kUnityScale120};
+  // Derived double (m_scale_120 / 120) for the FP-domain consumers: engine
+  // pixel ratio, pointer scale, and the integer buffer_scale fallback.
   double m_scale{1.0};
   // wp_viewport for m_base_surface (null without wp_viewporter). With a
   // viewport the buffer scale stays 1 and set_destination declares the
@@ -192,15 +199,16 @@ class WaylandWindow {
   [[nodiscard]] int32_t PhysWidth() const;
   [[nodiscard]] int32_t PhysHeight() const;
 
-  // Single entry point for scale changes from any source. Early-outs when
-  // unchanged; otherwise re-declares the surface mapping (viewport
-  // destination or integer buffer scale), resizes the backend to physical
-  // pixels, and pushes pixel-ratio / pointer-scale / display metadata to
-  // the engine and view.
-  void ApplyScale(double scale);
+  // Single entry point for scale changes from any source, in 1/120 units.
+  // Early-outs when unchanged; otherwise re-declares the surface mapping
+  // (viewport destination or integer buffer scale), resizes the backend to
+  // physical pixels, and pushes pixel-ratio / pointer-scale / display
+  // metadata to the engine and view.
+  void ApplyScale(int32_t scale_120);
 
-  // Max wl_output scale over m_entered_outputs (m_output_index when empty).
-  [[nodiscard]] double BestOutputScale() const;
+  // Max wl_output scale over m_entered_outputs (m_output_index when empty),
+  // expressed in 1/120 units (integer scale N -> N*120).
+  [[nodiscard]] int32_t BestOutputScale120() const;
   // Non-owning. The backend (Backend) is owned by the FlutterView that created
   // this window and outlives it; the ctor receives a raw Backend*. Storing it
   // in a shared_ptr here would create a SECOND, independent ownership of the
