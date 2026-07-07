@@ -17,6 +17,7 @@
 #include "logging/logging.h"
 
 #include <cassert>
+#include <cmath>
 #include <memory>
 #include <utility>
 
@@ -157,7 +158,7 @@ FlutterView::FlutterView(Configuration::Config config,
         m_config.view.activation_area_x, m_config.view.activation_area_y,
         m_config.view.activation_area_width,
         m_config.view.activation_area_height, m_backend.get(),
-        m_config.view.ivi_surface_id.value_or(0));
+        m_config.view.ivi_surface_id.value_or(0), this);
   }
 #endif
 
@@ -401,12 +402,25 @@ void FlutterView::Initialize() {
     height =
         static_cast<int32_t>(m_config.view.height.value_or(kDefaultViewHeight));
   }
-  display.width = static_cast<size_t>(width);
-  display.height = static_cast<size_t>(height);
-  display.device_pixel_ratio = m_flutter_engine->GetPixelRatio();
+  // DRM/software report native mode dims (already physical, scale 1); a
+  // Wayland window reports logical dims — convert with its surface scale so
+  // Flutter sees the display in physical pixels (issue #150).
+  double scale = 1.0;
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  if (m_wayland_window) {
+    scale = m_wayland_window->GetScale();
+  }
+#endif
+  display.width = static_cast<size_t>(std::lround(width * scale));
+  display.height = static_cast<size_t>(std::lround(height * scale));
+  display.device_pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) * scale;
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
+  spdlog::info("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
+               width, height, display.width, display.height,
+               display.device_pixel_ratio);
 
   // Update for Binary Messenger
   m_state->engine_state->flutter_engine = m_flutter_engine->GetFlutterEngine();
@@ -474,6 +488,37 @@ void FlutterView::Initialize() {
 #endif
 
   SPDLOG_DEBUG("({}) Engine running...", m_index);
+}
+
+void FlutterView::UpdateDisplayMetadata() const {
+  // Only the Wayland path has a runtime scale source; DRM/software report
+  // native mode dimensions once at startup and never rescale.
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  if (!m_wayland_window || !m_flutter_engine ||
+      !m_flutter_engine->IsRunning()) {
+    return;
+  }
+  const auto [width, height] = m_wayland_window->GetSize();
+  const double scale = m_wayland_window->GetScale();
+
+  FlutterEngineDisplay display{};
+  display.struct_size = sizeof(FlutterEngineDisplay);
+  display.display_id = 1;
+  display.single_display = true;
+  display.refresh_rate =
+      m_display->GetRefreshRate(m_wayland_window->GetOutputIndex());
+  display.width = static_cast<size_t>(std::lround(width * scale));
+  display.height = static_cast<size_t>(std::lround(height * scale));
+  display.device_pixel_ratio =
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) * scale;
+
+  LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
+                                        kFlutterEngineDisplaysUpdateTypeStartup,
+                                        &display, 1);
+  spdlog::debug("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
+                width, height, display.width, display.height,
+                display.device_pixel_ratio);
+#endif
 }
 
 void FlutterView::RunTasks() {

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <set>
 #include <string>
 
 #include "backend/backend.h"
@@ -30,9 +31,13 @@
 
 class Backend;
 
+struct wl_proxy;
+
 class Display;
 
 class Engine;
+
+class FlutterView;
 
 class WaylandWindow {
  public:
@@ -63,7 +68,8 @@ class WaylandWindow {
                 uint32_t activation_area_width,
                 uint32_t activation_area_height,
                 Backend* backend,
-                uint32_t ivi_surface_id);
+                uint32_t ivi_surface_id,
+                FlutterView* view = nullptr);
 
   ~WaylandWindow();
 
@@ -127,12 +133,25 @@ class WaylandWindow {
     return std::pair<int32_t, int32_t>{m_geometry.width, m_geometry.height};
   }
 
+  // Effective surface scale: buffer pixels per surface-local (logical) unit.
+  // Fractional when the compositor speaks wp_fractional_scale_v1, otherwise
+  // the integer wl_output scale, otherwise 1.
+  [[nodiscard]] double GetScale() const { return m_scale; }
+
+  [[nodiscard]] uint32_t GetOutputIndex() const { return m_output_index; }
+
   // Called from Display::NotifyOutputResized when wl_output.mode reports
   // new dimensions for output index @p output_index. Runs on the
   // wayland event thread. If this window is bound to that output and
   // its current geometry no longer fits, shrink to the new mode and
   // re-Resize the backend.
   void OnOutputResized(size_t output_index, int32_t new_w, int32_t new_h);
+
+  // Called from Display::NotifyOutputScaleChanged on the wayland event
+  // thread when a wl_output.done batch may have changed an output scale.
+  // Fallback scale source only — ignored while wp_fractional_scale_v1 is
+  // bound for this surface.
+  void OnOutputScaleChanged(size_t output_index, int32_t new_scale);
 
  private:
   size_t m_index;
@@ -141,7 +160,47 @@ class WaylandWindow {
   uint32_t m_output_index;
   std::shared_ptr<Engine> m_flutter_engine;
   double m_pixel_ratio;
+  // Owning FlutterView (non-owning back-pointer; the view owns this window
+  // and outlives it). Used to re-send Flutter display metadata on scale
+  // change. Null in unit-test construction.
+  FlutterView* m_view;
   struct wl_surface* m_base_surface{};
+
+  // --- surface scaling -------------------------------------------------
+  // Current effective scale; buffer size is round(logical * m_scale).
+  double m_scale{1.0};
+  // wp_viewport for m_base_surface (null without wp_viewporter). With a
+  // viewport the buffer scale stays 1 and set_destination declares the
+  // logical size — the fractional-capable path.
+  wl_proxy* m_viewport{};
+  // wp_fractional_scale_v1 listener (null when not advertised). While bound
+  // it is the sole scale source; wl_output scale is ignored.
+  struct FractionalScale;
+  std::unique_ptr<FractionalScale> m_fractional_scale;
+  // Fallback source: outputs the surface currently overlaps
+  // (wl_surface.enter/leave). The applied scale is the max wl_output scale
+  // in this set, so the surface stays sharp on the densest display it
+  // touches instead of flickering as enter events race.
+  std::set<uint32_t> m_entered_outputs;
+
+  // Re-declare the buffer->surface mapping (viewport destination or
+  // integer buffer scale) for the current geometry and scale. Must run
+  // whenever either changes, before the next commit.
+  void DeclareSurfaceMapping() const;
+
+  // Round the current logical geometry to buffer pixels.
+  [[nodiscard]] int32_t PhysWidth() const;
+  [[nodiscard]] int32_t PhysHeight() const;
+
+  // Single entry point for scale changes from any source. Early-outs when
+  // unchanged; otherwise re-declares the surface mapping (viewport
+  // destination or integer buffer scale), resizes the backend to physical
+  // pixels, and pushes pixel-ratio / pointer-scale / display metadata to
+  // the engine and view.
+  void ApplyScale(double scale);
+
+  // Max wl_output scale over m_entered_outputs (m_output_index when empty).
+  [[nodiscard]] double BestOutputScale() const;
   // Non-owning. The backend (Backend) is owned by the FlutterView that created
   // this window and outlives it; the ctor receives a raw Backend*. Storing it
   // in a shared_ptr here would create a SECOND, independent ownership of the

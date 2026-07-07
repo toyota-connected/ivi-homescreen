@@ -135,6 +135,12 @@ class Engine {
    */
   [[nodiscard]] double GetPixelRatio() const { return m_prev_pixel_ratio; };
 
+  // wl_output buffer scale applied to incoming pointer/touch coordinates.
+  // Wayland delivers surface-local (logical) coords; Flutter expects physical
+  // pixels. Only the output scale applies here — the config pixel_ratio part
+  // of m_prev_pixel_ratio is a render scale and would skew hit tests.
+  void SetPointerScale(const double scale) { m_pointer_scale = scale; }
+
   /**
    * @brief Stop the Flutter engine and join all of its threads.
    *
@@ -430,6 +436,7 @@ class Engine {
   size_t m_prev_height;
   size_t m_prev_width;
   double m_prev_pixel_ratio;
+  double m_pointer_scale{1.0};  // see SetPointerScale()
   int32_t m_accessibility_features;
 
   FLUTTER_API_SYMBOL(FlutterEngine) m_flutter_engine;
