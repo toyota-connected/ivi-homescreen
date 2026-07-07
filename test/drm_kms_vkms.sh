@@ -192,8 +192,19 @@ if [[ "$SOFTWARE_RENDER" == "1" ]]; then
     log "software rendering: LIBGL_ALWAYS_SOFTWARE=1"
 fi
 
-log "launching $HOMESCREEN -b $BUNDLE_COPY --drm-device $VKMS_CARD -d"
-env "${LAUNCH_ENV[@]}" "$HOMESCREEN" -b "$BUNDLE_COPY" \
+# Backend selection. On a bare VT the env-default picks the DRM backend, but
+# when the harness is run from inside a Wayland session (developer desktop
+# against vkms) the auto-selector sees WAYLAND_DISPLAY and picks wayland-egl,
+# ignoring --drm-device. Always request the DRM backend explicitly, and unset
+# the compositor socket so the run targets the vkms node rather than the host
+# compositor.
+if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    LAUNCH_ENV=(-u WAYLAND_DISPLAY -u WAYLAND_SOCKET "${LAUNCH_ENV[@]}")
+    log "Wayland session detected; forcing --backend drm-kms-egl, unsetting WAYLAND_DISPLAY"
+fi
+
+log "launching $HOMESCREEN --backend drm-kms-egl -b $BUNDLE_COPY --drm-device $VKMS_CARD -d"
+env "${LAUNCH_ENV[@]}" "$HOMESCREEN" --backend drm-kms-egl -b "$BUNDLE_COPY" \
     --drm-device "$VKMS_CARD" -d >"$LOG" 2>&1 &
 HS_PID=$!
 
@@ -274,7 +285,7 @@ cleanup_hs
 # directly rather than the word "critical" — the fmt patterns never
 # include the English level name.
 #
-# `-a` forces text mode: spdlog's console sink emits ANSI colour codes
+# `-a` forces text mode: spdlog's console sink emits ANSI color codes
 # that trip grep's binary-file heuristic and suppress match output.
 if grep -aE '\] \[[CE]\] ' "$LOG"; then
     echo "error: critical/error log entries detected; see above" >&2
@@ -288,7 +299,7 @@ fi
 # Make sure we actually saw the startup line: this means InitDrm /
 # InitGbm / InitEgl all succeeded and a mode was selected.
 if ! grep -aq '\[DrmBackend\] connector=' "$LOG"; then
-    echo "error: no [DrmBackend] startup line in log — initialisation silently"
+    echo "error: no [DrmBackend] startup line in log — initialization silently"
     echo "       failed or the build is not DRM-enabled." >&2
     sed 's/^/  | /' "$LOG" >&2
     exit 1
