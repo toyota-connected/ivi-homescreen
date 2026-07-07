@@ -366,6 +366,26 @@ class Display : public IDisplay,
    */
   [[nodiscard]] int32_t GetBufferScale(uint32_t index) const override;
 
+  // wp_viewporter availability. When true, windows scale via
+  // wp_viewport.set_destination (fractional-capable); otherwise they fall
+  // back to integer wl_surface.set_buffer_scale.
+  [[nodiscard]] bool HasViewporter() const { return m_viewporter != nullptr; }
+
+  // Create a wp_viewport for @p surface, or nullptr when the compositor
+  // does not advertise wp_viewporter.
+  [[nodiscard]] wl_proxy* CreateViewport(struct wl_surface* surface) const;
+
+  // Create a wp_fractional_scale_v1 for @p surface, or nullptr when the
+  // compositor does not advertise wp_fractional_scale_manager_v1. The caller
+  // installs its own listener.
+  [[nodiscard]] wl_proxy* CreateFractionalScale(
+      struct wl_surface* surface) const;
+
+  // Index of the output owning @p output, or OutputCount() if unknown.
+  [[nodiscard]] size_t GetOutputIndexByHandle(struct wl_output* output) const;
+
+  [[nodiscard]] size_t OutputCount() const { return m_all_outputs.size(); }
+
   /**
    * @brief Get a video mode size of a specified index of a view
    * @param[in] index Index of a view
@@ -598,6 +618,10 @@ class Display : public IDisplay,
   // m_output_index matches; the window decides whether to shrink.
   void NotifyOutputResized(const output_info_t* oi);
 
+  // Called from display_handle_done: fans the (possibly changed) output
+  // scale out to registered windows; they early-out if unchanged.
+  void NotifyOutputScaleChanged(const output_info_t* oi);
+
   // Notify the output listener when a wl_output's `done` event closes its
   // event batch: OnOutputAdded the first time, OnOutputChanged after.
   void EmitOutputDone(output_info_t* oi);
@@ -608,6 +632,11 @@ class Display : public IDisplay,
   static homescreen::OutputInfo ToOutputInfo(const output_info_t& oi);
 
   bool m_buffer_scale_enable{};
+
+  // Scaling protocol globals; null when the compositor does not advertise
+  // them (e.g. Westeros advertises neither, old Weston only wp_viewporter).
+  wl_proxy* m_viewporter{};
+  wl_proxy* m_fractional_scale_manager{};
 
   // Tracks whether the compositor advertised a GPU buffer-allocation
   // protocol that Mesa's Vulkan WSI can use. Set from
