@@ -41,7 +41,7 @@ struct WaylandWindow::FractionalScale final
 
   void OnPreferredScale(const uint32_t scale_120ths) override {
     if (scale_120ths != 0) {
-      m_window.ApplyScale(static_cast<double>(scale_120ths) / 120.0);
+      m_window.ApplyScale(static_cast<int32_t>(scale_120ths));
     }
   }
 
@@ -102,7 +102,10 @@ WaylandWindow::WaylandWindow(const size_t index,
   } else if (fs != nullptr) {
     wl_proxy_destroy(fs);
   }
-  m_scale = static_cast<double>(m_display->GetBufferScale(m_output_index));
+  // Initial integer buffer scale from the placed output (N -> N*120).
+  m_scale_120 = std::max(1, m_display->GetBufferScale(m_output_index)) *
+                ivi::ScalePolicy::kUnityScale120;
+  m_scale = ivi::ScalePolicy::CanvasScale(m_scale_120);
 
   // Assign the surface its role via the active compositor-protocol shell
   // (xdg / agl / ivi / simple).
@@ -282,11 +285,11 @@ WaylandWindow::~WaylandWindow() {
 }
 
 int32_t WaylandWindow::PhysWidth() const {
-  return static_cast<int32_t>(std::lround(m_geometry.width * m_scale));
+  return ivi::ScalePolicy::ScaledDim(m_geometry.width, m_scale_120);
 }
 
 int32_t WaylandWindow::PhysHeight() const {
-  return static_cast<int32_t>(std::lround(m_geometry.height * m_scale));
+  return ivi::ScalePolicy::ScaledDim(m_geometry.height, m_scale_120);
 }
 
 void WaylandWindow::DeclareSurfaceMapping() const {
@@ -314,22 +317,24 @@ void WaylandWindow::DeclareSurfaceMapping() const {
   }
 }
 
-double WaylandWindow::BestOutputScale() const {
+int32_t WaylandWindow::BestOutputScale120() const {
   int32_t best = m_display->GetBufferScale(m_output_index);
   for (const uint32_t idx : m_entered_outputs) {
     best = std::max(best, m_display->GetBufferScale(idx));
   }
-  return static_cast<double>(std::max(1, best));
+  return std::max(1, best) * ivi::ScalePolicy::kUnityScale120;
 }
 
-void WaylandWindow::ApplyScale(const double scale) {
-  if (scale <= 0.0 || scale == m_scale) {
+void WaylandWindow::ApplyScale(const int32_t scale_120) {
+  if (scale_120 <= 0 || scale_120 == m_scale_120) {
     return;
   }
-  m_scale = scale;
-  spdlog::debug("({}) ApplyScale: {} — {}x{} logical -> {}x{} buffer px",
-                m_index, scale, m_geometry.width, m_geometry.height,
-                PhysWidth(), PhysHeight());
+  m_scale_120 = scale_120;
+  m_scale = ivi::ScalePolicy::CanvasScale(scale_120);
+  spdlog::debug(
+      "({}) ApplyScale: {} ({}/120) — {}x{} logical -> {}x{} buffer px",
+      m_index, m_scale, scale_120, m_geometry.width, m_geometry.height,
+      PhysWidth(), PhysHeight());
 
   DeclareSurfaceMapping();
   if (m_flutter_engine) {
@@ -353,7 +358,7 @@ void WaylandWindow::handle_base_surface_enter(void* data,
     d->m_entered_outputs.insert(static_cast<uint32_t>(idx));
   }
   if (!d->m_fractional_scale) {
-    d->ApplyScale(d->BestOutputScale());
+    d->ApplyScale(d->BestOutputScale120());
   }
 }
 
@@ -369,7 +374,7 @@ void WaylandWindow::handle_base_surface_leave(void* data,
   // Empty set (left all known outputs): keep the current scale; the next
   // enter corrects it.
   if (!d->m_fractional_scale && !d->m_entered_outputs.empty()) {
-    d->ApplyScale(d->BestOutputScale());
+    d->ApplyScale(d->BestOutputScale120());
   }
 }
 
@@ -382,7 +387,7 @@ void WaylandWindow::OnOutputScaleChanged(const size_t output_index,
       output_index == m_output_index ||
       m_entered_outputs.count(static_cast<uint32_t>(output_index)) != 0;
   if (relevant) {
-    ApplyScale(BestOutputScale());
+    ApplyScale(BestOutputScale120());
   }
 }
 
