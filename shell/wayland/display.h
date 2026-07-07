@@ -69,6 +69,7 @@
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
 #include "vsync/wayland_vsync_provider.h"
+#include "wayland/input_timestamps.h"
 #include "wayland/shell/wayland_shell.h"
 
 class Engine;
@@ -497,6 +498,13 @@ class Display : public IDisplay,
   // drives FlutterEngineOnVsync from per-commit feedback).
   ivi::WaylandVsyncProvider m_vsync;
 
+  // zwp_input_timestamps_v1 provider (owns the manager global + per-device
+  // subscriptions; hands nanosecond kernel input timestamps to the
+  // pointer/touch handlers as engine-clock microseconds). Runtime-optional:
+  // absent global -> Take*() returns 0 -> arrival-time stamping, the
+  // historical behavior.
+  ivi::InputTimestamps input_timestamps_;
+
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};
   std::string m_cursor_theme_name;
@@ -589,6 +597,12 @@ class Display : public IDisplay,
     // handed to the engine as one batch (one lock, one main-loop wake, one
     // FlutterEngineSendPointerEvent group).
     std::vector<Engine::TouchEvent> frame;
+    // Shared high-resolution timestamp for the pending frame: the first
+    // nonzero zwp_input_timestamps_v1 value taken by a contact event since
+    // the last flush (contacts in one frame are logically simultaneous, and
+    // one shared stamp keeps the engine's resampler from interpolating skew
+    // between fingers). 0 -> no high-res source -> arrival-time stamping.
+    uint64_t frame_time_us;
     uint32_t state;
     FlutterPointerPhase phase;
   } m_touch{};
@@ -1073,11 +1087,16 @@ class Display : public IDisplay,
    * growing unbounded (parity with the drm/software seats).
    * @param[in] d Display instance
    * @param[in] ev Contact update to queue
+   * @param[in] ts_us High-resolution event timestamp in microseconds (engine
+   * clock domain), or 0 when unavailable. The first nonzero value since the
+   * last flush is latched as the frame's shared timestamp.
    * @return void
    * @relation
    * wayland, flutter
    */
-  static void touch_push(Display* d, const Engine::TouchEvent& ev);
+  static void touch_push(Display* d,
+                         const Engine::TouchEvent& ev,
+                         uint64_t ts_us);
 
   static const wl_touch_listener touch_listener;
 };
