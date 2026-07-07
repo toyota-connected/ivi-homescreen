@@ -155,6 +155,15 @@ function(ivi_wayland_protocols target)
     wayland_cxx_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/presentation_time_client.hpp TARGET ${target})
 
+    # input-timestamps — always (ivi::InputTimestamps: high-resolution kernel
+    # timestamps for the pointer/touch → Flutter path; runtime-optional, the
+    # provider no-ops when the compositor doesn't advertise the manager).
+    # No shipped header -> emit tables.
+    wayland_cxx_generate(PROTOCOL
+        "${IVI_WL_PROTOCOLS_BASE}/unstable/input-timestamps/input-timestamps-unstable-v1.xml"
+        MODE client-header EMIT_INTERFACE_TABLES
+        OUTPUT wayland-protocols/input_timestamps_client.hpp TARGET ${target})
+
     # viewporter — always (per-surface scaling; stable since wayland-protocols
     # 1.4, so present on Dunfell's 1.20). No shipped header -> emit tables.
     wayland_cxx_generate(PROTOCOL
