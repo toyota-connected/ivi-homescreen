@@ -38,6 +38,7 @@
 #include "input/cursor_position_sink.h"
 #include "input/iseat.h"
 #include "input/key_repeater.h"
+#include "input/wake_event_fd.h"
 #include "input/xkb_keyboard.h"
 
 namespace homescreen {
@@ -290,6 +291,14 @@ class DrmSeat final : public ISeat {
   std::unique_ptr<input::KeyRepeater> repeater_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
+
+  // Breaks DispatchLoop out of its infinite poll() when a cross-thread flag is
+  // set: stop_ (Stop), a session pause/resume action (On*Paused/Resumed, posted
+  // from the libseat dispatch thread), or a keymap reload (ReloadKeymap). Each
+  // producer stores its flag then Wake()s; the loop drains and re-checks the
+  // flags at the top. Without the session/keymap wakes, a VT switch-out under
+  // poll(-1) would stall until the next input event (revoked-fd hang).
+  input::WakeEventFd waker_;
 
   // Keymap reloads posted from any thread, drained on the dispatch
   // thread by ApplyPendingKeymap() at the top of each DispatchLoop

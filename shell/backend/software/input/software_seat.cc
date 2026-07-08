@@ -24,6 +24,7 @@
 #include <libudev.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
 #include <algorithm>
@@ -167,6 +168,9 @@ bool SoftwareSeat::Start() {
 
 void SoftwareSeat::Stop() {
   stop_.store(true, std::memory_order_release);
+  // Store-then-wake: the dispatch thread is blocked in poll(-1); Wake() makes
+  // the waker fd readable so the poll returns and the loop re-checks stop_.
+  waker_.Wake();
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -214,23 +218,34 @@ void SoftwareSeat::NotifyCursorMoved() {
 }
 
 void SoftwareSeat::DispatchLoop() {
-  // libinput's fd is the readiness gate for input events; the
-  // timerfd fires the key-repeat ticks. We still need to call
-  // libinput_dispatch() before draining events on POLLIN. Short
-  // timeout gives Stop() a worst-case wakeup latency comparable to
-  // one vblank.
+  pthread_setname_np(pthread_self(), "li-sw-dispatch");
+
+  // Event-driven: block in poll() with no timeout until libinput has events,
+  // the key-repeat timerfd fires, or waker_ is signaled. stop_ is noticed
+  // without a poll cap because Stop() stores the flag then Wake()s the waker,
+  // so the poll returns and the loop re-checks the flag at the top. Degraded
+  // mode (waker fd unavailable, e.g. eventfd() failed) falls back to a 16 ms
+  // cap — roughly one vblank — so Stop() is still observed promptly.
   const int li_fd = libinput_get_fd(li_);
   const int repeat_fd = repeater_ ? repeater_->fd() : -1;
-  pollfd fds[2];
-  fds[0] = pollfd{li_fd, static_cast<short>(POLLIN), 0};
-  fds[1] =
-      pollfd{repeat_fd, static_cast<short>(repeat_fd >= 0 ? POLLIN : 0), 0};
-  // 16 ms poll cap means a repeat tick scheduled mid-interval is
-  // delivered up to 16 ms late — at the 33 ms (~30 Hz) repeat
-  // cadence that's tolerable jitter for held keys; matches the
-  // worst-case Stop() wakeup latency.
+  const int wake_fd = waker_.fd();
+
+  pollfd fds[3];
+  nfds_t nfds = 0;
+  const int li_idx = static_cast<int>(nfds);
+  fds[nfds++] = pollfd{li_fd, static_cast<short>(POLLIN), 0};
+  const int repeat_idx = repeat_fd >= 0 ? static_cast<int>(nfds) : -1;
+  if (repeat_fd >= 0) {
+    fds[nfds++] = pollfd{repeat_fd, static_cast<short>(POLLIN), 0};
+  }
+  const int wake_idx = wake_fd >= 0 ? static_cast<int>(nfds) : -1;
+  if (wake_fd >= 0) {
+    fds[nfds++] = pollfd{wake_fd, static_cast<short>(POLLIN), 0};
+  }
+  const int timeout_ms = wake_fd >= 0 ? -1 : 16;
+
   while (!stop_.load(std::memory_order_acquire)) {
-    const int rc = ::poll(fds, 2, 16);
+    const int rc = ::poll(fds, nfds, timeout_ms);
     if (rc < 0) {
       if (errno == EINTR) {
         continue;
@@ -238,13 +253,16 @@ void SoftwareSeat::DispatchLoop() {
       spdlog::error("[SoftwareSeat] poll: {}", std::strerror(errno));
       break;
     }
-    if (rc == 0) {
+    // A waker wake is a pure "re-check your flags" nudge: drain and loop so the
+    // stop_ test at the top runs. (rc == 0 only in degraded mode; same effect.)
+    if (wake_idx >= 0 && (fds[wake_idx].revents & POLLIN) != 0) {
+      waker_.Drain();
       continue;
     }
-    if ((fds[0].revents & POLLIN) != 0) {
+    if ((fds[li_idx].revents & POLLIN) != 0) {
       DispatchLibinputEvents();
     }
-    if (repeat_fd >= 0 && (fds[1].revents & POLLIN) != 0) {
+    if (repeat_idx >= 0 && (fds[repeat_idx].revents & POLLIN) != 0) {
       repeater_->Dispatch();
     }
   }
