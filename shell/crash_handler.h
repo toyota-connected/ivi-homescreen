@@ -1,9 +1,10 @@
 #pragma once
 
+#include <config/common.h>
+
 #include <map>
 #include <string>
 #include <vector>
-#include "sentry.h"
 
 class CrashHandler {
  public:
@@ -14,7 +15,9 @@ class CrashHandler {
 
   ~CrashHandler();
 
+#if INTEGRATION_TEST_CRASH_HANDLER
   static void trigger_crash();
+#endif
 
   CrashHandler(const CrashHandler&) = delete;
   CrashHandler& operator=(const CrashHandler&) = delete;

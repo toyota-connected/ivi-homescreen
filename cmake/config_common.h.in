@@ -74,6 +74,7 @@ static constexpr char kSentryEnvDefault[] = "@CMAKE_BUILD_TYPE@";
 static constexpr char kCrashpadBinaryPath[] =
     "@CRASHPAD_BINARY_DIR@/crashpad_handler";
 #endif
+#cmakedefine01 INTEGRATION_TEST_CRASH_HANDLER
 
 #cmakedefine01 BUILD_ACCESSIBILITY
 

@@ -248,6 +248,13 @@ else()
     message(STATUS "Crash Handler .......... Disabled")
 endif ()
 
+option(INTEGRATION_TEST_CRASH_HANDLER "Enable crash handler integration test" OFF)
+if (INTEGRATION_TEST_CRASH_HANDLER)
+    message(STATUS "Crash Handler Integration Test ... Enabled")
+else()
+    message(STATUS "Crash Handler Integration Test ... Disabled")
+endif ()
+
 #
 # watchdog
 #
