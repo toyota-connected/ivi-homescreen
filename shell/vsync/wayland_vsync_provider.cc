@@ -28,6 +28,7 @@
 
 #include "libflutter_engine.h"
 #include "logging/logging.h"
+#include "profiling/motion_to_photon.h"
 #include "task_runner.h"
 
 namespace ivi {
@@ -196,6 +197,11 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
   }
   RetireFeedback(
       fb);  // clears feedback_pending_ once the last feedback retires
+  // Motion-to-photon: this scanout timestamp closes out the input events it
+  // presents (event thread, same as RecordInput).
+  if (m2p_ != nullptr) {
+    m2p_->RecordPresent(present_ns, "wayland");
+  }
   // Base records the present (cadence profile) + hands the parked baton back
   // with the compositor's real presented timestamp.
   DeliverVsync(present_ns);
