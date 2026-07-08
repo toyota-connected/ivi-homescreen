@@ -21,32 +21,33 @@
 namespace ihs::dlt {
 
 enum class ContextError {
-    TooManyContexts,
-    RegisterFailed,
+  TooManyContexts,
+  RegisterFailed,
 };
 
 inline constexpr std::size_t kMaxContexts = 256;
 
 struct ContextEntry {
-    std::string     id;
-    std::string     description;
-    abi::DltContext dlt_ctx{};
+  std::string id;
+  std::string description;
+  abi::DltContext dlt_ctx{};
 };
 
 class ContextCache {
-public:
-    explicit ContextCache(LibDltLoader& loader) noexcept : loader_(loader) {}
+ public:
+  explicit ContextCache(LibDltLoader& loader) noexcept : loader_(loader) {}
 
-    [[nodiscard]]
-    ihs::expected<std::uint32_t, ContextError>
-    ensure(std::string_view ctx_id, std::string_view description);
+  [[nodiscard]]
+  ihs::expected<std::uint32_t, ContextError> ensure(
+      std::string_view ctx_id,
+      std::string_view description);
 
-    [[nodiscard]] ContextEntry* at(std::uint32_t index) noexcept;
+  [[nodiscard]] ContextEntry* at(std::uint32_t index) noexcept;
 
-private:
-    LibDltLoader&                                loader_;
-    std::mutex                                   mu_;
-    std::vector<std::unique_ptr<ContextEntry>>   entries_;
+ private:
+  LibDltLoader& loader_;
+  std::mutex mu_;
+  std::vector<std::unique_ptr<ContextEntry>> entries_;
 };
 
-} // namespace ihs::dlt
+}  // namespace ihs::dlt

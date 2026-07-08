@@ -7,56 +7,57 @@
 namespace ihs::dlt {
 
 bool ThreadRing::push(std::uint32_t ctx_index,
-                      std::uint8_t  level,
-                      const char*   text,
-                      std::size_t   len) noexcept {
-    const std::uint32_t head = head_.load(std::memory_order_relaxed);
-    const std::uint32_t tail = tail_.load(std::memory_order_acquire);
+                      std::uint8_t level,
+                      const char* text,
+                      std::size_t len) noexcept {
+  const std::uint32_t head = head_.load(std::memory_order_relaxed);
+  const std::uint32_t tail = tail_.load(std::memory_order_acquire);
 
-    if (head - tail >= kRingCapacity) {
-        dropped_.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
+  if (head - tail >= kRingCapacity) {
+    dropped_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
 
-    RingSlot& slot = slots_[head & kMask];
-    slot.ctx_index = ctx_index;
-    slot.level     = level;
-    slot.sequence  = head;
+  RingSlot& slot = slots_[head & kMask];
+  slot.ctx_index = ctx_index;
+  slot.level = level;
+  slot.sequence = head;
 
-    const std::size_t copy_len = std::min<std::size_t>(len, kSlotTextCapacity - 1);
-    if (text != nullptr && copy_len > 0) {
-        std::memcpy(slot.text, text, copy_len);
-    }
-    slot.text[copy_len] = '\0';
-    slot.text_len       = static_cast<std::uint16_t>(copy_len);
+  const std::size_t copy_len =
+      std::min<std::size_t>(len, kSlotTextCapacity - 1);
+  if (text != nullptr && copy_len > 0) {
+    std::memcpy(slot.text, text, copy_len);
+  }
+  slot.text[copy_len] = '\0';
+  slot.text_len = static_cast<std::uint16_t>(copy_len);
 
-    head_.store(head + 1, std::memory_order_release);
-    return true;
+  head_.store(head + 1, std::memory_order_release);
+  return true;
 }
 
 const RingSlot* ThreadRing::peek() const noexcept {
-    const std::uint32_t tail = tail_.load(std::memory_order_relaxed);
-    const std::uint32_t head = head_.load(std::memory_order_acquire);
-    if (head == tail) {
-        return nullptr;
-    }
-    return &slots_[tail & kMask];
+  const std::uint32_t tail = tail_.load(std::memory_order_relaxed);
+  const std::uint32_t head = head_.load(std::memory_order_acquire);
+  if (head == tail) {
+    return nullptr;
+  }
+  return &slots_[tail & kMask];
 }
 
 void ThreadRing::pop() noexcept {
-    const std::uint32_t tail = tail_.load(std::memory_order_relaxed);
-    tail_.store(tail + 1, std::memory_order_release);
+  const std::uint32_t tail = tail_.load(std::memory_order_relaxed);
+  tail_.store(tail + 1, std::memory_order_release);
 }
 
 bool ThreadRing::empty() const noexcept {
-    return head_.load(std::memory_order_acquire) ==
-           tail_.load(std::memory_order_acquire);
+  return head_.load(std::memory_order_acquire) ==
+         tail_.load(std::memory_order_acquire);
 }
 
 std::size_t ThreadRing::pending() const noexcept {
-    const std::uint32_t head = head_.load(std::memory_order_acquire);
-    const std::uint32_t tail = tail_.load(std::memory_order_acquire);
-    return static_cast<std::size_t>(head - tail);
+  const std::uint32_t head = head_.load(std::memory_order_acquire);
+  const std::uint32_t tail = tail_.load(std::memory_order_acquire);
+  return static_cast<std::size_t>(head - tail);
 }
 
-} // namespace ihs::dlt
+}  // namespace ihs::dlt
