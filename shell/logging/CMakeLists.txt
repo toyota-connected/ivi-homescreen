@@ -32,6 +32,14 @@ target_compile_definitions(ihs_logging PUBLIC ENABLE_DLT=1)
 find_package(Threads REQUIRED)
 target_link_libraries(ihs_logging PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
+# Match the shell's C++ standard library. The `toolchain` INTERFACE library
+# applies -stdlib=libc++ on clang builds; without it the bridge compiles against
+# libstdc++ and its std::string_view / std::function symbols mismatch the libc++
+# homescreen binary at link time (undefined DltBridge::log / acquire_context).
+if (TARGET toolchain)
+    target_link_libraries(ihs_logging PRIVATE toolchain::toolchain)
+endif ()
+
 target_compile_options(ihs_logging PRIVATE -Wall -Wextra)
 
 # Note: the bridge's C++ entry points (DltBridge, ContextCache, etc.) are
