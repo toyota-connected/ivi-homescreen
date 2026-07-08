@@ -38,11 +38,11 @@ inline constexpr int kDltIdSize = 4;
 
 // Mirrors genivi/dlt-daemon DltContext layout.
 struct DltContext {
-    char         id[kDltIdSize];
-    std::int32_t pos;
-    std::int8_t* p1;
-    std::int8_t* p2;
-    std::uint8_t count;
+  char id[kDltIdSize];
+  std::int32_t pos;
+  std::int8_t* p1;
+  std::int8_t* p2;
+  std::uint8_t count;
 };
 
 // DltContextData layout is not stable across libdlt versions or vendor
@@ -59,9 +59,9 @@ inline constexpr std::size_t kContextDataSize = 4096;
 inline constexpr std::uint64_t kScratchGuardPattern = 0xDEADBEEFCAFEBABEull;
 
 struct alignas(16) GuardedContextData {
-    std::uint64_t head_guard = kScratchGuardPattern;
-    unsigned char bytes[kContextDataSize] = {};
-    std::uint64_t tail_guard = kScratchGuardPattern;
+  std::uint64_t head_guard = kScratchGuardPattern;
+  unsigned char bytes[kContextDataSize] = {};
+  std::uint64_t tail_guard = kScratchGuardPattern;
 };
 
 // Major / minor version this bridge was designed against. Passed to
@@ -70,83 +70,85 @@ struct alignas(16) GuardedContextData {
 inline constexpr const char* kDltExpectedMajor = "2";
 inline constexpr const char* kDltExpectedMinor = "18";
 
-} // namespace ihs::dlt::abi
+}  // namespace ihs::dlt::abi
 
 namespace ihs::dlt {
 
 // Why the bridge ended up disabled, surfaced via disabled_reason() so the
 // process can log it (or expose it as a metric) on startup.
 enum class DltDisableReason : std::uint8_t {
-    Ok                    = 0,
-    LibraryNotFound       = 1,
-    VersionCheckMissing   = 2,
-    VersionMismatch       = 3,
-    RequiredSymbolMissing = 4,
-    ScratchOverrun        = 5,
+  Ok = 0,
+  LibraryNotFound = 1,
+  VersionCheckMissing = 2,
+  VersionMismatch = 3,
+  RequiredSymbolMissing = 4,
+  ScratchOverrun = 5,
 };
 
 class LibDltLoader {
-public:
-    static LibDltLoader& instance();
+ public:
+  static LibDltLoader& instance();
 
-    [[nodiscard]] bool available() const noexcept {
-        return available_.load(std::memory_order_acquire);
-    }
+  [[nodiscard]] bool available() const noexcept {
+    return available_.load(std::memory_order_acquire);
+  }
 
-    [[nodiscard]] DltDisableReason disabled_reason() const noexcept {
-        return disabled_reason_;
-    }
+  [[nodiscard]] DltDisableReason disabled_reason() const noexcept {
+    return disabled_reason_;
+  }
 
-    // Number of emit() calls that were dropped because the bridge had
-    // already self-disabled (Layer 5 observability).
-    [[nodiscard]] std::uint64_t degraded_drops() const noexcept {
-        return degraded_drops_.load(std::memory_order_relaxed);
-    }
+  // Number of emit() calls that were dropped because the bridge had
+  // already self-disabled (Layer 5 observability).
+  [[nodiscard]] std::uint64_t degraded_drops() const noexcept {
+    return degraded_drops_.load(std::memory_order_relaxed);
+  }
 
-    // One-shot: register an application id with libdlt (no-op if unavailable).
-    bool register_app(const char* app_id, const char* description) noexcept;
-    void unregister_app() noexcept;
+  // One-shot: register an application id with libdlt (no-op if unavailable).
+  bool register_app(const char* app_id, const char* description) noexcept;
+  void unregister_app() noexcept;
 
-    // Context registration. Returns true on success or when libdlt is absent
-    // (the caller still gets a valid handle for the spdlog fallback path).
-    bool register_context(abi::DltContext* ctx,
-                          const char*      ctx_id,
-                          const char*      description) noexcept;
-    void unregister_context(abi::DltContext* ctx) noexcept;
+  // Context registration. Returns true on success or when libdlt is absent
+  // (the caller still gets a valid handle for the spdlog fallback path).
+  bool register_context(abi::DltContext* ctx,
+                        const char* ctx_id,
+                        const char* description) noexcept;
+  void unregister_context(abi::DltContext* ctx) noexcept;
 
-    // Emits a single log line. Silently drops if libdlt is unavailable;
-    // increments degraded_drops_ in that case.
-    void emit(abi::DltContext* ctx, int level, const char* text) noexcept;
+  // Emits a single log line. Silently drops if libdlt is unavailable;
+  // increments degraded_drops_ in that case.
+  void emit(abi::DltContext* ctx, int level, const char* text) noexcept;
 
-private:
-    LibDltLoader();
-    ~LibDltLoader();
-    LibDltLoader(const LibDltLoader&)            = delete;
-    LibDltLoader& operator=(const LibDltLoader&) = delete;
+ private:
+  LibDltLoader();
+  ~LibDltLoader();
+  LibDltLoader(const LibDltLoader&) = delete;
+  LibDltLoader& operator=(const LibDltLoader&) = delete;
 
-    void load();
-    void disable(DltDisableReason reason, const char* detail) noexcept;
+  void load();
+  void disable(DltDisableReason reason, const char* detail) noexcept;
 
-    void*                          handle_         = nullptr;
-    std::atomic<bool>              available_{false};
-    DltDisableReason               disabled_reason_ = DltDisableReason::Ok;
-    std::atomic<std::uint64_t>     degraded_drops_{0};
+  void* handle_ = nullptr;
+  std::atomic<bool> available_{false};
+  DltDisableReason disabled_reason_ = DltDisableReason::Ok;
+  std::atomic<std::uint64_t> degraded_drops_{0};
 
-    // Function pointer table — int returns match DltReturnValue.
-    int (*fn_check_version_)(const char*, const char*)                      = nullptr;
-    int (*fn_get_version_)(char*, std::size_t)                              = nullptr;
-    int (*fn_register_app_)(const char*, const char*)                       = nullptr;
-    int (*fn_unregister_app_)()                                             = nullptr;
-    int (*fn_register_context_)(abi::DltContext*, const char*, const char*) = nullptr;
-    int (*fn_unregister_context_)(abi::DltContext*)                         = nullptr;
-    int (*fn_log_write_start_)(abi::DltContext*, void*, int)                = nullptr;
-    int (*fn_log_write_finish_)(void*)                                      = nullptr;
-    int (*fn_log_write_string_)(void*, const char*)                         = nullptr;
+  // Function pointer table — int returns match DltReturnValue.
+  int (*fn_check_version_)(const char*, const char*) = nullptr;
+  int (*fn_get_version_)(char*, std::size_t) = nullptr;
+  int (*fn_register_app_)(const char*, const char*) = nullptr;
+  int (*fn_unregister_app_)() = nullptr;
+  int (*fn_register_context_)(abi::DltContext*,
+                              const char*,
+                              const char*) = nullptr;
+  int (*fn_unregister_context_)(abi::DltContext*) = nullptr;
+  int (*fn_log_write_start_)(abi::DltContext*, void*, int) = nullptr;
+  int (*fn_log_write_finish_)(void*) = nullptr;
+  int (*fn_log_write_string_)(void*, const char*) = nullptr;
 
-    // Layer 3: optional single-shot string entry point. When non-null,
-    // emit() uses it and skips the GuardedContextData scratch path
-    // entirely. Symbol name probed: "dlt_log_string".
-    int (*fn_log_string_oneshot_)(abi::DltContext*, int, const char*)       = nullptr;
+  // Layer 3: optional single-shot string entry point. When non-null,
+  // emit() uses it and skips the GuardedContextData scratch path
+  // entirely. Symbol name probed: "dlt_log_string".
+  int (*fn_log_string_oneshot_)(abi::DltContext*, int, const char*) = nullptr;
 };
 
-} // namespace ihs::dlt
+}  // namespace ihs::dlt
