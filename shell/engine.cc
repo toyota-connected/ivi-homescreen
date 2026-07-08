@@ -27,6 +27,9 @@
 #include "engine.h"
 #include "hexdump.h"
 #include "logging/logger.hpp"
+#if BUILD_WATCHDOG
+#include "watchdog.h"
+#endif
 #include "main_loop_waker.h"
 #include "utils.h"
 
@@ -894,5 +897,23 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
       update->struct_size, update->node_count, update->custom_action_count);
 
   accessibility_tree->HandleFlutterUpdate(update);
+}
+#endif
+#if BUILD_WATCHDOG
+void Engine::PetWatchdogViaCallback() {
+  if (!m_flutter_engine) {
+    return;
+  }
+
+  LibFlutterEngine->PostCallbackOnAllNativeThreads(
+      m_flutter_engine,
+      [](FlutterNativeThreadType type, void* /*user_data*/) {
+        if (type == kFlutterNativeThreadTypeRender) {
+#if BUILD_WATCHDOG
+          Watchdog::getInstance().pet(WATCHDOG_SOURCE_RENDER_THREAD);
+#endif
+        }
+      },
+      nullptr);
 }
 #endif

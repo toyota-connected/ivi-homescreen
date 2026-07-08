@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Toyota Connected North America
+ * Copyright 2026 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 #include "watchdog.h"
 
+#include <iostream>
+
 #if BUILD_SYSTEMD_WATCHDOG
 #include <systemd/sd-daemon.h>
 #include <chrono>
@@ -23,61 +25,134 @@
 #endif
 
 #include "logging/logging.h"
+#include "stats.h"
 
-Watchdog::Watchdog()
-    : interval_(std::chrono::microseconds(kDefaultTimeout)), stop_flag_(false) {
+Watchdog& Watchdog::getInstance() {
+  static Watchdog instance;
+  return instance;
+}
+
+uint64_t Watchdog::getTimeoutMs() const {
+  return intervalMs_;
+}
+
+Watchdog::Watchdog() {
 #if BUILD_SYSTEMD_WATCHDOG
   uint64_t interval;
   if (sd_watchdog_enabled(0, &interval) > 0) {
-    interval_ = std::chrono::microseconds(interval);
+    intervalMs_ = interval / 1000;
     sd_notify(0, "READY=1");
   }
+  sd_notifyf(0, "STATUS=Running");
 #endif
-  ihs::log::debug("Watchdog interval set for {} uS", interval_.count());
+  running_.store(true);
+  watchdogThread_ = std::thread(&Watchdog::watchdogService, this);
 }
 
 Watchdog::~Watchdog() {
-  if (watchdog_thread_.joinable()) {
-    stop();
-#if BUILD_SYSTEMD_WATCHDOG
-    sd_notify(0, "STOPPING=1");
-#endif
-  }
+  shutdown();
 }
 
-void Watchdog::start() {
-  watchdog_thread_ = std::thread([this] {
+void Watchdog::start(const WatchdogSource source) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  // Record the start time for the source
+  activeSources_[source] = std::chrono::steady_clock::now();
+  spdlog::debug("Watchdog started for source {}", static_cast<int64_t>(source));
+}
+
+void Watchdog::pet(const WatchdogSource source) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (const auto it = activeSources_.find(source); it == activeSources_.end()) {
+    spdlog::warn("Source {} is not being monitored.",
+                 static_cast<int64_t>(source));
+    return;
+  }
+
+  // Reset the timer of the source to the current time
+  activeSources_[source] = std::chrono::steady_clock::now();
+}
+
+void Watchdog::stop(const WatchdogSource source) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (activeSources_.find(source) == activeSources_.end()) {
+    spdlog::warn("Source {} is not being monitored.",
+                 static_cast<int64_t>(source));
+  }
+
+  // Remove the source from active sources
+  activeSources_.erase(source);
+  spdlog::debug("Watchdog stopped for source {}", static_cast<int64_t>(source));
+}
+
+void Watchdog::shutdown() {
+  running_.store(false);
 #if BUILD_SYSTEMD_WATCHDOG
-    sd_notifyf(0, "STATUS=Running");
+  sd_notify(0, "STOPPING=1");
 #endif
-    while (!stop_flag_) {
-      if (std::chrono::steady_clock::now() >= deadline_) {
+
+  if (watchdogThread_.joinable()) {
+    watchdogThread_.join();
+  }
+  spdlog::debug("Watchdog service shut down.");
+}
+
+void Watchdog::watchdogService() {
+  while (running_.load()) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+
+    timeval timeout{};
+
+    // Convert 1/2 of the interval to seconds and microseconds
+    auto halfIntervalMs = intervalMs_ / 2;
+    timeout.tv_sec = static_cast<__time_t>(halfIntervalMs) / 1000;
+    timeout.tv_usec = static_cast<__suseconds_t>(halfIntervalMs % 1000) * 1000;
+
+    // Wait for the timeout using select
+    if (int ret = select(0, &readfds, nullptr, nullptr, &timeout);
+        ret == 0) {  // Timeout occurred
+      std::lock_guard<std::mutex> lock(mutex_);
+
+#if BUILD_SYSTEMD_WATCHDOG
+      sd_notify(0, "WATCHDOG=1");
+#endif
+
+      Stats::ProcessStats stats{};
+      Stats::getSelfStats(stats);
+      spdlog::debug("Threads: {}, VIRT: {}, RES: {}", stats.num_threads,
+                    stats.virtual_memory, stats.resident_set_size);
+
+      // Check for any timeouts
+      auto now = std::chrono::steady_clock::now();
+      for (auto it = activeSources_.begin(); it != activeSources_.end();) {
+        auto source = it->first;
+
+        if (auto startTime = it->second;
+            std::chrono::duration_cast<std::chrono::milliseconds>(now -
+                                                                  startTime)
+                .count() >= static_cast<int>(kDefaultTimeoutMs)) {
+          // Timeout occurred for this source
         ihs::log::critical("Watchdog timeout");
-        // TODO dump stack
 #if BUILD_SYSTEMD_WATCHDOG
-        sd_notify(0, "WATCHDOG=trigger");
-#else
-        exit(EXIT_FAILURE);
+          sd_notify(0, "WATCHDOG=trigger");
 #endif
-        break;
+          running_.store(false);
+          abort();
+
+          // After timeout behavior: remove the source
+          it = activeSources_.erase(it);
+        } else {
+          ++it;
+        }
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(
-          kDefaultSleepTime));  // idle until next check
+    } else if (ret < 0) {
+      // Handles errors in the select call
+      spdlog::error("Error in select call; watchdog thread exiting.");
     }
-  });
-  pet();  // _reset the watchdog deadline to now + interval at the start
-}
-
-void Watchdog::stop() {
-  stop_flag_ = true;
-  if (watchdog_thread_.joinable()) {
-    watchdog_thread_.join();
   }
-}
 
-void Watchdog::pet() {
-  deadline_ = std::chrono::steady_clock::now() + interval_;
-#if BUILD_SYSTEMD_WATCHDOG
-  sd_notify(0, "WATCHDOG=1");
-#endif
+  spdlog::debug("Watchdog service exiting.");
 }
