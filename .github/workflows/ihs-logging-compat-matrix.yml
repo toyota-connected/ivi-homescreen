@@ -2,10 +2,11 @@
 name: ihs-logging-compat-matrix
 
 # Build + runtime-smoke the DLT bridge across the C++17 / C++20 / C++23
-# toolchains called out in INTEGRATION_PLAN.md §8. Runs the standalone
-# compat-matrix harness under shell/logging/tests/compat-matrix so it does
-# not pull in the homescreen binary's Wayland / Flutter / third_party
-# dependency chain — the job only needs a C++ toolchain and libdl.
+# toolchains so every compat.hpp polyfill is exercised. Also runs the load
+# harness under ThreadSanitizer / AddressSanitizer. Both use the standalone
+# harnesses under shell/logging/tests, so they do not pull in the homescreen
+# binary's Wayland / Flutter / third_party dependency chain — the jobs only
+# need a C++ toolchain and libdl.
 
 on:
   pull_request:
@@ -17,7 +18,7 @@ on:
   push:
     branches:
       - v2.0
-      - 'jw/dlt-refactor'
+      - 'jw/dlt-rebase'
     paths:
       - 'cmake/cxx_compat.cmake'
       - 'cmake/logging_helpers.cmake'
@@ -121,14 +122,62 @@ jobs:
         working-directory: build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }}
         run: |
           set -eux
-          # libihs_logging_dlt.so lives in the subproject build dir.
-          LD_LIBRARY_PATH="$PWD/shell_logging:${LD_LIBRARY_PATH:-}" \
-              ./compat_smoke
+          # ihs_logging is a static library, so compat_smoke is self-contained.
+          ./compat_smoke
 
       - name: ctest (no-op when ENABLE_DLT=OFF)
         if: matrix.enable_dlt == 'ON'
         working-directory: build/compat-${{ matrix.clang_ver }}-${{ matrix.cxx_std }}-${{ matrix.enable_dlt }}
         run: |
           set -eux
-          LD_LIBRARY_PATH="$PWD/shell_logging:${LD_LIBRARY_PATH:-}" \
-              ctest --output-on-failure
+          ctest --output-on-failure
+
+  # Run the bridge under a real load (ring push -> worker drain -> emit, via
+  # the dlt_stub stand-in) under ThreadSanitizer and AddressSanitizer, so a
+  # data race or memory error on the concurrent path fails CI. Uses the
+  # standalone shell/logging/tests/load harness (toolchain + libdl only).
+  dlt-load-sanitizers:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address]
+
+    name: "DLT load (${{ matrix.sanitizer }})"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Clang 17
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y \
+              clang-17 libc++-17-dev libc++abi-17-dev cmake ninja-build
+
+      - name: Configure
+        run: |
+          set -eux
+          cmake -GNinja \
+            -S shell/logging/tests/load \
+            -B build/load-${{ matrix.sanitizer }} \
+            -DCMAKE_C_COMPILER=clang-17 \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${{ matrix.sanitizer }}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=${{ matrix.sanitizer }}"
+
+      - name: Build
+        run: |
+          set -eux
+          cmake --build build/load-${{ matrix.sanitizer }} -j$(nproc)
+
+      - name: ctest (dlt_load_smoke)
+        working-directory: build/load-${{ matrix.sanitizer }}
+        run: |
+          set -eux
+          ctest --output-on-failure
