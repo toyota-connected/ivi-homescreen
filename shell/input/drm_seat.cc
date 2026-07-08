@@ -23,6 +23,7 @@
 #include <linux/input-event-codes.h>
 #include <linux/kd.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <csignal>
@@ -62,6 +63,9 @@ extern void KeyCallback(FlutterDesktopViewControllerState* view_state,
 
 namespace homescreen {
 namespace {
+// Degraded-mode poll cap, used only when the waker eventfd is unavailable
+// (eventfd() failed at construction). In the normal path the dispatch loop
+// blocks in poll(-1) and is woken explicitly via waker_.
 constexpr int kPollTimeoutMs = 100;
 
 // Strip control bytes from user-supplied strings before logging. The
@@ -406,6 +410,9 @@ bool DrmSeat::Start() {
 
 void DrmSeat::Stop() {
   stop_.store(true, std::memory_order_release);
+  // Store-then-wake: the dispatch thread is blocked in poll(-1); Wake() makes
+  // the waker fd readable so the poll returns and the loop re-checks stop_.
+  waker_.Wake();
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -428,9 +435,18 @@ void DrmSeat::Stop() {
 }
 
 void DrmSeat::DispatchLoop() {
+  pthread_setname_np(pthread_self(), "li-drm-dispatch");
+
   const int seat_fd = seat_->fd();
   int repeat_fd = repeater_ ? repeater_->fd() : -1;
+  const int wake_fd = waker_.fd();
   constexpr short kErr = POLLERR | POLLHUP | POLLNVAL;
+  // No timeout in the normal path: the loop blocks until the seat fd, the
+  // repeat timerfd, or the waker is ready. Each cross-thread flag (stop_,
+  // session pause/resume, keymap reload) is paired with a waker_.Wake(), so the
+  // poll returns and ApplyPendingKeymap() + the session-action exchange at the
+  // loop top run. Degraded mode (no waker fd) falls back to the 100 ms cap.
+  const int timeout_ms = wake_fd >= 0 ? -1 : kPollTimeoutMs;
 
   while (!stop_.load(std::memory_order_acquire)) {
     ApplyPendingKeymap();
@@ -455,6 +471,11 @@ void DrmSeat::DispatchLoop() {
             spdlog::info("[DrmSeat] libinput suspended for VT switch-out");
           }
         }
+        // Cancel any in-flight key repeat: a key held at switch-out would
+        // otherwise keep the repeat timerfd ticking into a backgrounded view.
+        if (repeater_) {
+          repeater_->Cancel();
+        }
         break;
       case PendingSessionAction::kResume:
         if (seat_) {
@@ -469,14 +490,20 @@ void DrmSeat::DispatchLoop() {
         break;
     }
 
-    pollfd pfds[2];
+    pollfd pfds[3];
     pfds[0] = {seat_fd, POLLIN, 0};
     nfds_t nfds = 1;
+    int repeat_idx = -1;
     if (repeat_fd >= 0) {
-      pfds[1] = {repeat_fd, POLLIN, 0};
-      nfds = 2;
+      repeat_idx = static_cast<int>(nfds);
+      pfds[nfds++] = {repeat_fd, POLLIN, 0};
     }
-    const int r = poll(pfds, nfds, kPollTimeoutMs);
+    int wake_idx = -1;
+    if (wake_fd >= 0) {
+      wake_idx = static_cast<int>(nfds);
+      pfds[nfds++] = {wake_fd, POLLIN, 0};
+    }
+    const int r = poll(pfds, nfds, timeout_ms);
     if (r < 0) {
       if (errno == EINTR) {
         continue;
@@ -485,6 +512,21 @@ void DrmSeat::DispatchLoop() {
       break;
     }
     if (r > 0) {
+      // The waker is a pure "re-check your flags" nudge: drain and loop so the
+      // stop_ test + ApplyPendingKeymap() + the session-action exchange at the
+      // top run. An error on the waker fd can't happen short of fd corruption;
+      // treat it as fatal.
+      if (wake_idx >= 0) {
+        if ((pfds[wake_idx].revents & kErr) != 0) {
+          spdlog::error("[DrmSeat] waker fd error (revents={:#x}); exiting",
+                        static_cast<unsigned>(pfds[wake_idx].revents));
+          break;
+        }
+        if ((pfds[wake_idx].revents & POLLIN) != 0) {
+          waker_.Drain();
+          continue;
+        }
+      }
       if ((pfds[0].revents & kErr) != 0) {
         spdlog::error("[DrmSeat] seat fd error (revents={:#x}); exiting",
                       static_cast<unsigned>(pfds[0].revents));
@@ -496,17 +538,17 @@ void DrmSeat::DispatchLoop() {
         }
         FlushCursorMotion();
       }
-      if (nfds == 2) {
-        if ((pfds[1].revents & kErr) != 0) {
+      if (repeat_idx >= 0) {
+        if ((pfds[repeat_idx].revents & kErr) != 0) {
           // Repeater timerfd died (HUP/ERR/NVAL). Drop it and keep
           // serving the seat — otherwise poll() returns POLLERR forever
           // and the loop spins.
           spdlog::warn(
               "[DrmSeat] repeater fd error (revents={:#x}); disabling repeat",
-              static_cast<unsigned>(pfds[1].revents));
+              static_cast<unsigned>(pfds[repeat_idx].revents));
           repeater_.reset();
           repeat_fd = -1;
-        } else if ((pfds[1].revents & POLLIN) != 0) {
+        } else if ((pfds[repeat_idx].revents & POLLIN) != 0) {
           repeater_->Dispatch();
         }
       }
@@ -625,8 +667,13 @@ void DrmSeat::HandleEvent(const drm::input::InputEvent& ev) {
 }
 
 void DrmSeat::ReloadKeymap(KeymapConfig cfg) {
-  std::lock_guard lk(pending_mu_);
-  pending_keymap_ = std::move(cfg);
+  {
+    std::lock_guard lk(pending_mu_);
+    pending_keymap_ = std::move(cfg);
+  }
+  // Wake the dispatch thread so ApplyPendingKeymap() runs now rather than on
+  // the next input event.
+  waker_.Wake();
 }
 
 void DrmSeat::SetVtSwitchHandler(VtSwitchHandler handler) {
@@ -695,11 +742,20 @@ void DrmSeat::SetInputTransforms(const std::vector<std::string>& specs) {
 void DrmSeat::OnSessionPaused() {
   pending_session_action_.store(PendingSessionAction::kSuspend,
                                 std::memory_order_release);
+  // Posted from the libseat dispatch thread. Wake this seat's dispatch thread
+  // so it services the suspend now; under poll(-1) it would otherwise stall
+  // until the next input event — but the fds are about to be revoked, so no
+  // event is coming (the revoked-fd hang the suspend dance exists to prevent).
+  waker_.Wake();
 }
 
 void DrmSeat::OnSessionResumed() {
   pending_session_action_.store(PendingSessionAction::kResume,
                                 std::memory_order_release);
+  // Same rationale as OnSessionPaused: the resume must run on the dispatch
+  // thread, and no input can arrive until libinput is resumed, so the waker is
+  // the only thing that can unblock the poll.
+  waker_.Wake();
 }
 
 void DrmSeat::ApplyPendingKeymap() {

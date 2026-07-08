@@ -169,6 +169,10 @@ if (BUILD_SOFTWARE_INPUT_LIBINPUT OR BUILD_BACKEND_DRM_KMS_EGL OR
     target_sources(${PROJECT_NAME} PRIVATE
             input/xkb_keyboard.cc
             input/key_repeater.cc
+            # eventfd waker that breaks the seat's dispatch poll out of an
+            # infinite block on a cross-thread flag change (stop / session
+            # pause-resume / keymap reload).
+            input/wake_event_fd.cc
     )
 endif ()
 
