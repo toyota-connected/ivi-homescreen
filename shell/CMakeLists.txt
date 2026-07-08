@@ -50,7 +50,9 @@ add_executable(${PROJECT_NAME}
 )
 
 if (BUILD_ACCESSIBILITY)
-    target_sources(${PROJECT_NAME} PRIVATE accessibility/accessibility_tree.cc)
+    target_sources(${PROJECT_NAME} PRIVATE
+            accessibility/accessibility_tree.cc
+            accessibility/semantics_translator.cc)
 endif ()
 
 # Wayland-specific TUs:

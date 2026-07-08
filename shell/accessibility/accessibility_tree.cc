@@ -15,9 +15,11 @@
  */
 
 #include "accessibility_tree.h"
-#include <filesystem>
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <unordered_set>
 
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
@@ -26,36 +28,43 @@
 #include "../utils.h"
 #include "logging/logging.h"
 
-void AccessibilityNode::AddChild(const int32_t child_id) {
-  m_children.push_back(child_id);
+AccessibilityNode::AccessibilityNode(const FlutterSemanticsNode2& fl_node) {
+  Update(fl_node);
 }
 
-void AccessibilityNode::UpdateNode(FlutterSemanticsNode2* /* fl_node */) {
-  // Look through all fl_node updates, compare to existing data, update where
-  // necessary
-}
+void AccessibilityNode::Update(const FlutterSemanticsNode2& fl_node) {
+  m_id = fl_node.id;
+  // Own copies of the text fields. The embedder only guarantees these
+  // pointers for the duration of the update callback, and any of them may be
+  // null — constructing std::string from a null pointer is undefined, so
+  // coalesce to empty.
+  m_label = fl_node.label ? fl_node.label : "";
+  m_hint = fl_node.hint ? fl_node.hint : "";
+  m_value = fl_node.value ? fl_node.value : "";
+  m_tooltip = fl_node.tooltip ? fl_node.tooltip : "";
+  m_bounds = fl_node.rect;
+  m_flags = fl_node.flags;
 
-AccessibilityNode::AccessibilityNode(const FlutterSemanticsNode2& fl_node)
-    : m_id(fl_node.id),
-      m_label(fl_node.label),
-      m_hint(fl_node.hint),
-      m_value(fl_node.value),
-      m_tooltip(fl_node.tooltip),
-      m_bounds(fl_node.rect),
-      m_flags(fl_node.flags) {
-  // Determine Role
-  uint8_t node_role;
+  // Role. This inline mapping is a stopgap; the SemanticsTranslator owns the
+  // full role/state/action table.
   if (fl_node.id == 0) {
-    node_role = SEMANTIC_ROLE_WINDOW;
+    m_role = SEMANTIC_ROLE_WINDOW;
   } else if (fl_node.flags & kFlutterSemanticsFlagIsButton) {
-    node_role = SEMANTIC_ROLE_BUTTON;
+    m_role = SEMANTIC_ROLE_BUTTON;
   } else {
-    // TODO: Add more role handling
-    node_role = SEMANTIC_ROLE_UNKNOWN;
+    m_role = SEMANTIC_ROLE_UNKNOWN;
   }
-  m_role = node_role;
 
-  // TODO: Initialize more info from flags and actions
+  // Replace (not append) the children in traversal order, so a reorder or a
+  // removed child is reflected when the node is re-sent.
+  if (fl_node.child_count > 0 &&
+      fl_node.children_in_traversal_order != nullptr) {
+    m_children.assign(fl_node.children_in_traversal_order,
+                      fl_node.children_in_traversal_order +
+                          static_cast<size_t>(fl_node.child_count));
+  } else {
+    m_children.clear();
+  }
 }
 
 AccessibilityTree::AccessibilityTree() : focused_node(0) {}
@@ -63,65 +72,102 @@ AccessibilityTree::~AccessibilityTree() = default;
 
 void AccessibilityTree::HandleFlutterUpdate(
     const FlutterSemanticsUpdate2* update) {
-  if (!IsTreeBuilt()) {
-    // Should be the first time this callback fired, with initial states of all
-    // nodes. Verify node 0 (root node) exists
-    bool root_node_found = false;
-    for (int i = 0; i < static_cast<int>(update->node_count); i++) {
-      if (const FlutterSemanticsNode2* node = update->nodes[i]; node->id == 0) {
-        root_node_found = true;
-      }
-    }
-
-    if (root_node_found) {
-      // Iterate through and create all the nodes
-      for (int i = 0; i < static_cast<int>(update->node_count); i++) {
-        const FlutterSemanticsNode2* node = update->nodes[i];
-        // get_node creates the node if it doesn't already exist (which it
-        // shouldn't)
-        AccessibilityNode* new_node = GetNode(*node);
-        for (int j = 0; j < static_cast<int>(node->child_count); j++) {
-          new_node->AddChild(node->children_in_traversal_order[j]);
-        }
-      }
-      SetTreeBuilt(true);
-      std::filesystem::path dir = Utils::GetConfigHomePath();
-      dir /= "accessibility";
-      std::error_code ec;
-      if (!std::filesystem::exists(dir)) {
-        std::filesystem::create_directories(dir, ec);
-      }
-      const std::string target = (dir / "semantic_tree_init.json").string();
-      // The accessibility directory is derived from the user's environment
-      // (XDG_CONFIG_HOME, or HOME as a fallback). Reject any ".." traversal
-      // segment before opening the file so a crafted environment cannot
-      // redirect the write outside the intended config tree.
-      if (target.find("..") != std::string::npos) {
-        spdlog::error(
-            "Refusing to write accessibility tree dump to '{}': path contains "
-            "a '..' traversal segment",
-            target);
-      } else {
-        DumpTree(target.c_str());
-      }
-#if ENABLE_ACCESSKIT
-      Init_AccessKit();
-#endif
-    }
-  } else {
-    // Tree is built, just provide updates
-    for (int i = 0; i < static_cast<int>(update->node_count); i++) {
-      FlutterSemanticsNode2* node = update->nodes[i];
-      const AccessibilityNode* updated_node = GetNode(*node);
-      if (node->flags & kFlutterSemanticsFlagIsFocused) {
-        SetFocusedNode(updated_node->GetId());
-      }
-      AccessibilityNode::UpdateNode(node);
+  // Upsert every node in this update: create the ones we have not seen and
+  // refresh the rest. Update() replaces fields and children, so stale labels
+  // and detached children never accumulate across successive updates.
+  for (size_t i = 0; i < update->node_count; i++) {
+    const FlutterSemanticsNode2* node = update->nodes[i];
+    AccessibilityNode* mirror = GetNode(*node);
+    mirror->Update(*node);
+    if (node->flags & kFlutterSemanticsFlagIsFocused) {
+      SetFocusedNode(node->id);
     }
   }
 
-  for (int j = 0; j < static_cast<int>(update->custom_action_count); j++) {
+  if (!IsTreeBuilt()) {
+    // The tree is only usable once the root (id 0) has arrived; Flutter sends
+    // it in the first update. Hold off on the initial dump until then.
+    if (node_index.find(0) == node_index.end()) {
+      return;
+    }
+    SetTreeBuilt(true);
+
+    std::filesystem::path dir = Utils::GetConfigHomePath();
+    dir /= "accessibility";
+    std::error_code ec;
+    if (!std::filesystem::exists(dir)) {
+      std::filesystem::create_directories(dir, ec);
+    }
+    const std::string target = (dir / "semantic_tree_init.json").string();
+    // The accessibility directory is derived from the user's environment
+    // (XDG_CONFIG_HOME, or HOME as a fallback). Reject any ".." traversal
+    // segment before opening the file so a crafted environment cannot
+    // redirect the write outside the intended config tree.
+    if (target.find("..") != std::string::npos) {
+      spdlog::error(
+          "Refusing to write accessibility tree dump to '{}': path contains "
+          "a '..' traversal segment",
+          target);
+    } else {
+      DumpTree(target.c_str());
+    }
+#if ENABLE_ACCESSKIT
+    Init_AccessKit();
+#endif
+  }
+
+  // Drop any node no longer reachable from the root: a subtree Flutter
+  // detached is removed from the mirror instead of lingering forever.
+  PruneUnreachable();
+
+  for (size_t j = 0; j < update->custom_action_count; j++) {
     // TODO: handle custom actions
+  }
+}
+
+void AccessibilityTree::PruneUnreachable() {
+  // Mark everything reachable from the root (id 0) via traversal-order
+  // children.
+  std::unordered_set<int32_t> reachable;
+  std::vector<int32_t> stack;
+  if (node_index.find(0) != node_index.end()) {
+    reachable.insert(0);
+    stack.push_back(0);
+  }
+  while (!stack.empty()) {
+    const int32_t id = stack.back();
+    stack.pop_back();
+    const auto it = node_index.find(id);
+    if (it == node_index.end()) {
+      continue;  // referenced by a parent but not (yet) mirrored
+    }
+    const AccessibilityNode* n = it->second;
+    for (uint32_t i = 0; i < n->NumberOfChildren(); i++) {
+      const int32_t child = n->GetChild(static_cast<int32_t>(i));
+      if (child >= 0 && reachable.insert(child).second) {
+        stack.push_back(child);
+      }
+    }
+  }
+
+  // Drop the unreachable nodes from both the index and the owning vector.
+  for (auto it = node_index.begin(); it != node_index.end();) {
+    if (reachable.find(it->first) == reachable.end()) {
+      it = node_index.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  nodes.erase(
+      std::remove_if(nodes.begin(), nodes.end(),
+                     [&reachable](const std::unique_ptr<AccessibilityNode>& n) {
+                       return reachable.find(n->GetId()) == reachable.end();
+                     }),
+      nodes.end());
+
+  // If the focused node was pruned, fall back to the root.
+  if (node_index.find(GetFocusedNode()) == node_index.end()) {
+    SetFocusedNode(0);
   }
 }
 
@@ -132,8 +178,9 @@ AccessibilityNode* AccessibilityTree::GetNode(
     return it->second;
   }
 
-  auto new_node = new AccessibilityNode(fl_node);
-  nodes.emplace_back(new_node);
+  auto owned = std::make_unique<AccessibilityNode>(fl_node);
+  AccessibilityNode* new_node = owned.get();
+  nodes.emplace_back(std::move(owned));
   node_index.emplace(new_node->GetId(), new_node);
   SPDLOG_TRACE("New AccessibilityNode created with ID: {}, number of nodes: {}",
                new_node->GetId(), nodes.size());
