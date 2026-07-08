@@ -63,6 +63,7 @@ message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
 include(compiler)
+include(cxx_compat)
 
 # drm_kms.cmake must run after compiler.cmake so the `toolchain` INTERFACE
 # library (which carries -stdlib=libc++ on clang builds) exists when we
@@ -90,6 +91,12 @@ if (BUILD_BACKEND_SOFTWARE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR
         BUILD_BACKEND_DRM_KMS_VULKAN))
     include(drm_cxx_cursor_load)
 endif ()
+
+if (ENABLE_DLT)
+    add_subdirectory(shell/logging)
+endif ()
+
+include(logging_helpers)
 
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
