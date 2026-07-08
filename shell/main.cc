@@ -96,6 +96,23 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>(sentry_config_path);
 #endif
 
+#if INTEGRATION_TEST_CRASH_HANDLER
+  // If we're running the crash handler integration test, trigger a crash and
+  // exit immediately. The test runner will then check if the crash was captured
+  // successfully.
+
+  spdlog::info(
+      "Running crash handler integration test: triggering crash in 3 "
+      "seconds...");
+  std::this_thread::sleep_for(std::chrono::seconds(3));
+
+  CrashHandler::trigger_crash();
+  spdlog::error(
+      "Crash handler integration test failed: trigger_crash() returned instead "
+      "of crashing.");
+  return 231;
+#endif
+
   // Handle --drm-list-modes[=<path>] as an early exit so the user doesn't need
   // to supply a bundle just to inspect modes. It is dispatched to the active
   // backend's mode lister (DRM lists the scanout connector's modes; software

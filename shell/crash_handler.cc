@@ -12,11 +12,13 @@
 
 #include "sentry.h"
 
+#if INTEGRATION_TEST_CRASH_HANDLER
 volatile auto invalid_mem = reinterpret_cast<void*>(1);
 
 void CrashHandler::trigger_crash() {
   memset(invalid_mem, 1, 100);
 }
+#endif
 
 CrashHandler::SentryConfig CrashHandler::LoadConfig(
     const std::string& config_path) {

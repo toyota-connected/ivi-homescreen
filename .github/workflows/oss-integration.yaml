@@ -1,0 +1,47 @@
+---
+name: integration-test
+description: Run integration test for ivi-homescreen
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  # Runs integration test for the CrashHandler (Sentry integration)
+  # - Sets up a local Kent (fake Sentry) server
+  # - Builds a homescreen binary with the crash handler and integration test enabled
+  # - Runs the binary, which intentionally crashes; checks if the crash report is received  
+  crash-handler:
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
+    runs-on: ubuntu-22.04
+    env:
+      PREFER_LLVM: 19
+    steps:
+      - name: Check Environment
+        id: check_environment
+        shell: bash
+        run: |
+          echo "Running on Ubuntu version: $(lsb_release -d | cut -f2)"
+          echo "Running on architecture: $(uname -m)"
+          echo "Current directory: $(pwd)"
+          echo "user=$(whoami)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup workspace
+        uses: meta-flutter/workspace-automation/.github/actions/setup-workspace@v2.0
+        with:
+          args: --disable=rive-text --enable=sentry-native --override-repo=https://github.com/toyota-connected/ivi-homescreen.git#${{ github.event.pull_request.head.ref && format('heads/{0}', github.event.pull_request.head.ref) || github.sha }}
+          user: ${{ steps.check_environment.outputs.user }}
+          ref: v2.0
+          cache: false
+          cache-key: crash-handler-integration-pr${{ github.event.pull_request.number }}
+
+      - name: Run integration test for crash handler
+        shell: bash
+        run: |
+          cd "${{ github.workspace }}"
+          source ./setup_env.sh
+          cd ./app/ivi-homescreen
+          ls -al scripts
+          git status
+          ./scripts/crash_handler_integration.sh
