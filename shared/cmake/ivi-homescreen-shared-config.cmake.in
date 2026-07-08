@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# Consumers do: find_package(ivi-homescreen-shared CONFIG REQUIRED)
+#               target_link_libraries(<tgt> PRIVATE ivi_homescreen::ihs_shared)
+include("${CMAKE_CURRENT_LIST_DIR}/ivi-homescreen-shared-targets.cmake")
+
+check_required_components(ivi-homescreen-shared)
