@@ -31,15 +31,20 @@ namespace profiling {
  * handlers) and compositor scanout time from wp_presentation feedback
  * (RecordPresent, from the vsync provider's presented event).
  *
- * v1 metric — input-to-next-scanout: every input timestamp is queued, and each
- * present drains the inputs it is at-or-after, recording present − input for
- * each. This is the *floor* of true motion-to-photon: the scanout at
- * present_ns is the first moment an input could be visible, but the frame that
- * actually reflects a given input may present a cycle or two later (engine
- * pipeline depth). Frame-accurate correlation — pairing an input with the
- * frame that rendered it via the vsync baton cutoff — is a follow-up that
- * refines this into the true latency; the floor is already useful and moves
- * exactly with an injected delay.
+ * Two latencies are reported per present, from the same queued inputs:
+ *
+ *   - frame-accurate (primary): each present carries its frame's input *cutoff*
+ *     — the frame_start_time of the baton that drove it (see
+ *     IVsyncProvider::LastDeliveredFrameStartNs). An input at or before the
+ *     cutoff was available when that frame's build began, so that frame is the
+ *     one that rendered it; its latency is present − input. Inputs after the
+ *     cutoff stay queued for the next frame. This is true motion-to-photon.
+ *
+ *   - floor (secondary): present − input for the first scanout at or after the
+ *     input, regardless of which frame consumed it. The scanout is the earliest
+ *     an input *could* be visible, so this under-counts by the engine pipeline
+ *     depth. Reported alongside the frame-accurate number; their difference is
+ *     that pipeline depth (typically one to two frames).
  *
  * Enabled by IVI_M2P_PROFILE (or IVI_PROFILE). Threading: RecordInput and
  * RecordPresent are both called on the Wayland event thread, so no locking —
@@ -53,10 +58,15 @@ class MotionToPhoton {
   /// Queue a kernel input timestamp (nanoseconds, CLOCK_MONOTONIC).
   void RecordInput(uint64_t input_ns);
 
-  /// A frame scanned out at @p present_ns (nanoseconds, CLOCK_MONOTONIC).
-  /// Records present − input for every queued input at or before it. @p label
-  /// tags the window log line (backend name).
-  void RecordPresent(uint64_t present_ns, std::string_view label);
+  /// A frame scanned out at @p present_ns (nanoseconds, CLOCK_MONOTONIC) whose
+  /// input cutoff (frame_start_time) was @p cutoff_ns. Drains and records the
+  /// frame-accurate latency for every queued input at or before the cutoff, and
+  /// the floor latency for every input at or before @p present_ns. @p label
+  /// tags the window log line (backend name). A @p cutoff_ns of 0 (unknown)
+  /// drains nothing frame-accurately — those inputs roll to a later present.
+  void RecordPresent(uint64_t present_ns,
+                     uint64_t cutoff_ns,
+                     std::string_view label);
 
   /// Emit the session-aggregate percentiles. No-op when nothing was recorded.
   void LogSessionSummary(std::string_view label) const;
@@ -81,16 +91,23 @@ class MotionToPhoton {
   };
 
   // FIFO ring of pending input timestamps (ns). Monotonic, so a present drains
-  // from the front. Overflow (inputs with no interleaving present — a stall or
-  // idle burst) drops the oldest and is counted.
+  // from the front. Two cursors chase tail_: head_ removes entries at the frame
+  // cutoff (frame-accurate); floor_head_ reads ahead to the present timestamp
+  // (floor) without removing. floor_head_ is always at or ahead of head_ in
+  // ring order because a cutoff never exceeds its present. Overflow (inputs
+  // with no interleaving present — a stall or idle burst) drops the oldest,
+  // advancing both cursors as needed, and is counted.
   static constexpr uint32_t kPending = 256;
   std::array<uint64_t, kPending> pending_{};
-  uint32_t head_{0};
+  uint32_t head_{0};        // frame-accurate drain (removes)
+  uint32_t floor_head_{0};  // floor read-ahead (does not remove)
   uint32_t tail_{0};
   uint32_t dropped_{0};
 
-  Hist window_{};
-  Hist session_{};
+  Hist window_{};         // frame-accurate, current window
+  Hist session_{};        // frame-accurate, whole session
+  Hist window_floor_{};   // floor, current window
+  Hist session_floor_{};  // floor, whole session
   uint32_t presents_{0};
 
   [[nodiscard]] bool Empty() const { return head_ == tail_; }

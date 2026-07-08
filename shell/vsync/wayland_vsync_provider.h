@@ -70,6 +70,12 @@ class WpFeedbackHandler final
                    uint32_t flags) override;
   void OnDiscarded() override;
 
+  // frame_start_time (input cutoff) of the frame this feedback was minted for,
+  // stamped at RequestFeedback and read at OnPresented (mint happens-before
+  // present, so no synchronization needed). 0 = unknown → no frame-accurate
+  // drain for this frame.
+  uint64_t cutoff_ns_{};
+
  private:
   WaylandVsyncProvider* owner_;
 };

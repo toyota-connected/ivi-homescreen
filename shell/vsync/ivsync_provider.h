@@ -130,6 +130,16 @@ class IVsyncProvider {
     return engine_.load(std::memory_order_acquire);
   }
 
+  /// The frame_start_time of the most recent baton handed to Flutter — i.e. the
+  /// input cutoff of the frame currently building/committing. Because a present
+  /// in flight keeps the next baton parked, this value is stable across a
+  /// single frame's commit, letting a source tag that frame's presentation
+  /// feedback with the cutoff of the inputs it actually consumed
+  /// (motion-to-photon). 0 until the first baton is delivered.
+  [[nodiscard]] uint64_t LastDeliveredFrameStartNs() const {
+    return last_frame_start_ns_.load(std::memory_order_acquire);
+  }
+
  private:
   // Marshal one OnVsync onto the runner's strand. No-op when the runner is not
   // wired (the caller must leave the baton parked in that case).
@@ -145,6 +155,10 @@ class IVsyncProvider {
   std::atomic<intptr_t> vsync_baton_{0};
   std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_{nullptr};
   std::atomic<TaskRunner*> runner_{nullptr};
+
+  // frame_start_time of the last baton delivered via PostOnVsync — the input
+  // cutoff of the frame that baton drives (see LastDeliveredFrameStartNs).
+  std::atomic<uint64_t> last_frame_start_ns_{0};
 
   // Default source state for the composition path (unused when a subclass
   // overrides IsSourcePending()/PeriodNs()). 60Hz period until told otherwise.

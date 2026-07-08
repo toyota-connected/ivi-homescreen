@@ -69,6 +69,11 @@ void MotionToPhoton::RecordInput(const uint64_t input_ns) {
   const uint32_t next = (tail_ + 1u) % kPending;
   if (next == head_) {
     // Ring full — drop the oldest so the newest (most relevant) input is kept.
+    // Keep floor_head_ >= head_: if the dropped entry was not yet floored,
+    // advance floor_head_ past it too.
+    if (floor_head_ == head_) {
+      floor_head_ = (floor_head_ + 1u) % kPending;
+    }
     head_ = (head_ + 1u) % kPending;
     dropped_++;
   }
@@ -77,11 +82,22 @@ void MotionToPhoton::RecordInput(const uint64_t input_ns) {
 }
 
 void MotionToPhoton::RecordPresent(const uint64_t present_ns,
+                                   const uint64_t cutoff_ns,
                                    const std::string_view label) {
-  // Drain every queued input at or before this scanout; each contributes one
-  // input-to-scanout sample. Inputs newer than present_ns (arrived after this
-  // frame's scanout timestamp) stay queued for a later present.
-  while (!Empty() && pending_[head_] <= present_ns) {
+  // Floor pass: any queued input at or before this scanout could first be
+  // visible now. Read-ahead only (floor_head_ does not remove) so the same
+  // inputs remain for the frame-accurate pass.
+  while (floor_head_ != tail_ && pending_[floor_head_] <= present_ns) {
+    const uint64_t latency_ns = present_ns - pending_[floor_head_];
+    window_floor_.Add(latency_ns);
+    session_floor_.Add(latency_ns);
+    floor_head_ = (floor_head_ + 1u) % kPending;
+  }
+
+  // Frame-accurate pass: this frame's build began at cutoff_ns, so it rendered
+  // exactly the inputs at or before that cutoff; each gets present − input.
+  // Inputs after the cutoff arrived too late for this frame — they stay queued.
+  while (head_ != tail_ && pending_[head_] <= cutoff_ns) {
     const uint64_t latency_ns = present_ns - pending_[head_];
     window_.Add(latency_ns);
     session_.Add(latency_ns);
@@ -90,11 +106,13 @@ void MotionToPhoton::RecordPresent(const uint64_t present_ns,
 
   if (++presents_ % kWindow == 0 && window_.count > 0) {
     spdlog::info(
-        "[{}] motion->photon (input->scanout floor): p50={:.1f}ms p99={:.1f}ms "
-        "max={:.1f}ms n={} dropped={}",
+        "[{}] motion->photon: frame-accurate p50={:.1f}ms p99={:.1f}ms "
+        "max={:.1f}ms | floor p50={:.1f}ms p99={:.1f}ms | n={} dropped={}",
         label, window_.Pct(0.50) / 1000.0, window_.Pct(0.99) / 1000.0,
-        window_.max_us / 1000.0, window_.count, dropped_);
+        window_.max_us / 1000.0, window_floor_.Pct(0.50) / 1000.0,
+        window_floor_.Pct(0.99) / 1000.0, window_.count, dropped_);
     window_ = Hist{};
+    window_floor_ = Hist{};
     dropped_ = 0;
   }
 }
@@ -104,12 +122,22 @@ void MotionToPhoton::LogSessionSummary(const std::string_view label) const {
     return;
   }
   spdlog::info(
-      "[{}] motion->photon session (input->scanout floor, {} samples): "
-      "mean={:.1f}ms p50={:.1f}ms p95={:.1f}ms p99={:.1f}ms max={:.1f}ms",
+      "[{}] motion->photon session (frame-accurate, {} samples): mean={:.1f}ms "
+      "p50={:.1f}ms p95={:.1f}ms p99={:.1f}ms max={:.1f}ms",
       label, session_.count,
       static_cast<double>(session_.sum_us) / session_.count / 1000.0,
       session_.Pct(0.50) / 1000.0, session_.Pct(0.95) / 1000.0,
       session_.Pct(0.99) / 1000.0, session_.max_us / 1000.0);
+  if (session_floor_.count > 0) {
+    spdlog::info(
+        "[{}] motion->photon session (floor, {} samples): mean={:.1f}ms "
+        "p50={:.1f}ms p95={:.1f}ms p99={:.1f}ms max={:.1f}ms",
+        label, session_floor_.count,
+        static_cast<double>(session_floor_.sum_us) / session_floor_.count /
+            1000.0,
+        session_floor_.Pct(0.50) / 1000.0, session_floor_.Pct(0.95) / 1000.0,
+        session_floor_.Pct(0.99) / 1000.0, session_floor_.max_us / 1000.0);
+  }
 }
 
 }  // namespace profiling
