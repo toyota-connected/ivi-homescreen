@@ -22,23 +22,23 @@
 
 LibDltExports::LibDltExports(void* lib) {
   if (lib != nullptr) {
-    GetFuncAddress(lib, "dlt_check_library_version", &CheckLibraryVersion);
-    GetFuncAddress(lib, "dlt_register_app", &RegisterApp);
-    GetFuncAddress(lib, "dlt_unregister_app", &UnregisterApp);
-    GetFuncAddress(lib, "dlt_register_context", &RegisterContext);
-    GetFuncAddress(lib, "dlt_unregister_context", &UnregisterContext);
-    GetFuncAddress(lib, "dlt_user_log_write_start", &UserLogWriteStart);
-    GetFuncAddress(lib, "dlt_user_log_write_finish", &UserLogWriteFinish);
-    GetFuncAddress(lib, "dlt_user_log_write_string", &UserLogWriteString);
-    GetFuncAddress(lib, "dlt_user_log_write_int", &UserLogWriteInt);
-    GetFuncAddress(lib, "dlt_user_log_write_int8", &UserLogWriteInt8);
-    GetFuncAddress(lib, "dlt_user_log_write_int16", &UserLogWriteInt16);
-    GetFuncAddress(lib, "dlt_user_log_write_int32", &UserLogWriteInt32);
-    GetFuncAddress(lib, "dlt_user_log_write_int64", &UserLogWriteInt64);
-    GetFuncAddress(lib, "dlt_user_log_write_constant_utf8_string",
-                   &UserLogWriteConstantUtf8String);
-    GetFuncAddress(lib, "dlt_user_log_write_sized_utf8_string",
-                   &UserLogWriteSizedUtf8String);
+    ShellGetFuncAddress(lib, "dlt_check_library_version", &CheckLibraryVersion);
+    ShellGetFuncAddress(lib, "dlt_register_app", &RegisterApp);
+    ShellGetFuncAddress(lib, "dlt_unregister_app", &UnregisterApp);
+    ShellGetFuncAddress(lib, "dlt_register_context", &RegisterContext);
+    ShellGetFuncAddress(lib, "dlt_unregister_context", &UnregisterContext);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_start", &UserLogWriteStart);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_finish", &UserLogWriteFinish);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_string", &UserLogWriteString);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_int", &UserLogWriteInt);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_int8", &UserLogWriteInt8);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_int16", &UserLogWriteInt16);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_int32", &UserLogWriteInt32);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_int64", &UserLogWriteInt64);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_constant_utf8_string",
+                        &UserLogWriteConstantUtf8String);
+    ShellGetFuncAddress(lib, "dlt_user_log_write_sized_utf8_string",
+                        &UserLogWriteSizedUtf8String);
   }
 }
 

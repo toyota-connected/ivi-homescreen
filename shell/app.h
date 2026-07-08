@@ -19,8 +19,9 @@
 #include <EGL/egl.h>
 #include <memory>
 
-#include "config/common.h"
+#include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 #include "configuration/configuration.h"
+#include "logging/logger.hpp"
 #include "view/flutter_view.h"
 #include "watchdog.h"
 
