@@ -116,6 +116,10 @@ void IVsyncProvider::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
     return;  // runner not wired yet — caller leaves the baton parked
   }
   const uint64_t period_ns = PeriodNs();
+  // Record now_ns as this frame's input cutoff (frame_start_time) before we
+  // hand Flutter the baton — a source's presentation feedback reads it back to
+  // attribute inputs to the frame that consumed them (motion-to-photon).
+  last_frame_start_ns_.store(now_ns, std::memory_order_release);
   asio::post(*runner->GetStrandContext(), [engine, baton, now_ns, period_ns]() {
     LibFlutterEngine->OnVsync(engine, baton, now_ns, now_ns + period_ns);
   });
