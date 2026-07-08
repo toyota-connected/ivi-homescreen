@@ -1,0 +1,12 @@
+# Linker version script for libihs_shared.so.
+#
+# Only the sanctioned C ABI (ihs_*) is exported; every other symbol — including
+# the C++ internals of the logging bridge and any vendored dependency compiled
+# in — stays local regardless of its visibility attributes. This is the hard
+# boundary: a plugin can reach nothing but the ihs_* surface.
+{
+  global:
+    ihs_*;
+  local:
+    *;
+};
