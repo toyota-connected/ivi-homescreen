@@ -157,6 +157,11 @@ void WaylandVsyncProvider::RequestFeedback() {
     return;
   }
   auto handler = std::make_unique<WpFeedbackHandler>(this);
+  // Stamp this frame's input cutoff: the frame being committed now was driven
+  // by the last baton we delivered (a present in flight keeps the next one
+  // parked), so its frame_start_time is the cutoff of the inputs it consumed.
+  // OnPresented reads it back for the motion-to-photon frame-accurate drain.
+  handler->cutoff_ns_ = LastDeliveredFrameStartNs();
   handler->_SetProxy(raw);  // adopts + installs presented/discarded listener
   {
     std::lock_guard<std::mutex> lock(feedback_mu_);
@@ -195,12 +200,16 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
   if (refresh_ns > 0 && refresh_ns <= kMaxPlausibleRefreshNs) {
     last_refresh_ns_.store(refresh_ns, std::memory_order_release);
   }
+  // Read the frame's input cutoff before RetireFeedback destroys fb.
+  const uint64_t cutoff_ns = fb->cutoff_ns_;
   RetireFeedback(
       fb);  // clears feedback_pending_ once the last feedback retires
-  // Motion-to-photon: this scanout timestamp closes out the input events it
-  // presents (event thread, same as RecordInput).
+  // Motion-to-photon: this scanout timestamp closes out the input events this
+  // frame consumed — those at or before its cutoff (event thread, same as
+  // RecordInput). present_ns feeds the floor; cutoff_ns the frame-accurate
+  // pass.
   if (m2p_ != nullptr) {
-    m2p_->RecordPresent(present_ns, "wayland");
+    m2p_->RecordPresent(present_ns, cutoff_ns, "wayland");
   }
   // Base records the present (cadence profile) + hands the parked baton back
   // with the compositor's real presented timestamp.
