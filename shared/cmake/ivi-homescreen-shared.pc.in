@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=@PKGCONFIG_LIBDIR@
+includedir=@PKGCONFIG_INCLUDEDIR@
+
+Name: ivi-homescreen-shared
+Description: ivi-homescreen shared FFI ABI (logging, tracing, platform-view negotiation, config)
+Version: @IHS_SHARED_PC_VERSION@
+Libs: -L${libdir} -lihs_shared
+Cflags: -I${includedir}
