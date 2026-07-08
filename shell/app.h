@@ -94,11 +94,4 @@ class App final {
   asio::io_context primary_ioc_;
   asio::executor_work_guard<asio::io_context::executor_type> primary_work_{
       asio::make_work_guard(primary_ioc_)};
-
-#if ENABLE_DLT
-  // Declared last so it destructs first: the periodic DLT-bridge flush stops
-  // before the displays/reactor tear down and before the process-global bridge
-  // is stopped at IHS_LOGGING_STOP.
-  std::unique_ptr<IhsFlushWatchdog> m_ihs_flush_watchdog;
-#endif
 };

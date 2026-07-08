@@ -27,7 +27,11 @@ bool DltBridge::start(const char* app_id, const char* description) {
     return false;
   }
   loader_.register_app(app_id, description);
-  worker_.start();
+  // No point running the drain thread when libdlt never loaded: acquire_context
+  // hands back invalid handles in that state, so nothing is ever enqueued.
+  if (loader_.available()) {
+    worker_.start();
+  }
   return true;
 }
 
@@ -48,6 +52,13 @@ void DltBridge::flush() noexcept {
 
 ContextHandle DltBridge::acquire_context(std::string_view ctx_id,
                                          std::string_view description) {
+  // When libdlt is unavailable there is nowhere to emit, so hand back an
+  // invalid handle: IHS_LOG_* gates on ContextHandle::is_valid(), so the whole
+  // ring/worker path is skipped and a disabled-DLT build costs (almost)
+  // nothing per log site instead of allocating a ring and draining to a drop.
+  if (!loader_.available()) {
+    return ContextHandle{};
+  }
   auto result = cache_.ensure(ctx_id, description);
   if (!result.has_value()) {
     return ContextHandle{};

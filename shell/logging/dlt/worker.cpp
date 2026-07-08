@@ -50,21 +50,31 @@ void Worker::flush() noexcept {
 }
 
 void Worker::run(ihs::stop_token stop) {
-  while (!stop.stop_requested()) {
-    drain_all();
-    flush_requested_.store(false, std::memory_order_release);
+  int empty_polls = 0;
+  drain_all();  // immediate first pass so startup logs are not held
 
-    std::unique_lock<std::mutex> lock(mu_);
-    wake_cv_.wait_for(lock, kInterval, [&] {
-      return stop.stop_requested() ||
-             flush_requested_.load(std::memory_order_acquire) ||
-             RingRegistry::instance().any_immediate();
-    });
+  while (!stop.stop_requested()) {
+    const auto interval =
+        empty_polls >= kEmptyPollsBeforeIdle ? kIdleInterval : kActiveInterval;
+    {
+      std::unique_lock<std::mutex> lock(mu_);
+      wake_cv_.wait_for(lock, interval, [&] {
+        return stop.stop_requested() ||
+               flush_requested_.load(std::memory_order_acquire);
+      });
+      // Consume the flush request under the lock, paired with flush()'s
+      // set under the lock: a flush() arriving during the drain below
+      // sets it again, so the next iteration re-drains and none is lost.
+      flush_requested_.store(false, std::memory_order_release);
+    }
+
+    empty_polls = (drain_all() == 0) ? empty_polls + 1 : 0;
   }
   drain_all();
 }
 
-void Worker::drain_all() {
+std::size_t Worker::drain_all() {
+  std::size_t drained = 0;
   for (ThreadRing* ring = registry_.head(); ring != nullptr;
        ring = ring->next) {
     while (const RingSlot* slot = ring->peek()) {
@@ -73,8 +83,10 @@ void Worker::drain_all() {
                      slot->text);
       }
       ring->pop();
+      ++drained;
     }
   }
+  return drained;
 }
 
 }  // namespace ihs::dlt
