@@ -165,7 +165,10 @@ Engine::Engine(FlutterView* view,
     exit(EXIT_FAILURE);
   }
 
-  // override path
+  // Engine selection: a bundle-local engine overrides the system engine.
+  // Overall precedence: preloaded > bundle > linker search (DT_RUNPATH,
+  // LD_LIBRARY_PATH, ld.so.cache). The latter two are selected here; a
+  // preloaded engine is detected inside Load() and wins over both.
   std::filesystem::path engine_file_path(bundle_path);
   engine_file_path /= kBundleEngine;
   if (std::filesystem::exists(engine_file_path)) {
@@ -175,9 +178,14 @@ Engine::Engine(FlutterView* view,
     engine_file_path = kSystemEngine;
   }
 
-  if (!LibFlutterEngine::IsPresent(engine_file_path.c_str())) {
-    spdlog::critical(dlerror());
-    exit(-1);
+  // One-shot per process: the first view binds the engine. Load() fails on
+  // dlopen error, a missing required export, or a prior view having bound a
+  // different path — each cause is already logged at critical/error by the
+  // loader itself.
+  if (!LibFlutterEngine::Load(engine_file_path.c_str())) {
+    spdlog::critical("({}) unable to load flutter engine: {}", m_index,
+                     engine_file_path.c_str());
+    exit(EXIT_FAILURE);
   }
 
   ///
