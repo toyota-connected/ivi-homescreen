@@ -204,14 +204,6 @@ jobs:
 
           # Get username
           echo "user=$(whoami)" >> "$GITHUB_OUTPUT"
-      # The setup-workspace action builds the embedder (incl. the wayland-cxx-
-      # scanner submodule, which find_package/pkg_check_modules(pugixml REQUIRED))
-      # but doesn't install pugixml. Add the host dev package before it runs.
-      - name: Install pugixml (host build dep for wayland-cxx-scanner)
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libpugixml-dev
       - name: Setup workspace
         uses: meta-flutter/workspace-automation/.github/actions/setup-workspace@v2.0
         with:
