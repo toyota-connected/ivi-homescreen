@@ -106,7 +106,13 @@ class Utils {
    * flutter
    */
   static const char* GetConfigHomePath() {
+    // Resolved once and cached for the process lifetime: the config directory
+    // does not change while running, and re-resolving would strdup() a fresh
+    // copy on every call and leak the previous one.
     static const char* config_home_dir = nullptr;
+    if (config_home_dir != nullptr) {
+      return config_home_dir;
+    }
 
     const auto config_env = getenv("XDG_CONFIG_HOME");
     if (config_env && *config_env) {

@@ -85,3 +85,10 @@ add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(text_input-test)
 #add_subdirectory(texture-test)
+
+# The accessibility sources are only part of the shell target (and therefore of
+# TYPICAL_TEST_SOURCES) when BUILD_ACCESSIBILITY is configured on.
+if (BUILD_ACCESSIBILITY)
+    add_subdirectory(semantics_translator-test)
+    add_subdirectory(accessibility_tree-test)
+endif ()
