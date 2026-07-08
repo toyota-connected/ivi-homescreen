@@ -1,15 +1,18 @@
 # shell/logging/CMakeLists.txt
 #
-# Builds the DLT bridge shared library (libihs_logging_dlt.so). The legacy
-# dlt.cc / libdlt.cc sources remain compiled into the homescreen binary via
-# shell/CMakeLists.txt; this library is purely additive; it precedes wiring
-# main.cc to the mux header.
+# Builds the DLT bridge as a STATIC library linked into the homescreen binary.
+# Static because it has no out-of-tree consumers yet: shipping it as a .so would
+# require install() + an $ORIGIN rpath that neither exists. When the ihs_shared
+# module lands, these sources relocate into shared/ and ship as part of
+# libihs_shared.so (with a proper C ABI, install/export, and SOVERSION); this
+# standalone target goes away then. The legacy dlt.cc / libdlt.cc sources are
+# compiled straight into homescreen via shell/CMakeLists.txt.
 
 if(NOT ENABLE_DLT)
     return()
 endif()
 
-add_library(ihs_logging SHARED
+add_library(ihs_logging STATIC
     dlt/libdlt_loader.cpp
     dlt/thread_ring.cpp
     dlt/ring_registry.cpp
@@ -42,9 +45,8 @@ endif ()
 
 target_compile_options(ihs_logging PRIVATE -Wall -Wextra)
 
-# Note: the bridge's C++ entry points (DltBridge, ContextCache, etc.) are
-# consumed directly by the homescreen binary, so we keep default symbol
-# visibility. The extern "C" ffi_shim surface is already public.
+# The bridge's C++ entry points (DltBridge, ContextCache) and the extern "C"
+# ffi_shim surface link straight into the homescreen binary from this archive.
 set_target_properties(ihs_logging PROPERTIES
     OUTPUT_NAME ihs_logging_dlt
 )
