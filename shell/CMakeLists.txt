@@ -46,6 +46,7 @@ add_executable(${PROJECT_NAME}
         timer.cc
         view/flutter_view.cc
         watchdog.cc
+        stats.cc
         task_runner.cc
 )
 

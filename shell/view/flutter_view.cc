@@ -671,3 +671,10 @@ void FlutterView::ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
   m_backend->ResizeCompositorSurface(id, width, height);
 }
 #endif
+#if BUILD_WATCHDOG
+void FlutterView::PetWatchdogViaCallback() {
+  if (m_flutter_engine) {
+    m_flutter_engine->PetWatchdogViaCallback();
+  }
+}
+#endif

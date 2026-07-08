@@ -33,6 +33,10 @@
 #include "timer.h"
 #include "view/flutter_view.h"
 
+#if BUILD_WATCHDOG
+#include "watchdog.h"
+#endif
+
 #include <chrono>
 
 #include "asio/io_context.hpp"
@@ -190,7 +194,9 @@ App::App(const std::vector<Configuration::Config>& configs) {
 #endif
 
 #if BUILD_WATCHDOG
-  m_watch_dog = std::make_unique<Watchdog>();
+  Watchdog::getInstance().start(WATCHDOG_SOURCE_MAIN_THREAD);
+  Watchdog::getInstance().start(WATCHDOG_SOURCE_RENDER_THREAD);
+  next_pet_ = std::chrono::steady_clock::now();
 #endif
 
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
@@ -215,6 +221,10 @@ App::~App() {
   for (const auto& display : m_displays) {
     display->StopEvents();
   }
+#if BUILD_WATCHDOG
+  Watchdog::getInstance().stop(WATCHDOG_SOURCE_RENDER_THREAD);
+  Watchdog::getInstance().stop(WATCHDOG_SOURCE_MAIN_THREAD);
+#endif
 }
 
 bool App::AnyHasRepeatTimer() const {
@@ -248,7 +258,17 @@ int App::Loop() const {
     EventTimer::wait_event();
 
 #if BUILD_WATCHDOG
-  m_watch_dog->pet();
+  Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
+
+  // Schedule RenderThread pet via callback
+  if (next_pet_ <= std::chrono::steady_clock::now()) {
+    for (auto const& view : m_views) {
+      view->PetWatchdogViaCallback();
+    }
+    uint64_t interval = Watchdog::getInstance().getTimeoutMs() / 2;
+    next_pet_ =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(interval);
+  }
 #endif
 
   // Frame production is driven entirely by each backend's own vsync source
@@ -329,7 +349,7 @@ int App::Run() {
       view->RunTasks();
     }
 #if BUILD_WATCHDOG
-    m_watch_dog->pet();
+    Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
 #endif
   };
 

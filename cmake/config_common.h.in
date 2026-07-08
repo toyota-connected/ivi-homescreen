@@ -75,6 +75,9 @@ static constexpr char kCrashpadBinaryPath[] = "@CRASHPAD_RUNTIME_PATH@";
 #endif
 #cmakedefine01 INTEGRATION_TEST_CRASH_HANDLER
 
+#cmakedefine01 BUILD_WATCHDOG
+#cmakedefine01 BUILD_SYSTEMD_WATCHDOG
+
 #cmakedefine01 BUILD_ACCESSIBILITY
 
 #cmakedefine01 DEBUG_PLATFORM_MESSAGES

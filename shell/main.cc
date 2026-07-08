@@ -34,6 +34,10 @@
 #include "crash_handler.h"
 #endif
 
+#if BUILD_WATCHDOG
+#include "watchdog.h"
+#endif
+
 #include "shutdown_flag.h"
 
 namespace {
@@ -260,6 +264,10 @@ int main(const int argc, char** argv) {
 
   IHS_LOGGING_FLUSH();
   IHS_LOGGING_STOP();
+
+#if BUILD_WATCHDOG
+  Watchdog::getInstance().shutdown();
+#endif
 
 #if BUILD_CRASH_HANDLER
   (void)crash_handler.release();
