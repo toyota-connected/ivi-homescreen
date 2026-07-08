@@ -10,7 +10,7 @@ Initialization Test Summary：Test process_resolver func with valid process name
                 by calling the API via the GetInstance() method.
 ***************************************************************/
 TEST(HomescreenGlProcessResolver, Lv1Normal001) {
-  const auto gl_process = GlProcessResolver::GetInstance();
+  const auto& gl_process = GlProcessResolver::GetInstance();
   const auto process_resolver = gl_process.process_resolver("glGetString");
 
   EXPECT_TRUE(process_resolver != nullptr);
@@ -23,7 +23,7 @@ Initialization Test Summary：Test process_resolver func with invalid process
 name
 ***************************************************************/
 TEST(HomescreenGlProcessResolver, Lv1Abnormal001) {
-  const auto gl_process = GlProcessResolver::GetInstance();
+  const auto& gl_process = GlProcessResolver::GetInstance();
   const auto process_resolver = gl_process.process_resolver("InvalidProcess");
 
   EXPECT_TRUE(process_resolver == nullptr);
@@ -35,7 +35,7 @@ HomescreenGlProcessResolverProcessResolver_Lv1Abnormal002 Use Case Name:
 Initialization Test Summary：Test process_resolver func with null param
 ***************************************************************/
 TEST(HomescreenGlProcessResolver, Lv1Abnormal002) {
-  const auto gl_process = GlProcessResolver::GetInstance();
+  const auto& gl_process = GlProcessResolver::GetInstance();
   const auto process_resolver = gl_process.process_resolver(nullptr);
 
   EXPECT_TRUE(process_resolver == nullptr);
@@ -47,7 +47,7 @@ Use Case Name: Initialization
 Test Summary：Test process_resolver func with valid library name
 ***************************************************************/
 TEST(HomescreenGlProcessResolverGetHandle, Lv1Normal001) {
-  void* handle;
+  void* handle = nullptr;
   const int ret = EglProcessResolver::GetHandle("libEGL.so.1", &handle);
 
   EXPECT_EQ(ret, 1);
@@ -61,8 +61,9 @@ Test Summary：Test process_resolver func with invalid library name
 ***************************************************************/
 
 TEST(HomescreenGlProcessResolverGetHandle, Lv1Abnormal001) {
-  void* handle;
+  void* handle = nullptr;
   const int ret = EglProcessResolver::GetHandle("InvalidLibrary", &handle);
 
   EXPECT_EQ(ret, -1);
+  EXPECT_EQ(handle, nullptr);
 }

@@ -24,15 +24,9 @@
 
 #include "logging.h"
 
-std::shared_ptr<EglProcessResolver> GlProcessResolver::sInstance = nullptr;
-
-EglProcessResolver::~EglProcessResolver() {
-  for (auto const& item : m_handles) {
-    dlclose(item.first);
-  }
-}
-
 int EglProcessResolver::GetHandle(const std::string& lib, void** out_handle) {
+  *out_handle = nullptr;
+
   const auto handle = dlopen(lib.c_str(), RTLD_LAZY | RTLD_LOCAL);
 #if !defined(NDEBUG)
   if (handle) {
@@ -49,16 +43,13 @@ int EglProcessResolver::GetHandle(const std::string& lib, void** out_handle) {
   return 1;
 }
 
-void EglProcessResolver::Initialize() {
-  void* handle;
-  const std::vector<std::string> libs(kGlSoNames,
-                                      kGlSoNames + std::size(kGlSoNames));
-  for (const auto& name : libs) {
-    GetHandle(name, &handle);
-    if (handle) {
+EglProcessResolver::EglProcessResolver() {
+  for (const auto& name : kGlSoNames) {
+    void* handle = nullptr;
+    if (GetHandle(name, &handle) == 1) {
       m_handles.emplace_back(handle, name);
     } else {
-      spdlog::critical("{}: Library not found", name[0]);
+      spdlog::critical("{}: Library not found", name);
       assert(false);
     }
   }
