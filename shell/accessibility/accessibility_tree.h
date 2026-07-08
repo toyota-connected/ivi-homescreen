@@ -18,6 +18,7 @@
 #define SHELL_ACCESSIBILITY_ACCESSIBILITY_TREE_H_
 
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -47,26 +48,28 @@ class AccessibilityNode {
   // Returns the ID of the node.
   [[nodiscard]] int32_t GetId() const { return m_id; };
 
-  // Adds a child node ID to the list of children.
-  void AddChild(int32_t child_id);
-
-  // Updates the node with new data from a Flutter semantics node.
-  static void UpdateNode(FlutterSemanticsNode2* fl_node);
+  // Refreshes all fields (label / hint / value / tooltip, bounds, flags, role)
+  // and REPLACES the children list from a Flutter semantics node. Called on
+  // create and on every subsequent update, so stale labels or detached
+  // children never accumulate across updates.
+  void Update(const FlutterSemanticsNode2& fl_node);
 
   // Returns the role of the node.
   [[nodiscard]] uint8_t GetRole() const { return m_role; };
 
-  // Returns the label of the node.
-  [[nodiscard]] const char* GetLabel() const { return m_label; };
+  // Returns the label of the node. Backed by an owned copy, so the pointer
+  // stays valid for the node's lifetime (unlike the embedder's transient
+  // FlutterSemanticsNode2 strings, which live only for the update callback).
+  [[nodiscard]] const char* GetLabel() const { return m_label.c_str(); };
 
   // Returns the hint text of the node.
-  [[nodiscard]] const char* GetHint() const { return m_hint; };
+  [[nodiscard]] const char* GetHint() const { return m_hint.c_str(); };
 
   // Returns the tooltip text of the node.
-  [[nodiscard]] const char* GetTooltip() const { return m_tooltip; };
+  [[nodiscard]] const char* GetTooltip() const { return m_tooltip.c_str(); };
 
   // Returns the value of the node.
-  [[nodiscard]] const char* GetValue() const { return m_value; };
+  [[nodiscard]] const char* GetValue() const { return m_value.c_str(); };
 
   // Returns the bounds of the node.
   [[nodiscard]] FlutterRect GetBounds() const { return m_bounds; };
@@ -86,15 +89,19 @@ class AccessibilityNode {
   }
 
  private:
-  uint8_t m_role;                   // Role of the node.
-  int32_t m_id;                     // ID of the node.
-  const char* m_label;              // Label of the node.
-  const char* m_hint;               // Hint text of the node.
-  const char* m_value;              // Value of the node.
-  const char* m_tooltip;            // Tooltip text of the node.
-  FlutterRect m_bounds;             // Bounds of the node.
-  FlutterSemanticsFlag m_flags;     // Flags associated with the node.
-  std::vector<int32_t> m_children;  // List of child node IDs.
+  // The scalar members are set unconditionally by Update() (called from the
+  // constructor), but carry in-class initializers so the type is never left
+  // with an indeterminate field on any construction path.
+  uint8_t m_role = SEMANTIC_ROLE_UNKNOWN;  // Role of the node.
+  int32_t m_id = -1;                       // ID of the node.
+  std::string m_label;                     // Label of the node (owned copy).
+  std::string m_hint;      // Hint text of the node (owned copy).
+  std::string m_value;     // Value of the node (owned copy).
+  std::string m_tooltip;   // Tooltip text of the node (owned copy).
+  FlutterRect m_bounds{};  // Bounds of the node.
+  FlutterSemanticsFlag m_flags =
+      static_cast<FlutterSemanticsFlag>(0);  // Flags associated with the node.
+  std::vector<int32_t> m_children;           // List of child node IDs.
 };
 
 // Class representing the accessibility tree.
@@ -116,7 +123,7 @@ class AccessibilityTree {
   // If the index is out of bounds, returns nullptr.
   [[nodiscard]] AccessibilityNode* GetNodeByIdx(const int32_t idx) const {
     return (idx >= 0 && static_cast<size_t>(idx) < nodes.size())
-               ? nodes[static_cast<size_t>(idx)]
+               ? nodes[static_cast<size_t>(idx)].get()
                : nullptr;
   }
 
@@ -152,16 +159,22 @@ class AccessibilityTree {
 #endif
 
  private:
+  // Drops nodes no longer reachable from the root (id 0), keeping `nodes` and
+  // `node_index` consistent after a subtree is detached in an update.
+  void PruneUnreachable();
+
   bool tree_built = false;  // Flag indicating if the tree is built.
-  std::vector<AccessibilityNode*> nodes;  // List of nodes in the tree.
+  // Owns the nodes. node_index below holds non-owning raw pointers into these,
+  // so the tree destructs cleanly without a manual delete loop.
+  std::vector<std::unique_ptr<AccessibilityNode>> nodes;
   // Index from node id to node, kept in sync with `nodes` so GetNode() is
   // O(1) instead of a linear scan (semantics updates touch many nodes per
-  // update, which would otherwise be O(n^2)).
+  // update, which would otherwise be O(n^2)). Non-owning.
   std::unordered_map<int32_t, AccessibilityNode*> node_index;
   int32_t focused_node;  // ID of the currently focused node.
 
 #if ENABLE_ACCESSKIT
-  accesskit_unix_adapter* adapter{} {};  // AccessKit adapter for Unix systems.
+  accesskit_unix_adapter* adapter{};  // AccessKit adapter for Unix systems.
 #endif
 };
 
