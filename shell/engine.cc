@@ -859,18 +859,15 @@ void Engine::onLogMessageCallback(const char* tag,
   static IhsLogContext kEngineCtx("FLTR", "Flutter engine");
   if (kEngineCtx.is_valid()) {
     char buf[256];
-    const int n =
-        std::snprintf(buf, sizeof(buf), "%s: %s",
-                      tag ? tag : "", message ? message : "");
+    const int n = std::snprintf(buf, sizeof(buf), "%s: %s", tag ? tag : "",
+                                message ? message : "");
     if (n > 0) {
       ihs::dlt::DltBridge::instance().log(
-          kEngineCtx.impl(),
-          ihs::dlt::LogLevel::Info,
-          std::string_view{buf,
-                           static_cast<std::size_t>(
-                               n < static_cast<int>(sizeof(buf))
-                                   ? n
-                                   : static_cast<int>(sizeof(buf)) - 1)});
+          kEngineCtx.impl(), ihs::dlt::LogLevel::Info,
+          std::string_view{buf, static_cast<std::size_t>(
+                                    n < static_cast<int>(sizeof(buf))
+                                        ? n
+                                        : static_cast<int>(sizeof(buf)) - 1)});
     }
   }
 #endif
