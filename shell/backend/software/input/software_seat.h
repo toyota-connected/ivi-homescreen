@@ -29,6 +29,7 @@
 
 #include "input/iseat.h"
 #include "input/key_repeater.h"
+#include "input/wake_event_fd.h"
 #include "input/xkb_keyboard.h"
 
 class SoftwareCursor;
@@ -139,6 +140,10 @@ class SoftwareSeat final : public ISeat {
 
   std::thread thread_;
   std::atomic<bool> stop_{false};
+
+  // Breaks DispatchLoop out of its infinite poll() when stop_ is set. Written
+  // (Wake) from Stop() on the caller's thread; drained on the dispatch thread.
+  input::WakeEventFd waker_;
 
   // Dispatch-thread state. Not atomic because only the worker thread
   // reads/writes; published to Flutter via the runner's strand.
