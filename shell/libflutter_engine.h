@@ -16,12 +16,11 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "flutter/shell/platform/embedder/embedder.h"
 
 struct LibFlutterEngineExports {
-  LibFlutterEngineExports() = default;
-  explicit LibFlutterEngineExports(void* lib);
-
   FlutterEngineCreateAOTDataFnPtr CreateAOTData = nullptr;
   FlutterEngineCollectAOTDataFnPtr CollectAOTData = nullptr;
   FlutterEngineRunFnPtr Run = nullptr;
@@ -65,23 +64,70 @@ struct LibFlutterEngineExports {
   FlutterEngineNotifyDisplayUpdateFnPtr NotifyDisplayUpdate = nullptr;
   FlutterEngineScheduleFrameFnPtr ScheduleFrame = nullptr;
   FlutterEngineSetNextFrameCallbackFnPtr SetNextFrameCallback = nullptr;
-  // Multi-view. Both are async; the
-  // add/remove callbacks in FlutterAddViewInfo/FlutterRemoveViewInfo report
-  // completion. May be null on an engine .so too old to export them.
+  // Multi-view. Both are async; the add/remove callbacks in
+  // FlutterAddViewInfo/FlutterRemoveViewInfo report completion.
+  // Optional ABI: may be null on an engine .so too old to export them.
+  // Call sites must null-check before use.
   FlutterEngineAddViewFnPtr AddView = nullptr;
   FlutterEngineRemoveViewFnPtr RemoveView = nullptr;
 };
 
 class LibFlutterEngine {
  public:
-  static bool IsPresent(const char* library_path = nullptr) {
-    return loadExports(library_path) != nullptr;
+  /**
+   * @brief One-shot loader. Call from engine bring-up, before any
+   *        operator-> use.
+   * @param[in] library_path path to the engine shared library, or nullptr
+   *            for the default "libflutter_engine.so". A preloaded engine
+   *            (statically linked or LD_PRELOADed, detected via the
+   *            FlutterEngineInitialize export in global scope) takes
+   *            precedence over any path.
+   * @return bool
+   * @retval true  engine loaded and required ABI validated
+   * @retval false dlopen failed, a required export is missing, or a prior
+   *               Load() bound a different library path. The reason is
+   *               logged. Failure is cached for the process lifetime;
+   *               Load() never retries.
+   * @relation
+   * internal
+   *
+   * Thread-safe: the load runs under std::call_once; the export table is
+   * published with release semantics after successful validation.
+   */
+  static bool Load(const char* library_path = nullptr);
+
+  /**
+   * @brief Whether a successful Load() has completed.
+   * @return bool
+   * @relation
+   * internal
+   */
+  static bool IsPresent() {
+    return table_.load(std::memory_order_acquire) != nullptr;
   }
 
-  LibFlutterEngineExports* operator->() const;
+  /**
+   * @brief Access the validated export table.
+   *
+   * Aborts with a critical log if used before a successful Load() —
+   * a diagnosable failure at the boundary instead of a null-pointer
+   * dereference several frames deep.
+   */
+  const LibFlutterEngineExports* operator->() const {
+    const auto* table = table_.load(std::memory_order_acquire);
+    if (table == nullptr) {
+      FailNotLoaded();
+    }
+    return table;
+  }
 
  private:
-  static LibFlutterEngineExports* loadExports(const char* library_path);
+  [[noreturn]] static void FailNotLoaded();
+
+  // Null until Load() succeeds; thereafter points to the immutable,
+  // fully populated export table. Acquire/release pairing makes the
+  // table contents visible to any thread that observes the pointer.
+  static std::atomic<const LibFlutterEngineExports*> table_;
 };
 
-extern LibFlutterEngine LibFlutterEngine;
+extern class LibFlutterEngine LibFlutterEngine;

@@ -16,27 +16,25 @@
 
 #pragma once
 
-#include <memory>
+#include <string>
 #include <vector>
 
 class EglProcessResolver {
  public:
   static constexpr char kGlSoNames[2UL][15UL] = {{"libGLESv2.so.2"},
                                                  {"libEGL.so.1"}};
-  ~EglProcessResolver();
 
-  /**
-   * @brief Initialize
-   * @return void
-   * @relation
-   * internal
-   */
-  void Initialize();
+  // Non-copyable, non-movable. A copy's destructor would tear down state
+  // it does not own; capture GetInstance() by reference only.
+  EglProcessResolver(const EglProcessResolver&) = delete;
+  EglProcessResolver& operator=(const EglProcessResolver&) = delete;
+  EglProcessResolver(EglProcessResolver&&) = delete;
+  EglProcessResolver& operator=(EglProcessResolver&&) = delete;
 
   /**
    * @brief Get DLL handle
-   * @param[in] lib of library
-   * @param[out] out_handle DLL handle
+   * @param[in] lib name of library
+   * @param[out] out_handle DLL handle; set to nullptr on failure
    * @return int
    * @retval 1 Normal end
    * @retval -1 Abnormal end
@@ -56,6 +54,25 @@ class EglProcessResolver {
   void* process_resolver(const char* name) const;
 
  private:
+  friend class GlProcessResolver;
+
+  /**
+   * @brief Loads the GL client libraries. Runs exactly once, under the
+   *        block-scope static initialization guarantee in
+   *        GlProcessResolver::GetInstance().
+   * @relation
+   * internal
+   */
+  EglProcessResolver();
+
+  /**
+   * Handles are intentionally never dlclose()d. The resolver lives for the
+   * lifetime of the process, and unloading GL client libraries during
+   * static destruction is unsafe: driver worker threads and TLS
+   * destructors may still reference their text segments.
+   */
+  ~EglProcessResolver() = default;
+
   std::vector<std::pair<void*, std::string>> m_handles;
 };
 
@@ -71,15 +88,14 @@ class GlProcessResolver {
    * @retval Instance of the EglProcessResolver class
    * @relation
    * internal
+   *
+   * Thread-safe: initialization of a block-scope variable with static
+   * storage duration is serialized by the implementation
+   * (C++11 [stmt.dcl]p4). Concurrent first callers block until
+   * construction completes; exactly one instance is ever created.
    */
   static EglProcessResolver& GetInstance() {
-    if (!sInstance) {
-      sInstance = std::make_shared<EglProcessResolver>();
-      sInstance->Initialize();
-    }
-    return *sInstance;
+    static EglProcessResolver instance;
+    return instance;
   }
-
- protected:
-  static std::shared_ptr<EglProcessResolver> sInstance;
 };
