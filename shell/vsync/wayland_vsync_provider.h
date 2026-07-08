@@ -34,6 +34,10 @@
 
 #include <wl/wl_ptr.hpp>
 
+namespace profiling {
+class MotionToPhoton;  // fed by OnPresented when IVI_M2P_PROFILE is set
+}  // namespace profiling
+
 struct wl_registry;
 struct wl_surface;
 
@@ -140,6 +144,10 @@ class WaylandVsyncProvider : public IVsyncProvider {
   /// discarded: still hand the baton back so Flutter keeps scheduling.
   void OnDiscarded(WpFeedbackHandler* fb);
 
+  /// Optional motion-to-photon profiler. Set by Display when IVI_M2P_PROFILE
+  /// is enabled; OnPresented feeds it each scanout timestamp (event thread).
+  void SetMotionToPhoton(profiling::MotionToPhoton* m2p) { m2p_ = m2p; }
+
  protected:
   // IVsyncProvider source hooks (read on the event thread + SubmitBaton).
   [[nodiscard]] bool IsSourcePending() const override {
@@ -166,6 +174,7 @@ class WaylandVsyncProvider : public IVsyncProvider {
   std::unique_ptr<PresentationHandler> presentation_;
 
   wl_surface* surface_{};
+  profiling::MotionToPhoton* m2p_{};  // not owned; null unless profiling
   std::atomic<clockid_t> clock_id_{CLOCK_MONOTONIC};
   std::atomic<bool> clock_compatible_{true};
 

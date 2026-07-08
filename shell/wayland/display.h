@@ -68,6 +68,7 @@
 #include "platform/homescreen/key_event_handler.h"
 #include "platform/homescreen/keyboard_hook_handler.h"
 #include "platform/homescreen/text_input_plugin.h"
+#include "profiling/motion_to_photon.h"
 #include "vsync/wayland_vsync_provider.h"
 #include "wayland/input_timestamps.h"
 #include "wayland/shell/wayland_shell.h"
@@ -497,6 +498,17 @@ class Display : public IDisplay,
   // wp_presentation vsync provider (owns the wp_presentation global + clock,
   // drives FlutterEngineOnVsync from per-commit feedback).
   ivi::WaylandVsyncProvider m_vsync;
+
+  // Motion-to-photon profiler (IVI_M2P_PROFILE). Fed kernel input timestamps
+  // from the pointer/touch handlers (NoteInput) and scanout timestamps from
+  // m_vsync's presented event; both run on the Wayland event thread.
+  profiling::MotionToPhoton m_m2p;
+  bool m_m2p_enabled{};
+
+  // Queue a dispatched input's timestamp for the motion-to-photon profiler.
+  // ts_us is the zwp_input_timestamps_v1 kernel time (0 = none -> arrival
+  // time). No-op unless profiling is enabled.
+  void NoteInput(uint64_t ts_us);
 
   // zwp_input_timestamps_v1 provider (owns the manager global + per-device
   // subscriptions; hands nanosecond kernel input timestamps to the
