@@ -59,6 +59,7 @@ internal wall-clock scheduler. The decision is logged once at startup
 |------|---------|--------|
 | `IVI_WL_VSYNC` | (on) | `0` disables both the `vsync_callback` wiring AND the per-commit `wp_presentation_feedback` requests, falling back to Flutter's internal wall-clock scheduler. Use to bisect pacing regressions or to work around a compositor whose `presented` events are unreliable. The two gates must move together — otherwise feedback objects would accumulate without a baton consumer. |
 | `IVI_WL_PROFILE` | (off) | Anything non-empty enables per-frame cadence profiling. Every 60 presented frames, `on_feedback_presented` logs: `profile (n=60): fps=X mean_interval=Yus max_interval=Zus discarded=N refresh=Mus flags=0xF`. Useful to confirm the compositor's presented timestamps line up with its advertised refresh and to spot stalls. |
+| `IVI_M2P_PROFILE` | (off) | Anything non-empty enables the **motion-to-photon** (input-to-scanout) profiler. Joins kernel input time from `zwp_input_timestamps_v1` (pointer/touch) with compositor scanout time from `wp_presentation` feedback: each input is queued and drained at the next scanout, recording `present − input`. Every 120 presents logs `[wayland] motion->photon (input->scanout floor): p50=Xms p99=Yms max=Zms n=N dropped=D`, plus a session summary at teardown. This is the *floor* of true motion-to-photon (the scanout is the earliest an input could be visible; the frame that reflects it may present a cycle later). `IVI_PROFILE` enables it too. |
 
 ## Architectural notes
 
