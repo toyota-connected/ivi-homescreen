@@ -63,6 +63,11 @@ excludes = (
     os.path.join(root, "shell", "platform", "homescreen", "public") + os.sep,
 )
 
+roots = (
+    os.path.join(root, "shell") + os.sep,
+    os.path.join(root, "shared") + os.sep,
+)
+
 seen = set()
 for entry in entries:
     path = os.path.realpath(
@@ -70,7 +75,7 @@ for entry in entries:
         if os.path.isabs(entry["file"])
         else os.path.join(entry.get("directory", ""), entry["file"])
     )
-    if not path.startswith(os.path.join(root, "shell") + os.sep):
+    if not any(path.startswith(r) for r in roots):
         continue
     if any(path.startswith(ex) for ex in excludes):
         continue

@@ -1,0 +1,131 @@
+#
+# Copyright 2026 Toyota Connected North America
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# ihs_shared: the C-ABI shared library that fronts logging, tracing,
+# platform-view surface negotiation, and config read-back for out-of-tree
+# Dart FFI plugins. See docs/PLUGIN_ABI.md for the boundary contract.
+#
+# Shared-only, on purpose: a static copy in both the shell and a plugin would
+# give the process two copies of the logging bridge, ring registry, and trace
+# sink table. There is exactly one copy of that state, in this .so.
+
+include(GNUInstallDirs)
+include(GenerateExportHeader)
+include(CMakePackageConfigHelpers)
+
+set(IHS_SHARED_ABI_VERSION_STR 1.0.0)
+
+add_library(ihs_shared SHARED
+        src/ihs_api.cc
+)
+add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
+
+set_target_properties(ihs_shared PROPERTIES
+        OUTPUT_NAME ihs_shared
+        VERSION ${IHS_SHARED_ABI_VERSION_STR}
+        SOVERSION 1
+        CXX_VISIBILITY_PRESET hidden
+        C_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+)
+
+# Generates <build>/include/ihs/ihs_export.h defining IHS_EXPORT. With the
+# hidden visibility presets above, only the entry points marked IHS_EXPORT are
+# candidates for export; the version script below is the belt-and-suspenders
+# that also strips anything that slips through.
+generate_export_header(ihs_shared
+        BASE_NAME IHS
+        EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/include/ihs/ihs_export.h
+)
+
+target_include_directories(ihs_shared
+        PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+# Restrict the dynamic symbol table to the ihs_* C ABI (see ihs_shared.map).
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(_ihs_version_script ${CMAKE_CURRENT_SOURCE_DIR}/ihs_shared.map)
+    target_link_options(ihs_shared PRIVATE
+            "LINKER:--version-script=${_ihs_version_script}")
+    set_target_properties(ihs_shared PROPERTIES
+            LINK_DEPENDS ${_ihs_version_script})
+endif ()
+
+# Match the shell's standard library selection (libc++ on clang builds) so the
+# bridge relocated here later links cleanly against the shell.
+if (TARGET toolchain)
+    target_link_libraries(ihs_shared PRIVATE toolchain::toolchain)
+endif ()
+if (COMMAND ihs_apply_cxx_compat)
+    ihs_apply_cxx_compat(ihs_shared)
+endif ()
+
+target_compile_options(ihs_shared PRIVATE -Wall -Wextra)
+
+#
+# Install + CMake package export
+#
+install(TARGETS ihs_shared EXPORT ihs_shared_targets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# Public headers (hand-written) + the generated export header.
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h"
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/ihs/ihs_export.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ihs
+)
+
+install(EXPORT ihs_shared_targets
+        FILE ivi-homescreen-shared-targets.cmake
+        NAMESPACE ivi_homescreen::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ivi-homescreen-shared
+)
+
+configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ivi-homescreen-shared-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-homescreen-shared-config.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ivi-homescreen-shared
+)
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-homescreen-shared-config-version.cmake
+        VERSION ${IHS_SHARED_ABI_VERSION_STR}
+        COMPATIBILITY SameMajorVersion
+)
+install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-homescreen-shared-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-homescreen-shared-config-version.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ivi-homescreen-shared
+)
+
+# pkg-config for meson / Yocto / quick sanity checks.
+set(PKGCONFIG_LIBDIR ${CMAKE_INSTALL_FULL_LIBDIR})
+set(PKGCONFIG_INCLUDEDIR ${CMAKE_INSTALL_FULL_INCLUDEDIR})
+set(IHS_SHARED_PC_VERSION ${IHS_SHARED_ABI_VERSION_STR})
+configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ivi-homescreen-shared.pc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/ivi-homescreen-shared.pc @ONLY
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ivi-homescreen-shared.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)

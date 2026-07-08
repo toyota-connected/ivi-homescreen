@@ -101,6 +101,12 @@ include(logging_helpers)
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)
 
 #
+# ihs_shared: C-ABI shared library for out-of-tree FFI plugins (logging,
+# tracing, platform-view negotiation, config). See docs/PLUGIN_ABI.md.
+#
+add_subdirectory(shared)
+
+#
 # libraries
 #
 add_subdirectory(third_party)
