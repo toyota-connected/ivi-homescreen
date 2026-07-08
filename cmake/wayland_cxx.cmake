@@ -116,14 +116,19 @@ if (TARGET wayland-cxx)
     endif ()
 endif ()
 
-# Silence the compiled scanner exe/lib (native builds only) and align its STL ABI
-# with the main binary on clang/libc++ builds (same fix as drm-cxx).
+# Silence the compiled scanner exe/lib (native builds only). Unlike drm-cxx,
+# do NOT link toolchain::toolchain onto them: the scanner is a standalone
+# codegen tool run *during* this build (not linked into the shell), so its STL
+# ABI need not match the main binary. toolchain::toolchain forces the project's
+# -stdlib=libc++, which made the freshly-built scanner depend on libc++abi.so.1
+# at exec time; on a toolchain that keeps that runtime off the system loader
+# path (flutter_workspace's clang) the tool then fails to start and codegen
+# aborts. Left on the compiler default (libstdc++, whose .so is always on the
+# loader path) the tool runs everywhere. The exe and its static lib stay on the
+# same stdlib because neither links the toolchain target.
 foreach (_tgt wayland-cxx-scanner wayland-cxx-scanner-lib)
     if (TARGET ${_tgt})
         target_compile_options(${_tgt} PRIVATE -w)
-        if (TARGET toolchain)
-            target_link_libraries(${_tgt} PRIVATE toolchain::toolchain)
-        endif ()
     endif ()
 endforeach ()
 
