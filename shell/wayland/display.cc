@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <ctime>
 #include <system_error>
 #include <utility>
 
@@ -54,6 +55,13 @@ Display::Display(const bool enable_cursor,
   SPDLOG_TRACE("+ Display()");
 
   wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
+
+  // Motion-to-photon profiling: feed the vsync provider's presented event when
+  // enabled. The input side is fed from the pointer/touch handlers (NoteInput).
+  m_m2p_enabled = profiling::MotionToPhoton::Enabled();
+  if (m_m2p_enabled) {
+    m_vsync.SetMotionToPhoton(&m_m2p);
+  }
 
   // Build the compositor-protocol shells (xdg / agl / ivi / simple) in priority
   // order BEFORE registry enumeration so HandleGlobal can offer each
@@ -120,6 +128,21 @@ Display::Display(const bool enable_cursor,
   SPDLOG_TRACE("- Display()");
 }
 
+void Display::NoteInput(const uint64_t ts_us) {
+  if (!m_m2p_enabled) {
+    return;
+  }
+  uint64_t ns = ts_us * 1000ULL;
+  if (ts_us == 0) {
+    // No high-resolution source: fall back to arrival time (same clock domain).
+    timespec t{};
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    ns = static_cast<uint64_t>(t.tv_sec) * 1'000'000'000ULL +
+         static_cast<uint64_t>(t.tv_nsec);
+  }
+  m_m2p.RecordInput(ns);
+}
+
 ivi::WaylandShell& Display::ActiveShell() const {
   for (const auto& s : shells_) {
     if (s->IsBound()) {
@@ -133,6 +156,11 @@ ivi::WaylandShell& Display::ActiveShell() const {
 
 Display::~Display() {
   SPDLOG_TRACE("+ ~Display()");
+
+  if (m_m2p_enabled) {
+    m_m2p.LogSessionSummary("wayland");
+    m_vsync.SetMotionToPhoton(nullptr);  // detach before m_m2p is destroyed
+  }
 
   // Detach the async descriptors from the fds they were watching. App owns and
   // has already stopped the shared reactor; both fds are owned elsewhere (the
@@ -508,6 +536,7 @@ void Display::pointer_handle_motion(void* data,
   // when the event is dropped keeps a stale stamp from attaching to a later
   // event.
   const uint64_t ts_us = d->input_timestamps_.TakePointerTimeUs();
+  d->NoteInput(ts_us);
 
   if (!d->m_wayland_event_mask.pointer_motion) {
     d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
@@ -532,6 +561,7 @@ void Display::pointer_handle_button(void* data,
   auto* d = static_cast<Display*>(data);
   // Take before the mask gate (see pointer_handle_motion).
   const uint64_t ts_us = d->input_timestamps_.TakePointerTimeUs();
+  d->NoteInput(ts_us);
   if (!d->m_wayland_event_mask.pointer_buttons) {
     d->m_pointer.event.button = button;
     d->m_pointer.event.state = state;
@@ -567,6 +597,7 @@ void Display::pointer_handle_axis(void* data,
   auto* d = static_cast<Display*>(data);
   // Take before the mask gate (see pointer_handle_motion).
   const uint64_t ts_us = d->input_timestamps_.TakePointerTimeUs();
+  d->NoteInput(ts_us);
   if (!d->m_wayland_event_mask.pointer_axis) {
     d->m_pointer.event.time = time;
     d->m_pointer.event.axes[axis].value = wl_fixed_to_double(value);
@@ -921,6 +952,9 @@ void Display::touch_flush_frame(Display* d) {
     return;
   }
   if (d->m_touch_engine) {
+    // One motion-to-photon sample per touch frame (contacts share the frame's
+    // hardware scan timestamp), not one per contact.
+    d->NoteInput(d->m_touch.frame_time_us);
     d->m_touch_engine->CoalesceTouchFrame(d->m_touch.frame.data(),
                                           d->m_touch.frame.size(),
                                           d->m_touch.frame_time_us);

@@ -39,6 +39,7 @@ add_executable(${PROJECT_NAME}
         main.cc
         main_loop_waker.cc
         profiling/frame_profile.cc
+        profiling/motion_to_photon.cc
         # Backend-spanning vsync baton machinery (Wayland/DRM/software providers
         # inherit it). Source-agnostic, so always compiled.
         vsync/ivsync_provider.cc
