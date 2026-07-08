@@ -2,6 +2,8 @@
 #include "libdlt_loader.hpp"
 
 #include <dlfcn.h>
+#include <sys/auxv.h>
+#include <unistd.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -14,6 +16,20 @@ namespace {
 template <typename Fn>
 void resolve(void* handle, const char* name, Fn& out) noexcept {
   out = reinterpret_cast<Fn>(::dlsym(handle, name));
+}
+
+// True when the process is running under elevated privileges — setuid/setgid,
+// file capabilities, or launched by the loader in secure-execution mode
+// (AT_SECURE). In that state an attacker-influenced environment must not be
+// able to redirect our dlopen(), so the IHS_DLT_LIBRARY override is ignored
+// (same reasoning glibc uses to drop LD_PRELOAD for secure execution).
+bool secure_execution() noexcept {
+#if defined(AT_SECURE)
+  if (::getauxval(AT_SECURE) != 0) {
+    return true;
+  }
+#endif
+  return ::geteuid() != ::getuid() || ::getegid() != ::getgid();
 }
 
 const char* reason_to_str(DltDisableReason r) noexcept {
@@ -63,8 +79,16 @@ void LibDltLoader::disable(DltDisableReason reason,
 void LibDltLoader::load() {
   // Layer 4.2: env override. IHS_DLT_LIBRARY=/path/to/libdlt.so.2 lets
   // ops point at a known-good build during incident response without
-  // recompiling. Falls back to the standard soname.
+  // recompiling. Falls back to the standard soname. Ignored under elevated
+  // privileges so the environment cannot redirect our dlopen() to an
+  // arbitrary library (code injection); see secure_execution().
   const char* override_path = std::getenv("IHS_DLT_LIBRARY");
+  if (override_path != nullptr && override_path[0] != '\0' &&
+      secure_execution()) {
+    std::fprintf(stderr,
+                 "[dlt] ignoring IHS_DLT_LIBRARY under elevated privileges\n");
+    override_path = nullptr;
+  }
   const char* soname = (override_path != nullptr && override_path[0] != '\0')
                            ? override_path
                            : "libdlt.so.2";

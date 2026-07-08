@@ -13,9 +13,12 @@ class RingRegistry {
  public:
   static RingRegistry& instance();
 
-  // Returns a reference to the calling thread's ring, creating it on first
-  // use. Thread-local storage owns the lifetime — rings leak at process
-  // exit, which is intentional (the worker may still be draining).
+  // Returns a reference to the calling thread's ring, claiming a released
+  // one from the pool or creating a new one on first use. A thread_local
+  // lease releases the ring back to the pool at thread exit so the total
+  // ring count is bounded by peak concurrent logging threads. Rings are
+  // never freed (the worker may still be draining), but they are reused, so
+  // memory does not grow with the count of threads that have ever logged.
   ThreadRing& thread_local_ring();
 
   [[nodiscard]] ThreadRing* head() const noexcept {
@@ -32,6 +35,9 @@ class RingRegistry {
   RingRegistry& operator=(const RingRegistry&) = delete;
 
   void register_ring(ThreadRing* r) noexcept;
+
+  // Claim a released ring from the pool, or allocate+register a new one.
+  ThreadRing& acquire_ring();
 
   std::atomic<ThreadRing*> head_{nullptr};
 };

@@ -4,12 +4,13 @@
 #include "compat.hpp"
 #include "libdlt_loader.hpp"
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
-#include <vector>
 
 // Note: ihs::flat_map is intentionally not used here. libstdc++14 has a
 // non-SFINAE-friendly std::tuple<__convertible_from_tuple_like> path that
@@ -46,8 +47,16 @@ class ContextCache {
 
  private:
   LibDltLoader& loader_;
+
+  // Writers (ensure(), first-use only) serialize on mu_. Readers (at(), the
+  // worker's per-slot drain) are lock-free: entries live in fixed storage that
+  // never moves and is never removed, so a published index is stable forever.
+  // count_ is the release/acquire fence — an entry is fully constructed before
+  // count_ is bumped, so a reader that sees index < count_ sees a complete
+  // entry.
   std::mutex mu_;
-  std::vector<std::unique_ptr<ContextEntry>> entries_;
+  std::atomic<std::uint32_t> count_{0};
+  std::array<std::unique_ptr<ContextEntry>, kMaxContexts> entries_{};
 };
 
 }  // namespace ihs::dlt
