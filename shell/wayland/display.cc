@@ -176,9 +176,17 @@ Display::~Display() {
   // display connection is still alive.
   input_timestamps_.Reset();
 
-  // The shells (xdg/agl/ivi/simple) and the vsync provider own their protocol
-  // objects and tear them down in their own destructors.
+  // The shells (xdg/agl/ivi/simple) own their protocol objects and tear them
+  // down in their own destructors, invoked here while the connection is alive.
   shells_.clear();
+
+  // Drain the vsync provider's in-flight wp_presentation_feedback proxies while
+  // the connection is still up. ~WpFeedbackHandler calls wl_proxy_destroy(),
+  // which walks the wl_display object map that wl_display_disconnect() (below)
+  // frees. The m_vsync member destructor runs AFTER this body — i.e. after
+  // disconnect — so leaving outstanding feedback for it to reap use-after-frees
+  // whenever shutdown races an in-flight frame. Stop() is idempotent. See #287.
+  m_vsync.Stop();
 
   if (m_shm)
     wl_shm_destroy(m_shm);
