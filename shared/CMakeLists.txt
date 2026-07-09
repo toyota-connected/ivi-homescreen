@@ -67,7 +67,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif ()
 
 # Match the shell's standard library selection (libc++ on clang builds) so the
-# bridge relocated here later links cleanly against the shell.
+# bridge compiled in here links cleanly against the shell.
 if (TARGET toolchain)
     target_link_libraries(ihs_shared PRIVATE toolchain::toolchain)
 endif ()
@@ -76,6 +76,35 @@ if (COMMAND ihs_apply_cxx_compat)
 endif ()
 
 target_compile_options(ihs_shared PRIVATE -Wall -Wextra)
+
+# Never unload this library: the DLT bridge owns a worker thread and per-thread
+# ring TLS whose destructors must not fire against code unmapped by dlclose.
+# -z nodelete pins it for the process lifetime even if a plugin that pulled it
+# in is unloaded.
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(ihs_shared PRIVATE "LINKER:-z,nodelete")
+endif ()
+
+# Logging capability: the DLT bridge. Compiled in only when ENABLE_DLT is set;
+# otherwise IhsApi::logging stays null (capability absent). The bridge dlopens
+# libdlt at runtime, so it adds no build-time dependency of its own.
+if (ENABLE_DLT)
+    find_package(Threads REQUIRED)
+    target_sources(ihs_shared PRIVATE
+            src/logging/libdlt_loader.cpp
+            src/logging/thread_ring.cpp
+            src/logging/ring_registry.cpp
+            src/logging/context_cache.cpp
+            src/logging/worker.cpp
+            src/logging/bridge.cpp
+            src/logging/ffi_shim.cpp
+    )
+    target_include_directories(ihs_shared PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
+    )
+    target_compile_definitions(ihs_shared PRIVATE ENABLE_DLT=1)
+    target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+endif ()
 
 #
 # Install + CMake package export

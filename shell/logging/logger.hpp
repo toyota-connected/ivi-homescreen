@@ -1,65 +1,71 @@
 // shell/logging/logger.hpp
-// Mux header for IHS logging. Routes to the DLT bridge (when ENABLE_DLT) or
-// leaves spdlog as the backend. The near-term focus is keeping this header
-// include-safe everywhere; main.cc integration follows separately.
+//
+// Header-only IHS logging convenience for the shell and in-tree plugins. When
+// ENABLE_DLT is on it is a thin inline layer over the ihs_shared C ABI
+// (ihs/logging.h): IhsLogContext wraps an acquired context index, and the
+// IHS_LOG_* macros format a line into a stack buffer (ihs::format_to) before
+// handing it to ihs_dlt_log. No C++ bridge internals cross the boundary — the
+// only symbols referenced are the exported ihs_dlt_* entry points. When
+// ENABLE_DLT is off the macros expand to ((void)0).
 #pragma once
 
 #if ENABLE_DLT
 
-#include "dlt/bridge.hpp"
-#include "dlt/compat.hpp"
-#include "dlt/log_level.hpp"
+#include "ihs/format.h"
+#include "ihs/logging.h"
 
-#include <string_view>
+#include <cstddef>
 
-// Lightweight RAII wrapper around a bridge ContextHandle. Construct one per
+// Lightweight wrapper around an acquired logging context. Construct one per
 // logging site; the bridge caches by id so duplicates are cheap.
 class IhsLogContext {
  public:
   IhsLogContext(const char* id, const char* description)
-      : handle_(ihs::dlt::DltBridge::instance().acquire_context(
-            std::string_view{id},
-            std::string_view{description})) {}
+      : index_(ihs_dlt_acquire_context(id, description)) {}
 
-  [[nodiscard]] bool is_valid() const noexcept { return handle_.is_valid(); }
-  [[nodiscard]] const ihs::dlt::ContextHandle& impl() const noexcept {
-    return handle_;
-  }
+  [[nodiscard]] bool is_valid() const noexcept { return index_ >= 0; }
+  [[nodiscard]] int32_t index() const noexcept { return index_; }
 
  private:
-  ihs::dlt::ContextHandle handle_;
+  int32_t index_ = -1;
 };
 
-#define IHS_LOGGING_START(app_id_, desc_) \
-  ihs::dlt::DltBridge::instance().start((app_id_), (desc_))
-#define IHS_LOGGING_STOP() ihs::dlt::DltBridge::instance().stop()
-#define IHS_LOGGING_FLUSH() ihs::dlt::DltBridge::instance().flush()
+#define IHS_LOGGING_START(app_id_, desc_) ihs_dlt_start((app_id_), (desc_))
+#define IHS_LOGGING_STOP() ihs_dlt_stop()
+#define IHS_LOGGING_FLUSH() ihs_dlt_flush()
 
-#define IHS_LOG_IMPL_(ctx_, level_, ...)                            \
-  do {                                                              \
-    if ((ctx_).is_valid()) {                                        \
-      ihs::dlt::DltBridge::instance().logf((ctx_).impl(), (level_), \
-                                           __VA_ARGS__);            \
-    }                                                               \
+// Format a line into a stack buffer and emit it through the bridge C ABI. The
+// format-string style follows ihs::format_to ("{}" under std::format, printf
+// placeholders under the C++17 fallback). Nothing is formatted or emitted when
+// the context is invalid.
+#define IHS_LOG_IMPL_(ctx_, level_, ...)                           \
+  do {                                                             \
+    const IhsLogContext& ihs_ctx_ = (ctx_);                        \
+    if (ihs_ctx_.is_valid()) {                                     \
+      char ihs_buf_[IHS_LOG_TEXT_CAPACITY];                        \
+      const std::size_t ihs_len_ =                                 \
+          ihs::format_to(ihs_buf_, sizeof(ihs_buf_), __VA_ARGS__); \
+      ihs_dlt_log(ihs_ctx_.index(), (level_), ihs_buf_, ihs_len_); \
+    }                                                              \
   } while (0)
 
 #define IHS_LOG_FATAL(ctx_, ...) \
-  IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Fatal, __VA_ARGS__)
+  IHS_LOG_IMPL_((ctx_), IHS_LEVEL_FATAL, __VA_ARGS__)
 #define IHS_LOG_ERROR(ctx_, ...) \
-  IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Error, __VA_ARGS__)
+  IHS_LOG_IMPL_((ctx_), IHS_LEVEL_ERROR, __VA_ARGS__)
 #define IHS_LOG_WARN(ctx_, ...) \
-  IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Warn, __VA_ARGS__)
+  IHS_LOG_IMPL_((ctx_), IHS_LEVEL_WARN, __VA_ARGS__)
 #define IHS_LOG_INFO(ctx_, ...) \
-  IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Info, __VA_ARGS__)
+  IHS_LOG_IMPL_((ctx_), IHS_LEVEL_INFO, __VA_ARGS__)
 #define IHS_LOG_DEBUG(ctx_, ...) \
-  IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Debug, __VA_ARGS__)
+  IHS_LOG_IMPL_((ctx_), IHS_LEVEL_DEBUG, __VA_ARGS__)
 #define IHS_LOG_TRACE(ctx_, ...) \
-  IHS_LOG_IMPL_((ctx_), ihs::dlt::LogLevel::Verbose, __VA_ARGS__)
+  IHS_LOG_IMPL_((ctx_), IHS_LEVEL_VERBOSE, __VA_ARGS__)
 
 #else  // !ENABLE_DLT (ENABLE_DLT undefined or defined to 0)
 
-// spdlog backend placeholder — left unwired for now. The macros expand
-// to nothing so existing sources can opt into the mux header incrementally.
+// spdlog remains the backend; the mux macros expand to nothing so sources can
+// opt into this header regardless of the DLT build setting.
 class IhsLogContext {
  public:
   IhsLogContext(const char* /*id*/, const char* /*description*/) {}
