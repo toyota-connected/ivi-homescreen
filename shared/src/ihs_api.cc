@@ -18,24 +18,16 @@
 
 #include <string>
 
+#if ENABLE_DLT
+#include "ihs_internal.hpp"
+#endif
+
 namespace {
 
 // Per-thread description of the last failure, surfaced through
 // ihs_last_error_message(). Thread-local so a diagnostic on one thread cannot
 // be clobbered by a call on another.
 thread_local std::string g_last_error;
-
-// The process-lifetime capability table. Sub-table pointers are null until the
-// corresponding surface is compiled into the library; a consumer treats a null
-// sub-table as "capability absent" (see docs/PLUGIN_ABI.md).
-const IhsApi g_api = {
-    /* struct_size   */ sizeof(IhsApi),
-    /* abi_version   */ IHS_SHARED_ABI_VERSION,
-    /* logging       */ nullptr,
-    /* trace         */ nullptr,
-    /* platform_view */ nullptr,
-    /* config        */ nullptr,
-};
 
 }  // namespace
 
@@ -49,7 +41,25 @@ extern "C" const IhsApi* ihs_get_api(uint32_t requested_abi) {
     return nullptr;
   }
   g_last_error.clear();
-  return &g_api;
+
+  // The process-lifetime capability table, built on first call so the
+  // sub-table pointers resolve at runtime (avoiding a static-initialization
+  // order dependency between translation units). A sub-table is null when the
+  // corresponding surface is not compiled into the library; a consumer treats
+  // that as "capability absent" (see docs/PLUGIN_ABI.md).
+  static const IhsApi api = {
+      /* struct_size   */ sizeof(IhsApi),
+      /* abi_version   */ IHS_SHARED_ABI_VERSION,
+#if ENABLE_DLT
+      /* logging       */ ihs::dlt::logging_api(),
+#else
+      /* logging       */ nullptr,
+#endif
+      /* trace         */ nullptr,
+      /* platform_view */ nullptr,
+      /* config        */ nullptr,
+  };
+  return &api;
 }
 
 extern "C" const char* ihs_last_error_message(void) {
