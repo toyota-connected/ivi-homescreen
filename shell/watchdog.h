@@ -27,7 +27,8 @@
 
 // Watchdog source IDs - simple integer constants for maintainability
 // - Negative values: reserved for internal embedder use
-// - Positive values: reserved for additional/external sources (e.g., plugins, tests)
+// - Positive values: reserved for additional/external sources (e.g., plugins,
+// tests)
 #define WATCHDOG_SOURCE_MAIN_THREAD -1
 #define WATCHDOG_SOURCE_RENDER_THREAD -2
 

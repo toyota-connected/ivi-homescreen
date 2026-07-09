@@ -385,15 +385,15 @@ int App::Run() {
   asio::steady_timer wd_timer(ioc);
   std::function<void(const std::error_code&)> on_wd_timer;
   std::function<void()> arm_wd_timer = [&]() {
-    wd_timer.expires_after(std::chrono::milliseconds(
-        Watchdog::getInstance().getTimeoutMs() / 2));
+    wd_timer.expires_after(
+        std::chrono::milliseconds(Watchdog::getInstance().getTimeoutMs() / 2));
     wd_timer.async_wait(on_wd_timer);
   };
   on_wd_timer = [&](const std::error_code& ec) {
     if (ec) {
       return;  // cancelled
     }
-    
+
     // Pet the dogs
     Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
     for (auto const& view : m_views) {
