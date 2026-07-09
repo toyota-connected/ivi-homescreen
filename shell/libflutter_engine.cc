@@ -22,6 +22,7 @@
 #include <mutex>
 #include <string>
 
+#include "ihs/trace.h"
 #include "logging.h"
 #include "shared_library.h"
 
@@ -155,6 +156,18 @@ bool LibFlutterEngine::Load(const char* library_path) {
     }
 
     table_.store(&g_exports, std::memory_order_release);
+
+    // Install the engine's trace procs as the ihs_shared trace sink, so shell
+    // and plugin trace events route into the Flutter/Perfetto timeline. Events
+    // emitted before this point (backend bring-up, modeset) fall back to the
+    // ftrace trace_marker sink inside ihs_shared.
+    static const IhsTraceEngineProcs kTraceProcs = {
+        sizeof(IhsTraceEngineProcs),
+        g_exports.TraceEventDurationBegin,
+        g_exports.TraceEventDurationEnd,
+        g_exports.TraceEventInstant,
+    };
+    ihs_trace_set_engine_procs(&kTraceProcs);
   });
 
   if (table_.load(std::memory_order_acquire) == nullptr) {

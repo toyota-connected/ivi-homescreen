@@ -18,9 +18,7 @@
 
 #include <string>
 
-#if ENABLE_DLT
 #include "ihs_internal.hpp"
-#endif
 
 namespace {
 
@@ -55,7 +53,7 @@ extern "C" const IhsApi* ihs_get_api(uint32_t requested_abi) {
 #else
       /* logging       */ nullptr,
 #endif
-      /* trace         */ nullptr,
+      /* trace         */ ihs::trace::trace_api(),
       /* platform_view */ nullptr,
       /* config        */ nullptr,
   };

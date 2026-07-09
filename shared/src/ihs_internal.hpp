@@ -23,6 +23,7 @@
 #define IHS_SHARED_SRC_IHS_INTERNAL_HPP_
 
 #include "ihs/logging.h"
+#include "ihs/trace.h"
 
 namespace ihs::dlt {
 
@@ -32,5 +33,12 @@ namespace ihs::dlt {
 const IhsLoggingApi* logging_api() noexcept;
 
 }  // namespace ihs::dlt
+
+namespace ihs::trace {
+
+// Returns the tracing sub-table. Defined in trace.cc; always compiled in.
+const IhsTraceApi* trace_api() noexcept;
+
+}  // namespace ihs::trace
 
 #endif  // IHS_SHARED_SRC_IHS_INTERNAL_HPP_
