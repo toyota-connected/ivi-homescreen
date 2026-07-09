@@ -517,6 +517,10 @@ Resolved per view; later layers override earlier ones key-by-key. Only
 
 `BUILD_PLUGIN_WEBIVEW_FLUTTER_VIEW` - Includes WebView View Plugin. Defaults to OFF
 
+`BUILD_WATCHDOG` - Build Watchdog support. Monitors main and render threads for hangs and aborts on timeout. Defaults to OFF
+
+`BUILD_SYSTEMD_WATCHDOG` - Integrate with systemd watchdog (sd_notify). Requires `BUILD_WATCHDOG=ON` and a systemd-enabled Linux distro. Defaults to OFF
+
 Each `BUILD_BACKEND_*` option gates whether that backend is compiled in; any
 subset may be enabled together and the active one is chosen at runtime (see
 [Backend Support](#backend-support)).
@@ -719,6 +723,86 @@ Path prefix used to determine required files is determined at build.
 
 For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
 For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
+
+## Watchdog
+
+The watchdog monitors the main thread and Flutter render thread for hangs. If either thread fails to check in within the timeout window (default 5 seconds), the process calls `abort()` to generate a core dump — or triggers `sd_notify(WATCHDOG=trigger)` when built with systemd support.
+
+### CMake Variables
+
+To enable watchdog support:
+
+    -DBUILD_WATCHDOG=ON
+
+To additionally integrate with the systemd service watchdog:
+
+    -DBUILD_WATCHDOG=ON -DBUILD_SYSTEMD_WATCHDOG=ON
+
+With systemd integration enabled, the embedder reads the `WatchdogSec=` interval from the service unit, sends `READY=1` on startup, `WATCHDOG=1` each ping, and `STOPPING=1` on clean shutdown.
+
+### Watchdog sources
+
+The watchdog tracks named integer source IDs (`WatchdogSource`, a `typedef int64_t`). The built-in sources are:
+
+| Constant | Value | Thread monitored |
+|---|---|---|
+| `WATCHDOG_SOURCE_MAIN_THREAD` | 0 | Application main loop |
+| `WATCHDOG_SOURCE_RENDER_THREAD` | 1 | Flutter rasterizer thread |
+| `WATCHDOG_SOURCE_FLUTTER` | 2 | Reserved (Flutter platform thread) |
+
+Source IDs 3–255 are available for Dart-side registration via the platform channel.
+
+### Platform channel
+
+When `BUILD_WATCHDOG=ON`, a `"watchdog"` platform channel is registered and available to Flutter apps via `StandardMethodCodec`. Methods:
+
+| Method | Arguments | Description |
+|---|---|---|
+| `get_callbacks` | — | Returns a map of `start`, `pet`, `stop` native function pointers (FFI callable from Dart) |
+| `start` | `{"source": int64}` | Register and begin monitoring source ID |
+| `pet` | `{"source": int64}` | Reset the timeout for source ID |
+| `stop` | `{"source": int64}` | Deregister source ID |
+
+Source IDs passed from Dart must be in the range 0–255.
+
+### Example (Dart)
+
+Use `get_callbacks` to retrieve native function pointers and call them directly from Dart FFI for zero-overhead petting on hot paths:
+
+```dart
+import 'dart:ffi';
+import 'package:ffi/ffi.dart';
+
+// Use method channels to get callbacks from the native watchdog implementation
+NativeFunction<Void Function(Int64)>>? startCallback;
+NativeFunction<Void Function(Int64)>>? petCallback;
+NativeFunction<Void Function(Int64)>>? stopCallback;
+
+void initWatchdog() async {
+  final channel = MethodChannel('watchdog');
+  final callbacks = await channel.invokeMethod<Map>('get_callbacks');
+
+  final startCallbackPtr = Pointer.fromAddress(callbacks['start']);
+  startCallback = startCallbackPtr.asFunction<void Function(int64)>();
+  final petCallbackPtr = Pointer.fromAddress(callbacks['pet']);
+  petCallback = petCallbackPtr.asFunction<void Function(int64)>();
+  final stopCallbackPtr = Pointer.fromAddress(callbacks['stop']);
+  stopCallback = stopCallbackPtr.asFunction<void Function(int64)>();
+}
+
+// example usage
+const int WATCHDOG_SOURCE_APP = 123;
+
+void main() {
+  initWatchdog();
+  // Start monitoring the main thread
+  startCallback?.call(WATCHDOG_SOURCE_APP);
+  // In your main loop, periodically pet the watchdog
+  petCallback?.call(WATCHDOG_SOURCE_APP);
+  // On shutdown, stop monitoring
+  stopCallback?.call(WATCHDOG_SOURCE_APP);
+}
+```
 
 ## Crash Handler
 
