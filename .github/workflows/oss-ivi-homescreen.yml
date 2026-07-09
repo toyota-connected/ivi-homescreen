@@ -163,9 +163,10 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      crash: ${{ steps.filter.outputs.crash }}
+      crash_handler: ${{ steps.filter.outputs.crash_handler }}
+      watchdog: ${{ steps.filter.outputs.watchdog }}
     steps:
-      - name: Detect crash-handler-relevant changes
+      - name: Detect feature-relevant changes
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -173,7 +174,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "Non-PR event (${{ github.event_name }}) — running crash-handler."
-            echo "crash=true" >> "$GITHUB_OUTPUT"
+            echo "crash_handler=true" >> "$GITHUB_OUTPUT"
+            echo "watchdog=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           files=$(gh api --paginate \
@@ -181,15 +183,17 @@ jobs:
             --jq '.[].filename')
           echo "Changed files:"; echo "$files"
           if echo "$files" | grep -qE '(^cmake/|\.cmake$|CMakeLists\.txt$|^shell/|^plugins/|^third_party/|^\.github/workflows/oss-ivi-homescreen\.yml$)'; then
-            echo "crash=true" >> "$GITHUB_OUTPUT"
+            echo "crash_handler=true" >> "$GITHUB_OUTPUT"
+            echo "watchdog=true" >> "$GITHUB_OUTPUT"
           else
             echo "Only docs/assets changed — skipping crash-handler."
-            echo "crash=false" >> "$GITHUB_OUTPUT"
+            echo "crash_handler=false" >> "$GITHUB_OUTPUT"
+            echo "watchdog=false" >> "$GITHUB_OUTPUT"
           fi
 
   crash-handler:
     needs: changes
-    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.crash == 'true' }}
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.crash_handler == 'true' }}
     runs-on: ubuntu-22.04
     steps:
       # Build the PR's own source with the crash handler enabled, via emb's
@@ -241,3 +245,53 @@ jobs:
           fi
           echo "::error::crash-handler did not pass (result=${result})"
           exit 1
+
+  watchdog:
+    needs: changes
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.watchdog == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check Environment
+        id: check_environment
+        shell: bash
+        run: |
+          echo "Running on Ubuntu version: $(lsb_release -d | cut -f2)"
+          echo "Running on architecture: $(uname -m)"
+          echo "Current directory: $(pwd)"
+          echo "Environment variables:"
+          env
+
+          # Get username
+          echo "user=$(whoami)" >> "$GITHUB_OUTPUT"
+      - name: Setup workspace
+        uses: meta-flutter/workspace-automation/.github/actions/setup-workspace@v2.0
+        with:
+          args: --disable=rive-text --enable=sentry-native --override-repo=https://github.com/toyota-connected/ivi-homescreen.git#${{ github.event.pull_request.head.ref || github.sha }}
+          user: ${{ steps.check_environment.outputs.user }}
+          ref: v2.0
+          cache: true
+          # cache-whole caches the entire workspace (the extracted LLVM
+          # toolchain under .tmp/ and the sentry-native build under
+          # app/sentry-native/build/), not just <workspace>/.cache. Without it
+          # the expensive toolchain extract + sentry build run on every job;
+          # the default .cache-only scope wouldn't reuse them.
+          cache-whole: true
+          # Stable key shared across PRs so the toolchain + sentry-native build
+          # are reused (the per-PR key meant every PR started cold). The
+          # sentry-native version is pinned in the setup-workspace action (@v2.0),
+          # so bump this suffix if that pin or the action ref changes.
+          cache-key: watchdog-${{ runner.os }}-wsa-v2.0
+
+      - name: Build watchdog
+        working-directory: ${{github.workspace}}
+        shell: bash
+        run: |
+          source ./setup_env.sh
+          cd app/ivi-homescreen
+          echo "Building watchdog plugin"
+          cmake \
+            -S . \
+            -B build/ \
+            -D BUILD_WATCHDOG=ON \
+            -D BUILD_SYSTEMD_WATCHDOG=ON
+          cd build && ninja
