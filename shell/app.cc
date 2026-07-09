@@ -377,6 +377,34 @@ int App::Run() {
     }
   };
 
+#if BUILD_WATCHDOG
+  // Watchdog heartbeat: pet the main-thread source on its own cadence so the
+  // reactor's idle gaps (no input, needs_periodic=false) never exceed the
+  // watchdog timeout. Fires every intervalMs/2, matching the watchdog service
+  // check period.
+  asio::steady_timer wd_timer(ioc);
+  std::function<void(const std::error_code&)> on_wd_timer;
+  std::function<void()> arm_wd_timer = [&]() {
+    wd_timer.expires_after(std::chrono::milliseconds(
+        Watchdog::getInstance().getTimeoutMs() / 2));
+    wd_timer.async_wait(on_wd_timer);
+  };
+  on_wd_timer = [&](const std::error_code& ec) {
+    if (ec) {
+      return;  // cancelled
+    }
+    
+    // Pet the dogs
+    Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
+    for (auto const& view : m_views) {
+      view->PetWatchdogViaCallback();
+    }
+
+    arm_wd_timer();
+  };
+  arm_wd_timer();
+#endif
+
   // Shutdown + on-demand wake: the MainLoopWaker eventfd is written by the
   // signal handler (shutdown) and by Engine input coalescing / view requests
   // (a task needs pumping while otherwise idle). Registered non-owning — the
