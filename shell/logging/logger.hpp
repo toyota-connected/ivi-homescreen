@@ -4,8 +4,8 @@
 // ENABLE_DLT is on it is a thin inline layer over the ihs_shared C ABI
 // (ihs/logging.h): IhsLogContext wraps an acquired context index, and the
 // IHS_LOG_* macros format a line into a stack buffer (ihs::format_to) before
-// handing it to ihs_dlt_log. No C++ bridge internals cross the boundary — the
-// only symbols referenced are the exported ihs_dlt_* entry points. When
+// handing it to ihs_log. No C++ bridge internals cross the boundary — the
+// only symbols referenced are the exported ihs_log_* entry points. When
 // ENABLE_DLT is off the macros expand to ((void)0).
 #pragma once
 
@@ -21,18 +21,24 @@
 class IhsLogContext {
  public:
   IhsLogContext(const char* id, const char* description)
-      : index_(ihs_dlt_acquire_context(id, description)) {}
+      : index_(open(id, description)) {}
 
   [[nodiscard]] bool is_valid() const noexcept { return index_ >= 0; }
   [[nodiscard]] int32_t index() const noexcept { return index_; }
 
  private:
+  static int32_t open(const char* id, const char* description) {
+    const IhsLogContextOptions options{
+        sizeof(IhsLogContextOptions), description, {}};
+    return ihs_log_context_open(id, &options);
+  }
+
   int32_t index_ = -1;
 };
 
-#define IHS_LOGGING_START(app_id_, desc_) ihs_dlt_start((app_id_), (desc_))
-#define IHS_LOGGING_STOP() ihs_dlt_stop()
-#define IHS_LOGGING_FLUSH() ihs_dlt_flush()
+#define IHS_LOGGING_START(app_id_, desc_) ihs_log_start((app_id_), (desc_))
+#define IHS_LOGGING_STOP() ihs_log_stop()
+#define IHS_LOGGING_FLUSH() ihs_log_flush()
 
 // Format a line into a stack buffer and emit it through the bridge C ABI. The
 // format-string style follows ihs::format_to ("{}" under std::format, printf
@@ -45,7 +51,7 @@ class IhsLogContext {
       char ihs_buf_[IHS_LOG_TEXT_CAPACITY];                        \
       const std::size_t ihs_len_ =                                 \
           ihs::format_to(ihs_buf_, sizeof(ihs_buf_), __VA_ARGS__); \
-      ihs_dlt_log(ihs_ctx_.index(), (level_), ihs_buf_, ihs_len_); \
+      ihs_log(ihs_ctx_.index(), (level_), ihs_buf_, ihs_len_);     \
     }                                                              \
   } while (0)
 

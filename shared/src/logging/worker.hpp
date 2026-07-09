@@ -2,33 +2,34 @@
 #pragma once
 
 #include "compat.hpp"
+#include "log_sink.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
+#include <vector>
 
 namespace ihs::dlt {
 
 class ContextCache;
-class LibDltLoader;
 class RingRegistry;
 
 // Background drainer. Wakes periodically (or on explicit flush()) and pulls
-// slots from every ThreadRing through the registry, dispatching them to
-// libdlt via the loader.
+// slots from every ThreadRing through the registry, fanning each out to every
+// active sink (DLT / console / file).
 class Worker {
  public:
-  Worker(RingRegistry& registry,
-         ContextCache& cache,
-         LibDltLoader& loader) noexcept;
+  Worker(RingRegistry& registry, ContextCache& cache) noexcept;
 
   ~Worker();
 
   Worker(const Worker&) = delete;
   Worker& operator=(const Worker&) = delete;
 
-  void start();
+  // sinks must outlive the worker (owned by the bridge's SinkSet).
+  void start(const std::vector<std::unique_ptr<Sink>>& sinks);
   void stop();
   void flush() noexcept;
 
@@ -36,10 +37,11 @@ class Worker {
   void run(ihs::stop_token stop);
   // Drains every ring; returns the number of slots dispatched this pass.
   std::size_t drain_all();
+  void flush_sinks() noexcept;
 
   RingRegistry& registry_;
   ContextCache& cache_;
-  LibDltLoader& loader_;
+  const std::vector<std::unique_ptr<Sink>>* sinks_ = nullptr;
 
   ihs::jthread thread_;
   std::mutex mu_;

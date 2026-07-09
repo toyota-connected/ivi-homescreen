@@ -113,6 +113,10 @@ if (ENABLE_DLT)
             src/logging/worker.cpp
             src/logging/bridge.cpp
             src/logging/ffi_shim.cpp
+            src/logging/dlt_sink.cpp
+            src/logging/console_sink.cpp
+            src/logging/file_sink.cpp
+            src/logging/sink_set.cpp
     )
     target_include_directories(ihs_shared PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/logging

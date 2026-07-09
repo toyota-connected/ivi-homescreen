@@ -44,6 +44,10 @@ set(IHS_BRIDGE_SRCS
     ${IHS_SHARED_DIR}/src/logging/worker.cpp
     ${IHS_SHARED_DIR}/src/logging/bridge.cpp
     ${IHS_SHARED_DIR}/src/logging/ffi_shim.cpp
+    ${IHS_SHARED_DIR}/src/logging/dlt_sink.cpp
+    ${IHS_SHARED_DIR}/src/logging/console_sink.cpp
+    ${IHS_SHARED_DIR}/src/logging/file_sink.cpp
+    ${IHS_SHARED_DIR}/src/logging/sink_set.cpp
 )
 
 add_executable(dlt_load_test dlt_load_test.cc)

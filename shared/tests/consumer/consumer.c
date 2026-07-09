@@ -72,14 +72,18 @@ int main(void) {
         "get_int width");
   api->config->release(snap);
 
-  /* Logging: present only in an ENABLE_DLT build. When present, the calls must
-   * be safe even with no DLT daemon (the bridge self-disables). */
+  /* Logging: present only in an ENABLE_DLT build. Generic surface — a context
+   * opens and logs even with no DLT daemon (records fall to the console sink),
+   * so ihs_log_start must succeed and the context must be valid. */
   if (api->logging != NULL) {
-    const int32_t ctx = api->logging->acquire_context("SMOK", "consumer");
-    if (ctx >= 0) {
-      const char line[] = "consumer smoke line";
-      api->logging->log(ctx, IHS_LEVEL_INFO, line, sizeof(line) - 1);
-    }
+    CHECK(api->logging->start("SMOK", "consumer smoke") == 1,
+          "ihs_log_start");
+    const int32_t ctx = api->logging->context_open("SMOK", NULL);
+    CHECK(ctx >= 0, "context_open valid without a DLT daemon");
+    const char line[] = "consumer smoke line";
+    api->logging->log(ctx, IHS_LEVEL_INFO, line, sizeof(line) - 1);
+    api->logging->flush();
+    api->logging->stop();
   }
 
   printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s\n",

@@ -15,7 +15,7 @@ DltBridge::DltBridge()
     : loader_(LibDltLoader::instance()),
       registry_(RingRegistry::instance()),
       cache_(loader_),
-      worker_(registry_, cache_, loader_) {}
+      worker_(registry_, cache_) {}
 
 DltBridge::~DltBridge() {
   stop();
@@ -27,11 +27,13 @@ bool DltBridge::start(const char* app_id, const char* description) {
     return false;
   }
   loader_.register_app(app_id, description);
-  // No point running the drain thread when libdlt never loaded: acquire_context
-  // hands back invalid handles in that state, so nothing is ever enqueued.
-  if (loader_.available()) {
-    worker_.start();
-  }
+  // Resolve sinks from the environment (IHS_LOG_SINK/LEVEL/FILE). There is
+  // always at least the console fallback, and console/file sinks work without
+  // libdlt, so the drain worker runs regardless of DLT availability.
+  sink_set_ = build_sink_set_from_env(loader_);
+  level_floor_.store(static_cast<std::uint8_t>(sink_set_.level_floor),
+                     std::memory_order_relaxed);
+  worker_.start(sink_set_.sinks);
   return true;
 }
 
@@ -52,11 +54,10 @@ void DltBridge::flush() noexcept {
 
 ContextHandle DltBridge::acquire_context(std::string_view ctx_id,
                                          std::string_view description) {
-  // When libdlt is unavailable there is nowhere to emit, so hand back an
-  // invalid handle: IHS_LOG_* gates on ContextHandle::is_valid(), so the whole
-  // ring/worker path is skipped and a disabled-DLT build costs (almost)
-  // nothing per log site instead of allocating a ring and draining to a drop.
-  if (!loader_.available()) {
+  // Contexts are valid once logging is started: console/file sinks serve them
+  // by tag even with no libdlt. Before start() there is no worker/sink, so hand
+  // back an invalid handle and the ring/worker path is skipped entirely.
+  if (!started_.load(std::memory_order_acquire)) {
     return ContextHandle{};
   }
   auto result = cache_.ensure(ctx_id, description);
@@ -70,6 +71,13 @@ bool DltBridge::log(const ContextHandle& ctx,
                     LogLevel level,
                     std::string_view message) noexcept {
   if (!ctx.is_valid()) {
+    return false;
+  }
+  // Global severity floor (IHS_LOG_LEVEL): drop records more verbose than the
+  // floor before they enter a ring. Levels are Fatal(1)..Verbose(6), so a
+  // numerically larger value is more verbose.
+  if (static_cast<std::uint8_t>(level) >
+      level_floor_.load(std::memory_order_relaxed)) {
     return false;
   }
   ThreadRing& ring = registry_.thread_local_ring();

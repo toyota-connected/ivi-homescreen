@@ -41,27 +41,31 @@ HandleTable& handle_table() {
 
 }  // namespace
 
-extern "C" int ihs_dlt_start(const char* app_id, const char* description) {
+extern "C" int ihs_log_start(const char* app_id, const char* description) {
   return ihs::dlt::DltBridge::instance().start(app_id, description) ? 1 : 0;
 }
 
-extern "C" void ihs_dlt_stop() {
+extern "C" void ihs_log_stop() {
   ihs::dlt::DltBridge::instance().stop();
 }
 
-extern "C" void ihs_dlt_flush() {
+extern "C" void ihs_log_flush() {
   ihs::dlt::DltBridge::instance().flush();
 }
 
-extern "C" int32_t ihs_dlt_acquire_context(const char* ctx_id,
-                                           const char* description) {
-  if (ctx_id == nullptr) {
+extern "C" int32_t ihs_log_context_open(const char* tag,
+                                        const IhsLogContextOptions* options) {
+  if (tag == nullptr) {
     return -1;
   }
+  // Description comes from the options struct; the DLT context id is derived
+  // from the tag (options->dlt_ctx_id is reserved for an explicit override).
+  const char* description =
+      (options != nullptr && options->description != nullptr)
+          ? options->description
+          : "";
   auto handle = ihs::dlt::DltBridge::instance().acquire_context(
-      std::string_view{ctx_id}, description != nullptr
-                                    ? std::string_view{description}
-                                    : std::string_view{});
+      std::string_view{tag}, std::string_view{description});
   if (!handle.is_valid()) {
     return -1;
   }
@@ -74,10 +78,10 @@ extern "C" int32_t ihs_dlt_acquire_context(const char* ctx_id,
   return slot;
 }
 
-extern "C" int ihs_dlt_log(int32_t ctx_index,
-                           uint8_t level,
-                           const char* text,
-                           size_t text_len) {
+extern "C" int ihs_log(int32_t ctx_index,
+                       uint8_t level,
+                       const char* text,
+                       size_t text_len) {
   if (ctx_index < 0 || text == nullptr) {
     return 0;
   }
@@ -98,8 +102,8 @@ namespace ihs::dlt {
 // ihs_get_api(). Function pointers alias the flat entry points above.
 const IhsLoggingApi* logging_api() noexcept {
   static const IhsLoggingApi api = {
-      sizeof(IhsLoggingApi), &ihs_dlt_start,           &ihs_dlt_stop,
-      &ihs_dlt_flush,        &ihs_dlt_acquire_context, &ihs_dlt_log,
+      sizeof(IhsLoggingApi), &ihs_log_start,        &ihs_log_stop,
+      &ihs_log_flush,        &ihs_log_context_open, &ihs_log,
   };
   return &api;
 }
