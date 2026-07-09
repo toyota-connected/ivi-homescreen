@@ -20,6 +20,19 @@
 # Shared-only, on purpose: a static copy in both the shell and a plugin would
 # give the process two copies of the logging bridge, ring registry, and trace
 # sink table. There is exactly one copy of that state, in this .so.
+#
+# Buildable standalone (CI ABI gate + consumer smoke) without the homescreen
+# tree: when this is the top-level project it establishes its own project() and
+# an ENABLE_DLT option; otherwise it inherits both from the parent build.
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(ihs_shared_standalone LANGUAGES CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    if (NOT DEFINED ENABLE_DLT)
+        option(ENABLE_DLT "Build the DLT logging bridge into ihs_shared" ON)
+    endif ()
+endif ()
 
 include(GNUInstallDirs)
 include(GenerateExportHeader)

@@ -1,0 +1,88 @@
+/*
+ * Copyright 2026 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Out-of-tree consumer smoke test for ihs_shared. Built from an empty tree
+ * against the INSTALLED CMake package (find_package(ivi-homescreen-shared)),
+ * exactly as a Dart FFI plugin's native library would consume it. Compiled as
+ * strict C11 so it doubles as a header C-cleanliness check. Exercises the
+ * version handshake and each capability sub-table end to end.
+ */
+
+#include <stdio.h>
+#include <string.h>
+
+#include "ihs/config.h"
+#include "ihs/ihs.h"
+#include "ihs/logging.h"
+#include "ihs/trace.h"
+
+#define CHECK(cond, msg)           \
+  do {                             \
+    if (!(cond)) {                 \
+      printf("FAIL: %s\n", (msg)); \
+      return 1;                    \
+    }                              \
+  } while (0)
+
+int main(void) {
+  /* Version handshake. */
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  CHECK(api != NULL, "ihs_get_api returned NULL for the matching major");
+  CHECK(api->struct_size == sizeof(IhsApi), "IhsApi struct_size mismatch");
+  CHECK(ihs_get_api((IHS_SHARED_ABI_MAJOR + 1u) << 16) == NULL,
+        "a newer major should be rejected");
+
+  /* Tracing: always present. Emitting is a safe nop with no sink installed. */
+  CHECK(api->trace != NULL, "trace sub-table absent");
+  api->trace->instant("consumer-smoke");
+  IHS_TRACE_INSTANT("consumer-smoke-macro");
+
+  /* Config: publish a snapshot (builder is part of the ABI) and read it back.
+   */
+  CHECK(api->config != NULL, "config sub-table absent");
+  IhsConfigBuilder* builder = ihs_config_builder_new(1);
+  ihs_config_builder_set_str(builder, IHS_CONFIG_GLOBAL, "app_id", "smoke");
+  ihs_config_builder_set_int(builder, 0, "width", 1280);
+  const uint64_t generation = ihs_config_publish(builder);
+  CHECK(generation >= 1, "publish did not return a generation");
+
+  const IhsConfigSnapshot* snap = api->config->acquire();
+  CHECK(snap != NULL, "acquire after publish returned NULL");
+  char app_id[64];
+  CHECK(api->config->get_str(snap, IHS_CONFIG_GLOBAL, "app_id", app_id,
+                             sizeof(app_id), NULL),
+        "get_str app_id");
+  CHECK(strcmp(app_id, "smoke") == 0, "app_id value mismatch");
+  int64_t width = 0;
+  CHECK(api->config->get_int(snap, 0, "width", &width) && width == 1280,
+        "get_int width");
+  api->config->release(snap);
+
+  /* Logging: present only in an ENABLE_DLT build. When present, the calls must
+   * be safe even with no DLT daemon (the bridge self-disables). */
+  if (api->logging != NULL) {
+    const int32_t ctx = api->logging->acquire_context("SMOK", "consumer");
+    if (ctx >= 0) {
+      const char line[] = "consumer smoke line";
+      api->logging->log(ctx, IHS_LEVEL_INFO, line, sizeof(line) - 1);
+    }
+  }
+
+  printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s\n",
+         api->abi_version, api->logging != NULL ? "present" : "absent");
+  return 0;
+}
