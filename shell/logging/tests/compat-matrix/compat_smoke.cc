@@ -100,7 +100,7 @@ int main() {
 
   // 4. Ring push stress: stay well under kRingCapacity so the worker
   // drains between bursts without any drops.
-  auto& ring = ihs::dlt::RingRegistry::instance().thread_local_ring();
+  auto& ring = ihs::dlt::RingRegistry::thread_local_ring();
   const std::uint64_t dropped_before = ring.dropped();
 
   for (int i = 0; i < 128; ++i) {

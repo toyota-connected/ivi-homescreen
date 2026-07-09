@@ -88,7 +88,7 @@ bool DltBridge::log(const ContextHandle& ctx,
       level_floor_.load(std::memory_order_relaxed)) {
     return false;
   }
-  ThreadRing& ring = registry_.thread_local_ring();
+  ThreadRing& ring = RingRegistry::thread_local_ring();
   return ring.push(ctx.index(), static_cast<std::uint8_t>(level),
                    message.data(), message.size());
 }
