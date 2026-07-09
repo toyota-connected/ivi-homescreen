@@ -66,6 +66,14 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
           ctest --test-dir cbuild --output-on-failure
 
+      - name: End-to-end logging sinks (console / file / level / fallback)
+        run: |
+          cmake -S shared/tests/sink_integration -B sbuild -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/prefix"
+          cmake --build sbuild
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          ctest --test-dir sbuild --output-on-failure
+
   abi-gate:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
@@ -121,3 +129,65 @@ jobs:
           name: ihs-shared-abi
           path: shared/abi/libihs_shared.so.abi
           if-no-files-found: ignore
+
+  # Opt-in real-wire test: the DLT sink through an actual dlt-daemon, captured
+  # with dlt-receive. Not a per-PR gate (daemon startup timing is flaky); runs
+  # on demand and post-merge. The deterministic DLT emit path is covered per-PR
+  # by the load harness against a libdlt stub.
+  dlt-daemon-e2e:
+    if: >-
+      ${{ github.server_url == 'https://github.com'
+          && (github.event_name == 'workflow_dispatch'
+              || github.event_name == 'push') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain + dlt-daemon
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc g++ dlt-daemon dlt-tools
+
+      - name: Build + install ihs_shared
+        run: |
+          cmake -S shared -B build -G Ninja -DENABLE_DLT=ON \
+            -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+          cmake --build build
+          cmake --install build
+
+      - name: Compile a marker logger
+        run: |
+          cat > driver.c <<'EOF'
+          #include <stdio.h>
+          #include "ihs/logging.h"
+          int main(void) {
+            if (ihs_log_start("IHSC", "dlt e2e") != 1) return 1;
+            const int32_t c = ihs_log_context_open("E2ET", NULL);
+            if (c < 0) return 1;
+            const char m[] = "dlt-e2e-marker-9f3a";
+            for (int i = 0; i < 40; ++i) ihs_log(c, 4 /*info*/, m, sizeof(m) - 1);
+            ihs_log_flush();
+            ihs_log_stop();
+            return 0;
+          }
+          EOF
+          gcc -std=c11 -Iprefix/include driver.c -o driver \
+            -Lprefix/lib -Lprefix/lib64 -lihs_shared
+
+      - name: Run dlt-daemon + capture the marker
+        run: |
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          dlt-daemon -d ; sleep 2
+          dlt-receive -a localhost > capture.txt 2>&1 &
+          RECV=$!
+          sleep 2
+          IHS_LOG_SINK=dlt ./driver
+          sleep 3
+          kill "$RECV" 2>/dev/null || true
+          echo "=== dlt-receive capture (tail) ==="; tail -n 40 capture.txt || true
+          if ! grep -q "dlt-e2e-marker-9f3a" capture.txt; then
+            echo "::error::marker was not received by dlt-daemon"
+            exit 1
+          fi
+          echo "dlt-daemon received the marker"
