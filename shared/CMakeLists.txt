@@ -29,6 +29,7 @@ set(IHS_SHARED_ABI_VERSION_STR 1.0.0)
 
 add_library(ihs_shared SHARED
         src/ihs_api.cc
+        src/trace.cc
 )
 add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
 
