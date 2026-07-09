@@ -55,7 +55,7 @@ extern "C" const IhsApi* ihs_get_api(uint32_t requested_abi) {
 #endif
       /* trace         */ ihs::trace::trace_api(),
       /* platform_view */ nullptr,
-      /* config        */ nullptr,
+      /* config        */ ihs::config::config_api(),
   };
   return &api;
 }

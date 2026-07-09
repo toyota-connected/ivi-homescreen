@@ -23,6 +23,7 @@
 #include "app.h"
 #include "backend/register_backends.h"
 #include "configuration/configuration.h"
+#include "ihs/config.h"
 #include "logging/logger.hpp"
 #include "logging/logging.h"
 #include "main_loop_waker.h"
@@ -61,6 +62,77 @@ void InstallShutdownHandlers() {
   }
 }
 
+// Publish the resolved configuration to ihs_shared so FFI plugins can read it.
+// One view scope per parsed Config; global (non-per-view) keys go under
+// IHS_CONFIG_GLOBAL. Only set-in-config values are published; a key absent
+// here reads as "not present" on the plugin side. Keys are flattened names,
+// so extending this set needs no ABI change.
+void PublishIhsConfig(const std::vector<Configuration::Config>& configs) {
+  IhsConfigBuilder* builder =
+      ihs_config_builder_new(static_cast<size_t>(configs.size()));
+
+  if (!configs.empty()) {
+    const auto& g = configs.front();
+    if (!g.app_id.empty()) {
+      ihs_config_builder_set_str(builder, IHS_CONFIG_GLOBAL, "app_id",
+                                 g.app_id.c_str());
+    }
+    if (!g.cursor_theme.empty()) {
+      ihs_config_builder_set_str(builder, IHS_CONFIG_GLOBAL, "cursor_theme",
+                                 g.cursor_theme.c_str());
+    }
+    if (g.disable_cursor.has_value()) {
+      ihs_config_builder_set_bool(builder, IHS_CONFIG_GLOBAL, "disable_cursor",
+                                  *g.disable_cursor ? 1 : 0);
+    }
+    if (g.debug_backend.has_value()) {
+      ihs_config_builder_set_bool(builder, IHS_CONFIG_GLOBAL, "debug_backend",
+                                  *g.debug_backend ? 1 : 0);
+    }
+  }
+
+  for (size_t i = 0; i < configs.size(); ++i) {
+    const auto& v = configs[i].view;
+    const auto view = static_cast<int32_t>(i);
+    if (!v.bundle_path.empty()) {
+      ihs_config_builder_set_str(builder, view, "bundle_path",
+                                 v.bundle_path.c_str());
+    }
+    if (!v.window_type.empty()) {
+      ihs_config_builder_set_str(builder, view, "window_type",
+                                 v.window_type.c_str());
+    }
+    if (v.width.has_value()) {
+      ihs_config_builder_set_int(builder, view, "width", *v.width);
+    }
+    if (v.height.has_value()) {
+      ihs_config_builder_set_int(builder, view, "height", *v.height);
+    }
+    if (v.pixel_ratio.has_value()) {
+      ihs_config_builder_set_double(builder, view, "pixel_ratio",
+                                    *v.pixel_ratio);
+    }
+    if (v.fullscreen.has_value()) {
+      ihs_config_builder_set_bool(builder, view, "fullscreen",
+                                  *v.fullscreen ? 1 : 0);
+    }
+    if (v.ivi_surface_id.has_value()) {
+      ihs_config_builder_set_int(builder, view, "ivi_surface_id",
+                                 *v.ivi_surface_id);
+    }
+    if (v.accessibility_features.has_value()) {
+      ihs_config_builder_set_int(builder, view, "accessibility_features",
+                                 *v.accessibility_features);
+    }
+    if (v.drm_device.has_value()) {
+      ihs_config_builder_set_str(builder, view, "drm_device",
+                                 v.drm_device->c_str());
+    }
+  }
+
+  ihs_config_publish(builder);
+}
+
 }  // namespace
 
 /**
@@ -79,6 +151,9 @@ int main(const int argc, char** argv) {
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
   assert(!configs.empty());
+
+  // Make the resolved configuration readable by FFI plugins via ihs_shared.
+  PublishIhsConfig(configs);
 
 #if BUILD_CRASH_HANDLER
   // [sentry] is process-level: read it from the --config master file when

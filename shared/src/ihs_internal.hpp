@@ -22,6 +22,7 @@
 #ifndef IHS_SHARED_SRC_IHS_INTERNAL_HPP_
 #define IHS_SHARED_SRC_IHS_INTERNAL_HPP_
 
+#include "ihs/config.h"
 #include "ihs/logging.h"
 #include "ihs/trace.h"
 
@@ -40,5 +41,12 @@ namespace ihs::trace {
 const IhsTraceApi* trace_api() noexcept;
 
 }  // namespace ihs::trace
+
+namespace ihs::config {
+
+// Returns the config read sub-table. Defined in config.cc; always compiled in.
+const IhsConfigApi* config_api() noexcept;
+
+}  // namespace ihs::config
 
 #endif  // IHS_SHARED_SRC_IHS_INTERNAL_HPP_
