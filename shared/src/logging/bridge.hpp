@@ -3,7 +3,6 @@
 
 #include "compat.hpp"
 #include "context_cache.hpp"
-#include "libdlt_loader.hpp"
 #include "log_level.hpp"
 #include "ring_registry.hpp"
 #include "sink_set.hpp"
@@ -92,7 +91,6 @@ class DltBridge {
   DltBridge(const DltBridge&) = delete;
   DltBridge& operator=(const DltBridge&) = delete;
 
-  LibDltLoader& loader_;
   RingRegistry& registry_;
   ContextCache cache_;
   Worker worker_;

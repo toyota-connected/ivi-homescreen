@@ -17,9 +17,11 @@
 #include "sink_set.hpp"
 
 #include "console_sink.hpp"
-#include "dlt_sink.hpp"
 #include "file_sink.hpp"
+#if ENABLE_DLT
+#include "dlt_sink.hpp"
 #include "libdlt_loader.hpp"
+#endif
 
 #include <cstddef>
 #include <cstdio>
@@ -94,13 +96,17 @@ void warn_once(const char* message) noexcept {
 
 }  // namespace
 
-SinkSet build_sink_set_from_env(LibDltLoader& loader) {
+SinkSet build_sink_set_from_env() {
   SinkSet set;
   set.level_floor = parse_level(getenv_sv("IHS_LOG_LEVEL"), LogLevel::Verbose);
 
   std::string_view spec = getenv_sv("IHS_LOG_SINK");
   if (spec.empty()) {
+#if ENABLE_DLT
     spec = "dlt";  // default: the primary target when built with DLT
+#else
+    spec = "console";  // no DLT compiled in; console is the sensible default
+#endif
   }
 
   bool want_console = false;
@@ -125,12 +131,19 @@ SinkSet build_sink_set_from_env(LibDltLoader& loader) {
     }
 
     if (tok == "dlt") {
+#if ENABLE_DLT
+      LibDltLoader& loader = LibDltLoader::instance();
       if (loader.available()) {
         set.sinks.push_back(std::make_unique<DltSink>(loader));
       } else {
         warn_once("IHS_LOG_SINK=dlt but libdlt is unavailable; using console");
         want_console = true;
       }
+#else
+      warn_once(
+          "IHS_LOG_SINK=dlt but this build has no DLT support; using console");
+      want_console = true;
+#endif
     } else if (tok == "console") {
       want_console = true;
     } else if (tok == "file") {

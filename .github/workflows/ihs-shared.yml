@@ -67,10 +67,10 @@ jobs:
           ctest --test-dir cbuild --output-on-failure
 
       - name: End-to-end logging sinks (console / file / level / fallback)
-        # The logging bridge (and thus the ihs_log_* exports the test links
-        # against) is only compiled with ENABLE_DLT=ON. With it OFF the ABI has
-        # no logging surface, so there is nothing to exercise here.
-        if: matrix.enable_dlt == 'ON'
+        # Logging is always compiled in; only the DLT sink is gated by
+        # ENABLE_DLT. Both matrix legs run the scenarios -- on the DLT=OFF leg
+        # the fallback scenario also covers the "dlt requested, not built"
+        # warn-and-fall-back-to-console path.
         run: |
           cmake -S shared/tests/sink_integration -B sbuild -G Ninja \
             -DCMAKE_PREFIX_PATH="$PWD/prefix"

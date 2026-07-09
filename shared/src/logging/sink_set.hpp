@@ -25,8 +25,6 @@
 
 namespace ihs::dlt {
 
-class LibDltLoader;
-
 // The resolved logging output configuration, evaluated once at ihs_log_start
 // from the environment (IHS_LOG_SINK, IHS_LOG_LEVEL, IHS_LOG_FILE*).
 struct SinkSet {
@@ -35,10 +33,12 @@ struct SinkSet {
 };
 
 // Build the sink list from the environment. IHS_LOG_SINK is a comma list of
-// dlt|console|file (default "dlt"); an unavailable sink warns once and falls
-// back to console; the console sink is always ensured so a well-formed program
-// never logs silently to nowhere.
-SinkSet build_sink_set_from_env(LibDltLoader& loader);
+// console|file plus dlt when the library is built with ENABLE_DLT (the default
+// is "dlt" in that build, else "console"). An unavailable sink warns once and
+// falls back to console; the console sink is always ensured so a well-formed
+// program never logs silently to nowhere. The DLT sink, when built, resolves
+// the process libdlt loader itself, so this takes no arguments.
+SinkSet build_sink_set_from_env();
 
 }  // namespace ihs::dlt
 

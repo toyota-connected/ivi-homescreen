@@ -4,6 +4,10 @@
 #include "ring_slot.hpp"
 #include "thread_ring.hpp"
 
+#if ENABLE_DLT
+#include "libdlt_loader.hpp"
+#endif
+
 namespace ihs::dlt {
 
 DltBridge& DltBridge::instance() {
@@ -12,10 +16,7 @@ DltBridge& DltBridge::instance() {
 }
 
 DltBridge::DltBridge()
-    : loader_(LibDltLoader::instance()),
-      registry_(RingRegistry::instance()),
-      cache_(loader_),
-      worker_(registry_, cache_) {}
+    : registry_(RingRegistry::instance()), worker_(registry_, cache_) {}
 
 DltBridge::~DltBridge() {
   stop();
@@ -26,11 +27,16 @@ bool DltBridge::start(const char* app_id, const char* description) {
   if (!started_.compare_exchange_strong(expected, true)) {
     return false;
   }
-  loader_.register_app(app_id, description);
+#if ENABLE_DLT
+  LibDltLoader::instance().register_app(app_id, description);
+#else
+  (void)app_id;
+  (void)description;
+#endif
   // Resolve sinks from the environment (IHS_LOG_SINK/LEVEL/FILE). There is
   // always at least the console fallback, and console/file sinks work without
   // libdlt, so the drain worker runs regardless of DLT availability.
-  sink_set_ = build_sink_set_from_env(loader_);
+  sink_set_ = build_sink_set_from_env();
   level_floor_.store(static_cast<std::uint8_t>(sink_set_.level_floor),
                      std::memory_order_relaxed);
   worker_.start(sink_set_.sinks);
@@ -43,7 +49,9 @@ void DltBridge::stop() {
     return;
   }
   worker_.stop();
-  loader_.unregister_app();
+#if ENABLE_DLT
+  LibDltLoader::instance().unregister_app();
+#endif
 }
 
 void DltBridge::flush() noexcept {
