@@ -20,9 +20,6 @@
 
 #include "logging/logging.h"
 
-// Maximum allowable source ID (allows for future expansion)
-constexpr int64_t kMaxWatchdogSource = 255;
-
 // StandardMethodCodec encodes small Dart integers as int32_t, not int64_t.
 // This helper safely widens either representation to int64_t.
 static int64_t GetEncodableInt(const flutter::EncodableValue& val) {
@@ -44,7 +41,7 @@ WatchdogPlugin::WatchdogPlugin(flutter::BinaryMessenger* messenger)
 }
 
 bool WatchdogPlugin::checkWatchdogSource(const int64_t source) {
-  return source >= 0 && source <= kMaxWatchdogSource;
+  return source >= 0;
 }
 
 void WatchdogPlugin::externalStart(int64_t source) {
