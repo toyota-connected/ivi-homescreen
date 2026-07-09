@@ -59,15 +59,15 @@ typedef enum IhsLogLevel {
 
 /*
  * Options for ihs_log_context_open. struct_size-first; all fields optional
- * (pass NULL for defaults). DLT-specific hints live here rather than in the
- * call signature — DLT is a sink, not the interface.
+ * (pass NULL for defaults). Sink-specific hints live here rather than in the
+ * call signature, so the core interface stays sink-neutral.
  */
 typedef struct IhsLogContextOptions {
   size_t struct_size;
-  const char*
-      description;    /* human-readable; also the DLT context description */
-  char dlt_ctx_id[4]; /* explicit 4-char DLT context id; derived from the
-                         tag when left zeroed */
+  const char* description; /* human-readable context description */
+  char sink_context_id[4]; /* optional explicit 4-char context id for sinks
+                              that key on one (e.g. the DLT context id);
+                              derived from the tag when left zeroed */
 } IhsLogContextOptions;
 
 /*

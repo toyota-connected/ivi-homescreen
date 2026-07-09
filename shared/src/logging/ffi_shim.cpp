@@ -58,8 +58,9 @@ extern "C" int32_t ihs_log_context_open(const char* tag,
   if (tag == nullptr) {
     return -1;
   }
-  // Description comes from the options struct; the DLT context id is derived
-  // from the tag (options->dlt_ctx_id is reserved for an explicit override).
+  // Description comes from the options struct; a sink's context id is derived
+  // from the tag (options->sink_context_id is reserved for an explicit
+  // override).
   const char* description =
       (options != nullptr && options->description != nullptr)
           ? options->description
