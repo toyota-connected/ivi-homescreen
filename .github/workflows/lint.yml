@@ -51,6 +51,12 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Update apt package index
+        # Refresh the index before cache-apt-pkgs-action resolves versions, so
+        # it pins the revision currently on the mirror rather than a stale one
+        # the runner image still lists (a dropped .deb 404s and aborts install).
+        run: sudo apt-get update
+
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -83,6 +89,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Update apt package index
+        # Refresh the index before cache-apt-pkgs-action resolves versions, so
+        # it pins the revision currently on the mirror rather than a stale one
+        # the runner image still lists (a dropped .deb 404s and aborts install).
+        run: sudo apt-get update
 
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@v1

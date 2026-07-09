@@ -327,19 +327,37 @@ void DrmDisplay::ArmFlipRead() {
 }
 
 void DrmDisplay::DrainFlip() {
+  // The reader thread's re-arm callback: drain whatever is ready right now.
+  (void)DrainReadyFlips(0);
+}
+
+bool DrmDisplay::DrainReadyFlips(const int timeout_ms) {
   if (!drm_dev_.has_value() || flip_handler_ == nullptr) {
-    return;
+    return false;
   }
-  // Single reader thread, so no lock: poll(0) then read only if readable. The
-  // handler (user_data == the committing DrmBackend*) routes each flip to its
-  // backend, clears that backend's flip_pending_, and returns its vsync baton.
-  pollfd pfd{drm_dev_->fd(), POLLIN, 0};
-  if (::poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
-    drmEventContext ctx{};
-    ctx.version = 2;
-    ctx.page_flip_handler = flip_handler_;
-    drmHandleEvent(drm_dev_->fd(), &ctx);
+  const int fd = drm_dev_->fd();
+  // Wait for readability WITHOUT the lock so the reader thread and the raster
+  // thread can both block here; whichever wins the drain locks below.
+  pollfd pfd{fd, POLLIN, 0};
+  if (::poll(&pfd, 1, timeout_ms) <= 0 || (pfd.revents & POLLIN) == 0) {
+    return false;
   }
+  // Serialize the actual fd read: two threads may have seen it readable, but
+  // only one may consume the event. The loser re-polls(0) below, finds nothing,
+  // and returns -- no double-read, no lost event. The handler (user_data == the
+  // committing sink) records the flip, clears its flip_pending_, and returns
+  // the vsync baton; safe from either thread (flip_pending_ is atomic and
+  // DeliverVsync marshals onto the runner strand).
+  const std::lock_guard<std::mutex> lock(flip_drain_mu_);
+  pollfd pfd2{fd, POLLIN, 0};
+  if (::poll(&pfd2, 1, 0) <= 0 || (pfd2.revents & POLLIN) == 0) {
+    return false;
+  }
+  drmEventContext ctx{};
+  ctx.version = 2;
+  ctx.page_flip_handler = flip_handler_;
+  drmHandleEvent(fd, &ctx);
+  return true;
 }
 
 void DrmDisplay::StopFlipReader() {
