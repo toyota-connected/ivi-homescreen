@@ -48,11 +48,7 @@ extern "C" const IhsApi* ihs_get_api(uint32_t requested_abi) {
   static const IhsApi api = {
       /* struct_size   */ sizeof(IhsApi),
       /* abi_version   */ IHS_SHARED_ABI_VERSION,
-#if ENABLE_DLT
       /* logging       */ ihs::dlt::logging_api(),
-#else
-      /* logging       */ nullptr,
-#endif
       /* trace         */ ihs::trace::trace_api(),
       /* platform_view */ nullptr,
       /* config        */ ihs::config::config_api(),

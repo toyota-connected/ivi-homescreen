@@ -100,29 +100,37 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_link_options(ihs_shared PRIVATE "LINKER:-z,nodelete")
 endif ()
 
-# Logging capability: the DLT bridge. Compiled in only when ENABLE_DLT is set;
-# otherwise IhsApi::logging stays null (capability absent). The bridge dlopens
-# libdlt at runtime, so it adds no build-time dependency of its own.
+# Logging capability. The generic logging surface (the ihs_log_* ABI, the ring
+# registry / drain worker, and the console, file, and level-floor sinks) is
+# always compiled in, so IhsApi::logging is always present. ENABLE_DLT gates
+# only the DLT-specific pieces — the runtime libdlt loader and the DLT sink;
+# with it off, "dlt" is simply not an available IHS_LOG_SINK and the surface
+# falls back to console. The DLT sink dlopens libdlt at runtime, so even the
+# ENABLE_DLT path adds no build-time dependency of its own.
+find_package(Threads REQUIRED)
+target_sources(ihs_shared PRIVATE
+        src/logging/thread_ring.cpp
+        src/logging/ring_registry.cpp
+        src/logging/context_cache.cpp
+        src/logging/worker.cpp
+        src/logging/bridge.cpp
+        src/logging/ffi_shim.cpp
+        src/logging/console_sink.cpp
+        src/logging/file_sink.cpp
+        src/logging/sink_set.cpp
+)
+target_include_directories(ihs_shared PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
+)
+target_link_libraries(ihs_shared PRIVATE Threads::Threads)
+
 if (ENABLE_DLT)
-    find_package(Threads REQUIRED)
     target_sources(ihs_shared PRIVATE
             src/logging/libdlt_loader.cpp
-            src/logging/thread_ring.cpp
-            src/logging/ring_registry.cpp
-            src/logging/context_cache.cpp
-            src/logging/worker.cpp
-            src/logging/bridge.cpp
-            src/logging/ffi_shim.cpp
             src/logging/dlt_sink.cpp
-            src/logging/console_sink.cpp
-            src/logging/file_sink.cpp
-            src/logging/sink_set.cpp
-    )
-    target_include_directories(ihs_shared PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
     )
     target_compile_definitions(ihs_shared PRIVATE ENABLE_DLT=1)
-    target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+    target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
 endif ()
 
 #
