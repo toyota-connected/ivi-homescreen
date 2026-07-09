@@ -15,10 +15,15 @@
  */
 
 /*
- * ihs_shared logging surface: a Diagnostic Log and Trace (DLT) bridge exposed
- * as a C ABI. The shell brings the bridge online before any plugin loads;
- * plugins acquire contexts and emit pre-formatted lines. See
- * docs/PLUGIN_ABI.md.
+ * ihs_shared logging surface: a generic C-ABI logging interface. Producers open
+ * a context (tag) and emit pre-formatted lines; the records fan out to whatever
+ * sinks are configured. DLT is one sink, not the interface — sinks are selected
+ * by environment (IHS_LOG_SINK = dlt|console|file, IHS_LOG_LEVEL, IHS_LOG_FILE,
+ * IHS_LOG_FILE_MAX_BYTES, IHS_LOG_FILE_MAX_FILES). See docs/PLUGIN_ABI.md.
+ *
+ * Timing contract: ihs_log() is non-blocking (enqueue to a per-thread ring, may
+ * drop-oldest under pressure); formatting and I/O happen on a drain thread.
+ * ihs_log_flush() is synchronous.
  */
 
 #ifndef IHS_LOGGING_H_
@@ -33,7 +38,8 @@
 extern "C" {
 #endif
 
-/* Severity, matching the DLT log-level scale. */
+/* Severity, matching the DLT log-level scale (numerically larger = more
+ * verbose). IHS_LOG_LEVEL sets a floor; more-verbose records are dropped. */
 typedef enum IhsLogLevel {
   IHS_LEVEL_OFF = 0,
   IHS_LEVEL_FATAL = 1,
@@ -46,42 +52,55 @@ typedef enum IhsLogLevel {
 
 /*
  * Maximum text length carried in one log record; longer messages are
- * truncated by the bridge. A convenience wrapper sizing a stack buffer for a
- * formatted line should use this.
+ * truncated. A convenience wrapper sizing a stack buffer for a formatted line
+ * should use this.
  */
 #define IHS_LOG_TEXT_CAPACITY 240
 
 /*
- * Bring the bridge online: load libdlt, register the app id, start the worker
- * thread. Called by the shell before any plugin is loaded. Idempotent — only
- * the first successful call takes effect, so a later call from a plugin is a
- * no-op rather than a re-initialization. Returns 1 on success, 0 on failure.
+ * Options for ihs_log_context_open. struct_size-first; all fields optional
+ * (pass NULL for defaults). DLT-specific hints live here rather than in the
+ * call signature — DLT is a sink, not the interface.
  */
-IHS_EXPORT int ihs_dlt_start(const char* app_id, const char* description);
-
-/* Tear the bridge down. Intended for the shell at process shutdown. */
-IHS_EXPORT void ihs_dlt_stop(void);
-
-/* Flush pending records to the DLT daemon. */
-IHS_EXPORT void ihs_dlt_flush(void);
+typedef struct IhsLogContextOptions {
+  size_t struct_size;
+  const char*
+      description;    /* human-readable; also the DLT context description */
+  char dlt_ctx_id[4]; /* explicit 4-char DLT context id; derived from the
+                         tag when left zeroed */
+} IhsLogContextOptions;
 
 /*
- * Acquire (or look up) a logging context. Returns a non-negative index for use
- * with ihs_dlt_log, or -1 on failure. Contexts are cached; re-acquiring the
- * same ctx_id is cheap.
+ * Bring logging online: register the app id, resolve sinks from the
+ * environment, start the drain thread. Called by the shell before any plugin
+ * is loaded. Idempotent — only the first successful call takes effect. Returns
+ * 1 on success, 0 otherwise.
  */
-IHS_EXPORT int32_t ihs_dlt_acquire_context(const char* ctx_id,
-                                           const char* description);
+IHS_EXPORT int ihs_log_start(const char* app_id, const char* description);
+
+/* Tear logging down. Intended for the shell at process shutdown. */
+IHS_EXPORT void ihs_log_stop(void);
+
+/* Synchronously flush pending records to the active sinks. */
+IHS_EXPORT void ihs_log_flush(void);
 
 /*
- * Emit a pre-formatted line under a context. level is an IhsLogLevel. The hot
- * path is wait-free and drops silently on ring overflow. Returns 1 when the
- * record was enqueued, 0 on drop or invalid arguments.
+ * Open (or look up) a logging context for tag. Returns a non-negative index for
+ * use with ihs_log, or -1 on failure. options may be NULL. Contexts are cached;
+ * re-opening the same tag is cheap.
  */
-IHS_EXPORT int ihs_dlt_log(int32_t ctx_index,
-                           uint8_t level,
-                           const char* text,
-                           size_t text_len);
+IHS_EXPORT int32_t ihs_log_context_open(const char* tag,
+                                        const IhsLogContextOptions* options);
+
+/*
+ * Emit a pre-formatted line under a context. level is an IhsLogLevel. Enqueue
+ * is wait-free and drops silently on ring overflow or when level is below the
+ * IHS_LOG_LEVEL floor. Returns 1 when enqueued, 0 on drop/invalid arguments.
+ */
+IHS_EXPORT int ihs_log(int32_t ctx_index,
+                       uint8_t level,
+                       const char* text,
+                       size_t text_len);
 
 /*
  * The logging capability sub-table reachable through IhsApi::logging. The
@@ -93,7 +112,7 @@ typedef struct IhsLoggingApi {
   int (*start)(const char* app_id, const char* description);
   void (*stop)(void);
   void (*flush)(void);
-  int32_t (*acquire_context)(const char* ctx_id, const char* description);
+  int32_t (*context_open)(const char* tag, const IhsLogContextOptions* options);
   int (*log)(int32_t ctx_index, uint8_t level, const char* text, size_t len);
 } IhsLoggingApi;
 

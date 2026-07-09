@@ -874,7 +874,7 @@ void Engine::onLogMessageCallback(const char* tag,
           static_cast<std::size_t>(n < static_cast<int>(sizeof(buf))
                                        ? n
                                        : static_cast<int>(sizeof(buf)) - 1);
-      ihs_dlt_log(kEngineCtx.index(), IHS_LEVEL_INFO, buf, len);
+      ihs_log(kEngineCtx.index(), IHS_LEVEL_INFO, buf, len);
     }
   }
 #endif

@@ -6,6 +6,7 @@
 #include "libdlt_loader.hpp"
 #include "log_level.hpp"
 #include "ring_registry.hpp"
+#include "sink_set.hpp"
 #include "worker.hpp"
 
 #include <atomic>
@@ -95,6 +96,11 @@ class DltBridge {
   RingRegistry& registry_;
   ContextCache cache_;
   Worker worker_;
+  SinkSet sink_set_;  // built from the environment at start()
+  // Records at or above this severity (numerically <=) are enqueued; more
+  // verbose ones are dropped ring-side. Verbose = pass everything.
+  std::atomic<std::uint8_t> level_floor_{
+      static_cast<std::uint8_t>(LogLevel::Verbose)};
   std::atomic<bool> started_{false};
 };
 
