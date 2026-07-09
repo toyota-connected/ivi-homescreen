@@ -748,7 +748,6 @@ The watchdog tracks named integer source IDs (`WatchdogSource`, a `typedef int64
 |---|---|---|
 | `WATCHDOG_SOURCE_MAIN_THREAD` | 0 | Application main loop |
 | `WATCHDOG_SOURCE_RENDER_THREAD` | 1 | Flutter rasterizer thread |
-| `WATCHDOG_SOURCE_FLUTTER` | 2 | Reserved (Flutter platform thread) |
 
 Source IDs 3–255 are available for Dart-side registration via the platform channel.
 

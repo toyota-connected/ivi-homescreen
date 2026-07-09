@@ -42,9 +42,9 @@ class WatchdogPlugin {
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
   /**
-   * @brief Validates if the given source is within the allowable range.
+   * @brief Validates if the given source is non-negative.
    * @param[in] source The integer identifier of the watchdog source.
-   * @return True if the source is valid; false otherwise.
+   * @return True if the source is valid (>= 0); false otherwise.
    */
   static bool checkWatchdogSource(int64_t source);
 
