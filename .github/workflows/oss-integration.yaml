@@ -48,3 +48,41 @@ jobs:
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           emb --version
           ./scripts/crash_handler_integration.sh
+
+  # Runs integration test for the Watchdog
+  # - Builds a homescreen binary with the watchdog enabled (software backend for CI)
+  # - Runs test/integration/watchdog-test
+  # - Checks if exited with code 0 (PASS) or 1 (FAIL)
+  watchdog:
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
+    runs-on: ubuntu-22.04
+    env:
+      PREFER_LLVM: 19
+    steps:
+      - name: Check Environment
+        id: check_environment
+        shell: bash
+        run: |
+          echo "Running on Ubuntu version: $(lsb_release -d | cut -f2)"
+          echo "Running on architecture: $(uname -m)"
+          echo "Current directory: $(pwd)"
+          echo "user=$(whoami)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup workspace
+        uses: meta-flutter/workspace-automation/.github/actions/setup-workspace@v2.0
+        with:
+          args: --disable=rive-text --enable=sentry-native --override-repo=https://github.com/toyota-connected/ivi-homescreen.git#${{ github.event.pull_request.head.ref && format('heads/{0}', github.event.pull_request.head.ref) || github.sha }}
+          user: ${{ steps.check_environment.outputs.user }}
+          ref: v2.0
+          cache: false
+          cache-key: watchdog-integration-pr${{ github.event.pull_request.number }}
+
+      - name: Run integration test for watchdog
+        shell: bash
+        run: |
+          cd "${{ github.workspace }}"
+          source ./setup_env.sh
+          cd ./app/ivi-homescreen
+          ls -al scripts
+          git status
+          ./scripts/watchdog_integration.sh
