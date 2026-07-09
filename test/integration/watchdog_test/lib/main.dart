@@ -31,6 +31,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -325,13 +326,18 @@ class _HomeState extends State<_Home> {
         final start = callbacks['start'];
         final pet = callbacks['pet'];
         final stop = callbacks['stop'];
-        if (start is int && start != 0 &&
-            pet is int && pet != 0 &&
-            stop is int && stop != 0) {
-          _setCheck('get_callbacks_shape', CheckStatus.pass,
+        if (start is int &&
+            start != 0 &&
+            pet is int &&
+            pet != 0 &&
+            stop is int &&
+            stop != 0) {
+          _setCheck(
+              'get_callbacks_shape',
+              CheckStatus.pass,
               'start=0x${start.toRadixString(16)}, '
-              'pet=0x${pet.toRadixString(16)}, '
-              'stop=0x${stop.toRadixString(16)}');
+                  'pet=0x${pet.toRadixString(16)}, '
+                  'stop=0x${stop.toRadixString(16)}');
         } else {
           _setCheck('get_callbacks_shape', CheckStatus.fail,
               'Unexpected shape: start=$start pet=$pet stop=$stop');
@@ -357,15 +363,15 @@ class _HomeState extends State<_Home> {
         final petAddr = callbacks['pet'] as int;
         final stopAddr = callbacks['stop'] as int;
 
-        final nativeStart = Pointer<NativeFunction<_WatchdogNative>>
-            .fromAddress(startAddr)
-            .asFunction<_WatchdogDart>();
-        final nativePet = Pointer<NativeFunction<_WatchdogNative>>
-            .fromAddress(petAddr)
-            .asFunction<_WatchdogDart>();
-        final nativeStop = Pointer<NativeFunction<_WatchdogNative>>
-            .fromAddress(stopAddr)
-            .asFunction<_WatchdogDart>();
+        final nativeStart =
+            Pointer<NativeFunction<_WatchdogNative>>.fromAddress(startAddr)
+                .asFunction<_WatchdogDart>();
+        final nativePet =
+            Pointer<NativeFunction<_WatchdogNative>>.fromAddress(petAddr)
+                .asFunction<_WatchdogDart>();
+        final nativeStop =
+            Pointer<NativeFunction<_WatchdogNative>>.fromAddress(stopAddr)
+                .asFunction<_WatchdogDart>();
 
         nativeStart(5);
         nativePet(5);
@@ -413,10 +419,11 @@ class _HomeState extends State<_Home> {
       verdict = 'PASS';
     }
     print('WATCHDOG_TEST: $verdict');
+    print('Waiting 3 seconds to exit...');
 
     // Wait 3 s so the UI result is visible, then exit with an appropriate code.
     // Exit code 0 = PASS or SKIP, exit code 1 = FAIL.
-    Future<void>.delayed(const Duration(seconds: 3), () {
+    Future<void>.delayed(const Duration(seconds: 3), () async {
       exit(failed > 0 ? 1 : 0);
     });
   }
@@ -493,9 +500,9 @@ class _CheckRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final (Color dotColor, String symbol) = switch (check.status) {
       CheckStatus.pending => (Colors.grey, '⬤'),
-      CheckStatus.pass    => (const Color(0xFF4CAF50), '⬤'),
-      CheckStatus.fail    => (const Color(0xFFF44336), '⬤'),
-      CheckStatus.skip    => (const Color(0xFFFF9800), '⬤'),
+      CheckStatus.pass => (const Color(0xFF4CAF50), '⬤'),
+      CheckStatus.fail => (const Color(0xFFF44336), '⬤'),
+      CheckStatus.skip => (const Color(0xFFFF9800), '⬤'),
     };
 
     return Padding(
