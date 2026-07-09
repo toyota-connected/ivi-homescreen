@@ -133,7 +133,7 @@ void Watchdog::watchdogService() {
         if (auto startTime = it->second;
             std::chrono::duration_cast<std::chrono::milliseconds>(now -
                                                                   startTime)
-                .count() >= static_cast<int>(kDefaultTimeoutMs)) {
+                .count() >= static_cast<int64_t>(intervalMs_)) {
           // Timeout occurred for this source
         ihs::log::critical("Watchdog timeout");
 #if BUILD_SYSTEMD_WATCHDOG
