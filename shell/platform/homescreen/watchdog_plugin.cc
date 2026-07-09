@@ -114,6 +114,7 @@ void WatchdogPlugin::HandleMethodCall(
     }
     Watchdog::getInstance().start(static_cast<WatchdogSource>(source));
 #endif
+    spdlog::trace("WatchdogPlugin: (fake) start");
     result->Success();
   } else if (method == kMethodPet) {
 #if BUILD_WATCHDOG
@@ -132,6 +133,7 @@ void WatchdogPlugin::HandleMethodCall(
     }
     Watchdog::getInstance().pet(static_cast<WatchdogSource>(source));
 #endif
+    spdlog::trace("WatchdogPlugin: (fake) pet");
     result->Success();
   } else if (method == kMethodStop) {
 #if BUILD_WATCHDOG
@@ -150,6 +152,7 @@ void WatchdogPlugin::HandleMethodCall(
     }
     Watchdog::getInstance().stop(static_cast<WatchdogSource>(source));
 #endif
+    spdlog::trace("WatchdogPlugin: (fake) stop");
     result->Success();
   } else {
     result->NotImplemented();
