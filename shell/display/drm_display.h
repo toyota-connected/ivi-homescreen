@@ -93,6 +93,18 @@ class DrmDisplay final : public IDisplay {
   // platform thread. Idempotent; a no-op until SharedDevice + SetFlipHandler.
   void StartFlipReader();
 
+  // Actively drain any ready PAGE_FLIP_EVENT(s). The card's reader thread is
+  // the normal drainer, but under heavy raster load (e.g. software GL on a
+  // GPU-less board) that unprioritized thread can be CPU-starved and miss a
+  // flip's completion within a backend's wait window -- leaving the flip
+  // pending so the next drmModePageFlip returns EBUSY. The backend's
+  // WaitForPendingFlip calls this so the thread that submitted the flip drains
+  // its own completion, immune to reader-thread scheduling. Serialized with the
+  // reader via a mutex, so the fd is never read by two threads at once.
+  // @p timeout_ms > 0 blocks up to that long waiting for an event; 0 polls
+  // without blocking. Returns true if at least one event was handled.
+  bool DrainReadyFlips(int timeout_ms);
+
   // Per-card plane coordination: overlay/cursor planes on a card may be valid
   // for several CRTCs, so independent per-view backends would otherwise pick
   // the same one and collide. A backend records the planes it owns here; the
@@ -216,6 +228,9 @@ class DrmDisplay final : public IDisplay {
   void ArmFlipRead();
   // Drain readable flip events on the reader thread (poll(0)+drmHandleEvent).
   void DrainFlip();
+  // Serializes the fd drain between the reader thread (DrainFlip) and the
+  // raster thread (DrainReadyFlips) so a PAGE_FLIP_EVENT is never read twice.
+  std::mutex flip_drain_mu_;
   // Stop + join the reader thread and detach the fd (drm_dev_ still owns it).
   void StopFlipReader();
 

@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "display/drm_display.h"    // DrainReadyFlips from WaitForPendingFlip
 #include "display/drm_mode_list.h"  // ConnectorTypeName, PrintDrmModes (shared)
 #include "logging/logging.h"
 
@@ -1402,23 +1403,40 @@ bool DrmBackend::RasterDrainEnabled() {
 
 bool DrmBackend::WaitForPendingFlip() const {
   using namespace std::chrono_literals;
-  // The card's flip reader (DrmDisplay, its own thread) is the single reader of
-  // the shared fd; it drains PAGE_FLIP_EVENTs and clears flip_pending_. We only
-  // wait for the flag -- reading the fd here would race the reader thread.
-  // Bounded wait. On nvidia-drm a flip's PAGE_FLIP_EVENT can go undelivered, so
-  // an unbounded loop would spin forever in hrtimer_nanosleep, hanging Present
-  // and ~DrmBackend so the process never exits on SIGTERM. Cap the wait and
-  // proceed; a healthy 60Hz flip clears in ~16ms.
+  // Actively drain this flip's PAGE_FLIP_EVENT rather than passively waiting
+  // for the card's reader thread to do it. That thread is unprioritized, so
+  // under heavy raster load (software GL on a GPU-less board) it can be
+  // CPU-starved and miss the deadline below -- leaving flip_pending_ set so the
+  // next drmModePageFlip returns EBUSY, and every subsequent flip cascades. We
+  // submitted the flip, we are blocked on it, so we drain it ourselves; the
+  // drain is mutex-serialized with the reader thread (see DrainReadyFlips), so
+  // the fd is never read twice. The reader thread still handles idle-time
+  // flips.
+  //
+  // Bounded wait as a hang-guard: on nvidia-drm a flip's PAGE_FLIP_EVENT can go
+  // genuinely undelivered, and an unbounded loop would hang Present and
+  // ~DrmBackend so the process never exits on SIGTERM. Cap and proceed.
   constexpr auto kFlipWaitTimeout = 100ms;
   const auto deadline = std::chrono::steady_clock::now() + kFlipWaitTimeout;
   while (flip_pending_.load(std::memory_order_acquire)) {
-    if (std::chrono::steady_clock::now() >= deadline) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
       spdlog::warn(
           "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
           "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
-    std::this_thread::sleep_for(200us);
+    if (drm_display_ != nullptr) {
+      const auto remaining =
+          std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
+              .count();
+      // Blocks up to the remaining budget waiting for the event, then drains
+      // it (clearing flip_pending_ via the handler). Falls through to re-check
+      // the flag when it returns.
+      drm_display_->DrainReadyFlips(static_cast<int>(remaining));
+    } else {
+      std::this_thread::sleep_for(200us);
+    }
   }
   return true;
 }
