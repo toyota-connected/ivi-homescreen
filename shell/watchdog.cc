@@ -58,11 +58,14 @@ void Watchdog::start(const WatchdogSource source) {
 
   // Record the start time for the source
   activeSources_[source] = std::chrono::steady_clock::now();
-  spdlog::debug("Watchdog started for source {}", static_cast<int64_t>(source));
+  spdlog::trace("Watchdog started for source {}", static_cast<int64_t>(source));
 }
 
 void Watchdog::pet(const WatchdogSource source) {
   std::lock_guard<std::mutex> lock(mutex_);
+
+  spdlog::trace("Watchdog pet received for source {}",
+                static_cast<int64_t>(source));
 
   if (const auto it = activeSources_.find(source); it == activeSources_.end()) {
     spdlog::warn("Source {} is not being monitored.",
@@ -84,7 +87,7 @@ void Watchdog::stop(const WatchdogSource source) {
 
   // Remove the source from active sources
   activeSources_.erase(source);
-  spdlog::debug("Watchdog stopped for source {}", static_cast<int64_t>(source));
+  spdlog::trace("Watchdog stopped for source {}", static_cast<int64_t>(source));
 }
 
 void Watchdog::shutdown() {
