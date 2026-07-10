@@ -28,6 +28,31 @@ cross:
   package:
     name: ivi-homescreen
     bin: shell/homescreen
+    files:
+      # crashpad_handler is a separate runtime executable staged into the augment
+      # overlay by sentry-native (not a link input), so it ships explicitly.
+      # Gated on the same define as the augment below.
+      overlay/usr/bin/crashpad_handler:
+        to: /usr/bin/crashpad_handler
+        mode: "0755"
+        requires_define: BUILD_CRASH_HANDLER
+  # Optional native crash handler (sentry-native + crashpad), inherited by every
+  # target. Off by default; enable per invocation with
+  # `--define BUILD_CRASH_HANDLER=ON`. The curl transport needs libcurl at
+  # runtime, which the board dev_packages already carry (libcurl4-openssl-dev).
+  augment:
+    - pkg: sentry-native
+      requires_define: BUILD_CRASH_HANDLER
+      min: "0.15.3"
+      url: https://github.com/getsentry/sentry-native/releases/download/0.15.3/sentry-native.zip
+      build: cmake
+      static: true
+      defines:
+        SENTRY_BACKEND: crashpad
+        SENTRY_TRANSPORT: curl
+        SENTRY_BUILD_SHARED_LIBS: 'OFF'
+        SENTRY_BUILD_TESTS: 'OFF'
+        SENTRY_BUILD_EXAMPLES: 'OFF'
   defines:
     DISABLE_PLUGINS: 'ON'              # shared by the native build and the boards
   # Native host backend matrix: `emb cross . --build` (no --target) compiles

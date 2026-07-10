@@ -71,8 +71,10 @@
 #cmakedefine01 BUILD_CRASH_HANDLER
 #if BUILD_CRASH_HANDLER
 static constexpr char kSentryEnvDefault[] = "@CMAKE_BUILD_TYPE@";
-static constexpr char kCrashpadBinaryPath[] =
-    "@CRASHPAD_BINARY_DIR@/crashpad_handler";
+// Path to crashpad_handler on the deployed target (see CRASHPAD_RUNTIME_PATH in
+// cmake/options.cmake). For a cross/staged build this is the on-target install
+// path, not the host build-tree location.
+static constexpr char kCrashpadBinaryPath[] = "@CRASHPAD_RUNTIME_PATH@";
 #endif
 #cmakedefine01 INTEGRATION_TEST_CRASH_HANDLER
 
