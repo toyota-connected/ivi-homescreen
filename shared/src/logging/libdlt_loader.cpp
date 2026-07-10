@@ -62,9 +62,18 @@ LibDltLoader::LibDltLoader() {
 }
 
 LibDltLoader::~LibDltLoader() {
+  // Destruction order across translation units is unspecified: DltBridge's own
+  // destructor may still run stop() (which calls unregister_app) and a final
+  // drain (which calls emit) after this loader is destroyed, reaching it via
+  // instance() — whose storage persists; only the object is destroyed. Disarm
+  // first so every method's available() guard short-circuits, turning any such
+  // late call into a no-op instead of a jump through a dangling function
+  // pointer into the library we are about to unmap.
+  available_.store(false, std::memory_order_release);
   if (handle_ != nullptr && handle_ != RTLD_DEFAULT) {
     ::dlclose(handle_);
   }
+  handle_ = nullptr;
 }
 
 void LibDltLoader::disable(DltDisableReason reason,
