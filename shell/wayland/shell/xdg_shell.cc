@@ -70,7 +70,7 @@ class XdgShellSurface final : public ShellSurface {
             wl::construct<xc::xdg_surface_traits,
                           xc::xdg_wm_base_traits::Op::GetXdgSurface>(
                 wm_base, surface_proxy))) {
-      spdlog::error("[XdgShell] xdg_wm_base.get_xdg_surface failed");
+      ihs::log::error("[XdgShell] xdg_wm_base.get_xdg_surface failed");
       return;
     }
     xdg_surface_.Get()->app_ = this;
@@ -80,7 +80,7 @@ class XdgShellSurface final : public ShellSurface {
             wl::construct<xc::xdg_toplevel_traits,
                           xc::xdg_surface_traits::Op::GetToplevel>(
                 *xdg_surface_.Get()))) {
-      spdlog::error("[XdgShell] xdg_surface.get_toplevel failed");
+      ihs::log::error("[XdgShell] xdg_surface.get_toplevel failed");
       return;
     }
     xdg_toplevel_.Get()->app_ = this;
@@ -181,10 +181,10 @@ bool XdgShell::TryBindGlobal(wl_registry* registry,
   auto* raw = wl_registry_bind(registry, name,
                                &xc::xdg_wm_base_traits::wl_iface(), bind_ver);
   if (!wl::SetupHandler(xdg_wm_base_, reinterpret_cast<wl_proxy*>(raw))) {
-    spdlog::error("[XdgShell] failed to set up xdg_wm_base");
+    ihs::log::error("[XdgShell] failed to set up xdg_wm_base");
     return false;
   }
-  spdlog::debug("[XdgShell] bound xdg_wm_base v{}", bind_ver);
+  ihs::log::debug("[XdgShell] bound xdg_wm_base v{}", bind_ver);
   return true;
 }
 
@@ -192,7 +192,7 @@ std::unique_ptr<ShellSurface> XdgShell::CreateSurface(
     wl_surface* surface,
     const WindowConfig& config) {
   if (!xdg_wm_base_) {
-    spdlog::error("[XdgShell] CreateSurface called before xdg_wm_base bound");
+    ihs::log::error("[XdgShell] CreateSurface called before xdg_wm_base bound");
     return nullptr;
   }
   return std::make_unique<XdgShellSurface>(*xdg_wm_base_.Get(), surface,

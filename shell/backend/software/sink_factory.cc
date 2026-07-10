@@ -37,11 +37,11 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
     const std::string_view spec,
     const std::string_view drm_device_hint) {
   if (spec.empty() || spec == "none") {
-    spdlog::info("[SoftwareBackend] sink: none (frames discarded)");
+    ihs::log::info("[SoftwareBackend] sink: none (frames discarded)");
     return std::make_unique<NoneSink>();
   }
   if (spec == "memory") {
-    spdlog::info("[SoftwareBackend] sink: memory (in-process snapshot)");
+    ihs::log::info("[SoftwareBackend] sink: memory (in-process snapshot)");
     return std::make_unique<MemorySink>();
   }
   // file:<pattern>
@@ -49,12 +49,12 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
   if (spec.rfind(kFilePrefix, 0) == 0) {
     std::string pattern(spec.substr(kFilePrefix.size()));
     if (pattern.empty()) {
-      spdlog::warn(
+      ihs::log::warn(
           "[SoftwareBackend] sink spec 'file:' has empty pattern; "
           "falling back to NoneSink");
       return std::make_unique<NoneSink>();
     }
-    spdlog::info("[SoftwareBackend] sink: file (pattern='{}')", pattern);
+    ihs::log::info("[SoftwareBackend] sink: file (pattern='{}')", pattern);
     return std::make_unique<FileSink>(std::move(pattern));
   }
 
@@ -67,19 +67,19 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
         spec == "drm-dumb" ? drm_device_hint : spec.substr(kDrmPrefix.size()));
     auto drm_sink = DrmDumbSink::Create(device);
     if (drm_sink) {
-      spdlog::info(
+      ihs::log::info(
           "[SoftwareBackend] sink: drm-dumb (device='{}', {}x{}@{:.2f}Hz)",
           device.empty() ? std::string("(probed)") : device,
           drm_sink->mode_width(), drm_sink->mode_height(),
           drm_sink->refresh_rate_hz());
       return drm_sink;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[SoftwareBackend] drm-dumb sink failed to initialize; "
         "falling back to NoneSink");
     return std::make_unique<NoneSink>();
 #else
-    spdlog::warn(
+    ihs::log::warn(
         "[SoftwareBackend] drm-dumb sink requested but compiled without "
         "BUILD_SOFTWARE_SINK_DRM; falling back to NoneSink");
     return std::make_unique<NoneSink>();
@@ -95,24 +95,24 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
                                  : spec.substr(kFbDevPrefix.size()));
     auto fb_sink = FbDevSink::Create(device);
     if (fb_sink) {
-      spdlog::info("[SoftwareBackend] sink: fbdev (device='{}', {}x{})",
-                   device.empty() ? std::string("/dev/fb0") : device,
-                   fb_sink->fb_width(), fb_sink->fb_height());
+      ihs::log::info("[SoftwareBackend] sink: fbdev (device='{}', {}x{})",
+                     device.empty() ? std::string("/dev/fb0") : device,
+                     fb_sink->fb_width(), fb_sink->fb_height());
       return fb_sink;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[SoftwareBackend] fbdev sink failed to initialize; "
         "falling back to NoneSink");
     return std::make_unique<NoneSink>();
 #else
-    spdlog::warn(
+    ihs::log::warn(
         "[SoftwareBackend] fbdev sink requested but compiled without "
         "BUILD_SOFTWARE_SINK_FBDEV; falling back to NoneSink");
     return std::make_unique<NoneSink>();
 #endif
   }
 
-  spdlog::warn(
+  ihs::log::warn(
       "[SoftwareBackend] unrecognized sink spec '{}' (valid: none | memory | "
       "file:<pattern> | fbdev[:<device>] | drm-dumb[:<device>]); falling "
       "back to NoneSink",

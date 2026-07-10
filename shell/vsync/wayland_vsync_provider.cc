@@ -56,7 +56,7 @@ void WaylandVsyncProvider::PresentationHandler::OnClockId(
   // compositor's presented timestamps usable as frame_start_time directly.
   owner_->clock_compatible_.store(clk_id == CLOCK_MONOTONIC,
                                   std::memory_order_release);
-  spdlog::debug("[WaylandVsync] wp_presentation clock_id={}", clk_id);
+  ihs::log::debug("[WaylandVsync] wp_presentation clock_id={}", clk_id);
 }
 
 WpFeedbackHandler::~WpFeedbackHandler() {
@@ -115,7 +115,7 @@ bool WaylandVsyncProvider::TryBindGlobal(wl_registry* registry,
   // swap, IVI_VK_PROFILE = vk present). IVI_PROFILE enables everything.
   EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                 "WaylandVsync");
-  spdlog::debug("[WaylandVsync] bound wp_presentation v{}", bind_ver);
+  ihs::log::debug("[WaylandVsync] bound wp_presentation v{}", bind_ver);
   return true;
 }
 
@@ -139,7 +139,7 @@ void WaylandVsyncProvider::RequestFeedback() {
   {
     std::lock_guard<std::mutex> lock(feedback_mu_);
     if (feedback_in_flight_.size() >= kFeedbackInFlightCap) {
-      spdlog::warn(
+      ihs::log::warn(
           "[WaylandVsync] feedback_in_flight_ saturated at {}; compositor "
           "dropping wp_presentation_feedback requests",
           feedback_in_flight_.size());
@@ -153,7 +153,7 @@ void WaylandVsyncProvider::RequestFeedback() {
                                    ptc::wp_presentation_traits::Op::Feedback>(
       *presentation_, reinterpret_cast<wl_proxy*>(surface_));
   if (raw == nullptr) {
-    spdlog::warn("[WaylandVsync] wp_presentation.feedback returned null");
+    ihs::log::warn("[WaylandVsync] wp_presentation.feedback returned null");
     return;
   }
   auto handler = std::make_unique<WpFeedbackHandler>(this);

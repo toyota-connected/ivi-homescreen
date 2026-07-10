@@ -65,7 +65,7 @@ DrmSession::DrmSession(drm::session::Seat seat) : seat_(std::move(seat)) {
       }
       return;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmSession] session preempted (VT switch-out) before lifecycle "
         "handlers installed — raising SIGTERM");
     // raise() delivers to this thread; SIGTERM's handler is async-
@@ -85,7 +85,7 @@ DrmSession::DrmSession(drm::session::Seat seat) : seat_(std::move(seat)) {
       }
       return;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmSession] resume for {} (fd={}) ignored — no lifecycle handler",
         std::string(path), new_fd);
   });
@@ -108,8 +108,8 @@ DrmSession::DrmSession(drm::session::Seat seat) : seat_(std::move(seat)) {
         }
       });
     } else {
-      spdlog::warn("[DrmSession] hotplug monitor unavailable: {}",
-                   hp.error().message());
+      ihs::log::warn("[DrmSession] hotplug monitor unavailable: {}",
+                     hp.error().message());
     }
   }
 
@@ -166,7 +166,7 @@ void DrmSession::DispatchLoop() {
   if (seat_fd < 0) {
     // No backend-backed poll fd — shouldn't happen because Open() would
     // have returned nullptr, but fail soft rather than busy-looping.
-    spdlog::warn("[DrmSession] poll_fd() returned -1; dispatcher exiting");
+    ihs::log::warn("[DrmSession] poll_fd() returned -1; dispatcher exiting");
     return;
   }
   int hp_fd = hotplug_ ? hotplug_->fd() : -1;
@@ -185,13 +185,13 @@ void DrmSession::DispatchLoop() {
       if (errno == EINTR) {
         continue;
       }
-      spdlog::error("[DrmSession] poll: {}", std::strerror(errno));
+      ihs::log::error("[DrmSession] poll: {}", std::strerror(errno));
       break;
     }
     if (r > 0) {
       if ((pfds[0].revents & kErr) != 0) {
-        spdlog::error("[DrmSession] seat fd error (revents={:#x}); exiting",
-                      static_cast<unsigned>(pfds[0].revents));
+        ihs::log::error("[DrmSession] seat fd error (revents={:#x}); exiting",
+                        static_cast<unsigned>(pfds[0].revents));
         break;
       }
       if ((pfds[0].revents & POLLIN) != 0) {
@@ -201,7 +201,7 @@ void DrmSession::DispatchLoop() {
         if ((pfds[1].revents & kErr) != 0) {
           // Drop the hotplug monitor and keep serving the seat. A bad
           // hotplug fd shouldn't silently busy-loop the seat dispatcher.
-          spdlog::warn(
+          ihs::log::warn(
               "[DrmSession] hotplug fd error (revents={:#x}); disabling "
               "monitor",
               static_cast<unsigned>(pfds[1].revents));
@@ -209,8 +209,8 @@ void DrmSession::DispatchLoop() {
           hp_fd = -1;
         } else if ((pfds[1].revents & POLLIN) != 0) {
           if (auto rc = hotplug_->dispatch(); !rc) {
-            spdlog::warn("[DrmSession] hotplug dispatch: {}",
-                         rc.error().message());
+            ihs::log::warn("[DrmSession] hotplug dispatch: {}",
+                           rc.error().message());
           }
         }
       }

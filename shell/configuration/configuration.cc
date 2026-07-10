@@ -313,7 +313,7 @@ void Configuration::get_toml_config(const char* config_toml_path,
 
   auto result = toml::parse_file(config_toml_path);
   if (!result) {
-    spdlog::error("TOML parsing failed: {}", config_toml_path);
+    ihs::log::error("TOML parsing failed: {}", config_toml_path);
     exit(EXIT_FAILURE);
   }
 
@@ -450,13 +450,13 @@ std::vector<Configuration::Config> Configuration::parse_config(
   if (cli_config.config_file && !cli_config.config_file->empty()) {
     const auto& path = *cli_config.config_file;
     if (!std::filesystem::exists(path)) {
-      spdlog::critical("--config file not found: {}", path);
+      ihs::log::critical("--config file not found: {}", path);
       exit(EXIT_FAILURE);
     }
     master_doc = toml::parse_file(path);
     if (!master_doc) {
-      spdlog::critical("TOML parsing failed: {} — {}", path,
-                       master_doc.error().description());
+      ihs::log::critical("TOML parsing failed: {} — {}", path,
+                         master_doc.error().description());
       exit(EXIT_FAILURE);
     }
     master_root = &master_doc.table();
@@ -470,7 +470,7 @@ std::vector<Configuration::Config> Configuration::parse_config(
         bundle = v->at_path("bundle").as_string()->value_or("");
       }
       if (bundle.empty()) {
-        spdlog::critical("--config: every [[view]] requires a 'bundle' path");
+        ihs::log::critical("--config: every [[view]] requires a 'bundle' path");
         exit(EXIT_FAILURE);
       }
       std::filesystem::path bp(bundle);
@@ -480,7 +480,7 @@ std::vector<Configuration::Config> Configuration::parse_config(
       descriptors.push_back({bp.string(), v});
     }
     if (!cli_config.bundle_paths.empty()) {
-      spdlog::warn("--config provided; ignoring -b/--bundle argument(s)");
+      ihs::log::warn("--config provided; ignoring -b/--bundle argument(s)");
     }
   } else {
     for (const auto& bundle_path : cli_config.bundle_paths) {
@@ -552,48 +552,49 @@ std::vector<Configuration::Config> Configuration::parse_config(
 }
 
 void Configuration::PrintConfig(const Config& config) {
-  spdlog::info("{} @ {}", kGitBranch, kGitCommitHash);
+  ihs::log::info("{} @ {}", kGitBranch, kGitCommitHash);
 
-  spdlog::info("**********");
-  spdlog::info("* Global *");
-  spdlog::info("**********");
+  ihs::log::info("**********");
+  ihs::log::info("* Global *");
+  ihs::log::info("**********");
   if (!config.app_id.empty()) {
-    spdlog::info("Application Id: .......... {}", config.app_id);
+    ihs::log::info("Application Id: .......... {}", config.app_id);
   }
   if (!config.cursor_theme.empty()) {
-    spdlog::info("Cursor Theme: ............ {}", config.cursor_theme);
+    ihs::log::info("Cursor Theme: ............ {}", config.cursor_theme);
   }
-  spdlog::info("Disable Cursor: .......... {}",
-               (config.disable_cursor.value_or(false) ? "true" : "false"));
+  ihs::log::info("Disable Cursor: .......... {}",
+                 (config.disable_cursor.value_or(false) ? "true" : "false"));
   if (!config.wayland_event_mask.empty()) {
-    spdlog::info("Wayland Event Mask: ...... {}", config.wayland_event_mask);
+    ihs::log::info("Wayland Event Mask: ...... {}", config.wayland_event_mask);
   }
-  spdlog::info("Debug Shell: ........... {}",
-               (config.debug_backend.value_or(false) ? "true" : "false"));
-  spdlog::info("********");
-  spdlog::info("* View *");
-  spdlog::info("********");
+  ihs::log::info("Debug Shell: ........... {}",
+                 (config.debug_backend.value_or(false) ? "true" : "false"));
+  ihs::log::info("********");
+  ihs::log::info("* View *");
+  ihs::log::info("********");
   if (!config.view.engine_args.empty()) {
-    spdlog::info("Engine Args:");
+    ihs::log::info("Engine Args:");
     for (auto const& arg : config.view.engine_args) {
-      spdlog::info(arg);
+      ihs::log::info(arg);
     }
   }
   if (!config.view.dart_args.empty()) {
-    spdlog::info("Dart Entrypoint Args:");
+    ihs::log::info("Dart Entrypoint Args:");
     for (auto const& arg : config.view.dart_args) {
-      spdlog::info(arg);
+      ihs::log::info(arg);
     }
   }
-  spdlog::info("Bundle Path: .............. {}", config.view.bundle_path);
-  spdlog::info("Window Type: .............. {}", config.view.window_type);
+  ihs::log::info("Bundle Path: .............. {}", config.view.bundle_path);
+  ihs::log::info("Window Type: .............. {}", config.view.window_type);
   if (config.view.backend.has_value() && !config.view.backend->empty()) {
-    spdlog::info("Backend: .................. {}", config.view.backend.value());
+    ihs::log::info("Backend: .................. {}",
+                   config.view.backend.value());
   }
-  spdlog::info("Output Index: ............. {}",
-               config.view.wl_output_index.value_or(0));
+  ihs::log::info("Output Index: ............. {}",
+                 config.view.wl_output_index.value_or(0));
   if (!config.view.output.empty()) {
-    spdlog::info(
+    ihs::log::info(
         "Output Match: ............. wl='{}' drm='{}' serial='{}' preload={} "
         "on_disconnect={}",
         config.view.output.wl_name.value_or("-"),
@@ -605,29 +606,31 @@ void Configuration::PrintConfig(const Config& config) {
             ? "teardown"
             : "suspend");
   }
-  spdlog::info("Size: ..................... {} x {}",
-               config.view.width.value_or(kDefaultViewWidth),
-               config.view.height.value_or(kDefaultViewHeight));
-  spdlog::info("Pixel Ratio: .............. {0:.1f}",
-               config.view.pixel_ratio.value_or(kDefaultPixelRatio));
-  spdlog::info("Fullscreen: ............... {}",
-               (config.view.fullscreen.value_or(false) ? "true" : "false"));
-  spdlog::info("Accessibility Features: ... {}",
-               config.view.accessibility_features.value_or(0));
+  ihs::log::info("Size: ..................... {} x {}",
+                 config.view.width.value_or(kDefaultViewWidth),
+                 config.view.height.value_or(kDefaultViewHeight));
+  ihs::log::info("Pixel Ratio: .............. {0:.1f}",
+                 config.view.pixel_ratio.value_or(kDefaultPixelRatio));
+  ihs::log::info("Fullscreen: ............... {}",
+                 (config.view.fullscreen.value_or(false) ? "true" : "false"));
+  ihs::log::info("Accessibility Features: ... {}",
+                 config.view.accessibility_features.value_or(0));
   if (config.view.ivi_surface_id.has_value()) {
-    spdlog::info("IVI Surface ID: ........... {}",
-                 config.view.ivi_surface_id.value());
+    ihs::log::info("IVI Surface ID: ........... {}",
+                   config.view.ivi_surface_id.value());
   }
 #if ENABLE_AGL_SHELL_CLIENT
-  spdlog::info("*******************");
-  spdlog::info("* Activation Area *");
-  spdlog::info("*******************");
-  spdlog::info("x: ........................ {}", config.view.activation_area_x);
-  spdlog::info("y: ........................ {}", config.view.activation_area_y);
-  spdlog::info("width: .................... {}",
-               config.view.activation_area_width);
-  spdlog::info("height: ................... {}",
-               config.view.activation_area_height);
+  ihs::log::info("*******************");
+  ihs::log::info("* Activation Area *");
+  ihs::log::info("*******************");
+  ihs::log::info("x: ........................ {}",
+                 config.view.activation_area_x);
+  ihs::log::info("y: ........................ {}",
+                 config.view.activation_area_y);
+  ihs::log::info("width: .................... {}",
+                 config.view.activation_area_width);
+  ihs::log::info("height: ................... {}",
+                 config.view.activation_area_height);
 #endif
 }
 
@@ -762,8 +765,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     const auto result = allocated->parse(argc, argv);
 
     if (result.count("help")) {
-      spdlog::info("{}", allocated->help({"", "Global", "View", "Shell",
-                                          "Backend", "DRM"}));
+      ihs::log::info("{}", allocated->help({"", "Global", "View", "Shell",
+                                            "Backend", "DRM"}));
       exit(EXIT_SUCCESS);
     }
 
@@ -777,7 +780,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
 
     if (result.count("accessibility-flags")) {
       if (accessibility_feature_flag_str.empty()) {
-        spdlog::critical(
+        ihs::log::critical(
             "-a option (Accessibility Features) requires an "
             "argument (e.g. -a 31)");
         exit(EXIT_FAILURE);
@@ -790,11 +793,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         config.view.accessibility_features = static_cast<int32_t>(
             std::stol(accessibility_feature_flag_str, nullptr, 0));
       } catch (const std::invalid_argument& /* e */) {
-        spdlog::critical(
+        ihs::log::critical(
             "-a option (Accessibility Features) requires an integer value");
         exit(EXIT_FAILURE);
       } catch (const std::out_of_range& /* e */) {
-        spdlog::critical(
+        ihs::log::critical(
             "The specified value to -a option, {} is out of range.",
             accessibility_feature_flag_str);
         exit(EXIT_FAILURE);
@@ -805,7 +808,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
 
     if (result.count("wayland-event-mask")) {
       if (config.wayland_event_mask.empty()) {
-        spdlog::critical(
+        ihs::log::critical(
             "--wayland-event-mask option requires an argument "
             "(e.g. --wayland-event-mask pointer-axis,keyboard)");
         exit(EXIT_FAILURE);
@@ -814,20 +817,22 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
 
     if ((result.count("app-id") || result.count("xdg-shell-app-id")) &&
         config.app_id.empty()) {
-      spdlog::critical("--app-id requires an argument (e.g. --app-id gallery)");
+      ihs::log::critical(
+          "--app-id requires an argument (e.g. --app-id gallery)");
       exit(EXIT_FAILURE);
     }
 
     if (result.count("cursor-theme")) {
       if (config.cursor_theme.empty()) {
-        spdlog::critical("-t option requires an argument (e.g. -t DMZ-White)");
+        ihs::log::critical(
+            "-t option requires an argument (e.g. -t DMZ-White)");
         exit(EXIT_FAILURE);
       }
     }
 
     if (result.count("window-type")) {
       if (config.view.window_type.empty()) {
-        spdlog::critical(
+        ihs::log::critical(
             "--window-type requires an argument (e.g. --window-type BG)");
         exit(EXIT_FAILURE);
       }
@@ -847,7 +852,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
 
     if (result.count("pixel-ratio")) {
       if (config.view.pixel_ratio == 0) {
-        spdlog::critical("-p option (Pixel Ratio) requires a non-zero value");
+        ihs::log::critical("-p option (Pixel Ratio) requires a non-zero value");
         exit(EXIT_FAILURE);
       }
       config.view.pixel_ratio = result["pixel-ratio"].as<double>();
@@ -940,8 +945,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
       }
       if (rot.has_value()) {
         if (*rot != 0 && *rot != 90 && *rot != 180 && *rot != 270) {
-          spdlog::critical("--drm-rotation must be 0, 90, 180, or 270 (got {})",
-                           *rot);
+          ihs::log::critical(
+              "--drm-rotation must be 0, 90, 180, or 270 (got {})", *rot);
           exit(EXIT_FAILURE);
         }
         config.view.drm_rotation = *rot;
@@ -963,7 +968,7 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
 
   } catch (const cxxopts::exceptions::exception& e) {
-    spdlog::critical("Failed to Convert Command Line: {}", e.what());
+    ihs::log::critical("Failed to Convert Command Line: {}", e.what());
     exit(EXIT_FAILURE);
   }
 
@@ -973,25 +978,26 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
   // be an existing directory (paths may originate from -b or from a --config
   // file's [[view]] entries).
   if (configs.empty()) {
-    spdlog::critical(
+    ihs::log::critical(
         "No views configured: provide -b <bundle> or --config <file>");
     exit(EXIT_FAILURE);
   }
   for (const auto& c : configs) {
     if (!std::filesystem::is_directory(c.view.bundle_path)) {
-      spdlog::critical("Bundle path is not a directory: {}",
-                       c.view.bundle_path);
+      ihs::log::critical("Bundle path is not a directory: {}",
+                         c.view.bundle_path);
       exit(EXIT_FAILURE);
     }
   }
 
   if (!config.view.fullscreen) {
     if (config.view.width == 0) {
-      spdlog::critical("-w option (Width) requires an argument (e.g. -w 720)");
+      ihs::log::critical(
+          "-w option (Width) requires an argument (e.g. -w 720)");
       exit(EXIT_FAILURE);
     }
     if (config.view.height == 0) {
-      spdlog::critical(
+      ihs::log::critical(
           "-h option (Height) requires an argument (e.g. -w 1280)");
       exit(EXIT_FAILURE);
     }

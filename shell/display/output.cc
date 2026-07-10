@@ -39,7 +39,7 @@ std::optional<std::string> ResolveOutput(const OutputMatch& match,
       return hit->name;
     }
     if (count > 1) {
-      spdlog::warn(
+      ihs::log::warn(
           "[OutputResolver] edid_serial '{}' matches {} connected outputs; "
           "ambiguous — falling back to the connector name",
           *match.edid_serial, count);
@@ -64,7 +64,7 @@ std::optional<std::string> ResolveOutput(const OutputMatch& match,
   // 3. Index — deprecated and unstable; the enumeration order can shift across
   //    probes/reboots. Indexes the connected outputs in order.
   if (match.index) {
-    spdlog::warn(
+    ihs::log::warn(
         "[OutputResolver] output.index is deprecated and unstable; prefer a "
         "connector / wl_output name");
     uint32_t i = 0;

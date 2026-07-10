@@ -56,18 +56,20 @@ bool FbDevSink::Init(const std::string& device_path) {
   const std::string path = device_path.empty() ? "/dev/fb0" : device_path;
   fb_fd_ = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
   if (fb_fd_ < 0) {
-    spdlog::error("[FbDevSink] open('{}'): {}", path, std::strerror(errno));
+    ihs::log::error("[FbDevSink] open('{}'): {}", path, std::strerror(errno));
     return false;
   }
 
   fb_var_screeninfo var{};
   if (ioctl(fb_fd_, FBIOGET_VSCREENINFO, &var) != 0) {
-    spdlog::error("[FbDevSink] FBIOGET_VSCREENINFO: {}", std::strerror(errno));
+    ihs::log::error("[FbDevSink] FBIOGET_VSCREENINFO: {}",
+                    std::strerror(errno));
     return false;
   }
   fb_fix_screeninfo fix{};
   if (ioctl(fb_fd_, FBIOGET_FSCREENINFO, &fix) != 0) {
-    spdlog::error("[FbDevSink] FBIOGET_FSCREENINFO: {}", std::strerror(errno));
+    ihs::log::error("[FbDevSink] FBIOGET_FSCREENINFO: {}",
+                    std::strerror(errno));
     return false;
   }
 
@@ -92,7 +94,7 @@ bool FbDevSink::Init(const std::string& device_path) {
                          var.green.offset == 5 && var.green.length == 6 &&
                          var.blue.offset == 0 && var.blue.length == 5;
   if (!ok_bgrx32 && !ok_rgb565) {
-    spdlog::error(
+    ihs::log::error(
         "[FbDevSink] unsupported pixel format on '{}': bpp={}, nonstd={}, "
         "R[ofs={},len={}] G[ofs={},len={}] B[ofs={},len={}]. "
         "Need 32-bpp BGRA/BGRX (R@16, G@8, B@0, nonstd=0) or 16-bpp "
@@ -120,7 +122,7 @@ bool FbDevSink::Init(const std::string& device_path) {
       static_cast<size_t>(fb_stride_) * static_cast<size_t>(fb_height_);
   if (fb_size_ == 0 || fb_stride_ < expected_row_bytes ||
       fb_size_ < expected_size) {
-    spdlog::error(
+    ihs::log::error(
         "[FbDevSink] implausible framebuffer dims: {}x{} stride={} size={}",
         fb_width_, fb_height_, fb_stride_, fb_size_);
     return false;
@@ -129,12 +131,12 @@ bool FbDevSink::Init(const std::string& device_path) {
   void* mapped =
       ::mmap(nullptr, fb_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd_, 0);
   if (mapped == MAP_FAILED) {
-    spdlog::error("[FbDevSink] mmap: {}", std::strerror(errno));
+    ihs::log::error("[FbDevSink] mmap: {}", std::strerror(errno));
     return false;
   }
   fb_map_ = static_cast<uint8_t*>(mapped);
 
-  spdlog::info(
+  ihs::log::info(
       "[FbDevSink] opened {} ({}x{}, format={}{}, stride={}, smem_len={})",
       path, fb_width_, fb_height_,
       format_ == Format::kRGB565 ? "rgb565" : "bgrx8888",

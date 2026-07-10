@@ -40,21 +40,21 @@ TaskRunner::TaskRunner(std::string name, FlutterEngine& engine)
 
   asio::post(*strand_, [&]() {
     pthread_self_ = pthread_self();
-    spdlog::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self_);
+    ihs::log::debug("{} Task Runner, thread_id=0x{:x}", name_, pthread_self_);
   });
 }
 
 TaskRunner::~TaskRunner() {
   work_.reset();
   thread_.join();
-  spdlog::debug("[0x{:x}] {} ~Task Runner", pthread_self(), name_);
+  ihs::log::debug("[0x{:x}] {} ~Task Runner", pthread_self(), name_);
 }
 
 void TaskRunner::QueueFlutterTask([[maybe_unused]] size_t index,
                                   uint64_t target_time,
                                   FlutterTask task,
                                   void* /* context */) {
-  SPDLOG_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
+  IHS_TRACE("({}) [{}] Task Queue {}", index, name_, task.task);
   (void)index;
   const auto current = LibFlutterEngine->GetCurrentTime();
   if (current >= target_time) {

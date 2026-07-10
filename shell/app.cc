@@ -88,7 +88,7 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
   // view independently resolves its own backend (ResolveKeyForConfig) below.
   auto& reg = backend::BackendRegistry::Instance();
   if (!EnsureActiveBackend(reg, configs)) {
-    spdlog::critical("[App] no usable backend available; aborting");
+    ihs::log::critical("[App] no usable backend available; aborting");
     std::exit(EXIT_FAILURE);
   }
 
@@ -121,7 +121,7 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
     const std::string key = ResolveKeyForConfig(reg, group_configs.front());
     const backend::BackendDescriptor* descriptor = reg.Resolve(key);
     if (descriptor == nullptr) {
-      spdlog::critical("[App] no backend resolved for context '{}'", ck);
+      ihs::log::critical("[App] no backend resolved for context '{}'", ck);
       std::exit(EXIT_FAILURE);
     }
     auto display = descriptor->make_display(group_configs);
@@ -134,7 +134,7 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
 }
 
 App::App(const std::vector<Configuration::Config>& configs) {
-  SPDLOG_DEBUG("+App::App");
+  IHS_DEBUG("+App::App");
   // One display per device-context; view_display[i] is the display config i
   // runs on (views sharing a context share a display).
   const std::vector<std::shared_ptr<IDisplay>> view_display =
@@ -208,7 +208,7 @@ App::App(const std::vector<Configuration::Config>& configs) {
     display->StartEvents();
   }
 
-  SPDLOG_DEBUG("-App::App");
+  IHS_DEBUG("-App::App");
 }
 
 App::~App() {

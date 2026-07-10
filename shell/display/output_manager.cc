@@ -38,7 +38,7 @@ std::optional<std::string> OutputManager::ResolveForView(
   IOutputProvider* provider =
       display != nullptr ? display->GetOutputProvider() : nullptr;
   if (provider == nullptr) {
-    spdlog::warn(
+    ihs::log::warn(
         "[OutputManager] a view requests a specific output but its display "
         "exposes no output provider; ignoring the request");
     return std::nullopt;
@@ -49,7 +49,7 @@ std::optional<std::string> OutputManager::ResolveForView(
   if (!name.has_value()) {
     // The requested output is not among the connected ones. The caller keeps
     // its default; full parking-until-present lands with the hotplug listener.
-    spdlog::warn(
+    ihs::log::warn(
         "[OutputManager] requested output is not connected (wl_name='{}' "
         "drm_connector='{}' serial='{}'); falling back to the default output",
         match.wl_name.value_or("-"), match.drm_connector.value_or("-"),
@@ -57,7 +57,7 @@ std::optional<std::string> OutputManager::ResolveForView(
     return std::nullopt;
   }
 
-  spdlog::info("[OutputManager] view bound to output '{}'", *name);
+  ihs::log::info("[OutputManager] view bound to output '{}'", *name);
   return name;
 }
 

@@ -35,7 +35,7 @@ inline void* ShellGetProcAddress(void* library, const char* name) {
   void* symbol = dlsym(library, name);
 
   if (!symbol && library != RTLD_DEFAULT) {
-    spdlog::error("ShellGetProcAddress: {} not found!", name);
+    ihs::log::error("ShellGetProcAddress: {} not found!", name);
     const char* reason = dlerror();
     (void)reason;
   }
@@ -59,7 +59,7 @@ void ShellGetFuncAddress(void* library,
   auto symbol = dlsym(library, function_name);
   if (!symbol) {
     const char* reason = dlerror();
-    spdlog::debug("ShellGetFuncAddress: {} - {}", function_name, reason);
+    ihs::log::debug("ShellGetFuncAddress: {} - {}", function_name, reason);
   }
   *out = reinterpret_cast<FunctionPointer>(symbol);
 }

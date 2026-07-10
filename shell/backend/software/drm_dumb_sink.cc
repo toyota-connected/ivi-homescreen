@@ -60,7 +60,7 @@ DrmDumbSink::Format RequestedFormatFromEnv() {
   if (v == "rgb565" || v == "565" || v == "RGB565") {
     return DrmDumbSink::Format::kRGB565;
   }
-  spdlog::warn(
+  ihs::log::warn(
       "[DrmDumbSink] IVI_SW_DRM_FORMAT='{}' unrecognized; "
       "using xrgb8888. Accepted: xrgb8888 (default), rgb565.",
       env);
@@ -150,15 +150,15 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   const std::string path = device_path.empty() ? "/dev/dri/card0" : device_path;
   drm_fd_ = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
   if (drm_fd_ < 0) {
-    spdlog::error("[DrmDumbSink] open('{}'): {}", path, std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] open('{}'): {}", path, std::strerror(errno));
     return false;
   }
-  spdlog::info("[DrmDumbSink] opened {}", path);
+  ihs::log::info("[DrmDumbSink] opened {}", path);
 
   drmModeRes* res = drmModeGetResources(drm_fd_);
   if (res == nullptr) {
-    spdlog::error("[DrmDumbSink] drmModeGetResources: {}",
-                  std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] drmModeGetResources: {}",
+                    std::strerror(errno));
     return false;
   }
 
@@ -176,7 +176,7 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
     }
   }
   if (connector == nullptr) {
-    spdlog::error("[DrmDumbSink] no connected connector with modes");
+    ihs::log::error("[DrmDumbSink] no connected connector with modes");
     drmModeFreeResources(res);
     return false;
   }
@@ -237,14 +237,14 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
         chosen_idx = match;
         mode_from_env = true;
       } else {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmDumbSink] IVI_SW_DRM_MODE='{}' not found on connector {}; "
             "using the {} mode",
             spec, connector->connector_id,
             preferred_idx >= 0 ? "preferred" : "first");
       }
     } else {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmDumbSink] IVI_SW_DRM_MODE='{}' is not <W>x<H>[@<R>]; ignoring",
           spec);
     }
@@ -255,10 +255,10 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   // IVI_SW_DRM_MODE values.
   for (int i = 0; i < connector->count_modes; ++i) {
     const auto& m = connector->modes[i];
-    spdlog::info("[DrmDumbSink]   mode[{}] {}x{}@{}Hz{}{}", i, m.hdisplay,
-                 m.vdisplay, m.vrefresh,
-                 i == preferred_idx ? " (preferred)" : "",
-                 i == chosen_idx ? " *" : "");
+    ihs::log::info("[DrmDumbSink]   mode[{}] {}x{}@{}Hz{}{}", i, m.hdisplay,
+                   m.vdisplay, m.vrefresh,
+                   i == preferred_idx ? " (preferred)" : "",
+                   i == chosen_idx ? " *" : "");
   }
 
   const drmModeModeInfo mode = connector->modes[chosen_idx];
@@ -275,9 +275,9 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   // present-call cadence); the "SoftwareVsync" label names this source.
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                        "SoftwareVsync");
-  spdlog::info("[DrmDumbSink] connector={} mode={}x{}@{:.2f}Hz{}",
-               connector->connector_id, mode_width_, mode_height_,
-               refresh_rate_hz_, mode_from_env ? " (IVI_SW_DRM_MODE)" : "");
+  ihs::log::info("[DrmDumbSink] connector={} mode={}x{}@{:.2f}Hz{}",
+                 connector->connector_id, mode_width_, mode_height_,
+                 refresh_rate_hz_, mode_from_env ? " (IVI_SW_DRM_MODE)" : "");
 
   // Pick a CRTC: prefer the connector's currently-bound encoder/CRTC
   // to avoid disturbing the existing console binding.
@@ -310,7 +310,7 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   drmModeFreeConnector(connector);
   drmModeFreeResources(res);
   if (crtc_id == 0) {
-    spdlog::error("[DrmDumbSink] no usable CRTC for connector");
+    ihs::log::error("[DrmDumbSink] no usable CRTC for connector");
     return false;
   }
   crtc_id_ = crtc_id;
@@ -329,15 +329,16 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   // them lists the fourcc, falling back to XRGB with a warn if not.
   // Caller's IVI_SW_DRM_FORMAT request lives in format_ already.
   if (format_ == Format::kRGB565 && !PlaneSupportsFormat(DRM_FORMAT_RGB565)) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmDumbSink] DRM_FORMAT_RGB565 not advertised by any plane "
         "usable on CRTC {}, falling back to XRGB8888",
         crtc_id_);
     format_ = Format::kXRGB8888;
   }
-  spdlog::info("[DrmDumbSink] format={} ({} bpp){}", FormatName(format_),
-               FormatBpp(format_),
-               (format_ == Format::kRGB565 && dither_) ? " +bayer-dither" : "");
+  ihs::log::info(
+      "[DrmDumbSink] format={} ({} bpp){}", FormatName(format_),
+      FormatBpp(format_),
+      (format_ == Format::kRGB565 && dither_) ? " +bayer-dither" : "");
 
   // Allocate both dumb buffers at the mode's dimensions.
   for (size_t i = 0; i < buffers_.size(); ++i) {
@@ -351,7 +352,7 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   drmModeModeInfo modeset_mode = mode;
   if (drmModeSetCrtc(drm_fd_, crtc_id_, buffers_[0].fb_id, 0, 0, &connector_id_,
                      1, &modeset_mode) != 0) {
-    spdlog::error("[DrmDumbSink] drmModeSetCrtc: {}", std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] drmModeSetCrtc: {}", std::strerror(errno));
     return false;
   }
   front_buffer_ = 0;
@@ -364,8 +365,8 @@ bool DrmDumbSink::AllocBuffer(const size_t index) {
   create.height = mode_height_;
   create.bpp = FormatBpp(format_);
   if (drmIoctl(drm_fd_, DRM_IOCTL_MODE_CREATE_DUMB, &create) != 0) {
-    spdlog::error("[DrmDumbSink] DRM_IOCTL_MODE_CREATE_DUMB: {}",
-                  std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] DRM_IOCTL_MODE_CREATE_DUMB: {}",
+                    std::strerror(errno));
     return false;
   }
   Buffer& b = buffers_[index];
@@ -380,8 +381,8 @@ bool DrmDumbSink::AllocBuffer(const size_t index) {
   const uint32_t offsets[4] = {0, 0, 0, 0};
   if (drmModeAddFB2(drm_fd_, mode_width_, mode_height_, FormatFourcc(format_),
                     handles, pitches, offsets, &b.fb_id, 0) != 0) {
-    spdlog::error("[DrmDumbSink] drmModeAddFB2({}): {}", FormatName(format_),
-                  std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] drmModeAddFB2({}): {}", FormatName(format_),
+                    std::strerror(errno));
     return false;
   }
 
@@ -390,14 +391,14 @@ bool DrmDumbSink::AllocBuffer(const size_t index) {
   drm_mode_map_dumb map_req{};
   map_req.handle = b.handle;
   if (drmIoctl(drm_fd_, DRM_IOCTL_MODE_MAP_DUMB, &map_req) != 0) {
-    spdlog::error("[DrmDumbSink] DRM_IOCTL_MODE_MAP_DUMB: {}",
-                  std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] DRM_IOCTL_MODE_MAP_DUMB: {}",
+                    std::strerror(errno));
     return false;
   }
   void* mapped = ::mmap(nullptr, b.size, PROT_READ | PROT_WRITE, MAP_SHARED,
                         drm_fd_, static_cast<off_t>(map_req.offset));
   if (mapped == MAP_FAILED) {
-    spdlog::error("[DrmDumbSink] mmap: {}", std::strerror(errno));
+    ihs::log::error("[DrmDumbSink] mmap: {}", std::strerror(errno));
     return false;
   }
   b.map = static_cast<uint8_t*>(mapped);
@@ -478,8 +479,8 @@ void DrmDumbSink::OnSize(uint32_t /*width*/, uint32_t /*height*/) {
 
 void DrmDumbSink::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
   cursor_ = std::move(cursor);
-  spdlog::debug("[DrmDumbSink] software cursor {}",
-                cursor_ ? "installed" : "cleared");
+  ihs::log::debug("[DrmDumbSink] software cursor {}",
+                  cursor_ ? "installed" : "cleared");
 }
 
 void DrmDumbSink::SwizzleInto(const size_t buffer_index,
@@ -558,7 +559,7 @@ bool DrmDumbSink::Present(const void* allocation,
             std::chrono::steady_clock::now() - wait_start)
             .count();
     if (static_cast<uint64_t>(elapsed_ns) > deadline_ns) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmDumbSink] PAGE_FLIP_EVENT not received within {} ns; "
           "force-clearing flip_pending_ and continuing",
           deadline_ns);
@@ -577,7 +578,7 @@ bool DrmDumbSink::Present(const void* allocation,
   // called immediately after Engine::Run returns), but the guard
   // protects against future re-orderings.
   if (!flip_descriptor_.has_value()) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmDumbSink] Present before SetPlatformTaskRunner armed flip "
         "descriptor; skipping page-flip for this frame");
     return true;
@@ -602,7 +603,7 @@ bool DrmDumbSink::Present(const void* allocation,
   vsync_.SetSourcePending(true);  // a present is now in flight
   if (drmModePageFlip(drm_fd_, crtc_id_, buffers_[back].fb_id,
                       DRM_MODE_PAGE_FLIP_EVENT, this) != 0) {
-    spdlog::warn("[DrmDumbSink] drmModePageFlip: {}", std::strerror(errno));
+    ihs::log::warn("[DrmDumbSink] drmModePageFlip: {}", std::strerror(errno));
     flip_pending_.store(false, std::memory_order_release);
     vsync_.SetSourcePending(false);
     // No flip queued — count a discard and hand the baton back so Flutter
@@ -637,7 +638,7 @@ void DrmDumbSink::SetPlatformTaskRunner(TaskRunner* runner) {
   // exactly once, but defending against future plumbing changes is
   // cheap.
   if (flip_descriptor_.has_value()) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmDumbSink] SetPlatformTaskRunner called while flip descriptor "
         "already armed; ignoring");
     return;
@@ -659,7 +660,7 @@ void DrmDumbSink::ArmFlipRead() {
       [this](const std::error_code& ec) {
         if (ec) {
           if (ec != asio::error::operation_aborted) {
-            spdlog::warn("[DrmDumbSink] flip monitor wait: {}", ec.message());
+            ihs::log::warn("[DrmDumbSink] flip monitor wait: {}", ec.message());
           }
           return;
         }
@@ -748,7 +749,7 @@ void DrmDumbSink::StopVsyncMonitor() {
       elapsed_ms += kPollSliceMs;
     }
     if (flip_pending_.load(std::memory_order_acquire)) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmDumbSink] StopVsyncMonitor: flip never arrived; "
           "force-clearing flip_pending_");
       flip_pending_.store(false, std::memory_order_release);
@@ -808,7 +809,7 @@ int PrintDumbSinkModes(const std::string& device_path) {
   // (and which mode to IVI_SW_DRM_MODE) without hard-coding card0.
   if (!device_path.empty()) {
     if (ListCardModes(device_path) != 0) {
-      spdlog::error("[DrmDumbSink] {} has no DRM/KMS resources", device_path);
+      ihs::log::error("[DrmDumbSink] {} has no DRM/KMS resources", device_path);
       return 1;
     }
     return 0;
@@ -827,7 +828,7 @@ int PrintDumbSinkModes(const std::string& device_path) {
     }
   }
   if (listed == 0) {
-    spdlog::error("[DrmDumbSink] no KMS-capable /dev/dri/card* found");
+    ihs::log::error("[DrmDumbSink] no KMS-capable /dev/dri/card* found");
     return 1;
   }
   return 0;

@@ -82,7 +82,7 @@ WaylandWindow::WaylandWindow(const size_t index,
       m_window_size({width, height}),
       m_type(get_window_type(type)),
       m_app_id(std::move(app_id)) {  // disable vsync
-  SPDLOG_TRACE("({}) + WaylandWindow()", m_index);
+  IHS_TRACE("({}) + WaylandWindow()", m_index);
 
   m_base_surface = wl_compositor_create_surface(m_display->GetCompositor());
   wl_surface_add_listener(m_base_surface, &m_base_surface_listener, this);
@@ -253,11 +253,11 @@ WaylandWindow::WaylandWindow(const size_t index,
   // OnOutputResized path never observes a partially-constructed window.
   m_display->RegisterWindow(this);
 
-  SPDLOG_TRACE("({}) - WaylandWindow()", m_index);
+  IHS_TRACE("({}) - WaylandWindow()", m_index);
 }
 
 WaylandWindow::~WaylandWindow() {
-  SPDLOG_TRACE("({}) + ~WaylandWindow()", m_index);
+  IHS_TRACE("({}) + ~WaylandWindow()", m_index);
 
   // Unregister first so an in-flight wl_output.mode callback can't see
   // us mid-destruction; UnregisterWindow's lock pairs with the snapshot
@@ -281,7 +281,7 @@ WaylandWindow::~WaylandWindow() {
   }
   wl_surface_destroy(m_base_surface);
 
-  SPDLOG_TRACE("({}) - ~WaylandWindow()", m_index);
+  IHS_TRACE("({}) - ~WaylandWindow()", m_index);
 }
 
 int32_t WaylandWindow::PhysWidth() const {
@@ -331,7 +331,7 @@ void WaylandWindow::ApplyScale(const int32_t scale_120) {
   }
   m_scale_120 = scale_120;
   m_scale = ivi::ScalePolicy::CanvasScale(scale_120);
-  spdlog::debug(
+  ihs::log::debug(
       "({}) ApplyScale: {} ({}/120) — {}x{} logical -> {}x{} buffer px",
       m_index, m_scale, scale_120, m_geometry.width, m_geometry.height,
       PhysWidth(), PhysHeight());
@@ -446,12 +446,12 @@ void WaylandWindow::SetEngine(const std::shared_ptr<Engine>& engine) {
     auto result = m_flutter_engine->SetWindowSize(
         static_cast<size_t>(PhysHeight()), static_cast<size_t>(PhysWidth()));
     if (result != kSuccess) {
-      spdlog::error("Failed to set Flutter Engine Window Size");
+      ihs::log::error("Failed to set Flutter Engine Window Size");
     }
 
     result = m_flutter_engine->SetPixelRatio(m_pixel_ratio * m_scale);
     if (result != kSuccess) {
-      spdlog::error("Failed to set Flutter Engine Pixel Ratio");
+      ihs::log::error("Failed to set Flutter Engine Pixel Ratio");
     }
 
     // Input arrives in surface-local units; only the surface scale converts

@@ -33,23 +33,23 @@ CrashHandler::SentryConfig CrashHandler::LoadConfig(
   config.dsn = dsn_env ? dsn_env : "";
 
   if (config_path.empty()) {
-    spdlog::warn("Config path is empty, using defaults");
+    ihs::log::warn("Config path is empty, using defaults");
     return config;
   }
 
   const std::filesystem::path toml_path(config_path);
 
   if (!std::filesystem::exists(toml_path)) {
-    spdlog::warn("Global config file not found at {}, using defaults",
-                 toml_path.string());
+    ihs::log::warn("Global config file not found at {}, using defaults",
+                   toml_path.string());
     return config;
   }
 
   // Parse TOML file
   auto result = toml::parse_file(toml_path.string());
   if (!result) {
-    spdlog::error("TOML parsing failed: {} — {}", toml_path.string(),
-                  result.error().description());
+    ihs::log::error("TOML parsing failed: {} — {}", toml_path.string(),
+                    result.error().description());
     return config;
   }
 
@@ -90,14 +90,14 @@ CrashHandler::CrashHandler(const std::string& config_path) {
   config_ = LoadConfig(config_path);
 
   if (config_.dsn.empty()) {
-    spdlog::warn("Sentry DSN is empty, crash reports will not be sent");
+    ihs::log::warn("Sentry DSN is empty, crash reports will not be sent");
     return;
   }
 
   sentry_options_t* options = sentry_options_new();
   if (!options) {
-    spdlog::error("Failed to create Sentry options, likely OOM");
-    spdlog::error("Crash handler will be disabled");
+    ihs::log::error("Failed to create Sentry options, likely OOM");
+    ihs::log::error("Crash handler will be disabled");
     return;
   }
 
@@ -123,7 +123,7 @@ CrashHandler::CrashHandler(const std::string& config_path) {
   sentry_options_set_debug(options, 0);
 
   if (sentry_init(options) != 0) {
-    spdlog::error("sentry_init() failed, crash reports will not be sent");
+    ihs::log::error("sentry_init() failed, crash reports will not be sent");
     return;
   }
   initialized_ = true;

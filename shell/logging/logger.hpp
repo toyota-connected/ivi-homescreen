@@ -1,15 +1,14 @@
 // shell/logging/logger.hpp
 //
-// Header-only IHS logging convenience for the shell and in-tree plugins. When
-// ENABLE_DLT is on it is a thin inline layer over the ihs_shared C ABI
-// (ihs/logging.h): IhsLogContext wraps an acquired context index, and the
-// IHS_LOG_* macros format a line into a stack buffer (ihs::format_to) before
-// handing it to ihs_log. No C++ bridge internals cross the boundary — the
-// only symbols referenced are the exported ihs_log_* entry points. When
-// ENABLE_DLT is off the macros expand to ((void)0).
+// Header-only IHS logging context + lifecycle for the shell and in-tree
+// plugins. A thin inline layer over the ihs_shared C ABI (ihs/logging.h):
+// IhsLogContext wraps an acquired context index, and the IHS_LOG_* macros
+// format a line into a stack buffer (ihs::format_to) before handing it to
+// ihs_log. No C++ bridge internals cross the boundary — the only symbols
+// referenced are the exported ihs_log_* entry points, which are always present
+// (the logging surface compiles regardless of ENABLE_DLT; DLT is just one
+// sink).
 #pragma once
-
-#if ENABLE_DLT
 
 #include "ihs/format.h"
 #include "ihs/logging.h"
@@ -68,26 +67,3 @@ class IhsLogContext {
   IHS_LOG_IMPL_((ctx_), IHS_LEVEL_DEBUG, __VA_ARGS__)
 #define IHS_LOG_TRACE(ctx_, ...) \
   IHS_LOG_IMPL_((ctx_), IHS_LEVEL_VERBOSE, __VA_ARGS__)
-
-#else  // !ENABLE_DLT (ENABLE_DLT undefined or defined to 0)
-
-// spdlog remains the backend; the mux macros expand to nothing so sources can
-// opt into this header regardless of the DLT build setting.
-class IhsLogContext {
- public:
-  IhsLogContext(const char* /*id*/, const char* /*description*/) {}
-  [[nodiscard]] bool is_valid() const noexcept { return false; }
-};
-
-#define IHS_LOGGING_START(app_id_, desc_) ((void)0)
-#define IHS_LOGGING_STOP() ((void)0)
-#define IHS_LOGGING_FLUSH() ((void)0)
-
-#define IHS_LOG_FATAL(ctx_, ...) ((void)0)
-#define IHS_LOG_ERROR(ctx_, ...) ((void)0)
-#define IHS_LOG_WARN(ctx_, ...) ((void)0)
-#define IHS_LOG_INFO(ctx_, ...) ((void)0)
-#define IHS_LOG_DEBUG(ctx_, ...) ((void)0)
-#define IHS_LOG_TRACE(ctx_, ...) ((void)0)
-
-#endif  // ENABLE_DLT

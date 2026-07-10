@@ -43,7 +43,7 @@ class handler_priority_queue : public asio::execution_context {
         handlers_.top()->execute();
         handlers_.pop();
       } else {
-        spdlog::debug("Task Pending Delta: {}", target_time - current);
+        ihs::log::debug("Task Pending Delta: {}", target_time - current);
         break;
       }
     }

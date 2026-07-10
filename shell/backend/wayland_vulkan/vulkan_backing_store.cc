@@ -80,8 +80,8 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
   }
 
   if (d.vkCreateImage(device_, &image_info, nullptr, &image_) != VK_SUCCESS) {
-    spdlog::error("VulkanBackingStore: vkCreateImage failed ({}x{})", width_,
-                  height_);
+    ihs::log::error("VulkanBackingStore: vkCreateImage failed ({}x{})", width_,
+                    height_);
     return;
   }
 
@@ -91,7 +91,7 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
   auto type_index = FindMemoryType(physical_device, req.memoryTypeBits,
                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (!type_index) {
-    spdlog::error("VulkanBackingStore: no device-local memory type");
+    ihs::log::error("VulkanBackingStore: no device-local memory type");
     Destroy();
     return;
   }
@@ -113,7 +113,7 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
   if (alloc_res != VK_SUCCESS && export_dma_buf) {
     // Retry without export on drivers that advertise the extension but
     // refuse DMA-BUF-exportable allocations for this format.
-    spdlog::warn(
+    ihs::log::warn(
         "VulkanBackingStore: DMA-BUF export alloc failed ({}); falling back",
         static_cast<int>(alloc_res));
     alloc_info.pNext = nullptr;
@@ -121,14 +121,14 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
     export_dma_buf = false;
   }
   if (alloc_res != VK_SUCCESS) {
-    spdlog::error("VulkanBackingStore: vkAllocateMemory failed ({})",
-                  static_cast<int>(alloc_res));
+    ihs::log::error("VulkanBackingStore: vkAllocateMemory failed ({})",
+                    static_cast<int>(alloc_res));
     Destroy();
     return;
   }
 
   if (d.vkBindImageMemory(device_, image_, memory_, 0) != VK_SUCCESS) {
-    spdlog::error("VulkanBackingStore: vkBindImageMemory failed");
+    ihs::log::error("VulkanBackingStore: vkBindImageMemory failed");
     Destroy();
     return;
   }
@@ -142,7 +142,7 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
   view_info.subresourceRange.levelCount = 1;
   view_info.subresourceRange.layerCount = 1;
   if (d.vkCreateImageView(device_, &view_info, nullptr, &view_) != VK_SUCCESS) {
-    spdlog::error("VulkanBackingStore: vkCreateImageView failed");
+    ihs::log::error("VulkanBackingStore: vkCreateImageView failed");
     Destroy();
     return;
   }
@@ -155,8 +155,8 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
     if (d.vkGetMemoryFdKHR) {
       VkResult r = d.vkGetMemoryFdKHR(device_, &fd_info, &dma_buf_fd_);
       if (r != VK_SUCCESS) {
-        spdlog::warn("VulkanBackingStore: vkGetMemoryFdKHR failed ({})",
-                     static_cast<int>(r));
+        ihs::log::warn("VulkanBackingStore: vkGetMemoryFdKHR failed ({})",
+                       static_cast<int>(r));
         dma_buf_fd_ = -1;
       }
     }

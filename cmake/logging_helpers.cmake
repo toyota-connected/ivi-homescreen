@@ -1,11 +1,12 @@
 # cmake/logging_helpers.cmake
 #
 # Provides ihs_target_add_logging(<target>): links a target against ihs_shared
-# and attaches the shell logging mux (shell/logging/logger.hpp). ihs_shared is
-# linked unconditionally — it provides the tracing and (later) config surfaces
-# regardless of ENABLE_DLT; ENABLE_DLT only adds the DLT logging bridge inside
-# it and switches logger.hpp from the stub macros to the live path. Intended
-# for the shell binary and for built-in plugin targets.
+# and attaches the shell logging surface (shell/logging/{logger.hpp,logging.h}).
+# ihs_shared is linked unconditionally — the logging, tracing, and config
+# surfaces are always present; ENABLE_DLT only adds the DLT sink inside it. The
+# logging.h shim formats with fmt ("{}" style) before the C ABI, so the target
+# also gets fmt's headers via the spdlog interface library (bundled fmt).
+# Intended for the shell binary and for built-in plugin targets.
 
 function(ihs_target_add_logging TARGET)
     if(NOT TARGET ${TARGET})
@@ -19,12 +20,23 @@ function(ihs_target_add_logging TARGET)
             "Ensure add_subdirectory(shared) runs before this helper is called.")
     endif()
 
-    target_include_directories(${TARGET} PRIVATE
+    # PUBLIC, not PRIVATE: a library target (e.g. platform_homescreen) exports
+    # PUBLIC sources — platform_views/*.cc — that its dependents (the plugins)
+    # compile themselves, and those sources include logging.h. The ihs_shared /
+    # spdlog include paths must therefore propagate to dependents, or the plugin
+    # build fails to find ihs/logging.h. For a leaf executable PUBLIC is
+    # equivalent to PRIVATE (nothing links it).
+    target_include_directories(${TARGET} PUBLIC
         ${CMAKE_SOURCE_DIR}/shell/logging
     )
     # Linking ihs_shared also propagates its public include dir, so the ihs/*
-    # headers (logging, trace, format) are on the include path.
-    target_link_libraries(${TARGET} PRIVATE ivi_homescreen::ihs_shared)
+    # headers (logging, trace, format) are on the include path. spdlog is an
+    # interface target that supplies the (bundled) fmt headers the logging.h
+    # shim formats with.
+    target_link_libraries(${TARGET} PUBLIC ivi_homescreen::ihs_shared)
+    if(TARGET spdlog)
+        target_link_libraries(${TARGET} PUBLIC spdlog)
+    endif()
 
     if(ENABLE_DLT)
         target_compile_definitions(${TARGET} PRIVATE ENABLE_DLT=1)

@@ -132,11 +132,11 @@ DebugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                    void* /*user_data*/) {
   const char* msg = data && data->pMessage ? data->pMessage : "";
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    spdlog::error("[vulkan] {}", msg);
+    ihs::log::error("[vulkan] {}", msg);
   } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-    spdlog::warn("[vulkan] {}", msg);
+    ihs::log::warn("[vulkan] {}", msg);
   } else {
-    spdlog::debug("[vulkan] {}", msg);
+    ihs::log::debug("[vulkan] {}", msg);
   }
   return VK_FALSE;
 }
@@ -235,7 +235,7 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
     auto src = drm::scene::ExternalDmaBufSource::create(
         dev, store.width(), store.height(), fourcc, mod, planes);
     if (!src) {
-      spdlog::error(
+      ihs::log::error(
           "[VulkanDrmBackend] framebuffer import ({}x{} fourcc=0x{:08x} "
           "mod=0x{:016x} planes={} offset={} pitch={}): {}",
           store.width(), store.height(), fourcc, mod, planes.size(),
@@ -335,12 +335,12 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
 
   std::string err;
   if (!backend->BringUp(err)) {
-    spdlog::critical("[VulkanDrmBackend] init failed; refusing to start: {}",
-                     err);
+    ihs::log::critical("[VulkanDrmBackend] init failed; refusing to start: {}",
+                       err);
     return nullptr;
   }
   if (!backend->SetupCompositor(err)) {
-    spdlog::critical(
+    ihs::log::critical(
         "[VulkanDrmBackend] compositor setup failed; refusing to start: {}",
         err);
     return nullptr;
@@ -375,20 +375,20 @@ bool VulkanDrmBackend::BringUp(std::string& refusal_reason) {
   }
   PopulateCaps();
 
-  spdlog::info(
+  ihs::log::info(
       "[VulkanDrmBackend] device='{}' driver='{}' vendor=0x{:04x} "
       "device=0x{:04x} api={}.{}.{}",
       caps_.device_name, caps_.driver_name, caps_.vendor_id, caps_.device_id,
       VK_VERSION_MAJOR(caps_.api_version), VK_VERSION_MINOR(caps_.api_version),
       VK_VERSION_PATCH(caps_.api_version));
-  spdlog::info(
+  ihs::log::info(
       "[VulkanDrmBackend] caps: drm_node={} timeline_sem={} global_priority={} "
       "lazy_transient={} dedicated_transfer={} gfx_queues={} max_image_2d={}",
       caps_.has_physical_device_drm, caps_.has_timeline_semaphore,
       caps_.has_global_priority, caps_.has_lazy_transient,
       caps_.has_dedicated_transfer_queue, caps_.graphics_queue_count,
       caps_.max_image_2d);
-  spdlog::info(
+  ihs::log::info(
       "[VulkanDrmBackend] graphics queue family {} created; scanout node '{}'",
       graphics_queue_family_, drm_device_);
 
@@ -488,7 +488,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     err = "no modifier common to the GPU and the scanout plane";
     return false;
   }
-  spdlog::info(
+  ihs::log::info(
       "[VulkanDrmBackend] scanout target: connector {} crtc {} plane {} mode "
       "{}x{}; {} modifier(s) negotiated",
       target.connector_id, target.crtc_id, target.primary_plane_id,
@@ -502,8 +502,8 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     for (auto m : allowed) {
       neg += " " + drm_kms_vulkan::DescribeModifier(m);
     }
-    spdlog::info("[VulkanDrmBackend] plane modifiers advertised:{}", adv);
-    spdlog::info("[VulkanDrmBackend] modifiers negotiated:{}", neg);
+    ihs::log::info("[VulkanDrmBackend] plane modifiers advertised:{}", adv);
+    ihs::log::info("[VulkanDrmBackend] modifiers negotiated:{}", neg);
   }
 
   auto dev_exp = drm::Device::open(drm_device_);
@@ -538,7 +538,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       }
     }
     if (state->scanout_modifiers.empty()) {
-      spdlog::warn(
+      ihs::log::warn(
           "[VulkanDrmBackend] no tiled non-DCC modifier available for a "
           "{}-degree rotation; the rotated scanout will not commit",
           rotation_);
@@ -548,8 +548,9 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       for (const auto m : state->scanout_modifiers) {
         picked += " " + drm_kms_vulkan::DescribeModifier(m);
       }
-      spdlog::info("[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
-                   rotation_, picked);
+      ihs::log::info(
+          "[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
+          rotation_, picked);
     }
   } else {
     state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
@@ -640,7 +641,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   width_ = state->width;
   height_ = state->height;
   compositor_ = std::move(state);
-  spdlog::info(
+  ihs::log::info(
       "[VulkanDrmBackend] compositor ready: {}x{}, DRM master acquired", width_,
       height_);
 
@@ -659,7 +660,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       compositor_->device, target.crtc_id, target.connector_id, target.mode,
       target.mode_width, target.mode_height, rotation_);
   if (!cursor_) {
-    spdlog::info("[VulkanDrmBackend] no HW cursor (disabled or unavailable)");
+    ihs::log::info("[VulkanDrmBackend] no HW cursor (disabled or unavailable)");
   }
 #endif
   return true;
@@ -728,7 +729,7 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
 
   if (slot < 0) {
     if (c.slots.size() >= CompositorState::kMaxRing) {
-      spdlog::error(
+      ihs::log::error(
           "[VulkanDrmBackend] scanout ring exhausted ({} buffers); dropping "
           "frame",
           c.slots.size());
@@ -743,8 +744,8 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
         physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM, c.fourcc,
         c.scanout_modifiers, err);
     if (!store) {
-      spdlog::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
-                    err);
+      ihs::log::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
+                      err);
       return false;
     }
     if (c.ring == nullptr) {
@@ -753,14 +754,15 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
     }
     auto idx = c.ring->AddSlot(c.device, *store, c.fourcc);
     if (!idx) {
-      spdlog::error("[VulkanDrmBackend] scanout framebuffer import failed");
+      ihs::log::error("[VulkanDrmBackend] scanout framebuffer import failed");
       return false;
     }
     slot = static_cast<int>(*idx);
     c.key_to_slot[store.get()] = static_cast<size_t>(slot);
     c.slots.push_back({std::move(store), false});
-    spdlog::info("[VulkanDrmBackend] scanout ring grew to {} buffer(s) ({}x{})",
-                 c.slots.size(), w, h);
+    ihs::log::info(
+        "[VulkanDrmBackend] scanout ring grew to {} buffer(s) ({}x{})",
+        c.slots.size(), w, h);
   }
 
   auto& [store, engine_owned] = c.slots[static_cast<size_t>(slot)];
@@ -860,8 +862,8 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     desc.display.rotation = c.rotation;
     auto layer = c.scene->add_layer(std::move(desc));
     if (!layer) {
-      spdlog::error("[VulkanDrmBackend] add_layer: {}",
-                    layer.error().message());
+      ihs::log::error("[VulkanDrmBackend] add_layer: {}",
+                      layer.error().message());
       return false;
     }
     c.layer = layer.value();
@@ -875,7 +877,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
       c.first_commit ? 0U
                      : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   if (auto report = c.scene->commit(flags); !report) {
-    spdlog::error("[VulkanDrmBackend] commit: {}", report.error().message());
+    ihs::log::error("[VulkanDrmBackend] commit: {}", report.error().message());
     return false;
   }
   if (c.first_commit) {
@@ -888,7 +890,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
 
   const uint64_t n = c.frame++;
   if (n < 3 || n % 120 == 0) {
-    spdlog::info(
+    ihs::log::info(
         "[VulkanDrmBackend] presented frame {} slot {} ({}x{}); ring={}", n,
         slot, store->width(), store->height(), c.slots.size());
   }
@@ -924,7 +926,7 @@ bool VulkanDrmBackend::CreateInstance(std::string& refusal_reason) {
       }
     }
     if (enabled_instance_layers_.empty()) {
-      spdlog::warn(
+      ihs::log::warn(
           "[VulkanDrmBackend] validation requested (-d) but "
           "VK_LAYER_KHRONOS_validation is not enumerable; continuing without "
           "validation");
