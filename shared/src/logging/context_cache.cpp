@@ -34,11 +34,14 @@ ihs::expected<std::uint32_t, ContextError> ContextCache::ensure(
   entry->id = std::string(ctx_id);
   entry->description = std::string(description);
 
-  if (!loader_.register_context(&entry->dlt_ctx, entry->id.c_str(),
-                                entry->description.c_str())) {
-    return ihs::unexpect<std::uint32_t, ContextError>(
-        ContextError::RegisterFailed);
-  }
+#if ENABLE_DLT
+  // Best-effort DLT registration: a failure (libdlt absent) leaves dlt_ctx
+  // unregistered, but the entry is still stored so its tag serves the console
+  // and file sinks. Only the DLT sink needs a registered context; a build
+  // without DLT skips registration entirely and leaves dlt_ctx zeroed.
+  LibDltLoader::instance().register_context(&entry->dlt_ctx, entry->id.c_str(),
+                                            entry->description.c_str());
+#endif
 
   entries_[count] = std::move(entry);
   // Release: the entry is fully constructed above; publish the new count so a

@@ -20,6 +20,19 @@
 # Shared-only, on purpose: a static copy in both the shell and a plugin would
 # give the process two copies of the logging bridge, ring registry, and trace
 # sink table. There is exactly one copy of that state, in this .so.
+#
+# Buildable standalone (CI ABI gate + consumer smoke) without the homescreen
+# tree: when this is the top-level project it establishes its own project() and
+# an ENABLE_DLT option; otherwise it inherits both from the parent build.
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(ihs_shared_standalone LANGUAGES CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    if (NOT DEFINED ENABLE_DLT)
+        option(ENABLE_DLT "Build the DLT logging bridge into ihs_shared" ON)
+    endif ()
+endif ()
 
 include(GNUInstallDirs)
 include(GenerateExportHeader)
@@ -29,6 +42,8 @@ set(IHS_SHARED_ABI_VERSION_STR 1.0.0)
 
 add_library(ihs_shared SHARED
         src/ihs_api.cc
+        src/trace.cc
+        src/config.cc
 )
 add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
 
@@ -67,7 +82,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif ()
 
 # Match the shell's standard library selection (libc++ on clang builds) so the
-# bridge relocated here later links cleanly against the shell.
+# bridge compiled in here links cleanly against the shell.
 if (TARGET toolchain)
     target_link_libraries(ihs_shared PRIVATE toolchain::toolchain)
 endif ()
@@ -76,6 +91,47 @@ if (COMMAND ihs_apply_cxx_compat)
 endif ()
 
 target_compile_options(ihs_shared PRIVATE -Wall -Wextra)
+
+# Never unload this library: the DLT bridge owns a worker thread and per-thread
+# ring TLS whose destructors must not fire against code unmapped by dlclose.
+# -z nodelete pins it for the process lifetime even if a plugin that pulled it
+# in is unloaded.
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(ihs_shared PRIVATE "LINKER:-z,nodelete")
+endif ()
+
+# Logging capability. The generic logging surface (the ihs_log_* ABI, the ring
+# registry / drain worker, and the console, file, and level-floor sinks) is
+# always compiled in, so IhsApi::logging is always present. ENABLE_DLT gates
+# only the DLT-specific pieces — the runtime libdlt loader and the DLT sink;
+# with it off, "dlt" is simply not an available IHS_LOG_SINK and the surface
+# falls back to console. The DLT sink dlopens libdlt at runtime, so even the
+# ENABLE_DLT path adds no build-time dependency of its own.
+find_package(Threads REQUIRED)
+target_sources(ihs_shared PRIVATE
+        src/logging/thread_ring.cpp
+        src/logging/ring_registry.cpp
+        src/logging/context_cache.cpp
+        src/logging/worker.cpp
+        src/logging/bridge.cpp
+        src/logging/ffi_shim.cpp
+        src/logging/console_sink.cpp
+        src/logging/file_sink.cpp
+        src/logging/sink_set.cpp
+)
+target_include_directories(ihs_shared PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
+)
+target_link_libraries(ihs_shared PRIVATE Threads::Threads)
+
+if (ENABLE_DLT)
+    target_sources(ihs_shared PRIVATE
+            src/logging/libdlt_loader.cpp
+            src/logging/dlt_sink.cpp
+    )
+    target_compile_definitions(ihs_shared PRIVATE ENABLE_DLT=1)
+    target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
+endif ()
 
 #
 # Install + CMake package export

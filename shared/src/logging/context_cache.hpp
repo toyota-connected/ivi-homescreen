@@ -36,7 +36,7 @@ struct ContextEntry {
 
 class ContextCache {
  public:
-  explicit ContextCache(LibDltLoader& loader) noexcept : loader_(loader) {}
+  ContextCache() noexcept = default;
 
   [[nodiscard]]
   ihs::expected<std::uint32_t, ContextError> ensure(
@@ -46,8 +46,6 @@ class ContextCache {
   [[nodiscard]] ContextEntry* at(std::uint32_t index) noexcept;
 
  private:
-  LibDltLoader& loader_;
-
   // Writers (ensure(), first-use only) serialize on mu_. Readers (at(), the
   // worker's per-slot drain) are lock-free: entries live in fixed storage that
   // never moves and is never removed, so a published index is stable forever.

@@ -101,39 +101,12 @@ inline expected<T, E> unexpect(E err) {
 #endif
 
 // ── 3. String formatting
-// ────────────────────────────────────────────────────── ihs::format_to(buf,
-// size, fmt, ...) → writes into char buf[size] Returns number of bytes written
-// (capped at size-1, always null-terminated).
+// ──────────────────────────────────────────────────────
+// ihs::format_to(buf, size, fmt, ...) → writes into char buf[size], returns
+// bytes written (capped at size-1, always null-terminated). Defined once in
+// the public header so the bridge and the shell's logger share it.
 
-#if defined(IHS_HAS_FORMAT_TO_N)
-#include <format>
-namespace ihs {
-template <class... Args>
-inline std::size_t format_to(char* buf,
-                             std::size_t size,
-                             std::format_string<Args...> fmt,
-                             Args&&... args) {
-  auto r = std::format_to_n(buf, size - 1, fmt, std::forward<Args>(args)...);
-  *r.out = '\0';
-  return static_cast<std::size_t>(r.size);
-}
-}  // namespace ihs
-
-#else
-// C++17 fallback: thin wrapper around snprintf.
-namespace ihs {
-template <class... Args>
-inline std::size_t format_to(char* buf,
-                             std::size_t size,
-                             const char* fmt,
-                             Args&&... args) {
-  int n = std::snprintf(buf, size, fmt, std::forward<Args>(args)...);
-  if (n < 0)
-    n = 0;
-  return static_cast<std::size_t>(n < static_cast<int>(size) ? n : size - 1);
-}
-}  // namespace ihs
-#endif
+#include "ihs/format.h"
 
 // ── 4. Stderr printing
 // ──────────────────────────────────────────────────────── ihs::println(fmt,
