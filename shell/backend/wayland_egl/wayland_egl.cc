@@ -18,6 +18,7 @@
 #include "logging/logging.h"
 
 #include <wayland-egl.h>
+#include <mutex>
 
 #include <asio/post.hpp>
 

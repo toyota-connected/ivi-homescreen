@@ -20,7 +20,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <mutex>
 #include <optional>
+#include <thread>
 #include <utility>
 
 #include <fcntl.h>

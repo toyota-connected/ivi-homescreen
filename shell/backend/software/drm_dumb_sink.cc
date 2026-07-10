@@ -32,6 +32,7 @@
 #include <cstring>
 #include <ctime>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include <asio/post.hpp>

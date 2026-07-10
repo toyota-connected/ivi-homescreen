@@ -18,6 +18,7 @@
 #include "logging/logging.h"
 
 #include <asio/post.hpp>
+#include <mutex>
 
 #include <cassert>
 #include <cstdlib>
