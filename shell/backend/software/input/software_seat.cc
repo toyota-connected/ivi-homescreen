@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <thread>
 
 #include <asio/dispatch.hpp>
 

@@ -18,6 +18,8 @@
 
 #if BUILD_SYSTEMD_WATCHDOG
 #include <systemd/sd-daemon.h>
+#include <chrono>
+#include <thread>
 #endif
 
 #include "logging/logging.h"

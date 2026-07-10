@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
+#include <mutex>
 #include <string>
 
 #include <asio/post.hpp>

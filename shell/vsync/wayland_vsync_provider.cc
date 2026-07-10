@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <mutex>
 
 #include <wayland-client.h>
 

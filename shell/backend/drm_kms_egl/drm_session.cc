@@ -22,7 +22,9 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "logging.h"

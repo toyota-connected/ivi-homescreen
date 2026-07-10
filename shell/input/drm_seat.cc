@@ -27,6 +27,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <csignal>
+#include <thread>
 
 #include <algorithm>
 #include <atomic>

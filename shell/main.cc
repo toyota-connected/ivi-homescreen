@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "config/common.h"
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "flutter_view.h"
+#include <chrono>
 #include <filesystem>
 #include "logging/logging.h"
 
