@@ -81,6 +81,12 @@ bool DltBridge::log(const ContextHandle& ctx,
   if (!ctx.is_valid()) {
     return false;
   }
+  // Off is a floor sentinel ("log nothing"), not a message severity: a record
+  // logged at Off never emits, and an IHS_LOG_LEVEL of off therefore silences
+  // everything (it would otherwise pass Off records, since 0 > 0 is false).
+  if (level == LogLevel::Off) {
+    return false;
+  }
   // Global severity floor (IHS_LOG_LEVEL): drop records more verbose than the
   // floor before they enter a ring. Levels are Fatal(1)..Verbose(6), so a
   // numerically larger value is more verbose.
