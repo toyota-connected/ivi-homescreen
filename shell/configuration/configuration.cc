@@ -16,6 +16,7 @@
 #include "configuration.h"
 #include "logging/logging.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string_view>
@@ -765,8 +766,13 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     const auto result = allocated->parse(argc, argv);
 
     if (result.count("help")) {
-      ihs::log::info("{}", allocated->help({"", "Global", "View", "Shell",
-                                            "Backend", "DRM"}));
+      // Requested help text is program output, not a log line: write it to
+      // stdout directly (synchronous, unprefixed) rather than through the
+      // async logger, which would send it to stderr with a timestamp/level.
+      const std::string help =
+          allocated->help({"", "Global", "View", "Shell", "Backend", "DRM"});
+      std::fputs(help.c_str(), stdout);
+      std::fputc('\n', stdout);
       exit(EXIT_SUCCESS);
     }
 
