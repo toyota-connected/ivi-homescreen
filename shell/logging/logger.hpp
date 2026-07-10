@@ -42,17 +42,18 @@ class IhsLogContext {
 
 // Format a line into a stack buffer and emit it through the bridge C ABI. The
 // format-string style follows ihs::format_to ("{}" under std::format, printf
-// placeholders under the C++17 fallback). Nothing is formatted or emitted when
-// the context is invalid.
-#define IHS_LOG_IMPL_(ctx_, level_, ...)                           \
-  do {                                                             \
-    const IhsLogContext& ihs_ctx_ = (ctx_);                        \
-    if (ihs_ctx_.is_valid()) {                                     \
-      char ihs_buf_[IHS_LOG_TEXT_CAPACITY];                        \
-      const std::size_t ihs_len_ =                                 \
-          ihs::format_to(ihs_buf_, sizeof(ihs_buf_), __VA_ARGS__); \
-      ihs_log(ihs_ctx_.index(), (level_), ihs_buf_, ihs_len_);     \
-    }                                                              \
+// placeholders under the C++17 fallback). The message is formatted (and its
+// arguments evaluated) only when the context is valid AND the level passes the
+// IHS_LOG_LEVEL floor, so a filtered call site pays nothing beyond the gate.
+#define IHS_LOG_IMPL_(ctx_, level_, ...)                                      \
+  do {                                                                        \
+    const IhsLogContext& ihs_ctx_ = (ctx_);                                   \
+    if (ihs_ctx_.is_valid() && ihs_log_enabled(ihs_ctx_.index(), (level_))) { \
+      char ihs_buf_[IHS_LOG_TEXT_CAPACITY];                                   \
+      const std::size_t ihs_len_ =                                            \
+          ihs::format_to(ihs_buf_, sizeof(ihs_buf_), __VA_ARGS__);            \
+      ihs_log(ihs_ctx_.index(), (level_), ihs_buf_, ihs_len_);                \
+    }                                                                         \
   } while (0)
 
 #define IHS_LOG_FATAL(ctx_, ...) \

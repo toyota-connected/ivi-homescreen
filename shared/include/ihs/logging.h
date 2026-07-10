@@ -94,6 +94,16 @@ IHS_EXPORT int32_t ihs_log_context_open(const char* tag,
                                         const IhsLogContextOptions* options);
 
 /*
+ * Fast-path gate: returns 1 if a record at level under ctx_index would be
+ * accepted (context valid, level is not Off, and level is at or above the
+ * IHS_LOG_LEVEL floor), 0 if it would be dropped. level is an IhsLogLevel.
+ * A caller uses this to skip formatting a message that would be discarded; it
+ * does not account for ring overflow (a transient condition), so a 1 is not a
+ * guarantee the subsequent ihs_log() enqueues.
+ */
+IHS_EXPORT int ihs_log_enabled(int32_t ctx_index, uint8_t level);
+
+/*
  * Emit a pre-formatted line under a context. level is an IhsLogLevel. Enqueue
  * is wait-free and drops silently on ring overflow or when level is below the
  * IHS_LOG_LEVEL floor. Returns 1 when enqueued, 0 on drop/invalid arguments.
@@ -115,6 +125,8 @@ typedef struct IhsLoggingApi {
   void (*flush)(void);
   int32_t (*context_open)(const char* tag, const IhsLogContextOptions* options);
   int (*log)(int32_t ctx_index, uint8_t level, const char* text, size_t len);
+  /* Appended after log (additive; guarded by struct_size). */
+  int (*enabled)(int32_t ctx_index, uint8_t level);
 } IhsLoggingApi;
 
 #ifdef __cplusplus
