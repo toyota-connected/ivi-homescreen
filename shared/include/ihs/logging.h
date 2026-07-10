@@ -21,9 +21,10 @@
  * by environment (IHS_LOG_SINK = dlt|console|file, IHS_LOG_LEVEL, IHS_LOG_FILE,
  * IHS_LOG_FILE_MAX_BYTES, IHS_LOG_FILE_MAX_FILES). See docs/PLUGIN_ABI.md.
  *
- * Timing contract: ihs_log() is non-blocking (enqueue to a per-thread ring, may
- * drop-oldest under pressure); formatting and I/O happen on a drain thread.
- * ihs_log_flush() is synchronous.
+ * Timing contract: ihs_log() is non-blocking (enqueue to a per-thread ring;
+ * when the ring is full the incoming record is dropped and a per-ring counter
+ * is bumped); formatting and I/O happen on a drain thread. ihs_log_flush() is
+ * synchronous.
  */
 
 #ifndef IHS_LOGGING_H_
