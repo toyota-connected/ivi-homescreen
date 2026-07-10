@@ -29,7 +29,7 @@ namespace homescreen::input {
 
 WakeEventFd::WakeEventFd() : fd_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
   if (fd_ < 0) {
-    spdlog::warn(
+    ihs::log::warn(
         "[WakeEventFd] eventfd() failed ({}); dispatch falls back to timed "
         "poll",
         std::strerror(errno));

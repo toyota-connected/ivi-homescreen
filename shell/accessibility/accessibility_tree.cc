@@ -104,7 +104,7 @@ void AccessibilityTree::HandleFlutterUpdate(
     // segment before opening the file so a crafted environment cannot
     // redirect the write outside the intended config tree.
     if (target.find("..") != std::string::npos) {
-      spdlog::error(
+      ihs::log::error(
           "Refusing to write accessibility tree dump to '{}': path contains "
           "a '..' traversal segment",
           target);
@@ -182,8 +182,8 @@ AccessibilityNode* AccessibilityTree::GetNode(
   AccessibilityNode* new_node = owned.get();
   nodes.emplace_back(std::move(owned));
   node_index.emplace(new_node->GetId(), new_node);
-  SPDLOG_TRACE("New AccessibilityNode created with ID: {}, number of nodes: {}",
-               new_node->GetId(), nodes.size());
+  IHS_TRACE("New AccessibilityNode created with ID: {}, number of nodes: {}",
+            new_node->GetId(), nodes.size());
   return new_node;
 }
 
@@ -239,9 +239,9 @@ void AccessibilityTree::DumpTree(const char* target_file) const {
   if (std::ofstream ofs(target_file); ofs.is_open()) {
     ofs << buffer.GetString();
     ofs.close();
-    spdlog::info("Accessibility tree dumped to {}", target_file);
+    ihs::log::info("Accessibility tree dumped to {}", target_file);
   } else {
-    spdlog::error("Failed to open {} for writing", target_file);
+    ihs::log::error("Failed to open {} for writing", target_file);
   }
 }
 
@@ -300,11 +300,11 @@ accesskit_tree_update* activation_handler_cbk(void* userdata) {
 
 void action_handler_cbk(accesskit_action_request* /* request */,
                         void* /* userdata */) {
-  spdlog::debug("accesskit_wrapper: action_handler++");
+  ihs::log::debug("accesskit_wrapper: action_handler++");
 }
 
 void deactivation_handler_cbk(void* /* userdata */) {
-  spdlog::debug("accesskit_wrapper: deactivation_handler++");
+  ihs::log::debug("accesskit_wrapper: deactivation_handler++");
 }
 
 void AccessibilityTree::Init_AccessKit() {

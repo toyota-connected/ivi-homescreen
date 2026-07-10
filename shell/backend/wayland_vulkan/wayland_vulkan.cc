@@ -77,7 +77,7 @@ WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
     // provider; the backend forwards to it.
     vsync_ = shell_display->GetVsyncProvider();
     if (vsync_ != nullptr && !vsync_->Usable()) {
-      spdlog::info(
+      ihs::log::info(
           "[WaylandVulkanBackend] wp_presentation unusable — vsync_callback "
           "disabled, falling back to engine wall-clock scheduler");
     }
@@ -150,7 +150,7 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
         s.pipeline_latency_samples > 0
             ? (s.pipeline_latency_sum_ns / s.pipeline_latency_samples) / 1000
             : 0;
-    spdlog::info(
+    ihs::log::info(
         "[WaylandVulkanBackend] session summary: frames={} fps={:.2f} "
         "mean_interval={}us max_interval={}us present_failures={} "
         "discarded={} flags=0x{:x} pipeline_mean={}us pipeline_max={}us",
@@ -159,7 +159,7 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
         s.pipeline_latency_max_ns / 1000);
     if (total > 0) {
       const double inv = 100.0 / static_cast<double>(total);
-      spdlog::info(
+      ihs::log::info(
           "[WaylandVulkanBackend] session buckets: "
           "60Hz(≤17ms)={} ({:.1f}%) 30Hz(18-33ms)={} ({:.1f}%) "
           "20Hz(34-50ms)={} ({:.1f}%) slow(51-100ms)={} ({:.1f}%) "
@@ -241,10 +241,10 @@ void WaylandVulkanBackend::createInstance() {
   surfaceSupported_ = false;
   waylandSurfaceSupported_ = false;
   auto instance_extensions = vk::enumerateInstanceExtensionProperties();
-  spdlog::debug("Vulkan Instance Extensions:");
+  ihs::log::debug("Vulkan Instance Extensions:");
 
   for (const auto& l : instance_extensions.value) {
-    spdlog::debug("\t{}, version: {}", l.extensionName.data(), l.specVersion);
+    ihs::log::debug("\t{}, version: {}", l.extensionName.data(), l.specVersion);
     if (enable_validation_layers_) {
       if (strcmp(l.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) ==
           0) {
@@ -269,7 +269,7 @@ void WaylandVulkanBackend::createInstance() {
   }
 
   if (!surfaceSupported_ || !waylandSurfaceSupported_) {
-    spdlog::critical(
+    ihs::log::critical(
         "This Vulkan driver does not support the minimum required extensions");
     exit(EXIT_FAILURE);
   }
@@ -280,7 +280,7 @@ void WaylandVulkanBackend::createInstance() {
   for (auto& extension : enabled_instance_extensions_) {
     ss << "\n\t" << extension;
   }
-  spdlog::info(ss.str());
+  ihs::log::info(ss.str());
 
   VkApplicationInfo app_info{};
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -341,9 +341,9 @@ void WaylandVulkanBackend::createInstance() {
 
   const auto available_layers = vk::enumerateInstanceLayerProperties();
   if (!available_layers.value.empty()) {
-    spdlog::debug("Vulkan Instance Layers:");
+    ihs::log::debug("Vulkan Instance Layers:");
     for (const auto& l : available_layers.value) {
-      spdlog::debug("\t{} - {}", l.layerName.data(), l.description.data());
+      ihs::log::debug("\t{} - {}", l.layerName.data(), l.description.data());
       if (enable_validation_layers_ &&
           strcmp(l.layerName, VK_LAYER_KHRONOS_VALIDATION_NAME) == 0) {
         enabled_layer_extensions_.push_back(VK_LAYER_KHRONOS_VALIDATION_NAME);
@@ -360,7 +360,7 @@ void WaylandVulkanBackend::createInstance() {
     for (const auto& layer : enabled_layer_extensions_) {
       ss << "\n\t" << layer;
     }
-    spdlog::info(ss.str());
+    ihs::log::info(ss.str());
   }
 
   info.enabledLayerCount =
@@ -410,7 +410,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
   CHECK_VK_RESULT(d().vkEnumeratePhysicalDevices(instance_, &count,
                                                  physical_devices.data()));
 
-  SPDLOG_DEBUG("Enumerating {} physical device(s).", count);
+  IHS_DEBUG("Enumerating {} physical device(s).", count);
 
   uint32_t selected_score = 0;
   for (const auto& physical_device : physical_devices) {
@@ -419,7 +419,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     d().vkGetPhysicalDeviceProperties(physical_device, &properties);
     d().vkGetPhysicalDeviceFeatures(physical_device, &features);
 
-    SPDLOG_DEBUG("Checking device: {}", properties.deviceName);
+    IHS_DEBUG("Checking device: {}", properties.deviceName);
 
     uint32_t score = 0;
     std::vector<const char*> supported_extensions;
@@ -448,7 +448,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     // Skip physical devices that don't have a graphics queue.
     if (!graphics_queue_family.has_value()) {
-      spdlog::info("  - Skipping due to no suitable graphics queues.");
+      ihs::log::info("  - Skipping due to no suitable graphics queues.");
       continue;
     }
 
@@ -488,7 +488,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
     // Skip physical devices that don't have swap chain support.
     if (!supports_swap_chain) {
-      SPDLOG_DEBUG("  - Skipping due to lack of swap chain support.");
+      IHS_DEBUG("  - Skipping due to lack of swap chain support.");
       continue;
     }
 
@@ -496,7 +496,7 @@ void WaylandVulkanBackend::findPhysicalDevice() {
     score += properties.limits.maxImageDimension2D;
 
     if (selected_score < score) {
-      SPDLOG_DEBUG("  - This is the best device so far. Score: 0x{:x}", score);
+      IHS_DEBUG("  - This is the best device so far. Score: 0x{:x}", score);
 
       selected_score = score;
       physical_device_ = physical_device;
@@ -524,22 +524,23 @@ void WaylandVulkanBackend::findPhysicalDevice() {
 
         d().vkGetPhysicalDeviceProperties2KHR(physical_device_,
                                               &physicalDeviceProperties2);
-        spdlog::info("Vulkan device driver: {} {}", driverProperties.driverName,
-                     driverProperties.driverInfo);
+        ihs::log::info("Vulkan device driver: {} {}",
+                       driverProperties.driverName,
+                       driverProperties.driverInfo);
       }
 
       // Print out some properties of the GPU for diagnostic purposes.
-      spdlog::info("vendor {:x}, device {:x}, driver {:x}, api {}.{}",
-                   properties.vendorID, properties.deviceID,
-                   properties.driverVersion,
-                   VK_VERSION_MAJOR(properties.apiVersion),
-                   VK_VERSION_MINOR(properties.apiVersion));
+      ihs::log::info("vendor {:x}, device {:x}, driver {:x}, api {}.{}",
+                     properties.vendorID, properties.deviceID,
+                     properties.driverVersion,
+                     VK_VERSION_MAJOR(properties.apiVersion),
+                     VK_VERSION_MINOR(properties.apiVersion));
       break;
     }
   }
 
   if (physical_device_ == nullptr) {
-    spdlog::critical("Failed to find a compatible Vulkan physical device.");
+    ihs::log::critical("Failed to find a compatible Vulkan physical device.");
     exit(EXIT_FAILURE);
   }
 }
@@ -552,7 +553,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
   for (const char* extension : enabled_device_extensions_) {
     ss << "  - " << extension;
   }
-  SPDLOG_DEBUG(ss.str());
+  IHS_DEBUG(ss.str());
 #endif
 
   float priority = 1.0f;
@@ -623,7 +624,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
           static_cast<vk::Result>(d().vkGetPhysicalDeviceSurfaceFormatsKHR(
               physical_device_, surface_, &format_count, nullptr));
       r != vk::Result::eSuccess) {
-    spdlog::critical(
+    ihs::log::critical(
         "vkGetPhysicalDeviceSurfaceFormatsKHR failed: {}. On Wayland this "
         "usually means the compositor exposes neither zwp_linux_dmabuf_v1 "
         "nor wl_drm — Mesa Vulkan WSI cannot back the swapchain.",
@@ -684,7 +685,8 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // there is no limit on the number of images, though there may be limits
   // related to the total amount of memory used by presentable images."
   if (maxImageCount != 0 && desiredImageCount > maxImageCount) {
-    spdlog::error("Swap chain does not support {} images.", desiredImageCount);
+    ihs::log::error("Swap chain does not support {} images.",
+                    desiredImageCount);
     desiredImageCount = surface_capabilities.minImageCount;
   }
 
@@ -716,7 +718,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     } else if (name == "immediate") {
       requested_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     } else if (name != "fifo") {
-      spdlog::warn(
+      ihs::log::warn(
           "[WaylandVulkanBackend] IVI_VK_PRESENT_MODE='{}' unrecognized; "
           "valid: fifo|fifo_relaxed|mailbox|immediate. Falling back to fifo.",
           env);
@@ -741,13 +743,13 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
         break;
       }
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[WaylandVulkanBackend] requested present mode {} not advertised "
         "by compositor; using {}.",
         static_cast<int>(requested_mode), static_cast<int>(present_mode));
   }
-  spdlog::info("[WaylandVulkanBackend] present mode: {}",
-               static_cast<int>(present_mode));
+  ihs::log::info("[WaylandVulkanBackend] present mode: {}",
+                 static_cast<int>(present_mode));
 
   // --------------------------------------------------------------------------
   // Create the swap chain.
@@ -878,14 +880,14 @@ VKAPI_ATTR VkBool32
         const char* pMessage,
         void* /* pUserData */) {
   if (flags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
-    spdlog::info("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
+    ihs::log::info("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
   } else if (flags & (VK_DEBUG_REPORT_WARNING_BIT_EXT |
                       VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT)) {
-    spdlog::warn("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
+    ihs::log::warn("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
   } else if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-    spdlog::error("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
+    ihs::log::error("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
   } else if (flags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) {
-    spdlog::debug("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
+    ihs::log::debug("Vulkan Report: ({}) {}", pLayerPrefix, pMessage);
   }
   return VK_FALSE;
 }
@@ -898,11 +900,11 @@ VKAPI_ATTR VkBool32 VKAPI_CALL WaylandVulkanBackend::debugUtilsCallback(
   if (severity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) {
-    spdlog::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
-                 cb_data->pMessage);
+    ihs::log::info("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
+                   cb_data->pMessage);
   } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    spdlog::error("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
-                  cb_data->pMessage);
+    ihs::log::error("Vulkan Dbg: ({}) {}", cb_data->pMessageIdName,
+                    cb_data->pMessage);
   }
   return VK_TRUE;
 }
@@ -911,7 +913,7 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
     void* user_data,
     const FlutterFrameInfo* frame_info) {
   if (frame_info->struct_size != sizeof(FlutterFrameInfo)) {
-    SPDLOG_ERROR(
+    ihs::log::error(
         "GetNextImageCallback: frame_info->struct_size != "
         "sizeof(FlutterFrameInfo)");
   }
@@ -1095,7 +1097,7 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
       p.pipeline_latency_samples > 0
           ? (p.pipeline_latency_sum_ns / p.pipeline_latency_samples) / 1000
           : 0;
-  spdlog::info(
+  ihs::log::info(
       "[WaylandVulkanBackend] profile (n={}): fps={:.2f} mean_interval={}us "
       "max_interval={}us present_failures={} discarded={} "
       "refresh={}us flags=0x{:x} pipeline_mean={}us pipeline_max={}us "
@@ -1195,7 +1197,7 @@ void WaylandVulkanBackend::Resize(size_t /* index */,
     if (engine) {
       if (engine->SetWindowSize(static_cast<size_t>(height),
                                 static_cast<size_t>(width)) != kSuccess) {
-        spdlog::error("Failed to set Flutter Engine Window Size");
+        ihs::log::error("Failed to set Flutter Engine Window Size");
       }
     }
   }
@@ -1205,7 +1207,7 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
                                          wl_surface* surface,
                                          int32_t /* width */,
                                          int32_t /* height */) {
-  SPDLOG_DEBUG("CreateSurface");
+  IHS_DEBUG("CreateSurface");
   assert(instance_ != VK_NULL_HANDLE);
   assert(surface_ == VK_NULL_HANDLE);
   assert(wl_display_ != nullptr);
@@ -1252,7 +1254,7 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
                           &swapchain_command_pool_);
 
   if (!InitializeSwapChain()) {
-    spdlog::critical("Failed to create swap chain.");
+    ihs::log::critical("Failed to create swap chain.");
     exit(EXIT_FAILURE);
   }
 }
@@ -1270,7 +1272,7 @@ bool WaylandVulkanBackend::CollectBackingStore(const FlutterBackingStore* store,
 #else
   (void)store;
   (void)user_data;
-  SPDLOG_DEBUG("CollectBackingStore");
+  IHS_DEBUG("CollectBackingStore");
   return false;
 #endif
 }
@@ -1288,7 +1290,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
   (void)config;
   (void)backing_store_out;
   (void)user_data;
-  SPDLOG_DEBUG("CreateBackingStore");
+  IHS_DEBUG("CreateBackingStore");
 #if 0  /// TODO
     auto surface_size = SkISize::Make(config->size.width, config->size.height);
     TestVulkanImage* test_image = new TestVulkanImage(
@@ -1328,7 +1330,7 @@ bool WaylandVulkanBackend::CreateBackingStore(
     );
 
     if (!surface) {
-      spdlog::error("Could not create Skia surface from Vulkan image.");
+      ihs::log::error("Could not create Skia surface from Vulkan image.");
       return false;
     }
     backing_store_out->type = kFlutterBackingStoreTypeVulkan;
@@ -1375,7 +1377,7 @@ bool WaylandVulkanBackend::PresentLayers(const FlutterLayer** layers,
   (void)layers;
   (void)layers_count;
   (void)user_data;
-  SPDLOG_DEBUG("PresentLayers");
+  IHS_DEBUG("PresentLayers");
   return false;
 #endif
 }
@@ -1438,7 +1440,7 @@ bool WaylandVulkanBackend::CreateBackingStoreImpl(
   auto store =
       m_store_pool.Acquire(w, h, device_, physical_device_, want_dma_buf);
   if (!store->IsValid()) {
-    spdlog::error("WaylandVulkanBackend: failed to create backing store");
+    ihs::log::error("WaylandVulkanBackend: failed to create backing store");
     return false;
   }
   // Record whether export succeeded at least once (for introspection).
@@ -1522,7 +1524,7 @@ void WaylandVulkanBackend::TransitionLayout(
   alloc.commandBufferCount = 1;
   VkCommandBuffer cmd{};
   if (d().vkAllocateCommandBuffers(device_, &alloc, &cmd) != VK_SUCCESS) {
-    spdlog::error("TransitionLayout: vkAllocateCommandBuffers failed");
+    ihs::log::error("TransitionLayout: vkAllocateCommandBuffers failed");
     return;
   }
 
@@ -1674,7 +1676,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
         // Only warn when *neither* is registered.
         std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
         if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
-          spdlog::warn(
+          ihs::log::warn(
               "Vulkan compositor: platform view {} has no "
               "registered subsurface or compositor surface",
               id);
@@ -1703,7 +1705,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
       if (composed.NeedsPluginComposite()) {
-        spdlog::debug(
+        ihs::log::debug(
             "Vulkan compositor: platform view {} has non-trivial mutations "
             "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); "
             "plugin OnPresent must apply them.",
@@ -1811,7 +1813,7 @@ void WaylandVulkanBackend::CompositorPipeliningInit() {
   pool_info.queueFamilyIndex = queue_family_index_;
   if (d().vkCreateCommandPool(device_, &pool_info, nullptr,
                               &m_compositor_cmd_pool_) != VK_SUCCESS) {
-    spdlog::error("Vulkan compositor: failed to create cmd pool");
+    ihs::log::error("Vulkan compositor: failed to create cmd pool");
     return;
   }
 

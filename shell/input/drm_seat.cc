@@ -335,8 +335,8 @@ bool DrmSeat::Start() {
     if (tty_fd_ >= 0) {
       if (ioctl(tty_fd_, KDGKBMODE, &saved_kb_mode_) == 0) {
         if (ioctl(tty_fd_, KDSKBMODE, K_OFF) == 0) {
-          spdlog::info("[DrmSeat] VT keyboard mode set to K_OFF (was {})",
-                       saved_kb_mode_);
+          ihs::log::info("[DrmSeat] VT keyboard mode set to K_OFF (was {})",
+                         saved_kb_mode_);
 
           // Publish the fd + original mode for the crash/atexit backstop.
           // Store the mode first so any concurrent restore sees a valid
@@ -345,8 +345,8 @@ bool DrmSeat::Start() {
           g_tty_fd.store(tty_fd_, std::memory_order_release);
           std::call_once(g_backstop_installed, &InstallBackstop);
         } else {
-          spdlog::warn("[DrmSeat] KDSKBMODE K_OFF failed: {}",
-                       std::strerror(errno));
+          ihs::log::warn("[DrmSeat] KDSKBMODE K_OFF failed: {}",
+                         std::strerror(errno));
         }
       }
     }
@@ -355,8 +355,8 @@ bool DrmSeat::Start() {
   auto opened = have_session ? drm::input::Seat::open({}, std::move(opener_))
                              : drm::input::Seat::open();
   if (!opened) {
-    spdlog::error("[DrmSeat] libinput seat open failed: {}",
-                  opened.error().message());
+    ihs::log::error("[DrmSeat] libinput seat open failed: {}",
+                    opened.error().message());
     return false;
   }
   seat_ = std::make_unique<drm::input::Seat>(std::move(*opened));
@@ -369,7 +369,7 @@ bool DrmSeat::Start() {
   // key is dropped at the sym==0 check in DispatchKeyToFlutter.
   keyboard_ = input::XkbKeyboard::Create();
   if (!keyboard_) {
-    spdlog::error("[DrmSeat] XkbKeyboard::Create failed");
+    ihs::log::error("[DrmSeat] XkbKeyboard::Create failed");
     return false;
   }
 
@@ -394,7 +394,7 @@ bool DrmSeat::Start() {
             DispatchKeyToFlutter(e);
           });
     } else {
-      spdlog::warn("[DrmSeat] KeyRepeater unavailable (timerfd_create)");
+      ihs::log::warn("[DrmSeat] KeyRepeater unavailable (timerfd_create)");
     }
   }
 
@@ -404,7 +404,7 @@ bool DrmSeat::Start() {
 
   stop_.store(false, std::memory_order_release);
   thread_ = std::thread([this] { DispatchLoop(); });
-  spdlog::info("[DrmSeat] started");
+  ihs::log::info("[DrmSeat] started");
   return true;
 }
 
@@ -428,7 +428,7 @@ void DrmSeat::Stop() {
   if (tty_fd_ >= 0) {
     g_tty_fd.store(-1, std::memory_order_release);
     ioctl(tty_fd_, KDSKBMODE, saved_kb_mode_);
-    spdlog::info("[DrmSeat] VT keyboard mode restored to {}", saved_kb_mode_);
+    ihs::log::info("[DrmSeat] VT keyboard mode restored to {}", saved_kb_mode_);
     ::close(tty_fd_);
     tty_fd_ = -1;
   }
@@ -466,9 +466,10 @@ void DrmSeat::DispatchLoop() {
       case PendingSessionAction::kSuspend:
         if (seat_) {
           if (auto r = seat_->suspend(); !r) {
-            spdlog::warn("[DrmSeat] libinput suspend: {}", r.error().message());
+            ihs::log::warn("[DrmSeat] libinput suspend: {}",
+                           r.error().message());
           } else {
-            spdlog::info("[DrmSeat] libinput suspended for VT switch-out");
+            ihs::log::info("[DrmSeat] libinput suspended for VT switch-out");
           }
         }
         // Cancel any in-flight key repeat: a key held at switch-out would
@@ -480,9 +481,10 @@ void DrmSeat::DispatchLoop() {
       case PendingSessionAction::kResume:
         if (seat_) {
           if (auto r = seat_->resume(); !r) {
-            spdlog::warn("[DrmSeat] libinput resume: {}", r.error().message());
+            ihs::log::warn("[DrmSeat] libinput resume: {}",
+                           r.error().message());
           } else {
-            spdlog::info("[DrmSeat] libinput resumed after VT switch-in");
+            ihs::log::info("[DrmSeat] libinput resumed after VT switch-in");
           }
         }
         break;
@@ -508,7 +510,7 @@ void DrmSeat::DispatchLoop() {
       if (errno == EINTR) {
         continue;
       }
-      spdlog::error("[DrmSeat] poll: {}", std::strerror(errno));
+      ihs::log::error("[DrmSeat] poll: {}", std::strerror(errno));
       break;
     }
     if (r > 0) {
@@ -518,8 +520,8 @@ void DrmSeat::DispatchLoop() {
       // treat it as fatal.
       if (wake_idx >= 0) {
         if ((pfds[wake_idx].revents & kErr) != 0) {
-          spdlog::error("[DrmSeat] waker fd error (revents={:#x}); exiting",
-                        static_cast<unsigned>(pfds[wake_idx].revents));
+          ihs::log::error("[DrmSeat] waker fd error (revents={:#x}); exiting",
+                          static_cast<unsigned>(pfds[wake_idx].revents));
           break;
         }
         if ((pfds[wake_idx].revents & POLLIN) != 0) {
@@ -528,13 +530,13 @@ void DrmSeat::DispatchLoop() {
         }
       }
       if ((pfds[0].revents & kErr) != 0) {
-        spdlog::error("[DrmSeat] seat fd error (revents={:#x}); exiting",
-                      static_cast<unsigned>(pfds[0].revents));
+        ihs::log::error("[DrmSeat] seat fd error (revents={:#x}); exiting",
+                        static_cast<unsigned>(pfds[0].revents));
         break;
       }
       if ((pfds[0].revents & POLLIN) != 0) {
         if (auto ok = seat_->dispatch(); !ok) {
-          spdlog::warn("[DrmSeat] dispatch: {}", ok.error().message());
+          ihs::log::warn("[DrmSeat] dispatch: {}", ok.error().message());
         }
         FlushCursorMotion();
       }
@@ -543,7 +545,7 @@ void DrmSeat::DispatchLoop() {
           // Repeater timerfd died (HUP/ERR/NVAL). Drop it and keep
           // serving the seat — otherwise poll() returns POLLERR forever
           // and the loop spins.
-          spdlog::warn(
+          ihs::log::warn(
               "[DrmSeat] repeater fd error (revents={:#x}); disabling repeat",
               static_cast<unsigned>(pfds[repeat_idx].revents));
           repeater_.reset();
@@ -693,7 +695,7 @@ void DrmSeat::SetInputTransforms(const std::vector<std::string>& specs) {
   for (const auto& spec : specs) {
     const auto eq = spec.rfind('=');
     if (eq == std::string::npos || eq == 0) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmSeat] --input-transform '{}' ignored "
           "(expected <name>=<0|90|180|270>[,flip-x][,flip-y])",
           Sanitize(spec));
@@ -721,8 +723,8 @@ void DrmSeat::SetInputTransforms(const std::vector<std::string>& specs) {
       } else if (tok == "270") {
         t.rotation = 270;
       } else {
-        spdlog::warn("[DrmSeat] --input-transform '{}': bad token '{}'",
-                     Sanitize(spec), Sanitize(tok));
+        ihs::log::warn("[DrmSeat] --input-transform '{}': bad token '{}'",
+                       Sanitize(spec), Sanitize(tok));
         valid = false;
       }
       if (comma == std::string::npos) {
@@ -731,7 +733,7 @@ void DrmSeat::SetInputTransforms(const std::vector<std::string>& specs) {
       start = comma + 1;
     }
     if (valid) {
-      spdlog::info(
+      ihs::log::info(
           "[DrmSeat] input-transform: match='{}' rot={} flip_x={} flip_y={}",
           Sanitize(t.match), t.rotation, t.flip_x, t.flip_y);
       pointer_transforms_.push_back(std::move(t));
@@ -774,14 +776,14 @@ void DrmSeat::ApplyPendingKeymap() {
   opts.variant = cfg->variant;
   opts.options = cfg->options;
   if (!keyboard_->Reload(opts)) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmSeat] keymap reload failed (rules='{}' model='{}' layout='{}' "
         "variant='{}' options='{}') — existing keymap kept",
         Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
         Sanitize(cfg->variant), Sanitize(cfg->options));
     return;
   }
-  spdlog::info(
+  ihs::log::info(
       "[DrmSeat] keymap reloaded (rules='{}' model='{}' layout='{}' "
       "variant='{}' options='{}')",
       Sanitize(cfg->rules), Sanitize(cfg->model), Sanitize(cfg->layout),
@@ -868,7 +870,7 @@ void DrmSeat::HandleKeyboard(const drm::input::KeyboardEvent& ev) {
         handler = vt_switch_handler_;
       }
       if (handler && handler(vt)) {
-        spdlog::info("[DrmSeat] Ctrl+Alt+F{} → VT switch requested", vt);
+        ihs::log::info("[DrmSeat] Ctrl+Alt+F{} → VT switch requested", vt);
         // Consume the event: don't repeat-track, don't forward to Flutter.
         return;
       }

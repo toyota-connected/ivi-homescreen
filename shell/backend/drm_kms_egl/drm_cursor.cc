@@ -163,7 +163,7 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
     const std::string_view theme_name) {
   if (const char* gate = std::getenv("IVI_DRM_CURSOR");
       gate != nullptr && std::string_view(gate) == "0") {
-    spdlog::info("[DrmCursor] disabled via IVI_DRM_CURSOR=0");
+    ihs::log::info("[DrmCursor] disabled via IVI_DRM_CURSOR=0");
     return nullptr;
   }
 
@@ -180,8 +180,8 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
 
   auto theme = drm::cursor::Theme::discover();
   if (!theme) {
-    spdlog::warn("[DrmCursor] no XCursor theme found ({}); no cursor sprite",
-                 theme.error().message());
+    ihs::log::warn("[DrmCursor] no XCursor theme found ({}); no cursor sprite",
+                   theme.error().message());
     return nullptr;
   }
 
@@ -190,8 +190,8 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
   auto cursor =
       drm::cursor::Cursor::load(*theme, "default", theme_name, sizing.sprite);
   if (!cursor) {
-    spdlog::warn("[DrmCursor] load 'default': {}; no cursor sprite",
-                 cursor.error().message());
+    ihs::log::warn("[DrmCursor] load 'default': {}; no cursor sprite",
+                   cursor.error().message());
     return nullptr;
   }
 
@@ -217,13 +217,13 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
   }
   auto renderer = drm::cursor::Renderer::create(dev, rcfg);
   if (!renderer) {
-    spdlog::warn("[DrmCursor] renderer create: {}; no cursor sprite",
-                 renderer.error().message());
+    ihs::log::warn("[DrmCursor] renderer create: {}; no cursor sprite",
+                   renderer.error().message());
     return nullptr;
   }
   if (auto r = renderer->set_cursor(std::move(*cursor)); !r) {
-    spdlog::warn("[DrmCursor] set_cursor: {}; no cursor sprite",
-                 r.error().message());
+    ihs::log::warn("[DrmCursor] set_cursor: {}; no cursor sprite",
+                   r.error().message());
     return nullptr;
   }
 
@@ -242,7 +242,7 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
   const int letterbox_y =
       (static_cast<int>(mode.vdisplay) - static_cast<int>(fb_h)) / 2;
 
-  spdlog::info(
+  ihs::log::info(
       "[DrmCursor] ready (sprite={}px buffer={}px path={} plane_id={} "
       "letterbox={},{})",
       sizing.sprite, sizing.buffer, PlanePathName(renderer->path()),
@@ -265,8 +265,8 @@ void DrmCursor::Move(const int fb_x, const int fb_y) {
   const int crtc_x = fb_x + impl_->letterbox_x;
   const int crtc_y = fb_y + impl_->letterbox_y;
   if (auto r = impl_->renderer.move_to(crtc_x, crtc_y); !r) {
-    spdlog::warn("[DrmCursor] move_to({}, {}): {}", crtc_x, crtc_y,
-                 r.error().message());
+    ihs::log::warn("[DrmCursor] move_to({}, {}): {}", crtc_x, crtc_y,
+                   r.error().message());
   }
 }
 
@@ -282,7 +282,7 @@ void DrmCursor::Hide() {
     return;
   }
   if (auto r = impl_->renderer.hide(); !r) {
-    spdlog::warn("[DrmCursor] hide: {}", r.error().message());
+    ihs::log::warn("[DrmCursor] hide: {}", r.error().message());
   }
 }
 
@@ -291,7 +291,7 @@ void DrmCursor::Show() {
     return;
   }
   if (auto r = impl_->renderer.show(); !r) {
-    spdlog::warn("[DrmCursor] show: {}", r.error().message());
+    ihs::log::warn("[DrmCursor] show: {}", r.error().message());
   }
 }
 
@@ -319,8 +319,8 @@ bool DrmCursor::Stage(drm::AtomicRequest& req, bool* const needs_modeset) {
   const int crtc_y = fb_y + impl_->letterbox_y;
   bool first = false;
   if (auto r = impl_->renderer.stage(req, crtc_x, crtc_y, first); !r) {
-    spdlog::warn("[DrmCursor] stage({}, {}): {}", crtc_x, crtc_y,
-                 r.error().message());
+    ihs::log::warn("[DrmCursor] stage({}, {}): {}", crtc_x, crtc_y,
+                   r.error().message());
     return false;
   }
   if (needs_modeset != nullptr) {
@@ -363,12 +363,13 @@ void DrmCursor::ApplyPendingShape() {
   auto cursor = drm::cursor::Cursor::load(impl_->theme, name, impl_->theme_name,
                                           impl_->sprite_size);
   if (!cursor) {
-    spdlog::warn("[DrmCursor] load '{}': {}; keeping current sprite", name,
-                 cursor.error().message());
+    ihs::log::warn("[DrmCursor] load '{}': {}; keeping current sprite", name,
+                   cursor.error().message());
     return;
   }
   if (auto r = impl_->renderer.set_cursor(std::move(*cursor)); !r) {
-    spdlog::warn("[DrmCursor] set_cursor '{}': {}", name, r.error().message());
+    ihs::log::warn("[DrmCursor] set_cursor '{}': {}", name,
+                   r.error().message());
   }
 }
 

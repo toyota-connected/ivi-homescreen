@@ -87,7 +87,6 @@ PlatformViewTouch::PlatformViewTouch(
 }
 
 void PlatformViewTouch::Print() {
-  SPDLOG_DEBUG("[{}] pointerCount: {}, action: {}, raw x: {}, raw y: {}", id_,
-               pointerCount_, action_, rawPointerCoords_[7],
-               rawPointerCoords_[8]);
+  IHS_DEBUG("[{}] pointerCount: {}, action: {}, raw x: {}, raw y: {}", id_,
+            pointerCount_, action_, rawPointerCoords_[7], rawPointerCoords_[8]);
 }

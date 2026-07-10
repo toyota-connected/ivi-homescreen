@@ -123,7 +123,7 @@ Engine::Engine(FlutterView* view,
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
       m_flutter_engine(nullptr) {
-  SPDLOG_TRACE("({}) +Engine::Engine", m_index);
+  IHS_TRACE("({}) +Engine::Engine", m_index);
 
   m_args.struct_size = sizeof(FlutterProjectArgs);
   m_args.command_line_argc = static_cast<int>(command_line_args_c.size());
@@ -161,7 +161,7 @@ Engine::Engine(FlutterView* view,
   /// libflutter_engine.so loading
   ///
   if (bundle_path.empty()) {
-    spdlog::critical("Specify bundle folder using --b= option");
+    ihs::log::critical("Specify bundle folder using --b= option");
     exit(EXIT_FAILURE);
   }
 
@@ -172,8 +172,8 @@ Engine::Engine(FlutterView* view,
   std::filesystem::path engine_file_path(bundle_path);
   engine_file_path /= kBundleEngine;
   if (std::filesystem::exists(engine_file_path)) {
-    SPDLOG_DEBUG("({}) libflutter_engine.so: {}", m_index,
-                 engine_file_path.c_str());
+    IHS_DEBUG("({}) libflutter_engine.so: {}", m_index,
+              engine_file_path.c_str());
   } else {
     engine_file_path = kSystemEngine;
   }
@@ -183,8 +183,8 @@ Engine::Engine(FlutterView* view,
   // different path — each cause is already logged at critical/error by the
   // loader itself.
   if (!LibFlutterEngine::Load(engine_file_path.c_str())) {
-    spdlog::critical("({}) unable to load flutter engine: {}", m_index,
-                     engine_file_path.c_str());
+    ihs::log::critical("({}) unable to load flutter engine: {}", m_index,
+                       engine_file_path.c_str());
     exit(EXIT_FAILURE);
   }
 
@@ -194,7 +194,7 @@ Engine::Engine(FlutterView* view,
 
   m_assets_path = bundle_path;
   m_assets_path /= kBundleFlutterAssets;
-  SPDLOG_DEBUG("({}) flutter_assets: {}", m_index, m_assets_path.c_str());
+  IHS_DEBUG("({}) flutter_assets: {}", m_index, m_assets_path.c_str());
   m_args.assets_path = m_assets_path.c_str();
 
   ///
@@ -207,11 +207,11 @@ Engine::Engine(FlutterView* view,
     m_icu_data_path /= kSystemIcudtl;
   }
   if (!exists(m_icu_data_path)) {
-    spdlog::critical("({}) {} is not present.", m_index,
-                     m_icu_data_path.c_str());
+    ihs::log::critical("({}) {} is not present.", m_index,
+                       m_icu_data_path.c_str());
     assert(false);
   }
-  SPDLOG_DEBUG("({}) icudtl.dat: {}", m_index, m_icu_data_path.c_str());
+  IHS_DEBUG("({}) icudtl.dat: {}", m_index, m_icu_data_path.c_str());
   m_args.icu_data_path = m_icu_data_path.c_str();
 
   ///
@@ -224,12 +224,12 @@ Engine::Engine(FlutterView* view,
       m_args.aot_data = m_aot_data;
     }
   } else {
-    spdlog::info("({}) Runtime=debug", m_index);
+    ihs::log::info("({}) Runtime=debug", m_index);
     std::filesystem::path kernel_snapshot = m_assets_path;
     kernel_snapshot /= "kernel_blob.bin";
     if (!exists(kernel_snapshot)) {
-      spdlog::critical("({}) {} missing Flutter Kernel\0", m_index,
-                       kernel_snapshot.c_str());
+      ihs::log::critical("({}) {} missing Flutter Kernel\0", m_index,
+                         kernel_snapshot.c_str());
       exit(EXIT_FAILURE);
     }
   }
@@ -270,8 +270,8 @@ Engine::Engine(FlutterView* view,
     m_render_task_runner_description = m_platform_task_runner_description;
     m_custom_task_runners.render_task_runner =
         &m_render_task_runner_description;
-    spdlog::info("({}) engine: raster thread merged onto the platform thread",
-                 m_index);
+    ihs::log::info("({}) engine: raster thread merged onto the platform thread",
+                   m_index);
   }
 
   // Per-thread priority setter (opt-in via IVI_DRM_RT=1). See
@@ -280,7 +280,7 @@ Engine::Engine(FlutterView* view,
 
   m_args.custom_task_runners = &m_custom_task_runners;
 
-  SPDLOG_TRACE("({}) -Engine::Engine", m_index);
+  IHS_TRACE("({}) -Engine::Engine", m_index);
 }
 
 Engine::~Engine() {
@@ -330,7 +330,7 @@ FlutterEngineResult Engine::SendKeyEvent(const FlutterKeyEvent& event,
 }
 
 FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
-  SPDLOG_TRACE("({}) +Engine::Run", m_index);
+  IHS_TRACE("({}) +Engine::Run", m_index);
 
   const auto config = m_backend->GetRenderConfig();
   m_compositor = m_backend->GetCompositorConfig();
@@ -341,14 +341,14 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   FlutterEngineResult result = LibFlutterEngine->Initialize(
       FLUTTER_ENGINE_VERSION, &config, &m_args, state, &m_flutter_engine);
   if (result != kSuccess) {
-    spdlog::error("({}) FlutterEngineRun failed or engine is null", m_index);
+    ihs::log::error("({}) FlutterEngineRun failed or engine is null", m_index);
     return result;
   }
 
   result = LibFlutterEngine->RunInitialized(m_flutter_engine);
   if (result == kSuccess) {
     m_running = true;
-    SPDLOG_DEBUG("({}) Engine::m_running = {}", m_index, m_running);
+    IHS_DEBUG("({}) Engine::m_running = {}", m_index, m_running);
   }
 
   // Set available system locales
@@ -364,7 +364,7 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   LibFlutterEngine->UpdateSemanticsEnabled(m_flutter_engine, true);
 #endif
 
-  SPDLOG_TRACE("({}) -Engine::Run", m_index);
+  IHS_TRACE("({}) -Engine::Run", m_index);
   return result;
 }
 
@@ -399,8 +399,8 @@ FlutterEngineResult Engine::SetWindowSize(const size_t height,
 
   if (LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme) !=
       kSuccess) {
-    spdlog::critical("({}) Failed send initial window size to flutter",
-                     m_index);
+    ihs::log::critical("({}) Failed send initial window size to flutter",
+                       m_index);
     assert(false);
   }
 
@@ -414,9 +414,9 @@ void Engine::OnAddViewComplete(const FlutterAddViewResult* result) {
   const auto* self = static_cast<const Engine*>(result->user_data);
   const size_t idx = self != nullptr ? self->m_index : 0;
   if (!result->added) {
-    spdlog::error("({}) FlutterEngineAddView failed", idx);
+    ihs::log::error("({}) FlutterEngineAddView failed", idx);
   } else {
-    spdlog::debug("({}) view added", idx);
+    ihs::log::debug("({}) view added", idx);
   }
 }
 
@@ -427,9 +427,9 @@ void Engine::OnRemoveViewComplete(const FlutterRemoveViewResult* result) {
   const auto* self = static_cast<const Engine*>(result->user_data);
   const size_t idx = self != nullptr ? self->m_index : 0;
   if (!result->removed) {
-    spdlog::error("({}) FlutterEngineRemoveView failed", idx);
+    ihs::log::error("({}) FlutterEngineRemoveView failed", idx);
   } else {
-    spdlog::debug("({}) view removed", idx);
+    ihs::log::debug("({}) view removed", idx);
   }
 }
 
@@ -442,7 +442,7 @@ FlutterEngineResult Engine::AddView(const int64_t view_id,
     return kInternalInconsistency;
   }
   if (LibFlutterEngine->AddView == nullptr) {
-    spdlog::error(
+    ihs::log::error(
         "({}) engine library has no FlutterEngineAddView; multi-view "
         " is unavailable",
         m_index);
@@ -521,13 +521,13 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   const auto result =
       LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
   if (result != kSuccess) {
-    spdlog::critical("({}) Failed send initial window size to flutter",
-                     m_index);
+    ihs::log::critical("({}) Failed send initial window size to flutter",
+                       m_index);
     assert(false);
   }
 
-  SPDLOG_TRACE("({}) SetWindowSize: width={}, height={}, pixel_ratio={}",
-               m_index, m_prev_width, m_prev_height, pixel_ratio);
+  IHS_TRACE("({}) SetWindowSize: width={}, height={}, pixel_ratio={}", m_index,
+            m_prev_width, m_prev_height, pixel_ratio);
   return kSuccess;
 }
 
@@ -537,13 +537,13 @@ std::string Engine::GetFilePath(size_t index) {
   if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
     if (!std::filesystem::create_directories(path)) {
       if (!std::filesystem::is_directory(path)) {
-        spdlog::critical("({}) create_directories failed: {}", index, path);
+        ihs::log::critical("({}) create_directories failed: {}", index, path);
         exit(EXIT_FAILURE);
       }
     }
   }
 
-  SPDLOG_DEBUG("({}) PersistentCachePath: {}", index, path);
+  IHS_DEBUG("({}) PersistentCachePath: {}", index, path);
 
   return path;
 }
@@ -557,7 +557,7 @@ FlutterEngineResult Engine::SendPlatformMessageResponse(
   }
 
   if (!m_platform_task_runner->IsThreadEqual(pthread_self())) {
-    spdlog::error("Not sending message on Platform Thread");
+    ihs::log::error("Not sending message on Platform Thread");
   }
 
   return LibFlutterEngine->SendPlatformMessageResponse(m_flutter_engine, handle,
@@ -677,7 +677,7 @@ void Engine::SetUpLocales() const {
   }
 
   if (result != kSuccess) {
-    spdlog::error("({}) Failed to set up Flutter locales.", m_index);
+    ihs::log::error("({}) Failed to set up Flutter locales.", m_index);
   }
 }
 
@@ -796,11 +796,11 @@ FlutterEngineAOTData Engine::LoadAotData(const std::string& bundle_path) const {
   std::filesystem::path aot_data_path(bundle_path);
   aot_data_path /= kBundleAot;
   if (!exists(aot_data_path)) {
-    SPDLOG_DEBUG("({}) AOT file not present", m_index);
+    IHS_DEBUG("({}) AOT file not present", m_index);
     return nullptr;
   }
 
-  spdlog::info("({}) Loading AOT: {}", m_index, aot_data_path.c_str());
+  ihs::log::info("({}) Loading AOT: {}", m_index, aot_data_path.c_str());
 
   FlutterEngineAOTDataSource source = {};
   source.type = kFlutterEngineAOTDataSourceTypeElfPath;
@@ -808,8 +808,8 @@ FlutterEngineAOTData Engine::LoadAotData(const std::string& bundle_path) const {
 
   FlutterEngineAOTData data;
   if (kSuccess != LibFlutterEngine->CreateAOTData(&source, &data)) {
-    spdlog::critical("({}) Failed to load AOT data from: {}", m_index,
-                     aot_data_path.c_str());
+    ihs::log::critical("({}) Failed to load AOT data from: {}", m_index,
+                       aot_data_path.c_str());
     return nullptr;
   }
   return data;
@@ -819,8 +819,9 @@ void Engine::OnFlutterPlatformMessage(
     const FlutterPlatformMessage* engine_message,
     void* user_data) {
   if (engine_message->struct_size != sizeof(FlutterPlatformMessage)) {
-    spdlog::error("Invalid message size received. Expected: {} but received {}",
-                  sizeof(FlutterPlatformMessage), engine_message->struct_size);
+    ihs::log::error(
+        "Invalid message size received. Expected: {} but received {}",
+        sizeof(FlutterPlatformMessage), engine_message->struct_size);
     return;
   }
 
@@ -834,7 +835,7 @@ void Engine::OnFlutterPlatformMessage(
 #if DEBUG_PLATFORM_MESSAGES
   std::stringstream ss;
   ss << Hexdump(engine_message->message, engine_message->message_size);
-  spdlog::debug("Channel: \"{}\"\n{}", engine_message->channel, ss.str());
+  ihs::log::debug("Channel: \"{}\"\n{}", engine_message->channel, ss.str());
 #endif
 
   engine_state->message_dispatcher->HandleMessage(
@@ -845,12 +846,12 @@ void Engine::OnFlutterPlatformMessage(
        .response_handle = engine_message->response_handle},
       [view] {
         if (view) {
-          SPDLOG_TRACE("input_block_cb");
+          IHS_TRACE("input_block_cb");
         }
       },
       [view] {
         if (view) {
-          SPDLOG_TRACE("input_unblock_cb");
+          IHS_TRACE("input_unblock_cb");
         }
       });
 }
@@ -858,7 +859,7 @@ void Engine::OnFlutterPlatformMessage(
 void Engine::onLogMessageCallback(const char* tag,
                                   const char* message,
                                   void* /* user_data */) {
-  spdlog::info("{}: {}", tag, message);
+  ihs::log::info("{}: {}", tag, message);
 
 #if ENABLE_DLT
   // Route the Flutter engine's message to the DLT bridge under a dedicated
@@ -887,7 +888,7 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
       static_cast<FlutterDesktopEngineState*>(user_data);
 
   auto* accessibility_tree = engine_state->accessibility_tree;
-  SPDLOG_TRACE(
+  IHS_TRACE(
       "[onSemanticsUpdateCallback] struct_size: {}, node_count: {} "
       "custom_action_count: {}",
       update->struct_size, update->node_count, update->custom_action_count);

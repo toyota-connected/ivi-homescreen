@@ -72,8 +72,9 @@ std::string ResolveOutputDir() {
   }
   std::string dir = std::string(xdg) + "/" + kApplicationName;
   if (::mkdir(dir.c_str(), 0700) != 0 && errno != EEXIST) {
-    spdlog::warn("[DrmCapture] mkdir({}): {}; falling back to /tmp (less safe)",
-                 dir, std::strerror(errno));
+    ihs::log::warn(
+        "[DrmCapture] mkdir({}): {}; falling back to /tmp (less safe)", dir,
+        std::strerror(errno));
     return "/tmp";
   }
   return dir;
@@ -87,7 +88,7 @@ std::unique_ptr<DrmCapture> DrmCapture::Create() {
     return nullptr;
   }
   std::call_once(g_installed, &InstallHandler);
-  spdlog::info(
+  ihs::log::info(
       "[DrmCapture] SIGUSR1 capture armed; "
       "kill -USR1 {} drops <dir>/{}-snapshot-<ms>.png",
       ::getpid(), kApplicationName);
@@ -117,7 +118,7 @@ void DrmCapture::MaybeCapture(const drm::Device& dev,
   // defense.
   struct stat st{};
   if (::lstat(path.c_str(), &st) == 0) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCapture] refusing to write {}: path already exists "
         "(symlink-trap protection)",
         path);
@@ -126,16 +127,16 @@ void DrmCapture::MaybeCapture(const drm::Device& dev,
 
   auto img = drm::capture::snapshot(dev, crtc_id);
   if (!img) {
-    spdlog::warn("[DrmCapture] snapshot(crtc={}): {}", crtc_id,
-                 img.error().message());
+    ihs::log::warn("[DrmCapture] snapshot(crtc={}): {}", crtc_id,
+                   img.error().message());
     return;
   }
   if (auto r = drm::capture::write_png(*img, path); !r) {
-    spdlog::warn("[DrmCapture] write_png({}): {}", path, r.error().message());
+    ihs::log::warn("[DrmCapture] write_png({}): {}", path, r.error().message());
     return;
   }
-  spdlog::info("[DrmCapture] wrote {} ({}x{})", path, img->width(),
-               img->height());
+  ihs::log::info("[DrmCapture] wrote {} ({}x{})", path, img->width(),
+                 img->height());
 }
 
 }  // namespace homescreen

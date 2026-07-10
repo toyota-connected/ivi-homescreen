@@ -60,7 +60,7 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
     // clock.
     vsync_ = shell_display->GetVsyncProvider();
     if (vsync_ != nullptr && !vsync_->Usable()) {
-      spdlog::info(
+      ihs::log::info(
           "[WaylandEglBackend] wp_presentation unusable — vsync_callback "
           "disabled, falling back to engine wall-clock scheduler");
     }
@@ -307,7 +307,7 @@ void WaylandEglBackend::StopVsyncMonitor() {
   // metric the swap-interval setting moves: lower mean / fewer blocked swaps
   // means the rasterizer spent less time stalled in the swap.
   if (const auto& sw = swap_session_; sw.samples > 0) {
-    spdlog::info(
+    ihs::log::info(
         "[WaylandEglBackend] swap session: n={} mean={}us max={}us "
         "blocked(>2ms)={} ({:.1f}%)",
         sw.samples, (sw.sum_ns / sw.samples) / 1000, sw.max_ns / 1000,
@@ -370,7 +370,7 @@ void WaylandEglBackend::RecordSwapDuration(const uint64_t swap_ns) {
 
   // Flush a window every 60 swaps, mirroring the frame-interval profiler.
   if (auto& w = swap_profile_; w.samples >= 60) {
-    spdlog::info(
+    ihs::log::info(
         "[WaylandEglBackend] swap profile (n={}): mean={}us max={}us "
         "blocked(>2ms)={} ({:.1f}%)",
         w.samples, (w.sum_ns / w.samples) / 1000, w.max_ns / 1000, w.blocked,
@@ -388,7 +388,7 @@ void WaylandEglBackend::Resize(size_t /* index */,
       const auto result = flutter_engine->SetWindowSize(
           static_cast<size_t>(height), static_cast<size_t>(width));
       if (result != kSuccess) {
-        spdlog::error("Failed to set Flutter Engine Window Size");
+        ihs::log::error("Failed to set Flutter Engine Window Size");
       }
     }
     UpdateSize(width, height);
@@ -429,16 +429,15 @@ void WaylandEglBackend::CreateSurface(size_t /* index */,
     } else if (std::string_view(env) == "1") {
       swap_interval = 1;
     }
-    spdlog::info("[WaylandEglBackend] IVI_WL_SWAP_INTERVAL={} -> interval {}",
-                 env, swap_interval);
+    ihs::log::info("[WaylandEglBackend] IVI_WL_SWAP_INTERVAL={} -> interval {}",
+                   env, swap_interval);
   }
   MakeCurrent();
   if (eglSwapInterval(GetDisplay(), swap_interval) != EGL_TRUE) {
-    spdlog::warn("[WaylandEglBackend] eglSwapInterval({}) failed",
-                 swap_interval);
+    ihs::log::warn("[WaylandEglBackend] eglSwapInterval({}) failed",
+                   swap_interval);
   } else {
-    SPDLOG_DEBUG("[WaylandEglBackend] eglSwapInterval set to {}",
-                 swap_interval);
+    IHS_DEBUG("[WaylandEglBackend] eglSwapInterval set to {}", swap_interval);
   }
   ClearCurrent();
 }
@@ -450,7 +449,7 @@ int64_t WaylandEglBackend::AddTexture() {
   /// Create Texture
   GLuint texture_id;
   glGenTextures(1, &texture_id);
-  SPDLOG_DEBUG("RegisterExternalTexture: {}", texture_id);
+  IHS_DEBUG("RegisterExternalTexture: {}", texture_id);
 
   /// check for danglers
   for (const auto& it : m_texture_registry) {
@@ -478,11 +477,11 @@ int64_t WaylandEglBackend::RegisterExternalTexture(
   int64_t result = -1;
 
   if (texture_info->type == kFlutterDesktopPixelBufferTexture) {
-    spdlog::error("RegisterExternalTexture: Pixel Buffer not implemented yet");
+    ihs::log::error("RegisterExternalTexture: Pixel Buffer not implemented yet");
   } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
     auto surface_texture = texture_info->gpu_surface_config;
     if (surface_texture.type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
-      spdlog::error(
+      ihs::log::error(
           "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeGlTexture2D "
           "is only supported at this time");
       return result;
@@ -661,7 +660,7 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
                                        bool blend) {
   auto* baton = static_cast<StoreBaton*>(store->user_data);
   if (!baton) {
-    spdlog::error("WaylandEglBackend: present layer missing baton");
+    ihs::log::error("WaylandEglBackend: present layer missing baton");
     return;
   }
 
@@ -705,7 +704,7 @@ bool WaylandEglBackend::BlitBackingStoreToWindow(
     const FlutterBackingStore* store) {
   auto* baton = static_cast<StoreBaton*>(store->user_data);
   if (!baton) {
-    spdlog::error("WaylandEglBackend: present layer missing baton");
+    ihs::log::error("WaylandEglBackend: present layer missing baton");
     return false;
   }
   const GLsizei w = (baton->kind == StoreKind::Fbo) ? baton->fbo_store->Width()
@@ -742,7 +741,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
         // Only warn when *neither* is registered.
         std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
         if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
-          spdlog::warn(
+          ihs::log::warn(
               "EGL compositor: platform view {} has no "
               "registered subsurface or compositor surface",
               id);
@@ -824,7 +823,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
       if (composed.NeedsPluginComposite()) {
-        spdlog::debug(
+        ihs::log::debug(
             "EGL compositor: platform view {} has non-trivial mutations "
             "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); "
             "plugin OnPresent must apply them.",

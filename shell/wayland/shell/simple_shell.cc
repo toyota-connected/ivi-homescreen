@@ -71,11 +71,11 @@ bool SimpleShell::TryBindGlobal(wl_registry* registry,
   auto* raw = wl_registry_bind(
       registry, name, &sc::wl_simple_shell_traits::wl_iface(), bind_ver);
   if (!wl::SetupHandler(shell_, reinterpret_cast<wl_proxy*>(raw))) {
-    spdlog::error("[SimpleShell] failed to set up wl_simple_shell");
+    ihs::log::error("[SimpleShell] failed to set up wl_simple_shell");
     return false;
   }
   shell_.Get()->app_ = this;
-  spdlog::debug("[SimpleShell] bound wl_simple_shell v{}", bind_ver);
+  ihs::log::debug("[SimpleShell] bound wl_simple_shell v{}", bind_ver);
   return true;
 }
 
@@ -83,7 +83,7 @@ std::unique_ptr<ShellSurface> SimpleShell::CreateSurface(
     wl_surface* surface,
     const WindowConfig& config) {
   if (!shell_) {
-    spdlog::error("[SimpleShell] CreateSurface before wl_simple_shell bound");
+    ihs::log::error("[SimpleShell] CreateSurface before wl_simple_shell bound");
     return nullptr;
   }
   return std::make_unique<SimpleShellSurface>(*this, surface, config);
@@ -105,8 +105,8 @@ void SimpleShell::OnSimpleShellSurfaceId(wl_proxy* surface,
         return reinterpret_cast<wl_proxy*>(s->surface()) == surface;
       });
   if (it == surfaces_.end()) {
-    spdlog::debug("[SimpleShell] surface_id {} for unknown surface",
-                  surface_id);
+    ihs::log::debug("[SimpleShell] surface_id {} for unknown surface",
+                    surface_id);
     return;
   }
   SimpleShellSurface* s = *it;
@@ -119,8 +119,8 @@ void SimpleShell::OnSimpleShellSurfaceId(wl_proxy* surface,
   shell->SetZorder(surface_id, wl_fixed_from_double(0.5));
   shell->SetOpacity(surface_id, wl_fixed_from_double(1.0));
   shell->SetVisible(surface_id, /*visible=*/1);
-  spdlog::debug("[SimpleShell] surface_id {} laid out {}x{}", surface_id,
-                cfg.width, cfg.height);
+  ihs::log::debug("[SimpleShell] surface_id {} laid out {}x{}", surface_id,
+                  cfg.width, cfg.height);
 }
 
 }  // namespace ivi

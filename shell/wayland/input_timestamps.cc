@@ -64,13 +64,13 @@ bool InputTimestamps::TryBindGlobal(wl_registry* registry,
       registry, name, &itc::zwp_input_timestamps_manager_v1_traits::wl_iface(),
       bind_ver));
   if (raw == nullptr) {
-    spdlog::warn("[InputTimestamps] manager bind failed");
+    ihs::log::warn("[InputTimestamps] manager bind failed");
     return true;  // consumed (nobody else wants this global)
   }
   // The manager has no events; adopt without a listener.
   manager_.Attach(raw);
-  spdlog::debug("[InputTimestamps] bound zwp_input_timestamps_manager_v1 v{}",
-                bind_ver);
+  ihs::log::debug("[InputTimestamps] bound zwp_input_timestamps_manager_v1 v{}",
+                  bind_ver);
   // Registry global order vs. wl_seat.capabilities order is not guaranteed;
   // subscribe anything the seat already announced.
   if (pointer_ != nullptr) {
@@ -119,11 +119,11 @@ void InputTimestamps::Subscribe(wl::WlPtr<Subscription>& sub,
                               GetTouchTimestamps>(*manager_.Get(), device);
   const char* what = kind == Kind::kPointer ? "pointer" : "touch";
   if (!wl::SetupHandler(sub, raw)) {
-    spdlog::warn("[InputTimestamps] {} subscription failed", what);
+    ihs::log::warn("[InputTimestamps] {} subscription failed", what);
     return;
   }
   sub.Get()->slot_ = slot;
-  spdlog::debug("[InputTimestamps] subscribed {} timestamps", what);
+  ihs::log::debug("[InputTimestamps] subscribed {} timestamps", what);
 }
 
 uint64_t InputTimestamps::TakePointerTimeUs() {
@@ -151,7 +151,7 @@ uint64_t InputTimestamps::Take(Pending& pending) {
   if (ts_us > now_us + kMaxFutureUs || ts_us + kMaxAgeUs < now_us) {
     if (!clock_warned_) {
       clock_warned_ = true;
-      spdlog::warn(
+      ihs::log::warn(
           "[InputTimestamps] timestamp {} µs is not CLOCK_MONOTONIC-domain "
           "(now {} µs); falling back to arrival-time stamping",
           ts_us, now_us);

@@ -34,8 +34,6 @@
 
 #include "shutdown_flag.h"
 
-std::unique_ptr<Logging> gLogger;
-
 namespace {
 
 // Async-signal-safe: just flip the running flag. Everything else (logging,
@@ -146,7 +144,6 @@ void PublishIhsConfig(const std::vector<Configuration::Config>& configs) {
  * wayland, flutter
  */
 int main(const int argc, char** argv) {
-  gLogger = std::make_unique<Logging>();
   IHS_LOGGING_START("IHSC", "ivi-homescreen Flutter runtime");
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
@@ -176,13 +173,13 @@ int main(const int argc, char** argv) {
   // exit immediately. The test runner will then check if the crash was captured
   // successfully.
 
-  spdlog::info(
+  ihs::log::info(
       "Running crash handler integration test: triggering crash in 3 "
       "seconds...");
   std::this_thread::sleep_for(std::chrono::seconds(3));
 
   CrashHandler::trigger_crash();
-  spdlog::error(
+  ihs::log::error(
       "Crash handler integration test failed: trigger_crash() returned instead "
       "of crashing.");
   return 231;
@@ -235,7 +232,7 @@ int main(const int argc, char** argv) {
     }
     const backend::BackendDescriptor& active = reg.Active();
     if (!active.list_modes) {
-      spdlog::critical(
+      ihs::log::critical(
           "[main] the '{}' backend does not support --drm-list-modes",
           active.key);
       return EXIT_FAILURE;
@@ -261,7 +258,6 @@ int main(const int argc, char** argv) {
 
   IHS_LOGGING_FLUSH();
   IHS_LOGGING_STOP();
-  gLogger.reset();
 
 #if BUILD_CRASH_HANDLER
   (void)crash_handler.release();

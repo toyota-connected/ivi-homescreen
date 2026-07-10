@@ -84,7 +84,7 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                               GL_RENDERBUFFER, color_rb_msaa_);
   } else {
-    spdlog::warn(
+    ihs::log::warn(
         "EglFboBackingStore: BUILD_EGL_ENABLE_MULTISAMPLE set but no "
         "multisample renderbuffer support; dropping MSAA.");
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
@@ -122,7 +122,7 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
 
   const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error(
+    ihs::log::error(
         "EglFboBackingStore: framebuffer incomplete (0x{:x}) for {}x{}", status,
         width_, height_);
   }

@@ -93,8 +93,8 @@ std::shared_ptr<Backend> Backend::Create(
   const std::string key = ResolveKeyForConfig(registry, config);
   const backend::BackendDescriptor* descriptor = registry.Resolve(key);
   if (descriptor == nullptr) {
-    spdlog::critical("[FlutterView] no backend resolved for view (key='{}')",
-                     key);
+    ihs::log::critical("[FlutterView] no backend resolved for view (key='{}')",
+                       key);
     return nullptr;
   }
   return descriptor->make_backend(config, display.get());
@@ -106,9 +106,9 @@ FlutterView::FlutterView(Configuration::Config config,
     : m_display(display), m_config(std::move(config)), m_index(index) {
   m_backend = Backend::Create(m_config, display);
 
-  SPDLOG_DEBUG("Width: {}, Height: {}",
-               m_config.view.width.value_or(kDefaultViewWidth),
-               m_config.view.height.value_or(kDefaultViewHeight));
+  IHS_DEBUG("Width: {}, Height: {}",
+            m_config.view.width.value_or(kDefaultViewWidth),
+            m_config.view.height.value_or(kDefaultViewHeight));
 
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
   // Construct the WaylandWindow only when the active backend drives a Wayland
@@ -123,7 +123,7 @@ FlutterView::FlutterView(Configuration::Config config,
     // view per output (a bundle each) on Wayland, or the DRM backend for a
     // single engine spanning outputs.
     if (!m_config.view.additional_outputs.empty()) {
-      spdlog::warn(
+      ihs::log::warn(
           "[FlutterView] additional [[view.output]] entries are ignored: the "
           "Wayland backend drives one output per view. Use one view/bundle per "
           "output, or the drm-kms-egl backend for one engine across outputs.");
@@ -141,7 +141,7 @@ FlutterView::FlutterView(Configuration::Config config,
       if (const auto idx = wl->WlOutputIndexForName(*resolved)) {
         wl_output_index = *idx;
       } else {
-        spdlog::warn(
+        ihs::log::warn(
             "[FlutterView] resolved wl_output '{}' is not live; using "
             "wl_output_index {}",
             *resolved, wl_output_index);
@@ -334,7 +334,7 @@ void FlutterView::Initialize() {
   m_flutter_engine->Run(m_state->engine_state);
 
   if (!m_flutter_engine->IsRunning()) {
-    spdlog::critical("Failed to Run Engine");
+    ihs::log::critical("Failed to Run Engine");
     exit(EXIT_FAILURE);
   }
 
@@ -418,9 +418,9 @@ void FlutterView::Initialize() {
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
-  spdlog::info("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
-               width, height, display.width, display.height,
-               display.device_pixel_ratio);
+  ihs::log::info("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
+                 width, height, display.width, display.height,
+                 display.device_pixel_ratio);
 
   // Update for Binary Messenger
   m_state->engine_state->flutter_engine = m_flutter_engine->GetFlutterEngine();
@@ -455,8 +455,8 @@ void FlutterView::Initialize() {
   if (!handled_by_wayland) {
     const auto result = m_flutter_engine->SetWindowSize(
         static_cast<size_t>(height), static_cast<size_t>(width));
-    spdlog::info("[FlutterView] SendWindowMetrics {}x{} result={}", width,
-                 height, static_cast<int>(result));
+    ihs::log::info("[FlutterView] SendWindowMetrics {}x{} result={}", width,
+                   height, static_cast<int>(result));
 #if BUILD_BACKEND_SOFTWARE
     // Match the seat's pointer-clamp viewport to the rendered size so the
     // pointer (and the software cursor) share the framebuffer coordinate space,
@@ -481,13 +481,13 @@ void FlutterView::Initialize() {
     for (const auto& v : drm->AdditionalViews()) {
       const auto r = m_flutter_engine->AddView(v.view_id, v.width, v.height,
                                                pixel_ratio, /*display_id=*/0);
-      spdlog::info("[FlutterView] AddView id={} {}x{} result={}", v.view_id,
-                   v.width, v.height, static_cast<int>(r));
+      ihs::log::info("[FlutterView] AddView id={} {}x{} result={}", v.view_id,
+                     v.width, v.height, static_cast<int>(r));
     }
   }
 #endif
 
-  SPDLOG_DEBUG("({}) Engine running...", m_index);
+  IHS_DEBUG("({}) Engine running...", m_index);
 }
 
 void FlutterView::UpdateDisplayMetadata() const {
@@ -515,9 +515,9 @@ void FlutterView::UpdateDisplayMetadata() const {
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
-  spdlog::debug("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
-                width, height, display.width, display.height,
-                display.device_pixel_ratio);
+  ihs::log::debug("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
+                  width, height, display.width, display.height,
+                  display.device_pixel_ratio);
 #endif
 }
 
@@ -581,7 +581,7 @@ size_t FlutterView::CreateSurface(void* h_module,
   const auto tEnd = std::chrono::steady_clock::now();
   const auto tDiff =
       std::chrono::duration<double, std::milli>(tEnd - tStart).count();
-  spdlog::info("comp surf init: {}", static_cast<float>(tDiff));
+  ihs::log::info("comp surf init: {}", static_cast<float>(tDiff));
 
   return static_cast<size_t>(index);
 }
@@ -621,8 +621,8 @@ void FlutterView::SetRegion(
   const auto base_region = wl_compositor_create_region(compositor);
 
   for (auto const& region : regions) {
-    SPDLOG_DEBUG("Set Region: type: {}, x: {}, y: {}, width: {}, height: {}",
-                 type, region.x, region.y, region.width, region.height);
+    IHS_DEBUG("Set Region: type: {}, x: {}, y: {}, width: {}, height: {}", type,
+              region.x, region.y, region.width, region.height);
     wl_region_add(base_region, region.x, region.y, region.width, region.height);
   }
 

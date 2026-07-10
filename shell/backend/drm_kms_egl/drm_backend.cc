@@ -180,7 +180,7 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
                                          ? std::to_string(*e.connector_id)
                                          : std::string("<unspecified>");
           const bool ours = e.connector_id && *e.connector_id == our_connector;
-          spdlog::info(
+          ihs::log::info(
               "[DrmBackend] hotplug: devnode={} connector_id={}{}",
               e.devnode.empty() ? std::string_view{"<unknown>"} : e.devnode,
               id_str, ours ? " (active connector)" : "");
@@ -223,7 +223,7 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   // their own AtomicRequests on the seat dispatch thread.
 #if HAVE_DRM_CURSOR
   if (backend->cfg_.disable_cursor) {
-    spdlog::info("[DrmBackend] HW cursor disabled (--disable-cursor)");
+    ihs::log::info("[DrmBackend] HW cursor disabled (--disable-cursor)");
   } else {
     backend->cursor_ = homescreen::DrmCursor::Create(
         *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
@@ -267,7 +267,7 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   // starves the legacy page flip on pointer motion. Drop the cursor on
   // that driver (other drivers keep the self-commit path).
   if (backend->cursor_ && backend->resolved_->driver_name == "nvidia-drm") {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmBackend] nvidia-drm without compositor: HW cursor disabled (no "
         "atomic commit to stage into)");
     backend->cursor_.reset();
@@ -286,7 +286,7 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
 #endif
     if (!hw_cursor_active && !backend->cfg_.disable_cursor) {
       backend->gl_cursor_ = std::make_unique<homescreen::GlCursor>();
-      spdlog::info(
+      ihs::log::info(
           "[DrmBackend] no HW cursor plane active — using GL-composited "
           "cursor");
     }
@@ -334,16 +334,16 @@ void InstallDrmCxxLogSink() {
     drm::set_log_sink([](const drm::LogLevel level, const std::string_view m) {
       switch (level) {
         case drm::LogLevel::Error:
-          spdlog::error("[drm-cxx] {}", m);
+          ihs::log::error("[drm-cxx] {}", m);
           break;
         case drm::LogLevel::Warn:
-          spdlog::warn("[drm-cxx] {}", m);
+          ihs::log::warn("[drm-cxx] {}", m);
           break;
         case drm::LogLevel::Info:
-          spdlog::info("[drm-cxx] {}", m);
+          ihs::log::info("[drm-cxx] {}", m);
           break;
         case drm::LogLevel::Debug:
-          spdlog::debug("[drm-cxx] {}", m);
+          ihs::log::debug("[drm-cxx] {}", m);
           break;
         case drm::LogLevel::Silent:
           break;
@@ -447,22 +447,22 @@ bool DrmBackend::InitDrm() {
   // backend neither opens the device nor takes master -- one card, one master,
   // shared by every view that scans out to it.
   if (drm_dev_ == nullptr) {
-    spdlog::error("[DrmBackend] no shared DRM device provided");
+    ihs::log::error("[DrmBackend] no shared DRM device provided");
     return false;
   }
 
   if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) !=
       0) {
-    spdlog::warn("[DrmBackend] DRM_CLIENT_CAP_UNIVERSAL_PLANES unsupported");
+    ihs::log::warn("[DrmBackend] DRM_CLIENT_CAP_UNIVERSAL_PLANES unsupported");
   }
   if (drmSetClientCap(drm_dev_->fd(), DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
-    spdlog::warn("[DrmBackend] DRM_CLIENT_CAP_ATOMIC unsupported");
+    ihs::log::warn("[DrmBackend] DRM_CLIENT_CAP_ATOMIC unsupported");
   }
 
   drmModeRes* res = drmModeGetResources(drm_dev_->fd());
   if (!res) {
-    spdlog::error("[DrmBackend] drmModeGetResources failed: {}",
-                  std::strerror(errno));
+    ihs::log::error("[DrmBackend] drmModeGetResources failed: {}",
+                    std::strerror(errno));
     return false;
   }
 
@@ -520,12 +520,12 @@ bool DrmBackend::InitDrm() {
       }
     }
     if (!connector) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmBackend] --drm-connector={} not found among eligible "
           "connectors; available:",
           want);
       for (drmModeConnector* c : eligible) {
-        spdlog::error("[DrmBackend]   {}", connector_name(c));
+        ihs::log::error("[DrmBackend]   {}", connector_name(c));
       }
       for (drmModeConnector* c : eligible) {
         drmModeFreeConnector(c);
@@ -553,7 +553,7 @@ bool DrmBackend::InitDrm() {
   }
 
   if (!connector) {
-    spdlog::error("[DrmBackend] no connected connector found");
+    ihs::log::error("[DrmBackend] no connected connector found");
     drmModeFreeResources(res);
     return false;
   }
@@ -562,8 +562,8 @@ bool DrmBackend::InitDrm() {
       drmModeFreeConnector(c);
     }
   }
-  spdlog::info("[DrmBackend] picked connector {} via {}",
-               connector_name(connector), pick_reason);
+  ihs::log::info("[DrmBackend] picked connector {} via {}",
+                 connector_name(connector), pick_reason);
   connector_id_ = connector->connector_id;
 
   // Default: drive the display at its preferred/native mode. Picking a
@@ -614,7 +614,7 @@ bool DrmBackend::InitDrm() {
       }
     }
     if (!ok) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmBackend] --drm-mode='{}' is not in '<W>x<H>@<R>' form "
           "(e.g. 1920x1080@120)",
           *cfg_.mode_spec);
@@ -631,7 +631,7 @@ bool DrmBackend::InitDrm() {
       }
     }
     if (mode_.clock == 0) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmBackend] --drm-mode='{}' not available on connector {}; run "
           "--drm-list-modes for the supported list",
           *cfg_.mode_spec, connector_name(connector));
@@ -639,8 +639,8 @@ bool DrmBackend::InitDrm() {
       drmModeFreeResources(res);
       return false;
     }
-    spdlog::info("[DrmBackend] mode override: {}x{}@{}Hz (--drm-mode)",
-                 mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
+    ihs::log::info("[DrmBackend] mode override: {}x{}@{}Hz (--drm-mode)",
+                   mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
   } else {
     for (int i = 0; i < connector->count_modes; ++i) {
       const auto& m = connector->modes[i];
@@ -696,8 +696,8 @@ bool DrmBackend::InitDrm() {
   }
 
   if (!crtc_id_) {
-    spdlog::error("[DrmBackend] no CRTC available for connector {}",
-                  connector_id_);
+    ihs::log::error("[DrmBackend] no CRTC available for connector {}",
+                    connector_id_);
     drmModeFreeConnector(connector);
     drmModeFreeResources(res);
     return false;
@@ -706,11 +706,11 @@ bool DrmBackend::InitDrm() {
   saved_crtc_ = drmModeGetCrtc(drm_dev_->fd(), crtc_id_);
 
   if (fb_w_ == mode_.hdisplay && fb_h_ == mode_.vdisplay) {
-    spdlog::info("[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz",
-                 connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay,
-                 mode_.vrefresh);
+    ihs::log::info("[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz",
+                   connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay,
+                   mode_.vrefresh);
   } else {
-    spdlog::info(
+    ihs::log::info(
         "[DrmBackend] connector={} crtc={} mode={}x{}@{}Hz fb={}x{} "
         "(letterboxed)",
         connector_id_, crtc_id_, mode_.hdisplay, mode_.vdisplay, mode_.vrefresh,
@@ -792,7 +792,7 @@ bool DrmBackend::InitGbm() {
   // formats we know how to drive; surface that clearly instead of letting
   // gbm_surface_create fail with a generic nullptr.
   if (resolved_->primary_format == 0) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmBackend] primary plane advertises no supported format "
         "(XRGB8888/XBGR8888/ARGB8888/ABGR8888/RGB565). Override with "
         "--drm-primary-format if you know what's there.");
@@ -801,7 +801,7 @@ bool DrmBackend::InitGbm() {
 
   gbm_device_ = gbm_create_device(drm_dev_->fd());
   if (!gbm_device_) {
-    spdlog::error("[DrmBackend] gbm_create_device failed");
+    ihs::log::error("[DrmBackend] gbm_create_device failed");
     return false;
   }
 
@@ -818,13 +818,13 @@ bool DrmBackend::InitGbm() {
           gbm_device_, fb_w_, fb_h_, resolved_->primary_format,
           modifiers.data(), static_cast<unsigned>(modifiers.size()));
       if (gbm_surface_) {
-        spdlog::info(
+        ihs::log::info(
             "[DrmBackend] gbm_surface_create_with_modifiers OK "
             "(format={}, {} IN_FORMATS modifiers)",
             drm::format_name(resolved_->primary_format), modifiers.size());
         return true;
       }
-      spdlog::debug(
+      ihs::log::debug(
           "[DrmBackend] gbm_surface_create_with_modifiers failed "
           "(errno={}); falling back to legacy gbm_surface_create",
           errno);
@@ -835,12 +835,12 @@ bool DrmBackend::InitGbm() {
       gbm_surface_create(gbm_device_, fb_w_, fb_h_, resolved_->primary_format,
                          GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
   if (!gbm_surface_) {
-    spdlog::error("[DrmBackend] gbm_surface_create(format={}) failed",
-                  drm::format_name(resolved_->primary_format));
+    ihs::log::error("[DrmBackend] gbm_surface_create(format={}) failed",
+                    drm::format_name(resolved_->primary_format));
     return false;
   }
-  spdlog::info("[DrmBackend] gbm_surface_create OK (format={}, legacy path)",
-               drm::format_name(resolved_->primary_format));
+  ihs::log::info("[DrmBackend] gbm_surface_create OK (format={}, legacy path)",
+                 drm::format_name(resolved_->primary_format));
   return true;
 }
 
@@ -856,20 +856,20 @@ bool DrmBackend::InitEgl() {
         eglGetDisplay(reinterpret_cast<EGLNativeDisplayType>(gbm_device_));
   }
   if (egl_display_ == EGL_NO_DISPLAY) {
-    spdlog::error("[DrmBackend] eglGetPlatformDisplay failed");
+    ihs::log::error("[DrmBackend] eglGetPlatformDisplay failed");
     return false;
   }
 
   EGLint major = 0;
   EGLint minor = 0;
   if (!eglInitialize(egl_display_, &major, &minor)) {
-    spdlog::error("[DrmBackend] eglInitialize failed: 0x{:x}", eglGetError());
+    ihs::log::error("[DrmBackend] eglInitialize failed: 0x{:x}", eglGetError());
     return false;
   }
-  SPDLOG_DEBUG("[DrmBackend] EGL {}.{}", major, minor);
+  IHS_DEBUG("[DrmBackend] EGL {}.{}", major, minor);
 
   if (!eglBindAPI(EGL_OPENGL_ES_API)) {
-    spdlog::error("[DrmBackend] eglBindAPI failed");
+    ihs::log::error("[DrmBackend] eglBindAPI failed");
     return false;
   }
 
@@ -882,15 +882,15 @@ bool DrmBackend::InitEgl() {
   EGLint num_configs = 0;
   if (!eglChooseConfig(egl_display_, egl_attrs, nullptr, 0, &num_configs) ||
       num_configs < 1) {
-    spdlog::error("[DrmBackend] eglChooseConfig (count) failed: 0x{:x}",
-                  eglGetError());
+    ihs::log::error("[DrmBackend] eglChooseConfig (count) failed: 0x{:x}",
+                    eglGetError());
     return false;
   }
   std::vector<EGLConfig> configs(static_cast<size_t>(num_configs));
   if (!eglChooseConfig(egl_display_, egl_attrs, configs.data(), num_configs,
                        &num_configs)) {
-    spdlog::error("[DrmBackend] eglChooseConfig (fill) failed: 0x{:x}",
-                  eglGetError());
+    ihs::log::error("[DrmBackend] eglChooseConfig (fill) failed: 0x{:x}",
+                    eglGetError());
     return false;
   }
 
@@ -901,10 +901,10 @@ bool DrmBackend::InitEgl() {
   };
 
   if (cfg_.debug_backend) {
-    spdlog::info("[DrmBackend] {} candidate EGL configs", num_configs);
+    ihs::log::info("[DrmBackend] {} candidate EGL configs", num_configs);
     for (EGLint i = 0; i < num_configs; ++i) {
       EGLConfig c = configs[static_cast<size_t>(i)];
-      spdlog::info(
+      ihs::log::info(
           "[DrmBackend]   [{}] visual=0x{:08x} R{}G{}B{}A{} depth={} "
           "stencil={} samples={} caveat=0x{:x} renderable=0x{:x} "
           "surface=0x{:x} conformant=0x{:x}",
@@ -975,7 +975,7 @@ bool DrmBackend::InitEgl() {
     }
   }
   if (best_idx < 0) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmBackend] no EGL config matches GBM format 0x{:x} (checked {} "
         "configs)",
         resolved_->primary_format, num_configs);
@@ -983,15 +983,15 @@ bool DrmBackend::InitEgl() {
   }
   egl_config_ = configs[static_cast<size_t>(best_idx)];
   if (cfg_.debug_backend) {
-    spdlog::info("[DrmBackend] selected config [{}] (compositor={})", best_idx,
-                 BUILD_COMPOSITOR ? "on" : "off");
+    ihs::log::info("[DrmBackend] selected config [{}] (compositor={})",
+                   best_idx, BUILD_COMPOSITOR ? "on" : "off");
   }
 
   egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT,
                                   kEsContextAttribs.data());
   if (egl_context_ == EGL_NO_CONTEXT) {
-    spdlog::error("[DrmBackend] eglCreateContext failed: 0x{:x}",
-                  eglGetError());
+    ihs::log::error("[DrmBackend] eglCreateContext failed: 0x{:x}",
+                    eglGetError());
     return false;
   }
   egl_resource_context_ = eglCreateContext(
@@ -1003,8 +1003,8 @@ bool DrmBackend::InitEgl() {
       egl_display_, egl_config_,
       reinterpret_cast<EGLNativeWindowType>(gbm_surface_), nullptr);
   if (egl_surface_ == EGL_NO_SURFACE) {
-    spdlog::error("[DrmBackend] eglCreateWindowSurface failed: 0x{:x}",
-                  eglGetError());
+    ihs::log::error("[DrmBackend] eglCreateWindowSurface failed: 0x{:x}",
+                    eglGetError());
     return false;
   }
   return true;
@@ -1043,7 +1043,7 @@ uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
     if (drmModeAddFB2WithModifiers(drm_dev_->fd(), width, height, format,
                                    handles, pitches, offsets, modifiers, &fb_id,
                                    DRM_MODE_FB_MODIFIERS) != 0) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmBackend] drmModeAddFB2WithModifiers({}x{}, fmt=0x{:08x}, "
           "mod=0x{:016x}, planes={}): {}",
           width, height, format, modifier, plane_count, std::strerror(errno));
@@ -1051,12 +1051,13 @@ uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
     }
   } else if (drmModeAddFB2(drm_dev_->fd(), width, height, format, handles,
                            pitches, offsets, &fb_id, 0) != 0) {
-    spdlog::error("[DrmBackend] drmModeAddFB2({}x{}, fmt=0x{:08x}, linear): {}",
-                  width, height, format, std::strerror(errno));
+    ihs::log::error(
+        "[DrmBackend] drmModeAddFB2({}x{}, fmt=0x{:08x}, linear): {}", width,
+        height, format, std::strerror(errno));
     return 0;
   }
   if (cfg_.debug_backend) {
-    spdlog::debug(
+    ihs::log::debug(
         "[DrmBackend] AddFb fb_id={} {}x{} fmt=0x{:08x} mod=0x{:016x} "
         "planes={} ({})",
         fb_id, width, height, format, modifier, plane_count,
@@ -1075,7 +1076,7 @@ bool DrmBackend::SetInitialMode() {
   // memcpy — rejected in favor of failing loudly so the user sees the
   // plane-compositor regression that pushed us here.
   if (fb_w_ != mode_.hdisplay || fb_h_ != mode_.vdisplay) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmBackend] legacy modeset reached with framed FB ({}x{} on "
         "{}x{} mode); atomic plane-compositor must succeed for framing. "
         "Remove view.width/view.height from config to run full-screen.",
@@ -1084,7 +1085,7 @@ bool DrmBackend::SetInitialMode() {
   }
   if (drmModeSetCrtc(drm_dev_->fd(), crtc_id_, current_fb_, 0, 0,
                      &connector_id_, 1, &mode_) != 0) {
-    spdlog::error("[DrmBackend] drmModeSetCrtc: {}", std::strerror(errno));
+    ihs::log::error("[DrmBackend] drmModeSetCrtc: {}", std::strerror(errno));
     return false;
   }
   mode_set_ = true;
@@ -1128,7 +1129,7 @@ void DrmBackend::RecordFlipComplete() {
   if (flip_submit_ns_ != 0) {
     [[maybe_unused]] const double latency_ms =
         static_cast<double>(now - flip_submit_ns_) / 1e6;
-    SPDLOG_DEBUG("[DrmBackend] flip latency: {:.2f} ms", latency_ms);
+    IHS_DEBUG("[DrmBackend] flip latency: {:.2f} ms", latency_ms);
     flip_submit_ns_ = 0;
   }
 
@@ -1138,8 +1139,8 @@ void DrmBackend::RecordFlipComplete() {
   }
   if (const double elapsed_s = static_cast<double>(now - fps_epoch_ns_) / 1e9;
       elapsed_s >= 1.0) {
-    spdlog::info("[DrmBackend] FPS: {:.1f} ({} frames / {:.2f}s)",
-                 frame_count_ / elapsed_s, frame_count_, elapsed_s);
+    ihs::log::info("[DrmBackend] FPS: {:.1f} ({} frames / {:.2f}s)",
+                   frame_count_ / elapsed_s, frame_count_, elapsed_s);
     frame_count_ = 0;
     fps_epoch_ns_ = now;
   }
@@ -1208,7 +1209,7 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
 }
 
 void DrmBackend::OnSessionPaused() {
-  spdlog::info("[DrmBackend] session paused (VT switch-out)");
+  ihs::log::info("[DrmBackend] session paused (VT switch-out)");
   session_paused_.store(true, std::memory_order_release);
 #if BUILD_COMPOSITOR
   if (compositor_) {
@@ -1227,13 +1228,13 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
   // libseat backend's behavior — log loudly because the rest of the
   // backend assumes per-fd state survived the round trip.
   if (drm_dev_ && new_fd != drm_dev_->fd()) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmBackend] resume: fd changed ({} -> {}) — preserve-fd contract "
         "violated; per-fd state (FB ids, EGL/GBM, property cache) is stale "
         "and the next commit will likely fail",
         drm_dev_->fd(), new_fd);
   }
-  spdlog::info("[DrmBackend] session resumed (VT switch-in, fd={})", new_fd);
+  ihs::log::info("[DrmBackend] session resumed (VT switch-in, fd={})", new_fd);
   session_paused_.store(false, std::memory_order_release);
 #if BUILD_COMPOSITOR
   if (compositor_) {
@@ -1250,7 +1251,7 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
 
   auto* engine = engine_handle_.load(std::memory_order_acquire);
   if (engine == nullptr) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmBackend] resume: no engine handle yet; redraw skipped (UI must "
         "tick on its own)");
     return;
@@ -1265,14 +1266,14 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
   //    ScheduleFrame to prompt Flutter into a new frame request, which
   //    our reset kick will deliver as the first-baton inline-fire.
   if (vsync_.DeliverParkedBaton()) {
-    spdlog::info("[DrmBackend] resume: drained pending baton");
+    ihs::log::info("[DrmBackend] resume: drained pending baton");
   } else {
     const FlutterEngineResult r = LibFlutterEngine->ScheduleFrame(engine);
     if (r != kSuccess) {
-      spdlog::warn("[DrmBackend] resume: ScheduleFrame failed (rc={})",
-                   static_cast<int>(r));
+      ihs::log::warn("[DrmBackend] resume: ScheduleFrame failed (rc={})",
+                     static_cast<int>(r));
     } else {
-      spdlog::info("[DrmBackend] resume: ScheduleFrame requested (idle UI)");
+      ihs::log::info("[DrmBackend] resume: ScheduleFrame requested (idle UI)");
     }
   }
 }
@@ -1309,7 +1310,7 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
   static std::atomic<uint64_t> flip_count{0};
   const uint64_t n = flip_count.fetch_add(1, std::memory_order_relaxed) + 1;
   if (flip_trace || (n % 60) == 0) {
-    spdlog::info("[DrmBackend] flip #{} handled (asio monitor)", n);
+    ihs::log::info("[DrmBackend] flip #{} handled (asio monitor)", n);
   }
   // Route the completion to the exact committer: the backend for a legacy
   // Present() page flip, or a compositor for a scene/atomic commit — each
@@ -1377,7 +1378,7 @@ void DrmBackend::StopVsyncMonitor() {
       elapsed_ms += kPollSliceMs;
     }
     if (flip_pending_.load(std::memory_order_acquire)) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmBackend] StopVsyncMonitor: flip event never arrived, "
           "force-clearing flip_pending_ to unblock destructors");
       flip_pending_.store(false, std::memory_order_release);
@@ -1421,7 +1422,7 @@ bool DrmBackend::WaitForPendingFlip() const {
   while (flip_pending_.load(std::memory_order_acquire)) {
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmBackend] WaitForPendingFlip: no flip completion after 100ms; "
           "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
@@ -1481,13 +1482,13 @@ bool DrmBackend::Present() {
   }
 
   if (!eglSwapBuffers(egl_display_, egl_surface_)) {
-    spdlog::error("[DrmBackend] eglSwapBuffers: 0x{:x}", eglGetError());
+    ihs::log::error("[DrmBackend] eglSwapBuffers: 0x{:x}", eglGetError());
     return false;
   }
 
   gbm_bo* next_bo = gbm_surface_lock_front_buffer(gbm_surface_);
   if (!next_bo) {
-    spdlog::error("[DrmBackend] gbm_surface_lock_front_buffer failed");
+    ihs::log::error("[DrmBackend] gbm_surface_lock_front_buffer failed");
     return false;
   }
 
@@ -1528,7 +1529,7 @@ bool DrmBackend::Present() {
   if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
                       DRM_MODE_PAGE_FLIP_EVENT,
                       static_cast<IFlipSink*>(this)) != 0) {
-    spdlog::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
+    ihs::log::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
     drmModeRmFB(drm_dev_->fd(), next_fb);
     gbm_surface_release_buffer(gbm_surface_, next_bo);
     return false;
@@ -1656,8 +1657,8 @@ bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
                                       DrmOutputContext& out) {
   drmModeRes* res = drmModeGetResources(drm_dev_->fd());
   if (res == nullptr) {
-    spdlog::error("[DrmBackend] drmModeGetResources failed: {}",
-                  std::strerror(errno));
+    ihs::log::error("[DrmBackend] drmModeGetResources failed: {}",
+                    std::strerror(errno));
     return false;
   }
   const auto name_of = [](const drmModeConnector* c) {
@@ -1679,7 +1680,7 @@ bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
     }
   }
   if (connector == nullptr) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmBackend] additional output connector '{}' not found or not "
         "connected",
         connector_name);
@@ -1724,14 +1725,14 @@ bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
   drmModeFreeResources(res);
 
   if (crtc_id == 0) {
-    spdlog::error("[DrmBackend] no free CRTC for additional output '{}'",
-                  connector_name);
+    ihs::log::error("[DrmBackend] no free CRTC for additional output '{}'",
+                    connector_name);
     return false;
   }
   used_crtcs_.push_back(crtc_id);
   out = DrmOutputContext(crtc_id, crtc_index, connector_id, mode, mode.hdisplay,
                          mode.vdisplay, &resolved());
-  spdlog::info(
+  ihs::log::info(
       "[DrmBackend] additional output '{}': connector={} crtc={} mode={}x{}@{}",
       connector_name, connector_id, crtc_id, mode.hdisplay, mode.vdisplay,
       mode.vrefresh);

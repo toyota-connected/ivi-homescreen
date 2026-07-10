@@ -72,7 +72,7 @@ GLuint CompileShader(const GLenum type, const char* src) {
   if (ok != GL_TRUE) {
     char log[512] = {};
     glGetShaderInfoLog(sh, sizeof(log), nullptr, log);
-    spdlog::error("[GlCursor] shader compile failed: {}", log);
+    ihs::log::error("[GlCursor] shader compile failed: {}", log);
     glDeleteShader(sh);
     return 0;
   }
@@ -213,7 +213,7 @@ bool GlCursor::EnsureGl() {
   if (linked != GL_TRUE) {
     char log[512] = {};
     glGetProgramInfoLog(program_, sizeof(log), nullptr, log);
-    spdlog::error("[GlCursor] program link failed: {}", log);
+    ihs::log::error("[GlCursor] program link failed: {}", log);
     glDeleteProgram(program_);
     program_ = 0;
     gl_failed_ = true;
@@ -226,7 +226,7 @@ bool GlCursor::EnsureGl() {
   if (a_pos_ < 0 || a_uv_ < 0 || u_tex_ < 0) {
     // A driver that dropped one of these would turn the GLuint casts below
     // into out-of-range attribute indices; bail instead.
-    spdlog::error("[GlCursor] shader attribute/uniform location missing");
+    ihs::log::error("[GlCursor] shader attribute/uniform location missing");
     glDeleteProgram(program_);
     program_ = 0;
     gl_failed_ = true;

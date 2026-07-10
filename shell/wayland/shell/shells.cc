@@ -76,7 +76,7 @@ std::vector<std::unique_ptr<WaylandShell>> WaylandShell::Create(
 #endif
 
   if (shells.empty()) {
-    spdlog::warn("[WaylandShell] no shell matched selection '{}'", sel);
+    ihs::log::warn("[WaylandShell] no shell matched selection '{}'", sel);
   }
   return shells;
 }

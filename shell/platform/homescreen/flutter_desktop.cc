@@ -40,13 +40,13 @@ static_assert(FLUTTER_ENGINE_VERSION == 1, "Engine version does not match");
 std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter> LoadAotData(
     const std::filesystem::path& aot_data_path) {
   if (aot_data_path.empty()) {
-    spdlog::error(
+    ihs::log::error(
         "Attempted to load AOT data, but no aot_data_path was provided.");
     return nullptr;
   }
   const std::string path_string = aot_data_path.string();
   if (!std::filesystem::exists(aot_data_path)) {
-    spdlog::error("Can't load AOT data from {}; no such file.", path_string);
+    ihs::log::error("Can't load AOT data from {}; no such file.", path_string);
     return nullptr;
   }
   FlutterEngineAOTDataSource source = {};
@@ -54,7 +54,7 @@ std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter> LoadAotData(
   source.elf_path = path_string.c_str();
   FlutterEngineAOTData data = nullptr;
   if (LibFlutterEngine->CreateAOTData(&source, &data) != kSuccess) {
-    spdlog::error("Failed to load AOT data from: {}", path_string);
+    ihs::log::error("Failed to load AOT data from: {}", path_string);
     return nullptr;
   }
   return std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>(data);
@@ -173,7 +173,7 @@ std::future<bool> PostMessengerSendWithReply(
                LibFlutterEngine->PlatformMessageCreateResponseHandle(
                    flutter_engine, reply, user_data, &response_handle);
            if (result != kSuccess) {
-             spdlog::error("Failed to create response handle");
+             ihs::log::error("Failed to create response handle");
              promise->set_value(false);
              return;
            }
@@ -232,7 +232,7 @@ bool FlutterDesktopMessengerSendWithReply(FlutterDesktopMessengerRef messenger,
               messenger->GetEngine()->flutter_engine, reply, user_data,
               &response_handle);
       if (result != kSuccess) {
-        spdlog::error("Failed to create response handle");
+        ihs::log::error("Failed to create response handle");
         return false;
       }
     }
@@ -329,7 +329,7 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
   if (texture_info->type == kFlutterDesktopPixelBufferTexture) {
     const auto& pb_config = texture_info->pixel_buffer_config;
     if (!pb_config.callback) {
-      spdlog::error(
+      ihs::log::error(
           "RegisterExternalTexture: pixel_buffer_config.callback is null");
       return result;
     }
@@ -355,8 +355,8 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
 
     texture_registrar->texture_registry[id] = std::move(desc);
 
-    SPDLOG_TRACE("RegisterExternalTexture (pixel-buffer): {}, {}",
-                 fmt::ptr(texture_registrar->engine->flutter_engine), id);
+    IHS_TRACE("RegisterExternalTexture (pixel-buffer): {}, {}",
+              fmt::ptr(texture_registrar->engine->flutter_engine), id);
     if (kSuccess == LibFlutterEngine->RegisterExternalTexture(
                         texture_registrar->engine->flutter_engine, id)) {
       result = id;
@@ -366,7 +366,7 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
   } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
     const auto& gpu_surface_config = texture_info->gpu_surface_config;
     if (gpu_surface_config.type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
-      spdlog::error(
+      ihs::log::error(
           "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeGlTexture2D "
           "is only supported at this time");
       return result;
@@ -377,13 +377,13 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
         gpu_surface_config.callback(0, 0, gpu_surface_config.user_data);
 
     if (!descriptor->handle) {
-      spdlog::critical(
+      ihs::log::critical(
           "Descriptor handle is not set.  Assign the address of the texture_id "
           "variable.");
       return result;
     }
     if (descriptor->struct_size != sizeof(FlutterDesktopGpuSurfaceDescriptor)) {
-      spdlog::critical(
+      ihs::log::critical(
           "Descriptor struct_size is not valid.  Set struct_size to "
           "sizeof(FlutterDesktopGpuSurfaceTextureConfig)"
           "is another problem.");
@@ -412,15 +412,15 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     val->target = GL_TEXTURE_2D;
     val->format = GL_RGBA8;
 
-    SPDLOG_TRACE("RegisterExternalTexture: {}, {}",
-                 fmt::ptr(texture_registrar->engine->flutter_engine), id);
+    IHS_TRACE("RegisterExternalTexture: {}, {}",
+              fmt::ptr(texture_registrar->engine->flutter_engine), id);
     if (kSuccess == LibFlutterEngine->RegisterExternalTexture(
                         texture_registrar->engine->flutter_engine, id)) {
       result = id;
     }
   }
   if (result < 0) {
-    spdlog::error("Failed to Register Texture");
+    ihs::log::error("Failed to Register Texture");
   }
   return result;
 }
@@ -466,7 +466,7 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
         glDeleteTextures(1, &name);
         backend->TextureClearCurrent();
       } else {
-        spdlog::warn(
+        ihs::log::warn(
             "UnregisterExternalTexture: backend texture context unavailable; "
             "GL texture {} leaked",
             removed->name);
@@ -492,8 +492,8 @@ bool FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(
   if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
     return false;
   }
-  SPDLOG_TRACE("MarkExternalTextureFrameAvailable: {}, {}",
-               fmt::ptr(texture_registrar->engine->flutter_engine), texture_id);
+  IHS_TRACE("MarkExternalTextureFrameAvailable: {}, {}",
+            fmt::ptr(texture_registrar->engine->flutter_engine), texture_id);
   const auto result = LibFlutterEngine->MarkExternalTextureFrameAvailable(
       texture_registrar->engine->flutter_engine, texture_id);
   return result == kSuccess;
@@ -506,7 +506,7 @@ bool FlutterDesktopTextureMakeCurrent(
   }
   const auto backend =
       texture_registrar->engine->view_controller->view->GetBackend();
-  SPDLOG_TRACE("TextureMakeCurrent: {}", fmt::ptr(backend));
+  IHS_TRACE("TextureMakeCurrent: {}", fmt::ptr(backend));
   return backend->TextureMakeCurrent();
 }
 
@@ -517,14 +517,14 @@ bool FlutterDesktopTextureClearCurrent(
   }
   const auto backend =
       texture_registrar->engine->view_controller->view->GetBackend();
-  SPDLOG_TRACE("TextureClearCurrent: {}", fmt::ptr(backend));
+  IHS_TRACE("TextureClearCurrent: {}", fmt::ptr(backend));
   return backend->TextureClearCurrent();
 }
 
 // Passes character input events to registered handlers.
 void CharCallback(FlutterDesktopViewControllerState* view_state,
                   const unsigned int code_point) {
-  spdlog::info("CharCallback: {}", code_point);
+  ihs::log::info("CharCallback: {}", code_point);
   for (const auto& handler : view_state->keyboard_hook_handlers) {
     handler->CharHook(code_point);
   }
@@ -536,8 +536,8 @@ void KeyCallback(FlutterDesktopViewControllerState* view_state,
                  xkb_keysym_t keysym,
                  uint32_t xkb_scancode,
                  const uint32_t modifiers) {
-  spdlog::debug("KeyCallback: released: {}, keysym: {}, xkb_scancode: {}",
-                released, keysym, xkb_scancode);
+  ihs::log::debug("KeyCallback: released: {}, keysym: {}, xkb_scancode: {}",
+                  released, keysym, xkb_scancode);
   for (const auto& handler : view_state->keyboard_hook_handlers) {
     handler->KeyboardHook(released, keysym, xkb_scancode, modifiers);
   }

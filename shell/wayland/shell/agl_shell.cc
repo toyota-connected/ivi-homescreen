@@ -54,12 +54,12 @@ bool AglShell::TryBindGlobal(wl_registry* registry,
     auto* raw = wl_registry_bind(registry, name,
                                  &ac::agl_shell_traits::wl_iface(), bind_ver);
     if (!wl::SetupHandler(agl_shell_, reinterpret_cast<wl_proxy*>(raw))) {
-      spdlog::error("[AglShell] failed to set up agl_shell");
+      ihs::log::error("[AglShell] failed to set up agl_shell");
       return false;
     }
     agl_shell_.Get()->app_ = this;
     agl_version_ = bind_ver;
-    spdlog::debug("[AglShell] bound agl_shell v{}", bind_ver);
+    ihs::log::debug("[AglShell] bound agl_shell v{}", bind_ver);
     return true;
   }
   // Everything else (xdg_wm_base, ...) is the standard xdg role.
@@ -79,14 +79,14 @@ bool AglShell::Sync(wl_display* display) {
     bound_pending_ = true;
     while (bound_pending_) {
       if (wl_display_roundtrip(display) < 0) {
-        spdlog::error(
+        ihs::log::error(
             "[AglShell] roundtrip failed waiting for agl_shell.bound");
         return false;
       }
     }
   }
   if (!bound_ok_) {
-    spdlog::error("[AglShell] agl_shell already in use by another client");
+    ihs::log::error("[AglShell] agl_shell already in use by another client");
   }
   return bound_ok_;
 }
@@ -127,8 +127,8 @@ void AglShell::SetActivationArea(const uint32_t x,
   if (!agl_shell_) {
     return;
   }
-  spdlog::debug("[AglShell] activation area [{}x{}+{}x{}]", width, height, x,
-                y);
+  ihs::log::debug("[AglShell] activation area [{}x{}+{}x{}]", width, height, x,
+                  y);
   agl_shell_.Get()->SetActivateRegion(
       reinterpret_cast<wl_proxy*>(ResolveOutput(output_index)),
       static_cast<int32_t>(x), static_cast<int32_t>(y),
