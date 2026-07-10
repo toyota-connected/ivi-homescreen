@@ -12,6 +12,7 @@ inline constexpr std::size_t kSlotTextCapacity = 240;
 // to keep producer writes from false-sharing with consumer reads of adjacent
 // slots.
 struct alignas(64) RingSlot {
+  std::uint64_t ts_ns = 0;      // CLOCK_REALTIME captured at push (emit time)
   std::uint32_t ctx_index = 0;  // index into ContextCache
   std::uint32_t sequence = 0;   // monotonically increasing per-ring
   std::uint16_t text_len = 0;

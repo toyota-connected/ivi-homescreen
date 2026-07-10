@@ -16,25 +16,12 @@
 
 #include "worker.hpp"
 
-#include <ctime>
-
 #include "context_cache.hpp"
 #include "ring_registry.hpp"
 #include "ring_slot.hpp"
 #include "thread_ring.hpp"
 
 namespace ihs::dlt {
-
-namespace {
-
-std::uint64_t now_realtime_ns() noexcept {
-  timespec ts{};
-  ::clock_gettime(CLOCK_REALTIME, &ts);
-  return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
-         static_cast<std::uint64_t>(ts.tv_nsec);
-}
-
-}  // namespace
 
 Worker::Worker(RingRegistry& registry, ContextCache& cache) noexcept
     : registry_(registry), cache_(cache) {}
@@ -121,7 +108,7 @@ std::size_t Worker::drain_all() {
             static_cast<LogLevel>(slot->level),
             slot->text,
             slot->text_len,
-            now_realtime_ns(),
+            slot->ts_ns,  // emit time, captured when the record was pushed
         };
         for (const auto& sink : *sinks_) {
           sink->write(record);
