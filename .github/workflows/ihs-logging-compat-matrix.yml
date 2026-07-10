@@ -8,9 +8,10 @@ name: ihs-logging-compat-matrix
 # Wayland / Flutter / third_party chain.
 #
 # The harnesses are tiny (a dozen source files), so the toolchain setup used to
-# dominate: the runner images already ship clang, cmake and ninja, so we only
-# apt-install a compiler when the pinned version is genuinely absent (clang-12
-# on 22.04) and never pull libc++ (the build uses libstdc++).
+# dominate. The runner images already ship clang-14/17 + cmake + ninja, so
+# those legs install nothing; clang-12 (not on the images) runs in the official
+# clang-12 container instead of a ~45s apt install. libc++ is never pulled (the
+# build uses libstdc++).
 
 on:
   pull_request:
@@ -39,15 +40,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── C++17 floor — exercises every polyfill in compat.hpp (jthread,
-          #    expected, format_to snprintf path, flat_map=map). Clang-12 is
-          #    not preinstalled on 22.04, so this is the one leg that installs.
-          - name: "Clang-12 C++17"
-            runner:     ubuntu-22.04
-            clang_ver:  12
-            cxx_std:    17
-            also_no_dlt: false
-
           # ── C++20 — std::format / std::jthread native; expected/flat_map
           #    still polyfilled. Clang-14 is preinstalled on 22.04.
           - name: "Clang-14 C++20"
@@ -106,6 +98,38 @@ jobs:
             cmake --build "$b" -j"$(nproc)"
             ctest --test-dir "$b" --output-on-failure
           done
+
+  # C++17 floor. clang-12 is not on the runner images, and apt-installing it
+  # costs ~45s, so run this leg in the official clang-12 image (clang + cmake
+  # baked in) and add only git (for checkout) + ninja (~2s).
+  compat-clang12:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-22.04
+    container: silkeh/clang:12
+    name: "Clang-12 C++17"
+    steps:
+      - name: Add git + ninja
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends git ninja-build
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build + run compat_smoke
+        run: |
+          set -eux
+          b="build/compat-12-17-ON"
+          cmake -GNinja -S shell/logging/tests/compat-matrix -B "$b" \
+            -DCMAKE_C_COMPILER=clang-12 \
+            -DCMAKE_CXX_COMPILER=clang++-12 \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DENABLE_DLT=ON \
+            -DCMAKE_BUILD_TYPE=Debug
+          grep -E '^IHS_HAS_' "$b/CMakeCache.txt" || true
+          cmake --build "$b" -j"$(nproc)"
+          ctest --test-dir "$b" --output-on-failure
 
   # Run the bridge under a real load (ring push -> worker drain -> emit, via the
   # dlt_stub stand-in) under ThreadSanitizer and AddressSanitizer, so a data
