@@ -862,20 +862,19 @@ void Engine::onLogMessageCallback(const char* tag,
 
 #if ENABLE_DLT
   // Route the Flutter engine's message to the DLT bridge under a dedicated
-  // context. The context is built on first call and cached for the process
-  // lifetime by DltBridge.
+  // context, via the ihs_shared C ABI. The context is acquired on first call
+  // and cached for the process lifetime by the bridge.
   static IhsLogContext kEngineCtx("FLTR", "Flutter engine");
   if (kEngineCtx.is_valid()) {
     char buf[256];
     const int n = std::snprintf(buf, sizeof(buf), "%s: %s", tag ? tag : "",
                                 message ? message : "");
     if (n > 0) {
-      ihs::dlt::DltBridge::instance().log(
-          kEngineCtx.impl(), ihs::dlt::LogLevel::Info,
-          std::string_view{buf, static_cast<std::size_t>(
-                                    n < static_cast<int>(sizeof(buf))
-                                        ? n
-                                        : static_cast<int>(sizeof(buf)) - 1)});
+      const auto len =
+          static_cast<std::size_t>(n < static_cast<int>(sizeof(buf))
+                                       ? n
+                                       : static_cast<int>(sizeof(buf)) - 1);
+      ihs_log(kEngineCtx.index(), IHS_LEVEL_INFO, buf, len);
     }
   }
 #endif

@@ -19,7 +19,11 @@ class RingRegistry {
   // ring count is bounded by peak concurrent logging threads. Rings are
   // never freed (the worker may still be draining), but they are reused, so
   // memory does not grow with the count of threads that have ever logged.
-  ThreadRing& thread_local_ring();
+  //
+  // Static: the ring is keyed off the calling thread (a thread_local lease)
+  // and the pool is reached through instance(), so this never touches a
+  // particular registry object.
+  static ThreadRing& thread_local_ring();
 
   [[nodiscard]] ThreadRing* head() const noexcept {
     return head_.load(std::memory_order_acquire);

@@ -92,10 +92,6 @@ if (BUILD_BACKEND_SOFTWARE AND NOT (BUILD_BACKEND_DRM_KMS_EGL OR
     include(drm_cxx_cursor_load)
 endif ()
 
-if (ENABLE_DLT)
-    add_subdirectory(shell/logging)
-endif ()
-
 include(logging_helpers)
 
 configure_file(cmake/config_common.h.in ${PROJECT_BINARY_DIR}/config/common.h)

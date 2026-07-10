@@ -1,0 +1,197 @@
+---
+name: ihs-shared
+
+# Gates for the ihs_shared FFI ABI. Both jobs build shared/ standalone (it
+# establishes its own project() when it is the top-level source), so they need
+# only a C++ toolchain, CMake, and libdl — no Wayland / Flutter / DRM stack.
+#
+#  - consumer-smoke : install the CMake package, compile every installed header
+#    as strict C11, then build an out-of-tree consumer via find_package and run
+#    it (version handshake + trace + config round-trip + logging), with
+#    ENABLE_DLT both on and off.
+#  - abi-gate : abidiff the built libihs_shared.so against the committed ABI
+#    baseline; fail on an incompatible (non-additive) change. The baseline lives
+#    at shared/abi/libihs_shared.so.abi; the job bootstraps it on first run.
+
+on:
+  pull_request:
+    paths:
+      - 'shared/**'
+      - '.github/workflows/ihs-shared.yml'
+  push:
+    branches:
+      - v2.0
+    paths:
+      - 'shared/**'
+      - '.github/workflows/ihs-shared.yml'
+  workflow_dispatch:
+
+jobs:
+  consumer-smoke:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        enable_dlt: [ON, OFF]
+    name: "consumer-smoke DLT=${{ matrix.enable_dlt }}"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+
+      - name: Build + install ihs_shared
+        run: |
+          cmake -S shared -B build -G Ninja \
+            -DENABLE_DLT=${{ matrix.enable_dlt }} \
+            -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+          cmake --build build
+          cmake --install build
+
+      - name: Installed headers compile as C11
+        run: |
+          for h in prefix/include/ihs/*.h; do
+            echo "  $h"
+            gcc -x c -std=c11 -fsyntax-only -Iprefix/include "$h"
+          done
+
+      - name: Out-of-tree consumer via find_package
+        run: |
+          cmake -S shared/tests/consumer -B cbuild -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/prefix"
+          cmake --build cbuild
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          ctest --test-dir cbuild --output-on-failure
+
+      - name: End-to-end logging sinks (console / file / level / fallback)
+        # Logging is always compiled in; only the DLT sink is gated by
+        # ENABLE_DLT. Both matrix legs run the scenarios -- on the DLT=OFF leg
+        # the fallback scenario also covers the "dlt requested, not built"
+        # warn-and-fall-back-to-console path.
+        run: |
+          cmake -S shared/tests/sink_integration -B sbuild -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/prefix"
+          cmake --build sbuild
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          ctest --test-dir sbuild --output-on-failure
+
+  abi-gate:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain + libabigail
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ abigail-tools
+
+      - name: Build ihs_shared
+        run: |
+          cmake -S shared -B build -G Ninja -DENABLE_DLT=ON
+          cmake --build build
+
+      - name: Locate the built library
+        id: lib
+        run: |
+          so=$(find build -name 'libihs_shared.so.*.*' | head -n1)
+          test -n "$so" || { echo "libihs_shared.so not found"; exit 1; }
+          echo "path=$so" >> "$GITHUB_OUTPUT"
+
+      - name: ABI diff against the committed baseline
+        run: |
+          baseline=shared/abi/libihs_shared.so.abi
+          current='${{ steps.lib.outputs.path }}'
+          if [ ! -f "$baseline" ]; then
+            echo "::warning::No ABI baseline at $baseline — generating one."
+            mkdir -p shared/abi
+            abidw --out-file "$baseline" "$current"
+            echo "Baseline generated. Commit it to enable the ABI gate:"
+            cat "$baseline"
+            exit 1
+          fi
+          # abidiff exit is a bitfield; bit 3 (value 8) is an ABI-incompatible
+          # (non-additive) change. Additive-only changes (new exports) pass.
+          set +e
+          abidiff --no-added-syms "$baseline" "$current"
+          rc=$?
+          set -e
+          echo "abidiff rc=$rc"
+          if [ $(( rc & 8 )) -ne 0 ]; then
+            echo "::error::Incompatible ABI change without a version bump."
+            exit 1
+          fi
+
+      - name: Upload baseline artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ihs-shared-abi
+          path: shared/abi/libihs_shared.so.abi
+          if-no-files-found: ignore
+
+  # Opt-in real-wire test: the DLT sink through an actual dlt-daemon, captured
+  # with dlt-receive. Not a per-PR gate (daemon startup timing is flaky); runs
+  # on demand and post-merge. The deterministic DLT emit path is covered per-PR
+  # by the load harness against a libdlt stub.
+  dlt-daemon-e2e:
+    if: >-
+      ${{ github.server_url == 'https://github.com'
+          && (github.event_name == 'workflow_dispatch'
+              || github.event_name == 'push') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain + dlt-daemon
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc g++ dlt-daemon dlt-tools
+
+      - name: Build + install ihs_shared
+        run: |
+          cmake -S shared -B build -G Ninja -DENABLE_DLT=ON \
+            -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+          cmake --build build
+          cmake --install build
+
+      - name: Compile a marker logger
+        run: |
+          cat > driver.c <<'EOF'
+          #include <stdio.h>
+          #include "ihs/logging.h"
+          int main(void) {
+            if (ihs_log_start("IHSC", "dlt e2e") != 1) return 1;
+            const int32_t c = ihs_log_context_open("E2ET", NULL);
+            if (c < 0) return 1;
+            const char m[] = "dlt-e2e-marker-9f3a";
+            for (int i = 0; i < 40; ++i) ihs_log(c, 4 /*info*/, m, sizeof(m) - 1);
+            ihs_log_flush();
+            ihs_log_stop();
+            return 0;
+          }
+          EOF
+          gcc -std=c11 -Iprefix/include driver.c -o driver \
+            -Lprefix/lib -Lprefix/lib64 -lihs_shared
+
+      - name: Run dlt-daemon + capture the marker
+        run: |
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          dlt-daemon -d ; sleep 2
+          dlt-receive -a localhost > capture.txt 2>&1 &
+          RECV=$!
+          sleep 2
+          IHS_LOG_SINK=dlt ./driver
+          sleep 3
+          kill "$RECV" 2>/dev/null || true
+          echo "=== dlt-receive capture (tail) ==="; tail -n 40 capture.txt || true
+          if ! grep -q "dlt-e2e-marker-9f3a" capture.txt; then
+            echo "::error::marker was not received by dlt-daemon"
+            exit 1
+          fi
+          echo "dlt-daemon received the marker"

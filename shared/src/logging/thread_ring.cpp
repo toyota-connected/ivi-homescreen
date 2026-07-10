@@ -3,6 +3,20 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
+
+namespace {
+
+// Wall-clock nanoseconds, captured at push so a record carries its emit time
+// rather than the (later, and per-drain-batch identical) drain time.
+std::uint64_t now_realtime_ns() noexcept {
+  timespec ts{};
+  ::clock_gettime(CLOCK_REALTIME, &ts);
+  return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+         static_cast<std::uint64_t>(ts.tv_nsec);
+}
+
+}  // namespace
 
 namespace ihs::dlt {
 
@@ -22,6 +36,7 @@ bool ThreadRing::push(std::uint32_t ctx_index,
   slot.ctx_index = ctx_index;
   slot.level = level;
   slot.sequence = head;
+  slot.ts_ns = now_realtime_ns();
 
   const std::size_t copy_len =
       std::min<std::size_t>(len, kSlotTextCapacity - 1);

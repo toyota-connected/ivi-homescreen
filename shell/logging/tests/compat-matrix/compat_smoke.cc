@@ -22,9 +22,9 @@
 #include "logger.hpp"
 
 #if defined(ENABLE_DLT)
-#include "dlt/bridge.hpp"
-#include "dlt/ring_registry.hpp"
-#include "dlt/thread_ring.hpp"
+#include "bridge.hpp"
+#include "ring_registry.hpp"
+#include "thread_ring.hpp"
 #endif
 
 #include <cassert>
@@ -88,15 +88,19 @@ int main() {
   IHS_LOG_INFO(kCtx, "id=%d flag=%d", 42, 1);
 #endif
 
-  // 3. Direct log() path (pre-formatted, no format args).
+  // 3. Direct log() path (pre-formatted, no format args). Acquire the bridge
+  // handle directly — this harness compiles the bridge sources in, so the C++
+  // API is available (the shell reaches the bridge only through the C ABI).
+  const auto direct = ihs::dlt::DltBridge::instance().acquire_context(
+      std::string_view{"SMOK"}, std::string_view{"smoke ctx"});
   const bool pushed = ihs::dlt::DltBridge::instance().log(
-      kCtx.impl(), ihs::dlt::LogLevel::Info,
+      direct, ihs::dlt::LogLevel::Info,
       std::string_view{"pre-formatted message"});
   check(pushed, "direct log push");
 
   // 4. Ring push stress: stay well under kRingCapacity so the worker
   // drains between bursts without any drops.
-  auto& ring = ihs::dlt::RingRegistry::instance().thread_local_ring();
+  auto& ring = ihs::dlt::RingRegistry::thread_local_ring();
   const std::uint64_t dropped_before = ring.dropped();
 
   for (int i = 0; i < 128; ++i) {

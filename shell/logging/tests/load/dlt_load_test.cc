@@ -19,10 +19,10 @@
 // Usage: dlt_load_test [threads=4] [seconds=5] [rate_per_thread=0(max)]
 #include "logger.hpp"
 
-#include "dlt/bridge.hpp"
-#include "dlt/libdlt_loader.hpp"
-#include "dlt/ring_registry.hpp"
-#include "dlt/thread_ring.hpp"
+#include "bridge.hpp"
+#include "libdlt_loader.hpp"
+#include "ring_registry.hpp"
+#include "thread_ring.hpp"
 
 #include <dlfcn.h>
 
@@ -93,7 +93,10 @@ int main(int argc, char** argv) {
   const long rss_before = read_vmrss_kb();
 
   IHS_LOGGING_START("LOAD", "dlt load test");
-  static IhsLogContext ctx("LOAD", "load ctx");
+  // Acquire the bridge handle directly: this harness compiles the bridge in
+  // and measures its C++ hot path (the shell uses only the C ABI).
+  const auto ctx = ihs::dlt::DltBridge::instance().acquire_context(
+      std::string_view{"LOAD"}, std::string_view{"load ctx"});
   if (!ctx.is_valid()) {
     std::fprintf(stderr,
                  "bridge disabled: set IHS_DLT_LIBRARY to a libdlt (or the "
@@ -119,7 +122,7 @@ int main(int argc, char** argv) {
     unsigned long long n = 0;
     while (Clock::now() < deadline) {
       const auto t0 = Clock::now();
-      ihs::dlt::DltBridge::instance().log(ctx.impl(), ihs::dlt::LogLevel::Info,
+      ihs::dlt::DltBridge::instance().log(ctx, ihs::dlt::LogLevel::Info,
                                           kPayload);
       const auto t1 = Clock::now();
       ++n;
