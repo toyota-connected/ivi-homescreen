@@ -64,6 +64,17 @@ inline bool passes(IhsLogContext& ctx, IhsLogLevel level) {
          ihs_log_enabled(ctx.index(), static_cast<std::uint8_t>(level)) != 0;
 }
 
+// spdlog was configured flush_on(err): an error or critical line was written
+// synchronously, so it appeared with no drain delay and survived a subsequent
+// abort()/crash. Match that here — flush after an error-or-worse record.
+// IhsLogLevel is numerically ascending by verbosity (FATAL=1, ERROR=2), so
+// "error or worse" is level <= ERROR. Info/debug/verbose stay async.
+inline void maybe_flush(IhsLogLevel level) {
+  if (level <= IHS_LEVEL_ERROR) {
+    ihs_log_flush();
+  }
+}
+
 // Verbatim line: emitted as-is, with no format parsing — safe for a runtime
 // string that may itself contain '{'/'}' and matches spdlog's single-argument
 // (non-formatting) behavior.
@@ -74,12 +85,7 @@ inline void emit_raw(IhsLogLevel level, std::string_view msg) {
   }
   ihs_log(ctx.index(), static_cast<std::uint8_t>(level), msg.data(),
           msg.size());
-  // A fatal line usually precedes an abort()/crash that runs no destructors, so
-  // drain it synchronously now — otherwise the async worker never emits it and
-  // the operator loses the reason for the abort.
-  if (level == IHS_LEVEL_FATAL) {
-    ihs_log_flush();
-  }
+  maybe_flush(level);
 }
 
 // Formatted line: fmt "{}" into a stack buffer. The ihs_log_enabled() gate
@@ -100,9 +106,7 @@ inline void emit_fmt(IhsLogLevel level,
                               ? static_cast<std::size_t>(result.size)
                               : sizeof(buf) - 1;
   ihs_log(ctx.index(), static_cast<std::uint8_t>(level), buf, len);
-  if (level == IHS_LEVEL_FATAL) {
-    ihs_log_flush();  // survive an imminent abort(); see emit_raw().
-  }
+  maybe_flush(level);
 }
 
 }  // namespace detail
