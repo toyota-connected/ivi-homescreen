@@ -19,19 +19,24 @@
 #include "bridge.hpp"
 #include "log_level.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string_view>
 
 namespace {
 
 // Parallel table of ContextHandles so the C boundary can speak in plain
-// integer indices. Append-only; the bridge's own cache bounds the maximum
-// number of contexts.
+// integer indices. Append-only: entries are never moved or removed, so a slot
+// published (count store-release) is stable forever and ihs_log can read it
+// lock-free (count load-acquire). Appenders serialize on mu_; the bridge's own
+// cache bounds the maximum number of contexts.
 struct HandleTable {
   static constexpr std::size_t kMax = 256;
   ihs::dlt::ContextHandle handles[kMax];
-  std::size_t count = 0;
+  std::mutex mu;
+  std::atomic<std::size_t> count{0};
 };
 
 HandleTable& handle_table() {
@@ -71,12 +76,16 @@ extern "C" int32_t ihs_log_context_open(const char* tag,
     return -1;
   }
   HandleTable& t = handle_table();
-  if (t.count >= HandleTable::kMax) {
+  std::lock_guard<std::mutex> lock(t.mu);
+  const std::size_t n = t.count.load(std::memory_order_relaxed);
+  if (n >= HandleTable::kMax) {
     return -1;
   }
-  const auto slot = static_cast<int32_t>(t.count);
-  t.handles[t.count++] = handle;
-  return slot;
+  t.handles[n] = handle;
+  // Release: the handle is fully written above; publish the new count so a
+  // lock-free ihs_log that observes it (acquire) also observes the handle.
+  t.count.store(n + 1, std::memory_order_release);
+  return static_cast<int32_t>(n);
 }
 
 extern "C" int ihs_log(int32_t ctx_index,
@@ -87,7 +96,8 @@ extern "C" int ihs_log(int32_t ctx_index,
     return 0;
   }
   HandleTable& t = handle_table();
-  if (static_cast<std::size_t>(ctx_index) >= t.count) {
+  if (static_cast<std::size_t>(ctx_index) >=
+      t.count.load(std::memory_order_acquire)) {
     return 0;
   }
   return ihs::dlt::DltBridge::instance().log(
