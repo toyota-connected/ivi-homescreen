@@ -23,10 +23,12 @@
 #include "libdlt_loader.hpp"
 #endif
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -36,6 +38,10 @@ namespace {
 
 constexpr std::size_t kDefaultFileMaxBytes = 5 * 1024 * 1024;  // 5 MiB
 constexpr int kDefaultFileMaxFiles = 3;
+// Ceiling on IHS_LOG_FILE_MAX_FILES: the rotation cascade renames every kept
+// file on each roll, so an unbounded value would stall the single drain thread
+// (and hence all logging) on its first rotation.
+constexpr int kMaxFileMaxFiles = 1000;
 
 std::string_view getenv_sv(const char* name) noexcept {
   const char* v = std::getenv(name);
@@ -73,11 +79,22 @@ std::size_t parse_size(std::string_view spec, std::size_t fallback) noexcept {
   if (spec.empty()) {
     return fallback;
   }
+  // strtoull silently wraps a leading '-' (e.g. "-1" -> ULLONG_MAX), which
+  // would disable rotation and let the log grow without bound; reject it
+  // outright.
+  if (spec.front() == '-') {
+    return fallback;
+  }
   char* end = nullptr;
   const unsigned long long v =
       std::strtoull(std::string(spec).c_str(), &end, 10);
-  return (end != nullptr && *end == '\0' && v > 0) ? static_cast<std::size_t>(v)
-                                                   : fallback;
+  // Guard the size_t cast: a value that does not fit (only possible where
+  // size_t is 32-bit) would truncate to something tiny and rotate every line.
+  if (end == nullptr || *end != '\0' || v == 0 ||
+      v > std::numeric_limits<std::size_t>::max()) {
+    return fallback;
+  }
+  return static_cast<std::size_t>(v);
 }
 
 int parse_int(std::string_view spec, int fallback) noexcept {
@@ -156,8 +173,9 @@ SinkSet build_sink_set_from_env() {
             std::string(path),
             parse_size(getenv_sv("IHS_LOG_FILE_MAX_BYTES"),
                        kDefaultFileMaxBytes),
-            parse_int(getenv_sv("IHS_LOG_FILE_MAX_FILES"),
-                      kDefaultFileMaxFiles));
+            std::min(parse_int(getenv_sv("IHS_LOG_FILE_MAX_FILES"),
+                               kDefaultFileMaxFiles),
+                     kMaxFileMaxFiles));
         if (file) {
           set.sinks.push_back(std::move(file));
         } else {
