@@ -16,7 +16,9 @@
 
 #include "file_sink.hpp"
 
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <cstdio>
 #include <cstring>
@@ -27,6 +29,27 @@
 namespace ihs::dlt {
 
 namespace {
+
+// Open the log file for appending with defensive flags: O_NOFOLLOW refuses a
+// symlink at the final path component (an attacker cannot redirect our append
+// to an arbitrary file), O_CLOEXEC keeps the fd from leaking across exec, and
+// mode 0600 keeps a freshly created log from being world-readable (logs may
+// carry sensitive data). Returns nullptr on any failure; the caller then falls
+// back to the console sink.
+std::FILE* open_append(const std::string& path) noexcept {
+  const int fd =
+      ::open(path.c_str(),
+             O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    return nullptr;
+  }
+  std::FILE* fp = ::fdopen(fd, "a");
+  if (fp == nullptr) {
+    ::close(fd);
+    return nullptr;
+  }
+  return fp;
+}
 
 char level_char(LogLevel level) noexcept {
   switch (level) {
@@ -62,7 +85,7 @@ std::unique_ptr<RotatingFileSink> RotatingFileSink::Create(
     const std::string& path,
     std::size_t max_bytes,
     int max_files) {
-  std::FILE* fp = std::fopen(path.c_str(), "ae");  // append, O_CLOEXEC
+  std::FILE* fp = open_append(path);
   if (fp == nullptr) {
     return nullptr;
   }
@@ -104,7 +127,7 @@ void RotatingFileSink::rotate() noexcept {
   }
   std::rename(path_.c_str(), (path_ + ".1").c_str());
 
-  fp_ = std::fopen(path_.c_str(), "ae");
+  fp_ = open_append(path_);
   cur_bytes_ = 0;
 }
 
