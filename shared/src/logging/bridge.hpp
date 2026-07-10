@@ -49,11 +49,19 @@ class DltBridge {
   ContextHandle acquire_context(std::string_view ctx_id,
                                 std::string_view description);
 
+  // Fast-path predicate: true if a record at level under ctx would pass the
+  // Off / severity-floor gate (mirrors log()'s accept condition, minus the
+  // transient ring-overflow drop). Lets a caller skip formatting a message
+  // that would be discarded.
+  [[nodiscard]] bool enabled(const ContextHandle& ctx,
+                             LogLevel level) const noexcept;
+
   // Hot path — append a pre-formatted message to the current thread's ring.
-  // Wait-free; drops silently on overflow.
+  // Wait-free; drops silently on overflow. const: it mutates only thread-local
+  // ring state, never the bridge object.
   bool log(const ContextHandle& ctx,
            LogLevel level,
-           std::string_view message) noexcept;
+           std::string_view message) const noexcept;
 
   // Formatted variant. Uses ihs::format_to, so the fmt argument type
   // switches between std::format_string (C++20+) and const char* (C++17).

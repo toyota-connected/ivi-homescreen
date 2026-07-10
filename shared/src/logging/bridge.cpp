@@ -75,9 +75,8 @@ ContextHandle DltBridge::acquire_context(std::string_view ctx_id,
   return ContextHandle{result.value(), true};
 }
 
-bool DltBridge::log(const ContextHandle& ctx,
-                    LogLevel level,
-                    std::string_view message) noexcept {
+bool DltBridge::enabled(const ContextHandle& ctx,
+                        LogLevel level) const noexcept {
   if (!ctx.is_valid()) {
     return false;
   }
@@ -87,11 +86,20 @@ bool DltBridge::log(const ContextHandle& ctx,
   if (level == LogLevel::Off) {
     return false;
   }
-  // Global severity floor (IHS_LOG_LEVEL): drop records more verbose than the
-  // floor before they enter a ring. Levels are Fatal(1)..Verbose(6), so a
-  // numerically larger value is more verbose.
-  if (static_cast<std::uint8_t>(level) >
-      level_floor_.load(std::memory_order_relaxed)) {
+  // Global severity floor (IHS_LOG_LEVEL): records more verbose than the floor
+  // are dropped. Levels are Fatal(1)..Verbose(6), so a numerically larger value
+  // is more verbose.
+  return static_cast<std::uint8_t>(level) <=
+         level_floor_.load(std::memory_order_relaxed);
+}
+
+bool DltBridge::log(const ContextHandle& ctx,
+                    LogLevel level,
+                    std::string_view message) const noexcept {
+  // Apply the Off/floor gate before touching a ring; the caller may already
+  // have gated via enabled(), but re-checking here keeps log() correct on its
+  // own and is a cheap atomic load.
+  if (!enabled(ctx, level)) {
     return false;
   }
   ThreadRing& ring = RingRegistry::thread_local_ring();

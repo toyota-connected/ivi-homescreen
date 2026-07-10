@@ -76,10 +76,13 @@ int main(void) {
    * opens and logs even with no DLT daemon (records fall to the console sink),
    * so ihs_log_start must succeed and the context must be valid. */
   if (api->logging != NULL) {
-    CHECK(api->logging->start("SMOK", "consumer smoke") == 1,
-          "ihs_log_start");
+    CHECK(api->logging->start("SMOK", "consumer smoke") == 1, "ihs_log_start");
     const int32_t ctx = api->logging->context_open("SMOK", NULL);
     CHECK(ctx >= 0, "context_open valid without a DLT daemon");
+    /* Fast-path gate (additive table field): Info passes the default floor,
+     * Off never does. */
+    CHECK(api->logging->enabled(ctx, IHS_LEVEL_INFO) == 1, "enabled(Info)");
+    CHECK(api->logging->enabled(ctx, IHS_LEVEL_OFF) == 0, "enabled(Off)");
     const char line[] = "consumer smoke line";
     api->logging->log(ctx, IHS_LEVEL_INFO, line, sizeof(line) - 1);
     api->logging->flush();

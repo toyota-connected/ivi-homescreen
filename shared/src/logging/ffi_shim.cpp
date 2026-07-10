@@ -88,6 +88,21 @@ extern "C" int32_t ihs_log_context_open(const char* tag,
   return static_cast<int32_t>(n);
 }
 
+extern "C" int ihs_log_enabled(int32_t ctx_index, uint8_t level) {
+  if (ctx_index < 0) {
+    return 0;
+  }
+  HandleTable& t = handle_table();
+  if (static_cast<std::size_t>(ctx_index) >=
+      t.count.load(std::memory_order_acquire)) {
+    return 0;
+  }
+  return ihs::dlt::DltBridge::instance().enabled(
+             t.handles[ctx_index], static_cast<ihs::dlt::LogLevel>(level))
+             ? 1
+             : 0;
+}
+
 extern "C" int ihs_log(int32_t ctx_index,
                        uint8_t level,
                        const char* text,
@@ -113,8 +128,8 @@ namespace ihs::dlt {
 // ihs_get_api(). Function pointers alias the flat entry points above.
 const IhsLoggingApi* logging_api() noexcept {
   static const IhsLoggingApi api = {
-      sizeof(IhsLoggingApi), &ihs_log_start,        &ihs_log_stop,
-      &ihs_log_flush,        &ihs_log_context_open, &ihs_log,
+      sizeof(IhsLoggingApi), &ihs_log_start, &ihs_log_stop,    &ihs_log_flush,
+      &ihs_log_context_open, &ihs_log,       &ihs_log_enabled,
   };
   return &api;
 }
