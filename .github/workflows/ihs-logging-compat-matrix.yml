@@ -60,11 +60,11 @@ jobs:
             cxx_std:   23
             enable_dlt: ON
 
-          # ── ENABLE_DLT=OFF sanity: the top-level shell/logging/CMakeLists
-          #    early-returns, so only the compat_smoke stub-macro path is
-          #    exercised. Catches include-path / macro regressions in the
-          #    spdlog-only build.
-          - name: "Clang-17 C++23 spdlog-only"
+          # ── ENABLE_DLT=OFF sanity: the logging surface (ihs_log_* + console/
+          #    file sinks) is always compiled; only the DLT sink is dropped. The
+          #    same compat_smoke body runs, fanning records to the console sink.
+          #    Catches regressions in the no-DLT logging build.
+          - name: "Clang-17 C++23 no-DLT"
             runner:    ubuntu-24.04
             clang_ver: 17
             cxx_std:   23
