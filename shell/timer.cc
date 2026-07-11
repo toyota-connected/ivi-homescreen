@@ -34,20 +34,20 @@ int EventTimer::evfd = -1;
 
 EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
     : m_callback(callback), m_callback_data(callback_data) {
-  SPDLOG_TRACE("+ EventTimer()");
+  IHS_TRACE("+ EventTimer()");
   if (evfd < 0) {
     // initialize class-global epoll fd
     evfd = epoll_create1(EPOLL_CLOEXEC);
     if (evfd < 0) {
       if (errno != EINVAL) {
-        spdlog::critical("Failed to create epoll fd cloexec. {}",
-                         strerror(errno));
+        ihs::log::critical("Failed to create epoll fd cloexec. {}",
+                           strerror(errno));
         exit(-1);
       } else {
         // fallback
         evfd = epoll_create(1);
         if (evfd < 0) {
-          spdlog::critical("Failed to create epoll fd. {}", strerror(errno));
+          ihs::log::critical("Failed to create epoll fd. {}", strerror(errno));
           exit(-1);
         }
       }
@@ -56,7 +56,7 @@ EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
 
   m_timerfd = timerfd_create(clock, TFD_CLOEXEC | TFD_NONBLOCK);
   if (m_timerfd == -1) {
-    spdlog::critical("Failed to create timerfd. {}", strerror(errno));
+    ihs::log::critical("Failed to create timerfd. {}", strerror(errno));
     exit(-1);
   }
 
@@ -64,7 +64,7 @@ EventTimer::EventTimer(int clock, evtimer_cb callback, void* callback_data)
 }
 
 EventTimer::~EventTimer() {
-  SPDLOG_TRACE("+ ~EventTimer()");
+  IHS_TRACE("+ ~EventTimer()");
 
   unwatch_timerfd();
   close(m_timerfd);
@@ -73,18 +73,18 @@ EventTimer::~EventTimer() {
   if (watched_fd == 0)
     close_evfd();
 
-  SPDLOG_TRACE("- ~EventTimer()");
+  IHS_TRACE("- ~EventTimer()");
 }
 
 void EventTimer::close_evfd() {
-  SPDLOG_TRACE("+ EventTimer::close_evfd()");
+  IHS_TRACE("+ EventTimer::close_evfd()");
   close(evfd);
   evfd = -1;
-  SPDLOG_TRACE("- EventTimer::close_evfd()");
+  IHS_TRACE("- EventTimer::close_evfd()");
 }
 
 void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
-  SPDLOG_TRACE("+ EventTimer::set_timerspec()");
+  IHS_TRACE("+ EventTimer::set_timerspec()");
 
   if (rate == 0)
     return;
@@ -102,40 +102,40 @@ void EventTimer::set_timerspec(int32_t rate, int32_t delay) {
   m_timerspec.it_value.tv_sec = repeat_delay_sec;
   m_timerspec.it_value.tv_nsec = repeat_delay_nsec;
 
-  SPDLOG_TRACE("- EventTimer::set_timerspec()");
+  IHS_TRACE("- EventTimer::set_timerspec()");
 }
 
 void EventTimer::_arm(const int fd, itimerspec const* timerspec) {
   if (timerfd_settime(fd, 0, timerspec, nullptr) < 0) {
-    spdlog::critical("Failed to release timer. {}", strerror(errno));
+    ihs::log::critical("Failed to release timer. {}", strerror(errno));
     exit(-1);
   }
 }
 
 void EventTimer::arm() {
-  SPDLOG_TRACE("+ EventTimer::arm()");
+  IHS_TRACE("+ EventTimer::arm()");
 
   _arm(m_timerfd, &m_timerspec);
   m_armed.store(true);
 
-  SPDLOG_TRACE("- EventTimer::arm()");
+  IHS_TRACE("- EventTimer::arm()");
 }
 
 void EventTimer::disarm() {
-  SPDLOG_TRACE("+ EventTimer::disarm()");
+  IHS_TRACE("+ EventTimer::disarm()");
 
   constexpr itimerspec timerspec{};
   _arm(m_timerfd, &timerspec);
   m_armed.store(false);
 
-  SPDLOG_TRACE("- EventTimer::disarm()");
+  IHS_TRACE("- EventTimer::disarm()");
 }
 
 void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
   struct epoll_event ep{};
 
   if (evfd < 0) {
-    spdlog::critical("Unexpected call _watch_fd(). Ignored.");
+    ihs::log::critical("Unexpected call _watch_fd(). Ignored.");
     return;
   }
 
@@ -146,17 +146,17 @@ void EventTimer::_watch_fd(int fd, uint32_t events, struct timer_task* task) {
 }
 
 void EventTimer::watch_timerfd() {
-  SPDLOG_TRACE("+ EventTimer::watch_timerfd()");
+  IHS_TRACE("+ EventTimer::watch_timerfd()");
   m_task.run = EventTimer::run;
   m_task.data = reinterpret_cast<void*>(this);
 
   _watch_fd(m_timerfd, EPOLLIN, &m_task);
-  SPDLOG_TRACE("- EventTimer::watch_timerfd()");
+  IHS_TRACE("- EventTimer::watch_timerfd()");
 }
 
 void EventTimer::_unwatch_fd(int fd) {
   if (evfd < 0) {
-    spdlog::critical("Unexpected call _unwatch_fd(). Ignored.");
+    ihs::log::critical("Unexpected call _unwatch_fd(). Ignored.");
     return;
   }
   epoll_ctl(evfd, EPOLL_CTL_DEL, fd, nullptr);
@@ -164,9 +164,9 @@ void EventTimer::_unwatch_fd(int fd) {
 }
 
 void EventTimer::unwatch_timerfd() const {
-  SPDLOG_TRACE("+ EventTimer::unwatch_timerfd()");
+  IHS_TRACE("+ EventTimer::unwatch_timerfd()");
   _unwatch_fd(m_timerfd);
-  SPDLOG_TRACE("- EventTimer::unwatch_timerfd()");
+  IHS_TRACE("- EventTimer::unwatch_timerfd()");
 }
 
 void EventTimer::wait_event() {
@@ -184,14 +184,14 @@ void EventTimer::run(timer_task const* task, uint32_t events) {
   const auto timer = static_cast<EventTimer*>(task->data);
 
   if (events != EPOLLIN)
-    spdlog::critical("Found Unexpected timerfd events: 0x{:x}", events);
+    ihs::log::critical("Found Unexpected timerfd events: 0x{:x}", events);
 
   if (!(events & EPOLLIN))
     return;
 
   if (read(timer->m_timerfd, &event, sizeof(event)) != sizeof(event)) {
     if (errno != EAGAIN)
-      spdlog::critical("Failed to read timer. {}", strerror(errno));
+      ihs::log::critical("Failed to read timer. {}", strerror(errno));
     return;
   }
 

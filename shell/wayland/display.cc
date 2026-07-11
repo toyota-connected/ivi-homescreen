@@ -23,6 +23,7 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <system_error>
 #include <utility>
 
@@ -52,7 +53,7 @@ Display::Display(const bool enable_cursor,
                  const std::vector<Configuration::Config>& configs)
     : m_enable_cursor(enable_cursor),
       m_cursor_theme_name(std::move(cursor_theme_name)) {
-  SPDLOG_TRACE("+ Display()");
+  IHS_TRACE("+ Display()");
 
   wayland_event_mask_update(ignore_wayland_event, m_wayland_event_mask);
 
@@ -76,8 +77,8 @@ Display::Display(const bool enable_cursor,
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
-    spdlog::critical("Failed to connect to Wayland display. {}",
-                     strerror(errno));
+    ihs::log::critical("Failed to connect to Wayland display. {}",
+                       strerror(errno));
     exit(-1);
   }
 
@@ -85,7 +86,7 @@ Display::Display(const bool enable_cursor,
   // through it) can share it; the per-global binds below stay raw via
   // reg.Get().
   if (!registry_.Create(m_display)) {
-    spdlog::critical("Failed to create Wayland registry.");
+    ihs::log::critical("Failed to create Wayland registry.");
     exit(-1);
   }
   registry_.OnGlobal(
@@ -106,7 +107,7 @@ Display::Display(const bool enable_cursor,
   // advertised; it creates the per-seat text_input from m_seat otherwise.
   if (m_seat &&
       !text_input_.Bind(registry_, this, reinterpret_cast<wl_proxy*>(m_seat))) {
-    spdlog::warn("[Display] text-input manager advertised but bind failed");
+    ihs::log::warn("[Display] text-input manager advertised but bind failed");
   }
 
   // AGL's window-management facet maps output indices to wl_outputs owned here.
@@ -120,12 +121,12 @@ Display::Display(const bool enable_cursor,
   // others are no-ops).
   for (auto& s : shells_) {
     if (!s->Sync(m_display)) {
-      spdlog::critical("[Display] shell '{}' handshake failed", s->Name());
+      ihs::log::critical("[Display] shell '{}' handshake failed", s->Name());
       exit(EXIT_FAILURE);
     }
   }
 
-  SPDLOG_TRACE("- Display()");
+  IHS_TRACE("- Display()");
 }
 
 void Display::NoteInput(const uint64_t ts_us) {
@@ -149,13 +150,13 @@ ivi::WaylandShell& Display::ActiveShell() const {
       return *s;
     }
   }
-  spdlog::critical(
+  ihs::log::critical(
       "[Display] no compositor shell bound (no xdg/agl/ivi/simple)");
   exit(EXIT_FAILURE);
 }
 
 Display::~Display() {
-  SPDLOG_TRACE("+ ~Display()");
+  IHS_TRACE("+ ~Display()");
 
   if (m_m2p_enabled) {
     m_m2p.LogSessionSummary("wayland");
@@ -209,7 +210,7 @@ Display::~Display() {
   wl_display_flush(m_display);
   wl_display_disconnect(m_display);
 
-  SPDLOG_TRACE("- ~Display()");
+  IHS_TRACE("- ~Display()");
 }
 
 void Display::HandleGlobal(wl::CRegistry& reg,
@@ -223,7 +224,7 @@ void Display::HandleGlobal(wl::CRegistry& reg,
   // C-string view for the strcmp-based comparisons retained below.
   const char* interface = iface.data();
 
-  SPDLOG_DEBUG("Wayland: {} version {}", iface, version);
+  IHS_DEBUG("Wayland: {} version {}", iface, version);
 
   // Note when GPU-buffer-allocation protocols are advertised. Mesa's
   // Vulkan WSI Wayland implementation needs one of these to back the
@@ -241,7 +242,7 @@ void Display::HandleGlobal(wl::CRegistry& reg,
       d->m_compositor = static_cast<wl_compositor*>(
           wl_registry_bind(registry, name, &wl_compositor_interface,
                            std::min(static_cast<uint32_t>(3), version)));
-      SPDLOG_DEBUG("\tBuffer Scale Enabled");
+      IHS_DEBUG("\tBuffer Scale Enabled");
       d->m_buffer_scale_enable = true;
       if (d->m_shm) {
         d->m_cursor_surface = wl_compositor_create_surface(d->m_compositor);
@@ -288,7 +289,7 @@ void Display::HandleGlobal(wl::CRegistry& reg,
           wl_registry_bind(registry, name, &wl_output_interface,
                            std::min(static_cast<uint32_t>(2), version)));
     wl_output_add_listener(oi->output, &output_listener, oi.get());
-    SPDLOG_DEBUG("Wayland: Output [{}]", d->m_all_outputs.size());
+    IHS_DEBUG("Wayland: Output [{}]", d->m_all_outputs.size());
     d->m_all_outputs.push_back(oi);
   } else if (iface == wl_seat_interface.name) {
     d->m_seat = static_cast<wl_seat*>(
@@ -351,8 +352,7 @@ void Display::display_handle_geometry(void* data,
   oi->physical_height = static_cast<unsigned int>(physical_height);
   oi->transform = transform;
 
-  SPDLOG_DEBUG("Physical width: {} mm x {} mm", physical_width,
-               physical_height);
+  IHS_DEBUG("Physical width: {} mm x {} mm", physical_width, physical_height);
 }
 
 void Display::display_handle_mode(void* data,
@@ -372,7 +372,7 @@ void Display::display_handle_mode(void* data,
     }
   }
 
-  SPDLOG_DEBUG("Video mode: {} x {} @ {} Hz", width, height, refresh / 1000.0);
+  IHS_DEBUG("Video mode: {} x {} @ {} Hz", width, height, refresh / 1000.0);
 }
 
 void Display::display_handle_scale(void* data,
@@ -381,7 +381,7 @@ void Display::display_handle_scale(void* data,
   auto* oi = static_cast<output_info_t*>(data);
   oi->scale = factor;
 
-  SPDLOG_DEBUG("Display Scale Factor: {}", factor);
+  IHS_DEBUG("Display Scale Factor: {}", factor);
 }
 
 void Display::display_handle_done(void* data,
@@ -431,7 +431,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.pointer) {
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.wl_pointer) {
-      spdlog::debug("Pointer Present");
+      ihs::log::debug("Pointer Present");
       d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
       wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
       d->input_timestamps_.AttachPointer(d->m_pointer.wl_pointer);
@@ -447,7 +447,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.keyboard) {
     if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->keyboard_.IsNull()) {
-      spdlog::debug("Keyboard Present");
+      ihs::log::debug("Keyboard Present");
       // Wrap the raw wl_keyboard in the scanner's CRTP handler (installs its
       // listener); set the back-pointer and register its repeat timerfd on the
       // reactor. This runs on the reactor thread during wl dispatch, so OnKey,
@@ -466,7 +466,7 @@ void Display::seat_handle_capabilities(void* data,
 
   if (!d->m_wayland_event_mask.touch) {
     if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
-      spdlog::debug("Touch Present");
+      ihs::log::debug("Touch Present");
       d->m_touch.touch = wl_seat_get_touch(seat);
       wl_touch_set_user_data(d->m_touch.touch, d);
       wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
@@ -485,7 +485,7 @@ void Display::seat_handle_name(void* /* data */,
                                struct wl_seat* /* seat */,
                                const char* name) {
   (void)name;
-  SPDLOG_DEBUG("Seat: {}", name);
+  IHS_DEBUG("Seat: {}", name);
 }
 
 const wl_seat_listener Display::seat_listener = {
@@ -928,7 +928,7 @@ void Display::touch_handle_motion(void* data,
 
 void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   auto* d = static_cast<Display*>(data);
-  SPDLOG_DEBUG("touch_handle_cancel");
+  IHS_DEBUG("touch_handle_cancel");
 
   // The compositor cancelled the whole touch session (e.g. it recognized a
   // system gesture). Every active contact must be cancelled in the engine —
@@ -1285,13 +1285,13 @@ bool Display::ActivateSystemCursor(const int32_t device,
     } else if (kind == "forbidden") {
       cursor_name = kCursorKindForbidden;
     } else {
-      SPDLOG_DEBUG("Cursor Kind = {}", kind);
+      IHS_DEBUG("Cursor Kind = {}", kind);
       return false;
     }
 
     const auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
-      SPDLOG_DEBUG("Cursor [{}] not found", cursor_name);
+      IHS_DEBUG("Cursor [{}] not found", cursor_name);
       return false;
     }
     const auto cursor_buffer = wl_cursor_image_get_buffer(cursor->images[0]);
@@ -1306,7 +1306,7 @@ bool Display::ActivateSystemCursor(const int32_t device,
                         static_cast<int32_t>(cursor->images[0]->height));
       wl_surface_commit(m_cursor_surface);
     } else {
-      SPDLOG_DEBUG("Failed to set cursor: Invalid Cursor Buffer");
+      IHS_DEBUG("Failed to set cursor: Invalid Cursor Buffer");
       return false;
     }
   }
@@ -1324,7 +1324,7 @@ int32_t Display::GetBufferScale(uint32_t index) const {
     }
     return static_cast<int32_t>(kDefaultBufferScale);
   }
-  SPDLOG_DEBUG("GetBufferScale: Invalid output index: {}", index);
+  IHS_DEBUG("GetBufferScale: Invalid output index: {}", index);
   return static_cast<int32_t>(kDefaultBufferScale);
 }
 
@@ -1332,7 +1332,7 @@ std::pair<int32_t, int32_t> Display::GetVideoModeSize(uint32_t index) const {
   if (index < m_all_outputs.size()) {
     return {m_all_outputs[index]->width, m_all_outputs[index]->height};
   }
-  SPDLOG_DEBUG("GetVideoModeSize: Invalid output index: {}", index);
+  IHS_DEBUG("GetVideoModeSize: Invalid output index: {}", index);
   return {0, 0};
 }
 
@@ -1340,7 +1340,7 @@ double Display::GetRefreshRate(uint32_t index) const {
   if (index < m_all_outputs.size()) {
     return m_all_outputs[index]->refresh_rate;
   }
-  SPDLOG_DEBUG("GetRefreshRate: Invalid output index: {}", index);
+  IHS_DEBUG("GetRefreshRate: Invalid output index: {}", index);
   return 0;
 }
 
@@ -1369,7 +1369,7 @@ void Display::wayland_event_mask_print(struct wayland_event_mask const& mask) {
   if (mask.touch)
     ss << "\n\ttouch";
 
-  spdlog::info(ss.str());
+  ihs::log::info(ss.str());
 }
 
 void Display::wayland_event_mask_update(
@@ -1403,7 +1403,7 @@ void Display::wayland_event_mask_update(
     else if (event == "touch")
       mask.touch = true;
     else if (!event.empty())
-      spdlog::warn("Unknown Wayland Event Mask: [{}]", event);
+      ihs::log::warn("Unknown Wayland Event Mask: [{}]", event);
   }
   if (!ignore_wayland_events.empty()) {
     wayland_event_mask_print(mask);

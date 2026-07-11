@@ -16,122 +16,140 @@
 
 #pragma once
 
-#include "config/common.h"
+// Shell logging surface. Formats a line with fmt ("{}" style) in the calling
+// thread, then hands the finished text to the ihs_shared logging C ABI
+// (ihs_log), which fans it out to the configured sinks (console / file / DLT,
+// selected by IHS_LOG_SINK). spdlog is retired: this header is the single
+// replacement for the old console logger and the DLT callback sink alike.
+//
+// fmt is sourced header-only from spdlog's bundled copy for now; the formatting
+// happens shell-side, before the C ABI, so libihs_shared.so stays dependency
+// free. Levels are filtered cheaply via ihs_log_enabled() before any formatting
+// or argument evaluation happens.
 
-#if !defined(NDEBUG)
-#ifndef SPDLOG_ACTIVE_LEVEL
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+#ifndef FMT_HEADER_ONLY
+#define FMT_HEADER_ONLY
 #endif
-#else
-#ifndef SPDLOG_ACTIVE_LEVEL
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_OFF
-#endif
-#endif
-#include "spdlog/sinks/stdout_color_sinks.h"
-#include "spdlog/spdlog.h"
+#include "spdlog/fmt/fmt.h"
 
-#if ENABLE_DLT
-#include "dlt/dlt.h"
-#endif
+#include "ihs/logging.h"
+#include "logging/logger.hpp"
 
-#include "spdlog/cfg/env.h"  // support for loading levels from the environment variable
-#include "spdlog/spdlog-inl.h"
-#if ENABLE_DLT
-#include "spdlog/sinks/callback_sink.h"
-#endif
-#include "spdlog/sinks/ringbuffer_sink.h"
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <utility>
 
-class Logging {
- public:
-  Logging() {
-#if ENABLE_DLT
-    if (Dlt::IsSupported()) {
-      Dlt::Register();
-      m_logger = spdlog::callback_logger_mt(
-          "primary", [](const spdlog::details::log_msg& msg) {
-            switch (msg.level) {
-              case SPDLOG_LEVEL_TRACE:
-                Dlt::LogSizedString(DltLogLevelType::LOG_VERBOSE,
-                                    msg.payload.data(),
-                                    static_cast<uint16_t>(msg.payload.size()));
-                break;
-              case SPDLOG_LEVEL_DEBUG:
-                Dlt::LogSizedString(DltLogLevelType::LOG_DEBUG,
-                                    msg.payload.data(),
-                                    static_cast<uint16_t>(msg.payload.size()));
-                break;
-              case SPDLOG_LEVEL_INFO:
-                Dlt::LogSizedString(DltLogLevelType::LOG_INFO,
-                                    msg.payload.data(),
-                                    static_cast<uint16_t>(msg.payload.size()));
-                break;
-              case SPDLOG_LEVEL_WARN:
-                Dlt::LogSizedString(DltLogLevelType::LOG_WARN,
-                                    msg.payload.data(),
-                                    static_cast<uint16_t>(msg.payload.size()));
-                break;
-              case SPDLOG_LEVEL_ERROR:
-                Dlt::LogSizedString(DltLogLevelType::LOG_ERROR,
-                                    msg.payload.data(),
-                                    static_cast<uint16_t>(msg.payload.size()));
-                break;
-              case SPDLOG_LEVEL_CRITICAL:
-                Dlt::LogSizedString(DltLogLevelType::LOG_FATAL,
-                                    msg.payload.data(),
-                                    static_cast<uint16_t>(msg.payload.size()));
-                break;
-              default:
-                break;
-            }
-          });
-      spdlog::set_default_logger(m_logger);
-      spdlog::set_pattern("%v");
-    } else {
-#endif
-      m_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-      m_logger = std::make_shared<spdlog::logger>("primary", m_console_sink);
-      spdlog::set_default_logger(m_logger);
-      spdlog::set_pattern("[%H:%M:%S.%f] [%L] %v");
-#if ENABLE_DLT
-    }
-#endif
+namespace ihs::log {
 
+// Process-wide default context for shell log lines. Normally opened on the
+// first log after IHS_LOGGING_START (which main() calls before anything logs).
+// If the first use happens before start, the open returns an invalid handle;
+// rather than cache that permanently (which would silently wedge all logging),
+// re-attempt while invalid so logging recovers once the bridge is up. The
+// pre-start window is single-threaded (no producers exist before start), so the
+// re-open needs no synchronization.
+inline IhsLogContext& default_context() {
+  static IhsLogContext ctx("SHEL", "ivi-homescreen shell");
+  if (!ctx.is_valid()) {
+    ctx = IhsLogContext("SHEL", "ivi-homescreen shell");
+  }
+  return ctx;
+}
+
+namespace detail {
+
+inline bool passes(IhsLogContext& ctx, IhsLogLevel level) {
+  return ctx.is_valid() &&
+         ihs_log_enabled(ctx.index(), static_cast<std::uint8_t>(level)) != 0;
+}
+
+// spdlog was configured flush_on(err): an error or critical line was written
+// synchronously, so it appeared with no drain delay and survived a subsequent
+// abort()/crash. Match that here — flush after an error-or-worse record.
+// IhsLogLevel is numerically ascending by verbosity (FATAL=1, ERROR=2), so
+// "error or worse" is level <= ERROR. Info/debug/verbose stay async.
+inline void maybe_flush(IhsLogLevel level) {
+  if (level <= IHS_LEVEL_ERROR) {
+    ihs_log_flush();
+  }
+}
+
+// Verbatim line: emitted as-is, with no format parsing — safe for a runtime
+// string that may itself contain '{'/'}' and matches spdlog's single-argument
+// (non-formatting) behavior.
+inline void emit_raw(IhsLogLevel level, std::string_view msg) {
+  IhsLogContext& ctx = default_context();
+  if (!passes(ctx, level)) {
+    return;
+  }
+  ihs_log(ctx.index(), static_cast<std::uint8_t>(level), msg.data(),
+          msg.size());
+  maybe_flush(level);
+}
+
+// Formatted line: fmt "{}" into a stack buffer. The ihs_log_enabled() gate
+// runs first, so a level filtered out by IHS_LOG_LEVEL costs nothing beyond
+// the gate — no formatting, no argument evaluation.
+template <class... Args>
+inline void emit_fmt(IhsLogLevel level,
+                     fmt::format_string<Args...> fmt_str,
+                     Args&&... args) {
+  IhsLogContext& ctx = default_context();
+  if (!passes(ctx, level)) {
+    return;
+  }
+  char buf[IHS_LOG_TEXT_CAPACITY];
+  const auto result = fmt::format_to_n(buf, sizeof(buf) - 1, fmt_str,
+                                       std::forward<Args>(args)...);
+  const std::size_t len = result.size < sizeof(buf)
+                              ? static_cast<std::size_t>(result.size)
+                              : sizeof(buf) - 1;
+  ihs_log(ctx.index(), static_cast<std::uint8_t>(level), buf, len);
+  maybe_flush(level);
+}
+
+}  // namespace detail
+
+// Each level has two overloads: a verbatim form (a complete line, or a runtime
+// string) and a compile-time-checked formatted form (a literal + >=1 argument).
+// The one-argument call resolves to the verbatim overload, so a bare message —
+// literal or runtime — never goes through the formatter.
+#define IHS_LOG_DEFINE_LEVEL(name_, level_)                               \
+  inline void name_(std::string_view msg) {                               \
+    detail::emit_raw((level_), msg);                                      \
+  }                                                                       \
+  template <class Arg0, class... Args>                                    \
+  inline void name_(fmt::format_string<Arg0, Args...> fmt_str, Arg0&& a0, \
+                    Args&&... a) {                                        \
+    detail::emit_fmt((level_), fmt_str, std::forward<Arg0>(a0),           \
+                     std::forward<Args>(a)...);                           \
+  }
+
+IHS_LOG_DEFINE_LEVEL(trace, IHS_LEVEL_VERBOSE)
+IHS_LOG_DEFINE_LEVEL(debug, IHS_LEVEL_DEBUG)
+IHS_LOG_DEFINE_LEVEL(info, IHS_LEVEL_INFO)
+IHS_LOG_DEFINE_LEVEL(warn, IHS_LEVEL_WARN)
+IHS_LOG_DEFINE_LEVEL(error, IHS_LEVEL_ERROR)
+IHS_LOG_DEFINE_LEVEL(critical, IHS_LEVEL_FATAL)
+#undef IHS_LOG_DEFINE_LEVEL
+
+}  // namespace ihs::log
+
+// Convenience aliases kept for existing call sites.
+#define LOG_INFO ihs::log::info
+#define LOG_DEBUG ihs::log::debug
+#define LOG_WARN ihs::log::warn
+#define LOG_ERROR ihs::log::error
+#define LOG_TRACE ihs::log::trace
+#define LOG_CRITICAL ihs::log::critical
+
+// Diagnostic debug/trace: compiled out entirely in release builds, as the old
+// SPDLOG_DEBUG / SPDLOG_TRACE were (SPDLOG_ACTIVE_LEVEL=OFF under NDEBUG).
 #ifndef NDEBUG
-    m_logger->set_level(spdlog::level::debug);
+#define IHS_DEBUG(...) ihs::log::debug(__VA_ARGS__)
+#define IHS_TRACE(...) ihs::log::trace(__VA_ARGS__)
+#else
+#define IHS_DEBUG(...) ((void)0)
+#define IHS_TRACE(...) ((void)0)
 #endif
-    spdlog::flush_on(spdlog::level::err);
-    spdlog::flush_every(std::chrono::seconds(kLogFlushInterval));
-    spdlog::cfg::load_env_levels();
-  }
-
-  ~Logging() {
-#if ENABLE_DLT
-    if (Dlt::IsSupported()) {
-      // switch logger to console, since we are unregistering DLT
-      m_logger.reset();
-      m_console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-      m_logger = std::make_shared<spdlog::logger>("post-dlt", m_console_sink);
-      spdlog::register_logger(m_logger);
-
-      Dlt::Unregister();
-    }
-#endif
-  }
-
- private:
-  std::shared_ptr<spdlog::logger> m_logger{};
-  std::shared_ptr<
-      spdlog::sinks::ansicolor_stdout_sink<spdlog::details::console_mutex>>
-      m_console_sink;
-};
-
-#define DLOG_DEBUG SPDLOG_DEBUG
-#define DLOG_TRACE SPDLOG_TRACE
-#define DLOG_CRITICAL SPDLOG_CRITICAL
-
-#define LOG_INFO spdlog::info
-#define LOG_DEBUG spdlog::debug
-#define LOG_WARN spdlog::warn
-#define LOG_ERROR spdlog::error
-#define LOG_TRACE spdlog::trace
-#define LOG_CRITICAL spdlog::critical

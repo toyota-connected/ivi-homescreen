@@ -125,8 +125,8 @@ void GlCaps::Probe() {
   }
   has_multisampled_renderbuffer = (renderbuffer_storage_multisample != nullptr);
 
-  spdlog::debug("GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={}",
-                context_major, context_minor, has_rgb8_rgba8,
-                has_packed_depth_stencil, has_blit_framebuffer,
-                has_multisampled_renderbuffer);
+  ihs::log::debug("GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={}",
+                  context_major, context_minor, has_rgb8_rgba8,
+                  has_packed_depth_stencil, has_blit_framebuffer,
+                  has_multisampled_renderbuffer);
 }

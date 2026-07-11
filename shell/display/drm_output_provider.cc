@@ -33,15 +33,15 @@ std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
 
   auto dev = drm::Device::open(device_path_);
   if (!dev) {
-    spdlog::warn("[DrmOutputProvider] open('{}'): {}", device_path_,
-                 dev.error().message());
+    ihs::log::warn("[DrmOutputProvider] open('{}'): {}", device_path_,
+                   dev.error().message());
     return outputs;
   }
 
   auto connectors = drm::display::query_connector_modes(*dev);
   if (!connectors) {
-    spdlog::warn("[DrmOutputProvider] query_connector_modes('{}'): {}",
-                 device_path_, connectors.error().message());
+    ihs::log::warn("[DrmOutputProvider] query_connector_modes('{}'): {}",
+                   device_path_, connectors.error().message());
     return outputs;
   }
 

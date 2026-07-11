@@ -241,7 +241,7 @@ void PlatformViewsHandler::HandleMethodCall(
     /// The user touched a platform view within Flutter.
     const auto& params = std::get_if<flutter::EncodableList>(arguments);
     const auto touch = PlatformViewTouch(*params);
-    SPDLOG_TRACE("PlatformViewTouch id: {}", touch.getId());
+    IHS_TRACE("PlatformViewTouch id: {}", touch.getId());
     if (const auto id = touch.getId();
         listeners_.find(id) != listeners_.end()) {
       auto [fst, snd] = listeners_[id];
@@ -300,7 +300,7 @@ void PlatformViewsHandler::HandleMethodCall(
     }
     result->Success();
   } else {
-    spdlog::error("[PlatformViews] method {} is unhandled", method_name);
+    ihs::log::error("[PlatformViews] method {} is unhandled", method_name);
     plugin_common::Encodable::PrintFlutterEncodableValue(method_name.c_str(),
                                                          *arguments);
     result->NotImplemented();

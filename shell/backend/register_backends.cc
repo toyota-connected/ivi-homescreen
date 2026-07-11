@@ -132,7 +132,7 @@ std::shared_ptr<IDisplay> MakeSoftwareDisplay(
     display->SetSeat(std::make_unique<homescreen::SoftwareSeat>(
         static_cast<int32_t>(w), static_cast<int32_t>(h)));
   } else {
-    spdlog::info("[SoftwareBackend] IVI_SW_INPUT=none — no input seat");
+    ihs::log::info("[SoftwareBackend] IVI_SW_INPUT=none — no input seat");
   }
 #endif
   // Software cursor, gated by --disable-cursor / IVI_SW_CURSOR=0. Owned by the
@@ -165,8 +165,8 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     if (*s == "no" || *s == "false" || *s == "off") {
       return drm_config::TriState::kNo;
     }
-    spdlog::warn("[FlutterView] drm tri-state '{}' unrecognized; using auto",
-                 *s);
+    ihs::log::warn("[FlutterView] drm tri-state '{}' unrecognized; using auto",
+                   *s);
     return drm_config::TriState::kAuto;
   };
   auto parse_compositor = [](const std::optional<std::string>& s) {
@@ -179,8 +179,8 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     if (*s == "gl") {
       return drm_config::Compositor::kGl;
     }
-    spdlog::warn("[FlutterView] drm-compositor '{}' unrecognized; using auto",
-                 *s);
+    ihs::log::warn("[FlutterView] drm-compositor '{}' unrecognized; using auto",
+                   *s);
     return drm_config::Compositor::kAuto;
   };
   auto parse_modeset = [](const std::optional<std::string>& s) {
@@ -193,7 +193,8 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     if (*s == "atomic") {
       return drm_config::Modeset::kAtomic;
     }
-    spdlog::warn("[FlutterView] drm-modeset '{}' unrecognized; using auto", *s);
+    ihs::log::warn("[FlutterView] drm-modeset '{}' unrecognized; using auto",
+                   *s);
     return drm_config::Modeset::kAuto;
   };
   auto parse_format = [](const std::optional<std::string>& s) {
@@ -215,7 +216,7 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     if (*s == "rgb565") {
       return drm_config::PrimaryFormat::kRgb565;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[FlutterView] drm-primary-format '{}' unrecognized "
         "(expected auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565); "
         "using auto",
@@ -288,7 +289,7 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // …). Continuing would dereference a null backend in Engine::Run
   // and SEGV; fail-fast with the same exit path as a missing bundle.
   if (!m_backend) {
-    spdlog::critical("[FlutterView] DRM backend init failed; aborting");
+    ihs::log::critical("[FlutterView] DRM backend init failed; aborting");
     exit(EXIT_FAILURE);
   }
 
@@ -344,7 +345,7 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
     for (const auto& extra : config.view.additional_outputs) {
       const std::string connector = extra.drm_connector.value_or("");
       if (connector.empty()) {
-        spdlog::warn(
+        ihs::log::warn(
             "[FlutterView] additional [[view.output]] has no drm_connector; "
             "skipping");
         continue;
@@ -381,7 +382,8 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
   // Engine::Run and SEGV; fail-fast with the same exit path the EGL DRM
   // backend uses.
   if (!vk_backend) {
-    spdlog::critical("[FlutterView] DRM Vulkan backend init failed; aborting");
+    ihs::log::critical(
+        "[FlutterView] DRM Vulkan backend init failed; aborting");
     exit(EXIT_FAILURE);
   }
 
@@ -431,7 +433,7 @@ std::shared_ptr<Backend> MakeWaylandVulkanBackend(
   // Mesa's Vulkan WSI on Wayland needs zwp_linux_dmabuf_v1 (modern) or
   // wl_drm (legacy) to allocate GPU buffers; warn loudly if absent.
   if (!wl->HasLinuxDmabuf() && !wl->HasWlDrm()) {
-    spdlog::warn(
+    ihs::log::warn(
         "[WaylandVulkanBackend] compositor advertises neither "
         "zwp_linux_dmabuf_v1 nor wl_drm — Mesa Vulkan WSI cannot "
         "allocate swapchain images. Swapchain init will fail; fix on the "
@@ -554,7 +556,7 @@ std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
     // egl/vulkan renderer hint) so a typo or wrong-build isn't silent.
     if (!hint.empty() && hint != "egl" && hint != "vulkan" &&
         hint != keys.front()) {
-      spdlog::warn(
+      ihs::log::warn(
           "[backend] requested backend '{}' is not compiled into this build; "
           "using the only available backend '{}'",
           hint, keys.front());
@@ -628,7 +630,7 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
       available += ' ';
       available += k;
     }
-    spdlog::critical(
+    ihs::log::critical(
         "[backend] could not resolve an active backend (key='{}'); "
         "registered:{}",
         key, available);

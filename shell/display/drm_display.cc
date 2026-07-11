@@ -20,7 +20,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <mutex>
 #include <optional>
+#include <thread>
 #include <utility>
 
 #include <fcntl.h>
@@ -46,7 +48,7 @@ namespace {
 
 std::unique_ptr<homescreen::DrmSession> OpenSessionOrLog(bool no_seat) {
   if (no_seat) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmDisplay] --drm-no-seat: bypassing libseat — the backend opens "
         "/dev/dri + input directly and self-acquires DRM master, skipping "
         "the foreground-VT guard. No VT-switch / pause-resume; you are "
@@ -55,11 +57,11 @@ std::unique_ptr<homescreen::DrmSession> OpenSessionOrLog(bool no_seat) {
   }
   auto session = homescreen::DrmSession::Open();
   if (!session) {
-    spdlog::info(
+    ihs::log::info(
         "[DrmDisplay] no libseat backend available — falling back to "
         "direct /dev/dri open + legacy VT/master guards");
   } else {
-    spdlog::info("[DrmDisplay] libseat session active");
+    ihs::log::info("[DrmDisplay] libseat session active");
   }
   return session;
 }
@@ -86,7 +88,7 @@ drm::input::InputDeviceOpener OpenerFrom(homescreen::DrmSession* session) {
 bool VerifyForegroundVt(const std::string& drm_device) {
   const int tty0 = ::open("/dev/tty0", O_RDONLY | O_CLOEXEC);
   if (tty0 < 0) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmDisplay] open(/dev/tty0): {} — skipping foreground-VT check",
         std::strerror(errno));
     return true;
@@ -96,8 +98,9 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   const int vt_errno = errno;
   ::close(tty0);
   if (!got_state) {
-    spdlog::warn("[DrmDisplay] VT_GETSTATE: {} — skipping foreground-VT check",
-                 std::strerror(vt_errno));
+    ihs::log::warn(
+        "[DrmDisplay] VT_GETSTATE: {} — skipping foreground-VT check",
+        std::strerror(vt_errno));
     return true;
   }
   const unsigned int active_vt = vtstat.v_active;
@@ -109,7 +112,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   // a daemon without setsid + TIOCSCTTY).
   const int ctl_fd = ::open("/dev/tty", O_RDONLY | O_CLOEXEC | O_NOCTTY);
   if (ctl_fd < 0) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmDisplay] no controlling terminal (open /dev/tty: {}). Cannot "
         "drive {} without a foreground VT — switch to the active console "
         "(tty{}) and rerun.",
@@ -126,7 +129,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   const int ioctl_errno = errno;
   ::close(ctl_fd);
   if (ioctl_rc != 0) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmDisplay] TIOCGDEV(/dev/tty): {}. Cannot drive {} without "
         "a foreground VT — switch to the active console (tty{}) and rerun.",
         std::strerror(ioctl_errno), drm_device, active_vt);
@@ -140,7 +143,7 @@ bool VerifyForegroundVt(const std::string& drm_device) {
   const unsigned int ctl_major = major(static_cast<dev_t>(dev));
   const unsigned int ctl_minor = minor(static_cast<dev_t>(dev));
   if (ctl_major != kTtyMajor) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmDisplay] controlling terminal is not a kernel VT "
         "(major={}, minor={}) — you're running from a terminal emulator or "
         "SSH. Active VT is tty{}. Switch to tty{} (Ctrl+Alt+F{}) and rerun, "
@@ -150,15 +153,15 @@ bool VerifyForegroundVt(const std::string& drm_device) {
     return false;
   }
   if (ctl_minor != active_vt) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmDisplay] controlling VT is tty{} but foreground VT is tty{} — "
         "scanout goes to the foreground. Switch to tty{} (Ctrl+Alt+F{}) and "
         "rerun. Refusing to drive {}.",
         ctl_minor, active_vt, ctl_minor, ctl_minor, drm_device);
     return false;
   }
-  spdlog::info("[DrmDisplay] foreground VT check: on tty{} (active)",
-               active_vt);
+  ihs::log::info("[DrmDisplay] foreground VT check: on tty{} (active)",
+                 active_vt);
   return true;
 }
 
@@ -195,8 +198,8 @@ DrmDisplay::DrmDisplay(int32_t width,
       drm_seat->SetVtSwitchHandler([sess](int vt) -> bool {
         const int err = sess->SwitchSession(vt);
         if (err != 0) {
-          spdlog::warn("[DrmDisplay] SwitchSession({}) failed: {}", vt,
-                       std::strerror(err));
+          ihs::log::warn("[DrmDisplay] SwitchSession({}) failed: {}", vt,
+                         std::strerror(err));
           return false;
         }
         return true;
@@ -233,18 +236,18 @@ drm::Device* DrmDisplay::SharedDevice() {
     // while we hold the seat. No drmSetMaster, no foreground-VT guard.
     const int fd = session_->TakeDevice(device_path_);
     if (fd < 0) {
-      spdlog::error("[DrmDisplay] session take_device({}): failed",
-                    device_path_);
+      ihs::log::error("[DrmDisplay] session take_device({}): failed",
+                      device_path_);
       return nullptr;
     }
     drm_dev_.emplace(drm::Device::from_fd(fd));
-    spdlog::info("[DrmDisplay] opened {} via libseat (fd={})", device_path_,
-                 fd);
+    ihs::log::info("[DrmDisplay] opened {} via libseat (fd={})", device_path_,
+                   fd);
   } else {
     // Fallback path: no seat backend (or --drm-no-seat). Refuse up-front if we
     // are not on the active VT, then open + take master directly.
     if (no_seat_) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmDisplay] --drm-no-seat: skipping the foreground-VT guard on "
           "{}. If the screen stays black, another DRM master holds the device "
           "or scanout is owned by a different VT.",
@@ -255,8 +258,8 @@ drm::Device* DrmDisplay::SharedDevice() {
 
     auto dev = drm::Device::open(device_path_);
     if (!dev) {
-      spdlog::error("[DrmDisplay] open({}): {}", device_path_,
-                    dev.error().message());
+      ihs::log::error("[DrmDisplay] open({}): {}", device_path_,
+                      dev.error().message());
       return nullptr;
     }
     drm_dev_.emplace(std::move(*dev));
@@ -267,21 +270,21 @@ drm::Device* DrmDisplay::SharedDevice() {
     if (drmSetMaster(drm_dev_->fd()) != 0) {
       if (const int err = errno;
           err == EBUSY || err == EACCES || err == EPERM) {
-        spdlog::error(
+        ihs::log::error(
             "[DrmDisplay] cannot acquire DRM master on {} ({}). Another "
             "display server (gdm / gnome-shell / sddm / Xorg / a Wayland "
             "compositor) is already holding the device. Stop it or run from a "
             "bare TTY (e.g. `sudo systemctl isolate multi-user.target`).",
             device_path_, std::strerror(err));
       } else {
-        spdlog::error("[DrmDisplay] drmSetMaster({}): {}", device_path_,
-                      std::strerror(err));
+        ihs::log::error("[DrmDisplay] drmSetMaster({}): {}", device_path_,
+                        std::strerror(err));
       }
       drm_dev_.reset();
       return nullptr;
     }
     drm_master_ = true;
-    spdlog::info("[DrmDisplay] DRM master on {}", device_path_);
+    ihs::log::info("[DrmDisplay] DRM master on {}", device_path_);
   }
   return &*drm_dev_;
 }
@@ -304,7 +307,7 @@ void DrmDisplay::StartFlipReader() {
   ArmFlipRead();
   flip_thread_ = std::thread([this]() { flip_ioc_->run(); });
   flip_reader_running_ = true;
-  spdlog::info("[DrmDisplay] flip reader started on fd={}", drm_dev_->fd());
+  ihs::log::info("[DrmDisplay] flip reader started on fd={}", drm_dev_->fd());
 }
 
 void DrmDisplay::ArmFlipRead() {
@@ -317,7 +320,7 @@ void DrmDisplay::ArmFlipRead() {
         if (ec) {
           // operation_aborted fires on cancel() at teardown -- quiet path.
           if (ec != asio::error::operation_aborted) {
-            spdlog::warn("[DrmDisplay] flip reader wait: {}", ec.message());
+            ihs::log::warn("[DrmDisplay] flip reader wait: {}", ec.message());
           }
           return;
         }

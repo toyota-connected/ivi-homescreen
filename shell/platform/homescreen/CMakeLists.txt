@@ -83,3 +83,7 @@ if (ENABLE_PLUGINS)
     )
 
 endif ()
+
+# The Flutter/shell logging surface (logging.h shim over ihs_shared) is used
+# throughout this library, so it needs the ihs/* headers and fmt on its path.
+ihs_target_add_logging(platform_homescreen)

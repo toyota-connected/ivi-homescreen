@@ -53,7 +53,7 @@ bool FileSink::Present(const void* allocation,
       std::snprintf(buf.data(), buf.size(), path_pattern_.c_str(),
                     static_cast<int>(frame_index_));
   if (written < 0 || static_cast<size_t>(written) >= buf.size()) {
-    spdlog::error(
+    ihs::log::error(
         "[FileSink] formatted path overflowed or failed for pattern '{}'",
         path_pattern_);
     return false;
@@ -80,7 +80,7 @@ bool FileSink::WritePam(const std::string& path,
 
   FILE* fp = std::fopen(path.c_str(), "wb");
   if (fp == nullptr) {
-    spdlog::error("[FileSink] cannot open '{}' for writing", path);
+    ihs::log::error("[FileSink] cannot open '{}' for writing", path);
     return false;
   }
 
@@ -114,7 +114,7 @@ bool FileSink::WritePam(const std::string& path,
   }
 
   if (!ok) {
-    spdlog::error("[FileSink] short write to '{}'", path);
+    ihs::log::error("[FileSink] short write to '{}'", path);
   }
   std::fclose(fp);
   return ok;

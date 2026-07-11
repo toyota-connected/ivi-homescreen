@@ -169,13 +169,13 @@ void DumpObjectProps(const int fd,
   drmModeObjectPropertiesPtr props =
       drmModeObjectGetProperties(fd, obj_id, obj_type);
   if (props == nullptr) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] snapshot {} id={}: getProperties failed (errno={})",
         label, obj_id, errno);
     return;
   }
-  spdlog::debug("[DrmCompositor] snapshot {} id={} ({} props):", label, obj_id,
-                props->count_props);
+  ihs::log::debug("[DrmCompositor] snapshot {} id={} ({} props):", label,
+                  obj_id, props->count_props);
   for (uint32_t i = 0; i < props->count_props; ++i) {
     drmModePropertyPtr prop = drmModeGetProperty(fd, props->props[i]);
     if (prop == nullptr) {
@@ -196,8 +196,8 @@ void DumpObjectProps(const int fd,
     } else if ((prop->flags & DRM_MODE_PROP_SIGNED_RANGE) != 0U) {
       kind = "SRANGE";
     }
-    spdlog::debug("[DrmCompositor]   {:<20} id={} value={} [{}]", prop->name,
-                  prop->prop_id, value, kind);
+    ihs::log::debug("[DrmCompositor]   {:<20} id={} value={} [{}]", prop->name,
+                    prop->prop_id, value, kind);
     drmModeFreeProperty(prop);
   }
   drmModeFreeObjectProperties(props);
@@ -294,7 +294,7 @@ bool DrmCompositor::InitEglExtensions() {
   has_native_fence_sync_ = has_fence_sync && has_native_fence &&
                            eglCreateSyncKHR_ && eglDestroySyncKHR_ &&
                            eglDupNativeFenceFDANDROID_;
-  spdlog::info(
+  ihs::log::info(
       "[DrmCompositor] explicit sync via IN_FENCE_FD: {} (fence_sync={}, "
       "native_fence_sync={})",
       has_native_fence_sync_ ? "available" : "unavailable",
@@ -307,13 +307,13 @@ bool DrmCompositor::InitEglExtensions() {
 bool DrmCompositor::InitPlaneAllocator() {
   auto reg = drm::planes::PlaneRegistry::enumerate(backend_->device());
   if (!reg) {
-    spdlog::warn("[DrmCompositor] PlaneRegistry: {}", reg.error().message());
+    ihs::log::warn("[DrmCompositor] PlaneRegistry: {}", reg.error().message());
     return false;
   }
   plane_registry_.emplace(std::move(*reg));
 
   const auto available = plane_registry_->for_crtc(out_.crtc_index());
-  spdlog::info(
+  ihs::log::info(
       "[DrmCompositor] {} planes available for CRTC {} (crtc_index={})",
       available.size(), out_.crtc_id(), out_.crtc_index());
   uint32_t primary_id = 0;
@@ -330,8 +330,9 @@ bool DrmCompositor::InitPlaneAllocator() {
         type_str = "CURSOR";
         break;
     }
-    spdlog::info("[DrmCompositor]   plane {} type={} zpos=[{},{}]", p->id,
-                 type_str, p->zpos_min.value_or(-1), p->zpos_max.value_or(-1));
+    ihs::log::info("[DrmCompositor]   plane {} type={} zpos=[{},{}]", p->id,
+                   type_str, p->zpos_min.value_or(-1),
+                   p->zpos_max.value_or(-1));
     if (p->type == drm::planes::DRMPlaneType::PRIMARY) {
       // Use zpos_min: when immutable it's the only legal value; when
       // mutable it's still the lowest slot, and we want the root Flutter
@@ -359,10 +360,10 @@ bool DrmCompositor::InitPlaneAllocator() {
     if (PlaneSupportsReflectY(backend_->drm_fd(),
                               static_cast<uint32_t>(p->id))) {
       any_plane_supports_reflect_y_ = true;
-      spdlog::info("[DrmCompositor]   plane {} supports REFLECT_Y", p->id);
+      ihs::log::info("[DrmCompositor]   plane {} supports REFLECT_Y", p->id);
     }
   }
-  spdlog::info("[DrmCompositor] primary plane zpos = {}", primary_zpos_);
+  ihs::log::info("[DrmCompositor] primary plane zpos = {}", primary_zpos_);
 
   // rockchip VOP2 advertises REFLECT_Y on its planes and even passes a
   // TEST_ONLY atomic commit with it, but an actual reflected scanout
@@ -375,7 +376,7 @@ bool DrmCompositor::InitPlaneAllocator() {
   // scanned un-reflected) which the VOP scans cleanly.
   if (out_.resolved().driver_name == "rockchip") {
     any_plane_supports_reflect_y_ = false;
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor] rockchip: REFLECT_Y scanout faults the VOP IOMMU; "
         "forcing GL composite");
   }
@@ -386,11 +387,11 @@ bool DrmCompositor::InitPlaneAllocator() {
   if (const char* v = std::getenv("IVI_DRM_NO_DIRECT_SCANOUT");
       v && *v && *v != '0') {
     any_plane_supports_reflect_y_ = false;
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor] IVI_DRM_NO_DIRECT_SCANOUT set; forcing GL composite");
   }
-  spdlog::info("[DrmCompositor] direct-scanout REFLECT_Y available: {}",
-               any_plane_supports_reflect_y_ ? "yes" : "no");
+  ihs::log::info("[DrmCompositor] direct-scanout REFLECT_Y available: {}",
+                 any_plane_supports_reflect_y_ ? "yes" : "no");
 
   // Pre-commit snapshot: what fbcon/prior session left on the pipe.
   // EINVAL on the first atomic TEST usually correlates to a residual
@@ -412,7 +413,8 @@ bool DrmCompositor::InitPlaneAllocator() {
   auto ms = drm::modeset::Modeset::create(backend_->device(), out_.crtc_id(),
                                           out_.connector_id(), out_.mode());
   if (!ms) {
-    spdlog::error("[DrmCompositor] Modeset::create: {}", ms.error().message());
+    ihs::log::error("[DrmCompositor] Modeset::create: {}",
+                    ms.error().message());
     return false;
   }
   modeset_.emplace(std::move(*ms));
@@ -442,7 +444,7 @@ bool DrmCompositor::InitPlaneAllocator() {
   framed_ = (out_.width() != out_.mode_width()) ||
             (out_.height() != out_.mode_height());
   if (framed_ && !InitFramedMode()) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] framed-mode init failed; plane path disabled");
     return false;
   }
@@ -479,18 +481,18 @@ bool DrmCompositor::InitPlaneAllocator() {
       auto scene = drm::scene::LayerScene::create(
           const_cast<drm::Device&>(backend_->device()), scene_cfg);
       if (!scene) {
-        spdlog::error("[DrmCompositor] LayerScene::create: {}",
-                      scene.error().message());
+        ihs::log::error("[DrmCompositor] LayerScene::create: {}",
+                        scene.error().message());
         return false;
       }
       scene_ = std::move(*scene);
       ApplyCursorReservation();
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] LayerScene constructed (crtc={} connector={})",
           scene_cfg.crtc_id, scene_cfg.connector_id);
     }
   } else if (!framed_) {
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor] no plane supports REFLECT_Y; using GL-composite "
         "path (scene direct-scanout needs the flip)");
   }
@@ -546,7 +548,7 @@ bool DrmCompositor::InitFramedMode() {
     }
   }
   if (framed_primary_id_ == 0 || framed_overlay_id_ == 0) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] framed mode needs 1 primary + 1 overlay plane on "
         "CRTC {} (primary={}, overlay={})",
         out_.crtc_id(), framed_primary_id_, framed_overlay_id_);
@@ -565,15 +567,15 @@ bool DrmCompositor::InitFramedMode() {
   if (auto r = framed_props_.cache_properties(fd, framed_primary_id_,
                                               DRM_MODE_OBJECT_PLANE);
       !r) {
-    spdlog::error("[DrmCompositor] cache primary props: {}",
-                  r.error().message());
+    ihs::log::error("[DrmCompositor] cache primary props: {}",
+                    r.error().message());
     return false;
   }
   if (auto r = framed_props_.cache_properties(fd, framed_overlay_id_,
                                               DRM_MODE_OBJECT_PLANE);
       !r) {
-    spdlog::error("[DrmCompositor] cache overlay props: {}",
-                  r.error().message());
+    ihs::log::error("[DrmCompositor] cache overlay props: {}",
+                    r.error().message());
     return false;
   }
   // Also, cache non-cursor planes we'll need to disable each frame, so
@@ -588,7 +590,7 @@ bool DrmCompositor::InitFramedMode() {
     (void)framed_props_.cache_properties(fd, p->id, DRM_MODE_OBJECT_PLANE);
   }
 
-  spdlog::info(
+  ihs::log::info(
       "[DrmCompositor] framed mode: primary={} overlay={} (zpos={}), "
       "BG {}x{}, content {}x{} at ({},{})",
       framed_primary_id_, framed_overlay_id_, framed_overlay_zpos_,
@@ -619,7 +621,7 @@ bool DrmCompositor::InitCompositionBuffers() {
     if (!CreateGbmStore(bg_store_, out_.mode_width(), out_.mode_height(),
                         format) ||
         !EnsureDrmFbId(bg_store_)) {
-      spdlog::error("[DrmCompositor] BG GBM store create failed");
+      ihs::log::error("[DrmCompositor] BG GBM store create failed");
       return false;
     }
     glBindFramebuffer(GL_FRAMEBUFFER, bg_store_.fbo);
@@ -641,7 +643,7 @@ void DrmCompositor::EnsureGlCapsProbed() {
   gl_caps_.Probe();
   gl_compositor_ = std::make_unique<GlCompositor>(&gl_caps_);
   if (!InitEglExtensions()) {
-    spdlog::error("[DrmCompositor] missing EGL_KHR_image / GL_OES_EGL_image");
+    ihs::log::error("[DrmCompositor] missing EGL_KHR_image / GL_OES_EGL_image");
   }
 
   // Only take the plane path if DriverProbe said this driver supports it
@@ -649,7 +651,8 @@ void DrmCompositor::EnsureGlCapsProbed() {
   // PresentViaGlFallback — same outcome as before, just honest about it.
   if (out_.resolved().use_plane_compositor) {
     if (!InitPlaneAllocator()) {
-      spdlog::warn("[DrmCompositor] plane allocator init failed; GL fallback");
+      ihs::log::warn(
+          "[DrmCompositor] plane allocator init failed; GL fallback");
     } else {
       // Flip planes_available_ BEFORE InitCompositionBuffers so the
       // CreateGbmStore call-chain inside it imports each comp BO as a
@@ -657,15 +660,16 @@ void DrmCompositor::EnsureGlCapsProbed() {
       // tells the kernel to disable the primary plane — blank screen.
       planes_available_ = true;
       if (InitCompositionBuffers()) {
-        spdlog::info("[DrmCompositor] plane allocator active");
+        ihs::log::info("[DrmCompositor] plane allocator active");
       } else {
         planes_available_ = false;
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] composition buffer init failed; GL fallback");
       }
     }
   } else {
-    spdlog::info("[DrmCompositor] plane compositor disabled by probe; GL path");
+    ihs::log::info(
+        "[DrmCompositor] plane compositor disabled by probe; GL path");
   }
   gl_caps_probed_ = true;
 }
@@ -679,7 +683,7 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
                                    const size_t pool_size,
                                    const bool force_scanout) const {
   if (pool_size == 0 || pool_size > GbmBackingStore::kMaxPoolSize) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] CreateGbmStore: pool_size={} out of range [1, {}]",
         pool_size, GbmBackingStore::kMaxPoolSize);
     return false;
@@ -702,8 +706,8 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
     auto& slot = store.pool[i];
     slot.bo = gbm_bo_create(backend_->gbm(), w, h, format, usage);
     if (!slot.bo) {
-      spdlog::error("[DrmCompositor] gbm_bo_create slot={} {}x{}: {}", i, w, h,
-                    std::strerror(errno));
+      ihs::log::error("[DrmCompositor] gbm_bo_create slot={} {}x{}: {}", i, w,
+                      h, std::strerror(errno));
       DestroyGbmStore(store);
       return false;
     }
@@ -716,8 +720,8 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
     // required by NVIDIA, harmless to Mesa.
     const int dmabuf_fd = gbm_bo_get_fd(slot.bo);
     if (dmabuf_fd < 0) {
-      spdlog::error("[DrmCompositor] gbm_bo_get_fd slot={}: {}", i,
-                    std::strerror(errno));
+      ihs::log::error("[DrmCompositor] gbm_bo_get_fd slot={}: {}", i,
+                      std::strerror(errno));
       DestroyGbmStore(store);
       return false;
     }
@@ -754,7 +758,7 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
         static_cast<EGLClientBuffer>(nullptr), attribs.data());
     close(dmabuf_fd);  // EGL dup's the fd; safe to close after the call.
     if (slot.egl_image == EGL_NO_IMAGE_KHR) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmCompositor] eglCreateImageKHR(slot={}, LINUX_DMA_BUF, "
           "fourcc={}, stride={}, offset={}, mod=0x{:x}): 0x{:x}",
           i, drm::format_name(format), stride, offset, modifier, eglGetError());
@@ -799,7 +803,7 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
   }
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error("[DrmCompositor] FBO incomplete");
+    ihs::log::error("[DrmCompositor] FBO incomplete");
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     DestroyGbmStore(store);
     return false;
@@ -851,14 +855,14 @@ uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) const {
     if (drmModeAddFB2WithModifiers(backend_->drm_fd(), w, h, format, handles,
                                    pitches, offsets, modifiers, &fb_id,
                                    DRM_MODE_FB_MODIFIERS) != 0) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmCompositor] drmModeAddFB2WithModifiers({}x{}, fmt=0x{:08x}, "
           "mod=0x{:016x}, planes={}): {}",
           w, h, format, modifier, plane_count, std::strerror(errno));
       return 0;
     }
     if (backend_->cfg_.debug_backend) {
-      spdlog::debug(
+      ihs::log::debug(
           "[DrmCompositor] AddFB2WithModifiers fb_id={} {}x{} fmt=0x{:08x} "
           "mod=0x{:016x} planes={}",
           fb_id, w, h, format, modifier, plane_count);
@@ -866,14 +870,15 @@ uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) const {
   } else {
     if (drmModeAddFB2(backend_->drm_fd(), w, h, format, handles, pitches,
                       offsets, &fb_id, 0) != 0) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmCompositor] drmModeAddFB2({}x{}, fmt=0x{:08x}, linear): {}", w,
           h, format, std::strerror(errno));
       return 0;
     }
     if (backend_->cfg_.debug_backend) {
-      spdlog::debug("[DrmCompositor] AddFB2 fb_id={} {}x{} fmt=0x{:08x} linear",
-                    fb_id, w, h, format);
+      ihs::log::debug(
+          "[DrmCompositor] AddFB2 fb_id={} {}x{} fmt=0x{:08x} linear", fb_id, w,
+          h, format);
     }
   }
   return fb_id;
@@ -974,7 +979,7 @@ bool DrmCompositor::WaitForPendingFlip() const {
       return false;
     }
     if (std::chrono::steady_clock::now() >= deadline) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmCompositor] WaitForPendingFlip: no flip completion after "
           "100ms; proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
@@ -1013,7 +1018,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   // outputs rather than corrupt the primary. The zero-copy scene path (the
   // normal zero-copy scene path) does not reach this.
   if (!drives_vsync_) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCompositor] GL fallback unavailable on a secondary output "
         "(crtc={}); dropping frame",
         out_.crtc_id());
@@ -1166,7 +1171,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       if (baton && baton->store) {
         const auto* s = baton->store;
         if (backend_->cfg_.debug_backend) {
-          spdlog::debug(
+          ihs::log::debug(
               "[DrmCompositor] framed layer[{}] BS src={}x{} "
               "offset=({:.1f},{:.1f}) size={:.1f}x{:.1f} blend={}",
               i, s->width, s->height, layer->offset.x, layer->offset.y,
@@ -1184,14 +1189,14 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         if (backend_->cfg_.debug_backend && !pv_probes.empty()) {
           for (const auto& p : pv_probes) {
             auto px = read_px(p.cx, p.cy);
-            spdlog::debug(
+            ihs::log::debug(
                 "[DrmCompositor] probe PV id={} @({},{}) after BS layer[{}] "
                 "rgba=({},{},{},{})",
                 p.id, p.cx, p.cy, i, px[0], px[1], px[2], px[3]);
           }
         }
       } else if (backend_->cfg_.debug_backend) {
-        spdlog::debug(
+        ihs::log::debug(
             "[DrmCompositor] framed layer[{}] BS SKIPPED (baton/store null)",
             i);
       }
@@ -1209,7 +1214,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       }
       if (!surface_sp) {
         if (backend_->cfg_.debug_backend) {
-          spdlog::debug(
+          ihs::log::debug(
               "[DrmCompositor] framed layer[{}] PV id={} SKIPPED (no "
               "registered surface; registry size={})",
               i, layer->platform_view->identifier, surfaces_size);
@@ -1219,7 +1224,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         const auto tex = surface_sp->GetGlTextureName();
         if (tex == 0) {
           if (backend_->cfg_.debug_backend) {
-            spdlog::debug(
+            ihs::log::debug(
                 "[DrmCompositor] framed layer[{}] PV id={} SKIPPED "
                 "(GetGlTextureName=0)",
                 i, layer->platform_view->identifier);
@@ -1231,7 +1236,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
           // flip_y=false so their already-top-down bytes land right-side-up.
           const bool flip_y = !surface_sp->TextureIsTopFirst();
           if (backend_->cfg_.debug_backend) {
-            spdlog::debug(
+            ihs::log::debug(
                 "[DrmCompositor] framed layer[{}] PV id={} tex={} "
                 "src={}x{} offset=({:.1f},{:.1f}) size={:.1f}x{:.1f} "
                 "blend={} flip_y={} top_first={}",
@@ -1255,7 +1260,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
             const auto cy =
                 static_cast<GLint>(layer->offset.y + layer->size.height / 2.0);
             auto px = read_px(cx, cy);
-            spdlog::debug(
+            ihs::log::debug(
                 "[DrmCompositor] probe PV id={} @({},{}) after-PV "
                 "rgba=({},{},{},{})",
                 layer->platform_view->identifier, cx, cy, px[0], px[1], px[2],
@@ -1266,15 +1271,15 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         }
       }
     } else if (backend_->cfg_.debug_backend) {
-      spdlog::debug("[DrmCompositor] framed layer[{}] unhandled type={}", i,
-                    static_cast<int>(layer->type));
+      ihs::log::debug("[DrmCompositor] framed layer[{}] unhandled type={}", i,
+                      static_cast<int>(layer->type));
     }
   }
   if (backend_->cfg_.debug_backend && !pv_probes.empty()) {
     for (const auto& p : pv_probes) {
       auto px = read_px(p.cx, p.cy);
       const bool changed = px != p.after_pv;
-      spdlog::debug(
+      ihs::log::debug(
           "[DrmCompositor] probe PV id={} @({},{}) after-all "
           "rgba=({},{},{},{}) was=({},{},{},{}) {}",
           p.id, p.cx, p.cy, px[0], px[1], px[2], px[3], p.after_pv[0],
@@ -1286,7 +1291,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   if (backend_->cfg_.debug_backend) {
-    spdlog::debug(
+    ihs::log::debug(
         "[DrmCompositor] framed frame: layers={} composited={} comp_idx={} "
         "comp_fb={}",
         count, composited_any, comp_idx_, comp.active().drm_fb_id);
@@ -1296,7 +1301,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
 
   drm::AtomicRequest req(backend_->device());
   if (!req.valid()) {
-    spdlog::warn("[DrmCompositor] framed: AtomicRequest alloc failed");
+    ihs::log::warn("[DrmCompositor] framed: AtomicRequest alloc failed");
     fallback_latched_ = true;
     return PresentViaGlFallback(layers, count);
   }
@@ -1311,7 +1316,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
 
   const bool dump = backend_->cfg_.debug_backend && !plane_mode_set_;
   if (dump) {
-    spdlog::debug(
+    ihs::log::debug(
         "[DrmCompositor] framed commit: crtc={} primary={} overlay={} "
         "mode={}x{} fb={}x{} offset=({},{})",
         crtc_id, framed_primary_id_, framed_overlay_id_, mode_w, mode_h, fb_w,
@@ -1323,12 +1328,12 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   // activate the CRTC.
   if (!plane_mode_set_ && modeset_) {
     if (auto r = modeset_->attach(req); !r) {
-      spdlog::warn("[DrmCompositor] framed: modeset attach: {}",
-                   r.error().message());
+      ihs::log::warn("[DrmCompositor] framed: modeset attach: {}",
+                     r.error().message());
       return PresentViaGlFallback(layers, count);
     }
     if (dump) {
-      spdlog::debug(
+      ihs::log::debug(
           "[DrmCompositor] framed commit: modeset_->attach() done "
           "(CRTC.ACTIVE/MODE_ID + connector.CRTC_ID)");
     }
@@ -1343,18 +1348,18 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                  const uint64_t value) -> bool {
     auto pid = framed_props_.property_id(obj, name);
     if (!pid) {
-      spdlog::warn("[DrmCompositor] framed: property {}.{} missing: {}", obj,
-                   name, pid.error().message());
+      ihs::log::warn("[DrmCompositor] framed: property {}.{} missing: {}", obj,
+                     name, pid.error().message());
       return false;
     }
     if (auto r = req.add_property(obj, *pid, value); !r) {
-      spdlog::warn("[DrmCompositor] framed: add_property {}.{}: {}", obj, name,
-                   r.error().message());
+      ihs::log::warn("[DrmCompositor] framed: add_property {}.{}: {}", obj,
+                     name, r.error().message());
       return false;
     }
     if (dump) {
-      spdlog::debug("[DrmCompositor] framed prop: obj={} pid={} {}={}", obj,
-                    *pid, name, value);
+      ihs::log::debug("[DrmCompositor] framed prop: obj={} pid={} {}={}", obj,
+                      *pid, name, value);
     }
     return true;
   };
@@ -1362,8 +1367,8 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   auto log_raw = [&](const uint32_t obj, const uint32_t pid, const char* name,
                      const uint64_t value) {
     if (dump) {
-      spdlog::debug("[DrmCompositor] framed prop: obj={} pid={} {}={}", obj,
-                    pid, name, value);
+      ihs::log::debug("[DrmCompositor] framed prop: obj={} pid={} {}={}", obj,
+                      pid, name, value);
     }
   };
 
@@ -1475,18 +1480,19 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
     constexpr uint32_t test_flags =
         DRM_MODE_ATOMIC_TEST_ONLY | DRM_MODE_ATOMIC_ALLOW_MODESET;
     if (auto r = req.test(test_flags); !r) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmCompositor] framed TEST_ONLY commit failed ({}); real commit "
           "will likely fail with the same error",
           r.error().message());
     } else {
-      spdlog::debug("[DrmCompositor] framed TEST_ONLY commit passed");
+      ihs::log::debug("[DrmCompositor] framed TEST_ONLY commit passed");
     }
   }
   const uint64_t t3 = profile ? NsNow() : 0;
 
   if (dump) {
-    spdlog::debug("[DrmCompositor] framed commit: flags=0x{:x}", commit_flags);
+    ihs::log::debug("[DrmCompositor] framed commit: flags=0x{:x}",
+                    commit_flags);
   }
 
   if (auto r = req.commit(commit_flags, static_cast<IFlipSink*>(this)); !r) {
@@ -1496,17 +1502,17 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       // us). Either way, skip the frame; in the still-active-flag case
       // log a warning so an unexpected revoke is still visible.
       if (!paused_.load(std::memory_order_acquire)) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] framed commit: master revoked (EACCES); skip "
             "frame");
       }
       return false;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCompositor] framed atomic commit failed ({}); latching GL "
         "fallback",
         r.error().message());
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] framed config ({}x{} on {}x{} mode) requires atomic "
         "plane support; GL fallback cannot letterbox. Next Present will fail.",
         fb_w, fb_h, mode_w, mode_h);
@@ -1529,7 +1535,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] framed profile (n={}): "
           "wait={:.2f}ms (max {:.2f})  compose={:.2f}ms (max {:.2f})  "
           "test={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
@@ -1570,15 +1576,16 @@ void DrmCompositor::VerifyPipeRunning() const {
     drmModeFreeObjectProperties(props);
   }
   if (!crtc_active_found) {
-    spdlog::warn("[DrmCompositor] pipe-check: CRTC.ACTIVE property not found");
+    ihs::log::warn(
+        "[DrmCompositor] pipe-check: CRTC.ACTIVE property not found");
   } else if (crtc_active != 1) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] pipe-check: CRTC {} NOT active (ACTIVE={}) after "
         "modeset commit. The atomic commit reported success but the kernel "
         "did not activate the pipe — no PAGE_FLIP_EVENTs will fire.",
         crtc_id, crtc_active);
   } else {
-    spdlog::info("[DrmCompositor] pipe-check: CRTC {} ACTIVE=1", crtc_id);
+    ihs::log::info("[DrmCompositor] pipe-check: CRTC {} ACTIVE=1", crtc_id);
   }
 
   // ── Primary plane FB_ID readback ──
@@ -1611,13 +1618,13 @@ void DrmCompositor::VerifyPipeRunning() const {
       drmModeFreeObjectProperties(props);
     }
     if (!fb_found || primary_fb == 0) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmCompositor] pipe-check: primary plane {} has no FB_ID "
           "(found={}, value={}). Kernel silently accepted commit without "
           "binding a framebuffer — nothing to scan out.",
           primary_plane_id, fb_found, primary_fb);
     } else {
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] pipe-check: primary plane {} FB_ID={} CRTC_ID={}",
           primary_plane_id, primary_fb, primary_crtc);
     }
@@ -1632,7 +1639,7 @@ void DrmCompositor::VerifyPipeRunning() const {
   uint64_t seq_before = 0;
   uint64_t ns_before = 0;
   if (drmCrtcGetSequence(fd, crtc_id, &seq_before, &ns_before) != 0) {
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCompositor] pipe-check: drmCrtcGetSequence unsupported or "
         "failed ({}); skipping vblank probe",
         std::strerror(errno));
@@ -1644,12 +1651,12 @@ void DrmCompositor::VerifyPipeRunning() const {
   uint64_t seq_after = 0;
   uint64_t ns_after = 0;
   if (drmCrtcGetSequence(fd, crtc_id, &seq_after, &ns_after) != 0) {
-    spdlog::warn("[DrmCompositor] pipe-check: drmCrtcGetSequence (after): {}",
-                 std::strerror(errno));
+    ihs::log::warn("[DrmCompositor] pipe-check: drmCrtcGetSequence (after): {}",
+                   std::strerror(errno));
     return;
   }
   if (seq_after == seq_before) {
-    spdlog::error(
+    ihs::log::error(
         "[DrmCompositor] pipe-check: vblank sequence did NOT advance over "
         "~{} ms (seq={}). CRTC {} is not scanning out — PAGE_FLIP_EVENTs "
         "will never fire. Likely causes: connector DPMS off, wrong "
@@ -1657,7 +1664,7 @@ void DrmCompositor::VerifyPipeRunning() const {
         "or driver silent-accept bug.",
         sleep_us / 1000, seq_before, crtc_id);
   } else {
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor] pipe-check: vblank advanced {} → {} ({} frames in "
         "~{} ms) — pipe is live",
         seq_before, seq_after, seq_after - seq_before, sleep_us / 1000);
@@ -1689,7 +1696,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // One-shot post-resume probe.
   if (!resume_pending_logged_ && !plane_mode_set_) {
     resume_pending_logged_ = true;
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor] PresentLayers entered post-resume; layer_count={} "
         "framed={} fallback_latched={}",
         layer_count, framed_, fallback_latched_);
@@ -1851,7 +1858,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
         const auto& s = store->active();
         if (s.bo != last_bo) {
           ++distinct_count;
-          spdlog::debug(
+          ihs::log::debug(
               "[DrmCompositor] direct-scanout bo cycle: bo={} fb_id={} "
               "(distinct={})",
               static_cast<const void*>(s.bo), s.drm_fb_id, distinct_count);
@@ -1903,8 +1910,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // don't bring up the CRTC.
   if (!plane_mode_set_ && modeset_) {
     if (auto r = modeset_->attach(req); !r) {
-      spdlog::warn("[DrmCompositor] modeset attach: {}; falling back to GL",
-                   r.error().message());
+      ihs::log::warn("[DrmCompositor] modeset attach: {}; falling back to GL",
+                     r.error().message());
       return PresentViaGlFallback(layers, layer_count);
     }
   }
@@ -1916,34 +1923,35 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       // toggled paused_. Skip the frame either way; warn only when
       // paused_ isn't set so an unexpected revoke remains visible.
       if (!paused_.load(std::memory_order_acquire)) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] allocator: master revoked (EACCES); skip frame");
       }
       return false;
     }
-    spdlog::warn("[DrmCompositor] allocator: {}; falling back to GL",
-                 result.error().message());
+    ihs::log::warn("[DrmCompositor] allocator: {}; falling back to GL",
+                   result.error().message());
     return PresentViaGlFallback(layers, layer_count);
   }
   if (backend_->cfg_.debug_backend) {
-    spdlog::info("[DrmCompositor] {} of {} layers on HW planes", *result,
-                 frame_layers.size());
+    ihs::log::info("[DrmCompositor] {} of {} layers on HW planes", *result,
+                   frame_layers.size());
     for (size_t i = 0; i < frame_layers.size(); ++i) {
       const auto& fl = frame_layers[i];
       if (auto pid = fl.drm->assigned_plane_id()) {
-        spdlog::info(
+        ihs::log::info(
             "[DrmCompositor]   layer {} → plane {} (fb_id={}, {}x{}, zpos={})",
             i, *pid, fl.store ? fl.store->active().drm_fb_id : 0,
             fl.store ? fl.store->width : 0, fl.store ? fl.store->height : 0,
             primary_zpos_ + i);
       } else if (fl.drm->needs_composition()) {
-        spdlog::info("[DrmCompositor]   layer {} → composition (overflow)", i);
+        ihs::log::info("[DrmCompositor]   layer {} → composition (overflow)",
+                       i);
       } else {
-        spdlog::info("[DrmCompositor]   layer {} → unassigned?!", i);
+        ihs::log::info("[DrmCompositor]   layer {} → unassigned?!", i);
       }
     }
     const auto comp_pid = comp_layer_.assigned_plane_id();
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor]   comp_layer → {} (fb_id={})",
         comp_pid ? std::to_string(*comp_pid) : std::string("<unassigned>"),
         comp.active().drm_fb_id);
@@ -2116,7 +2124,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       // EACCES race with libseat pause; warn only when paused_ hasn't
       // toggled yet so unexpected revokes still surface.
       if (!paused_.load(std::memory_order_acquire)) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] atomic commit: master revoked (EACCES); skip "
             "frame");
       }
@@ -2124,13 +2132,13 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     }
     // Latch: stop trying planes for the rest of the session. One WARN
     // per latch so the failure is visible without flooding.
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCompositor] atomic commit failed ({}); latching GL fallback "
         "for remaining session",
         commit_ok.error().message());
     if (out_.width() != out_.mode_width() ||
         out_.height() != out_.mode_height()) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmCompositor] framed config ({}x{} on {}x{} mode) needs the "
           "atomic plane compositor; legacy fallback can't letterbox. Next "
           "Present will fail.",
@@ -2193,7 +2201,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
           GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
           GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached_tex);
       if (static_cast<GLuint>(attached_tex) != store.active().color_tex) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] FBO rebind verify failed: expected "
             "color_tex={} got={}",
             store.active().color_tex, attached_tex);
@@ -2245,7 +2253,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
         out_.vrefresh() > 0 ? 1000000000ULL / out_.vrefresh() : 16666667ULL;
     const uint64_t slow_threshold_ns = (period_ns * 3) / 2;
     if (total_ns > slow_threshold_ns) {
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] slow frame: wait={:.2f}ms compose={:.2f}ms "
           "commit={:.2f}ms total={:.2f}ms (vblank budget {:.2f}ms)",
           static_cast<double>(wait_ns) / 1e6,
@@ -2263,7 +2271,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] planes profile (n={}): "
           "wait={:.2f}ms (max {:.2f})  compose={:.2f}ms (max {:.2f})  "
           "commit={:.2f}ms (max {:.2f})  total={:.2f}ms (max {:.2f})",
@@ -2377,7 +2385,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     // the store predated the scene_ construction, which can't happen
     // on the non-framed path (scene_ is built before any Present).
     if (!fl.baton->scene_source) {
-      spdlog::warn(
+      ihs::log::warn(
           "[DrmCompositor] LayerScene: baton lacks scene_source; routing "
           "frame through GL fallback");
       return PresentViaGlFallback(layers, layer_count);
@@ -2392,8 +2400,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     desc.identity_tag = fl.baton;
     auto handle = scene_->add_layer(std::move(desc));
     if (!handle) {
-      spdlog::warn("[DrmCompositor] LayerScene::add_layer: {}",
-                   handle.error().message());
+      ihs::log::warn("[DrmCompositor] LayerScene::add_layer: {}",
+                     handle.error().message());
       return PresentViaGlFallback(layers, layer_count);
     }
     scene_layer_batons_.push_back(fl.baton);
@@ -2408,21 +2416,21 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   if (!test) {
     if (test.error() == std::errc::permission_denied) {
       if (!paused_.load(std::memory_order_acquire)) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] LayerScene::test: master revoked (EACCES); "
             "skip frame");
       }
       return false;
     }
-    spdlog::warn("[DrmCompositor] LayerScene::test: {}; routing through GL",
-                 test.error().message());
+    ihs::log::warn("[DrmCompositor] LayerScene::test: {}; routing through GL",
+                   test.error().message());
     return PresentViaGlFallback(layers, layer_count);
   }
   for (const auto& p : test->placements) {
     if (p.placement == drm::scene::LayerPlacement::Composited ||
         p.placement == drm::scene::LayerPlacement::Unassigned) {
       if (backend_->cfg_.debug_backend) {
-        spdlog::debug(
+        ihs::log::debug(
             "[DrmCompositor] LayerScene test: layer {} {}; routing through "
             "GL fallback",
             p.handle.id,
@@ -2468,13 +2476,13 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   if (!report) {
     if (report.error() == std::errc::permission_denied) {
       if (!paused_.load(std::memory_order_acquire)) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] LayerScene::commit: master revoked (EACCES); "
             "skip frame");
       }
       return false;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCompositor] LayerScene::commit failed ({}); latching GL "
         "fallback for remaining session",
         report.error().message());
@@ -2543,7 +2551,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   }
 
   if (backend_->cfg_.debug_backend) {
-    spdlog::debug(
+    ihs::log::debug(
         "[DrmCompositor] LayerScene commit: total={} assigned={} "
         "composited={} unassigned={} skipped={} props_written={} "
         "fbs_attached={}",
@@ -2569,7 +2577,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] scene profile (n={}): wait={:.2f}ms (max {:.2f})  "
           "compose={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
           "total={:.2f}ms (max {:.2f})",
@@ -2596,8 +2604,8 @@ bool DrmCompositor::ProbePrimaryReflectY(const uint32_t primary_id,
   const int fd = backend_->drm_fd();
   drm::PropertyStore pp;
   if (auto r = pp.cache_properties(fd, primary_id, DRM_MODE_OBJECT_PLANE); !r) {
-    spdlog::warn("[DrmCompositor] REFLECT_Y probe: cache primary props: {}",
-                 r.error().message());
+    ihs::log::warn("[DrmCompositor] REFLECT_Y probe: cache primary props: {}",
+                   r.error().message());
     return enum_hint;
   }
   for (const auto* p : plane_registry_->for_crtc(out_.crtc_index())) {
@@ -2620,7 +2628,7 @@ bool DrmCompositor::ProbePrimaryReflectY(const uint32_t primary_id,
                       probe_format, /*pool_size=*/1,
                       /*force_scanout=*/true) ||
       !EnsureDrmFbId(probe_fb)) {
-    spdlog::warn("[DrmCompositor] REFLECT_Y probe: test FB create failed");
+    ihs::log::warn("[DrmCompositor] REFLECT_Y probe: test FB create failed");
     DestroyGbmStore(probe_fb);
     return enum_hint;
   }
@@ -2690,8 +2698,8 @@ bool DrmCompositor::ProbePrimaryReflectY(const uint32_t primary_id,
   }
   DestroyGbmStore(probe_fb);
 
-  spdlog::info("[DrmCompositor] REFLECT_Y probe: primary {} {} (verdict={})",
-               primary_id, verdict, result);
+  ihs::log::info("[DrmCompositor] REFLECT_Y probe: primary {} {} (verdict={})",
+                 primary_id, verdict, result);
   return result;
 }
 
@@ -2735,7 +2743,7 @@ bool DrmCompositor::InitDirectOverlay() {
     }
   }
   if (framed_primary_id_ == 0 || direct_overlay_id_ == 0) {
-    spdlog::info(
+    ihs::log::info(
         "[DrmCompositor] direct-overlay needs 1 primary + 1 REFLECT_Y overlay "
         "supporting the BS format on CRTC {} (primary={}, overlay={}); using "
         "scene path",
@@ -2748,15 +2756,15 @@ bool DrmCompositor::InitDirectOverlay() {
   if (auto r = framed_props_.cache_properties(fd, framed_primary_id_,
                                               DRM_MODE_OBJECT_PLANE);
       !r) {
-    spdlog::error("[DrmCompositor] direct-overlay cache primary props: {}",
-                  r.error().message());
+    ihs::log::error("[DrmCompositor] direct-overlay cache primary props: {}",
+                    r.error().message());
     return false;
   }
   if (auto r = framed_props_.cache_properties(fd, direct_overlay_id_,
                                               DRM_MODE_OBJECT_PLANE);
       !r) {
-    spdlog::error("[DrmCompositor] direct-overlay cache overlay props: {}",
-                  r.error().message());
+    ihs::log::error("[DrmCompositor] direct-overlay cache overlay props: {}",
+                    r.error().message());
     return false;
   }
   // Cache the other non-cursor planes we disable each frame so their
@@ -2781,7 +2789,7 @@ bool DrmCompositor::InitDirectOverlay() {
                         bg_format, /*pool_size=*/1,
                         /*force_scanout=*/true) ||
         !EnsureDrmFbId(bg_store_)) {
-      spdlog::error(
+      ihs::log::error(
           "[DrmCompositor] direct-overlay BG GBM store create failed");
       return false;
     }
@@ -2795,7 +2803,7 @@ bool DrmCompositor::InitDirectOverlay() {
     bg_store_valid_ = true;
   }
 
-  spdlog::info(
+  ihs::log::info(
       "[DrmCompositor] direct-overlay mode: primary(BG)={} overlay(BS)={} "
       "(zpos={}), CRTC {}x{}",
       framed_primary_id_, direct_overlay_id_, direct_overlay_zpos_,
@@ -2851,7 +2859,8 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   // ── Build the atomic request ──
   drm::AtomicRequest req(backend_->device());
   if (!req.valid()) {
-    spdlog::warn("[DrmCompositor] direct-overlay: AtomicRequest alloc failed");
+    ihs::log::warn(
+        "[DrmCompositor] direct-overlay: AtomicRequest alloc failed");
     fallback_latched_ = true;
     return PresentViaGlFallback(layers, count);
   }
@@ -2864,8 +2873,8 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   // First commit only: power up the pipe (MODE_ID / ACTIVE / CRTC_ID).
   if (!plane_mode_set_ && modeset_) {
     if (auto r = modeset_->attach(req); !r) {
-      spdlog::warn("[DrmCompositor] direct-overlay: modeset attach: {}",
-                   r.error().message());
+      ihs::log::warn("[DrmCompositor] direct-overlay: modeset attach: {}",
+                     r.error().message());
       return PresentViaGlFallback(layers, count);
     }
   }
@@ -2874,18 +2883,20 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
                  const uint64_t value) -> bool {
     auto pid = framed_props_.property_id(obj, name);
     if (!pid) {
-      spdlog::warn("[DrmCompositor] direct-overlay: property {}.{} missing: {}",
-                   obj, name, pid.error().message());
+      ihs::log::warn(
+          "[DrmCompositor] direct-overlay: property {}.{} missing: {}", obj,
+          name, pid.error().message());
       return false;
     }
     if (auto r = req.add_property(obj, *pid, value); !r) {
-      spdlog::warn("[DrmCompositor] direct-overlay: add_property {}.{}: {}",
-                   obj, name, r.error().message());
+      ihs::log::warn("[DrmCompositor] direct-overlay: add_property {}.{}: {}",
+                     obj, name, r.error().message());
       return false;
     }
     if (dump) {
-      spdlog::debug("[DrmCompositor] direct-overlay prop: obj={} pid={} {}={}",
-                    obj, *pid, name, value);
+      ihs::log::debug(
+          "[DrmCompositor] direct-overlay prop: obj={} pid={} {}={}", obj, *pid,
+          name, value);
     }
     return true;
   };
@@ -2973,13 +2984,13 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   if (auto r = req.commit(commit_flags, static_cast<IFlipSink*>(this)); !r) {
     if (r.error() == std::errc::permission_denied) {
       if (!paused_.load(std::memory_order_acquire)) {
-        spdlog::warn(
+        ihs::log::warn(
             "[DrmCompositor] direct-overlay commit: master revoked (EACCES); "
             "skip frame");
       }
       return false;
     }
-    spdlog::warn(
+    ihs::log::warn(
         "[DrmCompositor] direct-overlay atomic commit failed ({}); latching GL "
         "fallback for remaining session",
         r.error().message());
@@ -3027,7 +3038,7 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      spdlog::info(
+      ihs::log::info(
           "[DrmCompositor] direct-overlay profile (n={}): wait={:.2f}ms (max "
           "{:.2f})  sync={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
           "total={:.2f}ms (max {:.2f})",
@@ -3121,7 +3132,7 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
     store_peak_live_ = stores_.size();
   }
   if (backend_->cfg_.debug_backend) {
-    spdlog::debug(
+    ihs::log::debug(
         "[DrmCompositor] CreateBackingStore {}x{} #{} live={} peak={} "
         "pool(hit={} miss={} idle={})",
         w, h, store_create_total_, stores_.size(), store_peak_live_,
@@ -3164,8 +3175,8 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
 
   ++store_collect_total_;
   if (backend_->cfg_.debug_backend) {
-    spdlog::debug("[DrmCompositor] CollectBackingStore #{} live={} idle={}",
-                  store_collect_total_, stores_.size(), store_pool_.size());
+    ihs::log::debug("[DrmCompositor] CollectBackingStore #{} live={} idle={}",
+                    store_collect_total_, stores_.size(), store_pool_.size());
   }
   return true;
 }
@@ -3186,7 +3197,7 @@ void DrmCompositor::ApplyCursorReservation() {
   }
   const uint32_t planes[] = {cursor_reserved_plane_};
   scene_->set_external_reserved_planes(drm::span<const uint32_t>(planes, 1));
-  spdlog::info(
+  ihs::log::info(
       "[DrmCompositor] reserved cursor plane {} from scene allocator "
       "(disable-unused pass will leave it alone)",
       cursor_reserved_plane_);
@@ -3204,7 +3215,7 @@ void DrmCompositor::SetPaused(const bool paused) {
     scene_->on_session_paused();
   }
 #endif
-  spdlog::info("[DrmCompositor] session {}", paused ? "paused" : "resumed");
+  ihs::log::info("[DrmCompositor] session {}", paused ? "paused" : "resumed");
 }
 
 void DrmCompositor::OnResume() {
@@ -3227,8 +3238,8 @@ void DrmCompositor::OnResume() {
   if (scene_) {
     auto& dev = const_cast<drm::Device&>(backend_->device());
     if (auto r = scene_->on_session_resumed(dev); !r) {
-      spdlog::error("[DrmCompositor] LayerScene::on_session_resumed: {}",
-                    r.error().message());
+      ihs::log::error("[DrmCompositor] LayerScene::on_session_resumed: {}",
+                      r.error().message());
     }
   }
 #endif
@@ -3251,7 +3262,7 @@ void DrmCompositor::OnResume() {
     }
   }
 
-  spdlog::info("[DrmCompositor] resumed — next commit will re-modeset");
+  ihs::log::info("[DrmCompositor] resumed — next commit will re-modeset");
 }
 
 // ─── Surface registry ────────────────────────────────────────────────────
@@ -3262,8 +3273,8 @@ void DrmCompositor::RegisterSurface(
   std::lock_guard lock(surfaces_mu_);
   surfaces_[id] = std::move(surface);
   if (backend_->cfg_.debug_backend) {
-    spdlog::debug("[DrmCompositor] RegisterSurface id={} registry_size={}", id,
-                  surfaces_.size());
+    ihs::log::debug("[DrmCompositor] RegisterSurface id={} registry_size={}",
+                    id, surfaces_.size());
   }
 }
 
@@ -3271,8 +3282,8 @@ void DrmCompositor::UnregisterSurface(FlutterPlatformViewIdentifier id) {
   std::lock_guard lock(surfaces_mu_);
   surfaces_.erase(id);
   if (backend_->cfg_.debug_backend) {
-    spdlog::debug("[DrmCompositor] UnregisterSurface id={} registry_size={}",
-                  id, surfaces_.size());
+    ihs::log::debug("[DrmCompositor] UnregisterSurface id={} registry_size={}",
+                    id, surfaces_.size());
   }
 }
 

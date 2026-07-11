@@ -61,7 +61,7 @@ GLuint CompileShader(GLenum type, const char* src) {
     if (len > 0) {
       glGetShaderInfoLog(s, len, nullptr, log.data());
     }
-    spdlog::error("GlCompositor: shader compile failed: {}", log);
+    ihs::log::error("GlCompositor: shader compile failed: {}", log);
     glDeleteShader(s);
     return 0;
   }
@@ -113,7 +113,7 @@ bool GlCompositor::EnsureQuad() {
     if (len > 0) {
       glGetProgramInfoLog(program_, len, nullptr, log.data());
     }
-    spdlog::error("GlCompositor: program link failed: {}", log);
+    ihs::log::error("GlCompositor: program link failed: {}", log);
     glDeleteProgram(program_);
     program_ = 0;
     return false;

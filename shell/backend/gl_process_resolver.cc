@@ -30,7 +30,7 @@ int EglProcessResolver::GetHandle(const std::string& lib, void** out_handle) {
   const auto handle = dlopen(lib.c_str(), RTLD_LAZY | RTLD_LOCAL);
 #if !defined(NDEBUG)
   if (handle) {
-    SPDLOG_DEBUG("dlopen: {}", lib);
+    IHS_DEBUG("dlopen: {}", lib);
   }
 #endif
 
@@ -49,7 +49,7 @@ EglProcessResolver::EglProcessResolver() {
     if (GetHandle(name, &handle) == 1) {
       m_handles.emplace_back(handle, name);
     } else {
-      spdlog::critical("{}: Library not found", name);
+      ihs::log::critical("{}: Library not found", name);
       assert(false);
     }
   }
@@ -57,7 +57,7 @@ EglProcessResolver::EglProcessResolver() {
 
 void* EglProcessResolver::process_resolver(const char* name) const {
   if (name == nullptr) {
-    spdlog::error("gl_proc_resolver for nullptr; ignoring");
+    ihs::log::error("gl_proc_resolver for nullptr; ignoring");
     return nullptr;
   }
 
@@ -66,17 +66,17 @@ void* EglProcessResolver::process_resolver(const char* name) const {
   for (auto& handle : m_handles) {
     address = dlsym(handle.first, name);
     if (address) {
-      SPDLOG_TRACE("{} : {}", name, handle.second);
+      IHS_TRACE("{} : {}", name, handle.second);
       return address;
     }
   }
-  SPDLOG_TRACE("** eglGetProcAddress({})", name);
+  IHS_TRACE("** eglGetProcAddress({})", name);
   address = reinterpret_cast<void*>(eglGetProcAddress(name));
 
   if (address) {
     return address;
   }
 
-  spdlog::error("process_resolver: could not resolve symbol \"{}\"", name);
+  ihs::log::error("process_resolver: could not resolve symbol \"{}\"", name);
   return nullptr;
 }

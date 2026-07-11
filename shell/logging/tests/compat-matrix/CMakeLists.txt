@@ -36,36 +36,40 @@ set(IHS_GEN_INC ${CMAKE_BINARY_DIR}/ihs_gen)
 file(WRITE ${IHS_GEN_INC}/ihs/ihs_export.h
 "#ifndef IHS_EXPORT_H\n#define IHS_EXPORT_H\n#define IHS_EXPORT\n#define IHS_NO_EXPORT\n#endif\n")
 
-set(IHS_BRIDGE_SRCS
-    ${IHS_SHARED_DIR}/src/logging/libdlt_loader.cpp
+# The generic logging surface (the ihs_log_* ABI, ring, drain worker, and the
+# console/file sinks) is always compiled — ffi_shim.cpp defines the entry
+# points logger.hpp calls. Only the DLT loader and sink are gated by ENABLE_DLT.
+set(IHS_LOGGING_SRCS
     ${IHS_SHARED_DIR}/src/logging/thread_ring.cpp
     ${IHS_SHARED_DIR}/src/logging/ring_registry.cpp
     ${IHS_SHARED_DIR}/src/logging/context_cache.cpp
     ${IHS_SHARED_DIR}/src/logging/worker.cpp
     ${IHS_SHARED_DIR}/src/logging/bridge.cpp
     ${IHS_SHARED_DIR}/src/logging/ffi_shim.cpp
-    ${IHS_SHARED_DIR}/src/logging/dlt_sink.cpp
     ${IHS_SHARED_DIR}/src/logging/console_sink.cpp
     ${IHS_SHARED_DIR}/src/logging/file_sink.cpp
     ${IHS_SHARED_DIR}/src/logging/sink_set.cpp
 )
+set(IHS_DLT_SRCS
+    ${IHS_SHARED_DIR}/src/logging/libdlt_loader.cpp
+    ${IHS_SHARED_DIR}/src/logging/dlt_sink.cpp
+)
 
 add_executable(compat_smoke compat_smoke.cc)
+target_sources(compat_smoke PRIVATE ${IHS_LOGGING_SRCS})
+target_include_directories(compat_smoke PRIVATE
+    ${IHS_SHARED_DIR}/src/logging
+    ${IHS_SHARED_DIR}/include
+    ${IHS_GEN_INC}
+    ${IHS_ROOT}/shell/logging
+)
+find_package(Threads REQUIRED)
+target_link_libraries(compat_smoke PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+ihs_apply_cxx_compat(compat_smoke)
 
 if(ENABLE_DLT)
-    target_sources(compat_smoke PRIVATE ${IHS_BRIDGE_SRCS})
-    target_include_directories(compat_smoke PRIVATE
-        ${IHS_SHARED_DIR}/src/logging
-        ${IHS_SHARED_DIR}/include
-        ${IHS_GEN_INC}
-        ${IHS_ROOT}/shell/logging
-    )
+    target_sources(compat_smoke PRIVATE ${IHS_DLT_SRCS})
     target_compile_definitions(compat_smoke PRIVATE ENABLE_DLT=1)
-    find_package(Threads REQUIRED)
-    target_link_libraries(compat_smoke PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
-    ihs_apply_cxx_compat(compat_smoke)
-else()
-    target_include_directories(compat_smoke PRIVATE ${IHS_ROOT}/shell/logging)
 endif()
 
 target_compile_options(compat_smoke PRIVATE -Wall -Wextra -Werror)

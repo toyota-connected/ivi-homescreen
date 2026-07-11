@@ -659,8 +659,8 @@ void TextInputPlugin::CommitUnicodeInput() {
       codepoint = std::stoul(unicode_hex_, nullptr, 16);
     } catch (...) {
       // Make malformed hex observable so it can be debugged.
-      spdlog::warn("[text] CommitUnicodeInput: malformed hex '{}'; dropping",
-                   unicode_hex_);
+      ihs::log::warn("[text] CommitUnicodeInput: malformed hex '{}'; dropping",
+                     unicode_hex_);
     }
     // Reject U+0000, surrogates (U+D800–U+DFFF), and values above U+10FFFF.
     const bool valid = codepoint > 0 && codepoint <= 0x10FFFF &&

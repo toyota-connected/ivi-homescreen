@@ -44,22 +44,30 @@ void Worker::stop() {
     return;
   }
   thread_.request_stop();
-  {
-    std::lock_guard<std::mutex> lock(mu_);
-    flush_requested_.store(true, std::memory_order_release);
-  }
   wake_cv_.notify_all();
+  // running_ is already false, so any thread blocked in flush() wakes and
+  // returns; the worker's final drain below flushes their records regardless.
+  flush_done_cv_.notify_all();
   if (thread_.joinable()) {
     thread_.join();
   }
 }
 
 void Worker::flush() noexcept {
-  {
-    std::lock_guard<std::mutex> lock(mu_);
-    flush_requested_.store(true, std::memory_order_release);
+  std::unique_lock<std::mutex> lock(mu_);
+  if (!running_.load(std::memory_order_acquire)) {
+    return;  // no drain thread running; nothing to wait for
   }
+  // Publish a new request and block until the worker reports it drained +
+  // flushed a request at least this new. A record pushed before this call is
+  // in its ring, so the drain the worker runs for this request captures it.
+  const std::uint64_t target =
+      flush_request_.fetch_add(1, std::memory_order_acq_rel) + 1;
   wake_cv_.notify_all();
+  flush_done_cv_.wait(lock, [&] {
+    return flush_done_.load(std::memory_order_acquire) >= target ||
+           !running_.load(std::memory_order_acquire);
+  });
 }
 
 void Worker::run(ihs::stop_token stop) {
@@ -69,28 +77,40 @@ void Worker::run(ihs::stop_token stop) {
   while (!stop.stop_requested()) {
     const auto interval =
         empty_polls >= kEmptyPollsBeforeIdle ? kIdleInterval : kActiveInterval;
-    bool flushed = false;
     {
       std::unique_lock<std::mutex> lock(mu_);
       wake_cv_.wait_for(lock, interval, [&] {
         return stop.stop_requested() ||
-               flush_requested_.load(std::memory_order_acquire);
+               flush_request_.load(std::memory_order_acquire) >
+                   flush_done_.load(std::memory_order_acquire);
       });
-      // Consume the flush request under the lock, paired with flush()'s set
-      // under the lock: a flush() arriving during the drain below sets it
-      // again, so the next iteration re-drains and none is lost.
-      flushed = flush_requested_.exchange(false, std::memory_order_acq_rel);
     }
-
+    // Snapshot the request count BEFORE draining, so flush_done_ only advances
+    // for records the drain below actually swept. A flush() that arrives during
+    // the drain bumps flush_request_ past this snapshot and is satisfied on the
+    // next iteration.
+    const std::uint64_t req = flush_request_.load(std::memory_order_acquire);
     empty_polls = (drain_all() == 0) ? empty_polls + 1 : 0;
     // Only force the sinks' buffers on an explicit flush() / stop(); between
     // those, stdio buffering covers the periodic drains.
-    if (flushed) {
+    if (req > flush_done_.load(std::memory_order_relaxed)) {
       flush_sinks();
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        flush_done_.store(req, std::memory_order_release);
+      }
+      flush_done_cv_.notify_all();
     }
   }
   drain_all();
   flush_sinks();
+  // Release any flusher still blocked as the worker exits.
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    flush_done_.store(flush_request_.load(std::memory_order_acquire),
+                      std::memory_order_release);
+  }
+  flush_done_cv_.notify_all();
 }
 
 std::size_t Worker::drain_all() {

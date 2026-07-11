@@ -100,15 +100,15 @@ std::optional<std::string> ResolveDrmDevice(
   // 2. Look at the card nodes that actually exist (never assume card0/card1).
   const std::vector<std::string> cards = ListCardNodes();
   if (cards.empty()) {
-    spdlog::critical("[drm] no /dev/dri/card* node present");
+    ihs::log::critical("[drm] no /dev/dri/card* node present");
     return std::nullopt;
   }
 
   // 3. A single card is the only choice -- single-GPU systems (whatever the
   //    number) and headless vkms/CI.
   if (cards.size() == 1) {
-    spdlog::info("[drm] auto-selected the only DRM card present: {}",
-                 cards.front());
+    ihs::log::info("[drm] auto-selected the only DRM card present: {}",
+                   cards.front());
     return cards.front();
   }
 
@@ -121,7 +121,7 @@ std::optional<std::string> ResolveDrmDevice(
   }
   for (const auto& probe : probes) {
     if (probe.has_connected_real) {
-      spdlog::info(
+      ihs::log::info(
           "[drm] auto-selected first card with a connected display: {} ({}) -- "
           "set [view.backend.drm] device / --drm-device to override",
           probe.path, probe.summary);
@@ -131,12 +131,12 @@ std::optional<std::string> ResolveDrmDevice(
 
   // 5. Ambiguous: several cards, none with a connected display. Refuse and
   //    print the map rather than guess into a black screen.
-  spdlog::critical(
+  ihs::log::critical(
       "[drm] {} DRM cards present, none with a connected display; select one "
       "explicitly via --drm-device / [view.backend.drm] device:",
       cards.size());
   for (const auto& probe : probes) {
-    spdlog::critical("[drm]   {}: {}", probe.path, probe.summary);
+    ihs::log::critical("[drm]   {}: {}", probe.path, probe.summary);
   }
   return std::nullopt;
 }

@@ -39,8 +39,8 @@ MainLoopWaker& MainLoopWaker::instance() {
 
 MainLoopWaker::MainLoopWaker() : fd_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
   if (fd_ < 0) {
-    spdlog::critical("MainLoopWaker: failed to create eventfd: {}",
-                     strerror(errno));
+    ihs::log::critical("MainLoopWaker: failed to create eventfd: {}",
+                       strerror(errno));
   }
   g_signal_fd.store(fd_, std::memory_order_release);
 }
@@ -74,7 +74,7 @@ void MainLoopWaker::Wait(const int timeout_ms) const {
   const int rc = poll(&pfd, 1, timeout_ms);
   if (rc < 0) {
     if (errno != EINTR) {
-      spdlog::error("MainLoopWaker: poll failed: {}", strerror(errno));
+      ihs::log::error("MainLoopWaker: poll failed: {}", strerror(errno));
     }
     return;
   }

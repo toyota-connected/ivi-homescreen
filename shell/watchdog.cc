@@ -18,6 +18,8 @@
 
 #if BUILD_SYSTEMD_WATCHDOG
 #include <systemd/sd-daemon.h>
+#include <chrono>
+#include <thread>
 #endif
 
 #include "logging/logging.h"
@@ -31,7 +33,7 @@ Watchdog::Watchdog()
     sd_notify(0, "READY=1");
   }
 #endif
-  spdlog::debug("Watchdog interval set for {} uS", interval_.count());
+  ihs::log::debug("Watchdog interval set for {} uS", interval_.count());
 }
 
 Watchdog::~Watchdog() {
@@ -50,7 +52,7 @@ void Watchdog::start() {
 #endif
     while (!stop_flag_) {
       if (std::chrono::steady_clock::now() >= deadline_) {
-        spdlog::critical("Watchdog timeout");
+        ihs::log::critical("Watchdog timeout");
         // TODO dump stack
 #if BUILD_SYSTEMD_WATCHDOG
         sd_notify(0, "WATCHDOG=trigger");

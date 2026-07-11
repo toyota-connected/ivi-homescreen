@@ -464,7 +464,7 @@ std::string Sanitize(std::string_view s) {
 }  // namespace
 
 void LogResolved(const Resolved& r) {
-  spdlog::info(
+  ihs::log::info(
       "[DrmBackend] driver='{}' compositor={} modeset={} nonblock-modeset={} "
       "primary-fmt={} bs-fmt={} overlay-planes={} "
       "explicit-sync={} async-flip={}",
@@ -480,7 +480,7 @@ void LogResolved(const Resolved& r) {
     const auto& ci = *r.connector_info;
     if (ci.hdr.has_value()) {
       const auto& h = *ci.hdr;
-      spdlog::info(
+      ihs::log::info(
           "[DrmBackend] panel='{}' hdr=type1:{} sdr:{} hdr:{} pq:{} hlg:{} "
           "lum-max={:.0f} lum-min={:.4f}",
           ci.name.empty() ? std::string{"?"} : Sanitize(ci.name),
@@ -488,11 +488,11 @@ void LogResolved(const Resolved& r) {
           h.traditional_hdr ? "y" : "n", h.pq ? "y" : "n", h.hlg ? "y" : "n",
           h.desired_content_max_luminance, h.desired_content_min_luminance);
     } else {
-      spdlog::info("[DrmBackend] panel='{}' hdr=absent",
-                   ci.name.empty() ? std::string{"?"} : Sanitize(ci.name));
+      ihs::log::info("[DrmBackend] panel='{}' hdr=absent",
+                     ci.name.empty() ? std::string{"?"} : Sanitize(ci.name));
     }
   } else {
-    spdlog::info("[DrmBackend] panel=<no EDID>");
+    ihs::log::info("[DrmBackend] panel=<no EDID>");
   }
 }
 
