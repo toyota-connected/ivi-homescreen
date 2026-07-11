@@ -4,9 +4,6 @@
 [submodule "third_party/sanitizers-cmake"]
 	path = third_party/sanitizers-cmake
 	url = https://github.com/arsenm/sanitizers-cmake
-[submodule "third_party/spdlog"]
-	path = third_party/spdlog
-	url = https://github.com/gabime/spdlog
 [submodule "third_party/cxxopts"]
 	path = third_party/cxxopts
 	url = https://github.com/jarro2783/cxxopts
@@ -25,3 +22,6 @@
 [submodule "third_party/wayland-cxx-scanner"]
 	path = third_party/wayland-cxx-scanner
 	url = https://github.com/jwinarske/wayland-cxx-scanner.git
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt

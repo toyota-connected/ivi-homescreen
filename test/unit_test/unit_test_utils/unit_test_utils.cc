@@ -80,7 +80,7 @@ void utils_write_targa(const uint8_t* buf,
   header.width = static_cast<uint16_t>(width);
   header.height = static_cast<uint16_t>(height);
 #if (IS_ARCH_BIG_ENDIAN)
-  spdlog::info("Swapping bytes due to endianness");
+  ihs::log::info("Swapping bytes due to endianness");
   header.width = ((header.width & 0xFF) << 8) | ((header.width & 0xFF00) >> 8);
   header.height =
       ((header.height & 0xFF) << 8) | ((header.height & 0xFF00) >> 8);
@@ -89,7 +89,7 @@ void utils_write_targa(const uint8_t* buf,
   header.image_descriptor = 0x20;
 
   ensureDirectoryExistsIgnoringFileName(filename);
-  spdlog::info("Writing buffer to Targa file: {}", filename);
+  ihs::log::info("Writing buffer to Targa file: {}", filename);
   if (const auto f = fopen(filename.c_str(), "wb")) {
     fwrite(&header, sizeof(TARGA_HEADER), 1, f);
     for (int y = height - 1; y >= 0; y--) {
@@ -101,7 +101,7 @@ void utils_write_targa(const uint8_t* buf,
     }
     fclose(f);
   } else {
-    spdlog::info("File/Path not found: {}", filename);
+    ihs::log::info("File/Path not found: {}", filename);
   }
 }
 
@@ -118,7 +118,7 @@ int utils_images_are_equal(const std::string& image_under_test,
 
   FILE* test_image = fopen(image_under_test.c_str(), "r");
   FILE* comp_image = fopen(image_comp.c_str(), "r");
-  spdlog::info("Comparing images:\n\t{}\n\t{}", image_under_test, image_comp);
+  ihs::log::info("Comparing images:\n\t{}\n\t{}", image_under_test, image_comp);
 
   if (test_image && comp_image) {
     const size_t r1 =
@@ -127,7 +127,7 @@ int utils_images_are_equal(const std::string& image_under_test,
         fread(comp_image_buf, 1, IMAGE_FILE_SIZE(height, width), comp_image);
     ret = (r1 == r2 && memcmp(test_image_buf, comp_image_buf, r1) == 0) ? 1 : 0;
   } else {
-    spdlog::info("Could not open file(s)");
+    ihs::log::info("Could not open file(s)");
     ret = -1;
   }
 
