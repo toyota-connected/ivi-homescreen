@@ -42,9 +42,7 @@
 
 #include "config/common.h"
 
-#if USE_DRM_SCENE
 #include <drm-cxx/scene/layer_scene.hpp>
-#endif
 
 #include "backend/drm_kms_egl/drm_output_context.h"
 #include "backend/drm_kms_egl/flip_sink.h"
@@ -214,15 +212,13 @@ class DrmCompositor : public IFlipSink {
   struct StoreBaton {
     DrmCompositor* owner;
     GbmBackingStore* store;
-#if USE_DRM_SCENE
     // Borrowed LayerBufferSource adapter — owned by the LayerScene
     // once add_layer() consumes it; nullptr after that. CreateBackingStore
-    // constructs it; PresentLayers (under USE_DRM_SCENE) moves it into
-    // the scene the first time the store appears in a FlutterLayer.
+    // constructs it; PresentLayers moves it into the scene the first
+    // time the store appears in a FlutterLayer.
     // CollectBackingStore destroys the wrapper if it never reached the
     // scene (e.g. the store retired before its first Present).
     std::unique_ptr<GbmBackingStoreLayerSource> scene_source;
-#endif
   };
 
   bool InitEglExtensions();
@@ -320,7 +316,6 @@ class DrmCompositor : public IFlipSink {
   // rejects that anyway.
   bool PresentFramed(const FlutterLayer** layers, size_t count);
 
-#if USE_DRM_SCENE
   // Non-framed present path driven by drm::scene::LayerScene. Walks
   // FlutterLayer[], syncs the scene's layer membership against it via
   // find_by_identity_tag / add_layer / remove_layer keyed on the
@@ -362,7 +357,6 @@ class DrmCompositor : public IFlipSink {
   // any frame that isn't exactly one backing-store layer (multi-layer /
   // platform-view frames are a follow-on).
   bool PresentDirectOverlay(const FlutterLayer** layers, size_t count);
-#endif
 
   DrmBackend* backend_;
 
@@ -438,7 +432,6 @@ class DrmCompositor : public IFlipSink {
   // blob for atomic modesets. attach()-ed to the first commit.
   std::optional<drm::modeset::Modeset> modeset_;
 
-#if USE_DRM_SCENE
   // LayerScene-driven non-framed present path. Constructed in
   // InitPlaneAllocator when !framed_; null in framed mode (the
   // primary-BG + overlay layout keeps the manual atomic path).
@@ -457,15 +450,13 @@ class DrmCompositor : public IFlipSink {
   // capacity in steady state; std::vector + linear scan is faster
   // than any hashing for that size.
   std::vector<StoreBaton*> scene_layer_batons_;
-#endif
 
   // DRM plane id of an externally-managed cursor to reserve from the
   // scene allocator's disable-unused pass. Set by ReserveCursorPlane()
   // (from DrmBackend, once the cursor exists); applied to scene_ each
-  // time the scene is built. 0 = none / legacy cursor path. Declared
-  // unconditionally (ReserveCursorPlane is part of the BUILD_COMPOSITOR
-  // API regardless of USE_DRM_SCENE); ApplyCursorReservation's body is
-  // a no-op when USE_DRM_SCENE is off (no scene to reserve from).
+  // time the scene is built. 0 = none / legacy cursor path.
+  // ApplyCursorReservation is a no-op when scene_ is null (the
+  // GL-composite fallback has no scene to reserve from).
   uint32_t cursor_reserved_plane_{0};
   void ApplyCursorReservation();
 

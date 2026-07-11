@@ -122,22 +122,6 @@ option(BUILD_DRM_KMS_VULKAN_PROBE
         "Build the standalone drm_kms_vulkan zero-copy capability probe"
         OFF)
 
-# Drive the non-framed DRM/KMS present path through drm::scene::LayerScene
-# rather than the in-tree PlaneRegistry + Allocator + AtomicRequest pipeline.
-# Scoped to the DRM backends: the option only exists (and defaults ON) when a
-# DRM backend is built — it is the same path the Vulkan DRM backend always
-# uses. Set OFF to fall back to the in-tree pipeline, which is slated for
-# removal. The framed-mode path is unaffected by this flag. A non-DRM build
-# (wayland / software only) never sees the option: USE_DRM_SCENE is forced OFF
-# so config_common.h's #cmakedefine01 resolves and nothing else is impacted.
-if (BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN)
-    option(USE_DRM_SCENE
-            "Drive DRM/KMS non-framed present path via drm::scene::LayerScene"
-            ON)
-else ()
-    set(USE_DRM_SCENE OFF)
-endif ()
-
 #
 # Software (CPU rendering; no GPU, no display server)
 #
