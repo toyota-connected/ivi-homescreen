@@ -227,18 +227,14 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
                 backend/wayland_egl/gl_caps.cc
                 backend/wayland_egl/gl_compositor.cc
         )
-        # LayerScene-driven non-framed present path. Sources compile only
-        # when USE_DRM_SCENE=ON; the OFF build keeps the in-tree allocator
-        # path and never references drm::scene symbols. scene_layer_source_vk
-        # is built dormant: it provides the interface for an Impeller-on-Linux
+        # LayerScene-driven non-framed present path. scene_layer_source_vk is
+        # built dormant: it provides the interface for an Impeller-on-Linux
         # backing-store wrapper that lights up once the Vulkan renderer config
         # is wired through; nothing references it at runtime today.
-        if (USE_DRM_SCENE)
-            target_sources(${PROJECT_NAME} PRIVATE
-                    backend/drm_kms_egl/scene_layer_source_gl.cc
-                    backend/drm_kms_egl/scene_layer_source_vk.cc
-            )
-        endif ()
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/drm_kms_egl/scene_layer_source_gl.cc
+                backend/drm_kms_egl/scene_layer_source_vk.cc
+        )
     endif ()
     target_link_libraries(${PROJECT_NAME} PRIVATE
             drm-cxx::drm-cxx

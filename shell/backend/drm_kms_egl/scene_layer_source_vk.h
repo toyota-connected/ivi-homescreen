@@ -42,7 +42,7 @@ class Device;
 // plus a VkExternalMemoryImageCreateInfo on image creation) lives in the
 // caller — this wrapper takes the already-exported (fd, format, modifier,
 // plane layout) tuple. That keeps the wrapper free of Vulkan headers and
-// keeps USE_DRM_SCENE off the BUILD_BACKEND_VULKAN dependency graph.
+// keeps the LayerScene sources off the BUILD_BACKEND_VULKAN dependency graph.
 //
 // Sync is an OPEN QUESTION, not a solved one. FlutterVulkanImage carries
 // only {image, format} — the embedder exposes no per-backing-store

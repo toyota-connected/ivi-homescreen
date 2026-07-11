@@ -52,7 +52,7 @@
 #     --plugins-dir <path>    ivi-homescreen-plugins/plugins (default: ../ivi-homescreen-plugins/plugins)
 #     --no-plugins            build homescreen only
 #     --with-scene            enable the plane compositor + drm-cxx LayerScene
-#                               (BUILD_COMPOSITOR + USE_DRM_SCENE)
+#                               (BUILD_COMPOSITOR)
 #     --display-info-version <v>  libdisplay-info source tag (default: 0.2.0)
 #     --jobs <N>              parallel build jobs (default: nproc)
 #     --clean                 wipe the CMake build dir before configuring
@@ -287,7 +287,7 @@ phase4_build() {
     -DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
     -DBUILD_BACKEND_DRM_KMS_EGL=ON  -DBUILD_BACKEND_SOFTWARE=OFF
   )
-  [[ "$WITH_SCENE" -eq 1 ]] && args+=(-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON)
+  [[ "$WITH_SCENE" -eq 1 ]] && args+=(-DBUILD_COMPOSITOR=ON)
   if [[ "$NO_PLUGINS" -eq 1 ]]; then
     args+=(-DDISABLE_PLUGINS=ON)
   else
