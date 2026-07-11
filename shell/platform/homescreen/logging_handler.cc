@@ -48,7 +48,7 @@ void LoggingHandler::HandleMethodCall(
 
 namespace {
 // Level values passed by the Dart logging callback follow the historical
-// spdlog numeric scale (trace=0, debug=1, info=2, warn=3, error=4, critical=5,
+// numeric scale (trace=0, debug=1, info=2, warn=3, error=4, critical=5,
 // off=6) — distinct from the ihs IhsLogLevel scale, so map explicitly.
 enum DartLogLevel {
   kLevelTrace = 0,

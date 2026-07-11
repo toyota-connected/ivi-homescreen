@@ -13,14 +13,12 @@ target_compile_definitions(asio INTERFACE
 )
 
 #
-# Speedlog
+# fmt (header-only) — formatting for the logging.h shim and the FML
+# diagnostics, replacing spdlog's bundled copy.
 #
-set(SPDLOG_NO_EXCEPTIONS ON)
-set(SPDLOG_NO_THREAD_ID ON)
-set(SPDLOG_BUILD_PIC ON)
-set(SPDLOG_SANITIZE_ADDRESS ${SANITIZE_ADDRESS})
-add_library(spdlog INTERFACE)
-target_compile_options(spdlog INTERFACE -isystem${CMAKE_CURRENT_SOURCE_DIR}/spdlog/include)
+add_library(fmt INTERFACE)
+target_compile_options(fmt INTERFACE -isystem${CMAKE_CURRENT_SOURCE_DIR}/fmt/include)
+target_compile_definitions(fmt INTERFACE FMT_HEADER_ONLY)
 
 #
 # RapidJson

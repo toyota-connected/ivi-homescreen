@@ -65,7 +65,7 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
 // can match a Vulkan physical device's DRM node against the scanout device.
 // Returns false (leaving the outputs untouched) when the path cannot be
 // stat'd. Lives here so the stat/sysmacros includes stay out of the backend
-// translation unit, which pulls in spdlog.
+// translation unit, which pulls in the logging headers.
 bool DrmNodeNumber(const std::string& path,
                    unsigned& major_out,
                    unsigned& minor_out);

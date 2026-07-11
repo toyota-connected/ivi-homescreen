@@ -320,9 +320,9 @@ void DrmBackend::MaybeCaptureSnapshot() {
 }
 
 // Routes drm-cxx's internal diagnostics through the ivi-homescreen
-// spdlog logger so they interleave correctly with the embedder's own
-// output (and respect spdlog's level / sink config) instead of going
-// to stderr via drm-cxx's default print sink.
+// logger so they interleave correctly with the embedder's own output
+// (and respect its level / sink config) instead of going to stderr via
+// drm-cxx's default print sink.
 //
 // Installed once on first DrmBackend construction. The drm-cxx log
 // sink is process-wide; re-installing on every ctor would be harmless
