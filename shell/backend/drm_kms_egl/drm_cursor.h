@@ -131,8 +131,8 @@ class DrmCursor final : public ICursorShapeSink {
   [[nodiscard]] bool Stage(drm::AtomicRequest& req, bool* needs_modeset);
 
   // Self-commit the recorded position. Used by present paths that own
-  // their commit and can't accept a staged plane (the USE_DRM_SCENE
-  // LayerScene path) so the cursor stays visible in staged mode. No-op
+  // their commit and can't accept a staged plane (the LayerScene
+  // path) so the cursor stays visible in staged mode. No-op
   // outside staged mode or before the first SetPosition. Raster-thread
   // only. NOTE: this is a separate cursor commit on the CRTC and so
   // reintroduces the flip contention on nvidia-drm — a proper fix needs

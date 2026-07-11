@@ -62,7 +62,7 @@
 #                                   support); independent of the chosen backend
 #     --with-scene                  drm-kms-egl only: enable the plane compositor +
 #                                     drm-cxx LayerScene present path
-#                                     (BUILD_COMPOSITOR + USE_DRM_SCENE).
+#                                     (BUILD_COMPOSITOR).
 #     --jobs <N>                    default: nproc
 #     --clean                       wipe build dir before configure
 #     --prepare-only                fetch/extract toolchain, sync sysroot, engine, exit
@@ -905,7 +905,7 @@ phase5_build() {
                 -DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=OFF
                 -DBUILD_BACKEND_DRM_KMS_EGL=ON  -DBUILD_BACKEND_SOFTWARE=OFF)
             if [[ "$WITH_SCENE" -eq 1 ]]; then
-                cmake_args+=(-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON)
+                cmake_args+=(-DBUILD_COMPOSITOR=ON)
             fi ;;
         drm-kms-vulkan)
             cmake_args+=(

@@ -220,23 +220,21 @@ what was compiled in):
 | Config | CMake flags | Present path compiled in |
 |--------|-------------|--------------------------|
 | **C1** | `-DBUILD_COMPOSITOR=OFF` | Legacy GL only — `eglSwapBuffers` + `drmModePageFlip`. `drm_compositor.cc` is excluded. |
-| **C2** | `-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=OFF` | Atomic plane allocator + GL composite. The drm-cxx `LayerScene` zero-copy path is excluded. |
-| **C3** | `-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON` | Full path: `LayerScene` direct-scanout when the primary supports `REFLECT_Y`, GL composite otherwise. **Recommended / canonical.** |
+| **C2** | `-DBUILD_COMPOSITOR=ON` | Full path: `LayerScene` direct-scanout when the primary supports `REFLECT_Y`, GL composite otherwise. **Recommended / canonical.** |
 
-`USE_DRM_SCENE=ON` requires `BUILD_COMPOSITOR=ON` (it has no effect
-otherwise). Any code reachable from the unconditional `BUILD_COMPOSITOR`
-API (e.g. `DrmCompositor::ReserveCursorPlane`) must compile in **all**
-three configs — C2 in particular (compositor without scene) is an easy
-one to break, so the build matrix is exercised on both x86_64 and
-aarch64.
+`BUILD_COMPOSITOR=ON` compiles `DrmCompositor` together with the drm-cxx
+`LayerScene` present path; the GL composite runs as a runtime fallback
+where no plane supports `REFLECT_Y` (or a frame overflows the backing
+store / carries a platform view). The build matrix exercises both C1 and
+C2 on x86_64 and aarch64.
 
 The aarch64 cross-build maps these as: emb's `drm-kms-egl` backend → **C1**
-(default direct DRM/KMS + GBM); adding `USE_DRM_SCENE=ON` (with
-`BUILD_COMPOSITOR=ON`) to that backend's `defines` → **C3**.
+(default direct DRM/KMS + GBM); adding `BUILD_COMPOSITOR=ON` to that
+backend's `defines` → **C2**.
 
 Per-driver note: on **rockchip** (rk3588 VOP2) the primary advertises
 `REFLECT_Y` and passes a `TEST_ONLY` atomic commit with it, but a live
-reflected scanout faults the display IOMMU; C3 therefore force-selects
+reflected scanout faults the display IOMMU; C2 therefore force-selects
 the GL-composite sub-path on that driver (zero-copy direct-scanout is
 not usable there). vc4 and amdgpu are unaffected.
 
