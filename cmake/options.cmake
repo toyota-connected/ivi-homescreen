@@ -192,57 +192,89 @@ if (BUILD_CRASH_HANDLER)
 
     include(GNUInstallDirs)
 
-    # sentry-native installs its CMake package config under the GNUInstallDirs
-    # libdir of its staging prefix -- typically lib/cmake/sentry, but lib64 on
-    # some distros and a flat cmake/sentry on older layouts. Hardcoding a single
-    # suffix breaks whenever ${CMAKE_INSTALL_LIBDIR} here differs from the one
-    # sentry-native installed with (or is empty because GNUInstallDirs had not
-    # been included yet). Search the likely suffixes under the chosen base so a
-    # libdir mismatch can't break configure.
-    if (SENTRY_NATIVE_LIBDIR)
-        set(_sentry_base ${SENTRY_NATIVE_LIBDIR})
-    else ()
-        set(_sentry_base ${CMAKE_INSTALL_PREFIX})
+    # Locate sentry-native. When the caller pins a staging prefix
+    # (SENTRY_NATIVE_LIBDIR), honor it first so a build that stages a specific
+    # sentry-native stays deterministic. Otherwise prefer CMake config mode: it
+    # honors CMAKE_PREFIX_PATH / CMAKE_FIND_ROOT_PATH, so a sentry staged into a
+    # cross overlay (e.g. an emb augment) is found with no extra plumbing.
+    if (NOT SENTRY_NATIVE_LIBDIR)
+        find_package(sentry QUIET CONFIG)
     endif ()
 
-    set(sentry_DIR "")
-    foreach (_suffix
-            ${CMAKE_INSTALL_LIBDIR}/cmake/sentry
-            lib/cmake/sentry
-            lib64/cmake/sentry
-            cmake/sentry)
-        if (EXISTS ${_sentry_base}/${_suffix}/sentry-config.cmake)
-            set(sentry_DIR ${_sentry_base}/${_suffix})
-            break ()
+    if (NOT sentry_FOUND)
+        # Fallback: search a caller-provided staging prefix. sentry-native
+        # installs its CMake package config under the GNUInstallDirs libdir of
+        # that prefix -- typically lib/cmake/sentry, but lib64 on some distros
+        # and a flat cmake/sentry on older layouts. Hardcoding a single suffix
+        # breaks whenever ${CMAKE_INSTALL_LIBDIR} here differs from the one
+        # sentry-native installed with (or is empty because GNUInstallDirs had
+        # not been included yet). Search the likely suffixes under the chosen
+        # base so a libdir mismatch can't break configure.
+        if (SENTRY_NATIVE_LIBDIR)
+            set(_sentry_base ${SENTRY_NATIVE_LIBDIR})
+        else ()
+            set(_sentry_base ${CMAKE_INSTALL_PREFIX})
         endif ()
-    endforeach ()
 
-    if (sentry_DIR)
-        message(STATUS "Found libsentry: ${sentry_DIR}/sentry-config.cmake")
-    else ()
-        message(FATAL_ERROR
-                "sentry-config.cmake not found under ${_sentry_base} "
-                "(searched */cmake/sentry). Set SENTRY_NATIVE_LIBDIR to the "
-                "sentry-native staging prefix.")
+        set(sentry_DIR "")
+        foreach (_suffix
+                ${CMAKE_INSTALL_LIBDIR}/cmake/sentry
+                lib/cmake/sentry
+                lib64/cmake/sentry
+                cmake/sentry)
+            if (EXISTS ${_sentry_base}/${_suffix}/sentry-config.cmake)
+                set(sentry_DIR ${_sentry_base}/${_suffix})
+                break ()
+            endif ()
+        endforeach ()
+
+        if (NOT sentry_DIR)
+            message(FATAL_ERROR
+                    "sentry-config.cmake not found via CMAKE_PREFIX_PATH or "
+                    "under ${_sentry_base} (searched */cmake/sentry). Set "
+                    "SENTRY_NATIVE_LIBDIR to the sentry-native staging prefix.")
+        endif ()
+
+        find_package(sentry REQUIRED)
     endif ()
 
+    message(STATUS "Found libsentry: ${sentry_DIR}")
 
+    # crashpad_handler resolution. CRASHPAD_BINARY_DIR is a HOST/build-tree
+    # location, validated here only as a configure-time sanity gate -- it is NOT
+    # the path baked into the binary (see CRASHPAD_RUNTIME_PATH below), so a
+    # cross build may set it to the overlay/build tree (host path) freely.
     if (CRASHPAD_BINARY_DIR)
         if (NOT EXISTS ${CRASHPAD_BINARY_DIR}/crashpad_handler)
             message(FATAL_ERROR "${CRASHPAD_BINARY_DIR}/crashpad_handler does not exist")
-        else ()
-            message(STATUS "Using crashpad_handler at specified directory: ${CRASHPAD_BINARY_DIR}")
         endif ()
+        message(STATUS "Using crashpad_handler at specified directory: ${CRASHPAD_BINARY_DIR}")
+    elseif (CMAKE_CROSSCOMPILING)
+        # Cross build: crashpad_handler is packaged onto the target rootfs by the
+        # cross tooling, not consumed here, so there is no host binary to check.
+        message(STATUS "Cross build: crashpad_handler expected on target")
+    elseif (EXISTS ${CMAKE_INSTALL_PREFIX}/bin/crashpad_handler)
+        message(STATUS "Defaulting to system crashpad_handler at ${CMAKE_INSTALL_PREFIX}")
+        set(CRASHPAD_BINARY_DIR ${CMAKE_INSTALL_PREFIX}/bin)
     else ()
-        if (EXISTS ${CMAKE_INSTALL_PREFIX}/bin/crashpad_handler)
-            message(STATUS "Defaulting to system crashpad_handler at ${CMAKE_INSTALL_PREFIX}")
-            set(CRASHPAD_BINARY_DIR ${CMAKE_INSTALL_PREFIX}/bin)
+        message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
+    endif ()
+
+    # Absolute path to crashpad_handler on the DEPLOYED target -- this is what is
+    # baked into the binary and handed to sentry at runtime. For a native build
+    # it is the resolved host location; for a cross/staged build it is the
+    # on-target install path (the cross tooling packages the handler there).
+    # Override with -DCRASHPAD_RUNTIME_PATH=... when the target differs.
+    if (NOT DEFINED CRASHPAD_RUNTIME_PATH OR CRASHPAD_RUNTIME_PATH STREQUAL "")
+        if (CMAKE_CROSSCOMPILING)
+            set(CRASHPAD_RUNTIME_PATH "/usr/bin/crashpad_handler")
         else ()
-            message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
-        endif()
-    endif()
-    
-    find_package(sentry REQUIRED)
+            set(CRASHPAD_RUNTIME_PATH "${CRASHPAD_BINARY_DIR}/crashpad_handler")
+        endif ()
+    endif ()
+    set(CRASHPAD_RUNTIME_PATH "${CRASHPAD_RUNTIME_PATH}" CACHE STRING
+            "Absolute path to crashpad_handler on the deployed target" FORCE)
+    message(STATUS "Crashpad handler runtime path: ${CRASHPAD_RUNTIME_PATH}")
     string(TIMESTAMP BUILD_VER "%y%m%d")
 else()
     message(STATUS "Crash Handler .......... Disabled")

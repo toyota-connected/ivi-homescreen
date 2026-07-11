@@ -105,7 +105,18 @@ CrashHandler::CrashHandler(const std::string& config_path) {
   auto home_path = Utils::GetConfigHomePath();
   std::filesystem::path db_path = home_path;
   db_path /= ".sentry";
-  sentry_options_set_handler_path(options, kCrashpadBinaryPath);
+  // kCrashpadBinaryPath is where the handler is expected on the deployed
+  // target. If it is missing (relocated install, side-by-side tarball), leave
+  // the handler path unset so sentry-native searches next to the executable
+  // rather than failing outright.
+  if (std::filesystem::exists(kCrashpadBinaryPath)) {
+    sentry_options_set_handler_path(options, kCrashpadBinaryPath);
+  } else {
+    ihs::log::warn(
+        "crashpad_handler not found at {}, letting sentry locate it next to "
+        "the executable",
+        kCrashpadBinaryPath);
+  }
   sentry_options_set_database_path(options, db_path.c_str());
 
   sentry_options_set_release(options, config_.release.c_str());
