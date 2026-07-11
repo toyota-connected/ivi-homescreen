@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <ctime>
 
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 namespace profiling {
 
@@ -105,7 +105,7 @@ void FrameProfile::Record(const std::string_view label,
   }
   const uint64_t mean_ns =
       MeanIntervalNs(window_.interval_sum_ns, window_.frames);
-  spdlog::info(
+  ihs::log::info(
       "[{}] profile (n={}): fps={:.2f} mean_interval={}us max_interval={}us "
       "discarded={} buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
       label, window_.frames, FpsFromMean(mean_ns), mean_ns / 1000,
@@ -125,7 +125,7 @@ void FrameProfile::LogSessionSummary(const std::string_view label) const {
     return;
   }
   const uint64_t mean_ns = MeanIntervalNs(s.interval_sum_ns, s.frames);
-  spdlog::info(
+  ihs::log::info(
       "[{}] session summary: frames={} fps={:.2f} mean_interval={}us "
       "max_interval={}us discarded={}",
       label, s.frames, FpsFromMean(mean_ns), mean_ns / 1000,
@@ -134,7 +134,7 @@ void FrameProfile::LogSessionSummary(const std::string_view label) const {
   if (const uint32_t total = s.b60 + s.b30 + s.b20 + s.bslow + s.bidle;
       total > 0) {
     const double inv = 100.0 / static_cast<double>(total);
-    spdlog::info(
+    ihs::log::info(
         "[{}] session buckets: 60Hz={} ({:.1f}%) 30Hz={} ({:.1f}%) "
         "20Hz={} ({:.1f}%) slow={} ({:.1f}%) idle={} ({:.1f}%)",
         label, s.b60, s.b60 * inv, s.b30, s.b30 * inv, s.b20, s.b20 * inv,

@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <thread>
 
 #include <asio/dispatch.hpp>
 
@@ -56,13 +57,13 @@ namespace {
 int OpenRestricted(const char* path, int flags, void* /*user_data*/) {
   const int fd = ::open(path, flags | O_CLOEXEC);
   if (fd < 0) {
-    spdlog::warn(
+    ihs::log::warn(
         "[SoftwareSeat] open('{}') failed: {} — add the user to the 'input' "
         "group (or run on an active VT for the logind uaccess ACL)",
         path, std::strerror(errno));
     return -errno;
   }
-  spdlog::debug("[SoftwareSeat] opened input device {}", path);
+  ihs::log::debug("[SoftwareSeat] opened input device {}", path);
   return fd;
 }
 
@@ -122,16 +123,16 @@ SoftwareSeat::~SoftwareSeat() {
 bool SoftwareSeat::Start() {
   udev_ = udev_new();
   if (udev_ == nullptr) {
-    spdlog::error("[SoftwareSeat] udev_new failed");
+    ihs::log::error("[SoftwareSeat] udev_new failed");
     return false;
   }
   li_ = libinput_udev_create_context(&kLibinputInterface, this, udev_);
   if (li_ == nullptr) {
-    spdlog::error("[SoftwareSeat] libinput_udev_create_context failed");
+    ihs::log::error("[SoftwareSeat] libinput_udev_create_context failed");
     return false;
   }
   if (libinput_udev_assign_seat(li_, "seat0") != 0) {
-    spdlog::error("[SoftwareSeat] libinput_udev_assign_seat('seat0') failed");
+    ihs::log::error("[SoftwareSeat] libinput_udev_assign_seat('seat0') failed");
     return false;
   }
 
@@ -141,7 +142,7 @@ bool SoftwareSeat::Start() {
   // across backends. xkb picks up RMLVO from XKB_DEFAULT_* / built-in defaults.
   keyboard_ = input::XkbKeyboard::Create();
   if (!keyboard_) {
-    spdlog::error("[SoftwareSeat] XkbKeyboard::Create failed");
+    ihs::log::error("[SoftwareSeat] XkbKeyboard::Create failed");
     return false;
   }
   repeater_ = input::KeyRepeater::Create(keyboard_.get());
@@ -156,13 +157,13 @@ bool SoftwareSeat::Start() {
       }
     });
   } else {
-    spdlog::warn("[SoftwareSeat] key repeat unavailable (timerfd_create)");
+    ihs::log::warn("[SoftwareSeat] key repeat unavailable (timerfd_create)");
   }
 
   stop_.store(false, std::memory_order_release);
   thread_ = std::thread([this]() { DispatchLoop(); });
-  spdlog::info("[SoftwareSeat] started ({}x{} viewport)", viewport_w_,
-               viewport_h_);
+  ihs::log::info("[SoftwareSeat] started ({}x{} viewport)", viewport_w_,
+                 viewport_h_);
   return true;
 }
 
@@ -201,8 +202,9 @@ void SoftwareSeat::NotifyCursorMoved() {
   static bool logged_first = false;
   if (!logged_first) {
     logged_first = true;
-    spdlog::debug("[SoftwareSeat] cursor tracking pointer (first motion {},{})",
-                  static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
+    ihs::log::debug(
+        "[SoftwareSeat] cursor tracking pointer (first motion {},{})",
+        static_cast<int>(pointer_x_), static_cast<int>(pointer_y_));
   }
   // pointer_x_/y_ are in viewport (== framebuffer mode) pixels, the same space
   // the cursor blends into.
@@ -250,7 +252,7 @@ void SoftwareSeat::DispatchLoop() {
       if (errno == EINTR) {
         continue;
       }
-      spdlog::error("[SoftwareSeat] poll: {}", std::strerror(errno));
+      ihs::log::error("[SoftwareSeat] poll: {}", std::strerror(errno));
       break;
     }
     // A waker wake is a pure "re-check your flags" nudge: drain and loop so the

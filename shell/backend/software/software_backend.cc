@@ -44,7 +44,7 @@ SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
     if (const auto native = sink_->NativeSize();
         native.has_value() &&
         (native->first != width_ || native->second != height_)) {
-      spdlog::info(
+      ihs::log::info(
           "[SoftwareBackend] adopting sink native mode {}x{} (config was "
           "{}x{})",
           native->first, native->second, width_, height_);
@@ -64,9 +64,9 @@ SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
     const unsigned long long n = has_sign ? 0ULL : std::strtoull(env, &end, 10);
     if (!has_sign && end != env && *end == '\0' && n > 0) {
       stop_after_frames_ = n;
-      spdlog::info("[SoftwareBackend] stop_after_frames={}", n);
+      ihs::log::info("[SoftwareBackend] stop_after_frames={}", n);
     } else {
-      spdlog::warn(
+      ihs::log::warn(
           "[SoftwareBackend] IVI_SW_STOP_AFTER_FRAMES='{}' not a "
           "positive integer; ignored",
           env);
@@ -87,7 +87,7 @@ void SoftwareBackend::Resize(size_t /* index */,
     if (const auto result = flutter_engine->SetWindowSize(
             static_cast<size_t>(height), static_cast<size_t>(width));
         result != kSuccess) {
-      spdlog::error(
+      ihs::log::error(
           "[SoftwareBackend] Failed to set Flutter Engine Window Size");
     }
   }
@@ -120,7 +120,7 @@ VsyncCallback SoftwareBackend::GetVsyncCallback() const {
   }();
   if (env_disabled) {
     static const bool logged = []() {
-      spdlog::info("[SoftwareBackend] IVI_SW_VSYNC=0 — wall-clock scheduler");
+      ihs::log::info("[SoftwareBackend] IVI_SW_VSYNC=0 — wall-clock scheduler");
       return true;
     }();
     (void)logged;
@@ -171,7 +171,7 @@ bool SoftwareBackend::PresentTrampoline(void* user_data,
       // observes the flag and returns.
       if (bool expected = false;
           backend->stop_signaled_.compare_exchange_strong(expected, true)) {
-        spdlog::info(
+        ihs::log::info(
             "[SoftwareBackend] reached stop_after_frames={}; raising SIGTERM",
             backend->stop_after_frames_);
         std::raise(SIGTERM);

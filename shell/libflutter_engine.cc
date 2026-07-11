@@ -52,7 +52,8 @@ bool PopulateExports(void* lib) {
   const auto require = [lib, &ok](auto* out, const char* name) {
     ShellGetFuncAddress(lib, name, out);
     if (*out == nullptr) {
-      spdlog::critical("libflutter_engine: required export missing: {}", name);
+      ihs::log::critical("libflutter_engine: required export missing: {}",
+                         name);
       ok = false;
     }
   };
@@ -134,14 +135,14 @@ bool LibFlutterEngine::Load(const char* library_path) {
     if (ShellGetProcAddress(RTLD_DEFAULT, "FlutterEngineInitialize") !=
         nullptr) {
       g_loaded_path = kPreloadedSentinel;
-      spdlog::info("libflutter_engine: using preloaded engine");
+      ihs::log::info("libflutter_engine: using preloaded engine");
     } else {
       dlerror();  // clear stale error state
       lib = dlopen(requested.c_str(), RTLD_NOW | RTLD_LOCAL);
       if (lib == nullptr) {
         const char* reason = dlerror();
-        spdlog::critical("libflutter_engine: dlopen({}) failed: {}", requested,
-                         reason ? reason : "unknown reason");
+        ihs::log::critical("libflutter_engine: dlopen({}) failed: {}",
+                           requested, reason ? reason : "unknown reason");
         return;  // table_ stays null; failure is cached for process life
       }
       g_loaded_path = requested;
@@ -178,7 +179,7 @@ bool LibFlutterEngine::Load(const char* library_path) {
   // *different* path cannot be honored — fail loudly instead of
   // silently returning the wrong library's exports.
   if (g_loaded_path != kPreloadedSentinel && requested != g_loaded_path) {
-    spdlog::error(
+    ihs::log::error(
         "libflutter_engine: already loaded from '{}'; ignoring request "
         "for '{}'",
         g_loaded_path, requested);
@@ -189,7 +190,7 @@ bool LibFlutterEngine::Load(const char* library_path) {
 }
 
 void LibFlutterEngine::FailNotLoaded() {
-  spdlog::critical(
+  ihs::log::critical(
       "LibFlutterEngine used before a successful Load(); aborting");
   std::abort();
 }

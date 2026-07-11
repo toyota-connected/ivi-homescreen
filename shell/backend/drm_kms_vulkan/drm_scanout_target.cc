@@ -157,7 +157,7 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
     if (match >= 0) {
       chosen = match;
     } else {
-      spdlog::warn(
+      ihs::log::warn(
           "[drm_scanout] --drm-mode '{}' not found on connector; using "
           "preferred mode {}x{}",
           mode_spec, conn->modes[0].hdisplay, conn->modes[0].vdisplay);

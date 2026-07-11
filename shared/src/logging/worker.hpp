@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -46,7 +47,14 @@ class Worker {
   ihs::jthread thread_;
   std::mutex mu_;
   std::condition_variable wake_cv_;
-  std::atomic<bool> flush_requested_{false};
+  // Synchronous flush: flush() bumps flush_request_, wakes the worker, and
+  // blocks until the worker has drained and flushed a request at least as new
+  // as its own (flush_done_ >= its target). This makes ihs_log_flush() honor
+  // its documented synchronous contract, so an error/fatal line is durable
+  // before an abort() (see logging.h maybe_flush()).
+  std::condition_variable flush_done_cv_;
+  std::atomic<std::uint64_t> flush_request_{0};
+  std::atomic<std::uint64_t> flush_done_{0};
   std::atomic<bool> running_{false};
 
   // Producers push lock-free without signalling, so the worker polls. It

@@ -251,10 +251,10 @@ def capture_help():
                                text=True, timeout=15)
         except Exception:
             return None
-        out = (r.stdout or "") + (r.stderr or "")
-        lines = [re.sub(r"^\[[0-9:.]+\] \[\w\] ", "", ln)
-                 for ln in out.splitlines()]
-        text = "\n".join(lines)
+        # --help is program output on stdout; stderr carries startup log lines
+        # (e.g. the DLT/sink bring-up warnings) that are not part of the CLI
+        # reference, so capture stdout only.
+        text = r.stdout or ""
         i = text.find("Usage:")
         if i >= 0:
             text = text[i:]

@@ -113,7 +113,7 @@ void OnKeyEventResponse(bool handled, void* user_data) {
     const bool ctrl_or_alt = (data->modifiers & data->ctrl_mask) != 0 ||
                              (data->modifiers & data->alt_mask) != 0;
     if (ctrl_or_alt && data->character[0] != '\0') {
-      SPDLOG_DEBUG(
+      IHS_DEBUG(
           "[key] ctrl/alt + char key forwarded to TextInputPlugin "
           "(mods=0x{:02x})",
           data->modifiers);
@@ -196,7 +196,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
   const uint64_t physical = key_mapping::XkbScancodeToPhysicalKey(xkb_scancode);
   const uint32_t utf32 = xkb_keysym_to_utf32(keysym);
 
-  // SPDLOG_DEBUG(
+  // IHS_DEBUG(
   //     "[key] {} keysym=0x{:08x} scan={} mods=0x{:02x} "
   //     "physical=0x{:016x} utf32=0x{:04x}",
   //     released ? "up  " : "down", keysym, xkb_scancode, modifiers, physical,
@@ -233,7 +233,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
       //
       // Eg. occurs when Alt+Tab'ing into the app
       if (!was_pressed) {
-        spdlog::debug(
+        ihs::log::debug(
             "[key] ignoring key-up for unpressed key "
             "(keysym=0x{:08x} scan={} mods=0x{:02x} physical=0x{:016x})",
             keysym, xkb_scancode, modifiers, physical);
@@ -280,7 +280,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
     flutter_event.synthesized = false;
     flutter_event.device_type = kFlutterKeyEventDeviceTypeKeyboard;
 
-    // SPDLOG_DEBUG(
+    // IHS_DEBUG(
     //     "[key] -> embedder type={} physical=0x{:016x} "
     //     "logical=0x{:016x} char='{}'",
     //     static_cast<int>(type), physical, logical,

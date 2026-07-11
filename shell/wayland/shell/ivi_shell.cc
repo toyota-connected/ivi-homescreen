@@ -56,7 +56,7 @@ class IviShellSurface final : public ShellSurface {
                   WindowConfig config)
       : config_(std::move(config)) {
     if (config_.ivi_surface_id == 0) {
-      spdlog::warn(
+      ihs::log::warn(
           "[IviShell] ivi_surface_id is 0; ivi-shell needs an explicit "
           "surface id");
     }
@@ -66,8 +66,9 @@ class IviShellSurface final : public ShellSurface {
                              iac::ivi_application_traits::Op::SurfaceCreate>(
             app, config_.ivi_surface_id, surface_proxy);
     if (!wl::SetupHandler(ivi_surface_, raw)) {
-      spdlog::error("[IviShell] ivi_application.surface_create failed (id={})",
-                    config_.ivi_surface_id);
+      ihs::log::error(
+          "[IviShell] ivi_application.surface_create failed (id={})",
+          config_.ivi_surface_id);
       return;
     }
     ivi_surface_.Get()->on_configure = [this](int32_t w, int32_t h) {
@@ -79,8 +80,8 @@ class IviShellSurface final : public ShellSurface {
         config_.on_configure(c);
       }
     };
-    spdlog::debug("[IviShell] ivi_surface created (id={})",
-                  config_.ivi_surface_id);
+    ihs::log::debug("[IviShell] ivi_surface created (id={})",
+                    config_.ivi_surface_id);
   }
 
  private:
@@ -101,7 +102,7 @@ bool IviShell::TryBindGlobal(wl_registry* registry,
         registry, name, &iac::ivi_application_traits::wl_iface(), bind_ver);
     ivi_app_.Attach(
         reinterpret_cast<wl_proxy*>(raw));  // no events on this iface
-    spdlog::debug("[IviShell] bound ivi_application v{}", bind_ver);
+    ihs::log::debug("[IviShell] bound ivi_application v{}", bind_ver);
     return true;
   }
   // ivi_wm (layer/visibility/z-order) is left for the window-management facet
@@ -114,7 +115,7 @@ std::unique_ptr<ShellSurface> IviShell::CreateSurface(
     wl_surface* surface,
     const WindowConfig& config) {
   if (!ivi_app_) {
-    spdlog::error("[IviShell] CreateSurface before ivi_application bound");
+    ihs::log::error("[IviShell] CreateSurface before ivi_application bound");
     return nullptr;
   }
   return std::make_unique<IviShellSurface>(*ivi_app_.Get(), surface, config);

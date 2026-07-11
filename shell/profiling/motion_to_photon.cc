@@ -105,7 +105,7 @@ void MotionToPhoton::RecordPresent(const uint64_t present_ns,
   }
 
   if (++presents_ % kWindow == 0 && window_.count > 0) {
-    spdlog::info(
+    ihs::log::info(
         "[{}] motion->photon: frame-accurate p50={:.1f}ms p99={:.1f}ms "
         "max={:.1f}ms | floor p50={:.1f}ms p99={:.1f}ms | n={} dropped={}",
         label, window_.Pct(0.50) / 1000.0, window_.Pct(0.99) / 1000.0,
@@ -121,7 +121,7 @@ void MotionToPhoton::LogSessionSummary(const std::string_view label) const {
   if (session_.count == 0) {
     return;
   }
-  spdlog::info(
+  ihs::log::info(
       "[{}] motion->photon session (frame-accurate, {} samples): mean={:.1f}ms "
       "p50={:.1f}ms p95={:.1f}ms p99={:.1f}ms max={:.1f}ms",
       label, session_.count,
@@ -129,7 +129,7 @@ void MotionToPhoton::LogSessionSummary(const std::string_view label) const {
       session_.Pct(0.50) / 1000.0, session_.Pct(0.95) / 1000.0,
       session_.Pct(0.99) / 1000.0, session_.max_us / 1000.0);
   if (session_floor_.count > 0) {
-    spdlog::info(
+    ihs::log::info(
         "[{}] motion->photon session (floor, {} samples): mean={:.1f}ms "
         "p50={:.1f}ms p95={:.1f}ms p99={:.1f}ms max={:.1f}ms",
         label, session_floor_.count,

@@ -91,7 +91,7 @@ Resolved Resolve(int drm_fd,
                  uint32_t crtc_id,
                  const DrmConfig& cfg);
 
-// One-line log summary of the resolved config, at spdlog::info. Emitted
+// One-line log summary of the resolved config, at ihs::log::info. Emitted
 // by DrmBackend::Create so the effective knobs are visible at startup.
 void LogResolved(const Resolved& r);
 

@@ -17,12 +17,14 @@ on:
   pull_request:
     paths:
       - 'shared/**'
+      - 'shell/logging/**'
       - '.github/workflows/ihs-shared.yml'
   push:
     branches:
       - v2.0
     paths:
       - 'shared/**'
+      - 'shell/logging/**'
       - '.github/workflows/ihs-shared.yml'
   workflow_dispatch:
 
@@ -77,6 +79,40 @@ jobs:
           cmake --build sbuild
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
           ctest --test-dir sbuild --output-on-failure
+
+  # Producer-latency regression guard for the shell logging path. Links the
+  # installed libihs_shared (real cross-.so FFI) and asserts the per-call cost
+  # stays within a same-machine ratio of raw fmt formatting, so a future change
+  # that makes logging synchronous or adds a lock/alloc/syscall to the hot path
+  # fails here. Runner-independent (ratio, not absolute ns).
+  logging-bench:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch spdlog submodule (bundled fmt reference)
+        run: git submodule update --init --depth 1 third_party/spdlog
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+
+      - name: Build + install ihs_shared
+        run: |
+          cmake -S shared -B build -G Ninja -DENABLE_DLT=ON \
+            -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+          cmake --build build
+          cmake --install build
+
+      - name: Build + run the logging producer-latency guard
+        run: |
+          cmake -S shell/logging/tests/bench -B bbuild -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/prefix" -DIHS_ROOT="$PWD"
+          cmake --build bbuild
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          ctest --test-dir bbuild --output-on-failure
 
   abi-gate:
     if: ${{ github.server_url == 'https://github.com' }}
