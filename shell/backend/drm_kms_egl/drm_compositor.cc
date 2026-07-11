@@ -43,10 +43,8 @@
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
-#include "display/drm_display.h"
-#if USE_DRM_SCENE
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
-#endif
+#include "display/drm_display.h"
 #include "drm-cxx/src/modeset/atomic.hpp"
 #include "libflutter_engine.h"
 #include "logging.h"
@@ -449,7 +447,6 @@ bool DrmCompositor::InitPlaneAllocator() {
     return false;
   }
 
-#if USE_DRM_SCENE
   // The LayerScene drives the non-framed present path, but it only pays
   // off where the bottom-up GL backing store can reach scanout — i.e.
   // some plane supports REFLECT_Y. On hardware where NO plane does
@@ -496,7 +493,6 @@ bool DrmCompositor::InitPlaneAllocator() {
         "[DrmCompositor] no plane supports REFLECT_Y; using GL-composite "
         "path (scene direct-scanout needs the flip)");
   }
-#endif
 
   return true;
 }
@@ -1719,7 +1715,6 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     return PresentFramed(layers, layer_count);
   }
 
-#if USE_DRM_SCENE
   // Zero-copy direct-overlay path (primary lacks REFLECT_Y): BG on the
   // primary, the single Flutter BS direct-scanned on a REFLECT_Y
   // overlay. Owns its own GL-fallback decision for multi-layer / PV
@@ -1728,8 +1723,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     return PresentDirectOverlay(layers, layer_count);
   }
 
-  // Non-framed path under USE_DRM_SCENE: route every frame through
-  // LayerScene. PresentLayersViaScene owns the fallback decision —
+  // Non-framed path: route every frame through the LayerScene.
+  // PresentLayersViaScene owns the fallback decision —
   // returns true on a successful scene commit, false (after invoking
   // PresentViaGlFallback itself) when any layer would be Composited
   // (BS overflow), when the frame contains a platform view (not yet
@@ -1739,7 +1734,6 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   if (scene_) {
     return PresentLayersViaScene(layers, layer_count);
   }
-#endif
 
   // Profile fence post t0 (entry). Same wait/compose/commit/total
   // breakdown as PresentFramed; logs every kProfileWindow frames when
@@ -2284,7 +2278,6 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   return true;
 }
 
-#if USE_DRM_SCENE
 // ─── LayerScene-driven non-framed present path ───────────────────────────
 
 bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
@@ -3050,7 +3043,6 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   }
   return true;
 }
-#endif  // USE_DRM_SCENE
 
 // ─── Backing store create / collect ──────────────────────────────────────
 
@@ -3103,17 +3095,14 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
   auto* baton = new StoreBaton{};
   baton->owner = this;
   baton->store = store.get();
-#if USE_DRM_SCENE
   // Pre-build the LayerBufferSource wrapper for the LayerScene path.
-  // It stays in the baton until the first PresentLayers under
-  // USE_DRM_SCENE moves it into scene_->add_layer(). If the store
-  // retires (CollectBackingStore) before any Present, the wrapper is
-  // freed with the baton.
+  // It stays in the baton until the first PresentLayers moves it into
+  // scene_->add_layer(). If the store retires (CollectBackingStore)
+  // before any Present, the wrapper is freed with the baton.
   if (scene_) {
     baton->scene_source = std::make_unique<GbmBackingStoreLayerSource>(
         store.get(), [this](GbmBackingStore& s) { return EnsureDrmFbId(s); });
   }
-#endif
 
   out->struct_size = sizeof(FlutterBackingStore);
   out->type = kFlutterBackingStoreTypeOpenGL;
@@ -3153,7 +3142,6 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
   if (!baton) {
     return false;
   }
-#if USE_DRM_SCENE
   // If the store appeared in a Present this generation, the LayerScene
   // owns a Layer with identity_tag == baton. Drop it before the baton
   // disappears so the scene doesn't leave a stale layer referring to
@@ -3163,7 +3151,6 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
       scene_->remove_layer(layer->handle());
     }
   }
-#endif
   if (const auto it = stores_.find(baton); it != stores_.end()) {
     // Return the store to the pool instead of destroying it. Keeps the
     // GBM BO + EGLImage + GL FBO/tex/RB and (if already imported) the
@@ -3191,7 +3178,6 @@ void DrmCompositor::ReserveCursorPlane(const uint32_t plane_id) {
 }
 
 void DrmCompositor::ApplyCursorReservation() {
-#if USE_DRM_SCENE
   if (!scene_ || cursor_reserved_plane_ == 0) {
     return;
   }
@@ -3201,12 +3187,10 @@ void DrmCompositor::ApplyCursorReservation() {
       "[DrmCompositor] reserved cursor plane {} from scene allocator "
       "(disable-unused pass will leave it alone)",
       cursor_reserved_plane_);
-#endif
 }
 
 void DrmCompositor::SetPaused(const bool paused) {
   paused_.store(paused, std::memory_order_release);
-#if USE_DRM_SCENE
   // Mirror the pause edge into the scene so its layer sources can
   // drop fd-bound state before the kernel revokes master. Idempotent
   // and infallible per the LayerBufferSource::on_session_paused
@@ -3214,7 +3198,6 @@ void DrmCompositor::SetPaused(const bool paused) {
   if (paused && scene_) {
     scene_->on_session_paused();
   }
-#endif
   ihs::log::info("[DrmCompositor] session {}", paused ? "paused" : "resumed");
 }
 
@@ -3229,7 +3212,6 @@ void DrmCompositor::OnResume() {
   paused_.store(false, std::memory_order_release);
   resume_pending_logged_ = false;
 
-#if USE_DRM_SCENE
   // Rebuild the scene's per-fd kernel state (plane registry, property
   // caches, GEM/FB handles). DrmSession::TakeDevice opts in to
   // preserve_fd_across_resume, so backend_->device() wraps the same
@@ -3242,7 +3224,6 @@ void DrmCompositor::OnResume() {
                       r.error().message());
     }
   }
-#endif
 
   // Drain the BS-slot release pipeline — any flip events that would
   // have freed slots queued before pause never fired. Promote

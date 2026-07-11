@@ -661,12 +661,11 @@ phase4_build() {
         wayland-vulkan) cmake_args+=(-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=ON -DBUILD_BACKEND_DRM_KMS_EGL=OFF -DBUILD_BACKEND_SOFTWARE=OFF) ;;
         drm-kms-egl)
             cmake_args+=(-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=OFF -DBUILD_BACKEND_DRM_KMS_EGL=ON -DBUILD_BACKEND_SOFTWARE=OFF)
-            [[ "$WITH_SCENE" -eq 1 ]] && cmake_args+=(-DBUILD_COMPOSITOR=ON -DUSE_DRM_SCENE=ON) ;;
+            [[ "$WITH_SCENE" -eq 1 ]] && cmake_args+=(-DBUILD_COMPOSITOR=ON) ;;
         drm-kms-vulkan)
             # Flutter Vulkan renderer scanned out zero-copy on KMS planes via
             # dma-buf import. Requires the compositor (the engine presents
-            # through CreateBackingStore/PresentLayers); the LayerScene path is
-            # linked unconditionally, so USE_DRM_SCENE stays off.
+            # through CreateBackingStore/PresentLayers).
             cmake_args+=(-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=OFF -DBUILD_BACKEND_DRM_KMS_EGL=OFF -DBUILD_BACKEND_DRM_KMS_VULKAN=ON -DBUILD_BACKEND_SOFTWARE=OFF -DBUILD_COMPOSITOR=ON) ;;
         software)       cmake_args+=(-DBUILD_BACKEND_WAYLAND_EGL=OFF -DBUILD_BACKEND_WAYLAND_VULKAN=OFF -DBUILD_BACKEND_DRM_KMS_EGL=OFF -DBUILD_BACKEND_SOFTWARE=ON) ;;
     esac
