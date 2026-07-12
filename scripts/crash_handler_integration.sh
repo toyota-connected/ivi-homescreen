@@ -1,128 +1,116 @@
 #!/usr/bin/env bash
-# Crash-handler integration test — mirrors the crash-handler job in
-# .github/workflows/oss-integration.yaml for local / Docker reproduction.
+# Crash-handler integration test.
 #
-# Intended to be run inside a Docker container via:
-#   /home/jamie/workspace-automation/run-docker.sh ubuntu:22.04 amd64 \
-#     "scripts/crash_handler_integration.sh"
+# Builds THIS source tree (the checkout, not a pinned workspace) with the crash
+# handler via emb's native `local` build, then runs the intentionally-crashing
+# binary against a fake Sentry and verifies the crash report was delivered.
 #
-# Prerequisites (handled by flutter_workspace.py before this script runs):
-#   - sentry-native built under ${FLUTTER_WORKSPACE}/app/sentry-native/
-#   - ivi-homescreen sources at ${FLUTTER_WORKSPACE}/app/ivi-homescreen/
-#   - material_3_demo at ${FLUTTER_WORKSPACE}/app/samples/material_3_demo/
+# emb stages the sentry-native augment (+ crashpad_handler) into a per-workspace
+# overlay and fetches the Flutter engine SDK, so this needs only emb + a Flutter
+# SDK on PATH — no meta-flutter workspace checkout.
 #
-# Environment variables (all optional):
-#   KENT_HOST  — host for the fake Sentry server (default: 127.0.0.1)
-#   KENT_PORT  — port for the fake Sentry server (default: 5000)
+# The fake Sentry accepts crashpad's minidump upload: crashpad POSTs the crash
+# to `/api/<project>/minidump/`, an endpoint Kent (the usual fake Sentry) does
+# not serve — so we run a tiny minidump-aware stand-in instead.
+#
+# Env (all optional):
+#   EMB         emb executable (default: `emb` on PATH)
+#   APP         Flutter app to bundle (default: a throwaway `flutter create`;
+#               the binary crashes at startup, so the app content is irrelevant)
+#   MOCK_PORT   fake Sentry port (default: 5000)
 
 set -euo pipefail
 
-KENT_HOST="${KENT_HOST:-127.0.0.1}"
-KENT_PORT="${KENT_PORT:-5000}"
+EMB="${EMB:-emb}"
+MOCK_PORT="${MOCK_PORT:-5000}"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-IVI_SRC="${FLUTTER_WORKSPACE}/app/ivi-homescreen"
-IVI_BUILD="${IVI_SRC}/build"
-SENTRY_LIBDIR="${FLUTTER_WORKSPACE}/app/sentry-native/build/release/staging"
-CRASHPAD_BINDIR="${FLUTTER_WORKSPACE}/app/sentry-native/build/release/crashpad_build/handler"
-SAMPLES_DIR="${FLUTTER_WORKSPACE}/app/flutter-samples/material_3_demo"
-BUNDLE_DIR="${SAMPLES_DIR}/.desktop-homescreen"
+# ── A minimal app for the bundle ───────────────────────────────────────────
+APP="${APP:-}"
+if [[ -z "$APP" ]]; then
+  APP="$(mktemp -d)/crashapp"
+  flutter create "$APP" >/dev/null
+fi
 
-KENT_PID=""
+# ── Build embedder (crash handler + integration crash) + runnable bundle ───
+# Run from the source tree (emb cross .) so the -D define overrides apply — an
+# absolute source path selects a different build key and can reuse a cached
+# no-crash build. Capture emb's "runnable → <path>" line for the exact bundle.
+cd "$SRC"
+BUILD_LOG="$(mktemp)"
+"$EMB" cross . --backend software \
+  -D BUILD_CRASH_HANDLER=ON -D INTEGRATION_TEST_CRASH_HANDLER=ON \
+  --build --app "$APP" --mode debug 2>&1 | tee "$BUILD_LOG"
 
+RUN="$(grep -a 'runnable' "$BUILD_LOG" | grep -aoE '/[^[:space:]]+/runnable' | tail -1)"
+[[ -n "$RUN" && -x "$RUN/homescreen" ]] || {
+  echo "error: emb runnable bundle not found" >&2
+  exit 2
+}
+echo "runnable bundle: $RUN"
+
+# ── Fake Sentry (minidump-aware) ───────────────────────────────────────────
+HITS="$(mktemp)"
+python3 - "$MOCK_PORT" "$HITS" <<'PY' >/dev/null 2>&1 &
+import http.server, socketserver, sys, pathlib
+port = int(sys.argv[1]); hits = pathlib.Path(sys.argv[2]); hits.write_text("")
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        try:
+            self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
+        except Exception:
+            pass
+        with hits.open("a") as f:
+            f.write(self.path + "\n")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"id":"x"}')
+    def log_message(self, *a):
+        pass
+socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
+PY
+MOCK_PID=$!
 cleanup() {
-  if [[ -n "${KENT_PID}" ]]; then
-    kill "${KENT_PID}" 2>/dev/null || true
-  fi
+  kill "$MOCK_PID" 2>/dev/null || true
+  pkill -9 -x crashpad_handler 2>/dev/null || true
+  pkill -9 -x homescreen 2>/dev/null || true
 }
 trap cleanup EXIT
-
-_dir=$(pwd)
-
-# ---------------------------------------------------------------------------
-# Prepare test app
-# ---------------------------------------------------------------------------
-cd "${SAMPLES_DIR}"
-# this is required to make sure a `.desktop-homescreen` bundle is generated
-flutter pub get
-flutter build bundle
-flutter install -d desktop-homescreen
-cd "${_dir}"
-
-# ---------------------------------------------------------------------------
-# Configure
-# ---------------------------------------------------------------------------
-
-cmake \
-  -S "${IVI_SRC}" \
-  -B "${IVI_BUILD}" \
-  -D BUILD_BACKEND_WAYLAND_EGL=OFF \
-  -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
-  -D BUILD_BACKEND_DRM_KMS_EGL=OFF \
-  -D BUILD_BACKEND_SOFTWARE=ON \
-  -D BUILD_CRASH_HANDLER=ON \
-  -D INTEGRATION_TEST_CRASH_HANDLER=ON
-
-# ---------------------------------------------------------------------------
-# Build
-# ---------------------------------------------------------------------------
-ninja -C "${IVI_BUILD}"
-
-# ---------------------------------------------------------------------------
-# Install and start Kent (fake Sentry server)
-# ---------------------------------------------------------------------------
-pip install kent
-
-kent-server run --host "${KENT_HOST}" --port "${KENT_PORT}" &
-KENT_PID=$!
 sleep 2
 
-run_and_verify_crash() {
-  # ---------------------------------------------------------------------------
-  # Run homescreen (expected to crash)
-  # ---------------------------------------------------------------------------
+# ── Crash, then confirm the crash report reached Sentry ────────────────────
+run_and_verify() {
   set +e
-  SENTRY_DSN="http://public@${KENT_HOST}:${KENT_PORT}/1" \
-    "${IVI_BUILD}/shell/homescreen" -b "${BUNDLE_DIR}"
-  HOMESCREEN_EXIT_CODE=$?
+  ( cd "$RUN" && SENTRY_DSN="http://public@127.0.0.1:${MOCK_PORT}/1" \
+      LD_LIBRARY_PATH="$RUN/lib" timeout -k 5 60 ./homescreen -b . )
+  local ec=$?
   set -e
-
-  if [[ "${HOMESCREEN_EXIT_CODE}" == "0" ]]; then
-    echo "error: homescreen exited with 0 — expected a crash (non-zero exit)" >&2
+  echo "homescreen exit: ${ec}"
+  if [[ "${ec}" != 139 ]]; then
+    echo "error: expected crash exit 139 (SIGSEGV), got ${ec}" >&2
     return 1
   fi
-
-  _expected_exit_code=139
-  if [[ "${HOMESCREEN_EXIT_CODE}" != "${_expected_exit_code}" ]]; then
-    echo "error: homescreen exited with ${HOMESCREEN_EXIT_CODE} — expected ${_expected_exit_code}" >&2
-    return 1
-  else
-    echo "homescreen exited with expected crash code ${_expected_exit_code}"
+  sleep 12  # crashpad uploads the minidump out-of-process, asynchronously
+  if grep -q 'minidump' "$HITS"; then
+    echo "crash report (minidump) delivered to Sentry:"
+    cat "$HITS"
+    return 0
   fi
-
-  # ---------------------------------------------------------------------------
-  # Wait for crash report delivery, then verify Kent received it
-  # ---------------------------------------------------------------------------
-  sleep 10
-
-  response=$(curl -sf "http://${KENT_HOST}:${KENT_PORT}/api/eventlist/")
-  echo "Kent event list: ${response}"
-  # response = { "events" : [ { "event_id" : "..." }, ... ] }
-  # use jq to get length of events array
-  event_count=$(echo "${response}" | jq '.events | length' || echo "0")
-  if [[ "${event_count}" == "0" ]]; then
-    echo "error: no crash reports received by Kent" >&2
-    return 1
-  fi
-  echo "Kent received ${event_count} crash report(s) as expected"
+  echo "error: no minidump crash report received by the fake Sentry" >&2
+  cat "$HITS" >&2
+  return 1
 }
 
 for attempt in 1 2; do
-  if run_and_verify_crash; then
-    break
+  if run_and_verify; then
+    echo "crash-handler integration test PASSED"
+    exit 0
   fi
-  if [[ "${attempt}" == "2" ]]; then
-    echo "error: crash handler verification failed after ${attempt} attempts" >&2
+  if [[ "${attempt}" == 2 ]]; then
+    echo "error: crash-handler verification failed after ${attempt} attempts" >&2
     exit 1
   fi
-  echo "Attempt ${attempt} failed, retrying..."
+  echo "attempt ${attempt} failed, retrying..."
+  : > "$HITS"
 done
