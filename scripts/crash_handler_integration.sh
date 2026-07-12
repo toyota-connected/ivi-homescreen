@@ -37,7 +37,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # runnable Flutter bundle.
 cd "$SRC"
 BUILD_LOG="$(mktemp)"
-"$EMB" cross . --backend software \
+"$EMB" -v cross . --backend software \
   -D BUILD_CRASH_HANDLER=ON -D INTEGRATION_TEST_CRASH_HANDLER=ON \
   --build 2>&1 | tee "$BUILD_LOG"
 

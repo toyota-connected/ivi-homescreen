@@ -217,7 +217,7 @@ jobs:
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           emb --version
-          emb cross . --backend software \
+          emb -v cross . --backend software \
             -D BUILD_CRASH_HANDLER=ON --build
 
   # Aggregate gate so crash-handler can be a required status check even though
