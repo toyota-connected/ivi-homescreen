@@ -2,7 +2,6 @@
 #include <stdexcept>
 
 #include "gtest/gtest.h"
-#include "spdlog/spdlog.h"
 
 #include <configuration/configuration.h>
 #include <rapidjson/document.h>

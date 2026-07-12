@@ -108,7 +108,7 @@ class LibDltLoader {
   void unregister_app() noexcept;
 
   // Context registration. Returns true on success or when libdlt is absent
-  // (the caller still gets a valid handle for the spdlog fallback path).
+  // (the caller still gets a valid handle for the non-DLT fallback path).
   bool register_context(abi::DltContext* ctx,
                         const char* ctx_id,
                         const char* description) noexcept;

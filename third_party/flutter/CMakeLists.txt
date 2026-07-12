@@ -36,7 +36,7 @@ target_include_directories(flutter PUBLIC
 
 target_link_libraries(flutter PUBLIC
         rapidjson
-        spdlog
+        fmt
 )
 
 target_link_libraries(flutter PUBLIC toolchain::toolchain)

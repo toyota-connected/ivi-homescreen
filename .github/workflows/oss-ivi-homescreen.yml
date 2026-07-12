@@ -192,36 +192,33 @@ jobs:
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.crash == 'true' }}
     runs-on: ubuntu-22.04
     steps:
-      - name: Check Environment
-        id: check_environment
-        shell: bash
-        run: |
-          echo "Running on Ubuntu version: $(lsb_release -d | cut -f2)"
-          echo "Running on architecture: $(uname -m)"
-          echo "Current directory: $(pwd)"
-          echo "Environment variables:"
-          env
-
-          # Get username
-          echo "user=$(whoami)" >> "$GITHUB_OUTPUT"
-      - name: Setup workspace
-        uses: meta-flutter/workspace-automation/.github/actions/setup-workspace@v2.0
+      # Build the PR's own source with the crash handler enabled, via emb's
+      # native `local` build (no --target). emb pulls the sentry-native augment
+      # into a per-workspace overlay and wires it onto the embedder configure,
+      # so this needs no setup-workspace / pinned checkout — it compiles exactly
+      # the code under review.
+      - name: Checkout ivi-homescreen (PR)
+        uses: actions/checkout@v5
         with:
-          args: --disable=rive-text --enable=sentry-native --override-repo=https://github.com/toyota-connected/ivi-homescreen.git#${{ github.event.pull_request.head.ref || github.sha }}
-          user: ${{ steps.check_environment.outputs.user }}
-          ref: v2.0
-          cache: true
-          # cache-whole caches the entire workspace (the extracted LLVM
-          # toolchain under .tmp/ and the sentry-native build under
-          # app/sentry-native/build/), not just <workspace>/.cache. Without it
-          # the expensive toolchain extract + sentry build run on every job;
-          # the default .cache-only scope wouldn't reuse them.
-          cache-whole: true
-          # Stable key shared across PRs so the toolchain + sentry-native build
-          # are reused (the per-PR key meant every PR started cold). The
-          # sentry-native version is pinned in the setup-workspace action (@v2.0),
-          # so bump this suffix if that pin or the action ref changes.
-          cache-key: crash-handler-${{ runner.os }}-wsa-v2.0
+          submodules: recursive
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git python3 \
+            curl ca-certificates xz-utils \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+            libpugixml-dev libcurl4-openssl-dev
+      - name: Fetch emb
+        run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+      - name: Build crash handler (emb local, software backend)
+        run: |
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          emb -v cross . --backend software \
+            -D BUILD_CRASH_HANDLER=ON --build
 
   # Aggregate gate so crash-handler can be a required status check even though
   # it is path-gated (skipped on docs/asset-only PRs). This job always runs and

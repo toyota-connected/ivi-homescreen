@@ -10,13 +10,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <sstream>
 
 #include "flutter/fml/eintr_wrapper.h"
 #include "flutter/fml/mapping.h"
-#include "spdlog/spdlog.h"
+#include <fmt/format.h>
 
 namespace fml {
 
@@ -173,7 +174,7 @@ bool UnlinkFile(const char* path) {
 bool UnlinkFile(const fml::UniqueFD& base_directory, const char* path) {
   int code = ::unlinkat(base_directory.get(), path, 0);
   if (code != 0) {
-    SPDLOG_ERROR(strerror(errno));
+    fmt::println(stderr, "{}", strerror(errno));
   }
   return code == 0;
 }
@@ -235,13 +236,13 @@ bool WriteAtomically(const fml::UniqueFD& base_directory,
 bool VisitFiles(const fml::UniqueFD& directory, const FileVisitor& visitor) {
   fml::UniqueFD dup_fd(dup(directory.get()));
   if (!dup_fd.is_valid()) {
-    SPDLOG_ERROR("Can't dup the directory fd. Error: {}", strerror(errno));
+    fmt::println(stderr, "Can't dup the directory fd. Error: {}", strerror(errno));
     return true;  // continue to visit other files
   }
 
   fml::UniqueDir dir(::fdopendir(dup_fd.get()));
   if (!dir.is_valid()) {
-    SPDLOG_ERROR("Can't open the directory. Error: {}", strerror(errno));
+    fmt::println(stderr, "Can't open the directory. Error: {}", strerror(errno));
     return true;  // continue to visit other files
   }
 

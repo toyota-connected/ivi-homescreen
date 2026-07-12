@@ -355,7 +355,7 @@ flutter_desktop_messenger.h
 dlt_sink.h
 ----------
 
-.. doxygenclass:: spdlog::sinks::dlt_sink
+.. doxygenclass:: ihs::dlt::DltSink
    :project: ivi-homescreen
    :members:
    :private-members:
