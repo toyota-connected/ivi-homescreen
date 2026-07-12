@@ -5,13 +5,14 @@
 #ifndef FLUTTER_FML_NATIVE_LIBRARY_H_
 #define FLUTTER_FML_NATIVE_LIBRARY_H_
 
+#include <cstdio>
 #include <optional>
 
 #include "flutter/fml/build_config.h"
 #include "flutter/fml/macros.h"
 #include "flutter/fml/memory/ref_counted.h"
 #include "flutter/fml/memory/ref_ptr.h"
-#include "spdlog/spdlog.h"
+#include <fmt/format.h>
 
 #if defined(FML_OS_WIN)
 #include <windows.h>
@@ -48,7 +49,7 @@ class NativeLibrary : public fml::RefCountedThreadSafe<NativeLibrary> {
   const uint8_t* ResolveSymbol(const char* symbol) {
     auto* resolved_symbol = reinterpret_cast<const uint8_t*>(Resolve(symbol));
     if (resolved_symbol == nullptr) {
-      SPDLOG_INFO("Could not resolve symbol in library: {}", symbol);
+      fmt::println(stderr, "Could not resolve symbol in library: {}", symbol);
     }
     return resolved_symbol;
   }

@@ -241,7 +241,18 @@ if (BUILD_CRASH_HANDLER)
         message(STATUS "Defaulting to system crashpad_handler at ${CMAKE_INSTALL_PREFIX}")
         set(CRASHPAD_BINARY_DIR ${CMAKE_INSTALL_PREFIX}/bin)
     else ()
-        message(FATAL_ERROR "System crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}, please set CRASHPAD_BINARY_DIR")
+        # Native/overlay-staged build: sentry-native's crashpad_handler ships in
+        # an augment overlay (e.g. emb stages it under <overlay>/usr/bin). Search
+        # CMAKE_PREFIX_PATH's bin dirs, symmetric with the find_package(sentry)
+        # CONFIG lookup above, so no per-build CRASHPAD_BINARY_DIR is needed.
+        find_program(_crashpad_handler crashpad_handler
+                PATHS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES usr/bin bin)
+        if (_crashpad_handler)
+            get_filename_component(CRASHPAD_BINARY_DIR "${_crashpad_handler}" DIRECTORY)
+            message(STATUS "Found crashpad_handler at ${CRASHPAD_BINARY_DIR}")
+        else ()
+            message(FATAL_ERROR "crashpad_handler not found at ${CMAKE_INSTALL_PREFIX}/bin or on CMAKE_PREFIX_PATH; set CRASHPAD_BINARY_DIR")
+        endif ()
     endif ()
 
     # Absolute path to crashpad_handler on the DEPLOYED target -- this is what is

@@ -35,7 +35,7 @@ target_link_libraries(platform_homescreen PUBLIC
         asio
         flutter
         rapidjson
-        spdlog
+        fmt
         tomlplusplus::tomlplusplus
 )
 

@@ -22,7 +22,7 @@
 // selected by IHS_LOG_SINK). spdlog is retired: this header is the single
 // replacement for the old console logger and the DLT callback sink alike.
 //
-// fmt is sourced header-only from spdlog's bundled copy for now; the formatting
+// fmt is sourced header-only from the standalone fmt submodule; the formatting
 // happens shell-side, before the C ABI, so libihs_shared.so stays dependency
 // free. Levels are filtered cheaply via ihs_log_enabled() before any formatting
 // or argument evaluation happens.
@@ -30,7 +30,7 @@
 #ifndef FMT_HEADER_ONLY
 #define FMT_HEADER_ONLY
 #endif
-#include "spdlog/fmt/fmt.h"
+#include <fmt/format.h>
 
 #include "ihs/logging.h"
 #include "logging/logger.hpp"
