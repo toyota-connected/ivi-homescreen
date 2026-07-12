@@ -18,9 +18,12 @@ jobs:
     steps:
       # Build THIS PR's source (not a pinned v2.0 checkout) with the crash
       # handler via emb's native `local` build, then run the intentionally-
-      # crashing binary against a minidump-aware fake Sentry. emb stages the
-      # sentry-native augment + crashpad_handler into a per-workspace overlay
-      # and fetches the Flutter engine SDK, so no setup-workspace is needed.
+      # crashing binary against a minidump-aware fake Sentry. The integration
+      # crash fires in main() before the engine runs, so the test needs no
+      # Flutter app, no libflutter_engine.so (dlopened lazily, past the crash),
+      # and no Flutter SDK -- only emb + the system build deps. emb stages the
+      # sentry-native augment + crashpad_handler into a per-workspace overlay,
+      # so no setup-workspace is needed.
       - name: Checkout ivi-homescreen (PR)
         uses: actions/checkout@v5
         with:
@@ -36,12 +39,6 @@ jobs:
             libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
             libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
             libpugixml-dev libcurl4-openssl-dev
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.2
-          channel: stable
 
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli

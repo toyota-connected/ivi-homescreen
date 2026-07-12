@@ -5,18 +5,24 @@
 # handler via emb's native `local` build, then runs the intentionally-crashing
 # binary against a fake Sentry and verifies the crash report was delivered.
 #
-# emb stages the sentry-native augment (+ crashpad_handler) into a per-workspace
-# overlay and fetches the Flutter engine SDK, so this needs only emb + a Flutter
-# SDK on PATH — no meta-flutter workspace checkout.
+# What the test does NOT need, and why:
+#   * No Flutter app. The integration crash fires in main() (shell/main.cc,
+#     INTEGRATION_TEST_CRASH_HANDLER) right after arg-parse -- before any engine
+#     Run -- so there is no Dart content to compile.
+#   * No libflutter_engine.so. The binary dlopens the engine lazily at engine
+#     start-up, which is past the crash point, so the engine is never loaded.
+#   * No Flutter SDK. With no app to bundle, `flutter build bundle` is never
+#     invoked, so `flutter` need not be on PATH.
+# emb builds the sentry-native augment into a per-workspace overlay and bakes
+# that overlay's crashpad_handler path into the binary, so the crash uploads
+# with only emb + the system build deps present.
 #
 # The fake Sentry accepts crashpad's minidump upload: crashpad POSTs the crash
 # to `/api/<project>/minidump/`, an endpoint Kent (the usual fake Sentry) does
-# not serve — so we run a tiny minidump-aware stand-in instead.
+# not serve -- so we run a tiny minidump-aware stand-in instead.
 #
 # Env (all optional):
 #   EMB         emb executable (default: `emb` on PATH)
-#   APP         Flutter app to bundle (default: a throwaway `flutter create`;
-#               the binary crashes at startup, so the app content is irrelevant)
 #   MOCK_PORT   fake Sentry port (default: 5000)
 
 set -euo pipefail
@@ -25,29 +31,30 @@ EMB="${EMB:-emb}"
 MOCK_PORT="${MOCK_PORT:-5000}"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# ── A minimal app for the bundle ───────────────────────────────────────────
-APP="${APP:-}"
-if [[ -z "$APP" ]]; then
-  APP="$(mktemp -d)/crashapp"
-  flutter create "$APP" >/dev/null
-fi
-
-# ── Build embedder (crash handler + integration crash) + runnable bundle ───
-# Run from the source tree (emb cross .) so the -D define overrides apply — an
-# absolute source path selects a different build key and can reuse a cached
-# no-crash build. Capture emb's "runnable → <path>" line for the exact bundle.
+# ── Build embedder (crash handler + integration crash), no app bundle ──────
+# Run from the source tree (emb cross .) so the -D define overrides apply. No
+# --app: we only need the native binary + the staged crashpad_handler, not a
+# runnable Flutter bundle.
 cd "$SRC"
 BUILD_LOG="$(mktemp)"
 "$EMB" cross . --backend software \
   -D BUILD_CRASH_HANDLER=ON -D INTEGRATION_TEST_CRASH_HANDLER=ON \
-  --build --app "$APP" --mode debug 2>&1 | tee "$BUILD_LOG"
+  --build 2>&1 | tee "$BUILD_LOG"
 
-RUN="$(grep -a 'runnable' "$BUILD_LOG" | grep -aoE '/[^[:space:]]+/runnable' | tail -1)"
-[[ -n "$RUN" && -x "$RUN/homescreen" ]] || {
-  echo "error: emb runnable bundle not found" >&2
+# emb prints "software: built → <build-dir>/build-software"; the homescreen
+# binary lives at <build-dir>/build-software/shell/homescreen.
+BUILD_SW="$(grep -aoE '/[^[:space:]]+/build-software' "$BUILD_LOG" | tail -1)"
+HS="$BUILD_SW/shell/homescreen"
+[[ -n "$BUILD_SW" && -x "$HS" ]] || {
+  echo "error: homescreen binary not found (build-software=${BUILD_SW:-<none>})" >&2
   exit 2
 }
-echo "runnable bundle: $RUN"
+echo "homescreen binary: $HS"
+
+# A minimal bundle dir: the crash fires before the engine runs, so an empty
+# config.toml (DSN comes from SENTRY_DSN) is all arg-parse needs.
+BUNDLE="$(mktemp -d)"
+: > "$BUNDLE/config.toml"
 
 # ── Fake Sentry (minidump-aware) ───────────────────────────────────────────
 HITS="$(mktemp)"
@@ -82,8 +89,8 @@ sleep 2
 # ── Crash, then confirm the crash report reached Sentry ────────────────────
 run_and_verify() {
   set +e
-  ( cd "$RUN" && SENTRY_DSN="http://public@127.0.0.1:${MOCK_PORT}/1" \
-      LD_LIBRARY_PATH="$RUN/lib" timeout -k 5 60 ./homescreen -b . )
+  ( cd "$BUNDLE" && SENTRY_DSN="http://public@127.0.0.1:${MOCK_PORT}/1" \
+      timeout -k 5 60 "$HS" -b . )
   local ec=$?
   set -e
   echo "homescreen exit: ${ec}"
