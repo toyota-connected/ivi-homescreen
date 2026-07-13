@@ -30,7 +30,7 @@
 void Stats::getSelfStats(ProcessStats& stats) {
   std::ifstream statFile("/proc/self/stat");
   if (!statFile.is_open()) {
-    spdlog::error("Failed to open /proc/self/stat");
+    ihs::log::error("Failed to open /proc/self/stat");
     exit(EXIT_FAILURE);
   }
 
