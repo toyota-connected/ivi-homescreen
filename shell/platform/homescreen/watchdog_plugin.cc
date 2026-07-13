@@ -47,7 +47,7 @@ bool WatchdogPlugin::checkWatchdogSource(const int64_t source) {
 void WatchdogPlugin::externalStart(int64_t source) {
 #if BUILD_WATCHDOG
   if (!checkWatchdogSource(source)) {
-    spdlog::error("WatchdogPlugin: externalStart: Invalid source {}", source);
+    ihs::log::error("WatchdogPlugin: externalStart: Invalid source {}", source);
     return;
   }
   Watchdog::getInstance().start(static_cast<WatchdogSource>(source));
@@ -59,7 +59,7 @@ void WatchdogPlugin::externalStart(int64_t source) {
 void WatchdogPlugin::externalPet(int64_t source) {
 #if BUILD_WATCHDOG
   if (!checkWatchdogSource(source)) {
-    spdlog::error("WatchdogPlugin: externalPet: Invalid source {}", source);
+    ihs::log::error("WatchdogPlugin: externalPet: Invalid source {}", source);
     return;
   }
   Watchdog::getInstance().pet(static_cast<WatchdogSource>(source));
@@ -71,7 +71,7 @@ void WatchdogPlugin::externalPet(int64_t source) {
 void WatchdogPlugin::externalStop(int64_t source) {
 #if BUILD_WATCHDOG
   if (!checkWatchdogSource(source)) {
-    spdlog::error("WatchdogPlugin: externalStop: Invalid source {}", source);
+    ihs::log::error("WatchdogPlugin: externalStop: Invalid source {}", source);
     return;
   }
   Watchdog::getInstance().stop(static_cast<WatchdogSource>(source));
@@ -115,7 +115,7 @@ void WatchdogPlugin::HandleMethodCall(
       }
     }
     if (!checkWatchdogSource(source)) {
-      spdlog::error("WatchdogPlugin: start: Invalid source {}", source);
+      ihs::log::error("WatchdogPlugin: start: Invalid source {}", source);
       result->Error("invalid_source", "Source out of range");
       return;
     }
@@ -125,7 +125,7 @@ void WatchdogPlugin::HandleMethodCall(
     }
     Watchdog::getInstance().start(static_cast<WatchdogSource>(source));
 #endif
-    spdlog::trace("WatchdogPlugin: (fake) start");
+    ihs::log::trace("WatchdogPlugin: (fake) start");
     result->Success();
   } else if (method == kMethodPet) {
 #if BUILD_WATCHDOG
@@ -138,13 +138,13 @@ void WatchdogPlugin::HandleMethodCall(
       }
     }
     if (!checkWatchdogSource(source)) {
-      spdlog::error("WatchdogPlugin: pet: Invalid source {}", source);
+      ihs::log::error("WatchdogPlugin: pet: Invalid source {}", source);
       result->Error("invalid_source", "Source out of range");
       return;
     }
     Watchdog::getInstance().pet(static_cast<WatchdogSource>(source));
 #endif
-    spdlog::trace("WatchdogPlugin: (fake) pet");
+    ihs::log::trace("WatchdogPlugin: (fake) pet");
     result->Success();
   } else if (method == kMethodStop) {
 #if BUILD_WATCHDOG
@@ -157,13 +157,13 @@ void WatchdogPlugin::HandleMethodCall(
       }
     }
     if (!checkWatchdogSource(source)) {
-      spdlog::error("WatchdogPlugin: stop: Invalid source {}", source);
+      ihs::log::error("WatchdogPlugin: stop: Invalid source {}", source);
       result->Error("invalid_source", "Source out of range");
       return;
     }
     Watchdog::getInstance().stop(static_cast<WatchdogSource>(source));
 #endif
-    spdlog::trace("WatchdogPlugin: (fake) stop");
+    ihs::log::trace("WatchdogPlugin: (fake) stop");
     result->Success();
   } else {
     result->NotImplemented();
