@@ -751,17 +751,25 @@ The watchdog tracks named integer source IDs (`WatchdogSource`, a `typedef int64
 
 Source IDs 3–255 are available for Dart-side registration via the platform channel.
 
-#### Source name configuration
+#### Source name and timeout configuration
 
-The embedder reads human-readable labels for source IDs from the `[watchdog.source_names]` table in `config.toml`. Keys are the source IDs (as decimal strings), values are the display names used in log output.
+The `[watchdog]` table in `config.toml` is optional and accepts:
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `timeout_ms` | integer | `5000` | Watchdog timeout in milliseconds. Ignored when `BUILD_SYSTEMD_WATCHDOG=ON` (the `WatchdogSec=` unit interval takes precedence). |
+| `source_names` | table | — | Maps source IDs (decimal string keys) to human-readable names used in log output. |
 
 ```toml
+[watchdog]
+timeout_ms = 10000
+
 [watchdog.source_names]
 1 = 'MyFlutterApp'
 2 = 'BackgroundSync'
 ```
 
-Names can also be set or overridden at runtime by passing the optional `name` argument to the `start` platform channel method. The runtime value takes precedence over any config-defined name.
+Source names can also be set or overridden at runtime by passing the optional `name` argument to the `start` platform channel method. The runtime value takes precedence over any config-defined name.
 
 
 ### Platform channel
