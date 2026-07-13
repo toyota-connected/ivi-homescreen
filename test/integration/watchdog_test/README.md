@@ -25,6 +25,7 @@ runs even when the channel is absent.
 | `invalid_source_neg` | `start(-1)` returns `PlatformException(invalid_source)` |
 | `get_callbacks_shape` | `get_callbacks` returns a `Map` with non-zero `int` values for `start`, `pet`, `stop` |
 | `ffi_start_pet_stop` | Casts the pointers via `dart:ffi`, calls `start(5)` / `pet(5)` / `stop(5)` — no crash |
+| `start_with_name` | `start({source:6, name:'TestSource'})` → `pet(6)` → `stop(6)` — verifies the optional `name` argument is accepted |
 
 Source IDs used in the tests (3, 4, 5, 99, 1,000,000) are all outside the
 embedder-reserved range (0–2). There is no upper-bound restriction on source
@@ -65,10 +66,10 @@ The bundle directory is `build/flutter_assets/`.
 homescreen -b $(pwd)/build/flutter_assets
 ```
 
-All 11 checks should light up green and stdout should show:
+All 12 checks should light up green and stdout should show:
 
 ```
-WATCHDOG_TEST_SUMMARY {"pass":11,"fail":0,"skip":0,...}
+WATCHDOG_TEST_SUMMARY {"pass":12,"fail":0,"skip":0,...}
 WATCHDOG_TEST: PASS
 ```
 
@@ -83,7 +84,7 @@ then `channel_available` detects the missing channel and all remaining checks
 are skipped:
 
 ```
-WATCHDOG_TEST_SUMMARY {"pass":1,"fail":0,"skip":10,...}
+WATCHDOG_TEST_SUMMARY {"pass":1,"fail":0,"skip":11,...}
 WATCHDOG_TEST: SKIP
 ```
 

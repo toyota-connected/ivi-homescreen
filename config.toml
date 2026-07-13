@@ -13,7 +13,7 @@
 #             (a singular [view] is also accepted for a single-view bundle file)
 
 [global]
-# Process-level. app_id, cursor and the [sentry] table apply to the whole
+# Process-level. app_id, cursor, [sentry] and [watchdog] apply to the whole
 # process, not per view.
 app_id = 'homescreen'
 cursor_theme = 'DMZ-White'
@@ -29,6 +29,15 @@ debug_backend = false
 # env = 'production'
 # tags = { board = 'dev-board' }
 # attachments = []
+
+# [watchdog] is optional and process-level. source_names maps watchdog source
+# IDs (integers) to human-readable labels used in log output. Negative IDs are
+# reserved for internal embedder sources; positive IDs are for plugins/tests.
+# Names can also be set or overridden at runtime via the watchdog plugin's
+# start() method by passing a second (name) argument.
+# [watchdog.source_names]
+# 1 = 'MyFlutterApp'
+# 2 = 'BackgroundSync'
 
 [[view]]
 width = 1920

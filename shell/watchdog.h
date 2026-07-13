@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include "config/common.h"
@@ -40,6 +41,10 @@ class Watchdog {
 
   uint64_t getTimeoutMs() const;
 
+  void init(const std::string& config_path);
+
+  void setSourceName(WatchdogSource source, const std::string& name);
+
   void start(WatchdogSource source);
 
   void pet(WatchdogSource source);
@@ -57,14 +62,20 @@ class Watchdog {
   uint64_t intervalMs_ = kDefaultTimeoutMs;  // Timeout interval in ms
 
   std::map<WatchdogSource, std::chrono::time_point<std::chrono::steady_clock>>
-      activeSources_;                 // Track timeouts
-  std::mutex mutex_;                  // Protect access to activeSources_
+      activeSources_;  // Track timeouts
+  std::map<WatchdogSource, std::string>
+      sourceNames_;   // Source ID to name mapping
+  std::mutex mutex_;  // Protect access to activeSources_ and sourceNames_
   std::atomic<bool> running_{false};  // Whether the watchdog thread is running
   std::thread watchdogThread_;        // Single thread handling timeouts
 
   // Private constructor for Singleton
   Watchdog();
   ~Watchdog();
+
+  // Load source ID -> name associations from [watchdog.source_names] in
+  // config.toml
+  void loadConfig(const std::string& config_path);
 
   // The main watchdog thread routine
   void watchdogService();

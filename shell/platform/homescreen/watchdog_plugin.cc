@@ -100,17 +100,28 @@ void WatchdogPlugin::HandleMethodCall(
   } else if (method == kMethodStart) {
 #if BUILD_WATCHDOG
     int64_t source = 0;
+    std::string name;
     if (const auto* args =
             std::get_if<flutter::EncodableMap>(method_call.arguments())) {
       if (const auto it = args->find(flutter::EncodableValue("source"));
           it != args->end()) {
         source = GetEncodableInt(it->second);
       }
+      if (const auto it = args->find(flutter::EncodableValue("name"));
+          it != args->end()) {
+        if (const auto* str = std::get_if<std::string>(&it->second)) {
+          name = *str;
+        }
+      }
     }
     if (!checkWatchdogSource(source)) {
       spdlog::error("WatchdogPlugin: start: Invalid source {}", source);
       result->Error("invalid_source", "Source out of range");
       return;
+    }
+    if (!name.empty()) {
+      Watchdog::getInstance().setSourceName(static_cast<WatchdogSource>(source),
+                                            name);
     }
     Watchdog::getInstance().start(static_cast<WatchdogSource>(source));
 #endif
