@@ -751,6 +751,19 @@ The watchdog tracks named integer source IDs (`WatchdogSource`, a `typedef int64
 
 Source IDs 3–255 are available for Dart-side registration via the platform channel.
 
+#### Source name configuration
+
+The embedder reads human-readable labels for source IDs from the `[watchdog.source_names]` table in `config.toml`. Keys are the source IDs (as decimal strings), values are the display names used in log output.
+
+```toml
+[watchdog.source_names]
+1 = 'MyFlutterApp'
+2 = 'BackgroundSync'
+```
+
+Names can also be set or overridden at runtime by passing the optional `name` argument to the `start` platform channel method. The runtime value takes precedence over any config-defined name.
+
+
 ### Platform channel
 
 When `BUILD_WATCHDOG=ON`, a `"watchdog"` platform channel is registered and available to Flutter apps via `StandardMethodCodec`. Methods:
@@ -758,11 +771,12 @@ When `BUILD_WATCHDOG=ON`, a `"watchdog"` platform channel is registered and avai
 | Method | Arguments | Description |
 |---|---|---|
 | `get_callbacks` | — | Returns a map of `start`, `pet`, `stop` native function pointers (FFI callable from Dart) |
-| `start` | `{"source": int64}` | Register and begin monitoring source ID |
+| `start` | `{"source": int64, "name": string?}` | Register and begin monitoring source ID; optional `name` overrides any config-defined name for logging |
 | `pet` | `{"source": int64}` | Reset the timeout for source ID |
 | `stop` | `{"source": int64}` | Deregister source ID |
 
-Source IDs passed from Dart must be in the range 0–255.
+Source IDs passed from Dart must be non-negative. There is no upper-bound restriction.
+
 
 ### Example (Dart)
 

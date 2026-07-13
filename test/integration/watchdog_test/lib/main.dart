@@ -133,6 +133,7 @@ class _HomeState extends State<_Home> {
     Check('invalid_source_neg'),
     Check('get_callbacks_shape'),
     Check('ffi_start_pet_stop'),
+    Check('start_with_name'),
   ];
 
   bool _running = false;
@@ -382,6 +383,23 @@ class _HomeState extends State<_Home> {
       }
     } catch (e) {
       _setCheck('ffi_start_pet_stop', CheckStatus.fail, '$e');
+    }
+
+    // ------------------------------------------------------------------
+    // start_with_name
+    // Passing an optional 'name' string with start() must not cause any
+    // error. The name is stored internally and used in log output only;
+    // no return value is produced, so we verify absence of exceptions.
+    // ------------------------------------------------------------------
+    try {
+      await _channel
+          .invokeMethod<void>('start', {'source': 6, 'name': 'TestSource'});
+      await _channel.invokeMethod<void>('pet', {'source': 6});
+      await _channel.invokeMethod<void>('stop', {'source': 6});
+      _setCheck('start_with_name', CheckStatus.pass,
+          'start(6, name: TestSource) → pet(6) → stop(6) succeeded');
+    } catch (e) {
+      _setCheck('start_with_name', CheckStatus.fail, '$e');
     }
 
     _printSummary();

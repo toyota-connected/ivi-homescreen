@@ -174,6 +174,24 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>(sentry_config_path);
 #endif
 
+#if BUILD_WATCHDOG
+  // [watchdog.source_names] is process-level: read it from the --config master
+  // file when given, otherwise from the first bundle's config.toml.
+  {
+    std::string watchdog_config_path;
+    if (!configs.empty()) {
+      const auto& front = configs.front();
+      if (front.config_file && !front.config_file->empty()) {
+        watchdog_config_path = *front.config_file;
+      } else if (!front.view.bundle_path.empty()) {
+        watchdog_config_path =
+            front.view.bundle_path + "/" + std::string(kViewConfigToml);
+      }
+    }
+    Watchdog::getInstance().init(watchdog_config_path);
+  }
+#endif
+
 #if INTEGRATION_TEST_CRASH_HANDLER
   // If we're running the crash handler integration test, trigger a crash and
   // exit immediately. The test runner will then check if the crash was captured

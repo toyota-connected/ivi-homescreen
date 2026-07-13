@@ -16,6 +16,7 @@
 
 #include "watchdog.h"
 
+#include <filesystem>
 #include <iostream>
 
 #if BUILD_SYSTEMD_WATCHDOG
@@ -23,6 +24,9 @@
 #include <chrono>
 #include <thread>
 #endif
+
+#define TOML_EXCEPTIONS 0
+#include <tomlplusplus/toml.hpp>
 
 #include "logging/logging.h"
 #include "stats.h"
@@ -34,6 +38,65 @@ Watchdog& Watchdog::getInstance() {
 
 uint64_t Watchdog::getTimeoutMs() const {
   return intervalMs_;
+}
+
+void Watchdog::init(const std::string& config_path) {
+  loadConfig(config_path);
+}
+
+void Watchdog::setSourceName(const WatchdogSource source,
+                             const std::string& name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  sourceNames_[source] = name;
+  spdlog::debug("Watchdog: source {} named '{}'", static_cast<int64_t>(source),
+                name);
+}
+
+void Watchdog::loadConfig(const std::string& config_path) {
+  if (config_path.empty()) {
+    return;
+  }
+
+  const std::filesystem::path toml_path(config_path);
+  if (!std::filesystem::exists(toml_path)) {
+    spdlog::warn("Watchdog: config file not found at {}", toml_path.string());
+    return;
+  }
+
+  auto result = toml::parse_file(toml_path.string());
+  if (!result) {
+    spdlog::error("Watchdog: TOML parsing failed: {} — {}", toml_path.string(),
+                  result.error().description());
+    return;
+  }
+
+  auto& tbl = result.table();
+  auto* watchdog_section = tbl.get("watchdog");
+  if (!watchdog_section) {
+    return;
+  }
+
+  auto* names_node = watchdog_section->as_table()->get("source_names");
+  if (!names_node || !names_node->is_table()) {
+    return;
+  }
+
+  // Keys in TOML are always strings; parse each key as the source ID integer.
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto& [key, val] : *names_node->as_table()) {
+    if (auto name = val.value<std::string>()) {
+      try {
+        const WatchdogSource source =
+            static_cast<WatchdogSource>(std::stoll(std::string(key)));
+        sourceNames_[source] = *name;
+        spdlog::debug("Watchdog: config source {} = '{}'",
+                      static_cast<int64_t>(source), *name);
+      } catch (const std::exception&) {
+        spdlog::warn("Watchdog: ignoring non-integer source_names key '{}'",
+                     std::string(key));
+      }
+    }
+  }
 }
 
 Watchdog::Watchdog() {
@@ -58,18 +121,23 @@ void Watchdog::start(const WatchdogSource source) {
 
   // Record the start time for the source
   activeSources_[source] = std::chrono::steady_clock::now();
-  spdlog::trace("Watchdog started for source {}", static_cast<int64_t>(source));
+  const auto nameIt = sourceNames_.find(source);
+  spdlog::trace("Watchdog started for source {} ({})",
+                static_cast<int64_t>(source),
+                nameIt != sourceNames_.end() ? nameIt->second : "?");
 }
 
 void Watchdog::pet(const WatchdogSource source) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  spdlog::trace("Watchdog pet received for source {}",
-                static_cast<int64_t>(source));
+  const auto nameIt = sourceNames_.find(source);
+  const auto& sourceName = nameIt != sourceNames_.end() ? nameIt->second : "?";
+  spdlog::trace("Watchdog pet received for source {} ({})",
+                static_cast<int64_t>(source), sourceName);
 
   if (const auto it = activeSources_.find(source); it == activeSources_.end()) {
-    spdlog::warn("Source {} is not being monitored.",
-                 static_cast<int64_t>(source));
+    spdlog::warn("Source {} ({}) is not being monitored.",
+                 static_cast<int64_t>(source), sourceName);
     return;
   }
 
@@ -80,14 +148,17 @@ void Watchdog::pet(const WatchdogSource source) {
 void Watchdog::stop(const WatchdogSource source) {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  const auto nameIt = sourceNames_.find(source);
+  const auto& sourceName = nameIt != sourceNames_.end() ? nameIt->second : "?";
   if (activeSources_.find(source) == activeSources_.end()) {
-    spdlog::warn("Source {} is not being monitored.",
-                 static_cast<int64_t>(source));
+    spdlog::warn("Source {} ({}) is not being monitored.",
+                 static_cast<int64_t>(source), sourceName);
   }
 
   // Remove the source from active sources
   activeSources_.erase(source);
-  spdlog::trace("Watchdog stopped for source {}", static_cast<int64_t>(source));
+  spdlog::trace("Watchdog stopped for source {} ({})",
+                static_cast<int64_t>(source), sourceName);
 }
 
 void Watchdog::shutdown() {
@@ -138,7 +209,10 @@ void Watchdog::watchdogService() {
                                                                   startTime)
                 .count() >= static_cast<int64_t>(intervalMs_)) {
           // Timeout occurred for this source
-        ihs::log::critical("Watchdog timeout");
+          const auto nameIt2 = sourceNames_.find(source);
+          spdlog::error("Watchdog Timeout: source {} ({})",
+                        static_cast<int64_t>(source),
+                        nameIt2 != sourceNames_.end() ? nameIt2->second : "?");
 #if BUILD_SYSTEMD_WATCHDOG
           sd_notify(0, "WATCHDOG=trigger");
 #endif
