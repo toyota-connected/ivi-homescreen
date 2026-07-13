@@ -31,17 +31,26 @@
 #include "logging/logging.h"
 #include "stats.h"
 
+Watchdog* instance = nullptr;
+
 Watchdog& Watchdog::getInstance() {
-  static Watchdog instance;
-  return instance;
+  if (!instance) {
+    throw std::runtime_error("Watchdog::getInstance() called before init()");
+  }
+
+  return *instance;
 }
 
 uint64_t Watchdog::getTimeoutMs() const {
   return intervalMs_;
 }
 
-void Watchdog::init(const std::string& config_path) {
-  loadConfig(config_path);
+void Watchdog::init(const std::string* config_path) {
+  if (!instance) {
+    instance = new Watchdog(config_path);
+  } else {
+    ihs::log::warn("Watchdog: init() already called; ignoring");
+  }
 }
 
 void Watchdog::setSourceName(const WatchdogSource source,
@@ -71,17 +80,33 @@ void Watchdog::loadConfig(const std::string& config_path) {
   }
 
   auto& tbl = result.table();
-  auto* watchdog_section = tbl.get("watchdog");
-  if (!watchdog_section) {
+  const auto* watchdog_section = tbl.get("watchdog");
+  if (!watchdog_section || !watchdog_section->is_table()) {
     return;
   }
+  const auto* wdog_tbl = watchdog_section->as_table();
 
-  auto* names_node = watchdog_section->as_table()->get("source_names");
+  // [watchdog] timeout_ms — skipped when systemd owns the interval.
+  if (!systemdIntervalActive_) {
+    if (auto ms = wdog_tbl->get("timeout_ms")) {
+      if (auto val = ms->value<uint64_t>(); val && *val > 0) {
+        intervalMs_ = *val;
+        spdlog::debug("Watchdog: timeout set to {} ms from config",
+                      intervalMs_);
+      } else {
+        spdlog::warn(
+            "Watchdog: invalid timeout_ms in config, using default ({} ms)",
+            intervalMs_);
+      }
+    }
+  }
+
+  // [watchdog.source_names] — keys are source IDs (decimal strings).
+  const auto* names_node = wdog_tbl->get("source_names");
   if (!names_node || !names_node->is_table()) {
     return;
   }
 
-  // Keys in TOML are always strings; parse each key as the source ID integer.
   std::lock_guard<std::mutex> lock(mutex_);
   for (auto& [key, val] : *names_node->as_table()) {
     if (auto name = val.value<std::string>()) {
@@ -99,11 +124,16 @@ void Watchdog::loadConfig(const std::string& config_path) {
   }
 }
 
-Watchdog::Watchdog() {
+Watchdog::Watchdog(const std::string* config_path) {
+  if (config_path) {
+    loadConfig(*config_path);
+  }
+
 #if BUILD_SYSTEMD_WATCHDOG
   uint64_t interval;
   if (sd_watchdog_enabled(0, &interval) > 0) {
     intervalMs_ = interval / 1000;
+    systemdIntervalActive_ = true;
     sd_notify(0, "READY=1");
   }
   sd_notifyf(0, "STATUS=Running");

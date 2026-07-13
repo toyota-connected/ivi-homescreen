@@ -188,7 +188,7 @@ int main(const int argc, char** argv) {
             front.view.bundle_path + "/" + std::string(kViewConfigToml);
       }
     }
-    Watchdog::getInstance().init(watchdog_config_path);
+    Watchdog::init(&watchdog_config_path);
   }
 #endif
 

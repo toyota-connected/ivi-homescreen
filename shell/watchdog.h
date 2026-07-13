@@ -39,9 +39,9 @@ class Watchdog {
  public:
   static Watchdog& getInstance();
 
-  uint64_t getTimeoutMs() const;
+  static void init(const std::string* config_path = nullptr);
 
-  void init(const std::string& config_path);
+  uint64_t getTimeoutMs() const;
 
   void setSourceName(WatchdogSource source, const std::string& name);
 
@@ -60,6 +60,7 @@ class Watchdog {
  private:
   static constexpr uint64_t kDefaultTimeoutMs = 5'000;  // Default timeout in ms
   uint64_t intervalMs_ = kDefaultTimeoutMs;  // Timeout interval in ms
+  bool systemdIntervalActive_ = false;  // True when systemd owns the interval
 
   std::map<WatchdogSource, std::chrono::time_point<std::chrono::steady_clock>>
       activeSources_;  // Track timeouts
@@ -70,7 +71,7 @@ class Watchdog {
   std::thread watchdogThread_;        // Single thread handling timeouts
 
   // Private constructor for Singleton
-  Watchdog();
+  Watchdog(const std::string* config_path);
   ~Watchdog();
 
   // Load source ID -> name associations from [watchdog.source_names] in
