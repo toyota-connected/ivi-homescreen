@@ -130,12 +130,15 @@ class IVsyncProvider {
     return engine_.load(std::memory_order_acquire);
   }
 
+ public:
   /// The frame_start_time of the most recent baton handed to Flutter — i.e. the
   /// input cutoff of the frame currently building/committing. Because a present
   /// in flight keeps the next baton parked, this value is stable across a
   /// single frame's commit, letting a source tag that frame's presentation
   /// feedback with the cutoff of the inputs it actually consumed
-  /// (motion-to-photon). 0 until the first baton is delivered.
+  /// (motion-to-photon). 0 until the first baton is delivered. Public so a
+  /// backend that owns (rather than subclasses) the provider — the DRM/KMS
+  /// page-flip path — can read the cutoff when recording the scanout endpoint.
   [[nodiscard]] uint64_t LastDeliveredFrameStartNs() const {
     return last_frame_start_ns_.load(std::memory_order_acquire);
   }

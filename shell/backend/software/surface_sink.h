@@ -26,6 +26,10 @@ class TaskRunner;
 class SoftwareCursor;
 typedef void (*VsyncCallback)(void*, intptr_t);
 
+namespace profiling {
+class MotionToPhoton;
+}
+
 // Pluggable output destination for SoftwareBackend's
 // surface_present_callback. Sinks own one direction of data — pixels in,
 // either dropped, stored, or pushed to a device. They never call back
@@ -90,6 +94,10 @@ class ISurfaceSink {
   virtual void SetEngineHandle(void* /*engine*/) {}
   virtual void SetPlatformTaskRunner(TaskRunner* /*runner*/) {}
   virtual void StopVsyncMonitor() {}
+
+  // Hand the backend's motion-to-photon profiler (or nullptr) to a sink that
+  // drives page flips, so it can record the scanout endpoint. Default no-op.
+  virtual void SetMotionToPhoton(profiling::MotionToPhoton* /*m2p*/) {}
 
  protected:
   ISurfaceSink() = default;

@@ -45,6 +45,7 @@
 
 #include "asio/dispatch.hpp"
 #include "asio/post.hpp"
+#include "backend/backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "engine.h"
 #include "libflutter_engine.h"
@@ -308,9 +309,20 @@ void DrmSeat::DispatchToRegion(const ViewRegion& region,
   if (runner == nullptr || engine_handle == nullptr) {
     return;
   }
+  // Motion-to-photon input endpoint (IVI_M2P_PROFILE): the batch shares one
+  // engine-clock timestamp; record it on the strand so it joins the flip-path
+  // RecordPresent on the same thread. Backend* is null-checked; nullptr when
+  // not profiling. The event timestamp is microseconds on the engine's
+  // CLOCK_MONOTONIC clock — the same clock as the page-flip time.
+  auto* backend = s->engine->GetBackend();
+  auto* m2p = backend != nullptr ? backend->GetMotionToPhoton() : nullptr;
+  const uint64_t input_us = count > 0 ? events[count - 1].timestamp : 0;
   std::vector<FlutterPointerEvent> batch(events, events + count);
   asio::dispatch(*runner->GetStrandContext(),
-                 [engine_handle, batch = std::move(batch)]() {
+                 [engine_handle, batch = std::move(batch), m2p, input_us]() {
+                   if (m2p != nullptr && input_us != 0) {
+                     m2p->RecordInput(input_us * 1000ULL);
+                   }
                    LibFlutterEngine->SendPointerEvent(
                        engine_handle, batch.data(), batch.size());
                  });

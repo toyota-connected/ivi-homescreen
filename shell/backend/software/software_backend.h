@@ -96,6 +96,11 @@ class SoftwareBackend final : public Backend {
     if (sink_) {
       sink_->StopVsyncMonitor();
     }
+    // Motion-to-photon session summary, on the platform thread — the same
+    // thread the marshaled RecordInput/RecordPresent tasks execute on.
+    if (m2p_enabled_) {
+      m2p_.LogSessionSummary("sw");
+    }
   }
 
  private:
