@@ -84,3 +84,11 @@ jobs:
           source ./setup_env.sh
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           ./scripts/watchdog_integration.sh
+
+      - name: Install systemd dev library
+        run: sudo apt-get install -y --no-install-recommends libsystemd-dev
+
+      - name: Run integration test for systemd watchdog
+        shell: bash
+        run: |
+          ./scripts/systemd_watchdog_integration.sh
