@@ -17,6 +17,12 @@
 #include "backend/software/sink_factory.h"
 #include "logging/logging.h"
 
+// Defines BUILD_SOFTWARE_SINK_DRM / BUILD_SOFTWARE_SINK_FBDEV, which gate both
+// the sink includes and the factory branches below. Nothing else this file
+// includes pulls it in, and an undefined identifier in #if is 0, so without it
+// every drm-dumb / fbdev spec silently falls back to NoneSink.
+#include "config/common.h"
+
 #include <cstdlib>
 #include <string>
 
