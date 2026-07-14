@@ -16,6 +16,7 @@
 
 #include "backend/software/input/software_seat.h"
 
+#include "backend/software/input/libinput_log_bridge.h"
 #include "config/common.h"
 #include "logging/logging.h"
 
@@ -29,7 +30,10 @@
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
+#include <string_view>
 #include <thread>
 
 #include <asio/dispatch.hpp>
@@ -75,6 +79,41 @@ constexpr libinput_interface kLibinputInterface = {
     .open_restricted = OpenRestricted,
     .close_restricted = CloseRestricted,
 };
+
+// Forwards libinput's own diagnostics into ihs::log with a [libinput] tag,
+// priority-mapped. Installed via libinput_log_set_handler so the "client bug:
+// event processing lagging" marker (and device chatter at debug) lands in the
+// structured log / DLT instead of libinput's default stderr sink.
+void LibinputLogHandler(libinput* /*li*/,
+                        const libinput_log_priority priority,
+                        const char* format,
+                        va_list args) {
+  char buf[512];
+  const int n = std::vsnprintf(buf, sizeof(buf), format, args);
+  if (n <= 0) {
+    return;
+  }
+  const auto len = std::min(static_cast<std::size_t>(n), sizeof(buf) - 1);
+  std::string_view msg(buf, len);
+  // libinput terminates its lines with '\n'; ihs::log adds its own framing.
+  while (!msg.empty() && (msg.back() == '\n' || msg.back() == '\r')) {
+    msg.remove_suffix(1);
+  }
+  switch (MapLibinputLogLevel(priority)) {
+    case IHS_LEVEL_DEBUG:
+      ihs::log::debug("[libinput] {}", msg);
+      break;
+    case IHS_LEVEL_INFO:
+      ihs::log::info("[libinput] {}", msg);
+      break;
+    case IHS_LEVEL_ERROR:
+      ihs::log::error("[libinput] {}", msg);
+      break;
+    default:
+      ihs::log::warn("[libinput] {}", msg);
+      break;
+  }
+}
 
 // linux/input-event-codes BTN_* → Flutter button bit
 int64_t MapMouseButton(const uint32_t button) {
@@ -131,6 +170,12 @@ bool SoftwareSeat::Start() {
     ihs::log::error("[SoftwareSeat] libinput_udev_create_context failed");
     return false;
   }
+  // Route libinput's own diagnostics into ihs::log. INFO priority is requested
+  // explicitly so the "client bug: event processing lagging" marker is emitted
+  // regardless of libinput's build-time default (which suppresses it below
+  // ERROR on some versions).
+  libinput_log_set_handler(li_, LibinputLogHandler);
+  libinput_log_set_priority(li_, LIBINPUT_LOG_PRIORITY_INFO);
   if (libinput_udev_assign_seat(li_, "seat0") != 0) {
     ihs::log::error("[SoftwareSeat] libinput_udev_assign_seat('seat0') failed");
     return false;
