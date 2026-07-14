@@ -63,6 +63,7 @@
 #endif
 #endif
 #if BUILD_BACKEND_WAYLAND_EGL
+#include "backend/wayland_egl/partial_repaint_gate.h"
 #include "backend/wayland_egl/wayland_egl.h"
 #endif
 #if BUILD_BACKEND_WAYLAND_VULKAN
@@ -420,7 +421,8 @@ std::shared_ptr<Backend> MakeWaylandEglBackend(
   return std::make_shared<WaylandEglBackend>(
       wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
       config.view.height.value_or(kDefaultViewHeight),
-      config.debug_backend.value_or(false), kEglBufferSize);
+      config.debug_backend.value_or(false),
+      EngineSwitchesEnableImpeller(config.view.engine_args), kEglBufferSize);
 }
 #endif
 

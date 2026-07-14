@@ -63,11 +63,16 @@ class WaylandEglBackend : public Egl, public Backend {
   // @p shell_display is the @c Display owning the wp_presentation global.
   // May be nullptr (e.g., for tests that don't construct a Display); the
   // backend then falls back to the wall-clock vsync scheduler.
+  // @p enable_impeller reflects whether the engine was asked to run Impeller
+  // (via the --enable-impeller switch). When true the backend disables its
+  // partial-repaint path and reports full-surface damage, since that path is
+  // only correct under the Skia OpenGL renderer.
   WaylandEglBackend(Display* shell_display,
                     struct wl_display* display,
                     uint32_t initial_width,
                     uint32_t initial_height,
                     bool debug_backend,
+                    bool enable_impeller,
                     int buffer_size = kEglBufferSize);
 
   /**
@@ -207,6 +212,11 @@ class WaylandEglBackend : public Egl, public Backend {
   std::atomic<struct wl_surface*> m_wl_surface{nullptr};
   uint32_t m_initial_width;
   uint32_t m_initial_height;
+
+  // False when Impeller is the active renderer: the partial-repaint path
+  // (existing-damage query + damage swap) is bypassed in favor of full-surface
+  // repaint. See partial_repaint_gate.h for the rationale.
+  bool m_partial_repaint_enabled;
 
   // Keeps track of the existing damage associated with each FBO ID.
   // Storing the rect by value (not via heap) so populate_existing_damage
