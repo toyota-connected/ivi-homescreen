@@ -15,6 +15,7 @@
  */
 
 #include "backend/software/sink_factory.h"
+#include "config/common.h"  // BUILD_SOFTWARE_SINK_DRM / _FBDEV gates below
 #include "logging/logging.h"
 
 #include <cstdlib>

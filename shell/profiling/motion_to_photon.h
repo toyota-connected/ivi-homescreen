@@ -21,6 +21,8 @@
 #include <cstdint>
 #include <string_view>
 
+class TaskRunner;
+
 namespace profiling {
 
 /**
@@ -112,6 +114,19 @@ class MotionToPhoton {
 
   [[nodiscard]] bool Empty() const { return head_ == tail_; }
 };
+
+/// Marshal a scanout record onto the platform task runner's strand, then call
+/// RecordPresent there. The DRM/KMS page-flip handler runs on the flip-reader
+/// or raster thread, but the DRM input seats post RecordInput onto the same
+/// strand — routing the present through it keeps both endpoints on one thread,
+/// preserving MotionToPhoton's lock-free single-thread contract without the
+/// Wayland path's luxury of a shared event thread. No-op if @p m2p or
+/// @p runner is null (i.e. profiling off or the runner not yet wired).
+void MarshalRecordPresent(TaskRunner* runner,
+                          MotionToPhoton* m2p,
+                          uint64_t present_ns,
+                          uint64_t cutoff_ns,
+                          std::string_view label);
 
 }  // namespace profiling
 

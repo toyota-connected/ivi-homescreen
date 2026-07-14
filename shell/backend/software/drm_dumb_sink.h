@@ -92,6 +92,9 @@ class DrmDumbSink final : public ISurfaceSink {
   void SetEngineHandle(void* engine) override;
   void SetPlatformTaskRunner(TaskRunner* runner) override;
   void StopVsyncMonitor() override;
+  void SetMotionToPhoton(profiling::MotionToPhoton* m2p) override {
+    m2p_ = m2p;
+  }
 
   // For the SoftwareDisplay constructor, so it can report the actual
   // mode's refresh rate rather than a guessed default.
@@ -183,6 +186,11 @@ class DrmDumbSink final : public ISurfaceSink {
   ivi::IVsyncProvider vsync_;
   std::atomic<void*> engine_handle_{nullptr};
   std::atomic<TaskRunner*> platform_task_runner_{nullptr};
+
+  // Motion-to-photon profiler owned by SoftwareBackend, or nullptr when not
+  // profiling. Set via SetMotionToPhoton; read on the platform-runner thread
+  // (OnPageFlip) to record the scanout endpoint.
+  profiling::MotionToPhoton* m2p_{nullptr};
   // Refresh period as nanoseconds; computed once from the picked mode.
   std::atomic<uint64_t> refresh_period_ns_{16'666'667};
 

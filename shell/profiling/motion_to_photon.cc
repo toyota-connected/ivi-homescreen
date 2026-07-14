@@ -17,8 +17,12 @@
 #include "profiling/motion_to_photon.h"
 
 #include <cstdlib>
+#include <string>
+
+#include <asio/post.hpp>
 
 #include "logging/logging.h"
+#include "task_runner.h"
 
 namespace profiling {
 
@@ -138,6 +142,22 @@ void MotionToPhoton::LogSessionSummary(const std::string_view label) const {
         session_floor_.Pct(0.50) / 1000.0, session_floor_.Pct(0.95) / 1000.0,
         session_floor_.Pct(0.99) / 1000.0, session_floor_.max_us / 1000.0);
   }
+}
+
+void MarshalRecordPresent(TaskRunner* runner,
+                          MotionToPhoton* m2p,
+                          const uint64_t present_ns,
+                          const uint64_t cutoff_ns,
+                          const std::string_view label) {
+  if (m2p == nullptr || runner == nullptr) {
+    return;
+  }
+  // The label is a backend-static literal, but copy it into the task so the
+  // contract holds regardless of caller lifetime.
+  asio::post(*runner->GetStrandContext(),
+             [m2p, present_ns, cutoff_ns, label = std::string(label)]() {
+               m2p->RecordPresent(present_ns, cutoff_ns, label);
+             });
 }
 
 }  // namespace profiling

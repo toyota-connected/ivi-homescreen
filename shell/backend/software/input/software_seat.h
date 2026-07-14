@@ -119,6 +119,8 @@ class SoftwareSeat final : public ISeat {
   struct EngineRef {
     void* engine{nullptr};           // FlutterEngine
     void* platform_runner{nullptr};  // TaskRunner
+    void* m2p{nullptr};              // profiling::MotionToPhoton (null unless
+                                     // IVI_M2P_PROFILE)
   };
   [[nodiscard]] EngineRef CurrentEngine() const;
 

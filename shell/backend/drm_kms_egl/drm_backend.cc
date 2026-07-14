@@ -361,6 +361,9 @@ DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
   // RecordFlipComplete(). Enabled() also honors the umbrella IVI_PROFILE.
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                        "DrmVsync");
+  // Motion-to-photon (IVI_M2P_PROFILE): the flip path feeds RecordPresent and
+  // DrmSeat feeds RecordInput, both marshaled onto the platform task runner.
+  InitMotionToPhoton();
 }
 
 homescreen::ICursorPositionSink* DrmBackend::gl_cursor() const {
@@ -1331,6 +1334,13 @@ void DrmBackend::DeliverVsyncFromFlip(const unsigned int tv_sec,
   // uniformity; the one extra task hop is harmless.
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
+  // Record the scanout endpoint for motion-to-photon before returning the
+  // baton. The cutoff is the frame_start of the most recent baton — the input
+  // cutoff of the frame this flip presents. Marshaled onto the platform runner
+  // so it shares a thread with DrmSeat's RecordInput.
+  profiling::MarshalRecordPresent(
+      platform_task_runner_.load(std::memory_order_acquire),
+      GetMotionToPhoton(), tv_ns, vsync_.LastDeliveredFrameStartNs(), "drm");
   vsync_.DeliverVsync(tv_ns);
 }
 
@@ -1360,6 +1370,12 @@ void DrmBackend::StopVsyncMonitor() {
   // session summary. Any page-flip event the reader drains after this finds the
   // provider cleared and no-ops its DeliverVsync — correct, we're tearing down.
   vsync_.Stop();
+
+  // Motion-to-photon session summary. Runs on the platform thread, the same
+  // thread the marshaled RecordInput/RecordPresent tasks execute on.
+  if (m2p_enabled_) {
+    m2p_.LogSessionSummary("drm");
+  }
 
   // Wait for any in-flight PAGE_FLIP_EVENT to be drained by the card's flip
   // reader (owned by DrmDisplay, still running through our teardown) so

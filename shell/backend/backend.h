@@ -20,6 +20,7 @@
 
 #include "config/common.h"
 #include "configuration/configuration.h"
+#include "profiling/motion_to_photon.h"
 
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
@@ -227,4 +228,28 @@ class Backend {
                                        int32_t /*width*/,
                                        int32_t /*height*/) {}
 #endif
+
+  /**
+   * @brief The motion-to-photon profiler for this backend, or nullptr when it
+   * is not profiling.
+   *
+   * The DRM/KMS backends own an instance and opt in via InitMotionToPhoton()
+   * (enabled by IVI_M2P_PROFILE); they feed RecordPresent from the page-flip
+   * path and the input seat feeds RecordInput, both marshaled onto the platform
+   * task runner. The Wayland backends never opt in — their profiler lives on
+   * Display — so this returns nullptr for them.
+   */
+  [[nodiscard]] profiling::MotionToPhoton* GetMotionToPhoton() {
+    return m2p_enabled_ ? &m2p_ : nullptr;
+  }
+
+ protected:
+  /// Enable the motion-to-photon profiler for this backend if IVI_M2P_PROFILE
+  /// is set. Called from the DRM/KMS backend constructors.
+  void InitMotionToPhoton() {
+    m2p_enabled_ = profiling::MotionToPhoton::Enabled();
+  }
+
+  profiling::MotionToPhoton m2p_;
+  bool m2p_enabled_ = false;
 };
