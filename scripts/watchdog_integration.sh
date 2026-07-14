@@ -10,24 +10,17 @@
 
 set -euo pipefail
 
-IVI_SRC="${FLUTTER_WORKSPACE}/app/ivi-homescreen"
+IVI_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IVI_BUILD="${IVI_SRC}/build"
-TEST_DIR="${FLUTTER_WORKSPACE}/app/ivi-homescreen/test/integration/watchdog_test"
-BUNDLE_DIR="${TEST_DIR}/.desktop-homescreen"
-
-KENT_PID=""
+TEST_NAME="watchdog_test"
+TEST_DIR="${IVI_SRC}/test/integration/${TEST_NAME}"
+BUNDLE_DIR="${FLUTTER_WORKSPACE}/bundle/${TEST_NAME}-debug-$(uname -i)"
 
 
 # ---------------------------------------------------------------------------
 # Prepare test app
 # ---------------------------------------------------------------------------
-_dir=$(pwd)
-cd "${TEST_DIR}"
-# this is required to make sure a `.desktop-homescreen` bundle is generated
-flutter pub get
-flutter build bundle
-flutter install -d desktop-homescreen
-cd "${_dir}"
+emb bundle --app-path "$TEST_DIR" -m debug --build
 
 # ---------------------------------------------------------------------------
 # Configure
@@ -35,6 +28,7 @@ cd "${_dir}"
 cmake \
   -S "${IVI_SRC}" \
   -B "${IVI_BUILD}" \
+  -G Ninja \
   -D BUILD_BACKEND_WAYLAND_EGL=OFF \
   -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
   -D BUILD_BACKEND_DRM_KMS_EGL=OFF \
