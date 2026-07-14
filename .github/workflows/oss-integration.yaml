@@ -56,33 +56,31 @@ jobs:
   watchdog:
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
     runs-on: ubuntu-22.04
-    env:
-      PREFER_LLVM: 19
     steps:
-      - name: Check Environment
-        id: check_environment
-        shell: bash
-        run: |
-          echo "Running on Ubuntu version: $(lsb_release -d | cut -f2)"
-          echo "Running on architecture: $(uname -m)"
-          echo "Current directory: $(pwd)"
-          echo "user=$(whoami)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup workspace
-        uses: meta-flutter/workspace-automation/.github/actions/setup-workspace@v2.0
+      - name: Checkout ivi-homescreen (PR)
+        uses: actions/checkout@v5
         with:
-          args: --disable=rive-text --enable=sentry-native --override-repo=https://github.com/toyota-connected/ivi-homescreen.git#${{ github.event.pull_request.head.ref && format('heads/{0}', github.event.pull_request.head.ref) || github.sha }}
-          user: ${{ steps.check_environment.outputs.user }}
-          ref: v2.0
-          cache: false
-          cache-key: watchdog-integration-pr${{ github.event.pull_request.number }}
+          submodules: recursive
 
-      - name: Run integration test for watchdog
-        shell: bash
+      - name: Install build + test deps
         run: |
-          cd "${{ github.workspace }}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git python3 \
+            curl ca-certificates unzip xz-utils \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+            libpugixml-dev libcurl4-openssl-dev
+
+      - name: Fetch emb
+        run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+
+      - name: Watchdog integration test (emb local)
+        run: |
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          emb flutter --flutter-version $(cat .flutter-version)
           source ./setup_env.sh
-          cd ./app/ivi-homescreen
-          ls -al scripts
-          git status
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
           ./scripts/watchdog_integration.sh
