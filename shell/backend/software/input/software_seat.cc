@@ -16,6 +16,7 @@
 
 #include "backend/software/input/software_seat.h"
 
+#include "backend/backend.h"
 #include "backend/software/input/libinput_log_bridge.h"
 #include "config/common.h"
 #include "logging/logging.h"
@@ -712,6 +713,9 @@ SoftwareSeat::EngineRef SoftwareSeat::CurrentEngine() const {
   EngineRef out;
   out.engine = static_cast<void*>(s->engine->GetFlutterEngine());
   out.platform_runner = static_cast<void*>(s->engine->GetPlatformTaskRunner());
+  if (auto* backend = s->engine->GetBackend(); backend != nullptr) {
+    out.m2p = static_cast<void*>(backend->GetMotionToPhoton());
+  }
   return out;
 }
 
@@ -731,8 +735,17 @@ void SoftwareSeat::DispatchPointerEvents(const FlutterPointerEvent* pe,
     return;
   }
   auto* engine = static_cast<FLUTTER_API_SYMBOL(FlutterEngine)>(ref.engine);
+  // Motion-to-photon input endpoint (IVI_M2P_PROFILE): the batch shares one
+  // engine-clock timestamp; record it on the strand so it joins the sink's
+  // flip-path RecordPresent on the same thread. Null unless profiling.
+  auto* m2p = static_cast<profiling::MotionToPhoton*>(ref.m2p);
+  const uint64_t input_us = count > 0 ? pe[count - 1].timestamp : 0;
   std::vector<FlutterPointerEvent> events(pe, pe + count);
-  asio::dispatch(*strand, [engine, events = std::move(events)]() {
+  asio::dispatch(*strand, [engine, events = std::move(events), m2p,
+                           input_us]() {
+    if (m2p != nullptr && input_us != 0) {
+      m2p->RecordInput(input_us * 1000ULL);
+    }
     LibFlutterEngine->SendPointerEvent(engine, events.data(), events.size());
   });
 }

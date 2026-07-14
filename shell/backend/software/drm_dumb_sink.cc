@@ -41,6 +41,7 @@
 #include "backend/software/software_cursor.h"
 #include "libflutter_engine.h"
 #include "logging.h"
+#include "profiling/motion_to_photon.h"
 #include "task_runner.h"
 
 namespace {
@@ -700,6 +701,13 @@ void DrmDumbSink::OnPageFlip(const uint64_t tv_ns) {
   // dtor per the lifetime contract).
   flip_pending_.store(false, std::memory_order_release);
   vsync_.SetSourcePending(false);
+  // Record the scanout endpoint for motion-to-photon. Already on the platform
+  // runner thread here, but route through the strand for one uniform contract
+  // with the seat's RecordInput (MarshalRecordPresent no-ops when m2p_ is
+  // null).
+  profiling::MarshalRecordPresent(
+      platform_task_runner_.load(std::memory_order_acquire), m2p_, tv_ns,
+      vsync_.LastDeliveredFrameStartNs(), "sw");
   // Hand the parked baton back with the kernel-provided scanout timestamp.
   vsync_.DeliverVsync(tv_ns);
 }
