@@ -192,6 +192,26 @@ int main(const int argc, char** argv) {
   }
 #endif
 
+#if INTEGRATION_TEST_SYSTEMD_WATCHDOG
+  // Systemd watchdog integration test: register a source and never pet it so
+  // the watchdog thread fires, sends WATCHDOG=trigger to NOTIFY_SOCKET, and
+  // calls abort(). No Flutter engine or app bundle is needed — this fires
+  // before App construction. The script sets NOTIFY_SOCKET to a fake Unix
+  // datagram socket and verifies the trigger notification arrives.
+  Watchdog::getInstance().start(100);
+  ihs::log::info(
+      "Systemd watchdog integration test: source 100 registered, awaiting "
+      "timeout ({} ms)...",
+      Watchdog::getInstance().getTimeoutMs());
+  // Sleep well beyond the timeout so the watchdog thread has time to fire.
+  std::this_thread::sleep_for(
+      std::chrono::milliseconds(Watchdog::getInstance().getTimeoutMs() * 3));
+  // Unreachable if the watchdog fired correctly (abort() was called).
+  ihs::log::error(
+      "Systemd watchdog integration test failed: watchdog did not abort.");
+  return 232;
+#endif
+
 #if INTEGRATION_TEST_CRASH_HANDLER
   // If we're running the crash handler integration test, trigger a crash and
   // exit immediately. The test runner will then check if the crash was captured
