@@ -35,7 +35,12 @@ SoftwareBackend::SoftwareBackend(const uint32_t initial_width,
       width_(initial_width),
       height_(initial_height),
       sink_(std::move(sink)) {
+  // Motion-to-photon (IVI_M2P_PROFILE): the sink's page-flip path feeds
+  // RecordPresent and SoftwareSeat feeds RecordInput, both on the platform
+  // task runner. Hand the profiler to the sink so it can record scanout.
+  InitMotionToPhoton();
   if (sink_) {
+    sink_->SetMotionToPhoton(GetMotionToPhoton());
     // Adopt the sink's native extent (the DRM mode / fbdev virtual size) so
     // Flutter renders at the panel's resolution — the frame fills and centers,
     // and the seat/cursor share the framebuffer coordinate space — instead of
