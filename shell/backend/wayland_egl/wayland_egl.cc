@@ -49,11 +49,18 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
                                      const uint32_t initial_width,
                                      const uint32_t initial_height,
                                      const bool debug_backend,
+                                     const bool enable_impeller,
                                      const int buffer_size)
     : Egl(display, buffer_size, debug_backend),
       Backend(),
       m_initial_width(initial_width),
-      m_initial_height(initial_height) {
+      m_initial_height(initial_height),
+      m_partial_repaint_enabled(!enable_impeller) {
+  if (enable_impeller) {
+    ihs::log::info(
+        "[WaylandEglBackend] Impeller renderer active — partial repaint "
+        "disabled; presenting full frames");
+  }
   if (shell_display != nullptr) {
     // The wp_presentation global + vsync feedback machinery live in the
     // Display-owned provider; the backend forwards to it. Usable() reports
@@ -131,11 +138,14 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
     // map work.
     bool use_damage_swap = false;
     std::array<EGLint, 4> frame_rects{};
-    if (info->struct_size == sizeof(FlutterPresentInfo)) {
+    // Partial repaint is bypassed under Impeller (see partial_repaint_gate.h):
+    // present a full frame and skip the damage bookkeeping entirely.
+    if (b->m_partial_repaint_enabled &&
+        info->struct_size == sizeof(FlutterPresentInfo)) {
       // Existing-damage storage is held by value in m_existing_damage_map;
       // populate_existing_damage rewrites the entry in place on every call,
       // so no per-frame free is required here.
-      if (b->GetSetDamageRegion()) {
+      if (b->GetSetDamageRegion() && info->buffer_damage.damage) {
         // Set the buffer damage as the damage region.
         auto buffer_rects = b->RectToInts(info->buffer_damage.damage[0]);
         b->GetSetDamageRegion()(b->GetDisplay(), b->m_egl_surface,
@@ -179,6 +189,23 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
     const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
     auto* b = reinterpret_cast<WaylandEglBackend*>(
         state->view_controller->engine->GetBackend());
+
+    // Reuse the per-fbo slot in the map. operator[] default-constructs the
+    // FlutterRect on first use and returns a stable reference thereafter
+    // (std::unordered_map keeps node addresses stable across insertions).
+    FlutterRect& slot = b->m_existing_damage_map[fbo_id];
+    slot = FlutterRect{0, 0, static_cast<double>(b->m_initial_width),
+                       static_cast<double>(b->m_initial_height)};
+    existing_damage->num_rects = 1;
+    existing_damage->damage = &slot;
+
+    // Under Impeller the partial-repaint path is bypassed: report the whole
+    // surface as existing damage so the engine repaints the full frame rather
+    // than clipping against buffer-age history the presented buffer never kept.
+    if (!b->m_partial_repaint_enabled) {
+      return;
+    }
+
     // Given the FBO age, create existing damage region by joining
     // all frame damages since FBO was last used
     EGLint age;
@@ -189,16 +216,6 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
       age = 4;  // Virtually no driver should have a swap chain
                 // length > 4.
     }
-
-    existing_damage->num_rects = 1;
-
-    // Reuse the per-fbo slot in the map. operator[] default-constructs the
-    // FlutterRect on first use and returns a stable reference thereafter
-    // (std::unordered_map keeps node addresses stable across insertions).
-    FlutterRect& slot = b->m_existing_damage_map[fbo_id];
-    slot = FlutterRect{0, 0, static_cast<double>(b->m_initial_width),
-                       static_cast<double>(b->m_initial_height)};
-    existing_damage->damage = &slot;
 
     if (age > 1) {
       --age;

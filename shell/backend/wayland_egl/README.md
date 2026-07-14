@@ -96,6 +96,22 @@ with mismatched modes). The handler preserves the previous value
 rather than overwriting `last_refresh_ns_` with garbage that would
 skew `frame_target_time`.
 
+**Partial repaint is Skia-only.** The backend's partial-repaint path
+(buffer-age existing-damage query → `eglSetDamageRegionKHR` →
+`eglSwapBuffersWithDamageKHR`) is correct only under the Skia OpenGL
+renderer, which both consumes the existing damage and reports frame /
+buffer damage back on present. Under Impeller GLES the engine still
+queries existing damage and advertises partial-repaint support, but its
+present path reports no damage — feeding it buffer-age-narrowed existing
+damage would let it clip rendering against history the presented buffer
+never preserved (and it passes a null buffer-damage rect the swap path
+must not dereference). When Impeller is the active renderer the backend
+reports the whole surface as existing damage and swaps full frames. The
+active renderer is inferred from the `--enable-impeller` engine switch
+(the shell has no dedicated flag); the parse lives in
+`partial_repaint_gate.h`. Finishing Impeller's own present-damage wiring
+in the engine is what would let this path light up under Impeller.
+
 ---
 
 ## Benchmarks
