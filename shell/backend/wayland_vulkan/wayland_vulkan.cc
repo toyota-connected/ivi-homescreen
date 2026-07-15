@@ -1329,6 +1329,16 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
             "{:#018x} planes={} fd={}",
             img->width(), img->height(), img->modifier(), img->planes().size(),
             img->dma_buf_fd());
+        auto buf = wl_vulkan::WlDmabufBuffer::Create(
+            dmabuf_feedback_->CreateParams(), *img);
+        if (buf) {
+          ihs::log::info(
+              "[WaylandVulkanBackend] dma-buf wl_buffer created (released={})",
+              buf->released());
+        } else {
+          ihs::log::warn(
+              "[WaylandVulkanBackend] dma-buf wl_buffer creation failed");
+        }
       } else {
         ihs::log::warn(
             "[WaylandVulkanBackend] dma-buf present image alloc failed: {}",
