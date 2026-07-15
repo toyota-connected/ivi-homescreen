@@ -233,6 +233,11 @@ void Display::HandleGlobal(wl::CRegistry& reg,
   // backend pre-flight and emit a clear error rather than asserting.
   if (iface == "zwp_linux_dmabuf_v1") {
     d->m_has_linux_dmabuf = true;
+    // Remember the global's name + advertised version so a Vulkan backend can
+    // bind the v4 dma-buf feedback later (for the zero-copy present path),
+    // independent of Mesa's WSI, which binds its own instance.
+    d->m_linux_dmabuf_name = name;
+    d->m_linux_dmabuf_version = version;
   } else if (iface == "wl_drm") {
     d->m_has_wl_drm = true;
   }

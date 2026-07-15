@@ -22,6 +22,15 @@
 #include <mutex>
 #include <vector>
 
+// clang-format off
+// Include order is load-bearing: the generated protocol client header defines
+// the linux_dmabuf_unstable_v1::client traits that the shipped wl/ helpers
+// below reference, so it must precede them — clang-format must not reorder.
+#include "linux_dmabuf_client.hpp"  // generated (linux_dmabuf_unstable_v1::client)
+#include <wl/linux_dmabuf.hpp>      // shipped interface tables + wl_iface()
+#include <wl/dmabuf_feedback.hpp>   // wl::DmabufFeedback, wl::FeedbackSnapshot
+// clang-format on
+
 #include "vsync/wayland_vsync_provider.h"
 
 // Use vulkan.hpp's convenient proc table and resolver.
@@ -49,6 +58,11 @@
 
 class Display;
 class TaskRunner;
+
+namespace wl_vulkan {
+class DmabufImage;
+class WlDmabufBuffer;
+}  // namespace wl_vulkan
 
 class WaylandVulkanBackend final : public Backend {
  public:
@@ -401,6 +415,12 @@ class WaylandVulkanBackend final : public Backend {
                             size_t layers_count,
                             void* user_data);
 
+  // Whether the zero-copy dma-buf present path is active (see the DmabufSlot
+  // ring below). Declared outside BUILD_COMPOSITOR because CreateSurface reads
+  // it to decide whether to create the WSI swapchain, which is compiled on
+  // every configuration; it can only ever become true under BUILD_COMPOSITOR.
+  bool dmabuf_present_active_{false};
+
 #if BUILD_COMPOSITOR
   bool dma_buf_export_ok_{false};
 
@@ -465,6 +485,35 @@ class WaylandVulkanBackend final : public Backend {
   std::vector<VkSemaphore> m_compositor_render_finished_;
   size_t m_compositor_current_frame_{0};
 
+  // --- Zero-copy dma-buf present path (bypasses the WSI swapchain) ----------
+  // The engine's composited frame is blitted into a modifier-tiled dma-buf
+  // image the compositor imports as a wl_buffer and can promote to a hardware
+  // plane, committed directly on the wl_surface instead of vkQueuePresentKHR.
+  // Gated on the compositor advertising a usable modifier AND IVI_VK_DMABUF;
+  // off by default (the swapchain path stays the default until this proves
+  // out).
+  struct DmabufSlot {
+    std::unique_ptr<wl_vulkan::DmabufImage> image;
+    std::unique_ptr<wl_vulkan::WlDmabufBuffer> buffer;
+    VkCommandBuffer cmd{VK_NULL_HANDLE};
+    VkFence fence{VK_NULL_HANDLE};
+    VkImageLayout layout{VK_IMAGE_LAYOUT_UNDEFINED};
+  };
+  std::vector<uint64_t> dmabuf_modifiers_;  // negotiated set, cached in Create
+  VkCommandPool dmabuf_cmd_pool_{VK_NULL_HANDLE};
+  std::vector<DmabufSlot> dmabuf_slots_;
+  uint32_t dmabuf_ring_w_{0};
+  uint32_t dmabuf_ring_h_{0};
+  size_t dmabuf_frame_{0};
+
+  // Build (or rebuild after a resize) the ring of dma-buf image+wl_buffer
+  // slots at @p w x @p h. Returns false (and clears dmabuf_present_active_) on
+  // any allocation failure, so present falls back to the swapchain.
+  bool InitDmabufRing(uint32_t w, uint32_t h);
+  // Composite the layers into the current slot and commit its wl_buffer on the
+  // surface. Returns the present result like PresentLayersImpl.
+  bool PresentLayersDmabuf(const FlutterLayer** layers, size_t count);
+
   /// Allocate the per-slot pool, command buffers, fences, and semaphores.
   /// Idempotent — releases prior state first, so safe to call again after
   /// swapchain recreation.
@@ -522,6 +571,20 @@ class WaylandVulkanBackend final : public Backend {
   FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
   TaskRunner* platform_task_runner_{nullptr};
 
+  // Owning Display, kept so CreateSurface can bind the v4 dma-buf feedback
+  // (the compositor's scanout-capable modifiers + main device) for the
+  // zero-copy present path, independent of Mesa's own WSI dmabuf bind.
+  Display* shell_display_{nullptr};
+  std::unique_ptr<wl::DmabufFeedback<WaylandVulkanBackend>> dmabuf_feedback_;
+  mutable std::mutex fb_mu_;
+  wl::FeedbackSnapshot fb_snapshot_;  // guarded by fb_mu_
+
+ public:
+  // Fired by the dma-buf feedback helper on every `done`; records the snapshot
+  // and logs the scanout-capable modifiers the direct present path can use.
+  void OnDmabufFeedback(const wl::FeedbackSnapshot& snap);
+
+ private:
   // frame_start_time most recently handed to FlutterEngineOnVsync.
   // Updated atomically by the OnVsync-posting paths (PostOnVsync's
   // lambda and on_feedback_presented's inline post). Read by
