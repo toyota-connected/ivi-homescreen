@@ -36,7 +36,10 @@ Use Case Name: Initialization
 Test Summary：Test GetProcAddress with invalid symbol name.
 ***************************************************************/
 TEST(HomescreenSharedLibraryGetProcAddress, Lv1Abnormal002) {
-  const void* symbol = ShellGetProcAddress(nullptr, "g_file_read");
+  // Using a real symbol like "g_file_read" would succeed if GLib is loaded.
+  // Use a deliberately mangled name that cannot exist in any loaded library.
+  const void* symbol =
+      ShellGetProcAddress(nullptr, "__ivi_homescreen_no_such_symbol_a7f3b2");
   EXPECT_TRUE(symbol == nullptr);
 }
 
@@ -76,8 +79,12 @@ Use Case Name: Initialization
 Test Summary：Test GetProcAddress with null handle.
 ***************************************************************/
 TEST(HomescreenSharedLibraryGetFuncAddress, Lv1Abnormal002) {
+  // Same as GetProcAddress Lv1Abnormal002: nullptr handle == RTLD_DEFAULT,
+  // so a real symbol name like "g_file_read" would resolve if GLib is loaded.
+  // Use a deliberately mangled name that cannot exist in any loaded library.
   GFileInputStream (*GFileRead)(GFile*, GCancellable*, GError**) = nullptr;
-  ShellGetFuncAddress(nullptr, "g_file_read", &GFileRead);
+  ShellGetFuncAddress(nullptr, "__ivi_homescreen_no_such_symbol_a7f3b2",
+                      &GFileRead);
 
   EXPECT_TRUE(GFileRead == nullptr);
 }
