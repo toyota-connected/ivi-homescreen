@@ -14,96 +14,76 @@
  * limitations under the License.
  */
 
-// Conformance vectors for the fractional-scale rounding policy. These mirror
-// the canonical shared table published by wayland-cxx-scanner
-// (include/wl/scale_policy_vectors.hpp), which our ScalePolicy is a
-// backend-agnostic, dependency-free reimplementation of — asserting against
-// the same numbers is what keeps the two from diverging by a pixel. This
-// project cannot link the wcs header (its DRM/KMS and software backends pull in
-// no Wayland), so the vectors are reproduced here; any change to the canonical
-// table must be reflected in both.
+// Conformance test for the fractional-scale rounding policy. ivi-homescreen's
+// ScalePolicy is a backend-agnostic, dependency-free reimplementation of the
+// buffer-at-physical rounding that wayland-cxx-scanner defines normatively
+// (<wl/scale_policy.hpp>). Two normative implementations of the same rounding
+// is one pixel of divergence waiting to happen at some fractional scale, so the
+// contract is a SHARED conformance table: wcs publishes it as
+// <wl/scale_policy_vectors.hpp> and every implementation must reproduce it.
+//
+// Rather than hand-copy the numbers (which can silently drift from the
+// canonical table), this test includes that header directly from the vendored
+// submodule and drives ScalePolicy against `kToBufferVectors` /
+// `kCanvasScaleVectors`. The header is self-contained (only <cstdint>) and
+// pulls in no Wayland, so a build that links none can still assert against it.
+// A submodule bump that changes a vector then forces ScalePolicy to match or
+// this test fails — which is exactly the lock-step the shared table exists for.
 
 #include <cmath>
 
 #include <gtest/gtest.h>
 
+#include <wl/scale_policy_vectors.hpp>
+
 #include "display/scale_policy.h"
 
 using ivi::ScalePolicy;
+namespace conf = wl::scale_conformance;
 
 namespace {
 
-// --- Shared vector table (identical to wcs ScalePolicy) --------------------
+// --- The canonical shared table (single source of truth) -------------------
 
-TEST(ScalePolicy, UnityScaleIsIdentity) {
-  const auto b = ScalePolicy::ToBuffer(480, 320, 120);
-  EXPECT_EQ(b.width, 480);
-  EXPECT_EQ(b.height, 320);
+// Every buffer-size vector wcs publishes must round identically here.
+TEST(ScalePolicy, MatchesCanonicalToBufferVectors) {
+  ASSERT_GT(conf::kToBufferVectorCount, 0U)
+      << "canonical vector table is empty";
+  for (std::size_t i = 0; i < conf::kToBufferVectorCount; ++i) {
+    const conf::ToBufferVector& v = conf::kToBufferVectors[i];
+    const auto b = ScalePolicy::ToBuffer(v.logical_w, v.logical_h, v.scale_120);
+    EXPECT_EQ(b.width, v.expect_w)
+        << "vector[" << i << "] logical_w=" << v.logical_w
+        << " scale_120=" << v.scale_120;
+    EXPECT_EQ(b.height, v.expect_h)
+        << "vector[" << i << "] logical_h=" << v.logical_h
+        << " scale_120=" << v.scale_120;
+  }
 }
 
-TEST(ScalePolicy, IntegralFractions) {
-  const auto at125 = ScalePolicy::ToBuffer(480, 320, 150);  // 1.25
-  EXPECT_EQ(at125.width, 600);
-  EXPECT_EQ(at125.height, 400);
-  const auto at150 = ScalePolicy::ToBuffer(480, 320, 180);  // 1.5
-  EXPECT_EQ(at150.width, 720);
-  EXPECT_EQ(at150.height, 480);
-  const auto at2x = ScalePolicy::ToBuffer(480, 320, 240);  // 2.0
-  EXPECT_EQ(at2x.width, 960);
-  EXPECT_EQ(at2x.height, 640);
+// Every canvas-scale vector wcs publishes must match.
+TEST(ScalePolicy, MatchesCanonicalCanvasScaleVectors) {
+  ASSERT_GT(conf::kCanvasScaleVectorCount, 0U)
+      << "canonical canvas-scale table is empty";
+  for (std::size_t i = 0; i < conf::kCanvasScaleVectorCount; ++i) {
+    const conf::CanvasScaleVector& v = conf::kCanvasScaleVectors[i];
+    EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(v.scale_120), v.expect)
+        << "vector[" << i << "] scale_120=" << v.scale_120;
+  }
 }
 
-TEST(ScalePolicy, RoundsToNearestHalfUp) {
-  EXPECT_EQ(ScalePolicy::ScaledDim(100, 123), 103);  // 102.5  -> 103
-  EXPECT_EQ(ScalePolicy::ScaledDim(100, 127), 106);  // 105.83 -> 106
-  EXPECT_EQ(ScalePolicy::ScaledDim(100, 122), 102);  // 101.67 -> 102
-  EXPECT_EQ(ScalePolicy::ScaledDim(100, 126), 105);  // 105.0  -> 105 (exact)
-}
-
-TEST(ScalePolicy, NonPositiveScaleTreatedAsUnity) {
-  EXPECT_EQ(ScalePolicy::ToBuffer(480, 320, 0).width, 480);
-  EXPECT_EQ(ScalePolicy::ToBuffer(480, 320, 0).height, 320);
-  EXPECT_EQ(ScalePolicy::ToBuffer(480, 320, -10).width, 480);
-}
-
-TEST(ScalePolicy, ZeroLogicalSizeStaysZero) {
-  const auto b = ScalePolicy::ToBuffer(0, 0, 180);
-  EXPECT_EQ(b.width, 0);
-  EXPECT_EQ(b.height, 0);
-}
-
-TEST(ScalePolicy, LargeSizesDoNotOverflow) {
-  const auto b = ScalePolicy::ToBuffer(4096, 4096, 360);  // 3.0
-  EXPECT_EQ(b.width, 12288);
-  EXPECT_EQ(b.height, 12288);
-}
-
-TEST(ScalePolicy, CanvasScaleMatchesFraction) {
-  EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(120), 1.0);
-  EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(180), 1.5);
-  EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(240), 2.0);
-}
-
-TEST(ScalePolicy, CanvasScaleNonPositiveIsUnity) {
-  EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(0), 1.0);
-  EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(-5), 1.0);
-}
-
-TEST(ScalePolicy, UnityConstant) {
-  EXPECT_EQ(ScalePolicy::kUnityScale120, 120);
-}
-
-// --- Regression: exact integer rounding vs the old lround(dim*scale/120.0) --
+// --- ivi-specific properties beyond the shared table -----------------------
 
 // The earlier path computed std::lround(dim * (scale_120 / 120.0)). At exact
 // halves the double product lands just under .5 and truncates down, one pixel
-// short of the spec's round-half-up. These are the vectors where the two
-// disagreed; the policy must match the integer (spec) side.
+// short of the spec's round-half-up. This guards that ScalePolicy takes the
+// integer (spec) side AND that the old form genuinely differed there, so the
+// half-up cases in the shared table are protecting a real divergence rather
+// than a tautology.
 TEST(ScalePolicy, MatchesSpecWhereFloatingPointRoundedDown) {
   struct V {
     int32_t dim, scale_120, expect;
   };
-  // dim*scale/120 lands on an exact .5 the double form rounds down.
   constexpr V kCases[] = {
       {100, 123, 103},   // 102.5  (double form gave 102)
       {60, 123, 62},     // 61.5   (double form gave 61)
@@ -112,8 +92,6 @@ TEST(ScalePolicy, MatchesSpecWhereFloatingPointRoundedDown) {
   for (const auto& c : kCases) {
     EXPECT_EQ(ScalePolicy::ScaledDim(c.dim, c.scale_120), c.expect)
         << "dim=" << c.dim << " scale_120=" << c.scale_120;
-    // And demonstrate the old form actually differed, so this test is guarding
-    // a real divergence rather than a tautology.
     const auto old_form = static_cast<int32_t>(
         std::lround(c.dim * (static_cast<double>(c.scale_120) / 120.0)));
     EXPECT_EQ(old_form, c.expect - 1)
@@ -121,12 +99,18 @@ TEST(ScalePolicy, MatchesSpecWhereFloatingPointRoundedDown) {
   }
 }
 
-// Integer wl_output.scale N is carried as N*120; buffer is an exact multiple.
+// Integer wl_output.scale N is carried as N*120; the buffer is an exact
+// multiple and the canvas scale is exactly N, across the integer range.
 TEST(ScalePolicy, IntegerOutputScaleIsExactMultiple) {
   for (int32_t n = 1; n <= 4; ++n) {
     EXPECT_EQ(ScalePolicy::ScaledDim(1000, n * 120), 1000 * n);
     EXPECT_DOUBLE_EQ(ScalePolicy::CanvasScale(n * 120), static_cast<double>(n));
   }
+}
+
+TEST(ScalePolicy, UnityConstant) {
+  EXPECT_EQ(ScalePolicy::kUnityScale120, 120);
+  EXPECT_EQ(ScalePolicy::kUnityScale120, conf::kToBufferVectors[0].scale_120);
 }
 
 }  // namespace
