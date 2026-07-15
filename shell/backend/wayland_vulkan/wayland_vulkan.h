@@ -22,6 +22,15 @@
 #include <mutex>
 #include <vector>
 
+// clang-format off
+// Include order is load-bearing: the generated protocol client header defines
+// the linux_dmabuf_unstable_v1::client traits that the shipped wl/ helpers
+// below reference, so it must precede them — clang-format must not reorder.
+#include "linux_dmabuf_client.hpp"  // generated (linux_dmabuf_unstable_v1::client)
+#include <wl/linux_dmabuf.hpp>      // shipped interface tables + wl_iface()
+#include <wl/dmabuf_feedback.hpp>   // wl::DmabufFeedback, wl::FeedbackSnapshot
+// clang-format on
+
 #include "vsync/wayland_vsync_provider.h"
 
 // Use vulkan.hpp's convenient proc table and resolver.
@@ -522,6 +531,20 @@ class WaylandVulkanBackend final : public Backend {
   FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
   TaskRunner* platform_task_runner_{nullptr};
 
+  // Owning Display, kept so CreateSurface can bind the v4 dma-buf feedback
+  // (the compositor's scanout-capable modifiers + main device) for the
+  // zero-copy present path, independent of Mesa's own WSI dmabuf bind.
+  Display* shell_display_{nullptr};
+  std::unique_ptr<wl::DmabufFeedback<WaylandVulkanBackend>> dmabuf_feedback_;
+  mutable std::mutex fb_mu_;
+  wl::FeedbackSnapshot fb_snapshot_;  // guarded by fb_mu_
+
+ public:
+  // Fired by the dma-buf feedback helper on every `done`; records the snapshot
+  // and logs the scanout-capable modifiers the direct present path can use.
+  void OnDmabufFeedback(const wl::FeedbackSnapshot& snap);
+
+ private:
   // frame_start_time most recently handed to FlutterEngineOnVsync.
   // Updated atomically by the OnVsync-posting paths (PostOnVsync's
   // lambda and on_feedback_presented's inline post). Read by

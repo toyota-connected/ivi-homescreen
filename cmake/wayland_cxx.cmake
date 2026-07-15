@@ -176,6 +176,16 @@ function(ivi_wayland_protocols target)
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/viewporter_client.hpp TARGET ${target})
 
+    # linux-dmabuf-unstable-v1 — the wayland_vulkan zero-copy present path binds
+    # v4 feedback for the compositor's scanout modifiers. Shipped header
+    # wl/linux_dmabuf.hpp carries the interface tables, so generate WITHOUT
+    # --emit-interface-tables (same rule as xdg-shell). Generating it
+    # unconditionally costs nothing on stacks that never bind it.
+    wayland_cxx_generate(PROTOCOL
+        "${IVI_WL_PROTOCOLS_BASE}/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml"
+        MODE client-header
+        OUTPUT wayland-protocols/linux_dmabuf_client.hpp TARGET ${target})
+
     # fractional-scale-v1 — always. Vendored: the XML only ships with
     # wayland-protocols >= 1.31, which Dunfell/Ubuntu-20.04 hosts predate.
     # Both protocols are gated at runtime on the compositor advertising the

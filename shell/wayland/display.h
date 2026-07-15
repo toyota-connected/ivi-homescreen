@@ -669,10 +669,23 @@ class Display : public IDisplay,
   // HandleGlobal; consumed by the Vulkan backend pre-flight.
   bool m_has_linux_dmabuf{false};
   bool m_has_wl_drm{false};
+  // Registry name + advertised version of zwp_linux_dmabuf_v1, for a Vulkan
+  // backend that binds its own v4 feedback instance for the zero-copy present
+  // path. Zero name means the global was never advertised.
+  uint32_t m_linux_dmabuf_name{0};
+  uint32_t m_linux_dmabuf_version{0};
 
  public:
   [[nodiscard]] bool HasLinuxDmabuf() const { return m_has_linux_dmabuf; }
   [[nodiscard]] bool HasWlDrm() const { return m_has_wl_drm; }
+  [[nodiscard]] uint32_t GetLinuxDmabufName() const {
+    return m_linux_dmabuf_name;
+  }
+  [[nodiscard]] uint32_t GetLinuxDmabufVersion() const {
+    return m_linux_dmabuf_version;
+  }
+  // The registry the dma-buf feedback helper binds against.
+  [[nodiscard]] wl::CRegistry& GetRegistry() { return registry_; }
 
  private:
   static void wayland_event_mask_update(
