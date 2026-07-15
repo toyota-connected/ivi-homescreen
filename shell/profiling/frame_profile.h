@@ -48,9 +48,14 @@ class FrameProfile {
 
   // Record one present. When ok is false the frame is counted as discarded
   // (superseded / not scanned out) and contributes no interval. now_ns is a
-  // CLOCK_MONOTONIC timestamp; pass 0 to sample it internally. label is the
-  // backend tag for the window log line.
-  void Record(std::string_view label, bool ok, uint64_t now_ns = 0);
+  // CLOCK_MONOTONIC timestamp; pass 0 to sample it internally. Set stalled when
+  // the present had to block waiting for a buffer/flip — under correct pacing
+  // and buffer depth this stays zero, so a nonzero count flags a stall. label
+  // is the backend tag for the window log line.
+  void Record(std::string_view label,
+              bool ok,
+              uint64_t now_ns = 0,
+              bool stalled = false);
 
   // Emit the session-aggregate summary. No-op when no frames were recorded.
   void LogSessionSummary(std::string_view label) const;
@@ -63,11 +68,12 @@ class FrameProfile {
     uint64_t interval_max_ns{0};
     uint32_t frames{0};
     uint32_t discarded{0};
-    uint32_t b60{0};    // <= 17ms  (60Hz)
-    uint32_t b30{0};    // 18-33ms  (30Hz)
-    uint32_t b20{0};    // 34-50ms  (20Hz)
-    uint32_t bslow{0};  // 51-100ms
-    uint32_t bidle{0};  // > 100ms
+    uint32_t stalls{0};  // presents that blocked on a buffer/flip
+    uint32_t b60{0};     // <= 17ms  (60Hz)
+    uint32_t b30{0};     // 18-33ms  (30Hz)
+    uint32_t b20{0};     // 34-50ms  (20Hz)
+    uint32_t bslow{0};   // 51-100ms
+    uint32_t bidle{0};   // > 100ms
 
     void AddInterval(uint64_t dt_ns);
     void Merge(const Stats& other);
