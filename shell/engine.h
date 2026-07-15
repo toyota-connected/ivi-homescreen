@@ -435,6 +435,10 @@ class Engine {
     return m_engine_state.get();
   }
 
+#if BUILD_WATCHDOG
+  void PetWatchdogViaCallback();
+#endif
+
  private:
   size_t m_index;
   bool m_running;

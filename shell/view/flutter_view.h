@@ -257,6 +257,10 @@ class FlutterView {
                                int32_t height);
 #endif
 
+#if BUILD_WATCHDOG
+  void PetWatchdogViaCallback();
+#endif
+
   FML_DISALLOW_COPY_AND_ASSIGN(FlutterView);
 
  private:

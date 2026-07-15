@@ -10,6 +10,9 @@
 #include "platform/homescreen/logging_handler.h"
 #include "platform/homescreen/mouse_cursor_handler.h"
 #include "platform/homescreen/platform_handler.h"
+#if BUILD_WATCHDOG
+#include "platform/homescreen/watchdog_plugin.h"
+#endif
 #include "platform/homescreen/platform_views/platform_views_handler.h"
 #include "shell/libflutter_engine.h"
 #include "shell/task_runner.h"
@@ -68,6 +71,10 @@ struct FlutterDesktopEngineState {
   std::unique_ptr<MouseCursorHandler> mouse_cursor_handler{};
 
   std::unique_ptr<LoggingHandler> logging_handler{};
+
+#if BUILD_WATCHDOG
+  std::unique_ptr<WatchdogPlugin> watchdog_handler{};
+#endif
 
   AccessibilityTree* accessibility_tree = nullptr;
 

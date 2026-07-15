@@ -1,0 +1,6 @@
+[watchdog]
+timeout_ms = 10000
+
+[watchdog.source_names]
+"-1" = "main_thread"
+"-2" = "render_thread"
