@@ -28,6 +28,29 @@
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
 
+// clang-format off
+// Order is load-bearing: the generated client headers define the traits the
+// shipped wl/ helper below references. clang-format must not reorder these.
+#include "linux_dmabuf_client.hpp"  // linux_dmabuf_unstable_v1::client + traits
+#include "wayland_client.hpp"       // wayland::client::CWlBuffer, wl_buffer_traits
+#include <wl/wayland.hpp>           // core wl_iface() impls (wl_buffer, ...)
+#include <wl/linux_dmabuf.hpp>      // shipped tables (must follow the generated)
+// clang-format on
+#include <wl/client_helpers.hpp>  // wl::SetupHandler
+#include <wl/proxy_impl.hpp>      // wl::construct
+#include <wl/wl_ptr.hpp>          // wl::WlPtr
+
+// wl_buffer is a core object. ivi generates the core protocol without interface
+// tables (they come from libwayland), and no other translation unit has needed
+// a core object's wl_iface() before, so the shipped wl/ headers do not define
+// this one. Provide it — it simply maps to libwayland's wl_buffer_interface —
+// so wl::construct<wl_buffer_traits> can create the dma-buf wl_buffer.
+namespace wayland::client {
+const wl_interface& wl_buffer_traits::wl_iface() noexcept {
+  return wl_buffer_interface;
+}
+}  // namespace wayland::client
+
 namespace wl_vulkan {
 
 namespace {
@@ -267,6 +290,77 @@ DmabufImage::~DmabufImage() {
   if (dma_buf_fd_ >= 0) {
     close(dma_buf_fd_);
   }
+}
+
+namespace {
+
+// Tracks wl_buffer.release; released_ starts true (compositor does not hold
+// it).
+class WlBufferHandler : public wayland::client::CWlBuffer<WlBufferHandler> {
+ public:
+  bool released_ = true;
+  void OnRelease() override { released_ = true; }
+};
+
+// create_immed is synchronous — no created/failed events to handle.
+class LinuxBufferParamsHandler
+    : public linux_dmabuf_unstable_v1::client::CZwpLinuxBufferParamsV1<
+          LinuxBufferParamsHandler> {};
+
+}  // namespace
+
+struct WlDmabufBuffer::Impl {
+  wl::WlPtr<WlBufferHandler> buffer;
+};
+
+WlDmabufBuffer::WlDmabufBuffer() : impl_(std::make_unique<Impl>()) {}
+WlDmabufBuffer::~WlDmabufBuffer() = default;
+
+std::unique_ptr<WlDmabufBuffer> WlDmabufBuffer::Create(wl_proxy* params_proxy,
+                                                       const DmabufImage& img) {
+  if (params_proxy == nullptr) {
+    return nullptr;
+  }
+  wl::WlPtr<LinuxBufferParamsHandler> params;
+  params.Attach(params_proxy);
+
+  // One add() per memory plane, all sharing the fd (libwayland dups it).
+  const uint64_t mod = img.modifier();
+  const auto& planes = img.planes();
+  for (uint32_t i = 0; i < planes.size(); ++i) {
+    params.Get()->Add(img.dma_buf_fd(), i,
+                      static_cast<uint32_t>(planes[i].offset),
+                      static_cast<uint32_t>(planes[i].pitch),
+                      static_cast<uint32_t>(mod >> 32u),
+                      static_cast<uint32_t>(mod & 0xffffffffu));
+  }
+
+  wl_proxy* raw =
+      wl::construct<wayland::client::wl_buffer_traits,
+                    linux_dmabuf_unstable_v1::client::
+                        zwp_linux_buffer_params_v1_traits::Op::CreateImmed>(
+          *params.Get(), static_cast<int32_t>(img.width()),
+          static_cast<int32_t>(img.height()), img.drm_fourcc(), 0u);
+  if (raw == nullptr) {
+    return nullptr;
+  }
+
+  std::unique_ptr<WlDmabufBuffer> out(new WlDmabufBuffer());
+  out->impl_->buffer.Get()->_SetProxy(raw);
+  out->impl_->buffer.Get()->released_ = true;
+  return out;
+}
+
+wl_proxy* WlDmabufBuffer::proxy() const {
+  return impl_->buffer.Get()->GetProxy();
+}
+
+bool WlDmabufBuffer::released() const {
+  return impl_->buffer.Get()->released_;
+}
+
+void WlDmabufBuffer::mark_in_use() {
+  impl_->buffer.Get()->released_ = false;
 }
 
 }  // namespace wl_vulkan

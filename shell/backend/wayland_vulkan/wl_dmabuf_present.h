@@ -24,6 +24,8 @@
 
 #include <vulkan/vulkan.h>
 
+struct wl_proxy;
+
 namespace wl_vulkan {
 
 // Per-memory-plane layout of an exported dma-buf image.
@@ -95,6 +97,37 @@ class DmabufImage {
   VkImageView view_{VK_NULL_HANDLE};
   int dma_buf_fd_{-1};
   std::vector<PlaneLayout> planes_;
+};
+
+// A wl_buffer backed by a DmabufImage's dma-buf, for wl_surface.attach. Tracks
+// wl_buffer.release so the owning slot is not re-rendered while the compositor
+// is still scanning out of it. The wayland-client wrapper is hidden behind a
+// PIMPL so this header stays free of the generated protocol types.
+class WlDmabufBuffer {
+ public:
+  // Build the buffer from @p img: one zwp_linux_buffer_params add() per memory
+  // plane (all sharing the fd, which libwayland dups), then create_immed.
+  // @p params_proxy comes from wl::DmabufFeedback::CreateParams(); this
+  // consumes it. Returns nullptr on failure. The DmabufImage must outlive the
+  // buffer.
+  static std::unique_ptr<WlDmabufBuffer> Create(wl_proxy* params_proxy,
+                                                const DmabufImage& img);
+  ~WlDmabufBuffer();
+  WlDmabufBuffer(const WlDmabufBuffer&) = delete;
+  WlDmabufBuffer& operator=(const WlDmabufBuffer&) = delete;
+
+  // The wl_buffer proxy to hand to wl_surface.attach.
+  [[nodiscard]] wl_proxy* proxy() const;
+  // False while the compositor holds the buffer (attached, not yet released).
+  [[nodiscard]] bool released() const;
+  // Call at present, after attach, to mark the buffer in the compositor's
+  // hands.
+  void mark_in_use();
+
+ private:
+  WlDmabufBuffer();
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace wl_vulkan
