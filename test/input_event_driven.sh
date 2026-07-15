@@ -11,10 +11,11 @@
 #
 # ─── Scenarios ───────────────────────────────────────────────────────────────
 #   I1  1kHz mouse storm, DRM-KMS-EGL on vkms  → no lagging; input observed
+#   I2  idle window                            → dispatch-thread wakes stay low
 #   I3  SIGTERM at idle                        → exit < 100ms
 #   I6  1kHz mouse storm, software backend     → no lagging; input observed
 #   I8  degraded mode (eventfd() forced fail)  → fallback warning; still runs
-#   (I2/I4/I5/I7 — ctxt-switch, key-repeat, keymap-reload, MT burst — stubbed.)
+#   (I4/I5/I7 — key-repeat, keymap-reload, MT burst — need injection; stubbed.)
 #
 # ─── Requirements ────────────────────────────────────────────────────────────
 #   - vkms loaded (sudo modprobe vkms), a /dev/dri/cardN for it.
@@ -38,6 +39,7 @@ HOMESCREEN="${HOMESCREEN:-}"
 BUNDLE="${BUNDLE:-}"
 VKMS_CARD="${VKMS_CARD:-}"
 STORM_SECS="${STORM_SECS:-6}"
+IDLE_SECS="${IDLE_SECS:-5}"
 ONLY="${ONLY:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,7 +52,8 @@ declare -a RESULTS=()
 
 die() { echo "error: $*" >&2; rm -rf "$TMPDIR"; exit 2; }
 log() { echo "[input-harness] $*"; }
-trap 'rm -rf "$TMPDIR"' EXIT
+cleanup() { [[ -n "${HOMESCREEN:-}" ]] && pkill -KILL -f "$HOMESCREEN" 2>/dev/null; rm -rf "$TMPDIR"; }
+trap cleanup EXIT
 
 # ─── Prerequisites ───────────────────────────────────────────────────────────
 
@@ -87,9 +90,37 @@ check_prereqs() {
 
 # ─── Run helpers ─────────────────────────────────────────────────────────────
 
+# Ensure no homescreen (ours or a leaked prior run) is still holding the vkms
+# card before the next launch takes DRM master. A scenario that fails at startup
+# used to leave its process behind, whose retained DRM master made every later
+# launch look like it "exited at startup" too.
+reap_homescreen() {
+    pgrep -f "$HOMESCREEN" >/dev/null 2>&1 || return 0
+    pkill -TERM -f "$HOMESCREEN" 2>/dev/null
+    local i
+    for i in $(seq 1 15); do
+        pgrep -f "$HOMESCREEN" >/dev/null 2>&1 || return 0
+        sleep 0.2
+    done
+    pkill -KILL -f "$HOMESCREEN" 2>/dev/null
+    sleep 0.5
+}
+
+# Tear down the launched homescreen and wait for the DRM master to be released,
+# then reap any straggler so the next scenario starts from a clean card.
+stop_homescreen() {
+    if [[ -n "${HS_PID:-}" ]]; then
+        kill -TERM "$HS_PID" 2>/dev/null
+        wait "$HS_PID" 2>/dev/null
+    fi
+    HS_PID=""
+    reap_homescreen
+}
+
 # launch_homescreen <backend> <extra-env...> ; writes $HS_LOG, sets $HS_PID
 launch_homescreen() {
     local backend="$1"; shift
+    reap_homescreen  # clear any leftover master holder before we claim the card
     HS_LOG="${TMPDIR}/hs_${backend}.log"
     local extra_sink=()
     [[ "$backend" == software ]] && extra_sink=(IVI_SW_SINK="drm-dumb:${VKMS_CARD}")
@@ -112,6 +143,20 @@ input_observed() {
     grep -qE "motion->photon|cursor tracking pointer|RecordInput" "$HS_LOG" 2>/dev/null
 }
 
+# Find a task TID by its comm (thread name) under a pid.
+dispatch_tid() {  # dispatch_tid <pid> <comm>
+    local pid="$1" comm="$2" t
+    for t in /proc/"$pid"/task/*/comm; do
+        [[ -r "$t" ]] || continue
+        if [[ "$(cat "$t" 2>/dev/null)" == "$comm" ]]; then
+            basename "$(dirname "$t")"; return 0
+        fi
+    done
+    return 1
+}
+# voluntary_ctxt_switches for a task (each blocking wake that returns is one).
+vctxt() { awk '/^voluntary_ctxt_switches/{print $2}' "/proc/$1/task/$2/status" 2>/dev/null; }
+
 record() {  # record <name> <pass|fail|skip> <detail>
     RESULTS+=("$1 $2 — $3")
     case "$2" in
@@ -130,10 +175,10 @@ storm_scenario() {  # storm_scenario <name> <backend>
     if ! have_uinput; then record "$name" skip "no /dev/uinput write (run as root)"; return; fi
     launch_homescreen "$backend"
     sleep 2
-    if ! kill -0 "$HS_PID" 2>/dev/null; then record "$name" fail "homescreen exited at startup"; return; fi
+    if ! kill -0 "$HS_PID" 2>/dev/null; then stop_homescreen; record "$name" fail "homescreen exited at startup"; return; fi
     "$UINPUT_GEN" mouse --hz 1000 --seconds "$STORM_SECS" >"${TMPDIR}/inj_${name}.log" 2>&1
     sleep 1
-    kill -TERM "$HS_PID" 2>/dev/null; wait "$HS_PID" 2>/dev/null
+    stop_homescreen
     local lag; lag="$(lagging_count)"
     if [[ "$lag" -ne 0 ]]; then
         record "$name" fail "$lag 'event processing lagging' warnings under 1kHz storm"
@@ -144,11 +189,40 @@ storm_scenario() {  # storm_scenario <name> <backend>
     fi
 }
 
+# I2: an idle seat wakes rarely — the whole point of the event-driven rework.
+# Watch the dispatch thread's voluntary_ctxt_switches over an idle window; a
+# busy-poll seat would rack up thousands. No injection needed.
+scenario_I2() {  # scenario_I2 <backend> <comm>
+    local backend="$1" comm="$2"
+    launch_homescreen "$backend"
+    sleep 2
+    if ! kill -0 "$HS_PID" 2>/dev/null; then stop_homescreen; record I2 fail "homescreen exited at startup"; return; fi
+    local tid; tid="$(dispatch_tid "$HS_PID" "$comm")"
+    if [[ -z "$tid" ]]; then
+        stop_homescreen
+        record I2 skip "$comm thread not found (seat inactive)"; return
+    fi
+    local before after delta
+    before="$(vctxt "$HS_PID" "$tid")"
+    sleep "$IDLE_SECS"
+    after="$(vctxt "$HS_PID" "$tid")"
+    delta=$(( ${after:-0} - ${before:-0} ))
+    stop_homescreen
+    # Idle event-driven: single digits (SIGTERM re-check, keymap timers). A busy
+    # poll at even 60Hz would be ~300 over 5s, so the gap to a real regression is
+    # wide; 30 leaves headroom for timer noise without hiding a busy loop.
+    if [[ "$delta" -le 30 ]]; then
+        record I2 pass "$comm idle ${IDLE_SECS}s vctxt delta=$delta"
+    else
+        record I2 fail "$comm vctxt delta=$delta over ${IDLE_SECS}s idle (busy-polling?)"
+    fi
+}
+
 # I3: SIGTERM at idle exits promptly. No injection needed.
 scenario_I3() {
     launch_homescreen drm-kms-egl
     sleep 2
-    if ! kill -0 "$HS_PID" 2>/dev/null; then record I3 fail "homescreen exited at startup"; return; fi
+    if ! kill -0 "$HS_PID" 2>/dev/null; then stop_homescreen; record I3 fail "homescreen exited at startup"; return; fi
     local t0 t1 ms
     t0=$(date +%s%N)
     kill -TERM "$HS_PID" 2>/dev/null
@@ -164,17 +238,25 @@ scenario_I3() {
         if [[ "$ms" -lt 500 ]]; then record I3 pass "SIGTERM->exit ${ms}ms"; \
         else record I3 fail "SIGTERM->exit ${ms}ms (>=500ms)"; fi
     fi
+    HS_PID=""; reap_homescreen
 }
 
 # I8: degraded mode — squeeze RLIMIT_NOFILE so the seats' eventfd() fails and
 # they fall back to timed poll. Assert the fallback warning and that it runs.
 scenario_I8() {
     # A tight fd budget still leaves enough for the engine but starves the
-    # seat's extra eventfd; homescreen must log the WakeEventFd fallback.
-    ( ulimit -n 64 2>/dev/null; launch_homescreen drm-kms-egl )
+    # seat's extra eventfd; homescreen must log the WakeEventFd fallback. exec
+    # in the backgrounded subshell so $! is the homescreen PID (not an orphan).
+    reap_homescreen  # clear any leftover master holder before we claim the card
+    HS_LOG="${TMPDIR}/hs_degraded.log"
+    ( ulimit -n 64 2>/dev/null
+      exec env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET LIBGL_ALWAYS_SOFTWARE=1 \
+          "$HOMESCREEN" --backend drm-kms-egl -b "$BUNDLE" \
+          --drm-device "$VKMS_CARD" -d >"$HS_LOG" 2>&1 ) &
+    HS_PID=$!
     sleep 3
     local alive=0; kill -0 "$HS_PID" 2>/dev/null && alive=1
-    kill -TERM "$HS_PID" 2>/dev/null; wait "$HS_PID" 2>/dev/null
+    stop_homescreen
     if grep -qiE "eventfd.*fail|falls back to timed poll|degraded" "$HS_LOG" 2>/dev/null; then
         [[ "$alive" == 1 ]] && record I8 pass "eventfd fallback logged; still running" \
             || record I8 fail "fallback logged but process died"
@@ -197,6 +279,7 @@ fi
 
 check_prereqs
 run I1 && storm_scenario I1 drm-kms-egl
+run I2 && scenario_I2 drm-kms-egl li-drm-dispatch
 run I3 && scenario_I3
 run I6 && storm_scenario I6 software
 run I8 && scenario_I8
