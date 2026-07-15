@@ -34,6 +34,10 @@
 #include "crash_handler.h"
 #endif
 
+#if BUILD_WATCHDOG
+#include "watchdog.h"
+#endif
+
 #include "shutdown_flag.h"
 
 namespace {
@@ -170,6 +174,44 @@ int main(const int argc, char** argv) {
   auto crash_handler = std::make_unique<CrashHandler>(sentry_config_path);
 #endif
 
+#if BUILD_WATCHDOG
+  // [watchdog.source_names] is process-level: read it from the --config master
+  // file when given, otherwise from the first bundle's config.toml.
+  {
+    std::string watchdog_config_path;
+    if (!configs.empty()) {
+      const auto& front = configs.front();
+      if (front.config_file && !front.config_file->empty()) {
+        watchdog_config_path = *front.config_file;
+      } else if (!front.view.bundle_path.empty()) {
+        watchdog_config_path =
+            front.view.bundle_path + "/" + std::string(kViewConfigToml);
+      }
+    }
+    Watchdog::init(&watchdog_config_path);
+  }
+#endif
+
+#if INTEGRATION_TEST_SYSTEMD_WATCHDOG
+  // Systemd watchdog integration test: register a source and never pet it so
+  // the watchdog thread fires, sends WATCHDOG=trigger to NOTIFY_SOCKET, and
+  // calls abort(). No Flutter engine or app bundle is needed — this fires
+  // before App construction. The script sets NOTIFY_SOCKET to a fake Unix
+  // datagram socket and verifies the trigger notification arrives.
+  Watchdog::getInstance().start(100);
+  ihs::log::info(
+      "Systemd watchdog integration test: source 100 registered, awaiting "
+      "timeout ({} ms)...",
+      Watchdog::getInstance().getTimeoutMs());
+  // Sleep well beyond the timeout so the watchdog thread has time to fire.
+  std::this_thread::sleep_for(
+      std::chrono::milliseconds(Watchdog::getInstance().getTimeoutMs() * 3));
+  // Unreachable if the watchdog fired correctly (abort() was called).
+  ihs::log::error(
+      "Systemd watchdog integration test failed: watchdog did not abort.");
+  return 232;
+#endif
+
 #if INTEGRATION_TEST_CRASH_HANDLER
   // If we're running the crash handler integration test, trigger a crash and
   // exit immediately. The test runner will then check if the crash was captured
@@ -260,6 +302,10 @@ int main(const int argc, char** argv) {
 
   IHS_LOGGING_FLUSH();
   IHS_LOGGING_STOP();
+
+#if BUILD_WATCHDOG
+  Watchdog::getInstance().shutdown();
+#endif
 
 #if BUILD_CRASH_HANDLER
   (void)crash_handler.release();

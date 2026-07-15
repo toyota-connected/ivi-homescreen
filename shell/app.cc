@@ -33,6 +33,10 @@
 #include "timer.h"
 #include "view/flutter_view.h"
 
+#if BUILD_WATCHDOG
+#include "watchdog.h"
+#endif
+
 #include <chrono>
 
 #include "asio/io_context.hpp"
@@ -190,7 +194,9 @@ App::App(const std::vector<Configuration::Config>& configs) {
 #endif
 
 #if BUILD_WATCHDOG
-  m_watch_dog = std::make_unique<Watchdog>();
+  Watchdog::getInstance().start(WATCHDOG_SOURCE_MAIN_THREAD);
+  Watchdog::getInstance().start(WATCHDOG_SOURCE_RENDER_THREAD);
+  next_pet_ = std::chrono::steady_clock::now();
 #endif
 
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
@@ -215,6 +221,10 @@ App::~App() {
   for (const auto& display : m_displays) {
     display->StopEvents();
   }
+#if BUILD_WATCHDOG
+  Watchdog::getInstance().stop(WATCHDOG_SOURCE_RENDER_THREAD);
+  Watchdog::getInstance().stop(WATCHDOG_SOURCE_MAIN_THREAD);
+#endif
 }
 
 bool App::AnyHasRepeatTimer() const {
@@ -248,7 +258,17 @@ int App::Loop() const {
     EventTimer::wait_event();
 
 #if BUILD_WATCHDOG
-  m_watch_dog->pet();
+  Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
+
+  // Schedule RenderThread pet via callback
+  if (next_pet_ <= std::chrono::steady_clock::now()) {
+    for (auto const& view : m_views) {
+      view->PetWatchdogViaCallback();
+    }
+    uint64_t interval = Watchdog::getInstance().getTimeoutMs() / 2;
+    next_pet_ =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(interval);
+  }
 #endif
 
   // Frame production is driven entirely by each backend's own vsync source
@@ -329,7 +349,7 @@ int App::Run() {
       view->RunTasks();
     }
 #if BUILD_WATCHDOG
-    m_watch_dog->pet();
+    Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
 #endif
   };
 
@@ -356,6 +376,34 @@ int App::Run() {
       arm_pump();
     }
   };
+
+#if BUILD_WATCHDOG
+  // Watchdog heartbeat: pet the main-thread source on its own cadence so the
+  // reactor's idle gaps (no input, needs_periodic=false) never exceed the
+  // watchdog timeout. Fires every intervalMs/2, matching the watchdog service
+  // check period.
+  asio::steady_timer wd_timer(ioc);
+  std::function<void(const std::error_code&)> on_wd_timer;
+  std::function<void()> arm_wd_timer = [&]() {
+    wd_timer.expires_after(
+        std::chrono::milliseconds(Watchdog::getInstance().getTimeoutMs() / 2));
+    wd_timer.async_wait(on_wd_timer);
+  };
+  on_wd_timer = [&](const std::error_code& ec) {
+    if (ec) {
+      return;  // cancelled
+    }
+
+    // Pet the dogs
+    Watchdog::getInstance().pet(WATCHDOG_SOURCE_MAIN_THREAD);
+    for (auto const& view : m_views) {
+      view->PetWatchdogViaCallback();
+    }
+
+    arm_wd_timer();
+  };
+  arm_wd_timer();
+#endif
 
   // Shutdown + on-demand wake: the MainLoopWaker eventfd is written by the
   // signal handler (shutdown) and by Engine input coalescing / view requests

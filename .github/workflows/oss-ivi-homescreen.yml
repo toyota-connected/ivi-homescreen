@@ -163,9 +163,10 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      crash: ${{ steps.filter.outputs.crash }}
+      crash_handler: ${{ steps.filter.outputs.crash_handler }}
+      watchdog: ${{ steps.filter.outputs.watchdog }}
     steps:
-      - name: Detect crash-handler-relevant changes
+      - name: Detect feature-relevant changes
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -173,7 +174,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "Non-PR event (${{ github.event_name }}) — running crash-handler."
-            echo "crash=true" >> "$GITHUB_OUTPUT"
+            echo "crash_handler=true" >> "$GITHUB_OUTPUT"
+            echo "watchdog=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           files=$(gh api --paginate \
@@ -181,15 +183,17 @@ jobs:
             --jq '.[].filename')
           echo "Changed files:"; echo "$files"
           if echo "$files" | grep -qE '(^cmake/|\.cmake$|CMakeLists\.txt$|^shell/|^plugins/|^third_party/|^\.github/workflows/oss-ivi-homescreen\.yml$)'; then
-            echo "crash=true" >> "$GITHUB_OUTPUT"
+            echo "crash_handler=true" >> "$GITHUB_OUTPUT"
+            echo "watchdog=true" >> "$GITHUB_OUTPUT"
           else
             echo "Only docs/assets changed — skipping crash-handler."
-            echo "crash=false" >> "$GITHUB_OUTPUT"
+            echo "crash_handler=false" >> "$GITHUB_OUTPUT"
+            echo "watchdog=false" >> "$GITHUB_OUTPUT"
           fi
 
   crash-handler:
     needs: changes
-    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.crash == 'true' }}
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.crash_handler == 'true' }}
     runs-on: ubuntu-22.04
     steps:
       # Build the PR's own source with the crash handler enabled, via emb's
@@ -241,3 +245,42 @@ jobs:
           fi
           echo "::error::crash-handler did not pass (result=${result})"
           exit 1
+
+  watchdog:
+    needs: changes
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && needs.changes.outputs.watchdog == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout ivi-homescreen (PR)
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git python3 \
+            curl ca-certificates xz-utils \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+            libpugixml-dev libcurl4-openssl-dev
+      - name: Fetch emb
+        run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+      - name: Build watchdog
+        run: |
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          emb -v cross . --backend software \
+            -D BUILD_WATCHDOG=ON \
+            --build
+      - name: Build SystemD watchdog
+        run: |
+          sudo apt install -y libsystemd-dev
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          emb -v cross . --backend software \
+            -D BUILD_WATCHDOG=ON \
+            -D BUILD_SYSTEMD_WATCHDOG=ON \
+            --build
+

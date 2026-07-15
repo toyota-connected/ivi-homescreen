@@ -17,13 +17,13 @@
 #pragma once
 
 #include <EGL/egl.h>
+#include <chrono>
 #include <memory>
 
 #include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 #include "configuration/configuration.h"
 #include "logging/logger.hpp"
 #include "view/flutter_view.h"
-#include "watchdog.h"
 
 #include "asio/executor_work_guard.hpp"
 #include "asio/io_context.hpp"
@@ -79,7 +79,9 @@ class App final {
   // homogeneous config set yields a single shared display.
   std::vector<std::shared_ptr<IDisplay>> m_displays;
   std::vector<std::unique_ptr<FlutterView>> m_views;
-  std::unique_ptr<Watchdog> m_watch_dog;
+#if BUILD_WATCHDOG
+  mutable std::chrono::steady_clock::time_point next_pet_;
+#endif
 
   // Reductions across the owned displays.
   [[nodiscard]] bool AnyHasRepeatTimer() const;

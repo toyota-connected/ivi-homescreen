@@ -9,6 +9,7 @@ add_library(platform_homescreen STATIC
         mouse_cursor_handler.cc
         platform_handler.cc
         text_input_plugin.cc
+        watchdog_plugin.cc
 )
 
 target_include_directories(platform_homescreen PUBLIC

@@ -102,6 +102,12 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   // Logging handler.
   state->logging_handler = std::make_unique<LoggingHandler>(
       state->internal_plugin_registrar->messenger(), view);
+
+#if BUILD_WATCHDOG
+  // Watchdog plugin.
+  state->watchdog_handler = std::make_unique<WatchdogPlugin>(
+      state->internal_plugin_registrar->messenger());
+#endif
 }
 
 FlutterDesktopEngineRef FlutterDesktopGetEngine(

@@ -13,7 +13,7 @@
 #             (a singular [view] is also accepted for a single-view bundle file)
 
 [global]
-# Process-level. app_id, cursor and the [sentry] table apply to the whole
+# Process-level. app_id, cursor, [sentry] and [watchdog] apply to the whole
 # process, not per view.
 app_id = 'homescreen'
 cursor_theme = 'DMZ-White'
@@ -29,6 +29,21 @@ debug_backend = false
 # env = 'production'
 # tags = { board = 'dev-board' }
 # attachments = []
+
+# [watchdog] is optional and process-level.
+#   timeout_ms   – watchdog timeout in milliseconds (default: 5000). Ignored
+#                  when built with BUILD_SYSTEMD_WATCHDOG=ON, in which case the
+#                  WatchdogSec= service-unit interval takes precedence.
+#   source_names – maps source IDs (integers) to human-readable labels used in
+#                  log output. Names can also be set or overridden at runtime
+#                  via the watchdog plugin's start() method (optional 'name'
+#                  argument).
+# [watchdog]
+# timeout_ms = 5000
+#
+# [watchdog.source_names]
+# 1 = 'MyFlutterApp'
+# 2 = 'BackgroundSync'
 
 [[view]]
 width = 1920
