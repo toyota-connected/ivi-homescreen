@@ -1354,22 +1354,31 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   // callbacks.
   // --------------------------------------------------------------------------
 
-  VkFenceCreateInfo f_info{};
-  f_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  d().vkCreateFence(device_, &f_info, nullptr, &image_ready_fence_);
+  // On the dma-buf present path we commit buffers directly on the wl_surface
+  // and never touch a VkSwapchainKHR, so skip all swapchain setup. Creating a
+  // Mesa WSI swapchain on the same surface — even one we never present to —
+  // leaves Mesa owning the surface's buffer state, and the compositor then
+  // never presents (or sends presentation feedback for) our direct commits,
+  // which stalls the engine after its first pipeline of frames. The
+  // skia-vulkan-dmabuf reference never creates a swapchain either.
+  if (!dmabuf_present_active_) {
+    VkFenceCreateInfo f_info{};
+    f_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    d().vkCreateFence(device_, &f_info, nullptr, &image_ready_fence_);
 
-  // present_transition_semaphores_ are created per swapchain image inside
-  // InitializeSwapChain (below), since their count tracks the swapchain.
+    // present_transition_semaphores_ are created per swapchain image inside
+    // InitializeSwapChain (below), since their count tracks the swapchain.
 
-  VkCommandPoolCreateInfo pool_info{};
-  pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  pool_info.queueFamilyIndex = queue_family_index_;
-  d().vkCreateCommandPool(device_, &pool_info, nullptr,
-                          &swapchain_command_pool_);
+    VkCommandPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.queueFamilyIndex = queue_family_index_;
+    d().vkCreateCommandPool(device_, &pool_info, nullptr,
+                            &swapchain_command_pool_);
 
-  if (!InitializeSwapChain()) {
-    ihs::log::critical("Failed to create swap chain.");
-    exit(EXIT_FAILURE);
+    if (!InitializeSwapChain()) {
+      ihs::log::critical("Failed to create swap chain.");
+      exit(EXIT_FAILURE);
+    }
   }
 }
 
