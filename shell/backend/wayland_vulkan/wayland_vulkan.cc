@@ -2004,8 +2004,14 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   const uint32_t h = height_;
   if (dmabuf_slots_.empty() || dmabuf_ring_w_ != w || dmabuf_ring_h_ != h) {
     if (!InitDmabufRing(w, h)) {
-      // Allocation failed — fall back to the swapchain path for good.
-      return PresentLayersImpl(layers, count);
+      // Ring allocation failed. There is no swapchain to fall back to at
+      // runtime — it was skipped in CreateSurface when the dma-buf path was
+      // selected — so drop this frame. Rare: dma-buf allocation only fails
+      // under GPU memory pressure, and InitDmabufRing has already cleared
+      // dmabuf_present_active_.
+      ihs::log::error(
+          "[WaylandVulkanBackend] dma-buf ring init failed; frame dropped");
+      return false;
     }
   }
   // Prefer a slot whose wl_buffer the compositor has released, so we don't
