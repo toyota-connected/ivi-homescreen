@@ -328,7 +328,11 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
       mode_spec_(std::move(mode_spec)),
       rotation_(rotation),
       enable_validation_(enable_validation),
-      session_(session) {}
+      session_(session) {
+  // Motion-to-photon (IVI_M2P_PROFILE): the flip path feeds RecordPresent and
+  // DrmSeat feeds RecordInput, both marshaled onto the platform task runner.
+  InitMotionToPhoton();
+}
 
 VulkanDrmBackend::~VulkanDrmBackend() {
   // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRMVK_PROFILE ran).
@@ -1007,6 +1011,12 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int tv_sec,
   vsync_.SetSourcePending(false);
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
+  // Motion-to-photon scanout endpoint (IVI_M2P_PROFILE). The cutoff is the
+  // frame_start of the baton this flip presents; marshaled onto the platform
+  // runner so it joins DrmSeat's RecordInput on the same thread.
+  profiling::MarshalRecordPresent(
+      platform_task_runner_.load(std::memory_order_acquire),
+      GetMotionToPhoton(), tv_ns, vsync_.LastDeliveredFrameStartNs(), "drm-vk");
   vsync_.DeliverVsync(tv_ns);  // returns the baton, marshaled onto the runner
 }
 
@@ -1016,6 +1026,11 @@ void VulkanDrmBackend::StopVsyncMonitor() {
     compositor_->StopFlipReader();
   }
   vsync_.Stop();
+  // Motion-to-photon session summary, on the platform thread (the same thread
+  // the marshaled RecordInput/RecordPresent tasks ran on).
+  if (m2p_enabled_) {
+    m2p_.LogSessionSummary("drm-vk");
+  }
 }
 
 int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c, VkImage image) {
