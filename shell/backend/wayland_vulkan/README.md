@@ -68,6 +68,38 @@ internal wall-clock scheduler. The decision is logged once at startup.
 | `IVI_VK_PROFILE` | (off) | Anything non-empty enables per-frame cadence profiling. Every 60 frames the profiler logs `profile (n=60): fps=X mean_interval=Yus max_interval=Zus present_failures=N discarded=M refresh=Rus flags=0xF pipeline_mean=Lus pipeline_max=Lmaxus buckets[60Hz/30Hz/20Hz/slow/idle]=…`. `pipeline_*` measures beginFrame-to-present latency (time from the `frame_start_time` handed to Flutter via OnVsync to the next `vkQueuePresentKHR` return). |
 | `IVI_M2P_PROFILE` | (off) | Anything non-empty enables the **motion-to-photon** (input-to-scanout) profiler. Joins kernel input time from `zwp_input_timestamps_v1` (pointer/touch) with compositor scanout time from `wp_presentation` feedback. Reports two latencies per window: **frame-accurate** — each input is attributed to the frame whose build cutoff (the baton's `frame_start_time`) is at or after it, i.e. the frame that actually rendered it, giving true `present − input`; and **floor** — `present − input` for the first scanout at or after the input, which under-counts by the engine pipeline depth. Every 120 presents logs `[wayland] motion->photon: frame-accurate p50=Xms p99=Yms max=Zms \| floor p50=xms p99=yms \| n=N dropped=D`, plus a session summary (both metrics) at teardown. The frame-accurate metric is the input-side complement of the `pipeline_*` (beginFrame-to-present) latency above: together they span input → build → present. `IVI_PROFILE` enables it too. |
 | `IVI_VK_PRESENT_MODE` | `fifo` | One of `fifo`, `fifo_relaxed`, `mailbox`, `immediate`. Selects the swapchain present mode if the compositor advertises it; otherwise falls back to FIFO with a warn. See "Present-mode interaction" below — `mailbox` is the only setting where `vsync_callback`'s contribution becomes large. |
+| `IVI_VK_DMABUF` | (off) | **Experimental** zero-copy dma-buf present path (see below). When set, and the compositor advertises a DRM format modifier this GPU can render into, the compositor path bypasses the WSI swapchain entirely: it blits the engine's frame into a modifier-tiled, dma-buf-exported `VkImage` and commits it as a `wl_buffer` (via `zwp_linux_dmabuf_v1`) directly on the `wl_surface`, so the compositor can promote the surface to a hardware plane. Off by default; falls back to the swapchain when unset or when no renderable modifier is shared. |
+
+## Experimental: zero-copy dma-buf present (`IVI_VK_DMABUF`)
+
+Patterned on the wayland-cxx-scanner `skia-vulkan-dmabuf` example. The default
+present path renders through Mesa's `VK_KHR_wayland_surface` WSI swapchain, which
+means Mesa owns pacing (our `vsync_callback` is invisible at the present layer),
+needs `zwp_linux_dmabuf_v1`/`wl_drm` to allocate at all (`VK_ERROR_SURFACE_LOST`
+otherwise), and under MAILBOX discards thousands of frames for latency. The
+dma-buf path removes that layer:
+
+1. `wl::DmabufFeedback` (v4) reports the compositor's scanout-capable modifiers
+   and `main_device`; `NegotiateModifiers` intersects them with the modifiers
+   this device can export for `B8G8R8A8_UNORM`/`XRGB8888`.
+2. A ring of modifier-tiled, dma-buf-exported `VkImage` slots (`wl_dmabuf_present`),
+   each wrapped as a `wl_buffer` via `zwp_linux_buffer_params`.
+3. `PresentLayersDmabuf` blits the engine's backing-store layers into the current
+   slot (reusing the swapchain blit, retargeted), waits a per-slot CPU fence,
+   then attaches/damages/commits the `wl_buffer` — no `vkQueuePresentKHR`.
+
+Surface damage is version-driven: `wl_surface.damage_buffer` (buffer coords) on a
+v4+ surface, else `wl_surface.damage` (surface coords). ivi binds `wl_compositor`
+at v3 today, so it takes the v1 path — calling `damage_buffer` on a v3 surface is
+a **fatal protocol error** that disconnects the client.
+
+**Status / limitations.** Renders continuously and correctly on mutter
+(gnome-shell), default-off, no swapchain-path regression. Not yet done: (a) no
+vsync pacing, so the rasterizer runs free (MAILBOX-like, high fps) — refresh-
+adaptive pacing is a follow-up; (b) CPU-fence sync, not explicit sync
+(`wp_linux_drm_syncobj`, needs a scanner bump); (c) `wl_buffer.release` gating is
+best-effort (falls back to round-robin under the unpaced frame rate); (d)
+validated on mutter only. Platform-view layers are not yet composited on this path.
 
 ## Present-mode interaction (the surprising part)
 
