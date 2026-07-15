@@ -100,6 +100,13 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
             backend/wayland_vulkan/vulkan_queue_interposer.cc
             backend/wayland_vulkan/wl_dmabuf_present.cc
     )
+    # The dma-buf present path needs drm_fourcc.h (DRM_FORMAT_* constants), a
+    # libdrm header. On a cross sysroot it lives under <libdrm/>, so the include
+    # dir must come from pkg-config rather than the default search path.
+    if (NOT TARGET PkgConfig::DRM)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+    endif ()
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM)
     if (BUILD_COMPOSITOR)
         target_sources(${PROJECT_NAME} PRIVATE
                 backend/wayland_vulkan/vulkan_backing_store.cc
