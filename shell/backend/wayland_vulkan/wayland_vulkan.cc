@@ -2008,7 +2008,20 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
       return PresentLayersImpl(layers, count);
     }
   }
-  DmabufSlot& slot = dmabuf_slots_[dmabuf_frame_ % dmabuf_slots_.size()];
+  // Prefer a slot whose wl_buffer the compositor has released, so we don't
+  // overwrite a buffer that is still being scanned out. Start at the
+  // round-robin position and take the first free slot; if every slot is still
+  // in flight (the rasterizer is outrunning the compositor — expected until
+  // refresh- adaptive pacing lands), fall back to the round-robin slot.
+  size_t idx = dmabuf_frame_ % dmabuf_slots_.size();
+  for (size_t i = 0; i < dmabuf_slots_.size(); ++i) {
+    const size_t cand = (dmabuf_frame_ + i) % dmabuf_slots_.size();
+    if (dmabuf_slots_[cand].buffer->released()) {
+      idx = cand;
+      break;
+    }
+  }
+  DmabufSlot& slot = dmabuf_slots_[idx];
 
   CHECK_VK_RESULT(
       d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
@@ -2099,10 +2112,19 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   wl_surface* surface = wl_surface_.load(std::memory_order_acquire);
   auto* buffer = reinterpret_cast<wl_buffer*>(slot.buffer->proxy());
   wl_surface_attach(surface, buffer, 0, 0);
-  // wl_surface.damage (v1, surface coords), NOT damage_buffer (v4) — ivi binds
-  // wl_compositor at v3, so damage_buffer is a fatal protocol error. Full-
-  // surface damage covers any size regardless of the viewport scale.
-  wl_surface_damage(surface, 0, 0, INT32_MAX, INT32_MAX);
+  // Damage the surface. wl_surface.damage_buffer (buffer coordinates) is a v4
+  // request; ivi binds wl_compositor at v3 today, so calling it there is a
+  // FATAL protocol error that disconnects the client. Fall back to
+  // wl_surface.damage (v1, surface coordinates) on older surfaces. This branch
+  // is version-driven, so it auto-upgrades to the precise buffer-coordinate
+  // path (needed for partial-repaint damage) if the compositor bind is ever
+  // raised to v4+. Full-surface damage is equivalent under either request.
+  if (wl_proxy_get_version(reinterpret_cast<wl_proxy*>(surface)) >= 4) {
+    wl_surface_damage_buffer(surface, 0, 0, static_cast<int32_t>(w),
+                             static_cast<int32_t>(h));
+  } else {
+    wl_surface_damage(surface, 0, 0, INT32_MAX, INT32_MAX);
+  }
   wl_surface_commit(surface);
   wl_display_flush(wl_display_);
   slot.buffer->mark_in_use();
