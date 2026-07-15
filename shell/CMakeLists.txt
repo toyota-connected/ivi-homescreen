@@ -99,6 +99,7 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
             backend/wayland_vulkan/wayland_vulkan.cc
             backend/wayland_vulkan/vulkan_queue_interposer.cc
             backend/wayland_vulkan/wl_dmabuf_present.cc
+            backend/wayland_vulkan/wl_explicit_sync.cc
     )
     # The dma-buf present path needs drm_fourcc.h (DRM_FORMAT_* constants), a
     # libdrm header. On a cross sysroot it lives under <libdrm/>, so the include

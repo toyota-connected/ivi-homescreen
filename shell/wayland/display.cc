@@ -240,6 +240,12 @@ void Display::HandleGlobal(wl::CRegistry& reg,
     d->m_linux_dmabuf_version = version;
   } else if (iface == "wl_drm") {
     d->m_has_wl_drm = true;
+  } else if (iface == "wp_linux_drm_syncobj_manager_v1") {
+    // Remember the explicit-sync manager global so a Vulkan backend can bind it
+    // for the wp_linux_drm_syncobj timeline path (acquire/release points that
+    // replace the dma-buf present's CPU fence). Gated at runtime on this name.
+    d->m_drm_syncobj_name = name;
+    d->m_drm_syncobj_version = version;
   }
 
   if (iface == wl_compositor_interface.name) {

@@ -63,6 +63,7 @@ class TaskRunner;
 namespace wl_vulkan {
 class DmabufImage;
 class WlDmabufBuffer;
+class ExplicitSync;
 }  // namespace wl_vulkan
 
 class WaylandVulkanBackend final : public Backend {
@@ -499,6 +500,9 @@ class WaylandVulkanBackend final : public Backend {
     VkCommandBuffer cmd{VK_NULL_HANDLE};
     VkFence fence{VK_NULL_HANDLE};
     VkImageLayout layout{VK_IMAGE_LAYOUT_UNDEFINED};
+    // Explicit-sync release point for this slot's last commit; polled to know
+    // the compositor is done (replaces wl_buffer.release). 0 = never committed.
+    uint64_t release_point{0};
   };
   std::vector<uint64_t> dmabuf_modifiers_;  // negotiated set, cached in Create
   VkCommandPool dmabuf_cmd_pool_{VK_NULL_HANDLE};
@@ -506,6 +510,13 @@ class WaylandVulkanBackend final : public Backend {
   uint32_t dmabuf_ring_w_{0};
   uint32_t dmabuf_ring_h_{0};
   size_t dmabuf_frame_{0};
+
+  // Explicit sync via wp_linux_drm_syncobj: when the compositor advertises the
+  // manager and the device supports timeline/external-semaphore-fd, the blit
+  // submit signals an acquire timeline the compositor waits on and the slot is
+  // reclaimed by polling a release timeline — replacing the per-frame CPU
+  // fence. Null when unavailable; the CPU-fence path is used instead.
+  std::unique_ptr<wl_vulkan::ExplicitSync> explicit_sync_;
 
   // Refresh pacing for the dma-buf path. The WSI swapchain path is paced by
   // vkQueuePresentKHR blocking at vblank under FIFO; the dma-buf commit is
