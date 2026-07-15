@@ -65,7 +65,7 @@ cross:
         # Anchored so the trixie targets (no libdisplay-info augment) reuse it.
         - &augment_scanner
           pkg: wayland-cxx-scanner
-          url: https://github.com/jwinarske/wayland-cxx-scanner/archive/596addb0f614eeb5cdfb18bcfccf1ed3810e2188.tar.gz
+          url: https://github.com/jwinarske/wayland-cxx-scanner/archive/9c86b8e7e87e2c9d5ff34939d044df4053e70970.tar.gz
           build: cmake
           host: true
           defines:
