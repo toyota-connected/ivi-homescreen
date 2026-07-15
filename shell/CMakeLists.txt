@@ -98,6 +98,7 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/wayland_vulkan/wayland_vulkan.cc
             backend/wayland_vulkan/vulkan_queue_interposer.cc
+            backend/wayland_vulkan/wl_dmabuf_present.cc
     )
     if (BUILD_COMPOSITOR)
         target_sources(${PROJECT_NAME} PRIVATE

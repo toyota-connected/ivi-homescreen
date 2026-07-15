@@ -35,6 +35,7 @@
 
 #include <drm_fourcc.h>  // DRM_FORMAT_XRGB8888
 
+#include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "vulkan_queue_interposer.h"
 
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
@@ -487,6 +488,21 @@ void WaylandVulkanBackend::findPhysicalDevice() {
         score += 1 << 29;
         supported_extensions.push_back(
             VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
+      }
+      // dma-buf zero-copy present path: import/export a modifier-tiled image
+      // the compositor can scan out. Enabled when advertised; the path stays
+      // gated at runtime on a successful DmabufImage allocation, so a device
+      // missing any of these simply falls back to the WSI swapchain.
+      else {
+        for (const char* want :
+             {VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+              VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+              VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+              VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME}) {
+          if (strcmp(want, extensionName) == 0) {
+            supported_extensions.push_back(want);
+          }
+        }
       }
     }
 
@@ -1276,6 +1292,50 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 
   findPhysicalDevice();
   createLogicalDevice();
+
+  // Verify the zero-copy present path can allocate a modifier-tiled dma-buf
+  // image the compositor advertised. Prefer scanout-tranche modifiers (the
+  // compositor's plane-promotable candidates), fall back to any advertised one.
+  // This is diagnostic only for now — the buffer is not yet wired into present;
+  // a later commit builds a wl_buffer from it and commits it instead of the
+  // WSI swapchain.
+  if (dmabuf_feedback_) {
+    std::vector<uint64_t> comp_mods;
+    {
+      std::lock_guard<std::mutex> lock(fb_mu_);
+      comp_mods = fb_snapshot_.ScanoutModifiersFor(DRM_FORMAT_XRGB8888);
+      if (comp_mods.empty()) {
+        comp_mods = fb_snapshot_.ModifiersFor(DRM_FORMAT_XRGB8888);
+      }
+    }
+    const auto negotiated = wl_vulkan::NegotiateModifiers(
+        physical_device_, VK_FORMAT_B8G8R8A8_UNORM, comp_mods);
+    if (negotiated.empty()) {
+      ihs::log::info(
+          "[WaylandVulkanBackend] no renderable dma-buf modifier shared with "
+          "the compositor ({} offered); zero-copy present disabled",
+          comp_mods.size());
+    } else {
+      std::string err;
+      auto img = wl_vulkan::DmabufImage::Create(
+          physical_device_, device_, width_, height_, VK_FORMAT_B8G8R8A8_UNORM,
+          DRM_FORMAT_XRGB8888,
+          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+          negotiated, err);
+      if (img) {
+        ihs::log::info(
+            "[WaylandVulkanBackend] dma-buf present image OK: {}x{} modifier "
+            "{:#018x} planes={} fd={}",
+            img->width(), img->height(), img->modifier(), img->planes().size(),
+            img->dma_buf_fd());
+      } else {
+        ihs::log::warn(
+            "[WaylandVulkanBackend] dma-buf present image alloc failed: {}",
+            err);
+      }
+    }
+  }
 
   // --------------------------------------------------------------------------
   // Create sync primitives and command pool to use in the render loop
