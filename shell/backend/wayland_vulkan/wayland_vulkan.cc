@@ -1354,13 +1354,20 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   // callbacks.
   // --------------------------------------------------------------------------
 
-  // On the dma-buf present path we commit buffers directly on the wl_surface
-  // and never touch a VkSwapchainKHR, so skip all swapchain setup. Creating a
-  // Mesa WSI swapchain on the same surface — even one we never present to —
-  // leaves Mesa owning the surface's buffer state, and the compositor then
-  // never presents (or sends presentation feedback for) our direct commits,
-  // which stalls the engine after its first pipeline of frames. The
-  // skia-vulkan-dmabuf reference never creates a swapchain either.
+  // swapchain_command_pool_ backs TransitionLayout, which runs on BOTH present
+  // paths (backing-store layout transitions in CreateBackingStore), so always
+  // create it — the name is historical.
+  VkCommandPoolCreateInfo pool_info{};
+  pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  pool_info.queueFamilyIndex = queue_family_index_;
+  d().vkCreateCommandPool(device_, &pool_info, nullptr,
+                          &swapchain_command_pool_);
+
+  // The VkSwapchainKHR (and its image-acquire fence) is only for the WSI
+  // present path. On the dma-buf path we commit buffers directly on the
+  // wl_surface and never create a swapchain — a Mesa WSI swapchain on the same
+  // surface would otherwise own the surface's buffer state. skia-vulkan-dmabuf
+  // works the same.
   if (!dmabuf_present_active_) {
     VkFenceCreateInfo f_info{};
     f_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -1368,13 +1375,6 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
 
     // present_transition_semaphores_ are created per swapchain image inside
     // InitializeSwapChain (below), since their count tracks the swapchain.
-
-    VkCommandPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool_info.queueFamilyIndex = queue_family_index_;
-    d().vkCreateCommandPool(device_, &pool_info, nullptr,
-                            &swapchain_command_pool_);
-
     if (!InitializeSwapChain()) {
       ihs::log::critical("Failed to create swap chain.");
       exit(EXIT_FAILURE);
@@ -2099,8 +2099,10 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   wl_surface* surface = wl_surface_.load(std::memory_order_acquire);
   auto* buffer = reinterpret_cast<wl_buffer*>(slot.buffer->proxy());
   wl_surface_attach(surface, buffer, 0, 0);
-  wl_surface_damage_buffer(surface, 0, 0, static_cast<int32_t>(w),
-                           static_cast<int32_t>(h));
+  // wl_surface.damage (v1, surface coords), NOT damage_buffer (v4) — ivi binds
+  // wl_compositor at v3, so damage_buffer is a fatal protocol error. Full-
+  // surface damage covers any size regardless of the viewport scale.
+  wl_surface_damage(surface, 0, 0, INT32_MAX, INT32_MAX);
   wl_surface_commit(surface);
   wl_display_flush(wl_display_);
   slot.buffer->mark_in_use();
