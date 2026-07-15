@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -26,6 +27,7 @@
 #include "backend/backend.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "profiling/frame_profile.h"
+#include "vsync/ivsync_provider.h"
 
 namespace homescreen {
 class DrmSession;
@@ -78,6 +80,23 @@ class VulkanDrmBackend final : public Backend {
   bool TextureClearCurrent() override;
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
+
+  // Vsync: drive Flutter's frame scheduling from the real page-flip event
+  // instead of its wall-clock fallback, so frames align to the connector's
+  // refresh (and the raster thread no longer blocks in WaitForFlip). Returns a
+  // trampoline that parks the baton in vsync_; the async flip reader returns it
+  // via DeliverVsync. IVI_DRMVK_VSYNC=0 disables it (wall-clock fallback).
+  [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override {
+    engine_handle_.store(engine, std::memory_order_release);
+    vsync_.SetEngine(engine,
+                     platform_task_runner_.load(std::memory_order_acquire));
+  }
+  void SetPlatformTaskRunner(TaskRunner* runner) override {
+    platform_task_runner_.store(runner, std::memory_order_release);
+    vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
+  }
+  void StopVsyncMonitor() override;
 
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
@@ -180,6 +199,26 @@ class VulkanDrmBackend final : public Backend {
   // the ready slot's acquire fence (KMS waits via IN_FENCE_FD); on the
   // CPU-fence fallback the barrier is waited on here and -1 is returned.
   int SubmitScanoutBarrier(CompositorState& c, VkImage image);
+
+  // Flutter's vsync_callback -> parks the baton in vsync_. Static C ABI; the
+  // engine handle comes from the FlutterDesktopEngineState* user_data.
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
+  void SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine, intptr_t baton);
+
+  // Arm (and re-arm) the async_wait for the next page-flip event on the reader
+  // thread. Runs drmHandleEvent -> OnFlipEvent when the fd is readable.
+  void ArmFlipRead();
+
+  // Page-flip completion, on the async flip-reader thread (routed via the
+  // commit's user_data). Clears the pending flag and returns the baton with the
+  // kernel scanout time; touches no slot state (that stays
+  // raster-thread-local).
+  void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec);
+
+  // Backend-spanning vsync baton machinery; the async flip reader feeds it.
+  ivi::IVsyncProvider vsync_;
+  std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_handle_{nullptr};
+  std::atomic<TaskRunner*> platform_task_runner_{nullptr};
 
   // Self-committing HW cursor on the scanout CRTC's cursor plane. Created in
   // SetupCompositor against compositor_'s DRM device; destroyed before
