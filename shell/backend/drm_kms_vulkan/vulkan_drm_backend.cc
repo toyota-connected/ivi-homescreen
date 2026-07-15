@@ -26,8 +26,10 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -38,6 +40,10 @@
 
 #include <poll.h>
 #include <unistd.h>
+
+#include <asio/executor_work_guard.hpp>
+#include <asio/io_context.hpp>
+#include <asio/posix/stream_descriptor.hpp>
 
 #include <drm-cxx/core/device.hpp>
 #include <drm-cxx/scene/external_dma_buf_source.hpp>
@@ -52,7 +58,10 @@
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
 #include "backend/drm_kms_vulkan/modifier_format.h"
 #include "backend/drm_kms_vulkan/vulkan_backing_store.h"
+#include "engine.h"
 #include "logging.h"
+#include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "task_runner.h"
 
 namespace {
 
@@ -409,10 +418,36 @@ bool VulkanDrmBackend::BringUp(std::string& refusal_reason) {
 
 struct VulkanDrmBackend::CompositorState {
   explicit CompositorState(drm::Device d) : device(std::move(d)) {}
+
+  // Stop the async flip reader: cancel the pending async_wait, release (not
+  // close — the drm::Device owns the fd) and join. Idempotent.
+  void StopFlipReader() {
+    if (!flip_reader_running) {
+      return;
+    }
+    if (flip_fd.has_value()) {
+      std::error_code ec;
+      flip_fd->cancel(ec);
+      (void)flip_fd->release();
+      flip_fd.reset();
+    }
+    flip_work.reset();
+    if (flip_ioc) {
+      flip_ioc->stop();
+    }
+    if (flip_thread.joinable()) {
+      flip_thread.join();
+    }
+    flip_ioc.reset();
+    flip_reader_running = false;
+  }
+
   ~CompositorState() {
-    // Drain the in-flight flip so KMS is not mid-page-flip on a buffer we are
-    // about to free, then idle the GPU before releasing any Vulkan resources.
-    if (flip_pending) {
+    // Stop the reader first so nothing else touches the fd while we drain, then
+    // drain any lingering flip synchronously so KMS is not mid-page-flip on a
+    // buffer we free, then idle the GPU before releasing Vulkan resources.
+    StopFlipReader();
+    if (flip_pending.load(std::memory_order_acquire)) {
       WaitForFlip(device.fd(), evctx);
     }
     if (vk_device != VK_NULL_HANDLE) {
@@ -482,12 +517,26 @@ struct VulkanDrmBackend::CompositorState {
   std::optional<drm::scene::LayerHandle> layer;
 
   // Vsync pacing. The first commit is a blocking modeset; subsequent commits
-  // are non-blocking page flips drained against this event context.
+  // are non-blocking page flips whose completion the async reader drains.
   bool first_commit = true;
-  bool flip_pending = false;
+  // Set on the raster thread when a non-blocking flip is queued, cleared on the
+  // reader thread when its event arrives — hence atomic. scanning_slot /
+  // pending_slot stay raster-thread-local (present_layers only).
+  std::atomic<bool> flip_pending{false};
   int scanning_slot = -1;  // slot the CRTC is currently scanning
   int pending_slot = -1;   // slot in the in-flight non-blocking flip
   drmEventContext evctx{};
+
+  // Async page-flip reader: an asio descriptor over the DRM fd on its own
+  // io_context thread. async_wait -> drmHandleEvent(evctx) -> OnFlipEvent,
+  // which returns the vsync baton. Replaces the synchronous WaitForFlip poll so
+  // the raster thread never blocks and Flutter paces to the real refresh.
+  std::unique_ptr<asio::io_context> flip_ioc;
+  std::optional<asio::executor_work_guard<asio::io_context::executor_type>>
+      flip_work;
+  std::optional<asio::posix::stream_descriptor> flip_fd;
+  std::thread flip_thread;
+  bool flip_reader_running = false;
 
   // Scanout hand-off: drives each backing-store image's layout/cache between
   // the renderer and the KMS scanout engine.
@@ -684,12 +733,15 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   ihs::log::info("[VulkanDrmBackend] scanout sync: {}",
                  state->explicit_sync ? "explicit (IN_FENCE_FD)" : "CPU fence");
 
-  // Page-flip event draining for vsync pacing. A no-op handler is enough — the
-  // event arriving is the signal; we carry no per-flip state through it.
+  // Page-flip event routing: the commit passes `this` as user_data (see
+  // present), so the handler recovers the backend and returns the vsync baton
+  // with the kernel scanout time.
   state->evctx.version = 2;
-  state->evctx.page_flip_handler =
-      [](int /*fd*/, unsigned int /*sequence*/, unsigned int /*tv_sec*/,
-         unsigned int /*tv_usec*/, void* /*user_data*/) {};
+  state->evctx.page_flip_handler = [](int /*fd*/, unsigned int /*sequence*/,
+                                      unsigned int tv_sec, unsigned int tv_usec,
+                                      void* user_data) {
+    static_cast<VulkanDrmBackend*>(user_data)->OnFlipEvent(tv_sec, tv_usec);
+  };
 
   if (drmSetMaster(state->device.fd()) != 0) {
     if (const int set_err = errno;
@@ -715,6 +767,27 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   ihs::log::info(
       "[VulkanDrmBackend] compositor ready: {}x{}, DRM master acquired", width_,
       height_);
+
+  // Refresh-adaptive pacing: tell the vsync provider the connector's period so
+  // Flutter targets the real refresh, and start the async page-flip reader that
+  // returns each frame's baton on vblank.
+  const uint32_t vr = target.mode.vrefresh;
+  vsync_.SetPeriodNs(vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr)
+                            : 16'666'667U);
+  vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
+                       "DrmVkVsync");
+  {
+    CompositorState& c = *compositor_;
+    c.flip_ioc = std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1);
+    c.flip_work.emplace(asio::make_work_guard(*c.flip_ioc));
+    c.flip_fd.emplace(*c.flip_ioc);
+    c.flip_fd->assign(c.device.fd());
+    ArmFlipRead();
+    c.flip_thread = std::thread([&c]() { c.flip_ioc->run(); });
+    c.flip_reader_running = true;
+    ihs::log::info("[VulkanDrmBackend] vsync: page-flip reader on fd={}",
+                   c.device.fd());
+  }
 
 #if HAVE_DRM_CURSOR
   // Self-committing HW cursor on the scanout CRTC's cursor plane. It commits on
@@ -873,6 +946,78 @@ bool VulkanDrmBackend::CollectBackingStoreImpl(
   return true;
 }
 
+VsyncCallback VulkanDrmBackend::GetVsyncCallback() const {
+  // IVI_DRMVK_VSYNC=0 disables the vsync_callback (wall-clock fallback) —
+  // useful to bisect pacing or on hardware where PAGE_FLIP_EVENT delivery is
+  // unreliable.
+  static const bool enabled = []() {
+    const char* env = std::getenv("IVI_DRMVK_VSYNC");
+    return !(env != nullptr && env[0] == '0' && env[1] == '\0');
+  }();
+  return enabled ? &VsyncTrampoline : nullptr;
+}
+
+void VulkanDrmBackend::VsyncTrampoline(void* user_data, const intptr_t baton) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->view_controller == nullptr ||
+      state->view_controller->engine == nullptr) {
+    return;
+  }
+  auto* engine_obj = state->view_controller->engine;
+  auto* backend = dynamic_cast<VulkanDrmBackend*>(engine_obj->GetBackend());
+  if (backend == nullptr) {
+    return;
+  }
+  backend->SetVsyncBaton(engine_obj->GetFlutterEngine(), baton);
+}
+
+void VulkanDrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
+                                     const intptr_t baton) {
+  engine_handle_.store(engine, std::memory_order_release);
+  // The provider drains the baton inline for an idle pipeline (first frame /
+  // wake) or parks it until the in-flight flip returns via DeliverVsync, using
+  // our SetSourcePending() state; if the runner isn't wired yet it stays parked
+  // and SetEngine's kick latch delivers it.
+  vsync_.SubmitBaton(engine, baton);
+}
+
+void VulkanDrmBackend::ArmFlipRead() {
+  CompositorState* c = compositor_.get();
+  if (c == nullptr || !c->flip_fd.has_value()) {
+    return;
+  }
+  c->flip_fd->async_wait(asio::posix::stream_descriptor::wait_read,
+                         [this, c](const std::error_code& ec) {
+                           if (ec) {
+                             return;  // operation_aborted on teardown
+                           }
+                           // Routes to OnFlipEvent via the commit's user_data.
+                           drmHandleEvent(c->device.fd(), &c->evctx);
+                           ArmFlipRead();  // re-arm for the next vblank
+                         });
+}
+
+void VulkanDrmBackend::OnFlipEvent(const unsigned int tv_sec,
+                                   const unsigned int tv_usec) {
+  CompositorState* c = compositor_.get();
+  if (c == nullptr) {
+    return;
+  }
+  c->flip_pending.store(false, std::memory_order_release);
+  vsync_.SetSourcePending(false);
+  const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
+                         static_cast<uint64_t>(tv_usec) * 1000ULL;
+  vsync_.DeliverVsync(tv_ns);  // returns the baton, marshaled onto the runner
+}
+
+void VulkanDrmBackend::StopVsyncMonitor() {
+  platform_task_runner_.store(nullptr, std::memory_order_release);
+  if (compositor_) {
+    compositor_->StopFlipReader();
+  }
+  vsync_.Stop();
+}
+
 int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c, VkImage image) {
   const VkImageMemoryBarrier barrier = ColorBarrier(
       image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
@@ -958,12 +1103,20 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
   const int scanout_fence_fd = SubmitScanoutBarrier(c, store->image());
 
-  // Pace to vblank: drain the previous non-blocking flip before queueing the
-  // next. The drained flip's slot becomes the one being scanned; the slot it
-  // replaced returns to the free pool.
-  if (c.flip_pending) {
-    WaitForFlip(c.device.fd(), c.evctx);
-    c.flip_pending = false;
+  // The previous non-blocking flip has normally already completed: its event
+  // returned the vsync baton, which is what let the engine build this frame.
+  // Do NOT read the fd here — the async reader is the single reader (a second
+  // drmHandleEvent would race it). If a frame somehow arrives with a flip still
+  // in flight, wait on the flag (bounded) so the commit below does not EBUSY;
+  // under vsync pacing this loop never spins.
+  for (int i = 0; i < 100 && c.flip_pending.load(std::memory_order_acquire);
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  // Rotate: the completed flip's slot is now scanning; the slot it replaced
+  // returns to the free pool. Raster-thread-local (the reader never touches
+  // it).
+  if (c.pending_slot >= 0) {
     c.scanning_slot = c.pending_slot;
     c.pending_slot = -1;
   }
@@ -1009,16 +1162,22 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   const uint32_t flags =
       c.first_commit ? 0U
                      : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
-  if (auto report = c.scene->commit(flags); !report) {
+  // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
+  if (auto report = c.scene->commit(flags, this); !report) {
     ihs::log::error("[VulkanDrmBackend] commit: {}", report.error().message());
     return false;
   }
   if (c.first_commit) {
+    // Blocking modeset: no flip event. Leave the source not-pending so the
+    // provider drains the next baton inline and the async loop starts.
     c.first_commit = false;
     c.scanning_slot = static_cast<int>(slot);
   } else {
+    // Non-blocking flip: mark the source pending so the provider holds the next
+    // baton until OnFlipEvent returns it on vblank.
     c.pending_slot = static_cast<int>(slot);
-    c.flip_pending = true;
+    c.flip_pending.store(true, std::memory_order_release);
+    vsync_.SetSourcePending(true);
   }
 
   const uint64_t n = c.frame++;
