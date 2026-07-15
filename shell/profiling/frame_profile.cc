@@ -70,6 +70,7 @@ void FrameProfile::Stats::Merge(const Stats& other) {
   }
   frames += other.frames;
   discarded += other.discarded;
+  stalls += other.stalls;
   b60 += other.b60;
   b30 += other.b30;
   b20 += other.b20;
@@ -86,10 +87,14 @@ bool FrameProfile::Enabled(const char* legacy_env) {
 
 void FrameProfile::Record(const std::string_view label,
                           const bool ok,
-                          uint64_t now_ns) {
+                          uint64_t now_ns,
+                          const bool stalled) {
   if (!ok) {
     ++window_.discarded;
     return;
+  }
+  if (stalled) {
+    ++window_.stalls;
   }
   if (now_ns == 0) {
     now_ns = MonotonicNs();
@@ -107,10 +112,10 @@ void FrameProfile::Record(const std::string_view label,
       MeanIntervalNs(window_.interval_sum_ns, window_.frames);
   ihs::log::info(
       "[{}] profile (n={}): fps={:.2f} mean_interval={}us max_interval={}us "
-      "discarded={} buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
+      "discarded={} stalls={} buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
       label, window_.frames, FpsFromMean(mean_ns), mean_ns / 1000,
-      window_.interval_max_ns / 1000, window_.discarded, window_.b60,
-      window_.b30, window_.b20, window_.bslow, window_.bidle);
+      window_.interval_max_ns / 1000, window_.discarded, window_.stalls,
+      window_.b60, window_.b30, window_.b20, window_.bslow, window_.bidle);
 
   session_.Merge(window_);
   window_ = Stats{};  // reset the window; last_present_ns_ carries continuity
@@ -127,9 +132,9 @@ void FrameProfile::LogSessionSummary(const std::string_view label) const {
   const uint64_t mean_ns = MeanIntervalNs(s.interval_sum_ns, s.frames);
   ihs::log::info(
       "[{}] session summary: frames={} fps={:.2f} mean_interval={}us "
-      "max_interval={}us discarded={}",
+      "max_interval={}us discarded={} stalls={}",
       label, s.frames, FpsFromMean(mean_ns), mean_ns / 1000,
-      s.interval_max_ns / 1000, s.discarded);
+      s.interval_max_ns / 1000, s.discarded, s.stalls);
 
   if (const uint32_t total = s.b60 + s.b30 + s.b20 + s.bslow + s.bidle;
       total > 0) {
