@@ -186,6 +186,19 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     d().vkDeviceWaitIdle(device_);
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
+    // Retire any in-flight pacing callback. Safe here: App::~App() has already
+    // called Display::StopEvents() on every display, so the reactor is no
+    // longer dispatching Wayland events and OnFrameDone cannot race this — but
+    // the connection is still up (wl_display_disconnect runs later, in
+    // ~Display), so the proxy destroy is valid. Same teardown ordering the
+    // vsync feedback proxies rely on.
+    {
+      std::lock_guard<std::mutex> lock(frame_mu_);
+      if (frame_callback_ != nullptr) {
+        wl_callback_destroy(frame_callback_);
+        frame_callback_ = nullptr;
+      }
+    }
     // Tear down the dma-buf present ring before the device — DmabufImage's
     // destructor destroys its image view/image/memory with device_, and the
     // command buffers belong to dmabuf_cmd_pool_.
@@ -1998,6 +2011,24 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   return true;
 }
 
+void WaylandVulkanBackend::OnFrameDone(void* data,
+                                       wl_callback* cb,
+                                       uint32_t /*time*/) {
+  auto* self = static_cast<WaylandVulkanBackend*>(data);
+  {
+    std::lock_guard<std::mutex> lock(self->frame_mu_);
+    // Only the current in-flight callback advances pacing; a stale one (a prior
+    // frame whose callback fired after this frame's present timed out waiting)
+    // is still retired, just without touching state.
+    if (self->frame_callback_ == cb) {
+      self->frame_callback_ = nullptr;
+      self->frame_ready_ = true;
+    }
+  }
+  wl_callback_destroy(cb);
+  self->frame_cv_.notify_one();
+}
+
 bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
                                                size_t count) {
   const uint32_t w = width_;
@@ -2014,11 +2045,22 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
       return false;
     }
   }
+  // Refresh pacing. Block until the previous frame's wl_surface.frame callback
+  // fired — the compositor signalling it is ready for the next frame — before
+  // producing this one. This is the dma-buf path's backpressure; the swapchain
+  // path gets the equivalent from vkQueuePresentKHR blocking at vblank under
+  // FIFO. Bounded so an occluded/unmapped surface (whose callbacks stop firing)
+  // degrades to ~10 fps free-running instead of hanging the rasterizer.
+  {
+    std::unique_lock<std::mutex> lock(frame_mu_);
+    frame_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                       [this] { return frame_ready_; });
+  }
   // Prefer a slot whose wl_buffer the compositor has released, so we don't
   // overwrite a buffer that is still being scanned out. Start at the
-  // round-robin position and take the first free slot; if every slot is still
-  // in flight (the rasterizer is outrunning the compositor — expected until
-  // refresh- adaptive pacing lands), fall back to the round-robin slot.
+  // round-robin position and take the first free slot; with refresh pacing the
+  // previous buffer is normally released by now, but fall back to the
+  // round-robin slot if none is free.
   size_t idx = dmabuf_frame_ % dmabuf_slots_.size();
   for (size_t i = 0; i < dmabuf_slots_.size(); ++i) {
     const size_t cand = (dmabuf_frame_ + i) % dmabuf_slots_.size();
@@ -2116,6 +2158,18 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   RequestPresentationFeedback();
 
   wl_surface* surface = wl_surface_.load(std::memory_order_acquire);
+  // Arm the pacing callback for this commit, so the next frame's present waits
+  // on it. Request it before the commit it is paired with. A prior callback
+  // still in flight (this frame's wait timed out) is left to fire and self-
+  // retire in OnFrameDone; only the newest one advances pacing.
+  {
+    static const wl_callback_listener kFrameListener = {
+        &WaylandVulkanBackend::OnFrameDone};
+    std::lock_guard<std::mutex> lock(frame_mu_);
+    frame_callback_ = wl_surface_frame(surface);
+    wl_callback_add_listener(frame_callback_, &kFrameListener, this);
+    frame_ready_ = false;
+  }
   auto* buffer = reinterpret_cast<wl_buffer*>(slot.buffer->proxy());
   wl_surface_attach(surface, buffer, 0, 0);
   // Damage the surface. wl_surface.damage_buffer (buffer coordinates) is a v4

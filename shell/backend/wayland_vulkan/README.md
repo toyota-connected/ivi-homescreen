@@ -87,19 +87,43 @@ dma-buf path removes that layer:
 3. `PresentLayersDmabuf` blits the engine's backing-store layers into the current
    slot (reusing the swapchain blit, retargeted), waits a per-slot CPU fence,
    then attaches/damages/commits the `wl_buffer` — no `vkQueuePresentKHR`.
+4. Refresh pacing via `wl_surface.frame`. Each commit arms a frame callback; the
+   next present's rasterizer thread blocks until it fires (the compositor
+   signalling it is ready for the next frame). This is the backpressure the
+   swapchain path gets for free from `vkQueuePresentKHR` blocking at vblank under
+   FIFO — without it the non-blocking dma-buf commit lets the rasterizer run
+   free. The callback fires on the Display event thread; a `condition_variable`
+   hands the signal to the rasterizer thread. The wait is bounded (100 ms), so an
+   occluded/unmapped surface (whose callbacks stop firing) degrades to ~10 fps
+   free-running instead of hanging. The callback proxy is retired in the backend
+   destructor, which runs after `App::~App()` has already stopped Wayland event
+   dispatch via `Display::StopEvents()`, so the retire cannot race `OnFrameDone`.
 
 Surface damage is version-driven: `wl_surface.damage_buffer` (buffer coords) on a
 v4+ surface, else `wl_surface.damage` (surface coords). ivi binds `wl_compositor`
 at v3 today, so it takes the v1 path — calling `damage_buffer` on a v3 surface is
 a **fatal protocol error** that disconnects the client.
 
-**Status / limitations.** Renders continuously and correctly on mutter
-(gnome-shell), default-off, no swapchain-path regression. Not yet done: (a) no
-vsync pacing, so the rasterizer runs free (MAILBOX-like, high fps) — refresh-
-adaptive pacing is a follow-up; (b) CPU-fence sync, not explicit sync
-(`wp_linux_drm_syncobj`, needs a scanner bump); (c) `wl_buffer.release` gating is
-best-effort (falls back to round-robin under the unpaced frame rate); (d)
-validated on mutter only. Platform-view layers are not yet composited on this path.
+Because the pacing tracks the compositor's own repaint cadence rather than a
+fixed rate, the surface renders at whatever refresh the compositor drives it at.
+Measured with a scrolling workload:
+
+| Compositor | GPU | Refresh | fps |
+| --- | --- | --- | --- |
+| mutter (gnome-shell) | — | 60 Hz | ~59 |
+| mutter (gnome-shell) | — | 240 Hz | ~235 (mean interval 4.24 ms) |
+| gamescope (headless) | RADV Van Gogh (Steam Deck) | 120 Hz | ~118 |
+| gamescope (headless) | RADV Van Gogh (Steam Deck) | 60 Hz | 59.0 |
+
+0 present failures / 0 discarded / 0 protocol errors in every case, and the rate
+follows a window dragged between two mixed-refresh mutter outputs.
+
+**Status / limitations.** Renders continuously and correctly, paced to the
+compositor's refresh, default-off, no swapchain-path regression. Validated on
+mutter (gnome-shell) and gamescope (Steam Deck, RADV Van Gogh). Not yet done:
+(a) CPU-fence sync, not explicit sync (`wp_linux_drm_syncobj`, needs a scanner
+bump); (b) not yet run against a gamescope DRM session (headless only on the
+Deck). Platform-view layers are not yet composited on this path.
 
 ## Present-mode interaction (the surprising part)
 
