@@ -33,7 +33,8 @@
 #include "task_runner.h"
 #include "wayland/display.h"
 
-#include <drm_fourcc.h>  // DRM_FORMAT_XRGB8888
+#include <drm_fourcc.h>      // DRM_FORMAT_XRGB8888
+#include <wayland-client.h>  // wl_surface_attach/damage_buffer/commit
 
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "vulkan_queue_interposer.h"
@@ -185,6 +186,27 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     d().vkDeviceWaitIdle(device_);
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
+    // Tear down the dma-buf present ring before the device — DmabufImage's
+    // destructor destroys its image view/image/memory with device_, and the
+    // command buffers belong to dmabuf_cmd_pool_.
+    for (auto& s : dmabuf_slots_) {
+      if (s.fence != VK_NULL_HANDLE) {
+        d().vkDestroyFence(device_, s.fence, nullptr);
+      }
+    }
+    dmabuf_slots_.clear();
+    if (dmabuf_cmd_pool_ != VK_NULL_HANDLE) {
+      d().vkDestroyCommandPool(device_, dmabuf_cmd_pool_, nullptr);
+      dmabuf_cmd_pool_ = VK_NULL_HANDLE;
+    }
+    // Destroy the backing stores while device_ is still valid. These pools are
+    // members, so their default destruction runs AFTER this dtor body — i.e.
+    // after vkDestroyDevice below — and VulkanBackingStore::~ calls
+    // vkDestroyImageView with the (by then invalid) device, aborting in the
+    // loader. Flushing here fixes both present paths (a SIGTERM mid-run leaves
+    // stores checked out).
+    m_alive_stores.clear();
+    m_store_pool.Flush();
 #endif
     if (swapchain_command_pool_ != nullptr) {
       d().vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
@@ -1293,12 +1315,12 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   findPhysicalDevice();
   createLogicalDevice();
 
-  // Verify the zero-copy present path can allocate a modifier-tiled dma-buf
-  // image the compositor advertised. Prefer scanout-tranche modifiers (the
-  // compositor's plane-promotable candidates), fall back to any advertised one.
-  // This is diagnostic only for now — the buffer is not yet wired into present;
-  // a later commit builds a wl_buffer from it and commits it instead of the
-  // WSI swapchain.
+#if BUILD_COMPOSITOR
+  // Select the zero-copy dma-buf present path when the compositor advertises a
+  // modifier this device can render into and IVI_VK_DMABUF is set. Prefer
+  // scanout-tranche modifiers (the compositor's plane-promotable candidates),
+  // fall back to any advertised one. Off by default: the swapchain path stays
+  // the default until this proves out.
   if (dmabuf_feedback_) {
     std::vector<uint64_t> comp_mods;
     {
@@ -1308,44 +1330,24 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
         comp_mods = fb_snapshot_.ModifiersFor(DRM_FORMAT_XRGB8888);
       }
     }
-    const auto negotiated = wl_vulkan::NegotiateModifiers(
+    dmabuf_modifiers_ = wl_vulkan::NegotiateModifiers(
         physical_device_, VK_FORMAT_B8G8R8A8_UNORM, comp_mods);
-    if (negotiated.empty()) {
+    const bool env_on = std::getenv("IVI_VK_DMABUF") != nullptr;
+    if (!dmabuf_modifiers_.empty() && env_on) {
+      dmabuf_present_active_ = true;
       ihs::log::info(
-          "[WaylandVulkanBackend] no renderable dma-buf modifier shared with "
-          "the compositor ({} offered); zero-copy present disabled",
-          comp_mods.size());
+          "[WaylandVulkanBackend] zero-copy dma-buf present ENABLED ({} "
+          "renderable modifier(s) shared with the compositor)",
+          dmabuf_modifiers_.size());
     } else {
-      std::string err;
-      auto img = wl_vulkan::DmabufImage::Create(
-          physical_device_, device_, width_, height_, VK_FORMAT_B8G8R8A8_UNORM,
-          DRM_FORMAT_XRGB8888,
-          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-          negotiated, err);
-      if (img) {
-        ihs::log::info(
-            "[WaylandVulkanBackend] dma-buf present image OK: {}x{} modifier "
-            "{:#018x} planes={} fd={}",
-            img->width(), img->height(), img->modifier(), img->planes().size(),
-            img->dma_buf_fd());
-        auto buf = wl_vulkan::WlDmabufBuffer::Create(
-            dmabuf_feedback_->CreateParams(), *img);
-        if (buf) {
-          ihs::log::info(
-              "[WaylandVulkanBackend] dma-buf wl_buffer created (released={})",
-              buf->released());
-        } else {
-          ihs::log::warn(
-              "[WaylandVulkanBackend] dma-buf wl_buffer creation failed");
-        }
-      } else {
-        ihs::log::warn(
-            "[WaylandVulkanBackend] dma-buf present image alloc failed: {}",
-            err);
-      }
+      ihs::log::info(
+          "[WaylandVulkanBackend] dma-buf present {} (modifiers={}, env={}); "
+          "using WSI swapchain",
+          dmabuf_modifiers_.empty() ? "unavailable" : "disabled",
+          dmabuf_modifiers_.size(), env_on);
     }
   }
+#endif
 
   // --------------------------------------------------------------------------
   // Create sync primitives and command pool to use in the render loop
@@ -1728,6 +1730,9 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
 
 bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                                              size_t count) {
+  if (dmabuf_present_active_) {
+    return PresentLayersDmabuf(layers, count);
+  }
   if (resize_pending_) {
     InitializeSwapChain();
   }
@@ -1909,6 +1914,190 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   ProfilePresent(result == VK_SUCCESS);
 
   ++m_compositor_current_frame_;
+  return ok;
+}
+
+bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d().vkQueueWaitIdle(queue_);
+  }
+  for (auto& s : dmabuf_slots_) {
+    if (s.fence != VK_NULL_HANDLE) {
+      d().vkDestroyFence(device_, s.fence, nullptr);
+    }
+  }
+  dmabuf_slots_.clear();
+
+  if (dmabuf_cmd_pool_ == VK_NULL_HANDLE) {
+    VkCommandPoolCreateInfo pi{};
+    pi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pi.queueFamilyIndex = queue_family_index_;
+    if (d().vkCreateCommandPool(device_, &pi, nullptr, &dmabuf_cmd_pool_) !=
+        VK_SUCCESS) {
+      ihs::log::error("[WaylandVulkanBackend] dma-buf cmd pool create failed");
+      dmabuf_present_active_ = false;
+      return false;
+    }
+  }
+
+  constexpr size_t kRing = 3;
+  for (size_t i = 0; i < kRing; ++i) {
+    DmabufSlot slot;
+    std::string err;
+    slot.image = wl_vulkan::DmabufImage::Create(
+        physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM,
+        DRM_FORMAT_XRGB8888,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+        dmabuf_modifiers_, err);
+    if (!slot.image) {
+      ihs::log::error("[WaylandVulkanBackend] dma-buf ring image {} failed: {}",
+                      i, err);
+      dmabuf_present_active_ = false;
+      return false;
+    }
+    slot.buffer = wl_vulkan::WlDmabufBuffer::Create(
+        dmabuf_feedback_->CreateParams(), *slot.image);
+    if (!slot.buffer) {
+      ihs::log::error("[WaylandVulkanBackend] dma-buf ring buffer {} failed",
+                      i);
+      dmabuf_present_active_ = false;
+      return false;
+    }
+    VkCommandBufferAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = dmabuf_cmd_pool_;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    d().vkAllocateCommandBuffers(device_, &ai, &slot.cmd);
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;  // first wait returns immediately
+    d().vkCreateFence(device_, &fi, nullptr, &slot.fence);
+    slot.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    dmabuf_slots_.push_back(std::move(slot));
+  }
+  dmabuf_ring_w_ = w;
+  dmabuf_ring_h_ = h;
+  dmabuf_frame_ = 0;
+  ihs::log::info(
+      "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
+      "{:#018x}",
+      dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier());
+  return true;
+}
+
+bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
+                                               size_t count) {
+  const uint32_t w = width_;
+  const uint32_t h = height_;
+  if (dmabuf_slots_.empty() || dmabuf_ring_w_ != w || dmabuf_ring_h_ != h) {
+    if (!InitDmabufRing(w, h)) {
+      // Allocation failed — fall back to the swapchain path for good.
+      return PresentLayersImpl(layers, count);
+    }
+  }
+  DmabufSlot& slot = dmabuf_slots_[dmabuf_frame_ % dmabuf_slots_.size()];
+
+  CHECK_VK_RESULT(
+      d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
+  CHECK_VK_RESULT(d().vkResetFences(device_, 1, &slot.fence));
+
+  VkCommandBuffer cmd = slot.cmd;
+  d().vkResetCommandBuffer(cmd, 0);
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  d().vkBeginCommandBuffer(cmd, &begin);
+
+  // Transition the dma-buf image to TRANSFER_DST for the blit.
+  VkImageMemoryBarrier to_dst{};
+  to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_dst.oldLayout = slot.layout;
+  to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_dst.image = slot.image->image();
+  to_dst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &to_dst);
+
+  m_sequencer.Present(layers, count, nullptr,
+                      [](FlutterPlatformViewIdentifier) {});
+
+  bool ok = true;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (!layer) {
+      continue;
+    }
+    if (layer->type == kFlutterLayerContentTypeBackingStore &&
+        layer->backing_store) {
+      auto* baton =
+          static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
+      if (!baton || !baton->store) {
+        continue;
+      }
+      const auto dx = static_cast<int32_t>(layer->offset.x);
+      const auto dy = static_cast<int32_t>(layer->offset.y);
+      const auto dw = static_cast<int32_t>(layer->size.width);
+      const auto dh = static_cast<int32_t>(layer->size.height);
+      BlitStoreToSwapchain(cmd, *baton->store, slot.image->image(), dx, dy, dw,
+                           dh);
+    }
+    // Platform-view layers are not yet composited on the dma-buf path.
+  }
+
+  // GENERAL so the compositor's external dma-buf read sees a coherent frame.
+  // The CPU fence wait below is the producer/consumer sync for this first
+  // (non-explicit-sync) version.
+  VkImageMemoryBarrier to_general{};
+  to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_general.image = slot.image->image();
+  to_general.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  to_general.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &to_general);
+  slot.layout = VK_IMAGE_LAYOUT_GENERAL;
+
+  d().vkEndCommandBuffer(cmd);
+
+  VkSubmitInfo submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &cmd;
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d().vkQueueSubmit(queue_, 1, &submit, slot.fence);
+  }
+  // CPU fence: block until the blit completes so the dma-buf holds a full frame
+  // before the compositor samples it.
+  CHECK_VK_RESULT(
+      d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
+
+  RequestPresentationFeedback();
+
+  wl_surface* surface = wl_surface_.load(std::memory_order_acquire);
+  auto* buffer = reinterpret_cast<wl_buffer*>(slot.buffer->proxy());
+  wl_surface_attach(surface, buffer, 0, 0);
+  wl_surface_damage_buffer(surface, 0, 0, static_cast<int32_t>(w),
+                           static_cast<int32_t>(h));
+  wl_surface_commit(surface);
+  wl_display_flush(wl_display_);
+  slot.buffer->mark_in_use();
+
+  ProfilePresent(true);
+  ++dmabuf_frame_;
   return ok;
 }
 
