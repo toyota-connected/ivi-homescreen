@@ -37,12 +37,14 @@
 #include <ctime>
 
 #include <poll.h>
+#include <unistd.h>
 
 #include <drm-cxx/core/device.hpp>
 #include <drm-cxx/scene/external_dma_buf_source.hpp>
 #include <drm-cxx/scene/layer_desc.hpp>
 #include <drm-cxx/scene/layer_handle.hpp>
 #include <drm-cxx/scene/layer_scene.hpp>
+#include <drm-cxx/sync/fence.hpp>
 
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
@@ -248,6 +250,13 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
   }
 
   void SetReady(const size_t slot) noexcept { ready_ = slot; }
+  // Explicit-sync variant: stash a render-done fence on the ready slot's
+  // source. The scene wires it to the plane's IN_FENCE_FD, so KMS waits on the
+  // GPU instead of the raster thread CPU-blocking on the scanout barrier.
+  void SetReady(const size_t slot, drm::sync::SyncFence acquire) noexcept {
+    ready_ = slot;
+    slots_[slot]->set_acquire_fence(std::move(acquire));
+  }
   [[nodiscard]] size_t slot_count() const noexcept { return slots_.size(); }
 
   // ── LayerBufferSource — forwarded to the ready slot. ──────────────────────
@@ -417,6 +426,18 @@ struct VulkanDrmBackend::CompositorState {
     if (barrier_fence != VK_NULL_HANDLE) {
       d().vkDestroyFence(vk_device, barrier_fence, nullptr);
     }
+    // Explicit-sync ring: fences + semaphores (the command buffers are freed
+    // with the pool below). Device is idle here, so nothing is in flight.
+    for (VkFence f : sync_fence) {
+      if (f != VK_NULL_HANDLE) {
+        d().vkDestroyFence(vk_device, f, nullptr);
+      }
+    }
+    for (VkSemaphore s : sync_sem) {
+      if (s != VK_NULL_HANDLE) {
+        d().vkDestroySemaphore(vk_device, s, nullptr);
+      }
+    }
     if (barrier_pool != VK_NULL_HANDLE) {
       d().vkDestroyCommandPool(vk_device, barrier_pool, nullptr);
     }
@@ -472,7 +493,18 @@ struct VulkanDrmBackend::CompositorState {
   // the renderer and the KMS scanout engine.
   VkDevice vk_device = VK_NULL_HANDLE;
   VkCommandPool barrier_pool = VK_NULL_HANDLE;
-  VkFence barrier_fence = VK_NULL_HANDLE;
+  VkFence barrier_fence = VK_NULL_HANDLE;  // CPU-wait fallback path
+
+  // Explicit-sync ring: the scanout barrier signals sync_sem[i], exported as a
+  // sync_file the scene wires to the plane IN_FENCE_FD (KMS waits on the GPU;
+  // the raster thread never blocks). N deep so re-recording cmd[i] only waits
+  // on the N-frames-old fence, which is already retired — no per-frame stall.
+  static constexpr size_t kSyncRing = 3;
+  std::array<VkCommandBuffer, kSyncRing> sync_cmd{};
+  std::array<VkFence, kSyncRing> sync_fence{};
+  std::array<VkSemaphore, kSyncRing> sync_sem{};
+  bool explicit_sync = false;
+
   uint64_t frame = 0;
 };
 
@@ -612,6 +644,45 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     err = "vkCreateFence for scanout hand-off failed";
     return false;
   }
+
+  // Explicit-sync ring (VK_KHR_external_semaphore_fd). Build a small ring of
+  // (command buffer, signaled fence, SYNC_FD-exportable semaphore) so the
+  // scanout barrier signals a fence the kernel waits on via IN_FENCE_FD rather
+  // than the raster thread CPU-blocking. If the device can't export a SYNC_FD
+  // semaphore, explicit_sync stays false and the CPU-fence path (barrier_fence)
+  // runs — same output, one raster-thread stall per frame.
+  if (d().vkGetSemaphoreFdKHR != nullptr &&
+      std::getenv("IVI_DRMVK_NO_EXPLICIT_SYNC") == nullptr) {
+    VkCommandBufferAllocateInfo cbai{};
+    cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cbai.commandPool = state->barrier_pool;
+    cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cbai.commandBufferCount = CompositorState::kSyncRing;
+    bool ok = d().vkAllocateCommandBuffers(
+                  device_, &cbai, state->sync_cmd.data()) == VK_SUCCESS;
+    for (size_t i = 0; ok && i < CompositorState::kSyncRing; ++i) {
+      // Signaled so the first kSyncRing re-record waits pass immediately.
+      VkFenceCreateInfo sfci{};
+      sfci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+      sfci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+      ok = d().vkCreateFence(device_, &sfci, nullptr, &state->sync_fence[i]) ==
+           VK_SUCCESS;
+      if (!ok) {
+        break;
+      }
+      VkExportSemaphoreCreateInfo esci{};
+      esci.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+      esci.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+      VkSemaphoreCreateInfo sci{};
+      sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+      sci.pNext = &esci;
+      ok = d().vkCreateSemaphore(device_, &sci, nullptr, &state->sync_sem[i]) ==
+           VK_SUCCESS;
+    }
+    state->explicit_sync = ok;
+  }
+  ihs::log::info("[VulkanDrmBackend] scanout sync: {}",
+                 state->explicit_sync ? "explicit (IN_FENCE_FD)" : "CPU fence");
 
   // Page-flip event draining for vsync pacing. A no-op handler is enough — the
   // event arriving is the signal; we carry no per-flip state through it.
@@ -802,6 +873,61 @@ bool VulkanDrmBackend::CollectBackingStoreImpl(
   return true;
 }
 
+int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c, VkImage image) {
+  const VkImageMemoryBarrier barrier = ColorBarrier(
+      image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT);
+
+  if (!c.explicit_sync) {
+    // CPU-fence fallback: submit + block until the barrier retires, then the
+    // caller marks the slot ready with no in-fence.
+    SubmitImageBarrier(device_, c.barrier_pool, c.barrier_fence,
+                       graphics_queue_, barrier,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    return -1;
+  }
+
+  const size_t i = c.frame % CompositorState::kSyncRing;
+  // The submit that last used ring entry i was kSyncRing frames ago and is long
+  // retired (KMS scanned it out), so this wait never stalls — it only makes the
+  // command buffer safe to re-record.
+  d().vkWaitForFences(device_, 1, &c.sync_fence[i], VK_TRUE, UINT64_MAX);
+  d().vkResetFences(device_, 1, &c.sync_fence[i]);
+  VkCommandBuffer cmd = c.sync_cmd[i];
+  d().vkResetCommandBuffer(cmd, 0);
+  VkCommandBufferBeginInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  d().vkBeginCommandBuffer(cmd, &bi);
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &barrier);
+  d().vkEndCommandBuffer(cmd);
+
+  VkSubmitInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.commandBufferCount = 1;
+  si.pCommandBuffers = &cmd;
+  si.signalSemaphoreCount = 1;
+  si.pSignalSemaphores = &c.sync_sem[i];
+  if (d().vkQueueSubmit(graphics_queue_, 1, &si, c.sync_fence[i]) !=
+      VK_SUCCESS) {
+    return -1;
+  }
+  // Export the just-signaled semaphore as a sync_file. SYNC_FD export transfers
+  // the payload out, resetting the semaphore for its next turn in the ring.
+  VkSemaphoreGetFdInfoKHR gfi{};
+  gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+  gfi.semaphore = c.sync_sem[i];
+  gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+  int fd = -1;
+  if (d().vkGetSemaphoreFdKHR(device_, &gfi, &fd) != VK_SUCCESS) {
+    return -1;
+  }
+  return fd;
+}
+
 bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
                                          size_t count) {
   if (!compositor_ || !compositor_->scene) {
@@ -827,15 +953,10 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
 
   // Flush the renderer's color writes so the scanout engine sees this frame.
   // The embedder host-syncs all layers before present_layers, so the render is
-  // already retired; this barrier only makes the writes visible to KMS.
-  SubmitImageBarrier(
-      device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
-      ColorBarrier(store->image(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                   VK_IMAGE_LAYOUT_GENERAL,
-                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                   VK_ACCESS_MEMORY_READ_BIT),
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  // already retired; this barrier only makes the writes visible to KMS. On the
+  // explicit-sync path it returns a sync_file the scene hands to IN_FENCE_FD so
+  // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
+  const int scanout_fence_fd = SubmitScanoutBarrier(c, store->image());
 
   // Pace to vblank: drain the previous non-blocking flip before queueing the
   // next. The drained flip's slot becomes the one being scanned; the slot it
@@ -869,7 +990,19 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     c.layer = layer.value();
   }
 
-  c.ring->SetReady(slot);
+  // Mark the slot ready. On the explicit-sync path, hand its render-done
+  // sync_file to the source as the acquire fence (the scene lowers it to the
+  // plane's IN_FENCE_FD); SyncFence takes ownership of the fd.
+  if (scanout_fence_fd >= 0) {
+    if (auto fence = drm::sync::SyncFence::import_fd(scanout_fence_fd)) {
+      c.ring->SetReady(slot, std::move(fence.value()));
+    } else {
+      ::close(scanout_fence_fd);
+      c.ring->SetReady(slot);
+    }
+  } else {
+    c.ring->SetReady(slot);
+  }
   // First commit is a blocking modeset (the scene adds ALLOW_MODESET, which
   // cannot be non-blocking); subsequent frames are non-blocking page flips we
   // pace against.

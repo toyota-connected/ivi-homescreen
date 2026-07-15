@@ -175,6 +175,12 @@ class VulkanDrmBackend final : public Backend {
   struct CompositorState;
   std::unique_ptr<CompositorState> compositor_;
 
+  // Record + submit the scanout hand-off barrier for @p image. On the
+  // explicit-sync path returns an owned sync_file fd (>=0) the caller wraps as
+  // the ready slot's acquire fence (KMS waits via IN_FENCE_FD); on the
+  // CPU-fence fallback the barrier is waited on here and -1 is returned.
+  int SubmitScanoutBarrier(CompositorState& c, VkImage image);
+
   // Self-committing HW cursor on the scanout CRTC's cursor plane. Created in
   // SetupCompositor against compositor_'s DRM device; destroyed before
   // compositor_ so it never outlives that device.
