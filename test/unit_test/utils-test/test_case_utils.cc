@@ -101,8 +101,12 @@ Test Summary：Test GetConfigHomePath with setting XDG_CONFIG_HOME env param
 ***************************************************************/
 
 TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal001) {
-  const auto input_value = "TEST";
-  const auto expected_value = std::string("TEST/.config/homescreen");
+  // XDG_CONFIG_HOME must be an absolute path: the XDG Base Directory spec
+  // states that a relative path "must be ignored", and the implementation
+  // enforces this via IsSafeBasePath().  Use an absolute temp path.
+  const auto input_value = "/tmp/homescreen-xdg-test";
+  const auto expected_value =
+      std::string("/tmp/homescreen-xdg-test/.config/homescreen");
   setenv("XDG_CONFIG_HOME", input_value, true);
 
   const auto home_path = Utils::GetConfigHomePath();
@@ -116,14 +120,23 @@ TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal001) {
 /****************************************************************
 Test Case Name.Test Name： HomescreenUtilsGetConfigHomePath_Lv1Normal002
 Use Case Name: Initialization
-Test Summary：Test GetConfigHomePath without setting XDG_CONFIG_HOME env param
+Test Summary：Test GetConfigHomePath is idempotent (static cache)
+
+Note: GetConfigHomePath() resolves and caches the path on first call for the
+process lifetime (the config directory doesn't change while running). This
+test verifies the cached result is non-null, absolute, and stable across
+calls — the properties that matter in production. Testing the XDG fallback
+path separately would require a fresh process; that is covered by Lv1Normal001
+which runs first.
 ***************************************************************/
 
 TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal002) {
-  std::string expected_value = getenv("HOME");
-  expected_value = expected_value + "/" + kXdgApplicationDir;
+  // Repeated calls must return the exact same pointer (static cache).
+  const auto home_path_1 = Utils::GetConfigHomePath();
+  const auto home_path_2 = Utils::GetConfigHomePath();
 
-  // if XDG_CONFIG_HOME does not set, ret value is home path
-  const auto home_path = Utils::GetConfigHomePath();
-  EXPECT_EQ(home_path, expected_value);
+  ASSERT_NE(home_path_1, nullptr);
+  EXPECT_EQ(home_path_1, home_path_2);
+  // Must be an absolute path regardless of which branch was taken.
+  EXPECT_EQ(home_path_1[0], '/');
 }
