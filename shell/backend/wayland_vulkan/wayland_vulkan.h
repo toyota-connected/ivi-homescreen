@@ -17,6 +17,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <ctime>
 #include <mutex>
@@ -505,6 +506,22 @@ class WaylandVulkanBackend final : public Backend {
   uint32_t dmabuf_ring_w_{0};
   uint32_t dmabuf_ring_h_{0};
   size_t dmabuf_frame_{0};
+
+  // Refresh pacing for the dma-buf path. The WSI swapchain path is paced by
+  // vkQueuePresentKHR blocking at vblank under FIFO; the dma-buf commit is
+  // non-blocking, so without this the rasterizer runs free. Each present arms a
+  // wl_surface.frame callback (fires on the Display event thread at ~refresh
+  // when the surface is visible) and the next present's rasterizer thread waits
+  // on it — the same backpressure FIFO gives the swapchain path. A bounded wait
+  // degrades an occluded/unmapped surface (no callbacks) to free-running rather
+  // than a hang.
+  std::mutex frame_mu_;
+  std::condition_variable frame_cv_;
+  bool frame_ready_{true};  // guarded by frame_mu_; true = may present
+  wl_callback* frame_callback_{
+      nullptr};  // in-flight, retired on the event thread
+  // wl_surface.frame done handler (Display event thread).
+  static void OnFrameDone(void* data, wl_callback* cb, uint32_t time);
 
   // Build (or rebuild after a resize) the ring of dma-buf image+wl_buffer
   // slots at @p w x @p h. Returns false (and clears dmabuf_present_active_) on
