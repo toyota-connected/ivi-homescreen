@@ -121,15 +121,19 @@ jobs:
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
 
-      - name: Build (clang, DRM + compositor)
+      - name: Build (clang, DRM + software + compositor)
         env:
           CC: clang-19
           CXX: clang++-19
         run: |
+          # The census and input harness exercise both the DRM-KMS-EGL and the
+          # software (drm-dumb sink) backends, so build both here.
           cmake -GNinja \
             -B ${{github.workspace}}/build \
             -D CMAKE_BUILD_TYPE=Debug \
             -D BUILD_BACKEND_DRM_KMS_EGL=ON \
+            -D BUILD_BACKEND_SOFTWARE=ON \
+            -D BUILD_SOFTWARE_SINK_DRM=ON \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
             -D BUILD_COMPOSITOR=ON \
@@ -160,16 +164,29 @@ jobs:
         run: |
           test/drm_kms_vkms.sh --check
 
-      # A full harness run requires a Flutter bundle whose
-      # libflutter_engine.so version matches the one in third_party/flutter.
-      # When a CI-ready bundle is available, uncomment the step below.
-      #
-      # - name: Full vkms smoke test
-      #   if: steps.vkms.outputs.available == 'true'
-      #   env:
-      #     HOMESCREEN: ${{github.workspace}}/build/shell/homescreen
-      #     BUNDLE: /path/to/ci/bundle/.desktop-homescreen
-      #     SOFTWARE_RENDER: '1'
-      #     DURATION: '5'
-      #   run: |
-      #     test/drm_kms_vkms.sh
+      - name: Load uinput module (input-injection gate)
+        if: steps.vkms.outputs.available == 'true'
+        run: |
+          # Best-effort: load uinput so the input harness's injection scenarios
+          # (I1/I6) can run where the runner can open /dev/uinput. It stays
+          # root-only on a hosted runner, so those scenarios SKIP (reported in
+          # the summary) rather than fail; a self-hosted runner that grants
+          # write access runs them for real.
+          sudo modprobe uinput 2>/dev/null \
+            || echo "::warning::uinput unavailable; input injection scenarios will skip"
+
+      - name: Fetch emb
+        if: steps.vkms.outputs.available == 'true'
+        run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+
+      - name: Harness integration (census + input harness on vkms)
+        if: steps.vkms.outputs.available == 'true'
+        env:
+          IVI_BUILD: ${{github.workspace}}/build
+        run: |
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          emb --version
+          emb flutter --flutter-version "$(cat .flutter-version)"
+          source ./setup_env.sh
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          ./scripts/vkms_harness_integration.sh
