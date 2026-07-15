@@ -33,6 +33,8 @@
 #include "task_runner.h"
 #include "wayland/display.h"
 
+#include <drm_fourcc.h>  // DRM_FORMAT_XRGB8888
+
 #include "vulkan_queue_interposer.h"
 
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
@@ -73,6 +75,7 @@ WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
       wl_display_(display),
       width_(width),
       height_(height) {
+  shell_display_ = shell_display;
   if (shell_display != nullptr) {
     // wp_presentation + vsync feedback machinery live in the Display-owned
     // provider; the backend forwards to it.
@@ -1204,6 +1207,22 @@ void WaylandVulkanBackend::Resize(size_t /* index */,
   }
 }
 
+void WaylandVulkanBackend::OnDmabufFeedback(const wl::FeedbackSnapshot& snap) {
+  {
+    std::lock_guard<std::mutex> lock(fb_mu_);
+    fb_snapshot_ = snap;
+  }
+  const auto scanout = snap.ScanoutModifiersFor(DRM_FORMAT_XRGB8888);
+  const auto all = snap.ModifiersFor(DRM_FORMAT_XRGB8888);
+  ihs::log::info(
+      "[WaylandVulkanBackend] dma-buf feedback: main_device={:#x} "
+      "XRGB8888 modifiers scanout={} total={}",
+      static_cast<uint64_t>(snap.main_device), scanout.size(), all.size());
+  for (const uint64_t m : scanout) {
+    ihs::log::debug("[WaylandVulkanBackend]   scanout modifier {:#018x}", m);
+  }
+}
+
 void WaylandVulkanBackend::CreateSurface(size_t /* index */,
                                          wl_surface* surface,
                                          int32_t /* width */,
@@ -1223,6 +1242,28 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
   wl_surface_.store(surface, std::memory_order_release);
   if (vsync_ != nullptr) {
     vsync_->SetSurface(surface);
+  }
+
+  // Bind v4 dma-buf feedback for the zero-copy present path. Independent of
+  // Mesa's WSI dmabuf bind; per-surface feedback carries the accurate scanout
+  // flag for this surface. A roundtrip drains the initial advertisement so
+  // fb_snapshot_ is populated before the first frame.
+  if (shell_display_ != nullptr && shell_display_->GetLinuxDmabufName() != 0) {
+    dmabuf_feedback_ =
+        std::make_unique<wl::DmabufFeedback<WaylandVulkanBackend>>();
+    dmabuf_feedback_->Record(shell_display_->GetLinuxDmabufName(),
+                             shell_display_->GetLinuxDmabufVersion());
+    if (dmabuf_feedback_->Bind(shell_display_->GetRegistry(), this) &&
+        dmabuf_feedback_->StartSurface(wl_display_,
+                                       reinterpret_cast<wl_proxy*>(surface))) {
+      wl_display_roundtrip(wl_display_);
+    } else {
+      ihs::log::info(
+          "[WaylandVulkanBackend] dma-buf feedback v{} unavailable; zero-copy "
+          "present path disabled (WSI swapchain fallback)",
+          shell_display_->GetLinuxDmabufVersion());
+      dmabuf_feedback_.reset();
+    }
   }
 
   VkWaylandSurfaceCreateInfoKHR createInfo{};
