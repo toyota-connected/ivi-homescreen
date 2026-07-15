@@ -69,8 +69,9 @@ endif()
 
 #add_subdirectory(template-test-case)
 add_subdirectory(utils-test)
-add_subdirectory(flutter_view-test)
-add_subdirectory(app-test)
+# flutter_view-test and app-test require a live Wayland compositor connection
+# (Display::Display calls wl_display_connect / App::BuildDisplays).  They have
+# been moved to test/integration/ and are not run by the unit-test-coverage job.
 add_subdirectory(configuration-test-case)
 add_subdirectory(output_resolver-test)
 add_subdirectory(timer-test)
@@ -87,7 +88,9 @@ add_subdirectory(mutation_stack-test)
 add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(text_input-test)
-#add_subdirectory(texture-test)
+# texture-test requires a live Wayland compositor, Flutter engine, and an app
+# bundle on disk — it is an integration test and has been moved to
+# test/integration/texture-test/.  Do NOT re-add it here.
 
 # The accessibility sources are only part of the shell target (and therefore of
 # TYPICAL_TEST_SOURCES) when BUILD_ACCESSIBILITY is configured on.
