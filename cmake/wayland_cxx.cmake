@@ -194,6 +194,17 @@ function(ivi_wayland_protocols target)
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/fractional_scale_v1_client.hpp TARGET ${target})
 
+    # linux-drm-syncobj-v1 — the wayland_vulkan dma-buf present path binds this
+    # for explicit sync (acquire/release timeline points that replace the CPU
+    # fence). Vendored: the staging XML only ships with wayland-protocols >= 1.32,
+    # newer than the oldest supported sysroots. No shipped wl/ helper carries its
+    # interface tables, so generate self-contained with EMIT_INTERFACE_TABLES.
+    # Runtime-gated on the compositor advertising the global, so generating it
+    # unconditionally costs nothing on stacks that never bind it.
+    wayland_cxx_generate(PROTOCOL "${_loc}/linux-drm-syncobj-v1.xml"
+        MODE client-header EMIT_INTERFACE_TABLES
+        OUTPUT wayland-protocols/linux_drm_syncobj_client.hpp TARGET ${target})
+
     # text-input (IME) — the build-selected backend's client header. The
     # wl::ime backend header (<wl/ime/backends/text_input_v{1,3}.hpp>) includes
     # the generated header by its fixed name with --emit-interface-tables, so it

@@ -37,6 +37,7 @@
 #include <wayland-client.h>  // wl_surface_attach/damage_buffer/commit
 
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
+#include "backend/wayland_vulkan/wl_explicit_sync.h"
 #include "vulkan_queue_interposer.h"
 
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
@@ -199,6 +200,10 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
         frame_callback_ = nullptr;
       }
     }
+    // Tear down explicit sync before the device: it destroys its acquire
+    // timeline VkSemaphore with device_ (safe after the vkDeviceWaitIdle above)
+    // and its wp_linux_drm_syncobj proxies while the connection is still up.
+    explicit_sync_.reset();
     // Tear down the dma-buf present ring before the device — DmabufImage's
     // destructor destroys its image view/image/memory with device_, and the
     // command buffers belong to dmabuf_cmd_pool_.
@@ -527,13 +532,20 @@ void WaylandVulkanBackend::findPhysicalDevice() {
       // dma-buf zero-copy present path: import/export a modifier-tiled image
       // the compositor can scan out. Enabled when advertised; the path stays
       // gated at runtime on a successful DmabufImage allocation, so a device
-      // missing any of these simply falls back to the WSI swapchain.
+      // missing any of these simply falls back to the WSI swapchain. The last
+      // four back the wp_linux_drm_syncobj explicit-sync path (a timeline
+      // semaphore imported from a DRM syncobj + the render-node resolve);
+      // absent, that path degrades to the CPU fence.
       else {
         for (const char* want :
              {VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
               VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
               VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-              VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME}) {
+              VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
+              VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+              VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
+              VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
+              VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME}) {
           if (strcmp(want, extensionName) == 0) {
             supported_extensions.push_back(want);
           }
@@ -627,6 +639,20 @@ void WaylandVulkanBackend::createLogicalDevice() {
       static_cast<uint32_t>(enabled_device_extensions_.size());
   device_info.ppEnabledExtensionNames = enabled_device_extensions_.data();
   device_info.pEnabledFeatures = &device_features;
+
+  // Enable the timeline-semaphore feature when the extension was selected, so
+  // the wp_linux_drm_syncobj explicit-sync path can create the timeline
+  // semaphore it imports the acquire DRM syncobj into. Harmless otherwise.
+  VkPhysicalDeviceTimelineSemaphoreFeatures timeline_feature{};
+  timeline_feature.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+  for (const char* ext : enabled_device_extensions_) {
+    if (strcmp(ext, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) {
+      timeline_feature.timelineSemaphore = VK_TRUE;
+      device_info.pNext = &timeline_feature;
+      break;
+    }
+  }
 
   CHECK_VK_RESULT(
       d().vkCreateDevice(physical_device_, &device_info, nullptr, &device_));
@@ -1352,6 +1378,27 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
           "[WaylandVulkanBackend] zero-copy dma-buf present ENABLED ({} "
           "renderable modifier(s) shared with the compositor)",
           dmabuf_modifiers_.size());
+      // Bring up wp_linux_drm_syncobj explicit sync if the compositor
+      // advertises the manager and the device supports the timeline bridge. On
+      // failure the CPU fence is used — never fatal. IVI_VK_NO_EXPLICIT_SYNC
+      // forces the CPU fence (bisecting / A-B against the timeline path).
+      if (shell_display_ != nullptr &&
+          shell_display_->GetDrmSyncobjName() != 0 &&
+          std::getenv("IVI_VK_NO_EXPLICIT_SYNC") == nullptr) {
+        std::string sync_err;
+        explicit_sync_ = wl_vulkan::ExplicitSync::Create(
+            physical_device_, device_, shell_display_->GetRegistry(),
+            shell_display_->GetDrmSyncobjName(),
+            shell_display_->GetDrmSyncobjVersion(), wl_display_,
+            reinterpret_cast<wl_proxy*>(surface), sync_err);
+        if (!explicit_sync_) {
+          ihs::log::info(
+              "[WaylandVulkanBackend] explicit sync unavailable ({}); using "
+              "CPU "
+              "fence for the dma-buf path",
+              sync_err);
+        }
+      }
     } else {
       ihs::log::info(
           "[WaylandVulkanBackend] dma-buf present {} (modifiers={}, env={}); "
@@ -2064,7 +2111,14 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   size_t idx = dmabuf_frame_ % dmabuf_slots_.size();
   for (size_t i = 0; i < dmabuf_slots_.size(); ++i) {
     const size_t cand = (dmabuf_frame_ + i) % dmabuf_slots_.size();
-    if (dmabuf_slots_[cand].buffer->released()) {
+    // On the explicit-sync path the compositor signals a release timeline
+    // instead of sending wl_buffer.release, so poll that; otherwise use the
+    // wl_buffer.release flag.
+    const bool released =
+        explicit_sync_
+            ? explicit_sync_->SlotReleased(dmabuf_slots_[cand].release_point)
+            : dmabuf_slots_[cand].buffer->released();
+    if (released) {
       idx = cand;
       break;
     }
@@ -2146,14 +2200,35 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
+
+  // Explicit sync: the blit submit signals the acquire timeline at this frame's
+  // point (the compositor waits on it before sampling), so the CPU stall below
+  // is skipped. The fence still fires for command-buffer/image reuse safety at
+  // slot selection. Without explicit sync, the CPU fence is the producer sync.
+  wl_vulkan::ExplicitSync::FramePoints sync_pts{};
+  VkSemaphore acquire_sem = VK_NULL_HANDLE;
+  VkTimelineSemaphoreSubmitInfo tl{};
+  if (explicit_sync_) {
+    sync_pts = explicit_sync_->NextFrame();
+    acquire_sem = explicit_sync_->acquire_semaphore();
+    tl.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    tl.signalSemaphoreValueCount = 1;
+    tl.pSignalSemaphoreValues = &sync_pts.acquire;
+    submit.pNext = &tl;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &acquire_sem;
+  }
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueSubmit(queue_, 1, &submit, slot.fence);
   }
-  // CPU fence: block until the blit completes so the dma-buf holds a full frame
-  // before the compositor samples it.
-  CHECK_VK_RESULT(
-      d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
+  if (!explicit_sync_) {
+    // CPU fence: block until the blit completes so the dma-buf holds a full
+    // frame before the compositor samples it. Explicit sync replaces this stall
+    // with the acquire timeline point the compositor waits on GPU-side.
+    CHECK_VK_RESULT(
+        d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
+  }
 
   RequestPresentationFeedback();
 
@@ -2184,6 +2259,14 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
                              static_cast<int32_t>(h));
   } else {
     wl_surface_damage(surface, 0, 0, INT32_MAX, INT32_MAX);
+  }
+  // Explicit sync: attach the acquire/release points to this commit (must be
+  // between attach and commit) and record the slot's release point for the
+  // reuse poll. The compositor waits on acquire before sampling and signals
+  // release when done.
+  if (explicit_sync_) {
+    explicit_sync_->SetSurfacePoints(sync_pts);
+    slot.release_point = sync_pts.release;
   }
   wl_surface_commit(surface);
   wl_display_flush(wl_display_);

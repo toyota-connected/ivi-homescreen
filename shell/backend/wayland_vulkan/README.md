@@ -69,6 +69,7 @@ internal wall-clock scheduler. The decision is logged once at startup.
 | `IVI_M2P_PROFILE` | (off) | Anything non-empty enables the **motion-to-photon** (input-to-scanout) profiler. Joins kernel input time from `zwp_input_timestamps_v1` (pointer/touch) with compositor scanout time from `wp_presentation` feedback. Reports two latencies per window: **frame-accurate** — each input is attributed to the frame whose build cutoff (the baton's `frame_start_time`) is at or after it, i.e. the frame that actually rendered it, giving true `present − input`; and **floor** — `present − input` for the first scanout at or after the input, which under-counts by the engine pipeline depth. Every 120 presents logs `[wayland] motion->photon: frame-accurate p50=Xms p99=Yms max=Zms \| floor p50=xms p99=yms \| n=N dropped=D`, plus a session summary (both metrics) at teardown. The frame-accurate metric is the input-side complement of the `pipeline_*` (beginFrame-to-present) latency above: together they span input → build → present. `IVI_PROFILE` enables it too. |
 | `IVI_VK_PRESENT_MODE` | `fifo` | One of `fifo`, `fifo_relaxed`, `mailbox`, `immediate`. Selects the swapchain present mode if the compositor advertises it; otherwise falls back to FIFO with a warn. See "Present-mode interaction" below — `mailbox` is the only setting where `vsync_callback`'s contribution becomes large. |
 | `IVI_VK_DMABUF` | (off) | **Experimental** zero-copy dma-buf present path (see below). When set, and the compositor advertises a DRM format modifier this GPU can render into, the compositor path bypasses the WSI swapchain entirely: it blits the engine's frame into a modifier-tiled, dma-buf-exported `VkImage` and commits it as a `wl_buffer` (via `zwp_linux_dmabuf_v1`) directly on the `wl_surface`, so the compositor can promote the surface to a hardware plane. Off by default; falls back to the swapchain when unset or when no renderable modifier is shared. |
+| `IVI_VK_NO_EXPLICIT_SYNC` | (off) | On the dma-buf path, force the CPU-fence producer sync instead of `wp_linux_drm_syncobj` explicit sync (see below). For bisecting / A-B'ing the timeline path; no effect on the swapchain path. |
 
 ## Experimental: zero-copy dma-buf present (`IVI_VK_DMABUF`)
 
@@ -85,9 +86,23 @@ dma-buf path removes that layer:
 2. A ring of modifier-tiled, dma-buf-exported `VkImage` slots (`wl_dmabuf_present`),
    each wrapped as a `wl_buffer` via `zwp_linux_buffer_params`.
 3. `PresentLayersDmabuf` blits the engine's backing-store layers into the current
-   slot (reusing the swapchain blit, retargeted), waits a per-slot CPU fence,
-   then attaches/damages/commits the `wl_buffer` — no `vkQueuePresentKHR`.
-4. Refresh pacing via `wl_surface.frame`. Each commit arms a frame callback; the
+   slot (reusing the swapchain blit, retargeted), synchronizes producer/consumer
+   (explicit sync below, or a per-slot CPU fence), then attaches/damages/commits
+   the `wl_buffer` — no `vkQueuePresentKHR`.
+4. Explicit sync via `wp_linux_drm_syncobj` (`wl_explicit_sync`), when the
+   compositor advertises the manager and the device has timeline semaphores +
+   external-semaphore-fd. Instead of the CPU fence stalling the rasterizer until
+   the blit finishes, the blit submit signals an acquire timeline (a
+   `VK_SEMAPHORE_TYPE_TIMELINE` `VkSemaphore` imported — OPAQUE_FD — from a DRM
+   syncobj); the compositor waits on that point before sampling. A second
+   (release) syncobj the compositor signals is polled with a zero-timeout
+   `drmSyncobjTimelineWait` to reclaim slots — the explicit-sync replacement for
+   `wl_buffer.release`. The render node is opened from the device's
+   `VkPhysicalDeviceDrmPropertiesEXT` (a Wayland client has no DRM master). Falls
+   back to the CPU fence if any of this is unavailable; `IVI_VK_NO_EXPLICIT_SYNC`
+   forces the fallback. Validated hazard-free under the Vulkan synchronization
+   validation layer.
+5. Refresh pacing via `wl_surface.frame`. Each commit arms a frame callback; the
    next present's rasterizer thread blocks until it fires (the compositor
    signalling it is ready for the next frame). This is the backpressure the
    swapchain path gets for free from `vkQueuePresentKHR` blocking at vblank under
@@ -119,11 +134,12 @@ Measured with a scrolling workload:
 follows a window dragged between two mixed-refresh mutter outputs.
 
 **Status / limitations.** Renders continuously and correctly, paced to the
-compositor's refresh, default-off, no swapchain-path regression. Validated on
-mutter (gnome-shell) and gamescope (Steam Deck, RADV Van Gogh). Not yet done:
-(a) CPU-fence sync, not explicit sync (`wp_linux_drm_syncobj`, needs a scanner
-bump); (b) not yet run against a gamescope DRM session (headless only on the
-Deck). Platform-view layers are not yet composited on this path.
+compositor's refresh, explicit-sync where available (else CPU fence), default-off,
+no swapchain-path regression. Validated on mutter (gnome-shell) and gamescope
+(Steam Deck, RADV Van Gogh); explicit sync is hazard-free under the Vulkan
+synchronization validation layer on mutter/RADV. Not yet done: (a) not yet run
+against a gamescope DRM session (headless only on the Deck). Platform-view layers
+are not yet composited on this path.
 
 ## Present-mode interaction (the surprising part)
 
