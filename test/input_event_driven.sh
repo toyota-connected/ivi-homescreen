@@ -40,6 +40,7 @@ BUNDLE="${BUNDLE:-}"
 VKMS_CARD="${VKMS_CARD:-}"
 STORM_SECS="${STORM_SECS:-6}"
 IDLE_SECS="${IDLE_SECS:-5}"
+IDLE_CTXT_MAX="${IDLE_CTXT_MAX:-30}"  # max idle voluntary ctxt-switches for I2
 ONLY="${ONLY:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -208,10 +209,13 @@ scenario_I2() {  # scenario_I2 <backend> <comm>
     after="$(vctxt "$HS_PID" "$tid")"
     delta=$(( ${after:-0} - ${before:-0} ))
     stop_homescreen
-    # Idle event-driven: single digits (SIGTERM re-check, keymap timers). A busy
-    # poll at even 60Hz would be ~300 over 5s, so the gap to a real regression is
-    # wide; 30 leaves headroom for timer noise without hiding a busy loop.
-    if [[ "$delta" -le 30 ]]; then
+    # Idle event-driven: single digits (SIGTERM re-check, keymap timers) on a
+    # quiet box. A busy poll at even 60Hz would be ~300 over 5s, so the gap to a
+    # real regression is wide. The default 30 suits a quiet dev machine; a host
+    # with live input devices (a jittery mouse wakes the seat fd) or a loaded,
+    # shared CI runner legitimately accrues more idle wakes while staying far
+    # below busy-poll, so IDLE_CTXT_MAX raises the ceiling without hiding a loop.
+    if [[ "$delta" -le "$IDLE_CTXT_MAX" ]]; then
         record I2 pass "$comm idle ${IDLE_SECS}s vctxt delta=$delta"
     else
         record I2 fail "$comm vctxt delta=$delta over ${IDLE_SECS}s idle (busy-polling?)"
