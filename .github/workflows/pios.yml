@@ -38,6 +38,10 @@ env:
   # it resolves as a cache hit instead of re-downloading + re-extracting. Repo
   # defaults to `emb-cache`, so entries land at <registry>/emb-cache:<tag>.
   EMB_CACHE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+  # oras (OCI client) pinned version. Cached per job keyed on this value, so the
+  # binary is fetched from GitHub releases only when the version changes — every
+  # matrix job re-downloading it otherwise gets rate-limited.
+  ORAS_VERSION: "1.2.0"
 
 jobs:
   publish:
@@ -90,8 +94,7 @@ jobs:
       # step below (EMB_CACHE_REGISTRY). Pinned; installed to /usr/local/bin.
       - name: Install + log in oras
         run: |
-          ORAS_VERSION=1.2.0
-          curl -fsSL \
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
             "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
             | sudo tar -xzf - -C /usr/local/bin oras
           echo "${{ secrets.GITHUB_TOKEN }}" \
@@ -165,12 +168,20 @@ jobs:
       # oras pulls the resolved store entries (sysroot base + toolchain) from the
       # OCI cache in the Build step (EMB_CACHE_REGISTRY), so the resolve is a
       # cache hit. Root in-container; the image ships curl.
+      - name: Cache oras binary
+        uses: actions/cache@v5
+        with:
+          path: /usr/local/bin/oras
+          key: oras-${{ env.ORAS_VERSION }}-linux-amd64
       - name: Install + log in oras
         run: |
-          ORAS_VERSION=1.2.0
-          curl -fsSL \
-            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
-            | tar -xzf - -C /usr/local/bin oras
+          # Only fetch from GitHub releases on a cache miss (version bump); the
+          # cache restores /usr/local/bin/oras otherwise.
+          if [ ! -x /usr/local/bin/oras ]; then
+            curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+              "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+              | tar -xzf - -C /usr/local/bin oras
+          fi
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
