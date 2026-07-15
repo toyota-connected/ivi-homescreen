@@ -523,8 +523,9 @@ struct VulkanDrmBackend::CompositorState {
   // reader thread when its event arrives — hence atomic. scanning_slot /
   // pending_slot stay raster-thread-local (present_layers only).
   std::atomic<bool> flip_pending{false};
-  int scanning_slot = -1;  // slot the CRTC is currently scanning
-  int pending_slot = -1;   // slot in the in-flight non-blocking flip
+  int scanning_slot = -1;            // slot the CRTC is currently scanning
+  int pending_slot = -1;             // slot in the in-flight non-blocking flip
+  uint32_t period_ns = 16'666'667U;  // connector refresh period (from setup)
   drmEventContext evctx{};
 
   // Async page-flip reader: an asio descriptor over the DRM fd on its own
@@ -772,8 +773,10 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // Flutter targets the real refresh, and start the async page-flip reader that
   // returns each frame's baton on vblank.
   const uint32_t vr = target.mode.vrefresh;
-  vsync_.SetPeriodNs(vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr)
-                            : 16'666'667U);
+  const uint32_t period_ns =
+      vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
+  compositor_->period_ns = period_ns;
+  vsync_.SetPeriodNs(period_ns);
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                        "DrmVkVsync");
   {
@@ -1103,16 +1106,20 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
   const int scanout_fence_fd = SubmitScanoutBarrier(c, store->image());
 
-  // The previous non-blocking flip has normally already completed: its event
-  // returned the vsync baton, which is what let the engine build this frame.
-  // Do NOT read the fd here — the async reader is the single reader (a second
-  // drmHandleEvent would race it). If a frame somehow arrives with a flip still
-  // in flight, wait on the flag (bounded) so the commit below does not EBUSY;
-  // under vsync pacing this loop never spins.
-  for (int i = 0; i < 100 && c.flip_pending.load(std::memory_order_acquire);
-       ++i) {
+  // The engine's raster thread pipelines: it hands us frame N+1 while flip N is
+  // still in flight, and a single plane can hold only one flip, so we wait for
+  // the previous flip here. Do NOT read the fd — the async reader is the single
+  // reader (a second drmHandleEvent would race it); poll the flag instead.
+  // A short wait (~1 vblank slice) is the normal cost of single-plane double
+  // buffering; only a wait past the refresh period is a real stall (a dropped
+  // flip event or buffer starvation), which the counter flags.
+  int spin_ms = 0;
+  for (; spin_ms < 100 && c.flip_pending.load(std::memory_order_acquire);
+       ++spin_ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+  const bool stalled =
+      static_cast<uint32_t>(spin_ms) * 1'000'000U > c.period_ns;
   // Rotate: the completed flip's slot is now scanning; the slot it replaced
   // returns to the free pool. Raster-thread-local (the reader never touches
   // it).
@@ -1190,7 +1197,8 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   static const bool profile_enabled =
       profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
   if (profile_enabled) {
-    frame_profile_.Record("VulkanDrmBackend", /*ok=*/true);
+    frame_profile_.Record("VulkanDrmBackend", /*ok=*/true, /*now_ns=*/0,
+                          stalled);
   }
   return true;
 }
