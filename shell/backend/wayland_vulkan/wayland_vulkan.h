@@ -415,6 +415,12 @@ class WaylandVulkanBackend final : public Backend {
                             size_t layers_count,
                             void* user_data);
 
+  // Whether the zero-copy dma-buf present path is active (see the DmabufSlot
+  // ring below). Declared outside BUILD_COMPOSITOR because CreateSurface reads
+  // it to decide whether to create the WSI swapchain, which is compiled on
+  // every configuration; it can only ever become true under BUILD_COMPOSITOR.
+  bool dmabuf_present_active_{false};
+
 #if BUILD_COMPOSITOR
   bool dma_buf_export_ok_{false};
 
@@ -493,7 +499,6 @@ class WaylandVulkanBackend final : public Backend {
     VkFence fence{VK_NULL_HANDLE};
     VkImageLayout layout{VK_IMAGE_LAYOUT_UNDEFINED};
   };
-  bool dmabuf_present_active_{false};
   std::vector<uint64_t> dmabuf_modifiers_;  // negotiated set, cached in Create
   VkCommandPool dmabuf_cmd_pool_{VK_NULL_HANDLE};
   std::vector<DmabufSlot> dmabuf_slots_;
