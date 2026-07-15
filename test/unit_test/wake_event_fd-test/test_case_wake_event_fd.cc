@@ -205,6 +205,117 @@ TEST(WakeEventFd, MockDispatchLoopStopAndInput) {
   close(input_pipe[1]);
 }
 
+// Models the seat dispatch loop's SESSION-ACTION contract
+// (DrmSeat::DispatchLoop with OnSessionPaused/OnSessionResumed; software_seat
+// mirrors it): a VT-switch pause or resume is posted from the libseat dispatch
+// thread as an atomic action paired with a waker Wake(). The seat thread is
+// parked in poll(-1) with no input pending -- on suspend the evdev fds are
+// being revoked, on resume libinput is still suspended, so in both cases NO
+// input event is coming and the waker is the only thing that can unblock the
+// poll. Assert each action is serviced on the dispatch thread within the 100 ms
+// budget, exactly once, in order, with zero input traffic. libseat/libinput
+// semantics are HIL-only (WS-E); this covers the wake mechanics CI cannot
+// otherwise reach.
+TEST(WakeEventFd, SessionActionServicedPromptlyWithoutInput) {
+  enum class Action { kNone = 0, kSuspend = 1, kResume = 2 };
+  constexpr long long kBudgetNs = 100'000'000;  // 100 ms service ceiling
+  const auto now_ns = [] {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+  };
+
+  const WakeEventFd waker;
+  ASSERT_GE(waker.fd(), 0);
+
+  int input_pipe[2];
+  ASSERT_EQ(pipe(input_pipe), 0);
+  // Non-blocking read end (mirrors the seats' non-blocking libinput fd) so the
+  // drain-to-empty loop EAGAIN-exits back to poll().
+  ASSERT_EQ(fcntl(input_pipe[0], F_SETFL, O_NONBLOCK), 0);
+
+  std::atomic<Action> pending{Action::kNone};  // == pending_session_action_
+  std::atomic<bool> stop{false};
+  std::atomic<int> input_seen{0};
+  std::atomic<int> serviced_count{0};
+  std::atomic<int> last_serviced{0};
+  std::atomic<long long> post_ns{0};
+  std::atomic<long long> latency_ns{0};
+
+  std::thread loop([&] {
+    while (!stop.load(std::memory_order_acquire)) {
+      // Loop top: exchange and service the pending session action, exactly as
+      // DispatchLoop does before every poll(). exchange() hands the action to
+      // this thread once; a second observer would see kNone.
+      if (const Action act =
+              pending.exchange(Action::kNone, std::memory_order_acq_rel);
+          act != Action::kNone) {
+        latency_ns.store(now_ns() - post_ns.load(std::memory_order_acquire),
+                         std::memory_order_release);
+        last_serviced.store(static_cast<int>(act), std::memory_order_release);
+        serviced_count.fetch_add(1, std::memory_order_acq_rel);
+      }
+      pollfd pfds[2] = {{input_pipe[0], POLLIN, 0}, {waker.fd(), POLLIN, 0}};
+      if (::poll(pfds, 2, -1) < 0) {
+        continue;
+      }
+      if ((pfds[1].revents & POLLIN) != 0) {
+        waker.Drain();
+        continue;  // re-check stop_ and service the action at the top
+      }
+      if ((pfds[0].revents & POLLIN) != 0) {
+        char b = 0;
+        while (read(input_pipe[0], &b, 1) == 1) {
+          input_seen.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    }
+  });
+
+  std::this_thread::sleep_for(50ms);  // let the loop settle into poll(-1)
+
+  // Post an action the way OnSessionPaused/OnSessionResumed do (store, then
+  // Wake), then wait for the dispatch thread to service it. Returns the
+  // serviced latency in nanoseconds, or -1 if it was not serviced within the
+  // safety bound.
+  const auto post_and_wait = [&](Action act) -> long long {
+    const int want = static_cast<int>(act);
+    post_ns.store(now_ns(), std::memory_order_release);
+    pending.store(act, std::memory_order_release);
+    waker.Wake();
+    for (int i = 0;
+         i < 5000 && last_serviced.load(std::memory_order_acquire) != want;
+         ++i) {
+      std::this_thread::sleep_for(1ms);  // 5 s bound guards against a lost wake
+    }
+    if (last_serviced.load(std::memory_order_acquire) != want) {
+      return -1;
+    }
+    return latency_ns.load(std::memory_order_acquire);
+  };
+
+  const long long suspend_ns = post_and_wait(Action::kSuspend);
+  ASSERT_GE(suspend_ns, 0) << "suspend action was never serviced";
+  EXPECT_LT(suspend_ns, kBudgetNs);
+
+  const long long resume_ns = post_and_wait(Action::kResume);
+  ASSERT_GE(resume_ns, 0) << "resume action was never serviced";
+  EXPECT_LT(resume_ns, kBudgetNs);
+
+  EXPECT_EQ(serviced_count.load(), 2);  // each action serviced exactly once
+  EXPECT_EQ(input_seen.load(), 0);      // zero input; the waker alone woke it
+
+  std::cerr << "[   METRIC ] session suspend_service=" << suspend_ns / 1000
+            << "us resume_service=" << resume_ns / 1000
+            << "us (budget=" << kBudgetNs / 1'000'000 << "ms)\n";
+
+  stop.store(true, std::memory_order_release);
+  waker.Wake();
+  loop.join();  // hangs (caught by ctest timeout) if a wake is lost
+  close(input_pipe[0]);
+  close(input_pipe[1]);
+}
+
 // The point of #261: an idle dispatch thread blocked in poll(-1) accrues
 // (essentially) zero context switches, whereas the old timed poll wakes once
 // per timeout. Measures voluntary_ctxt_switches over an idle window for both
