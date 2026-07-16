@@ -133,6 +133,7 @@ add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(text_input-test)
 add_subdirectory(hexdump-test)
+add_subdirectory(stats-test)
 # texture-test requires a live Wayland compositor, Flutter engine, and an app
 # bundle on disk — it is an integration test and has been moved to
 # test/integration/texture-test/.  Do NOT re-add it here.
