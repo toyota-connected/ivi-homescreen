@@ -108,6 +108,10 @@ target_include_directories(homescreen_ut_shell
     # unit_test_utils.cc (in the archive) and test case .cc files both
     # include gtest/gtest.h; propagate it through the archive.
     $<TARGET_PROPERTY:gtest,INTERFACE_INCLUDE_DIRECTORIES>
+    # Phase 2 test drivers that use GMock include gmock/gmock.h; propagate
+    # the gmock include path so it is available without repeating it in each
+    # per-test CMakeLists.txt.
+    $<TARGET_PROPERTY:gmock,INTERFACE_INCLUDE_DIRECTORIES>
 )
 target_link_libraries(homescreen_ut_shell
     # PUBLIC: test executables that link this archive must also see the
@@ -146,6 +150,15 @@ add_subdirectory(motion_to_photon-test)
 add_subdirectory(xkb_keyboard-test)
 add_subdirectory(key_repeater-test)
 add_subdirectory(shutdown_flag-test)
+# ----- Phase 2: mock / stub tests -----------------------------------------
+add_subdirectory(output_manager-test)
+add_subdirectory(main_loop_waker-test)
+add_subdirectory(vsync_provider-test)
+add_subdirectory(logging_handler-test)
+add_subdirectory(platform_handler-test)
+add_subdirectory(mouse_cursor_handler-test)
+add_subdirectory(watchdog_plugin-test)
+add_subdirectory(key_event_handler-test)
 # texture-test requires a live Wayland compositor, Flutter engine, and an app
 # bundle on disk — it is an integration test and has been moved to
 # test/integration/texture-test/.  Do NOT re-add it here.
