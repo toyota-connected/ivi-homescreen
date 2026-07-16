@@ -91,23 +91,25 @@ void ReadPlaneModifiers(int fd,
 
 }  // namespace
 
-bool DiscoverScanoutTarget(const std::string& drm_device,
-                           uint32_t fourcc,
-                           const std::string& mode_spec,
-                           ScanoutTarget& out,
-                           std::string& err) {
-  const int fd = ::open(drm_device.c_str(), O_RDWR | O_CLOEXEC);
-  if (fd < 0) {
-    err = "open('" + drm_device + "'): " + std::strerror(errno);
-    return false;
-  }
+namespace {
+
+// The body of DiscoverScanoutTarget, on an already-open fd. Split out at the
+// open() so the same probe runs against a supplied fd -- wayland-leased-drm
+// hands it a lease fd, which it must use rather than re-opening the card: the
+// kernel filters a lease fd's view to the leased objects, and a leased client
+// may have no permission to open the node at all. Never closes @p fd; the
+// caller owns it.
+bool DiscoverScanoutTargetOnFd(int fd,
+                               uint32_t fourcc,
+                               const std::string& mode_spec,
+                               ScanoutTarget& out,
+                               std::string& err) {
   drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
   drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
 
   drmModeRes* res = drmModeGetResources(fd);
   if (!res) {
     err = "drmModeGetResources failed";
-    ::close(fd);
     return false;
   }
 
@@ -123,7 +125,6 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
   if (!conn) {
     err = "no connected connector with a mode";
     drmModeFreeResources(res);
-    ::close(fd);
     return false;
   }
   out.connector_id = conn->connector_id;
@@ -180,7 +181,6 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
   if (!out.crtc_id) {
     err = "no CRTC for connector";
     drmModeFreeResources(res);
-    ::close(fd);
     return false;
   }
 
@@ -194,14 +194,12 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
   drmModeFreeResources(res);
   if (crtc_index < 0) {
     err = "CRTC not found in resources";
-    ::close(fd);
     return false;
   }
 
   drmModePlaneRes* pres = drmModeGetPlaneResources(fd);
   if (!pres) {
     err = "drmModeGetPlaneResources failed";
-    ::close(fd);
     return false;
   }
   for (uint32_t i = 0; i < pres->count_planes; ++i) {
@@ -220,13 +218,40 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
   drmModeFreePlaneResources(pres);
   if (!out.primary_plane_id) {
     err = "no primary plane for CRTC";
-    ::close(fd);
     return false;
   }
 
   ReadPlaneModifiers(fd, out.primary_plane_id, fourcc, out.plane_modifiers);
-  ::close(fd);
   return true;
+}
+
+}  // namespace
+
+bool DiscoverScanoutTarget(const std::string& drm_device,
+                           uint32_t fourcc,
+                           const std::string& mode_spec,
+                           ScanoutTarget& out,
+                           std::string& err) {
+  const int fd = ::open(drm_device.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    err = "open('" + drm_device + "'): " + std::strerror(errno);
+    return false;
+  }
+  const bool ok = DiscoverScanoutTargetOnFd(fd, fourcc, mode_spec, out, err);
+  ::close(fd);
+  return ok;
+}
+
+bool DiscoverScanoutTarget(int drm_fd,
+                           uint32_t fourcc,
+                           const std::string& mode_spec,
+                           ScanoutTarget& out,
+                           std::string& err) {
+  if (drm_fd < 0) {
+    err = "DiscoverScanoutTarget: invalid fd";
+    return false;
+  }
+  return DiscoverScanoutTargetOnFd(drm_fd, fourcc, mode_spec, out, err);
 }
 
 }  // namespace drm_kms_vulkan

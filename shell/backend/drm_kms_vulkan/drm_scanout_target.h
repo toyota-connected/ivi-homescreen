@@ -52,4 +52,19 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
                            ScanoutTarget& out,
                            std::string& err);
 
+// wayland-leased-drm: probe an already-open fd instead of opening a card.
+// @p drm_fd is borrowed -- never closed here.
+//
+// Not just a convenience. A lease fd's resource view is kernel-filtered to the
+// leased objects, so probing through it finds exactly the connector we hold;
+// re-opening the node by path would enumerate the whole card and could pick one
+// the compositor is still scanning out on. It may also be the only handle we
+// have: a leased client uses a lease precisely because it may not be permitted
+// to open the DRM node itself.
+bool DiscoverScanoutTarget(int drm_fd,
+                           uint32_t fourcc,
+                           const std::string& mode_spec,
+                           ScanoutTarget& out,
+                           std::string& err);
+
 }  // namespace drm_kms_vulkan

@@ -59,6 +59,26 @@ class VulkanDrmBackend final : public Backend {
       const std::string& mode_spec,
       int rotation);
 
+  // wayland-leased-drm: drive an externally-owned DRM fd (the master fd from
+  // wp_drm_lease_v1.lease_fd) instead of opening a card by path.
+  //
+  // The lease only changes how the fd was obtained; the Vulkan side is
+  // unaffected. Unlike the EGL path, the VkDevice was never created from the
+  // KMS fd — the physical device is matched by DRM dev-number and lives on the
+  // ICD's render node — so only the scanout/modeset half touches the lease.
+  //
+  // @p drm_fd is borrowed: this backend never closes it. @p fd_owner is the
+  // opaque keep-alive that does own it (the LeaseHold) and must outlive the
+  // backend. @p drm_device is still needed, derived from the lease fd, because
+  // the physical-device match stats the node — it is never opened on this path.
+  static std::shared_ptr<VulkanDrmBackend> Create(
+      int drm_fd,
+      std::shared_ptr<void> fd_owner,
+      const std::string& drm_device,
+      bool enable_validation,
+      const std::string& mode_spec,
+      int rotation);
+
   ~VulkanDrmBackend() override;
 
   VulkanDrmBackend(const VulkanDrmBackend&) = delete;
@@ -120,6 +140,11 @@ class VulkanDrmBackend final : public Backend {
                    std::string mode_spec,
                    int rotation);
 
+  // Shared tail of both Create() overloads: bring-up + compositor setup, which
+  // are identical once the backend knows where its DRM fd comes from.
+  static std::shared_ptr<VulkanDrmBackend> FinishCreate(
+      std::shared_ptr<VulkanDrmBackend> backend);
+
   // Bring-up steps. Each logs and returns false on failure; refusal_reason
   // carries the cause for gate failures.
   bool BringUp(std::string& refusal_reason);
@@ -158,6 +183,16 @@ class VulkanDrmBackend final : public Backend {
   bool PresentLayersImpl(const FlutterLayer** layers, size_t count);
 
   std::string drm_device_;
+
+  // wayland-leased-drm: a borrowed DRM fd to use instead of opening
+  // drm_device_. -1 on the path-opened path. When set, drm_device_ is only ever
+  // stat()ed (physical-device match), never opened -- see the leased Create().
+  int injected_fd_ = -1;
+  // Keeps the injected fd's owner (the LeaseHold) alive for this backend's
+  // lifetime. Opaque so this header stays free of the lease client: the backend
+  // needs the fd to stay valid, not to know what keeps it so.
+  std::shared_ptr<void> fd_owner_;
+
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
   // DRM scanout rotation in degrees (0|90|180|270). 90/270 swap the render /
