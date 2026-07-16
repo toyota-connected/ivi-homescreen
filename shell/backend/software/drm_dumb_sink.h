@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -71,6 +72,27 @@ class DrmDumbSink final : public ISurfaceSink {
   // mode is found.
   static std::unique_ptr<DrmDumbSink> Create(const std::string& device_path);
 
+  // wayland-leased-drm: drive an externally-owned DRM fd (the master fd from
+  // wp_drm_lease_v1.lease_fd) instead of opening a card by path.
+  //
+  // Nothing has to be subtracted for a lease: this sink does no master handling
+  // at all, and a lease fd arrives master over its object set -- strictly
+  // better than the implicit-master assumption of the path above. The legacy
+  // modeset and dumb-buffer ioctls it uses are valid on a lease fd, and because
+  // the kernel filters the fd's resource view to the leased objects, the "first
+  // connected connector with modes" pick lands on the leased connector by
+  // construction.
+  //
+  // @p drm_fd is borrowed: the sink never closes it. @p fd_owner is the opaque
+  // keep-alive that does own it (the LeaseHold) and must outlive the sink.
+  // @p revoked, when set, is polled by Present(): once the lease is revoked its
+  // KMS objects are gone from the fd's view and every commit naming them fails,
+  // so frames are dropped rather than spraying ioctl errors. Null = never
+  // gated.
+  static std::unique_ptr<DrmDumbSink> Create(int drm_fd,
+                                             std::shared_ptr<void> fd_owner,
+                                             std::function<bool()> revoked);
+
   ~DrmDumbSink() override;
 
   DrmDumbSink(const DrmDumbSink&) = delete;
@@ -112,10 +134,15 @@ class DrmDumbSink final : public ISurfaceSink {
  private:
   DrmDumbSink();
 
-  // Probe the drm fd for a connector / CRTC / mode triple. Allocates
-  // both dumb buffers and attaches buffer 0 to the CRTC. Returns false
-  // on any failure; caller logs and falls back.
+  // Open @p device_path, then hand off to InitFromFd. Returns false on any
+  // failure; caller logs and falls back.
   bool InitDevice(const std::string& device_path);
+
+  // Probe drm_fd_ for a connector / CRTC / mode triple. Allocates both dumb
+  // buffers and attaches buffer 0 to the CRTC. Split out from InitDevice at the
+  // open() so the same probing runs against a supplied fd (a DRM lease), which
+  // is the whole of the leased software tier.
+  bool InitFromFd();
   bool AllocBuffer(size_t index);
   void FreeBuffer(size_t index);
 
@@ -144,6 +171,20 @@ class DrmDumbSink final : public ISurfaceSink {
   void OnPageFlip(uint64_t tv_ns);
 
   int drm_fd_{-1};
+
+  // False when drm_fd_ is a borrowed lease fd: the destructor must not close
+  // what the LeaseHold owns and will close itself.
+  bool owns_fd_{true};
+
+  // Keeps the borrowed fd's owner alive for the sink's lifetime. Opaque so this
+  // header stays free of the lease client -- the sink needs the fd to stay
+  // valid, not to know what keeps it so. Null on the path-opened path.
+  std::shared_ptr<void> fd_owner_;
+
+  // Lease revocation gate polled by Present(); null on the path-opened path,
+  // where there is no lease to lose.
+  std::function<bool()> revoked_;
+
   uint32_t connector_id_{0};
   uint32_t crtc_id_{0};
   uint32_t saved_crtc_id_{0};  // for restoring on shutdown
