@@ -20,36 +20,10 @@ if (NOT UT_LIBINPUT_FOUND)
     return()
 endif ()
 
-# Basically, the following statements need not be modified
-add_executable(
-        ${TESTCASE_NAME}
-        ${TYPICAL_TEST_SOURCES}
-        ${TESTCASE_CC}
-)
-
+add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})
-
-target_compile_definitions(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_DEFINITIONS}
-)
-
-target_include_directories(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_INC_DIRS}
-        ${UT_LIBINPUT_INCLUDE_DIRS}
-)
-
-target_link_libraries(
-        ${TESTCASE_NAME}
-        PRIVATE
-        gtest_main
-        ${TYPICAL_TEST_LINK_LIBS}
-        PkgConfig::UT_LIBINPUT
-        toolchain::toolchain
-)
+target_include_directories(${TESTCASE_NAME} PRIVATE ${UT_LIBINPUT_INCLUDE_DIRS})
+target_link_libraries(${TESTCASE_NAME} PRIVATE gtest_main homescreen_ut_shell PkgConfig::UT_LIBINPUT)
 
 add_test(
         NAME ${TESTCASE_NAME}

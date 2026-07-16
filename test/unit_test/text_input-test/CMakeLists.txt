@@ -3,33 +3,14 @@ set(TESTCASE_NAME "homescreen_text_input_ut_test_driver")
 set(TESTCASE_CC test_case_text_input.cc)
 list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
-add_executable(
-        ${TESTCASE_NAME}
-        ${TYPICAL_TEST_SOURCES}
-        ${TESTCASE_CC}
-)
-
+# homescreen_ut_shell is an OBJECT library so its .o files are expanded
+# directly into this executable's link command — identical to the old
+# ${TYPICAL_TEST_SOURCES} pattern.  This avoids the circular-dep ordering
+# issue between libflutter.a and libplatform_homescreen.a that a STATIC
+# archive would cause (see test/unit_test/CMakeLists.txt for details).
+add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})
-
-target_compile_definitions(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_DEFINITIONS}
-)
-
-target_include_directories(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_INC_DIRS}
-)
-
-target_link_libraries(
-        ${TESTCASE_NAME}
-        PRIVATE
-        gtest_main
-        ${TYPICAL_TEST_LINK_LIBS}
-        toolchain::toolchain
-)
+target_link_libraries(${TESTCASE_NAME} PRIVATE gtest_main homescreen_ut_shell)
 
 add_test(
         NAME ${TESTCASE_NAME}
