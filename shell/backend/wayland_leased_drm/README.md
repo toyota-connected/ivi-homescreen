@@ -50,16 +50,18 @@ before `create_lease_request`, so it is safe against a live session) or with
 ## Architecture
 
 ```
-main → BackendRegistry["wayland-leased-drm-{egl|software}"]
+main → BackendRegistry["wayland-leased-drm-{egl|vulkan|software}"]
   make_display:
     LeaseClient::Acquire(cfg) ─▶ LeaseHold { lease_fd, connector_id, name,
         │                                    card path, wl_display + monitor
         │                                    thread, revoked flag }
-        ├── egl ──────▶ DrmDisplay(AdoptFd, …, fd, hold)
+        ├── egl/vulkan ▶ DrmDisplay(AdoptFd, …, fd, hold)
         └── software ─▶ SoftwareDisplay + LeasedScanout{fd, connector_id,
                                                         revoked, owner}
   make_backend:
         ├── MakeDrmEglBackend(cfg, display)          [egl — reused verbatim]
+        ├── MakeDrmVulkanBackend(cfg, display)       [vulkan — branches on
+        │                                             display->adopted_fd()]
         └── DrmDumbSink::Create(fd, owner, conn, revoked)   [software]
 ```
 
@@ -131,9 +133,9 @@ the panel stops updating until the process is restarted.
 |---|---|---|---|
 | EGL | `wayland-leased-drm-egl` | `BUILD_BACKEND_DRM_KMS_EGL` | registered |
 | Software | `wayland-leased-drm-software` | `BUILD_BACKEND_SOFTWARE` + `BUILD_SOFTWARE_SINK_DRM` | registered |
-| Vulkan | `wayland-leased-drm-vulkan` | `BUILD_BACKEND_DRM_KMS_VULKAN` | **not registered** — needs `VulkanDrmBackend` to accept an injected `drm::Device` instead of opening by path |
+| Vulkan | `wayland-leased-drm-vulkan` | `BUILD_BACKEND_DRM_KMS_VULKAN` | registered — least lease-coupled of the three: the VkDevice was never created from the KMS fd, so only scanout/modeset touches the lease |
 
-A leased key that is not registered is **refused, not substituted**. Leasing is
+A tier whose renderer stack is not built is **refused, not substituted**. Leasing is
 the difference between driving a connector a compositor handed you and grabbing a
 card outright, so falling back to an unleased backend would do the opposite of
 what was configured, on hardware you may not own.

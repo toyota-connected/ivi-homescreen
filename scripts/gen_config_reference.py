@@ -76,6 +76,12 @@ META = {
     "shell.window.activation_area.height": ("view.height", "int", "agl", "Activation rect height (omit table -> full view)."),
     # [view.backend]
     "backend.type": ("(env-aware)", "wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|software", "all", "Renderer backend; unset = auto (Wayland session -> wayland-egl, else drm-kms-egl)."),
+    # [view.backend.lease] — wayland-leased-drm only. These say what to ask the
+    # compositor to lease, not how to drive a card we already own (backend.drm.*).
+    "backend.lease.device": ("(sole device)", "index or /dev/dri/cardN", "leased", "Which wp_drm_lease_device_v1 when several are advertised (one per DRM node); ambiguous + unset is fatal."),
+    "backend.lease.connector": ("(sole offer)", "e.g. HDMI-A-1", "leased", "Connector to request by name; several offers with no choice is fatal."),
+    "backend.lease.timeout_ms": ("5000", "> 0", "leased", "Bound on the whole lease negotiation; a compositor may defer the DRM fd until it regains DRM master."),
+
     # [view.backend.drm] — DRM/software only
     "backend.drm.device": ("(rank-pick)", "/dev/dri/cardN", "drm/sw", "DRM device node."),
     "backend.drm.connector": ("(rank-pick)", "e.g. eDP-1, HDMI-A-1", "drm/sw", "Connector to drive."),
@@ -110,7 +116,8 @@ META = {
 TABLE_ORDER = [
     "[global]", "[sentry]", "[[view]]", "[view.args]", "[view.shell]",
     "[view.shell.window]", "[view.shell.window.activation_area]",
-    "[view.backend]", "[view.backend.drm]", "[view.output]", "[view.engine]",
+    "[view.backend]", "[view.backend.drm]", "[view.backend.lease]",
+    "[view.output]", "[view.engine]",
 ]
 
 
@@ -131,6 +138,9 @@ def classify(key):
         return "[view.shell]", key.rsplit(".", 1)[1]
     if key.startswith("backend.drm."):
         return "[view.backend.drm]", key.rsplit(".", 1)[1]
+    if key.startswith("backend.lease."):
+        return "[view.backend.lease]", key.rsplit(".", 1)[1]
+    # Must stay last of the backend.* cases: it is the catch-all.
     if key.startswith("backend."):
         return "[view.backend]", key.rsplit(".", 1)[1]
     if key.startswith("output."):
