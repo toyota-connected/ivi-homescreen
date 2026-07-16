@@ -1855,19 +1855,10 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                            nullptr, 1, &to_dst);
 
   // Sequence platform-view subsurface Z-order for this frame.
-  m_sequencer.Present(
-      layers, count, nullptr, [this](FlutterPlatformViewIdentifier id) {
-        // PVs may choose the wl_subsurface route (sequencer)
-        // or the ICompositorSurface texture route (below).
-        // Only warn when *neither* is registered.
-        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
-        if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
-          ihs::log::warn(
-              "Vulkan compositor: platform view {} has no "
-              "registered subsurface or compositor surface",
-              id);
-        }
-      });
+  m_sequencer.Present(layers, count, nullptr,
+                      [this](FlutterPlatformViewIdentifier id) {
+                        WarnMissingPlatformView(id);
+                      });
 
   bool ok = true;
   for (size_t i = 0; i < count; ++i) {
@@ -1889,28 +1880,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
       BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
-      const auto composed = MutationStack::Compose(layer->platform_view);
-      if (composed.NeedsPluginComposite()) {
-        ihs::log::debug(
-            "Vulkan compositor: platform view {} has non-trivial mutations "
-            "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); "
-            "plugin OnPresent must apply them.",
-            layer->platform_view->identifier, composed.opacity,
-            composed.has_rounded_clip, composed.has_perspective,
-            composed.IsAxisAligned());
-      }
-      std::shared_ptr<ICompositorSurface> surface;
-      {
-        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
-        const auto it =
-            m_compositor_surfaces.find(layer->platform_view->identifier);
-        if (it != m_compositor_surfaces.end()) {
-          surface = it->second;
-        }
-      }
-      if (surface) {
-        ok = surface->OnPresent(layer) && ok;
-      }
+      ok = PresentPlatformView(layer) && ok;
     }
   }
 
@@ -2058,6 +2028,46 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   return true;
 }
 
+void WaylandVulkanBackend::WarnMissingPlatformView(
+    FlutterPlatformViewIdentifier id) {
+  // A platform view may take the wl_subsurface route (handled by the sequencer)
+  // or the ICompositorSurface texture route (PresentPlatformView). Warn only
+  // when neither is registered for it.
+  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+  if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
+    ihs::log::warn(
+        "Vulkan compositor: platform view {} has no registered subsurface or "
+        "compositor surface",
+        id);
+  }
+}
+
+bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
+  const auto composed = MutationStack::Compose(layer->platform_view);
+  if (composed.NeedsPluginComposite()) {
+    ihs::log::debug(
+        "Vulkan compositor: platform view {} has non-trivial mutations "
+        "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); plugin "
+        "OnPresent must apply them.",
+        layer->platform_view->identifier, composed.opacity,
+        composed.has_rounded_clip, composed.has_perspective,
+        composed.IsAxisAligned());
+  }
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+    const auto it =
+        m_compositor_surfaces.find(layer->platform_view->identifier);
+    if (it != m_compositor_surfaces.end()) {
+      surface = it->second;
+    }
+  }
+  // No compositor surface = the subsurface route (or an unregistered PV,
+  // already warned via the sequencer). Treat as success so it doesn't fail the
+  // present.
+  return surface ? surface->OnPresent(layer) : true;
+}
+
 void WaylandVulkanBackend::OnFrameDone(void* data,
                                        wl_callback* cb,
                                        uint32_t /*time*/) {
@@ -2150,8 +2160,13 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                            nullptr, 1, &to_dst);
 
+  // Sequence platform-view subsurface Z-order for this frame (same as the
+  // swapchain path): the backing-store layers blit into the dma-buf image
+  // below, and platform views composite via their own subsurfaces.
   m_sequencer.Present(layers, count, nullptr,
-                      [](FlutterPlatformViewIdentifier) {});
+                      [this](FlutterPlatformViewIdentifier id) {
+                        WarnMissingPlatformView(id);
+                      });
 
   bool ok = true;
   for (size_t i = 0; i < count; ++i) {
@@ -2172,8 +2187,12 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
       const auto dh = static_cast<int32_t>(layer->size.height);
       BlitStoreToSwapchain(cmd, *baton->store, slot.image->image(), dx, dy, dw,
                            dh);
+    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+               layer->platform_view) {
+      // Platform views composite via their own subsurface (sequencer route) or
+      // ICompositorSurface texture route — independent of the dma-buf image.
+      ok = PresentPlatformView(layer) && ok;
     }
-    // Platform-view layers are not yet composited on the dma-buf path.
   }
 
   // GENERAL so the compositor's external dma-buf read sees a coherent frame.
