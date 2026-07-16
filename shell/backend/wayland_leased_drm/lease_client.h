@@ -197,4 +197,21 @@ class LeaseClient {
   static Result Probe(const LeaseConfig& cfg);
 };
 
+// --lease-list-connectors handler. Scans @p argv; if the flag is absent returns
+// -1 and the caller carries on. Otherwise probes the compositor, prints what it
+// offers, and returns a process exit code.
+//
+// Takes raw argv rather than a Configuration because it must run before config
+// parsing: this is the tool you reach for when a leased backend will not start,
+// and it cannot require the bundle that the failing launch was trying to load.
+// It reads --lease-device and --lease-timeout-ms off argv for the same reason.
+//
+// Exit codes are meant to be scriptable, so "reached the compositor and it
+// offers nothing" is distinct from "no compositor" — on a wlroots host the
+// former is the normal outcome and the interesting one:
+//   0 — offers listed
+//   1 — reached a lease device, but zero connectors are offered
+//   2 — no Wayland session, or the compositor does not implement drm-lease-v1
+int MaybeListLeaseConnectors(int argc, char** argv);
+
 }  // namespace homescreen
