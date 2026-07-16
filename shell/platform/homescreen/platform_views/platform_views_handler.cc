@@ -50,6 +50,45 @@ static constexpr char kKeyHybrid[] = "hybrid";
 
 static constexpr bool kPlatformViewDebug = false;
 
+namespace {
+// A platform-view method argument is either a bare integer view id (UiKitView
+// sends its dispose id this way) or a map carrying an "id" key (the
+// AndroidView-style create/resize/gesture messages). Resolve the id from either
+// shape and from either integer width; returns false when none is present.
+// Without this, a bare-int dispose fell through to id 0, so no view was ever
+// unregistered and the compositor-surface map grew without bound.
+bool ResolveViewId(const flutter::EncodableValue* arguments, int32_t& out_id) {
+  if (arguments == nullptr) {
+    return false;
+  }
+  if (const auto* v = std::get_if<int32_t>(arguments)) {
+    out_id = *v;
+    return true;
+  }
+  if (const auto* v = std::get_if<int64_t>(arguments)) {
+    out_id = static_cast<int32_t>(*v);
+    return true;
+  }
+  if (const auto* map = std::get_if<flutter::EncodableMap>(arguments)) {
+    for (const auto& [key, value] : *map) {
+      const auto* key_str = std::get_if<std::string>(&key);
+      if (key_str == nullptr || *key_str != kKeyId) {
+        continue;
+      }
+      if (const auto* i32 = std::get_if<int32_t>(&value)) {
+        out_id = *i32;
+        return true;
+      }
+      if (const auto* i64 = std::get_if<int64_t>(&value)) {
+        out_id = static_cast<int32_t>(*i64);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+}  // namespace
+
 PlatformViewsHandler::PlatformViewsHandler(flutter::BinaryMessenger* messenger,
                                            FlutterDesktopEngineRef engine)
     : channel_(
@@ -87,18 +126,20 @@ void PlatformViewsHandler::HandleMethodCall(
       plugin_common::Encodable::PrintFlutterEncodableValue(kMethodDispose,
                                                            *arguments);
     }
+    // UiKitView disposes with a bare integer id; AndroidView with a map.
+    // Resolve either — an unresolved id would default to 0 and leak every real
+    // view.
+    if (!ResolveViewId(arguments, id)) {
+      ihs::log::warn("[PlatformViews] dispose with no resolvable id; ignoring");
+      result->Success();
+      return;
+    }
     if (const auto args = std::get_if<flutter::EncodableMap>(arguments);
         args != nullptr) {
       for (const auto& [fst, snd] : *args) {
-        if (kKeyId == std::get<std::string>(fst) &&
-            std::holds_alternative<int32_t>(snd)) {
-          id = std::get<int32_t>(snd);
-        } else if (kKeyHybrid == std::get<std::string>(fst) &&
-                   std::holds_alternative<bool>(snd)) {
+        if (kKeyHybrid == std::get<std::string>(fst) &&
+            std::holds_alternative<bool>(snd)) {
           hybrid = std::get<bool>(snd);
-        } else {
-          plugin_common::Encodable::PrintFlutterEncodableValue(kMethodDispose,
-                                                               *arguments);
         }
       }
     }
