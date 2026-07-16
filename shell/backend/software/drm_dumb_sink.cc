@@ -117,6 +117,31 @@ std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
   return sink;
 }
 
+std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
+    int drm_fd,
+    std::shared_ptr<void> fd_owner,
+    std::function<bool()> revoked) {
+  if (drm_fd < 0) {
+    ihs::log::error("[DrmDumbSink] Create: invalid fd {}", drm_fd);
+    return nullptr;
+  }
+  std::unique_ptr<DrmDumbSink> sink(new DrmDumbSink());
+  // The IVI_SW_DRM_MODE / format / dither env knobs pass through unchanged --
+  // the lease only changes where the fd came from, not how frames are made.
+  sink->format_ = RequestedFormatFromEnv();
+  sink->dither_ = DitherRequestedFromEnv();
+  sink->drm_fd_ = drm_fd;
+  sink->owns_fd_ = false;
+  sink->fd_owner_ = std::move(fd_owner);
+  sink->revoked_ = std::move(revoked);
+  if (!sink->InitFromFd()) {
+    return nullptr;
+  }
+  ihs::log::info("[DrmDumbSink] adopted lease fd {} (connector {})", drm_fd,
+                 sink->connector_id_);
+  return sink;
+}
+
 DrmDumbSink::DrmDumbSink() = default;
 
 DrmDumbSink::~DrmDumbSink() {
@@ -134,6 +159,8 @@ DrmDumbSink::~DrmDumbSink() {
     // Restore the prior CRTC mapping if we modeset; without this the
     // console doesn't come back after the embedder exits on a bare
     // TTY. saved_fb_ being unset means we never modeset, so skip.
+    // On a lease this hands the connector back as we found it, before the
+    // LeaseHold destroys the lease object and the compositor revokes.
     if (saved_fb_.has_value() && saved_crtc_id_ != 0) {
       drmModeSetCrtc(drm_fd_, saved_crtc_id_, *saved_fb_, 0, 0, &connector_id_,
                      1, nullptr);
@@ -141,7 +168,12 @@ DrmDumbSink::~DrmDumbSink() {
     for (size_t i = 0; i < buffers_.size(); ++i) {
       FreeBuffer(i);
     }
-    ::close(drm_fd_);
+    // Only close what we opened: a lease fd is owned by fd_owner_ (the
+    // LeaseHold), which closes it after returning the lease. Closing it here
+    // would be a double close.
+    if (owns_fd_) {
+      ::close(drm_fd_);
+    }
     drm_fd_ = -1;
   }
 }
@@ -155,8 +187,13 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
     ihs::log::error("[DrmDumbSink] open('{}'): {}", path, std::strerror(errno));
     return false;
   }
+  owns_fd_ = true;
   ihs::log::info("[DrmDumbSink] opened {}", path);
 
+  return InitFromFd();
+}
+
+bool DrmDumbSink::InitFromFd() {
   drmModeRes* res = drmModeGetResources(drm_fd_);
   if (res == nullptr) {
     ihs::log::error("[DrmDumbSink] drmModeGetResources: {}",
@@ -541,6 +578,15 @@ bool DrmDumbSink::Present(const void* allocation,
                           const size_t row_bytes,
                           const size_t height) {
   if (stopped_.load(std::memory_order_acquire)) {
+    return true;
+  }
+  // Lease revoked: the KMS objects are gone from this fd's view, so the modeset
+  // and flip below would fail on every frame. Drop it instead of spraying ioctl
+  // errors. Returns true — the frame is "handled" as far as the rasterizer is
+  // concerned, so it neither stalls nor retries; the display simply stops
+  // updating, which is the same steady state the pause path already produces.
+  // Reacquiring the lease and rebuilding is WS7.
+  if (revoked_ && revoked_()) {
     return true;
   }
   // Strict ping-pong: render into the buffer that isn't currently
