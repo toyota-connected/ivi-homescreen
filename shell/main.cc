@@ -24,6 +24,9 @@
 
 #include "app.h"
 #include "backend/register_backends.h"
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM
+#include "backend/wayland_leased_drm/lease_client.h"
+#endif
 #include "configuration/configuration.h"
 #include "ihs/config.h"
 #include "logging/logger.hpp"
@@ -151,6 +154,27 @@ void PublishIhsConfig(const std::vector<Configuration::Config>& configs) {
  */
 int main(const int argc, char** argv) {
   IHS_LOGGING_START("IHSC", "ivi-homescreen Flutter runtime");
+
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM
+  // --lease-list-connectors: ask the compositor what it will actually lease.
+  //
+  // Handled here, off raw argv and ahead of config parsing, because it must
+  // work with no bundle: it is the first thing to run when a leased backend
+  // refuses to start, and demanding an app bundle to answer "what do you
+  // offer?" would be absurd. (--drm-list-modes sits after parsing and does
+  // require one.)
+  //
+  // This exists because "the compositor implements drm-lease-v1" and "the
+  // compositor will lease you a connector" are different facts, and only the
+  // second one matters. wlroots offers a connector only when its EDID carries
+  // the non-desktop flag, so the usual outcome on a desktop is a device that
+  // advertises itself and offers nothing — indistinguishable, without this,
+  // from a misconfigured connector name.
+  if (const int rc = homescreen::MaybeListLeaseConnectors(argc, argv);
+      rc >= 0) {
+    return rc;
+  }
+#endif
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
   assert(!configs.empty());

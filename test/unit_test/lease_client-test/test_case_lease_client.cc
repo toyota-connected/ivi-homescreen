@@ -730,6 +730,38 @@ TEST(LeaseClient, ProbeWithNoOffersIsDistinctFromSuccess) {
   EXPECT_TRUE(res.offers.empty());
 }
 
+// --lease-list-connectors. Its exit codes are meant to be scriptable, so pin
+// them: an operator (or CI) has to be able to tell "the compositor offers
+// nothing" apart from "there is no compositor", because on a wlroots host the
+// former is the normal outcome and the one that needs explaining.
+TEST(LeaseListConnectors, AbsentFlagDefersToNormalStartup) {
+  char a0[] = "homescreen";
+  char a1[] = "--backend=software";
+  char* argv[] = {a0, a1};
+  EXPECT_EQ(homescreen::MaybeListLeaseConnectors(2, argv), -1)
+      << "without the flag it must not intercept startup";
+}
+
+TEST(LeaseListConnectors, ListsOffersAndSucceeds) {
+  MockCompositor mock{MockConfig{}};
+  char a0[] = "homescreen";
+  char a1[] = "--lease-list-connectors";
+  char* argv[] = {a0, a1};
+  EXPECT_EQ(homescreen::MaybeListLeaseConnectors(2, argv), 0);
+}
+
+TEST(LeaseListConnectors, NoOffersIsDistinctFromNoCompositor) {
+  MockConfig cfg;
+  cfg.devices = {DeviceSpec{{}}};  // advertises the device, offers nothing
+  MockCompositor mock{cfg};
+  char a0[] = "homescreen";
+  char a1[] = "--lease-list-connectors";
+  char* argv[] = {a0, a1};
+  EXPECT_EQ(homescreen::MaybeListLeaseConnectors(2, argv), 1)
+      << "a reachable compositor offering nothing must not look like an absent "
+         "one";
+}
+
 // No mock at all: a stale WAYLAND_DISPLAY must not be trusted.
 TEST(LeaseClient, StaleWaylandDisplayIsNotASession) {
   const char* prev = getenv("WAYLAND_DISPLAY");

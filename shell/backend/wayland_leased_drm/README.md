@@ -43,9 +43,22 @@ cannot set it at runtime. Getting a lease from such a host needs one of: an EDID
 that trips the kernel's `EDID_QUIRK_NON_DESKTOP` list (`drm.edid_firmware=`), a
 compositor patch/config, or a compositor built for the job.
 
-Verify before assuming, with the lease client's own read-only path (it stops
-before `create_lease_request`, so it is safe against a live session) or with
-`wayland-info`.
+Ask the binary rather than assuming:
+
+```bash
+homescreen --lease-list-connectors        # no bundle required
+```
+
+It probes read-only (stopping before `create_lease_request`, so it is safe
+against a live session) and prints what the compositor will actually lease. Exit
+codes are scriptable, and separate the two failures that look identical from the
+outside:
+
+| exit | meaning |
+|---|---|
+| 0 | connectors listed |
+| 1 | reached a lease device, but it offers **nothing** — the non-desktop gate above |
+| 2 | no Wayland session, or the compositor has no drm-lease-v1 |
 
 ## Architecture
 

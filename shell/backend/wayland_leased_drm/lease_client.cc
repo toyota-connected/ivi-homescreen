@@ -20,6 +20,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -773,6 +774,97 @@ LeaseClient::Result LeaseClient::Probe(const LeaseConfig& cfg) {
   // kNone means "enumeration succeeded, see offers".
   res.error = res.offers.empty() ? LeaseError::kNoOffers : LeaseError::kNone;
   return res;
+}
+
+namespace {
+
+// Read "--flag=value" or "--flag value" out of argv.
+std::optional<std::string> ArgValue(int argc,
+                                    char** argv,
+                                    std::string_view flag) {
+  const std::string eq = std::string(flag) + "=";
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view a = argv[i];
+    if (a == flag && i + 1 < argc) {
+      return std::string(argv[i + 1]);
+    }
+    if (a.rfind(eq, 0) == 0) {
+      return std::string(a.substr(eq.size()));
+    }
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
+int MaybeListLeaseConnectors(int argc, char** argv) {
+  bool requested = false;
+  for (int i = 1; i < argc; ++i) {
+    if (std::string_view(argv[i]) == "--lease-list-connectors") {
+      requested = true;
+      break;
+    }
+  }
+  if (!requested) {
+    return -1;
+  }
+
+  LeaseConfig cfg;
+  cfg.device = ArgValue(argc, argv, "--lease-device");
+  if (const auto t = ArgValue(argc, argv, "--lease-timeout-ms")) {
+    const unsigned long ms = std::strtoul(t->c_str(), nullptr, 10);
+    if (ms > 0) {
+      cfg.timeout_ms = static_cast<uint32_t>(ms);
+    }
+  }
+
+  const auto res = LeaseClient::Probe(cfg);
+  if (res.error == LeaseError::kNone) {
+    std::printf("Leasable connectors offered by this compositor:\n");
+    for (const auto& o : res.offers) {
+      std::printf("  %-14s connector_id=%-5u %s\n", o.name.c_str(),
+                  o.connector_id, o.description.c_str());
+    }
+    std::printf(
+        "\nUse: --backend=wayland-leased-drm-egl --lease-connector=<name>\n");
+    return 0;
+  }
+
+  if (res.error == LeaseError::kNoOffers) {
+    // The interesting case, and the reason this tool exists. Say what is
+    // actually wrong -- the compositor is working, its policy is the problem --
+    // rather than leaving the operator to conclude their connector name is
+    // wrong.
+    std::printf(
+        "This compositor implements drm-lease-v1 but offers no connectors.\n"
+        "\n"
+        "That is the normal outcome on a desktop compositor, not a fault: the\n"
+        "wlroots family (Sway, labwc, niri, Wayfire, ...) only offers a\n"
+        "connector for leasing when its EDID carries the non-desktop flag --\n"
+        "the protocol comes from VR headsets. Every ordinary panel is claimed\n"
+        "by the compositor for its own compositing.\n"
+        "\n"
+        "Check with:  drm_info | grep -i non-desktop\n"
+        "A connector reporting non-desktop=0 will not be offered, and the\n"
+        "property is immutable -- it cannot be set at runtime.\n"
+        "\n"
+        "To get a lease you need one of:\n"
+        "  * an EDID that trips the kernel's non-desktop quirk list\n"
+        "    (drm.edid_firmware=<connector>:<file>)\n"
+        "  * a compositor patched or configured to offer desktop connectors\n"
+        "  * a compositor built for leasing\n");
+    return 1;
+  }
+
+  std::printf("No connectors could be listed: %s\n", ToString(res.error));
+  if (res.error == LeaseError::kNoLeaseDevice) {
+    std::printf(
+        "\nThe compositor advertises no wp_drm_lease_device_v1 global. Weston\n"
+        "(and AGL's Weston-derived compositors) do not implement "
+        "drm-lease-v1;\n"
+        "KWin, the wlroots family, Mutter, Hyprland and COSMIC do.\n");
+  }
+  return 2;
 }
 
 LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
