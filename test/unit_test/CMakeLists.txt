@@ -137,6 +137,7 @@ add_subdirectory(stats-test)
 add_subdirectory(frame_profile-test)
 add_subdirectory(motion_to_photon-test)
 add_subdirectory(xkb_keyboard-test)
+add_subdirectory(key_repeater-test)
 # texture-test requires a live Wayland compositor, Flutter engine, and an app
 # bundle on disk — it is an integration test and has been moved to
 # test/integration/texture-test/.  Do NOT re-add it here.
