@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cctype>
+#include <cstdint>
 #include <iomanip>
 #include <ostream>
 
