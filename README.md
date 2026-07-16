@@ -115,9 +115,22 @@ uses it.
 | DRM/KMS EGL | `drm-kms-egl` | `BUILD_BACKEND_DRM_KMS_EGL` | Direct-to-display GL on bare KMS (no compositor) |
 | DRM/KMS Vulkan | `drm-kms-vulkan` | `BUILD_BACKEND_DRM_KMS_VULKAN` | Zero-copy dma-buf scanout on bare KMS |
 | Software | `software` | `BUILD_BACKEND_SOFTWARE` | CPU renderer; no GPU or display server |
+| Leased DRM (EGL) | `wayland-leased-drm-egl` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_DRM_KMS_EGL` | GL on a connector leased from a compositor via drm-lease-v1 |
+| Leased DRM (software) | `wayland-leased-drm-software` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_SOFTWARE` | CPU renderer on a leased connector |
 
 With no explicit selection, the resolver is environment-aware: a live Wayland
 session picks `wayland-egl`, otherwise `drm-kms-egl`.
+
+The `wayland-leased-drm-*` backends acquire a connector from a running Wayland
+compositor rather than opening a card, so one process can own a panel while the
+compositor owns the rest of the GPU. They are never selected implicitly, and a
+leased key is refused rather than substituted if unavailable — falling back to an
+unleased backend would grab hardware the operator did not ask for. The bare
+family name `wayland-leased-drm` picks the first available tier. Note that a
+compositor implementing drm-lease-v1 is necessary but **not** sufficient: the
+wlroots family only offers connectors flagged non-desktop in EDID, so an ordinary
+panel is not leasable without intervention. See
+[shell/backend/wayland_leased_drm/README.md](shell/backend/wayland_leased_drm/README.md).
 
 Running a Vulkan backend requires an engine build that supports Vulkan.
 
@@ -304,7 +317,10 @@ annotated all-keys file see
 | `[view.shell.window.activation_area]` | `width` | `int` | `view.width` | `int` | agl |
 | `[view.shell.window.activation_area]` | `x` | `int` | `0` | `int` | agl |
 | `[view.shell.window.activation_area]` | `y` | `int` | `0` | `int` | agl |
-| `[view.backend]` | `type` | `string` | `(env-aware)` | `wayland-egl\|wayland-vulkan\|drm-kms-egl\|drm-kms-vulkan\|software` | all |
+| `[view.backend]` | `type` | `string` | `(env-aware)` | `wayland-egl\|wayland-vulkan\|drm-kms-egl\|drm-kms-vulkan\|software\|wayland-leased-drm[-egl\|-software]` | all |
+| `[view.backend.lease]` | `connector` | `string` | `(sole offer)` | `e.g. HDMI-A-1` | leased |
+| `[view.backend.lease]` | `device` | `string` | `(sole device)` | index or `/dev/dri/cardN` | leased |
+| `[view.backend.lease]` | `timeout_ms` | `int` | `5000` | `> 0` | leased |
 | `[view.backend.drm]` | `allow_nonblock_modeset` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.drm]` | `async_flip` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.drm]` | `compositor` | `string` | `auto` | `auto\|planes\|gl` | drm |
