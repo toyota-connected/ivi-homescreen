@@ -104,8 +104,10 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     # The dma-buf present path needs drm_fourcc.h (DRM_FORMAT_* constants), a
     # libdrm header. On a cross sysroot it lives under <libdrm/>, so the include
     # dir must come from pkg-config rather than the default search path.
+    # GLOBAL so test/ can resolve it via TYPICAL_TEST_LINK_LIBS — see the note
+    # in the wayland-leased-drm block below.
     if (NOT TARGET PkgConfig::DRM)
-        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
     endif ()
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM)
     if (BUILD_COMPOSITOR)
@@ -140,8 +142,15 @@ if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
     # drmGetDeviceNameFromFd2() resolves the lease/enumeration fd to a node path.
     # On a cross sysroot xf86drm.h lives under <libdrm/>, so the include dir must
     # come from pkg-config rather than the default search path.
+    #
+    # GLOBAL: an IMPORTED target is directory-scoped by default, and the unit
+    # tests reuse this target's LINK_LIBRARIES (TYPICAL_TEST_LINK_LIBS) from
+    # test/. Without GLOBAL, every test target fails to configure with
+    # "PkgConfig::DRM ... but the target was not found" whenever the shell links
+    # libdrm from here rather than from cmake/drm_kms.cmake (which runs at
+    # top-level scope and so is visible everywhere).
     if (NOT TARGET PkgConfig::DRM)
-        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
     endif ()
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM)
 endif ()
