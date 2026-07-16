@@ -288,6 +288,66 @@ TEST(LeasedDrmVkms, RevokedLeaseLosesItsObjectsButKeepsTheFd) {
   }
 }
 
+// The one kernel-behaviour claim the whole EGL
+// recovery design rests on, and the reason egl's lease_on_revoke default is
+// `exit` until this is evidenced: "leases partition mode objects only. GEM
+// allocation, prime export/import and render ioctls were never lease-scoped, so
+// a revoked lease fd remains a functional render fd."
+//
+// If that is false, the egl tier is unimplementable as written -- it keeps
+// GBM/EGL and the engine's GL context on the OLD fd across a reacquire and
+// rebuilds only the KMS side. So this is worth pinning against a real kernel
+// rather than reasoning about.
+TEST(LeasedDrmVkms, RevokedLeaseFdIsStillAFunctionalRenderFd) {
+  REQUIRE_VKMS_LEASE(v);
+
+  // Baseline: GEM alloc + prime export work on the live lease fd.
+  uint32_t handle = 0;
+  uint32_t pitch = 0;
+  uint64_t size = 0;
+  ASSERT_EQ(drmModeCreateDumbBuffer(v.lease_fd(), 64, 64, 32, 0, &handle,
+                                    &pitch, &size),
+            0)
+      << "dumb alloc on a live lease fd: " << std::strerror(errno);
+  int prime_fd = -1;
+  const int pre_prime =
+      drmPrimeHandleToFD(v.lease_fd(), handle, DRM_CLOEXEC, &prime_fd);
+  if (prime_fd >= 0) {
+    ::close(prime_fd);
+    prime_fd = -1;
+  }
+  ASSERT_EQ(drmModeDestroyDumbBuffer(v.lease_fd(), handle), 0);
+
+  // Now revoke, and retry exactly the same operations on the same fd.
+  ASSERT_EQ(drmModeRevokeLease(v.card_fd(), v.lessee_id()), 0)
+      << std::strerror(errno);
+
+  // The KMS objects are gone -- that much is already covered above.
+  uint32_t post_handle = 0;
+  const int gem_rc = drmModeCreateDumbBuffer(v.lease_fd(), 64, 64, 32, 0,
+                                             &post_handle, &pitch, &size);
+  EXPECT_EQ(gem_rc, 0) << "GEM alloc FAILED on a revoked lease fd ("
+                       << std::strerror(errno)
+                       << ") — the render-fd claim fails, and the egl "
+                          "recovery tier needs redesigning";
+
+  if (gem_rc == 0) {
+    const int post_prime =
+        drmPrimeHandleToFD(v.lease_fd(), post_handle, DRM_CLOEXEC, &prime_fd);
+    EXPECT_EQ(post_prime, 0)
+        << "prime export FAILED on a revoked lease fd (" << std::strerror(errno)
+        << ") — the render-fd claim fails";
+    if (pre_prime == 0) {
+      EXPECT_EQ(post_prime, 0)
+          << "prime export worked before revocation but not after";
+    }
+    if (prime_fd >= 0) {
+      ::close(prime_fd);
+    }
+    EXPECT_EQ(drmModeDestroyDumbBuffer(v.lease_fd(), post_handle), 0);
+  }
+}
+
 // A sink built on a revoked lease must fail to construct rather than spray
 // ioctl errors.
 TEST(LeasedDrmVkms, DumbSinkRefusesARevokedLease) {
