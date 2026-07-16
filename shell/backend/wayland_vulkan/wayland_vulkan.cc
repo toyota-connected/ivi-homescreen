@@ -30,6 +30,7 @@
 #include "engine.h"
 #include "logging.h"
 #include "profiling/frame_profile.h"
+#include "profiling/pv_latency.h"
 #include "task_runner.h"
 #include "wayland/display.h"
 
@@ -2199,6 +2200,13 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
       }
       draws.push_back({src, VK_FORMAT_B8G8R8A8_UNORM, dx, dy, dw, dh, nullptr});
+      if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
+              layer->platform_view->identifier);
+          us >= 0) {
+        ihs::log::info(
+            "[pv-latency] view id={} input->first-composite {:.1f} ms",
+            layer->platform_view->identifier, static_cast<double>(us) / 1000.0);
+      }
     }
   }
 
@@ -2209,7 +2217,7 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.dx, dr.dy, dr.dw,
                                  dr.dh);
   }
-  layer_compositor_->EndFrame(cmd);
+  wl_vulkan::LayerCompositor::EndFrame(cmd);
 
   // Phase 3: restore backing stores to COLOR_ATTACHMENT for the engine's next
   // render into them.
