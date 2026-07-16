@@ -20,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install runtime packages
         run: |
@@ -130,7 +130,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install packages
         run: |
@@ -298,7 +298,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: 'true'
+          submodules: recursive
 
       - name: Install packages
         run: |
