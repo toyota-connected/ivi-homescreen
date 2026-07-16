@@ -198,6 +198,48 @@ std::shared_ptr<IDisplay> MakeSoftwareDisplay(
 }
 #endif
 
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_SOFTWARE && \
+    BUILD_SOFTWARE_SINK_DRM
+// Negotiate a lease, then hand the fd to a SoftwareDisplay for the backend to
+// build its dumb sink on. Shares the seat/cursor wiring with the direct
+// software display; only the scanout device differs.
+std::shared_ptr<IDisplay> MakeLeasedSoftwareDisplay(
+    const std::vector<Configuration::Config>& configs) {
+  homescreen::LeaseConfig lc;
+  lc.device = configs[0].view.lease_device;
+  lc.connector = configs[0].view.lease_connector;
+  if (configs[0].view.lease_timeout_ms.has_value()) {
+    lc.timeout_ms = *configs[0].view.lease_timeout_ms;
+  }
+
+  auto res = homescreen::LeaseClient::Acquire(lc);
+  if (!res.hold) {
+    ihs::log::error("[leased-drm] could not acquire a lease: {}",
+                    homescreen::ToString(res.error));
+    for (const auto& o : res.offers) {
+      ihs::log::error("[leased-drm]   offered: {} (connector_id {}) — {}",
+                      o.name, o.connector_id, o.description);
+    }
+    std::exit(EXIT_FAILURE);
+  }
+
+  auto display = MakeSoftwareDisplay(configs);
+  auto* sw = dynamic_cast<SoftwareDisplay*>(display.get());
+  assert(sw != nullptr);
+
+  const std::shared_ptr<homescreen::LeaseHold> hold(std::move(res.hold));
+  SoftwareDisplay::LeasedScanout scanout;
+  scanout.fd = hold->fd();
+  scanout.connector_id = hold->connector_id();
+  // By value: the sink polls this for the process lifetime, so it must not
+  // capture anything with a shorter life than the hold it reads.
+  scanout.revoked = [hold]() { return hold->revoked(); };
+  scanout.owner = hold;
+  sw->SetLeasedScanout(std::move(scanout));
+  return display;
+}
+#endif
+
 #if BUILD_BACKEND_DRM_KMS_EGL
 std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
                                            IDisplay* display) {
@@ -518,6 +560,36 @@ std::shared_ptr<Backend> MakeSoftwareBackend(
 }
 #endif
 
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_SOFTWARE && \
+    BUILD_SOFTWARE_SINK_DRM
+std::shared_ptr<Backend> MakeLeasedSoftwareBackend(
+    const Configuration::Config& config,
+    IDisplay* display) {
+  auto* sw_display = dynamic_cast<SoftwareDisplay*>(display);
+  assert(sw_display != nullptr);
+  const auto& scanout = sw_display->leased_scanout();
+  // make_display fail-fasts when the lease cannot be had, so reaching here
+  // without one is programmer error, not an operator mistake.
+  assert(scanout.has_value());
+
+  // Deliberately NOT MakeSinkFromEnv: the sink is not IVI_SW_SINK's to choose
+  // once the backend key has pinned drm-dumb-on-a-leased-fd. IVI_SW_DRM_MODE
+  // and the format/dither knobs still apply -- those say how to drive the
+  // connector, which the lease does not change.
+  auto sink = DrmDumbSink::Create(scanout->fd, scanout->owner,
+                                  scanout->connector_id, scanout->revoked);
+  if (!sink) {
+    ihs::log::error(
+        "[leased-drm] could not drive leased connector {} on the lease fd",
+        scanout->connector_id);
+    return nullptr;
+  }
+  return std::make_shared<SoftwareBackend>(
+      config.view.width.value_or(kDefaultViewWidth),
+      config.view.height.value_or(kDefaultViewHeight), std::move(sink));
+}
+#endif
+
 }  // namespace
 
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
@@ -562,6 +634,15 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry) {
   // listing (LeaseClient::Probe) can back it later.
   registry.Register({"wayland-leased-drm-egl", MakeLeasedDrmDisplay,
                      MakeDrmEglBackend, nullptr});
+#endif
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_SOFTWARE && \
+    BUILD_SOFTWARE_SINK_DRM
+  // The cheapest tier: the engine renders to CPU memory and only the dumb
+  // buffers plus CRTC state live on the leased fd. Unlike the direct software
+  // backend this one does not consult IVI_SW_SINK -- the key already chose the
+  // sink. list_modes is null for the same reason as the egl tier.
+  registry.Register({"wayland-leased-drm-software", MakeLeasedSoftwareDisplay,
+                     MakeLeasedSoftwareBackend, nullptr});
 #endif
 #if BUILD_BACKEND_DRM_KMS_VULKAN
   registry.Register(
