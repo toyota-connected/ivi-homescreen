@@ -30,7 +30,7 @@ using homescreen::input::RepeatConfig;
 using homescreen::input::XkbKeyboard;
 
 // evdev keycodes.
-static constexpr uint32_t kKeyA         = 30;
+static constexpr uint32_t kKeyA = 30;
 static constexpr uint32_t kKeyLeftShift = 42;  // non-repeating modifier
 
 // Short repeat config to keep tests fast: 80 ms initial delay, 40 ms interval.
@@ -149,9 +149,8 @@ TEST(KeyRepeater, OnKey_Release_DisarmsTimer) {
   ASSERT_NE(rep, nullptr);
 
   std::atomic<int> call_count{0};
-  rep->SetHandler([&](uint32_t, xkb_keysym_t, const std::string&) {
-    ++call_count;
-  });
+  rep->SetHandler(
+      [&](uint32_t, xkb_keysym_t, const std::string&) { ++call_count; });
 
   rep->OnKey(kKeyA, true);
   rep->OnKey(kKeyA, false);  // release immediately — disarms before first tick
@@ -194,14 +193,12 @@ TEST(KeyRepeater, SetHandler_NewHandler_Fires) {
   std::atomic<int> old_count{0};
   std::atomic<int> new_count{0};
 
-  rep->SetHandler([&](uint32_t, xkb_keysym_t, const std::string&) {
-    ++old_count;
-  });
+  rep->SetHandler(
+      [&](uint32_t, xkb_keysym_t, const std::string&) { ++old_count; });
   rep->OnKey(kKeyA, true);
   // Replace the handler before the first tick.
-  rep->SetHandler([&](uint32_t, xkb_keysym_t, const std::string&) {
-    ++new_count;
-  });
+  rep->SetHandler(
+      [&](uint32_t, xkb_keysym_t, const std::string&) { ++new_count; });
   ASSERT_TRUE(PollReadable(rep->fd(), 500));
   rep->Dispatch();
   EXPECT_EQ(old_count.load(), 0);

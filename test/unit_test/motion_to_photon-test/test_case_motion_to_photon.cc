@@ -63,8 +63,8 @@ TEST(MotionToPhoton, RecordPresent_NoInputs_DoesNotCrash) {
 // Input before the cutoff → consumed by the frame-accurate pass.
 TEST(MotionToPhoton, RecordInput_BeforeCutoff_ConsumedFrameAccurately) {
   MotionToPhoton m;
-  constexpr uint64_t input_ns   = 100'000'000ULL;  // 100 ms
-  constexpr uint64_t cutoff_ns  = 200'000'000ULL;  // 200 ms (input is before)
+  constexpr uint64_t input_ns = 100'000'000ULL;    // 100 ms
+  constexpr uint64_t cutoff_ns = 200'000'000ULL;   // 200 ms (input is before)
   constexpr uint64_t present_ns = 300'000'000ULL;  // 300 ms
   m.RecordInput(input_ns);
   m.RecordPresent(present_ns, cutoff_ns, "test");
@@ -77,15 +77,16 @@ TEST(MotionToPhoton, RecordInput_BeforeCutoff_ConsumedFrameAccurately) {
 // by the floor pass (input <= present).
 TEST(MotionToPhoton, RecordInput_AfterCutoff_ConsumedByFloorOnly) {
   MotionToPhoton m;
-  constexpr uint64_t input_ns   = 150'000'000ULL;  // after cutoff
-  constexpr uint64_t cutoff_ns  =  50'000'000ULL;  // cutoff is before input
+  constexpr uint64_t input_ns = 150'000'000ULL;    // after cutoff
+  constexpr uint64_t cutoff_ns = 50'000'000ULL;    // cutoff is before input
   constexpr uint64_t present_ns = 300'000'000ULL;  // present is after input
   m.RecordInput(input_ns);
   m.RecordPresent(present_ns, cutoff_ns, "test");
   m.LogSessionSummary("test");
 }
 
-// cutoff == 0 → frame-accurate pass drains nothing; inputs stay for next present.
+// cutoff == 0 → frame-accurate pass drains nothing; inputs stay for next
+// present.
 TEST(MotionToPhoton, RecordPresent_ZeroCutoff_InputStaysQueued) {
   MotionToPhoton m;
   m.RecordInput(100'000'000ULL);
@@ -107,8 +108,8 @@ TEST(MotionToPhoton, MultipleInputsAndPresents_DoesNotCrash) {
   for (int i = 0; i < 10; ++i) {
     const uint64_t frame_start = static_cast<uint64_t>(i) * 16'000'000ULL;
     m.RecordInput(frame_start + 3'000'000ULL);  // input 3 ms into frame
-    m.RecordPresent(frame_start + 16'000'000ULL,
-                    frame_start + 8'000'000ULL, "test");
+    m.RecordPresent(frame_start + 16'000'000ULL, frame_start + 8'000'000ULL,
+                    "test");
   }
   m.LogSessionSummary("test");
 }

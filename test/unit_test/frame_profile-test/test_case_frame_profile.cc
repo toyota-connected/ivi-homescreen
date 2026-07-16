@@ -90,7 +90,8 @@ TEST(FrameProfile, Record_StalledFrame_DoesNotCrash) {
 TEST(FrameProfile, Record_MixedOkAndDiscarded_DoesNotCrash) {
   FrameProfile fp;
   for (int i = 0; i < 10; ++i) {
-    fp.Record("test", /*ok=*/(i % 2 == 0), static_cast<uint64_t>(i) * 16'000'000ULL);
+    fp.Record("test", /*ok=*/(i % 2 == 0),
+              static_cast<uint64_t>(i) * 16'000'000ULL);
   }
 }
 
@@ -157,12 +158,15 @@ TEST(FrameProfile, Record_AllBucketBoundaries_DoesNotCrash) {
   // 30 Hz bucket: 17 < dt <= 33 ms
   fp.Record("b", true, 17'000'000ULL + 33'000'000ULL);  // dt = 33 ms → b30
   // 20 Hz bucket: 33 < dt <= 50 ms
-  fp.Record("b", true, 17'000'000ULL + 33'000'000ULL + 50'000'000ULL);  // dt = 50 ms → b20
+  fp.Record("b", true,
+            17'000'000ULL + 33'000'000ULL + 50'000'000ULL);  // dt = 50 ms → b20
   // slow bucket: 50 < dt <= 100 ms
-  fp.Record("b", true, 17'000'000ULL + 33'000'000ULL + 50'000'000ULL +
-                            100'000'000ULL);  // dt = 100 ms → bslow
+  fp.Record("b", true,
+            17'000'000ULL + 33'000'000ULL + 50'000'000ULL +
+                100'000'000ULL);  // dt = 100 ms → bslow
   // idle bucket: dt > 100 ms
-  fp.Record("b", true, 17'000'000ULL + 33'000'000ULL + 50'000'000ULL +
-                            100'000'000ULL + 101'000'000ULL);  // dt = 101 ms → bidle
+  fp.Record("b", true,
+            17'000'000ULL + 33'000'000ULL + 50'000'000ULL + 100'000'000ULL +
+                101'000'000ULL);  // dt = 101 ms → bidle
   fp.LogSessionSummary("buckets");
 }

@@ -27,10 +27,10 @@ using homescreen::input::KeymapOptions;
 using homescreen::input::XkbKeyboard;
 
 // evdev keycodes used in the tests (Linux input.h values).
-static constexpr uint32_t kKeyA         = 30;
-static constexpr uint32_t kKeyEscape    = 1;
+static constexpr uint32_t kKeyA = 30;
+static constexpr uint32_t kKeyEscape = 1;
 static constexpr uint32_t kKeyLeftShift = 42;
-static constexpr uint32_t kKeyLeftCtrl  = 29;
+static constexpr uint32_t kKeyLeftCtrl = 29;
 
 // ---------------------------------------------------------------------------
 // Create()
