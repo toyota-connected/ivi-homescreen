@@ -68,7 +68,8 @@ TEST_F(MainLoopWakerTest, FdIsValid) {
 
 TEST_F(MainLoopWakerTest, WakeMakesFdReadable) {
   MainLoopWaker::instance().Wake();
-  const short revents = PollIn(MainLoopWaker::instance().fd(), /*timeout_ms=*/50);
+  const short revents =
+      PollIn(MainLoopWaker::instance().fd(), /*timeout_ms=*/50);
   EXPECT_NE(revents & POLLIN, 0);
   Drain();
 }
@@ -77,7 +78,8 @@ TEST_F(MainLoopWakerTest, WakeMakesFdReadable) {
 
 TEST_F(MainLoopWakerTest, SignalWakeMakesFdReadable) {
   MainLoopWaker::SignalWake();
-  const short revents = PollIn(MainLoopWaker::instance().fd(), /*timeout_ms=*/50);
+  const short revents =
+      PollIn(MainLoopWaker::instance().fd(), /*timeout_ms=*/50);
   EXPECT_NE(revents & POLLIN, 0);
   Drain();
 }
@@ -93,10 +95,9 @@ TEST_F(MainLoopWakerTest, WaitReturnsAfterWake) {
 
   const auto t0 = std::chrono::steady_clock::now();
   MainLoopWaker::instance().Wait(/*timeout_ms=*/500);
-  const auto elapsed =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - t0)
-          .count();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
 
   waker.join();
 
@@ -109,10 +110,9 @@ TEST_F(MainLoopWakerTest, WaitReturnsAfterWake) {
 TEST_F(MainLoopWakerTest, WaitReturnsOnTimeout) {
   const auto t0 = std::chrono::steady_clock::now();
   MainLoopWaker::instance().Wait(/*timeout_ms=*/20);
-  const auto elapsed =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - t0)
-          .count();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
 
   // Should return within a generous bound (CI can be slow).
   EXPECT_GE(elapsed, 15);
@@ -128,10 +128,9 @@ TEST_F(MainLoopWakerTest, WaitDrainsToken) {
   // Second Wait: no token, must time out quickly.
   const auto t0 = std::chrono::steady_clock::now();
   MainLoopWaker::instance().Wait(/*timeout_ms=*/20);
-  const auto elapsed =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - t0)
-          .count();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
   EXPECT_GE(elapsed, 15);
 }
 
@@ -148,6 +147,7 @@ TEST_F(MainLoopWakerTest, MultipleWakesCoalesceIntoOneToken) {
   MainLoopWaker::instance().Wait(/*timeout_ms=*/50);
 
   // fd should now be empty.
-  const short revents = PollIn(MainLoopWaker::instance().fd(), /*timeout_ms=*/5);
+  const short revents =
+      PollIn(MainLoopWaker::instance().fd(), /*timeout_ms=*/5);
   EXPECT_EQ(revents & POLLIN, 0);
 }

@@ -68,7 +68,6 @@ TEST(MouseCursorHandler, UnknownMethod_NotImplemented) {
   StubBinaryMessenger messenger;
   MouseCursorHandler handler(&messenger, /*view=*/nullptr);
 
-  const auto reply =
-      DispatchStandard(messenger, kChannel, "noSuchMethod");
+  const auto reply = DispatchStandard(messenger, kChannel, "noSuchMethod");
   EXPECT_TRUE(EnvelopeIsNotImplemented(reply));
 }

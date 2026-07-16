@@ -28,7 +28,8 @@
 #include "display/output_provider.h"
 
 // GMock mock for IDisplay.  Use NiceMock<MockIDisplay> in tests that only
-// care about GetOutputProvider() so uninteresting calls don't generate warnings.
+// care about GetOutputProvider() so uninteresting calls don't generate
+// warnings.
 class MockIDisplay : public IDisplay {
  public:
   MOCK_METHOD(void, StartEvents, (), (override));

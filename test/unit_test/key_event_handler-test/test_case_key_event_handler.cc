@@ -31,8 +31,8 @@
 #include <memory>
 #include <string>
 
-#include <xkbcommon/xkbcommon.h>
 #include <gtest/gtest.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "stub_binary_messenger.h"
 
@@ -51,15 +51,15 @@ struct XkbKeymapDeleter {
 };
 
 using XkbContextPtr = std::unique_ptr<xkb_context, XkbContextDeleter>;
-using XkbKeymapPtr  = std::unique_ptr<xkb_keymap,  XkbKeymapDeleter>;
+using XkbKeymapPtr = std::unique_ptr<xkb_keymap, XkbKeymapDeleter>;
 
 static XkbContextPtr MakeContext() {
   return XkbContextPtr(xkb_context_new(XKB_CONTEXT_NO_FLAGS));
 }
 
 static XkbKeymapPtr MakeDefaultKeymap(xkb_context* ctx) {
-  return XkbKeymapPtr(xkb_keymap_new_from_names(
-      ctx, nullptr, XKB_KEYMAP_COMPILE_NO_FLAGS));
+  return XkbKeymapPtr(
+      xkb_keymap_new_from_names(ctx, nullptr, XKB_KEYMAP_COMPILE_NO_FLAGS));
 }
 
 // ---- Construction ---------------------------------------------------------

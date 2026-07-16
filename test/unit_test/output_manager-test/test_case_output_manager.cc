@@ -35,8 +35,8 @@
 
 using homescreen::BackendFamily;
 using homescreen::OutputInfo;
-using homescreen::OutputMatch;
 using homescreen::OutputManager;
+using homescreen::OutputMatch;
 using testing::NiceMock;
 using testing::Return;
 
@@ -113,8 +113,8 @@ TEST(OutputManager, NullOutputProvider_ReturnsNullopt) {
 TEST(OutputManager, DrmConnectorMatch_ReturnsName) {
   MockIOutputProvider provider;
   EXPECT_CALL(provider, EnumerateOutputs())
-      .WillOnce(Return(std::vector<OutputInfo>{MakeOutput("DP-1"),
-                                               MakeOutput("HDMI-A-1")}));
+      .WillOnce(Return(
+          std::vector<OutputInfo>{MakeOutput("DP-1"), MakeOutput("HDMI-A-1")}));
 
   NiceMock<MockIDisplay> display;
   EXPECT_CALL(display, GetOutputProvider()).WillOnce(Return(&provider));
@@ -130,8 +130,8 @@ TEST(OutputManager, DrmConnectorMatch_ReturnsName) {
 TEST(OutputManager, WaylandNameMatch_ReturnsName) {
   MockIOutputProvider provider;
   EXPECT_CALL(provider, EnumerateOutputs())
-      .WillOnce(Return(std::vector<OutputInfo>{MakeOutput("DP-1"),
-                                               MakeOutput("HDMI-A-1")}));
+      .WillOnce(Return(
+          std::vector<OutputInfo>{MakeOutput("DP-1"), MakeOutput("HDMI-A-1")}));
 
   NiceMock<MockIDisplay> display;
   EXPECT_CALL(display, GetOutputProvider()).WillOnce(Return(&provider));

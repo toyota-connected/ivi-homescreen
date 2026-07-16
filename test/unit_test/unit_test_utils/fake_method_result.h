@@ -27,9 +27,9 @@
 // bringing up a real messenger round-trip.
 //
 // Usage:
-//   auto result = std::make_unique<FakeMethodResult<flutter::EncodableValue>>();
-//   auto* raw = result.get();
-//   handler.HandleMethodCall(call, std::move(result));
+//   auto result =
+//   std::make_unique<FakeMethodResult<flutter::EncodableValue>>(); auto* raw =
+//   result.get(); handler.HandleMethodCall(call, std::move(result));
 //   EXPECT_TRUE(raw->succeeded());
 template <typename T>
 class FakeMethodResult : public flutter::MethodResult<T> {

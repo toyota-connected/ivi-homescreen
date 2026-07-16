@@ -41,8 +41,7 @@ static std::vector<uint8_t> DispatchWithSource(StubBinaryMessenger& messenger,
                                                const std::string& method,
                                                int32_t source) {
   flutter::EncodableMap args_map;
-  args_map[flutter::EncodableValue("source")] =
-      flutter::EncodableValue(source);
+  args_map[flutter::EncodableValue("source")] = flutter::EncodableValue(source);
   return DispatchStandard(
       messenger, kChannel, method,
       std::make_unique<flutter::EncodableValue>(std::move(args_map)));
@@ -62,8 +61,8 @@ TEST(WatchdogPlugin, GetCallbacks_ReturnsSuccess) {
   StubBinaryMessenger messenger;
   WatchdogPlugin plugin(&messenger);
 
-  const auto reply =
-      DispatchStandard(messenger, kChannel, WatchdogPlugin::kMethodGetCallbacks);
+  const auto reply = DispatchStandard(messenger, kChannel,
+                                      WatchdogPlugin::kMethodGetCallbacks);
   EXPECT_TRUE(EnvelopeIsSuccess(reply));
 }
 

@@ -110,8 +110,9 @@ TEST(VsyncProvider, SubmitBatonParkedWhenPendingAndNoEngine) {
   TestVsyncProvider p;
   p.SetSourcePending(true);
 
-  // Submit a non-zero baton (engine=nullptr simulated by never calling SetEngine).
-  // The provider stores it; DrainParkedBaton is a no-op (engine_ == nullptr).
+  // Submit a non-zero baton (engine=nullptr simulated by never calling
+  // SetEngine). The provider stores it; DrainParkedBaton is a no-op (engine_ ==
+  // nullptr).
   p.SubmitBaton(nullptr, 42);
 
   // Stop() with a parked baton must not crash.
