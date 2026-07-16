@@ -1623,12 +1623,20 @@ void WaylandVulkanBackend::RegisterCompositorSurface(
     std::shared_ptr<ICompositorSurface> surface) {
   std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces[id] = std::move(surface);
+  if (ivi::pv_latency::Enabled()) {
+    ihs::log::info("[pv-latency] surface registered id={} live={}", id,
+                   m_compositor_surfaces.size());
+  }
 }
 
 void WaylandVulkanBackend::UnregisterCompositorSurface(
     FlutterPlatformViewIdentifier id) {
   std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces.erase(id);
+  if (ivi::pv_latency::Enabled()) {
+    ihs::log::info("[pv-latency] surface disposed id={} live={}", id,
+                   m_compositor_surfaces.size());
+  }
 }
 
 void WaylandVulkanBackend::ResizeCompositorSurface(
