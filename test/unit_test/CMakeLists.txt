@@ -159,6 +159,7 @@ add_subdirectory(platform_handler-test)
 add_subdirectory(mouse_cursor_handler-test)
 add_subdirectory(watchdog_plugin-test)
 add_subdirectory(key_event_handler-test)
+add_subdirectory(key_mapping-test)
 # texture-test requires a live Wayland compositor, Flutter engine, and an app
 # bundle on disk — it is an integration test and has been moved to
 # test/integration/texture-test/.  Do NOT re-add it here.
