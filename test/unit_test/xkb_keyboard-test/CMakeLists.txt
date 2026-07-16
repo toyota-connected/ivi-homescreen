@@ -14,37 +14,10 @@ pkg_check_modules(XKB_KEYBOARD_TEST_XKB REQUIRED IMPORTED_TARGET xkbcommon)
 set(TESTCASE_NAME "homescreen_xkb_keyboard_ut_test_driver")
 set(TESTCASE_CC test_case_xkb_keyboard.cc)
 
-set(XKB_KEYBOARD_SRC ${PROJECT_SOURCE_DIR}/shell/input/xkb_keyboard.cc)
-
-add_executable(
-        ${TESTCASE_NAME}
-        ${TYPICAL_TEST_SOURCES}
-        ${XKB_KEYBOARD_SRC}
-        ${TESTCASE_CC}
-)
-
+# xkb_keyboard.cc is included in homescreen_ut_shell — see test/unit_test/CMakeLists.txt.
+add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})
-
-target_compile_definitions(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_DEFINITIONS}
-)
-
-target_include_directories(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_INC_DIRS}
-)
-
-target_link_libraries(
-        ${TESTCASE_NAME}
-        PRIVATE
-        gtest_main
-        ${TYPICAL_TEST_LINK_LIBS}
-        PkgConfig::XKB_KEYBOARD_TEST_XKB
-        toolchain::toolchain
-)
+target_link_libraries(${TESTCASE_NAME} PRIVATE gtest_main homescreen_ut_shell PkgConfig::XKB_KEYBOARD_TEST_XKB)
 
 add_test(
         NAME ${TESTCASE_NAME}

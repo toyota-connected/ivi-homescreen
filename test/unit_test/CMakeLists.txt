@@ -83,7 +83,14 @@ endif()
 # paths (sequential accumulation). Do NOT use ctest -j > 1 with COVERAGE=ON.
 add_library(homescreen_ut_shell OBJECT
     ${TYPICAL_TEST_SOURCES}
+    # The three input sources below are gated on BUILD_SOFTWARE_INPUT_LIBINPUT /
+    # DRM backends in the shell target and are therefore absent from
+    # TYPICAL_TEST_SOURCES in a default Wayland-EGL unit-test configure.
+    # Include them unconditionally here so every test driver (wake_event_fd,
+    # xkb_keyboard, key_repeater) can always link against the archive.
     ${PROJECT_SOURCE_DIR}/shell/input/wake_event_fd.cc
+    ${PROJECT_SOURCE_DIR}/shell/input/xkb_keyboard.cc
+    ${PROJECT_SOURCE_DIR}/shell/input/key_repeater.cc
 )
 target_compile_definitions(homescreen_ut_shell
     # PUBLIC: test executables inherit the compile-time defines (UNIT_TEST,
