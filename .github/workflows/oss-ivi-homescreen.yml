@@ -343,7 +343,7 @@ jobs:
         run: |
           lcov -d . -c --rc lcov_branch_coverage=1 -o coverage.info
           lcov -r coverage.info \
-            '*/test/*' '*/usr/*' '*/third_party/*' \
+            '*/test/*' '*/usr/*' '*/third_party/*' '*/wayland-protocols/*' \
             --rc lcov_branch_coverage=1 -o coverage.info
 
       - name: Print coverage summary
