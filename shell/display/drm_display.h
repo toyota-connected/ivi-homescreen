@@ -62,15 +62,20 @@ class DrmDisplay final : public IDisplay {
   // register_backends.cc casts to DrmDisplay*, so staying the same concrete
   // type keeps the DRM-EGL backend factory reusable as-is.
   //
-  // Differs from the path above in three ways, all because the compositor —
+  // Differs from the path above in four ways, all because the compositor —
   // not us — is the lessor:
   //   - the fd is already master over its leased object set, so there is no
   //     drmSetMaster and no foreground-VT guard (the compositor owns the VT);
   //   - teardown must NOT drmDropMaster: the lease is returned by destroying
   //     the wp_drm_lease_v1 object, which is @p fd_owner's job;
-  //   - the kernel filters this fd's resource view to the leased objects, so
-  //     the output provider is filtered to match (it re-opens the card
-  //     unfiltered and would otherwise advertise connectors we do not hold).
+  //   - outputs are enumerated through the lease fd, whose resource view the
+  //     kernel filters to the leased objects — re-opening the card by path
+  //     would both show connectors we do not hold and require permissions a
+  //     leased client may not have;
+  //   - no libseat session is taken: the compositor already holds the session
+  //     controller for this seat, so input falls back to direct evdev.
+  //     There is deliberately no no_seat knob here — the answer
+  //     is always "no seat".
   //
   // @p fd is borrowed: drm::Device::from_fd does not close it. @p fd_owner is
   // the opaque keep-alive that does own it (the LeaseHold) and must outlive
@@ -82,8 +87,7 @@ class DrmDisplay final : public IDisplay {
              double refresh_rate_hz,
              int fd,
              std::string device_path,
-             std::shared_ptr<void> fd_owner,
-             bool no_seat = false);
+             std::shared_ptr<void> fd_owner);
 
   ~DrmDisplay() override;
 

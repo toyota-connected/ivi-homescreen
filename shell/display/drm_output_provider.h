@@ -39,20 +39,31 @@ class DrmOutputProvider final : public IOutputProvider {
   void SetOutputListener(IOutputListener* listener) override;
   [[nodiscard]] bool SupportsHotplug() const override;
 
-  // Restrict enumeration to these connector ids. Needed by wayland-leased-drm:
-  // this provider re-opens the card as a plain non-master fd, whose resource
-  // view is the WHOLE card -- unlike the lease fd, which the kernel filters to
-  // the leased objects. Without the filter a leased display would advertise
-  // connectors it does not hold, and `[view.output]` validation would "succeed"
-  // against one the compositor still owns. Empty (the default) = no filtering.
-  void SetConnectorFilter(std::vector<uint32_t> connector_ids);
+  // Enumerate through @p fd instead of opening device_path_. Needed by
+  // wayland-leased-drm, for two reasons:
+  //
+  //   - Scope. The kernel filters a lease fd's resource view to the leased
+  //     objects, so enumerating through it yields exactly the connectors we
+  //     hold. Opening the card by path yields the WHOLE card, so a leased
+  //     display would advertise connectors the compositor still owns and
+  //     `[view.output]` validation would "succeed" against one of them.
+  //   - Permission. The point of drm-lease-v1 is that an unprivileged client
+  //     can drive a connector *without* being able to open the DRM node. On a
+  //     locked-down target the open() here fails with EACCES, enumeration comes
+  //     back empty, and a display holding a perfectly good lease advertises no
+  //     outputs at all.
+  //
+  // @p fd is borrowed and must outlive this provider (the display holds the
+  // LeaseHold that owns it). -1 (the default) restores the open-by-path path.
+  void SetEnumerationFd(int fd);
 
  private:
-  // The card this provider enumerates (e.g. "/dev/dri/card1").
+  // The card this provider enumerates (e.g. "/dev/dri/card1"). Unused when
+  // enumeration_fd_ is set, except for diagnostics.
   std::string device_path_;
 
-  // Connector-id allowlist; empty = enumerate everything on the card.
-  std::vector<uint32_t> connector_filter_;
+  // Borrowed fd to enumerate through; -1 = open device_path_ instead.
+  int enumeration_fd_{-1};
 
   // Set by SetOutputListener; consumed once the hotplug monitor is wired.
   IOutputListener* listener_ = nullptr;

@@ -173,13 +173,33 @@ class Device : public lease_proto::CWpDrmLeaseDeviceV1<Device> {
     if (id == nullptr) {
       return;
     }
+    // This object is dispatched for the process lifetime, and the compositor
+    // re-advertises leasable connectors on every VT switch back, hot-plug, and
+    // lease return. Without pruning, the deque and its live wl_proxy set would
+    // grow monotonically for days on an IVI unit until the compositor's
+    // per-client object table gives out. Prune here rather than in OnWithdrawn:
+    // that runs *on* the Connector being withdrawn, so destroying it there
+    // would free the object libwayland is currently dispatching into.
+    PruneWithdrawn();
     auto c = std::make_unique<Connector>();
     c->_SetProxy(id);
     connectors.emplace_back(std::move(c));
   }
 
-  void OnDone() override { done = true; }
+  void OnDone() override {
+    done = true;
+    PruneWithdrawn();
+  }
   void OnReleased() override { released = true; }
+
+  // Drop connectors the compositor has withdrawn. ~Connector sends
+  // wp_drm_lease_connector_v1.destroy and drops the proxy, which is the
+  // protocol-hygiene half of this.
+  void PruneWithdrawn() {
+    for (auto it = connectors.begin(); it != connectors.end();) {
+      it = (*it)->withdrawn ? connectors.erase(it) : it + 1;
+    }
+  }
 };
 
 // wp_drm_lease_request_v1 has no events; it exists only to carry
@@ -199,13 +219,35 @@ class Lease : public lease_proto::CWpDrmLeaseV1<Lease> {
   bool finished = false;
 
   ~Lease() override {
+    // The granted fd is ours until ReleaseFd() hands it to the LeaseHold. Close
+    // it otherwise, or any path that drops the Lease after lease_fd arrived --
+    // e.g. a protocol error dispatched in the SAME batch that delivered it --
+    // leaks the master fd outright.
+    CloseFd();
     // wp_drm_lease_v1.destroy IS a destructor request.
     if (GetProxy() != nullptr) {
       Destroy();
     }
   }
 
-  void OnLeaseFd(int32_t fd) override { lease_fd = fd; }
+  void CloseFd() noexcept {
+    if (lease_fd >= 0) {
+      close(lease_fd);
+      lease_fd = -1;
+    }
+  }
+
+  // Hand the fd to the caller; the Lease stops owning it.
+  [[nodiscard]] int ReleaseFd() noexcept { return std::exchange(lease_fd, -1); }
+
+  void OnLeaseFd(int32_t fd) override {
+    // The compositor is untrusted and this object is dispatched for the process
+    // lifetime. A repeat lease_fd (protocol-violating, but nothing stops it)
+    // must not drop the previous fd on the floor -- one leak per event walks
+    // the process to EMFILE. Same rule as Device::OnDrmFd.
+    CloseFd();
+    lease_fd = fd;
+  }
 
   // Either a denial (pre-grant) or a revocation (post-grant, at any time).
   void OnFinished() override { finished = true; }
@@ -436,10 +478,21 @@ bool OpenSession(Session& s, Clock::time_point deadline, LeaseError* err) {
     return false;
   }
 
+  // Gate on every connector's `done` as well as the device's. The device's
+  // `done` only brackets the connector *list*; each connector's own `done`
+  // brackets its name/description/connector_id, and a compositor is free to
+  // defer those (reading EDID is exactly what that event exists to bracket).
+  // Without this we could read an offer with an empty name and connector_id 0,
+  // then report kConnectorNotFound for a connector that was in fact offered.
   const auto all_done = [&s]() {
     for (const auto& d : s.devices) {
       if (!d->done) {
         return false;
+      }
+      for (const auto& c : d->connectors) {
+        if (!c->done && !c->withdrawn) {
+          return false;
+        }
       }
     }
     return true;
@@ -749,11 +802,13 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
   dev->CloseDrmFd();
 
   auto hold = std::unique_ptr<LeaseHold>(new LeaseHold());
-  hold->lease_fd_ = lease->lease_fd;
+  // Take ownership of the fd off the Lease: from here the LeaseHold closes it,
+  // and ~Lease must not.
+  hold->lease_fd_ = lease->ReleaseFd();
   hold->connector_id_ = conn->offer.connector_id;
   hold->connector_name_ = conn->offer.name;
   // Derive the node path from the LEASE fd — the fd every renderer will use.
-  hold->card_path_ = NodePathFromFd(lease->lease_fd);
+  hold->card_path_ = NodePathFromFd(hold->lease_fd_);
   if (hold->card_path_.empty()) {
     hold->card_path_ = dev->card_path;
   }
