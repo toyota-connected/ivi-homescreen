@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 #include "logging/logging.h"
+#include "profiling/pv_latency.h"
 
 #include <dlfcn.h>
 #include <cassert>
@@ -699,6 +700,13 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
   const auto timestamp = timestamp_us != 0
                              ? timestamp_us
                              : LibFlutterEngine->GetCurrentTime() / 1000;
+
+  // Latency probe: a tap fires down then up; stamp both so the last one before
+  // a platform-view create burst is the trigger (see pv_latency.h).
+  if (phase == kDown || phase == kUp) {
+    ivi::pv_latency::MarkInput();
+  }
+
   std::scoped_lock lock(m_pointer_mutex);
 
   FlutterPointerEvent e{};
