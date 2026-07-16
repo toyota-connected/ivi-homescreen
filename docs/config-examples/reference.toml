@@ -183,6 +183,10 @@
   # type=string default=(sole device) values=index or /dev/dri/cardN applies=leased
   device =
 
+  # On revocation (every VT switch away from the compositor is one): exit non-zero so a supervisor restarts and renegotiates, or gate and keep running with a frozen panel (debugging only).
+  # type=string default=exit values=exit|gate applies=leased
+  on_revoke =
+
   # Bound on the whole lease negotiation; a compositor may defer the DRM fd until it regains DRM master.
   # type=int default=5000 values=> 0 applies=leased
   timeout_ms =

@@ -258,6 +258,10 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
     instance.view.lease_connector =
         v->at_path("backend.lease.connector").as_string()->value_or("");
   }
+  if (v->at_path("backend.lease.on_revoke").is_string()) {
+    instance.view.lease_on_revoke =
+        v->at_path("backend.lease.on_revoke").as_string()->value_or("");
+  }
   if (v->at_path("backend.lease.timeout_ms").is_integer()) {
     const int64_t ms = v->at_path("backend.lease.timeout_ms")
                            .as_integer()
@@ -755,6 +759,13 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "wayland-leased-drm: connector to request by name (e.g. HDMI-A-1). "
         "Default: the sole offer; several offers with no choice is fatal.",
         cxxopts::value<std::string>())(
+        "lease-on-revoke",
+        "wayland-leased-drm: what to do when the compositor revokes the lease "
+        "(it does so on every VT switch away from it, not just on error). "
+        "exit (default) = log the cause and exit non-zero so a supervisor "
+        "restarts and renegotiates; gate = keep running with a frozen panel "
+        "(debugging only, nothing recovers). reacquire is not implemented yet.",
+        cxxopts::value<std::string>())(
         "lease-timeout-ms",
         "wayland-leased-drm: bound on the whole lease negotiation. Default "
         "5000. The protocol lets a compositor defer the DRM fd until it "
@@ -963,6 +974,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
                 config.view.lease_device);
     pick_string("lease-connector", "HOMESCREEN_LEASE_CONNECTOR",
                 config.view.lease_connector);
+    pick_string("lease-on-revoke", "HOMESCREEN_LEASE_ON_REVOKE",
+                config.view.lease_on_revoke);
     if (const char* e = std::getenv("HOMESCREEN_LEASE_TIMEOUT_MS");
         e != nullptr && *e != '\0') {
       char* end = nullptr;

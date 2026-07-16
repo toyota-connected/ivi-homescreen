@@ -290,6 +290,14 @@ Usage:
       --lease-connector arg   wayland-leased-drm: connector to request by name 
                               (e.g. HDMI-A-1). Default: the sole offer; several 
                               offers with no choice is fatal.
+      --lease-on-revoke arg   wayland-leased-drm: what to do when the 
+                              compositor revokes the lease (it does so on every 
+                              VT switch away from it, not just on error). exit 
+                              (default) = log the cause and exit non-zero so a 
+                              supervisor restarts and renegotiates; gate = keep 
+                              running with a frozen panel (debugging only, 
+                              nothing recovers). reacquire is not implemented 
+                              yet.
       --lease-timeout-ms arg  wayland-leased-drm: bound on the whole lease 
                               negotiation. Default 5000. The protocol lets a 
                               compositor defer the DRM fd until it regains DRM 
@@ -355,6 +363,7 @@ annotated all-keys file see
 | `[view.backend.drm]` | `stage_cursor` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.lease]` | `connector` | `string` | `(sole offer)` | `e.g. HDMI-A-1` | leased |
 | `[view.backend.lease]` | `device` | `string` | `(sole device)` | `index or /dev/dri/cardN` | leased |
+| `[view.backend.lease]` | `on_revoke` | `string` | `exit` | `exit\|gate` | leased |
 | `[view.backend.lease]` | `timeout_ms` | `int` | `5000` | `> 0` | leased |
 | `[view.output]` | `drm_connector` | `string` | `(none)` | `e.g. HDMI-A-1` | drm |
 | `[view.output]` | `index` | `int` | `(none)` | `int` | all |

@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,6 +43,26 @@ struct LeaseOffer {
                             // restarts on the same boot
 };
 
+// Why a lease ended. Distinct because they demand different operator actions:
+// master-loss is routine and self-healing on VT return, a
+// hot-unplug needs someone to plug the panel back in, and a dead compositor is
+// a supervision problem.
+enum class RevokeCause {
+  // wp_drm_lease_v1.finished. The spec's causes are the compositor losing DRM
+  // master — i.e. every VT switch away, the common case — or a hot-unplug. The
+  // protocol carries no way to tell them apart; the connector's `withdrawn`
+  // event hints at unplug but is not sent for master-loss.
+  kFinished,
+  // The wl_display died: the compositor exited or crashed. The lessor's fd went
+  // with it, so the lease is already kernel-dead.
+  kConnectionLost,
+  // The monitor thread itself failed (poll error). Not a protocol event; the
+  // lease's true state is unknown, so it is treated as lost.
+  kMonitorFailure,
+};
+
+const char* ToString(RevokeCause c);
+
 struct LeaseConfig {
   // Selects the wp_drm_lease_device_v1 global when several are advertised (one
   // per DRM node). Either a decimal index into the advertised order, or a DRM
@@ -58,6 +79,21 @@ struct LeaseConfig {
   // compositor defer `drm_fd` until it regains DRM master, so without a
   // deadline a VT-switched-away compositor would hang startup indefinitely.
   uint32_t timeout_ms{5000};
+
+  // Called exactly once, when the lease is first observed revoked. Runs on the
+  // monitor thread — or inline on the caller's thread from Acquire() itself, if
+  // `finished` arrived in the same dispatch batch as `lease_fd`. It must be
+  // cheap and must not block: the monitor thread is what teardown joins.
+  //
+  // Passed here rather than set on the LeaseHold afterwards because Acquire()
+  // spawns the monitor before it returns — a setter would race the very first
+  // revocation, which is precisely the case worth handling.
+  //
+  // Null = latch revoked() and nothing else. The renderers' gates still fire,
+  // so the display stops updating and stays that way. That is a deliberate
+  // choice
+  // (`gate`), not a default to fall into: see the exit policy below.
+  std::function<void(RevokeCause)> on_revoked;
 };
 
 // Why a negotiation attempt ended without a lease. Distinct causes because they
@@ -120,6 +156,12 @@ class LeaseHold {
   struct Impl;
 
   LeaseHold();
+
+  // Latch revoked() and, the first time only, log the cause and run the
+  // LeaseConfig::on_revoked handler. Idempotent and safe from either the
+  // monitor thread or Acquire()'s own thread; every path that discovers a dead
+  // lease goes through here so the "once" and the logging cannot drift apart.
+  void LatchRevoked(RevokeCause cause);
 
   std::unique_ptr<Impl> impl_;
   int lease_fd_{-1};
