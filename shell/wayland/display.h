@@ -674,6 +674,11 @@ class Display : public IDisplay,
   // path. Zero name means the global was never advertised.
   uint32_t m_linux_dmabuf_name{0};
   uint32_t m_linux_dmabuf_version{0};
+  // Registry name + advertised version of wp_linux_drm_syncobj_manager_v1, for
+  // a Vulkan backend that binds explicit-sync timelines on the dma-buf present
+  // path. Zero name means the global was never advertised.
+  uint32_t m_drm_syncobj_name{0};
+  uint32_t m_drm_syncobj_version{0};
 
  public:
   [[nodiscard]] bool HasLinuxDmabuf() const { return m_has_linux_dmabuf; }
@@ -683,6 +688,12 @@ class Display : public IDisplay,
   }
   [[nodiscard]] uint32_t GetLinuxDmabufVersion() const {
     return m_linux_dmabuf_version;
+  }
+  [[nodiscard]] uint32_t GetDrmSyncobjName() const {
+    return m_drm_syncobj_name;
+  }
+  [[nodiscard]] uint32_t GetDrmSyncobjVersion() const {
+    return m_drm_syncobj_version;
   }
   // The registry the dma-buf feedback helper binds against.
   [[nodiscard]] wl::CRegistry& GetRegistry() { return registry_; }
