@@ -77,6 +77,17 @@ add_subdirectory(output_resolver-test)
 # Needs no GPU/compositor, so it runs anywhere the lease client is built.
 if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
     add_subdirectory(lease_client-test)
+    # T2 — kernel-real lease on vkms. Skips itself without vkms + DRM master, so
+    # it is safe to build and run everywhere; it only does real work under sudo.
+    #
+    # Needs both halves of the leased scanout path it drives: the software sink
+    # (BUILD_SOFTWARE_SINK_DRM) and the output provider, whose drm-cxx only
+    # exists once a DRM-KMS backend pulls in cmake/drm_kms.cmake. Configure e.g.
+    #   -DBUILD_BACKEND_WAYLAND_LEASED_DRM=ON -DBUILD_BACKEND_SOFTWARE=ON \
+    #   -DBUILD_BACKEND_DRM_KMS_EGL=ON -DBUILD_UNIT_TESTS=ON
+    if (BUILD_SOFTWARE_SINK_DRM AND TARGET drm-cxx)
+        add_subdirectory(leased_drm_vkms-test)
+    endif ()
 endif ()
 add_subdirectory(timer-test)
 add_subdirectory(watchdog-test)
