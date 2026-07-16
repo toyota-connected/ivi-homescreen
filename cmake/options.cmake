@@ -329,6 +329,77 @@ endif ()
 option(ENABLE_STATIC_LINK "Link stdlib with static libs" OFF)
 
 #
+# Derived backend flags
+#
+# Declared last so every BUILD_BACKEND_* / BUILD_SOFTWARE_SINK_* above is
+# already defined. These name the distinctions the gates actually care about,
+# which are NOT the same as "is some Wayland backend on":
+#
+#   IVI_WAYLAND_SURFACE_BACKENDS — backends that own a wl_surface and take
+#       input/focus from the compositor. These are the only consumers of
+#       wayland-cursor, xkbcommon, and the surface protocol set (xdg, IME,
+#       viewporter, dmabuf, fractional-scale, syncobj).
+#   IVI_WAYLAND_ANY — anything that opens a wl_display connection at all.
+#       wayland-leased-drm connects, but only to negotiate a DRM lease: it has
+#       no wl_surface, and takes input from evdev. It therefore needs the
+#       scanner + wayland-client and nothing else, so a lease-only build must
+#       gate on this rather than on IVI_WAYLAND_SURFACE_BACKENDS.
+#
+# The leased renderer tiers reuse the existing renderer stacks rather than
+# adding parallel options — the lease only changes how the DRM fd is acquired,
+# not how frames are produced.
+#
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+    set(IVI_WAYLAND_SURFACE_BACKENDS TRUE)
+else ()
+    set(IVI_WAYLAND_SURFACE_BACKENDS FALSE)
+endif ()
+
+if (IVI_WAYLAND_SURFACE_BACKENDS OR BUILD_BACKEND_WAYLAND_LEASED_DRM)
+    set(IVI_WAYLAND_ANY TRUE)
+else ()
+    set(IVI_WAYLAND_ANY FALSE)
+endif ()
+
+# Per-tier availability for the three wayland-leased-drm registry keys.
+set(IVI_LEASED_DRM_EGL FALSE)
+set(IVI_LEASED_DRM_VULKAN FALSE)
+set(IVI_LEASED_DRM_SOFTWARE FALSE)
+if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
+    if (BUILD_BACKEND_DRM_KMS_EGL)
+        set(IVI_LEASED_DRM_EGL TRUE)
+    endif ()
+    if (BUILD_BACKEND_DRM_KMS_VULKAN)
+        set(IVI_LEASED_DRM_VULKAN TRUE)
+    endif ()
+    if (BUILD_BACKEND_SOFTWARE AND BUILD_SOFTWARE_SINK_DRM)
+        set(IVI_LEASED_DRM_SOFTWARE TRUE)
+    endif ()
+    if (NOT IVI_LEASED_DRM_EGL AND NOT IVI_LEASED_DRM_VULKAN AND
+        NOT IVI_LEASED_DRM_SOFTWARE)
+        message(FATAL_ERROR
+                "BUILD_BACKEND_WAYLAND_LEASED_DRM=ON but no renderer tier is "
+                "available — a lease acquires a DRM fd, it does not render, so "
+                "at least one renderer stack must be enabled to scan out on it. "
+                "Enable one of: BUILD_BACKEND_DRM_KMS_EGL "
+                "(wayland-leased-drm-egl), BUILD_BACKEND_DRM_KMS_VULKAN "
+                "(wayland-leased-drm-vulkan), or BUILD_BACKEND_SOFTWARE + "
+                "BUILD_SOFTWARE_SINK_DRM (wayland-leased-drm-software).")
+    endif ()
+    # NOTE: the wayland-leased-drm-* registry keys named above are NOT yet
+    # registered — that lands in WS6 (RegisterCompiledBackends + the family-hint
+    # resolution in ResolveKeyForConfig). Until then this option only compiles
+    # the lease client in; selecting a leased key at runtime will not resolve.
+    message(STATUS
+            "  wayland-leased-drm: lease client only — no backend registered "
+            "yet (WS6 pending)")
+endif ()
+
+message(STATUS "Wayland (surface) ...... ${IVI_WAYLAND_SURFACE_BACKENDS}")
+message(STATUS "Wayland (any conn.) .... ${IVI_WAYLAND_ANY}")
+message(STATUS "Leased DRM tiers ....... egl=${IVI_LEASED_DRM_EGL} vulkan=${IVI_LEASED_DRM_VULKAN} software=${IVI_LEASED_DRM_SOFTWARE}")
+
+#
 # Docs
 #
 option(BUILD_DOCS "Build documentation" OFF)
