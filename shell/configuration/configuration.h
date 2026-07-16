@@ -113,9 +113,22 @@ class Configuration {
       //                     defer drm_fd until it regains DRM master, so
       //                     without a bound a VT-switched-away compositor would
       //                     hang startup.
+      //   lease_on_revoke : what to do when the compositor revokes the lease —
+      //                     which it does on every VT switch away from it, not
+      //                     only on error.
+      //                       "exit" (default) — log the cause and exit
+      //                         non-zero, so a supervisor (systemd) restarts
+      //                         and renegotiates from scratch. The honest
+      //                         default until reacquire-in-place exists.
+      //                       "gate"           — stop committing and keep
+      //                         running with a frozen panel. Only useful for
+      //                         debugging a revocation, since nothing recovers.
+      //                       "reacquire"      — not implemented yet;
+      //                         accepted and warned about, treated as "exit".
       std::optional<std::string> lease_device;
       std::optional<std::string> lease_connector;
       std::optional<uint32_t> lease_timeout_ms;
+      std::optional<std::string> lease_on_revoke;
       // Wayland compositor-protocol shell selection: "auto" (default) | "xdg" |
       // "agl" | "ivi" | "simple". The Display reads it from the first view.
       std::optional<std::string> shell;

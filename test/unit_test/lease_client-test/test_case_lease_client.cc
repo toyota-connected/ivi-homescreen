@@ -532,6 +532,77 @@ TEST(LeaseClient, MonitorLatchesRevokedOnLaterFinished) {
   EXPECT_TRUE(res.hold->revoked()) << "monitor thread never observed finished";
 }
 
+// The revocation policy hook. The shell's `exit` policy installs a handler that
+// terminates the process, so the handler is injectable precisely to keep it out
+// of the library — these tests observe it instead of exiting.
+TEST(LeaseClient, OnRevokedFiresOnceWithTheCauseWhenFinishedArrivesLater) {
+  MockConfig cfg;
+  cfg.policy = GrantPolicy::kGrantThenFinishLater;
+  MockCompositor mock{cfg};
+
+  std::atomic<int> calls{0};
+  std::atomic<homescreen::RevokeCause> seen{
+      homescreen::RevokeCause::kMonitorFailure};
+  LeaseConfig c = Cfg();
+  c.on_revoked = [&](homescreen::RevokeCause cause) {
+    seen.store(cause);
+    calls.fetch_add(1);
+  };
+
+  auto res = LeaseClient::Acquire(c);
+  ASSERT_NE(res.hold, nullptr) << homescreen::ToString(res.error);
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (calls.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(calls.load(), 1);
+  EXPECT_EQ(seen.load(), homescreen::RevokeCause::kFinished);
+  EXPECT_TRUE(res.hold->revoked());
+
+  // Teardown must not fire it again: the handler is "once", and a policy that
+  // exits the process would be catastrophic to re-run while tearing down.
+  res.hold.reset();
+  EXPECT_EQ(calls.load(), 1);
+}
+
+// The same-batch case: `finished` arrives with lease_fd, so the monitor thread
+// never sees a fresh event. Acquire() must fire the handler itself.
+TEST(LeaseClient, OnRevokedFiresWhenFinishedArrivesInTheGrantBatch) {
+  MockConfig cfg;
+  cfg.policy = GrantPolicy::kGrantThenFinishNow;
+  MockCompositor mock{cfg};
+
+  std::atomic<int> calls{0};
+  LeaseConfig c = Cfg();
+  c.on_revoked = [&](homescreen::RevokeCause) { calls.fetch_add(1); };
+
+  auto res = LeaseClient::Acquire(c);
+  ASSERT_NE(res.hold, nullptr) << homescreen::ToString(res.error);
+  EXPECT_TRUE(res.hold->revoked());
+  EXPECT_EQ(calls.load(), 1) << "handler must fire even though the monitor "
+                                "thread will never see another event";
+}
+
+// A denial is not a revocation: no lease was ever held, so the policy must not
+// fire. Otherwise `exit` would turn a recoverable config error into a crash
+// loop with a misleading cause.
+TEST(LeaseClient, OnRevokedDoesNotFireOnDenial) {
+  MockConfig cfg;
+  cfg.policy = GrantPolicy::kDeny;
+  MockCompositor mock{cfg};
+
+  std::atomic<int> calls{0};
+  LeaseConfig c = Cfg();
+  c.on_revoked = [&](homescreen::RevokeCause) { calls.fetch_add(1); };
+
+  auto res = LeaseClient::Acquire(c);
+  ASSERT_EQ(res.hold, nullptr);
+  EXPECT_EQ(res.error, LeaseError::kDenied);
+  EXPECT_EQ(calls.load(), 0);
+}
+
 TEST(LeaseClient, NoConnectorsOfferedIsReported) {
   MockConfig cfg;
   cfg.devices = {DeviceSpec{{}}};  // device advertises zero connectors

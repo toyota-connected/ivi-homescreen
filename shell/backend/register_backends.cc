@@ -102,6 +102,63 @@ std::shared_ptr<IDisplay> MakeDrmDisplay(
 }
 #endif
 
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM
+// Build the LeaseConfig shared by every leased tier, including the revocation
+// policy.
+//
+// `exit` is the default because the alternative today is worse than it sounds:
+// gating leaves a frozen panel with no signal to anyone, and revocation is
+// routine — every VT switch away from the compositor is one. Exiting non-zero
+// hands the problem to the supervisor that can actually fix it, which
+// renegotiates from scratch on restart. Reacquire-in-place is later and will
+// change this default per tier.
+homescreen::LeaseConfig MakeLeaseConfig(const Configuration::Config& config) {
+  homescreen::LeaseConfig lc;
+  lc.device = config.view.lease_device;
+  lc.connector = config.view.lease_connector;
+  if (config.view.lease_timeout_ms.has_value()) {
+    lc.timeout_ms = *config.view.lease_timeout_ms;
+  }
+
+  const std::string policy = config.view.lease_on_revoke.value_or("exit");
+  if (policy == "gate") {
+    // Null handler: revoked() latches, the renderers' gates fire, and the panel
+    // stops updating. Debugging aid — nothing recovers.
+    ihs::log::warn(
+        "[leased-drm] lease_on_revoke=gate: on revocation the panel will "
+        "freeze "
+        "and the process will keep running. Nothing recovers from this; it is "
+        "for observing a revocation, not for production.");
+    return lc;
+  }
+  if (policy != "exit") {
+    ihs::log::warn(
+        "[leased-drm] lease_on_revoke='{}' is not implemented (accepted "
+        "values: "
+        "exit, gate); using 'exit'.",
+        policy);
+  }
+
+  lc.on_revoked = [](homescreen::RevokeCause cause) {
+    // Runs on the monitor thread. std::exit would run atexit handlers and
+    // static destructors concurrently with the threads still using them, so
+    // _Exit: the kernel closes the lease fd, which is what actually returns the
+    // connector, and the compositor re-advertises it. LatchRevoked has already
+    // logged the cause in operator terms; this says what is being done about
+    // it.
+    ihs::log::critical(
+        "[leased-drm] exiting on lease revocation ({}). lease_on_revoke=exit: "
+        "a "
+        "supervisor should restart and renegotiate. Use lease_on_revoke=gate "
+        "to "
+        "keep the process alive with a frozen panel instead.",
+        homescreen::ToString(cause));
+    std::_Exit(EXIT_FAILURE);
+  };
+  return lc;
+}
+#endif
+
 #if BUILD_BACKEND_WAYLAND_LEASED_DRM && \
     (BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN)
 // wayland-leased-drm: the DRM device comes from a compositor lease rather than
@@ -110,14 +167,7 @@ std::shared_ptr<IDisplay> MakeDrmDisplay(
 // the renderer -- so the DRM backend factories are reused verbatim.
 std::shared_ptr<IDisplay> MakeLeasedDrmDisplay(
     const std::vector<Configuration::Config>& configs) {
-  homescreen::LeaseConfig lc;
-  lc.device = configs[0].view.lease_device;
-  lc.connector = configs[0].view.lease_connector;
-  if (configs[0].view.lease_timeout_ms.has_value()) {
-    lc.timeout_ms = *configs[0].view.lease_timeout_ms;
-  }
-
-  auto res = homescreen::LeaseClient::Acquire(lc);
+  auto res = homescreen::LeaseClient::Acquire(MakeLeaseConfig(configs[0]));
   if (!res.hold) {
     // Fail fast, consistent with the rest of MakeDisplay: a leased backend that
     // could not get its lease has nothing to fall back to, and silently running
@@ -205,14 +255,7 @@ std::shared_ptr<IDisplay> MakeSoftwareDisplay(
 // software display; only the scanout device differs.
 std::shared_ptr<IDisplay> MakeLeasedSoftwareDisplay(
     const std::vector<Configuration::Config>& configs) {
-  homescreen::LeaseConfig lc;
-  lc.device = configs[0].view.lease_device;
-  lc.connector = configs[0].view.lease_connector;
-  if (configs[0].view.lease_timeout_ms.has_value()) {
-    lc.timeout_ms = *configs[0].view.lease_timeout_ms;
-  }
-
-  auto res = homescreen::LeaseClient::Acquire(lc);
+  auto res = homescreen::LeaseClient::Acquire(MakeLeaseConfig(configs[0]));
   if (!res.hold) {
     ihs::log::error("[leased-drm] could not acquire a lease: {}",
                     homescreen::ToString(res.error));

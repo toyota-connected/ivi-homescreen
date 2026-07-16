@@ -597,6 +597,18 @@ void LogOffers(const std::vector<LeaseOffer>& offers) {
 
 }  // namespace
 
+const char* ToString(RevokeCause c) {
+  switch (c) {
+    case RevokeCause::kFinished:
+      return "compositor lost DRM master (VT switch) or connector unplugged";
+    case RevokeCause::kConnectionLost:
+      return "compositor exited or crashed";
+    case RevokeCause::kMonitorFailure:
+      return "lease monitor failed";
+  }
+  return "unknown";
+}
+
 const char* ToString(LeaseError e) {
   switch (e) {
     case LeaseError::kNone:
@@ -633,6 +645,9 @@ const char* ToString(LeaseError e) {
 // protocol header.
 struct LeaseHold::Impl {
   wl_display* display = nullptr;
+  // From LeaseConfig::on_revoked. Read only under the LatchRevoked "once"
+  // guard, and set before the monitor thread starts, so it needs no lock.
+  std::function<void(RevokeCause)> on_revoked;
   std::unique_ptr<Device> device;
   std::unique_ptr<Lease> lease;
   std::thread monitor;
@@ -650,6 +665,42 @@ struct LeaseHold::Impl {
 constexpr int kMonitorFallbackTickMs = 200;
 
 LeaseHold::LeaseHold() : impl_(std::make_unique<Impl>()) {}
+
+void LeaseHold::LatchRevoked(const RevokeCause cause) {
+  // exchange, not store: every discovery path routes through here, and only the
+  // first may log or notify. Without this a connection that dies right after a
+  // `finished` would fire the policy twice.
+  if (revoked_.exchange(true, std::memory_order_acq_rel)) {
+    return;
+  }
+  switch (cause) {
+    case RevokeCause::kFinished:
+      // The protocol cannot say which of the two it was, so say both rather
+      // than guess: the operator actions differ completely.
+      ihs::log::warn(
+          "[leased-drm] lease revoked on connector '{}' (id {}): the "
+          "compositor "
+          "lost DRM master (a VT switch away) or the connector was unplugged. "
+          "Commits are gated from here.",
+          connector_name_, connector_id_);
+      break;
+    case RevokeCause::kConnectionLost:
+      ihs::log::error(
+          "[leased-drm] Wayland connection lost — the compositor exited or "
+          "crashed, so the lease died with its lessor. Connector '{}' (id {}).",
+          connector_name_, connector_id_);
+      break;
+    case RevokeCause::kMonitorFailure:
+      ihs::log::error(
+          "[leased-drm] lease monitor failed on connector '{}' (id {}); the "
+          "lease state is unknown, so it is treated as lost.",
+          connector_name_, connector_id_);
+      break;
+  }
+  if (impl_->on_revoked) {
+    impl_->on_revoked(cause);
+  }
+}
 
 LeaseHold::~LeaseHold() {
   // The monitor is dispatching on the display we are about to tear down, so it
@@ -816,6 +867,7 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
   // Hand the connection over; Session must not tear it down. Move the leased
   // device across FIRST, then release the rest while the display is still ours.
   hold->impl_->display = s.display;
+  hold->impl_->on_revoked = cfg.on_revoked;
   hold->impl_->lease = std::move(lease);
   for (auto& d : s.devices) {
     if (d.get() == dev) {
@@ -845,11 +897,9 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
   // fresh dispatch, and a dead lease produces no further events — so latch it
   // here or revoked() would stay false forever against dead KMS objects.
   if (hold->impl_->lease->finished) {
-    ihs::log::warn(
-        "[leased-drm] lease revoked before it could be used (finished arrived "
-        "with lease_fd) on connector '{}' (id {})",
-        hold->connector_name_, hold->connector_id_);
-    hold->revoked_.store(true, std::memory_order_release);
+    // Same dispatch batch as lease_fd — the monitor would never see another
+    // event to re-check on, so latch here, before it even starts.
+    hold->LatchRevoked(RevokeCause::kFinished);
   }
 
   // The event loop must stay alive for the process lifetime to observe
@@ -874,16 +924,7 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
       // be latched (see the pre-spawn check above), in which case no further
       // event will ever arrive to wake us.
       if (lease_obj->finished) {
-        if (!h->revoked_.exchange(true, std::memory_order_acq_rel)) {
-          // Per spec the causes are hot-unplug or the compositor losing DRM
-          // master (every VT switch away). We cannot tell them apart from this
-          // event alone; WS7 classifies and drives recovery. For now: latch
-          // revoked so renderers stop committing against dead KMS objects.
-          ihs::log::warn(
-              "[leased-drm] lease revoked (wp_drm_lease_v1.finished) on "
-              "connector '{}' (id {}) — commits gated",
-              h->connector_name_, h->connector_id_);
-        }
+        h->LatchRevoked(RevokeCause::kFinished);
         return;
       }
       wl_display_flush(display);
@@ -897,9 +938,8 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
         if (errno == EINTR) {
           continue;
         }
-        ihs::log::error("[leased-drm] monitor poll failed: {}",
-                        std::strerror(errno));
-        h->revoked_.store(true, std::memory_order_release);
+        ihs::log::error("[leased-drm] monitor poll: {}", std::strerror(errno));
+        h->LatchRevoked(RevokeCause::kMonitorFailure);
         return;
       }
       if (r == 0) {
@@ -912,12 +952,7 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
         continue;
       }
       if (wl_display_dispatch(display) < 0) {
-        // Connection death: the compositor exited or crashed. The lessor fd is
-        // gone, so the lease is already kernel-dead.
-        ihs::log::error(
-            "[leased-drm] Wayland connection lost — lease is revoked "
-            "(compositor exit/crash)");
-        h->revoked_.store(true, std::memory_order_release);
+        h->LatchRevoked(RevokeCause::kConnectionLost);
         return;
       }
     }
