@@ -211,6 +211,61 @@ DrmDisplay::DrmDisplay(int32_t width,
   }
 }
 
+DrmDisplay::DrmDisplay(AdoptFd,
+                       int32_t width,
+                       int32_t height,
+                       double refresh_rate_hz,
+                       int fd,
+                       std::string device_path,
+                       std::shared_ptr<void> fd_owner,
+                       bool no_seat)
+    // Delegate so the seat/session wiring stays in one place; only the device
+    // acquisition differs on this path.
+    : DrmDisplay(width,
+                 height,
+                 refresh_rate_hz,
+                 std::move(device_path),
+                 no_seat) {
+  adopted_fd_ = true;
+  fd_owner_ = std::move(fd_owner);
+
+  // Adopt up front so SharedDevice() short-circuits: no libseat TakeDevice, no
+  // direct open, no drmSetMaster, no foreground-VT guard. The lease fd is
+  // already master over its object set by construction.
+  //
+  // from_fd borrows: the fd stays owned by fd_owner_ (the LeaseHold), which is
+  // also what returns the lease. drm_master_ stays false so ~DrmDisplay does
+  // not drmDropMaster a lease we never took master on -- returning it is the
+  // lessor's business, driven by destroying the wp_drm_lease_v1 object.
+  drm_dev_.emplace(drm::Device::from_fd(fd));
+
+  // The lease fd's resource view is kernel-filtered to the leased objects, but
+  // output_provider_ re-opens the card by path and so sees the whole card.
+  // Seed it with what we actually hold, straight from the kernel: asking the
+  // lease fd is authoritative in a way that trusting our own lease request is
+  // not -- the requested connector set is only a suggestion, and the compositor
+  // picks the final object set (and may pick differently on every grant).
+  if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
+    std::vector<uint32_t> leased(
+        res->connectors,
+        res->connectors + static_cast<size_t>(res->count_connectors));
+    ihs::log::info(
+        "[DrmDisplay] adopted lease fd on {}: {} leased connector(s)",
+        device_path_, leased.size());
+    output_provider_.SetConnectorFilter(std::move(leased));
+    drmModeFreeResources(res);
+  } else {
+    // Enumeration failing on a fd we were just handed means the lease is
+    // already dead (revoked between grant and here) or the fd is not a DRM
+    // node. Leave the filter empty but say so -- an unfiltered provider would
+    // silently advertise the whole card.
+    ihs::log::error(
+        "[DrmDisplay] drmModeGetResources on the adopted lease fd failed: {}. "
+        "Outputs are NOT filtered to the lease.",
+        std::strerror(errno));
+  }
+}
+
 DrmDisplay::~DrmDisplay() {
   // Stop the per-card flip reader first -- it runs its own thread and holds the
   // fd via flip_descriptor_, so it must be torn down before the fd is closed.

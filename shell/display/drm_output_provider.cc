@@ -16,6 +16,7 @@
 
 #include "display/drm_output_provider.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <drm-cxx/core/device.hpp>
@@ -27,6 +28,11 @@ namespace homescreen {
 
 DrmOutputProvider::DrmOutputProvider(std::string device_path)
     : device_path_(std::move(device_path)) {}
+
+void DrmOutputProvider::SetConnectorFilter(
+    std::vector<uint32_t> connector_ids) {
+  connector_filter_ = std::move(connector_ids);
+}
 
 std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
   std::vector<OutputInfo> outputs;
@@ -47,6 +53,15 @@ std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
 
   outputs.reserve(connectors->size());
   for (const auto& connector : *connectors) {
+    // On a lease, this open() sees the whole card while we only hold a subset;
+    // drop anything outside the lease so callers cannot bind to a connector the
+    // compositor still owns.
+    if (!connector_filter_.empty() &&
+        std::find(connector_filter_.begin(), connector_filter_.end(),
+                  connector.connector_id) == connector_filter_.end()) {
+      continue;
+    }
+
     OutputInfo info;
     info.name = connector.name();
     info.connected = connector.connected;
