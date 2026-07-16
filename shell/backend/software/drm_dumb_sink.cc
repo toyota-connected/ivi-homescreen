@@ -120,6 +120,7 @@ std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
 std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
     int drm_fd,
     std::shared_ptr<void> fd_owner,
+    uint32_t connector_id,
     std::function<bool()> revoked) {
   if (drm_fd < 0) {
     ihs::log::error("[DrmDumbSink] Create: invalid fd {}", drm_fd);
@@ -134,7 +135,7 @@ std::unique_ptr<DrmDumbSink> DrmDumbSink::Create(
   sink->owns_fd_ = false;
   sink->fd_owner_ = std::move(fd_owner);
   sink->revoked_ = std::move(revoked);
-  if (!sink->InitFromFd()) {
+  if (!sink->InitFromFd(connector_id)) {
     return nullptr;
   }
   ihs::log::info("[DrmDumbSink] adopted lease fd {} (connector {})", drm_fd,
@@ -193,7 +194,7 @@ bool DrmDumbSink::InitDevice(const std::string& device_path) {
   return InitFromFd();
 }
 
-bool DrmDumbSink::InitFromFd() {
+bool DrmDumbSink::InitFromFd(uint32_t want_connector_id) {
   drmModeRes* res = drmModeGetResources(drm_fd_);
   if (res == nullptr) {
     ihs::log::error("[DrmDumbSink] drmModeGetResources: {}",
@@ -201,9 +202,15 @@ bool DrmDumbSink::InitFromFd() {
     return false;
   }
 
-  // Pick the first connected connector with at least one mode.
+  // Pin the requested connector when given (a lease may hold more than one, and
+  // the compositor -- not us -- picks the final object set, so "first
+  // connected" could light up the wrong panel). Otherwise take the first
+  // connected connector with at least one mode.
   drmModeConnector* connector = nullptr;
   for (int i = 0; i < res->count_connectors; ++i) {
+    if (want_connector_id != 0 && res->connectors[i] != want_connector_id) {
+      continue;
+    }
     drmModeConnector* c = drmModeGetConnector(drm_fd_, res->connectors[i]);
     if (c != nullptr && c->connection == DRM_MODE_CONNECTED &&
         c->count_modes > 0) {
@@ -215,7 +222,17 @@ bool DrmDumbSink::InitFromFd() {
     }
   }
   if (connector == nullptr) {
-    ihs::log::error("[DrmDumbSink] no connected connector with modes");
+    if (want_connector_id != 0) {
+      // Fail rather than silently falling back to another connector: the caller
+      // asked for a specific panel, and quietly driving a different one is
+      // worse than not starting.
+      ihs::log::error(
+          "[DrmDumbSink] requested connector {} is not present/connected with "
+          "modes on this fd",
+          want_connector_id);
+    } else {
+      ihs::log::error("[DrmDumbSink] no connected connector with modes");
+    }
     drmModeFreeResources(res);
     return false;
   }
@@ -581,12 +598,28 @@ bool DrmDumbSink::Present(const void* allocation,
     return true;
   }
   // Lease revoked: the KMS objects are gone from this fd's view, so the modeset
-  // and flip below would fail on every frame. Drop it instead of spraying ioctl
-  // errors. Returns true — the frame is "handled" as far as the rasterizer is
-  // concerned, so it neither stalls nor retries; the display simply stops
-  // updating, which is the same steady state the pause path already produces.
-  // Reacquiring the lease and rebuilding is WS7.
+  // and flip below would fail on every frame. Drop the frame rather than
+  // spraying ioctl errors.
+  //
+  // Park the vsync source rather than discarding. This path is a persistent
+  // state, not a transient error, which is why it does NOT mirror the
+  // drmModePageFlip-failure path below (SetSourcePending(false) +
+  // DeliverDiscard()): handing the baton straight back would make the engine
+  // immediately request the next vsync, SubmitBaton would drain it inline
+  // because nothing is in flight, and the UI+raster threads would spin
+  // rendering frames as fast as the CPU allows with nothing reaching a display.
+  // Holding the source pending instead means SubmitBaton parks the baton, no
+  // OnVsync fires, and raster stalls -- the same steady state the libseat pause
+  // path produces for the gated state. The
+  // platform thread, plugins and input keep running. Reacquire unparks it by
+  // reacquiring and rebuilding; until then the exit policy is the way out.
   if (revoked_ && revoked_()) {
+    vsync_.SetSourcePending(true);
+    if (!revoked_logged_.exchange(true, std::memory_order_relaxed)) {
+      ihs::log::warn(
+          "[DrmDumbSink] lease revoked — gating presents and parking vsync; "
+          "the panel stops updating until the lease is reacquired");
+    }
     return true;
   }
   // Strict ping-pong: render into the buffer that isn't currently

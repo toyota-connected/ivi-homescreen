@@ -85,12 +85,18 @@ class DrmDumbSink final : public ISurfaceSink {
   //
   // @p drm_fd is borrowed: the sink never closes it. @p fd_owner is the opaque
   // keep-alive that does own it (the LeaseHold) and must outlive the sink.
+  // @p connector_id is the connector to drive. A lease may contain more than
+  // one connector -- the requested set is only a suggestion and the compositor
+  // picks the final object set -- so the "first connected with modes" heuristic
+  // is only equivalent for a single-connector lease and would otherwise light
+  // up the wrong panel. 0 = fall back to that heuristic.
   // @p revoked, when set, is polled by Present(): once the lease is revoked its
   // KMS objects are gone from the fd's view and every commit naming them fails,
   // so frames are dropped rather than spraying ioctl errors. Null = never
   // gated.
   static std::unique_ptr<DrmDumbSink> Create(int drm_fd,
                                              std::shared_ptr<void> fd_owner,
+                                             uint32_t connector_id,
                                              std::function<bool()> revoked);
 
   ~DrmDumbSink() override;
@@ -142,7 +148,10 @@ class DrmDumbSink final : public ISurfaceSink {
   // buffers and attaches buffer 0 to the CRTC. Split out from InitDevice at the
   // open() so the same probing runs against a supplied fd (a DRM lease), which
   // is the whole of the leased software tier.
-  bool InitFromFd();
+  //
+  // @p want_connector_id, when non-zero, pins the connector instead of taking
+  // the first connected one with modes.
+  bool InitFromFd(uint32_t want_connector_id = 0);
   bool AllocBuffer(size_t index);
   void FreeBuffer(size_t index);
 
@@ -184,6 +193,9 @@ class DrmDumbSink final : public ISurfaceSink {
   // Lease revocation gate polled by Present(); null on the path-opened path,
   // where there is no lease to lose.
   std::function<bool()> revoked_;
+
+  // One-shot latch so the revocation notice is logged once, not once per frame.
+  std::atomic<bool> revoked_logged_{false};
 
   uint32_t connector_id_{0};
   uint32_t crtc_id_{0};

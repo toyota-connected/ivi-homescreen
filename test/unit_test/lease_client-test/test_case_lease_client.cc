@@ -47,6 +47,7 @@ extern "C" {
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -90,12 +91,33 @@ int MakeDummyFd() {
   return fd;
 }
 
+// Post an fd event and drop our copy: the sender keeps ownership of an 'h'
+// argument, so the mock must close what it created.
+void PostFdAndClose(wl_resource* res, uint32_t opcode) {
+  const int fd = MakeDummyFd();
+  wl_resource_post_event(res, opcode, fd);
+  close(fd);
+}
+
+// Number of fds this process currently holds. Used to gate fd leaks, which
+// LeakSanitizer cannot see -- it tracks memory, not descriptors.
+size_t CountOpenFds() {
+  size_t n = 0;
+  std::error_code ec;
+  for (auto it = std::filesystem::directory_iterator("/proc/self/fd", ec);
+       !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+    ++n;
+  }
+  return n;
+}
+
 // What the mock should do when a lease is submitted.
 enum class GrantPolicy {
   kGrant,                 // lease_fd
   kDeny,                  // finished, no lease_fd
   kGrantThenFinishNow,    // lease_fd + finished in the same flush
   kGrantThenFinishLater,  // lease_fd, then finished ~50 ms on
+  kGrantTwice,            // lease_fd twice — a misbehaving/hostile compositor
 };
 
 struct ConnectorSpec {
@@ -122,8 +144,17 @@ class MockCompositor {
   explicit MockCompositor(MockConfig cfg) : cfg_(std::move(cfg)) {
     // Hermetic runtime dir so the test never touches the developer's session.
     char tmpl[] = "/tmp/ivi-lease-test-XXXXXX";
-    runtime_dir_ = mkdtemp(tmpl);
-    EXPECT_FALSE(runtime_dir_.empty());
+    // mkdtemp returns null on failure (/tmp full or read-only in a constrained
+    // CI container); constructing a std::string from it would segfault inside
+    // this constructor. ADD_FAILURE rather than ASSERT_*: the latter expands to
+    // a value-returning `return`, which is ill-formed in a constructor. The
+    // early return leaves display_ null, which the destructor tolerates.
+    const char* dir = mkdtemp(tmpl);
+    if (dir == nullptr) {
+      ADD_FAILURE() << "mkdtemp failed: " << std::strerror(errno);
+      return;
+    }
+    runtime_dir_ = dir;
     prev_xdg_ = GetEnvOr("XDG_RUNTIME_DIR");
     prev_wl_ = GetEnvOr("WAYLAND_DISPLAY");
     setenv("XDG_RUNTIME_DIR", runtime_dir_.c_str(), 1);
@@ -135,24 +166,37 @@ class MockCompositor {
     socket_name_ = sock != nullptr ? sock : "";
     setenv("WAYLAND_DISPLAY", socket_name_.c_str(), 1);
 
+    // One global per device spec, each carrying its own index. NOT a running
+    // bind counter: every client connection binds every global, so a counter
+    // would only be correct for the first client and would silently advertise
+    // no connectors to the second.
     for (size_t i = 0; i < cfg_.devices.size(); ++i) {
+      global_ctxs_.push_back(GlobalCtx{this, i});
       wl_global_create(display_,
                        &proto::wp_drm_lease_device_v1_traits::wl_iface(), 1,
-                       this, &MockCompositor::BindDevice);
+                       &global_ctxs_.back(), &MockCompositor::BindDevice);
     }
     thread_ = std::thread([this] { wl_display_run(display_); });
   }
 
+  // Tolerates a half-constructed mock: the constructor bails out early if
+  // mkdtemp or wl_display_create fails, leaving these null/empty.
   ~MockCompositor() {
-    wl_display_terminate(display_);
+    if (display_ != nullptr) {
+      wl_display_terminate(display_);
+    }
     if (thread_.joinable()) {
       thread_.join();
     }
-    wl_display_destroy(display_);
+    if (display_ != nullptr) {
+      wl_display_destroy(display_);
+    }
     RestoreEnv("XDG_RUNTIME_DIR", prev_xdg_);
     RestoreEnv("WAYLAND_DISPLAY", prev_wl_);
-    std::error_code ec;
-    std::filesystem::remove_all(runtime_dir_, ec);
+    if (!runtime_dir_.empty()) {
+      std::error_code ec;
+      std::filesystem::remove_all(runtime_dir_, ec);
+    }
   }
 
   MockCompositor(const MockCompositor&) = delete;
@@ -171,20 +215,21 @@ class MockCompositor {
     }
   }
 
-  // Per-bound-device state.
-  struct DeviceCtx {
+  // Identifies which device spec a global (and each resource bound from it)
+  // corresponds to.
+  struct GlobalCtx {
     MockCompositor* self;
     size_t index;
   };
+  using DeviceCtx = GlobalCtx;
 
   static void BindDevice(wl_client* client,
                          void* data,
                          uint32_t version,
                          uint32_t id) {
-    auto* self = static_cast<MockCompositor*>(data);
-    // Which spec this bind maps to: globals are created in order, and the
-    // client binds them in advertisement order.
-    const size_t index = self->bind_count_++;
+    auto* gctx = static_cast<GlobalCtx*>(data);
+    auto* self = gctx->self;
+    const size_t index = gctx->index;
 
     wl_resource* res = wl_resource_create(
         client, &proto::wp_drm_lease_device_v1_traits::wl_iface(),
@@ -196,7 +241,11 @@ class MockCompositor {
     if (self->cfg_.send_drm_fd) {
       const int fd = MakeDummyFd();
       wl_resource_post_event(res, kDevDrmFd, fd);
-      // libwayland takes ownership of an 'h' arg and closes it once sent.
+      // The sender keeps ownership of an 'h' argument: libwayland dups it into
+      // the connection's out-buffer and does NOT close the original. Verified
+      // empirically -- without this close the mock leaked one memfd per bind,
+      // which the fd-growth gates below then (correctly) blamed on the client.
+      close(fd);
     }
 
     if (index < self->cfg_.devices.size()) {
@@ -283,14 +332,20 @@ class MockCompositor {
         wl_resource_post_event(lease, kLeaseFinished);
         break;
       case GrantPolicy::kGrant:
-        wl_resource_post_event(lease, kLeaseFd, MakeDummyFd());
+        PostFdAndClose(lease, kLeaseFd);
         break;
       case GrantPolicy::kGrantThenFinishNow:
-        wl_resource_post_event(lease, kLeaseFd, MakeDummyFd());
+        PostFdAndClose(lease, kLeaseFd);
         wl_resource_post_event(lease, kLeaseFinished);
         break;
+      case GrantPolicy::kGrantTwice:
+        // Protocol-violating, but nothing on the wire stops a compositor doing
+        // it, and the client must not drop the superseded fd on the floor.
+        PostFdAndClose(lease, kLeaseFd);
+        PostFdAndClose(lease, kLeaseFd);
+        break;
       case GrantPolicy::kGrantThenFinishLater: {
-        wl_resource_post_event(lease, kLeaseFd, MakeDummyFd());
+        PostFdAndClose(lease, kLeaseFd);
         auto* ctx = new FinishCtx{lease, nullptr};
         ctx->src =
             wl_event_loop_add_timer(wl_display_get_event_loop(self->display_),
@@ -321,7 +376,9 @@ class MockCompositor {
   std::string socket_name_;
   std::string prev_xdg_;
   std::string prev_wl_;
-  std::atomic<size_t> bind_count_{0};
+  // Stable addresses for wl_global_create's user data; deque never reallocates
+  // its elements.
+  std::deque<GlobalCtx> global_ctxs_;
 };
 
 LeaseConfig Cfg(uint32_t timeout_ms = 2000) {
@@ -361,6 +418,76 @@ TEST(LeaseClient, TeardownReleasesCleanly) {
   // The lease fd is ours and must be closed by the destructor.
   EXPECT_EQ(fcntl(fd, F_GETFD), -1);
   EXPECT_EQ(errno, EBADF);
+}
+
+// fd-leak gates. LeakSanitizer tracks memory, not descriptors, so these are the
+// only thing standing between an fd leak and EMFILE on a long-running unit.
+//
+// Measured as GROWTH across repeated cycles rather than an absolute
+// before/after delta: the mock server shares this process, and it reaps each
+// client's accepted socket asynchronously on its own thread, so a single
+// cycle's count is both offset and racy. A real leak is per-cycle and dominates
+// that noise; a constant offset does not.
+constexpr int kFdCycles = 8;
+constexpr size_t kFdSlack = 2;  // server-side reaping lag
+
+// The mock server reaps a disconnected client's socket on its own event-loop
+// thread, so give it a moment to catch up before counting — otherwise its
+// backlog of unreaped sockets is indistinguishable from a client-side leak.
+void SettleServer() {
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+}
+
+size_t FdGrowthOverCycles(const std::function<void()>& cycle) {
+  cycle();  // warm up: first pass allocates the steady-state structures
+  SettleServer();
+  const size_t before = CountOpenFds();
+  for (int i = 0; i < kFdCycles; ++i) {
+    cycle();
+  }
+  SettleServer();
+  const size_t after = CountOpenFds();
+  return after > before ? after - before : 0;
+}
+
+TEST(LeaseClient, GrantAndTeardownLeakNoFds) {
+  MockCompositor mock{MockConfig{}};
+  const size_t growth = FdGrowthOverCycles([] {
+    auto res = LeaseClient::Acquire(Cfg());
+    ASSERT_NE(res.hold, nullptr) << homescreen::ToString(res.error);
+  });
+  EXPECT_LE(growth, kFdSlack) << "fds grew by " << growth << " across "
+                              << kFdCycles << " grant/teardown cycles";
+}
+
+// A compositor that re-sends lease_fd must not leak the superseded descriptor.
+// Unfixed, OnLeaseFd clobbers the field and one fd escapes per event — a
+// hostile compositor could loop this to drive the embedder to EMFILE.
+TEST(LeaseClient, RepeatedLeaseFdDoesNotLeakTheSupersededFd) {
+  MockConfig cfg;
+  cfg.policy = GrantPolicy::kGrantTwice;
+  MockCompositor mock{cfg};
+  const size_t growth = FdGrowthOverCycles([] {
+    auto res = LeaseClient::Acquire(Cfg());
+    ASSERT_NE(res.hold, nullptr) << homescreen::ToString(res.error);
+    EXPECT_GE(res.hold->fd(), 0);
+  });
+  EXPECT_LE(growth, kFdSlack)
+      << "fds grew by " << growth << " across " << kFdCycles
+      << " cycles — the superseded lease_fd is leaking";
+}
+
+// A denial must not leak the enumeration fd either.
+TEST(LeaseClient, DenialLeaksNoFds) {
+  MockConfig cfg;
+  cfg.policy = GrantPolicy::kDeny;
+  MockCompositor mock{cfg};
+  const size_t growth = FdGrowthOverCycles([] {
+    auto res = LeaseClient::Acquire(Cfg());
+    ASSERT_EQ(res.hold, nullptr);
+  });
+  EXPECT_LE(growth, kFdSlack) << "fds grew by " << growth << " across "
+                              << kFdCycles << " denied cycles";
 }
 
 TEST(LeaseClient, DenialIsReportedAsDenied) {

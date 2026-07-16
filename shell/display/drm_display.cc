@@ -217,15 +217,18 @@ DrmDisplay::DrmDisplay(AdoptFd,
                        double refresh_rate_hz,
                        int fd,
                        std::string device_path,
-                       std::shared_ptr<void> fd_owner,
-                       bool no_seat)
-    // Delegate so the seat/session wiring stays in one place; only the device
-    // acquisition differs on this path.
+                       std::shared_ptr<void> fd_owner)
+    // Delegate for the width/height/seat wiring, but always with no_seat:
+    // libseat's TakeControl would fight the compositor, which already holds the
+    // session controller on the seat we are leasing from -- producing spurious
+    // session errors on every leased startup. The compositor owns the VT and
+    // the session; we own one connector. Input therefore comes from direct
+    // evdev; see the desktop-host hazard that creates.
     : DrmDisplay(width,
                  height,
                  refresh_rate_hz,
                  std::move(device_path),
-                 no_seat) {
+                 /*no_seat=*/true) {
   adopted_fd_ = true;
   fd_owner_ = std::move(fd_owner);
 
@@ -239,29 +242,33 @@ DrmDisplay::DrmDisplay(AdoptFd,
   // lessor's business, driven by destroying the wp_drm_lease_v1 object.
   drm_dev_.emplace(drm::Device::from_fd(fd));
 
-  // The lease fd's resource view is kernel-filtered to the leased objects, but
-  // output_provider_ re-opens the card by path and so sees the whole card.
-  // Seed it with what we actually hold, straight from the kernel: asking the
-  // lease fd is authoritative in a way that trusting our own lease request is
-  // not -- the requested connector set is only a suggestion, and the compositor
-  // picks the final object set (and may pick differently on every grant).
+  // Enumerate outputs through the lease fd rather than by re-opening the card.
+  // Two reasons, and both matter:
+  //   - Scope: the kernel filters this fd to the leased objects, so the
+  //     provider advertises exactly what we hold. Opening the card by path
+  //     would show the whole card, and `[view.output]` would happily validate
+  //     against a connector the compositor is still scanning out on.
+  //   - Permission: a leased client uses a lease precisely because it may not
+  //     be able to open /dev/dri/cardN at all. Opening by path would fail with
+  //     EACCES on a locked-down target and a display holding a perfectly good
+  //     lease would advertise no outputs.
+  output_provider_.SetEnumerationFd(fd);
+
   if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
-    std::vector<uint32_t> leased(
-        res->connectors,
-        res->connectors + static_cast<size_t>(res->count_connectors));
     ihs::log::info(
         "[DrmDisplay] adopted lease fd on {}: {} leased connector(s)",
-        device_path_, leased.size());
-    output_provider_.SetConnectorFilter(std::move(leased));
+        device_path_, res->count_connectors);
     drmModeFreeResources(res);
   } else {
-    // Enumeration failing on a fd we were just handed means the lease is
+    // Enumeration failing on an fd we were just handed means the lease is
     // already dead (revoked between grant and here) or the fd is not a DRM
-    // node. Leave the filter empty but say so -- an unfiltered provider would
-    // silently advertise the whole card.
+    // node. Nothing to disable -- the provider enumerates through this same fd
+    // and will come back empty, which is the fail-closed answer -- but say so,
+    // because "no outputs" otherwise looks like a config error.
     ihs::log::error(
         "[DrmDisplay] drmModeGetResources on the adopted lease fd failed: {}. "
-        "Outputs are NOT filtered to the lease.",
+        "The lease is dead or the fd is not a DRM node; this display will "
+        "advertise no outputs.",
         std::strerror(errno));
   }
 }
