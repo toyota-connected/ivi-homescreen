@@ -13,6 +13,7 @@
 #if BUILD_WATCHDOG
 #include "platform/homescreen/watchdog_plugin.h"
 #endif
+#include "platform/homescreen/platform_views/platform_view_registry.h"
 #include "platform/homescreen/platform_views/platform_views_handler.h"
 #include "shell/libflutter_engine.h"
 #include "shell/task_runner.h"
@@ -24,6 +25,7 @@ class AccessibilityTree;
 class Engine;
 class PlatformHandler;
 class PlatformViewsHandler;
+class PlatformViewRegistry;
 
 // Custom deleter for FlutterEngineAOTData.
 struct AOTDataDeleter {
@@ -65,6 +67,11 @@ struct FlutterDesktopEngineState {
 
   // Handler for the flutter/platform channel.
   std::unique_ptr<PlatformHandler> platform_handler{};
+
+  // Owns platform-view id->instance lifecycle + the view-type factory table.
+  // Declared before the handler so it outlives the handler that adapts to it,
+  // and is the object the shared-module C API fronts.
+  std::unique_ptr<PlatformViewRegistry> platform_view_registry{};
 
   std::unique_ptr<PlatformViewsHandler> platform_views_handler{};
 
