@@ -3,35 +3,10 @@
 set(TESTCASE_NAME "homescreen_watchdog_ut_test_driver")
 set(TESTCASE_CC test_case_watchdog.cc)
 
-# Basically, the following statements need not be modified
-add_executable(
-        ${TESTCASE_NAME}
-        ${TYPICAL_TEST_SOURCES}
-        ${TESTCASE_CC}
-)
-
+add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})
-
-target_compile_definitions(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_DEFINITIONS}
-        SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
-target_include_directories(
-        ${TESTCASE_NAME}
-        PRIVATE
-        ${TYPICAL_TEST_INC_DIRS}
-)
-
-target_link_libraries(
-        ${TESTCASE_NAME}
-        PRIVATE
-        gtest_main
-        ${TYPICAL_TEST_LINK_LIBS}
-        toolchain::toolchain
-)
+target_compile_definitions(${TESTCASE_NAME} PRIVATE SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(${TESTCASE_NAME} PRIVATE gtest_main homescreen_ut_shell)
 
 add_test(
         NAME ${TESTCASE_NAME}
