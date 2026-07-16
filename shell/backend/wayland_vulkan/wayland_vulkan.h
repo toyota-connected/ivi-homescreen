@@ -172,6 +172,11 @@ class WaylandVulkanBackend final : public Backend {
    */
   FlutterCompositor GetCompositorConfig() override;
 
+  // Expose this backend's Vulkan handles so a platform-view plugin can render
+  // into a VkImage on the same device Flutter uses (mirrors GetEglContext for
+  // EGL plugins). Always available once the device is created.
+  bool GetVulkanContext(BackendVulkanContext* out) const override;
+
   bool TextureMakeCurrent() override;
 
   bool TextureClearCurrent() override;
@@ -453,6 +458,16 @@ class WaylandVulkanBackend final : public Backend {
   /// Sequencer missing-view handler: warn only when a platform view has neither
   /// a subsurface nor a compositor surface registered.
   void WarnMissingPlatformView(FlutterPlatformViewIdentifier id);
+
+#if BUILD_COMPOSITOR
+  /// Composite a Vulkan platform view into the dma-buf slot: if the layer's
+  /// ICompositorSurface exposes a VkImage (rendered on this device), transition
+  /// it to a transfer source and blit it into @p dst at the layer's rect. No-op
+  /// for GL / subsurface platform views. Records into @p cmd (already open).
+  void BlitPlatformViewVulkan(VkCommandBuffer cmd,
+                              const FlutterLayer* layer,
+                              VkImage dst);
+#endif
 
   /// Record + submit a layout transition on a one-shot command buffer.
   void TransitionLayout(VkImage image,

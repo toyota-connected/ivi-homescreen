@@ -112,4 +112,35 @@ class ICompositorSurface {
    *   the DRM scanout-FBO destinations.
    */
   [[nodiscard]] virtual bool TextureIsTopFirst() const { return false; }
+
+  /**
+   * @brief Expose a Vulkan platform-view image the compositor can blit.
+   *
+   * The Vulkan counterpart to @c GetGlTextureName: a plugin that rendered into
+   * a @c VkImage on the backend's own device (obtained via
+   * @c Backend::GetVulkanContext) returns that handle here so a Vulkan
+   * compositor can composite it directly — same device, no cross-API/-device
+   * import. Returned as @c void* so this header stays free of a Vulkan include;
+   * the caller casts back to @c VkImage. Fills @p width / @p height with the
+   * image extent. Returns nullptr (default) when the plugin has no Vulkan image
+   * (GL path, or nothing rendered yet).
+   *
+   * Contract: the image is B8G8R8A8_UNORM, its memory holds a complete frame
+   * (the plugin has made its writes visible), and it is safe to transition to
+   * a transfer-source layout and read this frame.
+   */
+  [[nodiscard]] virtual void* GetVulkanImage(int32_t* /*width*/,
+                                             int32_t* /*height*/) const {
+    return nullptr;
+  }
+
+  /**
+   * @brief Current VkImageLayout of the Vulkan image (as uint32_t, so this
+   * header stays Vulkan-free). The compositor reads this to transition the
+   * image from its real layout, and calls @c SetVulkanImageLayout after doing
+   * so — a static platform-view image is then transitioned once, not per frame.
+   * 0 == VK_IMAGE_LAYOUT_UNDEFINED.
+   */
+  [[nodiscard]] virtual uint32_t GetVulkanImageLayout() const { return 0; }
+  virtual void SetVulkanImageLayout(uint32_t /*layout*/) {}
 };
