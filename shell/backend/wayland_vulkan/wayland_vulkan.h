@@ -445,6 +445,15 @@ class WaylandVulkanBackend final : public Backend {
   bool CollectBackingStoreImpl(const FlutterBackingStore* store);
   bool PresentLayersImpl(const FlutterLayer** layers, size_t count);
 
+  /// Composite one platform-view layer via its ICompositorSurface (texture
+  /// route), applying its mutation stack. Shared by the swapchain and dma-buf
+  /// present paths. Returns the surface's OnPresent result, or true when the
+  /// view takes the subsurface route (no compositor surface registered).
+  bool PresentPlatformView(const FlutterLayer* layer);
+  /// Sequencer missing-view handler: warn only when a platform view has neither
+  /// a subsurface nor a compositor surface registered.
+  void WarnMissingPlatformView(FlutterPlatformViewIdentifier id);
+
   /// Record + submit a layout transition on a one-shot command buffer.
   void TransitionLayout(VkImage image,
                         VkImageLayout from,
