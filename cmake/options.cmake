@@ -386,13 +386,30 @@ if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
                 "(wayland-leased-drm-vulkan), or BUILD_BACKEND_SOFTWARE + "
                 "BUILD_SOFTWARE_SINK_DRM (wayland-leased-drm-software).")
     endif ()
-    # NOTE: the wayland-leased-drm-* registry keys named above are NOT yet
-    # registered — that lands in WS6 (RegisterCompiledBackends + the family-hint
-    # resolution in ResolveKeyForConfig). Until then this option only compiles
-    # the lease client in; selecting a leased key at runtime will not resolve.
-    message(STATUS
-            "  wayland-leased-drm: lease client only — no backend registered "
-            "yet (WS6 pending)")
+    # Which tiers are actually registered today. The egl tier is wired; the
+    # other two are built but not yet selectable:
+    #   vulkan   — needs VulkanDrmBackend to accept an injected drm::Device
+    #              instead of opening by path (WS5).
+    #   software — needs SoftwareDisplay to carry the LeaseHold through to a
+    #              DrmDumbSink built on the leased fd.
+    # ResolveKeyForConfig refuses an unregistered leased key rather than falling
+    # back to an unleased backend, so asking for one of these fails loudly.
+    if (IVI_LEASED_DRM_EGL)
+        message(STATUS "  wayland-leased-drm-egl ........ registered")
+    endif ()
+    if (IVI_LEASED_DRM_VULKAN)
+        message(STATUS "  wayland-leased-drm-vulkan ..... built, NOT registered (WS5 pending)")
+    endif ()
+    if (IVI_LEASED_DRM_SOFTWARE)
+        message(STATUS "  wayland-leased-drm-software ... built, NOT registered (display wiring pending)")
+    endif ()
+    if (NOT IVI_LEASED_DRM_EGL)
+        message(WARNING
+                "BUILD_BACKEND_WAYLAND_LEASED_DRM=ON but no leased backend is "
+                "selectable in this configuration: only the -egl tier is wired "
+                "so far, and it needs BUILD_BACKEND_DRM_KMS_EGL=ON. The lease "
+                "client will be compiled in but unreachable.")
+    endif ()
 endif ()
 
 message(STATUS "Wayland (surface) ...... ${IVI_WAYLAND_SURFACE_BACKENDS}")
