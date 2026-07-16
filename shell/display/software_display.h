@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 
 #include "display/idisplay.h"
 
@@ -83,6 +86,28 @@ class SoftwareDisplay final : public IDisplay {
 
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
+  // wayland-leased-drm: everything the backend needs to build a DrmDumbSink on
+  // a leased DRM fd, when this display was made for a lease.
+  //
+  // Deliberately not a LeaseHold: this header stays free of the lease client,
+  // which the software tier otherwise has no reason to know about. The display
+  // holds it because the descriptor's make_display/make_backend pair is the
+  // only seam between negotiating the lease and building the sink -- and
+  // because `owner` must outlive the sink either way.
+  struct LeasedScanout {
+    int fd = -1;                    // borrowed; owned by `owner`
+    uint32_t connector_id = 0;      // the connector to drive, from the lease
+    std::function<bool()> revoked;  // polled by the sink's Present() gate
+    std::shared_ptr<void> owner;    // the LeaseHold; closes fd and returns the
+                                    // lease when the display goes
+  };
+  void SetLeasedScanout(LeasedScanout scanout) {
+    leased_scanout_ = std::move(scanout);
+  }
+  [[nodiscard]] const std::optional<LeasedScanout>& leased_scanout() const {
+    return leased_scanout_;
+  }
+
  private:
   int32_t width_;
   int32_t height_;
@@ -90,4 +115,5 @@ class SoftwareDisplay final : public IDisplay {
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
   std::unique_ptr<homescreen::ISeat> seat_;
   std::shared_ptr<SoftwareCursor> cursor_;
+  std::optional<LeasedScanout> leased_scanout_;
 };
