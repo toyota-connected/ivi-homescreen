@@ -463,9 +463,26 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
       (config.view.drm_mode.has_value() && !config.view.drm_mode->empty())
           ? *config.view.drm_mode
           : std::string{};
-  auto vk_backend = VulkanDrmBackend::Create(
-      drm_display->device_path(), config.debug_backend.value_or(false),
-      drm_display->session(), drm_mode, config.view.drm_rotation.value_or(0));
+  // Serves both the direct and the leased descriptor: the lease changes only
+  // where the DRM fd came from. Unlike MakeDrmEglBackend — which is reused
+  // verbatim because DrmBackend::Create takes the device from the display —
+  // VulkanDrmBackend::Create takes a path, so the branch lives here rather than
+  // being invisible.
+  //
+  // device_path() is passed on both paths: on a lease it was derived from the
+  // lease fd and is only ever stat()ed, for the physical-device match. The fd
+  // itself is what gets opened/adopted.
+  auto vk_backend =
+      drm_display->adopted_fd()
+          ? VulkanDrmBackend::Create(
+                drm_display->SharedDevice()->fd(), drm_display->fd_owner(),
+                drm_display->device_path(),
+                config.debug_backend.value_or(false), drm_mode,
+                config.view.drm_rotation.value_or(0))
+          : VulkanDrmBackend::Create(drm_display->device_path(),
+                                     config.debug_backend.value_or(false),
+                                     drm_display->session(), drm_mode,
+                                     config.view.drm_rotation.value_or(0));
 
   // Create returns nullptr on any init failure (unsupported device, no
   // zero-copy scanout path). Continuing would dereference a null backend in
@@ -634,6 +651,15 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry) {
   // listing (LeaseClient::Probe) can back it later.
   registry.Register({"wayland-leased-drm-egl", MakeLeasedDrmDisplay,
                      MakeDrmEglBackend, nullptr});
+#endif
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_DRM_KMS_VULKAN
+  // Same display as the leased-egl tier (MakeLeasedDrmDisplay serves either DRM
+  // renderer) and the same make_backend as the direct vulkan tier, which
+  // branches on the display's adopted_fd(). Only the scanout/modeset half of
+  // this backend touches the lease -- the VkDevice was never created from the
+  // KMS fd.
+  registry.Register({"wayland-leased-drm-vulkan", MakeLeasedDrmDisplay,
+                     MakeDrmVulkanBackend, nullptr});
 #endif
 #if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_SOFTWARE && \
     BUILD_SOFTWARE_SINK_DRM

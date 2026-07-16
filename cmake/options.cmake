@@ -386,11 +386,10 @@ if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
                 "(wayland-leased-drm-vulkan), or BUILD_BACKEND_SOFTWARE + "
                 "BUILD_SOFTWARE_SINK_DRM (wayland-leased-drm-software).")
     endif ()
-    # Which tiers are actually selectable today. egl and software are wired;
-    # vulkan is built but not registered — it needs VulkanDrmBackend to accept an
-    # injected drm::Device instead of opening the card by path (WS5).
-    # ResolveKeyForConfig refuses an unregistered leased key rather than falling
-    # back to an unleased backend, so asking for vulkan fails loudly.
+    # All three tiers are wired. ResolveKeyForConfig refuses a leased key that
+    # is not registered rather than falling back to an unleased backend, so a
+    # tier missing its renderer stack fails loudly instead of silently running
+    # something else.
     if (IVI_LEASED_DRM_EGL)
         message(STATUS "  wayland-leased-drm-egl ........ registered")
     endif ()
@@ -398,16 +397,7 @@ if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
         message(STATUS "  wayland-leased-drm-software ... registered")
     endif ()
     if (IVI_LEASED_DRM_VULKAN)
-        message(STATUS "  wayland-leased-drm-vulkan ..... built, NOT registered (WS5 pending)")
-    endif ()
-    if (NOT IVI_LEASED_DRM_EGL AND NOT IVI_LEASED_DRM_SOFTWARE)
-        message(WARNING
-                "BUILD_BACKEND_WAYLAND_LEASED_DRM=ON but no leased backend is "
-                "selectable in this configuration: only the -egl and -software "
-                "tiers are wired so far, needing BUILD_BACKEND_DRM_KMS_EGL=ON "
-                "or BUILD_BACKEND_SOFTWARE=ON + BUILD_SOFTWARE_SINK_DRM=ON "
-                "respectively. The lease client will be compiled in but "
-                "unreachable.")
+        message(STATUS "  wayland-leased-drm-vulkan ..... registered")
     endif ()
 endif ()
 

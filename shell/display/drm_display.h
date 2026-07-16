@@ -96,6 +96,13 @@ class DrmDisplay final : public IDisplay {
   // handoff, mode-object ownership — must branch on this.
   [[nodiscard]] bool adopted_fd() const { return adopted_fd_; }
 
+  // The adopted fd's owner (the LeaseHold), for a backend that wants to hold it
+  // too. Null on every non-adopted path. This display already outlives its
+  // backends, so a backend taking a share is belt-and-braces rather than
+  // required — but it makes the backend's own lifetime self-evident instead of
+  // resting on an ordering invariant documented elsewhere.
+  [[nodiscard]] std::shared_ptr<void> fd_owner() const { return fd_owner_; }
+
   // Process-wide libseat session. Null when no seat backend is available
   // (no logind/seatd/builtin), when drm-cxx was built without libseat, or
   // when --drm-no-seat forced the direct-open path.
