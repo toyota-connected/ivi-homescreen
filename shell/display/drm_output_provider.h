@@ -39,9 +39,20 @@ class DrmOutputProvider final : public IOutputProvider {
   void SetOutputListener(IOutputListener* listener) override;
   [[nodiscard]] bool SupportsHotplug() const override;
 
+  // Restrict enumeration to these connector ids. Needed by wayland-leased-drm:
+  // this provider re-opens the card as a plain non-master fd, whose resource
+  // view is the WHOLE card -- unlike the lease fd, which the kernel filters to
+  // the leased objects. Without the filter a leased display would advertise
+  // connectors it does not hold, and `[view.output]` validation would "succeed"
+  // against one the compositor still owns. Empty (the default) = no filtering.
+  void SetConnectorFilter(std::vector<uint32_t> connector_ids);
+
  private:
   // The card this provider enumerates (e.g. "/dev/dri/card1").
   std::string device_path_;
+
+  // Connector-id allowlist; empty = enumerate everything on the card.
+  std::vector<uint32_t> connector_filter_;
 
   // Set by SetOutputListener; consumed once the hotplug monitor is wired.
   IOutputListener* listener_ = nullptr;
