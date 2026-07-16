@@ -20,6 +20,7 @@
 #include "flutter_desktop_messenger.h"
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
+#include "platform/homescreen/platform_views/platform_view_registry.h"
 
 #include "backend/backend.h"
 #include "text_input_plugin.h"
@@ -90,7 +91,9 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
       state->internal_plugin_registrar->messenger(), view);
 
 #if ENABLE_PLUGINS
-  // Platform Views handler.
+  // Platform view registry (owns id->instance lifecycle + factories) and the
+  // channel adapter over it.
+  state->platform_view_registry = std::make_unique<PlatformViewRegistry>(state);
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
 #endif

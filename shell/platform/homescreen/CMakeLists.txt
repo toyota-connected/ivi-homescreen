@@ -72,6 +72,7 @@ if (ENABLE_PLUGINS)
 
     target_sources(platform_homescreen PUBLIC
             platform_views/platform_views_handler.cc
+            platform_views/platform_view_registry.cc
             platform_views/platform_view_touch.cc
     )
 
