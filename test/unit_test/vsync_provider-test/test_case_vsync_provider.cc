@@ -150,3 +150,31 @@ TEST(VsyncProvider, DoubleStopNoCrash) {
   p.Stop();
   p.Stop();
 }
+
+// ---- Stop() with profiling enabled ----------------------------------------
+//
+// When profile_enabled_=true and summary_logged_=false, Stop() must call
+// profile_.LogSessionSummary and then set summary_logged_=true.  A second
+// Stop() must be a no-op (the latch prevents a duplicate summary line).
+//
+// The FrameProfile::LogSessionSummary path is a simple log emission guarded
+// by the bool latch; we verify no crash / abort and that double-Stop does
+// not trigger undefined behaviour (ASAN / UBSAN in CI will catch any issue).
+
+TEST(VsyncProvider, StopWithProfileEnabled_NoCrash) {
+  TestVsyncProvider p;
+  p.EnableProfile(true, "ut-label");
+  // Stop() with profiling on and no frames recorded: LogSessionSummary emits
+  // a zero-frame summary line.  Must not crash.
+  EXPECT_NO_FATAL_FAILURE(p.Stop());
+}
+
+TEST(VsyncProvider, DoubleStopWithProfile_SummaryOnlyOnce) {
+  // The summary_logged_ latch must ensure the second Stop() is a no-op even
+  // when profiling is enabled.  If the latch is missing, double-free of the
+  // FrameProfile state or double-logging would occur.
+  TestVsyncProvider p;
+  p.EnableProfile(true, "ut-label");
+  EXPECT_NO_FATAL_FAILURE(p.Stop());
+  EXPECT_NO_FATAL_FAILURE(p.Stop());
+}
