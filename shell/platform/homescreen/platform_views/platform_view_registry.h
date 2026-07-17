@@ -69,7 +69,12 @@ class PlatformViewRegistry {
       const CreateRequest& request)>;
 
   explicit PlatformViewRegistry(FlutterDesktopEngineState* engine_state);
-  ~PlatformViewRegistry();
+  // Defaulted inline (all members are complete types here) so the destructor is
+  // emitted in every translation unit. FlutterDesktopEngineState holds this by
+  // unique_ptr unconditionally, but the registry is only ever constructed under
+  // ENABLE_PLUGINS; an out-of-line dtor would leave the engine-state destructor
+  // with an undefined reference in ENABLE_PLUGINS=OFF builds.
+  ~PlatformViewRegistry() = default;
 
   PlatformViewRegistry(const PlatformViewRegistry&) = delete;
   PlatformViewRegistry& operator=(const PlatformViewRegistry&) = delete;

@@ -33,8 +33,6 @@ PlatformViewRegistry::PlatformViewRegistry(
     FlutterDesktopEngineState* engine_state)
     : engine_state_(engine_state) {}
 
-PlatformViewRegistry::~PlatformViewRegistry() = default;
-
 void PlatformViewRegistry::RegisterFactory(const std::string& view_type,
                                            Factory factory) {
   std::lock_guard<std::mutex> lock(mutex_);
