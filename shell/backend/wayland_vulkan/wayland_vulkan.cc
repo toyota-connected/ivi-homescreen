@@ -30,6 +30,7 @@
 #include "engine.h"
 #include "logging.h"
 #include "profiling/frame_profile.h"
+#include "profiling/pv_latency.h"
 #include "task_runner.h"
 #include "wayland/display.h"
 
@@ -38,6 +39,7 @@
 
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "backend/wayland_vulkan/wl_explicit_sync.h"
+#include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "vulkan_queue_interposer.h"
 
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
@@ -114,6 +116,22 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
           .get_next_image_callback = GetNextImageCallback,
           .present_image_callback = PresentCallback,
       }};
+}
+
+bool WaylandVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
+  if (out == nullptr || device_ == VK_NULL_HANDLE) {
+    return false;
+  }
+  out->instance = instance_;
+  out->physical_device = physical_device_;
+  out->device = device_;
+  out->queue = queue_;
+  out->queue_family_index = queue_family_index_;
+  // Same loader the embedder + this backend resolve Vulkan through, so a plugin
+  // reusing the device gets identical function pointers.
+  out->get_instance_proc_addr =
+      reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
+  return true;
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
@@ -204,6 +222,9 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // timeline VkSemaphore with device_ (safe after the vkDeviceWaitIdle above)
     // and its wp_linux_drm_syncobj proxies while the connection is still up.
     explicit_sync_.reset();
+    // Layer compositor owns Vulkan objects (render pass, pipeline, pools, ...);
+    // destroy before the device.
+    layer_compositor_.reset();
     // Tear down the dma-buf present ring before the device — DmabufImage's
     // destructor destroys its image view/image/memory with device_, and the
     // command buffers belong to dmabuf_cmd_pool_.
@@ -1378,6 +1399,21 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
           "[WaylandVulkanBackend] zero-copy dma-buf present ENABLED ({} "
           "renderable modifier(s) shared with the compositor)",
           dmabuf_modifiers_.size());
+      // Bring up the alpha-blend layer compositor for correct src-over
+      // composition (platform views under transparent overlays). Falls back to
+      // overwrite blits if it can't be created.
+      {
+        std::string comp_err;
+        layer_compositor_ = wl_vulkan::LayerCompositor::Create(
+            device_, VK_FORMAT_B8G8R8A8_UNORM, comp_err);
+        if (!layer_compositor_) {
+          ihs::log::warn(
+              "[WaylandVulkanBackend] layer compositor unavailable ({}); "
+              "falling back to overwrite blits (overlapping layers may not "
+              "blend)",
+              comp_err);
+        }
+      }
       // Bring up wp_linux_drm_syncobj explicit sync if the compositor
       // advertises the manager and the device supports the timeline bridge. On
       // failure the CPU fence is used — never fatal. IVI_VK_NO_EXPLICIT_SYNC
@@ -1587,12 +1623,20 @@ void WaylandVulkanBackend::RegisterCompositorSurface(
     std::shared_ptr<ICompositorSurface> surface) {
   std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces[id] = std::move(surface);
+  if (ivi::pv_latency::Enabled()) {
+    ihs::log::info("[pv-latency] surface registered id={} live={}", id,
+                   m_compositor_surfaces.size());
+  }
 }
 
 void WaylandVulkanBackend::UnregisterCompositorSurface(
     FlutterPlatformViewIdentifier id) {
   std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
   m_compositor_surfaces.erase(id);
+  if (ivi::pv_latency::Enabled()) {
+    ihs::log::info("[pv-latency] surface disposed id={} live={}", id,
+                   m_compositor_surfaces.size());
+  }
 }
 
 void WaylandVulkanBackend::ResizeCompositorSurface(
@@ -1855,19 +1899,10 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                            nullptr, 1, &to_dst);
 
   // Sequence platform-view subsurface Z-order for this frame.
-  m_sequencer.Present(
-      layers, count, nullptr, [this](FlutterPlatformViewIdentifier id) {
-        // PVs may choose the wl_subsurface route (sequencer)
-        // or the ICompositorSurface texture route (below).
-        // Only warn when *neither* is registered.
-        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
-        if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
-          ihs::log::warn(
-              "Vulkan compositor: platform view {} has no "
-              "registered subsurface or compositor surface",
-              id);
-        }
-      });
+  m_sequencer.Present(layers, count, nullptr,
+                      [this](FlutterPlatformViewIdentifier id) {
+                        WarnMissingPlatformView(id);
+                      });
 
   bool ok = true;
   for (size_t i = 0; i < count; ++i) {
@@ -1889,28 +1924,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
       BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
-      const auto composed = MutationStack::Compose(layer->platform_view);
-      if (composed.NeedsPluginComposite()) {
-        ihs::log::debug(
-            "Vulkan compositor: platform view {} has non-trivial mutations "
-            "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); "
-            "plugin OnPresent must apply them.",
-            layer->platform_view->identifier, composed.opacity,
-            composed.has_rounded_clip, composed.has_perspective,
-            composed.IsAxisAligned());
-      }
-      std::shared_ptr<ICompositorSurface> surface;
-      {
-        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
-        const auto it =
-            m_compositor_surfaces.find(layer->platform_view->identifier);
-        if (it != m_compositor_surfaces.end()) {
-          surface = it->second;
-        }
-      }
-      if (surface) {
-        ok = surface->OnPresent(layer) && ok;
-      }
+      ok = PresentPlatformView(layer) && ok;
     }
   }
 
@@ -2058,6 +2072,246 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   return true;
 }
 
+void WaylandVulkanBackend::WarnMissingPlatformView(
+    FlutterPlatformViewIdentifier id) {
+  // A platform view may take the wl_subsurface route (handled by the sequencer)
+  // or the ICompositorSurface texture route (PresentPlatformView). Warn only
+  // when neither is registered for it.
+  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+  if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
+    ihs::log::warn(
+        "Vulkan compositor: platform view {} has no registered subsurface or "
+        "compositor surface",
+        id);
+  }
+}
+
+bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
+  const auto composed = MutationStack::Compose(layer->platform_view);
+  if (composed.NeedsPluginComposite()) {
+    ihs::log::debug(
+        "Vulkan compositor: platform view {} has non-trivial mutations "
+        "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); plugin "
+        "OnPresent must apply them.",
+        layer->platform_view->identifier, composed.opacity,
+        composed.has_rounded_clip, composed.has_perspective,
+        composed.IsAxisAligned());
+  }
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+    const auto it =
+        m_compositor_surfaces.find(layer->platform_view->identifier);
+    if (it != m_compositor_surfaces.end()) {
+      surface = it->second;
+    }
+  }
+  // No compositor surface = the subsurface route (or an unregistered PV,
+  // already warned via the sequencer). Treat as success so it doesn't fail the
+  // present.
+  return surface ? surface->OnPresent(layer) : true;
+}
+
+bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
+                                                const FlutterLayer** layers,
+                                                size_t count,
+                                                DmabufSlot& slot,
+                                                uint32_t width,
+                                                uint32_t height) {
+  struct Draw {
+    VkImage src;
+    VkFormat format;
+    int32_t dx, dy, dw, dh;
+    VulkanBackingStore* store;  // non-null => restore to COLOR_ATTACHMENT after
+  };
+  std::vector<Draw> draws;
+  draws.reserve(count);
+
+  const auto barrier =
+      [&](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+          VkAccessFlags src_access, VkPipelineStageFlags src_stage,
+          VkAccessFlags dst_access, VkPipelineStageFlags dst_stage) {
+        VkImageMemoryBarrier b{};
+        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.oldLayout = old_layout;
+        b.newLayout = new_layout;
+        b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = image;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        b.srcAccessMask = src_access;
+        b.dstAccessMask = dst_access;
+        d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0,
+                                 nullptr, 1, &b);
+      };
+
+  bool ok = true;
+  // Phase 1: render platform views and move every source to SHADER_READ_ONLY
+  // (layout transitions can't happen inside the render pass).
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (!layer) {
+      continue;
+    }
+    const auto dx = static_cast<int32_t>(layer->offset.x);
+    const auto dy = static_cast<int32_t>(layer->offset.y);
+    const auto dw = static_cast<int32_t>(layer->size.width);
+    const auto dh = static_cast<int32_t>(layer->size.height);
+    if (layer->type == kFlutterLayerContentTypeBackingStore &&
+        layer->backing_store) {
+      auto* baton =
+          static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
+      if (!baton || !baton->store) {
+        continue;
+      }
+      VulkanBackingStore* store = baton->store;
+      barrier(store->Image(), store->Layout(),
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+      store->SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      draws.push_back(
+          {store->Image(), VulkanBackingStore::kFormat, dx, dy, dw, dh, store});
+    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+               layer->platform_view) {
+      ok = PresentPlatformView(layer) && ok;
+      std::shared_ptr<ICompositorSurface> surface;
+      {
+        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+        const auto it =
+            m_compositor_surfaces.find(layer->platform_view->identifier);
+        if (it != m_compositor_surfaces.end()) {
+          surface = it->second;
+        }
+      }
+      if (!surface) {
+        continue;
+      }
+      int32_t pw = 0;
+      int32_t ph = 0;
+      void* vk_img = surface->GetVulkanImage(&pw, &ph);
+      if (vk_img == nullptr || pw <= 0 || ph <= 0) {
+        continue;  // GL / subsurface platform view — nothing to sample
+      }
+      auto src = reinterpret_cast<VkImage>(vk_img);
+      const auto cur =
+          static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
+      if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+        barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
+                from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                             : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      }
+      draws.push_back({src, VK_FORMAT_B8G8R8A8_UNORM, dx, dy, dw, dh, nullptr});
+      if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
+              layer->platform_view->identifier);
+          us >= 0) {
+        ihs::log::info(
+            "[pv-latency] view id={} input->first-composite {:.1f} ms",
+            layer->platform_view->identifier, static_cast<double>(us) / 1000.0);
+      }
+    }
+  }
+
+  // Phase 2: blend all layers into the slot in one render pass (z-order).
+  layer_compositor_->BeginFrame(cmd, slot.image->view(), width, height,
+                                dmabuf_frame_);
+  for (const Draw& dr : draws) {
+    layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.dx, dr.dy, dr.dw,
+                                 dr.dh);
+  }
+  wl_vulkan::LayerCompositor::EndFrame(cmd);
+
+  // Phase 3: restore backing stores to COLOR_ATTACHMENT for the engine's next
+  // render into them.
+  for (const Draw& dr : draws) {
+    if (dr.store != nullptr) {
+      barrier(dr.src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+      dr.store->SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    }
+  }
+  slot.layout = VK_IMAGE_LAYOUT_GENERAL;  // render pass finalLayout
+  return ok;
+}
+
+void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
+                                                  const FlutterLayer* layer,
+                                                  VkImage dst) {
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
+    const auto it =
+        m_compositor_surfaces.find(layer->platform_view->identifier);
+    if (it != m_compositor_surfaces.end()) {
+      surface = it->second;
+    }
+  }
+  if (!surface) {
+    return;
+  }
+  int32_t pw = 0;
+  int32_t ph = 0;
+  void* vk_img = surface->GetVulkanImage(&pw, &ph);
+  if (vk_img == nullptr || pw <= 0 || ph <= 0) {
+    return;  // GL / subsurface platform view — nothing to blit here.
+  }
+  auto src = reinterpret_cast<VkImage>(vk_img);
+
+  // The plugin's static image starts PREINITIALIZED (host-written, contents
+  // preserved). Transition it to a transfer source ONCE — a static image left
+  // in TRANSFER_SRC must not be re-transitioned every frame (that both corrupts
+  // the read and races the prior frame's blit). The surface tracks the layout.
+  const auto cur = static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
+  if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+    const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+    VkImageMemoryBarrier to_src{};
+    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_src.oldLayout = cur;
+    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_src.image = src;
+    to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    // PREINITIALIZED carries host writes; make them visible to the transfer.
+    to_src.srcAccessMask =
+        from_preinit ? VK_ACCESS_HOST_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    d().vkCmdPipelineBarrier(cmd,
+                             from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                                          : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to_src);
+    surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  }
+
+  // Blit the full platform-view image into the slot at the layer rect (scaling
+  // to size). dst is already in TRANSFER_DST_OPTIMAL for the backing-store
+  // blits in the same command buffer.
+  const auto dx = static_cast<int32_t>(layer->offset.x);
+  const auto dy = static_cast<int32_t>(layer->offset.y);
+  const auto dw = static_cast<int32_t>(layer->size.width);
+  const auto dh = static_cast<int32_t>(layer->size.height);
+  VkImageBlit region{};
+  region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.srcOffsets[0] = {0, 0, 0};
+  region.srcOffsets[1] = {pw, ph, 1};
+  region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.dstOffsets[0] = {dx, dy, 0};
+  region.dstOffsets[1] = {dx + dw, dy + dh, 1};
+  d().vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                     VK_FILTER_LINEAR);
+}
+
 void WaylandVulkanBackend::OnFrameDone(void* data,
                                        wl_callback* cb,
                                        uint32_t /*time*/) {
@@ -2136,63 +2390,100 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &begin);
 
-  // Transition the dma-buf image to TRANSFER_DST for the blit.
-  VkImageMemoryBarrier to_dst{};
-  to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  to_dst.oldLayout = slot.layout;
-  to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_dst.image = slot.image->image();
-  to_dst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &to_dst);
-
+  // Sequence platform-view subsurface Z-order for this frame (both paths): the
+  // backing-store layers compose into the dma-buf image, platform views
+  // composite via their own subsurfaces (sequencer) or their VkImage (below).
   m_sequencer.Present(layers, count, nullptr,
-                      [](FlutterPlatformViewIdentifier) {});
+                      [this](FlutterPlatformViewIdentifier id) {
+                        WarnMissingPlatformView(id);
+                      });
 
   bool ok = true;
-  for (size_t i = 0; i < count; ++i) {
-    const FlutterLayer* layer = layers[i];
-    if (!layer) {
-      continue;
-    }
-    if (layer->type == kFlutterLayerContentTypeBackingStore &&
-        layer->backing_store) {
-      auto* baton =
-          static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
-      if (!baton || !baton->store) {
+  if (layer_compositor_) {
+    // Correct src-over alpha compositing (a platform view under a transparent
+    // Flutter overlay blends instead of being overwritten to black).
+    ok = CompositeLayersBlend(cmd, layers, count, slot, w, h);
+  } else {
+    // Fallback: overwrite blits. Correct only when layers don't overlap; a
+    // transparent overlay over a platform view erases it. Transition the slot
+    // to TRANSFER_DST for the blits, then to GENERAL for the present.
+    VkImageMemoryBarrier to_dst{};
+    to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_dst.oldLayout = slot.layout;
+    to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_dst.image = slot.image->image();
+    to_dst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to_dst);
+
+    // Overlapping slot writes must run in layer order; barrier between them.
+    bool slot_written = false;
+    const auto order_slot_write = [&] {
+      if (!slot_written) {
+        slot_written = true;
+        return;
+      }
+      VkImageMemoryBarrier waw{};
+      waw.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      waw.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      waw.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      waw.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      waw.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      waw.image = slot.image->image();
+      waw.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      waw.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      waw.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &waw);
+    };
+
+    for (size_t i = 0; i < count; ++i) {
+      const FlutterLayer* layer = layers[i];
+      if (!layer) {
         continue;
       }
-      const auto dx = static_cast<int32_t>(layer->offset.x);
-      const auto dy = static_cast<int32_t>(layer->offset.y);
-      const auto dw = static_cast<int32_t>(layer->size.width);
-      const auto dh = static_cast<int32_t>(layer->size.height);
-      BlitStoreToSwapchain(cmd, *baton->store, slot.image->image(), dx, dy, dw,
-                           dh);
+      if (layer->type == kFlutterLayerContentTypeBackingStore &&
+          layer->backing_store) {
+        auto* baton =
+            static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
+        if (!baton || !baton->store) {
+          continue;
+        }
+        const auto dx = static_cast<int32_t>(layer->offset.x);
+        const auto dy = static_cast<int32_t>(layer->offset.y);
+        const auto dw = static_cast<int32_t>(layer->size.width);
+        const auto dh = static_cast<int32_t>(layer->size.height);
+        order_slot_write();
+        BlitStoreToSwapchain(cmd, *baton->store, slot.image->image(), dx, dy,
+                             dw, dh);
+      } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+                 layer->platform_view) {
+        ok = PresentPlatformView(layer) && ok;
+        order_slot_write();
+        BlitPlatformViewVulkan(cmd, layer, slot.image->image());
+      }
     }
-    // Platform-view layers are not yet composited on the dma-buf path.
-  }
 
-  // GENERAL so the compositor's external dma-buf read sees a coherent frame.
-  // The CPU fence wait below is the producer/consumer sync for this first
-  // (non-explicit-sync) version.
-  VkImageMemoryBarrier to_general{};
-  to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-  to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_general.image = slot.image->image();
-  to_general.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  to_general.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &to_general);
-  slot.layout = VK_IMAGE_LAYOUT_GENERAL;
+    VkImageMemoryBarrier to_general{};
+    to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_general.image = slot.image->image();
+    to_general.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_general.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &to_general);
+    slot.layout = VK_IMAGE_LAYOUT_GENERAL;
+  }
 
   d().vkEndCommandBuffer(cmd);
 

@@ -16,31 +16,37 @@
 
 #pragma once
 
-#include <map>
+#include <memory>
 
 #include <flutter/binary_messenger.h>
 #include <flutter/encodable_value.h>
 #include <flutter/method_call.h>
 #include <flutter/method_channel.h>
 #include <flutter/method_result.h>
-
-#include "flutter_homescreen.h"
-
 #include <flutter/standard_method_codec.h>
 
-class FlutterView;
+#include "flutter_homescreen.h"
+#include "platform_view_listener.h"
 
+class PlatformViewRegistry;
+
+// Thin adapter over the flutter/platform_views method channel: it decodes each
+// message and forwards to the PlatformViewRegistry, which owns the id->instance
+// lifecycle. It holds no view state of its own.
 class PlatformViewsHandler {
  public:
   explicit PlatformViewsHandler(flutter::BinaryMessenger* messenger,
                                 FlutterDesktopEngineRef engine);
 
  private:
-  // Called when a method is called on |channel_|;
+  // Called when a method is invoked on |channel_|.
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
+  // Trampolines handed to the generated create dispatch. |context| is the
+  // PlatformViewRegistry; a plugin also stores it to call the remove trampoline
+  // from its destructor.
   static void PlatformViewAddListener(
       void* context,
       int32_t id,
@@ -55,6 +61,6 @@ class PlatformViewsHandler {
   // A reference to the opaque data pointer, if any. Null in headless mode.
   FlutterDesktopEngineRef engine_;
 
-  std::map<int32_t, std::pair<const struct platform_view_listener*, void*>>
-      listeners_;
+  // Owns the id->instance lifecycle; borrowed from the engine state.
+  PlatformViewRegistry* registry_;
 };
