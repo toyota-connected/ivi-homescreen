@@ -159,19 +159,16 @@ homescreen::LeaseConfig MakeLeaseConfig(const Configuration::Config& config) {
 }
 #endif
 
-#if BUILD_BACKEND_WAYLAND_LEASED_DRM && \
-    (BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN)
-// wayland-leased-drm: the DRM device comes from a compositor lease rather than
-// an open() of a card we chose. Everything downstream is the same DrmDisplay
-// the direct backends use -- the lease only changes the acquisition axis, not
-// the renderer -- so the DRM backend factories are reused verbatim.
-std::shared_ptr<IDisplay> MakeLeasedDrmDisplay(
-    const std::vector<Configuration::Config>& configs) {
-  auto res = homescreen::LeaseClient::Acquire(MakeLeaseConfig(configs[0]));
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM
+// Acquire the lease or exit. Shared by every leased tier's make_display: the
+// failure contract must not drift between tiers, and it is one contract --
+// a leased backend that could not get its lease has nothing to fall back to,
+// and silently running on a different device would be worse than not starting.
+// Fail-fast is consistent with the rest of MakeDisplay.
+std::shared_ptr<homescreen::LeaseHold> AcquireLeaseOrExit(
+    const Configuration::Config& config) {
+  auto res = homescreen::LeaseClient::Acquire(MakeLeaseConfig(config));
   if (!res.hold) {
-    // Fail fast, consistent with the rest of MakeDisplay: a leased backend that
-    // could not get its lease has nothing to fall back to, and silently running
-    // on a different device would be worse than not starting.
     ihs::log::error("[leased-drm] could not acquire a lease: {}",
                     homescreen::ToString(res.error));
     for (const auto& o : res.offers) {
@@ -180,19 +177,36 @@ std::shared_ptr<IDisplay> MakeLeasedDrmDisplay(
     }
     std::exit(EXIT_FAILURE);
   }
+  return std::shared_ptr<homescreen::LeaseHold>(std::move(res.hold));
+}
+#endif
 
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM && \
+    (BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN)
+// wayland-leased-drm: the DRM device comes from a compositor lease rather than
+// an open() of a card we chose. Everything downstream is the same DrmDisplay
+// the direct backends use -- the lease only changes the acquisition axis, not
+// the renderer -- so the DRM backend factories are reused verbatim.
+std::shared_ptr<IDisplay> MakeLeasedDrmDisplay(
+    const std::vector<Configuration::Config>& configs) {
   // The display owns the hold: drm::Device::from_fd only borrows the fd, so the
   // LeaseHold (which owns it, and whose destruction returns the lease) must
   // outlive every backend built on it.
-  const std::shared_ptr<homescreen::LeaseHold> hold(std::move(res.hold));
+  const std::shared_ptr<homescreen::LeaseHold> hold =
+      AcquireLeaseOrExit(configs[0]);
   const int fd = hold->fd();
   std::string card = hold->card_path();
 
   const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
   const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  // connector_id and the revocation gate ride along to the backend through the
+  // display -- the DRM backend factories take everything else from it too. The
+  // gate captures the hold by value: fd_owner_ holds the same share, so the
+  // callable cannot outlive what it reads.
   return std::make_shared<DrmDisplay>(
       DrmDisplay::AdoptFd{}, static_cast<int32_t>(w), static_cast<int32_t>(h),
-      60.0, fd, std::move(card), hold);
+      60.0, fd, std::move(card), hold, hold->connector_id(),
+      [hold] { return hold->revoked(); });
 }
 #endif
 
@@ -255,22 +269,12 @@ std::shared_ptr<IDisplay> MakeSoftwareDisplay(
 // software display; only the scanout device differs.
 std::shared_ptr<IDisplay> MakeLeasedSoftwareDisplay(
     const std::vector<Configuration::Config>& configs) {
-  auto res = homescreen::LeaseClient::Acquire(MakeLeaseConfig(configs[0]));
-  if (!res.hold) {
-    ihs::log::error("[leased-drm] could not acquire a lease: {}",
-                    homescreen::ToString(res.error));
-    for (const auto& o : res.offers) {
-      ihs::log::error("[leased-drm]   offered: {} (connector_id {}) — {}",
-                      o.name, o.connector_id, o.description);
-    }
-    std::exit(EXIT_FAILURE);
-  }
+  const std::shared_ptr<homescreen::LeaseHold> hold =
+      AcquireLeaseOrExit(configs[0]);
 
   auto display = MakeSoftwareDisplay(configs);
   auto* sw = dynamic_cast<SoftwareDisplay*>(display.get());
   assert(sw != nullptr);
-
-  const std::shared_ptr<homescreen::LeaseHold> hold(std::move(res.hold));
   SoftwareDisplay::LeasedScanout scanout;
   scanout.fd = hold->fd();
   scanout.connector_id = hold->connector_id();
@@ -408,6 +412,11 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // --drm-no-seat: DrmDisplay forced the session null; tell DrmBackend to
   // also skip the foreground-VT guard on its direct-open path.
   cfg.no_seat = config.view.drm_no_seat.value_or(false);
+  // Leased tier: the compositor chose the connector, and the lease can be
+  // revoked under us. Both are inert (0 / empty) on the direct tiers, which is
+  // what makes this factory serve the leased descriptor unchanged.
+  cfg.lease_connector_id = drm_display->lease_connector_id();
+  cfg.lease_revoked = drm_display->lease_revoked();
 
   // drm_display (resolved above) owns the process-wide libseat session — it may
   // be null when no seat backend is available, in which case DrmBackend takes
@@ -521,7 +530,8 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
                 drm_display->SharedDevice()->fd(), drm_display->fd_owner(),
                 drm_display->device_path(),
                 config.debug_backend.value_or(false), drm_mode,
-                config.view.drm_rotation.value_or(0))
+                config.view.drm_rotation.value_or(0),
+                drm_display->lease_connector_id(), drm_display->lease_revoked())
           : VulkanDrmBackend::Create(drm_display->device_path(),
                                      config.debug_backend.value_or(false),
                                      drm_display->session(), drm_mode,
@@ -762,25 +772,6 @@ std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
     return hint;
   }
 
-  if (keys.size() == 1) {
-    // Only one backend is compiled in, so it is the only choice. Warn if the
-    // operator explicitly asked for a different one (a full key, not the legacy
-    // egl/vulkan renderer hint) so a typo or wrong-build isn't silent.
-    if (!hint.empty() && hint != "egl" && hint != "vulkan" &&
-        hint != keys.front()) {
-      ihs::log::warn(
-          "[backend] requested backend '{}' is not compiled into this build; "
-          "using the only available backend '{}'",
-          hint, keys.front());
-    }
-    return keys.front();
-  }
-
-  // Several backends and no exact key. Pick by environment, honoring the legacy
-  // egl/vulkan renderer-family hint within the chosen family:
-  //   - a live Wayland session -> a wayland-* backend (we run as a client);
-  //   - otherwise              -> KMS-direct (drm-kms-* / software).
-  const bool want_vulkan = (hint == "vulkan");
   const auto has = [&](std::string_view k) -> const std::string* {
     for (const auto& key : keys) {
       if (key == k) {
@@ -789,15 +780,19 @@ std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
     }
     return nullptr;
   };
-  const std::string* wl_egl = has("wayland-egl");
-  const std::string* wl_vk = has("wayland-vulkan");
-  const std::string* drm_egl = has("drm-kms-egl");
-  const std::string* drm_vk = has("drm-kms-vulkan");
-  const std::string* sw = has("software");
   const std::string* lease_egl = has("wayland-leased-drm-egl");
   const std::string* lease_vk = has("wayland-leased-drm-vulkan");
   const std::string* lease_sw = has("wayland-leased-drm-software");
 
+  // The leased family is resolved BEFORE any fallback below, including the
+  // single-backend short-circuit. Both fall back to a compiled-in backend when
+  // the requested one is absent, which for a leased request is the one outcome
+  // that must never happen: an unleased drm-kms-* opens a card and takes DRM
+  // master outright. That is not a degraded version of leasing, it is the
+  // opposite of it, on hardware the operator may not own. Order is load-bearing
+  // here, not stylistic -- this guard sitting after the keys.size() == 1 check
+  // is what let a leased request silently become drm-kms-egl.
+  //
   // "wayland-leased-drm" as a bare family name resolves within the family:
   // vulkan -> egl -> software among the tiers actually registered. Vulkan leads
   // because a leased connector is a dedicated scanout target, which is what the
@@ -836,6 +831,32 @@ std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
         hint);
     return std::string{};
   }
+
+  if (keys.size() == 1) {
+    // Only one backend is compiled in, so it is the only choice. Warn if the
+    // operator explicitly asked for a different one (a full key, not the legacy
+    // egl/vulkan renderer hint) so a typo or wrong-build isn't silent. A leased
+    // request never reaches here -- the guard above already refused it.
+    if (!hint.empty() && hint != "egl" && hint != "vulkan" &&
+        hint != keys.front()) {
+      ihs::log::warn(
+          "[backend] requested backend '{}' is not compiled into this build; "
+          "using the only available backend '{}'",
+          hint, keys.front());
+    }
+    return keys.front();
+  }
+
+  // Several backends and no exact key. Pick by environment, honoring the legacy
+  // egl/vulkan renderer-family hint within the chosen family:
+  //   - a live Wayland session -> a wayland-* backend (we run as a client);
+  //   - otherwise              -> KMS-direct (drm-kms-* / software).
+  const bool want_vulkan = (hint == "vulkan");
+  const std::string* wl_egl = has("wayland-egl");
+  const std::string* wl_vk = has("wayland-vulkan");
+  const std::string* drm_egl = has("drm-kms-egl");
+  const std::string* drm_vk = has("drm-kms-vulkan");
+  const std::string* sw = has("software");
 
   if (WaylandSessionAvailable() && (wl_egl != nullptr || wl_vk != nullptr)) {
     if (want_vulkan && wl_vk != nullptr) {

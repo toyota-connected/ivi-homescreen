@@ -513,7 +513,43 @@ bool DrmBackend::InitDrm() {
 
   drmModeConnector* connector = nullptr;
   std::string pick_reason;
-  if (cfg_.connector_name.has_value()) {
+  if (cfg_.lease_connector_id != 0) {
+    // A lease decides the connector for us, so this outranks both the name pin
+    // and the rank heuristic below. Failing here rather than falling back:
+    // every other connector on this fd is one we do not hold.
+    for (drmModeConnector* c : eligible) {
+      if (c->connector_id == cfg_.lease_connector_id) {
+        connector = c;
+        pick_reason = "lease";
+        break;
+      }
+    }
+    if (connector == nullptr) {
+      ihs::log::error(
+          "[DrmBackend] leased connector id {} is not eligible (absent, "
+          "disconnected, or no modes); eligible connectors on this lease fd:",
+          cfg_.lease_connector_id);
+      for (drmModeConnector* c : eligible) {
+        ihs::log::error("[DrmBackend]   {} (id {})", connector_name(c),
+                        c->connector_id);
+      }
+      for (drmModeConnector* c : eligible) {
+        drmModeFreeConnector(c);
+      }
+      drmModeFreeResources(res);
+      return false;
+    }
+    if (cfg_.connector_name.has_value()) {
+      // Both set means --drm-connector was given alongside a lease. The lease
+      // wins; say so rather than silently ignoring the operator's pin.
+      ihs::log::warn(
+          "[DrmBackend] --drm-connector={} ignored: this is a leased device "
+          "and the compositor leased connector {} ({}). Use --lease-connector "
+          "to influence which connector is requested.",
+          *cfg_.connector_name, cfg_.lease_connector_id,
+          connector_name(connector));
+    }
+  } else if (cfg_.connector_name.has_value()) {
     const std::string& want = *cfg_.connector_name;
     for (drmModeConnector* c : eligible) {
       if (connector_name(c) == want) {
@@ -1467,6 +1503,22 @@ bool DrmBackend::Present() {
   // frame without touching GL/KMS; OnSessionResumed re-modesets and restarts
   // the pacer.
   if (session_paused_.load(std::memory_order_acquire)) {
+    return true;
+  }
+  // Lease-revocation gate. Same shape as the session-pause gate above and for
+  // the same reason: the leased KMS objects are gone from this fd's view, so
+  // page flips naming them fail and never complete, and eglSwapBuffers would
+  // eventually block forever in gbm_surface_get_free_buffer with no buffer ever
+  // released -- wedging the rasterizer thread so FlutterEngineShutdown cannot
+  // join it. Unlike a VT pause this never resolves on its own: OnSessionResumed
+  // has no counterpart until reacquire, so the exit policy is the way out.
+  // Ack the frame without touching GL/KMS.
+  if (cfg_.lease_revoked && cfg_.lease_revoked()) {
+    if (!lease_revoked_logged_.exchange(true, std::memory_order_relaxed)) {
+      ihs::log::warn(
+          "[DrmBackend] lease revoked — gating presents; the panel stops "
+          "updating until the lease is reacquired");
+    }
     return true;
   }
   // Reclaim a buffer orphaned by a flip dropped during a VT-switch pause:

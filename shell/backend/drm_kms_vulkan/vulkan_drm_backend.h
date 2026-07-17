@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -71,13 +72,24 @@ class VulkanDrmBackend final : public Backend {
   // opaque keep-alive that does own it (the LeaseHold) and must outlive the
   // backend. @p drm_device is still needed, derived from the lease fd, because
   // the physical-device match stats the node — it is never opened on this path.
+  //
+  // @p connector_id is the leased connector to drive; a lease may hold more
+  // than one (the compositor picks the final object set), so without it the
+  // scanout probe takes "first connected" and can drive the wrong panel. 0 =
+  // that heuristic.
+  //
+  // @p revoked is polled before each atomic commit: a revoked lease's KMS
+  // objects are gone from the fd's view, so every commit naming them fails.
+  // Null = never gated.
   static std::shared_ptr<VulkanDrmBackend> Create(
       int drm_fd,
       std::shared_ptr<void> fd_owner,
       const std::string& drm_device,
       bool enable_validation,
       const std::string& mode_spec,
-      int rotation);
+      int rotation,
+      uint32_t connector_id,
+      std::function<bool()> revoked);
 
   ~VulkanDrmBackend() override;
 
@@ -192,6 +204,14 @@ class VulkanDrmBackend final : public Backend {
   // lifetime. Opaque so this header stays free of the lease client: the backend
   // needs the fd to stay valid, not to know what keeps it so.
   std::shared_ptr<void> fd_owner_;
+
+  // The leased connector to drive (0 = first connected with a mode) and the
+  // lease's revocation gate (empty on the path-opened path, where there is no
+  // lease to lose). Both inert unless injected_fd_ >= 0.
+  uint32_t lease_connector_id_ = 0;
+  std::function<bool()> lease_revoked_;
+  // One-shot latch so the revocation notice is logged once, not once per frame.
+  std::atomic<bool> lease_revoked_logged_{false};
 
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;

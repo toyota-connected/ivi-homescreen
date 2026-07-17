@@ -217,7 +217,9 @@ DrmDisplay::DrmDisplay(AdoptFd,
                        double refresh_rate_hz,
                        int fd,
                        std::string device_path,
-                       std::shared_ptr<void> fd_owner)
+                       std::shared_ptr<void> fd_owner,
+                       uint32_t connector_id,
+                       std::function<bool()> revoked)
     // Delegate for the width/height/seat wiring, but always with no_seat:
     // libseat's TakeControl would fight the compositor, which already holds the
     // session controller on the seat we are leasing from -- producing spurious
@@ -231,6 +233,8 @@ DrmDisplay::DrmDisplay(AdoptFd,
                  /*no_seat=*/true) {
   adopted_fd_ = true;
   fd_owner_ = std::move(fd_owner);
+  lease_connector_id_ = connector_id;
+  lease_revoked_ = std::move(revoked);
 
   // Adopt up front so SharedDevice() short-circuits: no libseat TakeDevice, no
   // direct open, no drmSetMaster, no foreground-VT guard. The lease fd is
