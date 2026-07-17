@@ -508,14 +508,14 @@ bool OpenSession(Session& s, Clock::time_point deadline, LeaseError* err) {
     }
     return true;
   };
+  // No roundtrip after this. There used to be one, to "let the connector's own
+  // name/description/connector_id/done events land" -- but that is exactly the
+  // condition all_done blocks on, so by the time it ran nothing was
+  // outstanding and it cost a full sync + poll/read/dispatch cycle of startup
+  // latency, charged against the operator's lease-timeout-ms budget. Waiting on
+  // the predicate is strictly better than waiting a fixed round trip: it is
+  // what we actually need, and it cannot be too short.
   if (!DispatchUntil(s.display, all_done, deadline, &protocol_error)) {
-    *err = protocol_error ? LeaseError::kProtocolError : LeaseError::kTimeout;
-    return false;
-  }
-
-  // Each connector's own name/description/connector_id/done events follow the
-  // device's new_id; one more (bounded) roundtrip lets them land.
-  if (!BoundedRoundtrip(s.display, deadline, &protocol_error)) {
     *err = protocol_error ? LeaseError::kProtocolError : LeaseError::kTimeout;
     return false;
   }
@@ -789,9 +789,21 @@ LeaseClient::Result LeaseClient::Probe(const LeaseConfig& cfg) {
 namespace {
 
 // Read "--flag=value" or "--flag value" out of argv.
+// Read one --flag / --flag=value from argv, falling back to @p env_name.
+//
+// This deliberately does NOT go through Configuration::ParseArgcArgv, which is
+// the obvious objection to it: --lease-list-connectors runs before that parser
+// precisely so it works with no bundle, and the parser fatals ("No views
+// configured") without one -- which would break the tool exactly when it is
+// most needed, before a working config exists. What it must NOT do is disagree
+// with the parser about what the same flags mean, so the precedence here (CLI
+// wins, env fills) mirrors pick_string in configuration.cc. Any lease flag
+// added there needs a line here too, or the diagnostic quietly reports on a
+// different device than the backend will lease from.
 std::optional<std::string> ArgValue(int argc,
                                     char** argv,
-                                    std::string_view flag) {
+                                    std::string_view flag,
+                                    const char* env_name) {
   const std::string eq = std::string(flag) + "=";
   for (int i = 1; i < argc; ++i) {
     const std::string_view a = argv[i];
@@ -800,6 +812,11 @@ std::optional<std::string> ArgValue(int argc,
     }
     if (a.rfind(eq, 0) == 0) {
       return std::string(a.substr(eq.size()));
+    }
+  }
+  if (env_name != nullptr) {
+    if (const char* e = std::getenv(env_name); e != nullptr && *e != '\0') {
+      return std::string(e);
     }
   }
   return std::nullopt;
@@ -820,11 +837,24 @@ int MaybeListLeaseConnectors(int argc, char** argv) {
   }
 
   LeaseConfig cfg;
-  cfg.device = ArgValue(argc, argv, "--lease-device");
-  if (const auto t = ArgValue(argc, argv, "--lease-timeout-ms")) {
-    const unsigned long ms = std::strtoul(t->c_str(), nullptr, 10);
-    if (ms > 0) {
+  cfg.device =
+      ArgValue(argc, argv, "--lease-device", "HOMESCREEN_LEASE_DEVICE");
+  if (const auto t = ArgValue(argc, argv, "--lease-timeout-ms",
+                              "HOMESCREEN_LEASE_TIMEOUT_MS")) {
+    // Validated the way configuration.cc validates it, not with a bare strtoul:
+    // that accepted "5000abc" as 5000 and let a value above uint32 max through
+    // to be truncated. A diagnostic that silently reinterprets the operator's
+    // input is worse than one that refuses it.
+    char* end = nullptr;
+    const unsigned long long ms = std::strtoull(t->c_str(), &end, 10);
+    if (end != t->c_str() && *end == '\0' && ms > 0 &&
+        ms <= std::numeric_limits<uint32_t>::max()) {
       cfg.timeout_ms = static_cast<uint32_t>(ms);
+    } else {
+      std::fprintf(stderr,
+                   "--lease-timeout-ms='%s' must be an integer in 1..%u; using "
+                   "the default\n",
+                   t->c_str(), std::numeric_limits<uint32_t>::max());
     }
   }
 
