@@ -64,6 +64,7 @@ namespace wl_vulkan {
 class DmabufImage;
 class WlDmabufBuffer;
 class ExplicitSync;
+class LayerCompositor;
 }  // namespace wl_vulkan
 
 class WaylandVulkanBackend final : public Backend {
@@ -171,6 +172,11 @@ class WaylandVulkanBackend final : public Backend {
    * wayland
    */
   FlutterCompositor GetCompositorConfig() override;
+
+  // Expose this backend's Vulkan handles so a platform-view plugin can render
+  // into a VkImage on the same device Flutter uses (mirrors GetEglContext for
+  // EGL plugins). Always available once the device is created.
+  bool GetVulkanContext(BackendVulkanContext* out) const override;
 
   bool TextureMakeCurrent() override;
 
@@ -445,6 +451,39 @@ class WaylandVulkanBackend final : public Backend {
   bool CollectBackingStoreImpl(const FlutterBackingStore* store);
   bool PresentLayersImpl(const FlutterLayer** layers, size_t count);
 
+  /// Composite one platform-view layer via its ICompositorSurface (texture
+  /// route), applying its mutation stack. Shared by the swapchain and dma-buf
+  /// present paths. Returns the surface's OnPresent result, or true when the
+  /// view takes the subsurface route (no compositor surface registered).
+  bool PresentPlatformView(const FlutterLayer* layer);
+  /// Sequencer missing-view handler: warn only when a platform view has neither
+  /// a subsurface nor a compositor surface registered.
+  void WarnMissingPlatformView(FlutterPlatformViewIdentifier id);
+
+#if BUILD_COMPOSITOR
+  /// Composite a Vulkan platform view into the dma-buf slot: if the layer's
+  /// ICompositorSurface exposes a VkImage (rendered on this device), transition
+  /// it to a transfer source and blit it into @p dst at the layer's rect. No-op
+  /// for GL / subsurface platform views. Records into @p cmd (already open).
+  /// (Overwrite fallback used when the alpha-blend compositor is unavailable.)
+  void BlitPlatformViewVulkan(VkCommandBuffer cmd,
+                              const FlutterLayer* layer,
+                              VkImage dst);
+
+  /// Composite the layer stack into @p slot with src-over alpha blending via
+  /// layer_compositor_ (a render pass): each backing store and Vulkan platform
+  /// view is sampled and blended in z-order, so a transparent Flutter overlay
+  /// over a platform view keeps the view instead of overwriting it to black.
+  /// Leaves the slot in GENERAL. Returns the per-view OnPresent success.
+  struct DmabufSlot;  // defined below
+  bool CompositeLayersBlend(VkCommandBuffer cmd,
+                            const FlutterLayer** layers,
+                            size_t count,
+                            DmabufSlot& slot,
+                            uint32_t width,
+                            uint32_t height);
+#endif
+
   /// Record + submit a layout transition on a one-shot command buffer.
   void TransitionLayout(VkImage image,
                         VkImageLayout from,
@@ -517,6 +556,12 @@ class WaylandVulkanBackend final : public Backend {
   // reclaimed by polling a release timeline — replacing the per-frame CPU
   // fence. Null when unavailable; the CPU-fence path is used instead.
   std::unique_ptr<wl_vulkan::ExplicitSync> explicit_sync_;
+
+  // Alpha-blend layer compositor for the dma-buf path. When present, the layer
+  // stack is composited with src-over blending (a render pass) instead of
+  // overwrite blits — required so a platform view under a transparent Flutter
+  // overlay is not erased to black. Null falls back to the blit path.
+  std::unique_ptr<wl_vulkan::LayerCompositor> layer_compositor_;
 
   // Refresh pacing for the dma-buf path. The WSI swapchain path is paced by
   // vkQueuePresentKHR blocking at vblank under FIFO; the dma-buf commit is

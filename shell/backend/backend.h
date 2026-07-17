@@ -45,6 +45,21 @@ struct BackendEglContext {
                         // visible on the raster thread.
 };
 
+// Carries the Vulkan handle set a plugin needs to render into a VkImage using
+// the SAME device Flutter renders with (so a platform view's output is a
+// first-class Vulkan resource the compositor can later import — no second
+// device, no cross-API copy). All handles are |void*| so the public embedder
+// header avoids a hard Vulkan include; callers cast them back to the matching
+// Vk types. Only Vulkan-based backends override GetVulkanContext.
+struct BackendVulkanContext {
+  void* instance;         // VkInstance
+  void* physical_device;  // VkPhysicalDevice
+  void* device;           // VkDevice
+  void* queue;            // VkQueue (externally synchronized — see note below)
+  uint32_t queue_family_index;
+  void* get_instance_proc_addr;  // PFN_vkGetInstanceProcAddr (shared loader)
+};
+
 // The unified display-target interface: a Backend owns surface lifecycle, the
 // Flutter renderer/compositor config, and vsync for one presentation target
 // (Wayland compositor, DRM-KMS, software dumb buffer). One factory
@@ -122,6 +137,22 @@ class Backend {
    *        the default returns false.
    */
   virtual bool GetEglContext(BackendEglContext* /* out */) const {
+    return false;
+  }
+
+  /**
+   * @brief Fill |out| with the backend's Vulkan handles so a plugin can render
+   *        a platform view into a VkImage on the SAME device Flutter uses. Only
+   *        Vulkan-based backends override this; the default returns false (the
+   *        plugin then falls back to its GL path or declines).
+   *
+   * The queue is the backend's single graphics/present queue and is externally
+   * synchronized: a plugin submitting on it must serialize with the embedder
+   * (the wayland_vulkan backend routes engine submissions through a shared
+   * mutex via QueueInterposer — a plugin should submit from the raster thread
+   * inside OnPresent and wait its own fence, not hold work across frames).
+   */
+  virtual bool GetVulkanContext(BackendVulkanContext* /* out */) const {
     return false;
   }
 
