@@ -443,3 +443,50 @@ jobs:
         with:
           name: coverage-${{ matrix.backend }}
           path: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}/coverage.info
+  
+          # Coverage merge + report job.
+  #
+  # Downloads all per-backend coverage.info files uploaded by the unit-tests
+  # matrix, merges them with lcov, generates a single HTML report, and
+  # uploads it as a downloadable artifact. All unit-test matrix legs must
+  # succeed before this job runs.
+  coverage:
+    name: coverage
+    needs: unit-tests
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install lcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Download per-backend coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-artifacts
+          merge-multiple: false
+
+      - name: Merge coverage data
+        run: |
+          inputs=$(find coverage-artifacts -name 'coverage.info' \
+                     -printf '-a %p ')
+          lcov ${inputs} --rc lcov_branch_coverage=1 -o merged.info
+          lcov -r merged.info \
+            '*/test/*' '*/usr/*' '*/third_party/*' \
+            --rc lcov_branch_coverage=1 -o merged.info
+
+      - name: Print coverage summary
+        run: |
+          echo "=== Coverage Summary (all backends merged) ==="
+          lcov --summary merged.info 2>&1 | grep -E 'lines\.|functions\.|branches\.'
+
+      - name: Generate HTML report
+        run: genhtml -o lcovHtml -s --legend --branch-coverage merged.info
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-coverage-html
+          path: lcovHtml/
