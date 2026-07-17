@@ -364,7 +364,9 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const std::string& drm_device,
     const bool enable_validation,
     const std::string& mode_spec,
-    const int rotation) {
+    const int rotation,
+    const uint32_t connector_id,
+    std::function<bool()> revoked) {
   if (drm_fd < 0) {
     ihs::log::critical("[VulkanDrmBackend] Create: invalid lease fd {}",
                        drm_fd);
@@ -377,6 +379,10 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
       drm_device, enable_validation, /*session=*/nullptr, mode_spec, rotation));
   backend->injected_fd_ = drm_fd;
   backend->fd_owner_ = std::move(fd_owner);
+  // Set BEFORE FinishCreate: SetupCompositor runs inside it and is what pins
+  // the connector.
+  backend->lease_connector_id_ = connector_id;
+  backend->lease_revoked_ = std::move(revoked);
   return FinishCreate(std::move(backend));
 }
 
@@ -599,7 +605,8 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   const bool discovered =
       injected_fd_ >= 0
           ? drm_kms_vulkan::DiscoverScanoutTarget(
-                injected_fd_, DRM_FORMAT_XRGB8888, mode_spec_, target, err)
+                injected_fd_, DRM_FORMAT_XRGB8888, mode_spec_,
+                lease_connector_id_, target, err)
           : drm_kms_vulkan::DiscoverScanoutTarget(
                 drm_device_, DRM_FORMAT_XRGB8888, mode_spec_, target, err);
   if (!discovered) {
@@ -1143,6 +1150,24 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
                                          size_t count) {
   if (!compositor_ || !compositor_->scene) {
     return false;
+  }
+  // Lease revoked: the leased KMS objects are gone from this fd's view, so
+  // every atomic commit naming them fails -- and a failed commit produces no
+  // PAGE_FLIP_EVENT, so the flip path would churn rather than settle. Park the
+  // vsync source instead: SubmitBaton parks the baton, no OnVsync fires, and
+  // raster stalls, which is the same steady state the libseat pause path
+  // produces for the gated state. Returning true
+  // reports the frame as presented -- it was not, but the alternative is the
+  // engine treating a revoked lease as a render error. Reacquire unparks by
+  // reacquiring; until then the exit policy is the way out.
+  if (lease_revoked_ && lease_revoked_()) {
+    vsync_.SetSourcePending(true);
+    if (!lease_revoked_logged_.exchange(true, std::memory_order_relaxed)) {
+      ihs::log::warn(
+          "[VulkanDrmBackend] lease revoked — gating commits and parking "
+          "vsync; the panel stops updating until the lease is reacquired");
+    }
+    return true;
   }
   CompositorState& c = *compositor_;
   const FlutterLayer* bs_layer = nullptr;

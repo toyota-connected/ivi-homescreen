@@ -61,9 +61,16 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
 // the compositor is still scanning out on. It may also be the only handle we
 // have: a leased client uses a lease precisely because it may not be permitted
 // to open the DRM node itself.
+//
+// @p want_connector_id pins the connector (0 = first connected with a mode).
+// Pass the LeaseHold's connector_id: a lease may contain several connectors --
+// the requested set is only a suggestion and the compositor picks the final set
+// -- so without it the probe can modeset the wrong panel and leave the
+// requested one dark, silently.
 bool DiscoverScanoutTarget(int drm_fd,
                            uint32_t fourcc,
                            const std::string& mode_spec,
+                           uint32_t want_connector_id,
                            ScanoutTarget& out,
                            std::string& err);
 
