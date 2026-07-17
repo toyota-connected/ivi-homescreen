@@ -900,8 +900,19 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
     return res;
   }
 
+  // Copy the offer NOW, by value. `conn` does not survive the dispatch below:
+  // wlroots withdraws a connector once it has been leased out and re-brackets
+  // the device's list with `done`, and both OnDone and OnConnector run
+  // PruneWithdrawn(), which erases the withdrawn Connector from the deque and
+  // frees it -- while we are still holding this raw pointer. Reading
+  // conn->offer afterwards is a heap-use-after-free (proven under ASan by
+  // ConnectorWithdrawnDuringGrantIsNotAUseAfterFree, which fails at exactly
+  // this read without this copy). Nothing below may dereference `conn` except
+  // GetProxy() before submit, which happens before any dispatch.
+  const LeaseOffer requested = conn->offer;
+
   ihs::log::info("[leased-drm] requesting connector '{}' (id {}) on {}",
-                 conn->offer.name, conn->offer.connector_id,
+                 requested.name, requested.connector_id,
                  dev->card_path.empty() ? "(unresolved)" : dev->card_path);
 
   // create_lease_request -> request_connector -> submit. `submit` destroys the
@@ -958,8 +969,10 @@ LeaseClient::Result LeaseClient::Acquire(const LeaseConfig& cfg) {
   // Take ownership of the fd off the Lease: from here the LeaseHold closes it,
   // and ~Lease must not.
   hold->lease_fd_ = lease->ReleaseFd();
-  hold->connector_id_ = conn->offer.connector_id;
-  hold->connector_name_ = conn->offer.name;
+  // From the copy taken before the dispatch, not from `conn` -- which the
+  // compositor may have had us free by now (see the copy's comment).
+  hold->connector_id_ = requested.connector_id;
+  hold->connector_name_ = requested.name;
   // Derive the node path from the LEASE fd — the fd every renderer will use.
   hold->card_path_ = NodePathFromFd(hold->lease_fd_);
   if (hold->card_path_.empty()) {

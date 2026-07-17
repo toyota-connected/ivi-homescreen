@@ -77,6 +77,8 @@ constexpr uint32_t kConnConnectorId =
     proto::wp_drm_lease_connector_v1_traits::Evt::ConnectorId;
 constexpr uint32_t kConnDone =
     proto::wp_drm_lease_connector_v1_traits::Evt::Done;
+constexpr uint32_t kConnWithdrawn =
+    proto::wp_drm_lease_connector_v1_traits::Evt::Withdrawn;
 
 constexpr uint32_t kLeaseFd = proto::wp_drm_lease_v1_traits::Evt::LeaseFd;
 constexpr uint32_t kLeaseFinished =
@@ -118,6 +120,11 @@ enum class GrantPolicy {
   kGrantThenFinishNow,    // lease_fd + finished in the same flush
   kGrantThenFinishLater,  // lease_fd, then finished ~50 ms on
   kGrantTwice,            // lease_fd twice — a misbehaving/hostile compositor
+  // What wlroots actually does: a connector that has been leased out is no
+  // longer leasable, so it is withdrawn and the device re-brackets its list
+  // with `done`. Sent in the same flush as lease_fd, so the client sees all
+  // three in the dispatch it runs while waiting for the grant.
+  kGrantThenWithdrawConnector,
 };
 
 struct ConnectorSpec {
@@ -258,6 +265,10 @@ class MockCompositor {
         wl_resource_post_event(cr, kConnDescription, c.description.c_str());
         wl_resource_post_event(cr, kConnConnectorId, c.connector_id);
         wl_resource_post_event(cr, kConnDone);
+        // Retained so a policy can withdraw them later; the device resource is
+        // the parent, so these do not outlive the client connection.
+        self->connector_res_.push_back(cr);
+        self->device_res_ = res;
       }
     }
     if (self->cfg_.send_device_done) {
@@ -344,6 +355,15 @@ class MockCompositor {
         PostFdAndClose(lease, kLeaseFd);
         PostFdAndClose(lease, kLeaseFd);
         break;
+      case GrantPolicy::kGrantThenWithdrawConnector:
+        PostFdAndClose(lease, kLeaseFd);
+        for (wl_resource* cr : self->connector_res_) {
+          wl_resource_post_event(cr, kConnWithdrawn);
+        }
+        if (self->device_res_ != nullptr) {
+          wl_resource_post_event(self->device_res_, kDevDone);
+        }
+        break;
       case GrantPolicy::kGrantThenFinishLater: {
         PostFdAndClose(lease, kLeaseFd);
         auto* ctx = new FinishCtx{lease, nullptr};
@@ -370,6 +390,12 @@ class MockCompositor {
   } kLeaseImpl{&MockCompositor::LeaseDestroy};
 
   MockConfig cfg_;
+
+  // Connector/device resources from the most recent bind, so a grant policy can
+  // withdraw a connector after leasing it out. Non-owning: libwayland destroys
+  // them with the client connection.
+  std::vector<wl_resource*> connector_res_;
+  wl_resource* device_res_ = nullptr;
   wl_display* display_ = nullptr;
   std::thread thread_;
   std::string runtime_dir_;
@@ -778,6 +804,45 @@ TEST(LeaseClient, StaleWaylandDisplayIsNotASession) {
   } else {
     setenv("WAYLAND_DISPLAY", saved.c_str(), 1);
   }
+}
+
+// A compositor that withdraws the connector it just leased out -- which is what
+// wlroots does, since a leased connector is no longer leasable -- must not take
+// the client's cached Connector* out from under it.
+//
+// Acquire() caches the selected Connector*, submits, then dispatches waiting
+// for lease_fd. Both wp_drm_lease_device_v1.done and a subsequent .connector
+// run PruneWithdrawn(), which erases the withdrawn Connector from the device's
+// deque and frees it -- while Acquire still holds a raw pointer it reads
+// afterwards to populate the hold's connector_id/name. The withdraw carries no
+// lease meaning here (the spec says the lease status is unchanged post-grant
+// and the client should merely destroy the object), so this must be a clean
+// grant.
+//
+// Built as an ASan regression test: without the fix the reads after the
+// dispatch are a heap-use-after-free, which ASan aborts on. Unsanitized, the
+// freed offer usually still holds plausible bytes, so the failure is a garbage
+// connector_id rather than a crash -- which is exactly why the assertions below
+// check the values, not just survival.
+TEST(LeaseClient, ConnectorWithdrawnDuringGrantIsNotAUseAfterFree) {
+  MockConfig cfg;
+  cfg.policy = GrantPolicy::kGrantThenWithdrawConnector;
+  cfg.devices = {{{{"HDMI-A-1", "mock panel", 42}}}};
+  MockCompositor mock(std::move(cfg));
+
+  auto res = LeaseClient::Acquire(Cfg(2000));
+
+  ASSERT_NE(res.hold, nullptr)
+      << "withdrawing the connector after granting must not fail the lease: "
+         "the spec leaves the lease status unchanged";
+  // The identity must survive the withdraw. A UAF read here typically yields 0
+  // or garbage rather than crashing.
+  EXPECT_EQ(res.hold->connector_id(), 42u)
+      << "connector_id was read from a Connector freed by PruneWithdrawn";
+  EXPECT_EQ(res.hold->connector_name(), "HDMI-A-1")
+      << "connector_name was read from a Connector freed by PruneWithdrawn";
+  EXPECT_FALSE(res.hold->revoked())
+      << "a post-grant withdraw is not a revocation";
 }
 
 }  // namespace
