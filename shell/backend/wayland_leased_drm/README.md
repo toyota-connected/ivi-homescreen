@@ -179,7 +179,7 @@ homescreen --backend=wayland-leased-drm-egl --lease-connector=HDMI-A-1 -b <bundl
 
 | Flag | Env | TOML | Meaning |
 |---|---|---|---|
-| `--backend` | — | `[view.backend] type` | `wayland-leased-drm[-egl\|-software]`; the bare family name picks the first available tier |
+| `--backend` | — | `[view.backend] type` | `wayland-leased-drm[-vulkan\|-egl\|-software]`; the bare family name resolves vulkan → egl → software among the tiers this build registered. Name a tier explicitly to pin it |
 | `--lease-connector` | `HOMESCREEN_LEASE_CONNECTOR` | `[view.backend.lease] connector` | Connector to request by name. Unset + one offer takes it; unset + several is fatal and lists them |
 | `--lease-device` | `HOMESCREEN_LEASE_DEVICE` | `[view.backend.lease] device` | Which `wp_drm_lease_device_v1` when several are advertised (one per DRM node): index or node path |
 | `--lease-timeout-ms` | `HOMESCREEN_LEASE_TIMEOUT_MS` | `[view.backend.lease] timeout_ms` | Bound on the whole negotiation (default 5000) |
