@@ -26,6 +26,7 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -316,10 +317,19 @@ bool DispatchUntil(wl_display* display,
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
             .count();
+    // Clamp rather than cast. poll() takes an int and treats ANY negative value
+    // as "block forever", so a timeout above INT_MAX ms -- which the config
+    // surface accepts, being uint32_t -- would wrap negative and hang startup
+    // forever: the exact failure the deadline exists to prevent. Clamping caps
+    // one poll() at ~24.9 days; the while-loop re-checks the real deadline, so
+    // a longer timeout still expires correctly, just across more iterations.
+    const int poll_ms = ms > std::numeric_limits<int>::max()
+                            ? std::numeric_limits<int>::max()
+                            : static_cast<int>(ms);
 
     pollfd pfd{wl_display_get_fd(display),
                static_cast<short>(POLLIN | (want_write ? POLLOUT : 0)), 0};
-    const int r = poll(&pfd, 1, static_cast<int>(ms));
+    const int r = poll(&pfd, 1, poll_ms);
     if (r < 0) {
       wl_display_cancel_read(display);
       if (errno == EINTR) {

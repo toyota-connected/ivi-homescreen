@@ -266,13 +266,17 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
     const int64_t ms = v->at_path("backend.lease.timeout_ms")
                            .as_integer()
                            ->value_or(int64_t{0});
-    if (ms > 0) {
+    // The upper bound is not pedantry: TOML integers are int64_t, so without it
+    // a value that is a multiple of 2^32 truncates to 0 -- an already-expired
+    // deadline that fails the lease instantly and blames the compositor in the
+    // log. Matches the bound HOMESCREEN_LEASE_TIMEOUT_MS enforces.
+    if (ms > 0 && ms <= std::numeric_limits<uint32_t>::max()) {
       instance.view.lease_timeout_ms = static_cast<uint32_t>(ms);
     } else {
       ihs::log::warn(
-          "[view.backend.lease] timeout_ms must be > 0 (got {}); using the "
-          "default",
-          ms);
+          "[view.backend.lease] timeout_ms must be in 1..{} (got {}); using "
+          "the default",
+          std::numeric_limits<uint32_t>::max(), ms);
     }
   }
   if (v->at_path("backend.drm.connector").is_string()) {
@@ -976,20 +980,37 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
                 config.view.lease_connector);
     pick_string("lease-on-revoke", "HOMESCREEN_LEASE_ON_REVOKE",
                 config.view.lease_on_revoke);
-    if (const char* e = std::getenv("HOMESCREEN_LEASE_TIMEOUT_MS");
-        e != nullptr && *e != '\0') {
-      char* end = nullptr;
-      const unsigned long ms = std::strtoul(e, &end, 10);
-      if (end != e && *end == '\0' && ms > 0 &&
-          ms <= std::numeric_limits<uint32_t>::max()) {
-        config.view.lease_timeout_ms = static_cast<uint32_t>(ms);
-      } else {
-        ihs::log::warn(
-            "HOMESCREEN_LEASE_TIMEOUT_MS='{}' is not a positive integer; "
-            "using the default",
-            e);
+    // Same CLI-wins-then-env precedence as pick_string, but parsed as a bounded
+    // uint32. Written as a lambda over both sources rather than an env-only
+    // block: --lease-timeout-ms was registered as a flag and read from nowhere,
+    // so it parsed, was discarded, and the default silently applied while the
+    // help text advertised otherwise.
+    auto pick_timeout_ms = [&](const char* cli_name, const char* env_name,
+                               std::optional<uint32_t>& out) {
+      const auto parse = [&](const std::string& s, const char* source) {
+        char* end = nullptr;
+        const unsigned long long ms = std::strtoull(s.c_str(), &end, 10);
+        if (end != s.c_str() && *end == '\0' && ms > 0 &&
+            ms <= std::numeric_limits<uint32_t>::max()) {
+          out = static_cast<uint32_t>(ms);
+          return true;
+        }
+        ihs::log::warn("{}='{}' must be an integer in 1..{}; using the default",
+                       source, s, std::numeric_limits<uint32_t>::max());
+        return false;
+      };
+      if (result.count(cli_name) != 0U) {
+        const auto v = result[cli_name].as<std::string>();
+        if (!v.empty() && parse(v, cli_name)) {
+          return;
+        }
       }
-    }
+      if (const char* e = std::getenv(env_name); e != nullptr && *e != '\0') {
+        parse(e, env_name);
+      }
+    };
+    pick_timeout_ms("lease-timeout-ms", "HOMESCREEN_LEASE_TIMEOUT_MS",
+                    config.view.lease_timeout_ms);
     pick_string("drm-mode", "HOMESCREEN_DRM_MODE", config.view.drm_mode);
     pick_string("drm-compositor", "HOMESCREEN_DRM_COMPOSITOR",
                 config.view.drm_compositor);
