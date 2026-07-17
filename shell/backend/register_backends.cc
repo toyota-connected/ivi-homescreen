@@ -798,9 +798,14 @@ std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
   const std::string* lease_vk = has("wayland-leased-drm-vulkan");
   const std::string* lease_sw = has("wayland-leased-drm-software");
 
-  // "wayland-leased-drm" as a bare family name resolves within the family, the
-  // same way the legacy egl/vulkan hint does: egl -> vulkan -> software among
-  // the tiers actually registered.
+  // "wayland-leased-drm" as a bare family name resolves within the family:
+  // vulkan -> egl -> software among the tiers actually registered. Vulkan leads
+  // because a leased connector is a dedicated scanout target, which is what the
+  // vulkan tier's explicit-ownership model is built for; egl is the fallback
+  // for stacks without an ICD. This does NOT consult the legacy egl/vulkan
+  // renderer hint -- that hint and this family name arrive in the same string,
+  // so it can only ever be one or the other. Say wayland-leased-drm-egl to pin
+  // egl.
   //
   // Anything else under the family prefix is an error rather than a fallback.
   // Leasing is not a preference, it is the difference between driving a
@@ -811,14 +816,11 @@ std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
   constexpr std::string_view kLeasedFamily = "wayland-leased-drm";
   if (hint.rfind(kLeasedFamily, 0) == 0) {
     if (hint == kLeasedFamily) {
-      if (want_vulkan && lease_vk != nullptr) {
+      if (lease_vk != nullptr) {
         return *lease_vk;
       }
       if (lease_egl != nullptr) {
         return *lease_egl;
-      }
-      if (lease_vk != nullptr) {
-        return *lease_vk;
       }
       if (lease_sw != nullptr) {
         return *lease_sw;
@@ -887,6 +889,18 @@ bool EnsureActiveBackend(backend::BackendRegistry& registry,
         "registered:{}",
         key, available);
     return false;
+  }
+
+  // Report the resolved key when it is not what was configured -- a bare family
+  // name, a legacy egl/vulkan hint, or an unset backend field all resolve to
+  // something the operator never typed. The configured string is what gets
+  // echoed as "Backend:", so without this there is no way to tell which tier a
+  // family name actually landed on.
+  if (const std::string configured = configs[0].view.backend.value_or("");
+      key != configured) {
+    ihs::log::info("[backend] resolved '{}' -> '{}'",
+                   configured.empty() ? std::string{"<unset>"} : configured,
+                   key);
   }
 
   // The "active" backend is the process-wide default: it backs the first
