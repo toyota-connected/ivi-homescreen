@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -118,6 +119,21 @@ struct DrmConfig {
   // (e.g. "eDP-1", "HDMI-A-1") matches; init fails if no such connector
   // is connected. Name format matches --drm-list-modes output.
   std::optional<std::string> connector_name{};
+
+  // wayland-leased-drm: the leased connector's DRM object id. Takes precedence
+  // over connector_name and the rank heuristic -- on a lease the compositor
+  // decides which connector we get, so neither an operator's name pin nor a
+  // "prefer internal panels" ranking has standing. A lease may contain more
+  // than one connector (the requested set is only a suggestion), so without
+  // this the rank heuristic can drive the wrong panel and leave the requested
+  // one dark. 0 = not leased; use the rules above.
+  uint32_t lease_connector_id{0};
+
+  // wayland-leased-drm: polled before each commit. A revoked lease's KMS
+  // objects are gone from the fd's view, so every commit naming them fails and
+  // produces no PAGE_FLIP_EVENT. Empty = never gated (the path-opened tiers,
+  // which have no lease to lose).
+  std::function<bool()> lease_revoked{};
 
   // Unset = pick the connector's preferred mode (DRM_MODE_TYPE_PREFERRED).
   // Set = pick the first mode matching the spec "<W>x<H>@<R>" (e.g.
@@ -390,6 +406,10 @@ class DrmBackend : public Backend, public IFlipSink {
   // forever in gbm_surface_get_free_buffer, wedging the rasterizer thread and
   // hanging teardown. Mirrors DrmCompositor's own paused_ gate.
   std::atomic<bool> session_paused_{false};
+
+  // One-shot latch so the lease-revocation notice is logged once, not once per
+  // frame. The gate itself lives in cfg_.lease_revoked.
+  std::atomic<bool> lease_revoked_logged_{false};
 
   // EGL
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;

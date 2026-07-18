@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <string_view>
 
 #include "config/common.h"
@@ -245,6 +246,38 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
   if (v->at_path("backend.drm.device").is_string()) {
     instance.view.drm_device =
         v->at_path("backend.drm.device").as_string()->value_or("");
+  }
+  // [view.backend.lease] — wayland-leased-drm negotiation knobs. Kept under
+  // their own table rather than backend.drm.*: they select what to ask the
+  // compositor for, not how to drive a card we already own.
+  if (v->at_path("backend.lease.device").is_string()) {
+    instance.view.lease_device =
+        v->at_path("backend.lease.device").as_string()->value_or("");
+  }
+  if (v->at_path("backend.lease.connector").is_string()) {
+    instance.view.lease_connector =
+        v->at_path("backend.lease.connector").as_string()->value_or("");
+  }
+  if (v->at_path("backend.lease.on_revoke").is_string()) {
+    instance.view.lease_on_revoke =
+        v->at_path("backend.lease.on_revoke").as_string()->value_or("");
+  }
+  if (v->at_path("backend.lease.timeout_ms").is_integer()) {
+    const int64_t ms = v->at_path("backend.lease.timeout_ms")
+                           .as_integer()
+                           ->value_or(int64_t{0});
+    // The upper bound is not pedantry: TOML integers are int64_t, so without it
+    // a value that is a multiple of 2^32 truncates to 0 -- an already-expired
+    // deadline that fails the lease instantly and blames the compositor in the
+    // log. Matches the bound HOMESCREEN_LEASE_TIMEOUT_MS enforces.
+    if (ms > 0 && ms <= std::numeric_limits<uint32_t>::max()) {
+      instance.view.lease_timeout_ms = static_cast<uint32_t>(ms);
+    } else {
+      ihs::log::warn(
+          "[view.backend.lease] timeout_ms must be in 1..{} (got {}); using "
+          "the default",
+          std::numeric_limits<uint32_t>::max(), ms);
+    }
   }
   if (v->at_path("backend.drm.connector").is_string()) {
     instance.view.drm_connector =
@@ -711,8 +744,37 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     allocated->add_options("Backend")(
         "backend",
         "Active backend: wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|"
-        "software (default: env-aware -- a Wayland session selects "
-        "wayland-egl, else drm-kms-egl)",
+        "software|wayland-leased-drm[-egl|-vulkan|-software] (default: "
+        "env-aware -- a Wayland session selects wayland-egl, else "
+        "drm-kms-egl). The bare name wayland-leased-drm picks the first "
+        "available leased tier; a leased backend never falls back to an "
+        "unleased one.",
+        cxxopts::value<std::string>());
+
+    // [view.backend.lease] (also settable via HOMESCREEN_LEASE_* env)
+    allocated->add_options("Lease")(
+        "lease-device",
+        "wayland-leased-drm: which wp_drm_lease_device_v1 to lease from when "
+        "several are advertised (one per DRM node) -- a decimal index or a "
+        "node "
+        "path (/dev/dri/card1). Default: the sole device; ambiguous is fatal.",
+        cxxopts::value<std::string>())(
+        "lease-connector",
+        "wayland-leased-drm: connector to request by name (e.g. HDMI-A-1). "
+        "Default: the sole offer; several offers with no choice is fatal.",
+        cxxopts::value<std::string>())(
+        "lease-on-revoke",
+        "wayland-leased-drm: what to do when the compositor revokes the lease "
+        "(it does so on every VT switch away from it, not just on error). "
+        "exit (default) = log the cause and exit non-zero so a supervisor "
+        "restarts and renegotiates; gate = keep running with a frozen panel "
+        "(debugging only, nothing recovers). reacquire is not implemented yet.",
+        cxxopts::value<std::string>())(
+        "lease-timeout-ms",
+        "wayland-leased-drm: bound on the whole lease negotiation. Default "
+        "5000. The protocol lets a compositor defer the DRM fd until it "
+        "regains DRM master, so this is what stops a VT-switched-away "
+        "compositor hanging startup.",
         cxxopts::value<std::string>());
 
     // [view.backend.drm] (also settable via HOMESCREEN_DRM_* env)
@@ -769,8 +831,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
       // Requested help text is program output, not a log line: write it to
       // stdout directly (synchronous, unprefixed) rather than through the
       // async logger, which would send it to stderr with a timestamp/level.
-      const std::string help =
-          allocated->help({"", "Global", "View", "Shell", "Backend", "DRM"});
+      const std::string help = allocated->help(
+          {"", "Global", "View", "Shell", "Backend", "DRM", "Lease"});
       std::fputs(help.c_str(), stdout);
       std::fputc('\n', stdout);
       exit(EXIT_SUCCESS);
@@ -910,6 +972,45 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     pick_string("drm-device", "HOMESCREEN_DRM_DEVICE", config.view.drm_device);
     pick_string("drm-connector", "HOMESCREEN_DRM_CONNECTOR",
                 config.view.drm_connector);
+    // wayland-leased-drm. Distinct from the drm-* keys above: those say how to
+    // drive a card we opened, these say what to ask the compositor to lease.
+    pick_string("lease-device", "HOMESCREEN_LEASE_DEVICE",
+                config.view.lease_device);
+    pick_string("lease-connector", "HOMESCREEN_LEASE_CONNECTOR",
+                config.view.lease_connector);
+    pick_string("lease-on-revoke", "HOMESCREEN_LEASE_ON_REVOKE",
+                config.view.lease_on_revoke);
+    // Same CLI-wins-then-env precedence as pick_string, but parsed as a bounded
+    // uint32. Written as a lambda over both sources rather than an env-only
+    // block: --lease-timeout-ms was registered as a flag and read from nowhere,
+    // so it parsed, was discarded, and the default silently applied while the
+    // help text advertised otherwise.
+    auto pick_timeout_ms = [&](const char* cli_name, const char* env_name,
+                               std::optional<uint32_t>& out) {
+      const auto parse = [&](const std::string& s, const char* source) {
+        char* end = nullptr;
+        const unsigned long long ms = std::strtoull(s.c_str(), &end, 10);
+        if (end != s.c_str() && *end == '\0' && ms > 0 &&
+            ms <= std::numeric_limits<uint32_t>::max()) {
+          out = static_cast<uint32_t>(ms);
+          return true;
+        }
+        ihs::log::warn("{}='{}' must be an integer in 1..{}; using the default",
+                       source, s, std::numeric_limits<uint32_t>::max());
+        return false;
+      };
+      if (result.count(cli_name) != 0U) {
+        const auto v = result[cli_name].as<std::string>();
+        if (!v.empty() && parse(v, cli_name)) {
+          return;
+        }
+      }
+      if (const char* e = std::getenv(env_name); e != nullptr && *e != '\0') {
+        parse(e, env_name);
+      }
+    };
+    pick_timeout_ms("lease-timeout-ms", "HOMESCREEN_LEASE_TIMEOUT_MS",
+                    config.view.lease_timeout_ms);
     pick_string("drm-mode", "HOMESCREEN_DRM_MODE", config.view.drm_mode);
     pick_string("drm-compositor", "HOMESCREEN_DRM_COMPOSITOR",
                 config.view.drm_compositor);

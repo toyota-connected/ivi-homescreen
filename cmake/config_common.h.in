@@ -27,8 +27,12 @@
 #ifndef BUILD_BACKEND_WAYLAND_VULKAN
 #cmakedefine01 BUILD_BACKEND_WAYLAND_VULKAN
 #endif
-#ifndef BUILD_BACKEND_WAYLAND_DRM_LEASED
-#cmakedefine01 BUILD_BACKEND_WAYLAND_DRM_LEASED
+// Spelled to match the option in cmake/options.cmake. It previously read
+// BUILD_BACKEND_WAYLAND_DRM_LEASED, which matched no CMake variable, so
+// #cmakedefine01 always emitted 0 — every gate on it would have been silently
+// dead even with the option ON.
+#ifndef BUILD_BACKEND_WAYLAND_LEASED_DRM
+#cmakedefine01 BUILD_BACKEND_WAYLAND_LEASED_DRM
 #endif
 #ifndef BUILD_BACKEND_DRM_KMS_EGL
 #cmakedefine01 BUILD_BACKEND_DRM_KMS_EGL

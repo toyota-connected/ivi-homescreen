@@ -13,24 +13,49 @@
 # call once it exists. Mirrors cmake/drm_kms.cmake.
 #
 
-if (NOT BUILD_BACKEND_WAYLAND_EGL AND NOT BUILD_BACKEND_WAYLAND_VULKAN)
+# Gate on IVI_WAYLAND_ANY, not on the surface backends: wayland-leased-drm
+# needs the scanner + wayland-client to speak drm-lease-v1, even though it
+# never creates a wl_surface.
+if (NOT IVI_WAYLAND_ANY)
     return()
 endif ()
 
 find_package(PkgConfig REQUIRED)
 
-# Core Wayland runtime libs. libwayland-client + libwayland-cursor + xkbcommon
-# are needed by every Wayland backend; wayland-egl only by the EGL backend.
-pkg_check_modules(WAYLAND_CXX_RUNTIME REQUIRED IMPORTED_TARGET
-    wayland-client wayland-cursor xkbcommon)
+# Core Wayland runtime libs, split by what actually needs them.
+#
+# wayland-client is required by any backend that opens a wl_display.
+#
+# wayland-cursor + xkbcommon are *surface* deps: they back wl/cursor.hpp and
+# wl/seat.hpp + wl/keyboard.hpp respectively, which only a backend with a
+# wl_surface and compositor input focus includes. wayland-leased-drm has
+# neither (input comes from evdev), so requiring them here would fail a
+# lease-only configure on an image that ships no cursor/xkb libs. The
+# wayland-cxx target itself is header-only with no pkg-config deps, so the
+# split is safe: the deps are per-header, not per-target.
+pkg_check_modules(WAYLAND_CXX_RUNTIME REQUIRED IMPORTED_TARGET wayland-client)
+if (IVI_WAYLAND_SURFACE_BACKENDS)
+    pkg_check_modules(WAYLAND_CXX_SURFACE REQUIRED IMPORTED_TARGET
+        wayland-cursor xkbcommon)
+endif ()
 if (BUILD_BACKEND_WAYLAND_EGL)
     pkg_check_modules(WAYLAND_CXX_EGL REQUIRED IMPORTED_TARGET wayland-egl)
 endif ()
 
 # Protocol XML base — xdg-shell + presentation-time ship with wayland-protocols.
-pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.20)
-pkg_get_variable(_wlcxx_proto_base wayland-protocols pkgdatadir)
-set(IVI_WL_PROTOCOLS_BASE "${_wlcxx_proto_base}" CACHE INTERNAL "wayland-protocols pkgdatadir")
+#
+# Surface builds only: a lease-only build reads nothing from wayland-protocols.
+# Its core wayland.xml comes from wayland-scanner's pkgdatadir (below) and
+# drm-lease-v1.xml is vendored in-tree (the staging XML needs >= 1.22, above our
+# 1.20 floor), so requiring the package here would fail a lease-only configure
+# on a minimal sysroot over data the build never reads. Every consumer of
+# IVI_WL_PROTOCOLS_BASE sits behind the surface-backend gate in
+# ivi_wayland_protocols().
+if (IVI_WAYLAND_SURFACE_BACKENDS)
+    pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.20)
+    pkg_get_variable(_wlcxx_proto_base wayland-protocols pkgdatadir)
+    set(IVI_WL_PROTOCOLS_BASE "${_wlcxx_proto_base}" CACHE INTERNAL "wayland-protocols pkgdatadir")
+endif ()
 
 # Core Wayland protocol XML (wl_seat / wl_keyboard / …) ships with
 # wayland-scanner. The generated wayland_client.hpp backs wl::KeyboardHandler;
@@ -145,22 +170,47 @@ endforeach ()
 # A protocol with no shipped header (presentation-time, ivi-*) needs
 # --emit-interface-tables so the generated header is self-contained.
 #
+# Everything except core wayland and drm-lease-v1 is *surface*-only: those
+# protocols exist to drive a wl_surface (shells, scaling, dmabuf present,
+# vsync, IME, input). wayland-leased-drm has no surface — it connects solely
+# to negotiate a DRM lease — so a lease-only build generates just core +
+# drm-lease. This also keeps non-lease builds byte-identical: the lease
+# codegen is conditional on the option.
+#
 function(ivi_wayland_protocols target)
     set(_xdg  "${IVI_WL_PROTOCOLS_BASE}/stable/xdg-shell/xdg-shell.xml")
     set(_pres "${IVI_WL_PROTOCOLS_BASE}/stable/presentation-time/presentation-time.xml")
     set(_bund "${IVI_WL_CXX_SRC}/protocols")
     set(_loc  "${CMAKE_SOURCE_DIR}/shell/wayland/protocols")
 
-    # core wayland — always (wl::KeyboardHandler needs wayland::client::CWlKeyboard);
+    # core wayland — always (wl::Registry drives the lease client's globals;
+    # wl::KeyboardHandler needs wayland::client::CWlKeyboard on surface builds);
     # core wl_interface tables come from libwayland, so do NOT emit tables.
     wayland_cxx_generate(PROTOCOL "${IVI_WL_CORE_XML}" MODE client-header
         OUTPUT wayland-protocols/wayland_client.hpp TARGET ${target})
 
-    # presentation-time — always (IVsyncProvider); no shipped header -> emit tables.
+    # drm-lease-v1 — the wayland-leased-drm backend's entire Wayland surface
+    # area: bind wp_drm_lease_device_v1, enumerate connectors, submit a lease
+    # request, then monitor for finished/withdrawn. Vendored: the staging XML
+    # only ships with wayland-protocols >= 1.22 and the project floor is 1.20
+    # (see the >=1.20 pkg_check_modules above), so it cannot be taken from
+    # IVI_WL_PROTOCOLS_BASE. No shipped wl/ helper carries its interface
+    # tables, so generate self-contained with EMIT_INTERFACE_TABLES.
+    if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
+        wayland_cxx_generate(PROTOCOL "${_loc}/drm-lease-v1.xml"
+            MODE client-header EMIT_INTERFACE_TABLES
+            OUTPUT wayland-protocols/drm_lease_v1_client.hpp TARGET ${target})
+    endif ()
+
+    if (NOT IVI_WAYLAND_SURFACE_BACKENDS)
+        return()
+    endif ()
+
+    # presentation-time — every surface build (IVsyncProvider); no shipped header -> emit tables.
     wayland_cxx_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/presentation_time_client.hpp TARGET ${target})
 
-    # input-timestamps — always (ivi::InputTimestamps: high-resolution kernel
+    # input-timestamps — every surface build (ivi::InputTimestamps: high-resolution kernel
     # timestamps for the pointer/touch → Flutter path; runtime-optional, the
     # provider no-ops when the compositor doesn't advertise the manager).
     # No shipped header -> emit tables.
@@ -169,7 +219,7 @@ function(ivi_wayland_protocols target)
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/input_timestamps_client.hpp TARGET ${target})
 
-    # viewporter — always (per-surface scaling; stable since wayland-protocols
+    # viewporter — every surface build (per-surface scaling; stable since wayland-protocols
     # 1.4, so present on Dunfell's 1.20). No shipped header -> emit tables.
     wayland_cxx_generate(PROTOCOL
         "${IVI_WL_PROTOCOLS_BASE}/stable/viewporter/viewporter.xml"
@@ -186,7 +236,7 @@ function(ivi_wayland_protocols target)
         MODE client-header
         OUTPUT wayland-protocols/linux_dmabuf_client.hpp TARGET ${target})
 
-    # fractional-scale-v1 — always. Vendored: the XML only ships with
+    # fractional-scale-v1 — every surface build. Vendored: the XML only ships with
     # wayland-protocols >= 1.31, which Dunfell/Ubuntu-20.04 hosts predate.
     # Both protocols are gated at runtime on the compositor advertising the
     # global, so generating unconditionally costs nothing on old stacks.
@@ -257,6 +307,9 @@ function(ivi_wayland_link target)
     target_link_libraries(${target} PRIVATE
         wayland-cxx::wayland-cxx
         PkgConfig::WAYLAND_CXX_RUNTIME)
+    if (TARGET PkgConfig::WAYLAND_CXX_SURFACE)
+        target_link_libraries(${target} PRIVATE PkgConfig::WAYLAND_CXX_SURFACE)
+    endif ()
     if (TARGET PkgConfig::WAYLAND_CXX_EGL)
         target_link_libraries(${target} PRIVATE PkgConfig::WAYLAND_CXX_EGL)
     endif ()

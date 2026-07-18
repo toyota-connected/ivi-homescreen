@@ -105,8 +105,10 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     # The dma-buf present path needs drm_fourcc.h (DRM_FORMAT_* constants), a
     # libdrm header. On a cross sysroot it lives under <libdrm/>, so the include
     # dir must come from pkg-config rather than the default search path.
+    # GLOBAL so test/ can resolve it via TYPICAL_TEST_LINK_LIBS — see the note
+    # in the wayland-leased-drm block below.
     if (NOT TARGET PkgConfig::DRM)
-        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
     endif ()
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM)
     if (BUILD_COMPOSITOR)
@@ -129,6 +131,29 @@ if (BUILD_BACKEND_WAYLAND_EGL)
                 backend/wayland_egl/gl_compositor.cc
         )
     endif ()
+endif ()
+
+# wayland-leased-drm: the drm-lease-v1 client. Renderer-agnostic — it only
+# acquires the DRM fd; the egl/vulkan/software tiers then scan out on it, so
+# this block is independent of which renderer stacks are enabled.
+if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
+    target_sources(${PROJECT_NAME} PRIVATE
+            backend/wayland_leased_drm/lease_client.cc
+    )
+    # drmGetDeviceNameFromFd2() resolves the lease/enumeration fd to a node path.
+    # On a cross sysroot xf86drm.h lives under <libdrm/>, so the include dir must
+    # come from pkg-config rather than the default search path.
+    #
+    # GLOBAL: an IMPORTED target is directory-scoped by default, and the unit
+    # tests reuse this target's LINK_LIBRARIES (TYPICAL_TEST_LINK_LIBS) from
+    # test/. Without GLOBAL, every test target fails to configure with
+    # "PkgConfig::DRM ... but the target was not found" whenever the shell links
+    # libdrm from here rather than from cmake/drm_kms.cmake (which runs at
+    # top-level scope and so is visible everywhere).
+    if (NOT TARGET PkgConfig::DRM)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
+    endif ()
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::DRM)
 endif ()
 
 if (BUILD_BACKEND_SOFTWARE)
@@ -409,7 +434,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # link the wl/ framework + libwayland runtime onto the shell binary. Both helpers
 # are defined in cmake/wayland_cxx.cmake. Non-Wayland binaries (DRM EGL/Vulkan,
 # software) get neither the headers nor the libwayland-client / -cursor deps.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+#
+# Gated on IVI_WAYLAND_ANY so wayland-leased-drm is included: it opens a
+# wl_display to negotiate a DRM lease. Both helpers self-narrow for that case —
+# only core + drm-lease-v1 are generated, and wayland-cursor/xkbcommon are not
+# required — so a lease-only build stays free of the surface deps.
+if (IVI_WAYLAND_ANY)
     ivi_wayland_protocols(${PROJECT_NAME})
     ivi_wayland_link(${PROJECT_NAME})
 endif ()

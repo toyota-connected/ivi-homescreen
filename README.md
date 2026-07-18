@@ -26,6 +26,8 @@ Flutter Linux CPP Embedder
     * DRM/KMS EGL (direct-to-display, no compositor)
     * DRM/KMS Vulkan (zero-copy dma-buf scanout)
     * Software (CPU renderer, no GPU or display-server dependency)
+    * Leased DRM, EGL / Vulkan / software (drm-lease-v1: own a connector leased
+      from a compositor while it keeps the rest of the card)
 * Multi-display
     * Multiple views across multiple outputs from one process
     * Per-view output binding by connector / `wl_output` name (`[view.output]`)
@@ -115,9 +117,23 @@ uses it.
 | DRM/KMS EGL | `drm-kms-egl` | `BUILD_BACKEND_DRM_KMS_EGL` | Direct-to-display GL on bare KMS (no compositor) |
 | DRM/KMS Vulkan | `drm-kms-vulkan` | `BUILD_BACKEND_DRM_KMS_VULKAN` | Zero-copy dma-buf scanout on bare KMS |
 | Software | `software` | `BUILD_BACKEND_SOFTWARE` | CPU renderer; no GPU or display server |
+| Leased DRM (EGL) | `wayland-leased-drm-egl` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_DRM_KMS_EGL` | GL on a connector leased from a compositor via drm-lease-v1 |
+| Leased DRM (Vulkan) | `wayland-leased-drm-vulkan` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_DRM_KMS_VULKAN` | Zero-copy dma-buf scanout on a leased connector |
+| Leased DRM (software) | `wayland-leased-drm-software` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_SOFTWARE` | CPU renderer on a leased connector |
 
 With no explicit selection, the resolver is environment-aware: a live Wayland
 session picks `wayland-egl`, otherwise `drm-kms-egl`.
+
+The `wayland-leased-drm-*` backends acquire a connector from a running Wayland
+compositor rather than opening a card, so one process can own a panel while the
+compositor owns the rest of the GPU. They are never selected implicitly, and a
+leased key is refused rather than substituted if unavailable — falling back to an
+unleased backend would grab hardware the operator did not ask for. The bare
+family name `wayland-leased-drm` picks the first available tier. Note that a
+compositor implementing drm-lease-v1 is necessary but **not** sufficient: the
+wlroots family only offers connectors flagged non-desktop in EDID, so an ordinary
+panel is not leasable without intervention. See
+[shell/backend/wayland_leased_drm/README.md](shell/backend/wayland_leased_drm/README.md).
 
 Running a Vulkan backend requires an engine build that supports Vulkan.
 
@@ -225,8 +241,11 @@ Usage:
  Backend options:
       --backend arg  Active backend: 
                      wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|softw
-                     are (default: env-aware -- a Wayland session selects 
-                     wayland-egl, else drm-kms-egl)
+                     are|wayland-leased-drm[-egl|-vulkan|-software] (default: 
+                     env-aware -- a Wayland session selects wayland-egl, else 
+                     drm-kms-egl). The bare name wayland-leased-drm picks the 
+                     first available leased tier; a leased backend never falls 
+                     back to an unleased one.
 
  DRM options:
       --drm-list-modes [=arg(=)]
@@ -261,6 +280,29 @@ Usage:
       --input-transform arg     Per-device pointer transform (repeatable): 
                                 "<device-name-substring>=<0|90|180|270>[,flip-x]
                                 [,flip-y]"
+
+ Lease options:
+      --lease-device arg      wayland-leased-drm: which wp_drm_lease_device_v1 
+                              to lease from when several are advertised (one 
+                              per DRM node) -- a decimal index or a node path 
+                              (/dev/dri/card1). Default: the sole device; 
+                              ambiguous is fatal.
+      --lease-connector arg   wayland-leased-drm: connector to request by name 
+                              (e.g. HDMI-A-1). Default: the sole offer; several 
+                              offers with no choice is fatal.
+      --lease-on-revoke arg   wayland-leased-drm: what to do when the 
+                              compositor revokes the lease (it does so on every 
+                              VT switch away from it, not just on error). exit 
+                              (default) = log the cause and exit non-zero so a 
+                              supervisor restarts and renegotiates; gate = keep 
+                              running with a frozen panel (debugging only, 
+                              nothing recovers). reacquire is not implemented 
+                              yet.
+      --lease-timeout-ms arg  wayland-leased-drm: bound on the whole lease 
+                              negotiation. Default 5000. The protocol lets a 
+                              compositor defer the DRM fd until it regains DRM 
+                              master, so this is what stops a VT-switched-away 
+                              compositor hanging startup.
 ```
 
 <!-- END CLI-REFERENCE -->
@@ -319,6 +361,10 @@ annotated all-keys file see
 | `[view.backend.drm]` | `primary_format` | `string` | `auto` | `auto\|xrgb8888\|xbgr8888\|argb8888\|abgr8888\|rgb565` | drm |
 | `[view.backend.drm]` | `rotation` | `int` | `0` | `0\|90\|180\|270` | drm |
 | `[view.backend.drm]` | `stage_cursor` | `string` | `auto` | `auto\|yes\|no` | drm |
+| `[view.backend.lease]` | `connector` | `string` | `(sole offer)` | `e.g. HDMI-A-1` | leased |
+| `[view.backend.lease]` | `device` | `string` | `(sole device)` | `index or /dev/dri/cardN` | leased |
+| `[view.backend.lease]` | `on_revoke` | `string` | `exit` | `exit\|gate` | leased |
+| `[view.backend.lease]` | `timeout_ms` | `int` | `5000` | `> 0` | leased |
 | `[view.output]` | `drm_connector` | `string` | `(none)` | `e.g. HDMI-A-1` | drm |
 | `[view.output]` | `index` | `int` | `(none)` | `int` | all |
 | `[view.output]` | `name` | `string` | `(primary)` | `e.g. DP-1, HDMI-A-1` | all |

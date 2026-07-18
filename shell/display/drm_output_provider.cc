@@ -16,6 +16,7 @@
 
 #include "display/drm_output_provider.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <drm-cxx/core/device.hpp>
@@ -28,14 +29,28 @@ namespace homescreen {
 DrmOutputProvider::DrmOutputProvider(std::string device_path)
     : device_path_(std::move(device_path)) {}
 
+void DrmOutputProvider::SetEnumerationFd(int fd) {
+  enumeration_fd_ = fd;
+}
+
 std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
   std::vector<OutputInfo> outputs;
 
-  auto dev = drm::Device::open(device_path_);
-  if (!dev) {
-    ihs::log::warn("[DrmOutputProvider] open('{}'): {}", device_path_,
-                   dev.error().message());
-    return outputs;
+  // Prefer a supplied fd (a DRM lease) over opening the card: it is both the
+  // correctly-scoped view (the kernel filters it to the leased objects) and the
+  // only handle a leased client is guaranteed to have. from_fd borrows -- the
+  // fd stays owned by whoever supplied it.
+  std::optional<drm::Device> dev;
+  if (enumeration_fd_ >= 0) {
+    dev.emplace(drm::Device::from_fd(enumeration_fd_));
+  } else {
+    auto opened = drm::Device::open(device_path_);
+    if (!opened) {
+      ihs::log::warn("[DrmOutputProvider] open('{}'): {}", device_path_,
+                     opened.error().message());
+      return outputs;
+    }
+    dev.emplace(std::move(*opened));
   }
 
   auto connectors = drm::display::query_connector_modes(*dev);
