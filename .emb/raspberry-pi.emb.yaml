@@ -91,6 +91,11 @@ cross:
           BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
           BUILD_BACKEND_DRM_KMS_EGL: 'ON'
           BUILD_BACKEND_SOFTWARE: 'OFF'
+          # The DRM compositor + LayerScene plane path (and platform-view
+          # plugins) live in the drm-kms-egl backend; without this the
+          # FlutterCompositor API compiles out and native/platform-view
+          # content never reaches a KMS plane. (drm-kms-vulkan sets it too.)
+          BUILD_COMPOSITOR: 'ON'
         drm-kms-vulkan:
           BUILD_BACKEND_WAYLAND_EGL: 'OFF'
           BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
