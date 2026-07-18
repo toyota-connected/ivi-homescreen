@@ -355,6 +355,39 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
   auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
       drm_device, enable_validation, session, mode_spec, rotation));
 
+  return FinishCreate(std::move(backend));
+}
+
+std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
+    const int drm_fd,
+    std::shared_ptr<void> fd_owner,
+    const std::string& drm_device,
+    const bool enable_validation,
+    const std::string& mode_spec,
+    const int rotation,
+    const uint32_t connector_id,
+    std::function<bool()> revoked) {
+  if (drm_fd < 0) {
+    ihs::log::critical("[VulkanDrmBackend] Create: invalid lease fd {}",
+                       drm_fd);
+    return nullptr;
+  }
+  // session is null by construction: on a lease the compositor owns the seat's
+  // session, so there is no libseat session to pause/resume against. The
+  // existing bring-up already tolerates a null session.
+  auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
+      drm_device, enable_validation, /*session=*/nullptr, mode_spec, rotation));
+  backend->injected_fd_ = drm_fd;
+  backend->fd_owner_ = std::move(fd_owner);
+  // Set BEFORE FinishCreate: SetupCompositor runs inside it and is what pins
+  // the connector.
+  backend->lease_connector_id_ = connector_id;
+  backend->lease_revoked_ = std::move(revoked);
+  return FinishCreate(std::move(backend));
+}
+
+std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::FinishCreate(
+    std::shared_ptr<VulkanDrmBackend> backend) {
   std::string err;
   if (!backend->BringUp(err)) {
     ihs::log::critical("[VulkanDrmBackend] init failed; refusing to start: {}",
@@ -564,8 +597,19 @@ struct VulkanDrmBackend::CompositorState {
 
 bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   drm_kms_vulkan::ScanoutTarget target;
-  if (!drm_kms_vulkan::DiscoverScanoutTarget(drm_device_, DRM_FORMAT_XRGB8888,
-                                             mode_spec_, target, err)) {
+  // Probe through the lease fd when we have one. Not an optimisation: the
+  // kernel scopes that fd's view to the leased objects, so this finds exactly
+  // the connector we hold, where re-opening the card by path would enumerate
+  // the whole card and could pick one the compositor is still driving -- and
+  // may not be permitted at all.
+  const bool discovered =
+      injected_fd_ >= 0
+          ? drm_kms_vulkan::DiscoverScanoutTarget(
+                injected_fd_, DRM_FORMAT_XRGB8888, mode_spec_,
+                lease_connector_id_, target, err)
+          : drm_kms_vulkan::DiscoverScanoutTarget(
+                drm_device_, DRM_FORMAT_XRGB8888, mode_spec_, target, err);
+  if (!discovered) {
     return false;
   }
   const std::vector<uint64_t> allowed = drm_kms_vulkan::NegotiateModifiers(
@@ -592,12 +636,23 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     ihs::log::info("[VulkanDrmBackend] modifiers negotiated:{}", neg);
   }
 
-  auto dev_exp = drm::Device::open(drm_device_);
-  if (!dev_exp) {
-    err = "drm::Device::open: " + dev_exp.error().message();
-    return false;
+  // On a lease, adopt the fd rather than opening the card: it is already master
+  // over its leased object set, its view is correctly scoped, and a leased
+  // client may not be permitted to open the node at all. from_fd borrows -- the
+  // fd stays owned by fd_owner_ (the LeaseHold), so CompositorState's Device
+  // will not close it.
+  std::optional<drm::Device> dev;
+  if (injected_fd_ >= 0) {
+    dev.emplace(drm::Device::from_fd(injected_fd_));
+  } else {
+    auto dev_exp = drm::Device::open(drm_device_);
+    if (!dev_exp) {
+      err = "drm::Device::open: " + dev_exp.error().message();
+      return false;
+    }
+    dev.emplace(std::move(dev_exp.value()));
   }
-  auto state = std::make_unique<CompositorState>(std::move(dev_exp.value()));
+  auto state = std::make_unique<CompositorState>(std::move(*dev));
   (void)state->device.enable_atomic();
   (void)state->device.enable_universal_planes();
   state->fourcc = DRM_FORMAT_XRGB8888;
@@ -1095,6 +1150,24 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
                                          size_t count) {
   if (!compositor_ || !compositor_->scene) {
     return false;
+  }
+  // Lease revoked: the leased KMS objects are gone from this fd's view, so
+  // every atomic commit naming them fails -- and a failed commit produces no
+  // PAGE_FLIP_EVENT, so the flip path would churn rather than settle. Park the
+  // vsync source instead: SubmitBaton parks the baton, no OnVsync fires, and
+  // raster stalls, which is the same steady state the libseat pause path
+  // produces for the gated state. Returning true
+  // reports the frame as presented -- it was not, but the alternative is the
+  // engine treating a revoked lease as a render error. Reacquire unparks by
+  // reacquiring; until then the exit policy is the way out.
+  if (lease_revoked_ && lease_revoked_()) {
+    vsync_.SetSourcePending(true);
+    if (!lease_revoked_logged_.exchange(true, std::memory_order_relaxed)) {
+      ihs::log::warn(
+          "[VulkanDrmBackend] lease revoked — gating commits and parking "
+          "vsync; the panel stops updating until the lease is reacquired");
+    }
+    return true;
   }
   CompositorState& c = *compositor_;
   const FlutterLayer* bs_layer = nullptr;

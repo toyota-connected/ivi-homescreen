@@ -50,11 +50,11 @@ include(options)
 # and main() has nothing to run.
 if (NOT (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
          BUILD_BACKEND_DRM_KMS_EGL OR BUILD_BACKEND_DRM_KMS_VULKAN OR
-         BUILD_BACKEND_SOFTWARE))
+         BUILD_BACKEND_SOFTWARE OR BUILD_BACKEND_WAYLAND_LEASED_DRM))
     message(FATAL_ERROR
             "No backend selected — enable at least one BUILD_BACKEND_* "
             "(WAYLAND_EGL, WAYLAND_VULKAN, DRM_KMS_EGL, DRM_KMS_VULKAN, "
-            "SOFTWARE)")
+            "SOFTWARE, WAYLAND_LEASED_DRM)")
 endif ()
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
@@ -77,7 +77,12 @@ endif ()
 # `toolchain` INTERFACE library exists when we add_subdirectory the
 # wayland-cxx-scanner subproject on clang/libc++ builds. Gated internally on the
 # Wayland backends.
-if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+#
+# IVI_WAYLAND_ANY, not the surface backends: wayland-leased-drm speaks
+# drm-lease-v1 over a wl_display and so needs the scanner + the
+# ivi_wayland_protocols()/ivi_wayland_link() helpers this module defines,
+# despite never creating a wl_surface.
+if (IVI_WAYLAND_ANY)
     include(wayland_cxx)
 endif ()
 

@@ -89,12 +89,46 @@ class Configuration {
       std::optional<int> drm_rotation;
       // Backend selection when several backends are compiled into one binary.
       // Accepts a full registry key (wayland-egl | wayland-vulkan | drm-kms-egl
-      // | drm-kms-vulkan | software) or, for back-compat, an "egl" | "vulkan"
-      // renderer-family hint. Empty/unset = the sole compiled backend. Set per
-      // bundle under [view] in the bundle's TOML, or process-wide via
+      // | drm-kms-vulkan | software | wayland-leased-drm-{egl,vulkan,software})
+      // or, for back-compat, an "egl" | "vulkan" renderer-family hint. The bare
+      // family name "wayland-leased-drm" is also accepted and resolves to the
+      // first available leased tier. Empty/unset = the sole compiled backend.
+      // Set per bundle under [view] in the bundle's TOML, or process-wide via
       // --backend. One process drives one backend today, so the first bundle's
       // value wins.
       std::optional<std::string> backend;
+
+      // wayland-leased-drm knobs. All optional; see LeaseConfig in
+      // backend/wayland_leased_drm/lease_client.h for the semantics.
+      //   lease_device    : which wp_drm_lease_device_v1 to lease from when the
+      //                     compositor advertises several (one per DRM node) —
+      //                     a decimal index or a node path ("/dev/dri/card1").
+      //                     Unset = the sole device; ambiguous + unset is
+      //                     fatal.
+      //   lease_connector : connector to request, by name ("HDMI-A-1"). Unset +
+      //                     exactly one offer takes it; unset + several is
+      //                     fatal and lists what was offered.
+      //   lease_timeout_ms: wall-clock bound on the whole negotiation. Unset =
+      //                     5000. Load-bearing: the spec lets a compositor
+      //                     defer drm_fd until it regains DRM master, so
+      //                     without a bound a VT-switched-away compositor would
+      //                     hang startup.
+      //   lease_on_revoke : what to do when the compositor revokes the lease —
+      //                     which it does on every VT switch away from it, not
+      //                     only on error.
+      //                       "exit" (default) — log the cause and exit
+      //                         non-zero, so a supervisor (systemd) restarts
+      //                         and renegotiates from scratch. The honest
+      //                         default until reacquire-in-place exists.
+      //                       "gate"           — stop committing and keep
+      //                         running with a frozen panel. Only useful for
+      //                         debugging a revocation, since nothing recovers.
+      //                       "reacquire"      — not implemented yet;
+      //                         accepted and warned about, treated as "exit".
+      std::optional<std::string> lease_device;
+      std::optional<std::string> lease_connector;
+      std::optional<uint32_t> lease_timeout_ms;
+      std::optional<std::string> lease_on_revoke;
       // Wayland compositor-protocol shell selection: "auto" (default) | "xdg" |
       // "agl" | "ivi" | "simple". The Display reads it from the first view.
       std::optional<std::string> shell;

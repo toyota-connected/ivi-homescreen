@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -53,7 +54,82 @@ class DrmDisplay final : public IDisplay {
              double refresh_rate_hz,
              std::string device_path,
              bool no_seat = false);
+
+  // Tag for the adopted-fd construction path below.
+  struct AdoptFd {};
+
+  // wayland-leased-drm: build around a DRM fd we did not open — the master fd
+  // from wp_drm_lease_v1.lease_fd. A tag rather than a subclass because
+  // register_backends.cc casts to DrmDisplay*, so staying the same concrete
+  // type keeps the DRM-EGL backend factory reusable as-is.
+  //
+  // Differs from the path above in four ways, all because the compositor —
+  // not us — is the lessor:
+  //   - the fd is already master over its leased object set, so there is no
+  //     drmSetMaster and no foreground-VT guard (the compositor owns the VT);
+  //   - teardown must NOT drmDropMaster: the lease is returned by destroying
+  //     the wp_drm_lease_v1 object, which is @p fd_owner's job;
+  //   - outputs are enumerated through the lease fd, whose resource view the
+  //     kernel filters to the leased objects — re-opening the card by path
+  //     would both show connectors we do not hold and require permissions a
+  //     leased client may not have;
+  //   - no libseat session is taken: the compositor already holds the session
+  //     controller for this seat, so input falls back to direct evdev.
+  //     There is deliberately no no_seat knob here — the answer
+  //     is always "no seat".
+  //
+  // @p fd is borrowed: drm::Device::from_fd does not close it. @p fd_owner is
+  // the opaque keep-alive that does own it (the LeaseHold) and must outlive
+  // this display; it is held so the lease cannot be dropped while a backend is
+  // still scanning out on the fd.
+  //
+  // @p connector_id is the leased connector the backend must drive. A lease may
+  // contain more than one -- the requested set is only a suggestion and the
+  // compositor picks the final set -- so a backend that instead takes "the
+  // first connected connector" can light up the wrong panel and leave the
+  // requested one dark. 0 falls back to that heuristic.
+  //
+  // @p revoked is polled by the backends' commit paths: once the lease is
+  // revoked its KMS objects are gone from the fd's view and every commit naming
+  // them fails, so frames are dropped rather than spraying ioctl errors
+  // forever. Null = never gated.
+  DrmDisplay(AdoptFd,
+             int32_t width,
+             int32_t height,
+             double refresh_rate_hz,
+             int fd,
+             std::string device_path,
+             std::shared_ptr<void> fd_owner,
+             uint32_t connector_id,
+             std::function<bool()> revoked);
+
   ~DrmDisplay() override;
+
+  // True when built through the adopted-fd path (a DRM lease). Callers that
+  // would otherwise assume this process is the master — VT guards, master
+  // handoff, mode-object ownership — must branch on this.
+  [[nodiscard]] bool adopted_fd() const { return adopted_fd_; }
+
+  // The adopted fd's owner (the LeaseHold), for a backend that wants to hold it
+  // too. Null on every non-adopted path. This display already outlives its
+  // backends, so a backend taking a share is belt-and-braces rather than
+  // required — but it makes the backend's own lifetime self-evident instead of
+  // resting on an ordering invariant documented elsewhere.
+  [[nodiscard]] std::shared_ptr<void> fd_owner() const { return fd_owner_; }
+
+  // The leased connector the backend must drive; 0 on every non-adopted path
+  // (and on a lease that named none), meaning "first connected with a mode".
+  [[nodiscard]] uint32_t lease_connector_id() const {
+    return lease_connector_id_;
+  }
+
+  // Revocation gate for the backends' commit paths; empty on every non-adopted
+  // path, where there is no lease to lose. Copied by value into a backend, so
+  // it must stay callable for that backend's lifetime -- it captures the
+  // LeaseHold share, which fd_owner_ also holds.
+  [[nodiscard]] std::function<bool()> lease_revoked() const {
+    return lease_revoked_;
+  }
 
   // Process-wide libseat session. Null when no seat backend is available
   // (no logind/seatd/builtin), when drm-cxx was built without libseat, or
@@ -205,6 +281,24 @@ class DrmDisplay final : public IDisplay {
   // --drm-no-seat: skip the foreground-VT guard on the direct-open path when
   // SharedDevice() falls back (no libseat session).
   bool no_seat_;
+
+  // True when drm_dev_ wraps a borrowed fd (a DRM lease) rather than one this
+  // display opened. Gates the master bookkeeping off: we never took master, so
+  // the destructor must never drop it.
+  bool adopted_fd_ = false;
+
+  // Keeps the adopted fd's owner (the LeaseHold) alive for at least as long as
+  // drm_dev_, which only borrows the fd — drm::Device::from_fd does not close
+  // it. Declared BEFORE drm_dev_ so it is destroyed AFTER it: the Device must
+  // go while its fd is still open. Opaque so this header stays free of the
+  // lease client (the display only needs the fd to stay valid, not to know what
+  // keeps it so). Null on every non-adopted path.
+  std::shared_ptr<void> fd_owner_;
+
+  // The leased connector to drive, and the lease's revocation gate. Both are
+  // inert (0 / empty) on every non-adopted path. See the accessors.
+  uint32_t lease_connector_id_ = 0;
+  std::function<bool()> lease_revoked_;
 
   // Enumerates this card's connectors as outputs (libdrm only, no master).
   homescreen::DrmOutputProvider output_provider_;

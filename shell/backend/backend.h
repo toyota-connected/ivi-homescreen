@@ -70,14 +70,6 @@ struct BackendVulkanContext {
 // compositor-protocol shells in wayland/shell/ (the --shell option).
 class Backend {
  public:
-  enum Type {
-    WaylandEgl,
-    WaylandVulkan,
-    WaylandLeasedDrm,
-    DrmKms,
-    DrmKmsVulkan,
-  };
-
   Backend() = default;
   virtual ~Backend() = default;
 
