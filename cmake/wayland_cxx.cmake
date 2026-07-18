@@ -165,10 +165,11 @@ endforeach ()
 #   xdg-shell, presentation-time (core-backed: tables from the shipped wl/*.hpp
 #   resp. emitted inline), agl-shell, ivi-application, ivi-wm, simpleshell.
 #
-# Rule: a protocol with a shipped wl/<name>.hpp (xdg, agl, simple) provides its
-# wl_interface table inline there, so generate WITHOUT --emit-interface-tables.
-# A protocol with no shipped header (presentation-time, ivi-*) needs
-# --emit-interface-tables so the generated header is self-contained.
+# Rule: a protocol whose shipped wl/<name>.hpp provides its wl_interface table
+# inline (xdg, simple) generates WITHOUT --emit-interface-tables. Everything
+# else needs --emit-interface-tables so the generated header is self-contained:
+# protocols with no shipped header (presentation-time, ivi-*) and agl-shell,
+# whose shipped header stopped hand-writing the table in scanner v1.0.0.
 #
 # Everything except core wayland and drm-lease-v1 is *surface*-only: those
 # protocols exist to drive a wl_surface (shells, scaling, dmabuf present,
@@ -278,7 +279,13 @@ function(ivi_wayland_protocols target)
         target_compile_definitions(${target} PRIVATE ENABLE_XDG_CLIENT=1)
     endif ()
     if (ENABLE_AGL_SHELL_CLIENT)
+        # agl-shell — the shipped wl/agl_shell.hpp once hand-wrote the interface
+        # table + wl_iface(), but wayland-cxx-scanner v1.0.0 dropped that (it
+        # pinned the protocol version to whatever the table spelled out) and now
+        # expects the table generated from the XML. So emit tables here, unlike
+        # xdg/simple whose shipped headers still carry wl_iface() inline.
         wayland_cxx_generate(PROTOCOL "${_bund}/agl-shell.xml" MODE client-header
+            EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/agl_shell_client.hpp TARGET ${target})
         target_compile_definitions(${target} PRIVATE ENABLE_AGL_SHELL_CLIENT=1)
     endif ()
