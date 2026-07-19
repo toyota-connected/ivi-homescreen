@@ -29,11 +29,17 @@
 // instead.
 #if BUILD_COMPOSITOR
 
+#include <unistd.h>
+
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 
+#include <vulkan/vulkan.h>
+
 #include "backend/backend.h"
+#include "dmabuf_vulkan_import.h"
 #include "flutter_desktop_view_controller_state.h"
 #include "platform_view.h"
 #include "platform_view_listener.h"
@@ -56,9 +62,9 @@ Backend* BackendOf(void* user_data) {
 // A registry-owned PlatformView that fronts an ihs_pv plugin: it holds the
 // plugin's IhsPvCallbacks table and per-view state, trampolines the registry's
 // platform_view_listener into that table, and is the ICompositorSurface the
-// compositor pulls each frame. The submit path that feeds GetVulkanImage a real
-// VkImage is wired in a follow-up; today it registers cleanly and routes
-// lifecycle, and the compositor sees "no frame yet" (null image).
+// compositor pulls each frame. Submitted dma-bufs are imported into VkImages
+// (cached per ring buffer) that GetVulkanImage hands the compositor; before the
+// first submit it reports a null image ("nothing to composite this frame").
 class IhsPluginView final : public PlatformView, public ICompositorSurface {
  public:
   explicit IhsPluginView(const PlatformViewRegistry::CreateRequest& request)
@@ -70,6 +76,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
                      request.width,
                      request.height),
         id_(request.id) {}
+
+  ~IhsPluginView() override;
 
   IhsPluginView(const IhsPluginView&) = delete;
   IhsPluginView& operator=(const IhsPluginView&) = delete;
@@ -83,6 +91,16 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   uint32_t drm_plane_id{0};
   int shm_fd{-1};
   size_t shm_stride{0};
+
+  // Imported dma-bufs keyed by the plugin's ring-buffer id — created once per
+  // buffer, reused every submit. `current` points at the buffer the plugin most
+  // recently submitted (a stable std::map node, so it survives later inserts).
+  // The plugin submits from its own thread while the compositor samples on the
+  // raster thread, so `mutex` guards this block.
+  mutable std::mutex mutex;
+  std::map<uint32_t, DmabufVulkanImporter::ImportedImage> buffers;
+  DmabufVulkanImporter::ImportedImage* current{nullptr};
+  uint32_t current_layout{VK_IMAGE_LAYOUT_UNDEFINED};
 
   // ICompositorSurface — a Vulkan producer (no backing store, no GL texture).
   bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
@@ -98,15 +116,59 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   }
   void OnResize(int32_t, int32_t) override {}
 
-  // No frame is available until the submit path is wired; the compositor treats
-  // a null image as "nothing to composite this frame".
-  [[nodiscard]] void* GetVulkanImage(int32_t*, int32_t*) const override {
-    return nullptr;
+  // The compositor samples the most recently submitted buffer. Null until the
+  // first frame arrives — the compositor treats that as "nothing this frame".
+  [[nodiscard]] void* GetVulkanImage(int32_t* width,
+                                     int32_t* height) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (current == nullptr || current->image == VK_NULL_HANDLE) {
+      return nullptr;
+    }
+    if (width != nullptr) {
+      *width = static_cast<int32_t>(current->width);
+    }
+    if (height != nullptr) {
+      *height = static_cast<int32_t>(current->height);
+    }
+    return reinterpret_cast<void*>(current->image);
+  }
+  [[nodiscard]] uint32_t GetVulkanImageLayout() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current_layout;
+  }
+  void SetVulkanImageLayout(uint32_t layout) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    current_layout = layout;
   }
 
  private:
   int32_t id_;
 };
+
+// One importer per process (a single Vulkan device), initialized once from the
+// backend's Vulkan context at host install. Stays not-ready when the active
+// backend is not Vulkan or lacks the dma-buf import extensions, in which case
+// ihs_pv views fall back to producing no frame.
+DmabufVulkanImporter g_importer;
+
+IhsPluginView::~IhsPluginView() {
+  // NOTE: the compositor may still hold in-flight blits of these images;
+  // deferring the destroy behind the release fence is the explicit-sync
+  // increment. Today dispose runs after the last present for the view.
+  const std::lock_guard<std::mutex> lock(mutex);
+  for (auto& [buffer_id, image] : buffers) {
+    g_importer.Destroy(&image);
+  }
+}
+
+// Close every plane fd a frame still owns (its import did not consume them).
+void CloseFrameFds(const IhsFrame* frame) {
+  for (uint32_t i = 0; i < frame->plane_count && i < 4; ++i) {
+    if (frame->plane_fd[i] >= 0) {
+      close(frame->plane_fd[i]);
+    }
+  }
+}
 
 // platform_view_listener trampolines: the registry drives these with the
 // listener context (the IhsPluginView*), which we forward into the plugin's
@@ -290,16 +352,48 @@ int HostGrantShmFd(void* /*user_data*/,
   return v->shm_fd;
 }
 
-int HostSubmit(void* /*user_data*/,
-               IhsPlatformView* /*view*/,
-               const IhsFrame* /*frame*/,
-               int /*acquire_fence_fd*/,
+int HostSubmit(void* user_data,
+               IhsPlatformView* view,
+               const IhsFrame* frame,
+               int acquire_fence_fd,
                int* out_release_fence_fd) {
-  // Importing the submitted dma-buf into a VkImage the compositor samples is
-  // the next increment; until then a submit is accepted but produces no frame.
   if (out_release_fence_fd != nullptr) {
     *out_release_fence_fd = -1;
   }
+  // Explicit sync is a follow-up; consume the acquire fence so it does not
+  // leak.
+  if (acquire_fence_fd >= 0) {
+    close(acquire_fence_fd);
+  }
+
+  (void)user_data;
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  if (!g_importer.ready()) {
+    CloseFrameFds(frame);
+    return IHS_PV_ERR_NO_BACKEND;
+  }
+
+  const std::lock_guard<std::mutex> lock(v->mutex);
+  if (auto it = v->buffers.find(frame->buffer_id); it != v->buffers.end()) {
+    // Known ring buffer: the submitted fd is a redundant handle to the same
+    // memory. Close it and reuse the existing import.
+    CloseFrameFds(frame);
+    v->current = &it->second;
+  } else {
+    DmabufVulkanImporter::ImportedImage imported;
+    if (!g_importer.Import(*frame, &imported)) {
+      CloseFrameFds(frame);  // import left the fds untouched on failure
+      return IHS_PV_ERR_INVALID;
+    }
+    // Import consumed plane_fd[0]; a single-plane RGB frame owns no other fds.
+    auto [pos, inserted] = v->buffers.emplace(frame->buffer_id, imported);
+    v->current = &pos->second;
+  }
+
+  // The plugin re-rendered the buffer before submitting, so the compositor
+  // transitions from GENERAL to read it. A spec-correct foreign-queue-family
+  // acquire from the producer is the explicit-sync increment.
+  v->current_layout = VK_IMAGE_LAYOUT_GENERAL;
   return IHS_PV_OK;
 }
 
@@ -327,7 +421,20 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.grant_shm_fd = HostGrantShmFd;
   g_host.submit = HostSubmit;
   ihs_pv_set_host(&g_host);
-  ihs::log::debug("[ihs_pv] platform-view host installed");
+
+  // Bring up the dma-buf importer once, on this thread, from the backend's
+  // Vulkan context — so the submit path (which runs off-thread) never races an
+  // init. Not-ready is fine: the view simply produces no frame.
+  if (Backend* backend = BackendOf(engine_state); backend != nullptr) {
+    if (BackendVulkanContext vk{}; backend->GetVulkanContext(&vk)) {
+      g_importer.Init(static_cast<VkInstance>(vk.instance),
+                      static_cast<VkPhysicalDevice>(vk.physical_device),
+                      static_cast<VkDevice>(vk.device),
+                      vk.get_instance_proc_addr);
+    }
+  }
+  ihs::log::debug("[ihs_pv] platform-view host installed (dma-buf import {})",
+                  g_importer.ready() ? "ready" : "unavailable");
 }
 
 #else  // !BUILD_COMPOSITOR

@@ -81,6 +81,7 @@ if (ENABLE_PLUGINS)
     # consume the PUBLIC registry/handler sources above.
     target_sources(platform_homescreen PRIVATE
             platform_views/platform_view_host.cc
+            platform_views/dmabuf_vulkan_import.cc
     )
 
     target_include_directories(platform_homescreen PUBLIC
