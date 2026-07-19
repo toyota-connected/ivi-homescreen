@@ -20,6 +20,7 @@
 #include "flutter_desktop_messenger.h"
 #include "flutter_desktop_view.h"
 #include "flutter_desktop_view_controller_state.h"
+#include "platform/homescreen/platform_views/platform_view_host.h"
 #include "platform/homescreen/platform_views/platform_view_registry.h"
 
 #include "backend/backend.h"
@@ -96,6 +97,9 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_view_registry = std::make_unique<PlatformViewRegistry>(state);
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
+  // Front the registry + backend to out-of-tree FFI plugins via the ihs_shared
+  // platform-view host (ihs_pv_*). The registry + backend both exist here.
+  InstallPlatformViewHost(state);
 #endif
 
   // Mouse Cursor handler.

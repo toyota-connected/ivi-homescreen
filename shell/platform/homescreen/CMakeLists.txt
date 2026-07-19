@@ -76,6 +76,13 @@ if (ENABLE_PLUGINS)
             platform_views/platform_view_touch.cc
     )
 
+    # The ihs_shared platform-view host reaches the Backend + compositor, so it
+    # is shell-only (PRIVATE) — it must not compile into the plugin targets that
+    # consume the PUBLIC registry/handler sources above.
+    target_sources(platform_homescreen PRIVATE
+            platform_views/platform_view_host.cc
+    )
+
     target_include_directories(platform_homescreen PUBLIC
             ${PLUGINS_DIR}
     )
