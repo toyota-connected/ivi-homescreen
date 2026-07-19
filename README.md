@@ -303,6 +303,16 @@ Usage:
                               compositor defer the DRM fd until it regains DRM 
                               master, so this is what stops a VT-switched-away 
                               compositor hanging startup.
+      --lease-input arg       wayland-leased-drm: whether to read input from 
+                              raw evdev. A leased client has no wl_surface, so 
+                              libinput on /dev/input/event* is its only input 
+                              source, and it is ungrabbed -- on a host with a 
+                              live Wayland session that duplicates every 
+                              keystroke into this process and the session 
+                              compositor. auto (default) = read evdev on an 
+                              embedded target but disable it when a Wayland 
+                              session is detected; on = always read evdev; off 
+                              = never.
 ```
 
 <!-- END CLI-REFERENCE -->
@@ -363,6 +373,7 @@ annotated all-keys file see
 | `[view.backend.drm]` | `stage_cursor` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.lease]` | `connector` | `string` | `(sole offer)` | `e.g. HDMI-A-1` | leased |
 | `[view.backend.lease]` | `device` | `string` | `(sole device)` | `index or /dev/dri/cardN` | leased |
+| `[view.backend.lease]` | `input` | `string` | `auto` | `auto\|on\|off` | leased |
 | `[view.backend.lease]` | `on_revoke` | `string` | `exit` | `exit\|gate` | leased |
 | `[view.backend.lease]` | `timeout_ms` | `int` | `5000` | `> 0` | leased |
 | `[view.output]` | `drm_connector` | `string` | `(none)` | `e.g. HDMI-A-1` | drm |
