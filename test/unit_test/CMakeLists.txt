@@ -73,6 +73,7 @@ add_subdirectory(flutter_view-test)
 add_subdirectory(app-test)
 add_subdirectory(configuration-test-case)
 add_subdirectory(output_resolver-test)
+add_subdirectory(ihs_pv-test)
 # T1 — drives the real LeaseClient against a mock drm-lease-v1 compositor.
 # Needs no GPU/compositor, so it runs anywhere the lease client is built.
 if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
