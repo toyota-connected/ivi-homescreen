@@ -64,7 +64,11 @@ if (ACCESSKIT_FOUND)
     )
 endif ()
 
-if (ENABLE_PLUGINS)
+# Platform views compose through the compositor (ICompositorSurface), so the
+# subsystem is gated on BUILD_COMPOSITOR — not the external plugins framework.
+# This keeps platform views (and the ihs_shared ihs_pv host) a core shell
+# feature that builds without the ivi-homescreen-plugins repo.
+if (BUILD_COMPOSITOR)
 
     if (POLICY CMP0076)
         cmake_policy(SET CMP0076 NEW)
@@ -83,6 +87,12 @@ if (ENABLE_PLUGINS)
             platform_views/platform_view_host.cc
             platform_views/dmabuf_vulkan_import.cc
     )
+
+endif ()
+
+# The external plugins framework (out-of-tree plugins built from the plugins
+# repo) is independent of the platform-view subsystem above.
+if (ENABLE_PLUGINS)
 
     target_include_directories(platform_homescreen PUBLIC
             ${PLUGINS_DIR}

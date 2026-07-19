@@ -23,6 +23,6 @@ struct FlutterDesktopEngineState;
 // then register a view factory via ihs_pv_register_factory, reuse the backend's
 // Vulkan/EGL context, and submit frames — all routed to this engine's Backend,
 // PlatformViewRegistry, and compositor. Call once at startup after the registry
-// and backend exist; a no-op without ENABLE_PLUGINS. Safe to call again to
+// and backend exist; a no-op without BUILD_COMPOSITOR. Safe to call again to
 // re-point the process-global host at a different engine (last wins).
 void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state);

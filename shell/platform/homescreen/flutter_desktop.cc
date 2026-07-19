@@ -16,6 +16,7 @@
 
 #include <asio/post.hpp>
 
+#include "config/common.h"  // BUILD_COMPOSITOR
 #include "flutter_desktop_engine_state.h"
 #include "flutter_desktop_messenger.h"
 #include "flutter_desktop_view.h"
@@ -91,9 +92,11 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
   state->platform_handler = std::make_unique<PlatformHandler>(
       state->internal_plugin_registrar->messenger(), view);
 
-#if ENABLE_PLUGINS
-  // Platform view registry (owns id->instance lifecycle + factories) and the
-  // channel adapter over it.
+#if BUILD_COMPOSITOR
+  // Platform views compose through the compositor, so the subsystem lives with
+  // BUILD_COMPOSITOR (a core shell feature), independent of the external
+  // plugins framework. Registry owns id->instance lifecycle + factories; the
+  // handler is the channel adapter over it.
   state->platform_view_registry = std::make_unique<PlatformViewRegistry>(state);
   state->platform_views_handler = std::make_unique<PlatformViewsHandler>(
       state->internal_plugin_registrar->messenger(), state);
