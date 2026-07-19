@@ -141,6 +141,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     current_layout = layout;
   }
 
+  // The image is an imported dma-buf the plugin rewrites; the compositor
+  // acquires it from VK_QUEUE_FAMILY_EXTERNAL each frame rather than using the
+  // once-only transition for a compositor-owned image.
+  [[nodiscard]] bool NeedsExternalQueueAcquire() const override { return true; }
+
  private:
   int32_t id_;
 };

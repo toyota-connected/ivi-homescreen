@@ -2265,32 +2265,55 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     return;  // GL / subsurface platform view — nothing to blit here.
   }
   auto src = reinterpret_cast<VkImage>(vk_img);
+  const bool external = surface->NeedsExternalQueueAcquire();
 
-  // The plugin's static image starts PREINITIALIZED (host-written, contents
-  // preserved). Transition it to a transfer source ONCE — a static image left
-  // in TRANSFER_SRC must not be re-transitioned every frame (that both corrupts
-  // the read and races the prior frame's blit). The surface tracks the layout.
-  const auto cur = static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
-  if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-    const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
-    VkImageMemoryBarrier to_src{};
-    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_src.oldLayout = cur;
-    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_src.image = src;
-    to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    // PREINITIALIZED carries host writes; make them visible to the transfer.
-    to_src.srcAccessMask =
-        from_preinit ? VK_ACCESS_HOST_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
-    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    d().vkCmdPipelineBarrier(cmd,
-                             from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
-                                          : VK_PIPELINE_STAGE_TRANSFER_BIT,
+  if (external) {
+    // An imported dma-buf the producer rewrites every frame through an aliased
+    // image. Acquire ownership from VK_QUEUE_FAMILY_EXTERNAL and move it to a
+    // transfer source each frame (the producer released it to EXTERNAL after
+    // its render); it is handed back after the blit below.
+    VkImageMemoryBarrier acq{};
+    acq.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    acq.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    acq.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    acq.srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    acq.dstQueueFamilyIndex = queue_family_index_;
+    acq.srcAccessMask = 0;  // the release on the producer side owns src access
+    acq.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    acq.image = src;
+    acq.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &to_src);
-    surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                             nullptr, 1, &acq);
+  } else {
+    // The plugin's static image starts PREINITIALIZED (host-written, contents
+    // preserved). Transition it to a transfer source ONCE — a static image left
+    // in TRANSFER_SRC must not be re-transitioned every frame (that both
+    // corrupts the read and races the prior frame's blit). The surface tracks
+    // the layout.
+    const auto cur =
+        static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
+    if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+      const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+      VkImageMemoryBarrier to_src{};
+      to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      to_src.oldLayout = cur;
+      to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.image = src;
+      to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      // PREINITIALIZED carries host writes; make them visible to the transfer.
+      to_src.srcAccessMask = from_preinit ? VK_ACCESS_HOST_WRITE_BIT
+                                          : VK_ACCESS_TRANSFER_WRITE_BIT;
+      to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      d().vkCmdPipelineBarrier(cmd,
+                               from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                                            : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &to_src);
+      surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    }
   }
 
   // Blit the full platform-view image into the slot at the layer rect (scaling
@@ -2310,6 +2333,24 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
   d().vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
                      VK_FILTER_LINEAR);
+
+  if (external) {
+    // Release ownership back to VK_QUEUE_FAMILY_EXTERNAL so the producer can
+    // rewrite the buffer for the next frame.
+    VkImageMemoryBarrier rel{};
+    rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    rel.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    rel.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    rel.srcQueueFamilyIndex = queue_family_index_;
+    rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    rel.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    rel.dstAccessMask = 0;  // the acquire on the producer side owns dst access
+    rel.image = src;
+    rel.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &rel);
+  }
 }
 
 void WaylandVulkanBackend::OnFrameDone(void* data,
