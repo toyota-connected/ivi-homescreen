@@ -278,7 +278,14 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     }
     // Destroy the swapchain before the device. It is otherwise only torn down
     // on resize (InitializeSwapChain); on shutdown it must be released here so
-    // the WSI hands its images' wl_buffers back to the compositor.
+    // the WSI hands its images' wl_buffers back to the compositor. The
+    // per-image color-attachment views go first (queue already idle above).
+    for (auto view : swapchain_image_views_) {
+      if (view != VK_NULL_HANDLE) {
+        d().vkDestroyImageView(device_, view, nullptr);
+      }
+    }
+    swapchain_image_views_.clear();
     if (swapchain_ != nullptr) {
       d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
       swapchain_ = VK_NULL_HANDLE;
@@ -715,6 +722,19 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
       std::lock_guard<std::mutex> queue_lock(queue_mutex_);
       CHECK_VK_RESULT(d().vkQueueWaitIdle(queue_));
     }
+    // Queue is idle: drop the old swapchain image views before they are
+    // recreated for the new image set below, and the layer compositor's
+    // framebuffers built from them (else it would reuse a framebuffer that
+    // references a freed view).
+    for (auto view : swapchain_image_views_) {
+      if (view != VK_NULL_HANDLE) {
+        d().vkDestroyImageView(device_, view, nullptr);
+      }
+    }
+    swapchain_image_views_.clear();
+    if (layer_compositor_) {
+      layer_compositor_->ClearFramebuffers();
+    }
     CHECK_VK_RESULT(
         d().vkResetCommandPool(device_, swapchain_command_pool_,
                                VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
@@ -917,6 +937,21 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   swapchain_images_.resize(image_count);
   CHECK_VK_RESULT(d().vkGetSwapchainImagesKHR(device_, swapchain_, &image_count,
                                               swapchain_images_.data()));
+
+  // Color-attachment views of the swapchain images, so the layer stack can be
+  // alpha-blended straight into the swapchain on the WSI path (platform-view
+  // frames). Images already carry VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT above.
+  swapchain_image_views_.resize(swapchain_images_.size());
+  for (size_t i = 0; i < swapchain_images_.size(); i++) {
+    VkImageViewCreateInfo view_ci{};
+    view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.image = swapchain_images_[i];
+    view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format = surface_format_.format;
+    view_ci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    CHECK_VK_RESULT(d().vkCreateImageView(device_, &view_ci, nullptr,
+                                          &swapchain_image_views_[i]));
+  }
 
   // --------------------------------------------------------------------------
   // Record a command buffer for each of the images to be executed prior to
@@ -1894,26 +1929,32 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &begin);
 
-  // Transition swapchain image UNDEFINED/PRESENT_SRC -> TRANSFER_DST_OPTIMAL.
-  VkImageMemoryBarrier to_dst{};
-  to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_dst.image = dst;
-  to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  to_dst.subresourceRange.levelCount = 1;
-  to_dst.subresourceRange.layerCount = 1;
-  to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  // srcStage must be TRANSFER (the stage the acquire semaphore is waited at),
-  // not TOP_OF_PIPE: that orders this layout-transition write after the
-  // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
-  // sync-validation layer flags (it explicitly suggests including the transfer
-  // stage in this barrier's srcStageMask).
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &to_dst);
+  // A Vulkan platform view only composites correctly with src-over alpha (a
+  // transparent Flutter overlay must blend over it, not overwrite it to black).
+  // When one is present, blend the whole layer stack into the swapchain via
+  // layer_compositor_; otherwise keep the proven overwrite-blit path. The
+  // compositor is created lazily here (the dma-buf path makes its own).
+  bool has_platform_view = false;
+  for (size_t i = 0; i < count; ++i) {
+    if (layers[i] && layers[i]->type == kFlutterLayerContentTypePlatformView &&
+        layers[i]->platform_view) {
+      has_platform_view = true;
+      break;
+    }
+  }
+  if (has_platform_view && !layer_compositor_) {
+    std::string comp_err;
+    layer_compositor_ = wl_vulkan::LayerCompositor::Create(
+        device_, surface_format_.format, comp_err);
+    if (!layer_compositor_) {
+      ihs::log::warn(
+          "[WaylandVulkanBackend] layer compositor unavailable ({}); platform "
+          "view falls back to overwrite blit (a transparent overlay may erase "
+          "it)",
+          comp_err);
+    }
+  }
+  const bool blend = has_platform_view && layer_compositor_;
 
   // Sequence platform-view subsurface Z-order for this frame.
   m_sequencer.Present(layers, count, nullptr,
@@ -1922,45 +1963,89 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                       });
 
   bool ok = true;
-  for (size_t i = 0; i < count; ++i) {
-    const FlutterLayer* layer = layers[i];
-    if (!layer) {
-      continue;
-    }
-    if (layer->type == kFlutterLayerContentTypeBackingStore &&
-        layer->backing_store) {
-      auto* baton =
-          static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
-      if (!baton || !baton->store) {
+  if (blend) {
+    // Alpha-blend the whole stack (backing stores + platform views) straight
+    // into the swapchain image. The render pass clears then leaves it in
+    // GENERAL; transition that to PRESENT_SRC below.
+    ok = CompositeLayersBlend(cmd, layers, count,
+                              swapchain_image_views_[image_index], width_,
+                              height_, m_compositor_current_frame_);
+
+    VkImageMemoryBarrier to_present{};
+    to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_present.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.image = dst;
+    to_present.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_present.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &to_present);
+  } else {
+    // Transition swapchain image UNDEFINED/PRESENT_SRC -> TRANSFER_DST_OPTIMAL.
+    VkImageMemoryBarrier to_dst{};
+    to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_dst.image = dst;
+    to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    to_dst.subresourceRange.levelCount = 1;
+    to_dst.subresourceRange.layerCount = 1;
+    to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    // srcStage must be TRANSFER (the stage the acquire semaphore is waited at),
+    // not TOP_OF_PIPE: that orders this layout-transition write after the
+    // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
+    // sync-validation layer flags (it explicitly suggests including the
+    // transfer stage in this barrier's srcStageMask).
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to_dst);
+
+    for (size_t i = 0; i < count; ++i) {
+      const FlutterLayer* layer = layers[i];
+      if (!layer) {
         continue;
       }
-      const auto dx = static_cast<int32_t>(layer->offset.x);
-      const auto dy = static_cast<int32_t>(layer->offset.y);
-      const auto dw = static_cast<int32_t>(layer->size.width);
-      const auto dh = static_cast<int32_t>(layer->size.height);
-      BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
-    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
-               layer->platform_view) {
-      ok = PresentPlatformView(layer) && ok;
+      if (layer->type == kFlutterLayerContentTypeBackingStore &&
+          layer->backing_store) {
+        auto* baton =
+            static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
+        if (!baton || !baton->store) {
+          continue;
+        }
+        const auto dx = static_cast<int32_t>(layer->offset.x);
+        const auto dy = static_cast<int32_t>(layer->offset.y);
+        const auto dw = static_cast<int32_t>(layer->size.width);
+        const auto dh = static_cast<int32_t>(layer->size.height);
+        BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
+      } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+                 layer->platform_view) {
+        ok = PresentPlatformView(layer) && ok;
+      }
     }
-  }
 
-  // Transition swapchain image -> PRESENT_SRC_KHR.
-  VkImageMemoryBarrier to_present{};
-  to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-  to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_present.image = dst;
-  to_present.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  to_present.subresourceRange.levelCount = 1;
-  to_present.subresourceRange.layerCount = 1;
-  to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &to_present);
+    // Transition swapchain image -> PRESENT_SRC_KHR.
+    VkImageMemoryBarrier to_present{};
+    to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.image = dst;
+    to_present.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    to_present.subresourceRange.levelCount = 1;
+    to_present.subresourceRange.layerCount = 1;
+    to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &to_present);
+  }
 
   d().vkEndCommandBuffer(cmd);
 
@@ -1968,13 +2053,16 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // presentable), signals render_finished and the slot's in_flight fence.
   // No vkQueueWaitIdle — the next frame's slot wait is the only sync point.
   //
-  // Wait at TRANSFER, not COLOR_ATTACHMENT_OUTPUT: the command buffer's first
-  // use of the acquired image is the UNDEFINED->TRANSFER_DST layout transition
-  // and the blit, both transfer-stage. Waiting at a later stage left the
-  // acquire unsynchronized with that first barrier
+  // Wait stage matches the command buffer's first use of the acquired image:
+  // the blend path's first write is the render pass color attachment
+  // (COLOR_ATTACHMENT_OUTPUT); the overwrite-blit path's is the
+  // UNDEFINED->TRANSFER_DST transition + blit (TRANSFER). Waiting at the wrong
+  // stage leaves the acquire unsynchronized with that first write
   // (SYNC-HAZARD-WRITE-AFTER-READ vs vkAcquireNextImageKHR,
   // MissingAcquireWait).
-  const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+  const VkPipelineStageFlags wait_stage =
+      blend ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            : VK_PIPELINE_STAGE_TRANSFER_BIT;
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.waitSemaphoreCount = 1;
@@ -2132,9 +2220,10 @@ bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
 bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                                                 const FlutterLayer** layers,
                                                 size_t count,
-                                                DmabufSlot& slot,
+                                                VkImageView target_view,
                                                 uint32_t width,
-                                                uint32_t height) {
+                                                uint32_t height,
+                                                uint64_t frame) {
   struct Draw {
     VkImage src;
     VkFormat format;
@@ -2235,9 +2324,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     }
   }
 
-  // Phase 2: blend all layers into the slot in one render pass (z-order).
-  layer_compositor_->BeginFrame(cmd, slot.image->view(), width, height,
-                                dmabuf_frame_);
+  // Phase 2: blend all layers into the target in one render pass (z-order).
+  layer_compositor_->BeginFrame(cmd, target_view, width, height, frame);
   for (const Draw& dr : draws) {
     layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.dx, dr.dy, dr.dw,
                                  dr.dh);
@@ -2256,7 +2344,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       dr.store->SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
   }
-  slot.layout = VK_IMAGE_LAYOUT_GENERAL;  // render pass finalLayout
+  // The render pass leaves target_view's image in GENERAL (its finalLayout);
+  // the caller transitions from there (present or dma-buf hand-off).
   return ok;
 }
 
@@ -2460,7 +2549,9 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   if (layer_compositor_) {
     // Correct src-over alpha compositing (a platform view under a transparent
     // Flutter overlay blends instead of being overwritten to black).
-    ok = CompositeLayersBlend(cmd, layers, count, slot, w, h);
+    ok = CompositeLayersBlend(cmd, layers, count, slot.image->view(), w, h,
+                              dmabuf_frame_);
+    slot.layout = VK_IMAGE_LAYOUT_GENERAL;  // render pass finalLayout
   } else {
     // Fallback: overwrite blits. Correct only when layers don't overlap; a
     // transparent overlay over a platform view erases it. Transition the slot

@@ -233,6 +233,10 @@ class WaylandVulkanBackend final : public Backend {
   VkSwapchainKHR swapchain_{};
   VkCommandPool swapchain_command_pool_{};
   std::vector<VkImage> swapchain_images_;
+  // Color-attachment views of swapchain_images_ (same order), used to blend the
+  // layer stack directly into the swapchain on the WSI path (platform-view
+  // frames). Created in InitializeSwapChain, destroyed with the swapchain.
+  std::vector<VkImageView> swapchain_image_views_;
   std::vector<VkCommandBuffer> present_transition_buffers_;
   // One present-transition semaphore per swapchain image. Per-image (rather
   // than a single shared semaphore) so the non-compositor present path does
@@ -478,18 +482,23 @@ class WaylandVulkanBackend final : public Backend {
                               const FlutterLayer* layer,
                               VkImage dst);
 
-  /// Composite the layer stack into @p slot with src-over alpha blending via
-  /// layer_compositor_ (a render pass): each backing store and Vulkan platform
-  /// view is sampled and blended in z-order, so a transparent Flutter overlay
-  /// over a platform view keeps the view instead of overwriting it to black.
-  /// Leaves the slot in GENERAL. Returns the per-view OnPresent success.
-  struct DmabufSlot;  // defined below
+  /// Composite the layer stack into @p target_view with src-over alpha blending
+  /// via layer_compositor_ (a render pass): each backing store and Vulkan
+  /// platform view is sampled and blended in z-order, so a transparent Flutter
+  /// overlay over a platform view keeps the view instead of overwriting it to
+  /// black. The render pass clears then leaves the target in GENERAL (the
+  /// caller transitions from there). Shared by the dma-buf present path (target
+  /// = the dma-buf slot's view) and the WSI path (target = a swapchain image
+  /// view).
+  /// @p frame drives layer_compositor_'s per-frame resource recycling. Returns
+  /// the per-view OnPresent success.
   bool CompositeLayersBlend(VkCommandBuffer cmd,
                             const FlutterLayer** layers,
                             size_t count,
-                            DmabufSlot& slot,
+                            VkImageView target_view,
                             uint32_t width,
-                            uint32_t height);
+                            uint32_t height,
+                            uint64_t frame);
 #endif
 
   /// Record + submit a layout transition on a one-shot command buffer.
