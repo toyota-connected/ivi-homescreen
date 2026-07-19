@@ -127,11 +127,28 @@ bool WaylandVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->device = device_;
   out->queue = queue_;
   out->queue_family_index = queue_family_index_;
-  // Same loader the embedder + this backend resolve Vulkan through, so a plugin
-  // reusing the device gets identical function pointers.
+  // The INTERPOSED loader (not the raw d().vkGetInstanceProcAddr): a plugin
+  // reusing the shared queue must resolve vkQueue* through the locking
+  // trampolines, or its submits race the engine's and this backend's on the one
+  // graphics queue (issue #208) — exactly the threading error a raw loader
+  // produces.
   out->get_instance_proc_addr =
-      reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
+      reinterpret_cast<void*>(&WaylandVulkanBackend::PluginInstanceProcAddr);
   return true;
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+WaylandVulkanBackend::PluginInstanceProcAddr(VkInstance instance,
+                                             const char* procname) {
+  // Same shim as GetInstanceProcAddressCallback (the engine's loader), in the
+  // PFN_vkGetInstanceProcAddr shape a plugin calls: swap vkQueue* (and
+  // vkGetDeviceProcAddr) for the shared-queue locking trampolines, else fall
+  // through to the real loader.
+  if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
+          instance, procname, d().vkGetInstanceProcAddr)) {
+    return interposed;
+  }
+  return d().vkGetInstanceProcAddr(instance, procname);
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {

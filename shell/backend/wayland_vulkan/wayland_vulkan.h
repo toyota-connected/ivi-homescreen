@@ -331,6 +331,14 @@ class WaylandVulkanBackend final : public Backend {
       FlutterVulkanInstanceHandle instance,
       const char* procname);
 
+  // Plugin-facing vkGetInstanceProcAddr handed out by GetVulkanContext: like
+  // GetInstanceProcAddressCallback (the engine's loader) but in the
+  // PFN_vkGetInstanceProcAddr shape, it swaps vkQueue* entry points for the
+  // shared-queue locking trampolines so a plugin reusing the device serializes
+  // its submits with the engine and this backend (issue #208).
+  static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+  PluginInstanceProcAddr(VkInstance instance, const char* procname);
+
   VkDebugReportCallbackEXT mDebugCallback = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT mDebugMessenger = VK_NULL_HANDLE;
 
