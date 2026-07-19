@@ -461,6 +461,15 @@ IHS_EXPORT int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride);
  * @format is the fourcc+modifier matching the grant; @plane_fd/@plane_offset/
  * @plane_stride describe each plane (one fd may back several planes). Fill
  * @plane_count planes.
+ *
+ * @buffer_id names WHICH buffer of the plugin's ring this frame is (0..N-1,
+ * stable for that buffer's lifetime). The registry imports each distinct
+ * buffer_id once — creating the VkImage / KMS framebuffer that aliases the
+ * dma-buf — and reuses that import on every later submit of the same id, so a
+ * steady stream of frames costs no per-frame allocation. A plugin that hands a
+ * fresh dma-buf every frame (no ring) uses a rolling id; one that cycles a fixed
+ * ring reuses its ids. The plane fds are consumed by the registry on the import
+ * (first sight of an id) and closed as redundant on a cache hit.
  */
 typedef struct IhsFrame {
   size_t struct_size;
@@ -475,6 +484,7 @@ typedef struct IhsFrame {
   uint32_t plane_offset[4];
   uint32_t plane_stride[4];
   const IhsHdrMetadata* hdr; /* NULL = SDR; set for PQ/HLG HDR video */
+  uint32_t buffer_id;        /* ring-buffer identity for import caching */
 } IhsFrame;
 
 /*
