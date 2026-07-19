@@ -143,4 +143,21 @@ class ICompositorSurface {
    */
   [[nodiscard]] virtual uint32_t GetVulkanImageLayout() const { return 0; }
   virtual void SetVulkanImageLayout(uint32_t /*layout*/) {}
+
+  /**
+   * @brief Whether the Vulkan image is a dma-buf the producer rewrites on
+   * another agent's queue, so the compositor must take ownership of it before
+   * reading and hand it back after.
+   *
+   * - @c false (default) — a static image on the compositor's own device: the
+   *   compositor transitions it to a transfer source ONCE (tracked via
+   *   Get/SetVulkanImageLayout) and reads it every frame thereafter.
+   * - @c true — an imported dma-buf whose content is written by an external
+   *   producer through an aliased image. The compositor issues a
+   *   VK_QUEUE_FAMILY_EXTERNAL ownership acquire (from GENERAL to transfer
+   *   source) before the blit and a release back after it, every frame; the
+   *   producer performs the complementary release/acquire around its render.
+   *   GetVulkanImageLayout is not consulted on this path.
+   */
+  [[nodiscard]] virtual bool NeedsExternalQueueAcquire() const { return false; }
 };
