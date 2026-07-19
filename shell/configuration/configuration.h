@@ -125,10 +125,26 @@ class Configuration {
       //                         debugging a revocation, since nothing recovers.
       //                       "reacquire"      — not implemented yet;
       //                         accepted and warned about, treated as "exit".
+      //   lease_input     : whether the leased backend reads input from raw
+      //                     evdev. A leased client has no wl_surface, so the
+      //                     compositor delivers it no input — its only source
+      //                     is libinput on /dev/input/event*, ungrabbed, which
+      //                     on a host with a live Wayland session duplicates
+      //                     every keystroke into both this process and the
+      //                     session compositor.
+      //                       "auto" (default) — read evdev on an embedded
+      //                         target (no WAYLAND_DISPLAY), but disable it
+      //                         when a host Wayland session is detected,
+      //                         warning why.
+      //                       "on"             — always read evdev, even under
+      //                         a host session
+      //                         (embedded-under-compositor).
+      //                       "off"            — never read evdev.
       std::optional<std::string> lease_device;
       std::optional<std::string> lease_connector;
       std::optional<uint32_t> lease_timeout_ms;
       std::optional<std::string> lease_on_revoke;
+      std::optional<std::string> lease_input;
       // Wayland compositor-protocol shell selection: "auto" (default) | "xdg" |
       // "agl" | "ivi" | "simple". The Display reads it from the first view.
       std::optional<std::string> shell;

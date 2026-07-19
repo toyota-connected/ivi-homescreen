@@ -192,6 +192,13 @@ class DrmDisplay final : public IDisplay {
   void StopEvents() override;
   [[nodiscard]] int PollEvents() const override { return 0; }
 
+  // Gate the input seat. When false, StartEvents() does not start the seat, so
+  // libinput never opens /dev/input/event*. Default true. The leased factory
+  // sets it false when a host Wayland session is present (wayland-leased-drm
+  // has no wl_surface, so its evdev reads would duplicate input into both this
+  // process and the session compositor). Must be called before StartEvents().
+  void SetInputEnabled(bool enabled) { input_enabled_ = enabled; }
+
   void SetViewControllerState(
       FlutterDesktopViewControllerState* state) override;
 
@@ -316,6 +323,11 @@ class DrmDisplay final : public IDisplay {
   // is there so a Wayland-client + DRM-rendering configuration can swap in
   // a WaylandSeat without changing this class.
   std::unique_ptr<homescreen::ISeat> seat_;
+
+  // When false, StartEvents() leaves seat_ unstarted so libinput never opens
+  // input devices. See SetInputEnabled(). Default true (path-opened tiers read
+  // input as before).
+  bool input_enabled_ = true;
 
   // Arm the async_wait for the next PAGE_FLIP_EVENT; re-armed after every
   // drain.

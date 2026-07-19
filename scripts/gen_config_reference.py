@@ -83,6 +83,7 @@ META = {
     "backend.lease.connector": ("(sole offer)", "e.g. HDMI-A-1", "leased", "Connector to request by name; several offers with no choice is fatal."),
     "backend.lease.timeout_ms": ("5000", "> 0", "leased", "Bound on the whole lease negotiation; a compositor may defer the DRM fd until it regains DRM master."),
     "backend.lease.on_revoke": ("exit", "exit|gate", "leased", "On revocation (every VT switch away from the compositor is one): exit non-zero so a supervisor restarts and renegotiates, or gate and keep running with a frozen panel (debugging only)."),
+    "backend.lease.input": ("auto", "auto|on|off", "leased", "Whether to read input from raw evdev. A leased client has no wl_surface, so ungrabbed libinput is its only input source; under a host Wayland session that duplicates events into both this process and the compositor. auto disables it when a session is detected, on forces it (embedded-under-compositor), off never reads evdev."),
 
     # [view.backend.drm] — DRM/software only
     "backend.drm.device": ("(rank-pick)", "/dev/dri/cardN", "drm/sw", "DRM device node."),

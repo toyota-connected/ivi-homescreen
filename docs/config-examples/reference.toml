@@ -183,6 +183,10 @@
   # type=string default=(sole device) values=index or /dev/dri/cardN applies=leased
   device =
 
+  # Whether to read input from raw evdev. A leased client has no wl_surface, so ungrabbed libinput is its only input source; under a host Wayland session that duplicates events into both this process and the compositor. auto disables it when a session is detected, on forces it (embedded-under-compositor), off never reads evdev.
+  # type=string default=auto values=auto|on|off applies=leased
+  input =
+
   # On revocation (every VT switch away from the compositor is one): exit non-zero so a supervisor restarts and renegotiates, or gate and keep running with a frozen panel (debugging only).
   # type=string default=exit values=exit|gate applies=leased
   on_revoke =
