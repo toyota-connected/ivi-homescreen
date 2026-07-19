@@ -24,6 +24,7 @@
 
 #include "ihs/config.h"
 #include "ihs/logging.h"
+#include "ihs/platform_view.h"
 #include "ihs/trace.h"
 
 namespace ihs::dlt {
@@ -48,5 +49,13 @@ namespace ihs::config {
 const IhsConfigApi* config_api() noexcept;
 
 }  // namespace ihs::config
+
+namespace ihs::pv {
+
+// Returns the platform-view sub-table (function pointers over the flat ihs_pv_*
+// entry points). Defined in platform_view.cc; always compiled in.
+const IhsPlatformViewApi* platform_view_api() noexcept;
+
+}  // namespace ihs::pv
 
 #endif  // IHS_SHARED_SRC_IHS_INTERNAL_HPP_

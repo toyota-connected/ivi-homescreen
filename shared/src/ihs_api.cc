@@ -50,7 +50,7 @@ extern "C" const IhsApi* ihs_get_api(uint32_t requested_abi) {
       /* abi_version   */ IHS_SHARED_ABI_VERSION,
       /* logging       */ ihs::dlt::logging_api(),
       /* trace         */ ihs::trace::trace_api(),
-      /* platform_view */ nullptr,
+      /* platform_view */ ihs::pv::platform_view_api(),
       /* config        */ ihs::config::config_api(),
   };
   return &api;
