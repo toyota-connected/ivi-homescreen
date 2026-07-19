@@ -29,9 +29,12 @@
 // instead.
 #if BUILD_COMPOSITOR
 
+#include <dlfcn.h>
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -458,6 +461,32 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   }
   ihs::log::debug("[ihs_pv] platform-view host installed (dma-buf import {})",
                   g_importer.ready() ? "ready" : "unavailable");
+
+  // TEMPORARY test shim. The engine .so's factory is meant to be registered by
+  // Dart's @Native mlv_register_ihs_pv() (Dart is the sole dlopener), but that
+  // needs native-assets FFI resolution the embedder does not yet provide. Until
+  // it does, opt in with IVI_MLV_TEST_SHIM=<lib-path|1> to force-load the
+  // engine here (after the host exists) and run the same registration, so the
+  // render path can be validated. Remove once native-assets lands.
+  if (const char* shim = std::getenv("IVI_MLV_TEST_SHIM")) {
+    const char* lib = (shim[0] != '\0' && std::strcmp(shim, "1") != 0)
+                          ? shim
+                          : "libmaplibre_view.so";
+    if (void* handle = dlopen(lib, RTLD_NOW | RTLD_GLOBAL)) {
+      if (auto* reg = reinterpret_cast<void (*)()>(
+              dlsym(handle, "mlv_register_ihs_pv"))) {
+        reg();
+        ihs::log::debug("[ihs_pv] TEST SHIM registered engine factory via {}",
+                        lib);
+      } else {
+        ihs::log::warn("[ihs_pv] TEST SHIM: mlv_register_ihs_pv missing in {}",
+                       lib);
+      }
+    } else {
+      ihs::log::warn("[ihs_pv] TEST SHIM dlopen({}) failed: {}", lib,
+                     dlerror());
+    }
+  }
 }
 
 #else  // !BUILD_COMPOSITOR
