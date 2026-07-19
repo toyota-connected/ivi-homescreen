@@ -82,6 +82,22 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   IhsPluginView(const IhsPluginView&) = delete;
   IhsPluginView& operator=(const IhsPluginView&) = delete;
 
+  // Fire the plugin's dispose callback exactly once. A factory-created view can
+  // be torn down either through the registry's dispose path or by its
+  // RegisterListener "toggle" (a second create for the same id erases the owned
+  // instance), and the plugin's dispose is what stops any producer thread that
+  // still holds this view — so both paths must run it before the view's memory
+  // is freed, or that thread use-after-frees the view. Platform-thread only.
+  void DisposePlugin() {
+    if (disposed_) {
+      return;
+    }
+    disposed_ = true;
+    if (callbacks.dispose != nullptr) {
+      callbacks.dispose(plugin_user_data);
+    }
+  }
+
   // Plugin callback table + per-view state, filled by the factory.
   IhsPvCallbacks callbacks{};
   void* plugin_user_data{nullptr};
@@ -148,6 +164,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
  private:
   int32_t id_;
+  bool disposed_{false};
 };
 
 // One importer per process (a single Vulkan device), initialized once from the
@@ -157,6 +174,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 DmabufVulkanImporter g_importer;
 
 IhsPluginView::~IhsPluginView() {
+  // Stop any producer thread that still holds this view BEFORE freeing the
+  // imports it submits into — run outside the lock, since the dispose join may
+  // let that thread take the lock (GetVulkanImage/submit) on its way out.
+  DisposePlugin();
   // NOTE: the compositor may still hold in-flight blits of these images;
   // deferring the destroy behind the release fence is the explicit-sync
   // increment. Today dispose runs after the last present for the view.
@@ -200,10 +221,7 @@ void ListenerOnTouch(int32_t action,
 }
 
 void ListenerDispose(bool /*hybrid*/, void* data) {
-  auto* view = static_cast<IhsPluginView*>(data);
-  if (view->callbacks.dispose != nullptr) {
-    view->callbacks.dispose(view->plugin_user_data);
-  }
+  static_cast<IhsPluginView*>(data)->DisposePlugin();
 }
 
 const platform_view_listener kListener = {
