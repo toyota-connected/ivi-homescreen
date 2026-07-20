@@ -134,6 +134,10 @@ bool WaylandVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
   // produces.
   out->get_instance_proc_addr =
       reinterpret_cast<void*>(&WaylandVulkanBackend::PluginInstanceProcAddr);
+  // enabled_device_extensions_ outlives every context handed out (it is set
+  // once at device creation), so exposing its storage directly is safe.
+  out->device_extensions = enabled_device_extensions_.data();
+  out->device_extension_count = enabled_device_extensions_.size();
   return true;
 }
 
@@ -263,6 +267,30 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // stores checked out).
     m_alive_stores.clear();
     m_store_pool.Flush();
+    // Imported platform-view acquire semaphores (queue is idle by here).
+    for (auto& [seq, sem] : acquire_wait_retire_) {
+      d().vkDestroySemaphore(device_, sem, nullptr);
+    }
+    acquire_wait_retire_.clear();
+    for (VkSemaphore s : frame_acquire_waits_) {
+      d().vkDestroySemaphore(device_, s, nullptr);
+    }
+    frame_acquire_waits_.clear();
+    if (release_sem_ != VK_NULL_HANDLE) {
+      d().vkDestroySemaphore(device_, release_sem_, nullptr);
+      release_sem_ = VK_NULL_HANDLE;
+    }
+    // Run any imports a late dispose deferred but present never reaped (GPU is
+    // idle from the vkDeviceWaitIdle above, so this is safe).
+    {
+      const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+      for (auto& [tag, fn] : deferred_destroys_) {
+        if (fn) {
+          fn();
+        }
+      }
+      deferred_destroys_.clear();
+    }
 #endif
     if (swapchain_command_pool_ != nullptr) {
       d().vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
@@ -1931,6 +1959,15 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &begin);
 
+  // Explicit-sync acquire bookkeeping: retire semaphores from completed frames,
+  // start a fresh per-frame wait list (filled by CollectAcquireWait during
+  // compositing, consumed by the submit below).
+  ReapAcquireWaits();
+  ReapDeferredDestroys();
+  ++acquire_wait_seq_;
+  frame_acquire_waits_.clear();
+  frame_pv_surfaces_.clear();
+
   // A Vulkan platform view only composites correctly with src-over alpha (a
   // transparent Flutter overlay must blend over it, not overwrite it to black).
   // When one is present, blend the whole layer stack into the swapchain via
@@ -2069,22 +2106,46 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   const VkPipelineStageFlags wait_stage =
       blend ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
             : VK_PIPELINE_STAGE_TRANSFER_BIT;
+  // Wait the swapchain-image acquire plus every platform-view producer's
+  // acquire fence collected while compositing. The producer's copy is read at
+  // the fragment shader (blend) or transfer (blit), so wait its fence before
+  // both.
+  std::vector<VkSemaphore> wait_sems = {slot.image_available};
+  std::vector<VkPipelineStageFlags> wait_stages = {wait_stage};
+  for (VkSemaphore s : frame_acquire_waits_) {
+    wait_sems.push_back(s);
+    wait_stages.push_back(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                          VK_PIPELINE_STAGE_TRANSFER_BIT);
+  }
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submit.waitSemaphoreCount = 1;
-  submit.pWaitSemaphores = &slot.image_available;
-  submit.pWaitDstStageMask = &wait_stage;
+  submit.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size());
+  submit.pWaitSemaphores = wait_sems.data();
+  submit.pWaitDstStageMask = wait_stages.data();
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
   // Signal (and later present-wait on) the per-image semaphore, not a per-slot
   // one, so it isn't reused while a prior present on this image is pending.
+  // Also signal the release semaphore when a platform view was sampled, so its
+  // producer/host can tell when this frame is done reading it.
   VkSemaphore& render_finished = m_compositor_render_finished_[image_index];
-  submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &render_finished;
+  std::array<VkSemaphore, 2> signal_sems = {render_finished, release_sem_};
+  const bool signal_release =
+      !frame_pv_surfaces_.empty() && release_sem_ != VK_NULL_HANDLE;
+  submit.signalSemaphoreCount = signal_release ? 2 : 1;
+  submit.pSignalSemaphores = signal_sems.data();
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
   }
+  // Export the release fence to each platform view composited this frame.
+  PublishReleaseFences();
+  // The imported acquire semaphores are now owned by this submit; retire them
+  // after a margin so they are destroyed once its fence has signalled.
+  for (VkSemaphore s : frame_acquire_waits_) {
+    acquire_wait_retire_.emplace_back(acquire_wait_seq_ + 4, s);
+  }
+  frame_acquire_waits_.clear();
 
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -2223,6 +2284,120 @@ bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   return surface ? surface->OnPresent(layer) : true;
 }
 
+void WaylandVulkanBackend::CollectAcquireWait(ICompositorSurface* surface) {
+  // Every composited platform view is handed a release fence (so the producer /
+  // host can tell when this frame is done reading it). Create the shared,
+  // SYNC_FD-exportable release semaphore lazily on first use.
+  if (release_sem_ == VK_NULL_HANDLE && !release_sem_failed_) {
+    VkExportSemaphoreCreateInfo esi{};
+    esi.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+    esi.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    VkSemaphoreCreateInfo sci{};
+    sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    sci.pNext = &esi;
+    if (d().vkCreateSemaphore(device_, &sci, VKALLOC, &release_sem_) !=
+        VK_SUCCESS) {
+      release_sem_ = VK_NULL_HANDLE;
+      release_sem_failed_ = true;
+    }
+  }
+  if (release_sem_ != VK_NULL_HANDLE) {
+    frame_pv_surfaces_.push_back(surface);
+  }
+
+  const int fd = surface->TakeAcquireFenceFd();
+  if (fd < 0) {
+    return;  // producer stalled synchronously (or no SYNC_FD support)
+  }
+  VkSemaphore sem = VK_NULL_HANDLE;
+  VkSemaphoreCreateInfo sci{};
+  sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  if (d().vkCreateSemaphore(device_, &sci, VKALLOC, &sem) != VK_SUCCESS) {
+    close(fd);
+    return;
+  }
+  VkImportSemaphoreFdInfoKHR ii{};
+  ii.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR;
+  ii.semaphore = sem;
+  ii.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+  ii.flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT;  // required for SYNC_FD
+  ii.fd = fd;  // consumed by a successful import; owned by us on failure
+  if (d().vkImportSemaphoreFdKHR(device_, &ii) != VK_SUCCESS) {
+    close(fd);
+    d().vkDestroySemaphore(device_, sem, VKALLOC);
+    return;
+  }
+  frame_acquire_waits_.push_back(sem);
+}
+
+void WaylandVulkanBackend::ReapAcquireWaits() {
+  for (auto it = acquire_wait_retire_.begin();
+       it != acquire_wait_retire_.end();) {
+    if (acquire_wait_seq_ >= it->first) {
+      d().vkDestroySemaphore(device_, it->second, VKALLOC);
+      it = acquire_wait_retire_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void WaylandVulkanBackend::ScheduleDeferredDestroy(std::function<void()> fn) {
+  if (!fn) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+  // Free after a margin of presents: by then any frame that bound the resource
+  // has been submitted and its fence waited at slot reuse (frames retire in
+  // order), and no frame is mid-record (this runs at the top of present).
+  deferred_destroys_.emplace_back(deferred_epoch_ + 6, std::move(fn));
+}
+
+void WaylandVulkanBackend::ReapDeferredDestroys() {
+  std::vector<std::function<void()>> ready;
+  {
+    const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+    ++deferred_epoch_;
+    for (auto it = deferred_destroys_.begin();
+         it != deferred_destroys_.end();) {
+      if (deferred_epoch_ >= it->first) {
+        ready.push_back(std::move(it->second));
+        it = deferred_destroys_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (auto& fn : ready) {
+    fn();  // outside the lock: frees an import via the host's importer
+  }
+}
+
+void WaylandVulkanBackend::PublishReleaseFences() {
+  if (frame_pv_surfaces_.empty()) {
+    return;
+  }
+  // release_sem_ was signalled by the frame submit; export a sync_file that
+  // fires when the frame retires and give each composited view its own dup.
+  int release_fd = -1;
+  if (release_sem_ != VK_NULL_HANDLE) {
+    VkSemaphoreGetFdInfoKHR gfi{};
+    gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+    gfi.semaphore = release_sem_;
+    gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    if (d().vkGetSemaphoreFdKHR(device_, &gfi, &release_fd) != VK_SUCCESS) {
+      release_fd = -1;
+    }
+  }
+  for (auto* s : frame_pv_surfaces_) {
+    s->SetReleaseFenceFd(release_fd >= 0 ? dup(release_fd) : -1);
+  }
+  if (release_fd >= 0) {
+    close(release_fd);
+  }
+  frame_pv_surfaces_.clear();
+}
+
 bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                                                 const FlutterLayer** layers,
                                                 size_t count,
@@ -2307,6 +2482,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         continue;  // GL / subsurface platform view — nothing to sample
       }
       auto src = reinterpret_cast<VkImage>(vk_img);
+      // Wait the producer's acquire fence (if any) in this frame's submit.
+      CollectAcquireWait(surface.get());
       const auto cur =
           static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
       if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -2377,6 +2554,8 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     return;  // GL / subsurface platform view — nothing to blit here.
   }
   auto src = reinterpret_cast<VkImage>(vk_img);
+  // Wait the producer's acquire fence (if any) in this frame's submit.
+  CollectAcquireWait(surface.get());
   const bool external = surface->NeedsExternalQueueAcquire();
 
   if (external) {
@@ -2543,6 +2722,14 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &begin);
 
+  // Explicit-sync acquire bookkeeping (see PresentLayersImpl): retire completed
+  // semaphores and start this frame's wait list.
+  ReapAcquireWaits();
+  ReapDeferredDestroys();
+  ++acquire_wait_seq_;
+  frame_acquire_waits_.clear();
+  frame_pv_surfaces_.clear();
+
   // Sequence platform-view subsurface Z-order for this frame (both paths): the
   // backing-store layers compose into the dma-buf image, platform views
   // composite via their own subsurfaces (sequencer) or their VkImage (below).
@@ -2647,27 +2834,59 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
 
+  // Wait every platform-view producer's acquire fence collected while
+  // compositing (binary sync_file semaphores), before the fragment/transfer
+  // read of the view.
+  const std::vector<VkPipelineStageFlags> pv_wait_stages(
+      frame_acquire_waits_.size(),
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT);
+  if (!frame_acquire_waits_.empty()) {
+    submit.waitSemaphoreCount =
+        static_cast<uint32_t>(frame_acquire_waits_.size());
+    submit.pWaitSemaphores = frame_acquire_waits_.data();
+    submit.pWaitDstStageMask = pv_wait_stages.data();
+  }
+
   // Explicit sync: the blit submit signals the acquire timeline at this frame's
   // point (the compositor waits on it before sampling), so the CPU stall below
   // is skipped. The fence still fires for command-buffer/image reuse safety at
   // slot selection. Without explicit sync, the CPU fence is the producer sync.
   wl_vulkan::ExplicitSync::FramePoints sync_pts{};
-  VkSemaphore acquire_sem = VK_NULL_HANDLE;
   VkTimelineSemaphoreSubmitInfo tl{};
+  // Signal the wl compositor's acquire timeline (explicit sync) and/or the
+  // platform-view release semaphore (binary; value ignored). Build one array so
+  // both can ride the same submit.
+  std::array<VkSemaphore, 2> signal_sems{};
+  std::array<uint64_t, 2> signal_vals{};
+  uint32_t signal_count = 0;
   if (explicit_sync_) {
     sync_pts = explicit_sync_->NextFrame();
-    acquire_sem = explicit_sync_->acquire_semaphore();
-    tl.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    tl.signalSemaphoreValueCount = 1;
-    tl.pSignalSemaphoreValues = &sync_pts.acquire;
-    submit.pNext = &tl;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &acquire_sem;
+    signal_sems[signal_count] = explicit_sync_->acquire_semaphore();
+    signal_vals[signal_count] = sync_pts.acquire;
+    ++signal_count;
+  }
+  const bool signal_release =
+      !frame_pv_surfaces_.empty() && release_sem_ != VK_NULL_HANDLE;
+  if (signal_release) {
+    signal_sems[signal_count] = release_sem_;
+    signal_vals[signal_count] = 0;  // ignored for a binary semaphore
+    ++signal_count;
+  }
+  if (signal_count > 0) {
+    submit.signalSemaphoreCount = signal_count;
+    submit.pSignalSemaphores = signal_sems.data();
+    if (explicit_sync_) {  // a timeline signal needs the values sidecar
+      tl.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+      tl.signalSemaphoreValueCount = signal_count;
+      tl.pSignalSemaphoreValues = signal_vals.data();
+      submit.pNext = &tl;
+    }
   }
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueSubmit(queue_, 1, &submit, slot.fence);
   }
+  PublishReleaseFences();
   if (!explicit_sync_) {
     // CPU fence: block until the blit completes so the dma-buf holds a full
     // frame before the compositor samples it. Explicit sync replaces this stall
@@ -2675,6 +2894,12 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
     CHECK_VK_RESULT(
         d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
   }
+  // The imported acquire semaphores are owned by this submit now; retire them
+  // to be destroyed once its fence has signalled.
+  for (VkSemaphore s : frame_acquire_waits_) {
+    acquire_wait_retire_.emplace_back(acquire_wait_seq_ + 4, s);
+  }
+  frame_acquire_waits_.clear();
 
   RequestPresentationFeedback();
 

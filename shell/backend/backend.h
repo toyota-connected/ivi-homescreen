@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "config/common.h"
@@ -58,6 +59,12 @@ struct BackendVulkanContext {
   void* queue;            // VkQueue (externally synchronized — see note below)
   uint32_t queue_family_index;
   void* get_instance_proc_addr;  // PFN_vkGetInstanceProcAddr (shared loader)
+  // The device extensions the backend enabled, so a plugin can gate optional
+  // paths (e.g. sync_file semaphore export for explicit-sync acquire) on what
+  // the shared device actually supports. Backed by backend-owned storage that
+  // outlives the context; null/0 when the backend does not report them.
+  const char* const* device_extensions;
+  size_t device_extension_count;
 };
 
 // The unified display-target interface: a Backend owns surface lifecycle, the
@@ -146,6 +153,16 @@ class Backend {
    */
   virtual bool GetVulkanContext(BackendVulkanContext* /* out */) const {
     return false;
+  }
+
+  // Run @fn at a point where no compositor frame is recording or in flight —
+  // the top of a later present, after prior frame fences. A platform-view host
+  // uses this to free an imported image on dispose without racing the raster
+  // thread that may be mid-record binding it. Default: run now (no compositor).
+  virtual void ScheduleDeferredDestroy(std::function<void()> fn) {
+    if (fn) {
+      fn();
+    }
   }
 
   /**

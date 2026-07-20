@@ -102,6 +102,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   IhsPvCallbacks callbacks{};
   void* plugin_user_data{nullptr};
 
+  // The backend, so dispose can hand imports to it for a safe deferred free
+  // (see ~IhsPluginView). Set by the factory; may be null in headless contexts.
+  Backend* backend_{nullptr};
+
   // Negotiated grant, cached from the host's grant() for the accessors.
   uint32_t granted_kind{IHS_PV_KIND_NONE};
   uint32_t drm_plane_id{0};
@@ -129,6 +133,17 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     uint64_t reap_at{0};
   };
   std::vector<RetiredImport> retired;
+
+  // Acquire fence (sync_file fd) for the latest submit, handed to the
+  // compositor via TakeAcquireFenceFd. -1 when the producer stalled
+  // synchronously. Owned here until taken; closed on the next submit that
+  // supersedes it and on dispose.
+  int pending_acquire_fd{-1};
+
+  // Release fence (sync_file fd) from the compositor's most recent frame that
+  // sampled this view. Polled at dispose so imports are not freed while a
+  // compositor frame still binds them. -1 when none yet.
+  int release_fence_fd{-1};
 
   // ICompositorSurface — a Vulkan producer (no backing store, no GL texture).
   bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
@@ -174,6 +189,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // once-only transition for a compositor-owned image.
   [[nodiscard]] bool NeedsExternalQueueAcquire() const override { return true; }
 
+  // Hand the compositor the acquire fence for the current buffer, transferring
+  // ownership. -1 when the producer stalled synchronously (no wait needed).
+  [[nodiscard]] int TakeAcquireFenceFd() override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    const int fd = pending_acquire_fd;
+    pending_acquire_fd = -1;
+    return fd;
+  }
+
+  // Store the compositor's release fence for this view; it supersedes any
+  // previous one (the newest frame's completion implies the older).
+  void SetReleaseFenceFd(int fd) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (release_fence_fd >= 0) {
+      close(release_fence_fd);
+    }
+    release_fence_fd = fd;
+  }
+
  private:
   int32_t id_;
   bool disposed_{false};
@@ -190,18 +224,35 @@ IhsPluginView::~IhsPluginView() {
   // imports it submits into — run outside the lock, since the dispose join may
   // let that thread take the lock (GetVulkanImage/submit) on its way out.
   DisposePlugin();
-  // NOTE: the compositor may still hold in-flight blits of these images;
-  // deferring the destroy behind the release fence is the explicit-sync
-  // increment. Today dispose runs after the last present for the view.
   const std::lock_guard<std::mutex> lock(mutex);
+  if (release_fence_fd >= 0) {
+    close(release_fence_fd);
+    release_fence_fd = -1;
+  }
+  if (pending_acquire_fd >= 0) {
+    close(pending_acquire_fd);
+    pending_acquire_fd = -1;
+  }
+  // With explicit-sync acquire the compositor's read of these imports is gated
+  // on the producer's fence, so a re-create can dispose this view while a
+  // compositor frame is still recording or in flight binding them (a GPU
+  // completion fence can't cover a not-yet-submitted record). Hand the frees to
+  // the backend, which runs them at the top of a later present — after prior
+  // frames' fences and before recording — so no frame binds a freed image.
+  const auto defer = [this](DmabufVulkanImporter::ImportedImage img) {
+    if (backend_ != nullptr) {
+      backend_->ScheduleDeferredDestroy(
+          [img]() mutable { g_importer.Destroy(&img); });
+    } else {
+      g_importer.Destroy(&img);
+    }
+  };
   for (auto& [buffer_id, image] : buffers) {
-    g_importer.Destroy(&image);
+    defer(image);
   }
   buffers.clear();
-  // Drain any imports still awaiting their retire margin (a resize shortly
-  // before dispose); dispose already runs after the view's last present.
   for (auto& r : retired) {
-    g_importer.Destroy(&r.image);
+    defer(r.image);
   }
   retired.clear();
 }
@@ -271,6 +322,7 @@ int HostRegisterFactory(void* user_data,
           const PlatformViewRegistry::CreateRequest& request)
           -> std::unique_ptr<PlatformView> {
         auto view = std::make_unique<IhsPluginView>(request);
+        view->backend_ = BackendOf(state);
 
         IhsPvCreateInfo info{};
         info.struct_size = sizeof(info);
@@ -344,8 +396,13 @@ int HostVulkanContext(void* user_data, IhsVulkanContext* out) {
   out->queue = vk.queue;
   out->queue_family_index = vk.queue_family_index;
   out->get_instance_proc_addr = vk.get_instance_proc_addr;
-  // device/instance extensions, queue lock, and the VMA allocator are not
-  // exposed by the backend yet; the plugin allocates manually until then.
+  // Device extensions let the plugin gate optional paths (e.g. sync_file
+  // acquire) on the shared device's capabilities. Storage is backend-owned and
+  // outlives this context.
+  out->device_extensions = vk.device_extensions;
+  out->device_extension_count = vk.device_extension_count;
+  // Instance extensions, queue lock, and the VMA allocator are not exposed by
+  // the backend yet; the plugin allocates manually until then.
   return IHS_PV_OK;
 }
 
@@ -399,19 +456,18 @@ int HostSubmit(void* user_data,
                const IhsFrame* frame,
                int acquire_fence_fd,
                int* out_release_fence_fd) {
+  // Release fences (compositor -> producer) are a follow-up; nothing to return.
   if (out_release_fence_fd != nullptr) {
     *out_release_fence_fd = -1;
-  }
-  // Explicit sync is a follow-up; consume the acquire fence so it does not
-  // leak.
-  if (acquire_fence_fd >= 0) {
-    close(acquire_fence_fd);
   }
 
   (void)user_data;
   auto* v = reinterpret_cast<IhsPluginView*>(view);
   if (!g_importer.ready()) {
     CloseFrameFds(frame);
+    if (acquire_fence_fd >= 0) {
+      close(acquire_fence_fd);
+    }
     return IHS_PV_ERR_NO_BACKEND;
   }
 
@@ -422,12 +478,28 @@ int HostSubmit(void* user_data,
 
   const std::lock_guard<std::mutex> lock(v->mutex);
   ++v->submit_seq;
-  // Reap imports whose retire margin has elapsed (any frame that bound them has
-  // long since retired). Frames retire in order, so a simple submit count is a
-  // safe, bounded stand-in for a per-import fence.
+  // Stash this frame's acquire fence (a sync_file) for the compositor to wait
+  // on before sampling; it supersedes any previous unconsumed one, since the
+  // compositor only ever samples the latest submit (v->current). -1 means the
+  // producer stalled synchronously and no wait is needed.
+  if (v->pending_acquire_fd >= 0) {
+    close(v->pending_acquire_fd);
+  }
+  v->pending_acquire_fd = acquire_fence_fd;
+
+  // Reap imports whose retire margin has elapsed. This runs on the plugin's
+  // thread, so hand the free to the backend rather than destroying here — the
+  // compositor may still be recording a frame that binds the image, which a
+  // submit-count margin alone doesn't cover.
   for (auto rit = v->retired.begin(); rit != v->retired.end();) {
     if (v->submit_seq >= rit->reap_at) {
-      g_importer.Destroy(&rit->image);
+      if (v->backend_ != nullptr) {
+        auto img = rit->image;
+        v->backend_->ScheduleDeferredDestroy(
+            [img]() mutable { g_importer.Destroy(&img); });
+      } else {
+        g_importer.Destroy(&rit->image);
+      }
       rit = v->retired.erase(rit);
     } else {
       ++rit;
