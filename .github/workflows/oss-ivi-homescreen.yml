@@ -345,11 +345,23 @@ jobs:
             '*/test/*' '*/usr/*' '*/third_party/*' \
             --rc lcov_branch_coverage=1 -o coverage.info
 
-      - name: Print coverage summary
+      - name: Coverage summary
         working-directory: ${{github.workspace}}/build/unit-tests
         run: |
-          echo "=== Coverage Summary ==="
-          lcov --summary coverage.info 2>&1 | grep -E 'lines\.|functions\.|branches\.'
+          {
+            echo "## Unit test coverage"
+            echo '```'
+            lcov --summary coverage.info 2>&1 | grep -E 'lines|functions|branches'
+            echo '```'
+            echo "### Lowest-covered files"
+            echo '| File | Lines |'
+            echo '|---|---|'
+            lcov --list coverage.info 2>/dev/null \
+              | awk -F'|' '/%/ {gsub(/ /,"",$2); print $1"|"$2}' \
+              | sort -t'|' -k2 -n | head -15 \
+              | awk -F'|' '{printf "| %s | %s |\n", $1, $2}'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "${GITHUB_STEP_SUMMARY}"
 
       - name: Generate HTML report
         working-directory: ${{github.workspace}}/build/unit-tests
