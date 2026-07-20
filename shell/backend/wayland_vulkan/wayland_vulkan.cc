@@ -900,6 +900,8 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   info.imageFormat = surface_format_.format;
   info.imageColorSpace = surface_format_.colorSpace;
   info.imageExtent = clientSize;
+  swapchain_extent_ =
+      clientSize;  // the extent the images (and views) are made at
   info.imageArrayLayers = 1;
   // The compositor present path (PresentLayersImpl/BlitStoreToSwapchain) blits
   // each backing store into the swapchain image, so it must be a transfer
@@ -1967,9 +1969,13 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
     // Alpha-blend the whole stack (backing stores + platform views) straight
     // into the swapchain image. The render pass clears then leaves it in
     // GENERAL; transition that to PRESENT_SRC below.
+    // Size the blend to the swapchain images' actual extent (not
+    // width_/height_, which can differ mid-resize) so the framebuffer matches
+    // the image views.
     ok = CompositeLayersBlend(cmd, layers, count,
-                              swapchain_image_views_[image_index], width_,
-                              height_, m_compositor_current_frame_);
+                              swapchain_image_views_[image_index],
+                              swapchain_extent_.width, swapchain_extent_.height,
+                              m_compositor_current_frame_);
 
     VkImageMemoryBarrier to_present{};
     to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;

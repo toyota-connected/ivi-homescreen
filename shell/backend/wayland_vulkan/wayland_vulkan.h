@@ -233,6 +233,10 @@ class WaylandVulkanBackend final : public Backend {
   VkSwapchainKHR swapchain_{};
   VkCommandPool swapchain_command_pool_{};
   std::vector<VkImage> swapchain_images_;
+  // The extent the swapchain images were actually created at (the surface's
+  // currentExtent, which can differ from width_/height_ mid-resize). The blend
+  // path sizes its framebuffer to this so it matches the image views.
+  VkExtent2D swapchain_extent_{};
   // Color-attachment views of swapchain_images_ (same order), used to blend the
   // layer stack directly into the swapchain on the WSI path (platform-view
   // frames). Created in InitializeSwapChain, destroyed with the swapchain.

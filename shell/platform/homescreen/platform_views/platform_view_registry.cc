@@ -83,11 +83,17 @@ void PlatformViewRegistry::RegisterListener(
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (const auto it = instances_.find(id); it != instances_.end()) {
-      // Legacy toggle: a repeated registration for a live id clears it (matches
-      // the pre-registry PlatformViewAddListener). Move any owned instance out
-      // to destroy it after releasing the lock.
+      // A repeated registration for a live id — the framework re-creating a
+      // platform view with the same id before disposing the old one. The new
+      // view wins: move the old owned instance out to destroy after the lock,
+      // and replace the callback table + context in place so the entry stays
+      // well-formed (the matching CreateViaFactory attaches the new owned
+      // view). (Previously this erased the entry, which CreateViaFactory then
+      // resurrected via operator[] with a null listener -> a later Resize/touch
+      // dereferenced it and crashed.)
       to_destroy = std::move(it->second.owned);
-      instances_.erase(it);
+      it->second.listener = listener;
+      it->second.listener_context = context;
     } else {
       instances_[id] = Instance{listener, context, nullptr};
     }
@@ -111,7 +117,9 @@ bool PlatformViewRegistry::LookupListener(
     void** context) const {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto it = instances_.find(id);
-  if (it == instances_.end()) {
+  // A well-formed instance always has a listener; treat a listener-less entry
+  // as absent so callers (Resize/OnTouch/…) never dereference a null table.
+  if (it == instances_.end() || it->second.listener == nullptr) {
     return false;
   }
   *listener = it->second.listener;
