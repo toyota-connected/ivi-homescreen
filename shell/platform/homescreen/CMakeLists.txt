@@ -85,8 +85,20 @@ if (BUILD_COMPOSITOR)
     # consume the PUBLIC registry/handler sources above.
     target_sources(platform_homescreen PRIVATE
             platform_views/platform_view_host.cc
-            platform_views/dmabuf_vulkan_import.cc
     )
+
+    # The Vulkan dma-buf importer is only reachable on a Vulkan backend; it (and
+    # the host's Vulkan path) #include <vulkan/vulkan.h>. Compile it and put the
+    # vendored Vulkan headers on the path only for Vulkan builds, so an
+    # EGL/DRM-EGL/software build without system Vulkan headers stays
+    # Vulkan-header-free. Guarded in the host by IVI_HAVE_VULKAN.
+    if (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN)
+        target_sources(platform_homescreen PRIVATE
+                platform_views/dmabuf_vulkan_import.cc
+        )
+        target_include_directories(platform_homescreen PRIVATE
+                ${CMAKE_SOURCE_DIR}/third_party/Vulkan-Headers/include)
+    endif ()
 
     # The EGL/GLES dma-buf importer (the GL counterpart of the Vulkan one) is
     # only reachable on an EGL backend; it needs the EGL/GLES + libdrm headers
