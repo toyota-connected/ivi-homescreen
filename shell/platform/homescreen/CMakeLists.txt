@@ -88,6 +88,20 @@ if (BUILD_COMPOSITOR)
             platform_views/dmabuf_vulkan_import.cc
     )
 
+    # The EGL/GLES dma-buf importer (the GL counterpart of the Vulkan one) is
+    # only reachable on an EGL backend; it needs the EGL/GLES + libdrm headers
+    # and links EGL/GLESv2. Guarded in the host by IVI_HAVE_EGL.
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL)
+        target_sources(platform_homescreen PRIVATE
+                platform_views/egl_dmabuf_import.cc
+        )
+        if (NOT TARGET PkgConfig::DRM)
+            pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
+        endif ()
+        target_link_libraries(platform_homescreen PRIVATE
+                EGL GLESv2 PkgConfig::DRM)
+    endif ()
+
 endif ()
 
 # The external plugins framework (out-of-tree plugins built from the plugins
