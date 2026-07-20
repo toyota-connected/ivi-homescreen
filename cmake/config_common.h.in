@@ -62,6 +62,15 @@
 #else
 #define IVI_HAVE_EGL 0
 #endif
+
+// Vulkan is needed only by the Vulkan-based backends. The platform-view host's
+// dma-buf importer pulls <vulkan/vulkan.h>; gate it so EGL/DRM-EGL/software
+// builds without a Vulkan backend stay Vulkan-header-free (mirrors IVI_HAVE_EGL).
+#if BUILD_BACKEND_WAYLAND_VULKAN || BUILD_BACKEND_DRM_KMS_VULKAN
+#define IVI_HAVE_VULKAN 1
+#else
+#define IVI_HAVE_VULKAN 0
+#endif
 #cmakedefine01 BUILD_EGL_TRANSPARENCY
 #cmakedefine01 BUILD_EGL_ENABLE_3D
 #cmakedefine01 BUILD_EGL_ENABLE_MULTISAMPLE

@@ -36,10 +36,14 @@
 #include <memory>
 #include <string>
 
+#if IVI_HAVE_VULKAN
 #include <vulkan/vulkan.h>
+#endif
 
 #include "backend/backend.h"
+#if IVI_HAVE_VULKAN
 #include "dmabuf_vulkan_import.h"
+#endif
 #if IVI_HAVE_EGL
 #include "egl_dmabuf_import.h"
 #endif
@@ -115,27 +119,35 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   int shm_fd{-1};
   size_t shm_stride{0};
 
+  // The plugin submits from its own thread while the compositor samples on the
+  // raster thread, so `mutex` guards the import block(s) below (Vulkan and/or
+  // EGL — exactly one is populated per process).
+  mutable std::mutex mutex;
+
+#if IVI_HAVE_VULKAN
   // Imported dma-bufs keyed by the plugin's ring-buffer id — created once per
   // buffer, reused every submit. `current` points at the buffer the plugin most
   // recently submitted (a stable std::map node, so it survives later inserts).
-  // The plugin submits from its own thread while the compositor samples on the
-  // raster thread, so `mutex` guards this block.
-  mutable std::mutex mutex;
   std::map<uint32_t, DmabufVulkanImporter::ImportedImage> buffers;
   DmabufVulkanImporter::ImportedImage* current{nullptr};
   uint32_t current_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+#endif
 
+  // Common retire clock for both import paths (incremented on every submit).
+  uint64_t submit_seq{0};
+
+#if IVI_HAVE_VULKAN
   // A resize re-creates a ring slot's dma-buf at a new size, replacing the
   // cached import. The old import can't be destroyed at once — a compositor
   // present command buffer may still bind it. It waits here until enough later
   // submits have gone by that any such frame has retired (frames retire in
   // order; the compositor runs only a few frames deep), then it is destroyed.
-  uint64_t submit_seq{0};
   struct RetiredImport {
     DmabufVulkanImporter::ImportedImage image;
     uint64_t reap_at{0};
   };
   std::vector<RetiredImport> retired;
+#endif
 
 #if IVI_HAVE_EGL
   // EGL/GL counterpart of the Vulkan import block above, used when the active
@@ -190,6 +202,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   }
   void OnResize(int32_t, int32_t) override {}
 
+#if IVI_HAVE_VULKAN
   // The compositor samples the most recently submitted buffer. Null until the
   // first frame arrives — the compositor treats that as "nothing this frame".
   [[nodiscard]] void* GetVulkanImage(int32_t* width,
@@ -214,6 +227,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     const std::lock_guard<std::mutex> lock(mutex);
     current_layout = layout;
   }
+#endif
 
 #if IVI_HAVE_EGL
   // GL seam consumed by the EGL backends (wayland-egl / drm-kms-egl). Imports
@@ -265,11 +279,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   bool disposed_{false};
 };
 
+#if IVI_HAVE_VULKAN
 // One importer per process (a single Vulkan device), initialized once from the
 // backend's Vulkan context at host install. Stays not-ready when the active
 // backend is not Vulkan or lacks the dma-buf import extensions, in which case
 // ihs_pv views fall back to producing no frame.
 DmabufVulkanImporter g_importer;
+#endif
 
 #if IVI_HAVE_EGL
 // EGL/GL counterpart of g_importer, initialized from the backend's EGL context
@@ -292,6 +308,7 @@ IhsPluginView::~IhsPluginView() {
     close(pending_acquire_fd);
     pending_acquire_fd = -1;
   }
+#if IVI_HAVE_VULKAN
   // With explicit-sync acquire the compositor's read of these imports is gated
   // on the producer's fence, so a re-create can dispose this view while a
   // compositor frame is still recording or in flight binding them (a GPU
@@ -314,6 +331,7 @@ IhsPluginView::~IhsPluginView() {
     defer(r.image);
   }
   retired.clear();
+#endif
 
 #if IVI_HAVE_EGL
   // A frame stashed but never imported (submitted with no present before
@@ -609,8 +627,14 @@ int HostSubmit(void* user_data,
   (void)user_data;
   auto* v = reinterpret_cast<IhsPluginView*>(view);
 
+#if IVI_HAVE_VULKAN
+  const bool vulkan_ready = g_importer.ready();
+#else
+  constexpr bool vulkan_ready = false;
+#endif
+
 #if IVI_HAVE_EGL
-  if (!g_importer.ready() && g_egl_importer.ready()) {
+  if (!vulkan_ready && g_egl_importer.ready()) {
     // EGL backend: GL import is context-affine, so only stash the frame here
     // (on the plugin's thread); GetGlTextureName imports it on the raster
     // thread. The EGL backends composite the texture without an explicit
@@ -631,7 +655,18 @@ int HostSubmit(void* user_data,
   }
 #endif
 
-  if (!g_importer.ready()) {
+#if !IVI_HAVE_VULKAN
+  // No Vulkan importer compiled and EGL (if any) did not handle it: no backend
+  // consumes the frame.
+  (void)vulkan_ready;
+  CloseFrameFds(frame);
+  if (acquire_fence_fd >= 0) {
+    close(acquire_fence_fd);
+  }
+  return IHS_PV_ERR_NO_BACKEND;
+}
+#else
+  if (!vulkan_ready) {
     CloseFrameFds(frame);
     if (acquire_fence_fd >= 0) {
       close(acquire_fence_fd);
@@ -708,6 +743,7 @@ int HostSubmit(void* user_data,
   v->current_layout = VK_IMAGE_LAYOUT_GENERAL;
   return IHS_PV_OK;
 }
+#endif  // IVI_HAVE_VULKAN
 
 // Process-global host; user_data re-points at the most recently installed
 // engine (single-engine today).
@@ -735,33 +771,45 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   ihs_pv_set_host(&g_host);
 
   // Bring up the dma-buf importer once, on this thread, from the backend's
-  // Vulkan context — so the submit path (which runs off-thread) never races an
-  // init. Not-ready is fine: the view simply produces no frame.
+  // Vulkan or EGL context — so the submit path (which runs off-thread) never
+  // races an init. A backend provides exactly one of the two, so these are
+  // independent (not else-if). Not-ready is fine: the view produces no frame.
   if (Backend* backend = BackendOf(engine_state); backend != nullptr) {
+    (void)backend;
+#if IVI_HAVE_VULKAN
     if (BackendVulkanContext vk{}; backend->GetVulkanContext(&vk)) {
       g_importer.Init(static_cast<VkInstance>(vk.instance),
                       static_cast<VkPhysicalDevice>(vk.physical_device),
                       static_cast<VkDevice>(vk.device),
                       vk.get_instance_proc_addr);
     }
+#endif
 #if IVI_HAVE_EGL
-    // On an EGL backend (no Vulkan context), bring up the GL importer from the
-    // backend's EGLDisplay instead. Only the entry points are resolved here (no
-    // GL context needed); the imports themselves happen on the raster thread.
-    else if (BackendEglContext egl{}; backend->GetEglContext(&egl)) {
+    // On an EGL backend, bring up the GL importer from the backend's
+    // EGLDisplay. Only the entry points are resolved here (no GL context
+    // needed); the imports themselves happen on the raster thread.
+    if (BackendEglContext egl{}; backend->GetEglContext(&egl)) {
       g_egl_importer.Init(egl.display);
     }
 #endif
   }
-#if IVI_HAVE_EGL
+#if IVI_HAVE_VULKAN && IVI_HAVE_EGL
   ihs::log::debug(
       "[ihs_pv] platform-view host installed (dma-buf import: vulkan {}, egl "
       "{})",
       g_importer.ready() ? "ready" : "off",
       g_egl_importer.ready() ? "ready" : "off");
+#elif IVI_HAVE_VULKAN
+  ihs::log::debug(
+      "[ihs_pv] platform-view host installed (dma-buf import: vulkan {})",
+      g_importer.ready() ? "ready" : "unavailable");
+#elif IVI_HAVE_EGL
+  ihs::log::debug(
+      "[ihs_pv] platform-view host installed (dma-buf import: egl {})",
+      g_egl_importer.ready() ? "ready" : "unavailable");
 #else
-  ihs::log::debug("[ihs_pv] platform-view host installed (dma-buf import {})",
-                  g_importer.ready() ? "ready" : "unavailable");
+  ihs::log::debug(
+      "[ihs_pv] platform-view host installed (no dma-buf import backend)");
 #endif
 }
 
