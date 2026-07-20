@@ -11,7 +11,6 @@ endif ()
 
 set(TESTCASE_NAME "homescreen_compositor_registry_ut_test_driver")
 set(TESTCASE_CC test_case_compositor_registry.cc)
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})

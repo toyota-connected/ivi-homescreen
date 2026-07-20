@@ -14,8 +14,6 @@
 set(TESTCASE_NAME "homescreen_flutter_view_ut_test_driver")
 set(TESTCASE_CC test_case_flutter_view.cc)
 
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-
 # Basically, the following statements need not be modified
 add_executable(
         ${TESTCASE_NAME}

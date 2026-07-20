@@ -1,7 +1,6 @@
 # test-case specific settings
 set(TESTCASE_NAME "homescreen_text_input_ut_test_driver")
 set(TESTCASE_CC test_case_text_input.cc)
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # homescreen_ut_shell is an OBJECT library so its .o files are expanded
 # directly into this executable's link command — identical to the old
