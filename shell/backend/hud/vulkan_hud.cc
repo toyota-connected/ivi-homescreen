@@ -10,6 +10,8 @@
 
 #include "backend/hud/vulkan_hud.h"
 
+#include <cstring>
+
 // Shared dynamic dispatch (the backend owns/initialises the loader storage), so
 // the HUD's own render-pass/framebuffer calls resolve through the same
 // interposed loader as the rest of the compositor.
@@ -39,7 +41,20 @@ LoaderCtx g_loader_ctx;
 
 PFN_vkVoidFunction HudLoader(const char* name, void* user_data) {
   auto* c = static_cast<LoaderCtx*>(user_data);
-  return c->gipa(c->instance, name);
+  PFN_vkVoidFunction fn = c->gipa(c->instance, name);
+  if (fn == nullptr && name != nullptr &&
+      (std::strstr(name, "Swapchain") != nullptr ||
+       std::strstr(name, "Surface") != nullptr)) {
+    // imgui's LoadFunctions unconditionally requires the swapchain/surface
+    // entry points for its ImGui_ImplVulkanH_* window helpers. We never use
+    // those (the HUD records into the caller's render pass), and backends that
+    // scan out without a swapchain — the DRM Vulkan backend presents via
+    // dma-buf/KMS, so VK_KHR_swapchain/surface are not enabled — resolve them
+    // to null. Hand back a non-null sentinel so LoadFunctions succeeds; it is
+    // never dereferenced because the window helpers are never called.
+    return reinterpret_cast<PFN_vkVoidFunction>(&HudLoader);
+  }
+  return fn;
 }
 
 }  // namespace
@@ -119,7 +134,17 @@ std::unique_ptr<VulkanHud> VulkanHud::Create(VkInstance instance,
   hud->InitContext();
 
   g_loader_ctx = LoaderCtx{gipa, instance};
-  ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_1, HudLoader, &g_loader_ctx);
+  if (!ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_1, HudLoader,
+                                      &g_loader_ctx)) {
+    // A required core entry point did not resolve. Fail gracefully rather than
+    // letting ImGui_ImplVulkan_Init abort on its g_FunctionsLoaded assertion.
+    err = "ImGui_ImplVulkan_LoadFunctions failed";
+    ImGui::DestroyContext(static_cast<ImGuiContext*>(hud->imgui_ctx_));
+    hud->imgui_ctx_ = nullptr;  // so ~VulkanHud skips ImGui_ImplVulkan_Shutdown
+    d().vkDestroyDescriptorPool(device, hud->desc_pool_, nullptr);
+    d().vkDestroyRenderPass(device, hud->render_pass_, nullptr);
+    return nullptr;
+  }
 
   ImGui_ImplVulkan_InitInfo init{};
   init.ApiVersion = VK_API_VERSION_1_1;

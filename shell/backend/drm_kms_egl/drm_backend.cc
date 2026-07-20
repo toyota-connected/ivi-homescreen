@@ -1507,32 +1507,35 @@ bool DrmBackend::WaitForPendingFlip() const {
 }
 
 #if BUILD_HUD
-void DrmBackend::MaybeRenderHud(const FlutterLayer** layers, size_t count) {
+bool DrmBackend::EnsureHud() {
   if (!hud_checked_) {
     hud_checked_ = true;
     hud_enabled_ = std::getenv("IVI_HUD") != nullptr || hud_config_enable_;
   }
   if (!hud_enabled_ || hud_init_failed_) {
-    return;
+    return false;
   }
   if (!hud_) {
     std::string err;
-    hud_ = ihs::hud::GlHud::Create(err);  // GL context is current in Present
+    hud_ = ihs::hud::GlHud::Create(err);  // GL context is current in present
     if (!hud_) {
       hud_init_failed_ = true;
       ihs::log::warn("[DrmBackend] HUD unavailable ({})", err);
-      return;
+      return false;
     }
     hud_->SetConfig(hud_config_);
     hud_->SetOpen(true);
     ihs::log::info("[DrmBackend] debug HUD enabled");
   }
+  return true;
+}
 
+ihs::hud::HudStats DrmBackend::ComputeHudStats(float& dt_s) {
   timespec ts{};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
                           static_cast<uint64_t>(ts.tv_nsec);
-  float dt_s = 1.0f / 60.0f;
+  dt_s = 1.0f / 60.0f;
   if (hud_last_present_ns_ != 0 && now_ns > hud_last_present_ns_) {
     const uint64_t dt = now_ns - hud_last_present_ns_;
     dt_s = static_cast<float>(dt) / 1e9f;
@@ -1558,6 +1561,15 @@ void DrmBackend::MaybeRenderHud(const FlutterLayer** layers, size_t count) {
   }
   stats.target_fps =
       mode_.vrefresh > 0 ? static_cast<float>(mode_.vrefresh) : 60.0f;
+  return stats;
+}
+
+void DrmBackend::MaybeRenderHud(const FlutterLayer** layers, size_t count) {
+  if (!EnsureHud()) {
+    return;
+  }
+  float dt_s = 0.0f;
+  const ihs::hud::HudStats stats = ComputeHudStats(dt_s);
 
   std::vector<ihs::hud::HudViewSample> views;
   for (size_t i = 0; layers != nullptr && i < count; ++i) {
@@ -1573,6 +1585,17 @@ void DrmBackend::MaybeRenderHud(const FlutterLayer** layers, size_t count) {
   }
 
   hud_->Render(fb_w_, fb_h_, dt_s, stats, views);
+}
+
+unsigned int DrmBackend::RenderHudTexture(uint32_t width, uint32_t height) {
+  if (!EnsureHud()) {
+    return 0;
+  }
+  float dt_s = 0.0f;
+  const ihs::hud::HudStats stats = ComputeHudStats(dt_s);
+  // The plane compositor doesn't pass the layer list here; per-view rows are
+  // omitted (frame stats + histogram still show).
+  return hud_->RenderOffscreen(width, height, dt_s, stats, {});
 }
 #endif  // BUILD_HUD
 

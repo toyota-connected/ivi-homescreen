@@ -516,7 +516,20 @@ class DrmBackend : public Backend, public IFlipSink {
   std::array<float, 60> hud_interval_ms_{};
   uint32_t hud_interval_head_{0};
   uint32_t hud_interval_count_{0};
+  // Lazily create hud_ (env/config gated); returns true if it exists.
+  bool EnsureHud();
+  // Roll the present-interval window and produce this frame's stats; @dt_s out.
+  ihs::hud::HudStats ComputeHudStats(float& dt_s);
+  // GL-swap path: draw the HUD into FBO 0 before the buffer swap.
   void MaybeRenderHud(const FlutterLayer** layers, size_t count);
+
+ public:
+  // Plane-compositor path: render the HUD into an offscreen RGBA texture and
+  // return its GL name (0 when disabled), so DrmCompositor can composite it
+  // onto its scanout buffer (with the same y-flip it uses for app layers).
+  unsigned int RenderHudTexture(uint32_t width, uint32_t height);
+
+ private:
 #endif
 
  public:
