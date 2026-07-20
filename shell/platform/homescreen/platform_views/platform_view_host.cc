@@ -118,6 +118,18 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   DmabufVulkanImporter::ImportedImage* current{nullptr};
   uint32_t current_layout{VK_IMAGE_LAYOUT_UNDEFINED};
 
+  // A resize re-creates a ring slot's dma-buf at a new size, replacing the
+  // cached import. The old import can't be destroyed at once — a compositor
+  // present command buffer may still bind it. It waits here until enough later
+  // submits have gone by that any such frame has retired (frames retire in
+  // order; the compositor runs only a few frames deep), then it is destroyed.
+  uint64_t submit_seq{0};
+  struct RetiredImport {
+    DmabufVulkanImporter::ImportedImage image;
+    uint64_t reap_at{0};
+  };
+  std::vector<RetiredImport> retired;
+
   // ICompositorSurface — a Vulkan producer (no backing store, no GL texture).
   bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
                             FlutterBackingStore*) override {
@@ -185,6 +197,13 @@ IhsPluginView::~IhsPluginView() {
   for (auto& [buffer_id, image] : buffers) {
     g_importer.Destroy(&image);
   }
+  buffers.clear();
+  // Drain any imports still awaiting their retire margin (a resize shortly
+  // before dispose); dispose already runs after the view's last present.
+  for (auto& r : retired) {
+    g_importer.Destroy(&r.image);
+  }
+  retired.clear();
 }
 
 // Close every plane fd a frame still owns (its import did not consume them).
@@ -396,13 +415,43 @@ int HostSubmit(void* user_data,
     return IHS_PV_ERR_NO_BACKEND;
   }
 
+  // Margin, in submits, before a resize-replaced import is destroyed — safely
+  // more than the frames the compositor keeps in flight, so no present command
+  // buffer still binds it by the time it is freed.
+  constexpr uint64_t kImportRetireMargin = 8;
+
   const std::lock_guard<std::mutex> lock(v->mutex);
-  if (auto it = v->buffers.find(frame->buffer_id); it != v->buffers.end()) {
-    // Known ring buffer: the submitted fd is a redundant handle to the same
-    // memory. Close it and reuse the existing import.
+  ++v->submit_seq;
+  // Reap imports whose retire margin has elapsed (any frame that bound them has
+  // long since retired). Frames retire in order, so a simple submit count is a
+  // safe, bounded stand-in for a per-import fence.
+  for (auto rit = v->retired.begin(); rit != v->retired.end();) {
+    if (v->submit_seq >= rit->reap_at) {
+      g_importer.Destroy(&rit->image);
+      rit = v->retired.erase(rit);
+    } else {
+      ++rit;
+    }
+  }
+
+  const auto it = v->buffers.find(frame->buffer_id);
+  if (it != v->buffers.end() && it->second.width == frame->width &&
+      it->second.height == frame->height) {
+    // Known ring buffer, unchanged size: the submitted fd is a redundant handle
+    // to the same memory. Close it and reuse the existing import.
     CloseFrameFds(frame);
     v->current = &it->second;
   } else {
+    // New ring id, or the plugin re-created this slot at a different size (a
+    // resize): the cached import — if any — now aliases old memory of the wrong
+    // dimensions, so retire it and import the submitted dma-buf. Otherwise
+    // GetVulkanImage keeps handing the compositor the stale image and the blend
+    // just scales it to the new view rect. The old import is retired (not freed
+    // now) because a compositor present may still bind it this frame.
+    if (it != v->buffers.end()) {
+      v->retired.push_back({it->second, v->submit_seq + kImportRetireMargin});
+      v->buffers.erase(it);
+    }
     DmabufVulkanImporter::ImportedImage imported;
     if (!g_importer.Import(*frame, &imported)) {
       CloseFrameFds(frame);  // import left the fds untouched on failure
