@@ -97,7 +97,13 @@ TEST(HomescreenUtilsGetHomePath, Lv1Normal001) {
 /****************************************************************
 Test Case Name.Test Name： HomescreenUtilsGetConfigHomePath_Lv1Normal001
 Use Case Name: Initialization
-Test Summary：Test GetConfigHomePath with setting XDG_CONFIG_HOME env param
+Test Summary：Test GetConfigHomePath with XDG_CONFIG_HOME and static-cache
+             idempotency in a single, order-independent test.
+
+Note: GetConfigHomePath() resolves and caches the result on the first call
+for the process lifetime.  Both concerns — the XDG path resolution and the
+cache stability — are verified here so the test is not sensitive to
+--gtest_shuffle or --gtest_filter execution order.
 ***************************************************************/
 
 TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal001) {
@@ -109,30 +115,15 @@ TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal001) {
       std::string("/tmp/homescreen-xdg-test/.config/homescreen");
   setenv("XDG_CONFIG_HOME", input_value, true);
 
-  const auto home_path = Utils::GetConfigHomePath();
-
-  EXPECT_EQ(home_path, expected_value);
-
-  // delete param
-  unsetenv("XDG_CONFIG_HOME");
-}
-
-/****************************************************************
-Test Case Name.Test Name： HomescreenUtilsGetConfigHomePath_Lv1Normal002
-Use Case Name: Initialization
-Test Summary：Test GetConfigHomePath is idempotent (static cache)
-
-Note: GetConfigHomePath() resolves and caches the path on first call for the
-process lifetime (the config directory doesn't change while running). This
-test verifies the cached result is non-null, absolute, and stable across
-calls — the properties that matter in production. Testing the XDG fallback
-path separately would require a fresh process; that is covered by Lv1Normal001
-which runs first.
-***************************************************************/
-
-TEST(HomescreenUtilsGetConfigHomePath, Lv1Normal002) {
-  // Repeated calls must return the exact same pointer (static cache).
   const auto home_path_1 = Utils::GetConfigHomePath();
+
+  EXPECT_EQ(home_path_1, expected_value);
+
+  // Unset before the second call to confirm the cache is used, not a
+  // re-evaluation of the (now absent) env var.
+  unsetenv("XDG_CONFIG_HOME");
+
+  // Repeated calls must return the exact same pointer (static cache).
   const auto home_path_2 = Utils::GetConfigHomePath();
 
   ASSERT_NE(home_path_1, nullptr);
