@@ -769,9 +769,11 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
       }
     }
     swapchain_image_views_.clear();
+#if BUILD_COMPOSITOR
     if (layer_compositor_) {
       layer_compositor_->ClearFramebuffers();
     }
+#endif
 #if BUILD_HUD
     if (hud_) {
       hud_->DropFramebuffers();  // views it cached were just freed
