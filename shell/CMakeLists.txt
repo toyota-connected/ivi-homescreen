@@ -412,6 +412,22 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
             VK_USE_PLATFORM_WAYLAND_KHR=1)
 endif ()
+# Dear ImGui debug HUD (frame stats + per-view tracking + live toggles). The
+# shared UI core is built once; the Vulkan and/or GL render backend is added per
+# the enabled backends, matching third_party/imgui's conditional impl sources.
+if (BUILD_HUD AND BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_VULKAN OR
+        BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_BACKEND_WAYLAND_EGL OR
+        BUILD_BACKEND_DRM_KMS_EGL))
+    target_sources(${PROJECT_NAME} PRIVATE backend/hud/hud_base.cc)
+    if (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN)
+        target_sources(${PROJECT_NAME} PRIVATE backend/hud/vulkan_hud.cc)
+    endif ()
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL)
+        target_sources(${PROJECT_NAME} PRIVATE backend/hud/gl_hud.cc)
+    endif ()
+    target_link_libraries(${PROJECT_NAME} PRIVATE imgui)
+endif ()
+
 if (BUILD_CRASH_HANDLER)
     target_link_libraries(${PROJECT_NAME} PRIVATE sentry::sentry)
 endif ()

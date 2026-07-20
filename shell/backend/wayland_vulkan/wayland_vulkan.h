@@ -16,10 +16,12 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -66,6 +68,10 @@ class WlDmabufBuffer;
 class ExplicitSync;
 class LayerCompositor;
 }  // namespace wl_vulkan
+
+namespace ihs::hud {
+class VulkanHud;
+}  // namespace ihs::hud
 
 class WaylandVulkanBackend final : public Backend {
  public:
@@ -695,6 +701,37 @@ class WaylandVulkanBackend final : public Backend {
   // No-op when IVI_VK_PROFILE is unset. Mutates profile_/session_totals_
   // without locks because the rasterizer thread is the only writer.
   void ProfilePresent(bool ok);
+
+#if BUILD_HUD
+  // Dear ImGui debug overlay drawn over the composited frame. Created lazily on
+  // the first present when IVI_HUD is set; toggled open/closed by ToggleHud
+  // from the shell input path. All HUD Vulkan work (create/record) runs on the
+  // raster thread inside the present command buffer.
+  std::unique_ptr<ihs::hud::VulkanHud> hud_;
+  bool hud_enabled_{false};      // IVI_HUD present (checked once)
+  bool hud_checked_{false};      // env probed
+  bool hud_init_failed_{false};  // create failed; don't retry
+  // Rolling present-interval window for the HUD's fps/frame stats, independent
+  // of IVI_VK_PROFILE. Written on the raster thread only.
+  uint64_t hud_last_present_ns_{0};
+  std::array<float, 60> hud_interval_ms_{};
+  uint32_t hud_interval_head_{0};
+  uint32_t hud_interval_count_{0};
+
+  // Lazily create hud_ (no-op if disabled/already tried). Records the HUD over
+  // @view (@w x @h) into @cmd, emitting a barrier from @old_layout to GENERAL
+  // first if needed; returns true if it drew (image is then in GENERAL, so the
+  // caller must transition to PRESENT_SRC from GENERAL). Returns false when the
+  // HUD is inactive and the caller should transition from @old_layout as usual.
+  bool MaybeRenderHud(VkCommandBuffer cmd,
+                      VkImage image,
+                      VkImageView view,
+                      uint32_t w,
+                      uint32_t h,
+                      VkImageLayout old_layout,
+                      const FlutterLayer** layers,
+                      size_t count);
+#endif  // BUILD_HUD
 
   // wp_presentation vsync now lives in the Display-owned WaylandVsyncProvider;
   // the backend forwards to it. Same pattern as WaylandEglBackend. The

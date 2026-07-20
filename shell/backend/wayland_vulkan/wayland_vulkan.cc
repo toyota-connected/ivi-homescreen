@@ -39,6 +39,9 @@
 
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "backend/wayland_vulkan/wl_explicit_sync.h"
+#if BUILD_HUD
+#include "backend/hud/vulkan_hud.h"
+#endif
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "vulkan_queue_interposer.h"
 
@@ -224,6 +227,12 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // flag ("wl_buffer still attached" / "queue destroyed while proxies still
     // attached") and which can fault during vkDestroyDevice.
     d().vkDeviceWaitIdle(device_);
+#if BUILD_HUD
+    // Tear the HUD down while device_ is still valid: ~VulkanHud runs
+    // ImGui_ImplVulkan_Shutdown, which frees Vulkan buffers/memory. Left to the
+    // member destructor it would run after vkDestroyDevice below and fault.
+    hud_.reset();
+#endif
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
     // Retire any in-flight pacing callback. Safe here: App::~App() has already
@@ -763,6 +772,11 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
     if (layer_compositor_) {
       layer_compositor_->ClearFramebuffers();
     }
+#if BUILD_HUD
+    if (hud_) {
+      hud_->DropFramebuffers();  // views it cached were just freed
+    }
+#endif
     CHECK_VK_RESULT(
         d().vkResetCommandPool(device_, swapchain_command_pool_,
                                VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
@@ -1315,6 +1329,129 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
   }
   p = FrameProfile{.last_present_ns = p.last_present_ns};
 }
+
+// -----------------------------------------------------------------------------
+// Debug HUD (Dear ImGui). Created on the raster thread on first present when
+// IVI_HUD is set (or on the first ToggleHud), recorded into the present command
+// buffer, and fed input from the platform thread via the shell.
+// -----------------------------------------------------------------------------
+
+#if BUILD_HUD
+bool WaylandVulkanBackend::MaybeRenderHud(VkCommandBuffer cmd,
+                                          VkImage image,
+                                          VkImageView view,
+                                          uint32_t w,
+                                          uint32_t h,
+                                          VkImageLayout old_layout,
+                                          const FlutterLayer** layers,
+                                          size_t count) {
+  if (!hud_checked_) {
+    hud_checked_ = true;
+    hud_enabled_ = std::getenv("IVI_HUD") != nullptr || hud_config_enable_;
+  }
+  if (!hud_enabled_ || hud_init_failed_) {
+    return false;
+  }
+  if (!hud_) {
+    std::string err;
+    // Match the HUD render pass to the actual target image format. The dma-buf
+    // ring images are B8G8R8A8_UNORM and the swapchain-format selection is
+    // skipped on that path (surface_format_ stays UNDEFINED), so pick the ring
+    // format explicitly there; the WSI path uses the chosen swapchain format.
+    const VkFormat hud_format = dmabuf_present_active_
+                                    ? VK_FORMAT_B8G8R8A8_UNORM
+                                    : surface_format_.format;
+    const uint32_t hud_image_count =
+        dmabuf_present_active_
+            ? static_cast<uint32_t>(dmabuf_slots_.size())
+            : static_cast<uint32_t>(swapchain_images_.size());
+    hud_ = ihs::hud::VulkanHud::Create(
+        instance_, physical_device_, device_, queue_family_index_, queue_,
+        reinterpret_cast<void*>(d().vkGetInstanceProcAddr), hud_format,
+        hud_image_count, err);
+    if (!hud_) {
+      hud_init_failed_ = true;
+      ihs::log::warn("[WaylandVulkanBackend] HUD unavailable ({})", err);
+      return false;
+    }
+    hud_->SetConfig(hud_config_);  // appearance from [hud] config
+    hud_->SetOpen(true);           // config/IVI_HUD summons it open
+    ihs::log::info("[WaylandVulkanBackend] debug HUD enabled");
+  }
+
+  // Present-interval window for the HUD's fps/frame stats (independent of
+  // IVI_VK_PROFILE). Raster thread is the only writer.
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                          static_cast<uint64_t>(ts.tv_nsec);
+  float dt_s = 1.0f / 60.0f;
+  if (hud_last_present_ns_ != 0 && now_ns > hud_last_present_ns_) {
+    const uint64_t dt = now_ns - hud_last_present_ns_;
+    dt_s = static_cast<float>(dt) / 1e9f;
+    hud_interval_ms_[hud_interval_head_] = static_cast<float>(dt) / 1e6f;
+    hud_interval_head_ = (hud_interval_head_ + 1) % hud_interval_ms_.size();
+    if (hud_interval_count_ < hud_interval_ms_.size()) {
+      ++hud_interval_count_;
+    }
+  }
+  hud_last_present_ns_ = now_ns;
+
+  ihs::hud::HudStats stats{};
+  if (hud_interval_count_ > 0) {
+    float sum = 0.0f;
+    float worst = 0.0f;
+    for (uint32_t i = 0; i < hud_interval_count_; ++i) {
+      sum += hud_interval_ms_[i];
+      worst = std::max(worst, hud_interval_ms_[i]);
+    }
+    stats.frame_ms = sum / static_cast<float>(hud_interval_count_);
+    stats.frame_max_ms = worst;
+    stats.fps = stats.frame_ms > 0.0f ? 1000.0f / stats.frame_ms : 0.0f;
+  }
+  stats.dmabuf_present = dmabuf_present_active_;
+  stats.explicit_sync = explicit_sync_ != nullptr;
+  const uint32_t refresh_ns = vsync_ != nullptr ? vsync_->RefreshPeriodNs() : 0;
+  stats.target_fps =
+      refresh_ns > 0 ? 1e9f / static_cast<float>(refresh_ns) : 60.0f;
+
+  // Snapshot the platform views composited this frame so the HUD can track
+  // per-view present counts and flash add/dispose.
+  std::vector<ihs::hud::HudViewSample> views;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (layer != nullptr &&
+        layer->type == kFlutterLayerContentTypePlatformView &&
+        layer->platform_view != nullptr) {
+      views.push_back({layer->platform_view->identifier,
+                       static_cast<uint32_t>(layer->size.width),
+                       static_cast<uint32_t>(layer->size.height),
+                       dmabuf_present_active_});
+    }
+  }
+
+  // Bring the swapchain image to GENERAL for the HUD's LOAD render pass.
+  if (old_layout != VK_IMAGE_LAYOUT_GENERAL) {
+    VkImageMemoryBarrier to_general{};
+    to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_general.oldLayout = old_layout;
+    to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_general.image = image;
+    to_general.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_general.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                             0, nullptr, 0, nullptr, 1, &to_general);
+  }
+
+  hud_->Render(cmd, view, w, h, dt_s, stats, views);
+  return true;
+}
+#endif  // BUILD_HUD
 
 // -----------------------------------------------------------------------------
 // wp_presentation-driven vsync. Mirrors WaylandEglBackend; the only path
@@ -2014,6 +2151,13 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                               swapchain_extent_.width, swapchain_extent_.height,
                               m_compositor_current_frame_);
 
+#if BUILD_HUD
+    // Image is already in GENERAL; the HUD leaves it there.
+    MaybeRenderHud(cmd, dst, swapchain_image_views_[image_index],
+                   swapchain_extent_.width, swapchain_extent_.height,
+                   VK_IMAGE_LAYOUT_GENERAL, layers, count);
+#endif
+
     VkImageMemoryBarrier to_present{};
     to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     to_present.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -2072,10 +2216,22 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
       }
     }
 
+    // The HUD (if active) transitions TRANSFER_DST->GENERAL and draws; the
+    // present transition then sources from GENERAL instead of TRANSFER_DST.
+#if BUILD_HUD
+    const bool hud_drew =
+        MaybeRenderHud(cmd, dst, swapchain_image_views_[image_index],
+                       swapchain_extent_.width, swapchain_extent_.height,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layers, count);
+#else
+    const bool hud_drew = false;
+#endif
+
     // Transition swapchain image -> PRESENT_SRC_KHR.
     VkImageMemoryBarrier to_present{};
     to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_present.oldLayout = hud_drew ? VK_IMAGE_LAYOUT_GENERAL
+                                    : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -2083,9 +2239,13 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
     to_present.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     to_present.subresourceRange.levelCount = 1;
     to_present.subresourceRange.layerCount = 1;
-    to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_present.srcAccessMask = hud_drew ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                                        : VK_ACCESS_TRANSFER_WRITE_BIT;
     to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    d().vkCmdPipelineBarrier(cmd,
+                             hud_drew
+                                 ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                                 : VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
                              nullptr, 0, nullptr, 1, &to_present);
   }
@@ -2826,6 +2986,13 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
                              nullptr, 0, nullptr, 1, &to_general);
     slot.layout = VK_IMAGE_LAYOUT_GENERAL;
   }
+
+#if BUILD_HUD
+  // Draw the debug HUD over the composited slot (already GENERAL, which is also
+  // the layout the exported dma-buf is scanned out in, so no post-transition).
+  MaybeRenderHud(cmd, slot.image->image(), slot.image->view(), w, h,
+                 VK_IMAGE_LAYOUT_GENERAL, layers, count);
+#endif
 
   d().vkEndCommandBuffer(cmd);
 
