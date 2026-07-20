@@ -40,6 +40,9 @@
 
 #include "backend/backend.h"
 #include "dmabuf_vulkan_import.h"
+#if IVI_HAVE_EGL
+#include "egl_dmabuf_import.h"
+#endif
 #include "flutter_desktop_view_controller_state.h"
 #include "platform_view.h"
 #include "platform_view_listener.h"
@@ -134,6 +137,34 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   };
   std::vector<RetiredImport> retired;
 
+#if IVI_HAVE_EGL
+  // EGL/GL counterpart of the Vulkan import block above, used when the active
+  // backend is EGL: the same submitted dma-buf is imported into a GL_TEXTURE_2D
+  // (cached per ring buffer) that GetGlTextureName hands the EGL compositor.
+  // Exactly one of the Vulkan or EGL block is populated per process (one
+  // backend). Guarded by `mutex` like the Vulkan block.
+  //
+  // Unlike Vulkan, GL import (glGenTextures / glEGLImageTargetTexture2DOES) is
+  // GL-context-affine, so it can't run in HostSubmit on the plugin's thread.
+  // The producer's frame is stashed in `pending_egl` on submit; the actual
+  // import happens lazily in GetGlTextureName, which the EGL compositor calls
+  // on the raster thread with the context current. These fields are therefore
+  // mutated from the const GetGlTextureName — hence `mutable` (guarded by
+  // `mutex`).
+  struct PendingEglFrame {
+    bool valid{false};
+    IhsFrame frame{};  // owns the plane fds until imported / superseded
+  };
+  mutable PendingEglFrame pending_egl;
+  mutable std::map<uint32_t, EglDmabufImporter::ImportedTexture> buffers_egl;
+  mutable EglDmabufImporter::ImportedTexture* current_egl{nullptr};
+  struct RetiredEglImport {
+    EglDmabufImporter::ImportedTexture texture;
+    uint64_t reap_at{0};
+  };
+  mutable std::vector<RetiredEglImport> retired_egl;
+#endif
+
   // Acquire fence (sync_file fd) for the latest submit, handed to the
   // compositor via TakeAcquireFenceFd. -1 when the producer stalled
   // synchronously. Owned here until taken; closed on the next submit that
@@ -184,6 +215,27 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     current_layout = layout;
   }
 
+#if IVI_HAVE_EGL
+  // GL seam consumed by the EGL backends (wayland-egl / drm-kms-egl). Imports
+  // any frame stashed by HostSubmit into a GL_TEXTURE_2D on this (raster)
+  // thread — the GL context is current here — then returns it. 0 until the
+  // first frame. Defined out of line (needs g_egl_importer + CloseFrameFds).
+  [[nodiscard]] uint32_t GetGlTextureName() const override;
+  [[nodiscard]] int32_t GetGlTextureWidth() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current_egl != nullptr ? static_cast<int32_t>(current_egl->width)
+                                  : 0;
+  }
+  [[nodiscard]] int32_t GetGlTextureHeight() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current_egl != nullptr ? static_cast<int32_t>(current_egl->height)
+                                  : 0;
+  }
+  // Imported dma-bufs are top-first (row 0 is the top), so the EGL compositor
+  // must V-flip when sampling into its bottom-first framebuffer.
+  [[nodiscard]] bool TextureIsTopFirst() const override { return true; }
+#endif
+
   // The image is an imported dma-buf the plugin rewrites; the compositor
   // acquires it from VK_QUEUE_FAMILY_EXTERNAL each frame rather than using the
   // once-only transition for a compositor-owned image.
@@ -218,6 +270,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 // backend is not Vulkan or lacks the dma-buf import extensions, in which case
 // ihs_pv views fall back to producing no frame.
 DmabufVulkanImporter g_importer;
+
+#if IVI_HAVE_EGL
+// EGL/GL counterpart of g_importer, initialized from the backend's EGL context
+// at host install when the active backend is EGL (and Vulkan is absent). Stays
+// not-ready on a Vulkan backend.
+EglDmabufImporter g_egl_importer;
+#endif
 
 IhsPluginView::~IhsPluginView() {
   // Stop any producer thread that still holds this view BEFORE freeing the
@@ -255,6 +314,38 @@ IhsPluginView::~IhsPluginView() {
     defer(r.image);
   }
   retired.clear();
+
+#if IVI_HAVE_EGL
+  // A frame stashed but never imported (submitted with no present before
+  // dispose) still owns its dma-buf fds — close them so they don't leak.
+  // (CloseFrameFds is defined below this out-of-line dtor, so close inline.)
+  if (pending_egl.valid) {
+    for (uint32_t i = 0; i < pending_egl.frame.plane_count && i < 4; ++i) {
+      if (pending_egl.frame.plane_fd[i] >= 0) {
+        close(pending_egl.frame.plane_fd[i]);
+      }
+    }
+    pending_egl.valid = false;
+  }
+  // Same deferred free for the GL imports (glDeleteTextures needs the GL
+  // context current, which the backend's deferred-destroy runs at a present).
+  const auto defer_egl = [this](EglDmabufImporter::ImportedTexture tex) {
+    if (backend_ != nullptr) {
+      backend_->ScheduleDeferredDestroy(
+          [tex]() mutable { g_egl_importer.Destroy(&tex); });
+    } else {
+      g_egl_importer.Destroy(&tex);
+    }
+  };
+  for (auto& [buffer_id, tex] : buffers_egl) {
+    defer_egl(tex);
+  }
+  buffers_egl.clear();
+  for (auto& r : retired_egl) {
+    defer_egl(r.texture);
+  }
+  retired_egl.clear();
+#endif
 }
 
 // Close every plane fd a frame still owns (its import did not consume them).
@@ -265,6 +356,51 @@ void CloseFrameFds(const IhsFrame* frame) {
     }
   }
 }
+
+#if IVI_HAVE_EGL
+// Raster-thread lazy import for the EGL path: HostSubmit stashed the frame
+// (plugin thread, no GL context); import it here, where the EGL compositor
+// calls us with the context current, caching per ring buffer like the Vulkan
+// path.
+uint32_t IhsPluginView::GetGlTextureName() const {
+  const std::lock_guard<std::mutex> lock(mutex);
+  if (pending_egl.valid) {
+    // Margin (in submits) before a resize-replaced import is destroyed; the
+    // compositor samples GetGlTextureName synchronously here, so GL's own
+    // deferred deletion already covers in-flight draws — the margin is safety.
+    constexpr uint64_t kImportRetireMargin = 8;
+    for (auto rit = retired_egl.begin(); rit != retired_egl.end();) {
+      if (submit_seq >= rit->reap_at) {
+        g_egl_importer.Destroy(&rit->texture);  // GL context current here
+        rit = retired_egl.erase(rit);
+      } else {
+        ++rit;
+      }
+    }
+    IhsFrame& f = pending_egl.frame;
+    const auto it = buffers_egl.find(f.buffer_id);
+    if (it != buffers_egl.end() && it->second.width == f.width &&
+        it->second.height == f.height) {
+      CloseFrameFds(&f);  // redundant handle to the cached import
+      current_egl = &it->second;
+    } else {
+      if (it != buffers_egl.end()) {
+        retired_egl.push_back({it->second, submit_seq + kImportRetireMargin});
+        buffers_egl.erase(it);
+      }
+      EglDmabufImporter::ImportedTexture imported;
+      if (g_egl_importer.Import(f, &imported)) {
+        auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
+        current_egl = &pos->second;
+      } else {
+        CloseFrameFds(&f);  // import left the fds untouched on failure
+      }
+    }
+    pending_egl.valid = false;
+  }
+  return current_egl != nullptr ? current_egl->texture : 0;
+}
+#endif
 
 // platform_view_listener trampolines: the registry drives these with the
 // listener context (the IhsPluginView*), which we forward into the plugin's
@@ -380,6 +516,15 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     if (backend->GetVulkanContext(&vk)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
     }
+#if IVI_HAVE_EGL
+    // The EGL backends import a submitted dma-buf into a GL_TEXTURE_2D, so the
+    // dma-buf-import kind is offered on a GL context too (a GLES producer
+    // path).
+    BackendEglContext egl{};
+    if (backend->GetEglContext(&egl)) {
+      out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+    }
+#endif
   }
   return IHS_PV_OK;
 }
@@ -463,6 +608,29 @@ int HostSubmit(void* user_data,
 
   (void)user_data;
   auto* v = reinterpret_cast<IhsPluginView*>(view);
+
+#if IVI_HAVE_EGL
+  if (!g_importer.ready() && g_egl_importer.ready()) {
+    // EGL backend: GL import is context-affine, so only stash the frame here
+    // (on the plugin's thread); GetGlTextureName imports it on the raster
+    // thread. The EGL backends composite the texture without an explicit
+    // acquire wait, so the producer must have finished rendering before submit
+    // — close the acquire fence (a GL fence wait on this path is a follow-up).
+    if (acquire_fence_fd >= 0) {
+      close(acquire_fence_fd);
+    }
+    const std::lock_guard<std::mutex> lock(v->mutex);
+    ++v->submit_seq;
+    if (v->pending_egl.valid) {
+      CloseFrameFds(&v->pending_egl.frame);  // superseded before import
+    }
+    v->pending_egl.frame = *frame;       // take ownership of the plane fds
+    v->pending_egl.frame.hdr = nullptr;  // do not retain the plugin's hdr ptr
+    v->pending_egl.valid = true;
+    return IHS_PV_OK;
+  }
+#endif
+
   if (!g_importer.ready()) {
     CloseFrameFds(frame);
     if (acquire_fence_fd >= 0) {
@@ -576,9 +744,25 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
                       static_cast<VkDevice>(vk.device),
                       vk.get_instance_proc_addr);
     }
+#if IVI_HAVE_EGL
+    // On an EGL backend (no Vulkan context), bring up the GL importer from the
+    // backend's EGLDisplay instead. Only the entry points are resolved here (no
+    // GL context needed); the imports themselves happen on the raster thread.
+    else if (BackendEglContext egl{}; backend->GetEglContext(&egl)) {
+      g_egl_importer.Init(egl.display);
+    }
+#endif
   }
+#if IVI_HAVE_EGL
+  ihs::log::debug(
+      "[ihs_pv] platform-view host installed (dma-buf import: vulkan {}, egl "
+      "{})",
+      g_importer.ready() ? "ready" : "off",
+      g_egl_importer.ready() ? "ready" : "off");
+#else
   ihs::log::debug("[ihs_pv] platform-view host installed (dma-buf import {})",
                   g_importer.ready() ? "ready" : "unavailable");
+#endif
 }
 
 #else  // !BUILD_COMPOSITOR
