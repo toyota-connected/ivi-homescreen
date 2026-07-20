@@ -195,6 +195,8 @@ class WaylandVulkanBackend final : public Backend {
                                int32_t width,
                                int32_t height) override;
 
+  void ScheduleDeferredDestroy(std::function<void()> fn) override;
+
   [[nodiscard]] bool HasDmaBufExport() const { return dma_buf_export_ok_; }
 #endif
 
@@ -503,6 +505,42 @@ class WaylandVulkanBackend final : public Backend {
                             uint32_t width,
                             uint32_t height,
                             uint64_t frame);
+
+  /// Explicit-sync acquire: a platform-view producer may hand over a sync_file
+  /// that signals when its render/copy completed. Import it into a binary
+  /// semaphore and stash it in frame_acquire_waits_ so the frame's queue submit
+  /// waits on it before sampling the view (no reliance on the producer having
+  /// CPU-stalled). No-op when the surface has no acquire fence.
+  void CollectAcquireWait(ICompositorSurface* surface);
+  /// Destroy imported acquire semaphores whose frame has completed.
+  void ReapAcquireWaits();
+
+  /// After the frame submit that signalled release_sem_, export a release fence
+  /// (sync_file) and hand each platform view composited this frame its own dup,
+  /// so the producer/host can wait it before reusing or freeing the buffer.
+  void PublishReleaseFences();
+
+  // Acquire semaphores imported for the frame currently being recorded; the
+  // queue submit waits on them, then they move to acquire_wait_retire_.
+  std::vector<VkSemaphore> frame_acquire_waits_;
+  uint64_t acquire_wait_seq_{0};
+  std::vector<std::pair<uint64_t, VkSemaphore>> acquire_wait_retire_;
+  // Platform-view surfaces composited this frame; each gets a release fence.
+  std::vector<ICompositorSurface*> frame_pv_surfaces_;
+  // Signalled by any frame that sampled a platform view, exported per-frame as
+  // release sync_files. Created lazily as SYNC_FD-exportable; null if the
+  // device can't export (then no release fences are published).
+  VkSemaphore release_sem_{VK_NULL_HANDLE};
+  bool release_sem_failed_{false};
+
+  /// Run deferred-destroy callbacks whose frame margin has elapsed. Called at
+  /// the top of each present, so no frame is recording and prior frames' fences
+  /// have been waited — safe to free imports a disposed view handed over.
+  void ReapDeferredDestroys();
+  std::mutex deferred_destroy_mu_;
+  uint64_t deferred_epoch_{
+      0};  // present count; guarded by deferred_destroy_mu_
+  std::vector<std::pair<uint64_t, std::function<void()>>> deferred_destroys_;
 #endif
 
   /// Record + submit a layout transition on a one-shot command buffer.
