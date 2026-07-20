@@ -2,7 +2,6 @@
 # when creating new test-case, you need to change here
 set(TESTCASE_NAME "homescreen_shared_library_ut_test_driver")
 set(TESTCASE_CC test_case_shared_library.cc)
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)

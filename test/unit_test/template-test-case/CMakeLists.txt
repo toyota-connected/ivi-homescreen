@@ -3,8 +3,6 @@
 set(TESTCASE_NAME "templateTest")
 set(TESTCASE_CC test_case.cc)
 
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
-
 # Basically, the following statements need not be modified
 add_executable(
         ${TESTCASE_NAME}

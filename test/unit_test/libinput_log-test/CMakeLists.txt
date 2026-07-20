@@ -2,7 +2,6 @@
 # when creating new test-case, you need to change here
 set(TESTCASE_NAME "homescreen_libinput_log_ut_test_driver")
 set(TESTCASE_CC test_case_libinput_log.cc)
-list(REMOVE_ITEM TYPICAL_TEST_DEFINITIONS "ENABLE_PLUGIN_URL_LAUNCHER")
 
 # libinput_log_bridge.h includes <libinput.h>, so this test requires the
 # libinput development headers (libinput-dev / libinput-devel).  When the
