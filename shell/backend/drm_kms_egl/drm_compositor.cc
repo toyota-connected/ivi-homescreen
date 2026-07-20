@@ -1283,6 +1283,21 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
           changed ? "(OVERWRITTEN)" : "(unchanged)");
     }
   }
+
+#if BUILD_HUD
+  // Composite the debug HUD over the framed content (comp.fbo is content-sized
+  // and KMS-inverted, so flip_y like the app layers). Sits in the content area,
+  // not the letterbox border.
+  const auto comp_w = static_cast<GLsizei>(out_.width());
+  const auto comp_h = static_cast<GLsizei>(out_.height());
+  if (const unsigned int hud_tex =
+          backend_->RenderHudTexture(out_.width(), out_.height())) {
+    glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
+    CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, hud_tex, comp_w, comp_h, 0,
+                          0, comp_w, comp_h, /*blend=*/true, /*flip_y=*/true);
+  }
+#endif
+
   glFinish();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -2020,6 +2035,21 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
         }
       }
     }
+
+#if BUILD_HUD
+    // Composite the debug HUD on top of the frame. RenderHudTexture draws imgui
+    // into its own offscreen texture (correct orientation, transparent bg) and
+    // rebinds off comp.fbo; re-bind and blend it in with the same y-flip the
+    // app layers use, since comp.fbo is KMS-inverted.
+    if (const unsigned int hud_tex = backend_->RenderHudTexture(fb_w, fb_h)) {
+      glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
+      CompositeLayerIntoFbo(
+          comp.fbo, /*src_fbo=*/0, hud_tex, static_cast<GLsizei>(fb_w),
+          static_cast<GLsizei>(fb_h), 0, 0, static_cast<GLsizei>(fb_w),
+          static_cast<GLsizei>(fb_h), /*blend=*/true,
+          /*flip_y=*/true);
+    }
+#endif
 
     glFinish();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

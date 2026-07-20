@@ -42,12 +42,31 @@ class GlHud : public HudBase {
               const HudStats& stats,
               const std::vector<HudViewSample>& views);
 
+  // Render the HUD into an owned offscreen RGBA texture (transparent where the
+  // HUD window isn't), returning the GL texture name (0 on failure). For
+  // backends that composite the HUD onto a plane buffer rather than the default
+  // framebuffer — e.g. the DRM plane compositor, whose scanout buffer is
+  // KMS-inverted, so the caller composites this texture with the same y-flip it
+  // uses for the app layers. The texture is owned + reused across frames.
+  unsigned int RenderOffscreen(uint32_t width,
+                               uint32_t height,
+                               float dt_seconds,
+                               const HudStats& stats,
+                               const std::vector<HudViewSample>& views);
+
  protected:
   void ImplNewFrame() override;
   void ImplRenderDrawData(ImDrawData* draw_data) override;
 
  private:
   GlHud() = default;
+
+  // Owned offscreen target for RenderOffscreen (lazily sized to the render
+  // extent). 0 until first use.
+  unsigned int offscreen_fbo_{0};
+  unsigned int offscreen_tex_{0};
+  uint32_t offscreen_w_{0};
+  uint32_t offscreen_h_{0};
 };
 
 }  // namespace ihs::hud
