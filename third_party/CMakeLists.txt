@@ -57,6 +57,15 @@ add_library(vulkan_headers INTERFACE)
 target_include_directories(vulkan_headers INTERFACE Vulkan-Headers/include)
 
 #
+# Dear ImGui — the compositor debug HUD (Vulkan and/or OpenGL-ES render
+# backend, per the enabled ivi backends; see imgui/CMakeLists.txt).
+#
+if (BUILD_HUD AND (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN OR
+        BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
+    add_subdirectory(imgui)
+endif ()
+
+#
 # Flutter Common library
 #
 add_subdirectory(flutter)

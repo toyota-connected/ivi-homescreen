@@ -80,6 +80,63 @@ extern void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 extern void SetUpCommonEngineState(FlutterDesktopEngineState* state,
                                    FlutterView* view);
 
+#if BUILD_HUD
+#include "backend/hud/ihud.h"
+
+namespace {
+// Translate the view's [hud] config into an ihs::hud::HudConfig, returning
+// whether config asked for the HUD (OR-ed with IVI_HUD in the backend).
+bool BuildHudConfig(const Configuration::Config& config,
+                    ihs::hud::HudConfig& out) {
+  const auto& h = config.hud;
+  if (h.corner) {
+    const std::string& c = *h.corner;
+    if (c == "top-right") {
+      out.corner = ihs::hud::HudConfig::Corner::kTopRight;
+    } else if (c == "bottom-left") {
+      out.corner = ihs::hud::HudConfig::Corner::kBottomLeft;
+    } else if (c == "bottom-right") {
+      out.corner = ihs::hud::HudConfig::Corner::kBottomRight;
+    } else {
+      out.corner = ihs::hud::HudConfig::Corner::kTopLeft;
+    }
+  }
+  if (h.margin) {
+    out.margin = static_cast<float>(*h.margin);
+  }
+  if (h.font_scale) {
+    out.font_scale = static_cast<float>(*h.font_scale);
+  }
+  if (h.bg_alpha) {
+    out.bg_alpha = static_cast<float>(*h.bg_alpha);
+  }
+  // "#RRGGBB" or "#RRGGBBAA" -> normalized floats.
+  if (h.text_color && !h.text_color->empty()) {
+    std::string s = *h.text_color;
+    if (s.front() == '#') {
+      s.erase(0, 1);
+    }
+    auto hex = [&](size_t i) -> float {
+      const auto b =
+          static_cast<unsigned>(std::stoul(s.substr(i, 2), nullptr, 16));
+      return static_cast<float>(b) / 255.0f;
+    };
+    try {
+      if (s.size() >= 6) {
+        out.text_r = hex(0);
+        out.text_g = hex(2);
+        out.text_b = hex(4);
+        out.text_a = s.size() >= 8 ? hex(6) : 1.0f;
+      }
+    } catch (const std::exception&) {
+      // Malformed color: keep the default (opaque white).
+    }
+  }
+  return h.enable.value_or(false);
+}
+}  // namespace
+#endif  // BUILD_HUD
+
 // The single per-view Backend factory (declared in backend/backend.h).
 // Delegates to the runtime BackendRegistry: the resolved descriptor's
 // make_backend holds the concrete-backend construction + post-creation wiring
@@ -98,7 +155,15 @@ std::shared_ptr<Backend> Backend::Create(
                        key);
     return nullptr;
   }
-  return descriptor->make_backend(config, display.get());
+  auto backend = descriptor->make_backend(config, display.get());
+#if BUILD_HUD
+  if (backend) {
+    ihs::hud::HudConfig hc;
+    const bool enable = BuildHudConfig(config, hc);
+    backend->SetHudConfig(hc, enable);
+  }
+#endif
+  return backend;
 }
 
 FlutterView::FlutterView(Configuration::Config config,

@@ -154,6 +154,13 @@ class WaylandVsyncProvider : public IVsyncProvider {
   /// is enabled; OnPresented feeds it each scanout timestamp (event thread).
   void SetMotionToPhoton(profiling::MotionToPhoton* m2p) { m2p_ = m2p; }
 
+  // Public read of the display refresh period in nanoseconds (0 until the first
+  // presented event fixes it). For the debug HUD's frame-rate threshold; the
+  // scheduler path uses the protected PeriodNs() override.
+  [[nodiscard]] uint32_t RefreshPeriodNs() const {
+    return last_refresh_ns_.load(std::memory_order_acquire);
+  }
+
  protected:
   // IVsyncProvider source hooks (read on the event thread + SubmitBaton).
   [[nodiscard]] bool IsSourcePending() const override {

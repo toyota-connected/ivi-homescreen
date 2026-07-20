@@ -42,6 +42,10 @@
 #include <GLES2/gl2.h>
 #endif
 
+#if BUILD_HUD
+#include "backend/hud/gl_hud.h"
+#endif
+
 struct FlutterDesktopEngineState;
 
 WaylandEglBackend::WaylandEglBackend(Display* shell_display,
@@ -74,6 +78,88 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
     }
   }
 }
+
+#if BUILD_HUD
+WaylandEglBackend::~WaylandEglBackend() {
+  // Tear the HUD down with the GL context current so imgui's glDelete* land on
+  // a live context (the Egl base — destroyed after this — still owns it).
+  if (hud_) {
+    MakeCurrent();
+    hud_.reset();
+  }
+}
+
+void WaylandEglBackend::MaybeRenderHud(const FlutterLayer** layers,
+                                       size_t count) {
+  if (!hud_checked_) {
+    hud_checked_ = true;
+    hud_enabled_ = std::getenv("IVI_HUD") != nullptr || hud_config_enable_;
+  }
+  if (!hud_enabled_ || hud_init_failed_) {
+    return;
+  }
+  if (!hud_) {
+    std::string err;
+    hud_ = ihs::hud::GlHud::Create(err);  // GL context is current in present
+    if (!hud_) {
+      hud_init_failed_ = true;
+      ihs::log::warn("[WaylandEglBackend] HUD unavailable ({})", err);
+      return;
+    }
+    hud_->SetConfig(hud_config_);  // appearance from [hud] config
+    hud_->SetOpen(true);           // config/IVI_HUD summons it open
+    ihs::log::info("[WaylandEglBackend] debug HUD enabled");
+  }
+
+  // Rolling present-interval window for the fps/frame stats.
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                          static_cast<uint64_t>(ts.tv_nsec);
+  float dt_s = 1.0f / 60.0f;
+  if (hud_last_present_ns_ != 0 && now_ns > hud_last_present_ns_) {
+    const uint64_t dt = now_ns - hud_last_present_ns_;
+    dt_s = static_cast<float>(dt) / 1e9f;
+    hud_interval_ms_[hud_interval_head_] = static_cast<float>(dt) / 1e6f;
+    hud_interval_head_ = (hud_interval_head_ + 1) % hud_interval_ms_.size();
+    if (hud_interval_count_ < hud_interval_ms_.size()) {
+      ++hud_interval_count_;
+    }
+  }
+  hud_last_present_ns_ = now_ns;
+
+  ihs::hud::HudStats stats{};
+  if (hud_interval_count_ > 0) {
+    float sum = 0.0f;
+    float worst = 0.0f;
+    for (uint32_t i = 0; i < hud_interval_count_; ++i) {
+      sum += hud_interval_ms_[i];
+      worst = std::max(worst, hud_interval_ms_[i]);
+    }
+    stats.frame_ms = sum / static_cast<float>(hud_interval_count_);
+    stats.frame_max_ms = worst;
+    stats.fps = stats.frame_ms > 0.0f ? 1000.0f / stats.frame_ms : 0.0f;
+  }
+  const uint32_t refresh_ns = vsync_ != nullptr ? vsync_->RefreshPeriodNs() : 0;
+  stats.target_fps =
+      refresh_ns > 0 ? 1e9f / static_cast<float>(refresh_ns) : 60.0f;
+
+  std::vector<ihs::hud::HudViewSample> views;
+  for (size_t i = 0; layers != nullptr && i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (layer != nullptr &&
+        layer->type == kFlutterLayerContentTypePlatformView &&
+        layer->platform_view != nullptr) {
+      views.push_back({layer->platform_view->identifier,
+                       static_cast<uint32_t>(layer->size.width),
+                       static_cast<uint32_t>(layer->size.height),
+                       /*dmabuf=*/false});
+    }
+  }
+
+  hud_->Render(m_initial_width, m_initial_height, dt_s, stats, views);
+}
+#endif  // BUILD_HUD
 
 FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
   FlutterRendererConfig config{};
@@ -731,6 +817,9 @@ bool WaylandEglBackend::BlitBackingStoreToWindow(
                         ? baton->fbo_store->Height()
                         : baton->tex_store->Height();
   CompositeLayer(store, 0, 0, w, h);
+#if BUILD_HUD
+  MaybeRenderHud(nullptr, 0);  // fast path: single backing store, no PVs
+#endif
   return SwapBuffers();
 }
 
@@ -907,6 +996,9 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
 
   m_gl_compositor->EndFrame();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#if BUILD_HUD
+  MaybeRenderHud(layers, count);
+#endif
   return SwapBuffers() && ok;
 }
 
