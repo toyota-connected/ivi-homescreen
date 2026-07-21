@@ -396,17 +396,6 @@ jobs:
         working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
         run: ctest --output-on-failure --test-dir .
 
-      - name: Reset coverage counters
-        working-directory: ${{github.workspace}}/build/unit-tests
-        run: lcov -d . -z
-
-      - name: Run test drivers (coverage collection)
-        working-directory: ${{github.workspace}}/build/unit-tests
-        run: |
-          for driver in $(find test/unit_test/ -name '*_test_driver'); do
-            ./${driver}
-          done
-
       - name: Capture coverage data
         working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
         run: |
