@@ -37,6 +37,7 @@ TYPE = {
     "is_integer": "int",
     "is_boolean": "bool",
     "is_floating_point": "float",
+    "is_number": "float",
     "is_array": "array<string>",
 }
 
@@ -112,13 +113,20 @@ META = {
 
     # [view.engine] — engine threading knobs
     "engine.merge_render_platform": ("false", "true|false", "all", "Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing)."),
+    # [view.hud] — compositor debug HUD (BUILD_HUD builds, compositor on)
+    "hud.enable": ("false", "true|false", "all", "Enable the debug HUD (the IVI_HUD env var also enables it); needs a BUILD_HUD build with the compositor on."),
+    "hud.corner": ("top-left", "top-left|top-right|bottom-left|bottom-right", "all", "Screen corner the overlay hugs."),
+    "hud.margin": ("12", "float (px)", "all", "Gap from the chosen corner in pixels."),
+    "hud.font_scale": ("1.0", "float", "all", "Multiplies the base HUD font size."),
+    "hud.bg_alpha": ("0.75", "float [0,1]", "all", "HUD window background opacity."),
+    "hud.text_color": ("#FFFFFF", "#RRGGBB or #RRGGBBAA", "all", "HUD text color."),
 }
 
 TABLE_ORDER = [
     "[global]", "[sentry]", "[[view]]", "[view.args]", "[view.shell]",
     "[view.shell.window]", "[view.shell.window.activation_area]",
     "[view.backend]", "[view.backend.drm]", "[view.backend.lease]",
-    "[view.output]", "[view.engine]",
+    "[view.output]", "[view.engine]", "[view.hud]",
 ]
 
 
@@ -148,6 +156,8 @@ def classify(key):
         return "[view.output]", key.split(".", 1)[1]
     if key.startswith("engine."):
         return "[view.engine]", key.rsplit(".", 1)[1]
+    if key.startswith("hud."):
+        return "[view.hud]", key.rsplit(".", 1)[1]
     return "[[view]]", key
 
 
