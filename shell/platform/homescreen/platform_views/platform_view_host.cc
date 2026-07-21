@@ -137,6 +137,14 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Common retire clock for both import paths (incremented on every submit).
   uint64_t submit_seq{0};
 
+  // Deliver-once guard for the direct-scanout path: the submit_seq last handed
+  // to GetDmabuf. The compositor commits faster than a 30fps producer submits,
+  // so a reused overlay layer polls GetDmabuf every present; without this it
+  // would re-import the same buffer each time, churning AddFB2/retire for no
+  // new content. Set when GetDmabuf hands out a frame; a fresh submit bumps
+  // submit_seq past it, re-arming delivery.
+  mutable uint64_t dmabuf_delivered_seq{0};
+
 #if IVI_HAVE_VULKAN
   // A resize re-creates a ring slot's dma-buf at a new size, replacing the
   // cached import. The old import can't be destroyed at once — a compositor
@@ -272,6 +280,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (out == nullptr || !pending_egl.valid) {
       return false;
     }
+    // Hand each submitted frame to the scanout path at most once — the reuse
+    // branch polls this every present but only wants a fresh buffer.
+    if (dmabuf_delivered_seq == submit_seq) {
+      return false;
+    }
     const IhsFrame& f = pending_egl.frame;
     if (f.plane_count == 0 || f.plane_fd[0] < 0) {
       return false;
@@ -287,6 +300,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         return false;
       }
     }
+
     const int dup_fd = ::dup(f.plane_fd[0]);
     if (dup_fd < 0) {
       return false;
@@ -304,6 +318,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // The DRM scene path is implicit-sync today and does not consume an acquire
     // fence; leave it unset until explicit-sync IN_FENCE wiring lands.
     out->acquire_fence_fd = -1;
+    dmabuf_delivered_seq = submit_seq;
     return true;
   }
 #endif

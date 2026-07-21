@@ -2397,15 +2397,18 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // reached it yet).
       surface->OnResize(static_cast<int32_t>(fl->size.width),
                         static_cast<int32_t>(fl->size.height));
-      // Only pull (and dup) a dma-buf for a NEW platform view — one that will
-      // build an ExternalDmaBufSource below. An existing scene layer keeps its
-      // source (the reuse path in the add loop), so calling GetDmabuf for it
-      // every frame would dup+close an fd for nothing. find_by_identity_tag
-      // reflects last frame's layers; this PV is present, so it survives the
-      // prune and the add loop finds it too.
+      // Pull this present's dma-buf for every platform view, new or reused: a
+      // per-frame producer (a decoder, a camera) hands a fresh buffer each
+      // present, and the reuse path in the add loop swaps it in via
+      // replace_source. GetDmabuf is deliver-once (keyed on the producer's
+      // submit_seq), so on a present with no new frame it returns false and the
+      // layer keeps its current source. find_by_identity_tag reflects last
+      // frame's layers; this PV survives the prune and the add loop finds it.
       ICompositorSurface::Dmabuf db{};
-      if (scene_->find_by_identity_tag(surface.get()) == nullptr &&
-          !surface->GetDmabuf(&db)) {
+      const bool is_new =
+          scene_->find_by_identity_tag(surface.get()) == nullptr;
+      const bool have_db = surface->GetDmabuf(&db);
+      if (is_new && !have_db) {
         // New platform view with no dma-buf (GL-only surface, or none ready
         // this present): route the whole frame through GL composition, which
         // samples the surface's GL texture / Vulkan image.
@@ -2520,24 +2523,37 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         // dups the fds and does its own AddFB2WithModifiers; the pv_fd_closer
         // closes our dup at scope exit.
         const auto& db = fl.pv_db;
-        const uint32_t np = db.plane_count;
-        std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
-        for (uint32_t p = 0; p < np && p < 4; ++p) {
-          planes[p] =
-              drm::scene::ExternalPlaneInfo{db.fd, db.offset[p], db.stride[p]};
-        }
-        auto src = drm::scene::ExternalDmaBufSource::create(
-            backend_->device(), db.width, db.height, db.fourcc, db.modifier,
-            drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np));
-        if (src) {
-          if (auto r = scene_->replace_source(layer->handle(),
-                                              std::move(src.value()));
-              !r) {
-            ihs::log::warn(
-                "[DrmCompositor] LayerScene::replace_source (pv): {}",
-                r.error().message());
+        // GetDmabuf is deliver-once: a valid descriptor here means a fresh
+        // frame this present. When it's empty (fd < 0 — the producer had no new
+        // frame), keep the source already on the plane rather than tearing the
+        // layer down, so the last frame holds until the next one arrives.
+        if (db.fd >= 0 && db.plane_count > 0) {
+          const uint32_t np = db.plane_count;
+          std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
+          for (uint32_t p = 0; p < np && p < 4; ++p) {
+            planes[p] = drm::scene::ExternalPlaneInfo{db.fd, db.offset[p],
+                                                      db.stride[p]};
           }
-        }  // else: keep the existing source rather than tear the layer down
+          auto src = drm::scene::ExternalDmaBufSource::create(
+              backend_->device(), db.width, db.height, db.fourcc, db.modifier,
+              drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(),
+                                                             np));
+          if (src) {
+            if (auto r = scene_->replace_source(layer->handle(),
+                                                std::move(src.value()));
+                !r) {
+              ihs::log::warn(
+                  "[DrmCompositor] LayerScene::replace_source (pv): {}",
+                  r.error().message());
+            }
+          } else {
+            ihs::log::warn(
+                "[DrmCompositor] pv ExternalDmaBufSource::create failed "
+                "({}): {}x{} fourcc=0x{:08x} mod=0x{:016x} planes={}",
+                src.error().message(), db.width, db.height, db.fourcc,
+                db.modifier, np);
+          }
+        }
         layer->set_dst_rect_if_changed(dst_rect);
         layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
         ++pv_reused;
