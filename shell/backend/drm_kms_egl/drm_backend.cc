@@ -1988,5 +1988,6 @@ bool DrmBackend::GetEglContext(BackendEglContext* out) const {
   out->display = egl_display_;
   out->config = egl_config_;
   out->share_context = egl_context_;
+  out->gbm_device = gbm_device_;
   return true;
 }

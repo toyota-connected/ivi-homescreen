@@ -39,6 +39,7 @@
 #include <xf86drmMode.h>
 
 #include <drm-cxx/core/format.hpp>
+#include <drm-cxx/scene/external_dma_buf_source.hpp>
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
@@ -2323,111 +2324,228 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   }
   const uint64_t t1 = profile ? NsNow() : 0;
 
-  // Pre-scan: any platform-view layer forces the whole frame through
-  // the GL composite path. Platform-view→LayerBufferSource plumbing
-  // (Tier-2 wrappers over ExternalDmaBufSource / GstAppsinkSource) is
-  // not wired in this revision; routing PVs through GL keeps the
-  // current visual behaviour intact while BS layers benefit from the
-  // scene allocator.
-  for (size_t i = 0; i < layer_count; ++i) {
-    const FlutterLayer* fl = layers[i];
-    if (fl && fl->type == kFlutterLayerContentTypePlatformView) {
-      return PresentViaGlFallback(layers, layer_count);
-    }
-  }
-
   // Walk the FlutterLayer[] in z-order (Flutter's convention: layer 0
-  // is bottom). Sync scene_'s layer set against the current frame's
-  // batons: add new, update dst_rect on existing, remove any scene
-  // layer whose baton didn't appear this frame.
+  // is bottom). Sync scene_'s layer set against the current frame: add
+  // new, update geometry/zpos on existing, remove any scene layer whose
+  // tag didn't appear this frame. Backing stores are keyed by their
+  // StoreBaton; platform views by their ICompositorSurface pointer. A
+  // platform view that exports a dma-buf goes onto a KMS overlay plane
+  // via ExternalDmaBufSource; one that can't (GL-only, or no frame yet)
+  // drops the whole frame to GL composition — the same all-or-nothing
+  // rule the backing-store overflow uses below.
   struct FrameLayer {
     const FlutterLayer* flutter;
-    GbmBackingStore* store;
-    StoreBaton* baton;
+    StoreBaton* baton;                 // non-null for backing-store layers
+    GbmBackingStore* store;            // non-null for backing-store layers
+    void* pv_tag;                      // PV surface* identity tag (null for BS)
+    ICompositorSurface::Dmabuf pv_db;  // PV frame (valid when pv_tag != null)
   };
   std::vector<FrameLayer> frame_layers;
   frame_layers.reserve(layer_count);
 
-  // Track this frame's batons for the stale-layer prune below. Linear
-  // scan; engaged layer count is single-digit in practice.
+  // Per-frame prune keys — two tag spaces (BS batons, PV surface ptrs).
   std::vector<StoreBaton*> frame_batons;
+  std::vector<void*> frame_pv_tags;
   frame_batons.reserve(layer_count);
+  frame_pv_tags.reserve(layer_count);
 
   for (size_t i = 0; i < layer_count; ++i) {
     const FlutterLayer* fl = layers[i];
-    if (!fl || fl->type != kFlutterLayerContentTypeBackingStore ||
-        !fl->backing_store) {
+    if (!fl) {
       continue;
     }
-    auto* baton = static_cast<StoreBaton*>(fl->backing_store->user_data);
-    if (!baton || !baton->store) {
-      continue;
-    }
-    frame_layers.push_back({fl, baton->store, baton});
-    frame_batons.push_back(baton);
-  }
-
-  // Prune scene layers whose batons are not in this frame's set. The
-  // scene retains layers across commits; without this step, a layer
-  // for a backing store Flutter dropped from its layer tree (without
-  // collecting it yet) would still be acquired by the next commit
-  // with stale dst_rect.
-  for (auto it = scene_layer_batons_.begin();
-       it != scene_layer_batons_.end();) {
-    StoreBaton* baton = *it;
-    const bool still_present =
-        std::find(frame_batons.begin(), frame_batons.end(), baton) !=
-        frame_batons.end();
-    if (!still_present) {
-      if (auto* layer = scene_->find_by_identity_tag(baton)) {
-        scene_->remove_layer(layer->handle());
+    if (fl->type == kFlutterLayerContentTypeBackingStore && fl->backing_store) {
+      auto* baton = static_cast<StoreBaton*>(fl->backing_store->user_data);
+      if (!baton || !baton->store) {
+        continue;
       }
-      it = scene_layer_batons_.erase(it);
-    } else {
-      ++it;
+      frame_layers.push_back({fl, baton, baton->store, nullptr, {}});
+      frame_batons.push_back(baton);
+    } else if (fl->type == kFlutterLayerContentTypePlatformView &&
+               fl->platform_view) {
+      std::shared_ptr<ICompositorSurface> surface;
+      {
+        const std::lock_guard<std::mutex> lock(surfaces_mu_);
+        if (auto it = surfaces_.find(fl->platform_view->identifier);
+            it != surfaces_.end()) {
+          surface = it->second;
+        }
+      }
+      if (!surface) {
+        // No registered surface for this view id this frame — nothing to
+        // place; fall back so the frame stays well-formed.
+        return PresentViaGlFallback(layers, layer_count);
+      }
+      // The producer renders at this size; feed it the laid-out extent
+      // before pulling its frame (the create/resize channel may not have
+      // reached it yet).
+      surface->OnResize(static_cast<int32_t>(fl->size.width),
+                        static_cast<int32_t>(fl->size.height));
+      ICompositorSurface::Dmabuf db;
+      if (!surface->GetDmabuf(&db)) {
+        // GL-only surface, or no dma-buf frame ready this present: route
+        // the whole frame through GL composition (which samples the
+        // surface's GL texture / Vulkan image).
+        return PresentViaGlFallback(layers, layer_count);
+      }
+      frame_layers.push_back({fl, nullptr, nullptr, surface.get(), db});
+      frame_pv_tags.push_back(surface.get());
     }
   }
 
-  // Add new layers; update dst_rect on existing ones. dst_rect is in
-  // CRTC coordinates; the non-framed path has no letterbox so
+  // Prune scene layers whose tag is not in this frame's set. The scene
+  // retains layers across commits; without this a layer for a store /
+  // view Flutter dropped from its tree (without collecting it yet) would
+  // still be acquired by the next commit with stale geometry. Two tag
+  // spaces (BS batons, PV surface ptrs), so the prune runs over both.
+  const auto prune = [&](auto& tags, const auto& present) -> int {
+    int pruned = 0;
+    for (auto it = tags.begin(); it != tags.end();) {
+      const bool still_present =
+          std::find(present.begin(), present.end(), *it) != present.end();
+      if (!still_present) {
+        if (auto* layer =
+                scene_->find_by_identity_tag(static_cast<void*>(*it))) {
+          scene_->remove_layer(layer->handle());
+        }
+        it = tags.erase(it);
+        ++pruned;
+      } else {
+        ++it;
+      }
+    }
+    return pruned;
+  };
+  const int bs_pruned = prune(scene_layer_batons_, frame_batons);
+  const int pv_pruned = prune(scene_pv_tags_, frame_pv_tags);
+
+  // Add new layers; update geometry/zpos on existing ones. dst_rect is
+  // in CRTC coordinates; the non-framed path has no letterbox so
   // FlutterLayer.offset is already CRTC-relative.
+  //
+  // z_index is each layer's position in Flutter's array = its z-order.
+  // Write it as the plane zpos for EVERY non-primary layer (backing
+  // stores AND platform views) so the whole overlay stack shares one
+  // Flutter-order z scheme; leaving BS overlays unset let them float in z
+  // relative to the PVs. The first layer (z_index 0, the UI/primary
+  // backing store) is left unset — its plane's zpos is immutable on some
+  // drivers, and writing zpos=N matching the primary mis-screens overlays.
+  int bs_reused = 0, bs_new = 0, pv_reused = 0, pv_new = 0;
+  int z_index = -1;
   for (auto& fl : frame_layers) {
+    ++z_index;
+    const bool is_ui = (z_index == 0);
     drm::scene::Rect dst_rect{
         static_cast<int32_t>(fl.flutter->offset.x),
         static_cast<int32_t>(fl.flutter->offset.y),
         static_cast<uint32_t>(fl.flutter->size.width),
         static_cast<uint32_t>(fl.flutter->size.height),
     };
-    auto* layer = scene_->find_by_identity_tag(fl.baton);
-    if (layer) {
-      layer->set_dst_rect_if_changed(dst_rect);
-      continue;
+
+    if (fl.pv_tag == nullptr) {
+      // ── Backing store: hand the pre-built scene_source to the scene ──
+      if (auto* layer = scene_->find_by_identity_tag(fl.baton)) {
+        layer->set_dst_rect_if_changed(dst_rect);
+        if (!is_ui) {
+          layer->set_zpos_if_changed(z_index);
+        }
+        ++bs_reused;
+        continue;
+      }
+      ++bs_new;
+      // CreateBackingStore pre-built the scene_source; nullptr would only
+      // happen if the store predated scene_ construction, which can't
+      // happen on the non-framed path (scene_ is built before any Present).
+      if (!fl.baton->scene_source) {
+        ihs::log::warn(
+            "[DrmCompositor] LayerScene: baton lacks scene_source; routing "
+            "frame through GL fallback");
+        return PresentViaGlFallback(layers, layer_count);
+      }
+      drm::scene::LayerDesc desc{};
+      desc.source = std::move(fl.baton->scene_source);
+      desc.display.dst_rect = dst_rect;
+      desc.display.rotation = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
+      // Non-UI backing stores get a Flutter-order zpos too, matching the PVs.
+      if (!is_ui) {
+        desc.display.zpos = z_index;
+      }
+      desc.content_type = is_ui ? drm::planes::ContentType::UI
+                                : drm::planes::ContentType::Generic;
+      desc.identity_tag = fl.baton;
+      auto handle = scene_->add_layer(std::move(desc));
+      if (!handle) {
+        ihs::log::warn("[DrmCompositor] LayerScene::add_layer (bs): {}",
+                       handle.error().message());
+        return PresentViaGlFallback(layers, layer_count);
+      }
+      scene_layer_batons_.push_back(fl.baton);
+    } else {
+      // ── Platform view: wrap the dma-buf as a scene buffer source ──
+      if (auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
+        // The current producer submits a static buffer, so only geometry /
+        // stacking change. A producer that cycles buffers per frame would
+        // replace_source() here (or drive an external_dma_buf ring) —
+        // deferred to the video-producer work.
+        layer->set_dst_rect_if_changed(dst_rect);
+        layer->set_zpos_if_changed(z_index);  // restack on widget-tree reorder
+        ++pv_reused;
+        continue;
+      }
+      ++pv_new;
+      const auto& db = fl.pv_db;
+      const uint32_t np = db.plane_count ? db.plane_count : 1;
+      std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
+      for (uint32_t p = 0; p < np && p < 4; ++p) {
+        planes[p] =
+            drm::scene::ExternalPlaneInfo{db.fd, db.offset[p], db.stride[p]};
+      }
+      // ExternalDmaBufSource dups the fds and does its own
+      // AddFB2WithModifiers; the producer keeps ownership of the originals.
+      auto src = drm::scene::ExternalDmaBufSource::create(
+          backend_->device(), db.width, db.height, db.fourcc, db.modifier,
+          drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np));
+      if (!src) {
+        ihs::log::warn(
+            "[DrmCompositor] ExternalDmaBufSource::create (pv): {}; routing "
+            "through GL fallback",
+            src.error().message());
+        return PresentViaGlFallback(layers, layer_count);
+      }
+      drm::scene::LayerDesc desc{};
+      desc.source = std::move(src.value());
+      desc.display.dst_rect = dst_rect;
+      // Producer hands scanout-oriented (top-down) pixels — no REFLECT_Y,
+      // unlike GL backing stores.
+      desc.display.rotation = DRM_MODE_ROTATE_0;
+      desc.display.zpos = z_index;
+      desc.content_type = drm::planes::ContentType::Generic;
+      desc.identity_tag = fl.pv_tag;
+      auto handle = scene_->add_layer(std::move(desc));
+      if (!handle) {
+        ihs::log::warn("[DrmCompositor] LayerScene::add_layer (pv): {}",
+                       handle.error().message());
+        return PresentViaGlFallback(layers, layer_count);
+      }
+      scene_pv_tags_.push_back(fl.pv_tag);
+      if (backend_->cfg_.debug_backend) {
+        ihs::log::debug(
+            "[DrmCompositor] platform-view scene layer added: {}x{} "
+            "fmt=0x{:08x} mod=0x{:016x} dst=({},{} {}x{})",
+            db.width, db.height, db.fourcc, db.modifier,
+            static_cast<int32_t>(fl.flutter->offset.x),
+            static_cast<int32_t>(fl.flutter->offset.y),
+            static_cast<uint32_t>(fl.flutter->size.width),
+            static_cast<uint32_t>(fl.flutter->size.height));
+      }
     }
-    // First sight: hand the scene_source wrapper to the scene.
-    // CreateBackingStore pre-built it; nullptr would only happen if
-    // the store predated the scene_ construction, which can't happen
-    // on the non-framed path (scene_ is built before any Present).
-    if (!fl.baton->scene_source) {
-      ihs::log::warn(
-          "[DrmCompositor] LayerScene: baton lacks scene_source; routing "
-          "frame through GL fallback");
-      return PresentViaGlFallback(layers, layer_count);
-    }
-    drm::scene::LayerDesc desc{};
-    desc.source = std::move(fl.baton->scene_source);
-    desc.display.dst_rect = dst_rect;
-    desc.display.rotation = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
-    desc.content_type = (&fl == &frame_layers.front())
-                            ? drm::planes::ContentType::UI
-                            : drm::planes::ContentType::Generic;
-    desc.identity_tag = fl.baton;
-    auto handle = scene_->add_layer(std::move(desc));
-    if (!handle) {
-      ihs::log::warn("[DrmCompositor] LayerScene::add_layer: {}",
-                     handle.error().message());
-      return PresentViaGlFallback(layers, layer_count);
-    }
-    scene_layer_batons_.push_back(fl.baton);
+  }
+  if (backend_->cfg_.debug_backend &&
+      (bs_new || pv_new || bs_pruned || pv_pruned)) {
+    ihs::log::debug(
+        "[pv-churn] bs: reused={} new={} pruned={} | pv: reused={} new={} "
+        "pruned={}",
+        bs_reused, bs_new, bs_pruned, pv_reused, pv_new, pv_pruned);
   }
 
   // TEST_ONLY probe: if any layer would land in the composition
