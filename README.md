@@ -376,6 +376,12 @@ annotated all-keys file see
 | `[view.output]` | `x` | `int` | `0` | `int (px)` | all |
 | `[view.output]` | `y` | `int` | `0` | `int (px)` | all |
 | `[view.engine]` | `merge_render_platform` | `bool` | `false` | `true\|false` | all |
+| `[view.hud]` | `bg_alpha` | `float` | `0.75` | `float [0,1]` | all |
+| `[view.hud]` | `corner` | `string` | `top-left` | `top-left\|top-right\|bottom-left\|bottom-right` | all |
+| `[view.hud]` | `enable` | `bool` | `false` | `true\|false` | all |
+| `[view.hud]` | `font_scale` | `float` | `1.0` | `float` | all |
+| `[view.hud]` | `margin` | `float` | `12` | `float (px)` | all |
+| `[view.hud]` | `text_color` | `string` | `#FFFFFF` | `#RRGGBB or #RRGGBBAA` | all |
 
 <!-- END CONFIG-REFERENCE -->
 

@@ -409,4 +409,11 @@ void LayerCompositor::EndFrame(VkCommandBuffer cmd) {
   d().vkCmdEndRenderPass(cmd);
 }
 
+void LayerCompositor::ClearFramebuffers() {
+  for (auto& [view, fb] : framebuffers_) {
+    d().vkDestroyFramebuffer(device_, fb, nullptr);
+  }
+  framebuffers_.clear();
+}
+
 }  // namespace wl_vulkan

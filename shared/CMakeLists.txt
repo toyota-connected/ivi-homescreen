@@ -44,6 +44,7 @@ add_library(ihs_shared SHARED
         src/ihs_api.cc
         src/trace.cc
         src/config.cc
+        src/platform_view.cc
 )
 add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
 

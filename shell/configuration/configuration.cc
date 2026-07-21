@@ -337,6 +337,28 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
           t.as_string()->value_or(""));
     }
   }
+
+  // [hud] — compositor debug HUD appearance/layout (BUILD_HUD builds only).
+  if (v->at_path("hud.enable").is_boolean()) {
+    instance.hud.enable = v->at_path("hud.enable").value<bool>().value();
+  }
+  if (v->at_path("hud.corner").is_string()) {
+    instance.hud.corner = v->at_path("hud.corner").as_string()->value_or("");
+  }
+  if (v->at_path("hud.margin").is_number()) {
+    instance.hud.margin = v->at_path("hud.margin").value<double>().value();
+  }
+  if (v->at_path("hud.font_scale").is_number()) {
+    instance.hud.font_scale =
+        v->at_path("hud.font_scale").value<double>().value();
+  }
+  if (v->at_path("hud.bg_alpha").is_number()) {
+    instance.hud.bg_alpha = v->at_path("hud.bg_alpha").value<double>().value();
+  }
+  if (v->at_path("hud.text_color").is_string()) {
+    instance.hud.text_color =
+        v->at_path("hud.text_color").as_string()->value_or("");
+  }
 }
 
 void Configuration::get_toml_config(const char* config_toml_path,

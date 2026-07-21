@@ -64,7 +64,11 @@ if (ACCESSKIT_FOUND)
     )
 endif ()
 
-if (ENABLE_PLUGINS)
+# Platform views compose through the compositor (ICompositorSurface), so the
+# subsystem is gated on BUILD_COMPOSITOR — not the external plugins framework.
+# This keeps platform views (and the ihs_shared ihs_pv host) a core shell
+# feature that builds without the ivi-homescreen-plugins repo.
+if (BUILD_COMPOSITOR)
 
     if (POLICY CMP0076)
         cmake_policy(SET CMP0076 NEW)
@@ -75,6 +79,46 @@ if (ENABLE_PLUGINS)
             platform_views/platform_view_registry.cc
             platform_views/platform_view_touch.cc
     )
+
+    # The ihs_shared platform-view host reaches the Backend + compositor, so it
+    # is shell-only (PRIVATE) — it must not compile into the plugin targets that
+    # consume the PUBLIC registry/handler sources above.
+    target_sources(platform_homescreen PRIVATE
+            platform_views/platform_view_host.cc
+    )
+
+    # The Vulkan dma-buf importer is only reachable on a Vulkan backend; it (and
+    # the host's Vulkan path) #include <vulkan/vulkan.h>. Compile it and put the
+    # vendored Vulkan headers on the path only for Vulkan builds, so an
+    # EGL/DRM-EGL/software build without system Vulkan headers stays
+    # Vulkan-header-free. Guarded in the host by IVI_HAVE_VULKAN.
+    if (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN)
+        target_sources(platform_homescreen PRIVATE
+                platform_views/dmabuf_vulkan_import.cc
+        )
+        target_include_directories(platform_homescreen PRIVATE
+                ${CMAKE_SOURCE_DIR}/third_party/Vulkan-Headers/include)
+    endif ()
+
+    # The EGL/GLES dma-buf importer (the GL counterpart of the Vulkan one) is
+    # only reachable on an EGL backend; it needs the EGL/GLES + libdrm headers
+    # and links EGL/GLESv2. Guarded in the host by IVI_HAVE_EGL.
+    if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL)
+        target_sources(platform_homescreen PRIVATE
+                platform_views/egl_dmabuf_import.cc
+        )
+        if (NOT TARGET PkgConfig::DRM)
+            pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
+        endif ()
+        target_link_libraries(platform_homescreen PRIVATE
+                EGL GLESv2 PkgConfig::DRM)
+    endif ()
+
+endif ()
+
+# The external plugins framework (out-of-tree plugins built from the plugins
+# repo) is independent of the platform-view subsystem above.
+if (ENABLE_PLUGINS)
 
     target_include_directories(platform_homescreen PUBLIC
             ${PLUGINS_DIR}

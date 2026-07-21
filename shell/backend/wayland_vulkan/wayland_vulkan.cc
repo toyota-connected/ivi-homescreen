@@ -39,6 +39,9 @@
 
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "backend/wayland_vulkan/wl_explicit_sync.h"
+#if BUILD_HUD
+#include "backend/hud/vulkan_hud.h"
+#endif
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "vulkan_queue_interposer.h"
 
@@ -127,11 +130,32 @@ bool WaylandVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->device = device_;
   out->queue = queue_;
   out->queue_family_index = queue_family_index_;
-  // Same loader the embedder + this backend resolve Vulkan through, so a plugin
-  // reusing the device gets identical function pointers.
+  // The INTERPOSED loader (not the raw d().vkGetInstanceProcAddr): a plugin
+  // reusing the shared queue must resolve vkQueue* through the locking
+  // trampolines, or its submits race the engine's and this backend's on the one
+  // graphics queue (issue #208) — exactly the threading error a raw loader
+  // produces.
   out->get_instance_proc_addr =
-      reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
+      reinterpret_cast<void*>(&WaylandVulkanBackend::PluginInstanceProcAddr);
+  // enabled_device_extensions_ outlives every context handed out (it is set
+  // once at device creation), so exposing its storage directly is safe.
+  out->device_extensions = enabled_device_extensions_.data();
+  out->device_extension_count = enabled_device_extensions_.size();
   return true;
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+WaylandVulkanBackend::PluginInstanceProcAddr(VkInstance instance,
+                                             const char* procname) {
+  // Same shim as GetInstanceProcAddressCallback (the engine's loader), in the
+  // PFN_vkGetInstanceProcAddr shape a plugin calls: swap vkQueue* (and
+  // vkGetDeviceProcAddr) for the shared-queue locking trampolines, else fall
+  // through to the real loader.
+  if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
+          instance, procname, d().vkGetInstanceProcAddr)) {
+    return interposed;
+  }
+  return d().vkGetInstanceProcAddr(instance, procname);
 }
 
 FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
@@ -203,6 +227,12 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // flag ("wl_buffer still attached" / "queue destroyed while proxies still
     // attached") and which can fault during vkDestroyDevice.
     d().vkDeviceWaitIdle(device_);
+#if BUILD_HUD
+    // Tear the HUD down while device_ is still valid: ~VulkanHud runs
+    // ImGui_ImplVulkan_Shutdown, which frees Vulkan buffers/memory. Left to the
+    // member destructor it would run after vkDestroyDevice below and fault.
+    hud_.reset();
+#endif
 #if BUILD_COMPOSITOR
     CompositorPipeliningCleanup();
     // Retire any in-flight pacing callback. Safe here: App::~App() has already
@@ -246,6 +276,30 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // stores checked out).
     m_alive_stores.clear();
     m_store_pool.Flush();
+    // Imported platform-view acquire semaphores (queue is idle by here).
+    for (auto& [seq, sem] : acquire_wait_retire_) {
+      d().vkDestroySemaphore(device_, sem, nullptr);
+    }
+    acquire_wait_retire_.clear();
+    for (VkSemaphore s : frame_acquire_waits_) {
+      d().vkDestroySemaphore(device_, s, nullptr);
+    }
+    frame_acquire_waits_.clear();
+    if (release_sem_ != VK_NULL_HANDLE) {
+      d().vkDestroySemaphore(device_, release_sem_, nullptr);
+      release_sem_ = VK_NULL_HANDLE;
+    }
+    // Run any imports a late dispose deferred but present never reaped (GPU is
+    // idle from the vkDeviceWaitIdle above, so this is safe).
+    {
+      const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+      for (auto& [tag, fn] : deferred_destroys_) {
+        if (fn) {
+          fn();
+        }
+      }
+      deferred_destroys_.clear();
+    }
 #endif
     if (swapchain_command_pool_ != nullptr) {
       d().vkDestroyCommandPool(device_, swapchain_command_pool_, nullptr);
@@ -261,7 +315,14 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     }
     // Destroy the swapchain before the device. It is otherwise only torn down
     // on resize (InitializeSwapChain); on shutdown it must be released here so
-    // the WSI hands its images' wl_buffers back to the compositor.
+    // the WSI hands its images' wl_buffers back to the compositor. The
+    // per-image color-attachment views go first (queue already idle above).
+    for (auto view : swapchain_image_views_) {
+      if (view != VK_NULL_HANDLE) {
+        d().vkDestroyImageView(device_, view, nullptr);
+      }
+    }
+    swapchain_image_views_.clear();
     if (swapchain_ != nullptr) {
       d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
       swapchain_ = VK_NULL_HANDLE;
@@ -698,6 +759,26 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
       std::lock_guard<std::mutex> queue_lock(queue_mutex_);
       CHECK_VK_RESULT(d().vkQueueWaitIdle(queue_));
     }
+    // Queue is idle: drop the old swapchain image views before they are
+    // recreated for the new image set below, and the layer compositor's
+    // framebuffers built from them (else it would reuse a framebuffer that
+    // references a freed view).
+    for (auto view : swapchain_image_views_) {
+      if (view != VK_NULL_HANDLE) {
+        d().vkDestroyImageView(device_, view, nullptr);
+      }
+    }
+    swapchain_image_views_.clear();
+#if BUILD_COMPOSITOR
+    if (layer_compositor_) {
+      layer_compositor_->ClearFramebuffers();
+    }
+#endif
+#if BUILD_HUD
+    if (hud_) {
+      hud_->DropFramebuffers();  // views it cached were just freed
+    }
+#endif
     CHECK_VK_RESULT(
         d().vkResetCommandPool(device_, swapchain_command_pool_,
                                VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
@@ -863,6 +944,8 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   info.imageFormat = surface_format_.format;
   info.imageColorSpace = surface_format_.colorSpace;
   info.imageExtent = clientSize;
+  swapchain_extent_ =
+      clientSize;  // the extent the images (and views) are made at
   info.imageArrayLayers = 1;
   // The compositor present path (PresentLayersImpl/BlitStoreToSwapchain) blits
   // each backing store into the swapchain image, so it must be a transfer
@@ -900,6 +983,21 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   swapchain_images_.resize(image_count);
   CHECK_VK_RESULT(d().vkGetSwapchainImagesKHR(device_, swapchain_, &image_count,
                                               swapchain_images_.data()));
+
+  // Color-attachment views of the swapchain images, so the layer stack can be
+  // alpha-blended straight into the swapchain on the WSI path (platform-view
+  // frames). Images already carry VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT above.
+  swapchain_image_views_.resize(swapchain_images_.size());
+  for (size_t i = 0; i < swapchain_images_.size(); i++) {
+    VkImageViewCreateInfo view_ci{};
+    view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.image = swapchain_images_[i];
+    view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format = surface_format_.format;
+    view_ci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    CHECK_VK_RESULT(d().vkCreateImageView(device_, &view_ci, nullptr,
+                                          &swapchain_image_views_[i]));
+  }
 
   // --------------------------------------------------------------------------
   // Record a command buffer for each of the images to be executed prior to
@@ -1233,6 +1331,129 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
   }
   p = FrameProfile{.last_present_ns = p.last_present_ns};
 }
+
+// -----------------------------------------------------------------------------
+// Debug HUD (Dear ImGui). Created on the raster thread on first present when
+// IVI_HUD is set (or on the first ToggleHud), recorded into the present command
+// buffer, and fed input from the platform thread via the shell.
+// -----------------------------------------------------------------------------
+
+#if BUILD_HUD
+bool WaylandVulkanBackend::MaybeRenderHud(VkCommandBuffer cmd,
+                                          VkImage image,
+                                          VkImageView view,
+                                          uint32_t w,
+                                          uint32_t h,
+                                          VkImageLayout old_layout,
+                                          const FlutterLayer** layers,
+                                          size_t count) {
+  if (!hud_checked_) {
+    hud_checked_ = true;
+    hud_enabled_ = std::getenv("IVI_HUD") != nullptr || hud_config_enable_;
+  }
+  if (!hud_enabled_ || hud_init_failed_) {
+    return false;
+  }
+  if (!hud_) {
+    std::string err;
+    // Match the HUD render pass to the actual target image format. The dma-buf
+    // ring images are B8G8R8A8_UNORM and the swapchain-format selection is
+    // skipped on that path (surface_format_ stays UNDEFINED), so pick the ring
+    // format explicitly there; the WSI path uses the chosen swapchain format.
+    const VkFormat hud_format = dmabuf_present_active_
+                                    ? VK_FORMAT_B8G8R8A8_UNORM
+                                    : surface_format_.format;
+    const uint32_t hud_image_count =
+        dmabuf_present_active_
+            ? static_cast<uint32_t>(dmabuf_slots_.size())
+            : static_cast<uint32_t>(swapchain_images_.size());
+    hud_ = ihs::hud::VulkanHud::Create(
+        instance_, physical_device_, device_, queue_family_index_, queue_,
+        reinterpret_cast<void*>(d().vkGetInstanceProcAddr), hud_format,
+        hud_image_count, err);
+    if (!hud_) {
+      hud_init_failed_ = true;
+      ihs::log::warn("[WaylandVulkanBackend] HUD unavailable ({})", err);
+      return false;
+    }
+    hud_->SetConfig(hud_config_);  // appearance from [hud] config
+    hud_->SetOpen(true);           // config/IVI_HUD summons it open
+    ihs::log::info("[WaylandVulkanBackend] debug HUD enabled");
+  }
+
+  // Present-interval window for the HUD's fps/frame stats (independent of
+  // IVI_VK_PROFILE). Raster thread is the only writer.
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                          static_cast<uint64_t>(ts.tv_nsec);
+  float dt_s = 1.0f / 60.0f;
+  if (hud_last_present_ns_ != 0 && now_ns > hud_last_present_ns_) {
+    const uint64_t dt = now_ns - hud_last_present_ns_;
+    dt_s = static_cast<float>(dt) / 1e9f;
+    hud_interval_ms_[hud_interval_head_] = static_cast<float>(dt) / 1e6f;
+    hud_interval_head_ = (hud_interval_head_ + 1) % hud_interval_ms_.size();
+    if (hud_interval_count_ < hud_interval_ms_.size()) {
+      ++hud_interval_count_;
+    }
+  }
+  hud_last_present_ns_ = now_ns;
+
+  ihs::hud::HudStats stats{};
+  if (hud_interval_count_ > 0) {
+    float sum = 0.0f;
+    float worst = 0.0f;
+    for (uint32_t i = 0; i < hud_interval_count_; ++i) {
+      sum += hud_interval_ms_[i];
+      worst = std::max(worst, hud_interval_ms_[i]);
+    }
+    stats.frame_ms = sum / static_cast<float>(hud_interval_count_);
+    stats.frame_max_ms = worst;
+    stats.fps = stats.frame_ms > 0.0f ? 1000.0f / stats.frame_ms : 0.0f;
+  }
+  stats.dmabuf_present = dmabuf_present_active_;
+  stats.explicit_sync = explicit_sync_ != nullptr;
+  const uint32_t refresh_ns = vsync_ != nullptr ? vsync_->RefreshPeriodNs() : 0;
+  stats.target_fps =
+      refresh_ns > 0 ? 1e9f / static_cast<float>(refresh_ns) : 60.0f;
+
+  // Snapshot the platform views composited this frame so the HUD can track
+  // per-view present counts and flash add/dispose.
+  std::vector<ihs::hud::HudViewSample> views;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (layer != nullptr &&
+        layer->type == kFlutterLayerContentTypePlatformView &&
+        layer->platform_view != nullptr) {
+      views.push_back({layer->platform_view->identifier,
+                       static_cast<uint32_t>(layer->size.width),
+                       static_cast<uint32_t>(layer->size.height),
+                       dmabuf_present_active_});
+    }
+  }
+
+  // Bring the swapchain image to GENERAL for the HUD's LOAD render pass.
+  if (old_layout != VK_IMAGE_LAYOUT_GENERAL) {
+    VkImageMemoryBarrier to_general{};
+    to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_general.oldLayout = old_layout;
+    to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_general.image = image;
+    to_general.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_general.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                             0, nullptr, 0, nullptr, 1, &to_general);
+  }
+
+  hud_->Render(cmd, view, w, h, dt_s, stats, views);
+  return true;
+}
+#endif  // BUILD_HUD
 
 // -----------------------------------------------------------------------------
 // wp_presentation-driven vsync. Mirrors WaylandEglBackend; the only path
@@ -1877,26 +2098,41 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &begin);
 
-  // Transition swapchain image UNDEFINED/PRESENT_SRC -> TRANSFER_DST_OPTIMAL.
-  VkImageMemoryBarrier to_dst{};
-  to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_dst.image = dst;
-  to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  to_dst.subresourceRange.levelCount = 1;
-  to_dst.subresourceRange.layerCount = 1;
-  to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  // srcStage must be TRANSFER (the stage the acquire semaphore is waited at),
-  // not TOP_OF_PIPE: that orders this layout-transition write after the
-  // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
-  // sync-validation layer flags (it explicitly suggests including the transfer
-  // stage in this barrier's srcStageMask).
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &to_dst);
+  // Explicit-sync acquire bookkeeping: retire semaphores from completed frames,
+  // start a fresh per-frame wait list (filled by CollectAcquireWait during
+  // compositing, consumed by the submit below).
+  ReapAcquireWaits();
+  ReapDeferredDestroys();
+  ++acquire_wait_seq_;
+  frame_acquire_waits_.clear();
+  frame_pv_surfaces_.clear();
+
+  // A Vulkan platform view only composites correctly with src-over alpha (a
+  // transparent Flutter overlay must blend over it, not overwrite it to black).
+  // When one is present, blend the whole layer stack into the swapchain via
+  // layer_compositor_; otherwise keep the proven overwrite-blit path. The
+  // compositor is created lazily here (the dma-buf path makes its own).
+  bool has_platform_view = false;
+  for (size_t i = 0; i < count; ++i) {
+    if (layers[i] && layers[i]->type == kFlutterLayerContentTypePlatformView &&
+        layers[i]->platform_view) {
+      has_platform_view = true;
+      break;
+    }
+  }
+  if (has_platform_view && !layer_compositor_) {
+    std::string comp_err;
+    layer_compositor_ = wl_vulkan::LayerCompositor::Create(
+        device_, surface_format_.format, comp_err);
+    if (!layer_compositor_) {
+      ihs::log::warn(
+          "[WaylandVulkanBackend] layer compositor unavailable ({}); platform "
+          "view falls back to overwrite blit (a transparent overlay may erase "
+          "it)",
+          comp_err);
+    }
+  }
+  const bool blend = has_platform_view && layer_compositor_;
 
   // Sequence platform-view subsurface Z-order for this frame.
   m_sequencer.Present(layers, count, nullptr,
@@ -1905,45 +2141,116 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                       });
 
   bool ok = true;
-  for (size_t i = 0; i < count; ++i) {
-    const FlutterLayer* layer = layers[i];
-    if (!layer) {
-      continue;
-    }
-    if (layer->type == kFlutterLayerContentTypeBackingStore &&
-        layer->backing_store) {
-      auto* baton =
-          static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
-      if (!baton || !baton->store) {
+  if (blend) {
+    // Alpha-blend the whole stack (backing stores + platform views) straight
+    // into the swapchain image. The render pass clears then leaves it in
+    // GENERAL; transition that to PRESENT_SRC below.
+    // Size the blend to the swapchain images' actual extent (not
+    // width_/height_, which can differ mid-resize) so the framebuffer matches
+    // the image views.
+    ok = CompositeLayersBlend(cmd, layers, count,
+                              swapchain_image_views_[image_index],
+                              swapchain_extent_.width, swapchain_extent_.height,
+                              m_compositor_current_frame_);
+
+#if BUILD_HUD
+    // Image is already in GENERAL; the HUD leaves it there.
+    MaybeRenderHud(cmd, dst, swapchain_image_views_[image_index],
+                   swapchain_extent_.width, swapchain_extent_.height,
+                   VK_IMAGE_LAYOUT_GENERAL, layers, count);
+#endif
+
+    VkImageMemoryBarrier to_present{};
+    to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_present.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.image = dst;
+    to_present.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    to_present.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &to_present);
+  } else {
+    // Transition swapchain image UNDEFINED/PRESENT_SRC -> TRANSFER_DST_OPTIMAL.
+    VkImageMemoryBarrier to_dst{};
+    to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_dst.image = dst;
+    to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    to_dst.subresourceRange.levelCount = 1;
+    to_dst.subresourceRange.layerCount = 1;
+    to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    // srcStage must be TRANSFER (the stage the acquire semaphore is waited at),
+    // not TOP_OF_PIPE: that orders this layout-transition write after the
+    // vkAcquireNextImageKHR signal and removes the WRITE_AFTER_READ hazard the
+    // sync-validation layer flags (it explicitly suggests including the
+    // transfer stage in this barrier's srcStageMask).
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to_dst);
+
+    for (size_t i = 0; i < count; ++i) {
+      const FlutterLayer* layer = layers[i];
+      if (!layer) {
         continue;
       }
-      const auto dx = static_cast<int32_t>(layer->offset.x);
-      const auto dy = static_cast<int32_t>(layer->offset.y);
-      const auto dw = static_cast<int32_t>(layer->size.width);
-      const auto dh = static_cast<int32_t>(layer->size.height);
-      BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
-    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
-               layer->platform_view) {
-      ok = PresentPlatformView(layer) && ok;
+      if (layer->type == kFlutterLayerContentTypeBackingStore &&
+          layer->backing_store) {
+        auto* baton =
+            static_cast<VulkanStoreBaton*>(layer->backing_store->user_data);
+        if (!baton || !baton->store) {
+          continue;
+        }
+        const auto dx = static_cast<int32_t>(layer->offset.x);
+        const auto dy = static_cast<int32_t>(layer->offset.y);
+        const auto dw = static_cast<int32_t>(layer->size.width);
+        const auto dh = static_cast<int32_t>(layer->size.height);
+        BlitStoreToSwapchain(cmd, *baton->store, dst, dx, dy, dw, dh);
+      } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+                 layer->platform_view) {
+        ok = PresentPlatformView(layer) && ok;
+      }
     }
-  }
 
-  // Transition swapchain image -> PRESENT_SRC_KHR.
-  VkImageMemoryBarrier to_present{};
-  to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-  to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  to_present.image = dst;
-  to_present.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  to_present.subresourceRange.levelCount = 1;
-  to_present.subresourceRange.layerCount = 1;
-  to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &to_present);
+    // The HUD (if active) transitions TRANSFER_DST->GENERAL and draws; the
+    // present transition then sources from GENERAL instead of TRANSFER_DST.
+#if BUILD_HUD
+    const bool hud_drew =
+        MaybeRenderHud(cmd, dst, swapchain_image_views_[image_index],
+                       swapchain_extent_.width, swapchain_extent_.height,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layers, count);
+#else
+    const bool hud_drew = false;
+#endif
+
+    // Transition swapchain image -> PRESENT_SRC_KHR.
+    VkImageMemoryBarrier to_present{};
+    to_present.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_present.oldLayout = hud_drew ? VK_IMAGE_LAYOUT_GENERAL
+                                    : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    to_present.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_present.image = dst;
+    to_present.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    to_present.subresourceRange.levelCount = 1;
+    to_present.subresourceRange.layerCount = 1;
+    to_present.srcAccessMask = hud_drew ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                                        : VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    d().vkCmdPipelineBarrier(cmd,
+                             hud_drew
+                                 ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                                 : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &to_present);
+  }
 
   d().vkEndCommandBuffer(cmd);
 
@@ -1951,29 +2258,56 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // presentable), signals render_finished and the slot's in_flight fence.
   // No vkQueueWaitIdle — the next frame's slot wait is the only sync point.
   //
-  // Wait at TRANSFER, not COLOR_ATTACHMENT_OUTPUT: the command buffer's first
-  // use of the acquired image is the UNDEFINED->TRANSFER_DST layout transition
-  // and the blit, both transfer-stage. Waiting at a later stage left the
-  // acquire unsynchronized with that first barrier
+  // Wait stage matches the command buffer's first use of the acquired image:
+  // the blend path's first write is the render pass color attachment
+  // (COLOR_ATTACHMENT_OUTPUT); the overwrite-blit path's is the
+  // UNDEFINED->TRANSFER_DST transition + blit (TRANSFER). Waiting at the wrong
+  // stage leaves the acquire unsynchronized with that first write
   // (SYNC-HAZARD-WRITE-AFTER-READ vs vkAcquireNextImageKHR,
   // MissingAcquireWait).
-  const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+  const VkPipelineStageFlags wait_stage =
+      blend ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            : VK_PIPELINE_STAGE_TRANSFER_BIT;
+  // Wait the swapchain-image acquire plus every platform-view producer's
+  // acquire fence collected while compositing. The producer's copy is read at
+  // the fragment shader (blend) or transfer (blit), so wait its fence before
+  // both.
+  std::vector<VkSemaphore> wait_sems = {slot.image_available};
+  std::vector<VkPipelineStageFlags> wait_stages = {wait_stage};
+  for (VkSemaphore s : frame_acquire_waits_) {
+    wait_sems.push_back(s);
+    wait_stages.push_back(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                          VK_PIPELINE_STAGE_TRANSFER_BIT);
+  }
   VkSubmitInfo submit{};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submit.waitSemaphoreCount = 1;
-  submit.pWaitSemaphores = &slot.image_available;
-  submit.pWaitDstStageMask = &wait_stage;
+  submit.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size());
+  submit.pWaitSemaphores = wait_sems.data();
+  submit.pWaitDstStageMask = wait_stages.data();
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
   // Signal (and later present-wait on) the per-image semaphore, not a per-slot
   // one, so it isn't reused while a prior present on this image is pending.
+  // Also signal the release semaphore when a platform view was sampled, so its
+  // producer/host can tell when this frame is done reading it.
   VkSemaphore& render_finished = m_compositor_render_finished_[image_index];
-  submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &render_finished;
+  std::array<VkSemaphore, 2> signal_sems = {render_finished, release_sem_};
+  const bool signal_release =
+      !frame_pv_surfaces_.empty() && release_sem_ != VK_NULL_HANDLE;
+  submit.signalSemaphoreCount = signal_release ? 2 : 1;
+  submit.pSignalSemaphores = signal_sems.data();
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
   }
+  // Export the release fence to each platform view composited this frame.
+  PublishReleaseFences();
+  // The imported acquire semaphores are now owned by this submit; retire them
+  // after a margin so they are destroyed once its fence has signalled.
+  for (VkSemaphore s : frame_acquire_waits_) {
+    acquire_wait_retire_.emplace_back(acquire_wait_seq_ + 4, s);
+  }
+  frame_acquire_waits_.clear();
 
   VkPresentInfoKHR present_info{};
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -2112,12 +2446,127 @@ bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   return surface ? surface->OnPresent(layer) : true;
 }
 
+void WaylandVulkanBackend::CollectAcquireWait(ICompositorSurface* surface) {
+  // Every composited platform view is handed a release fence (so the producer /
+  // host can tell when this frame is done reading it). Create the shared,
+  // SYNC_FD-exportable release semaphore lazily on first use.
+  if (release_sem_ == VK_NULL_HANDLE && !release_sem_failed_) {
+    VkExportSemaphoreCreateInfo esi{};
+    esi.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+    esi.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    VkSemaphoreCreateInfo sci{};
+    sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    sci.pNext = &esi;
+    if (d().vkCreateSemaphore(device_, &sci, VKALLOC, &release_sem_) !=
+        VK_SUCCESS) {
+      release_sem_ = VK_NULL_HANDLE;
+      release_sem_failed_ = true;
+    }
+  }
+  if (release_sem_ != VK_NULL_HANDLE) {
+    frame_pv_surfaces_.push_back(surface);
+  }
+
+  const int fd = surface->TakeAcquireFenceFd();
+  if (fd < 0) {
+    return;  // producer stalled synchronously (or no SYNC_FD support)
+  }
+  VkSemaphore sem = VK_NULL_HANDLE;
+  VkSemaphoreCreateInfo sci{};
+  sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  if (d().vkCreateSemaphore(device_, &sci, VKALLOC, &sem) != VK_SUCCESS) {
+    close(fd);
+    return;
+  }
+  VkImportSemaphoreFdInfoKHR ii{};
+  ii.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR;
+  ii.semaphore = sem;
+  ii.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+  ii.flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT;  // required for SYNC_FD
+  ii.fd = fd;  // consumed by a successful import; owned by us on failure
+  if (d().vkImportSemaphoreFdKHR(device_, &ii) != VK_SUCCESS) {
+    close(fd);
+    d().vkDestroySemaphore(device_, sem, VKALLOC);
+    return;
+  }
+  frame_acquire_waits_.push_back(sem);
+}
+
+void WaylandVulkanBackend::ReapAcquireWaits() {
+  for (auto it = acquire_wait_retire_.begin();
+       it != acquire_wait_retire_.end();) {
+    if (acquire_wait_seq_ >= it->first) {
+      d().vkDestroySemaphore(device_, it->second, VKALLOC);
+      it = acquire_wait_retire_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void WaylandVulkanBackend::ScheduleDeferredDestroy(std::function<void()> fn) {
+  if (!fn) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+  // Free after a margin of presents: by then any frame that bound the resource
+  // has been submitted and its fence waited at slot reuse (frames retire in
+  // order), and no frame is mid-record (this runs at the top of present).
+  deferred_destroys_.emplace_back(deferred_epoch_ + 6, std::move(fn));
+}
+
+void WaylandVulkanBackend::ReapDeferredDestroys() {
+  std::vector<std::function<void()>> ready;
+  {
+    const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+    ++deferred_epoch_;
+    for (auto it = deferred_destroys_.begin();
+         it != deferred_destroys_.end();) {
+      if (deferred_epoch_ >= it->first) {
+        ready.push_back(std::move(it->second));
+        it = deferred_destroys_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (auto& fn : ready) {
+    fn();  // outside the lock: frees an import via the host's importer
+  }
+}
+
+void WaylandVulkanBackend::PublishReleaseFences() {
+  if (frame_pv_surfaces_.empty()) {
+    return;
+  }
+  // release_sem_ was signalled by the frame submit; export a sync_file that
+  // fires when the frame retires and give each composited view its own dup.
+  int release_fd = -1;
+  if (release_sem_ != VK_NULL_HANDLE) {
+    VkSemaphoreGetFdInfoKHR gfi{};
+    gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+    gfi.semaphore = release_sem_;
+    gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    if (d().vkGetSemaphoreFdKHR(device_, &gfi, &release_fd) != VK_SUCCESS) {
+      release_fd = -1;
+    }
+  }
+  for (auto* s : frame_pv_surfaces_) {
+    s->SetReleaseFenceFd(release_fd >= 0 ? dup(release_fd) : -1);
+  }
+  if (release_fd >= 0) {
+    close(release_fd);
+  }
+  frame_pv_surfaces_.clear();
+}
+
 bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                                                 const FlutterLayer** layers,
                                                 size_t count,
-                                                DmabufSlot& slot,
+                                                VkImageView target_view,
                                                 uint32_t width,
-                                                uint32_t height) {
+                                                uint32_t height,
+                                                uint64_t frame) {
   struct Draw {
     VkImage src;
     VkFormat format;
@@ -2195,6 +2644,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         continue;  // GL / subsurface platform view — nothing to sample
       }
       auto src = reinterpret_cast<VkImage>(vk_img);
+      // Wait the producer's acquire fence (if any) in this frame's submit.
+      CollectAcquireWait(surface.get());
       const auto cur =
           static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
       if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -2218,9 +2669,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     }
   }
 
-  // Phase 2: blend all layers into the slot in one render pass (z-order).
-  layer_compositor_->BeginFrame(cmd, slot.image->view(), width, height,
-                                dmabuf_frame_);
+  // Phase 2: blend all layers into the target in one render pass (z-order).
+  layer_compositor_->BeginFrame(cmd, target_view, width, height, frame);
   for (const Draw& dr : draws) {
     layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.dx, dr.dy, dr.dw,
                                  dr.dh);
@@ -2239,7 +2689,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       dr.store->SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
   }
-  slot.layout = VK_IMAGE_LAYOUT_GENERAL;  // render pass finalLayout
+  // The render pass leaves target_view's image in GENERAL (its finalLayout);
+  // the caller transitions from there (present or dma-buf hand-off).
   return ok;
 }
 
@@ -2265,32 +2716,57 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     return;  // GL / subsurface platform view — nothing to blit here.
   }
   auto src = reinterpret_cast<VkImage>(vk_img);
+  // Wait the producer's acquire fence (if any) in this frame's submit.
+  CollectAcquireWait(surface.get());
+  const bool external = surface->NeedsExternalQueueAcquire();
 
-  // The plugin's static image starts PREINITIALIZED (host-written, contents
-  // preserved). Transition it to a transfer source ONCE — a static image left
-  // in TRANSFER_SRC must not be re-transitioned every frame (that both corrupts
-  // the read and races the prior frame's blit). The surface tracks the layout.
-  const auto cur = static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
-  if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-    const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
-    VkImageMemoryBarrier to_src{};
-    to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_src.oldLayout = cur;
-    to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_src.image = src;
-    to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    // PREINITIALIZED carries host writes; make them visible to the transfer.
-    to_src.srcAccessMask =
-        from_preinit ? VK_ACCESS_HOST_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
-    to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    d().vkCmdPipelineBarrier(cmd,
-                             from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
-                                          : VK_PIPELINE_STAGE_TRANSFER_BIT,
+  if (external) {
+    // An imported dma-buf the producer rewrites every frame through an aliased
+    // image. Acquire ownership from VK_QUEUE_FAMILY_EXTERNAL and move it to a
+    // transfer source each frame (the producer released it to EXTERNAL after
+    // its render); it is handed back after the blit below.
+    VkImageMemoryBarrier acq{};
+    acq.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    acq.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    acq.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    acq.srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    acq.dstQueueFamilyIndex = queue_family_index_;
+    acq.srcAccessMask = 0;  // the release on the producer side owns src access
+    acq.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    acq.image = src;
+    acq.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &to_src);
-    surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                             nullptr, 1, &acq);
+  } else {
+    // The plugin's static image starts PREINITIALIZED (host-written, contents
+    // preserved). Transition it to a transfer source ONCE — a static image left
+    // in TRANSFER_SRC must not be re-transitioned every frame (that both
+    // corrupts the read and races the prior frame's blit). The surface tracks
+    // the layout.
+    const auto cur =
+        static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
+    if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+      const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+      VkImageMemoryBarrier to_src{};
+      to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      to_src.oldLayout = cur;
+      to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.image = src;
+      to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      // PREINITIALIZED carries host writes; make them visible to the transfer.
+      to_src.srcAccessMask = from_preinit ? VK_ACCESS_HOST_WRITE_BIT
+                                          : VK_ACCESS_TRANSFER_WRITE_BIT;
+      to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      d().vkCmdPipelineBarrier(cmd,
+                               from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                                            : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &to_src);
+      surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    }
   }
 
   // Blit the full platform-view image into the slot at the layer rect (scaling
@@ -2310,6 +2786,24 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
   d().vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
                      VK_FILTER_LINEAR);
+
+  if (external) {
+    // Release ownership back to VK_QUEUE_FAMILY_EXTERNAL so the producer can
+    // rewrite the buffer for the next frame.
+    VkImageMemoryBarrier rel{};
+    rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    rel.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    rel.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    rel.srcQueueFamilyIndex = queue_family_index_;
+    rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    rel.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    rel.dstAccessMask = 0;  // the acquire on the producer side owns dst access
+    rel.image = src;
+    rel.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &rel);
+  }
 }
 
 void WaylandVulkanBackend::OnFrameDone(void* data,
@@ -2390,6 +2884,14 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &begin);
 
+  // Explicit-sync acquire bookkeeping (see PresentLayersImpl): retire completed
+  // semaphores and start this frame's wait list.
+  ReapAcquireWaits();
+  ReapDeferredDestroys();
+  ++acquire_wait_seq_;
+  frame_acquire_waits_.clear();
+  frame_pv_surfaces_.clear();
+
   // Sequence platform-view subsurface Z-order for this frame (both paths): the
   // backing-store layers compose into the dma-buf image, platform views
   // composite via their own subsurfaces (sequencer) or their VkImage (below).
@@ -2402,7 +2904,9 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   if (layer_compositor_) {
     // Correct src-over alpha compositing (a platform view under a transparent
     // Flutter overlay blends instead of being overwritten to black).
-    ok = CompositeLayersBlend(cmd, layers, count, slot, w, h);
+    ok = CompositeLayersBlend(cmd, layers, count, slot.image->view(), w, h,
+                              dmabuf_frame_);
+    slot.layout = VK_IMAGE_LAYOUT_GENERAL;  // render pass finalLayout
   } else {
     // Fallback: overwrite blits. Correct only when layers don't overlap; a
     // transparent overlay over a platform view erases it. Transition the slot
@@ -2485,6 +2989,13 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
     slot.layout = VK_IMAGE_LAYOUT_GENERAL;
   }
 
+#if BUILD_HUD
+  // Draw the debug HUD over the composited slot (already GENERAL, which is also
+  // the layout the exported dma-buf is scanned out in, so no post-transition).
+  MaybeRenderHud(cmd, slot.image->image(), slot.image->view(), w, h,
+                 VK_IMAGE_LAYOUT_GENERAL, layers, count);
+#endif
+
   d().vkEndCommandBuffer(cmd);
 
   VkSubmitInfo submit{};
@@ -2492,27 +3003,59 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
 
+  // Wait every platform-view producer's acquire fence collected while
+  // compositing (binary sync_file semaphores), before the fragment/transfer
+  // read of the view.
+  const std::vector<VkPipelineStageFlags> pv_wait_stages(
+      frame_acquire_waits_.size(),
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT);
+  if (!frame_acquire_waits_.empty()) {
+    submit.waitSemaphoreCount =
+        static_cast<uint32_t>(frame_acquire_waits_.size());
+    submit.pWaitSemaphores = frame_acquire_waits_.data();
+    submit.pWaitDstStageMask = pv_wait_stages.data();
+  }
+
   // Explicit sync: the blit submit signals the acquire timeline at this frame's
   // point (the compositor waits on it before sampling), so the CPU stall below
   // is skipped. The fence still fires for command-buffer/image reuse safety at
   // slot selection. Without explicit sync, the CPU fence is the producer sync.
   wl_vulkan::ExplicitSync::FramePoints sync_pts{};
-  VkSemaphore acquire_sem = VK_NULL_HANDLE;
   VkTimelineSemaphoreSubmitInfo tl{};
+  // Signal the wl compositor's acquire timeline (explicit sync) and/or the
+  // platform-view release semaphore (binary; value ignored). Build one array so
+  // both can ride the same submit.
+  std::array<VkSemaphore, 2> signal_sems{};
+  std::array<uint64_t, 2> signal_vals{};
+  uint32_t signal_count = 0;
   if (explicit_sync_) {
     sync_pts = explicit_sync_->NextFrame();
-    acquire_sem = explicit_sync_->acquire_semaphore();
-    tl.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    tl.signalSemaphoreValueCount = 1;
-    tl.pSignalSemaphoreValues = &sync_pts.acquire;
-    submit.pNext = &tl;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &acquire_sem;
+    signal_sems[signal_count] = explicit_sync_->acquire_semaphore();
+    signal_vals[signal_count] = sync_pts.acquire;
+    ++signal_count;
+  }
+  const bool signal_release =
+      !frame_pv_surfaces_.empty() && release_sem_ != VK_NULL_HANDLE;
+  if (signal_release) {
+    signal_sems[signal_count] = release_sem_;
+    signal_vals[signal_count] = 0;  // ignored for a binary semaphore
+    ++signal_count;
+  }
+  if (signal_count > 0) {
+    submit.signalSemaphoreCount = signal_count;
+    submit.pSignalSemaphores = signal_sems.data();
+    if (explicit_sync_) {  // a timeline signal needs the values sidecar
+      tl.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+      tl.signalSemaphoreValueCount = signal_count;
+      tl.pSignalSemaphoreValues = signal_vals.data();
+      submit.pNext = &tl;
+    }
   }
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueSubmit(queue_, 1, &submit, slot.fence);
   }
+  PublishReleaseFences();
   if (!explicit_sync_) {
     // CPU fence: block until the blit completes so the dma-buf holds a full
     // frame before the compositor samples it. Explicit sync replaces this stall
@@ -2520,6 +3063,12 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
     CHECK_VK_RESULT(
         d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
   }
+  // The imported acquire semaphores are owned by this submit now; retire them
+  // to be destroyed once its fence has signalled.
+  for (VkSemaphore s : frame_acquire_waits_) {
+    acquire_wait_retire_.emplace_back(acquire_wait_seq_ + 4, s);
+  }
+  frame_acquire_waits_.clear();
 
   RequestPresentationFeedback();
 
