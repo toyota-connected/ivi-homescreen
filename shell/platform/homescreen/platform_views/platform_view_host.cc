@@ -249,6 +249,63 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Imported dma-bufs are top-first (row 0 is the top), so the EGL compositor
   // must V-flip when sampling into its bottom-first framebuffer.
   [[nodiscard]] bool TextureIsTopFirst() const override { return true; }
+
+  // Direct-scanout seam for the DRM compositor: expose the latest submitted
+  // frame's dma-buf so it can be placed on a KMS overlay plane instead of being
+  // GL-composited. Reads the frame stashed by HostSubmit and returns a *dup* of
+  // its dma-buf fd — owned by the caller, which must close it. Duping under the
+  // lock keeps the fd valid even if a concurrent HostSubmit supersedes and
+  // closes the plugin's original before the compositor imports it. The
+  // compositor still plane-routes XOR GL-imports a given surface per present so
+  // the two paths don't both consume a frame. Producers submit top-down pixels
+  // (no REFLECT_Y), so the plane scans the buffer out as-is.
+  //
+  // A GL fallback for a frame (no overlay plane fits) imports the stashed frame
+  // via GetGlTextureName, which consumes it — so GetDmabuf then returns false
+  // until the producer submits again. A continuous producer resumes direct
+  // scanout on its next submit; a static producer stays GL-composited (still
+  // correct, just not zero-copy) until it resubmits. Retaining the dma-buf
+  // across a GL import so a static producer returns to scanout is part of the
+  // dynamic-producer follow-up.
+  [[nodiscard]] bool GetDmabuf(Dmabuf* out) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (out == nullptr || !pending_egl.valid) {
+      return false;
+    }
+    const IhsFrame& f = pending_egl.frame;
+    if (f.plane_count == 0 || f.plane_fd[0] < 0) {
+      return false;
+    }
+    // The Dmabuf descriptor carries a single fd shared across planes (the
+    // v4l2 / libcamera / Chromium single-handle layout). A genuine per-plane-fd
+    // frame can't be represented here, so bail — the caller falls back to the
+    // GL import path, which handles multiple fds. Clamp to the 4 planes the
+    // descriptor holds (a DRM fourcc has at most 4).
+    const uint32_t np = f.plane_count < 4 ? f.plane_count : 4;
+    for (uint32_t i = 1; i < np; ++i) {
+      if (f.plane_fd[i] != f.plane_fd[0]) {
+        return false;
+      }
+    }
+    const int dup_fd = ::dup(f.plane_fd[0]);
+    if (dup_fd < 0) {
+      return false;
+    }
+    out->fd = dup_fd;  // owned by the caller
+    out->fourcc = f.format.fourcc;
+    out->modifier = f.format.modifier;
+    out->width = f.width;
+    out->height = f.height;
+    out->plane_count = np;
+    for (uint32_t i = 0; i < np; ++i) {
+      out->offset[i] = f.plane_offset[i];
+      out->stride[i] = f.plane_stride[i];
+    }
+    // The DRM scene path is implicit-sync today and does not consume an acquire
+    // fence; leave it unset until explicit-sync IN_FENCE wiring lands.
+    out->acquire_fence_fd = -1;
+    return true;
+  }
 #endif
 
   // The image is an imported dma-buf the plugin rewrites; the compositor
@@ -555,6 +612,14 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     BackendEglContext egl{};
     if (backend->GetEglContext(&egl)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+      // The DRM-KMS-EGL backend (gbm_device set; wayland-egl leaves it null)
+      // runs the plane compositor, which can scan out a submitted dma-buf
+      // directly on a KMS overlay plane — offer the zero-copy DRM_PLANE kind.
+      // The scene path falls back to GL if a plane can't be allocated for a
+      // given frame, so advertising it never hard-fails a view.
+      if (egl.gbm_device != nullptr) {
+        out->kinds |= IHS_PV_KIND_DRM_PLANE;
+      }
     }
 #endif
   }
@@ -592,7 +657,7 @@ int HostEglContext(void* user_data, IhsEglContext* out) {
   out->egl_display = egl.display;
   out->egl_context = egl.share_context;
   out->egl_config = egl.config;
-  out->gbm_device = nullptr;
+  out->gbm_device = egl.gbm_device;
   return IHS_PV_OK;
 }
 
