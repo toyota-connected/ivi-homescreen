@@ -27,8 +27,8 @@
  *      (ihs_pv_query_capabilities) and picks its render strategy. The available
  *      set is backend-dependent: a DRM backend offers DRM_PLANE (direct
  *      scanout), every backend offers TEXTURE_DMABUF_IMPORT and SOFTWARE_SHM,
- *      and so on (see the kind matrix in docs/PLATFORM_VIEW_NEGOTIATION.md). Every
- *      backend offers SOFTWARE_SHM, so a plugin that handles the floor always
+ *      and so on (see the kind matrix in docs/PLATFORM_VIEW_NEGOTIATION.md).
+ * Every backend offers SOFTWARE_SHM, so a plugin that handles the floor always
  *      has a path.
  *   1. At load, the plugin installs a factory for its view type
  *      (ihs_pv_register_factory). Registration is process-global.
@@ -111,8 +111,8 @@ typedef enum IhsTransfer {
  */
 typedef struct IhsHdrMetadata {
   size_t struct_size;
-  uint8_t transfer;    /* IhsTransfer */
-  uint8_t reserved[7]; /* pad; must be 0 */
+  uint8_t transfer;                /* IhsTransfer */
+  uint8_t reserved[7];             /* pad; must be 0 */
   uint16_t display_primaries_x[3]; /* R,G,B, in 0.00002 units */
   uint16_t display_primaries_y[3];
   uint16_t white_point_x;
@@ -161,13 +161,15 @@ typedef enum IhsPvZOrder {
 } IhsPvZOrder;
 
 /* Result codes. Negotiation returns UNSUPPORTED only when the requirement
- * excludes even the floor (SOFTWARE_SHM bit unset and no granted higher kind). */
+ * excludes even the floor (SOFTWARE_SHM bit unset and no granted higher kind).
+ */
 typedef enum IhsPvResult {
   IHS_PV_OK = 0,
   IHS_PV_ERR_INVALID = -1,     /* null/oversized arguments, bad struct_size */
   IHS_PV_ERR_NO_BACKEND = -2,  /* no active backend to negotiate against */
   IHS_PV_ERR_UNSUPPORTED = -3, /* requirement excludes even the floor */
-  IHS_PV_ERR_NO_REGISTRY = -4  /* platform-view registry unavailable (headless) */
+  IHS_PV_ERR_NO_REGISTRY =
+      -4 /* platform-view registry unavailable (headless) */
 } IhsPvResult;
 
 /*
@@ -175,15 +177,15 @@ typedef enum IhsPvResult {
  * first thing a plugin asks.
  *
  * @backend_key is the active backend's registry key ("wayland-egl",
- * "drm-kms-vulkan", "wayland-leased-drm-vulkan", ...), registry-owned and stable
- * for the process. It is informational: a plugin selects its native context by
- * calling the accessor it wants — each returns IHS_PV_ERR_UNSUPPORTED when the
- * active backend does not provide it — not by switching on the key. There is no
- * fixed backend-type enum; the shell's BackendDescriptor registry is
- * string-keyed and new backends (the leased-DRM tiers) add keys without an ABI
- * change. A leased-DRM tier is a DRM client that obtained its fd from a
- * compositor lease rather than opening a card: it exposes the DRM/Vulkan
- * context and DRM_PLANE, not a Wayland surface.
+ * "drm-kms-vulkan", "wayland-leased-drm-vulkan", ...), registry-owned and
+ * stable for the process. It is informational: a plugin selects its native
+ * context by calling the accessor it wants — each returns
+ * IHS_PV_ERR_UNSUPPORTED when the active backend does not provide it — not by
+ * switching on the key. There is no fixed backend-type enum; the shell's
+ * BackendDescriptor registry is string-keyed and new backends (the leased-DRM
+ * tiers) add keys without an ABI change. A leased-DRM tier is a DRM client that
+ * obtained its fd from a compositor lease rather than opening a card: it
+ * exposes the DRM/Vulkan context and DRM_PLANE, not a Wayland surface.
  *
  * @kinds is a bitmask of the IhsPvKind values this backend can produce; it
  * varies by backend and can change on an output/mode switch — or a lease
@@ -195,9 +197,9 @@ typedef enum IhsPvResult {
 typedef struct IhsPvCapabilities {
   size_t struct_size;
   const char* backend_key; /* active BackendDescriptor key; registry-owned */
-  uint32_t kinds;          /* bitmask of IhsPvKind the active backend can grant */
-  uint8_t explicit_sync;   /* 1 if EXPLICIT sync is available */
-  uint8_t reserved[3];     /* pad; must be 0 */
+  uint32_t kinds;        /* bitmask of IhsPvKind the active backend can grant */
+  uint8_t explicit_sync; /* 1 if EXPLICIT sync is available */
+  uint8_t reserved[3];   /* pad; must be 0 */
   const IhsFormatModifier* formats;
   size_t format_count;
 } IhsPvCapabilities;
@@ -220,25 +222,27 @@ IHS_EXPORT int ihs_pv_query_capabilities(IhsPvCapabilities* out);
  * avoids a second VkDevice, shares the backend's memory budget/allocator, and
  * gets guaranteed dma-buf modifier compatibility. But a plugin built on an
  * engine that insists on its own device (Filament, some maplibre builds) MAY
- * create its own, render there, and export a dma-buf that ihs_pv_submit hands to
- * the compositor for cross-device import — still zero-copy at scanout, subject
- * to the format+modifier negotiation confirming the compositor can import it. In
- * that case the queue-sharing note below does not apply (the plugin owns its own
- * queue); it applies only to a plugin that reuses @queue.
+ * create its own, render there, and export a dma-buf that ihs_pv_submit hands
+ * to the compositor for cross-device import — still zero-copy at scanout,
+ * subject to the format+modifier negotiation confirming the compositor can
+ * import it. In that case the queue-sharing note below does not apply (the
+ * plugin owns its own queue); it applies only to a plugin that reuses @queue.
  *
- * The plugin MUST resolve every Vulkan function through @get_instance_proc_addr.
- * It is the same interposed loader the engine is given: it returns the real
- * entry points, except that vkQueueSubmit/vkQueueSubmit2/vkQueuePresentKHR (and
- * their device-level resolution) are wrapped to take the shared-queue lock. So a
- * plugin that resolves through it is serialized on the queue automatically, the
- * same way the engine is — resolving through any other loader reintroduces the
- * data race.
+ * The plugin MUST resolve every Vulkan function through
+ * @get_instance_proc_addr. It is the same interposed loader the engine is
+ * given: it returns the real entry points, except that
+ * vkQueueSubmit/vkQueueSubmit2/vkQueuePresentKHR (and their device-level
+ * resolution) are wrapped to take the shared-queue lock. So a plugin that
+ * resolves through it is serialized on the queue automatically, the same way
+ * the engine is — resolving through any other loader reintroduces the data
+ * race.
  *
  * A plugin cannot add extensions or features to an already-created device, so
  * @device_extensions lists what was enabled: dma-buf export needs
  * VK_EXT_external_memory_dma_buf + VK_KHR_external_memory_fd +
- * VK_EXT_image_drm_format_modifier; explicit sync needs VK_KHR_timeline_semaphore
- * or synchronization2. Absent an extension, the plugin falls back to the floor.
+ * VK_EXT_image_drm_format_modifier; explicit sync needs
+ * VK_KHR_timeline_semaphore or synchronization2. Absent an extension, the
+ * plugin falls back to the floor.
  *
  * Queue sharing: the Flutter embedder Vulkan API takes a single VkQueue and
  * exposes no engine->backend hand-off semaphore, so the engine, the backend and
@@ -246,15 +250,15 @@ IHS_EXPORT int ihs_pv_query_capabilities(IhsPvCapabilities* out);
  * VkQueue must be externally synchronized (issue #208). Per-submit
  * serialization is handled for you by the interposed loader above; use
  * @queue_lock / @queue_unlock only to make a multi-call sequence atomic (e.g. a
- * vkQueueSubmit immediately followed by a vkQueuePresentKHR). Both are NULL when
- * the active backend is not Vulkan.
+ * vkQueueSubmit immediately followed by a vkQueuePresentKHR). Both are NULL
+ * when the active backend is not Vulkan.
  */
 typedef struct IhsVulkanContext {
   size_t struct_size;
-  void* instance;               /* VkInstance */
-  void* physical_device;        /* VkPhysicalDevice */
-  void* device;                 /* VkDevice */
-  void* queue;                  /* VkQueue (shared engine/backend/plugin) */
+  void* instance;        /* VkInstance */
+  void* physical_device; /* VkPhysicalDevice */
+  void* device;          /* VkDevice */
+  void* queue;           /* VkQueue (shared engine/backend/plugin) */
   uint32_t queue_family_index;
   uint32_t api_version;         /* VK_API_VERSION the device was created with */
   void* get_instance_proc_addr; /* interposed PFN_vkGetInstanceProcAddr */
@@ -262,7 +266,7 @@ typedef struct IhsVulkanContext {
   size_t device_extension_count;
   const char* const* instance_extensions;
   size_t instance_extension_count;
-  void (*queue_lock)(void);   /* only for multi-call atomicity; see above */
+  void (*queue_lock)(void); /* only for multi-call atomicity; see above */
   void (*queue_unlock)(void);
   /* The backend's VmaAllocator, so a plugin allocates from the same memory
      pools / budget / defrag rather than a competing allocator. NULL until VMA
@@ -341,6 +345,7 @@ typedef struct IhsPvGrant {
   IhsFormatModifier format;
 } IhsPvGrant;
 
+/* clang-format off */
 /*
  * Per-view event callbacks the factory fills. The registry drives these on the
  * platform thread, in response to the flutter/platform_views channel and to
@@ -373,6 +378,7 @@ typedef struct IhsPvGrant {
  *                                    registry frees the instance and releases
  *                                    the grant after it returns.
  */
+/* clang-format on */
 typedef struct IhsPvCallbacks {
   size_t struct_size;
   void (*resize)(void* user_data, double width, double height);
@@ -436,6 +442,7 @@ IHS_EXPORT int ihs_pv_negotiate(IhsPlatformView* view,
                                 const IhsPvRequirements* requirements,
                                 IhsPvGrant* out);
 
+/* clang-format off */
 /*
  * Kind-specific grant payload, valid only for the current grant on @view.
  * Each returns 0 / NULL when the current granted_kind does not match.
@@ -452,6 +459,7 @@ IHS_EXPORT int ihs_pv_negotiate(IhsPlatformView* view,
  * shared context from its native-context accessor and exports a dma-buf per
  * frame via ihs_pv_submit (declared with the producer surface).
  */
+/* clang-format on */
 IHS_EXPORT uint32_t ihs_pv_grant_drm_plane_id(IhsPlatformView* view);
 IHS_EXPORT int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride);
 
@@ -467,9 +475,9 @@ IHS_EXPORT int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride);
  * buffer_id once — creating the VkImage / KMS framebuffer that aliases the
  * dma-buf — and reuses that import on every later submit of the same id, so a
  * steady stream of frames costs no per-frame allocation. A plugin that hands a
- * fresh dma-buf every frame (no ring) uses a rolling id; one that cycles a fixed
- * ring reuses its ids. The plane fds are consumed by the registry on the import
- * (first sight of an id) and closed as redundant on a cache hit.
+ * fresh dma-buf every frame (no ring) uses a rolling id; one that cycles a
+ * fixed ring reuses its ids. The plane fds are consumed by the registry on the
+ * import (first sight of an id) and closed as redundant on a cache hit.
  */
 typedef struct IhsFrame {
   size_t struct_size;
@@ -495,9 +503,9 @@ typedef struct IhsFrame {
  * grant *out_release_fence_fd is set to a fence that fires when the buffer is
  * free to reuse — the plugin owns and closes it, and waits on it before
  * overwriting that buffer; on implicit paths it is -1 and release rides
- * IhsPvCallbacks / the native protocol. The plugin keeps whatever buffer ring it
- * wants (double, triple, N); the registry never counts them. Returns IHS_PV_OK
- * or a negative IhsPvResult.
+ * IhsPvCallbacks / the native protocol. The plugin keeps whatever buffer ring
+ * it wants (double, triple, N); the registry never counts them. Returns
+ * IHS_PV_OK or a negative IhsPvResult.
  */
 IHS_EXPORT int ihs_pv_submit(IhsPlatformView* view,
                              const IhsFrame* frame,
