@@ -72,6 +72,12 @@ class LayerCompositor {
 
   static void EndFrame(VkCommandBuffer cmd);
 
+  // Destroy all cached framebuffers. Call when the target image views they were
+  // built from are being destroyed (e.g. a swapchain resize) so a later
+  // BeginFrame rebuilds them instead of reusing a framebuffer that references a
+  // freed view. The caller must have made the GPU idle first.
+  void ClearFramebuffers();
+
  private:
   explicit LayerCompositor(VkDevice device) : device_(device) {}
   VkImageView CreateSourceView(VkImage image, VkFormat format);

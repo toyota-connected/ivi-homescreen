@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <unistd.h>
 #include <cstdint>
 
 #include <shell/platform/embedder/embedder.h>
@@ -143,4 +144,54 @@ class ICompositorSurface {
    */
   [[nodiscard]] virtual uint32_t GetVulkanImageLayout() const { return 0; }
   virtual void SetVulkanImageLayout(uint32_t /*layout*/) {}
+
+  /**
+   * @brief Whether the Vulkan image is a dma-buf the producer rewrites on
+   * another agent's queue, so the compositor must take ownership of it before
+   * reading and hand it back after.
+   *
+   * - @c false (default) — a static image on the compositor's own device: the
+   *   compositor transitions it to a transfer source ONCE (tracked via
+   *   Get/SetVulkanImageLayout) and reads it every frame thereafter.
+   * - @c true — an imported dma-buf whose content is written by an external
+   *   producer through an aliased image. The compositor issues a
+   *   VK_QUEUE_FAMILY_EXTERNAL ownership acquire (from GENERAL to transfer
+   *   source) before the blit and a release back after it, every frame; the
+   *   producer performs the complementary release/acquire around its render.
+   *   GetVulkanImageLayout is not consulted on this path.
+   */
+  [[nodiscard]] virtual bool NeedsExternalQueueAcquire() const { return false; }
+
+  /**
+   * @brief Take the acquire fence (a sync_file fd) for the frame the producer
+   * most recently submitted, transferring ownership to the caller.
+   *
+   * When the producer submits asynchronously (explicit sync), it exports a
+   * sync_file that signals when its render/copy into the imported dma-buf has
+   * completed and hands it over with the frame. The compositor imports it into
+   * a VkSemaphore and waits on it before sampling the image, so it need not
+   * rely on the producer having stalled on the CPU first. Returns -1 when there
+   * is no pending acquire fence (the producer stalled synchronously, or the
+   * device lacks SYNC_FD semaphore support); the caller then reads the image
+   * directly. The returned fd is owned by the caller (import-consumes or close
+   * it).
+   */
+  [[nodiscard]] virtual int TakeAcquireFenceFd() { return -1; }
+
+  /**
+   * @brief Hand back a release fence (a sync_file fd) that signals when the
+   * frame the compositor just submitted has finished sampling this surface's
+   * image, transferring ownership of the fd.
+   *
+   * The producer waits on it before overwriting a ring buffer, and the host
+   * waits on it before freeing an import at dispose, so neither frees or
+   * rewrites memory the compositor is still reading. The default ignores it
+   * (closing the fd) for surfaces that manage their own lifetime. The fd is
+   * owned by the callee.
+   */
+  virtual void SetReleaseFenceFd(int fd) {
+    if (fd >= 0) {
+      ::close(fd);
+    }
+  }
 };

@@ -87,6 +87,17 @@ endif ()
 option(BUILD_COMPOSITOR "Enable FlutterCompositor backing store API" OFF)
 
 #
+# Compositor debug HUD (Dear ImGui overlay: frame stats + per-view tracking,
+# toggled with F12 / summoned by IVI_HUD). Default ON, but needs the compositor;
+# turn it OFF to drop the vendored imgui + HUD code from size-constrained builds.
+#
+option(BUILD_HUD "Build the compositor debug HUD (Dear ImGui overlay)" ON)
+if (BUILD_HUD AND NOT BUILD_COMPOSITOR)
+    message(STATUS "BUILD_HUD requires BUILD_COMPOSITOR; disabling the HUD")
+    set(BUILD_HUD OFF CACHE BOOL "Build the compositor debug HUD (Dear ImGui overlay)" FORCE)
+endif ()
+
+#
 # Export Vulkan backing-store memory as a DMA-BUF fd so plugins can import
 # it zero-copy. Requires VK_KHR_external_memory_fd at runtime; silently
 # falls back to a non-exportable allocation if unavailable.

@@ -16,10 +16,12 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <ctime>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -54,6 +56,10 @@ class Backend;
 
 class Engine;
 
+namespace ihs::hud {
+class GlHud;
+}  // namespace ihs::hud
+
 class WaylandEglBackend : public Egl, public Backend {
  public:
   // Maximum damage history - for triple buffering we need to store damage for
@@ -74,6 +80,12 @@ class WaylandEglBackend : public Egl, public Backend {
                     bool debug_backend,
                     bool enable_impeller,
                     int buffer_size = kEglBufferSize);
+
+#if BUILD_HUD
+  // Out-of-line so the GlHud unique_ptr (incomplete here) is destroyed where
+  // GlHud is complete; also tears the HUD down with the GL context current.
+  ~WaylandEglBackend() override;
+#endif
 
   /**
    * @brief Resize Flutter engine Window size
@@ -246,6 +258,27 @@ class WaylandEglBackend : public Egl, public Backend {
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
   BackingStorePool<EglTextureBackingStore> m_texture_pool;
   PresentLayerSequencer m_sequencer;
+
+#if BUILD_HUD
+  // Debug HUD (imgui GL). Lazily created on the first present when IVI_HUD is
+  // set, or on the first ToggleHud (F12). All HUD GL work runs on the raster
+  // thread with the context current; rolling present-interval window feeds the
+  // fps/frame stats independent of IVI_WL_PROFILE.
+  std::unique_ptr<ihs::hud::GlHud> hud_;
+  bool hud_enabled_{false};
+  bool hud_checked_{false};
+  bool hud_init_failed_{false};
+  uint64_t hud_last_present_ns_{0};
+  std::array<float, 60> hud_interval_ms_{};
+  uint32_t hud_interval_head_{0};
+  uint32_t hud_interval_count_{0};
+
+  // Lazily create hud_ (no-op if disabled/already tried) and draw it over the
+  // window's default framebuffer before the buffer swap. @layers/@count may be
+  // null/0 (fast path) — then no platform-view rows are updated this frame.
+  void MaybeRenderHud(const FlutterLayer** layers, size_t count);
+#endif  // BUILD_HUD
+
   // Register/Unregister fire on the platform thread via FlutterView;
   // PresentLayers reads the map on the rasterizer thread. The mutex is
   // held only across map lookups — never across the OnPresent call

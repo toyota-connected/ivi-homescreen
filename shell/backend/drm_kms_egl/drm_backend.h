@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -46,6 +47,10 @@
 class DrmCompositor;
 class DrmDisplay;
 class TaskRunner;
+namespace ihs::hud {
+class GlHud;
+}  // namespace ihs::hud
+
 namespace homescreen {
 class DrmCapture;
 class DrmCursor;
@@ -496,6 +501,35 @@ class DrmBackend : public Backend, public IFlipSink {
   std::unique_ptr<homescreen::GlCursor> gl_cursor_{};
 #if HAVE_DRM_CAPTURE
   std::unique_ptr<homescreen::DrmCapture> capture_;
+#endif
+
+#if BUILD_HUD
+  // Debug HUD (imgui GL) drawn into FBO 0 before the swap on the GL-swap
+  // present path. (The plane-compositor path scans out planes directly and is
+  // not covered.) Created lazily on first present when IVI_HUD / [hud].enable
+  // is set.
+  std::unique_ptr<ihs::hud::GlHud> hud_;
+  bool hud_enabled_{false};
+  bool hud_checked_{false};
+  bool hud_init_failed_{false};
+  uint64_t hud_last_present_ns_{0};
+  std::array<float, 60> hud_interval_ms_{};
+  uint32_t hud_interval_head_{0};
+  uint32_t hud_interval_count_{0};
+  // Lazily create hud_ (env/config gated); returns true if it exists.
+  bool EnsureHud();
+  // Roll the present-interval window and produce this frame's stats; @dt_s out.
+  ihs::hud::HudStats ComputeHudStats(float& dt_s);
+  // GL-swap path: draw the HUD into FBO 0 before the buffer swap.
+  void MaybeRenderHud(const FlutterLayer** layers, size_t count);
+
+ public:
+  // Plane-compositor path: render the HUD into an offscreen RGBA texture and
+  // return its GL name (0 when disabled), so DrmCompositor can composite it
+  // onto its scanout buffer (with the same y-flip it uses for app layers).
+  unsigned int RenderHudTexture(uint32_t width, uint32_t height);
+
+ private:
 #endif
 
  public:

@@ -16,10 +16,12 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -66,6 +68,10 @@ class WlDmabufBuffer;
 class ExplicitSync;
 class LayerCompositor;
 }  // namespace wl_vulkan
+
+namespace ihs::hud {
+class VulkanHud;
+}  // namespace ihs::hud
 
 class WaylandVulkanBackend final : public Backend {
  public:
@@ -195,6 +201,8 @@ class WaylandVulkanBackend final : public Backend {
                                int32_t width,
                                int32_t height) override;
 
+  void ScheduleDeferredDestroy(std::function<void()> fn) override;
+
   [[nodiscard]] bool HasDmaBufExport() const { return dma_buf_export_ok_; }
 #endif
 
@@ -233,6 +241,14 @@ class WaylandVulkanBackend final : public Backend {
   VkSwapchainKHR swapchain_{};
   VkCommandPool swapchain_command_pool_{};
   std::vector<VkImage> swapchain_images_;
+  // The extent the swapchain images were actually created at (the surface's
+  // currentExtent, which can differ from width_/height_ mid-resize). The blend
+  // path sizes its framebuffer to this so it matches the image views.
+  VkExtent2D swapchain_extent_{};
+  // Color-attachment views of swapchain_images_ (same order), used to blend the
+  // layer stack directly into the swapchain on the WSI path (platform-view
+  // frames). Created in InitializeSwapChain, destroyed with the swapchain.
+  std::vector<VkImageView> swapchain_image_views_;
   std::vector<VkCommandBuffer> present_transition_buffers_;
   // One present-transition semaphore per swapchain image. Per-image (rather
   // than a single shared semaphore) so the non-compositor present path does
@@ -330,6 +346,14 @@ class WaylandVulkanBackend final : public Backend {
       void* user_data,
       FlutterVulkanInstanceHandle instance,
       const char* procname);
+
+  // Plugin-facing vkGetInstanceProcAddr handed out by GetVulkanContext: like
+  // GetInstanceProcAddressCallback (the engine's loader) but in the
+  // PFN_vkGetInstanceProcAddr shape, it swaps vkQueue* entry points for the
+  // shared-queue locking trampolines so a plugin reusing the device serializes
+  // its submits with the engine and this backend (issue #208).
+  static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+  PluginInstanceProcAddr(VkInstance instance, const char* procname);
 
   VkDebugReportCallbackEXT mDebugCallback = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT mDebugMessenger = VK_NULL_HANDLE;
@@ -470,18 +494,59 @@ class WaylandVulkanBackend final : public Backend {
                               const FlutterLayer* layer,
                               VkImage dst);
 
-  /// Composite the layer stack into @p slot with src-over alpha blending via
-  /// layer_compositor_ (a render pass): each backing store and Vulkan platform
-  /// view is sampled and blended in z-order, so a transparent Flutter overlay
-  /// over a platform view keeps the view instead of overwriting it to black.
-  /// Leaves the slot in GENERAL. Returns the per-view OnPresent success.
-  struct DmabufSlot;  // defined below
+  /// Composite the layer stack into @p target_view with src-over alpha blending
+  /// via layer_compositor_ (a render pass): each backing store and Vulkan
+  /// platform view is sampled and blended in z-order, so a transparent Flutter
+  /// overlay over a platform view keeps the view instead of overwriting it to
+  /// black. The render pass clears then leaves the target in GENERAL (the
+  /// caller transitions from there). Shared by the dma-buf present path (target
+  /// = the dma-buf slot's view) and the WSI path (target = a swapchain image
+  /// view).
+  /// @p frame drives layer_compositor_'s per-frame resource recycling. Returns
+  /// the per-view OnPresent success.
   bool CompositeLayersBlend(VkCommandBuffer cmd,
                             const FlutterLayer** layers,
                             size_t count,
-                            DmabufSlot& slot,
+                            VkImageView target_view,
                             uint32_t width,
-                            uint32_t height);
+                            uint32_t height,
+                            uint64_t frame);
+
+  /// Explicit-sync acquire: a platform-view producer may hand over a sync_file
+  /// that signals when its render/copy completed. Import it into a binary
+  /// semaphore and stash it in frame_acquire_waits_ so the frame's queue submit
+  /// waits on it before sampling the view (no reliance on the producer having
+  /// CPU-stalled). No-op when the surface has no acquire fence.
+  void CollectAcquireWait(ICompositorSurface* surface);
+  /// Destroy imported acquire semaphores whose frame has completed.
+  void ReapAcquireWaits();
+
+  /// After the frame submit that signalled release_sem_, export a release fence
+  /// (sync_file) and hand each platform view composited this frame its own dup,
+  /// so the producer/host can wait it before reusing or freeing the buffer.
+  void PublishReleaseFences();
+
+  // Acquire semaphores imported for the frame currently being recorded; the
+  // queue submit waits on them, then they move to acquire_wait_retire_.
+  std::vector<VkSemaphore> frame_acquire_waits_;
+  uint64_t acquire_wait_seq_{0};
+  std::vector<std::pair<uint64_t, VkSemaphore>> acquire_wait_retire_;
+  // Platform-view surfaces composited this frame; each gets a release fence.
+  std::vector<ICompositorSurface*> frame_pv_surfaces_;
+  // Signalled by any frame that sampled a platform view, exported per-frame as
+  // release sync_files. Created lazily as SYNC_FD-exportable; null if the
+  // device can't export (then no release fences are published).
+  VkSemaphore release_sem_{VK_NULL_HANDLE};
+  bool release_sem_failed_{false};
+
+  /// Run deferred-destroy callbacks whose frame margin has elapsed. Called at
+  /// the top of each present, so no frame is recording and prior frames' fences
+  /// have been waited — safe to free imports a disposed view handed over.
+  void ReapDeferredDestroys();
+  std::mutex deferred_destroy_mu_;
+  uint64_t deferred_epoch_{
+      0};  // present count; guarded by deferred_destroy_mu_
+  std::vector<std::pair<uint64_t, std::function<void()>>> deferred_destroys_;
 #endif
 
   /// Record + submit a layout transition on a one-shot command buffer.
@@ -636,6 +701,37 @@ class WaylandVulkanBackend final : public Backend {
   // No-op when IVI_VK_PROFILE is unset. Mutates profile_/session_totals_
   // without locks because the rasterizer thread is the only writer.
   void ProfilePresent(bool ok);
+
+#if BUILD_HUD
+  // Dear ImGui debug overlay drawn over the composited frame. Created lazily on
+  // the first present when IVI_HUD is set; toggled open/closed by ToggleHud
+  // from the shell input path. All HUD Vulkan work (create/record) runs on the
+  // raster thread inside the present command buffer.
+  std::unique_ptr<ihs::hud::VulkanHud> hud_;
+  bool hud_enabled_{false};      // IVI_HUD present (checked once)
+  bool hud_checked_{false};      // env probed
+  bool hud_init_failed_{false};  // create failed; don't retry
+  // Rolling present-interval window for the HUD's fps/frame stats, independent
+  // of IVI_VK_PROFILE. Written on the raster thread only.
+  uint64_t hud_last_present_ns_{0};
+  std::array<float, 60> hud_interval_ms_{};
+  uint32_t hud_interval_head_{0};
+  uint32_t hud_interval_count_{0};
+
+  // Lazily create hud_ (no-op if disabled/already tried). Records the HUD over
+  // @view (@w x @h) into @cmd, emitting a barrier from @old_layout to GENERAL
+  // first if needed; returns true if it drew (image is then in GENERAL, so the
+  // caller must transition to PRESENT_SRC from GENERAL). Returns false when the
+  // HUD is inactive and the caller should transition from @old_layout as usual.
+  bool MaybeRenderHud(VkCommandBuffer cmd,
+                      VkImage image,
+                      VkImageView view,
+                      uint32_t w,
+                      uint32_t h,
+                      VkImageLayout old_layout,
+                      const FlutterLayer** layers,
+                      size_t count);
+#endif  // BUILD_HUD
 
   // wp_presentation vsync now lives in the Display-owned WaylandVsyncProvider;
   // the backend forwards to it. Same pattern as WaylandEglBackend. The

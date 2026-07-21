@@ -54,6 +54,9 @@
 
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
+#if BUILD_HUD
+#include "backend/hud/vulkan_hud.h"
+#endif
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
 #include "backend/drm_kms_vulkan/modifier_format.h"
@@ -337,6 +340,14 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
 VulkanDrmBackend::~VulkanDrmBackend() {
   // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRMVK_PROFILE ran).
   frame_profile_.LogSessionSummary("VulkanDrmBackend");
+#if BUILD_HUD
+  // Free the HUD while the Vulkan device is still alive (Teardown destroys it):
+  // ~VulkanHud runs ImGui_ImplVulkan_Shutdown, which frees device memory.
+  if (device_ != VK_NULL_HANDLE) {
+    d().vkDeviceWaitIdle(device_);
+  }
+  hud_.reset();
+#endif
   // Tear the cursor down first: it commits on compositor_'s DRM device, so it
   // must not outlive it.
   cursor_.reset();
@@ -1091,14 +1102,21 @@ void VulkanDrmBackend::StopVsyncMonitor() {
   }
 }
 
-int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c, VkImage image) {
-  const VkImageMemoryBarrier barrier = ColorBarrier(
-      image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT);
-
+int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
+                                           VkImage image,
+                                           VkImageView view,
+                                           uint32_t width,
+                                           uint32_t height,
+                                           const FlutterLayer** layers,
+                                           size_t count) {
   if (!c.explicit_sync) {
     // CPU-fence fallback: submit + block until the barrier retires, then the
-    // caller marks the slot ready with no in-fence.
+    // caller marks the slot ready with no in-fence. (The HUD is folded only
+    // into the explicit-sync path, where the scanout fence covers its draw.)
+    const VkImageMemoryBarrier barrier = ColorBarrier(
+        image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_ACCESS_MEMORY_READ_BIT);
     SubmitImageBarrier(device_, c.barrier_pool, c.barrier_fence,
                        graphics_queue_, barrier,
                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1118,9 +1136,40 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c, VkImage image) {
   bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &bi);
+
+  // Barrier the engine's render (COLOR_ATTACHMENT_OPTIMAL) to GENERAL. When the
+  // HUD will draw, make its writes ordered against the HUD render pass (a color
+  // attachment read/write) instead of just flushing to scanout.
+#if BUILD_HUD
+  const bool hud_active = hud_enabled_ || !hud_checked_ ||
+                          std::getenv("IVI_HUD") != nullptr ||
+                          hud_config_enable_;
+#else
+  const bool hud_active = false;
+#endif
+  const VkImageMemoryBarrier barrier = ColorBarrier(
+      image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      hud_active ? (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+                 : VK_ACCESS_MEMORY_READ_BIT);
   d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &barrier);
+                           hud_active
+                               ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                               : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                           0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+#if BUILD_HUD
+  // Draw the HUD into the same command buffer (image is now GENERAL), so the
+  // exported scanout fence covers it. Leaves the image in GENERAL.
+  RecordHud(cmd, view, width, height, layers, count);
+#else
+  (void)view;
+  (void)width;
+  (void)height;
+  (void)layers;
+  (void)count;
+#endif
   d().vkEndCommandBuffer(cmd);
 
   VkSubmitInfo si{};
@@ -1145,6 +1194,88 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c, VkImage image) {
   }
   return fd;
 }
+
+#if BUILD_HUD
+bool VulkanDrmBackend::RecordHud(VkCommandBuffer cmd,
+                                 VkImageView view,
+                                 uint32_t width,
+                                 uint32_t height,
+                                 const FlutterLayer** layers,
+                                 size_t count) {
+  if (!hud_checked_) {
+    hud_checked_ = true;
+    hud_enabled_ = std::getenv("IVI_HUD") != nullptr || hud_config_enable_;
+  }
+  if (!hud_enabled_ || hud_init_failed_) {
+    return false;
+  }
+  if (!hud_) {
+    std::string err;
+    hud_ = ihs::hud::VulkanHud::Create(
+        instance_, physical_device_, device_, graphics_queue_family_,
+        graphics_queue_, reinterpret_cast<void*>(d().vkGetInstanceProcAddr),
+        VK_FORMAT_B8G8R8A8_UNORM, CompositorState::kSyncRing, err);
+    if (!hud_) {
+      hud_init_failed_ = true;
+      ihs::log::warn("[VulkanDrmBackend] HUD unavailable ({})", err);
+      return false;
+    }
+    hud_->SetConfig(hud_config_);
+    hud_->SetOpen(true);
+    ihs::log::info("[VulkanDrmBackend] debug HUD enabled");
+  }
+
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                          static_cast<uint64_t>(ts.tv_nsec);
+  float dt_s = 1.0f / 60.0f;
+  if (hud_last_present_ns_ != 0 && now_ns > hud_last_present_ns_) {
+    const uint64_t dt = now_ns - hud_last_present_ns_;
+    dt_s = static_cast<float>(dt) / 1e9f;
+    hud_interval_ms_[hud_interval_head_] = static_cast<float>(dt) / 1e6f;
+    hud_interval_head_ = (hud_interval_head_ + 1) % hud_interval_ms_.size();
+    if (hud_interval_count_ < hud_interval_ms_.size()) {
+      ++hud_interval_count_;
+    }
+  }
+  hud_last_present_ns_ = now_ns;
+
+  ihs::hud::HudStats stats{};
+  if (hud_interval_count_ > 0) {
+    float sum = 0.0f;
+    float worst = 0.0f;
+    for (uint32_t i = 0; i < hud_interval_count_; ++i) {
+      sum += hud_interval_ms_[i];
+      worst = std::max(worst, hud_interval_ms_[i]);
+    }
+    stats.frame_ms = sum / static_cast<float>(hud_interval_count_);
+    stats.frame_max_ms = worst;
+    stats.fps = stats.frame_ms > 0.0f ? 1000.0f / stats.frame_ms : 0.0f;
+  }
+  stats.dmabuf_present = true;  // DRM Vulkan always scans out the dma-buf slot
+  stats.explicit_sync = true;   // this path is explicit-sync only
+  const uint32_t refresh_ns = compositor_ ? compositor_->period_ns : 0;
+  stats.target_fps =
+      refresh_ns > 0 ? 1e9f / static_cast<float>(refresh_ns) : 60.0f;
+
+  std::vector<ihs::hud::HudViewSample> views;
+  for (size_t i = 0; layers != nullptr && i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (layer != nullptr &&
+        layer->type == kFlutterLayerContentTypePlatformView &&
+        layer->platform_view != nullptr) {
+      views.push_back({layer->platform_view->identifier,
+                       static_cast<uint32_t>(layer->size.width),
+                       static_cast<uint32_t>(layer->size.height),
+                       /*dmabuf=*/true});
+    }
+  }
+
+  hud_->Render(cmd, view, width, height, dt_s, stats, views);
+  return true;
+}
+#endif  // BUILD_HUD
 
 bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
                                          size_t count) {
@@ -1192,7 +1323,9 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   // already retired; this barrier only makes the writes visible to KMS. On the
   // explicit-sync path it returns a sync_file the scene hands to IN_FENCE_FD so
   // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
-  const int scanout_fence_fd = SubmitScanoutBarrier(c, store->image());
+  const int scanout_fence_fd =
+      SubmitScanoutBarrier(c, store->image(), store->view(), store->width(),
+                           store->height(), layers, count);
 
   // The engine's raster thread pipelines: it hands us frame N+1 while flip N is
   // still in flight, and a single plane can hold only one flip, so we wait for

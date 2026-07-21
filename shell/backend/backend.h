@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "config/common.h"
@@ -27,6 +28,10 @@
 
 #if BUILD_COMPOSITOR
 #include "view/compositor_surface_interface.h"
+#endif
+
+#if BUILD_HUD
+#include "backend/hud/ihud.h"
 #endif
 
 class Engine;
@@ -58,6 +63,12 @@ struct BackendVulkanContext {
   void* queue;            // VkQueue (externally synchronized — see note below)
   uint32_t queue_family_index;
   void* get_instance_proc_addr;  // PFN_vkGetInstanceProcAddr (shared loader)
+  // The device extensions the backend enabled, so a plugin can gate optional
+  // paths (e.g. sync_file semaphore export for explicit-sync acquire) on what
+  // the shared device actually supports. Backed by backend-owned storage that
+  // outlives the context; null/0 when the backend does not report them.
+  const char* const* device_extensions;
+  size_t device_extension_count;
 };
 
 // The unified display-target interface: a Backend owns surface lifecycle, the
@@ -75,6 +86,18 @@ class Backend {
 
   Backend(const Backend&) = delete;
   const Backend& operator=(const Backend&) = delete;
+
+#if BUILD_HUD
+  // Debug-HUD appearance/layout + whether config enabled it, translated from
+  // the view's [hud] table (see register_backends). The concrete backend
+  // applies hud_config_ to its HUD and treats hud_config_enable_ as an enable
+  // source in addition to the IVI_HUD env var. Set once, before the first
+  // present.
+  void SetHudConfig(const ihs::hud::HudConfig& config, bool enable) {
+    hud_config_ = config;
+    hud_config_enable_ = enable;
+  }
+#endif
 
   /**
    * @brief The single factory for a per-view Backend. Selects the concrete
@@ -146,6 +169,16 @@ class Backend {
    */
   virtual bool GetVulkanContext(BackendVulkanContext* /* out */) const {
     return false;
+  }
+
+  // Run @fn at a point where no compositor frame is recording or in flight —
+  // the top of a later present, after prior frame fences. A platform-view host
+  // uses this to free an imported image on dispose without racing the raster
+  // thread that may be mid-record binding it. Default: run now (no compositor).
+  virtual void ScheduleDeferredDestroy(std::function<void()> fn) {
+    if (fn) {
+      fn();
+    }
   }
 
   /**
@@ -275,4 +308,9 @@ class Backend {
 
   profiling::MotionToPhoton m2p_;
   bool m2p_enabled_ = false;
+
+#if BUILD_HUD
+  ihs::hud::HudConfig hud_config_{};
+  bool hud_config_enable_{false};
+#endif
 };

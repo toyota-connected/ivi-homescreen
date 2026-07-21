@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -34,6 +35,10 @@ namespace homescreen {
 class DrmSession;
 class DrmCursor;
 }  // namespace homescreen
+
+namespace ihs::hud {
+class VulkanHud;
+}  // namespace ihs::hud
 
 // DRM/KMS scanout backend that drives the Flutter Vulkan renderer and presents
 // on hardware KMS planes via zero-copy dma-buf import, reusing the session /
@@ -253,7 +258,36 @@ class VulkanDrmBackend final : public Backend {
   // explicit-sync path returns an owned sync_file fd (>=0) the caller wraps as
   // the ready slot's acquire fence (KMS waits via IN_FENCE_FD); on the
   // CPU-fence fallback the barrier is waited on here and -1 is returned.
-  int SubmitScanoutBarrier(CompositorState& c, VkImage image);
+  int SubmitScanoutBarrier(CompositorState& c,
+                           VkImage image,
+                           VkImageView view,
+                           uint32_t width,
+                           uint32_t height,
+                           const FlutterLayer** layers,
+                           size_t count);
+
+#if BUILD_HUD
+  // Debug HUD (imgui Vulkan). Lazily created on the first present when IVI_HUD
+  // or [hud].enable is set; recorded into the scanout-barrier command buffer so
+  // the scanout fence covers it. Explicit-sync path only.
+  std::unique_ptr<ihs::hud::VulkanHud> hud_;
+  bool hud_enabled_{false};
+  bool hud_checked_{false};
+  bool hud_init_failed_{false};
+  uint64_t hud_last_present_ns_{0};
+  std::array<float, 60> hud_interval_ms_{};
+  uint32_t hud_interval_head_{0};
+  uint32_t hud_interval_count_{0};
+
+  // Ensure hud_ exists and record it into @cmd over the store image (already in
+  // GENERAL). @layers/@count feed per-view tracking. Returns true if it drew.
+  bool RecordHud(VkCommandBuffer cmd,
+                 VkImageView view,
+                 uint32_t width,
+                 uint32_t height,
+                 const FlutterLayer** layers,
+                 size_t count);
+#endif
 
   // Flutter's vsync_callback -> parks the baton in vsync_. Static C ABI; the
   // engine handle comes from the FlutterDesktopEngineState* user_data.

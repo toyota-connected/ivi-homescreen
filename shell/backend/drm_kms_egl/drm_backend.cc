@@ -52,6 +52,9 @@
 #include "backend/drm_kms_egl/drm_session.h"
 #include "backend/drm_kms_egl/gl_cursor.h"
 #include "backend/gl_process_resolver.h"
+#if BUILD_HUD
+#include "backend/hud/gl_hud.h"
+#endif
 #include "engine.h"
 #include "logging.h"
 #include "profiling/frame_profile.h"
@@ -386,6 +389,15 @@ DrmBackend::~DrmBackend() {
     gl_cursor_->Destroy();
   }
   gl_cursor_.reset();
+
+#if BUILD_HUD
+  // Free the HUD's GL objects while the context is current.
+  if (hud_ && egl_display_ != EGL_NO_DISPLAY &&
+      egl_context_ != EGL_NO_CONTEXT) {
+    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+  }
+  hud_.reset();
+#endif
 
 #if BUILD_COMPOSITOR
   // Release compositor GL resources while the context is still current.
@@ -1494,6 +1506,99 @@ bool DrmBackend::WaitForPendingFlip() const {
   return true;
 }
 
+#if BUILD_HUD
+bool DrmBackend::EnsureHud() {
+  if (!hud_checked_) {
+    hud_checked_ = true;
+    hud_enabled_ = std::getenv("IVI_HUD") != nullptr || hud_config_enable_;
+  }
+  if (!hud_enabled_ || hud_init_failed_) {
+    return false;
+  }
+  if (!hud_) {
+    std::string err;
+    hud_ = ihs::hud::GlHud::Create(err);  // GL context is current in present
+    if (!hud_) {
+      hud_init_failed_ = true;
+      ihs::log::warn("[DrmBackend] HUD unavailable ({})", err);
+      return false;
+    }
+    hud_->SetConfig(hud_config_);
+    hud_->SetOpen(true);
+    ihs::log::info("[DrmBackend] debug HUD enabled");
+  }
+  return true;
+}
+
+ihs::hud::HudStats DrmBackend::ComputeHudStats(float& dt_s) {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  const uint64_t now_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                          static_cast<uint64_t>(ts.tv_nsec);
+  dt_s = 1.0f / 60.0f;
+  if (hud_last_present_ns_ != 0 && now_ns > hud_last_present_ns_) {
+    const uint64_t dt = now_ns - hud_last_present_ns_;
+    dt_s = static_cast<float>(dt) / 1e9f;
+    hud_interval_ms_[hud_interval_head_] = static_cast<float>(dt) / 1e6f;
+    hud_interval_head_ = (hud_interval_head_ + 1) % hud_interval_ms_.size();
+    if (hud_interval_count_ < hud_interval_ms_.size()) {
+      ++hud_interval_count_;
+    }
+  }
+  hud_last_present_ns_ = now_ns;
+
+  ihs::hud::HudStats stats{};
+  if (hud_interval_count_ > 0) {
+    float sum = 0.0f;
+    float worst = 0.0f;
+    for (uint32_t i = 0; i < hud_interval_count_; ++i) {
+      sum += hud_interval_ms_[i];
+      worst = std::max(worst, hud_interval_ms_[i]);
+    }
+    stats.frame_ms = sum / static_cast<float>(hud_interval_count_);
+    stats.frame_max_ms = worst;
+    stats.fps = stats.frame_ms > 0.0f ? 1000.0f / stats.frame_ms : 0.0f;
+  }
+  stats.target_fps =
+      mode_.vrefresh > 0 ? static_cast<float>(mode_.vrefresh) : 60.0f;
+  return stats;
+}
+
+void DrmBackend::MaybeRenderHud(const FlutterLayer** layers, size_t count) {
+  if (!EnsureHud()) {
+    return;
+  }
+  float dt_s = 0.0f;
+  const ihs::hud::HudStats stats = ComputeHudStats(dt_s);
+
+  std::vector<ihs::hud::HudViewSample> views;
+  for (size_t i = 0; layers != nullptr && i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (layer != nullptr &&
+        layer->type == kFlutterLayerContentTypePlatformView &&
+        layer->platform_view != nullptr) {
+      views.push_back({layer->platform_view->identifier,
+                       static_cast<uint32_t>(layer->size.width),
+                       static_cast<uint32_t>(layer->size.height),
+                       /*dmabuf=*/false});
+    }
+  }
+
+  hud_->Render(fb_w_, fb_h_, dt_s, stats, views);
+}
+
+unsigned int DrmBackend::RenderHudTexture(uint32_t width, uint32_t height) {
+  if (!EnsureHud()) {
+    return 0;
+  }
+  float dt_s = 0.0f;
+  const ihs::hud::HudStats stats = ComputeHudStats(dt_s);
+  // The plane compositor doesn't pass the layer list here; per-view rows are
+  // omitted (frame stats + histogram still show).
+  return hud_->RenderOffscreen(width, height, dt_s, stats, {});
+}
+#endif  // BUILD_HUD
+
 bool DrmBackend::Present() {
   // Session-pause gate (mirrors DrmCompositor::PresentLayers). While the VT is
   // switched away, scanout is revoked and page flips never complete, so the
@@ -1548,6 +1653,13 @@ bool DrmBackend::Present() {
   if (gl_cursor_) {
     gl_cursor_->Draw(fb_w_, fb_h_);
   }
+
+#if BUILD_HUD
+  // Draw the debug HUD over FBO 0 before the swap. This is the GL-swap path;
+  // the plane-compositor path is not covered. No layer list here, so per-view
+  // rows are omitted (stats + histogram still show).
+  MaybeRenderHud(nullptr, 0);
+#endif
 
   if (!eglSwapBuffers(egl_display_, egl_surface_)) {
     ihs::log::error("[DrmBackend] eglSwapBuffers: 0x{:x}", eglGetError());

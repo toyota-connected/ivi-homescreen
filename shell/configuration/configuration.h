@@ -166,6 +166,21 @@ class Configuration {
       std::vector<homescreen::OutputMatch> additional_outputs;
     } view;
 
+    // Compositor debug HUD ([hud] table). Appearance + layout only; the HUD is
+    // enabled by `enable` here or the IVI_HUD env var (no hot key). All ignored
+    // unless the build has BUILD_HUD and the compositor is on.
+    struct {
+      std::optional<bool> enable;
+      // Screen corner the overlay hugs: "top-left" (default), "top-right",
+      // "bottom-left", "bottom-right".
+      std::optional<std::string> corner;
+      std::optional<double> margin;      // pixels from the corner
+      std::optional<double> font_scale;  // multiplies the base font size
+      std::optional<double> bg_alpha;    // window background opacity [0,1]
+      // Text color as "#RRGGBB" or "#RRGGBBAA".
+      std::optional<std::string> text_color;
+    } hud;
+
     // Path to a master config.toml passed via --config. Process-level: it can
     // describe many [[view]] entries (each with its own bundle) and supplies
     // the process [global]/[sentry] tables. Empty/unset = legacy per-bundle
