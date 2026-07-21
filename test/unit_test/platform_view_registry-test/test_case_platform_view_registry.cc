@@ -100,16 +100,20 @@ TEST(PlatformViewRegistry, LegacyListenerLifecycle) {
   EXPECT_FALSE(registry.Dispose(3, false));
 }
 
-// The pre-registry AddListener toggled: a repeated registration for a live id
-// cleared it. Preserved for compatibility.
-TEST(PlatformViewRegistry, RepeatedRegistrationTogglesOff) {
+// A repeated registration for a live id no longer toggles the entry off; the
+// new view wins. The old owned instance is dropped and the callback table is
+// replaced in place, so the id stays live and dispatch reaches the listener.
+// (The old toggle erased the entry, which CreateViaFactory then resurrected
+// with a null listener -> a later Resize dereferenced it and crashed.)
+TEST(PlatformViewRegistry, RepeatedRegistrationReplacesInPlace) {
   PlatformViewRegistry registry(nullptr);
   Probe probe;
 
   registry.RegisterListener(1, &kListener, &probe);
-  registry.RegisterListener(1, &kListener, &probe);  // toggles the entry off
+  registry.RegisterListener(1, &kListener,
+                            &probe);  // new view wins, still live
   registry.Resize(1, 10.0, 10.0);
-  EXPECT_EQ(probe.resize, 0);
+  EXPECT_EQ(probe.resize, 1);
 }
 
 // P1.2: no factory for a type -> caller falls back (CreateViaFactory is false).
