@@ -2397,11 +2397,18 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // reached it yet).
       surface->OnResize(static_cast<int32_t>(fl->size.width),
                         static_cast<int32_t>(fl->size.height));
-      ICompositorSurface::Dmabuf db;
-      if (!surface->GetDmabuf(&db)) {
-        // GL-only surface, or no dma-buf frame ready this present: route
-        // the whole frame through GL composition (which samples the
-        // surface's GL texture / Vulkan image).
+      // Only pull (and dup) a dma-buf for a NEW platform view — one that will
+      // build an ExternalDmaBufSource below. An existing scene layer keeps its
+      // source (the reuse path in the add loop), so calling GetDmabuf for it
+      // every frame would dup+close an fd for nothing. find_by_identity_tag
+      // reflects last frame's layers; this PV is present, so it survives the
+      // prune and the add loop finds it too.
+      ICompositorSurface::Dmabuf db{};
+      if (scene_->find_by_identity_tag(surface.get()) == nullptr &&
+          !surface->GetDmabuf(&db)) {
+        // New platform view with no dma-buf (GL-only surface, or none ready
+        // this present): route the whole frame through GL composition, which
+        // samples the surface's GL texture / Vulkan image.
         return PresentViaGlFallback(layers, layer_count);
       }
       frame_layers.push_back({fl, nullptr, nullptr, surface.get(), db});
@@ -2439,7 +2446,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // in CRTC coordinates; the non-framed path has no letterbox so
   // FlutterLayer.offset is already CRTC-relative.
   //
-  // z_index is each layer's position in Flutter's array = its z-order.
+  // z_index is each engaged layer's position in frame_layers, which is built
+  // in Flutter's layer order — so it preserves the relative z-order (any
+  // skipped null/unsupported layers just compact the numbering, which is fine:
+  // only relative order matters for stacking).
   // Every non-primary layer (backing stores AND platform views) gets an
   // explicit plane zpos so the whole overlay stack shares one Flutter-order
   // scheme (leaving BS overlays unset let them float in z relative to the
@@ -2502,14 +2512,32 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     } else {
       // ── Platform view: wrap the dma-buf as a scene buffer source ──
       if (auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
-        // Only geometry / stacking are updated here — the scene layer keeps
-        // its existing ExternalDmaBufSource. That is correct for the current
-        // producer, whose buffer content is static once submitted (a resize
-        // re-stretches a solid color, no visible change). A producer that
-        // cycles buffer *content* per frame (a decoder, a camera) needs
-        // LayerScene::replace_source() driven by a buffer ring here — the
-        // dynamic-producer follow-up; without it such a plane would scan out
-        // the first frame indefinitely.
+        // Reused layer: swap in this frame's dma-buf so a per-frame producer
+        // (a decoder, a camera) scans out fresh content instead of the first
+        // frame forever. replace_source retires the displaced source only once
+        // its in-flight buffers release (with their release fences), so nothing
+        // is freed while the kernel may still scan it. ExternalDmaBufSource
+        // dups the fds and does its own AddFB2WithModifiers; the pv_fd_closer
+        // closes our dup at scope exit.
+        const auto& db = fl.pv_db;
+        const uint32_t np = db.plane_count;
+        std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
+        for (uint32_t p = 0; p < np && p < 4; ++p) {
+          planes[p] =
+              drm::scene::ExternalPlaneInfo{db.fd, db.offset[p], db.stride[p]};
+        }
+        auto src = drm::scene::ExternalDmaBufSource::create(
+            backend_->device(), db.width, db.height, db.fourcc, db.modifier,
+            drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np));
+        if (src) {
+          if (auto r = scene_->replace_source(layer->handle(),
+                                              std::move(src.value()));
+              !r) {
+            ihs::log::warn(
+                "[DrmCompositor] LayerScene::replace_source (pv): {}",
+                r.error().message());
+          }
+        }  // else: keep the existing source rather than tear the layer down
         layer->set_dst_rect_if_changed(dst_rect);
         layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
         ++pv_reused;
