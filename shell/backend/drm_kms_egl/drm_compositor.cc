@@ -2548,9 +2548,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             }
           } else {
             ihs::log::warn(
-                "[DrmCompositor] pv ExternalDmaBufSource::create failed: "
-                "{}x{} fourcc=0x{:08x} mod=0x{:016x} planes={}",
-                db.width, db.height, db.fourcc, db.modifier, np);
+                "[DrmCompositor] pv ExternalDmaBufSource::create failed "
+                "({}): {}x{} fourcc=0x{:08x} mod=0x{:016x} planes={}",
+                src.error().message(), db.width, db.height, db.fourcc,
+                db.modifier, np);
           }
         }
         layer->set_dst_rect_if_changed(dst_rect);
