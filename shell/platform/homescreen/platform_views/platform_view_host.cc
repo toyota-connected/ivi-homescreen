@@ -268,6 +268,17 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (f.plane_count == 0 || f.plane_fd[0] < 0) {
       return false;
     }
+    // The Dmabuf descriptor carries a single fd shared across planes (the
+    // v4l2 / libcamera / Chromium single-handle layout). A genuine per-plane-fd
+    // frame can't be represented here, so bail — the caller falls back to the
+    // GL import path, which handles multiple fds. Clamp to the 4 planes the
+    // descriptor holds (a DRM fourcc has at most 4).
+    const uint32_t np = f.plane_count < 4 ? f.plane_count : 4;
+    for (uint32_t i = 1; i < np; ++i) {
+      if (f.plane_fd[i] != f.plane_fd[0]) {
+        return false;
+      }
+    }
     const int dup_fd = ::dup(f.plane_fd[0]);
     if (dup_fd < 0) {
       return false;
@@ -277,10 +288,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     out->modifier = f.format.modifier;
     out->width = f.width;
     out->height = f.height;
-    // A single-handle multi-planar layout shares one fd across planes; clamp to
-    // the 4 the descriptor holds (a DRM fourcc has at most 4 planes).
-    out->plane_count = f.plane_count < 4 ? f.plane_count : 4;
-    for (uint32_t i = 0; i < out->plane_count; ++i) {
+    out->plane_count = np;
+    for (uint32_t i = 0; i < np; ++i) {
       out->offset[i] = f.plane_offset[i];
       out->stride[i] = f.plane_stride[i];
     }
@@ -595,6 +604,14 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     BackendEglContext egl{};
     if (backend->GetEglContext(&egl)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+      // The DRM-KMS-EGL backend (gbm_device set; wayland-egl leaves it null)
+      // runs the plane compositor, which can scan out a submitted dma-buf
+      // directly on a KMS overlay plane — offer the zero-copy DRM_PLANE kind.
+      // The scene path falls back to GL if a plane can't be allocated for a
+      // given frame, so advertising it never hard-fails a view.
+      if (egl.gbm_device != nullptr) {
+        out->kinds |= IHS_PV_KIND_DRM_PLANE;
+      }
     }
 #endif
   }
