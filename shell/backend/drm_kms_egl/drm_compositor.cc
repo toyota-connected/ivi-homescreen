@@ -2440,17 +2440,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // FlutterLayer.offset is already CRTC-relative.
   //
   // z_index is each layer's position in Flutter's array = its z-order.
-  // Write it as the plane zpos for EVERY non-primary layer (backing
-  // stores AND platform views) so the whole overlay stack shares one
-  // Flutter-order z scheme; leaving BS overlays unset let them float in z
-  // relative to the PVs. The first layer (z_index 0, the UI/primary
-  // backing store) is left unset — its plane's zpos is immutable on some
-  // drivers, and writing zpos=N matching the primary mis-screens overlays.
+  // Every non-primary layer (backing stores AND platform views) gets an
+  // explicit plane zpos so the whole overlay stack shares one Flutter-order
+  // scheme (leaving BS overlays unset let them float in z relative to the
+  // PVs). The zpos is primary_zpos_ + z_index, NOT the raw index: on drivers
+  // where the primary plane's zpos is not 0 (e.g. amdgpu primary zpos=2), a
+  // raw zpos=1 would sit below the primary and invert stacking. The first
+  // layer (z_index 0, the UI/primary backing store) is left unset — it lands
+  // on the primary plane, whose zpos is immutable on some drivers.
   int bs_reused = 0, bs_new = 0, pv_reused = 0, pv_new = 0;
   int z_index = -1;
   for (auto& fl : frame_layers) {
     ++z_index;
     const bool is_ui = (z_index == 0);
+    const int overlay_zpos = static_cast<int>(primary_zpos_) + z_index;
     drm::scene::Rect dst_rect{
         static_cast<int32_t>(fl.flutter->offset.x),
         static_cast<int32_t>(fl.flutter->offset.y),
@@ -2463,7 +2466,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       if (auto* layer = scene_->find_by_identity_tag(fl.baton)) {
         layer->set_dst_rect_if_changed(dst_rect);
         if (!is_ui) {
-          layer->set_zpos_if_changed(z_index);
+          layer->set_zpos_if_changed(overlay_zpos);
         }
         ++bs_reused;
         continue;
@@ -2484,7 +2487,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       desc.display.rotation = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
       // Non-UI backing stores get a Flutter-order zpos too, matching the PVs.
       if (!is_ui) {
-        desc.display.zpos = z_index;
+        desc.display.zpos = overlay_zpos;
       }
       desc.content_type = is_ui ? drm::planes::ContentType::UI
                                 : drm::planes::ContentType::Generic;
@@ -2499,18 +2502,24 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     } else {
       // ── Platform view: wrap the dma-buf as a scene buffer source ──
       if (auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
-        // The current producer submits a static buffer, so only geometry /
-        // stacking change. A producer that cycles buffers per frame would
-        // replace_source() here (or drive an external_dma_buf ring) —
-        // deferred to the video-producer work.
+        // Only geometry / stacking are updated here — the scene layer keeps
+        // its existing ExternalDmaBufSource. That is correct for the current
+        // producer, whose buffer content is static once submitted (a resize
+        // re-stretches a solid color, no visible change). A producer that
+        // cycles buffer *content* per frame (a decoder, a camera) needs
+        // LayerScene::replace_source() driven by a buffer ring here — the
+        // dynamic-producer follow-up; without it such a plane would scan out
+        // the first frame indefinitely.
         layer->set_dst_rect_if_changed(dst_rect);
-        layer->set_zpos_if_changed(z_index);  // restack on widget-tree reorder
+        layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
         ++pv_reused;
         continue;
       }
       ++pv_new;
       const auto& db = fl.pv_db;
-      const uint32_t np = db.plane_count ? db.plane_count : 1;
+      // GetDmabuf guarantees a valid single-handle plane set (1..4 planes); it
+      // returns false rather than a zero-plane frame.
+      const uint32_t np = db.plane_count;
       std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
       for (uint32_t p = 0; p < np && p < 4; ++p) {
         planes[p] =
@@ -2534,7 +2543,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // Producer hands scanout-oriented (top-down) pixels — no REFLECT_Y,
       // unlike GL backing stores.
       desc.display.rotation = DRM_MODE_ROTATE_0;
-      desc.display.zpos = z_index;
+      desc.display.zpos = overlay_zpos;
       desc.content_type = drm::planes::ContentType::Generic;
       desc.identity_tag = fl.pv_tag;
       auto handle = scene_->add_layer(std::move(desc));
