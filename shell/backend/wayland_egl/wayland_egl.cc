@@ -630,6 +630,9 @@ bool WaylandEglBackend::GetEglContext(BackendEglContext* out) const {
   // share_context transitively shares GL objects with Flutter's raster
   // context.
   out->share_context = GetTextureContext();
+  // No gbm on a Wayland EGL backend — platform views present via wl_surface /
+  // GL texture, not a KMS plane, so there is no scanout buffer to export.
+  out->gbm_device = nullptr;
   return out->display != EGL_NO_DISPLAY && out->share_context != EGL_NO_CONTEXT;
 }
 

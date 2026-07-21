@@ -48,6 +48,9 @@ struct BackendEglContext {
   void* share_context;  // EGLContext suitable as share_context for a
                         // plugin-owned context that uploads GL objects
                         // visible on the raster thread.
+  void* gbm_device;     // struct gbm_device* on a gbm/DRM backend (NULL on a
+                        // Wayland EGL backend). Lets a platform view allocate a
+                        // scanout-capable buffer it can export as a dma-buf.
 };
 
 // Carries the Vulkan handle set a plugin needs to render into a VkImage using
