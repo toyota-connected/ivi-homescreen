@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -533,6 +534,19 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     BackendVulkanContext vk{};
     if (backend->GetVulkanContext(&vk)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+      // Explicit-sync acquire is available when the shared device can import a
+      // producer's sync_file as a semaphore — the compositor's platform-view
+      // wait path (TakeAcquireFenceFd -> vkImportSemaphoreFdKHR) needs
+      // VK_KHR_external_semaphore_fd. Advertise it so a Vulkan producer hands
+      // over a fence instead of stalling on the blit.
+      for (size_t i = 0; i < vk.device_extension_count; ++i) {
+        if (vk.device_extensions[i] != nullptr &&
+            std::strcmp(vk.device_extensions[i],
+                        "VK_KHR_external_semaphore_fd") == 0) {
+          out->explicit_sync = 1;
+          break;
+        }
+      }
     }
 #if IVI_HAVE_EGL
     // The EGL backends import a submitted dma-buf into a GL_TEXTURE_2D, so the
