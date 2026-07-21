@@ -152,9 +152,10 @@ class ICompositorSurface {
    * (YUV) frames fill @c plane_count entries of @c offset / @c stride, all
    * sharing one @c fd (the common single-handle layout v4l2/libcamera and
    * Chromium's accelerated paint produce). @c fourcc is a @c DRM_FORMAT_* code
-   * and @c modifier a @c DRM_FORMAT_MOD_* value (@c DRM_FORMAT_MOD_INVALID for
-   * an unmodified linear buffer). @c width / @c height are the source extent in
-   * pixels; the plane scales this to the layer's destination rect.
+   * and @c modifier a @c DRM_FORMAT_MOD_* value — @c DRM_FORMAT_MOD_LINEAR (0)
+   * for a plain linear buffer, @c DRM_FORMAT_MOD_INVALID only when the modifier
+   * is unknown/unspecified (let the importer infer). @c width / @c height are
+   * the source extent in pixels; the plane scales this to the layer's dst rect.
    *
    * @c acquire_fence_fd, when >= 0, is a sync_file naming when the producer's
    * writes complete — intended for the atomic commit's @c IN_FENCE_FD so
