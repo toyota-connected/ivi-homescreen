@@ -259,6 +259,14 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // compositor still plane-routes XOR GL-imports a given surface per present so
   // the two paths don't both consume a frame. Producers submit top-down pixels
   // (no REFLECT_Y), so the plane scans the buffer out as-is.
+  //
+  // A GL fallback for a frame (no overlay plane fits) imports the stashed frame
+  // via GetGlTextureName, which consumes it — so GetDmabuf then returns false
+  // until the producer submits again. A continuous producer resumes direct
+  // scanout on its next submit; a static producer stays GL-composited (still
+  // correct, just not zero-copy) until it resubmits. Retaining the dma-buf
+  // across a GL import so a static producer returns to scanout is part of the
+  // dynamic-producer follow-up.
   [[nodiscard]] bool GetDmabuf(Dmabuf* out) const override {
     const std::lock_guard<std::mutex> lock(mutex);
     if (out == nullptr || !pending_egl.valid) {
