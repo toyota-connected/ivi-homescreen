@@ -156,10 +156,12 @@ class ICompositorSurface {
    * an unmodified linear buffer). @c width / @c height are the source extent in
    * pixels; the plane scales this to the layer's destination rect.
    *
-   * @c acquire_fence_fd, when >= 0, is a sync_file the compositor hands to the
-   * atomic commit as @c IN_FENCE_FD so scanout waits for the producer's writes,
-   * tear-free without a CPU stall. Ownership stays with the surface; the
-   * compositor dups it if it needs to outlive the call.
+   * @c acquire_fence_fd, when >= 0, is a sync_file naming when the producer's
+   * writes complete — intended for the atomic commit's @c IN_FENCE_FD so
+   * scanout is tear-free without a CPU stall. Not every present path consumes
+   * it yet: the DRM scene path is implicit-sync today and ignores it (leave it
+   * -1 for an implicit-sync producer). When a path does consume it, ownership
+   * stays with the surface and the compositor dups it.
    */
   struct Dmabuf {
     int fd{-1};
@@ -182,9 +184,10 @@ class ICompositorSurface {
    * geometry drives the Layer Crtc and Src rects, which drive the plane)
    * instead of GL-compositing it. Returns false (default) for GL-only surfaces,
    * or when no dma-buf frame is ready this present — the compositor falls back
-   * to the @c GetGlTextureName / @c GetVulkanImage path. Buffer ownership stays
-   * with the surface; the returned @c fd must remain valid until the next
-   * present.
+   * to the @c GetGlTextureName / @c GetVulkanImage path. The returned @c fd is
+   * owned by the caller (an implementation may dup its internal handle to make
+   * it robust against a concurrent producer superseding the frame); the caller
+   * closes it once it has imported the buffer.
    */
   [[nodiscard]] virtual bool GetDmabuf(Dmabuf* /*out*/) const { return false; }
 

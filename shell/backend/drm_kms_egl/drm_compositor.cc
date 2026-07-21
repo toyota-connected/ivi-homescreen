@@ -2349,6 +2349,22 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   frame_batons.reserve(layer_count);
   frame_pv_tags.reserve(layer_count);
 
+  // GetDmabuf hands back an owned (dup'd) fd per platform view; close them on
+  // every exit path (each GL-fallback return below, and the normal exit).
+  // ExternalDmaBufSource::create dups again for the KMS framebuffer, so closing
+  // after the scene layer is built is correct.
+  struct PvFdCloser {
+    std::vector<FrameLayer>& fls;
+    ~PvFdCloser() {
+      for (auto& fl : fls) {
+        if (fl.pv_tag != nullptr && fl.pv_db.fd >= 0) {
+          ::close(fl.pv_db.fd);
+          fl.pv_db.fd = -1;
+        }
+      }
+    }
+  } pv_fd_closer{frame_layers};
+
   for (size_t i = 0; i < layer_count; ++i) {
     const FlutterLayer* fl = layers[i];
     if (!fl) {

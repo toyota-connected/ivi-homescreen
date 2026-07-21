@@ -252,12 +252,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
   // Direct-scanout seam for the DRM compositor: expose the latest submitted
   // frame's dma-buf so it can be placed on a KMS overlay plane instead of being
-  // GL-composited. A pure read of the frame stashed by HostSubmit; the returned
-  // fd is borrowed (owned by pending_egl — valid until the next submit
-  // supersedes it, or GetGlTextureName imports and closes it). The compositor
-  // must therefore plane-route XOR GL-import a given surface in one present so
-  // the two paths never both consume the frame. Producers submit top-down
-  // pixels (no REFLECT_Y), so the plane scans the buffer out as-is.
+  // GL-composited. Reads the frame stashed by HostSubmit and returns a *dup* of
+  // its dma-buf fd — owned by the caller, which must close it. Duping under the
+  // lock keeps the fd valid even if a concurrent HostSubmit supersedes and
+  // closes the plugin's original before the compositor imports it. The
+  // compositor still plane-routes XOR GL-imports a given surface per present so
+  // the two paths don't both consume a frame. Producers submit top-down pixels
+  // (no REFLECT_Y), so the plane scans the buffer out as-is.
   [[nodiscard]] bool GetDmabuf(Dmabuf* out) const override {
     const std::lock_guard<std::mutex> lock(mutex);
     if (out == nullptr || !pending_egl.valid) {
@@ -267,19 +268,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (f.plane_count == 0 || f.plane_fd[0] < 0) {
       return false;
     }
-    out->fd = f.plane_fd[0];
+    const int dup_fd = ::dup(f.plane_fd[0]);
+    if (dup_fd < 0) {
+      return false;
+    }
+    out->fd = dup_fd;  // owned by the caller
     out->fourcc = f.format.fourcc;
     out->modifier = f.format.modifier;
     out->width = f.width;
     out->height = f.height;
-    out->plane_count = f.plane_count;
-    for (uint32_t i = 0; i < f.plane_count && i < 4; ++i) {
+    // A single-handle multi-planar layout shares one fd across planes; clamp to
+    // the 4 the descriptor holds (a DRM fourcc has at most 4 planes).
+    out->plane_count = f.plane_count < 4 ? f.plane_count : 4;
+    for (uint32_t i = 0; i < out->plane_count; ++i) {
       out->offset[i] = f.plane_offset[i];
       out->stride[i] = f.plane_stride[i];
     }
-    // Borrowed; -1 on the implicit-sync path. The compositor dups it for the
-    // atomic commit's IN_FENCE_FD when >= 0.
-    out->acquire_fence_fd = pending_acquire_fd;
+    // The DRM scene path is implicit-sync today and does not consume an acquire
+    // fence; leave it unset until explicit-sync IN_FENCE wiring lands.
+    out->acquire_fence_fd = -1;
     return true;
   }
 #endif
