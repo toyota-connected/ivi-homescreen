@@ -361,16 +361,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build lcov \
+            ninja-build lcov libglib2.0-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev \
-            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+            clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
 
       - name: Install DRM backend packages
         if: ${{ startsWith(matrix.backend, 'drm-') }}
         run: |
           sudo apt-get install -y \
             libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
-            libxcursor-dev libglib2.0-dev
+            libxcursor-dev
 
       - name: Setup libdisplay-info
         if: ${{ startsWith(matrix.backend, 'drm-') }}
