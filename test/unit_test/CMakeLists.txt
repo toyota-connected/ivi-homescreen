@@ -67,10 +67,55 @@ if(COVERAGE)
         DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 
+# Shared OBJECT library: compile all shell + unit_test_utils sources ONCE
+# and let every test driver link against it. Avoids the O(N_tests × M_sources)
+# recompilation that the old pattern caused — 22 tests × ~25 shell TUs was
+# ~550 redundant compilation units (very visible in CI with -DCOVERAGE=ON).
+#
+# OBJECT (not STATIC) is intentional: CMake expands an OBJECT library into
+# a flat list of .o files in each consumer's link command, identical to how
+# ${TYPICAL_TEST_SOURCES} behaved when compiled directly into each executable.
+# This eliminates the circular-dependency link-ordering issue that a STATIC
+# archive has between libflutter.a and libplatform_homescreen.a: with a flat
+# .o list the GNU linker resolves back-references on its normal forward pass.
+#
+# Coverage: all test drivers write gcda hits into the shared .o files' gcda
+# paths (sequential accumulation). Do NOT use ctest -j > 1 with COVERAGE=ON.
+add_library(homescreen_ut_shell OBJECT
+    ${TYPICAL_TEST_SOURCES}
+    ${PROJECT_SOURCE_DIR}/shell/input/wake_event_fd.cc
+)
+target_compile_definitions(homescreen_ut_shell
+    # PUBLIC: test executables inherit the compile-time defines (UNIT_TEST,
+    # TEST_APP_BUNDLE_PATH, GOLDEN_IMAGE_PATH, ASIO_* flags, etc.) so they
+    # do not need to repeat them in each per-test CMakeLists.
+    PUBLIC
+    ${TYPICAL_TEST_DEFINITIONS}
+)
+target_include_directories(homescreen_ut_shell
+    # PUBLIC so that every test driver that links against the archive
+    # automatically inherits the shell and unit_test_utils include paths,
+    # without each per-test CMakeLists needing to repeat them.
+    PUBLIC
+    ${TYPICAL_TEST_INC_DIRS}
+    # unit_test_utils.cc (in the archive) and test case .cc files both
+    # include gtest/gtest.h; propagate it through the archive.
+    $<TARGET_PROPERTY:gtest,INTERFACE_INCLUDE_DIRECTORIES>
+)
+target_link_libraries(homescreen_ut_shell
+    # PUBLIC: test executables that link this archive must also see the
+    # transitive link deps (wayland, EGL, flutter, toolchain isystem paths).
+    PUBLIC
+    ${TYPICAL_TEST_LINK_LIBS}
+    toolchain::toolchain
+)
+
+
 #add_subdirectory(template-test-case)
 add_subdirectory(utils-test)
-add_subdirectory(flutter_view-test)
-add_subdirectory(app-test)
+# flutter_view-test and app-test require a live Wayland compositor connection
+# (Display::Display calls wl_display_connect / App::BuildDisplays).  They have
+# been moved to test/integration/ and are not run by the unit-test-coverage job.
 add_subdirectory(configuration-test-case)
 add_subdirectory(output_resolver-test)
 # T1 — drives the real LeaseClient against a mock drm-lease-v1 compositor.
@@ -104,7 +149,9 @@ add_subdirectory(mutation_stack-test)
 add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(text_input-test)
-#add_subdirectory(texture-test)
+# texture-test requires a live Wayland compositor, Flutter engine, and an app
+# bundle on disk — it is an integration test and has been moved to
+# test/integration/texture-test/.  Do NOT re-add it here.
 
 # The accessibility sources are only part of the shell target (and therefore of
 # TYPICAL_TEST_SOURCES) when BUILD_ACCESSIBILITY is configured on.

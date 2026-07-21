@@ -15,3 +15,7 @@ Testing/
 plugins/
 ivi-homescreen-plugins/
 build-systemd-watchdog-test/
+
+lcovHtml/
+
+coverage.info

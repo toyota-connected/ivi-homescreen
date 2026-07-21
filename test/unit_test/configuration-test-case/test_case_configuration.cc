@@ -27,7 +27,7 @@ TEST(HomescreenConfigurationParseConfig, Lv1Normal001) {
   const auto& [app_id, cursor_theme, disable_cursor, wayland_event_mask,
                debug_backend, bundle_paths, view, config_file] = configs.back();
 
-  EXPECT_EQ("homescreen", app_id);
+  EXPECT_EQ("com.toyotaconnected.homescreen", app_id);
   EXPECT_EQ(false, disable_cursor.value_or(false));
   EXPECT_EQ(false, debug_backend.value_or(false));
   EXPECT_EQ(kBundlePath, view.bundle_path);
@@ -47,12 +47,14 @@ Initialization Test Summary：Test the function of ConfigFromArgcArgv
 ***************************************************************/
 
 TEST(HomescreenConfigurationParseArgcArgv, Lv1Normal001) {
-  // setup test parameters
-  // -c/-d/-f are switches (no value); -h is now help so height is --height.
+  // ParseArgcArgv validates that the bundle path is an existing directory.
+  // kUnitTestAppBundle (/home/root) is only valid on a target device.  Use
+  // the test source root (SOURCE_ROOT_DIR) which is guaranteed to exist on
+  // every machine that builds the tests.
   constexpr int argc = 26;
   const char* argv[26] = {"homescreen",
                           "-b",
-                          kUnitTestAppBundle,
+                          kSourceRoot,
                           "-a",
                           "2",
                           "-c",
@@ -85,7 +87,7 @@ TEST(HomescreenConfigurationParseArgcArgv, Lv1Normal001) {
                debug_backend, bundle_paths, view, config_file] = configs.back();
   // check result
 
-  EXPECT_EQ(kUnitTestAppBundle, view.bundle_path);
+  EXPECT_EQ(kSourceRoot, view.bundle_path);
   EXPECT_EQ(2, view.accessibility_features.value_or(0));
   EXPECT_EQ(true, disable_cursor.value_or(false));
   EXPECT_EQ(true, debug_backend.value_or(false));

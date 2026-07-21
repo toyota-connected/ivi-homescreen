@@ -7,3 +7,4 @@ if (BUILD_BACKEND_WAYLAND_EGL)
 endif ()
 
 add_subdirectory(unit_test)
+add_subdirectory(integration)

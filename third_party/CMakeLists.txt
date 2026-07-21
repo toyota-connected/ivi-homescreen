@@ -76,13 +76,19 @@ if (BUILD_UNIT_TESTS)
     if (TOOLCHAIN_COMPILE_OPTIONS)
         target_compile_options(gtest PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
     endif ()
-    # GCC 15 promotes a signed-conversion warning inside googletest itself
-    # (gtest.cc: kSize template parameter). Demote to a warning for
-    # third_party only — the project's own Werror settings stay intact.
+    # Suppress warnings inside googletest/googlemock that are promoted to errors
+    # by our toolchain flags. Keep these in sync with the vendored version:
+    #   v1.17.0 (C++17 required) — added -Wno-error=maybe-uninitialized for
+    #   new matcher code in gmock-matchers.h that trips GCC 14+ at -O2, and
+    #   for gtest_main on GCC 15.
     target_compile_options(gtest PRIVATE
             -Wno-error=sign-conversion
             -Wno-error=conversion)
-    target_compile_options(gmock PRIVATE -Wno-error=deprecated-copy)
+    target_compile_options(gmock PRIVATE
+            -Wno-error=sign-conversion
+            -Wno-error=conversion
+            -Wno-error=deprecated-copy
+            -Wno-error=maybe-uninitialized)
 
     target_compile_options(gtest_main PRIVATE -include cstdint)
     get_target_property(TOOLCHAIN_COMPILE_OPTIONS toolchain INTERFACE_COMPILE_OPTIONS)
@@ -91,8 +97,7 @@ if (BUILD_UNIT_TESTS)
     endif ()
     target_compile_options(gtest_main PRIVATE
             -Wno-error=sign-conversion
-            -Wno-error=conversion)
-
-    target_compile_options(gmock PRIVATE -Wno-error=deprecated-copy)
+            -Wno-error=conversion
+            -Wno-error=maybe-uninitialized)
 
 endif ()
