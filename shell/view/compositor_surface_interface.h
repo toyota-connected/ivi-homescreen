@@ -146,6 +146,49 @@ class ICompositorSurface {
   virtual void SetVulkanImageLayout(uint32_t /*layout*/) {}
 
   /**
+   * @brief A single dma-buf frame a surface can hand to a KMS overlay plane.
+   *
+   * Plain data so this header stays free of DRM/GBM includes. Multi-planar
+   * (YUV) frames fill @c plane_count entries of @c offset / @c stride, all
+   * sharing one @c fd (the common single-handle layout v4l2/libcamera and
+   * Chromium's accelerated paint produce). @c fourcc is a @c DRM_FORMAT_* code
+   * and @c modifier a @c DRM_FORMAT_MOD_* value (@c DRM_FORMAT_MOD_INVALID for
+   * an unmodified linear buffer). @c width / @c height are the source extent in
+   * pixels; the plane scales this to the layer's destination rect.
+   *
+   * @c acquire_fence_fd, when >= 0, is a sync_file the compositor hands to the
+   * atomic commit as @c IN_FENCE_FD so scanout waits for the producer's writes,
+   * tear-free without a CPU stall. Ownership stays with the surface; the
+   * compositor dups it if it needs to outlive the call.
+   */
+  struct Dmabuf {
+    int fd{-1};
+    uint32_t fourcc{0};
+    uint64_t modifier{0};
+    uint32_t width{0};
+    uint32_t height{0};
+    uint32_t plane_count{0};
+    uint32_t offset[4]{};
+    uint32_t stride[4]{};
+    int acquire_fence_fd{-1};
+  };
+
+  /**
+   * @brief Expose the surface's latest frame as a dma-buf for direct scanout.
+   *
+   * A surface that produced a frame into a dma-buf (a video decoder, a camera,
+   * a Vulkan/GL plugin that exported its image) fills @p out and returns true;
+   * the compositor then routes it onto a KMS overlay plane (the FlutterLayer
+   * geometry drives the Layer Crtc and Src rects, which drive the plane)
+   * instead of GL-compositing it. Returns false (default) for GL-only surfaces,
+   * or when no dma-buf frame is ready this present — the compositor falls back
+   * to the @c GetGlTextureName / @c GetVulkanImage path. Buffer ownership stays
+   * with the surface; the returned @c fd must remain valid until the next
+   * present.
+   */
+  [[nodiscard]] virtual bool GetDmabuf(Dmabuf* /*out*/) const { return false; }
+
+  /**
    * @brief Whether the Vulkan image is a dma-buf the producer rewrites on
    * another agent's queue, so the compositor must take ownership of it before
    * reading and hand it back after.

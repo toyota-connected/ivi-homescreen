@@ -249,6 +249,39 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Imported dma-bufs are top-first (row 0 is the top), so the EGL compositor
   // must V-flip when sampling into its bottom-first framebuffer.
   [[nodiscard]] bool TextureIsTopFirst() const override { return true; }
+
+  // Direct-scanout seam for the DRM compositor: expose the latest submitted
+  // frame's dma-buf so it can be placed on a KMS overlay plane instead of being
+  // GL-composited. A pure read of the frame stashed by HostSubmit; the returned
+  // fd is borrowed (owned by pending_egl — valid until the next submit
+  // supersedes it, or GetGlTextureName imports and closes it). The compositor
+  // must therefore plane-route XOR GL-import a given surface in one present so
+  // the two paths never both consume the frame. Producers submit top-down
+  // pixels (no REFLECT_Y), so the plane scans the buffer out as-is.
+  [[nodiscard]] bool GetDmabuf(Dmabuf* out) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (out == nullptr || !pending_egl.valid) {
+      return false;
+    }
+    const IhsFrame& f = pending_egl.frame;
+    if (f.plane_count == 0 || f.plane_fd[0] < 0) {
+      return false;
+    }
+    out->fd = f.plane_fd[0];
+    out->fourcc = f.format.fourcc;
+    out->modifier = f.format.modifier;
+    out->width = f.width;
+    out->height = f.height;
+    out->plane_count = f.plane_count;
+    for (uint32_t i = 0; i < f.plane_count && i < 4; ++i) {
+      out->offset[i] = f.plane_offset[i];
+      out->stride[i] = f.plane_stride[i];
+    }
+    // Borrowed; -1 on the implicit-sync path. The compositor dups it for the
+    // atomic commit's IN_FENCE_FD when >= 0.
+    out->acquire_fence_fd = pending_acquire_fd;
+    return true;
+  }
 #endif
 
   // The image is an imported dma-buf the plugin rewrites; the compositor
@@ -592,7 +625,7 @@ int HostEglContext(void* user_data, IhsEglContext* out) {
   out->egl_display = egl.display;
   out->egl_context = egl.share_context;
   out->egl_config = egl.config;
-  out->gbm_device = nullptr;
+  out->gbm_device = egl.gbm_device;
   return IHS_PV_OK;
 }
 

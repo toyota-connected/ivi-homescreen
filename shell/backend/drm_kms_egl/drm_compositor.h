@@ -451,6 +451,12 @@ class DrmCompositor : public IFlipSink {
   // than any hashing for that size.
   std::vector<StoreBaton*> scene_layer_batons_;
 
+  // Sibling prune list for platform-view scene layers, keyed by the
+  // ICompositorSurface pointer (its scene identity_tag). Same rationale as
+  // scene_layer_batons_ — the scene retains layers across commits, so a PV
+  // that vanished from the frame must be pruned by tag.
+  std::vector<void*> scene_pv_tags_;
+
   // DRM plane id of an externally-managed cursor to reserve from the
   // scene allocator's disable-unused pass. Set by ReserveCursorPlane()
   // (from DrmBackend, once the cursor exists); applied to scene_ each
