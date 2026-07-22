@@ -1836,11 +1836,17 @@ bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->device = device_;
   out->queue = graphics_queue_;
   out->queue_family_index = graphics_queue_family_;
-  // Raw loader: this backend does not yet interpose vkQueue* through a shared-
-  // queue lock the way WaylandVulkanBackend does (QueueInterposer), so a
-  // plugin's submits and the compositor's share the one graphics queue without
-  // serialization (issue #208) — benign in practice; an interposed loader is a
-  // follow-up.
+  // KNOWN CONTRACT GAP (issue #208): this hands back the raw loader, but
+  // ihs/platform_view.h requires get_instance_proc_addr to be an INTERPOSED
+  // loader that serializes vkQueueSubmit/vkQueuePresentKHR on the shared
+  // graphics queue (as WaylandVulkanBackend does via QueueInterposer). This
+  // backend has no queue mutex yet, so a plugin resolving through this loader
+  // would submit unsynchronized against the compositor/engine — undefined
+  // behavior per the Vulkan external-synchronization rules. Latent today (no
+  // Vulkan-on-DRM plugin is wired to this ABI), but it MUST be interposed
+  // before one is. Fixing it means adding a queue mutex, wrapping this
+  // backend's own submit/present sites in it, and returning the interposed
+  // loader here and to the engine — tracked under #208.
   out->get_instance_proc_addr =
       reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
   out->device_extensions = enabled_device_extensions_.data();
