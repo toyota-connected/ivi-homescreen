@@ -118,6 +118,12 @@ class VulkanDrmBackend final : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
 
+  // Expose the backend's Vulkan device to the ihs_pv platform-view host so a
+  // plugin (e.g. the Mapbox Maps SDK) can adopt the shared device, render into
+  // an exported dma-buf, and submit it for zero-copy import — the same seam
+  // WaylandVulkanBackend provides.
+  bool GetVulkanContext(BackendVulkanContext* out) const override;
+
   // Vsync: drive Flutter's frame scheduling from the real page-flip event
   // instead of its wall-clock fallback, so frames align to the connector's
   // refresh (and the raster thread no longer blocks in WaitForFlip). Returns a
