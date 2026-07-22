@@ -1827,6 +1827,27 @@ bool VulkanDrmBackend::TextureClearCurrent() {
   return false;
 }
 
+bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {
+  if (out == nullptr || device_ == VK_NULL_HANDLE) {
+    return false;
+  }
+  out->instance = instance_;
+  out->physical_device = physical_device_;
+  out->device = device_;
+  out->queue = graphics_queue_;
+  out->queue_family_index = graphics_queue_family_;
+  // Raw loader: this backend does not yet interpose vkQueue* through a shared-
+  // queue lock the way WaylandVulkanBackend does (QueueInterposer), so a
+  // plugin's submits and the compositor's share the one graphics queue without
+  // serialization (issue #208) — benign in practice; an interposed loader is a
+  // follow-up.
+  out->get_instance_proc_addr =
+      reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
+  out->device_extensions = enabled_device_extensions_.data();
+  out->device_extension_count = enabled_device_extensions_.size();
+  return true;
+}
+
 FlutterRendererConfig VulkanDrmBackend::GetRenderConfig() {
   FlutterRendererConfig config{};
   config.type = kVulkan;
