@@ -1616,6 +1616,14 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   VkPhysicalDeviceTimelineSemaphoreFeatures timeline_supported{};
   timeline_supported.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+  // Also probe pipelineCreationCacheControl: a platform-view engine that adopts
+  // this device (e.g. the Mapbox Maps SDK) creates its pipeline cache with
+  // EXTERNALLY_SYNCHRONIZED, which needs this feature to be valid.
+  VkPhysicalDevicePipelineCreationCacheControlFeatures
+      cache_control_supported{};
+  cache_control_supported.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
+  timeline_supported.pNext = &cache_control_supported;
   VkPhysicalDeviceSynchronization2Features sync2_supported{};
   sync2_supported.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
@@ -1650,6 +1658,12 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   queue_info.pQueuePriorities = &priority;
 
   VkPhysicalDeviceFeatures device_features{};
+  // A platform-view engine that adopts this device creates anisotropic samplers
+  // and uses dual-source blending; enable those when the device offers them so
+  // such an engine renders validation-clean. Harmless to the compositor.
+  device_features.samplerAnisotropy = features2.features.samplerAnisotropy;
+  device_features.dualSrcBlend = features2.features.dualSrcBlend;
+
   VkDeviceCreateInfo device_info{};
   device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   device_info.pNext = &sync2_enable;
@@ -1659,6 +1673,34 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
       static_cast<uint32_t>(enabled_device_extensions_.size());
   device_info.ppEnabledExtensionNames = enabled_device_extensions_.data();
   device_info.pEnabledFeatures = &device_features;
+
+  // Enable pipelineCreationCacheControl (and its extension) when the device
+  // offers both, so an adopting engine's externally-synchronized pipeline cache
+  // is valid. Declared at function scope so it outlives vkCreateDevice.
+  VkPhysicalDevicePipelineCreationCacheControlFeatures cache_control_enable{};
+  cache_control_enable.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
+  if (cache_control_supported.pipelineCreationCacheControl == VK_TRUE) {
+    uint32_t ext_count = 0;
+    d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                             &ext_count, nullptr);
+    std::vector<VkExtensionProperties> avail(ext_count);
+    if (ext_count > 0) {
+      d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                               &ext_count, avail.data());
+    }
+    if (HasExt(avail, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME)) {
+      enabled_device_extensions_.push_back(
+          VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME);
+      // push_back may reallocate, so refresh the pointer/count on device_info.
+      device_info.enabledExtensionCount =
+          static_cast<uint32_t>(enabled_device_extensions_.size());
+      device_info.ppEnabledExtensionNames = enabled_device_extensions_.data();
+      cache_control_enable.pipelineCreationCacheControl = VK_TRUE;
+      cache_control_enable.pNext = const_cast<void*>(device_info.pNext);
+      device_info.pNext = &cache_control_enable;
+    }
+  }
 
   if (d().vkCreateDevice(physical_device_, &device_info, nullptr, &device_) !=
       VK_SUCCESS) {
