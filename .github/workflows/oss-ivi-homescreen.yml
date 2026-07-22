@@ -406,8 +406,12 @@ jobs:
 
       - name: Upload per-backend coverage data
         uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.backend }}
+          path: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}/coverage.info
+        
       - name: Coverage summary
-        working-directory: ${{github.workspace}}/build/unit-tests
+        working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
         run: |
           {
             echo "## Unit test coverage"
@@ -423,18 +427,8 @@ jobs:
               | awk -F'|' '{printf "| %s | %s |\n", $1, $2}'
           } >> "$GITHUB_STEP_SUMMARY"
           cat "${GITHUB_STEP_SUMMARY}"
-
-      - name: Generate HTML report
-        working-directory: ${{github.workspace}}/build/unit-tests
-        run: genhtml -o lcovHtml -s --legend --branch-coverage coverage.info
-
-      - name: Upload coverage HTML report
-        uses: actions/upload-artifact@v5
-        with:
-          name: coverage-${{ matrix.backend }}
-          path: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}/coverage.info
   
-          # Coverage merge + report job.
+  # Coverage merge + report job.
   #
   # Downloads all per-backend coverage.info files uploaded by the unit-tests
   # matrix, merges them with lcov, generates a single HTML report, and
