@@ -754,16 +754,29 @@ void WaylandVulkanBackend::createLogicalDevice() {
 
   // Enable pipelineCreationCacheControl when the extension was selected, so a
   // platform-view engine's externally-synchronized pipeline cache is valid.
+  // The extension being advertised does not guarantee the feature bit, so
+  // query it via vkGetPhysicalDeviceFeatures2 and only chain it when the
+  // device reports support — requesting an unsupported feature can fail
+  // vkCreateDevice.
   VkPhysicalDevicePipelineCreationCacheControlFeatures cache_control{};
   cache_control.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
   for (const char* ext : enabled_device_extensions_) {
     if (strcmp(ext, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME) ==
         0) {
-      cache_control.pipelineCreationCacheControl = VK_TRUE;
-      // chain ahead of any prior struct (pNext on the create info is const)
-      cache_control.pNext = const_cast<void*>(device_info.pNext);
-      device_info.pNext = &cache_control;
+      VkPhysicalDevicePipelineCreationCacheControlFeatures cache_supported{};
+      cache_supported.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
+      VkPhysicalDeviceFeatures2 features2{};
+      features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      features2.pNext = &cache_supported;
+      d().vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
+      if (cache_supported.pipelineCreationCacheControl == VK_TRUE) {
+        cache_control.pipelineCreationCacheControl = VK_TRUE;
+        // chain ahead of any prior struct (pNext on the create info is const)
+        cache_control.pNext = const_cast<void*>(device_info.pNext);
+        device_info.pNext = &cache_control;
+      }
       break;
     }
   }
