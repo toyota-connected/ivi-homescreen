@@ -40,6 +40,7 @@
 
 #include <drm-cxx/core/format.hpp>
 #include <drm-cxx/scene/external_dma_buf_source.hpp>
+#include <drm-cxx/sync/fence.hpp>
 
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
@@ -2361,6 +2362,16 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           ::close(fl.pv_db.fd);
           fl.pv_db.fd = -1;
         }
+        // Close the producer's acquire fence. drm::sync::SyncFence::import_fd
+        // (used by set_acquire_fence below) DUPS the fd rather than taking
+        // ownership, so this original is always ours to close — the same
+        // pattern vulkan_drm_backend.cc follows (it also ::close()s its fd
+        // after import_fd). Also covers the paths where the source failed to
+        // build.
+        if (fl.pv_tag != nullptr && fl.pv_db.acquire_fence_fd >= 0) {
+          ::close(fl.pv_db.acquire_fence_fd);
+          fl.pv_db.acquire_fence_fd = -1;
+        }
       }
     }
   } pv_fd_closer{frame_layers};
@@ -2539,6 +2550,22 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(),
                                                              np));
           if (src) {
+            // Explicit sync: the producer's acquire fence rides the plane's
+            // IN_FENCE_FD (scene CPU-waits as a fallback). import_fd dups, so
+            // PvFdCloser still closes our original fd.
+            if (db.acquire_fence_fd >= 0) {
+              if (auto f = drm::sync::SyncFence::import_fd(db.acquire_fence_fd);
+                  f) {
+                src.value()->set_acquire_fence(std::move(f.value()));
+              } else {
+                // Fall back to implicit sync for this frame (the producer
+                // synced, or scanout may tear); log so it's diagnosable.
+                ihs::log::warn(
+                    "[DrmCompositor] pv acquire-fence import failed ({}); "
+                    "implicit sync this frame",
+                    f.error().message());
+              }
+            }
             if (auto r = scene_->replace_source(layer->handle(),
                                                 std::move(src.value()));
                 !r) {
@@ -2580,6 +2607,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             "through GL fallback",
             src.error().message());
         return PresentViaGlFallback(layers, layer_count);
+      }
+      // Explicit sync: hand the producer's acquire fence to the source so the
+      // scene wires it to the plane's IN_FENCE_FD (CPU-wait fallback).
+      // import_fd dups, so PvFdCloser still closes our original fd.
+      if (db.acquire_fence_fd >= 0) {
+        if (auto f = drm::sync::SyncFence::import_fd(db.acquire_fence_fd); f) {
+          src.value()->set_acquire_fence(std::move(f.value()));
+        } else {
+          // Fall back to implicit sync for this frame; log so it's diagnosable.
+          ihs::log::warn(
+              "[DrmCompositor] pv acquire-fence import failed ({}); implicit "
+              "sync this frame",
+              f.error().message());
+        }
       }
       drm::scene::LayerDesc desc{};
       desc.source = std::move(src.value());
