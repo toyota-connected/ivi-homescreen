@@ -29,8 +29,10 @@
 // instead.
 #if BUILD_COMPOSITOR
 
+#include <poll.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -175,6 +177,12 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   struct PendingEglFrame {
     bool valid{false};
     IhsFrame frame{};  // owns the plane fds until imported / superseded
+    // Producer's acquire fence (sync_file fd) for this frame's writes.
+    // GetDmabuf hands the DRM scene path a dup for the plane's IN_FENCE_FD and
+    // this copy stays owned here; it is closed on a superseding submit, on
+    // dispose, or by the GL-fallback wait in GetGlTextureName. -1 when the
+    // producer synced before submit.
+    int acquire_fence_fd{-1};
   };
   mutable PendingEglFrame pending_egl;
   mutable std::map<uint32_t, EglDmabufImporter::ImportedTexture> buffers_egl;
@@ -315,9 +323,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       out->offset[i] = f.plane_offset[i];
       out->stride[i] = f.plane_stride[i];
     }
-    // The DRM scene path is implicit-sync today and does not consume an acquire
-    // fence; leave it unset until explicit-sync IN_FENCE wiring lands.
+    // Explicit sync: hand the producer's acquire fence to the DRM scene path,
+    // which wires it to the plane's IN_FENCE_FD (or CPU-waits as a fallback).
+    // Per the ICompositorSurface::Dmabuf contract the surface keeps ownership
+    // and the compositor gets a dup; retaining it here also lets the GL-texture
+    // fallback (GetGlTextureName) still wait on the fence if this present later
+    // falls back after GetDmabuf. The surface's copy is closed on the next
+    // superseding submit, on dispose, or by the fallback wait. -1 when the
+    // producer synced before submit.
     out->acquire_fence_fd = -1;
+    if (pending_egl.acquire_fence_fd >= 0) {
+      out->acquire_fence_fd = ::dup(pending_egl.acquire_fence_fd);
+      if (out->acquire_fence_fd < 0) {
+        // Fall back to implicit sync for this frame; log so it's diagnosable.
+        ihs::log::warn(
+            "[ihs_pv] dup(acquire_fence) failed (errno={}); implicit sync "
+            "this frame",
+            errno);
+      }
+    }
     dmabuf_delivered_seq = submit_seq;
     return true;
   }
@@ -416,6 +440,10 @@ IhsPluginView::~IhsPluginView() {
         close(pending_egl.frame.plane_fd[i]);
       }
     }
+    if (pending_egl.acquire_fence_fd >= 0) {
+      close(pending_egl.acquire_fence_fd);
+      pending_egl.acquire_fence_fd = -1;
+    }
     pending_egl.valid = false;
   }
   // Same deferred free for the GL imports (glDeleteTextures needs the GL
@@ -454,8 +482,43 @@ void CloseFrameFds(const IhsFrame* frame) {
 // calls us with the context current, caching per ring buffer like the Vulkan
 // path.
 uint32_t IhsPluginView::GetGlTextureName() const {
-  const std::lock_guard<std::mutex> lock(mutex);
+  std::unique_lock<std::mutex> lock(mutex);
   if (pending_egl.valid) {
+    // The GL-texture fallback samples the buffer directly with no plane
+    // IN_FENCE_FD, so block until the producer's writes complete before
+    // sampling, then release the fence. Only reached when direct scanout is
+    // unavailable (the fence otherwise rides the plane's IN_FENCE_FD via
+    // GetDmabuf), so this wait is off the hot path. Drop the lock across the
+    // (bounded) wait so a wedged fence can't block HostSubmit or dispose; take
+    // ownership of the fd first so a superseding submit won't close it, and
+    // loop so a frame that arrived while unlocked is also waited on — we never
+    // sample ahead of the producer. On timeout/error we sample best-effort but
+    // warn.
+    while (pending_egl.valid && pending_egl.acquire_fence_fd >= 0) {
+      const int fence = pending_egl.acquire_fence_fd;
+      pending_egl.acquire_fence_fd = -1;
+      lock.unlock();
+      pollfd pfd{fence, POLLIN, 0};
+      int pr = 0;
+      while ((pr = ::poll(&pfd, 1, 1000)) < 0 && errno == EINTR) {
+      }
+      // Only POLLIN means the fence signalled; poll() can also wake on
+      // POLLERR/POLLHUP/POLLNVAL (>0 with no POLLIN), which is a failure, not a
+      // signal. Sample best-effort either way, but warn.
+      if (pr <= 0 || (pfd.revents & POLLIN) == 0) {
+        ihs::log::warn(
+            "[ihs_pv] GL-fallback acquire-fence wait {} (fd={}, "
+            "revents=0x{:x});"
+            " sampling anyway — frame may tear",
+            pr == 0 ? "timed out" : "failed", fence, pfd.revents);
+      }
+      close(fence);
+      lock.lock();
+    }
+    // The view may have been disposed while the lock was dropped for the wait.
+    if (!pending_egl.valid) {
+      return current_egl != nullptr ? current_egl->texture : 0;
+    }
     // Margin (in submits) before a resize-replaced import is destroyed; the
     // compositor samples GetGlTextureName synchronously here, so GL's own
     // deferred deletion already covers in-flight draws — the margin is safety.
@@ -731,19 +794,21 @@ int HostSubmit(void* user_data,
   if (!vulkan_ready && g_egl_importer.ready()) {
     // EGL backend: GL import is context-affine, so only stash the frame here
     // (on the plugin's thread); GetGlTextureName imports it on the raster
-    // thread. The EGL backends composite the texture without an explicit
-    // acquire wait, so the producer must have finished rendering before submit
-    // — close the acquire fence (a GL fence wait on this path is a follow-up).
-    if (acquire_fence_fd >= 0) {
-      close(acquire_fence_fd);
-    }
+    // thread. The DRM scene path (GetDmabuf) forwards the acquire fence to the
+    // plane's IN_FENCE_FD for explicit sync; the GL-texture fallback has no
+    // plane fence, so GetGlTextureName CPU-waits on it before sampling. Stash
+    // the fence with the frame for both.
     const std::lock_guard<std::mutex> lock(v->mutex);
     ++v->submit_seq;
     if (v->pending_egl.valid) {
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import
+      if (v->pending_egl.acquire_fence_fd >= 0) {
+        close(v->pending_egl.acquire_fence_fd);
+      }
     }
     v->pending_egl.frame = *frame;       // take ownership of the plane fds
     v->pending_egl.frame.hdr = nullptr;  // do not retain the plugin's hdr ptr
+    v->pending_egl.acquire_fence_fd = acquire_fence_fd;  // ownership moves here
     v->pending_egl.valid = true;
     return IHS_PV_OK;
   }
