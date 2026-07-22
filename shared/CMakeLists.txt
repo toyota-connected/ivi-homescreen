@@ -93,6 +93,16 @@ endif ()
 
 target_compile_options(ihs_shared PRIVATE -Wall -Wextra)
 
+# Coverage instrumentation. The COVERAGE flag is handled in
+# test/unit_test/CMakeLists.txt via CMAKE_CXX_FLAGS, but that runs after
+# add_subdirectory(shared) in the root so ihs_shared would otherwise be built
+# without --coverage and produce no .gcda data. Wire it here so lcov captures
+# shared/ sources when COVERAGE=ON.
+if (COVERAGE)
+    target_compile_options(ihs_shared PRIVATE --coverage)
+    target_link_options(ihs_shared PRIVATE --coverage)
+endif ()
+
 # Never unload this library: the DLT bridge owns a worker thread and per-thread
 # ring TLS whose destructors must not fire against code unmapped by dlclose.
 # -z nodelete pins it for the process lifetime even if a plugin that pulled it
