@@ -399,10 +399,10 @@ jobs:
       - name: Capture coverage data
         working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
         run: |
-          lcov -d . -c --rc lcov_branch_coverage=1 -o coverage.info
+          lcov -d . -c --rc lcov_branch_coverage=1 --ignore-errors mismatch -o coverage.info
           lcov -r coverage.info \
             '*/test/*' '*/usr/*' '*/third_party/*' '*/wayland-protocols/*' \
-            --rc lcov_branch_coverage=1 -o coverage.info
+            --rc lcov_branch_coverage=1 --ignore-errors mismatch -o coverage.info
 
       - name: Upload per-backend coverage data
         uses: actions/upload-artifact@v4
