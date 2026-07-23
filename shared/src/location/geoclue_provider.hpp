@@ -18,20 +18,16 @@
 #include <thread>
 
 #include "location.hpp"
-
-// sd_bus is a named struct (portably forward-declarable); sd_bus_message /
-// sd_bus_error are not (sd_bus_error is an anonymous-struct typedef on some
-// libsystemd versions), so the D-Bus callback and its types stay in the .cc.
-extern "C" {
-typedef struct sd_bus sd_bus;
-}
+#include "sd_bus_dynamic.hpp"
 
 namespace ihs::location {
 
 // ILocationProvider backed by geoclue (freedesktop.org's location service) over
-// D-Bus (sd-bus, from libsystemd — present wherever systemd is, so no extra
-// dependency). This is the FALLBACK: geoclue aggregates network/Wi-Fi and, when
-// present, GPS. GpsdProvider is the primary; the engine selects one.
+// D-Bus. sd-bus (libsystemd) is loaded at runtime via SdBusLoad() so ihs_shared
+// carries no build- or link-time dependency on libsystemd; if the library is
+// absent the provider simply reports no fix. This is the FALLBACK: geoclue
+// aggregates network/Wi-Fi and, when present, GPS. GpsdProvider is the primary;
+// the engine selects one.
 //
 // A worker thread owns the bus: it creates a geoclue Client, sets DesktopId +
 // accuracy, subscribes to LocationUpdated, calls Start, and pumps the bus. Each
@@ -71,8 +67,9 @@ class GeoclueProvider final : public ILocationProvider {
   std::thread thread_;
   std::atomic<bool> running_{false};
 
-  sd_bus* bus_ = nullptr;    // worker-thread only
-  std::string client_path_;  // worker-thread only
+  const SdBusApi* sd_ = nullptr;  // resolved libsystemd entry points
+  sd_bus* bus_ = nullptr;         // worker-thread only
+  std::string client_path_;       // worker-thread only
 
   mutable std::mutex mu_;
   Position latest_;
