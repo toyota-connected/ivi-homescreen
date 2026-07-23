@@ -977,7 +977,10 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
           // dmabuf, pre-flipped YUV shader) opt into a sampler V-invert by
           // overriding ICompositorSurface::TextureIsTopFirst() → true.
           const bool flip_y = surface.TextureIsTopFirst();
-          if (!blend && m_gl_caps.has_blit_framebuffer) {
+          // An external texture cannot be attached to an FBO or blitted; it
+          // has to go through the external sampler.
+          const bool external = surface.TextureIsExternalOes();
+          if (!external && !blend && m_gl_caps.has_blit_framebuffer) {
             if (!m_texture_blit_fbo_) {
               glGenFramebuffers(1, &m_texture_blit_fbo_);
             }
@@ -989,7 +992,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                                 flip_y);
           } else {
             m_gl_compositor->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh,
-                                                blend, flip_y);
+                                                blend, flip_y, external);
           }
           composited_any = true;
         }

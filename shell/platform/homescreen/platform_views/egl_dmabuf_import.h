@@ -38,10 +38,16 @@
 class EglDmabufImporter {
  public:
   struct ImportedTexture {
-    unsigned int texture{0};   // GLuint (GL_TEXTURE_2D), 0 = unset
+    unsigned int texture{0};   // GLuint, 0 = unset
     void* egl_image{nullptr};  // EGLImageKHR
     uint32_t width{0};
     uint32_t height{0};
+    // Which target the texture is bound to. A YUV image — planar (NV12, ...) or
+    // packed (YUYV/UYVY) — must be GL_TEXTURE_EXTERNAL_OES so the driver does
+    // the YUV->RGB conversion; sampling one as GL_TEXTURE_2D yields raw/luma
+    // data. Packed RGB stays on GL_TEXTURE_2D, which every GLES context
+    // supports.
+    bool external{false};
   };
 
   EglDmabufImporter() = default;
@@ -58,12 +64,15 @@ class EglDmabufImporter {
            image_target_texture_ != nullptr;
   }
 
-  // Import @frame's dma-buf planes into a GL_TEXTURE_2D in @out. On success the
+  // Import @frame's dma-buf planes into a texture in @out. On success the
   // texture owns the import; @frame.plane_fd[*] are consumed (EGL dup's them,
   // so they are closed here). On failure the fds are left for the caller to
-  // close. Single/multi-plane packed formats bound as GL_TEXTURE_2D (the map's
-  // RGBA path); planar YUV → GL_TEXTURE_EXTERNAL_OES is a follow-up. GL context
-  // must be current.
+  // close.
+  //
+  // YUV formats — planar (NV12, ...) or packed (YUYV/UYVY) — are bound as
+  // GL_TEXTURE_EXTERNAL_OES, which is what applies the color conversion; packed
+  // RGB stays GL_TEXTURE_2D. ImportedTexture::external says which, and the
+  // caller must sample with a matching sampler. GL context must be current.
   bool Import(const IhsFrame& frame, ImportedTexture* out) const;
 
   void Destroy(ImportedTexture* out) const;

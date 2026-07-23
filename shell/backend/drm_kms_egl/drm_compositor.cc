@@ -999,9 +999,11 @@ void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
                                           GLsizei dst_w,
                                           GLsizei dst_h,
                                           bool blend,
-                                          bool flip_y) const {
+                                          bool flip_y,
+                                          bool external) const {
   gl_compositor_->CompositeToFbo(target_fbo, src_fbo, src_tex, src_w, src_h,
-                                 dst_x, dst_y, dst_w, dst_h, blend, flip_y);
+                                 dst_x, dst_y, dst_w, dst_h, blend, flip_y,
+                                 external);
 }
 
 // ─── GL fallback (no plane allocator) ────────────────────────────────────
@@ -1073,8 +1075,9 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
           // GlFallback writes into FBO 0 (gbm_surface, standard GL NDC).
           // Flip only when the surface reports top-first storage.
           const bool flip_y = surface_sp->TextureIsTopFirst();
+          const bool external = surface_sp->TextureIsExternalOes();
           gl_compositor_->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh,
-                                             blend, flip_y);
+                                             blend, flip_y, external);
           composited_any = true;
         }
       }
@@ -1237,20 +1240,22 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
             ihs::log::debug(
                 "[DrmCompositor] framed layer[{}] PV id={} tex={} "
                 "src={}x{} offset=({:.1f},{:.1f}) size={:.1f}x{:.1f} "
-                "blend={} flip_y={} top_first={}",
+                "blend={} flip_y={} top_first={} external={}",
                 i, layer->platform_view->identifier, tex,
                 surface_sp->GetGlTextureWidth(),
                 surface_sp->GetGlTextureHeight(), layer->offset.x,
                 layer->offset.y, layer->size.width, layer->size.height, blend,
-                flip_y, surface_sp->TextureIsTopFirst());
+                flip_y, surface_sp->TextureIsTopFirst(),
+                surface_sp->TextureIsExternalOes());
           }
-          CompositeLayerIntoFbo(
-              comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
-              surface_sp->GetGlTextureHeight(),
-              static_cast<GLint>(layer->offset.x),
-              static_cast<GLint>(layer->offset.y),
-              static_cast<GLsizei>(layer->size.width),
-              static_cast<GLsizei>(layer->size.height), blend, flip_y);
+          CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
+                                surface_sp->GetGlTextureWidth(),
+                                surface_sp->GetGlTextureHeight(),
+                                static_cast<GLint>(layer->offset.x),
+                                static_cast<GLint>(layer->offset.y),
+                                static_cast<GLsizei>(layer->size.width),
+                                static_cast<GLsizei>(layer->size.height), blend,
+                                flip_y, surface_sp->TextureIsExternalOes());
           composited_any = true;
           if (backend_->cfg_.debug_backend) {
             const auto cx =
@@ -2031,7 +2036,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                 static_cast<GLint>(flutter->offset.x),
                 static_cast<GLint>(flutter->offset.y),
                 static_cast<GLsizei>(flutter->size.width),
-                static_cast<GLsizei>(flutter->size.height), blend, flip_y);
+                static_cast<GLsizei>(flutter->size.height), blend, flip_y,
+                surface_sp->TextureIsExternalOes());
             any_composited = true;
           }
         }

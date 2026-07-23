@@ -15,9 +15,15 @@
  */
 
 #include "backend/wayland_egl/gl_compositor.h"
+#include "backend/gl_extensions.h"
 #include "logging/logging.h"
 
+#include <GLES2/gl2ext.h>  // GL_TEXTURE_EXTERNAL_OES
+
 #include <array>
+#include <cstring>
+#include <string>
+#include <string_view>
 
 #include "backend/wayland_egl/gl_caps.h"
 #include "logging.h"
@@ -44,6 +50,20 @@ constexpr char kFragSrc[] =
     "precision mediump float;\n"
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_tex;\n"
+    "void main() {\n"
+    "  gl_FragColor = texture2D(u_tex, v_uv);\n"
+    "}\n";
+
+// The same quad, sampling an external image. A dma-buf holding planar YUV can
+// only be sampled through samplerExternalOES, which is what applies the
+// colour-space conversion; the driver picks BT.601/709 from the image. Built
+// only when the context advertises the extension, so a driver without it keeps
+// working for packed formats.
+constexpr char kFragSrcExternal[] =
+    "#extension GL_OES_EGL_image_external : require\n"
+    "precision mediump float;\n"
+    "varying vec2 v_uv;\n"
+    "uniform samplerExternalOES u_tex;\n"
     "void main() {\n"
     "  gl_FragColor = texture2D(u_tex, v_uv);\n"
     "}\n";
@@ -78,6 +98,9 @@ GlCompositor::~GlCompositor() {
   }
   if (program_) {
     glDeleteProgram(program_);
+  }
+  if (program_external_) {
+    glDeleteProgram(program_external_);
   }
 }
 
@@ -122,6 +145,7 @@ bool GlCompositor::EnsureQuad() {
   attr_pos_ = glGetAttribLocation(program_, "a_pos");
   attr_uv_ = glGetAttribLocation(program_, "a_uv");
   uni_tex_ = glGetUniformLocation(program_, "u_tex");
+  BuildExternalProgram();
   uni_uv_y_scale_ = glGetUniformLocation(program_, "u_uv_y_scale");
   uni_uv_y_offset_ = glGetUniformLocation(program_, "u_uv_y_offset");
 
@@ -149,6 +173,56 @@ bool GlCompositor::EnsureQuad() {
   glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts.data(), GL_STATIC_DRAW);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   return true;
+}
+
+void GlCompositor::BuildExternalProgram() {
+  // Optional: a driver without the extension keeps the packed-format path, and
+  // a planar frame is then simply not composited rather than mis-sampled.
+  const auto* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+  if (!ihs::gl::ExtensionSupported(exts, "GL_OES_EGL_image_external")) {
+    // Left unbuilt, not an error: a context that never presents a YUV
+    // platform-view frame does not need it. The one warning, if a frame does
+    // arrive, is emitted where the composite is refused.
+    return;
+  }
+  const GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
+  const GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFragSrcExternal);
+  if (!vs || !fs) {
+    if (vs) {
+      glDeleteShader(vs);
+    }
+    if (fs) {
+      glDeleteShader(fs);
+    }
+    return;
+  }
+  program_external_ = glCreateProgram();
+  glAttachShader(program_external_, vs);
+  glAttachShader(program_external_, fs);
+  glLinkProgram(program_external_);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  GLint ok = 0;
+  glGetProgramiv(program_external_, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    GLint len = 0;
+    glGetProgramiv(program_external_, GL_INFO_LOG_LENGTH, &len);
+    std::string log(static_cast<size_t>(len > 0 ? len : 0), '\0');
+    if (len > 0) {
+      glGetProgramInfoLog(program_external_, len, nullptr, log.data());
+    }
+    ihs::log::error("GlCompositor: external program link failed: {}", log);
+    glDeleteProgram(program_external_);
+    program_external_ = 0;
+    return;
+  }
+  attr_pos_external_ = glGetAttribLocation(program_external_, "a_pos");
+  attr_uv_external_ = glGetAttribLocation(program_external_, "a_uv");
+  uni_tex_external_ = glGetUniformLocation(program_external_, "u_tex");
+  uni_uv_y_scale_external_ =
+      glGetUniformLocation(program_external_, "u_uv_y_scale");
+  uni_uv_y_offset_external_ =
+      glGetUniformLocation(program_external_, "u_uv_y_offset");
 }
 
 void GlCompositor::EmitPersistentQuadState() {
@@ -203,6 +277,78 @@ void GlCompositor::TearDownPersistentQuadState() {
   bound_tex_ = 0;
 }
 
+void GlCompositor::CompositeViaQuadExternal(GLuint tex,
+                                            GLint dst_x,
+                                            GLint dst_y,
+                                            GLsizei dst_w,
+                                            GLsizei dst_h,
+                                            bool blend,
+                                            bool flip_y) {
+  // Self-contained: this program has its own attribute and uniform locations,
+  // so it cannot ride the batched state emitted for the sampler2D program.
+  if (persistent_state_emitted_) {
+    TearDownPersistentQuadState();
+    persistent_state_emitted_ = false;
+  }
+  // Same baseline the batched path establishes: anything left enabled by the
+  // caller could clip or discard this draw.
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_CULL_FACE);
+
+  glUseProgram(program_external_);
+  glActiveTexture(GL_TEXTURE0);
+  if (uni_tex_external_ >= 0) {
+    glUniform1i(uni_tex_external_, 0);
+  }
+  if (uni_uv_y_scale_external_ >= 0) {
+    glUniform1f(uni_uv_y_scale_external_, flip_y ? -1.f : 1.f);
+  }
+  if (uni_uv_y_offset_external_ >= 0) {
+    glUniform1f(uni_uv_y_offset_external_, flip_y ? 1.f : 0.f);
+  }
+  if (blend) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  } else {
+    glDisable(GL_BLEND);
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+  if (attr_pos_external_ >= 0) {
+    glEnableVertexAttribArray(static_cast<GLuint>(attr_pos_external_));
+    glVertexAttribPointer(static_cast<GLuint>(attr_pos_external_), 2, GL_FLOAT,
+                          GL_FALSE, 4 * sizeof(GLfloat), nullptr);
+  }
+  if (attr_uv_external_ >= 0) {
+    glEnableVertexAttribArray(static_cast<GLuint>(attr_uv_external_));
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    glVertexAttribPointer(static_cast<GLuint>(attr_uv_external_), 2, GL_FLOAT,
+                          GL_FALSE, 4 * sizeof(GLfloat),
+                          reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+  }
+  glViewport(dst_x, dst_y, dst_w, dst_h);
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+  if (attr_pos_external_ >= 0) {
+    glDisableVertexAttribArray(static_cast<GLuint>(attr_pos_external_));
+  }
+  if (attr_uv_external_ >= 0) {
+    glDisableVertexAttribArray(static_cast<GLuint>(attr_uv_external_));
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glUseProgram(0);
+  // Blend is left off rather than as this draw wanted it. This path clears
+  // persistent_state_emitted_, so EndFrame will not tear anything down, and an
+  // enabled blend would leak into the rest of the present and the next frame.
+  if (blend) {
+    glDisable(GL_BLEND);
+  }
+  blend_enabled_ = false;
+  bound_tex_ = 0;
+}
+
 void GlCompositor::BeginFrame() {
   frame_open_ = true;
   persistent_state_emitted_ = false;
@@ -222,8 +368,30 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
                                     GLsizei dst_w,
                                     GLsizei dst_h,
                                     bool blend,
-                                    bool flip_y) {
+                                    bool flip_y,
+                                    bool external) {
   if (!EnsureQuad()) {
+    return;
+  }
+  if (external && program_external_ == 0) {
+    // Blank rather than the luma plane in red. Warn once: the driver lacks
+    // GL_OES_EGL_image_external and a YUV frame has now actually reached here.
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      ihs::log::warn(
+          "GlCompositor: a YUV platform-view frame needs "
+          "GL_OES_EGL_image_external, which this context lacks; it will not be "
+          "composited");
+    }
+    return;
+  }
+  // The external path is rare (one platform-view layer), so it does not join
+  // the frame-batched fast path: it sets its own program and state and leaves
+  // the batched baseline to be re-emitted for the next 2D layer.
+  if (external) {
+    CompositeViaQuadExternal(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend,
+                             flip_y);
     return;
   }
 
@@ -324,15 +492,18 @@ void GlCompositor::CompositeToFbo(GLuint dst_fbo,
                                   GLsizei dst_w,
                                   GLsizei dst_h,
                                   bool blend,
-                                  bool flip_y) {
+                                  bool flip_y,
+                                  bool external) {
   // Blit can't alpha-blend, so overlay layers must take the quad path.
   // Also skip blit when there is no source FBO to read from (e.g. raw
   // platform-view textures with no associated FBO) — falling through to
   // the quad path handles that case via sampler.
   // glBlitFramebuffer flips vertically when dstY1 < dstY0; we use that for
   // GL-native-origin sources that need to land top-down.
-  if (!blend && src_fbo != 0 && caps_ && caps_->has_blit_framebuffer &&
-      caps_->blit_framebuffer) {
+  // An external texture has no FBO to read from and must go through its own
+  // sampler, so it never takes the blit path.
+  if (!external && !blend && src_fbo != 0 && caps_ &&
+      caps_->has_blit_framebuffer && caps_->blit_framebuffer) {
     glBindFramebuffer(kReadFramebuffer, src_fbo);
     glBindFramebuffer(kDrawFramebuffer, dst_fbo);
     const GLint dst_y0 = flip_y ? dst_y + dst_h : dst_y;
@@ -344,6 +515,7 @@ void GlCompositor::CompositeToFbo(GLuint dst_fbo,
   }
   // Quad path draws into whatever FBO is currently bound.
   glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
-  CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend, flip_y);
+  CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend, flip_y,
+                   external);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
