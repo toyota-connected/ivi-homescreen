@@ -18,6 +18,9 @@
 #include "logging/logging.h"
 
 #include <array>
+#include <cstring>
+#include <string>
+#include <string_view>
 
 #include "backend/wayland_egl/gl_caps.h"
 #include "logging.h"
