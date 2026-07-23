@@ -129,9 +129,9 @@ class GlCompositor {
   GLuint bound_tex_{0};
 
   bool EnsureQuad();
-  // Links the samplerExternalOES variant of the quad program, used for planar
-  // YUV platform-view frames. Leaves program_external_ at 0 when the driver
-  // lacks GL_OES_EGL_image_external.
+  // Links the samplerExternalOES variant of the quad program, used for YUV
+  // platform-view frames (planar or packed). Leaves program_external_ at 0 when
+  // the driver lacks GL_OES_EGL_image_external.
   void BuildExternalProgram();
   void CompositeViaQuadExternal(GLuint tex,
                                 GLint dst_x,
