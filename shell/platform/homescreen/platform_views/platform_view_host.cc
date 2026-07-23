@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -138,6 +139,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
   // Common retire clock for both import paths (incremented on every submit).
   uint64_t submit_seq{0};
+
+  // Synthesised buffer_id for a plugin whose IhsFrame predates that field, so
+  // each of its frames is imported afresh instead of aliasing cache slot 0.
+  uint32_t rolling_buffer_id{0};
 
   // Deliver-once guard for the direct-scanout path: the submit_seq last handed
   // to GetDmabuf. The compositor commits faster than a 30fps producer submits,
@@ -787,6 +792,37 @@ int HostSubmit(void* user_data,
 
   (void)user_data;
   auto* v = reinterpret_cast<IhsPluginView*>(view);
+
+  // The plugin may be built against an older, smaller IhsFrame. Copying *frame
+  // whole would read past the end of its object, and the trailing buffer_id
+  // (the import-cache key) would be garbage. Copy only the bytes it provided
+  // into a full-size zeroed frame; fields its struct did not reach read as
+  // zero. A struct too small to even carry the plane data is rejected -- and
+  // not closed, since plane_count/plane_fd cannot be trusted either.
+  IhsFrame normalized{};
+  if (frame == nullptr ||
+      frame->struct_size <
+          offsetof(IhsFrame, plane_stride) + sizeof(normalized.plane_stride)) {
+    if (acquire_fence_fd >= 0) {
+      close(acquire_fence_fd);
+    }
+    ihs::log::warn(
+        "[ihs_pv] submit rejected: IhsFrame struct_size {} too small",
+        frame != nullptr ? frame->struct_size : 0);
+    return IHS_PV_ERR_INVALID;
+  }
+  const size_t copy = frame->struct_size < sizeof(IhsFrame) ? frame->struct_size
+                                                            : sizeof(IhsFrame);
+  std::memcpy(&normalized, frame, copy);
+  normalized.struct_size = sizeof(IhsFrame);
+  // buffer_id absent from the plugin's struct read as 0, which would key every
+  // frame on one cache slot and freeze on the first. Give each such frame a
+  // fresh id so it is imported rather than aliased.
+  if (frame->struct_size <
+      offsetof(IhsFrame, buffer_id) + sizeof(normalized.buffer_id)) {
+    normalized.buffer_id = v->rolling_buffer_id++;
+  }
+  frame = &normalized;
 
 #if IVI_HAVE_VULKAN
   const bool vulkan_ready = g_importer.ready();
