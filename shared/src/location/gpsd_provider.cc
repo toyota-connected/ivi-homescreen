@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <thread>
@@ -57,23 +58,32 @@ bool ParseTpv(const std::string& line, Position& out) {
   if (!FindNumber(line, "lat", lat) || !FindNumber(line, "lon", lon)) {
     return false;  // TPV without a position (e.g. mode 1 acquiring)
   }
+  // A caller may point gpsd at an arbitrary host, so reject NaN/Inf and
+  // impossible coordinates rather than propagate them downstream.
+  if (!std::isfinite(lat) || !std::isfinite(lon) || lat < -90.0 || lat > 90.0 ||
+      lon < -180.0 || lon > 180.0) {
+    return false;
+  }
   Position p;
   p.latitude = lat;
   p.longitude = lon;
   double mode = 0.0;
-  // A TPV that carries lat/lon but omits mode still represents a fix; default
-  // to 3D so it counts as valid().
-  p.mode = FindNumber(line, "mode", mode) ? static_cast<int>(mode) : 3;
+  // A TPV that carries lat/lon but omits mode (or reports a non-finite mode)
+  // still represents a fix; default to 3D so it counts as valid().
+  p.mode = (FindNumber(line, "mode", mode) && std::isfinite(mode))
+               ? static_cast<int>(mode)
+               : 3;
   if (!p.valid()) {
     return false;
   }
   double track = 0.0;
-  if (FindNumber(line, "track", track)) {
+  if (FindNumber(line, "track", track) && std::isfinite(track)) {
     p.bearing_deg = track;
     p.has_bearing = true;
   }
   double speed = 0.0;
-  if (FindNumber(line, "speed", speed)) {
+  if (FindNumber(line, "speed", speed) && std::isfinite(speed) &&
+      speed >= 0.0) {
     p.speed_mps = speed;
   }
   out = p;

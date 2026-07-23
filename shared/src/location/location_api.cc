@@ -88,7 +88,9 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
     }
     auto service = std::make_unique<IhsLocationService>();
     service->provider = std::move(provider);
-    service->provider->Start();
+    if (!service->provider->Start()) {
+      return nullptr;  // could not start at all — don't hand back a dead handle
+    }
     return service.release();
   } catch (...) {
     return nullptr;
