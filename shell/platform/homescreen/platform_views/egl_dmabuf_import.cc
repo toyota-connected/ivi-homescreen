@@ -87,7 +87,10 @@ bool HasExternalImage() {
   return supported;
 }
 
-bool IsPlanarYuv(uint32_t fourcc) {
+// True for YUV formats that must be sampled through GL_TEXTURE_EXTERNAL_OES so
+// the driver applies the YUV->RGB conversion — planar (NV12, ...) and packed
+// (YUYV/UYVY) alike. Packed RGB returns false and stays on GL_TEXTURE_2D.
+bool NeedsExternalOes(uint32_t fourcc) {
   switch (fourcc) {
     case DRM_FORMAT_NV12:
     case DRM_FORMAT_NV21:
@@ -187,7 +190,7 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
         eglGetError());
     return false;
   }
-  const bool external = IsPlanarYuv(frame.format.fourcc);
+  const bool external = NeedsExternalOes(frame.format.fourcc);
   if (external && !HasExternalImage()) {
     // Binding to a target the context does not implement raises
     // GL_INVALID_ENUM and would otherwise return a half-built texture. Undo

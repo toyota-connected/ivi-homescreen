@@ -275,7 +275,7 @@ class DrmCompositor : public IFlipSink {
                              GLsizei dst_h,
                              bool blend,
                              bool flip_y = false,
-                             // Planar YUV imports are bound to
+                             // YUV imports (planar or packed) are bound to
                              // GL_TEXTURE_EXTERNAL_OES and need the external
                              // sampler; see ICompositorSurface.
                              bool external = false) const;

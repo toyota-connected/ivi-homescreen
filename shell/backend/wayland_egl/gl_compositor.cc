@@ -200,8 +200,8 @@ void GlCompositor::BuildExternalProgram() {
   const auto* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
   if (!ExtensionSupported(exts, "GL_OES_EGL_image_external")) {
     ihs::log::warn(
-        "GlCompositor: GL_OES_EGL_image_external absent; planar YUV "
-        "platform-view frames cannot be sampled");
+        "GlCompositor: GL_OES_EGL_image_external absent; YUV platform-view "
+        "frames (planar or packed) cannot be sampled");
     return;
   }
   const GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
