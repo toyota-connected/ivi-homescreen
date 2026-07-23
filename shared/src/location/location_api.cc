@@ -40,9 +40,12 @@ std::unique_ptr<ihs::location::ILocationProvider> MakeGpsd(const char* config) {
     const std::string v(config);
     if (const std::string::size_type c = v.find(':'); c != std::string::npos) {
       host = v.substr(0, c);
+      const char* pstr = v.c_str() + c + 1;
       char* end = nullptr;
-      const long p = std::strtol(v.c_str() + c + 1, &end, 10);
-      if (p > 0 && p < 65536) {
+      const long p = std::strtol(pstr, &end, 10);
+      // Require the whole substring to be the number (no trailing garbage) and
+      // a valid port; otherwise keep the default.
+      if (end != pstr && *end == '\0' && p > 0 && p < 65536) {
         port = static_cast<uint16_t>(p);
       }
     } else {

@@ -86,6 +86,12 @@ int main() {
   Expect(!ParseTpv(R"({"class":"TPV","mode":3,"lat":0.0,"lon":inf})", p),
          "Inf longitude rejected");
 
+  // Only mode 2/3 are fixes: a valid position with mode 4 or 1 is rejected.
+  Expect(!ParseTpv(R"({"class":"TPV","mode":4,"lat":10.0,"lon":10.0})", p),
+         "mode 4 rejected even with a position");
+  Expect(!ParseTpv(R"({"class":"TPV","mode":1,"lat":10.0,"lon":10.0})", p),
+         "mode 1 rejected even with a position");
+
   std::printf(g_fails ? "\n%d FAILED\n" : "\nALL PASS\n", g_fails);
   return g_fails == 0 ? 0 : 1;
 }
