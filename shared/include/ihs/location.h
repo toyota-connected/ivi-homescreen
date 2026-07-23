@@ -57,11 +57,12 @@ typedef struct IhsLocationService IhsLocationService;
 
 /*
  * Start acquiring from @source. @config is an optional backend hint (may be
- * NULL): for gpsd, "host:port" (default 127.0.0.1:2947); for geoclue, a D-Bus
- * address, or the literal "user" to use the session bus (default the system
- * bus); ignored for IHS_LOCATION_AUTO. Returns NULL only on failure — a backend
- * with no fix yet (or that is not present) still returns a handle and simply
- * reports no fix until one arrives.
+ * NULL): for gpsd, a numeric IPv4 "host:port" (default 127.0.0.1:2947 — host
+ * names are not resolved); for geoclue, a D-Bus address, or the literal "user"
+ * to use the session bus (default the system bus); ignored for
+ * IHS_LOCATION_AUTO. Returns NULL on failure — a backend with no fix yet (or
+ * that is not present) still returns a handle and simply reports no fix until
+ * one arrives.
  */
 IHS_EXPORT IhsLocationService* ihs_location_start(IhsLocationSource source,
                                                   const char* config);

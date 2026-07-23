@@ -76,6 +76,16 @@ int main() {
   Expect(!ParseTpv("not json", p), "garbage rejected");
   Expect(!ParseTpv("", p), "empty rejected");
 
+  // Out-of-range / non-finite coordinates are rejected.
+  Expect(!ParseTpv(R"({"class":"TPV","mode":3,"lat":91.0,"lon":0.0})", p),
+         "latitude > 90 rejected");
+  Expect(!ParseTpv(R"({"class":"TPV","mode":3,"lat":0.0,"lon":-181.0})", p),
+         "longitude < -180 rejected");
+  Expect(!ParseTpv(R"({"class":"TPV","mode":3,"lat":nan,"lon":0.0})", p),
+         "NaN latitude rejected");
+  Expect(!ParseTpv(R"({"class":"TPV","mode":3,"lat":0.0,"lon":inf})", p),
+         "Inf longitude rejected");
+
   std::printf(g_fails ? "\n%d FAILED\n" : "\nALL PASS\n", g_fails);
   return g_fails == 0 ? 0 : 1;
 }
