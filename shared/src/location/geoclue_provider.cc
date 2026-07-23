@@ -131,6 +131,10 @@ void GeoclueProvider::OnLocationObject(const char* location_path) {
   }
   sd_->error_free(&err);
 
+  if (!ValidLatLon(lat, lon)) {
+    return;  // ignore a malformed geoclue reply rather than publish NaN/range
+  }
+
   const double heading = ReadDouble(sd_, bus_, location_path, "Heading");
   const double speed = ReadDouble(sd_, bus_, location_path, "Speed");
 

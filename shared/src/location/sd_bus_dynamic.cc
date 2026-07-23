@@ -56,8 +56,13 @@ const SdBusApi* SdBusLoad() {
     Resolve(h, "sd_bus_flush_close_unref", api.flush_close_unref, ok);
     Resolve(h, "sd_bus_error_free", api.error_free, ok);
     loaded = ok;
-    // Intentionally leak @h: the library stays mapped for the process lifetime
-    // (like the DLT loader), so the resolved pointers remain valid.
+    if (ok) {
+      // Intentionally leak @h on success: the library stays mapped for the
+      // process lifetime (like the DLT loader) so the resolved pointers stay
+      // valid.
+    } else {
+      dlclose(h);  // resolution failed; unmap rather than leave a dead mapping
+    }
   });
   return loaded ? &api : nullptr;
 }

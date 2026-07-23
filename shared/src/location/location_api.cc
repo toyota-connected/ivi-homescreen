@@ -104,31 +104,45 @@ int ihs_location_latest(IhsLocationService* service, IhsPosition* out) {
   if (service == nullptr || !service->provider || out == nullptr) {
     return 0;
   }
-  ihs::location::Position pos;
-  if (!service->provider->Latest(pos)) {
+  try {
+    ihs::location::Position pos;
+    if (!service->provider->Latest(pos)) {
+      return 0;
+    }
+    out->latitude = pos.latitude;
+    out->longitude = pos.longitude;
+    out->bearing_deg = pos.bearing_deg;
+    out->speed_mps = pos.speed_mps;
+    out->mode = pos.mode;
+    out->has_bearing = pos.has_bearing ? 1 : 0;
+    return 1;
+  } catch (...) {
     return 0;
   }
-  out->latitude = pos.latitude;
-  out->longitude = pos.longitude;
-  out->bearing_deg = pos.bearing_deg;
-  out->speed_mps = pos.speed_mps;
-  out->mode = pos.mode;
-  out->has_bearing = pos.has_bearing ? 1 : 0;
-  return 1;
 }
 
 uint64_t ihs_location_generation(IhsLocationService* service) {
-  return (service != nullptr && service->provider)
-             ? service->provider->generation()
-             : 0;
+  if (service == nullptr || !service->provider) {
+    return 0;
+  }
+  try {
+    return service->provider->generation();
+  } catch (...) {
+    return 0;
+  }
 }
 
 void ihs_location_stop(IhsLocationService* service) {
   if (service == nullptr) {
     return;
   }
-  if (service->provider) {
-    service->provider->Stop();
+  // No exception may cross the C ABI; if a provider's Stop() throws, swallow it
+  // and still free the handle.
+  try {
+    if (service->provider) {
+      service->provider->Stop();
+    }
+  } catch (...) {
   }
   delete service;
 }
