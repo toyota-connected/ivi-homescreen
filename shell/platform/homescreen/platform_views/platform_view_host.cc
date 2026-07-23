@@ -253,6 +253,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // first frame. Defined out of line (needs g_egl_importer + CloseFrameFds).
   [[nodiscard]] uint32_t GetGlTextureName() const override;
   [[nodiscard]] bool TextureIsExternalOes() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
     return current_egl != nullptr && current_egl->external;
   }
   [[nodiscard]] int32_t GetGlTextureWidth() const override {

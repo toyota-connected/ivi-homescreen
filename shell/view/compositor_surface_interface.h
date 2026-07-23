@@ -117,10 +117,11 @@ class ICompositorSurface {
   /**
    * @brief Whether GetGlTextureName() is bound to GL_TEXTURE_EXTERNAL_OES.
    *
-   * True for a planar YUV dma-buf import, which can only be sampled through
-   * samplerExternalOES — that is where the colour conversion happens. Sampling
-   * such a texture as GL_TEXTURE_2D yields the luma plane alone. Packed
-   * formats stay on GL_TEXTURE_2D and leave this false.
+   * True for a YUV dma-buf import — planar (e.g. NV12) or packed (e.g.
+   * YUYV/UYVY) — which is sampled through samplerExternalOES, where the driver
+   * does the YUV->RGB conversion. Sampling such a texture as GL_TEXTURE_2D
+   * yields raw/luma data. Packed RGB(A) formats stay on GL_TEXTURE_2D and leave
+   * this false.
    */
   [[nodiscard]] virtual bool TextureIsExternalOes() const { return false; }
 
