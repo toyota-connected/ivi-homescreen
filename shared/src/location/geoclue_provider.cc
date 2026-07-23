@@ -174,7 +174,9 @@ bool GeoclueProvider::Setup() {
       r = sd_->set_address(bus_, bus_address_.c_str());
     }
     if (r >= 0) {
-      sd_->set_bus_client(bus_, 1);
+      r = sd_->set_bus_client(bus_, 1);
+    }
+    if (r >= 0) {
       r = sd_->start(bus_);
     }
   }

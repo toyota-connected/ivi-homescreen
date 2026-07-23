@@ -39,7 +39,9 @@ std::unique_ptr<ihs::location::ILocationProvider> MakeGpsd(const char* config) {
   if (config != nullptr && config[0] != '\0') {
     const std::string v(config);
     if (const std::string::size_type c = v.find(':'); c != std::string::npos) {
-      host = v.substr(0, c);
+      if (c > 0) {
+        host = v.substr(0, c);  // ":2947" (empty host) keeps the default host
+      }
       const char* pstr = v.c_str() + c + 1;
       char* end = nullptr;
       const long p = std::strtol(pstr, &end, 10);
