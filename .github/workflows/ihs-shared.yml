@@ -80,6 +80,14 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
           ctest --test-dir sbuild --output-on-failure
 
+      - name: Location gpsd TPV parser unit test
+        # Standalone: compiles the internal provider source directly (ParseTpv
+        # is not part of the installed C ABI), so no prefix / gpsd is needed.
+        run: |
+          cmake -S shared/tests/location -B lbuild -G Ninja
+          cmake --build lbuild
+          ctest --test-dir lbuild --output-on-failure
+
   # Producer-latency regression guard for the shell logging path. Links the
   # installed libihs_shared (real cross-.so FFI) and asserts the per-call cost
   # stays within a same-machine ratio of raw fmt formatting, so a future change

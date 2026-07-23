@@ -49,7 +49,7 @@ constexpr char kWatchCommand[] = "?WATCH={\"enable\":true,\"json\":true}\r\n";
 }  // namespace
 
 bool ParseTpv(const std::string& line, Position& out) {
-  if (line.find("\"class\":\"TPV\"") == std::string::npos) {
+  if (line.find(R"("class":"TPV")") == std::string::npos) {
     return false;
   }
   double lat = 0.0;
@@ -92,7 +92,12 @@ bool GpsdProvider::Start() {
   if (!running_.compare_exchange_strong(expected, true)) {
     return true;  // already started
   }
-  thread_ = std::thread([this] { Run(); });
+  try {
+    thread_ = std::thread([this] { Run(); });
+  } catch (...) {
+    running_.store(false);  // roll back so the object is reusable / not stuck
+    return false;
+  }
   return true;
 }
 
