@@ -572,7 +572,7 @@ uint32_t IhsPluginView::GetGlTextureName() const {
         // them (the reap margin covers a compositor present still binding one)
         // so the cache holds just the current import rather than growing per
         // frame.
-        if (synth_buffer_id.load()) {
+        if (synth_buffer_id.load(std::memory_order_relaxed)) {
           for (auto bit = buffers_egl.begin(); bit != buffers_egl.end();) {
             if (bit->first != f.buffer_id) {
               retired_egl.push_back(
@@ -848,8 +848,9 @@ int HostSubmit(void* user_data,
   // fresh id so it is imported rather than aliased.
   if (frame->struct_size <
       offsetof(IhsFrame, buffer_id) + sizeof(normalized.buffer_id)) {
-    normalized.buffer_id = v->rolling_buffer_id.fetch_add(1);
-    v->synth_buffer_id.store(true);
+    normalized.buffer_id =
+        v->rolling_buffer_id.fetch_add(1, std::memory_order_relaxed);
+    v->synth_buffer_id.store(true, std::memory_order_relaxed);
   }
   frame = &normalized;
 
@@ -966,7 +967,7 @@ int HostSubmit(void* user_data,
     // Synthesised ids never repeat, so every earlier entry is dead. Retire them
     // (the reap margin covers a compositor present still binding one) so the
     // cache holds just the current import rather than growing per frame.
-    if (v->synth_buffer_id.load()) {
+    if (v->synth_buffer_id.load(std::memory_order_relaxed)) {
       for (auto bit = v->buffers.begin(); bit != v->buffers.end();) {
         if (bit->first != frame->buffer_id) {
           v->retired.push_back(
