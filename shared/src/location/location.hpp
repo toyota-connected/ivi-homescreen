@@ -22,7 +22,7 @@ struct Position {
   double latitude = 0.0;
   double longitude = 0.0;
   double bearing_deg = 0.0;  // course over ground; valid only if has_bearing
-  double speed_mps = 0.0;    // ground speed, meters/second
+  double speed_mps = -1.0;   // ground speed m/s; < 0 means unknown
   int mode = 0;              // gpsd-style fix mode: <2 no fix, 2 = 2D, 3 = 3D
   bool has_bearing = false;
 

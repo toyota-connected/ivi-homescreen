@@ -31,9 +31,10 @@ namespace ihs::location {
 //
 // A worker thread owns the bus: it creates a geoclue Client, sets DesktopId +
 // accuracy, subscribes to LocationUpdated, calls Start, and pumps the bus. Each
-// location update is published as a Position. The bus address is
-// system-by-default but overridable (IHS_LOC_GEOCLUE_BUS) so the D-Bus client
-// can be tested against a stand-in service on the session bus.
+// location update is published as a Position. The bus address is passed to the
+// constructor (empty = system bus; "user" = session bus; any other value is an
+// explicit D-Bus address), so a stand-in geoclue can be tested on the session
+// bus without a system-bus name.
 class GeoclueProvider final : public ILocationProvider {
  public:
   // @desktop_id must match geoclue's allow-list expectation (a .desktop id);

@@ -35,13 +35,12 @@
 extern "C" {
 #endif
 
-/* One location fix. bearing_deg/speed_mps are meaningful only when the backend
- * supplies them (has_bearing / a non-negative speed). */
+/* One location fix. */
 typedef struct IhsPosition {
   double latitude;
   double longitude;
-  double bearing_deg;  /* course over ground, degrees */
-  double speed_mps;    /* ground speed, meters/second */
+  double bearing_deg;  /* course over ground, degrees; valid iff has_bearing */
+  double speed_mps;    /* ground speed, meters/second; < 0 means unknown */
   int32_t mode;        /* gpsd-style fix mode: <2 no fix, 2 = 2D, 3 = 3D */
   int32_t has_bearing; /* 0/1 */
 } IhsPosition;
@@ -59,9 +58,10 @@ typedef struct IhsLocationService IhsLocationService;
 /*
  * Start acquiring from @source. @config is an optional backend hint (may be
  * NULL): for gpsd, "host:port" (default 127.0.0.1:2947); for geoclue, a D-Bus
- * address (default the system bus); ignored for IHS_LOCATION_AUTO. Returns NULL
- * only on allocation failure — a backend that has no fix yet (or is not
- * present) still returns a handle and simply reports no fix until one arrives.
+ * address, or the literal "user" to use the session bus (default the system
+ * bus); ignored for IHS_LOCATION_AUTO. Returns NULL only on failure — a backend
+ * with no fix yet (or that is not present) still returns a handle and simply
+ * reports no fix until one arrives.
  */
 IHS_EXPORT IhsLocationService* ihs_location_start(IhsLocationSource source,
                                                   const char* config);

@@ -40,7 +40,8 @@ std::unique_ptr<ihs::location::ILocationProvider> MakeGpsd(const char* config) {
     const std::string v(config);
     if (const std::string::size_type c = v.find(':'); c != std::string::npos) {
       host = v.substr(0, c);
-      const int p = std::atoi(v.c_str() + c + 1);
+      char* end = nullptr;
+      const long p = std::strtol(v.c_str() + c + 1, &end, 10);
       if (p > 0 && p < 65536) {
         port = static_cast<uint16_t>(p);
       }
@@ -64,29 +65,34 @@ extern "C" {
 
 IhsLocationService* ihs_location_start(IhsLocationSource source,
                                        const char* config) {
-  std::unique_ptr<ihs::location::ILocationProvider> provider;
-  switch (source) {
-    case IHS_LOCATION_GEOCLUE:
-      provider = MakeGeoclue(config);
-      break;
-    case IHS_LOCATION_AUTO:
-      provider = std::make_unique<ihs::location::FallbackLocationProvider>(
-          MakeGpsd(nullptr), MakeGeoclue(nullptr));
-      break;
-    case IHS_LOCATION_GPSD:
-    default:
-      provider = MakeGpsd(config);
-      break;
-  }
-  if (!provider) {
+  // No exception may cross this C ABI boundary: provider construction and
+  // Start() (allocations, std::thread) can throw, so translate any failure to
+  // a NULL return.
+  try {
+    std::unique_ptr<ihs::location::ILocationProvider> provider;
+    switch (source) {
+      case IHS_LOCATION_GEOCLUE:
+        provider = MakeGeoclue(config);
+        break;
+      case IHS_LOCATION_AUTO:
+        provider = std::make_unique<ihs::location::FallbackLocationProvider>(
+            MakeGpsd(nullptr), MakeGeoclue(nullptr));
+        break;
+      case IHS_LOCATION_GPSD:
+      default:
+        provider = MakeGpsd(config);
+        break;
+    }
+    if (!provider) {
+      return nullptr;
+    }
+    auto service = std::make_unique<IhsLocationService>();
+    service->provider = std::move(provider);
+    service->provider->Start();
+    return service.release();
+  } catch (...) {
     return nullptr;
   }
-  auto* service = new (std::nothrow) IhsLocationService{std::move(provider)};
-  if (service == nullptr) {
-    return nullptr;
-  }
-  service->provider->Start();
-  return service;
 }
 
 int ihs_location_latest(IhsLocationService* service, IhsPosition* out) {

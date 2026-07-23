@@ -27,6 +27,7 @@
 
 #include "ihs/config.h"
 #include "ihs/ihs.h"
+#include "ihs/location.h"
 #include "ihs/logging.h"
 #include "ihs/trace.h"
 
@@ -88,6 +89,22 @@ int main(void) {
     api->logging->flush();
     api->logging->stop();
   }
+
+  /* Location: exercise the ihs_location_* ABI without needing gpsd or geoclue
+   * present. Point gpsd at a dead port so no fix is ever produced, and assert
+   * the contract: a handle is returned, no fix, generation 0, and stop frees
+   * cleanly. This guards the ABI/headers against regressions in CI. */
+  IhsLocationService* loc =
+      ihs_location_start(IHS_LOCATION_GPSD, "127.0.0.1:9");
+  CHECK(loc != NULL, "ihs_location_start returned NULL");
+  IhsPosition pos;
+  CHECK(ihs_location_latest(loc, &pos) == 0,
+        "no fix expected from a dead port");
+  CHECK(ihs_location_generation(loc) == 0, "generation 0 before any fix");
+  ihs_location_stop(loc);
+  CHECK(ihs_location_latest(NULL, &pos) == 0, "latest(NULL) is safe");
+  CHECK(ihs_location_generation(NULL) == 0, "generation(NULL) is 0");
+  ihs_location_stop(NULL); /* must be a safe nop */
 
   printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s\n",
          api->abi_version, api->logging != NULL ? "present" : "absent");
