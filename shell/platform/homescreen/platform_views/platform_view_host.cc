@@ -74,10 +74,22 @@ namespace {
 // platform view out on their own vblank loop don't need this, but the nudge is
 // harmless there. ScheduleFrame is thread-safe, so it is safe from the
 // producer's thread (same reason the software cursor uses it).
+//
+// Submitting on its own thread also means a submit can land while the view is
+// being torn down, and flutter_engine is never cleared on shutdown — a null
+// check alone only covers "before the engine started" and would still hand a
+// shut-down engine to ScheduleFrame. ~FlutterView latches shutting_down on the
+// texture registrar before the engine state is destroyed for exactly this class
+// of caller (the same gate the external-texture entry points use), so honor it
+// here too.
 void ScheduleEngineFrame(void* user_data) {
   auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
   if (state == nullptr || state->flutter_engine == nullptr) {
     return;  // submit before the engine is running: nothing to nudge
+  }
+  if (state->texture_registrar == nullptr ||
+      state->texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+    return;  // tearing down: the engine handle is no longer safe to call
   }
   LibFlutterEngine->ScheduleFrame(state->flutter_engine);
 }
