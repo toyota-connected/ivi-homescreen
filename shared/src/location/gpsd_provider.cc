@@ -58,10 +58,7 @@ bool ParseTpv(const std::string& line, Position& out) {
   if (!FindNumber(line, "lat", lat) || !FindNumber(line, "lon", lon)) {
     return false;  // TPV without a position (e.g. mode 1 acquiring)
   }
-  // A caller may point gpsd at an arbitrary host, so reject NaN/Inf and
-  // impossible coordinates rather than propagate them downstream.
-  if (!std::isfinite(lat) || !std::isfinite(lon) || lat < -90.0 || lat > 90.0 ||
-      lon < -180.0 || lon > 180.0) {
+  if (!ValidLatLon(lat, lon)) {
     return false;
   }
   Position p;

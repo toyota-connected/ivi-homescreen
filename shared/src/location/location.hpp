@@ -11,9 +11,19 @@
 #ifndef IHS_LOC_LOCATION_H_
 #define IHS_LOC_LOCATION_H_
 
+#include <cmath>
 #include <cstdint>
 
 namespace ihs::location {
+
+// A coordinate is usable only if finite and within the geographic range. Both
+// providers validate before publishing so a malformed source (an arbitrary
+// gpsd host, a bad D-Bus reply) can't push NaN/Inf or impossible coordinates to
+// consumers doing projection/camera math.
+inline bool ValidLatLon(double lat, double lon) {
+  return std::isfinite(lat) && std::isfinite(lon) && lat >= -90.0 &&
+         lat <= 90.0 && lon >= -180.0 && lon <= 180.0;
+}
 
 // One location fix, provider-agnostic. Consumers (the map camera, a puck)
 // read this; whether it came from gpsd, geoclue, or a test source is hidden
