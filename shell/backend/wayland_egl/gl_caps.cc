@@ -20,29 +20,11 @@
 #include <cstring>
 #include <string_view>
 
+#include "backend/gl_extensions.h"
 #include "backend/gl_process_resolver.h"
 #include "logging.h"
 
 namespace {
-
-bool ExtensionSupported(const char* extensions, const char* name) {
-  if (!extensions || !name) {
-    return false;
-  }
-  const size_t name_len = std::strlen(name);
-  const std::string_view sv(extensions);
-  size_t pos = 0;
-  while ((pos = sv.find(name, pos)) != std::string_view::npos) {
-    const bool left_ok = (pos == 0) || (sv[pos - 1] == ' ');
-    const size_t end = pos + name_len;
-    const bool right_ok = (end == sv.size()) || (sv[end] == ' ');
-    if (left_ok && right_ok) {
-      return true;
-    }
-    pos = end;
-  }
-  return false;
-}
 
 void* Resolve(const char* name) {
   return GlProcessResolver::GetInstance().process_resolver(name);
@@ -83,9 +65,10 @@ void GlCaps::Probe() {
 
   const char* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
 
-  has_rgb8_rgba8 = is_es3 || ExtensionSupported(exts, "GL_OES_rgb8_rgba8");
-  has_packed_depth_stencil =
-      is_es3 || ExtensionSupported(exts, "GL_OES_packed_depth_stencil");
+  has_rgb8_rgba8 =
+      is_es3 || ihs::gl::ExtensionSupported(exts, "GL_OES_rgb8_rgba8");
+  has_packed_depth_stencil = is_es3 || ihs::gl::ExtensionSupported(
+                                           exts, "GL_OES_packed_depth_stencil");
 
   // Resolve blit_framebuffer.
   blit_framebuffer = nullptr;
@@ -93,12 +76,13 @@ void GlCaps::Probe() {
     blit_framebuffer =
         reinterpret_cast<BlitFramebufferFn>(Resolve("glBlitFramebuffer"));
   }
-  if (!blit_framebuffer && ExtensionSupported(exts, "GL_NV_framebuffer_blit")) {
+  if (!blit_framebuffer &&
+      ihs::gl::ExtensionSupported(exts, "GL_NV_framebuffer_blit")) {
     blit_framebuffer =
         reinterpret_cast<BlitFramebufferFn>(Resolve("glBlitFramebufferNV"));
   }
   if (!blit_framebuffer &&
-      ExtensionSupported(exts, "GL_ANGLE_framebuffer_blit")) {
+      ihs::gl::ExtensionSupported(exts, "GL_ANGLE_framebuffer_blit")) {
     blit_framebuffer =
         reinterpret_cast<BlitFramebufferFn>(Resolve("glBlitFramebufferANGLE"));
   }
@@ -112,13 +96,13 @@ void GlCaps::Probe() {
             Resolve("glRenderbufferStorageMultisample"));
   }
   if (!renderbuffer_storage_multisample &&
-      ExtensionSupported(exts, "GL_ANGLE_framebuffer_multisample")) {
+      ihs::gl::ExtensionSupported(exts, "GL_ANGLE_framebuffer_multisample")) {
     renderbuffer_storage_multisample =
         reinterpret_cast<RenderbufferStorageMultisampleFn>(
             Resolve("glRenderbufferStorageMultisampleANGLE"));
   }
   if (!renderbuffer_storage_multisample &&
-      ExtensionSupported(exts, "GL_NV_framebuffer_multisample")) {
+      ihs::gl::ExtensionSupported(exts, "GL_NV_framebuffer_multisample")) {
     renderbuffer_storage_multisample =
         reinterpret_cast<RenderbufferStorageMultisampleFn>(
             Resolve("glRenderbufferStorageMultisampleNV"));
