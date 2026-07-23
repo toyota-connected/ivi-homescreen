@@ -134,6 +134,20 @@ if (ENABLE_DLT)
     target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
 endif ()
 
+# Location service (the ihs_location_* C ABI): the gpsd and geoclue providers
+# and their gpsd-primary/geoclue-fallback combiner. geoclue talks D-Bus through
+# sd-bus, which it loads from libsystemd.so.0 at runtime via dlopen — exactly as
+# the DLT sink loads libdlt — so ihs_shared keeps no build- or link-time
+# dependency on libsystemd; only libdl (for dlopen) is needed.
+target_sources(ihs_shared PRIVATE
+        src/location/location_api.cc
+        src/location/gpsd_provider.cc
+        src/location/geoclue_provider.cc
+        src/location/fallback_location_provider.cc
+        src/location/sd_bus_dynamic.cc
+)
+target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
+
 #
 # Install + CMake package export
 #
