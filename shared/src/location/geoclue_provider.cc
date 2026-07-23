@@ -10,12 +10,12 @@
 
 #include "geoclue_provider.hpp"
 
-#include <systemd/sd-bus.h>
-
 #include <chrono>
 #include <cstdio>
 #include <thread>
 #include <utility>
+
+#include "sd_bus_dynamic.hpp"
 
 namespace ihs::location {
 
@@ -31,23 +31,30 @@ constexpr char kLocationIface[] = "org.freedesktop.GeoClue2.Location";
 // 8 exact. Request street-level; geoclue clamps to what it can provide.
 constexpr uint32_t kAccuracyStreet = 6;
 
-double ReadDouble(sd_bus* bus, const char* path, const char* member) {
-  sd_bus_error err = SD_BUS_ERROR_NULL;
+double ReadDouble(const SdBusApi* sd,
+                  sd_bus* bus,
+                  const char* path,
+                  const char* member) {
+  sd_bus_error err{};
   double v = -1.0;
-  if (sd_bus_get_property_trivial(bus, kGeoclue, path, kLocationIface, member,
-                                  &err, 'd', &v) < 0) {
+  if (sd->get_property_trivial(bus, kGeoclue, path, kLocationIface, member,
+                               &err, 'd', &v) < 0) {
     v = -1.0;
   }
-  sd_bus_error_free(&err);
+  sd->error_free(&err);
   return v;
 }
 
 // sd-bus signal handler for Client.LocationUpdated(old, new); reads the new
 // Location object path and hands it to the provider.
 int LocationUpdatedCb(sd_bus_message* m, void* userdata, sd_bus_error* /*e*/) {
+  const SdBusApi* sd = SdBusLoad();
+  if (sd == nullptr) {
+    return 0;
+  }
   const char* old_path = nullptr;
   const char* new_path = nullptr;
-  if (sd_bus_message_read(m, "oo", &old_path, &new_path) < 0 ||
+  if (sd->message_read(m, "oo", &old_path, &new_path) < 0 ||
       new_path == nullptr) {
     return 0;
   }
@@ -104,20 +111,23 @@ uint64_t GeoclueProvider::generation() const {
 }
 
 void GeoclueProvider::OnLocationObject(const char* location_path) {
-  sd_bus_error err = SD_BUS_ERROR_NULL;
-  double lat = 0.0;
-  double lon = 0.0;
-  if (sd_bus_get_property_trivial(bus_, kGeoclue, location_path, kLocationIface,
-                                  "Latitude", &err, 'd', &lat) < 0 ||
-      sd_bus_get_property_trivial(bus_, kGeoclue, location_path, kLocationIface,
-                                  "Longitude", &err, 'd', &lon) < 0) {
-    sd_bus_error_free(&err);
+  if (sd_ == nullptr) {
     return;
   }
-  sd_bus_error_free(&err);
+  sd_bus_error err{};
+  double lat = 0.0;
+  double lon = 0.0;
+  if (sd_->get_property_trivial(bus_, kGeoclue, location_path, kLocationIface,
+                                "Latitude", &err, 'd', &lat) < 0 ||
+      sd_->get_property_trivial(bus_, kGeoclue, location_path, kLocationIface,
+                                "Longitude", &err, 'd', &lon) < 0) {
+    sd_->error_free(&err);
+    return;
+  }
+  sd_->error_free(&err);
 
-  const double heading = ReadDouble(bus_, location_path, "Heading");
-  const double speed = ReadDouble(bus_, location_path, "Speed");
+  const double heading = ReadDouble(sd_, bus_, location_path, "Heading");
+  const double speed = ReadDouble(sd_, bus_, location_path, "Speed");
 
   Position p;
   p.latitude = lat;
@@ -139,92 +149,97 @@ void GeoclueProvider::OnLocationObject(const char* location_path) {
 }
 
 bool GeoclueProvider::Setup() {
+  sd_ = SdBusLoad();
+  if (sd_ == nullptr) {
+    return false;  // libsystemd not present -> geoclue unavailable
+  }
+
   int r = 0;
   if (bus_address_.empty()) {
-    r = sd_bus_open_system(&bus_);
+    r = sd_->open_system(&bus_);
   } else if (bus_address_ == "user") {
-    r = sd_bus_open_user(&bus_);
+    r = sd_->open_user(&bus_);
   } else {
-    r = sd_bus_new(&bus_);
+    r = sd_->bus_new(&bus_);
     if (r >= 0) {
-      r = sd_bus_set_address(bus_, bus_address_.c_str());
+      r = sd_->set_address(bus_, bus_address_.c_str());
     }
     if (r >= 0) {
-      sd_bus_set_bus_client(bus_, 1);
-      r = sd_bus_start(bus_);
+      sd_->set_bus_client(bus_, 1);
+      r = sd_->start(bus_);
     }
   }
   if (r < 0 || bus_ == nullptr) {
     return false;
   }
 
-  sd_bus_error err = SD_BUS_ERROR_NULL;
+  sd_bus_error err{};
   sd_bus_message* reply = nullptr;
 
   // Manager.GetClient -> our per-app client object path.
-  r = sd_bus_call_method(bus_, kGeoclue, kManagerPath, kManagerIface,
-                         "GetClient", &err, &reply, "");
+  r = sd_->call_method(bus_, kGeoclue, kManagerPath, kManagerIface, "GetClient",
+                       &err, &reply, "");
   if (r < 0) {
     std::fprintf(stderr, "[ihs.location] geoclue: GetClient failed: %s\n",
                  err.message ? err.message : "?");
-    sd_bus_error_free(&err);
+    sd_->error_free(&err);
     return false;
   }
   const char* client_path = nullptr;
-  r = sd_bus_message_read(reply, "o", &client_path);
+  r = sd_->message_read(reply, "o", &client_path);
   if (r >= 0 && client_path != nullptr) {
     client_path_ = client_path;
   }
-  reply = sd_bus_message_unref(reply);
+  reply = sd_->message_unref(reply);
   if (client_path_.empty()) {
-    sd_bus_error_free(&err);
+    sd_->error_free(&err);
     return false;
   }
 
   // Identify + request accuracy before starting (both required by geoclue).
-  sd_bus_set_property(bus_, kGeoclue, client_path_.c_str(), kClientIface,
-                      "DesktopId", &err, "s", desktop_id_.c_str());
-  sd_bus_set_property(bus_, kGeoclue, client_path_.c_str(), kClientIface,
-                      "RequestedAccuracyLevel", &err, "u", kAccuracyStreet);
+  sd_->set_property(bus_, kGeoclue, client_path_.c_str(), kClientIface,
+                    "DesktopId", &err, "s", desktop_id_.c_str());
+  sd_->set_property(bus_, kGeoclue, client_path_.c_str(), kClientIface,
+                    "RequestedAccuracyLevel", &err, "u", kAccuracyStreet);
 
   // Fixes arrive via LocationUpdated(old, new).
-  r = sd_bus_match_signal(bus_, nullptr, kGeoclue, client_path_.c_str(),
-                          kClientIface, "LocationUpdated", &LocationUpdatedCb,
-                          this);
+  r = sd_->match_signal(bus_, nullptr, kGeoclue, client_path_.c_str(),
+                        kClientIface, "LocationUpdated", &LocationUpdatedCb,
+                        this);
   if (r < 0) {
-    sd_bus_error_free(&err);
+    sd_->error_free(&err);
     return false;
   }
 
-  r = sd_bus_call_method(bus_, kGeoclue, client_path_.c_str(), kClientIface,
-                         "Start", &err, &reply, "");
+  r = sd_->call_method(bus_, kGeoclue, client_path_.c_str(), kClientIface,
+                       "Start", &err, &reply, "");
   if (r < 0) {
     std::fprintf(stderr, "[ihs.location] geoclue: Start failed: %s\n",
                  err.message ? err.message : "?");
-    sd_bus_error_free(&err);
+    sd_->error_free(&err);
     return false;
   }
-  sd_bus_message_unref(reply);
-  sd_bus_error_free(&err);
+  sd_->message_unref(reply);
+  sd_->error_free(&err);
   std::fprintf(stderr, "[ihs.location] geoclue: watching %s\n",
                client_path_.c_str());
   return true;
 }
 
 void GeoclueProvider::Teardown() {
-  if (bus_ == nullptr) {
+  if (sd_ == nullptr || bus_ == nullptr) {
     return;
   }
   if (!client_path_.empty()) {
-    sd_bus_error err = SD_BUS_ERROR_NULL;
+    sd_bus_error err{};
     sd_bus_message* reply = nullptr;
-    sd_bus_call_method(bus_, kGeoclue, client_path_.c_str(), kClientIface,
-                       "Stop", &err, &reply, "");
-    sd_bus_message_unref(reply);
-    sd_bus_error_free(&err);
+    sd_->call_method(bus_, kGeoclue, client_path_.c_str(), kClientIface, "Stop",
+                     &err, &reply, "");
+    sd_->message_unref(reply);
+    sd_->error_free(&err);
     client_path_.clear();
   }
-  bus_ = sd_bus_flush_close_unref(bus_);
+  bus_ = sd_->flush_close_unref(bus_);
 }
 
 void GeoclueProvider::Run() {
@@ -237,14 +252,14 @@ void GeoclueProvider::Run() {
       continue;
     }
     while (running_.load()) {
-      const int r = sd_bus_process(bus_, nullptr);
+      const int r = sd_->process(bus_, nullptr);
       if (r < 0) {
         break;  // bus error -> reconnect
       }
       if (r > 0) {
         continue;  // more queued, process again before waiting
       }
-      sd_bus_wait(bus_, 200000);  // 200 ms, so running_ is re-checked
+      sd_->wait(bus_, 200000);  // 200 ms, so running_ is re-checked
     }
     Teardown();
     if (running_.load()) {
