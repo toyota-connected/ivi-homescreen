@@ -252,6 +252,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // thread — the GL context is current here — then returns it. 0 until the
   // first frame. Defined out of line (needs g_egl_importer + CloseFrameFds).
   [[nodiscard]] uint32_t GetGlTextureName() const override;
+  [[nodiscard]] bool TextureIsExternalOes() const override {
+    return current_egl != nullptr && current_egl->external;
+  }
   [[nodiscard]] int32_t GetGlTextureWidth() const override {
     const std::lock_guard<std::mutex> lock(mutex);
     return current_egl != nullptr ? static_cast<int32_t>(current_egl->width)

@@ -115,6 +115,16 @@ class ICompositorSurface {
   [[nodiscard]] virtual bool TextureIsTopFirst() const { return false; }
 
   /**
+   * @brief Whether GetGlTextureName() is bound to GL_TEXTURE_EXTERNAL_OES.
+   *
+   * True for a planar YUV dma-buf import, which can only be sampled through
+   * samplerExternalOES — that is where the colour conversion happens. Sampling
+   * such a texture as GL_TEXTURE_2D yields the luma plane alone. Packed
+   * formats stay on GL_TEXTURE_2D and leave this false.
+   */
+  [[nodiscard]] virtual bool TextureIsExternalOes() const { return false; }
+
+  /**
    * @brief Expose a Vulkan platform-view image the compositor can blit.
    *
    * The Vulkan counterpart to @c GetGlTextureName: a plugin that rendered into
