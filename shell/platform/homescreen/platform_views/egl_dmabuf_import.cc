@@ -54,6 +54,26 @@ constexpr std::array<PlaneAttribs, 4> kPlaneAttribs{{
      EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT},
 }};
 
+// Formats whose planes carry Y and chroma separately, or subsampled packed
+// YUV. These need the external sampler; packed RGB does not.
+bool IsPlanarYuv(uint32_t fourcc) {
+  switch (fourcc) {
+    case DRM_FORMAT_NV12:
+    case DRM_FORMAT_NV21:
+    case DRM_FORMAT_NV16:
+    case DRM_FORMAT_NV61:
+    case DRM_FORMAT_YUV420:
+    case DRM_FORMAT_YVU420:
+    case DRM_FORMAT_YUV422:
+    case DRM_FORMAT_YUV444:
+    case DRM_FORMAT_P010:
+    case DRM_FORMAT_YUYV:
+    case DRM_FORMAT_UYVY:
+      return true;
+    default:
+      return false;
+  }
+}
 }  // namespace
 
 bool EglDmabufImporter::Init(void* egl_display) {
@@ -140,22 +160,31 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
     close(frame.plane_fd[p]);  // EGL dup'd them
   }
 
+  // A YUV image carries its colour conversion in the sampler, which only
+  // GL_TEXTURE_EXTERNAL_OES provides. Bound as GL_TEXTURE_2D the driver
+  // exposes the first plane alone, so a plain sampler2D reads luma into red.
+  const bool external = IsPlanarYuv(frame.format.fourcc);
+  const GLenum target = external ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
+
   GLuint tex = 0;
   glGenTextures(1, &tex);
-  glBindTexture(GL_TEXTURE_2D, tex);
+  glBindTexture(target, tex);
   auto image_target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
       image_target_texture_);
-  image_target(GL_TEXTURE_2D, static_cast<GLeglImageOES>(image));
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  image_target(target, static_cast<GLeglImageOES>(image));
+  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  // External textures support only CLAMP_TO_EDGE and no mipmaps; the same
+  // settings suit the 2D path, so there is one set for both.
+  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(target, 0);
 
   out->texture = tex;
   out->egl_image = image;
   out->width = frame.width;
   out->height = frame.height;
+  out->external = external;
   return true;
 }
 

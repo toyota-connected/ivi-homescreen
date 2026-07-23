@@ -73,7 +73,8 @@ class GlCompositor {
                       GLsizei dst_w,
                       GLsizei dst_h,
                       bool blend = false,
-                      bool flip_y = false);
+                      bool flip_y = false,
+                      bool external = false);
 
   // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,
@@ -85,9 +86,10 @@ class GlCompositor {
                           GLsizei dst_w,
                           GLsizei dst_h,
                           bool blend = false,
-                          bool flip_y = false) {
+                          bool flip_y = false,
+                          bool external = false) {
     CompositeToFbo(0, src_fbo, src_color_tex, src_w, src_h, dst_x, dst_y, dst_w,
-                   dst_h, blend, flip_y);
+                   dst_h, blend, flip_y, external);
   }
 
   /**
@@ -127,16 +129,40 @@ class GlCompositor {
   GLuint bound_tex_{0};
 
   bool EnsureQuad();
+  // Links the samplerExternalOES variant of the quad program, used for planar
+  // YUV platform-view frames. Leaves program_external_ at 0 when the driver
+  // lacks GL_OES_EGL_image_external.
+  void BuildExternalProgram();
+  void CompositeViaQuadExternal(GLuint tex,
+                                GLint dst_x,
+                                GLint dst_y,
+                                GLsizei dst_w,
+                                GLsizei dst_h,
+                                bool blend,
+                                bool flip_y);
+  // @external selects the samplerExternalOES program and the
+  // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,
                         GLint dst_x,
                         GLint dst_y,
                         GLsizei dst_w,
                         GLsizei dst_h,
                         bool blend,
-                        bool flip_y);
+                        bool flip_y,
+                        bool external);
   void EmitPersistentQuadState();
   void TearDownPersistentQuadState();
 
   GLint uni_uv_y_scale_{-1};
   GLint uni_uv_y_offset_{-1};
+
+  // The external-sampler variant. A planar YUV dma-buf is bound to
+  // GL_TEXTURE_EXTERNAL_OES and can only be read through this program;
+  // sampling it with the sampler2D one yields the luma plane in red.
+  GLuint program_external_{0};
+  GLint attr_pos_external_{-1};
+  GLint attr_uv_external_{-1};
+  GLint uni_tex_external_{-1};
+  GLint uni_uv_y_scale_external_{-1};
+  GLint uni_uv_y_offset_external_{-1};
 };
