@@ -144,6 +144,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // each of its frames is imported afresh instead of aliasing cache slot 0.
   uint32_t rolling_buffer_id{0};
 
+  // Set once an id has been synthesised (the plugin's IhsFrame predates
+  // buffer_id). Synthesised ids never repeat, so the import cache can never
+  // reuse them; for such a view the import paths keep only the current import
+  // and retire the rest, so the cache stays bounded instead of accumulating a
+  // VkImage/GL texture (and its dma-buf) per frame for the producer's lifetime.
+  bool synth_buffer_id{false};
+
   // Deliver-once guard for the direct-scanout path: the submit_seq last handed
   // to GetDmabuf. The compositor commits faster than a 30fps producer submits,
   // so a reused overlay layer polls GetDmabuf every present; without this it
@@ -555,6 +562,21 @@ uint32_t IhsPluginView::GetGlTextureName() const {
       if (g_egl_importer.Import(f, &imported)) {
         auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
         current_egl = &pos->second;
+        // Synthesised ids never repeat, so every earlier entry is dead. Retire
+        // them (the reap margin covers a compositor present still binding one)
+        // so the cache holds just the current import rather than growing per
+        // frame.
+        if (synth_buffer_id) {
+          for (auto bit = buffers_egl.begin(); bit != buffers_egl.end();) {
+            if (bit->first != f.buffer_id) {
+              retired_egl.push_back(
+                  {bit->second, submit_seq + kImportRetireMargin});
+              bit = buffers_egl.erase(bit);
+            } else {
+              ++bit;
+            }
+          }
+        }
       } else {
         CloseFrameFds(&f);  // import left the fds untouched on failure
       }
@@ -821,6 +843,7 @@ int HostSubmit(void* user_data,
   if (frame->struct_size <
       offsetof(IhsFrame, buffer_id) + sizeof(normalized.buffer_id)) {
     normalized.buffer_id = v->rolling_buffer_id++;
+    v->synth_buffer_id = true;
   }
   frame = &normalized;
 
@@ -934,6 +957,20 @@ int HostSubmit(void* user_data,
     // Import consumed plane_fd[0]; a single-plane RGB frame owns no other fds.
     auto [pos, inserted] = v->buffers.emplace(frame->buffer_id, imported);
     v->current = &pos->second;
+    // Synthesised ids never repeat, so every earlier entry is dead. Retire them
+    // (the reap margin covers a compositor present still binding one) so the
+    // cache holds just the current import rather than growing per frame.
+    if (v->synth_buffer_id) {
+      for (auto bit = v->buffers.begin(); bit != v->buffers.end();) {
+        if (bit->first != frame->buffer_id) {
+          v->retired.push_back(
+              {bit->second, v->submit_seq + kImportRetireMargin});
+          bit = v->buffers.erase(bit);
+        } else {
+          ++bit;
+        }
+      }
+    }
   }
 
   // The plugin re-rendered the buffer before submitting, so the compositor
