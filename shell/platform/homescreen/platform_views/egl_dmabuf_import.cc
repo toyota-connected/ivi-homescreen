@@ -24,6 +24,9 @@
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <cstring>
+#include <string_view>
+
 #include <drm_fourcc.h>
 
 #include "logging/logging.h"
@@ -56,6 +59,34 @@ constexpr std::array<PlaneAttribs, 4> kPlaneAttribs{{
 
 // Formats whose planes carry Y and chroma separately, or subsampled packed
 // YUV. These need the external sampler; packed RGB does not.
+// Exact, space-delimited match; see the note in gl_compositor.cc.
+bool ExtensionSupported(const char* extensions, const char* name) {
+  if (extensions == nullptr || name == nullptr) {
+    return false;
+  }
+  const size_t name_len = std::strlen(name);
+  const std::string_view sv(extensions);
+  size_t pos = 0;
+  while ((pos = sv.find(name, pos)) != std::string_view::npos) {
+    const bool left_ok = (pos == 0) || (sv[pos - 1] == ' ');
+    const size_t end = pos + name_len;
+    const bool right_ok = (end == sv.size()) || (sv[end] == ' ');
+    if (left_ok && right_ok) {
+      return true;
+    }
+    pos = end;
+  }
+  return false;
+}
+
+// Queried once with a context current, which Import guarantees.
+bool HasExternalImage() {
+  static const bool supported = ExtensionSupported(
+      reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)),
+      "GL_OES_EGL_image_external");
+  return supported;
+}
+
 bool IsPlanarYuv(uint32_t fourcc) {
   switch (fourcc) {
     case DRM_FORMAT_NV12:
@@ -156,6 +187,23 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
         eglGetError());
     return false;
   }
+  const bool external = IsPlanarYuv(frame.format.fourcc);
+  if (external && !HasExternalImage()) {
+    // Binding to a target the context does not implement raises
+    // GL_INVALID_ENUM and would otherwise return a half-built texture. Undo
+    // the image and report failure, which leaves the plane fds to the caller
+    // as the contract says.
+    auto destroy = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(destroy_image_);
+    if (destroy != nullptr) {
+      destroy(static_cast<EGLDisplay>(egl_display_), image);
+    }
+    ihs::log::error(
+        "[EglDmabufImporter] planar fourcc=0x{:x} needs "
+        "GL_OES_EGL_image_external, which this context lacks",
+        frame.format.fourcc);
+    return false;
+  }
+
   for (uint32_t p = 0; p < planes; ++p) {
     close(frame.plane_fd[p]);  // EGL dup'd them
   }
@@ -163,7 +211,6 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
   // A YUV image carries its colour conversion in the sampler, which only
   // GL_TEXTURE_EXTERNAL_OES provides. Bound as GL_TEXTURE_2D the driver
   // exposes the first plane alone, so a plain sampler2D reads luma into red.
-  const bool external = IsPlanarYuv(frame.format.fourcc);
   const GLenum target = external ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
 
   GLuint tex = 0;

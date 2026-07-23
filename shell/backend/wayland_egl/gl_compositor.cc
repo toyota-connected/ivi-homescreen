@@ -62,6 +62,28 @@ constexpr char kFragSrcExternal[] =
     "  gl_FragColor = texture2D(u_tex, v_uv);\n"
     "}\n";
 
+// Exact, space-delimited match. A substring search would accept
+// GL_OES_EGL_image_external_essl3 as the base extension and go on to compile a
+// shader the driver cannot link.
+bool ExtensionSupported(const char* extensions, const char* name) {
+  if (extensions == nullptr || name == nullptr) {
+    return false;
+  }
+  const size_t name_len = std::strlen(name);
+  const std::string_view sv(extensions);
+  size_t pos = 0;
+  while ((pos = sv.find(name, pos)) != std::string_view::npos) {
+    const bool left_ok = (pos == 0) || (sv[pos - 1] == ' ');
+    const size_t end = pos + name_len;
+    const bool right_ok = (end == sv.size()) || (sv[end] == ' ');
+    if (left_ok && right_ok) {
+      return true;
+    }
+    pos = end;
+  }
+  return false;
+}
+
 GLuint CompileShader(GLenum type, const char* src) {
   const GLuint s = glCreateShader(type);
   glShaderSource(s, 1, &src, nullptr);
@@ -92,6 +114,9 @@ GlCompositor::~GlCompositor() {
   }
   if (program_) {
     glDeleteProgram(program_);
+  }
+  if (program_external_) {
+    glDeleteProgram(program_external_);
   }
 }
 
@@ -170,9 +195,7 @@ void GlCompositor::BuildExternalProgram() {
   // Optional: a driver without the extension keeps the packed-format path, and
   // a planar frame is then simply not composited rather than mis-sampled.
   const auto* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-  if (exts == nullptr ||
-      std::string_view(exts).find("GL_OES_EGL_image_external") ==
-          std::string_view::npos) {
+  if (!ExtensionSupported(exts, "GL_OES_EGL_image_external")) {
     ihs::log::warn(
         "GlCompositor: GL_OES_EGL_image_external absent; planar YUV "
         "platform-view frames cannot be sampled");
@@ -283,6 +306,13 @@ void GlCompositor::CompositeViaQuadExternal(GLuint tex,
     TearDownPersistentQuadState();
     persistent_state_emitted_ = false;
   }
+  // Same baseline the batched path establishes: anything left enabled by the
+  // caller could clip or discard this draw.
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_CULL_FACE);
+
   glUseProgram(program_external_);
   glActiveTexture(GL_TEXTURE0);
   if (uni_tex_external_ >= 0) {
@@ -325,6 +355,13 @@ void GlCompositor::CompositeViaQuadExternal(GLuint tex,
   }
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glUseProgram(0);
+  // Blend is left off rather than as this draw wanted it. This path clears
+  // persistent_state_emitted_, so EndFrame will not tear anything down, and an
+  // enabled blend would leak into the rest of the present and the next frame.
+  if (blend) {
+    glDisable(GL_BLEND);
+  }
+  blend_enabled_ = false;
   bound_tex_ = 0;
 }
 
