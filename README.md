@@ -59,15 +59,7 @@ Logging level support
 * critical
 * off
 
-If environmental variable SPDLOG_LEVEL is not set, logging defaults to info.
-
-To set logging to trace use
-
-    SPDLOG_LEVEL=trace
-
-To set logging to debug use
-
-    SPDLOG_LEVEL=debug
+If environmental variable IHS_LOG_LEVEL is set, it will override the default logging level of info. The logging level can also be set via the command line argument --log-level <level>.
 
 ### DLT logging
 
