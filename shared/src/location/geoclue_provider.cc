@@ -267,8 +267,16 @@ void GeoclueProvider::Teardown() {
 }
 
 void GeoclueProvider::Run() {
+  // libsystemd is resolved once (std::call_once); if it is absent it will never
+  // appear later in this process, so there is nothing to retry — leave the
+  // worker idle rather than wake every 2s forever.
+  if (SdBusLoad() == nullptr) {
+    return;
+  }
   while (running_.load()) {
     if (!Setup()) {
+      // Setup only fails now for a transient reason (geoclue not up yet, a
+      // denied client), so retrying is worthwhile.
       Teardown();
       if (running_.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(2));  // retry
