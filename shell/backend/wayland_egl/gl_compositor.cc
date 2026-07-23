@@ -15,6 +15,7 @@
  */
 
 #include "backend/wayland_egl/gl_compositor.h"
+#include "backend/gl_extensions.h"
 #include "logging/logging.h"
 
 #include <array>
@@ -64,28 +65,6 @@ constexpr char kFragSrcExternal[] =
     "void main() {\n"
     "  gl_FragColor = texture2D(u_tex, v_uv);\n"
     "}\n";
-
-// Exact, space-delimited match. A substring search would accept
-// GL_OES_EGL_image_external_essl3 as the base extension and go on to compile a
-// shader the driver cannot link.
-bool ExtensionSupported(const char* extensions, const char* name) {
-  if (extensions == nullptr || name == nullptr) {
-    return false;
-  }
-  const size_t name_len = std::strlen(name);
-  const std::string_view sv(extensions);
-  size_t pos = 0;
-  while ((pos = sv.find(name, pos)) != std::string_view::npos) {
-    const bool left_ok = (pos == 0) || (sv[pos - 1] == ' ');
-    const size_t end = pos + name_len;
-    const bool right_ok = (end == sv.size()) || (sv[end] == ' ');
-    if (left_ok && right_ok) {
-      return true;
-    }
-    pos = end;
-  }
-  return false;
-}
 
 GLuint CompileShader(GLenum type, const char* src) {
   const GLuint s = glCreateShader(type);
@@ -198,10 +177,10 @@ void GlCompositor::BuildExternalProgram() {
   // Optional: a driver without the extension keeps the packed-format path, and
   // a planar frame is then simply not composited rather than mis-sampled.
   const auto* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-  if (!ExtensionSupported(exts, "GL_OES_EGL_image_external")) {
-    ihs::log::warn(
-        "GlCompositor: GL_OES_EGL_image_external absent; YUV platform-view "
-        "frames (planar or packed) cannot be sampled");
+  if (!ihs::gl::ExtensionSupported(exts, "GL_OES_EGL_image_external")) {
+    // Left unbuilt, not an error: a context that never presents a YUV
+    // platform-view frame does not need it. The one warning, if a frame does
+    // arrive, is emitted where the composite is refused.
     return;
   }
   const GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
@@ -393,7 +372,17 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
     return;
   }
   if (external && program_external_ == 0) {
-    return;  // no external sampler; better blank than the luma plane in red
+    // Blank rather than the luma plane in red. Warn once: the driver lacks
+    // GL_OES_EGL_image_external and a YUV frame has now actually reached here.
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      ihs::log::warn(
+          "GlCompositor: a YUV platform-view frame needs "
+          "GL_OES_EGL_image_external, which this context lacks; it will not be "
+          "composited");
+    }
+    return;
   }
   // The external path is rare (one platform-view layer), so it does not join
   // the frame-batched fast path: it sets its own program and state and leaves

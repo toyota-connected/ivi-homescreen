@@ -29,6 +29,8 @@
 
 #include <drm_fourcc.h>
 
+#include "backend/gl_extensions.h"
+
 #include "logging/logging.h"
 
 namespace {
@@ -57,31 +59,9 @@ constexpr std::array<PlaneAttribs, 4> kPlaneAttribs{{
      EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT},
 }};
 
-// Formats whose planes carry Y and chroma separately, or subsampled packed
-// YUV. These need the external sampler; packed RGB does not.
-// Exact, space-delimited match; see the note in gl_compositor.cc.
-bool ExtensionSupported(const char* extensions, const char* name) {
-  if (extensions == nullptr || name == nullptr) {
-    return false;
-  }
-  const size_t name_len = std::strlen(name);
-  const std::string_view sv(extensions);
-  size_t pos = 0;
-  while ((pos = sv.find(name, pos)) != std::string_view::npos) {
-    const bool left_ok = (pos == 0) || (sv[pos - 1] == ' ');
-    const size_t end = pos + name_len;
-    const bool right_ok = (end == sv.size()) || (sv[end] == ' ');
-    if (left_ok && right_ok) {
-      return true;
-    }
-    pos = end;
-  }
-  return false;
-}
-
 // Queried once with a context current, which Import guarantees.
 bool HasExternalImage() {
-  static const bool supported = ExtensionSupported(
+  static const bool supported = ihs::gl::ExtensionSupported(
       reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)),
       "GL_OES_EGL_image_external");
   return supported;
