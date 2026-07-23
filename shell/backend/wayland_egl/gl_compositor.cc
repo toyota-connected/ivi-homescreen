@@ -18,6 +18,8 @@
 #include "backend/gl_extensions.h"
 #include "logging/logging.h"
 
+#include <GLES2/gl2ext.h>  // GL_TEXTURE_EXTERNAL_OES
+
 #include <array>
 #include <cstring>
 #include <string>
