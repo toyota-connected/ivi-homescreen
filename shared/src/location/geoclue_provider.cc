@@ -201,14 +201,15 @@ bool GeoclueProvider::Setup() {
     return false;
   }
 
-  // Identify + request accuracy before starting (both required by geoclue).
-  // Check each return and reset the shared error on failure, so a first failure
-  // neither leaks nor leaves a stale error for the next call.
+  // Identify + request accuracy before starting. geoclue requires both, so a
+  // failure is fatal: fail Setup() and let the retry loop try again rather than
+  // run a client that can never receive fixes.
   if (sd_->set_property(bus_, kGeoclue, client_path_.c_str(), kClientIface,
                         "DesktopId", &err, "s", desktop_id_.c_str()) < 0) {
     std::fprintf(stderr, "[ihs.location] geoclue: set DesktopId failed: %s\n",
                  err.message ? err.message : "?");
     sd_->error_free(&err);
+    return false;
   }
   if (sd_->set_property(bus_, kGeoclue, client_path_.c_str(), kClientIface,
                         "RequestedAccuracyLevel", &err, "u",
@@ -218,6 +219,7 @@ bool GeoclueProvider::Setup() {
         "[ihs.location] geoclue: set RequestedAccuracyLevel failed: %s\n",
         err.message ? err.message : "?");
     sd_->error_free(&err);
+    return false;
   }
 
   // Fixes arrive via LocationUpdated(old, new).

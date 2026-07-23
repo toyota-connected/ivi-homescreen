@@ -67,14 +67,17 @@ bool ParseTpv(const std::string& line, Position& out) {
   Position p;
   p.latitude = lat;
   p.longitude = lon;
+  // gpsd fix mode: only 2 (2D) and 3 (3D) are fixes. Reject anything else
+  // (0/1 = no fix, or a garbage value). A TPV with lat/lon but no mode field is
+  // treated as a 3D fix.
   double mode = 0.0;
-  // A TPV that carries lat/lon but omits mode (or reports a non-finite mode)
-  // still represents a fix; default to 3D so it counts as valid().
-  p.mode = (FindNumber(line, "mode", mode) && std::isfinite(mode))
-               ? static_cast<int>(mode)
-               : 3;
-  if (!p.valid()) {
-    return false;
+  if (FindNumber(line, "mode", mode)) {
+    if (mode != 2.0 && mode != 3.0) {
+      return false;
+    }
+    p.mode = static_cast<int>(mode);
+  } else {
+    p.mode = 3;
   }
   double track = 0.0;
   if (FindNumber(line, "track", track) && std::isfinite(track)) {
