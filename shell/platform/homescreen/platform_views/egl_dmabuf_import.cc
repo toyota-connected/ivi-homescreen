@@ -24,7 +24,12 @@
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <cstring>
+#include <string_view>
+
 #include <drm_fourcc.h>
+
+#include "backend/gl_extensions.h"
 
 #include "logging/logging.h"
 
@@ -54,6 +59,35 @@ constexpr std::array<PlaneAttribs, 4> kPlaneAttribs{{
      EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT},
 }};
 
+// Queried once with a context current, which Import guarantees.
+bool HasExternalImage() {
+  static const bool supported = ihs::gl::ExtensionSupported(
+      reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)),
+      "GL_OES_EGL_image_external");
+  return supported;
+}
+
+// True for YUV formats that must be sampled through GL_TEXTURE_EXTERNAL_OES so
+// the driver applies the YUV->RGB conversion — planar (NV12, ...) and packed
+// (YUYV/UYVY) alike. Packed RGB returns false and stays on GL_TEXTURE_2D.
+bool NeedsExternalOes(uint32_t fourcc) {
+  switch (fourcc) {
+    case DRM_FORMAT_NV12:
+    case DRM_FORMAT_NV21:
+    case DRM_FORMAT_NV16:
+    case DRM_FORMAT_NV61:
+    case DRM_FORMAT_YUV420:
+    case DRM_FORMAT_YVU420:
+    case DRM_FORMAT_YUV422:
+    case DRM_FORMAT_YUV444:
+    case DRM_FORMAT_P010:
+    case DRM_FORMAT_YUYV:
+    case DRM_FORMAT_UYVY:
+      return true;
+    default:
+      return false;
+  }
+}
 }  // namespace
 
 bool EglDmabufImporter::Init(void* egl_display) {
@@ -136,26 +170,51 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
         eglGetError());
     return false;
   }
+  const bool external = NeedsExternalOes(frame.format.fourcc);
+  if (external && !HasExternalImage()) {
+    // Binding to a target the context does not implement raises
+    // GL_INVALID_ENUM and would otherwise return a half-built texture. Undo
+    // the image and report failure, which leaves the plane fds to the caller
+    // as the contract says.
+    auto destroy = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(destroy_image_);
+    if (destroy != nullptr) {
+      destroy(static_cast<EGLDisplay>(egl_display_), image);
+    }
+    ihs::log::error(
+        "[EglDmabufImporter] planar fourcc=0x{:x} needs "
+        "GL_OES_EGL_image_external, which this context lacks",
+        frame.format.fourcc);
+    return false;
+  }
+
   for (uint32_t p = 0; p < planes; ++p) {
     close(frame.plane_fd[p]);  // EGL dup'd them
   }
 
+  // A YUV image carries its colour conversion in the sampler, which only
+  // GL_TEXTURE_EXTERNAL_OES provides. Bound as GL_TEXTURE_2D the driver
+  // exposes the first plane alone, so a plain sampler2D reads luma into red.
+  const GLenum target = external ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
+
   GLuint tex = 0;
   glGenTextures(1, &tex);
-  glBindTexture(GL_TEXTURE_2D, tex);
+  glBindTexture(target, tex);
   auto image_target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
       image_target_texture_);
-  image_target(GL_TEXTURE_2D, static_cast<GLeglImageOES>(image));
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  image_target(target, static_cast<GLeglImageOES>(image));
+  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  // External textures support only CLAMP_TO_EDGE and no mipmaps; the same
+  // settings suit the 2D path, so there is one set for both.
+  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(target, 0);
 
   out->texture = tex;
   out->egl_image = image;
   out->width = frame.width;
   out->height = frame.height;
+  out->external = external;
   return true;
 }
 
