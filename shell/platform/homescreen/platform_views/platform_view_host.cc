@@ -32,6 +32,7 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -142,14 +143,19 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
   // Synthesised buffer_id for a plugin whose IhsFrame predates that field, so
   // each of its frames is imported afresh instead of aliasing cache slot 0.
-  uint32_t rolling_buffer_id{0};
+  // Atomic: written on the plugin thread in HostSubmit (outside v->mutex) and,
+  // if a view ever sees concurrent submits, the increment must not tear.
+  std::atomic<uint32_t> rolling_buffer_id{0};
 
   // Set once an id has been synthesised (the plugin's IhsFrame predates
   // buffer_id). Synthesised ids never repeat, so the import cache can never
   // reuse them; for such a view the import paths keep only the current import
   // and retire the rest, so the cache stays bounded instead of accumulating a
   // VkImage/GL texture (and its dma-buf) per frame for the producer's lifetime.
-  bool synth_buffer_id{false};
+  // Atomic: written on the plugin thread (HostSubmit, outside v->mutex) and
+  // read on the raster thread (GetGlTextureName / GetVulkanImage, under
+  // v->mutex).
+  std::atomic<bool> synth_buffer_id{false};
 
   // Deliver-once guard for the direct-scanout path: the submit_seq last handed
   // to GetDmabuf. The compositor commits faster than a 30fps producer submits,
@@ -566,7 +572,7 @@ uint32_t IhsPluginView::GetGlTextureName() const {
         // them (the reap margin covers a compositor present still binding one)
         // so the cache holds just the current import rather than growing per
         // frame.
-        if (synth_buffer_id) {
+        if (synth_buffer_id.load(std::memory_order_relaxed)) {
           for (auto bit = buffers_egl.begin(); bit != buffers_egl.end();) {
             if (bit->first != f.buffer_id) {
               retired_egl.push_back(
@@ -842,8 +848,9 @@ int HostSubmit(void* user_data,
   // fresh id so it is imported rather than aliased.
   if (frame->struct_size <
       offsetof(IhsFrame, buffer_id) + sizeof(normalized.buffer_id)) {
-    normalized.buffer_id = v->rolling_buffer_id++;
-    v->synth_buffer_id = true;
+    normalized.buffer_id =
+        v->rolling_buffer_id.fetch_add(1, std::memory_order_relaxed);
+    v->synth_buffer_id.store(true, std::memory_order_relaxed);
   }
   frame = &normalized;
 
@@ -960,7 +967,7 @@ int HostSubmit(void* user_data,
     // Synthesised ids never repeat, so every earlier entry is dead. Retire them
     // (the reap margin covers a compositor present still binding one) so the
     // cache holds just the current import rather than growing per frame.
-    if (v->synth_buffer_id) {
+    if (v->synth_buffer_id.load(std::memory_order_relaxed)) {
       for (auto bit = v->buffers.begin(); bit != v->buffers.end();) {
         if (bit->first != frame->buffer_id) {
           v->retired.push_back(
