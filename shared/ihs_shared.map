@@ -1,12 +1,23 @@
 # Linker version script for libihs_shared.so.
 #
-# Only the sanctioned C ABI (ihs_*) is exported; every other symbol — including
-# the C++ internals of the logging bridge and any vendored dependency compiled
-# in — stays local regardless of its visibility attributes. This is the hard
-# boundary: a plugin can reach nothing but the ihs_* surface.
+# Two sanctioned surfaces are exported; every other symbol — including the C++
+# internals of the logging bridge and any vendored dependency compiled in —
+# stays local regardless of its visibility attributes. This is the hard
+# boundary: a plugin can reach nothing but these.
+#
+#   ihs_*           the native C ABI (logging, tracing, platform-view surface
+#                   negotiation, config, location).
+#   FlutterDesktop* forwarders for the Flutter desktop embedder C API, over a
+#                   proc table the shell installs (see
+#                   include/ihs/flutter_desktop_bridge.h). The embedder itself
+#                   lives in the executable, which is not a shared object a
+#                   dlopen'd plugin can bind to, so a plugin resolves the whole
+#                   host ABI from this one library. Only the 18 forwarders
+#                   compiled into flutter_desktop_bridge.cc carry this prefix.
 {
   global:
     ihs_*;
+    FlutterDesktop*;
   local:
     *;
 };

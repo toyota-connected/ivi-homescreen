@@ -148,6 +148,30 @@ target_sources(ihs_shared PRIVATE
 )
 target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
 
+# Flutter desktop embedder C API forwarders (the FlutterDesktop* surface; see
+# include/ihs/flutter_desktop_bridge.h). They forward to a proc table the shell
+# installs at engine bring-up, so a plugin dlopen'd into the executable resolves
+# the whole host ABI -- ihs_* and FlutterDesktop* alike -- from this one .so.
+#
+# Only meaningful inside the homescreen tree: the standalone ABI-gate build has
+# no embedder to install the table, and the public embedder headers live under
+# third_party/flutter, outside this directory. So the source is gated on those
+# headers being present; the standalone build simply omits the forwarders (its
+# ihs_* surface is unchanged). FLUTTER_DESKTOP_LIBRARY (defined in the source)
+# makes the FLUTTER_EXPORT annotations resolve to default visibility despite the
+# hidden preset; the version script then keeps them in the dynamic table.
+set(_ihs_flutter_public
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/flutter/shell/platform/common/public")
+if (EXISTS "${_ihs_flutter_public}/flutter_messenger.h" AND
+        EXISTS "${_ihs_flutter_public}/flutter_plugin_registrar.h" AND
+        EXISTS "${_ihs_flutter_public}/flutter_texture_registrar.h")
+    target_sources(ihs_shared PRIVATE src/flutter_desktop_bridge.cc)
+    # Only the forwarder source includes the embedder headers, but attach the
+    # path at target scope: it applies consistently across generators and IDEs,
+    # and no other source pulls those headers in.
+    target_include_directories(ihs_shared PRIVATE "${_ihs_flutter_public}")
+endif ()
+
 #
 # Install + CMake package export
 #
@@ -159,9 +183,18 @@ install(TARGETS ihs_shared EXPORT ihs_shared_targets
 )
 
 # Public headers (hand-written) + the generated export header.
+#
+# flutter_desktop_bridge.h is deliberately not installed. Its one exported
+# symbol, ihs_flutter_desktop_set_procs, is a real ihs_* entry point (the shell
+# calls it to install the proc table), but the header that declares it #includes
+# the Flutter embedder headers, which ihs_shared does not ship -- so an installed
+# copy could not compile standalone. It is a shell-internal integration point,
+# consumed in-tree from the source include directory; nothing out-of-tree needs
+# to declare the setter.
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         FILES_MATCHING PATTERN "*.h"
+        PATTERN "flutter_desktop_bridge.h" EXCLUDE
 )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/ihs/ihs_export.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ihs
