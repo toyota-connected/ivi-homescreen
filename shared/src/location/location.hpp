@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 
 namespace ihs::location {
 
@@ -62,6 +63,26 @@ struct Position {
   double sigma_v_mps = -1.0;
 
   [[nodiscard]] bool valid() const { return mode >= 2; }
+};
+
+// Event push: a source invokes this with each new fix as it arrives, on the
+// source's own acquisition thread. It is the push counterpart to polling
+// Latest()/generation() — a source calls it at its wake point (a socket read, a
+// D-Bus signal), so a consumer is driven by events instead of polling. @pos is
+// valid only for the duration of the call.
+using FixSink = std::function<void(const Position& pos)>;
+
+// An event-driven source of fixes: install a sink, then Start()/Stop() the
+// acquisition; the source's worker invokes the sink at its wake point. This is
+// the poll-free interface the location Manager binds to (via an adapter to the
+// C source ABI). gpsd/geoclue satisfy it; FallbackSource combines two of them.
+// SetOnFix must be called before Start().
+class IEventSource {
+ public:
+  virtual ~IEventSource() = default;
+  virtual void SetOnFix(FixSink on_fix) = 0;
+  virtual bool Start() = 0;
+  virtual void Stop() = 0;
 };
 
 // A source of location fixes. Implementations (GpsdProvider, later
