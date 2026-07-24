@@ -136,6 +136,8 @@ void Manager::Shutdown() {
     inst = filter_instance_;
     ops = filter_ops_;
     filter_instance_ = nullptr;
+    filter_ops_ = IhsLocationFilterOps{};
+    filter_user_data_ = nullptr;
     have_fix_ = false;
     generation_ = 0;
     latest_ = Position{};
