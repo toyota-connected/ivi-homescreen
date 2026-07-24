@@ -142,6 +142,7 @@ endif ()
 target_sources(ihs_shared PRIVATE
         src/location/location_api.cc
         src/location/registry.cc
+        src/location/manager.cc
         src/location/gpsd_provider.cc
         src/location/geoclue_provider.cc
         src/location/fallback_location_provider.cc

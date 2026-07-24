@@ -55,3 +55,15 @@ target_compile_options(registry_test PRIVATE -Wall -Wextra)
 target_link_libraries(registry_test PRIVATE Threads::Threads)
 
 add_test(NAME registry COMMAND registry_test)
+
+# Location Manager: fuses registered sources' measurements into a Position.
+# Compiles manager.cc + registry.cc directly (both use internal APIs) and shares
+# the same ihs_export.h stub include path.
+add_executable(manager_test manager_test.cc
+        ${_loc_src}/manager.cc ${_loc_src}/registry.cc)
+target_include_directories(manager_test PRIVATE
+        ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_compile_options(manager_test PRIVATE -Wall -Wextra)
+target_link_libraries(manager_test PRIVATE Threads::Threads)
+
+add_test(NAME manager COMMAND manager_test)
