@@ -180,6 +180,39 @@ int main() {
     Check(src.stop_calls == 1, "source stopped");
   }
 
+  // --- an invalid position is dropped: no fix, no generation bump, and it
+  //     never clobbers a prior good fix
+  //     ----------------------------------------
+  {
+    FakeSource src;
+    IhsLocationSourceOps ops = FakeSourceOps();
+    ihs_location_register_source("gnss.invalid", &ops, &src);
+    Manager m({"gnss.invalid"}, "", "");
+    m.Start();
+    Position pos;
+
+    src.Push(PosMeas(200.0, 10.0, 1));  // latitude out of range
+    Check(!m.Latest(pos) && m.generation() == 0,
+          "out-of-range position is dropped (no fix, no generation)");
+    src.Push(PosMeas(std::nan(""), 10.0, 2));  // non-finite latitude
+    Check(!m.Latest(pos) && m.generation() == 0, "NaN position is dropped");
+    IhsMeasurement one_comp = PosMeas(10.0, 20.0, 3);
+    one_comp.value_count = 1;
+    src.Push(one_comp);
+    Check(!m.Latest(pos) && m.generation() == 0,
+          "a position with < 2 components is dropped");
+
+    src.Push(PosMeas(10.0, 20.0, 4));  // finally a valid one
+    Check(m.Latest(pos) && pos.latitude == 10.0 && m.generation() == 1,
+          "a valid position after invalid ones is the first accepted fix");
+
+    src.Push(PosMeas(-999.0, 0.0, 5));  // invalid again
+    Check(m.Latest(pos) && pos.latitude == 10.0 && m.generation() == 1,
+          "an invalid position after a fix neither bumps generation nor "
+          "clobbers the prior fix");
+    m.Stop();
+  }
+
   // --- bounded copy at the sink: a shorter (no-flags) measurement is still
   //     understood; a runt too small for the value block is dropped ----------
   {
