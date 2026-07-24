@@ -86,6 +86,28 @@ bool ParseTpv(const std::string& line, Position& out) {
       speed >= 0.0) {
     p.speed_mps = speed;
   }
+
+  // Error estimates, all in the same units as the fix. gpsd gives per-axis
+  // (epx = longitude/east error, epy = latitude/north error) and a combined
+  // horizontal (eph); prefer the per-axis pair, falling back to eph for both.
+  // eps is the speed error. A filter reads these as measurement noise, so only
+  // finite, non-negative values are accepted.
+  auto positive = [](double v) { return std::isfinite(v) && v >= 0.0; };
+  double epx = 0.0;
+  double epy = 0.0;
+  double eph = 0.0;
+  const bool have_eph = FindNumber(line, "eph", eph) && positive(eph);
+  p.sigma_e_m = (FindNumber(line, "epx", epx) && positive(epx)) ? epx
+                : have_eph                                      ? eph
+                                                                : -1.0;
+  p.sigma_n_m = (FindNumber(line, "epy", epy) && positive(epy)) ? epy
+                : have_eph                                      ? eph
+                                                                : -1.0;
+  double eps = 0.0;
+  if (FindNumber(line, "eps", eps) && positive(eps)) {
+    p.sigma_v_mps = eps;
+  }
+
   out = p;
   return true;
 }
@@ -183,6 +205,7 @@ void GpsdProvider::Run() {
         buf.erase(0, nl + 1);
         Position p;
         if (ParseTpv(line, p)) {
+          p.t_monotonic_ns = MonotonicNs();  // arrival, not gpsd's GPS time
           {
             const std::lock_guard<std::mutex> lock(mu_);
             latest_ = p;
