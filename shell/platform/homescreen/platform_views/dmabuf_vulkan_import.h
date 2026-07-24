@@ -40,6 +40,19 @@ class DmabufVulkanImporter {
     VkDeviceMemory memory{VK_NULL_HANDLE};
     uint32_t width{0};
     uint32_t height{0};
+    // The format the image was created with, and whether it is a planar YUV
+    // one. The compositor needs both to build the view and sampler: a YUV
+    // image samples through a VkSamplerYcbcrConversion of this format, an RGB
+    // image through a plain sampler. VK_FORMAT_UNDEFINED on an unset image.
+    VkFormat format{VK_FORMAT_UNDEFINED};
+    bool yuv{false};
+    // For a YUV image, the color model and range the compositor's
+    // VkSamplerYcbcrConversion must use, resolved from the frame's color_space/
+    // color_range (IHS_COLOR_*_DEFAULT -> BT.601/709 by height, limited range).
+    // Unused for RGB.
+    VkSamplerYcbcrModelConversion ycbcr_model{
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY};
+    VkSamplerYcbcrRange ycbcr_range{VK_SAMPLER_YCBCR_RANGE_ITU_NARROW};
   };
 
   DmabufVulkanImporter() = default;
@@ -54,10 +67,15 @@ class DmabufVulkanImporter {
 
   [[nodiscard]] bool ready() const { return device_ != VK_NULL_HANDLE; }
 
-  // Import @frame's first-plane dma-buf into @out. On success the imported
-  // image has taken ownership of frame.plane_fd[0] (freed with the memory in
-  // Destroy); on failure the fd is left untouched for the caller to close.
-  // Single-plane RGB only for now (the YUV multi-plane path lands with video).
+  // Import @frame's dma-buf into @out. On success the imported image has taken
+  // ownership of frame.plane_fd[0] (freed with the memory in Destroy); on
+  // failure the fd is left untouched for the caller to close.
+  //
+  // Packed RGB (one plane) and planar YUV whose planes share a single dma-buf
+  // (NV12: two planes, one fd, offsets within the one allocation). A YUV image
+  // must be sampled through a VkSamplerYcbcrConversion of ImportedImage::format
+  // -- created in the compositor, since the conversion is baked into the
+  // sampler and descriptor layout there, not here.
   bool Import(const IhsFrame& frame, ImportedImage* out) const;
 
   void Destroy(ImportedImage* image) const;
