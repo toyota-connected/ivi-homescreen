@@ -1,0 +1,21 @@
+name: stopwatch_stress_test
+description: Integration test app that runs a stopwatch and spinner while the embedder is stressed, exercising the watchdog under load.
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
