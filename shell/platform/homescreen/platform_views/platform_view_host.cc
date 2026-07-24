@@ -287,6 +287,27 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     }
     return reinterpret_cast<void*>(current->image);
   }
+  [[nodiscard]] uint32_t GetVulkanImageFormat() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current != nullptr ? static_cast<uint32_t>(current->format) : 0;
+  }
+  // Model/range are meaningful only for a YUV image; for an RGB one return the
+  // interface default (0) rather than the ImportedImage field, so the reported
+  // values match the ICompositorSurface contract and nothing keys off a stray
+  // narrow-range/601 default on a frame that is never sampled through a
+  // conversion.
+  [[nodiscard]] uint32_t GetVulkanYcbcrModel() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current != nullptr && current->yuv
+               ? static_cast<uint32_t>(current->ycbcr_model)
+               : 0;
+  }
+  [[nodiscard]] uint32_t GetVulkanYcbcrRange() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current != nullptr && current->yuv
+               ? static_cast<uint32_t>(current->ycbcr_range)
+               : 0;
+  }
   [[nodiscard]] uint32_t GetVulkanImageLayout() const override {
     const std::lock_guard<std::mutex> lock(mutex);
     return current_layout;
@@ -524,8 +545,21 @@ IhsPluginView::~IhsPluginView() {
 
 // Close every plane fd a frame still owns (its import did not consume them).
 void CloseFrameFds(const IhsFrame* frame) {
+  // One fd may back several planes (IhsFrame contract), so a plane_fd can
+  // repeat across entries. Close each distinct numeric fd once -- closing a
+  // duplicate a second time could close an unrelated fd that reused the number.
   for (uint32_t i = 0; i < frame->plane_count && i < 4; ++i) {
-    if (frame->plane_fd[i] >= 0) {
+    if (frame->plane_fd[i] < 0) {
+      continue;
+    }
+    bool already_closed = false;
+    for (uint32_t j = 0; j < i; ++j) {
+      if (frame->plane_fd[j] == frame->plane_fd[i]) {
+        already_closed = true;
+        break;
+      }
+    }
+    if (!already_closed) {
       close(frame->plane_fd[i]);
     }
   }
