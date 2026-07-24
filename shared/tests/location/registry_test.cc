@@ -18,7 +18,7 @@
 
 #include "registry.hpp"
 
-#include <cassert>
+#include <cstddef>  // offsetof
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
