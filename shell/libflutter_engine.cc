@@ -22,6 +22,7 @@
 #include <mutex>
 #include <string>
 
+#include "ihs/flutter_desktop_bridge.h"
 #include "ihs/trace.h"
 #include "logging.h"
 #include "shared_library.h"
@@ -169,6 +170,38 @@ bool LibFlutterEngine::Load(const char* library_path) {
         g_exports.TraceEventInstant,
     };
     ihs_trace_set_engine_procs(&kTraceProcs);
+
+    // Install the shell's Flutter desktop embedder implementations as the
+    // ihs_shared forwarder table, so an out-of-tree plugin resolves the whole
+    // host ABI -- ihs_* and FlutterDesktop* alike -- from libihs_shared.so. The
+    // embedder lives in this executable rather than a shared object, so it
+    // cannot export these itself (see ihs/flutter_desktop_bridge.h). The names
+    // bind to the real definitions here because platform_homescreen, which
+    // implements them, is linked into this binary; ihs_shared's exported
+    // symbols of the same name are its forwarders, which call back through this
+    // table. Installed before any plugin registrar runs.
+    static const IhsFlutterDesktopProcs kFlutterDesktopProcs = {
+        sizeof(IhsFlutterDesktopProcs),
+        FlutterDesktopMessengerSend,
+        FlutterDesktopMessengerSendWithReply,
+        FlutterDesktopMessengerSendResponse,
+        FlutterDesktopMessengerSetCallback,
+        FlutterDesktopMessengerAddRef,
+        FlutterDesktopMessengerRelease,
+        FlutterDesktopMessengerIsAvailable,
+        FlutterDesktopMessengerLock,
+        FlutterDesktopMessengerUnlock,
+        FlutterDesktopPluginRegistrarGetMessenger,
+        FlutterDesktopPluginRegistrarGetFlutterAssetFolder,
+        FlutterDesktopRegistrarGetTextureRegistrar,
+        FlutterDesktopPluginRegistrarSetDestructionHandler,
+        FlutterDesktopTextureRegistrarRegisterExternalTexture,
+        FlutterDesktopTextureRegistrarUnregisterExternalTexture,
+        FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable,
+        FlutterDesktopTextureMakeCurrent,
+        FlutterDesktopTextureClearCurrent,
+    };
+    ihs_flutter_desktop_set_procs(&kFlutterDesktopProcs);
   });
 
   if (table_.load(std::memory_order_acquire) == nullptr) {

@@ -12,6 +12,22 @@ add_library(platform_homescreen STATIC
         watchdog_plugin.cc
 )
 
+# Keep every symbol of this static library out of the executable's dynamic
+# symbol table. It implements the Flutter desktop C API (FlutterDesktop*), which
+# libihs_shared.so also defines -- as forwarders that re-export the surface for
+# out-of-tree plugins. Without hidden visibility the two colliding definitions
+# force the linker to export the executable's copies too; being first in symbol
+# search order the executable would then preempt the forwarders, so a plugin
+# would bind straight to these internal copies and libihs_shared.so's re-export
+# would be dead. Hidden here, these stay usable within the executable (the shell
+# installs their addresses into the forwarder proc table, see
+# shell/libflutter_engine.cc) while libihs_shared.so remains the sole exporter.
+set_target_properties(platform_homescreen PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        C_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+)
+
 target_include_directories(platform_homescreen PUBLIC
         .
         ${CMAKE_SOURCE_DIR}
