@@ -149,7 +149,9 @@ void Manager::Shutdown() {
 }
 
 void Manager::SinkThunk(void* sink_user_data, const IhsMeasurement* m) {
-  if (m == nullptr) {
+  // Guard the trampoline: a misbehaving source could call the sink with an
+  // unexpected user_data or a null measurement.
+  if (sink_user_data == nullptr || m == nullptr) {
     return;
   }
   // Bounded copy across the ABI boundary (the #337 discipline the header
@@ -166,6 +168,14 @@ void Manager::SinkThunk(void* sink_user_data, const IhsMeasurement* m) {
   }
   std::memcpy(&full, m, n);
   full.struct_size = n;
+  // Clamp value_count to the array bound: value[]/variance[] are fixed at 6, so
+  // a source that over-declares it must not lead a downstream filter iterating
+  // [0, value_count) to read past the arrays.
+  const auto kMaxComponents =
+      static_cast<uint32_t>(sizeof(full.value) / sizeof(full.value[0]));
+  if (full.value_count > kMaxComponents) {
+    full.value_count = kMaxComponents;
+  }
   static_cast<Manager*>(sink_user_data)->OnMeasurement(full);
 }
 
@@ -200,8 +210,15 @@ void Manager::OnMeasurement(const IhsMeasurement& m) {
 void Manager::ApplyToPassthrough(const IhsMeasurement& m) {
   switch (m.kind) {
     case IHS_MEAS_POSITION_LLA:
-      // OnMeasurement has already validated value_count >= 2 and the
-      // coordinates, so store them directly.
+      // A position anchors a new fix. Reset to a fresh Position so
+      // speed/heading are reported only if (re)supplied for THIS fix, matching
+      // the gpsd/geoclue providers that build each fix fresh (a TPV without
+      // speed/track leaves those unknown) rather than carrying stale scalars
+      // forward. A source emits the POSITION anchor first, then any SPEED/
+      // HEADING for the same fix; independent multi-rate sensors are the
+      // filter's domain, not the passthrough's. OnMeasurement has already
+      // validated value_count >= 2 and the coordinates.
+      latest_ = Position{};
       latest_.latitude = m.value[0];
       latest_.longitude = m.value[1];
       // A third component (altitude) marks a 3D fix, mirroring gpsd's
