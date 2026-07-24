@@ -40,6 +40,37 @@
     }                              \
   } while (0)
 
+/* A trivial C measurement source + filter, only so the registration ABI is
+ * exercised as strict C11 (the point of this consumer). They are never bound
+ * here — that is the manager's job in a later step. */
+static int smoke_src_start(void* ud, IhsMeasSink sink, void* sink_ud) {
+  (void)ud;
+  (void)sink;
+  (void)sink_ud;
+  return 1;
+}
+static void smoke_src_stop(void* ud) {
+  (void)ud;
+}
+static void* smoke_flt_create(void* ud, const char* config) {
+  (void)ud;
+  (void)config;
+  return (void*)&smoke_flt_create; /* any non-NULL instance */
+}
+static void smoke_flt_destroy(void* inst) {
+  (void)inst;
+}
+static void smoke_flt_update(void* inst, const IhsMeasurement* m) {
+  (void)inst;
+  (void)m;
+}
+static int smoke_flt_estimate(void* inst, uint64_t t_ns, IhsPosition* out) {
+  (void)inst;
+  (void)t_ns;
+  (void)out;
+  return 0;
+}
+
 int main(void) {
   /* Version handshake. */
   const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
@@ -121,6 +152,36 @@ int main(void) {
   }
   CHECK(ihs_location_generation(NULL) == 0, "generation(NULL) is 0");
   ihs_location_stop(NULL); /* must be a safe nop */
+
+  /* Measurement source / filter registry: additive ABI. Register one of each,
+   * assert the return codes and the argument-rejection contract. Nothing binds
+   * them here; this is the header/ABI C-cleanliness gate for the new surface.
+   */
+  {
+    IhsLocationSourceOps src_ops;
+    IhsLocationFilterOps flt_ops;
+    memset(&src_ops, 0, sizeof(src_ops));
+    src_ops.struct_size = sizeof(src_ops);
+    src_ops.start = smoke_src_start;
+    src_ops.stop = smoke_src_stop;
+    CHECK(ihs_location_register_source("gnss.smoke", &src_ops, NULL) == 1,
+          "register a measurement source");
+    CHECK(ihs_location_register_source(NULL, &src_ops, NULL) == 0,
+          "reject a NULL source key");
+    CHECK(ihs_location_register_source("gnss.smoke", NULL, NULL) == 0,
+          "reject NULL source ops");
+
+    memset(&flt_ops, 0, sizeof(flt_ops));
+    flt_ops.struct_size = sizeof(flt_ops);
+    flt_ops.create = smoke_flt_create;
+    flt_ops.destroy = smoke_flt_destroy;
+    flt_ops.update = smoke_flt_update;
+    flt_ops.estimate = smoke_flt_estimate;
+    CHECK(ihs_location_register_filter("kalman.smoke", &flt_ops, NULL) == 1,
+          "register a filter");
+    CHECK(ihs_location_register_filter(NULL, &flt_ops, NULL) == 0,
+          "reject a NULL filter key");
+  }
 
   printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s\n",
          api->abi_version, api->logging != NULL ? "present" : "absent");
