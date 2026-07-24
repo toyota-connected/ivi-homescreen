@@ -43,6 +43,7 @@ add_test(NAME parse_tpv COMMAND parse_tpv_test)
 # only the full library build produces. This test links everything statically,
 # so a trivial empty IHS_EXPORT stands in — no installed library needed.
 set(_export_stub ${CMAKE_CURRENT_BINARY_DIR}/gen/ihs/ihs_export.h)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/gen/ihs)
 file(WRITE ${_export_stub}
         "#ifndef IHS_EXPORT_H\n#define IHS_EXPORT_H\n"
         "#define IHS_EXPORT\n#define IHS_NO_EXPORT\n#endif\n")

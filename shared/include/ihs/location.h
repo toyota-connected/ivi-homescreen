@@ -206,8 +206,11 @@ typedef struct IhsLocationFilterOps {
  * Register a measurement source / filter under @key (e.g. "gnss.gpsd",
  * "kalman.cv"). @ops is copied (bounded by its struct_size) and @user_data is
  * passed back to each callback. Re-registering a key replaces the prior entry.
- * Returns 1 on success, 0 on invalid arguments (NULL key/ops, or an ops with a
- * struct_size too small to hold its required callbacks). Thread-safe.
+ * Returns 1 on success, 0 on invalid arguments: a NULL key/ops, a struct_size
+ * too small to hold the mandatory callbacks, or a NULL mandatory callback — for
+ * a source that is start(); for a filter, create()/update()/estimate(). The
+ * optional teardown callbacks (source stop(), filter destroy()) may be NULL.
+ * Thread-safe.
  */
 IHS_EXPORT int ihs_location_register_source(const char* key,
                                             const IhsLocationSourceOps* ops,
