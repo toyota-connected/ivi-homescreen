@@ -53,10 +53,15 @@ T CopyOps(const T* ops) {
 bool RegisterSource(const std::string& key,
                     const IhsLocationSourceOps* ops,
                     void* user_data) {
-  // A source is useless without start(); struct_size must at least reach it.
+  // start() is the mandatory callback — a source with none can never be
+  // started, so reject it here rather than let a manager NULL-call it later.
+  // struct_size must reach start() before it can be read (short-circuits so the
+  // NULL check never touches an out-of-bounds slot). stop() stays optional (a
+  // source with nothing to tear down is fine; the manager NULL-checks it).
   if (key.empty() || ops == nullptr ||
       ops->struct_size <
-          offsetof(IhsLocationSourceOps, start) + sizeof(ops->start)) {
+          offsetof(IhsLocationSourceOps, start) + sizeof(ops->start) ||
+      ops->start == nullptr) {
     return false;
   }
   const std::lock_guard<std::mutex> lock(g_mutex);
@@ -67,11 +72,16 @@ bool RegisterSource(const std::string& key,
 bool RegisterFilter(const std::string& key,
                     const IhsLocationFilterOps* ops,
                     void* user_data) {
-  // A filter must at least carry estimate() (the last of its callbacks) to be
-  // usable; require struct_size to reach it.
+  // create()/update()/estimate() are the mandatory filter contract; reject an
+  // ops missing any of them rather than register an unusable filter that fails
+  // at bind/call time. struct_size must reach estimate() (the last callback,
+  // so this also covers create()/update()) before those slots can be read.
+  // destroy() stays optional (a filter with nothing to free is fine).
   if (key.empty() || ops == nullptr ||
       ops->struct_size <
-          offsetof(IhsLocationFilterOps, estimate) + sizeof(ops->estimate)) {
+          offsetof(IhsLocationFilterOps, estimate) + sizeof(ops->estimate) ||
+      ops->create == nullptr || ops->update == nullptr ||
+      ops->estimate == nullptr) {
     return false;
   }
   const std::lock_guard<std::mutex> lock(g_mutex);

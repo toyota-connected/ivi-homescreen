@@ -223,9 +223,41 @@ int main() {
     Check(ihs_location_register_source("gnss.tiny", &tiny, nullptr) == 0,
           "reject ops too small to hold start()");
 
+    // A source with room for start() but a NULL start() is unusable — rejected.
+    IhsLocationSourceOps no_start{};
+    no_start.struct_size = sizeof(no_start);
+    no_start.start = nullptr;
+    no_start.stop = &FakeSourceStop;
+    Check(ihs_location_register_source("gnss.nostart", &no_start, nullptr) == 0,
+          "reject a source with a NULL start()");
+
     SourceEntry absent;
     Check(!LookupSource("gnss.absent", absent),
           "lookup of an unregistered key fails");
+  }
+
+  // --- a filter missing a mandatory callback is rejected ---------------------
+  {
+    IhsLocationFilterOps ops{};
+    ops.struct_size = sizeof(ops);
+    ops.create = &FakeFilterCreate;
+    ops.destroy = &FakeFilterDestroy;
+    ops.update = &FakeFilterUpdate;
+    ops.estimate = nullptr;  // the mandatory estimator is missing
+    Check(ihs_location_register_filter("kalman.noest", &ops, nullptr) == 0,
+          "reject a filter with a NULL estimate()");
+
+    // destroy() is optional: a filter that provides create/update/estimate but
+    // no destroy() is still usable and must be accepted.
+    IhsLocationFilterOps no_destroy{};
+    no_destroy.struct_size = sizeof(no_destroy);
+    no_destroy.create = &FakeFilterCreate;
+    no_destroy.destroy = nullptr;
+    no_destroy.update = &FakeFilterUpdate;
+    no_destroy.estimate = &FakeFilterEstimate;
+    Check(ihs_location_register_filter("kalman.nodestroy", &no_destroy,
+                                       nullptr) == 1,
+          "accept a filter with no destroy()");
   }
 
   // --- bounded copy: a shorter-struct_size ops that omits stop() reads back
