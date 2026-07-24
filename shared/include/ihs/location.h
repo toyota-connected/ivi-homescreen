@@ -151,14 +151,14 @@ enum {
 /*
  * One tagged sensor measurement pushed by a source into the filter.
  *
- * ABI: struct_size versions it exactly as IhsFrame does — a producer built
- * against a newer header may append fields, and a consumer copies only
- * min(its sizeof, the producer's struct_size), never reading past either
- * object (the bounded-copy discipline). value_count says how many of value[]
- * /variance[] carry data for this `kind`.
+ * ABI: struct_size versions it as IhsFrame does (a size_t leading field) — a
+ * producer built against a newer header may append fields, and a consumer
+ * copies only min(its sizeof, the producer's struct_size), never reading past
+ * either object (the bounded-copy discipline). value_count says how many of
+ * value[]/variance[] carry data for this `kind`.
  */
 typedef struct IhsMeasurement {
-  uint32_t struct_size;
+  size_t struct_size;
   uint32_t kind;           /* IhsMeasKind */
   uint64_t t_monotonic_ns; /* arrival on CLOCK_MONOTONIC — see IhsPosition */
   uint32_t value_count;    /* components used in value[]/variance[] */
@@ -181,7 +181,7 @@ typedef void (*IhsMeasSink)(void* sink_user_data, const IhsMeasurement* m);
  * success, 0 if it could not begin at all.
  */
 typedef struct IhsLocationSourceOps {
-  uint32_t struct_size;
+  size_t struct_size;
   int (*start)(void* user_data, IhsMeasSink sink, void* sink_user_data);
   void (*stop)(void* user_data);
 } IhsLocationSourceOps;
@@ -195,7 +195,7 @@ typedef struct IhsLocationSourceOps {
  * holds a valid estimate, else 0.
  */
 typedef struct IhsLocationFilterOps {
-  uint32_t struct_size;
+  size_t struct_size;
   void* (*create)(void* user_data, const char* config);
   void (*destroy)(void* instance);
   void (*update)(void* instance, const IhsMeasurement* m);

@@ -52,10 +52,11 @@ static int smoke_src_start(void* ud, IhsMeasSink sink, void* sink_ud) {
 static void smoke_src_stop(void* ud) {
   (void)ud;
 }
+static int smoke_flt_state; /* a static object handed back as the instance */
 static void* smoke_flt_create(void* ud, const char* config) {
   (void)ud;
   (void)config;
-  return (void*)&smoke_flt_create; /* any non-NULL instance */
+  return &smoke_flt_state; /* any non-NULL instance (object, not a function) */
 }
 static void smoke_flt_destroy(void* inst) {
   (void)inst;

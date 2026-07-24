@@ -70,7 +70,7 @@ constexpr bool Covers(size_t copied, size_t offset, size_t size) {
 IhsLocationSourceOps CopySourceOps(const IhsLocationSourceOps* ops) {
   const size_t n = CopiedSize(ops);
   IhsLocationSourceOps full{};
-  full.struct_size = static_cast<uint32_t>(n);
+  full.struct_size = n;
   COPY_FIELD(full, ops, n, start);
   COPY_FIELD(full, ops, n, stop);
   return full;
@@ -79,7 +79,7 @@ IhsLocationSourceOps CopySourceOps(const IhsLocationSourceOps* ops) {
 IhsLocationFilterOps CopyFilterOps(const IhsLocationFilterOps* ops) {
   const size_t n = CopiedSize(ops);
   IhsLocationFilterOps full{};
-  full.struct_size = static_cast<uint32_t>(n);
+  full.struct_size = n;
   COPY_FIELD(full, ops, n, create);
   COPY_FIELD(full, ops, n, destroy);
   COPY_FIELD(full, ops, n, update);
