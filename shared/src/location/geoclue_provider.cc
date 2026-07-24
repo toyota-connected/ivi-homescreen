@@ -137,17 +137,25 @@ void GeoclueProvider::OnLocationObject(const char* location_path) {
 
   const double heading = ReadDouble(sd_, bus_, location_path, "Heading");
   const double speed = ReadDouble(sd_, bus_, location_path, "Speed");
+  // geoclue reports a single horizontal accuracy in meters (ReadDouble returns
+  // < 0 when absent), which stands in for both position axes.
+  const double accuracy = ReadDouble(sd_, bus_, location_path, "Accuracy");
 
   Position p;
   p.latitude = lat;
   p.longitude = lon;
   p.mode = 3;  // geoclue reports a fix (no 2D/3D distinction); treat as valid
+  p.t_monotonic_ns = MonotonicNs();
   if (heading >= 0.0) {
     p.bearing_deg = heading;
     p.has_bearing = true;
   }
   if (speed >= 0.0) {
     p.speed_mps = speed;
+  }
+  if (accuracy >= 0.0) {
+    p.sigma_e_m = accuracy;
+    p.sigma_n_m = accuracy;
   }
   {
     const std::lock_guard<std::mutex> lock(mu_);

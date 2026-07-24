@@ -13,8 +13,10 @@
 
 #include "ihs/location.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <new>
 #include <string>
@@ -102,6 +104,30 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
   }
 }
 
+namespace {
+
+// Fill a full IhsPosition from the internal fix.
+void Fill(IhsPosition& out, const ihs::location::Position& pos) {
+  out.latitude = pos.latitude;
+  out.longitude = pos.longitude;
+  out.bearing_deg = pos.bearing_deg;
+  out.speed_mps = pos.speed_mps;
+  out.mode = pos.mode;
+  out.has_bearing = pos.has_bearing ? 1 : 0;
+  out.t_monotonic_ns = pos.t_monotonic_ns;
+  out.sigma_e_m = pos.sigma_e_m;
+  out.sigma_n_m = pos.sigma_n_m;
+  out.sigma_v_mps = pos.sigma_v_mps;
+}
+
+// Offset one past has_bearing — the original struct's size, and the boundary
+// this accessor must not write beyond so a pre-accuracy caller is never
+// overrun.
+constexpr size_t kLegacySize =
+    offsetof(IhsPosition, has_bearing) + sizeof(int32_t);
+
+}  // namespace
+
 int ihs_location_latest(IhsLocationService* service, IhsPosition* out) {
   if (service == nullptr || !service->provider || out == nullptr) {
     return 0;
@@ -111,12 +137,39 @@ int ihs_location_latest(IhsLocationService* service, IhsPosition* out) {
     if (!service->provider->Latest(pos)) {
       return 0;
     }
+    // Legacy accessor: fill only the original fields, leaving the appended ones
+    // untouched, since @out may be a caller's smaller pre-accuracy struct.
     out->latitude = pos.latitude;
     out->longitude = pos.longitude;
     out->bearing_deg = pos.bearing_deg;
     out->speed_mps = pos.speed_mps;
     out->mode = pos.mode;
     out->has_bearing = pos.has_bearing ? 1 : 0;
+    return 1;
+  } catch (...) {
+    return 0;
+  }
+}
+
+int ihs_location_latest2(IhsLocationService* service,
+                         IhsPosition* out,
+                         size_t out_size) {
+  if (service == nullptr || !service->provider || out == nullptr ||
+      out_size < kLegacySize) {
+    return 0;  // too small to even hold a fix
+  }
+  try {
+    ihs::location::Position pos;
+    if (!service->provider->Latest(pos)) {
+      return 0;
+    }
+    // Build the full struct, then copy only what the caller's buffer holds, so
+    // a caller compiled against an older (shorter) header is never overrun.
+    IhsPosition full{};
+    Fill(full, pos);
+    const size_t n =
+        out_size < sizeof(IhsPosition) ? out_size : sizeof(IhsPosition);
+    std::memcpy(out, &full, n);
     return 1;
   } catch (...) {
     return 0;

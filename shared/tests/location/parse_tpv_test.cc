@@ -53,6 +53,44 @@ int main() {
          "track 95.4 -> bearing");
   Expect(p.speed_mps > 1.3 && p.speed_mps < 1.4, "speed 1.34");
 
+  // Error estimates: per-axis epx/epy/eps map to the sigma fields.
+  Position e;
+  Expect(ParseTpv(R"({"class":"TPV","mode":3,"lat":37.77,"lon":-122.42,)"
+                  R"("epx":4.5,"epy":6.0,"eph":7.1,"eps":0.8})",
+                  e),
+         "TPV with error estimates parses");
+  Expect(e.sigma_e_m > 4.4 && e.sigma_e_m < 4.6, "epx 4.5 -> sigma_e");
+  Expect(e.sigma_n_m > 5.9 && e.sigma_n_m < 6.1, "epy 6.0 -> sigma_n");
+  Expect(e.sigma_v_mps > 0.7 && e.sigma_v_mps < 0.9, "eps 0.8 -> sigma_v");
+
+  // Only eph present: it fills both position axes.
+  Position h;
+  Expect(
+      ParseTpv(
+          R"({"class":"TPV","mode":3,"lat":37.77,"lon":-122.42,"eph":9.0})", h),
+      "TPV with only eph parses");
+  Expect(h.sigma_e_m > 8.9 && h.sigma_e_m < 9.1 && h.sigma_n_m > 8.9 &&
+             h.sigma_n_m < 9.1,
+         "eph fills both sigma_e and sigma_n");
+
+  // No error fields: sigmas stay unknown (< 0), and speed defaults unknown too.
+  Position n;
+  Expect(ParseTpv(R"({"class":"TPV","mode":3,"lat":37.77,"lon":-122.42})", n),
+         "TPV with no error fields parses");
+  Expect(n.sigma_e_m < 0.0 && n.sigma_n_m < 0.0 && n.sigma_v_mps < 0.0,
+         "absent error fields -> sigmas < 0 (unknown)");
+
+  // A garbage/negative error is rejected, not stored.
+  Position g;
+  Expect(ParseTpv(R"({"class":"TPV","mode":3,"lat":37.77,"lon":-122.42,)"
+                  R"("epx":-1.0})",
+                  g) &&
+             g.sigma_e_m < 0.0,
+         "negative epx -> sigma_e unknown");
+
+  // ParseTpv is pure: it must not stamp a timestamp (that is done at receipt).
+  Expect(e.t_monotonic_ns == 0, "ParseTpv leaves t_monotonic_ns unstamped");
+
   // Non-TPV classes are rejected.
   Expect(!ParseTpv(R"({"class":"VERSION","release":"3.22"})", p),
          "VERSION rejected");

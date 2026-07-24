@@ -22,6 +22,7 @@
  * version handshake and each capability sub-table end to end.
  */
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -100,9 +101,24 @@ int main(void) {
   IhsPosition pos;
   CHECK(ihs_location_latest(loc, &pos) == 0,
         "no fix expected from a dead port");
+  CHECK(ihs_location_latest2(loc, &pos, sizeof(pos)) == 0,
+        "latest2 also reports no fix from a dead port");
   CHECK(ihs_location_generation(loc) == 0, "generation 0 before any fix");
   ihs_location_stop(loc);
   CHECK(ihs_location_latest(NULL, &pos) == 0, "latest(NULL) is safe");
+  CHECK(ihs_location_latest2(NULL, &pos, sizeof(pos)) == 0,
+        "latest2(NULL) is safe");
+  /* latest2 with the old (pre-accuracy) struct size: a smaller out_size must be
+   * honored without overrunning, which is the whole point of the accessor.
+   * offsetof(has_bearing)+4 is the legacy size; a byte less must be rejected.
+   */
+  {
+    const size_t legacy = offsetof(IhsPosition, has_bearing) + sizeof(int32_t);
+    CHECK(ihs_location_latest2(NULL, &pos, legacy) == 0,
+          "latest2 accepts the legacy struct size");
+    CHECK(ihs_location_latest2(loc, &pos, legacy - 1) == 0,
+          "latest2 rejects a below-legacy size");
+  }
   CHECK(ihs_location_generation(NULL) == 0, "generation(NULL) is 0");
   ihs_location_stop(NULL); /* must be a safe nop */
 
