@@ -28,6 +28,7 @@ number that matters for that use case.
 | `ITEMS` | `2000` | number of rows |
 | `VELOCITY` | `600` | auto-scroll speed, logical px/s |
 | `AUTOSCROLL` | `true` | set `false` for a manual (touch-driven) run |
+| `TIMINGS_FILE` | *(empty)* | per-frame engine-timing CSV path, empty disables |
 
 Raise `VELOCITY` / `ITEMS` (and/or drive a higher-res mode) to push past the
 vsync cap and find the software-raster ceiling.
@@ -65,6 +66,17 @@ every 60 frames over the drm-cxx `DrmDumbSink` present path:
 
 Use `IVI_WL_PROFILE` (wayland-egl) or `IVI_VK_PROFILE` (wayland-vulkan /
 drm-kms-vulkan) for the same cadence report on the other backends.
+
+For per-frame data, build with `TIMINGS_FILE` set to write one CSV row per
+frame with [FrameTiming](https://api.flutter.dev/flutter/dart-ui/FrameTiming-class.html):
+
+```
+frame,vsync_start_us,build_start_us,build_finish_us,raster_start_us,raster_finish_us,raster_finish_wall_us
+```
+
+The first line records the tunables. Works on any backend in release mode.
+Stdout prints a summary every ~300 frames and
+`scroll_bench: first frame rasterized +N ms` once, for startup timing.
 
 ## Reference result
 
