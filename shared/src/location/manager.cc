@@ -98,8 +98,10 @@ bool Manager::Start() {
     }
   }
 
-  // Return true even if nothing started: a transient source may appear later,
-  // matching the enum providers' "handle returned, no fix yet" contract.
+  // Return true even if no bound source has produced a fix yet: a live source
+  // may only start reporting later, matching the enum providers' "handle
+  // returned, no fix yet" contract. Sources bind once here and are not
+  // re-queried, so registering one after Start() has no effect.
   started_ = true;
   return true;
 }
@@ -160,6 +162,17 @@ void Manager::SinkThunk(void* sink_user_data, const IhsMeasurement* m) {
 }
 
 void Manager::OnMeasurement(const IhsMeasurement& m) {
+  // Drop an unusable position up front so neither the filter nor the
+  // passthrough ever sees NaN/out-of-range coordinates, and so
+  // have_fix_/generation_ below never mark a fix that was not actually accepted
+  // (which would let Latest() report the zero-initialized default, or bump
+  // generation over a stale fix). Other measurement kinds carry their own
+  // guards in ApplyToPassthrough.
+  if (m.kind == IHS_MEAS_POSITION_LLA &&
+      (m.value_count < 2 || !ValidLatLon(m.value[0], m.value[1]))) {
+    return;
+  }
+
   const std::lock_guard<std::mutex> lock(mutex_);
   if (filter_instance_ != nullptr && filter_ops_.update != nullptr) {
     filter_ops_.update(filter_instance_, &m);
@@ -167,7 +180,7 @@ void Manager::OnMeasurement(const IhsMeasurement& m) {
     ApplyToPassthrough(m);
   }
   // A position measurement is the anchor of a fix; count one generation per
-  // such measurement (velocity/heading augment the same fix silently), so a
+  // accepted position (velocity/heading augment the same fix silently), so a
   // consumer sees one bump per fix regardless of how many components a source
   // splits it into.
   if (m.kind == IHS_MEAS_POSITION_LLA) {
@@ -179,16 +192,16 @@ void Manager::OnMeasurement(const IhsMeasurement& m) {
 void Manager::ApplyToPassthrough(const IhsMeasurement& m) {
   switch (m.kind) {
     case IHS_MEAS_POSITION_LLA:
-      if (m.value_count >= 2 && ValidLatLon(m.value[0], m.value[1])) {
-        latest_.latitude = m.value[0];
-        latest_.longitude = m.value[1];
-        // A third component (altitude) marks a 3D fix, mirroring gpsd's
-        // mode 2 (lat/lon) vs mode 3 (lat/lon/alt).
-        latest_.mode = m.value_count >= 3 ? 3 : 2;
-        latest_.t_monotonic_ns = m.t_monotonic_ns;
-        latest_.sigma_e_m = SigmaFromVariance(m.variance[0]);
-        latest_.sigma_n_m = SigmaFromVariance(m.variance[1]);
-      }
+      // OnMeasurement has already validated value_count >= 2 and the
+      // coordinates, so store them directly.
+      latest_.latitude = m.value[0];
+      latest_.longitude = m.value[1];
+      // A third component (altitude) marks a 3D fix, mirroring gpsd's
+      // mode 2 (lat/lon) vs mode 3 (lat/lon/alt).
+      latest_.mode = m.value_count >= 3 ? 3 : 2;
+      latest_.t_monotonic_ns = m.t_monotonic_ns;
+      latest_.sigma_e_m = SigmaFromVariance(m.variance[0]);
+      latest_.sigma_n_m = SigmaFromVariance(m.variance[1]);
       break;
     case IHS_MEAS_SPEED:
       if (m.value_count >= 1) {
