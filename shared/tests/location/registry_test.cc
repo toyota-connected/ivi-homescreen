@@ -282,6 +282,26 @@ int main() {
           "partial: stored struct_size preserves the caller's declared size");
   }
 
+  // --- a struct_size that ends MID-pointer must not yield a truncated,
+  //     non-NULL stop(): the field is only partly covered, so it stays NULL ---
+  {
+    IhsLocationSourceOps straddle{};
+    // One byte into stop's pointer — a byte-wise copy would splice a truncated,
+    // non-NULL garbage pointer; the field-at-a-time copy leaves it NULL.
+    straddle.struct_size = offsetof(IhsLocationSourceOps, stop) + 1;
+    straddle.start = &FakeSourceStart;
+    straddle.stop = &FakeSourceStop;
+
+    Check(
+        ihs_location_register_source("gnss.straddle", &straddle, nullptr) == 1,
+        "accept ops whose size ends mid-stop()");
+    SourceEntry entry;
+    Check(LookupSource("gnss.straddle", entry), "lookup straddle source");
+    Check(entry.ops.start == &FakeSourceStart, "straddle: start copied");
+    Check(entry.ops.stop == nullptr,
+          "straddle: a partially-covered stop() reads back NULL, not garbage");
+  }
+
   if (g_failures == 0) {
     std::printf("registry_test: all %d checks passed\n", g_tests);
   } else {
