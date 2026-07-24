@@ -91,12 +91,30 @@ jobs:
             | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # oras uploads the resolved store entries to the OCI cache in the publish
-      # step below (EMB_CACHE_REGISTRY). Pinned; installed to /usr/local/bin.
+      # step below (EMB_CACHE_REGISTRY). Cache the binary keyed on the version so
+      # a warm run skips the GitHub-releases fetch — the publish job had no cache
+      # and a run hit a 504 window that outlasted the curl retries and failed.
+      #
+      # Cache a runner-owned dir, NOT /usr/local/bin: this job runs on the bare
+      # runner as a non-root user, and actions/cache runs without sudo, so it
+      # cannot restore into root-owned /usr/local/bin. Install from the cached
+      # dir into /usr/local/bin (where the publish step's oras is on PATH).
+      - name: Cache oras binary
+        uses: actions/cache@v5
+        with:
+          path: ~/oras-bin
+          key: oras-${{ env.ORAS_VERSION }}-linux-amd64
       - name: Install + log in oras
         run: |
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
-            | sudo tar -xzf - -C /usr/local/bin oras
+          # Fetch from GitHub releases only on a cache miss (version bump or
+          # eviction); the cache restores ~/oras-bin/oras otherwise.
+          if [ ! -x "$HOME/oras-bin/oras" ]; then
+            mkdir -p "$HOME/oras-bin"
+            curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+              "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+              | tar -xzf - -C "$HOME/oras-bin" oras
+          fi
+          sudo install -m 0755 "$HOME/oras-bin/oras" /usr/local/bin/oras
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
