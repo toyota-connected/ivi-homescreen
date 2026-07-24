@@ -359,6 +359,35 @@ int main() {
     m.Stop();  // destroys the filter instance (no leak)
   }
 
+  // --- filter route: Latest() and generation() stay consistent — no fix is
+  //     surfaced until a position correction, so a velocity-only-primed filter
+  //     cannot report a fix while generation() is still 0 --------------------
+  {
+    FakeSource src;
+    IhsLocationSourceOps sops = FakeSourceOps();
+    ihs_location_register_source("gnss.prime", &sops, &src);
+    IhsLocationFilterOps fops{};
+    fops.struct_size = sizeof(fops);
+    fops.create = &FakeFilterCreate;
+    fops.destroy = &FakeFilterDestroy;
+    fops.update = &FakeFilterUpdate;  // estimate() succeeds after ANY update
+    fops.estimate = &FakeFilterEstimate;
+    ihs_location_register_filter("kalman.prime", &fops, nullptr);
+
+    Manager m({"gnss.prime"}, "kalman.prime", "");
+    m.Start();
+    Position pos;
+    src.Push(ScalarMeas(IHS_MEAS_SPEED, 3.0));  // primes the filter, not a fix
+    Check(!m.Latest(pos) && m.generation() == 0,
+          "no fix and generation 0 before any position, even if the filter "
+          "could estimate");
+    src.Push(PosMeas(51.5, -0.12, 42));
+    Check(m.Latest(pos) && m.generation() == 1,
+          "the first position correction is the first fix; Latest and "
+          "generation agree");
+    m.Stop();
+  }
+
   // --- a configured-but-missing filter falls back to passthrough ------------
   {
     FakeSource src;
