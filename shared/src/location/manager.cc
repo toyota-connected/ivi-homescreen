@@ -249,15 +249,21 @@ void Manager::ApplyToPassthrough(const IhsMeasurement& m) {
 
 bool Manager::Latest(Position& out) {
   const std::lock_guard<std::mutex> lock(mutex_);
+  // No fix until at least one position correction has arrived — in both the
+  // filter and passthrough paths. For the filter this keeps Latest() consistent
+  // with generation() (which bumps on an accepted position): a filter that can
+  // produce an estimate from velocity alone, with no position anchor, must not
+  // surface a fix while generation() is still 0, and cannot know absolute
+  // position anyway.
+  if (!have_fix_) {
+    return false;
+  }
   if (filter_instance_ != nullptr && filter_ops_.estimate != nullptr) {
     IhsPosition est{};
     if (filter_ops_.estimate(filter_instance_, MonotonicNs(), &est) == 1) {
       FromIhsPosition(out, est);
       return true;
     }
-    return false;
-  }
-  if (!have_fix_) {
     return false;
   }
   out = latest_;
