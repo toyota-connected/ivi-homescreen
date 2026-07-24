@@ -163,6 +163,13 @@ void GeoclueProvider::OnLocationObject(const char* location_path) {
     have_fix_ = true;
   }
   generation_.fetch_add(1);
+  if (on_fix_) {
+    on_fix_(p);  // event push (worker thread) — the wake point
+  }
+}
+
+void GeoclueProvider::SetOnFix(FixSink on_fix) {
+  on_fix_ = std::move(on_fix);
 }
 
 bool GeoclueProvider::Setup() {
