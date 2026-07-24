@@ -115,6 +115,110 @@ IHS_EXPORT uint64_t ihs_location_generation(IhsLocationService* service);
 /* Stop acquiring and free @service; the handle is invalid afterwards. */
 IHS_EXPORT void ihs_location_stop(IhsLocationService* service);
 
+/*
+ * --- Measurement source / filter registry ----------------------------------
+ *
+ * A second, composable way to build the service, mirroring ihs_pv's factory
+ * registry: sources push tagged IhsMeasurement records, a filter fuses them
+ * into an IhsPosition. It exists so a non-GNSS sensor (CAN speed, an IMU) or a
+ * real estimator (a Kalman filter) can be added without touching this ABI or
+ * the enum providers above — a new sensor differs only by measurement `kind`.
+ *
+ * This surface is purely additive. The ihs_location_start() enum API is
+ * unchanged, and with nothing registered the registry is simply empty; the two
+ * ways to build the service do not interfere.
+ */
+
+/*
+ * What an IhsMeasurement's value[] carries. POSITION/VELOCITY are the GNSS
+ * staples; the rest let non-GNSS sensors feed the same filter unchanged — they
+ * differ only by `kind`, never by interface.
+ */
+typedef enum IhsMeasKind {
+  IHS_MEAS_POSITION_LLA = 0, /* lat, lon [, alt] (deg, deg, m)   — GNSS */
+  IHS_MEAS_VELOCITY_NED = 1, /* v_n, v_e [, v_d] (m/s)           — GNSS/CAN */
+  IHS_MEAS_SPEED = 2,        /* scalar ground speed (m/s)        — CAN wheel */
+  IHS_MEAS_HEADING = 3,      /* course over ground (deg)         — GNSS track */
+  IHS_MEAS_YAW_RATE = 4,     /* yaw rate (rad/s)                 — gyro/CAN */
+  IHS_MEAS_ACCEL_BODY = 5,   /* a_x, a_y, a_z (m/s^2)            — IMU */
+} IhsMeasKind;
+
+/* IhsMeasurement.flags bits. */
+enum {
+  IHS_MEAS_FLAG_DEAD_RECKONED = 1u << 0, /* propagated, not directly observed */
+};
+
+/*
+ * One tagged sensor measurement pushed by a source into the filter.
+ *
+ * ABI: struct_size versions it as IhsFrame does (a size_t leading field) — a
+ * producer built against a newer header may append fields, and a consumer
+ * copies only min(its sizeof, the producer's struct_size), never reading past
+ * either object (the bounded-copy discipline). value_count says how many of
+ * value[]/variance[] carry data for this `kind`.
+ */
+typedef struct IhsMeasurement {
+  size_t struct_size;
+  uint32_t kind;           /* IhsMeasKind */
+  uint64_t t_monotonic_ns; /* arrival on CLOCK_MONOTONIC — see IhsPosition */
+  uint32_t value_count;    /* components used in value[]/variance[] */
+  double value[6];
+  double variance[6]; /* per-component 1-sigma^2; < 0 = unknown, filter fills */
+  uint32_t flags;     /* IHS_MEAS_FLAG_* */
+} IhsMeasurement;
+
+/*
+ * A source pushes each measurement into this sink, which the manager supplies
+ * to IhsLocationSourceOps.start. Called on the source's own acquisition thread;
+ * @m is owned by the caller and valid only for the duration of the call.
+ */
+typedef void (*IhsMeasSink)(void* sink_user_data, const IhsMeasurement* m);
+
+/*
+ * Lifecycle of a measurement source. start() begins acquisition and pushes
+ * measurements to @sink (with @sink_user_data) until stop(); both receive the
+ * user_data passed to ihs_location_register_source. start() returns 1 on
+ * success, 0 if it could not begin at all.
+ */
+typedef struct IhsLocationSourceOps {
+  size_t struct_size;
+  int (*start)(void* user_data, IhsMeasSink sink, void* sink_user_data);
+  void (*stop)(void* user_data);
+} IhsLocationSourceOps;
+
+/*
+ * A filter fuses measurements into a position estimate. estimate(t) predicts
+ * the state forward to @t_monotonic_ns rather than returning the last fix, so a
+ * consumer polling at UI rate gets a fresh position from a 1 Hz source — the
+ * actual value of running a filter. create() returns an opaque instance (or
+ * NULL on failure) that the other ops receive; estimate() returns 1 when @out
+ * holds a valid estimate, else 0.
+ */
+typedef struct IhsLocationFilterOps {
+  size_t struct_size;
+  void* (*create)(void* user_data, const char* config);
+  void (*destroy)(void* instance);
+  void (*update)(void* instance, const IhsMeasurement* m);
+  int (*estimate)(void* instance, uint64_t t_monotonic_ns, IhsPosition* out);
+} IhsLocationFilterOps;
+
+/*
+ * Register a measurement source / filter under @key (e.g. "gnss.gpsd",
+ * "kalman.cv"). @ops is copied (bounded by its struct_size) and @user_data is
+ * passed back to each callback. Re-registering a key replaces the prior entry.
+ * Returns 1 on success, 0 on invalid arguments: a NULL key/ops, a struct_size
+ * too small to hold the mandatory callbacks, or a NULL mandatory callback — for
+ * a source that is start(); for a filter, create()/update()/estimate(). The
+ * optional teardown callbacks (source stop(), filter destroy()) may be NULL.
+ * Thread-safe.
+ */
+IHS_EXPORT int ihs_location_register_source(const char* key,
+                                            const IhsLocationSourceOps* ops,
+                                            void* user_data);
+IHS_EXPORT int ihs_location_register_filter(const char* key,
+                                            const IhsLocationFilterOps* ops,
+                                            void* user_data);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
