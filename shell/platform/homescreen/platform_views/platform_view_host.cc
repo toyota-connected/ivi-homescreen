@@ -39,6 +39,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #if IVI_HAVE_VULKAN
@@ -60,6 +61,38 @@
 #include "view/flutter_view.h"
 
 namespace {
+
+// Ask the engine for a frame after a producer submits.
+//
+// A producer renders and submits on its own thread, out of band with Flutter's
+// frame pipeline, but a platform-view surface is only composited from inside
+// the embedder's PresentLayers callback — which runs when the engine presents a
+// frame, and the engine only presents dirty ones. Flutter itself has nothing to
+// repaint when just the platform-view content changed, so without this nudge
+// the new frame sits unshown until something unrelated (input, a Dart repaint)
+// drives a frame, which reads as a frozen view. The backends that scan a
+// platform view out on their own vblank loop don't need this, but the nudge is
+// harmless there. ScheduleFrame is thread-safe, so it is safe from the
+// producer's thread (same reason the software cursor uses it).
+//
+// Submitting on its own thread also means a submit can land while the view is
+// being torn down, and flutter_engine is never cleared on shutdown — a null
+// check alone only covers "before the engine started" and would still hand a
+// shut-down engine to ScheduleFrame. ~FlutterView latches shutting_down on the
+// texture registrar before the engine state is destroyed for exactly this class
+// of caller (the same gate the external-texture entry points use), so honor it
+// here too.
+void ScheduleEngineFrame(void* user_data) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->flutter_engine == nullptr) {
+    return;  // submit before the engine is running: nothing to nudge
+  }
+  if (state->texture_registrar == nullptr ||
+      state->texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+    return;  // tearing down: the engine handle is no longer safe to call
+  }
+  LibFlutterEngine->ScheduleFrame(state->flutter_engine);
+}
 
 // Reaches the active Backend for the engine the host was installed for.
 Backend* BackendOf(void* user_data) {
@@ -818,7 +851,6 @@ int HostSubmit(void* user_data,
     *out_release_fence_fd = -1;
   }
 
-  (void)user_data;
   auto* v = reinterpret_cast<IhsPluginView*>(view);
 
   // The plugin may be built against an older, smaller IhsFrame. Copying *frame
@@ -868,7 +900,7 @@ int HostSubmit(void* user_data,
     // plane's IN_FENCE_FD for explicit sync; the GL-texture fallback has no
     // plane fence, so GetGlTextureName CPU-waits on it before sampling. Stash
     // the fence with the frame for both.
-    const std::lock_guard<std::mutex> lock(v->mutex);
+    std::unique_lock<std::mutex> lock(v->mutex);
     ++v->submit_seq;
     if (v->pending_egl.valid) {
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import
@@ -880,6 +912,8 @@ int HostSubmit(void* user_data,
     v->pending_egl.frame.hdr = nullptr;  // do not retain the plugin's hdr ptr
     v->pending_egl.acquire_fence_fd = acquire_fence_fd;  // ownership moves here
     v->pending_egl.valid = true;
+    lock.unlock();  // don't call into the engine holding the view lock
+    ScheduleEngineFrame(user_data);
     return IHS_PV_OK;
   }
 #endif
@@ -908,7 +942,7 @@ int HostSubmit(void* user_data,
   // buffer still binds it by the time it is freed.
   constexpr uint64_t kImportRetireMargin = 8;
 
-  const std::lock_guard<std::mutex> lock(v->mutex);
+  std::unique_lock<std::mutex> lock(v->mutex);
   ++v->submit_seq;
   // Stash this frame's acquire fence (a sync_file) for the compositor to wait
   // on before sampling; it supersedes any previous unconsumed one, since the
@@ -984,6 +1018,8 @@ int HostSubmit(void* user_data,
   // transitions from GENERAL to read it. A spec-correct foreign-queue-family
   // acquire from the producer is the explicit-sync increment.
   v->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+  lock.unlock();  // don't call into the engine holding the view lock
+  ScheduleEngineFrame(user_data);
   return IHS_PV_OK;
 }
 #endif  // IVI_HAVE_VULKAN
