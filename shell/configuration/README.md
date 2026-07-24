@@ -198,11 +198,8 @@ Usage:
  Backend options:
       --backend arg  Active backend: 
                      wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|softw
-                     are|wayland-leased-drm[-egl|-vulkan|-software] (default: 
-                     env-aware -- a Wayland session selects wayland-egl, else 
-                     drm-kms-egl). The bare name wayland-leased-drm picks the 
-                     first available leased tier; a leased backend never falls 
-                     back to an unleased one.
+                     are (default: env-aware -- a Wayland session selects 
+                     wayland-egl, else drm-kms-egl)
 
  DRM options:
       --drm-list-modes [=arg(=)]
@@ -237,29 +234,6 @@ Usage:
       --input-transform arg     Per-device pointer transform (repeatable): 
                                 "<device-name-substring>=<0|90|180|270>[,flip-x]
                                 [,flip-y]"
-
- Lease options:
-      --lease-device arg      wayland-leased-drm: which wp_drm_lease_device_v1 
-                              to lease from when several are advertised (one 
-                              per DRM node) -- a decimal index or a node path 
-                              (/dev/dri/card1). Default: the sole device; 
-                              ambiguous is fatal.
-      --lease-connector arg   wayland-leased-drm: connector to request by name 
-                              (e.g. HDMI-A-1). Default: the sole offer; several 
-                              offers with no choice is fatal.
-      --lease-on-revoke arg   wayland-leased-drm: what to do when the 
-                              compositor revokes the lease (it does so on every 
-                              VT switch away from it, not just on error). exit 
-                              (default) = log the cause and exit non-zero so a 
-                              supervisor restarts and renegotiates; gate = keep 
-                              running with a frozen panel (debugging only, 
-                              nothing recovers). reacquire is not implemented 
-                              yet.
-      --lease-timeout-ms arg  wayland-leased-drm: bound on the whole lease 
-                              negotiation. Default 5000. The protocol lets a 
-                              compositor defer the DRM fd until it regains DRM 
-                              master, so this is what stops a VT-switched-away 
-                              compositor hanging startup.
 ```
 
 <!-- END CLI-REFERENCE -->
