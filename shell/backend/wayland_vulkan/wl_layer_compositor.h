@@ -62,9 +62,16 @@ class LayerCompositor {
   // SHADER_READ_ONLY_OPTIMAL, of format @p src_format — the view must match the
   // image's own format) into the destination rect (pixels, top-left origin —
   // matches the blit path, no Y flip).
+  //
+  // A planar-YUV @p src_format is sampled through a VkSamplerYcbcrConversion of
+  // @p ycbcr_model / @p ycbcr_range (built and cached on first use); packed RGB
+  // formats ignore those and use the plain sampler. A layer whose YUV program
+  // cannot be built is skipped.
   void DrawLayer(VkCommandBuffer cmd,
                  VkImage src_image,
                  VkFormat src_format,
+                 VkSamplerYcbcrModelConversion ycbcr_model,
+                 VkSamplerYcbcrRange ycbcr_range,
                  int32_t dst_x,
                  int32_t dst_y,
                  int32_t dst_w,
@@ -80,10 +87,42 @@ class LayerCompositor {
 
  private:
   explicit LayerCompositor(VkDevice device) : device_(device) {}
-  VkImageView CreateSourceView(VkImage image, VkFormat format);
+  // Create a sampled view of @p image. For a YUV image pass the matching
+  // @p conversion so the view carries it (chained via
+  // VkSamplerYcbcrConversionInfo); pass VK_NULL_HANDLE for a plain RGB view.
+  // The view is owned by the current ring slot and freed when it recycles.
+  VkImageView CreateSourceView(VkImage image,
+                               VkFormat format,
+                               VkSamplerYcbcrConversion conversion);
   VkFramebuffer GetOrCreateFramebuffer(VkImageView slot_view,
                                        uint32_t width,
                                        uint32_t height);
+
+  // A YUV image needs its conversion baked into an immutable sampler, which in
+  // turn is baked into the descriptor set layout and thus a distinct pipeline.
+  // These are keyed by (format, model, range) — a video stream uses one for its
+  // lifetime — and built lazily on the first matching layer.
+  struct YuvProgram {
+    VkFormat format{VK_FORMAT_UNDEFINED};
+    VkSamplerYcbcrModelConversion model{
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY};
+    VkSamplerYcbcrRange range{VK_SAMPLER_YCBCR_RANGE_ITU_NARROW};
+    VkSamplerYcbcrConversion conversion{VK_NULL_HANDLE};
+    VkSampler sampler{VK_NULL_HANDLE};
+    VkDescriptorSetLayout set_layout{VK_NULL_HANDLE};
+    VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
+    VkPipeline pipeline{VK_NULL_HANDLE};
+    // False for a cached negative result: the device could not build the
+    // program (no samplerYcbcrConversion / no linear ycbcr filtering), so the
+    // handles are null and the lookup returns nullptr without reattempting the
+    // expensive creation every frame.
+    bool ok{false};
+  };
+  // Returns the program for the given YUV parameters, building it on first use.
+  // nullptr if the conversion/sampler/pipeline could not be created.
+  const YuvProgram* GetOrCreateYuvProgram(VkFormat format,
+                                          VkSamplerYcbcrModelConversion model,
+                                          VkSamplerYcbcrRange range);
 
   VkDevice device_{VK_NULL_HANDLE};
   VkFormat color_format_{VK_FORMAT_UNDEFINED};
@@ -92,6 +131,7 @@ class LayerCompositor {
   VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
   VkPipeline pipeline_{VK_NULL_HANDLE};
   VkSampler sampler_{VK_NULL_HANDLE};
+  std::vector<YuvProgram> yuv_programs_;
 
   // Current frame state.
   uint32_t fb_width_{0};
