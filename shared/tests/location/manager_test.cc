@@ -242,6 +242,28 @@ int main() {
     m.Stop();
   }
 
+  // --- restart is pristine: after Stop, a fresh Start reports no fix and
+  //     generation 0 until a new fix arrives (not a stale generation) ---------
+  {
+    FakeSource src;
+    IhsLocationSourceOps ops = FakeSourceOps();
+    ihs_location_register_source("gnss.restart", &ops, &src);
+    Manager m({"gnss.restart"}, "", "");
+    m.Start();
+    src.Push(PosMeas(1.0, 2.0, 1));
+    Position pos;
+    Check(m.Latest(pos) && m.generation() == 1, "fix before restart");
+    m.Stop();
+
+    m.Start();
+    Check(!m.Latest(pos) && m.generation() == 0,
+          "after restart: no fix and generation 0, not a stale generation");
+    src.Push(PosMeas(3.0, 4.0, 2));
+    Check(m.Latest(pos) && pos.latitude == 3.0 && m.generation() == 1,
+          "restarted Manager tracks fixes from generation 1");
+    m.Stop();
+  }
+
   // --- an unregistered source key is skipped, a registered one still binds --
   {
     FakeSource src;

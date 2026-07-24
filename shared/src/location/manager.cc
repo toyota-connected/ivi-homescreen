@@ -123,8 +123,12 @@ void Manager::Shutdown() {
   sources_.clear();
 
   // Detach the filter under the lock (a concurrent Latest() reads it there) and
-  // reset have_fix_ so a restarted Manager cannot report a pre-stop fix; then
-  // destroy the instance outside the lock (destroy() is a user callback).
+  // reset the whole fix state to pristine, so a restarted Manager behaves like
+  // a fresh one: no fix and generation 0 until a new fix arrives (the
+  // documented "0 before any fix" contract). Resetting have_fix_ without
+  // generation_ would leave generation() non-zero while Latest() reports
+  // nothing. Destroy the instance outside the lock (destroy() is a user
+  // callback).
   void* inst = nullptr;
   IhsLocationFilterOps ops{};
   {
@@ -133,6 +137,8 @@ void Manager::Shutdown() {
     ops = filter_ops_;
     filter_instance_ = nullptr;
     have_fix_ = false;
+    generation_ = 0;
+    latest_ = Position{};
   }
   if (inst != nullptr && ops.destroy != nullptr) {
     ops.destroy(inst);
