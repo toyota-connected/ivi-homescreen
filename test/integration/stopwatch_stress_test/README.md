@@ -10,6 +10,21 @@ the CPU, memory and I/O. If the main or render thread is starved past the
 watchdog timeout, the embedder aborts (SIGABRT). The test passes when the app
 stays responsive for the whole stress window.
 
+### Launch modes (chosen at runtime from `HAS_SYSTEMD`)
+
+The driver script detects whether it is running inside a systemd session and
+picks one of two modes:
+
+- **`HAS_SYSTEMD=1` — real systemd service.** homescreen is launched as a
+  transient `systemd-run --user` `Type=notify` service with `WatchdogSec`.
+  systemd itself owns `NOTIFY_SOCKET` and the watchdog interval, so the true
+  `sd_watchdog_enabled()` path runs: the embedder completes the `READY=1`
+  handshake and must keep sending `WATCHDOG=1` pings or systemd kills the unit
+  (`Result=watchdog`).
+- **`HAS_SYSTEMD=0` — fake socket.** homescreen runs in the background against
+  a fake `NOTIFY_SOCKET` listener that only records `sd_notify()` datagrams.
+  systemd is not involved; this exercises message delivery only.
+
 ### Backend selection (chosen at runtime from `HAS_WAYLAND`)
 
 The driver script also detects whether it is running inside a Wayland session
@@ -31,11 +46,13 @@ The driver script also detects whether it is running inside a Wayland session
 - Shows an animated **spinner** (`CircularProgressIndicator`).
 - Appends the current uptime to a file **once every minute**.
 - Registers a watchdog source via the `watchdog` `MethodChannel` and pets it on
-  a 1 s timer.
-- Provides a **"Stop petting watchdog (crash)"** button. Pressing it cancels
-  the pet timer, leaving the source registered but starved. The embedder's
-  watchdog thread then fires after the timeout and aborts the process
-  (SIGABRT) — the intended way to provoke a crash for testing.
+  a 1 s timer so the app survives the stress window.
+- Provides a **"Stop petting watchdog"** button. Pressing it cancels the pet
+  timer, leaving the source registered but starved. The embedder's watchdog
+  thread then fires once the timeout elapses and aborts the process
+  (**SIGABRT**, exit code 134), which the test harness sees as an error. The
+  `STOPWATCH_STRESS_STOP_PET` marker is flushed the moment the button is
+  pressed so the harness can attribute the abort to it.
 
 The uptime file path is taken from the `STOPWATCH_UPTIME_FILE` environment
 variable (set by the test script), falling back to
@@ -47,15 +64,18 @@ variable (set by the test script), falling back to
 
 ## CI output
 
-Printed to stdout:
+Each marker is printed to stdout and also appended (synchronously, `flush:true`)
+to the file named by `STOPWATCH_STATUS_FILE` when set, so it survives stdout
+buffering under systemd. The driver script streams the homescreen log live as it
+is produced (prefixed with `[hs]`).
 
 | Marker | Meaning |
 |---|---|
-| `STOPWATCH_STRESS_START` | Printed once at startup |
-| `STOPWATCH_STRESS_TICK <seconds>` | Printed every minute after writing the file |
-| `STOPWATCH_STRESS_WRITE_FAIL <e>` | Printed if a file write throws |
-| `STOPWATCH_STRESS_STOP_PET` | Printed when the button cancels the pet timer |
-| `STOPWATCH_STRESS_WATCHDOG_UNAVAILABLE <e>` | Printed if the watchdog channel is absent (`BUILD_WATCHDOG=OFF`) |
+| `STOPWATCH_STRESS_START` | Emitted once at startup |
+| `STOPWATCH_STRESS_TICK <seconds>` | Emitted every minute after writing the file |
+| `STOPWATCH_STRESS_WRITE_FAIL <e>` | Emitted if a file write throws |
+| `STOPWATCH_STRESS_STOP_PET` | Emitted when the button cancels the pet timer |
+| `STOPWATCH_STRESS_WATCHDOG_UNAVAILABLE <e>` | Emitted if the watchdog channel is absent (`BUILD_WATCHDOG=OFF`) |
 
 ## Building
 
@@ -95,6 +115,7 @@ Tunable via environment variables:
 | `STRESS_VM` | `2` | Number of `stress-ng` VM workers |
 | `STRESS_VM_BYTES` | `256M` | Memory per VM worker |
 | `IHS_LOG_LEVEL` | `DEBUG` | Homescreen log level |
+| `WATCHDOG_SEC` | `ceil(WATCHDOG_MS/1000)` | systemd `WatchdogSec` (systemd mode only) |
 
 The script:
 
@@ -103,8 +124,10 @@ The script:
    `BUILD_SYSTEMD_WATCHDOG=ON` (Wayland-EGL backend under a Wayland session,
    otherwise the software backend, headless).
 3. Writes `[watchdog] timeout_ms` into the bundle `config.toml`.
-4. Starts a fake `NOTIFY_SOCKET` listener, launches homescreen, then runs
-   `stress-ng` in parallel for the stress window.
-5. Verifies: the app started, the watchdog did **not** fire (no SIGABRT), the
-   uptime file was written (when `STRESS_SECS >= 60`), and `sd_notify`
-   keep-alive messages were received.
+4. Picks a launch mode from `HAS_SYSTEMD` (see above), launches homescreen,
+   then runs `stress-ng` in parallel for the stress window.
+5. Verifies: the app started, the watchdog did **not** fire (no SIGABRT and,
+   in systemd mode, no `Result=watchdog` kill), the uptime file was written
+   (when `STRESS_SECS >= 60`), and the systemd-watchdog integration was active
+   (systemd `Type=notify` handshake sustained the unit, or `sd_notify`
+   keep-alive datagrams were recorded in fake-socket mode).

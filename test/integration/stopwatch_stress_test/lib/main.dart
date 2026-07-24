@@ -14,19 +14,24 @@
 //   * Shows an animated CircularProgressIndicator spinner.
 //   * Appends the current uptime to a file once every minute.
 //   * Registers a watchdog source via the 'watchdog' MethodChannel and pets it
-//     on a timer. A "Stop petting watchdog" button cancels the pet timer,
-//     which starves the source and provokes the embedder to abort (SIGABRT)
-//     once the watchdog timeout elapses.
+//     on a timer so the app survives the stress window.
+//   * Provides a "Stop petting watchdog" button. Pressing it cancels the pet
+//     timer, leaving the source registered but starved. The embedder's
+//     watchdog thread then fires once the timeout elapses and aborts the
+//     process (SIGABRT), which the test script sees as an error.
 //
 // The uptime file path comes from the STOPWATCH_UPTIME_FILE environment
 // variable (set by the test script) and falls back to
 // /tmp/stopwatch_stress_uptime.txt.
 //
-// CI output (printed to stdout):
-//   STOPWATCH_STRESS_START           — printed once at startup
-//   STOPWATCH_STRESS_TICK <seconds>  — printed every minute after writing file
-//   STOPWATCH_STRESS_WRITE_FAIL <e>  — printed if the file write throws
-//   STOPWATCH_STRESS_STOP_PET        — printed when the pet timer is cancelled
+// CI markers are printed to stdout AND appended (synchronously, so they are
+// not lost to stdout buffering when the process runs under systemd) to the
+// status file named by STOPWATCH_STATUS_FILE when that variable is set:
+//   STOPWATCH_STRESS_START           — emitted once at startup
+//   STOPWATCH_STRESS_TICK <seconds>  — emitted every minute after writing file
+//   STOPWATCH_STRESS_WRITE_FAIL <e>  — emitted if the uptime write throws
+//   STOPWATCH_STRESS_STOP_PET        — emitted when the pet timer is cancelled
+//   STOPWATCH_STRESS_WATCHDOG_UNAVAILABLE <e> — watchdog channel absent
 
 import 'dart:async';
 import 'dart:io';
@@ -48,6 +53,33 @@ const MethodChannel _watchdogChannel = MethodChannel('watchdog');
 const int _watchdogSource = 7;
 
 // ---------------------------------------------------------------------------
+// CI marker emission
+// ---------------------------------------------------------------------------
+
+String? _statusFilePath() {
+  final path = Platform.environment['STOPWATCH_STATUS_FILE'];
+  return (path != null && path.isNotEmpty) ? path : null;
+}
+
+// Emits a CI marker to stdout and, when STOPWATCH_STATUS_FILE is set, also
+// appends it to that file synchronously with flush:true. The status file is
+// the reliable channel: stdout is block-buffered when the process runs under
+// systemd (stdout is a pipe, not a TTY), so printed markers can be lost, but
+// a flushed file write is always visible to the test script immediately.
+void _emit(String marker) {
+  print(marker);
+  final path = _statusFilePath();
+  if (path != null) {
+    try {
+      File(path).writeAsStringSync('$marker\n',
+          mode: FileMode.append, flush: true);
+    } catch (_) {
+      // Best-effort; stdout still carries the marker.
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -58,7 +90,15 @@ void main() {
       debugPrint('STACK:\n${details.stack}');
     }
   };
-  print('STOPWATCH_STRESS_START');
+  // Truncate the status file so stale markers from a previous run do not
+  // confuse the test verifier, then emit the startup marker.
+  final statusPath = _statusFilePath();
+  if (statusPath != null) {
+    try {
+      File(statusPath).writeAsStringSync('');
+    } catch (_) {}
+  }
+  _emit('STOPWATCH_STRESS_START');
   runApp(const StopwatchStressApp());
 }
 
@@ -128,7 +168,7 @@ class _HomeState extends State<_Home> {
     try {
       File(_uptimeFile).writeAsStringSync('');
     } catch (e) {
-      print('STOPWATCH_STRESS_WRITE_FAIL $e');
+      _emit('STOPWATCH_STRESS_WRITE_FAIL $e');
     }
 
     // UI refresh — 10 Hz keeps the stopwatch smooth without busy-spinning.
@@ -164,7 +204,7 @@ class _HomeState extends State<_Home> {
     } catch (e) {
       // Channel absent (BUILD_WATCHDOG=OFF) or start failed — the button will
       // then have no effect, but the rest of the app still runs.
-      print('STOPWATCH_STRESS_WATCHDOG_UNAVAILABLE $e');
+      _emit('STOPWATCH_STRESS_WATCHDOG_UNAVAILABLE $e');
       return;
     }
 
@@ -182,12 +222,14 @@ class _HomeState extends State<_Home> {
   }
 
   // Stops petting the watchdog source. The source is left registered but never
-  // pet again, so the embedder's watchdog thread fires after the timeout and
-  // aborts the process (SIGABRT).
+  // pet again, so the embedder's watchdog thread fires after the timeout
+  // elapses and aborts the process (SIGABRT) — the deliberate failure path the
+  // test exercises. The marker is flushed first so the harness can attribute
+  // the resulting abort to the button press.
   void _stopWatchdogPetting() {
     _petTimer?.cancel();
     _petTimer = null;
-    print('STOPWATCH_STRESS_STOP_PET');
+    _emit('STOPWATCH_STRESS_STOP_PET');
     setState(() => _petting = false);
   }
 
@@ -199,9 +241,9 @@ class _HomeState extends State<_Home> {
       File(_uptimeFile).writeAsStringSync(line, mode: FileMode.append);
       _writeCount++;
       setState(() => _lastWrite = line.trim());
-      print('STOPWATCH_STRESS_TICK $seconds');
+      _emit('STOPWATCH_STRESS_TICK $seconds');
     } catch (e) {
-      print('STOPWATCH_STRESS_WRITE_FAIL $e');
+      _emit('STOPWATCH_STRESS_WRITE_FAIL $e');
     }
   }
 
@@ -266,7 +308,7 @@ class _HomeState extends State<_Home> {
               icon: const Icon(Icons.dangerous),
               label: Text(
                 _petting
-                    ? 'Stop petting watchdog (crash)'
+                    ? 'Stop petting watchdog'
                     : 'Watchdog no longer petted',
               ),
               style: FilledButton.styleFrom(
