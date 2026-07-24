@@ -781,6 +781,32 @@ void WaylandVulkanBackend::createLogicalDevice() {
     }
   }
 
+  // Enable samplerYcbcrConversion so the platform-view compositor can build a
+  // VkSamplerYcbcrConversion to sample planar YUV (NV12) video dma-bufs. Core
+  // in Vulkan 1.1 (this device targets 1.1), but the feature bit must still be
+  // requested; query it and chain it only when the device reports support, so a
+  // device without it still creates rather than failing here. Without the
+  // feature the compositor's VkSamplerYcbcrConversion/pipeline creation fails
+  // (LayerCompositor logs it once and caches the failure); a planar-YUV layer
+  // is then skipped and its video does not display.
+  VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr_feature{};
+  ycbcr_feature.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
+  {
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr_supported{};
+    ycbcr_supported.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &ycbcr_supported;
+    d().vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
+    if (ycbcr_supported.samplerYcbcrConversion == VK_TRUE) {
+      ycbcr_feature.samplerYcbcrConversion = VK_TRUE;
+      ycbcr_feature.pNext = const_cast<void*>(device_info.pNext);
+      device_info.pNext = &ycbcr_feature;
+    }
+  }
+
   CHECK_VK_RESULT(
       d().vkCreateDevice(physical_device_, &device_info, nullptr, &device_));
 
@@ -2617,6 +2643,10 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     VkFormat format;
     int32_t dx, dy, dw, dh;
     VulkanBackingStore* store;  // non-null => restore to COLOR_ATTACHMENT after
+    // Color conversion for a planar-YUV source; ignored for RGB formats.
+    VkSamplerYcbcrModelConversion ycbcr_model{
+        VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY};
+    VkSamplerYcbcrRange ycbcr_range{VK_SAMPLER_YCBCR_RANGE_ITU_NARROW};
   };
   std::vector<Draw> draws;
   draws.reserve(count);
@@ -2689,6 +2719,16 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         continue;  // GL / subsurface platform view — nothing to sample
       }
       auto src = reinterpret_cast<VkImage>(vk_img);
+      // The image's real format: 0 keeps the historical B8G8R8A8_UNORM contract
+      // (RGB producers); a planar YUV producer reports its format plus the
+      // color model/range for the compositor's VkSamplerYcbcrConversion.
+      const uint32_t pv_fmt = surface->GetVulkanImageFormat();
+      const VkFormat src_format = pv_fmt != 0 ? static_cast<VkFormat>(pv_fmt)
+                                              : VK_FORMAT_B8G8R8A8_UNORM;
+      const auto ycbcr_model = static_cast<VkSamplerYcbcrModelConversion>(
+          surface->GetVulkanYcbcrModel());
+      const auto ycbcr_range =
+          static_cast<VkSamplerYcbcrRange>(surface->GetVulkanYcbcrRange());
       // Wait the producer's acquire fence (if any) in this frame's submit.
       CollectAcquireWait(surface.get());
       const auto cur =
@@ -2703,7 +2743,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
       }
-      draws.push_back({src, VK_FORMAT_B8G8R8A8_UNORM, dx, dy, dw, dh, nullptr});
+      draws.push_back(
+          {src, src_format, dx, dy, dw, dh, nullptr, ycbcr_model, ycbcr_range});
       if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
               layer->platform_view->identifier);
           us >= 0) {
@@ -2715,12 +2756,19 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
   }
 
   // Phase 2: blend all layers into the target in one render pass (z-order).
-  layer_compositor_->BeginFrame(cmd, target_view, width, height, frame);
-  for (const Draw& dr : draws) {
-    layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.dx, dr.dy, dr.dw,
-                                 dr.dh);
+  // Only record draws/EndFrame if BeginFrame actually opened the render pass;
+  // on failure (e.g. framebuffer creation) recording them would emit commands
+  // outside a render pass and produce an invalid command buffer. Phase 3 below
+  // still runs so the backing stores are restored regardless.
+  if (layer_compositor_->BeginFrame(cmd, target_view, width, height, frame)) {
+    for (const Draw& dr : draws) {
+      layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
+                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh);
+    }
+    wl_vulkan::LayerCompositor::EndFrame(cmd);
+  } else {
+    ok = false;
   }
-  wl_vulkan::LayerCompositor::EndFrame(cmd);
 
   // Phase 3: restore backing stores to COLOR_ATTACHMENT for the engine's next
   // render into them.

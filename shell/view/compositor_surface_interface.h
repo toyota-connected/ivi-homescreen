@@ -126,25 +126,55 @@ class ICompositorSurface {
   [[nodiscard]] virtual bool TextureIsExternalOes() const { return false; }
 
   /**
-   * @brief Expose a Vulkan platform-view image the compositor can blit.
+   * @brief Expose a Vulkan platform-view image the compositor can composite.
    *
    * The Vulkan counterpart to @c GetGlTextureName: a plugin that rendered into
    * a @c VkImage on the backend's own device (obtained via
    * @c Backend::GetVulkanContext) returns that handle here so a Vulkan
    * compositor can composite it directly — same device, no cross-API/-device
-   * import. Returned as @c void* so this header stays free of a Vulkan include;
-   * the caller casts back to @c VkImage. Fills @p width / @p height with the
-   * image extent. Returns nullptr (default) when the plugin has no Vulkan image
-   * (GL path, or nothing rendered yet).
+   * import. The layer compositor samples it in a shader
+   * (SHADER_READ_ONLY_OPTIMAL), so it composes with alpha rather than a plain
+   * overwriting blit. Returned as @c void* so this header stays free of a
+   * Vulkan include; the caller casts back to @c VkImage. Fills @p width / @p
+   * height with the image extent. Returns nullptr (default) when the plugin has
+   * no Vulkan image (GL path, or nothing rendered yet).
    *
-   * Contract: the image is B8G8R8A8_UNORM, its memory holds a complete frame
-   * (the plugin has made its writes visible), and it is safe to transition to
-   * a transfer-source layout and read this frame.
+   * Contract: the image's memory holds a complete frame (the plugin has made
+   * its writes visible) and it is safe to transition to a shader-read layout
+   * and read this frame. Its VkFormat is reported by @c GetVulkanImageFormat
+   * (a packed RGB format sampled directly, or a planar YUV format sampled
+   * through a VkSamplerYcbcrConversion the compositor builds).
    */
   [[nodiscard]] virtual void* GetVulkanImage(int32_t* /*width*/,
                                              int32_t* /*height*/) const {
     return nullptr;
   }
+
+  /**
+   * @brief VkFormat (as uint32_t, keeping this header Vulkan-free) of the image
+   * returned by @c GetVulkanImage. 0 (VK_FORMAT_UNDEFINED, the default) means
+   * the historical B8G8R8A8_UNORM contract, so an RGB producer need not
+   * override this. A planar YUV producer returns its multi-planar format (e.g.
+   * VK_FORMAT_G8_B8R8_2PLANE_420_UNORM), which the compositor samples through a
+   * VkSamplerYcbcrConversion built from @c GetVulkanYcbcrModel /
+   * @c GetVulkanYcbcrRange.
+   */
+  [[nodiscard]] virtual uint32_t GetVulkanImageFormat() const { return 0; }
+
+  /**
+   * @brief For a YUV @c GetVulkanImage, the VkSamplerYcbcrModelConversion and
+   * VkSamplerYcbcrRange (as uint32_t) the compositor's conversion must apply,
+   * resolved by the producer from the frame's color metadata. Consulted only
+   * when @c GetVulkanImageFormat reports a YUV format; a producer that reports
+   * one MUST override both (there is no color metadata to default from here).
+   *
+   * The defaults are the values a non-overriding (RGB) producer yields and are
+   * never sampled through a conversion: 0 is
+   * VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY for the model and
+   * VK_SAMPLER_YCBCR_RANGE_ITU_FULL for the range.
+   */
+  [[nodiscard]] virtual uint32_t GetVulkanYcbcrModel() const { return 0; }
+  [[nodiscard]] virtual uint32_t GetVulkanYcbcrRange() const { return 0; }
 
   /**
    * @brief Current VkImageLayout of the Vulkan image (as uint32_t, so this
