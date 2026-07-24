@@ -278,6 +278,8 @@ int main() {
     Check(entry.ops.start == &FakeSourceStart, "partial: start copied");
     Check(entry.ops.stop == nullptr,
           "partial: stop past struct_size read back NULL, not the bogus value");
+    Check(entry.ops.struct_size == offsetof(IhsLocationSourceOps, stop),
+          "partial: stored struct_size preserves the caller's declared size");
   }
 
   if (g_failures == 0) {
