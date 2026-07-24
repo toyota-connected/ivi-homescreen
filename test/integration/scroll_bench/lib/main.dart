@@ -9,17 +9,31 @@
 //   IVI_SW_PROFILE=1 homescreen -b <bundle> --window-type=NORMAL -f
 //
 // Tunables (compile-time --dart-define, all optional):
-//   ITEMS      number of rows                       (default 2000)
-//   VELOCITY   auto-scroll speed, logical px/s      (default 600)
-//   AUTOSCROLL "false" disables auto-scroll (manual)(default on)
+//   ITEMS        number of rows                       (default 2000)
+//   VELOCITY     auto-scroll speed, logical px/s      (default 600)
+//   AUTOSCROLL   "false" disables auto-scroll (manual)(default on)
+//   TIMINGS_FILE per-frame engine-timing CSV path     (default off)
+import 'dart:io';
+import 'dart:ui' show FramePhase;
+
 import 'package:flutter/material.dart';
 
 const int kItems = int.fromEnvironment('ITEMS', defaultValue: 2000);
 const int kVelocity = int.fromEnvironment('VELOCITY', defaultValue: 600);
 const bool kAutoScroll =
     bool.fromEnvironment('AUTOSCROLL', defaultValue: true);
+const String kTimingsFile =
+    String.fromEnvironment('TIMINGS_FILE', defaultValue: '');
 
-void main() => runApp(const ScrollBenchApp());
+void main() {
+  if (kTimingsFile.isNotEmpty) {
+    final sinceMain = Stopwatch()..start();
+    final binding = WidgetsFlutterBinding.ensureInitialized();
+    _logFrameTimings(binding, sinceMain);
+  }
+
+  runApp(const ScrollBenchApp());
+}
 
 class ScrollBenchApp extends StatelessWidget {
   const ScrollBenchApp({super.key});
@@ -216,4 +230,42 @@ class _InfoTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Writes a row of FrameTiming for each frame to a CSV, and prints a summary
+/// to stdout every ~300 frames.
+void _logFrameTimings(WidgetsBinding binding, Stopwatch sinceMain) {
+  final sink = File(kTimingsFile).openWrite();
+  sink
+    ..writeln('# scroll_bench items=$kItems velocity=$kVelocity')
+    ..writeln('frame,vsync_start_us,build_start_us,build_finish_us,'
+        'raster_start_us,raster_finish_us,raster_finish_wall_us');
+  var frames = 0;
+  var maxTotalUs = 0;
+  binding.addTimingsCallback((timings) {
+    for (final t in timings) {
+      sink.writeln('${t.frameNumber},'
+          '${t.timestampInMicroseconds(FramePhase.vsyncStart)},'
+          '${t.timestampInMicroseconds(FramePhase.buildStart)},'
+          '${t.timestampInMicroseconds(FramePhase.buildFinish)},'
+          '${t.timestampInMicroseconds(FramePhase.rasterStart)},'
+          '${t.timestampInMicroseconds(FramePhase.rasterFinish)},'
+          '${t.timestampInMicroseconds(FramePhase.rasterFinishWallTime)}');
+      frames += 1;
+      if (t.totalSpan.inMicroseconds > maxTotalUs) {
+        maxTotalUs = t.totalSpan.inMicroseconds;
+      }
+    }
+    if (frames >= 300) {
+      print('scroll_bench: $frames frames, max total '
+          '${(maxTotalUs / 1000).toStringAsFixed(1)} ms');
+      sink.flush();
+      frames = 0;
+      maxTotalUs = 0;
+    }
+  });
+  binding.waitUntilFirstFrameRasterized.then((_) {
+    print('scroll_bench: first frame rasterized '
+        '+${sinceMain.elapsedMilliseconds} ms');
+  });
 }
