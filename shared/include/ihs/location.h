@@ -27,6 +27,7 @@
 #ifndef IHS_LOCATION_H_
 #define IHS_LOCATION_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "ihs/ihs_export.h"
@@ -35,7 +36,18 @@
 extern "C" {
 #endif
 
-/* One location fix. */
+/*
+ * One location fix.
+ *
+ * ABI: fields are only ever APPENDED, never reordered or removed. Older callers
+ * pass a shorter struct, so the two accessors differ by what they may write:
+ *   - ihs_location_latest() fills only the original six fields, so it is safe
+ *     for a caller built against any past version of this header.
+ *   - ihs_location_latest2(out, out_size) fills up to out_size bytes, so a
+ *     caller passing sizeof(IhsPosition) gets the newer fields too.
+ * A caller that wants the timestamp or accuracy MUST use ihs_location_latest2;
+ * ihs_location_latest leaves those fields untouched.
+ */
 typedef struct IhsPosition {
   double latitude;
   double longitude;
@@ -43,6 +55,12 @@ typedef struct IhsPosition {
   double speed_mps;    /* ground speed, meters/second; < 0 means unknown */
   int32_t mode;        /* gpsd-style fix mode: <2 no fix, 2 = 2D, 3 = 3D */
   int32_t has_bearing; /* 0/1 */
+
+  /* --- appended; only ihs_location_latest2 writes these --- */
+  uint64_t t_monotonic_ns; /* fix arrival on CLOCK_MONOTONIC; 0 if unstamped */
+  double sigma_e_m;        /* 1-sigma east position error, m; < 0 unknown */
+  double sigma_n_m;        /* 1-sigma north position error, m; < 0 unknown */
+  double sigma_v_mps;      /* 1-sigma speed error, m/s; < 0 unknown */
 } IhsPosition;
 
 /* Which backend(s) the service acquires from. */
@@ -68,11 +86,24 @@ IHS_EXPORT IhsLocationService* ihs_location_start(IhsLocationSource source,
                                                   const char* config);
 
 /*
- * Copy the most recent fix into @out. Returns 1 if a valid fix exists, else 0
- * (in which case @out is left unchanged).
+ * Copy the most recent fix into @out, filling only the original six fields
+ * (through has_bearing). Returns 1 if a valid fix exists, else 0 (in which case
+ * @out is left unchanged). Use ihs_location_latest2 for the timestamp/accuracy.
  */
 IHS_EXPORT int ihs_location_latest(IhsLocationService* service,
                                    IhsPosition* out);
+
+/*
+ * Copy the most recent fix into @out, writing at most @out_size bytes — pass
+ * sizeof(IhsPosition) as compiled against the header you built with, and only
+ * fields that fit are written. This is the forward-compatible accessor: a
+ * caller built against a newer header gets the appended fields (timestamp,
+ * accuracy); one built against an older header passes its smaller size and is
+ * never overrun. Returns 1 if a valid fix exists, else 0.
+ */
+IHS_EXPORT int ihs_location_latest2(IhsLocationService* service,
+                                    IhsPosition* out,
+                                    size_t out_size);
 
 /*
  * A monotonic counter bumped on each new fix, so a consumer can tell whether
