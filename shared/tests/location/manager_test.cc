@@ -101,6 +101,10 @@ IhsMeasurement ScalarMeas(uint32_t kind, double v) {
   return m;
 }
 
+// value_count of the last measurement any filter saw — lets a test assert the
+// manager clamped it before the filter was called.
+uint32_t g_last_meas_value_count = 0;
+
 // A fake filter that stores the last position measurement and reports it.
 struct FakeFilter {
   double lat = 0.0;
@@ -115,6 +119,7 @@ void FakeFilterDestroy(void* inst) {
 }
 void FakeFilterUpdate(void* inst, const IhsMeasurement* m) {
   auto* f = static_cast<FakeFilter*>(inst);
+  g_last_meas_value_count = m->value_count;
   if (m->kind == IHS_MEAS_POSITION_LLA && m->value_count >= 2) {
     f->lat = m->value[0];
     f->lon = m->value[1];
@@ -239,6 +244,53 @@ int main() {
     src.Push(runt);
     Check(m.generation() == before && m.Latest(pos) && pos.latitude == 33.0,
           "a runt measurement is dropped, leaving the prior fix intact");
+    m.Stop();
+  }
+
+  // --- a new position anchor clears stale per-fix speed/heading -------------
+  {
+    FakeSource src;
+    IhsLocationSourceOps ops = FakeSourceOps();
+    ihs_location_register_source("gnss.fresh", &ops, &src);
+    Manager m({"gnss.fresh"}, "", "");
+    m.Start();
+    src.Push(PosMeas(1.0, 2.0, 1));
+    src.Push(ScalarMeas(IHS_MEAS_SPEED, 7.0));
+    src.Push(ScalarMeas(IHS_MEAS_HEADING, 45.0));
+    Position pos;
+    Check(m.Latest(pos) && pos.speed_mps == 7.0 && pos.has_bearing,
+          "speed/heading present for the fix they follow");
+
+    // A new position with no following speed/heading must not carry the old
+    // ones forward (each fix is fresh, like the gpsd/geoclue providers).
+    src.Push(PosMeas(1.1, 2.1, 2));
+    Check(m.Latest(pos) && pos.latitude == 1.1 && pos.speed_mps < 0 &&
+              !pos.has_bearing,
+          "a new position anchor clears stale speed/heading");
+    m.Stop();
+  }
+
+  // --- an over-declared value_count is clamped before a filter sees it ------
+  {
+    FakeSource src;
+    IhsLocationSourceOps sops = FakeSourceOps();
+    ihs_location_register_source("gnss.clamp", &sops, &src);
+    IhsLocationFilterOps fops{};
+    fops.struct_size = sizeof(fops);
+    fops.create = &FakeFilterCreate;
+    fops.destroy = &FakeFilterDestroy;
+    fops.update = &FakeFilterUpdate;
+    fops.estimate = &FakeFilterEstimate;
+    ihs_location_register_filter("kalman.clamp", &fops, nullptr);
+
+    Manager m({"gnss.clamp"}, "kalman.clamp", "");
+    m.Start();
+    IhsMeasurement over = PosMeas(1.0, 2.0, 1);
+    over.value_count = 100;  // absurd; must be clamped to the array bound (6)
+    g_last_meas_value_count = 0;
+    src.Push(over);
+    Check(g_last_meas_value_count == 6,
+          "value_count is clamped to 6 before a filter is called");
     m.Stop();
   }
 
