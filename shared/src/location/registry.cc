@@ -44,7 +44,11 @@ T CopyOps(const T* ops) {
   T full{};
   const size_t n = ops->struct_size < sizeof(T) ? ops->struct_size : sizeof(T);
   std::memcpy(&full, ops, n);
-  full.struct_size = sizeof(T);  // normalize to what this build understands
+  // Preserve the copied (clamped) size, not sizeof(T): the stored struct_size
+  // is the ABI signal for which fields the caller actually provided, so a
+  // consumer can tell a field that was omitted from one supplied with a
+  // zero/NULL value. Matches platform_view.cc's zero_out discipline.
+  full.struct_size = static_cast<uint32_t>(n);
   return full;
 }
 
