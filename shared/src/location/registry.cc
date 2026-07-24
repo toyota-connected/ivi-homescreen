@@ -14,7 +14,6 @@
 #include "registry.hpp"
 
 #include <cstddef>
-#include <cstring>
 #include <map>
 #include <mutex>
 #include <string>
@@ -33,24 +32,62 @@ std::map<std::string, FilterEntry>& filters() {
   return m;
 }
 
-// Copy the caller's ops into a zeroed full-size struct, taking only the bytes
-// the caller declared (min(struct_size, sizeof)). This is the ivi-homescreen
-// #337 bounded-copy discipline applied to an inbound struct: a caller built
-// against an older header passes a smaller struct_size, and any callback slot
-// it does not carry stays NULL (so the manager null-checks before calling)
-// rather than being read from past the caller's object.
+// Inbound ops are copied with the ivi-homescreen #337 bounded-copy discipline:
+// a caller built against an older header passes a smaller struct_size, and any
+// callback it does not carry stays NULL (the manager null-checks before
+// calling) rather than being read from past the caller's object.
+
+// The clamped number of bytes the caller actually declared.
 template <typename T>
-T CopyOps(const T* ops) {
-  T full{};
-  const size_t n = ops->struct_size < sizeof(T) ? ops->struct_size : sizeof(T);
-  std::memcpy(&full, ops, n);
-  // Preserve the copied (clamped) size, not sizeof(T): the stored struct_size
-  // is the ABI signal for which fields the caller actually provided, so a
-  // consumer can tell a field that was omitted from one supplied with a
-  // zero/NULL value. Matches platform_view.cc's zero_out discipline.
+size_t CopiedSize(const T* ops) {
+  return ops->struct_size < sizeof(T) ? ops->struct_size : sizeof(T);
+}
+
+// True iff the field at [offset, offset+size) is FULLY within the caller's
+// declared bytes. A per-field copy is guarded by this so that (a) a field the
+// caller did not carry is never read past their object, and (b) a struct_size
+// that ends mid-field never yields a truncated, non-NULL garbage pointer that a
+// manager would later call — the omitted/partial field stays NULL/zero.
+constexpr bool Covers(size_t copied, size_t offset, size_t size) {
+  return offset + size <= copied;
+}
+
+// COPY_FIELD(full, ops, copied, name): copy one field only when fully covered.
+#define COPY_FIELD(full, ops, copied, name)              \
+  do {                                                   \
+    if (Covers((copied), offsetof(decltype(full), name), \
+               sizeof((full).name))) {                   \
+      (full).name = (ops)->name;                         \
+    }                                                    \
+  } while (0)
+
+// Copy the caller's ops field-by-field into a zeroed full-size struct. Unlike a
+// byte-wise memcpy of struct_size bytes (which can split a pointer field), this
+// copies each callback only when the caller's struct_size fully covers it, so
+// an omitted or straddled callback reads back NULL — the bounded-copy contract.
+// The stored struct_size keeps the caller's clamped size (the ABI signal for
+// which fields were provided), matching platform_view.cc's zero_out discipline.
+IhsLocationSourceOps CopySourceOps(const IhsLocationSourceOps* ops) {
+  const size_t n = CopiedSize(ops);
+  IhsLocationSourceOps full{};
   full.struct_size = static_cast<uint32_t>(n);
+  COPY_FIELD(full, ops, n, start);
+  COPY_FIELD(full, ops, n, stop);
   return full;
 }
+
+IhsLocationFilterOps CopyFilterOps(const IhsLocationFilterOps* ops) {
+  const size_t n = CopiedSize(ops);
+  IhsLocationFilterOps full{};
+  full.struct_size = static_cast<uint32_t>(n);
+  COPY_FIELD(full, ops, n, create);
+  COPY_FIELD(full, ops, n, destroy);
+  COPY_FIELD(full, ops, n, update);
+  COPY_FIELD(full, ops, n, estimate);
+  return full;
+}
+
+#undef COPY_FIELD
 
 }  // namespace
 
@@ -69,7 +106,7 @@ bool RegisterSource(const std::string& key,
     return false;
   }
   const std::lock_guard<std::mutex> lock(g_mutex);
-  sources()[key] = SourceEntry{CopyOps(ops), user_data};
+  sources()[key] = SourceEntry{CopySourceOps(ops), user_data};
   return true;
 }
 
@@ -89,7 +126,7 @@ bool RegisterFilter(const std::string& key,
     return false;
   }
   const std::lock_guard<std::mutex> lock(g_mutex);
-  filters()[key] = FilterEntry{CopyOps(ops), user_data};
+  filters()[key] = FilterEntry{CopyFilterOps(ops), user_data};
   return true;
 }
 
