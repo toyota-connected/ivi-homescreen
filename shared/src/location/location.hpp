@@ -11,10 +11,22 @@
 #ifndef IHS_LOC_LOCATION_H_
 #define IHS_LOC_LOCATION_H_
 
+#include <ctime>
+
 #include <cmath>
 #include <cstdint>
 
 namespace ihs::location {
+
+// Now on CLOCK_MONOTONIC in nanoseconds — the fix arrival clock. Monotonic
+// because a filter's dt must not be corrupted by wall-clock jumps (NTP steps,
+// and gpsd hands out GPS time that can step at startup).
+inline uint64_t MonotonicNs() {
+  struct timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
 
 // A coordinate is usable only if finite and within the geographic range. Both
 // providers validate before publishing so a malformed source (an arbitrary
@@ -35,6 +47,19 @@ struct Position {
   double speed_mps = -1.0;   // ground speed m/s; < 0 means unknown
   int mode = 0;              // gpsd-style fix mode: <2 no fix, 2 = 2D, 3 = 3D
   bool has_bearing = false;
+
+  // Arrival time on CLOCK_MONOTONIC, stamped when the fix is received. A filter
+  // needs a clock immune to wall-clock jumps (NTP steps, and gpsd hands out GPS
+  // time that can jump at startup) for its dt; 0 means unstamped.
+  uint64_t t_monotonic_ns = 0;
+
+  // 1-sigma position error, meters, split east/north; the measurement noise a
+  // filter weights the fix by. < 0 means the source did not report it. A source
+  // that gives only a combined horizontal error fills both with that value.
+  double sigma_e_m = -1.0;
+  double sigma_n_m = -1.0;
+  // 1-sigma speed error, m/s; < 0 unknown.
+  double sigma_v_mps = -1.0;
 
   [[nodiscard]] bool valid() const { return mode >= 2; }
 };
