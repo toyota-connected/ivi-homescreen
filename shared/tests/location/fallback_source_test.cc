@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <utility>  // std::move
 
 #include "location.hpp"
 
