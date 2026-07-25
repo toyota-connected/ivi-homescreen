@@ -82,13 +82,24 @@ add_test(NAME manager COMMAND manager_test)
 # the Manager, comparing filtered RMSE to raw RMSE. Today it exercises the
 # passthrough (filtered == raw baseline); the estimator increments must beat it.
 add_executable(filter_test filter_test.cc track_gen.cc
-        ${_loc_src}/manager.cc ${_loc_src}/registry.cc)
+        ${_loc_src}/manager.cc ${_loc_src}/registry.cc ${_loc_src}/kalman_cv.cc)
 target_include_directories(filter_test PRIVATE
         ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
 target_compile_options(filter_test PRIVATE -Wall -Wextra)
 target_link_libraries(filter_test PRIVATE Threads::Threads)
 
 add_test(NAME filter COMMAND filter_test)
+
+# Constant-velocity Kalman filter, unit-tested directly through its ops table
+# (create/update/estimate/destroy) without a Manager.
+add_executable(kalman_cv_test kalman_cv_test.cc track_gen.cc
+        ${_loc_src}/kalman_cv.cc ${_loc_src}/registry.cc)
+target_include_directories(kalman_cv_test PRIVATE
+        ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_compile_options(kalman_cv_test PRIVATE -Wall -Wextra)
+target_link_libraries(kalman_cv_test PRIVATE Threads::Threads)
+
+add_test(NAME kalman_cv COMMAND kalman_cv_test)
 
 # gnss.file replay source: parses captured gpsd JSON and re-emits fixes as an
 # event source. Compiles file_source.cc + gpsd_provider.cc (ParseTpv) directly.
