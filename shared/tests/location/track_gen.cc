@@ -147,13 +147,24 @@ std::vector<NoisyFix> AddNoise(const std::vector<TruthSample>& truth,
                                Rng& rng) {
   std::vector<NoisyFix> out;
   out.reserve(truth.size());
+  // Scale the east error to longitude at a single reference latitude — the
+  // origin, truth.front().lat — not each sample's latitude. The rest of the
+  // harness pins the tangent plane to the origin the same way (OffsetToLatLon
+  // and the RMSE both use lat0), so using per-sample latitude here would read
+  // the injected east noise back at a slightly different scale as the track
+  // drifts north, skewing RMSE. An empty track has no reference; skip it.
+  if (truth.empty()) {
+    return out;
+  }
+  const double ref_lat = truth.front().lat;
+  const double m_per_deg_lon = MetersPerDegLon(ref_lat);
   for (const TruthSample& s : truth) {
     const double de = rng.Gaussian() * sigma_m;  // east error, m
     const double dn = rng.Gaussian() * sigma_m;  // north error, m
     NoisyFix f;
     f.t_ns = s.t_ns;
     f.lat = s.lat + dn / MetersPerDegLat();
-    f.lon = s.lon + de / MetersPerDegLon(s.lat);
+    f.lon = s.lon + de / m_per_deg_lon;
     f.sigma_m = sigma_m;
     out.push_back(f);
   }
