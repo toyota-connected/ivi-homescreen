@@ -98,10 +98,12 @@ class KalmanCv {
     }
     const double lat = m.value[0];
     const double lon = m.value[1];
-    // value[] is [lat, lon]: lat maps to north, lon to east, so variance[0]
-    // (lat) is the north measurement variance and variance[1] (lon) the east.
-    const double var_n = m.variance[0] >= 0.0 ? m.variance[0] : kDefaultPosVar;
-    const double var_e = m.variance[1] >= 0.0 ? m.variance[1] : kDefaultPosVar;
+    // value[] is [lat, lon] (lat = north, lon = east), but variance[] follows
+    // the service convention variance[0] = east, variance[1] = north — the same
+    // order as IhsPosition's sigma_e_m/sigma_n_m and the Manager passthrough —
+    // decoupled from the value order.
+    const double var_e = m.variance[0] >= 0.0 ? m.variance[0] : kDefaultPosVar;
+    const double var_n = m.variance[1] >= 0.0 ? m.variance[1] : kDefaultPosVar;
     const int mode = m.value_count >= 3 ? 3 : 2;
 
     if (!have_state_) {

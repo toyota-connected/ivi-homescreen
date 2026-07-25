@@ -28,6 +28,8 @@ namespace {
 using ihs::location::KalmanCvFilterOps;
 using ihs::location::test::AddNoise;
 using ihs::location::test::MetersBetween;
+using ihs::location::test::MetersPerDegLat;
+using ihs::location::test::MetersPerDegLon;
 using ihs::location::test::Rng;
 using ihs::location::test::TruthSample;
 
@@ -54,6 +56,26 @@ IhsMeasurement PosMeas(double lat, double lon, double sigma_m, uint64_t t_ns) {
   m.value[1] = lon;
   m.variance[0] = sigma_m * sigma_m;
   m.variance[1] = sigma_m * sigma_m;
+  return m;
+}
+
+// Position measurement with per-axis variance in the service order:
+// variance[0] = east, variance[1] = north (see IhsPosition
+// sigma_e_m/sigma_n_m).
+IhsMeasurement PosMeasAniso(double lat,
+                            double lon,
+                            double var_e,
+                            double var_n,
+                            uint64_t t_ns) {
+  IhsMeasurement m{};
+  m.struct_size = sizeof(m);
+  m.kind = IHS_MEAS_POSITION_LLA;
+  m.t_monotonic_ns = t_ns;
+  m.value_count = 2;
+  m.value[0] = lat;
+  m.value[1] = lon;
+  m.variance[0] = var_e;
+  m.variance[1] = var_n;
   return m;
 }
 
@@ -216,6 +238,40 @@ void TestCoastingGrowsSigma() {
   ops.destroy(inst);
 }
 
+// Axis mapping of the measurement variance: variance[0] is the EAST error and
+// variance[1] the NORTH error (the service convention). A fix offset equally in
+// both axes but declared very uncertain in east and precise in north must pull
+// the estimate north (trusted) far more than east (distrusted); a swapped
+// mapping would do the opposite.
+void TestAnisotropicVariance() {
+  const IhsLocationFilterOps& ops = KalmanCvFilterOps();
+  void* inst = ops.create(nullptr, nullptr);
+  // Seed once so the state covariance is still wide (a tightly settled filter
+  // would NIS-reject the offset below as an outlier, defeating the test).
+  const IhsMeasurement seed = PosMeas(kLat0, kLon0, 2.0, SecToNs(0));
+  ops.update(inst, &seed);
+  // A modest +5 m offset in both axes — within the gate — but east variance
+  // dominant and north variance tiny. (East must dominate the still-wide state
+  // covariance, which the first predict inflates via the unknown initial
+  // velocity, for the axes to separate cleanly.)
+  const double off = 5.0;
+  const double lat = kLat0 + off / MetersPerDegLat();
+  const double lon = kLon0 + off / MetersPerDegLon(kLat0);
+  const IhsMeasurement m =
+      PosMeasAniso(lat, lon, /*var_e=*/1.0e6, /*var_n=*/0.01, SecToNs(1));
+  ops.update(inst, &m);
+  IhsPosition out{};
+  ops.estimate(inst, SecToNs(1), &out);
+  const double moved_n = (out.latitude - kLat0) * MetersPerDegLat();
+  const double moved_e = (out.longitude - kLon0) * MetersPerDegLon(kLat0);
+  std::printf("aniso    : moved north=%.2f m  east=%.2f m (offset 5 m each)\n",
+              moved_n, moved_e);
+  Check(moved_n > 3.0 && moved_e < 1.0,
+        "the low-variance (north) axis is tracked, the high-variance (east) is "
+        "not");
+  ops.destroy(inst);
+}
+
 }  // namespace
 
 int main() {
@@ -225,6 +281,7 @@ int main() {
   TestPredictionForward();
   TestOutlierRejection();
   TestCoastingGrowsSigma();
+  TestAnisotropicVariance();
 
   if (g_failures == 0) {
     std::printf("kalman_cv_test: all %d checks passed\n", g_tests);
