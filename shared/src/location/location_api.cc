@@ -238,7 +238,12 @@ void ihs_location_set_callback(IhsLocationService* service,
     service->manager->SetFixNotify([service, callback, user_data]() {
       IhsPosition pos{};
       if (ihs_location_latest2(service, &pos, sizeof(pos)) == 1) {
-        callback(user_data, &pos);
+        // The consumer callback runs on the acquisition thread; no exception it
+        // throws may unwind through the library, so contain it here.
+        try {
+          callback(user_data, &pos);
+        } catch (...) {
+        }
       }
     });
   } catch (...) {
