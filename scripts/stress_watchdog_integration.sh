@@ -166,9 +166,9 @@ fi
 # ---------------------------------------------------------------------------
 # Working area: uptime file, log, and (fake-socket mode only) NOTIFY_SOCKET.
 # ---------------------------------------------------------------------------
-WORK_DIR="$(mktemp -d)"
+WORK_DIR="$(pwd)/stresstest-$(date +%Y%m%d-%H%M%S)"; mkdir -p "${WORK_DIR}"
 UPTIME_FILE="${WORK_DIR}/uptime.txt"
-SOCK_PATH="${WORK_DIR}/notify.sock"
+SOCK_PATH="$(mktemp -d)/notify.sock"
 MSGS_FILE="${WORK_DIR}/messages.txt"
 HS_LOG="${WORK_DIR}/homescreen.log"
 # The app mirrors its CI markers here synchronously (flush:true), so they are
@@ -232,7 +232,7 @@ cleanup() {
     sleep 1
     kill "${TAIL_PID}" 2>/dev/null || true
   fi
-  rm -rf "${WORK_DIR}"
+  echo "== script complete: logs available under ${WORK_DIR} =="
 }
 trap cleanup EXIT
 
