@@ -204,6 +204,11 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
     return false;
   }
   ready_ = true;
+  // Force a keyframe on the next Present: the consumer was (re)configured, so a
+  // resize starts a fresh encoder that must open with an IDR for a decoder to
+  // resync at the new geometry. Resetting here covers every (re)configure, not
+  // just the first buffer.
+  frame_index_ = 0;
   ihs::log::info("[EncoderSink] NV12 dma-buf ready ({}x{}, stride {})", width_,
                  height_, stride_);
   return true;

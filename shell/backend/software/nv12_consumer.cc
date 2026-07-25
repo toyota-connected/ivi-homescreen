@@ -84,6 +84,9 @@ class FileEncoderConsumer final : public INv12Consumer {
     height_ = height;
     const uint32_t bitrate = EnvU32("IVI_ENC_BITRATE", 4'000'000);
     const uint32_t fps = EnvU32("IVI_ENC_FPS", 30);
+    // Release any prior encoder before reopening the device: a reconfigure
+    // (resize) must not hold two encoders on the same V4L2 node at once.
+    encoder_.reset();
     encoder_ = v4l2wc::V4l2M2mEncoder::Create(EncodeDevice(), width, height,
                                               bitrate, fps, fps * 2);
     if (!encoder_) {
@@ -91,11 +94,18 @@ class FileEncoderConsumer final : public INv12Consumer {
                       EncodeDevice(), width, height);
       return false;
     }
-    file_ = std::fopen(path_.c_str(), "wb");
+    // Open the capture once. A reconfigure keeps writing to the same file, so
+    // the new stream -- which starts with a fresh IDR (the sink forces a
+    // keyframe on the first frame after each configure) -- appends at the
+    // resolution change rather than truncating and discarding what was already
+    // captured, and the FILE* is never leaked by reopening.
     if (file_ == nullptr) {
-      ihs::log::error("[EncoderSink/file] cannot open {} for write", path_);
-      encoder_.reset();  // don't leave the V4L2 device open half-configured
-      return false;
+      file_ = std::fopen(path_.c_str(), "wb");
+      if (file_ == nullptr) {
+        ihs::log::error("[EncoderSink/file] cannot open {} for write", path_);
+        encoder_.reset();  // don't leave the V4L2 device open half-configured
+        return false;
+      }
     }
     ihs::log::info("[EncoderSink/file] encoding {}x{} -> {} via {}", width,
                    height, path_, EncodeDevice());

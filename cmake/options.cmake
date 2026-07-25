@@ -185,12 +185,17 @@ if (BUILD_BACKEND_SOFTWARE)
     if (BUILD_SOFTWARE_SINK_ENCODER)
         set(V4L2WC_DIR "${CMAKE_SOURCE_DIR}/../v4l2-webrtc-codec"
                 CACHE PATH "Path to the v4l2-webrtc-codec checkout")
-        if (NOT EXISTS "${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc")
-            message(FATAL_ERROR
-                    "BUILD_SOFTWARE_SINK_ENCODER=ON but the v4l2-webrtc-codec "
-                    "encoder was not found at V4L2WC_DIR='${V4L2WC_DIR}' "
-                    "(set -DV4L2WC_DIR=<path>)")
-        endif ()
+        # Verify every V4L2WC source the shell compiles (encoder + its logger),
+        # so a partial checkout / layout change fails here with a clear message
+        # rather than midway through the build.
+        foreach (_v4l2wc_src src/v4l2_m2m_encoder.cc src/log.cc)
+            if (NOT EXISTS "${V4L2WC_DIR}/${_v4l2wc_src}")
+                message(FATAL_ERROR
+                        "BUILD_SOFTWARE_SINK_ENCODER=ON but the v4l2-webrtc-codec "
+                        "source '${_v4l2wc_src}' was not found at "
+                        "V4L2WC_DIR='${V4L2WC_DIR}' (set -DV4L2WC_DIR=<path>)")
+            endif ()
+        endforeach ()
     endif ()
 endif ()
 
