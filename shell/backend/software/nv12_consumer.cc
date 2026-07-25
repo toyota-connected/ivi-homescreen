@@ -19,6 +19,7 @@
 // of that dependency. The WebRTC-send consumer (which links libwebrtc) will be
 // added here behind the same seam.
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -46,8 +47,18 @@ uint32_t EnvU32(const char* name, uint32_t fallback) {
   if (v == nullptr || v[0] == '\0') {
     return fallback;
   }
-  const unsigned long parsed = std::strtoul(v, nullptr, 10);
-  return parsed != 0 ? static_cast<uint32_t>(parsed) : fallback;
+  // strtoul silently wraps a leading '-', so reject a sign up front.
+  if (v[0] == '-' || v[0] == '+') {
+    return fallback;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(v, &end, 10);
+  if (errno != 0 || end == v || *end != '\0' || parsed == 0 ||
+      parsed > UINT32_MAX) {
+    return fallback;  // out of range / trailing junk / not a positive integer
+  }
+  return static_cast<uint32_t>(parsed);
 }
 
 // Drives the V4L2 hardware encoder and appends each coded H.264 access unit to
