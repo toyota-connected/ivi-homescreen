@@ -12,6 +12,7 @@
 #define IHS_LOC_MANAGER_H_
 
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -69,6 +70,12 @@ class Manager : public ILocationProvider {
   // Thread-safe; typically called from the source's acquisition thread.
   void PublishFix(const Position& fix);
 
+  // Install a callback fired once on each new fix (each generation bump), for a
+  // push consumer. It is invoked WITHOUT the internal mutex held (so the
+  // callback may call back into Latest()/generation()), on whichever thread
+  // produced the fix. Pass nullptr to clear. Thread-safe.
+  void SetFixNotify(std::function<void()> notify);
+
   bool Start() override;
   void Stop() override;
   bool Latest(Position& out) override;
@@ -103,9 +110,10 @@ class Manager : public ILocationProvider {
   void* filter_instance_ = nullptr;
 
   mutable std::mutex mutex_;
-  Position latest_;          // guarded by mutex_
-  bool have_fix_ = false;    // guarded by mutex_
-  uint64_t generation_ = 0;  // guarded by mutex_
+  Position latest_;                   // guarded by mutex_
+  bool have_fix_ = false;             // guarded by mutex_
+  uint64_t generation_ = 0;           // guarded by mutex_
+  std::function<void()> fix_notify_;  // guarded by mutex_; invoked unlocked
   bool started_ = false;
 };
 

@@ -112,6 +112,29 @@ IHS_EXPORT int ihs_location_latest2(IhsLocationService* service,
  */
 IHS_EXPORT uint64_t ihs_location_generation(IhsLocationService* service);
 
+/*
+ * Called on each new fix. @pos points to a full IhsPosition owned by the
+ * service and valid only for the duration of the call — copy what you keep.
+ * Reading only the fields your header knows is safe (fields are append-only).
+ * The callback runs on the service's internal acquisition thread, NOT the
+ * caller's, so it must be thread-safe or hand the work to its own thread, and
+ * it must not call ihs_location_stop() on this service (that would free the
+ * service from within its own callback).
+ */
+typedef void (*IhsLocationCallback)(void* user_data, const IhsPosition* pos);
+
+/*
+ * Register @callback to fire on each new fix (push), replacing any prior
+ * callback on @service; pass NULL to clear it. This complements the polling
+ * accessors: subscribe FIRST, then call ihs_location_latest2() for the current
+ * value — that order cannot miss an update (a fix landing in between simply
+ * arrives once through each path, deduplicated by generation). The callback
+ * does not fire for the fix already present at registration.
+ */
+IHS_EXPORT void ihs_location_set_callback(IhsLocationService* service,
+                                          IhsLocationCallback callback,
+                                          void* user_data);
+
 /* Stop acquiring and free @service; the handle is invalid afterwards. */
 IHS_EXPORT void ihs_location_stop(IhsLocationService* service);
 
