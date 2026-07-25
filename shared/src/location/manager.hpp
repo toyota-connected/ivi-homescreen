@@ -60,6 +60,15 @@ class Manager : public ILocationProvider {
   Manager(const Manager&) = delete;
   Manager& operator=(const Manager&) = delete;
 
+  // Publish a complete fix directly and atomically. This is the path for a
+  // built-in source (gpsd/geoclue) that already produces a whole Position:
+  // storing it in one step avoids the assembly window a consumer polling on
+  // generation() could otherwise observe if the fix were split into separate
+  // POSITION/SPEED/HEADING measurements. The measurement path (OnMeasurement,
+  // via a registered source + optional filter) remains for decomposed sources.
+  // Thread-safe; typically called from the source's acquisition thread.
+  void PublishFix(const Position& fix);
+
   bool Start() override;
   void Stop() override;
   bool Latest(Position& out) override;
