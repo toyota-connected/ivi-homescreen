@@ -117,9 +117,11 @@ IHS_EXPORT uint64_t ihs_location_generation(IhsLocationService* service);
  * duration of the call — a temporary, not a stable service-owned buffer, so
  * copy what you keep and do not retain the pointer. Reading only the fields
  * your header knows is safe (fields are append-only).
- * The callback runs on the service's internal acquisition thread, NOT the
- * caller's, so it must be thread-safe or hand the work to its own thread, and
- * it must not call ihs_location_stop() on this service (that would free the
+ * The callback runs on an internal acquisition thread, NOT the caller's — and
+ * not necessarily the same one across fixes (IHS_LOCATION_AUTO forwards from
+ * either the gpsd or the geoclue thread), so do not assume a single thread
+ * identity. It must be thread-safe or hand the work to its own thread, and it
+ * must not call ihs_location_stop() on this service (that would free the
  * service from within its own callback).
  */
 typedef void (*IhsLocationCallback)(void* user_data, const IhsPosition* pos);
