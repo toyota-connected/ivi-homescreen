@@ -112,6 +112,40 @@ IHS_EXPORT int ihs_location_latest2(IhsLocationService* service,
  */
 IHS_EXPORT uint64_t ihs_location_generation(IhsLocationService* service);
 
+/*
+ * Called on each new fix. @pos points to a full IhsPosition valid only for the
+ * duration of the call — a temporary, not a stable service-owned buffer, so
+ * copy what you keep and do not retain the pointer. Reading only the fields
+ * your header knows is safe (fields are append-only).
+ * The callback runs on an internal acquisition thread, NOT the caller's — and
+ * not necessarily the same one across fixes (IHS_LOCATION_AUTO forwards from
+ * either the gpsd or the geoclue thread), so do not assume a single thread
+ * identity. It must be thread-safe or hand the work to its own thread, and it
+ * must not call ihs_location_stop() on this service (that would free the
+ * service from within its own callback).
+ */
+typedef void (*IhsLocationCallback)(void* user_data, const IhsPosition* pos);
+
+/*
+ * Register @callback to fire on each new fix (push), replacing any prior
+ * callback on @service; pass NULL to clear it. This complements the polling
+ * accessors: subscribe FIRST, then call ihs_location_latest2() for the current
+ * value — that order cannot MISS an update. A fix landing in the window between
+ * the two calls may be delivered twice (once through each path); the callback
+ * carries no generation, so it is not de-duplicated for you, but applying the
+ * same fix is idempotent (same position), so a repeat is harmless. The callback
+ * does not fire for the fix already present at registration.
+ *
+ * Replacing or clearing the callback is not a synchronization point: a callback
+ * that has already begun on the acquisition thread may still be running (or
+ * about to run) when this returns. Only ihs_location_stop() guarantees no
+ * further callbacks, by joining that thread — so tear down consumer state the
+ * callback touches only after stop(), not merely after clearing.
+ */
+IHS_EXPORT void ihs_location_set_callback(IhsLocationService* service,
+                                          IhsLocationCallback callback,
+                                          void* user_data);
+
 /* Stop acquiring and free @service; the handle is invalid afterwards. */
 IHS_EXPORT void ihs_location_stop(IhsLocationService* service);
 

@@ -73,9 +73,12 @@ std::unique_ptr<IEventSource> MakeGeoclue(const char* config) {
 // pushes each fix to Manager::PublishFix on its worker thread, and the Manager
 // is the ILocationProvider the accessors below read. Declaration order matters
 // for teardown — @source is declared last so it is destroyed first, joining its
-// worker before the Manager it calls into is gone.
+// worker before the Manager it calls into is gone. @manager is a non-owning
+// alias of @provider (trivially destructible), so its position does not affect
+// that ordering.
 struct IhsLocationService {
   std::unique_ptr<ihs::location::ILocationProvider> provider;  // the Manager
+  ihs::location::Manager* manager = nullptr;  // non-owning alias of `provider`
   std::unique_ptr<ihs::location::IEventSource> source;
 };
 
@@ -125,6 +128,7 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
       return nullptr;  // could not begin acquisition at all
     }
     auto service = std::make_unique<IhsLocationService>();
+    service->manager = mgr;  // alias before the unique_ptr is moved
     service->provider = std::move(manager);
     service->source = std::move(src);
     return service.release();
@@ -213,6 +217,40 @@ uint64_t ihs_location_generation(IhsLocationService* service) {
     return service->provider->generation();
   } catch (...) {
     return 0;
+  }
+}
+
+void ihs_location_set_callback(IhsLocationService* service,
+                               IhsLocationCallback callback,
+                               void* user_data) {
+  if (service == nullptr || service->manager == nullptr) {
+    return;
+  }
+  // No exception may cross the C ABI (installing a std::function can throw).
+  try {
+    if (callback == nullptr) {
+      service->manager->SetFixNotify(nullptr);
+      return;
+    }
+    // On each fix the Manager pings this (off its lock); fetch the current fix
+    // through the same accessor a poller uses — uniform across the passthrough
+    // and filter paths — and hand it to the C callback.
+    service->manager->SetFixNotify([service, callback, user_data]() {
+      IhsPosition pos{};
+      if (ihs_location_latest2(service, &pos, sizeof(pos)) == 1) {
+        // The consumer callback runs on the acquisition thread; no exception it
+        // throws may unwind through the library, so contain it here.
+        try {
+          callback(user_data, &pos);
+        } catch (...) {
+        }
+      }
+    });
+  } catch (...) {
+    // Installing the std::function can throw (bad_alloc). This function has no
+    // error return, so leave the service with NO callback rather than a stale
+    // prior one — clearing is noexcept.
+    service->manager->SetFixNotify(nullptr);
   }
 }
 
