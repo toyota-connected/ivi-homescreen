@@ -81,4 +81,5 @@ class EncoderSink final : public ISurfaceSink {
   uint32_t stride_{0};
   uint64_t frame_index_{0};
   bool ready_{false};
+  bool have_onsize_{false};  // OnSize gave authoritative geometry
 };

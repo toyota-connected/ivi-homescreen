@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 
 #include "logging/logging.h"
@@ -56,7 +57,18 @@ void DmaSyncWrite(int fd, bool start) {
   dma_buf_sync sync{};
   sync.flags =
       (start ? DMA_BUF_SYNC_START : DMA_BUF_SYNC_END) | DMA_BUF_SYNC_WRITE;
-  ::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
+  if (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) != 0) {
+    // A failed CPU/device sync can leave the encoder reading stale cache lines
+    // (visible as corrupt frames). Warn once rather than per frame.
+    static bool warned = false;
+    if (!warned) {
+      ihs::log::warn(
+          "[EncoderSink] DMA_BUF_IOCTL_SYNC failed ({}); frames may show cache "
+          "artifacts",
+          std::strerror(errno));
+      warned = true;
+    }
+  }
 }
 
 // BgraToNv12 reads Skia's kN32 buffer as BGRA in memory, which holds on a
@@ -185,6 +197,7 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
 }
 
 void EncoderSink::OnSize(uint32_t width, uint32_t height) {
+  have_onsize_ = true;
   EnsureBuffer(width, height);
 }
 
@@ -194,10 +207,12 @@ bool EncoderSink::Present(const void* allocation,
   if (allocation == nullptr) {
     return true;
   }
-  // Derive width from the stride; OnSize may not have fired before the first
-  // present, so ensure the buffer here too.
+  // Prefer the geometry OnSize gave us. row_bytes is the source stride and can
+  // exceed 4*width (padding), so deriving width from it would encode the pad
+  // columns as image. Fall back to row_bytes/4 only if OnSize never fired.
   const uint32_t src_h = static_cast<uint32_t>(height);
-  const uint32_t src_w = static_cast<uint32_t>(row_bytes / 4);
+  const uint32_t src_w =
+      have_onsize_ ? width_ : static_cast<uint32_t>(row_bytes / 4);
   if (!EnsureBuffer(src_w, src_h)) {
     return true;  // soft failure: keep the engine running
   }
