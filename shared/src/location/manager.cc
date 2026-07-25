@@ -65,10 +65,22 @@ void Manager::PublishFix(const Position& fix) {
   if (!fix.valid() || !ValidLatLon(fix.latitude, fix.longitude)) {
     return;
   }
+  std::function<void()> notify;
+  {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    latest_ = fix;
+    have_fix_ = true;
+    ++generation_;
+    notify = fix_notify_;  // copy under the lock; invoke below without it
+  }
+  if (notify) {
+    notify();
+  }
+}
+
+void Manager::SetFixNotify(std::function<void()> notify) {
   const std::lock_guard<std::mutex> lock(mutex_);
-  latest_ = fix;
-  have_fix_ = true;
-  ++generation_;
+  fix_notify_ = std::move(notify);
 }
 
 bool Manager::Start() {
@@ -155,6 +167,7 @@ void Manager::Shutdown() {
     have_fix_ = false;
     generation_ = 0;
     latest_ = Position{};
+    fix_notify_ = nullptr;
   }
   if (inst != nullptr && ops.destroy != nullptr) {
     ops.destroy(inst);
@@ -205,19 +218,26 @@ void Manager::OnMeasurement(const IhsMeasurement& m) {
     return;
   }
 
-  const std::lock_guard<std::mutex> lock(mutex_);
-  if (filter_instance_ != nullptr && filter_ops_.update != nullptr) {
-    filter_ops_.update(filter_instance_, &m);
-  } else {
-    ApplyToPassthrough(m);
+  std::function<void()> notify;
+  {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (filter_instance_ != nullptr && filter_ops_.update != nullptr) {
+      filter_ops_.update(filter_instance_, &m);
+    } else {
+      ApplyToPassthrough(m);
+    }
+    // A position measurement is the anchor of a fix; count one generation per
+    // accepted position (velocity/heading augment the same fix silently), so a
+    // consumer sees one bump per fix regardless of how many components a source
+    // splits it into.
+    if (m.kind == IHS_MEAS_POSITION_LLA) {
+      have_fix_ = true;
+      ++generation_;
+      notify = fix_notify_;  // copy under the lock; invoke below without it
+    }
   }
-  // A position measurement is the anchor of a fix; count one generation per
-  // accepted position (velocity/heading augment the same fix silently), so a
-  // consumer sees one bump per fix regardless of how many components a source
-  // splits it into.
-  if (m.kind == IHS_MEAS_POSITION_LLA) {
-    have_fix_ = true;
-    ++generation_;
+  if (notify) {
+    notify();
   }
 }
 
