@@ -80,9 +80,10 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
           ctest --test-dir sbuild --output-on-failure
 
-      - name: Location gpsd TPV parser unit test
-        # Standalone: compiles the internal provider source directly (ParseTpv
-        # is not part of the installed C ABI), so no prefix / gpsd is needed.
+      - name: Location unit tests (parser / registry / manager / fallback / filter)
+        # Standalone: compiles the internal location sources directly (ParseTpv,
+        # registry, manager, etc. are not part of the installed C ABI), so no
+        # prefix / gpsd is needed. ctest runs every add_test in the project.
         run: |
           cmake -S shared/tests/location -B lbuild -G Ninja
           cmake --build lbuild
