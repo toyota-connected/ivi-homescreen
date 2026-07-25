@@ -81,5 +81,9 @@ class EncoderSink final : public ISurfaceSink {
   uint32_t stride_{0};
   uint64_t frame_index_{0};
   bool ready_{false};
-  bool have_onsize_{false};  // OnSize gave authoritative geometry
+  // Authoritative render width from OnSize. Kept separate from width_ (which
+  // EnsureBuffer mutates to the allocated buffer's width) so a transient short
+  // row can't permanently shrink the encoded width.
+  bool have_onsize_{false};
+  uint32_t onsize_width_{0};
 };

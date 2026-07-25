@@ -211,6 +211,7 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
 
 void EncoderSink::OnSize(uint32_t width, uint32_t height) {
   have_onsize_ = true;
+  onsize_width_ = width;
   EnsureBuffer(width, height);
 }
 
@@ -226,7 +227,8 @@ bool EncoderSink::Present(const void* allocation,
   // a short row can't be read past its end.
   const uint32_t stride_px = static_cast<uint32_t>(row_bytes / 4);
   const uint32_t src_h = static_cast<uint32_t>(height);
-  const uint32_t src_w = have_onsize_ ? std::min(width_, stride_px) : stride_px;
+  const uint32_t src_w =
+      have_onsize_ ? std::min(onsize_width_, stride_px) : stride_px;
   if (!EnsureBuffer(src_w, src_h)) {
     return true;  // soft failure: keep the engine running
   }
