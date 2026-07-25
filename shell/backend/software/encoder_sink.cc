@@ -26,12 +26,25 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <ctime>
 
 #include "logging/logging.h"
 
 namespace {
 
-// Allocate one contiguous CMA buffer as a dma-buf. Returns the fd, or -1.
+// Real elapsed time for the frame timestamp, so the encoder's PTS tracks the
+// actual present cadence rather than an assumed frame rate.
+uint64_t MonotonicUs() {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1'000'000 +
+         static_cast<uint64_t>(ts.tv_nsec) / 1000;
+}
+
+// Allocate one dma-buf for the packed NV12 frame. Prefers a CMA heap (the
+// physically contiguous memory most SoC V4L2 encoders require); the `system`
+// heap is a last-resort fallback and is not necessarily contiguous. Returns the
+// fd, or -1.
 int AllocDmabuf(size_t size) {
   static const char* kHeaps[] = {"/dev/dma_heap/linux,cma",
                                  "/dev/dma_heap/default_cma_region",
@@ -207,12 +220,13 @@ bool EncoderSink::Present(const void* allocation,
   if (allocation == nullptr) {
     return true;
   }
-  // Prefer the geometry OnSize gave us. row_bytes is the source stride and can
-  // exceed 4*width (padding), so deriving width from it would encode the pad
-  // columns as image. Fall back to row_bytes/4 only if OnSize never fired.
+  // row_bytes is the source stride. Prefer the OnSize width (row_bytes can
+  // exceed 4*width as padding, which we must not encode as image), but never
+  // encode more columns than the row actually holds -- clamp to row_bytes/4 so
+  // a short row can't be read past its end.
+  const uint32_t stride_px = static_cast<uint32_t>(row_bytes / 4);
   const uint32_t src_h = static_cast<uint32_t>(height);
-  const uint32_t src_w =
-      have_onsize_ ? width_ : static_cast<uint32_t>(row_bytes / 4);
+  const uint32_t src_w = have_onsize_ ? std::min(width_, stride_px) : stride_px;
   if (!EnsureBuffer(src_w, src_h)) {
     return true;  // soft failure: keep the engine running
   }
@@ -222,9 +236,8 @@ bool EncoderSink::Present(const void* allocation,
              row_bytes, stride_, map_);
   DmaSyncWrite(dmabuf_fd_, /*start=*/false);
 
-  // ~30 fps timestamp; the first frame forces a keyframe.
-  const uint64_t ts_us = frame_index_ * 33'333;
-  consumer_->OnFrame(dmabuf_fd_, map_, ts_us,
+  // Real capture time; the first frame forces a keyframe.
+  consumer_->OnFrame(dmabuf_fd_, map_, MonotonicUs(),
                      /*force_keyframe=*/frame_index_ == 0);
   ++frame_index_;
   return true;
