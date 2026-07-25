@@ -473,7 +473,7 @@ int main() {
     // The notify is invoked without the internal lock, so it may re-enter
     // Latest()/generation(); if it were fired under the lock this would
     // deadlock and hang the test.
-    Position seen;
+    Position seen{};
     bool reentered = false;
     m.SetFixNotify(
         [&]() { reentered = m.Latest(seen) && seen.latitude == 3.0; });
