@@ -89,3 +89,14 @@ target_compile_options(filter_test PRIVATE -Wall -Wextra)
 target_link_libraries(filter_test PRIVATE Threads::Threads)
 
 add_test(NAME filter COMMAND filter_test)
+
+# gnss.file replay source: parses captured gpsd JSON and re-emits fixes as an
+# event source. Compiles file_source.cc + gpsd_provider.cc (ParseTpv) directly.
+add_executable(file_source_test file_source_test.cc
+        ${_loc_src}/file_source.cc ${_loc_src}/gpsd_provider.cc)
+target_include_directories(file_source_test PRIVATE
+        ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_compile_options(file_source_test PRIVATE -Wall -Wextra)
+target_link_libraries(file_source_test PRIVATE Threads::Threads)
+
+add_test(NAME file_source COMMAND file_source_test)
