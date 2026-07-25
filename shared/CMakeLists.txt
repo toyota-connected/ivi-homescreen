@@ -145,7 +145,6 @@ target_sources(ihs_shared PRIVATE
         src/location/manager.cc
         src/location/gpsd_provider.cc
         src/location/geoclue_provider.cc
-        src/location/fallback_location_provider.cc
         src/location/fallback_source.cc
         src/location/sd_bus_dynamic.cc
 )

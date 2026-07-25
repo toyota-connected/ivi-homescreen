@@ -41,16 +41,18 @@ bool FallbackSource::Start() {
   if (fallback_) {
     fallback_->SetOnFix([this](const Position& p) { OnFallback(p); });
   }
+  // Report success if at least one child began acquiring. Each child returns
+  // true even with no daemon present yet (it retries), so this is false only if
+  // both could not start at all — matching the old combiner's Start().
+  bool ok = false;
   if (primary_) {
-    primary_->Start();
+    ok = primary_->Start() || ok;
   }
   if (fallback_) {
-    fallback_->Start();
+    ok = fallback_->Start() || ok;
   }
   started_ = true;
-  // Return true even if neither is producing yet: a source may report later,
-  // matching the enum providers' "handle returned, no fix yet" contract.
-  return true;
+  return ok;
 }
 
 void FallbackSource::Stop() {
