@@ -77,3 +77,15 @@ target_compile_options(manager_test PRIVATE -Wall -Wextra)
 target_link_libraries(manager_test PRIVATE Threads::Threads)
 
 add_test(NAME manager COMMAND manager_test)
+
+# Filter harness: synthetic ground-truth tracks + Gaussian noise driven through
+# the Manager, comparing filtered RMSE to raw RMSE. Today it exercises the
+# passthrough (filtered == raw baseline); the estimator increments must beat it.
+add_executable(filter_test filter_test.cc track_gen.cc
+        ${_loc_src}/manager.cc ${_loc_src}/registry.cc)
+target_include_directories(filter_test PRIVATE
+        ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_compile_options(filter_test PRIVATE -Wall -Wextra)
+target_link_libraries(filter_test PRIVATE Threads::Threads)
+
+add_test(NAME filter COMMAND filter_test)
