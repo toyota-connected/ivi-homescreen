@@ -33,7 +33,7 @@ bool ParseTpv(const std::string& line, Position& out);
 // (default 127.0.0.1:2947), issues ?WATCH, and publishes each TPV fix. Runs a
 // worker thread that reconnects if gpsd drops, so it tolerates gpsd starting
 // after the map. This is the primary provider; GeoclueProvider is the fallback.
-class GpsdProvider : public ILocationProvider {
+class GpsdProvider : public ILocationProvider, public IEventSource {
  public:
   explicit GpsdProvider(std::string host = "127.0.0.1", uint16_t port = 2947);
   ~GpsdProvider() override;
@@ -46,6 +46,12 @@ class GpsdProvider : public ILocationProvider {
   bool Latest(Position& out) override;
   [[nodiscard]] uint64_t generation() const override;
 
+  // Event push: install a sink invoked with each new fix as it arrives, on the
+  // worker thread. Must be called before Start() (the worker reads it without a
+  // lock, relying on the happens-before of thread creation). This is how the
+  // location Manager drives on gpsd events instead of polling generation().
+  void SetOnFix(FixSink on_fix) override;
+
  private:
   void Run();         // worker: connect, WATCH, read TPV lines, publish
   void StopWorker();  // non-virtual; Stop() and the destructor both call it
@@ -56,6 +62,8 @@ class GpsdProvider : public ILocationProvider {
   std::thread thread_;
   std::atomic<bool> running_{false};
   std::atomic<int> sock_{-1};  // current socket fd, -1 when not connected
+
+  FixSink on_fix_;  // set before Start(); invoked on the worker thread
 
   mutable std::mutex mu_;
   Position latest_;
