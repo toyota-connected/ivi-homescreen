@@ -116,6 +116,11 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
     // Drive the Manager atomically on each fix the source pushes (worker
     // thread). SetOnFix must precede the source's Start().
     src->SetOnFix([mgr](const Position& p) { mgr->PublishFix(p); });
+    // Arm the Manager before the source begins pushing, honoring the
+    // Start()/Stop() lifecycle (ihs_location_stop calls Stop()).
+    if (!manager->Start()) {
+      return nullptr;
+    }
     if (!src->Start()) {
       return nullptr;  // could not begin acquisition at all
     }
