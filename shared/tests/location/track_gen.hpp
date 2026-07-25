@@ -41,7 +41,9 @@ struct NoisyFix {
   double sigma_m = 0.0;  // the 1-sigma the noise was drawn at (per axis), m
 };
 
-// Meters-per-degree at a latitude (flat-earth local scale).
+// Local flat-earth scale, meters per degree. A degree of latitude is very
+// nearly constant, so MetersPerDegLat() takes no argument; a degree of
+// longitude shrinks with latitude (by cos), so MetersPerDegLon() takes it.
 double MetersPerDegLat();
 double MetersPerDegLon(double lat_deg);
 

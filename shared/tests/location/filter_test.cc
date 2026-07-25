@@ -15,8 +15,17 @@
 // Today the only "filter" is the Manager's passthrough (no filter registered),
 // so this reports filtered == raw: the baseline increment 4's kalman.cv must
 // improve on. The scenarios (straight, stationary, outage) and their reports
-// are built now so that adding a filter is a one-line change here plus the
-// filter itself, and the improvement is provable in CI rather than eyeballed.
+// are built now so the improvement is provable in CI rather than eyeballed.
+//
+// One seam is deliberately deferred to the filter increment. This harness reads
+// the estimate with Manager::Latest(), which for a real filter evaluates
+// estimate() at the wall clock (MonotonicNs()), not at the synthetic
+// measurement time stamped into each pushed measurement. The passthrough is
+// time-independent, so the baseline here is exact; but a constant-velocity
+// filter would extrapolate across the gap between the synthetic timeline (based
+// at 0) and the wall clock and produce nonsense. Wiring a real filter therefore
+// also needs the estimate sampled on the synthetic timeline (a
+// time-parameterized read) — that lands with the filter, where it is testable.
 
 #include "manager.hpp"
 
@@ -89,10 +98,14 @@ std::vector<Position> RunFilter(const std::vector<NoisyFix>& fixes,
   ops.struct_size = sizeof(ops);
   ops.start = &FakeStart;
   ops.stop = &FakeStop;
-  ihs_location_register_source("gnss.harness", &ops, &src);
+  Check(ihs_location_register_source("gnss.harness", &ops, &src) == 1,
+        "fake source registered");
 
   Manager m({"gnss.harness"}, filter_key, "");
-  m.Start();
+  Check(m.Start(), "Manager started");
+  // Prove the Manager bound the source: FakeStart ran and handed us the sink.
+  // Without this the loop below would silently exercise the no-fix path.
+  Check(src.sink != nullptr, "Manager bound the fake source");
 
   std::vector<Position> est;
   est.reserve(fixes.size());
