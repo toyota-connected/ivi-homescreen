@@ -87,6 +87,12 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
   // (allocations, std::thread) can throw, so translate any failure to a NULL
   // return.
   try {
+    // Declare the Manager before the source: the source's worker calls into the
+    // Manager (Manager::PublishFix), so on any early return or exception after
+    // the source starts, reverse-order destruction must tear down the source
+    // first (joining its worker) and only then the Manager it points at.
+    auto manager = std::make_unique<Manager>(std::vector<std::string>{},
+                                             std::string{}, std::string{});
     std::unique_ptr<IEventSource> src;
     switch (source) {
       case IHS_LOCATION_GEOCLUE:
@@ -106,8 +112,6 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
     if (!src) {
       return nullptr;
     }
-    auto manager = std::make_unique<Manager>(std::vector<std::string>{},
-                                             std::string{}, std::string{});
     Manager* const mgr = manager.get();
     // Drive the Manager atomically on each fix the source pushes (worker
     // thread). SetOnFix must precede the source's Start().
