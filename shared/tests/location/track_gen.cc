@@ -11,6 +11,7 @@
 #include "track_gen.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace ihs::location::test {
 
@@ -18,9 +19,17 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kMetersPerDegLat = 111320.0;
 uint64_t SecToNs(double s) {
-  // Guard the cast: a negative double to uint64_t is undefined behavior.
-  // Callers pass t >= 0, but keep the conversion total.
-  return s <= 0.0 ? 0 : static_cast<uint64_t>(s * 1e9);
+  // Keep the conversion total: a negative, NaN, or out-of-range double cast to
+  // uint64_t is undefined behavior. Callers pass a finite t >= 0, but guard it
+  // all — !(s > 0) also rejects NaN, since every NaN comparison is false.
+  if (!(s > 0.0)) {
+    return 0;
+  }
+  const double ns = s * 1e9;
+  if (ns >= static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+    return std::numeric_limits<uint64_t>::max();
+  }
+  return static_cast<uint64_t>(ns);
 }
 }  // namespace
 
