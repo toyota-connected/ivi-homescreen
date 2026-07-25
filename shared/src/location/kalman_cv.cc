@@ -45,6 +45,13 @@ double MetersPerDegLon(double lat_deg) {
   return kMetersPerDegLat * std::cos(lat_deg * kPi / 180.0);
 }
 
+// A measurement variance is usable only if finite and non-negative; a negative
+// value is the "unknown" sentinel and a non-finite one (NaN/+Inf) is garbage
+// that would poison S / NIS / K. Either falls back to @fallback.
+double FiniteVarianceOr(double variance, double fallback) {
+  return (std::isfinite(variance) && variance >= 0.0) ? variance : fallback;
+}
+
 using Mat4 = std::array<std::array<double, 4>, 4>;
 
 Mat4 Zero4() {
@@ -101,9 +108,11 @@ class KalmanCv {
     // value[] is [lat, lon] (lat = north, lon = east), but variance[] follows
     // the service convention variance[0] = east, variance[1] = north — the same
     // order as IhsPosition's sigma_e_m/sigma_n_m and the Manager passthrough —
-    // decoupled from the value order.
-    const double var_e = m.variance[0] >= 0.0 ? m.variance[0] : kDefaultPosVar;
-    const double var_n = m.variance[1] >= 0.0 ? m.variance[1] : kDefaultPosVar;
+    // decoupled from the value order. A non-finite or negative variance is
+    // "unknown": +Inf would otherwise make S infinite and produce NaNs through
+    // S^-1 / NIS / K that corrupt the state.
+    const double var_e = FiniteVarianceOr(m.variance[0], kDefaultPosVar);
+    const double var_n = FiniteVarianceOr(m.variance[1], kDefaultPosVar);
     const int mode = m.value_count >= 3 ? 3 : 2;
 
     if (!have_state_) {
@@ -220,10 +229,14 @@ class KalmanCv {
 
  private:
   [[nodiscard]] double SecondsSince(uint64_t t_monotonic_ns) const {
-    // Signed difference in seconds; both are CLOCK_MONOTONIC nanoseconds.
-    const auto now = static_cast<double>(t_monotonic_ns);
-    const auto last = static_cast<double>(last_t_ns_);
-    return (now - last) * 1e-9;
+    // Difference in integer nanoseconds first, then to seconds: both are
+    // CLOCK_MONOTONIC ns (well under 2^63), so the int64 subtraction is exact
+    // and signed. Converting each to double before subtracting would lose
+    // sub-microsecond precision once the clock passes ~2^52 ns (~52 days up),
+    // jittering dt and breaking out-of-order detection.
+    const int64_t d =
+        static_cast<int64_t>(t_monotonic_ns) - static_cast<int64_t>(last_t_ns_);
+    return static_cast<double>(d) * 1e-9;
   }
 
   void Seed(double lat,

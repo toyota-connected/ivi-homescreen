@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 
 #include "ihs/location.h"
 #include "track_gen.hpp"
@@ -272,6 +273,26 @@ void TestAnisotropicVariance() {
   ops.destroy(inst);
 }
 
+// A garbage (non-finite) measurement variance must be treated as unknown, not
+// fed into S — otherwise S^-1 / NIS / K produce NaNs that corrupt the state.
+void TestNonFiniteVariance() {
+  const IhsLocationFilterOps& ops = KalmanCvFilterOps();
+  void* inst = ops.create(nullptr, nullptr);
+  const IhsMeasurement seed = PosMeas(kLat0, kLon0, 4.0, SecToNs(0));
+  ops.update(inst, &seed);
+  const double inf = std::numeric_limits<double>::infinity();
+  const double lat = kLat0 + 3.0 / MetersPerDegLat();
+  const IhsMeasurement bad = PosMeasAniso(lat, kLon0, inf, inf, SecToNs(1));
+  ops.update(inst, &bad);
+  IhsPosition out{};
+  Check(ops.estimate(inst, SecToNs(1), &out) == 1,
+        "estimate valid after an inf-variance measurement");
+  Check(std::isfinite(out.latitude) && std::isfinite(out.longitude) &&
+            std::isfinite(out.sigma_e_m) && std::isfinite(out.sigma_n_m),
+        "non-finite variance does not corrupt the state with NaN");
+  ops.destroy(inst);
+}
+
 }  // namespace
 
 int main() {
@@ -282,6 +303,7 @@ int main() {
   TestOutlierRejection();
   TestCoastingGrowsSigma();
   TestAnisotropicVariance();
+  TestNonFiniteVariance();
 
   if (g_failures == 0) {
     std::printf("kalman_cv_test: all %d checks passed\n", g_tests);
