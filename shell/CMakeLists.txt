@@ -175,6 +175,18 @@ if (BUILD_BACKEND_SOFTWARE)
                 backend/software/fbdev_sink.cc
         )
     endif ()
+    if (BUILD_SOFTWARE_SINK_ENCODER)
+        # The sink + consumer, plus the webrtc-free V4L2 M2M encoder + its log
+        # seam from the v4l2-webrtc-codec checkout (V4L2WC_DIR). Only this TU
+        # set links the codec; the rest of the backend stays dependency-light.
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/encoder_sink.cc
+                backend/software/nv12_consumer.cc
+                ${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc
+                ${V4L2WC_DIR}/src/log.cc
+        )
+        target_include_directories(${PROJECT_NAME} PRIVATE ${V4L2WC_DIR})
+    endif ()
     if (BUILD_SOFTWARE_INPUT_LIBINPUT)
         target_sources(${PROJECT_NAME} PRIVATE
                 backend/software/input/software_seat.cc
