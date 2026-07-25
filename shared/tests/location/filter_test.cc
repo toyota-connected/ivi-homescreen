@@ -155,15 +155,17 @@ double RmseRaw(const std::vector<NoisyFix>& fixes,
   return n == 0 ? 0.0 : std::sqrt(sum / static_cast<double>(n));
 }
 
-// RMSE (meters) of the estimates vs truth, over [from, to).
+// RMSE (meters) of the estimates vs truth, over [from, to). Total: clamps to
+// the shorter vector and returns 0 over an empty window.
 double RmseEst(const std::vector<Position>& est,
                const std::vector<TruthSample>& truth,
                double ref_lat,
                size_t from,
                size_t to) {
+  const size_t end = std::min({to, est.size(), truth.size()});
   double sum = 0.0;
   size_t n = 0;
-  for (size_t i = from; i < to && i < truth.size(); ++i) {
+  for (size_t i = from; i < end; ++i) {
     const double d = MetersBetween(est[i].latitude, est[i].longitude,
                                    truth[i].lat, truth[i].lon, ref_lat);
     sum += d * d;
