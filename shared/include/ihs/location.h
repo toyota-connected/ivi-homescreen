@@ -130,6 +130,12 @@ typedef void (*IhsLocationCallback)(void* user_data, const IhsPosition* pos);
  * value — that order cannot miss an update (a fix landing in between simply
  * arrives once through each path, deduplicated by generation). The callback
  * does not fire for the fix already present at registration.
+ *
+ * Replacing or clearing the callback is not a synchronization point: a callback
+ * that has already begun on the acquisition thread may still be running (or
+ * about to run) when this returns. Only ihs_location_stop() guarantees no
+ * further callbacks, by joining that thread — so tear down consumer state the
+ * callback touches only after stop(), not merely after clearing.
  */
 IHS_EXPORT void ihs_location_set_callback(IhsLocationService* service,
                                           IhsLocationCallback callback,
