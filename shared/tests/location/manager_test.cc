@@ -447,6 +447,49 @@ int main() {
     m.Stop();
   }
 
+  // --- SetFixNotify fires once per accepted fix, unlocked (the push seam) ----
+  {
+    Manager m({}, "", "");
+    m.Start();
+    int calls = 0;
+    m.SetFixNotify([&calls]() { ++calls; });
+
+    Position fix;
+    fix.latitude = 1.0;
+    fix.longitude = 2.0;
+    fix.mode = 3;
+    m.PublishFix(fix);
+    Check(calls == 1, "notify fires on an accepted fix");
+    m.PublishFix(fix);
+    Check(calls == 2, "notify fires again on the next fix");
+
+    Position bad;  // dropped: out of range
+    bad.latitude = 200.0;
+    bad.longitude = 0.0;
+    bad.mode = 3;
+    m.PublishFix(bad);
+    Check(calls == 2, "notify does not fire for a dropped fix");
+
+    // The notify is invoked without the internal lock, so it may re-enter
+    // Latest()/generation(); if it were fired under the lock this would
+    // deadlock and hang the test.
+    Position seen;
+    bool reentered = false;
+    m.SetFixNotify(
+        [&]() { reentered = m.Latest(seen) && seen.latitude == 3.0; });
+    Position fix2;
+    fix2.latitude = 3.0;
+    fix2.longitude = 4.0;
+    fix2.mode = 3;
+    m.PublishFix(fix2);
+    Check(reentered, "notify may re-enter Latest() without deadlock");
+
+    m.SetFixNotify(nullptr);
+    m.PublishFix(fix);
+    Check(seen.latitude == 3.0, "cleared notify does not fire");
+    m.Stop();
+  }
+
   if (g_failures == 0) {
     std::printf("manager_test: all %d checks passed\n", g_tests);
   } else {

@@ -77,6 +77,7 @@ std::unique_ptr<IEventSource> MakeGeoclue(const char* config) {
 struct IhsLocationService {
   std::unique_ptr<ihs::location::ILocationProvider> provider;  // the Manager
   std::unique_ptr<ihs::location::IEventSource> source;
+  ihs::location::Manager* manager = nullptr;  // non-owning alias of `provider`
 };
 
 extern "C" {
@@ -125,6 +126,7 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
       return nullptr;  // could not begin acquisition at all
     }
     auto service = std::make_unique<IhsLocationService>();
+    service->manager = mgr;  // alias before the unique_ptr is moved
     service->provider = std::move(manager);
     service->source = std::move(src);
     return service.release();
@@ -213,6 +215,31 @@ uint64_t ihs_location_generation(IhsLocationService* service) {
     return service->provider->generation();
   } catch (...) {
     return 0;
+  }
+}
+
+void ihs_location_set_callback(IhsLocationService* service,
+                               IhsLocationCallback callback,
+                               void* user_data) {
+  if (service == nullptr || service->manager == nullptr) {
+    return;
+  }
+  // No exception may cross the C ABI (installing a std::function can throw).
+  try {
+    if (callback == nullptr) {
+      service->manager->SetFixNotify(nullptr);
+      return;
+    }
+    // On each fix the Manager pings this (off its lock); fetch the current fix
+    // through the same accessor a poller uses — uniform across the passthrough
+    // and filter paths — and hand it to the C callback.
+    service->manager->SetFixNotify([service, callback, user_data]() {
+      IhsPosition pos{};
+      if (ihs_location_latest2(service, &pos, sizeof(pos)) == 1) {
+        callback(user_data, &pos);
+      }
+    });
+  } catch (...) {
   }
 }
 

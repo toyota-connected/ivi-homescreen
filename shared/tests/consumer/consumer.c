@@ -72,6 +72,13 @@ static int smoke_flt_estimate(void* inst, uint64_t t_ns, IhsPosition* out) {
   return 0;
 }
 
+/* Push callback for the location subscribe ABI (never fires against a dead
+ * port; present only to exercise the ABI as strict C11). */
+static void smoke_location_cb(void* ud, const IhsPosition* pos) {
+  (void)ud;
+  (void)pos;
+}
+
 int main(void) {
   /* Version handshake. */
   const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
@@ -136,6 +143,11 @@ int main(void) {
   CHECK(ihs_location_latest2(loc, &pos, sizeof(pos)) == 0,
         "latest2 also reports no fix from a dead port");
   CHECK(ihs_location_generation(loc) == 0, "generation 0 before any fix");
+  /* Subscribe/clear the push callback and check NULL safety (it never fires
+   * against a dead port; this exercises the ABI). */
+  ihs_location_set_callback(loc, smoke_location_cb, NULL);
+  ihs_location_set_callback(loc, NULL, NULL);               /* clear */
+  ihs_location_set_callback(NULL, smoke_location_cb, NULL); /* NULL is safe */
   ihs_location_stop(loc);
   CHECK(ihs_location_latest(NULL, &pos) == 0, "latest(NULL) is safe");
   CHECK(ihs_location_latest2(NULL, &pos, sizeof(pos)) == 0,
