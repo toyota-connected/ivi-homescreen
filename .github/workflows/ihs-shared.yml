@@ -80,7 +80,7 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
           ctest --test-dir sbuild --output-on-failure
 
-      - name: Location unit tests (parser / registry / manager / fallback / filter / file)
+      - name: Location unit tests (parser / registry / manager / fallback / filter / file / kalman)
         # Standalone: compiles the internal location sources directly (ParseTpv,
         # registry, manager, etc. are not part of the installed C ABI), so no
         # prefix / gpsd is needed. ctest runs every add_test in the project.

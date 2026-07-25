@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "ihs/location.h"
+#include "kalman_cv.hpp"
 #include "location.hpp"
 #include "track_gen.hpp"
 
@@ -126,8 +127,12 @@ std::vector<Position> RunFilter(const std::vector<NoisyFix>& fixes,
       mm.variance[1] = f.sigma_m * f.sigma_m;
       src.sink(src.sink_ud, &mm);
     }
+    // Sample on the SYNTHETIC timeline, not the wall clock: for a filter this
+    // predicts the estimate to this measurement's timestamp, so the RMSE is
+    // deterministic and the outage window coasts to the right times. The
+    // passthrough ignores the time and returns the last fix.
     Position p;
-    if (!m.Latest(p)) {
+    if (!m.Estimate(p, fixes[i].t_ns)) {
       p = Position{};  // no fix yet
     }
     est.push_back(p);
@@ -181,27 +186,34 @@ int main() {
   const double kLon0 = -122.0;
   const double kSigma = 8.0;  // per-axis measurement noise, meters
 
+  Check(ihs::location::RegisterKalmanCvFilter(), "kalman.cv registered");
+
   // --- straight track: raw vs filtered RMSE --------------------------------
   {
     const auto truth =
         ihs::location::test::StraightTrack(kLat0, kLon0, 5.0, 3.0, 120, 1.0);
     Rng rng(0x1234ABCD);
     const auto fixes = AddNoise(truth, kSigma, rng);
-    const auto est = RunFilter(fixes, "" /* passthrough */);
+    const auto est_pt = RunFilter(fixes, "" /* passthrough */);
+    const auto est_kf = RunFilter(fixes, "kalman.cv");
 
     const double raw = RmseRaw(fixes, truth, kLat0, 0, truth.size());
-    const double filt = RmseEst(est, truth, kLat0, 0, truth.size());
-    std::printf("straight : raw=%.3f m  filtered=%.3f m  (sigma=%.1f)\n", raw,
-                filt, kSigma);
+    const double filt_pt = RmseEst(est_pt, truth, kLat0, 0, truth.size());
+    const double filt_kf = RmseEst(est_kf, truth, kLat0, 0, truth.size());
+    std::printf(
+        "straight : raw=%.3f m  passthrough=%.3f m  kalman.cv=%.3f m  "
+        "(sigma=%.1f)\n",
+        raw, filt_pt, filt_kf, kSigma);
 
     // Harness sanity: per-axis sigma 8 m gives a 2D RMSE ~ sigma*sqrt(2).
     Check(raw > kSigma && raw < kSigma * 2.0,
           "raw RMSE is in the expected band for the noise sigma");
-    // Baseline: the passthrough republishes the last measurement, so filtered
-    // equals raw. increment 4's kalman.cv must drive filtered materially below.
-    Check(
-        std::abs(filt - raw) < 0.05,
-        "passthrough filtered RMSE equals raw (no improvement) — the baseline");
+    // The passthrough republishes the last measurement, so filtered equals raw
+    // exactly — the baseline the estimator must beat.
+    Check(std::abs(filt_pt - raw) < 0.05,
+          "passthrough filtered RMSE equals raw (the baseline)");
+    // kalman.cv fuses the history, so it must come in materially below raw.
+    Check(filt_kf < raw * 0.8, "kalman.cv beats raw on a straight track");
   }
 
   // --- stationary: does the estimate settle? -------------------------------
@@ -210,23 +222,25 @@ int main() {
         ihs::location::test::StationaryTrack(kLat0, kLon0, 120, 1.0);
     Rng rng(0x55AA55AA);
     const auto fixes = AddNoise(truth, kSigma, rng);
-    const auto est = RunFilter(fixes, "" /* passthrough */);
+    const auto est_pt = RunFilter(fixes, "" /* passthrough */);
+    const auto est_kf = RunFilter(fixes, "kalman.cv");
 
-    const double raw_full = RmseRaw(fixes, truth, kLat0, 0, truth.size());
-    // Compare like windows: late-window filtered vs late-window raw. For a real
-    // filter the filtered value collapses well below raw; for the passthrough
-    // it equals raw exactly (the estimate is the last measurement), so a tight
-    // tolerance holds and a regression that perturbed the passthrough here
-    // would trip it — where the earlier full-window-vs-late-window compare
-    // would not.
+    // Compare like windows: late-window filtered vs late-window raw. The
+    // passthrough equals raw exactly (the estimate is the last measurement);
+    // kalman.cv's variance should have collapsed well below it by the late
+    // window on a stationary vehicle (no more wandering puck).
     const size_t late = 60;
     const double raw_late = RmseRaw(fixes, truth, kLat0, late, truth.size());
-    const double filt_late = RmseEst(est, truth, kLat0, late, truth.size());
+    const double pt_late = RmseEst(est_pt, truth, kLat0, late, truth.size());
+    const double kf_late = RmseEst(est_kf, truth, kLat0, late, truth.size());
     std::printf(
-        "stationary: raw=%.3f m  raw(late)=%.3f m  filtered(late)=%.3f m\n",
-        raw_full, raw_late, filt_late);
-    Check(std::abs(filt_late - raw_late) < 0.05,
+        "stationary: raw(late)=%.3f m  passthrough(late)=%.3f m  "
+        "kalman.cv(late)=%.3f m\n",
+        raw_late, pt_late, kf_late);
+    Check(std::abs(pt_late - raw_late) < 0.05,
           "passthrough does not collapse the stationary variance (baseline)");
+    Check(kf_late < raw_late * 0.6,
+          "kalman.cv collapses the stationary variance");
   }
 
   // --- outage: withhold measurements mid-track -----------------------------
@@ -236,17 +250,26 @@ int main() {
     Rng rng(0x0F0F0F0F);
     const auto fixes = AddNoise(truth, kSigma, rng);
     // Withhold 10 s (samples 50..59).
-    const auto est = RunFilter(fixes, "" /* passthrough */, 50, 10);
+    const size_t gap_from = 50;
+    const size_t gap_to = 60;
+    const auto est_pt = RunFilter(fixes, "" /* passthrough */, gap_from, 10);
+    const auto est_kf = RunFilter(fixes, "kalman.cv", gap_from, 10);
 
-    // During the gap the passthrough holds the last fix (no coasting): its
-    // error grows only because the vehicle keeps moving away from that stale
-    // point.
-    const double gap = RmseEst(est, truth, kLat0, 50, 60);
+    // The passthrough holds the last fix (no coasting): its error grows as the
+    // vehicle moves away from that stale point. kalman.cv coasts on its
+    // velocity estimate, so it tracks the (still moving) truth far better
+    // across the gap.
+    const double gap_pt = RmseEst(est_pt, truth, kLat0, gap_from, gap_to);
+    const double gap_kf = RmseEst(est_kf, truth, kLat0, gap_from, gap_to);
     std::printf(
-        "outage   : passthrough error across the 10 s gap=%.3f m "
-        "(coasting filter must beat this)\n",
-        gap);
-    Check(gap > 0.0, "harness produced an estimate across the outage");
+        "outage   : passthrough gap error=%.3f m  kalman.cv gap error=%.3f m\n",
+        gap_pt, gap_kf);
+    Check(gap_kf < gap_pt, "kalman.cv coasts through the outage better");
+    // Reported accuracy must GROW while coasting (no confident wrong position):
+    // the covariance widens with each prediction step through the gap.
+    Check(est_kf[gap_to - 1].sigma_e_m > est_kf[gap_from].sigma_e_m &&
+              est_kf[gap_to - 1].sigma_n_m > est_kf[gap_from].sigma_n_m,
+          "kalman.cv accuracy degrades monotonically across the outage");
   }
 
   if (g_failures == 0) {
