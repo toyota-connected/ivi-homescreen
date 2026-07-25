@@ -29,6 +29,7 @@
 
 #include "manager.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -135,17 +136,23 @@ std::vector<Position> RunFilter(const std::vector<NoisyFix>& fixes,
   return est;
 }
 
-// RMSE (meters) of the noisy fixes vs truth.
+// RMSE (meters) of the noisy fixes vs truth, over [from, to). Total: clamps to
+// the shorter vector and returns 0 over an empty window.
 double RmseRaw(const std::vector<NoisyFix>& fixes,
                const std::vector<TruthSample>& truth,
-               double ref_lat) {
+               double ref_lat,
+               size_t from,
+               size_t to) {
+  const size_t end = std::min({to, fixes.size(), truth.size()});
   double sum = 0.0;
-  for (size_t i = 0; i < truth.size(); ++i) {
+  size_t n = 0;
+  for (size_t i = from; i < end; ++i) {
     const double d = MetersBetween(fixes[i].lat, fixes[i].lon, truth[i].lat,
                                    truth[i].lon, ref_lat);
     sum += d * d;
+    ++n;
   }
-  return std::sqrt(sum / static_cast<double>(truth.size()));
+  return n == 0 ? 0.0 : std::sqrt(sum / static_cast<double>(n));
 }
 
 // RMSE (meters) of the estimates vs truth, over [from, to).
@@ -180,7 +187,7 @@ int main() {
     const auto fixes = AddNoise(truth, kSigma, rng);
     const auto est = RunFilter(fixes, "" /* passthrough */);
 
-    const double raw = RmseRaw(fixes, truth, kLat0);
+    const double raw = RmseRaw(fixes, truth, kLat0, 0, truth.size());
     const double filt = RmseEst(est, truth, kLat0, 0, truth.size());
     std::printf("straight : raw=%.3f m  filtered=%.3f m  (sigma=%.1f)\n", raw,
                 filt, kSigma);
@@ -203,13 +210,20 @@ int main() {
     const auto fixes = AddNoise(truth, kSigma, rng);
     const auto est = RunFilter(fixes, "" /* passthrough */);
 
-    const double raw = RmseRaw(fixes, truth, kLat0);
-    // Late-window estimate RMSE: for a real filter this collapses well below
-    // raw; for the passthrough it stays at the measurement noise.
-    const double filt_late = RmseEst(est, truth, kLat0, 60, truth.size());
-    std::printf("stationary: raw=%.3f m  filtered(late)=%.3f m\n", raw,
-                filt_late);
-    Check(std::abs(filt_late - raw) < kSigma,
+    const double raw_full = RmseRaw(fixes, truth, kLat0, 0, truth.size());
+    // Compare like windows: late-window filtered vs late-window raw. For a real
+    // filter the filtered value collapses well below raw; for the passthrough
+    // it equals raw exactly (the estimate is the last measurement), so a tight
+    // tolerance holds and a regression that perturbed the passthrough here
+    // would trip it — where the earlier full-window-vs-late-window compare
+    // would not.
+    const size_t late = 60;
+    const double raw_late = RmseRaw(fixes, truth, kLat0, late, truth.size());
+    const double filt_late = RmseEst(est, truth, kLat0, late, truth.size());
+    std::printf(
+        "stationary: raw=%.3f m  raw(late)=%.3f m  filtered(late)=%.3f m\n",
+        raw_full, raw_late, filt_late);
+    Check(std::abs(filt_late - raw_late) < 0.05,
           "passthrough does not collapse the stationary variance (baseline)");
   }
 
