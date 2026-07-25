@@ -137,6 +137,10 @@ void GpsdProvider::Stop() {
   StopWorker();
 }
 
+void GpsdProvider::SetOnFix(FixSink on_fix) {
+  on_fix_ = std::move(on_fix);
+}
+
 void GpsdProvider::StopWorker() {
   if (!running_.exchange(false)) {
     return;  // already stopped
@@ -212,6 +216,9 @@ void GpsdProvider::Run() {
             have_fix_ = true;
           }
           generation_.fetch_add(1);
+          if (on_fix_) {
+            on_fix_(p);  // event push (worker thread) — the wake point
+          }
         }
       }
     }

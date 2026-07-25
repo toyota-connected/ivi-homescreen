@@ -58,6 +58,19 @@ Manager::~Manager() {
   Shutdown();
 }
 
+void Manager::PublishFix(const Position& fix) {
+  // Ignore a Position that is not a usable fix (providers validate too), so the
+  // counters below never mark an invalid one. The whole fix is stored in one
+  // step — no partial-assembly window.
+  if (!fix.valid() || !ValidLatLon(fix.latitude, fix.longitude)) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(mutex_);
+  latest_ = fix;
+  have_fix_ = true;
+  ++generation_;
+}
+
 bool Manager::Start() {
   if (started_) {
     return true;
@@ -84,7 +97,8 @@ bool Manager::Start() {
     // failing the whole service.
   }
 
-  // Bind each registered source key (skipping the rest), then start them.
+  // Bind each registered source key (skipping the unregistered), then start
+  // them.
   for (const std::string& key : source_keys_) {
     SourceEntry se;
     if (LookupSource(key, se)) {

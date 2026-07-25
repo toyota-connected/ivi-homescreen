@@ -56,6 +56,16 @@ target_link_libraries(registry_test PRIVATE Threads::Threads)
 
 add_test(NAME registry COMMAND registry_test)
 
+# Event-driven gpsd-primary / geoclue-fallback selection (standalone).
+add_executable(fallback_source_test fallback_source_test.cc
+        ${_loc_src}/fallback_source.cc)
+target_include_directories(fallback_source_test PRIVATE
+        ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_compile_options(fallback_source_test PRIVATE -Wall -Wextra)
+target_link_libraries(fallback_source_test PRIVATE Threads::Threads)
+
+add_test(NAME fallback_source COMMAND fallback_source_test)
+
 # Location Manager: fuses registered sources' measurements into a Position.
 # Compiles manager.cc + registry.cc directly (both use internal APIs) and shares
 # the same ihs_export.h stub include path.

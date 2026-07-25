@@ -35,7 +35,7 @@ namespace ihs::location {
 // constructor (empty = system bus; "user" = session bus; any other value is an
 // explicit D-Bus address), so a stand-in geoclue can be tested on the session
 // bus without a system-bus name.
-class GeoclueProvider final : public ILocationProvider {
+class GeoclueProvider final : public ILocationProvider, public IEventSource {
  public:
   // @desktop_id must match geoclue's allow-list expectation (a .desktop id);
   // @bus_address empty means the system bus.
@@ -56,6 +56,11 @@ class GeoclueProvider final : public ILocationProvider {
   // runs on the worker thread and is not part of the intended API.
   void OnLocationObject(const char* location_path);
 
+  // Event push: install a sink invoked with each new fix as it arrives, on the
+  // worker thread. Must be called before Start() (read without a lock, relying
+  // on the happens-before of thread creation). Mirrors GpsdProvider::SetOnFix.
+  void SetOnFix(FixSink on_fix) override;
+
  private:
   void Run();         // worker: set up the client, then pump the bus
   void StopWorker();  // non-virtual; Stop() and the destructor both call it
@@ -71,6 +76,8 @@ class GeoclueProvider final : public ILocationProvider {
   const SdBusApi* sd_ = nullptr;  // resolved libsystemd entry points
   sd_bus* bus_ = nullptr;         // worker-thread only
   std::string client_path_;       // worker-thread only
+
+  FixSink on_fix_;  // set before Start(); invoked on the worker thread
 
   mutable std::mutex mu_;
   Position latest_;
