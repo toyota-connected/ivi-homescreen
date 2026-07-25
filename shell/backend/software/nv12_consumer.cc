@@ -83,6 +83,7 @@ class FileEncoderConsumer final : public INv12Consumer {
     file_ = std::fopen(path_.c_str(), "wb");
     if (file_ == nullptr) {
       ihs::log::error("[EncoderSink/file] cannot open {} for write", path_);
+      encoder_.reset();  // don't leave the V4L2 device open half-configured
       return false;
     }
     ihs::log::info("[EncoderSink/file] encoding {}x{} -> {} via {}", width,
@@ -108,7 +109,20 @@ class FileEncoderConsumer final : public INv12Consumer {
       return;
     }
     if (!au_.empty()) {
-      std::fwrite(au_.data(), 1, au_.size(), file_);
+      const size_t wrote = std::fwrite(au_.data(), 1, au_.size(), file_);
+      if (wrote != au_.size()) {
+        // Short write (disk full / IO error): the file is now truncated, so
+        // warn once and stop counting rather than silently produce corruption.
+        if (!write_failed_) {
+          ihs::log::error(
+              "[EncoderSink/file] short write to {} ({} of {} bytes); output "
+              "is "
+              "truncated",
+              path_, wrote, au_.size());
+          write_failed_ = true;
+        }
+        return;
+      }
       bytes_ += au_.size();
       ++frames_;
     }
@@ -123,11 +137,18 @@ class FileEncoderConsumer final : public INv12Consumer {
   uint32_t height_{0};
   uint64_t frames_{0};
   uint64_t bytes_{0};
+  bool write_failed_{false};
 };
 
 }  // namespace
 
 std::unique_ptr<INv12Consumer> MakeNv12Consumer(std::string_view spec) {
+  if (spec.empty()) {
+    ihs::log::warn(
+        "[EncoderSink] the encoder sink needs a consumer, e.g. "
+        "IVI_SW_SINK=encoder:file:<path>");
+    return nullptr;
+  }
   constexpr std::string_view kFilePrefix = "file:";
   if (spec.rfind(kFilePrefix, 0) == 0) {
     std::string path(spec.substr(kFilePrefix.size()));

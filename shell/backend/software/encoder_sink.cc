@@ -59,10 +59,18 @@ void DmaSyncWrite(int fd, bool start) {
   ::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
 }
 
-// Premultiplied BGRA8888 (Skia kN32 on a little-endian host: memory [B,G,R,A])
-// -> NV12, limited-range BT.601. Un-premultiplies so a translucent scene
-// converts correctly; opaque pixels pass straight through. Chroma is
-// point-subsampled at the 2x2 block center.
+// BgraToNv12 reads Skia's kN32 buffer as BGRA in memory, which holds on a
+// little-endian host (every shipping target). Fail the build on big-endian
+// rather than silently swap channels; a BE target renders kN32 as RGBA and
+// would need a byte-order branch below (cf. pixel_swizzle.h's endian gate).
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "EncoderSink BGRA->NV12 assumes a little-endian host (kN32 == BGRA)"
+#endif
+
+// Premultiplied BGRA8888 (kN32 on a little-endian host: memory [B,G,R,A]) ->
+// NV12, limited-range BT.601. Un-premultiplies so a translucent scene converts
+// correctly; opaque pixels pass straight through. Chroma is point-subsampled
+// at the 2x2 block center.
 void BgraToNv12(const uint8_t* bgra,
                 uint32_t w,
                 uint32_t h,
@@ -135,7 +143,14 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
     return true;
   }
   ReleaseBuffer();
-  // NV12 is subsampled 2x2, so both dimensions must be even.
+  // NV12 is subsampled 2x2, so both dimensions must be even. Round an odd
+  // source down and say so -- the last column/row is dropped from the encode.
+  if ((width & 1u) != 0 || (height & 1u) != 0) {
+    ihs::log::warn(
+        "[EncoderSink] source {}x{} has an odd dimension; encoding {}x{} "
+        "(last column/row dropped)",
+        width, height, width & ~1u, height & ~1u);
+  }
   width_ = width & ~1u;
   height_ = height & ~1u;
   stride_ = width_;

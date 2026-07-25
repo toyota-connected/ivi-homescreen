@@ -153,7 +153,7 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
   ihs::log::warn(
       "[SoftwareBackend] unrecognized sink spec '{}' (valid: none | memory | "
       "file:<pattern> | fbdev[:<device>] | drm-dumb[:<device>] | "
-      "encoder[:file:<path>]); falling back to NoneSink",
+      "encoder:file:<path>); falling back to NoneSink",
       std::string(spec));
   return std::make_unique<NoneSink>();
 }
