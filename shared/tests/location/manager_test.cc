@@ -403,6 +403,50 @@ int main() {
     m.Stop();
   }
 
+  // --- PublishFix stores a whole fix atomically (the built-in source path) ---
+  {
+    Manager m({}, "", "");
+    m.Start();
+    Position pos;
+    Check(!m.Latest(pos), "no fix before any PublishFix");
+
+    Position fix;
+    fix.latitude = 40.0;
+    fix.longitude = -74.0;
+    fix.mode = 3;
+    fix.speed_mps = 5.0;
+    fix.bearing_deg = 90.0;
+    fix.has_bearing = true;
+    fix.sigma_e_m = 2.0;
+    fix.sigma_n_m = 3.0;
+    fix.sigma_v_mps = 1.5;
+    fix.t_monotonic_ns = 123;
+    m.PublishFix(fix);
+    Check(m.Latest(pos) && pos.latitude == 40.0 && pos.longitude == -74.0 &&
+              pos.mode == 3 && pos.speed_mps == 5.0 && pos.has_bearing &&
+              pos.bearing_deg == 90.0 && pos.sigma_e_m == 2.0 &&
+              pos.sigma_n_m == 3.0 && pos.sigma_v_mps == 1.5 &&
+              pos.t_monotonic_ns == 123,
+          "PublishFix stores the whole fix atomically and exactly");
+    Check(m.generation() == 1, "PublishFix bumps generation once");
+
+    Position bad;  // out-of-range latitude
+    bad.latitude = 200.0;
+    bad.longitude = 0.0;
+    bad.mode = 3;
+    m.PublishFix(bad);
+    Check(m.generation() == 1 && m.Latest(pos) && pos.latitude == 40.0,
+          "an invalid PublishFix is dropped, prior fix intact");
+
+    Position nofix;  // mode < 2 is not a fix
+    nofix.latitude = 1.0;
+    nofix.longitude = 2.0;
+    nofix.mode = 1;
+    m.PublishFix(nofix);
+    Check(m.generation() == 1, "a mode<2 PublishFix is dropped");
+    m.Stop();
+  }
+
   if (g_failures == 0) {
     std::printf("manager_test: all %d checks passed\n", g_tests);
   } else {

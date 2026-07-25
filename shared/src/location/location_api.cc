@@ -22,20 +22,22 @@
 #include <string>
 #include <utility>
 
-#include "fallback_location_provider.hpp"
+#include <vector>
+
+#include "fallback_source.hpp"
 #include "geoclue_provider.hpp"
 #include "gpsd_provider.hpp"
 #include "location.hpp"
-
-// The opaque handle simply owns a running provider.
-struct IhsLocationService {
-  std::unique_ptr<ihs::location::ILocationProvider> provider;
-};
+#include "manager.hpp"
 
 namespace {
 
+using ihs::location::IEventSource;
+using ihs::location::Manager;
+using ihs::location::Position;
+
 // gpsd from an optional "host:port" (default 127.0.0.1:2947).
-std::unique_ptr<ihs::location::ILocationProvider> MakeGpsd(const char* config) {
+std::unique_ptr<IEventSource> MakeGpsd(const char* config) {
   std::string host = "127.0.0.1";
   uint16_t port = 2947;
   if (config != nullptr && config[0] != '\0') {
@@ -60,44 +62,62 @@ std::unique_ptr<ihs::location::ILocationProvider> MakeGpsd(const char* config) {
 }
 
 // geoclue with an optional bus address (empty => system bus).
-std::unique_ptr<ihs::location::ILocationProvider> MakeGeoclue(
-    const char* config) {
+std::unique_ptr<IEventSource> MakeGeoclue(const char* config) {
   return std::make_unique<ihs::location::GeoclueProvider>(
       "ihs-location", config != nullptr ? config : "");
 }
 
 }  // namespace
 
+// The opaque handle owns the event source and the Manager it drives: the source
+// pushes each fix to Manager::PublishFix on its worker thread, and the Manager
+// is the ILocationProvider the accessors below read. Declaration order matters
+// for teardown — @source is declared last so it is destroyed first, joining its
+// worker before the Manager it calls into is gone.
+struct IhsLocationService {
+  std::unique_ptr<ihs::location::ILocationProvider> provider;  // the Manager
+  std::unique_ptr<ihs::location::IEventSource> source;
+};
+
 extern "C" {
 
 IhsLocationService* ihs_location_start(IhsLocationSource source,
                                        const char* config) {
-  // No exception may cross this C ABI boundary: provider construction and
-  // Start() (allocations, std::thread) can throw, so translate any failure to
-  // a NULL return.
+  // No exception may cross this C ABI boundary: construction and Start()
+  // (allocations, std::thread) can throw, so translate any failure to a NULL
+  // return.
   try {
-    std::unique_ptr<ihs::location::ILocationProvider> provider;
+    std::unique_ptr<IEventSource> src;
     switch (source) {
       case IHS_LOCATION_GEOCLUE:
-        provider = MakeGeoclue(config);
+        src = MakeGeoclue(config);
         break;
       case IHS_LOCATION_AUTO:
-        provider = std::make_unique<ihs::location::FallbackLocationProvider>(
+        // gpsd primary, geoclue fallback — the same composition as before, now
+        // an event-driven combiner.
+        src = std::make_unique<ihs::location::FallbackSource>(
             MakeGpsd(nullptr), MakeGeoclue(nullptr));
         break;
       case IHS_LOCATION_GPSD:
       default:
-        provider = MakeGpsd(config);
+        src = MakeGpsd(config);
         break;
     }
-    if (!provider) {
+    if (!src) {
       return nullptr;
     }
-    auto service = std::make_unique<IhsLocationService>();
-    service->provider = std::move(provider);
-    if (!service->provider->Start()) {
-      return nullptr;  // could not start at all — don't hand back a dead handle
+    auto manager = std::make_unique<Manager>(std::vector<std::string>{},
+                                             std::string{}, std::string{});
+    Manager* const mgr = manager.get();
+    // Drive the Manager atomically on each fix the source pushes (worker
+    // thread). SetOnFix must precede the source's Start().
+    src->SetOnFix([mgr](const Position& p) { mgr->PublishFix(p); });
+    if (!src->Start()) {
+      return nullptr;  // could not begin acquisition at all
     }
+    auto service = std::make_unique<IhsLocationService>();
+    service->provider = std::move(manager);
+    service->source = std::move(src);
     return service.release();
   } catch (...) {
     return nullptr;
@@ -191,9 +211,13 @@ void ihs_location_stop(IhsLocationService* service) {
   if (service == nullptr) {
     return;
   }
-  // No exception may cross the C ABI; if a provider's Stop() throws, swallow it
-  // and still free the handle.
+  // No exception may cross the C ABI; if a Stop() throws, swallow it and still
+  // free the handle. Stop the source first so its worker is joined (no fix can
+  // reach the Manager afterward), then the Manager.
   try {
+    if (service->source) {
+      service->source->Stop();
+    }
     if (service->provider) {
       service->provider->Stop();
     }
