@@ -280,7 +280,8 @@ class WebRtcSenderConsumer final : public INv12Consumer {
   static constexpr int kEof = -2;
   static int ReadLine(int fd, char* out, int max) {
     int i = 0;
-    while (i < max - 1) {
+    bool overflow = false;
+    for (;;) {
       char c;
       const ssize_t r = read(fd, &c, 1);
       if (r < 0 && errno == EINTR) {
@@ -295,10 +296,16 @@ class WebRtcSenderConsumer final : public INv12Consumer {
       if (c == '\n') {
         break;
       }
-      out[i++] = c;
+      if (i < max - 1) {
+        out[i++] = c;
+      } else {
+        overflow = true;  // keep draining to '\n' so the stream stays framed
+      }
     }
     out[i] = 0;
-    return i;
+    // A line that didn't fit is malformed (headers are short); skip it, but
+    // only after consuming through '\n' above so the next read stays aligned.
+    return overflow ? -1 : i;
   }
   static int ReadN(int fd, char* buf, int n) {
     int got = 0;
@@ -317,9 +324,11 @@ class WebRtcSenderConsumer final : public INv12Consumer {
   void ReaderLoop() {
     char header[128];
     std::unique_ptr<char[]> payload(new char[1 << 16]);
+    // Wake the blocking reads once a second so the running_ flag is observed
+    // even when the peer is idle; set the timeout once rather than per read.
+    const timeval tv = {1, 0};
+    setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     while (running_) {
-      timeval tv = {1, 0};
-      setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
       const int hlen = ReadLine(sock_, header, sizeof header);
       if (hlen == kEof) {
         break;  // peer closed the signaling channel; stop rather than spin
