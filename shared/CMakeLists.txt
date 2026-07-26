@@ -147,6 +147,7 @@ target_sources(ihs_shared PRIVATE
         src/location/geoclue_provider.cc
         src/location/fallback_source.cc
         src/location/file_source.cc
+        src/location/kalman_cv.cc
         src/location/sd_bus_dynamic.cc
 )
 target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
