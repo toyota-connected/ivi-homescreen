@@ -143,6 +143,29 @@ void TestFileThroughKalman() {
   Check(p.mode == 3, "3D source keeps mode 3 through the filter");
 }
 
+void TestFileThroughCtrv() {
+  // The other built-in filter is reachable the same way end to end.
+  const auto path = WriteTrackFixture("ihs_wire_ctrv.jsonl", 15.0, 40, 0.025);
+  Collector c;
+  IhsLocationService* svc = ihs_location_start_filtered(
+      IHS_LOCATION_FILE, path.string().c_str(), "kalman.ctrv", nullptr);
+  Check(svc != nullptr, "start FILE + kalman.ctrv");
+  if (svc == nullptr) {
+    std::filesystem::remove(path);
+    return;
+  }
+  ihs_location_set_callback(svc, &Collector::Thunk, &c);
+  Check(c.WaitFor(30, std::chrono::seconds(5)), "ctrv fixes delivered");
+  ihs_location_stop(svc);
+  std::filesystem::remove(path);
+  if (c.count() > 0) {
+    const IhsPosition p = c.last();
+    Check(std::isfinite(p.latitude) && std::isfinite(p.longitude) &&
+              p.speed_mps > 15.0 * 0.5,
+          "ctrv delivers a finite fix with recovered speed");
+  }
+}
+
 void TestFilePassthrough() {
   // The same source with no filter still delivers fixes (the passthrough path).
   const auto path =
