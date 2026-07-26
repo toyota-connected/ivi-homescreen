@@ -31,6 +31,7 @@
 #include "kalman_cv.hpp"
 #include "location.hpp"
 #include "manager.hpp"
+#include "registry.hpp"
 
 namespace {
 
@@ -80,10 +81,18 @@ std::unique_ptr<IEventSource> MakeFile(const char* config) {
       config, ihs::location::FileSource::Pace::kRealtime, /*loop=*/false);
 }
 
-// Register the built-in filters so a filter_key resolves in the registry. Only
-// "kalman.cv" is built in today; other keys are the caller's to register.
-void RegisterBuiltinFilters() {
-  ihs::location::RegisterKalmanCvFilter();
+// Make the built-in filter named @key available on demand. Only "kalman.cv" is
+// built in; any other key is the caller's to register, so it is left untouched.
+// A key already registered (e.g. a caller's own "kalman.cv") is NOT overwritten
+// — the caller's registration wins.
+void EnsureBuiltinFilter(const std::string& key) {
+  if (key != "kalman.cv") {
+    return;
+  }
+  ihs::location::FilterEntry existing;
+  if (!ihs::location::LookupFilter(key, existing)) {
+    ihs::location::RegisterKalmanCvFilter();
+  }
 }
 
 }  // namespace
@@ -118,9 +127,10 @@ IhsLocationService* ihs_location_start_filtered(IhsLocationSource source,
   try {
     const bool use_filter = filter_key != nullptr && filter_key[0] != '\0';
     if (use_filter) {
-      // Publish the built-in filters so the Manager can bind filter_key. A
-      // key it still cannot resolve degrades to the passthrough inside Manager.
-      RegisterBuiltinFilters();
+      // Make the requested filter available if it is a built-in the caller did
+      // not already register. An unknown key resolves to nothing and degrades
+      // to the passthrough inside Manager.
+      EnsureBuiltinFilter(filter_key);
     }
     // Declare the Manager before the source: the source's worker calls into the
     // Manager, so on any early return or exception after the source starts,
