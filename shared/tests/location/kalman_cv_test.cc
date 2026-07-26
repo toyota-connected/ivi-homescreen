@@ -213,7 +213,7 @@ void TestOutlierRejection() {
   IhsPosition before{};
   ops.estimate(inst, SecToNs(20), &before);
   // One gross outlier ~500 m north (well past the gate).
-  const double bad_lat = kLat0 + 500.0 / 111320.0;
+  const double bad_lat = kLat0 + 500.0 / MetersPerDegLat();
   const IhsMeasurement spike = PosMeas(bad_lat, kLon0, 5.0, SecToNs(21));
   ops.update(inst, &spike);
   IhsPosition after{};
@@ -328,10 +328,30 @@ void TestModePreservedOnReject() {
   ops.destroy(inst);
 }
 
+// Near the poles cos(lat) -> 0, so the meters<->degrees longitude scale (a
+// divisor) must stay bounded or the estimate goes inf/NaN. Feed a high-latitude
+// fix and assert the output stays finite.
+void TestNearPoleFinite() {
+  const IhsLocationFilterOps& ops = KalmanCvFilterOps();
+  void* inst = ops.create(nullptr, nullptr);
+  const double lat = 89.9999;
+  for (int i = 0; i < 3; ++i) {
+    const IhsMeasurement m = PosMeas(lat, 10.0, 5.0, SecToNs(i));
+    ops.update(inst, &m);
+  }
+  IhsPosition out{};
+  Check(ops.estimate(inst, SecToNs(3), &out) == 1, "estimate near the pole");
+  Check(std::isfinite(out.latitude) && std::isfinite(out.longitude) &&
+            std::isfinite(out.sigma_e_m),
+        "near-pole estimate stays finite (bounded longitude scale)");
+  ops.destroy(inst);
+}
+
 }  // namespace
 
 int main() {
   TestSeeding();
+  TestNearPoleFinite();
   TestBeatsRawStraight();
   TestVelocityRecovery();
   TestPredictionForward();
