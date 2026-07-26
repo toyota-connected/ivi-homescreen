@@ -43,7 +43,7 @@
 #include <string_view>
 #include <thread>
 
-#include "backend/software/encoder_sink.h"
+#include "backend/software/nv12_consumer.h"
 #include "logging/logging.h"
 
 // The fork's flat C ABI (headers via LIBWEBRTC_DIR/include, .so linked by the
