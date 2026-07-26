@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -38,14 +39,23 @@ class INv12Consumer {
   // follows at offset stride*height. Returns false to disable the sink.
   virtual bool Configure(uint32_t width, uint32_t height, uint32_t stride) = 0;
 
-  // Hand off one packed NV12 frame. `dmabuf_fd` is the single fd the encoder
+  // Hand off one packed NV12 frame. `dmabuf_fd` is the single fd an encoder
   // imports zero-copy; `nv12` maps the same bytes for a CPU-side consumer.
-  // Runs on Flutter's rasterizer thread and must consume synchronously (the
-  // buffer is reused on the next present).
-  virtual void OnFrame(int dmabuf_fd,
+  // Called on Flutter's rasterizer thread.
+  //
+  // The frame lives in one slot of the sink's ring. A consumer that FINISHES
+  // with it before returning (a synchronous encode) returns false, and the sink
+  // reclaims the slot immediately. A consumer that HOLDS it past the call (an
+  // asynchronous encode -- e.g. a WebRTC send whose encoder runs on its own
+  // thread) returns true, takes the release obligation, and MUST call
+  // `release(release_ctx)` exactly once when done -- from any thread. Until it
+  // does, that slot is not reused, so the buffer it points at stays valid.
+  virtual bool OnFrame(int dmabuf_fd,
                        const uint8_t* nv12,
                        uint64_t timestamp_us,
-                       bool force_keyframe) = 0;
+                       bool force_keyframe,
+                       void (*release)(void*),
+                       void* release_ctx) = 0;
 };
 
 // Build a consumer from the part of the sink spec after "encoder:". Today:
@@ -54,8 +64,11 @@ class INv12Consumer {
 std::unique_ptr<INv12Consumer> MakeNv12Consumer(std::string_view spec);
 
 // Software-backend sink that converts each premultiplied-BGRA present to NV12
-// in one dma-buf and hands it to an INv12Consumer. No networking or encoder
-// dependency lives here -- that is all behind INv12Consumer.
+// in a dma-buf and hands it to an INv12Consumer. No networking or encoder
+// dependency lives here -- that is all behind INv12Consumer. Frames are packed
+// into a small ring of dma-bufs so an asynchronous consumer can still be
+// encoding one frame while the next present is packed; when the ring is full
+// the present is dropped (latency over a growing queue).
 class EncoderSink final : public ISurfaceSink {
  public:
   explicit EncoderSink(std::unique_ptr<INv12Consumer> consumer);
@@ -67,19 +80,42 @@ class EncoderSink final : public ISurfaceSink {
   void OnSize(uint32_t width, uint32_t height) override;
 
  private:
-  // (Re)allocate the NV12 dma-buf for `width`x`height`. Returns false on
+  static constexpr uint32_t kRingSize = 4;
+
+  // (Re)allocate the dma-buf ring for `width`x`height`. Returns false on
   // failure (the sink then drops frames).
   bool EnsureBuffer(uint32_t width, uint32_t height);
   void ReleaseBuffer();
+  // Return a ring slot to the free pool. Thread-safe: an async consumer's
+  // release fires from its own (encode) thread. The trampoline is what a
+  // consumer receives as its release callback.
+  void ReleaseSlot(uint32_t index);
+  static void ReleaseSlotTrampoline(void* ctx);
 
   std::unique_ptr<INv12Consumer> consumer_;
-  int dmabuf_fd_{-1};
-  uint8_t* map_{nullptr};
-  size_t map_size_{0};
+
+  // One NV12 dma-buf. `in_flight` is set while a consumer holds the frame.
+  struct Slot {
+    int fd{-1};
+    uint8_t* map{nullptr};
+    bool in_flight{false};
+  };
+  // Stable per-slot cookie handed to the consumer as release_ctx.
+  struct SlotRef {
+    EncoderSink* sink;
+    uint32_t index;
+  };
+  Slot ring_[kRingSize];
+  SlotRef slot_ref_[kRingSize];
+  std::mutex
+      ring_mu_;  // guards Slot::in_flight across the rasterizer + release
+
+  size_t slot_size_{0};
   uint32_t width_{0};
   uint32_t height_{0};
   uint32_t stride_{0};
   uint64_t frame_index_{0};
+  uint64_t dropped_{0};
   bool ready_{false};
   // Authoritative render width from OnSize. Kept separate from width_ (which
   // EnsureBuffer mutates to the allocated buffer's width) so a transient short
