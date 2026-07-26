@@ -227,12 +227,13 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     }
     return true;
   }
-  // write() may complete partially on a TCP socket; a short write here would
+  // send() may complete partially on a TCP socket; a short write here would
   // desync the length-framed protocol, so loop until all bytes are sent.
+  // MSG_NOSIGNAL: a peer disconnect must not raise SIGPIPE and kill the shell.
   static bool WriteAll(int fd, const char* buf, size_t n) {
     size_t sent = 0;
     while (sent < n) {
-      const ssize_t r = write(fd, buf + sent, n - sent);
+      const ssize_t r = send(fd, buf + sent, n - sent, MSG_NOSIGNAL);
       if (r <= 0) {
         return false;
       }
@@ -241,7 +242,12 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     return true;
   }
   void SendFramed(const char* header, const char* payload, int len) {
+    // send_mu_ also serializes with Stop() closing sock_, so the fd can't be
+    // closed under us and sock_ is read consistently.
     std::lock_guard<std::mutex> lock(send_mu_);
+    if (sock_ < 0) {
+      return;
+    }
     if (!WriteAll(sock_, header, std::strlen(header))) {
       return;
     }
@@ -352,9 +358,14 @@ class WebRtcSenderConsumer final : public INv12Consumer {
       lw_terminate();
       lw_initialized_ = false;
     }
-    if (sock_ >= 0) {
-      close(sock_);
-      sock_ = -1;
+    // Close the socket under send_mu_ so it cannot race a SendFramed() call
+    // that a signaling-thread observer callback may still be making.
+    {
+      std::lock_guard<std::mutex> lock(send_mu_);
+      if (sock_ >= 0) {
+        close(sock_);
+        sock_ = -1;
+      }
     }
   }
 
