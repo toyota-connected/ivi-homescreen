@@ -188,6 +188,19 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
   if (ready_ && even_w == width_ && even_h == height_) {
     return true;
   }
+  // A geometry change must not free a slot an async consumer still holds --
+  // unmapping/closing it mid-encode would invalidate the fd/mapping in use and
+  // race the later release. Defer the realloc (drop this frame) until every
+  // in-flight slot has been released; the encoder drains them within a few
+  // frames. (The dtor is safe already: it destroys the consumer first.)
+  {
+    std::lock_guard<std::mutex> lock(ring_mu_);
+    for (const auto& slot : ring_) {
+      if (slot.in_flight) {
+        return false;
+      }
+    }
+  }
   ReleaseBuffer();
   if ((width & 1u) != 0 || (height & 1u) != 0) {
     ihs::log::warn(
