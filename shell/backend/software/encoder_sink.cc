@@ -199,7 +199,8 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
       nullptr, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED, dmabuf_fd_, 0));
   if (map_ == MAP_FAILED) {
     map_ = nullptr;
-    ihs::log::warn("[EncoderSink] mmap of NV12 dma-buf failed");
+    ihs::log::warn("[EncoderSink] mmap of NV12 dma-buf failed: {}",
+                   std::strerror(errno));
     ReleaseBuffer();
     return false;
   }
