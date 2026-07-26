@@ -209,7 +209,9 @@ void TestFileLoop() {
   // A 5-fix capture with "?loop" (and "fast" so the passes fly): more than 5
   // fixes arrive, proving it restarted at EOF.
   const auto path = WriteTrackFixture("ihs_wire_loop.jsonl", 5.0, 5, 0.02);
-  const std::string spec = path.string() + "?loop,fast";
+  // '&' separator here (TestFileFastPacing uses ',') so both documented
+  // separators are exercised.
+  const std::string spec = path.string() + "?loop&fast";
   Collector c;
   IhsLocationService* svc = ihs_location_start(IHS_LOCATION_FILE, spec.c_str());
   Check(svc != nullptr, "start FILE ?loop");
