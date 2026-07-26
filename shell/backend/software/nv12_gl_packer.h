@@ -96,6 +96,7 @@ class Nv12GlPacker {
   GLuint program_{0};
   GLuint vbo_{0};
   GLuint vao_{0};
+  uint64_t last_push_us_{0};  // last submitted frame, for the push-rate cap
   GLint u_src_{-1};
   GLint u_w_{-1};
   GLint u_h_{-1};

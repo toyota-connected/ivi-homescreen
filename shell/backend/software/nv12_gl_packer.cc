@@ -23,6 +23,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <cstring>
 
 #include "logging/logging.h"
@@ -242,6 +243,21 @@ void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
                                  bool force_keyframe) {
   if (!ready_) {
     return;
+  }
+  // Cap the push rate. The engine renders headless with no vsync (~60fps on a
+  // Pi 4), but a WebRTC send encodes asynchronously and drops every frame when
+  // fed that fast -- capping to a sane video rate is what lets frames through.
+  // Default 30fps; IVI_ENC_MAX_FPS overrides (0 = uncapped).
+  static const char* max_fps_env = std::getenv("IVI_ENC_MAX_FPS");
+  static const int max_fps =
+      max_fps_env != nullptr ? std::atoi(max_fps_env) : 30;
+  if (max_fps > 0) {
+    const uint64_t min_interval = 1000000ULL / static_cast<uint64_t>(max_fps);
+    if (last_push_us_ != 0 && timestamp_us > last_push_us_ &&
+        timestamp_us - last_push_us_ < min_interval) {
+      return;  // arrived too soon; drop to hold the target rate
+    }
+    last_push_us_ = timestamp_us;
   }
   uint32_t idx = kRingSize;
   {
