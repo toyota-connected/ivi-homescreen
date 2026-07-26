@@ -126,7 +126,9 @@ class FileEncoderConsumer final : public INv12Consumer {
     bool keyframe = false;
     if (!encoder_->EncodeDmabuf(fds, offsets, strides, 2, timestamp_us,
                                 force_keyframe, &au_, &keyframe)) {
-      ihs::log::warn("[EncoderSink/file] encode failed at frame {}", frames_);
+      ihs::log::warn(
+          "[EncoderSink/file] encode failed ({} frames written so far)",
+          frames_);
       return;
     }
     if (!au_.empty()) {
