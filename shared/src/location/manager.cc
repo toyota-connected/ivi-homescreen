@@ -82,6 +82,21 @@ void Manager::SubmitPositionFix(const Position& fix) {
   if (!fix.valid() || !ValidLatLon(fix.latitude, fix.longitude)) {
     return;  // not a usable fix (OnMeasurement validates too)
   }
+  // With no filter actually bound (a missing or create-failed filter_key),
+  // behave exactly like the unfiltered path: store the whole fix, preserving
+  // the source's speed/heading rather than dropping them by decomposing to a
+  // position-only measurement. filter_instance_ is set at Start() before any
+  // source pushes and cleared at Shutdown() after they stop, so it is stable
+  // here; read it under the lock for good measure.
+  bool has_filter = false;
+  {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    has_filter = filter_instance_ != nullptr;
+  }
+  if (!has_filter) {
+    PublishFix(fix);
+    return;
+  }
   IhsMeasurement m{};
   m.struct_size = sizeof(m);
   m.kind = IHS_MEAS_POSITION_LLA;

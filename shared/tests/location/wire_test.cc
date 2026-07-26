@@ -163,14 +163,25 @@ void TestBadPathAndKeys() {
   Check(svc == nullptr, "missing file fails start");
 
   // An unknown filter key degrades to the passthrough rather than failing (the
-  // file still opens), so the start succeeds.
-  const auto path = WriteTrackFixture("ihs_wire_badkey.jsonl", 5.0, 5, 0.01);
+  // file still opens), so the start succeeds — and the degrade is identical to
+  // the unfiltered path, preserving the source's reported speed (5 m/s) rather
+  // than dropping it by decomposing to a position-only measurement.
+  const double v_e = 5.0;
+  const auto path = WriteTrackFixture("ihs_wire_badkey.jsonl", v_e, 20, 0.02);
+  Collector c;
   IhsLocationService* svc2 = ihs_location_start_filtered(
       IHS_LOCATION_FILE, path.string().c_str(), "no.such.filter", nullptr);
   Check(svc2 != nullptr,
         "unknown filter key still starts (degrades to passthrough)");
   if (svc2 != nullptr) {
+    ihs_location_set_callback(svc2, &Collector::Thunk, &c);
+    Check(c.WaitFor(10, std::chrono::seconds(5)),
+          "degraded path delivers fixes");
     ihs_location_stop(svc2);
+    if (c.count() > 0) {
+      Check(std::abs(c.last().speed_mps - v_e) < 0.5,
+            "degrade-to-passthrough preserves the source speed (not dropped)");
+    }
   }
   std::filesystem::remove(path);
 }

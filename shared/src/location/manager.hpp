@@ -71,12 +71,13 @@ class Manager : public ILocationProvider {
   void PublishFix(const Position& fix);
 
   // Submit a whole fix from an event source (gpsd/geoclue/file) into the
-  // MEASUREMENT path: it is decomposed to a single POSITION measurement so a
-  // configured filter processes it (and, with no filter, folds through the
-  // passthrough just like PublishFix). This is the path used when the service
-  // is started with a filter; PublishFix remains the raw atomic store for the
-  // unfiltered path, where it also preserves the source's speed/heading that a
-  // position-only filter would otherwise re-estimate. Thread-safe; typically
+  // filter. When a filter is bound it is decomposed to a single POSITION
+  // measurement so the filter processes it. When no filter is bound (a missing
+  // or failed filter_key), this defers to PublishFix, so the "degrade to
+  // passthrough" behavior is identical to the unfiltered path — including
+  // preserving the source's speed/heading, which a position-only filter would
+  // re-estimate and a position-only measurement would drop. This is the path
+  // used when the service is started with a filter. Thread-safe; typically
   // called from the source's acquisition thread.
   void SubmitPositionFix(const Position& fix);
 
