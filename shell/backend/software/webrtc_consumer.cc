@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -238,6 +239,9 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     size_t sent = 0;
     while (sent < n) {
       const ssize_t r = send(fd, buf + sent, n - sent, MSG_NOSIGNAL);
+      if (r < 0 && errno == EINTR) {
+        continue;  // interrupted by a signal before sending; retry
+      }
       if (r <= 0) {
         return false;
       }
@@ -268,6 +272,9 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     while (i < max - 1) {
       char c;
       const ssize_t r = read(fd, &c, 1);
+      if (r < 0 && errno == EINTR) {
+        continue;  // interrupted by a signal; retry the read
+      }
       if (r == 0) {
         return kEof;
       }
@@ -285,11 +292,14 @@ class WebRtcSenderConsumer final : public INv12Consumer {
   static int ReadN(int fd, char* buf, int n) {
     int got = 0;
     while (got < n) {
-      const int r = read(fd, buf + got, n - got);
+      const ssize_t r = read(fd, buf + got, n - got);
+      if (r < 0 && errno == EINTR) {
+        continue;  // interrupted by a signal; retry the read
+      }
       if (r <= 0) {
         return -1;
       }
-      got += r;
+      got += static_cast<int>(r);
     }
     return got;
   }
