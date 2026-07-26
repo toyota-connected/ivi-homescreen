@@ -25,10 +25,13 @@
 #include <vector>
 
 #include "fallback_source.hpp"
+#include "file_source.hpp"
 #include "geoclue_provider.hpp"
 #include "gpsd_provider.hpp"
+#include "kalman_cv.hpp"
 #include "location.hpp"
 #include "manager.hpp"
+#include "registry.hpp"
 
 namespace {
 
@@ -67,6 +70,31 @@ std::unique_ptr<IEventSource> MakeGeoclue(const char* config) {
       "ihs-location", config != nullptr ? config : "");
 }
 
+// gnss.file replay from @config = a captured gpsd JSON path. Replays at the
+// recorded cadence, so a consumer is driven like a live receiver. NULL/empty
+// path yields no source (a NULL return fails ihs_location_start).
+std::unique_ptr<IEventSource> MakeFile(const char* config) {
+  if (config == nullptr || config[0] == '\0') {
+    return nullptr;
+  }
+  return std::make_unique<ihs::location::FileSource>(
+      config, ihs::location::FileSource::Pace::kRealtime, /*loop=*/false);
+}
+
+// Make the built-in filter named @key available on demand. Only "kalman.cv" is
+// built in; any other key is the caller's to register, so it is left untouched.
+// A key already registered (e.g. a caller's own "kalman.cv") is NOT overwritten
+// — the caller's registration wins.
+void EnsureBuiltinFilter(const std::string& key) {
+  if (key != "kalman.cv") {
+    return;
+  }
+  ihs::location::FilterEntry existing;
+  if (!ihs::location::LookupFilter(key, existing)) {
+    ihs::location::RegisterKalmanCvFilter();
+  }
+}
+
 }  // namespace
 
 // The opaque handle owns the event source and the Manager it drives: the source
@@ -86,20 +114,39 @@ extern "C" {
 
 IhsLocationService* ihs_location_start(IhsLocationSource source,
                                        const char* config) {
+  return ihs_location_start_filtered(source, config, nullptr, nullptr);
+}
+
+IhsLocationService* ihs_location_start_filtered(IhsLocationSource source,
+                                                const char* config,
+                                                const char* filter_key,
+                                                const char* filter_config) {
   // No exception may cross this C ABI boundary: construction and Start()
   // (allocations, std::thread) can throw, so translate any failure to a NULL
   // return.
   try {
+    const bool use_filter = filter_key != nullptr && filter_key[0] != '\0';
+    if (use_filter) {
+      // Make the requested filter available if it is a built-in the caller did
+      // not already register. An unknown key resolves to nothing and degrades
+      // to the passthrough inside Manager.
+      EnsureBuiltinFilter(filter_key);
+    }
     // Declare the Manager before the source: the source's worker calls into the
-    // Manager (Manager::PublishFix), so on any early return or exception after
-    // the source starts, reverse-order destruction must tear down the source
-    // first (joining its worker) and only then the Manager it points at.
-    auto manager = std::make_unique<Manager>(std::vector<std::string>{},
-                                             std::string{}, std::string{});
+    // Manager, so on any early return or exception after the source starts,
+    // reverse-order destruction must tear down the source first (joining its
+    // worker) and only then the Manager it points at.
+    auto manager = std::make_unique<Manager>(
+        std::vector<std::string>{},
+        use_filter ? std::string(filter_key) : std::string{},
+        filter_config != nullptr ? std::string(filter_config) : std::string{});
     std::unique_ptr<IEventSource> src;
     switch (source) {
       case IHS_LOCATION_GEOCLUE:
         src = MakeGeoclue(config);
+        break;
+      case IHS_LOCATION_FILE:
+        src = MakeFile(config);
         break;
       case IHS_LOCATION_AUTO:
         // gpsd primary, geoclue fallback — the same composition as before, now
@@ -116,9 +163,16 @@ IhsLocationService* ihs_location_start(IhsLocationSource source,
       return nullptr;
     }
     Manager* const mgr = manager.get();
-    // Drive the Manager atomically on each fix the source pushes (worker
-    // thread). SetOnFix must precede the source's Start().
-    src->SetOnFix([mgr](const Position& p) { mgr->PublishFix(p); });
+    // Drive the Manager on each fix the source pushes (worker thread).
+    // SetOnFix must precede the source's Start(). With a filter, route the fix
+    // through the measurement path so the filter processes it; without one,
+    // PublishFix stores the whole fix atomically (and keeps the source's
+    // speed/heading a position-only filter would otherwise re-estimate).
+    if (use_filter) {
+      src->SetOnFix([mgr](const Position& p) { mgr->SubmitPositionFix(p); });
+    } else {
+      src->SetOnFix([mgr](const Position& p) { mgr->PublishFix(p); });
+    }
     // Arm the Manager before the source begins pushing, honoring the
     // Start()/Stop() lifecycle (ihs_location_stop calls Stop()).
     if (!manager->Start()) {

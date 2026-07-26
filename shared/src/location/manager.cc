@@ -78,6 +78,45 @@ void Manager::PublishFix(const Position& fix) {
   }
 }
 
+void Manager::SubmitPositionFix(const Position& fix) {
+  if (!fix.valid() || !ValidLatLon(fix.latitude, fix.longitude)) {
+    return;  // not a usable fix (OnMeasurement validates too)
+  }
+  // With no filter actually bound (a missing or create-failed filter_key),
+  // behave exactly like the unfiltered path: store the whole fix, preserving
+  // the source's speed/heading rather than dropping them by decomposing to a
+  // position-only measurement. filter_instance_ is set at Start() before any
+  // source pushes and cleared at Shutdown() after they stop, so it is stable
+  // here; read it under the lock for good measure.
+  bool has_filter = false;
+  {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    has_filter = filter_instance_ != nullptr;
+  }
+  if (!has_filter) {
+    PublishFix(fix);
+    return;
+  }
+  IhsMeasurement m{};
+  m.struct_size = sizeof(m);
+  m.kind = IHS_MEAS_POSITION_LLA;
+  m.t_monotonic_ns = fix.t_monotonic_ns;
+  // Carry the source's 2D/3D mode through value_count. A position-only filter
+  // (kalman.cv) ignores the altitude slot, but the reported mode should not be
+  // downgraded, so the altitude component is present (value 0) only to mark a
+  // 3D fix.
+  m.value_count = fix.mode >= 3 ? 3 : 2;
+  m.value[0] = fix.latitude;
+  m.value[1] = fix.longitude;
+  m.value[2] = 0.0;
+  // Service convention: variance[0] = east, variance[1] = north (a < 0 sigma is
+  // "unknown", left as the -1 sentinel for the filter/passthrough to handle).
+  m.variance[0] = fix.sigma_e_m >= 0.0 ? fix.sigma_e_m * fix.sigma_e_m : -1.0;
+  m.variance[1] = fix.sigma_n_m >= 0.0 ? fix.sigma_n_m * fix.sigma_n_m : -1.0;
+  m.variance[2] = -1.0;
+  OnMeasurement(m);
+}
+
 void Manager::SetFixNotify(std::function<void()> notify) {
   const std::lock_guard<std::mutex> lock(mutex_);
   fix_notify_ = std::move(notify);

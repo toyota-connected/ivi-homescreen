@@ -111,3 +111,21 @@ target_compile_options(file_source_test PRIVATE -Wall -Wextra)
 target_link_libraries(file_source_test PRIVATE Threads::Threads)
 
 add_test(NAME file_source COMMAND file_source_test)
+
+# End-to-end wiring: ihs_location_start_filtered() over the whole location
+# subsystem (the real C ABI in location_api.cc), replaying a gnss.file through
+# kalman.cv and delivering fixes via the push callback. Links libdl for the
+# geoclue/sd-bus runtime dlopen (compiled in even though this test drives the
+# file source).
+add_executable(wire_test wire_test.cc
+        ${_loc_src}/location_api.cc ${_loc_src}/manager.cc
+        ${_loc_src}/registry.cc ${_loc_src}/kalman_cv.cc
+        ${_loc_src}/file_source.cc ${_loc_src}/gpsd_provider.cc
+        ${_loc_src}/geoclue_provider.cc ${_loc_src}/fallback_source.cc
+        ${_loc_src}/sd_bus_dynamic.cc)
+target_include_directories(wire_test PRIVATE
+        ${_loc_src} ${_loc_inc} ${CMAKE_CURRENT_BINARY_DIR}/gen)
+target_compile_options(wire_test PRIVATE -Wall -Wextra)
+target_link_libraries(wire_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+
+add_test(NAME wire COMMAND wire_test)

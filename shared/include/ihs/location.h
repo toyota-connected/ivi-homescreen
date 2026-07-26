@@ -68,6 +68,7 @@ typedef enum IhsLocationSource {
   IHS_LOCATION_GPSD = 0,    /* gpsd JSON socket */
   IHS_LOCATION_GEOCLUE = 1, /* geoclue over D-Bus */
   IHS_LOCATION_AUTO = 2,    /* gpsd primary, geoclue fallback */
+  IHS_LOCATION_FILE = 3, /* replay a captured gpsd JSON file (@config=path) */
 } IhsLocationSource;
 
 /* Opaque handle to a running location service. */
@@ -77,13 +78,38 @@ typedef struct IhsLocationService IhsLocationService;
  * Start acquiring from @source. @config is an optional backend hint (may be
  * NULL): for gpsd, a numeric IPv4 "host:port" (default 127.0.0.1:2947 — host
  * names are not resolved); for geoclue, a D-Bus address, or the literal "user"
- * to use the session bus (default the system bus); ignored for
- * IHS_LOCATION_AUTO. Returns NULL on failure — a backend with no fix yet (or
- * that is not present) still returns a handle and simply reports no fix until
- * one arrives.
+ * to use the session bus (default the system bus); for IHS_LOCATION_FILE, the
+ * path to a captured gpsd JSON stream (as `gpspipe -w` writes) replayed at its
+ * recorded cadence; ignored for IHS_LOCATION_AUTO. Returns NULL on failure — a
+ * backend with no fix yet (or that is not present) still returns a handle and
+ * simply reports no fix until one arrives.
+ *
+ * Equivalent to ihs_location_start_filtered(source, config, NULL, NULL): the
+ * fix is reported as received (no smoothing).
  */
 IHS_EXPORT IhsLocationService* ihs_location_start(IhsLocationSource source,
                                                   const char* config);
+
+/*
+ * Start acquiring from @source (see ihs_location_start) but fuse the fixes
+ * through a registered filter before reporting them. @filter_key selects the
+ * filter — "kalman.cv" is the built-in constant-velocity Kalman filter, which
+ * smooths a noisy source, interpolates a fresh position between fixes when
+ * polled at UI rate, and coasts through a brief outage; NULL or "" means no
+ * filter (identical to ihs_location_start). @filter_config is an optional
+ * filter tuning string (may be NULL); for kalman.cv, "q=<value>" sets the
+ * process-noise density.
+ *
+ * An unrecognized @filter_key (or a filter that fails to initialize) degrades
+ * to no filter rather than failing the service, so a non-NULL return does NOT
+ * guarantee the named filter is active — it only guarantees a running source.
+ * Returns NULL only when the source itself cannot start (e.g. a missing file).
+ */
+IHS_EXPORT IhsLocationService* ihs_location_start_filtered(
+    IhsLocationSource source,
+    const char* config,
+    const char* filter_key,
+    const char* filter_config);
 
 /*
  * Copy the most recent fix into @out, filling only the original six fields
