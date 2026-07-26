@@ -28,6 +28,7 @@
 #include "file_source.hpp"
 #include "geoclue_provider.hpp"
 #include "gpsd_provider.hpp"
+#include "kalman_ctrv.hpp"
 #include "kalman_cv.hpp"
 #include "location.hpp"
 #include "manager.hpp"
@@ -81,17 +82,24 @@ std::unique_ptr<IEventSource> MakeFile(const char* config) {
       config, ihs::location::FileSource::Pace::kRealtime, /*loop=*/false);
 }
 
-// Make the built-in filter named @key available on demand. Only "kalman.cv" is
-// built in; any other key is the caller's to register, so it is left untouched.
-// A key already registered (e.g. a caller's own "kalman.cv") is NOT overwritten
-// — the caller's registration wins.
+// Make the built-in filter named @key available on demand. "kalman.cv" and
+// "kalman.ctrv" are built in; any other key is the caller's to register, so it
+// is left untouched. A key already registered (e.g. a caller's own "kalman.cv")
+// is NOT overwritten — the caller's registration wins.
 void EnsureBuiltinFilter(const std::string& key) {
-  if (key != "kalman.cv") {
+  const bool is_cv = key == "kalman.cv";
+  const bool is_ctrv = key == "kalman.ctrv";
+  if (!is_cv && !is_ctrv) {
     return;
   }
   ihs::location::FilterEntry existing;
-  if (!ihs::location::LookupFilter(key, existing)) {
+  if (ihs::location::LookupFilter(key, existing)) {
+    return;  // a caller already registered this key
+  }
+  if (is_cv) {
     ihs::location::RegisterKalmanCvFilter();
+  } else {
+    ihs::location::RegisterKalmanCtrvFilter();
   }
 }
 
