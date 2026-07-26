@@ -42,7 +42,13 @@ constexpr double kReanchorMeters = 10000.0;
 constexpr double kMinSpeedForBearing = 0.5;
 
 double MetersPerDegLon(double lat_deg) {
-  return kMetersPerDegLat * std::cos(lat_deg * kPi / 180.0);
+  // cos -> 0 at the poles, and this scale is a divisor in the meters->degrees
+  // conversions (Estimate / ReanchorIfFar), so clamp to a small positive floor:
+  // an unclamped value would produce inf/NaN or wild longitude jumps for an
+  // otherwise-valid high latitude.
+  constexpr double kMinMetersPerDegLon = 1.0;
+  const double scale = kMetersPerDegLat * std::cos(lat_deg * kPi / 180.0);
+  return scale > kMinMetersPerDegLon ? scale : kMinMetersPerDegLon;
 }
 
 // A measurement variance is usable only if finite and non-negative; a negative
