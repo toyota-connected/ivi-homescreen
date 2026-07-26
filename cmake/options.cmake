@@ -174,6 +174,29 @@ if (BUILD_BACKEND_SOFTWARE)
                 "BUILD_SOFTWARE_INPUT_LIBINPUT=ON but pkg-config could not "
                 "find libinput / libudev / xkbcommon")
     endif ()
+    # Optional encoder sink: pack each present to NV12 and drive the V4L2
+    # hardware H.264 encoder (from the v4l2-webrtc-codec repo, webrtc-free).
+    # Off by default; a target-only feature (needs a V4L2 M2M encoder node).
+    # V4L2WC_DIR points at the v4l2-webrtc-codec checkout that supplies the
+    # encoder sources; defaults to a sibling of this repo.
+    option(BUILD_SOFTWARE_SINK_ENCODER
+            "Build the V4L2 hardware-encoder sink for the software backend"
+            OFF)
+    if (BUILD_SOFTWARE_SINK_ENCODER)
+        set(V4L2WC_DIR "${CMAKE_SOURCE_DIR}/../v4l2-webrtc-codec"
+                CACHE PATH "Path to the v4l2-webrtc-codec checkout")
+        # Verify every V4L2WC source the shell compiles (encoder + its logger),
+        # so a partial checkout / layout change fails here with a clear message
+        # rather than midway through the build.
+        foreach (_v4l2wc_src src/v4l2_m2m_encoder.cc src/log.cc)
+            if (NOT EXISTS "${V4L2WC_DIR}/${_v4l2wc_src}")
+                message(FATAL_ERROR
+                        "BUILD_SOFTWARE_SINK_ENCODER=ON but the v4l2-webrtc-codec "
+                        "source '${_v4l2wc_src}' was not found at "
+                        "V4L2WC_DIR='${V4L2WC_DIR}' (set -DV4L2WC_DIR=<path>)")
+            endif ()
+        endforeach ()
+    endif ()
 endif ()
 
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)

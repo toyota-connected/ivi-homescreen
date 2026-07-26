@@ -40,6 +40,10 @@
 #include "backend/software/fbdev_sink.h"
 #endif
 
+#if BUILD_SOFTWARE_SINK_ENCODER
+#include "backend/software/encoder_sink.h"
+#endif
+
 std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
     const std::string_view spec,
     const std::string_view drm_device_hint) {
@@ -119,10 +123,45 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
 #endif
   }
 
+  // encoder[:<consumer-spec>]  — pack each present to NV12 and hand it to a
+  // consumer (today: file:<path> to the V4L2 hardware encoder).
+  constexpr std::string_view kEncoderPrefix = "encoder:";
+  if (spec == "encoder" || spec.rfind(kEncoderPrefix, 0) == 0) {
+#if BUILD_SOFTWARE_SINK_ENCODER
+    const std::string_view consumer_spec =
+        spec == "encoder" ? std::string_view{}
+                          : spec.substr(kEncoderPrefix.size());
+    if (consumer_spec.empty()) {
+      // "encoder" / "encoder:" with no consumer. Emit one explicit message
+      // rather than letting MakeNv12Consumer warn and then warning again.
+      ihs::log::warn(
+          "[SoftwareBackend] encoder sink needs a consumer (e.g. "
+          "encoder:file:<path>); falling back to NoneSink");
+      return std::make_unique<NoneSink>();
+    }
+    auto consumer = MakeNv12Consumer(consumer_spec);
+    if (consumer) {
+      ihs::log::info("[SoftwareBackend] sink: encoder (consumer='{}')",
+                     std::string(consumer_spec));
+      return std::make_unique<EncoderSink>(std::move(consumer));
+    }
+    ihs::log::warn(
+        "[SoftwareBackend] encoder sink consumer '{}' failed; falling back to "
+        "NoneSink",
+        std::string(consumer_spec));
+    return std::make_unique<NoneSink>();
+#else
+    ihs::log::warn(
+        "[SoftwareBackend] encoder sink requested but compiled without "
+        "BUILD_SOFTWARE_SINK_ENCODER; falling back to NoneSink");
+    return std::make_unique<NoneSink>();
+#endif
+  }
+
   ihs::log::warn(
       "[SoftwareBackend] unrecognized sink spec '{}' (valid: none | memory | "
-      "file:<pattern> | fbdev[:<device>] | drm-dumb[:<device>]); falling "
-      "back to NoneSink",
+      "file:<pattern> | fbdev[:<device>] | drm-dumb[:<device>] | "
+      "encoder:file:<path>); falling back to NoneSink",
       std::string(spec));
   return std::make_unique<NoneSink>();
 }
