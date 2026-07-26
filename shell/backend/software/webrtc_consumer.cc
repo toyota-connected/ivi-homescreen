@@ -97,12 +97,13 @@ class WebRtcSenderConsumer final : public INv12Consumer {
       return false;
     }
 
-    LwPcObserver obs;
-    std::memset(&obs, 0, sizeof obs);
-    obs.size = sizeof obs;
-    obs.on_ice_candidate = &OnIceCandidate;
-    obs.on_ice_connection_state = &OnIceState;
-    lw_pc_set_observer(pc_, &obs, this);
+    // obs_ is a member, not a local: even though the C ABI copies the struct,
+    // keeping it alive for the session removes any dependency on that copy.
+    std::memset(&obs_, 0, sizeof obs_);
+    obs_.size = sizeof obs_;
+    obs_.on_ice_candidate = &OnIceCandidate;
+    obs_.on_ice_connection_state = &OnIceState;
+    lw_pc_set_observer(pc_, &obs_, this);
 
     source_ = lw_factory_create_video_source(factory_, "ivi-homescreen");
     track_ = lw_factory_create_video_track(factory_, source_, "v0");
@@ -410,6 +411,7 @@ class WebRtcSenderConsumer final : public INv12Consumer {
   lw_pc_t* pc_{nullptr};
   lw_video_source_t* source_{nullptr};
   lw_video_track_t* track_{nullptr};
+  LwPcObserver obs_{};  // outlives the lw_pc_set_observer registration on pc_
 
   uint32_t width_{0};
   uint32_t height_{0};
