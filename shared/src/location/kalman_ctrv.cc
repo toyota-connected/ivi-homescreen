@@ -310,10 +310,13 @@ class KalmanCtrv {
     // Service convention: variance[0] = east, variance[1] = north.
     const double var_e = FiniteVarianceOr(m.variance[0], kDefaultPosVar);
     const double var_n = FiniteVarianceOr(m.variance[1], kDefaultPosVar);
-    last_mode_ = m.value_count >= 3 ? 3 : 2;
+    // mode describes the last ACCEPTED fix, so it is set only on seed/reset and
+    // on acceptance below — never for a rejected or out-of-order measurement.
+    const int mode = m.value_count >= 3 ? 3 : 2;
 
     if (!have_state_) {
       Seed(lat, lon, var_e, var_n, m.t_monotonic_ns);
+      last_mode_ = mode;
       return;
     }
     const double dt = SecondsSince(m.t_monotonic_ns);
@@ -346,10 +349,12 @@ class KalmanCtrv {
     if (nis > kChi2Gate2Dof) {
       if (++consecutive_rejects_ >= kMaxConsecutiveRejects) {
         Seed(lat, lon, var_e, var_n, m.t_monotonic_ns);
+        last_mode_ = mode;  // reset adopts the measurement
       }
       return;
     }
     consecutive_rejects_ = 0;
+    last_mode_ = mode;  // measurement accepted
 
     // K = P H^T S^-1 (P H^T is the first two columns of P).
     std::array<std::array<double, 2>, 5> k{};

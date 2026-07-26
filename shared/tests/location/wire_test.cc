@@ -218,6 +218,7 @@ void TestBadPathAndKeys() {
 
 int main() {
   TestFileThroughKalman();
+  TestFileThroughCtrv();
   TestFilePassthrough();
   TestBadPathAndKeys();
 
