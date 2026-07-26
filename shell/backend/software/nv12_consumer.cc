@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -102,7 +103,8 @@ class FileEncoderConsumer final : public INv12Consumer {
     if (file_ == nullptr) {
       file_ = std::fopen(path_.c_str(), "wb");
       if (file_ == nullptr) {
-        ihs::log::error("[EncoderSink/file] cannot open {} for write", path_);
+        ihs::log::error("[EncoderSink/file] cannot open {} for write: {}",
+                        path_, std::strerror(errno));
         encoder_.reset();  // don't leave the V4L2 device open half-configured
         return false;
       }
