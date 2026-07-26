@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -55,11 +56,16 @@ namespace {
 constexpr uint32_t kDrmFormatNv12 = 0x3231564EU;  // 'N','V','1','2'
 
 int ParsePort(std::string_view s, int fallback) {
-  if (s.empty()) {
+  // Strict parse: the whole string must be a number in 1..65535. from_chars
+  // rejects a trailing garbage tail (ptr != end) and overflow (ec set), unlike
+  // atoi which parses partially and is UB on overflow.
+  int value = 0;
+  const char* const end = s.data() + s.size();
+  const auto [ptr, ec] = std::from_chars(s.data(), end, value);
+  if (ec != std::errc{} || ptr != end || value <= 0 || value > 65535) {
     return fallback;
   }
-  const int p = std::atoi(std::string(s).c_str());
-  return (p > 0 && p < 65536) ? p : fallback;
+  return value;
 }
 
 // Offerer WebRTC send session driven by pushed NV12 dma-bufs.
@@ -213,24 +219,28 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     char portstr[16];
     std::snprintf(portstr, sizeof portstr, "%d", port_);
     addrinfo* res = nullptr;
-    if (getaddrinfo(host_.c_str(), portstr, &hints, &res) != 0) {
-      ihs::log::error("[EncoderSink/webrtc] resolve {}:{} failed", host_,
-                      port_);
+    const int gai = getaddrinfo(host_.c_str(), portstr, &hints, &res);
+    if (gai != 0) {
+      ihs::log::error("[EncoderSink/webrtc] resolve {}:{} failed: {}", host_,
+                      port_, gai_strerror(gai));
       return false;
     }
     sock_ = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    const bool ok =
-        sock_ >= 0 && connect(sock_, res->ai_addr, res->ai_addrlen) == 0;
-    freeaddrinfo(res);
-    if (!ok) {
-      ihs::log::error("[EncoderSink/webrtc] connect {}:{} failed", host_,
-                      port_);
-      if (sock_ >= 0) {
-        close(sock_);  // connect() failed on an open fd; don't leak it
-        sock_ = -1;
-      }
+    if (sock_ < 0) {
+      ihs::log::error("[EncoderSink/webrtc] socket() failed: {}",
+                      std::strerror(errno));
+      freeaddrinfo(res);
       return false;
     }
+    if (connect(sock_, res->ai_addr, res->ai_addrlen) != 0) {
+      ihs::log::error("[EncoderSink/webrtc] connect {}:{} failed: {}", host_,
+                      port_, std::strerror(errno));
+      close(sock_);  // connect() failed on an open fd; don't leak it
+      sock_ = -1;
+      freeaddrinfo(res);
+      return false;
+    }
+    freeaddrinfo(res);
     return true;
   }
   // send() may complete partially on a TCP socket; a short write here would
