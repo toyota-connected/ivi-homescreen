@@ -223,6 +223,10 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     if (!ok) {
       ihs::log::error("[EncoderSink/webrtc] connect {}:{} failed", host_,
                       port_);
+      if (sock_ >= 0) {
+        close(sock_);  // connect() failed on an open fd; don't leak it
+        sock_ = -1;
+      }
       return false;
     }
     return true;
@@ -255,11 +259,19 @@ class WebRtcSenderConsumer final : public INv12Consumer {
       WriteAll(sock_, payload, static_cast<size_t>(len));
     }
   }
+  // Returns the line length (>=0), kEof when the peer closed the socket, or -1
+  // on a timeout/error. Distinguishing EOF lets ReaderLoop stop instead of
+  // spinning: after a disconnect read() returns 0 immediately every call.
+  static constexpr int kEof = -2;
   static int ReadLine(int fd, char* out, int max) {
     int i = 0;
     while (i < max - 1) {
       char c;
-      if (read(fd, &c, 1) <= 0) {
+      const ssize_t r = read(fd, &c, 1);
+      if (r == 0) {
+        return kEof;
+      }
+      if (r < 0) {
         return -1;
       }
       if (c == '\n') {
@@ -287,8 +299,12 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     while (running_) {
       timeval tv = {1, 0};
       setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-      if (ReadLine(sock_, header, sizeof header) <= 0) {
-        continue;
+      const int hlen = ReadLine(sock_, header, sizeof header);
+      if (hlen == kEof) {
+        break;  // peer closed the signaling channel; stop rather than spin
+      }
+      if (hlen <= 0) {
+        continue;  // timeout or empty line: retry while running_
       }
       char kind[16];
       int a = 0;
