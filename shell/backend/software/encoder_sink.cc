@@ -147,19 +147,33 @@ EncoderSink::EncoderSink(std::unique_ptr<INv12Consumer> consumer)
     : consumer_(std::move(consumer)) {}
 
 EncoderSink::~EncoderSink() {
+  // Destroy the consumer first so no OnFrame is in progress and every held
+  // frame's release has fired before we unmap/close the ring it points into.
+  consumer_.reset();
   ReleaseBuffer();
 }
 
+void EncoderSink::ReleaseSlotTrampoline(void* ctx) {
+  auto* ref = static_cast<SlotRef*>(ctx);
+  ref->sink->ReleaseSlot(ref->index);
+}
+
+void EncoderSink::ReleaseSlot(uint32_t index) {
+  std::lock_guard<std::mutex> lock(ring_mu_);
+  ring_[index].in_flight = false;
+}
+
 void EncoderSink::ReleaseBuffer() {
-  if (map_ != nullptr) {
-    ::munmap(map_, map_size_);
-    map_ = nullptr;
+  for (auto& slot : ring_) {
+    if (slot.map != nullptr) {
+      ::munmap(slot.map, slot_size_);
+    }
+    if (slot.fd >= 0) {
+      ::close(slot.fd);
+    }
+    slot = {};
   }
-  if (dmabuf_fd_ >= 0) {
-    ::close(dmabuf_fd_);
-    dmabuf_fd_ = -1;
-  }
-  map_size_ = 0;
+  slot_size_ = 0;
   ready_ = false;
 }
 
@@ -174,6 +188,19 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
   if (ready_ && even_w == width_ && even_h == height_) {
     return true;
   }
+  // A geometry change must not free a slot an async consumer still holds --
+  // unmapping/closing it mid-encode would invalidate the fd/mapping in use and
+  // race the later release. Defer the realloc (drop this frame) until every
+  // in-flight slot has been released; the encoder drains them within a few
+  // frames. (The dtor is safe already: it destroys the consumer first.)
+  {
+    std::lock_guard<std::mutex> lock(ring_mu_);
+    for (const auto& slot : ring_) {
+      if (slot.in_flight) {
+        return false;
+      }
+    }
+  }
   ReleaseBuffer();
   if ((width & 1u) != 0 || (height & 1u) != 0) {
     ihs::log::warn(
@@ -187,22 +214,28 @@ bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
   if (width_ == 0 || height_ == 0) {
     return false;
   }
-  map_size_ = static_cast<size_t>(stride_) * height_ * 3 / 2;
+  slot_size_ = static_cast<size_t>(stride_) * height_ * 3 / 2;
 
-  dmabuf_fd_ = AllocDmabuf(map_size_);
-  if (dmabuf_fd_ < 0) {
-    ihs::log::warn("[EncoderSink] dma-heap alloc of {} bytes failed",
-                   map_size_);
-    return false;
-  }
-  map_ = static_cast<uint8_t*>(::mmap(
-      nullptr, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED, dmabuf_fd_, 0));
-  if (map_ == MAP_FAILED) {
-    map_ = nullptr;
-    ihs::log::warn("[EncoderSink] mmap of NV12 dma-buf failed: {}",
-                   std::strerror(errno));
-    ReleaseBuffer();
-    return false;
+  for (uint32_t i = 0; i < kRingSize; ++i) {
+    ring_[i].fd = AllocDmabuf(slot_size_);
+    if (ring_[i].fd < 0) {
+      ihs::log::warn("[EncoderSink] dma-heap alloc of {} bytes failed",
+                     slot_size_);
+      ReleaseBuffer();
+      return false;
+    }
+    ring_[i].map = static_cast<uint8_t*>(::mmap(nullptr, slot_size_,
+                                                PROT_READ | PROT_WRITE,
+                                                MAP_SHARED, ring_[i].fd, 0));
+    if (ring_[i].map == MAP_FAILED) {
+      ring_[i].map = nullptr;
+      ihs::log::warn("[EncoderSink] mmap of NV12 dma-buf failed: {}",
+                     std::strerror(errno));
+      ReleaseBuffer();
+      return false;
+    }
+    ring_[i].in_flight = false;
+    slot_ref_[i] = {this, i};
   }
   if (consumer_ == nullptr || !consumer_->Configure(width_, height_, stride_)) {
     ihs::log::warn("[EncoderSink] consumer rejected {}x{}", width_, height_);
@@ -244,14 +277,42 @@ bool EncoderSink::Present(const void* allocation,
     return true;  // soft failure: keep the engine running
   }
 
-  DmaSyncWrite(dmabuf_fd_, /*start=*/true);
-  BgraToNv12(static_cast<const uint8_t*>(allocation), width_, height_,
-             row_bytes, stride_, map_);
-  DmaSyncWrite(dmabuf_fd_, /*start=*/false);
+  // Take a free ring slot; drop the frame if the consumer has released none
+  // (favor latency over a growing backlog).
+  uint32_t idx = kRingSize;
+  {
+    std::lock_guard<std::mutex> lock(ring_mu_);
+    for (uint32_t i = 0; i < kRingSize; ++i) {
+      if (!ring_[i].in_flight) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx == kRingSize) {
+      if (++dropped_ % 60 == 1) {
+        ihs::log::warn(
+            "[EncoderSink] ring full; dropping frames (consumer behind, {} "
+            "dropped)",
+            dropped_);
+      }
+      return true;
+    }
+    ring_[idx].in_flight = true;
+  }
 
-  // Real capture time; the first frame forces a keyframe.
-  consumer_->OnFrame(dmabuf_fd_, map_, MonotonicUs(),
-                     /*force_keyframe=*/frame_index_ == 0);
+  Slot& slot = ring_[idx];
+  DmaSyncWrite(slot.fd, /*start=*/true);
+  BgraToNv12(static_cast<const uint8_t*>(allocation), width_, height_,
+             row_bytes, stride_, slot.map);
+  DmaSyncWrite(slot.fd, /*start=*/false);
+
+  // Real capture time; the first frame after (re)configure forces a keyframe.
+  const bool took = consumer_->OnFrame(slot.fd, slot.map, MonotonicUs(),
+                                       /*force_keyframe=*/frame_index_ == 0,
+                                       &ReleaseSlotTrampoline, &slot_ref_[idx]);
   ++frame_index_;
+  if (!took) {
+    ReleaseSlot(idx);  // synchronous consumer: reclaim the slot now
+  }
   return true;
 }
