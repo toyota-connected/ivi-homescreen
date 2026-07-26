@@ -64,16 +64,23 @@ class HeadlessEglBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
 
-  // Called from the engine's OpenGL renderer config trampolines (raster thread).
+  // Called from the engine's OpenGL renderer config trampolines (raster
+  // thread).
   bool MakeCurrent();
   bool ClearCurrent();
   bool MakeResourceCurrent();
   uint32_t Fbo() const { return render_fbo_; }
   bool Present();  // engine finished the frame -> pack + submit
+  // Existing-damage query for the engine's partial-repaint path. The render
+  // target is one FBO reused every frame (a swap chain of age 1 that already
+  // holds the last frame), so this reports nothing stale and the engine does
+  // correct incremental repaints instead of leaving trails from prior frames.
+  void PopulateExistingDamage(FlutterDamage* out);
 
  private:
   bool InitEgl(const char* render_node);
-  bool InitRenderTarget();  // the RGBA FBO + the packer; GL context must be current
+  bool
+  InitRenderTarget();  // the RGBA FBO + the packer; GL context must be current
   void Teardown();
 
   uint32_t width_{0};
@@ -89,6 +96,8 @@ class HeadlessEglBackend final : public Backend {
   GLuint render_tex_{0};  // RGBA colour attachment the engine draws into
   GLuint render_fbo_{0};
   bool target_ready_{false};
+  FlutterRect
+      existing_damage_{};  // stable storage for populate_existing_damage
 
   std::unique_ptr<INv12Consumer> consumer_;
   Nv12GlPacker packer_;

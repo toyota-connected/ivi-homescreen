@@ -98,12 +98,18 @@ bool HeadlessEglBackend::InitEgl(const char* render_node) {
     return false;
   }
   eglBindAPI(EGL_OPENGL_ES_API);
-  const EGLint cfg_attrs[] = {EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
-                              EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-                              EGL_RED_SIZE,        8,
-                              EGL_GREEN_SIZE,      8,
-                              EGL_BLUE_SIZE,       8,
-                              EGL_ALPHA_SIZE,      8,
+  const EGLint cfg_attrs[] = {EGL_SURFACE_TYPE,
+                              EGL_WINDOW_BIT,
+                              EGL_RENDERABLE_TYPE,
+                              EGL_OPENGL_ES3_BIT,
+                              EGL_RED_SIZE,
+                              8,
+                              EGL_GREEN_SIZE,
+                              8,
+                              EGL_BLUE_SIZE,
+                              8,
+                              EGL_ALPHA_SIZE,
+                              8,
                               EGL_NONE};
   EGLConfig cfg = nullptr;
   EGLint ncfg = 0;
@@ -166,14 +172,14 @@ bool HeadlessEglBackend::MakeCurrent() {
 
 bool HeadlessEglBackend::ClearCurrent() {
   return dpy_ != EGL_NO_DISPLAY &&
-         eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE,
-                        EGL_NO_CONTEXT) != 0;
+         eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) !=
+             0;
 }
 
 bool HeadlessEglBackend::MakeResourceCurrent() {
   return dpy_ != EGL_NO_DISPLAY &&
-         eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE,
-                        resource_ctx_) != 0;
+         eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, resource_ctx_) !=
+             0;
 }
 
 bool HeadlessEglBackend::Present() {
@@ -184,6 +190,19 @@ bool HeadlessEglBackend::Present() {
                         /*force_keyframe=*/frame_index_ == 0);
   ++frame_index_;
   return true;
+}
+
+void HeadlessEglBackend::PopulateExistingDamage(FlutterDamage* out) {
+  // The render target is one FBO we reuse every frame, so from the engine's
+  // point of view it is a swap chain of age 1: the buffer already holds the
+  // last presented frame and nothing in it is stale. Reporting an empty
+  // existing-damage region tells the engine exactly that, so it repaints only
+  // what actually changed (including the vacated region when a widget moves)
+  // onto the intact buffer -- no full-frame cost, and no stale trails.
+  existing_damage_ = FlutterRect{0.0, 0.0, 0.0, 0.0};
+  out->struct_size = sizeof(FlutterDamage);
+  out->num_rects = 1;
+  out->damage = &existing_damage_;
 }
 
 FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
@@ -199,11 +218,22 @@ FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
   config.open_gl.make_resource_current = [](void* user_data) -> bool {
     return BackendOf(user_data)->MakeResourceCurrent();
   };
-  config.open_gl.fbo_callback = [](void* user_data) -> uint32_t {
+  // The frame-info present variants plus populate_existing_damage let us tell
+  // the engine the whole surface is stale each frame, forcing a full repaint
+  // into our single persistent FBO (a plain fbo_callback + present pair still
+  // let the engine clip to partial damage and leaves ghosting).
+  config.open_gl.fbo_with_frame_info_callback =
+      [](void* user_data, const FlutterFrameInfo* /*info*/) -> uint32_t {
     return BackendOf(user_data)->Fbo();
   };
-  config.open_gl.present = [](void* user_data) -> bool {
+  config.open_gl.present_with_info =
+      [](void* user_data, const FlutterPresentInfo* /*info*/) -> bool {
     return BackendOf(user_data)->Present();
+  };
+  config.open_gl.populate_existing_damage =
+      [](void* user_data, intptr_t /*fbo_id*/,
+         FlutterDamage* existing_damage) -> void {
+    BackendOf(user_data)->PopulateExistingDamage(existing_damage);
   };
   config.open_gl.fbo_reset_after_present = false;
   config.open_gl.gl_proc_resolver = [](void* /*user_data*/,
