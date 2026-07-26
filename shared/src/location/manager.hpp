@@ -70,6 +70,16 @@ class Manager : public ILocationProvider {
   // Thread-safe; typically called from the source's acquisition thread.
   void PublishFix(const Position& fix);
 
+  // Submit a whole fix from an event source (gpsd/geoclue/file) into the
+  // MEASUREMENT path: it is decomposed to a single POSITION measurement so a
+  // configured filter processes it (and, with no filter, folds through the
+  // passthrough just like PublishFix). This is the path used when the service
+  // is started with a filter; PublishFix remains the raw atomic store for the
+  // unfiltered path, where it also preserves the source's speed/heading that a
+  // position-only filter would otherwise re-estimate. Thread-safe; typically
+  // called from the source's acquisition thread.
+  void SubmitPositionFix(const Position& fix);
+
   // Install a callback fired once on each new fix (each generation bump), for a
   // push consumer. It is invoked WITHOUT the internal mutex held (so the
   // callback may call back into Latest()/generation()), on whichever thread
