@@ -223,6 +223,47 @@ if (BUILD_BACKEND_SOFTWARE)
     endif ()
 endif ()
 
+#
+# Headless GPU-EGL encode backend: the Flutter engine renders on the GPU into an
+# offscreen FBO, packed RGBA->NV12 on the GPU into a dma-buf and handed to the
+# same encode consumer the software backend uses (a file encoder or a WebRTC
+# send). No display / Wayland. Needs EGL/GLES/gbm + the V4L2 encoder sources
+# (V4L2WC_DIR) + optionally libwebrtc (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC).
+#
+option(BUILD_BACKEND_HEADLESS_EGL
+        "Build the headless GPU-EGL encode backend (GPU render -> NV12 -> HW encode)"
+        OFF)
+if (BUILD_BACKEND_HEADLESS_EGL)
+    set(V4L2WC_DIR "${CMAKE_SOURCE_DIR}/../v4l2-webrtc-codec"
+            CACHE PATH "Path to the v4l2-webrtc-codec checkout")
+    foreach (_v4l2wc_src src/v4l2_m2m_encoder.cc src/log.cc)
+        if (NOT EXISTS "${V4L2WC_DIR}/${_v4l2wc_src}")
+            message(FATAL_ERROR
+                    "BUILD_BACKEND_HEADLESS_EGL needs the v4l2-webrtc-codec "
+                    "source '${_v4l2wc_src}' at V4L2WC_DIR='${V4L2WC_DIR}'")
+        endif ()
+    endforeach ()
+    # Same WebRTC-consumer toggle the software encoder sink uses (it gates the
+    # shared webrtc_consumer.cc and its config define).
+    option(BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
+            "Build the WebRTC send consumer (links libwebrtc)" OFF)
+    if (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC)
+        set(LIBWEBRTC_DIR "${CMAKE_SOURCE_DIR}/../libwebrtc"
+                CACHE PATH "Path to the libwebrtc checkout (flat C ABI headers)")
+        set(LIBWEBRTC_SO "" CACHE FILEPATH "Path to the prebuilt libwebrtc.so")
+        if (NOT EXISTS "${LIBWEBRTC_DIR}/include/c/lw_c_api.h")
+            message(FATAL_ERROR
+                    "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON but the libwebrtc C "
+                    "ABI header was not found at LIBWEBRTC_DIR='${LIBWEBRTC_DIR}'")
+        endif ()
+        if (NOT LIBWEBRTC_SO OR NOT EXISTS "${LIBWEBRTC_SO}")
+            message(FATAL_ERROR
+                    "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON requires "
+                    "-DLIBWEBRTC_SO=<path to libwebrtc.so>")
+        endif ()
+    endif ()
+endif ()
+
 option(DEBUG_PLATFORM_MESSAGES "Debug platform messages" OFF)
 
 #
