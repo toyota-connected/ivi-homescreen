@@ -81,7 +81,16 @@ IhsMeasurement PosMeasAniso(double lat,
 }
 
 uint64_t SecToNs(double s) {
-  return static_cast<uint64_t>(s * 1e9);
+  // Total conversion: a negative, NaN, or out-of-range double cast to uint64_t
+  // is undefined behavior. !(s > 0) also rejects NaN.
+  if (!(s > 0.0)) {
+    return 0;
+  }
+  const double ns = s * 1e9;
+  if (ns >= static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+    return std::numeric_limits<uint64_t>::max();
+  }
+  return static_cast<uint64_t>(ns);
 }
 
 // Lifecycle + seeding: no estimate before a measurement; the first measurement
