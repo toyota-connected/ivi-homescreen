@@ -86,6 +86,9 @@ double RmseThroughOps(const IhsLocationFilterOps& ops,
                       const std::vector<TruthSample>& truth,
                       const std::vector<NoisyFix>& fixes) {
   void* inst = ops.create(nullptr, nullptr);
+  // Without this a create() failure would make update/estimate no-ops and the
+  // helper return 0, which a "< threshold" assertion would read as a pass.
+  Check(inst != nullptr, "filter instance created");
   double sum = 0.0;
   std::size_t n = 0;
   for (std::size_t i = 0; i < fixes.size(); ++i) {
