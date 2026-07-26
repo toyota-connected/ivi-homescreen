@@ -71,15 +71,47 @@ std::unique_ptr<IEventSource> MakeGeoclue(const char* config) {
       "ihs-location", config != nullptr ? config : "");
 }
 
-// gnss.file replay from @config = a captured gpsd JSON path. Replays at the
-// recorded cadence, so a consumer is driven like a live receiver. NULL/empty
-// path yields no source (a NULL return fails ihs_location_start).
+// gnss.file replay from @config = "<path>[?<opt>[,<opt>...]]": a captured gpsd
+// JSON path with optional replay flags after a '?' (comma/&-separated) —
+//   fast      emit back-to-back, ignoring the recorded cadence
+//   realtime  wait the recorded inter-sample gap (the default)
+//   loop      restart from the top at EOF
+// Unrecognized flags are ignored (forward-compatible). With no '?' the whole
+// string is the path and the defaults (realtime, single pass) apply, so a bare
+// path behaves as before. NULL/empty path yields no source (a NULL return fails
+// the start). A '?' is not expected in a capture-file path.
 std::unique_ptr<IEventSource> MakeFile(const char* config) {
   if (config == nullptr || config[0] == '\0') {
     return nullptr;
   }
-  return std::make_unique<ihs::location::FileSource>(
-      config, ihs::location::FileSource::Pace::kRealtime, /*loop=*/false);
+  std::string spec(config);
+  std::string path = spec;
+  auto pace = ihs::location::FileSource::Pace::kRealtime;
+  bool loop = false;
+  if (const std::string::size_type q = spec.find('?'); q != std::string::npos) {
+    path = spec.substr(0, q);
+    const std::string opts = spec.substr(q + 1);
+    for (std::string::size_type start = 0; start <= opts.size();) {
+      const std::string::size_type sep = opts.find_first_of(",&", start);
+      const std::string tok = opts.substr(
+          start, sep == std::string::npos ? std::string::npos : sep - start);
+      if (tok == "loop") {
+        loop = true;
+      } else if (tok == "fast") {
+        pace = ihs::location::FileSource::Pace::kAsFast;
+      } else if (tok == "realtime") {
+        pace = ihs::location::FileSource::Pace::kRealtime;
+      }
+      if (sep == std::string::npos) {
+        break;
+      }
+      start = sep + 1;
+    }
+  }
+  if (path.empty()) {
+    return nullptr;
+  }
+  return std::make_unique<ihs::location::FileSource>(path, pace, loop);
 }
 
 // Make the built-in filter named @key available on demand. "kalman.cv" and

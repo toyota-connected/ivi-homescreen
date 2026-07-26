@@ -184,6 +184,46 @@ void TestFilePassthrough() {
   std::filesystem::remove(path);
 }
 
+void TestFileFastPacing() {
+  // 12 fixes at a 1 s recorded cadence: realtime would deliver only ~2 in 2 s,
+  // but "?fast" ignores the cadence and bursts them. "loop" is added so the
+  // source keeps emitting until the callback is installed — a single fast pass
+  // could otherwise finish before ihs_location_set_callback() runs, making the
+  // count timing-dependent. Realtime+loop would still need 12 s for 12 fixes,
+  // so hitting 12 within 2 s proves the recorded cadence is ignored.
+  const auto path = WriteTrackFixture("ihs_wire_fast.jsonl", 5.0, 12, 1.0);
+  const std::string spec = path.string() + "?fast,loop";
+  Collector c;
+  IhsLocationService* svc = ihs_location_start(IHS_LOCATION_FILE, spec.c_str());
+  Check(svc != nullptr, "start FILE ?fast");
+  if (svc != nullptr) {
+    ihs_location_set_callback(svc, &Collector::Thunk, &c);
+    Check(c.WaitFor(12, std::chrono::seconds(2)),
+          "?fast delivers fixes without waiting the recorded cadence");
+    ihs_location_stop(svc);
+  }
+  std::filesystem::remove(path);
+}
+
+void TestFileLoop() {
+  // A 5-fix capture with "?loop" (and "fast" so the passes fly): more than 5
+  // fixes arrive, proving it restarted at EOF.
+  const auto path = WriteTrackFixture("ihs_wire_loop.jsonl", 5.0, 5, 0.02);
+  // '&' separator here (TestFileFastPacing uses ',') so both documented
+  // separators are exercised.
+  const std::string spec = path.string() + "?loop&fast";
+  Collector c;
+  IhsLocationService* svc = ihs_location_start(IHS_LOCATION_FILE, spec.c_str());
+  Check(svc != nullptr, "start FILE ?loop");
+  if (svc != nullptr) {
+    ihs_location_set_callback(svc, &Collector::Thunk, &c);
+    Check(c.WaitFor(15, std::chrono::seconds(3)),
+          "?loop replays past EOF (more fixes than the file holds)");
+    ihs_location_stop(svc);
+  }
+  std::filesystem::remove(path);
+}
+
 void TestBadPathAndKeys() {
   // A missing file fails the start.
   IhsLocationService* svc = ihs_location_start_filtered(
@@ -220,6 +260,8 @@ int main() {
   TestFileThroughKalman();
   TestFileThroughCtrv();
   TestFilePassthrough();
+  TestFileFastPacing();
+  TestFileLoop();
   TestBadPathAndKeys();
 
   if (g_failures == 0) {
