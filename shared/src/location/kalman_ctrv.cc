@@ -30,10 +30,11 @@ constexpr double kMetersPerDegLat = 111320.0;
 // 1/omega singularity.
 constexpr double kOmegaEps = 1.0e-4;  // rad/s
 
-// Process-noise densities (the two tuning knobs): longitudinal acceleration and
-// yaw acceleration, as 1-sigma^2. Defaults suit a road vehicle.
-constexpr double kDefaultQa = 2.0 * 2.0;    // (m/s^2)^2
-constexpr double kDefaultQw = 0.15 * 0.15;  // (rad/s^2)^2
+// Process-noise 1-sigma (the two tuning knobs): longitudinal acceleration and
+// yaw acceleration. The "qa="/"qw=" config values are these sigmas, squared to
+// variances in Create(). Defaults suit a road vehicle.
+constexpr double kDefaultSigmaA = 2.0;   // m/s^2
+constexpr double kDefaultSigmaW = 0.15;  // rad/s^2
 // Seed variances for the states a single position cannot observe.
 constexpr double kInitHeadingVar = kPi * kPi;   // rad^2 (heading unknown)
 constexpr double kInitSpeedVar = 50.0 * 50.0;   // (m/s)^2
@@ -116,7 +117,9 @@ double ParseNamed(const char* config, const char* key, double fallback) {
 // Constant-turn-rate-and-velocity extended Kalman filter.
 class KalmanCtrv {
  public:
-  KalmanCtrv(double qa, double qw) : qa_(qa), qw_(qw) {}
+  // @qa_var / @qw_var are the acceleration / yaw-acceleration noise variances
+  // (1-sigma^2) used by the process-noise model.
+  KalmanCtrv(double qa_var, double qw_var) : qa_(qa_var), qw_(qw_var) {}
 
   void Update(const IhsMeasurement& m) {
     switch (m.kind) {
@@ -451,8 +454,11 @@ class KalmanCtrv {
 
 void* Create(void* /*user_data*/, const char* config) {
   try {
-    return new KalmanCtrv(ParseNamed(config, "qa=", kDefaultQa),
-                          ParseNamed(config, "qw=", kDefaultQw));
+    // The config knobs are 1-sigma accelerations; square them to the variances
+    // the process-noise model uses, so "qa=2" means 2 m/s^2 (the default).
+    const double sigma_a = ParseNamed(config, "qa=", kDefaultSigmaA);
+    const double sigma_w = ParseNamed(config, "qw=", kDefaultSigmaW);
+    return new KalmanCtrv(sigma_a * sigma_a, sigma_w * sigma_w);
   } catch (...) {
     return nullptr;
   }
