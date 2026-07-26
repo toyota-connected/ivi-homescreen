@@ -875,12 +875,44 @@ int HostGrantShmFd(void* /*user_data*/,
   return v->shm_fd;
 }
 
+// Hand back a dup of the compositor's latest release fence for this view
+// (#338), so a producer on an explicit-sync grant can wait on it before reusing
+// a ring buffer. Only explicit-sync submits get a fence: ihs_pv_submit's
+// contract keeps *out_release_fence_fd at -1 on implicit paths (where release
+// rides the callback / native protocol), and a submit is implicit exactly when
+// it carries no acquire fence. Also leaves it at -1 when there is no fence yet
+// or the dup fails -- the producer then throttles conservatively rather than
+// racing the compositor. Caller holds v->mutex (release_fence_fd is read here).
+void HandBackReleaseFence(const IhsPluginView* v,
+                          int acquire_fence_fd,
+                          int* out_release_fence_fd) {
+  if (out_release_fence_fd == nullptr || acquire_fence_fd < 0 ||
+      v->release_fence_fd < 0) {
+    return;
+  }
+  const int fd = ::dup(v->release_fence_fd);
+  if (fd < 0) {
+    // Capture errno before the log call, which may clobber it, then log so an
+    // explicit-sync stall is diagnosable, matching the acquire path.
+    const int dup_errno = errno;
+    ihs::log::warn(
+        "[ihs_pv] dup(release_fence) failed (errno={}); producer throttles "
+        "conservatively this frame",
+        dup_errno);
+    return;
+  }
+  *out_release_fence_fd = fd;
+}
+
 int HostSubmit(void* user_data,
                IhsPlatformView* view,
                const IhsFrame* frame,
                int acquire_fence_fd,
                int* out_release_fence_fd) {
-  // Release fences (compositor -> producer) are a follow-up; nothing to return.
+  // Release fence (compositor -> producer, #338): -1 by default, replaced under
+  // v->mutex in each backend path below with a dup of this view's latest fence
+  // (see HandBackReleaseFence). -1 stands until the first composite has run, or
+  // if the dup fails; the producer owns and closes any fd handed back.
   if (out_release_fence_fd != nullptr) {
     *out_release_fence_fd = -1;
   }
@@ -936,6 +968,7 @@ int HostSubmit(void* user_data,
     // the fence with the frame for both.
     std::unique_lock<std::mutex> lock(v->mutex);
     ++v->submit_seq;
+    HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
     if (v->pending_egl.valid) {
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import
       if (v->pending_egl.acquire_fence_fd >= 0) {
@@ -978,10 +1011,13 @@ int HostSubmit(void* user_data,
 
   std::unique_lock<std::mutex> lock(v->mutex);
   ++v->submit_seq;
+  HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
   // Stash this frame's acquire fence (a sync_file) for the compositor to wait
   // on before sampling; it supersedes any previous unconsumed one, since the
-  // compositor only ever samples the latest submit (v->current). -1 means the
-  // producer stalled synchronously and no wait is needed.
+  // compositor only ever samples the latest submit (v->current). -1 is an
+  // implicit-sync submit -- no acquire fence, the producer already made the
+  // content ready -- which is the same condition under which
+  // HandBackReleaseFence hands back no release fence.
   if (v->pending_acquire_fd >= 0) {
     close(v->pending_acquire_fd);
   }
