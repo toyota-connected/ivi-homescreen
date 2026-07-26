@@ -81,6 +81,15 @@ class Manager : public ILocationProvider {
   bool Latest(Position& out) override;
   [[nodiscard]] uint64_t generation() const override;
 
+  // Read the estimate at a specific CLOCK_MONOTONIC time. For the built-in
+  // passthrough this returns the last fix unchanged (it is time-independent);
+  // for a filter it runs estimate(@at_monotonic_ns), which predicts the state
+  // forward to that instant. Latest() is exactly Estimate(out, MonotonicNs());
+  // a caller passes an explicit time to sample the state on its own timeline
+  // (e.g. a deterministic test clock, or to compensate pipeline latency).
+  // Returns false until a fix exists. Thread-safe.
+  bool Estimate(Position& out, uint64_t at_monotonic_ns);
+
  private:
   // C sink trampoline: sink_user_data is the Manager*.
   static void SinkThunk(void* sink_user_data, const IhsMeasurement* m);

@@ -282,6 +282,10 @@ void Manager::ApplyToPassthrough(const IhsMeasurement& m) {
 }
 
 bool Manager::Latest(Position& out) {
+  return Estimate(out, MonotonicNs());
+}
+
+bool Manager::Estimate(Position& out, uint64_t at_monotonic_ns) {
   const std::lock_guard<std::mutex> lock(mutex_);
   // No fix until at least one position correction has arrived — in both the
   // filter and passthrough paths. For the filter this keeps Latest() consistent
@@ -294,7 +298,7 @@ bool Manager::Latest(Position& out) {
   }
   if (filter_instance_ != nullptr && filter_ops_.estimate != nullptr) {
     IhsPosition est{};
-    if (filter_ops_.estimate(filter_instance_, MonotonicNs(), &est) == 1) {
+    if (filter_ops_.estimate(filter_instance_, at_monotonic_ns, &est) == 1) {
       FromIhsPosition(out, est);
       return true;
     }
