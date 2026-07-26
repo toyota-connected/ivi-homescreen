@@ -114,12 +114,17 @@ class FileEncoderConsumer final : public INv12Consumer {
     return true;
   }
 
-  void OnFrame(int dmabuf_fd,
+  // Synchronous: EncodeDmabuf completes before we return, so we never hold the
+  // frame -- return false and the sink reclaims the ring slot itself (we take
+  // neither the buffer nor the release).
+  bool OnFrame(int dmabuf_fd,
                const uint8_t* /*nv12*/,
                uint64_t timestamp_us,
-               bool force_keyframe) override {
+               bool force_keyframe,
+               void (* /*release*/)(void*),
+               void* /*release_ctx*/) override {
     if (!encoder_ || file_ == nullptr) {
-      return;
+      return false;
     }
     int fds[2] = {dmabuf_fd, dmabuf_fd};
     uint32_t offsets[2] = {0, stride_ * height_};
@@ -131,7 +136,7 @@ class FileEncoderConsumer final : public INv12Consumer {
       ihs::log::warn(
           "[EncoderSink/file] encode failed ({} frames written so far)",
           frames_);
-      return;
+      return false;
     }
     if (!au_.empty()) {
       const size_t wrote = std::fwrite(au_.data(), 1, au_.size(), file_);
@@ -146,11 +151,12 @@ class FileEncoderConsumer final : public INv12Consumer {
               path_, wrote, au_.size());
           write_failed_ = true;
         }
-        return;
+        return false;
       }
       bytes_ += au_.size();
       ++frames_;
     }
+    return false;
   }
 
  private:
