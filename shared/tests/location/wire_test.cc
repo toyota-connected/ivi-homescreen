@@ -17,6 +17,8 @@
 
 #include "ihs/location.h"
 
+#include <unistd.h>  // getpid
+
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -55,9 +57,12 @@ std::filesystem::path WriteTrackFixture(const std::string& name,
                                         double v_e,
                                         int n,
                                         double dt_s) {
-  const std::filesystem::path path =
-      std::filesystem::temp_directory_path() / name;
+  // Per-process filename so concurrent runs (ctest -j, a shared runner) cannot
+  // truncate each other's fixtures.
+  const std::filesystem::path path = std::filesystem::temp_directory_path() /
+                                     (std::to_string(getpid()) + "-" + name);
   std::ofstream out(path, std::ios::trunc);
+  Check(out.is_open(), "fixture temp file opened for write");
   const double m_per_deg_lon = MetersPerDegLon(kLat0);
   for (int i = 0; i < n; ++i) {
     const double t = static_cast<double>(i) * dt_s;
