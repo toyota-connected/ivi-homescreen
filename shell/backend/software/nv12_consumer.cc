@@ -30,11 +30,17 @@
 #include <vector>
 
 #include "backend/software/encoder_sink.h"
+#include "config/common.h"  // BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
 #include "logging/logging.h"
 
 // The V4L2 M2M encoder from the v4l2-webrtc-codec repo (webrtc-free). Its path
 // is put on the include path by the BUILD_SOFTWARE_SINK_ENCODER CMake branch.
 #include "src/v4l2_m2m_encoder.h"
+
+#if BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
+// Defined in webrtc_consumer.cc (the only TU that links libwebrtc).
+std::unique_ptr<INv12Consumer> MakeWebRtcConsumer(std::string_view spec);
+#endif
 
 namespace {
 
@@ -114,12 +120,19 @@ class FileEncoderConsumer final : public INv12Consumer {
     return true;
   }
 
-  void OnFrame(int dmabuf_fd,
+  // Synchronous: EncodeDmabuf completes before we return, so we never hold the
+  // frame -- return false and the sink reclaims the ring slot itself (we take
+  // neither the buffer nor the release).
+  bool OnFrame(int dmabuf_fd,
                const uint8_t* /*nv12*/,
                uint64_t timestamp_us,
-               bool force_keyframe) override {
-    if (!encoder_ || file_ == nullptr) {
-      return;
+               bool force_keyframe,
+               void (* /*release*/)(void*),
+               void* /*release_ctx*/) override {
+    // Once a write has failed the file is already truncated, so stop encoding:
+    // further EncodeDmabuf()/fwrite() work only burns CPU/IO on a corrupt file.
+    if (!encoder_ || file_ == nullptr || write_failed_) {
+      return false;
     }
     int fds[2] = {dmabuf_fd, dmabuf_fd};
     uint32_t offsets[2] = {0, stride_ * height_};
@@ -131,7 +144,7 @@ class FileEncoderConsumer final : public INv12Consumer {
       ihs::log::warn(
           "[EncoderSink/file] encode failed ({} frames written so far)",
           frames_);
-      return;
+      return false;
     }
     if (!au_.empty()) {
       const size_t wrote = std::fwrite(au_.data(), 1, au_.size(), file_);
@@ -146,11 +159,12 @@ class FileEncoderConsumer final : public INv12Consumer {
               path_, wrote, au_.size());
           write_failed_ = true;
         }
-        return;
+        return false;
       }
       bytes_ += au_.size();
       ++frames_;
     }
+    return false;
   }
 
  private:
@@ -183,8 +197,20 @@ std::unique_ptr<INv12Consumer> MakeNv12Consumer(std::string_view spec) {
     }
     return std::make_unique<FileEncoderConsumer>(std::move(path));
   }
+  constexpr std::string_view kWebrtcPrefix = "webrtc:";
+  if (spec.rfind(kWebrtcPrefix, 0) == 0) {
+#if BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
+    return MakeWebRtcConsumer(spec.substr(kWebrtcPrefix.size()));
+#else
+    ihs::log::warn(
+        "[EncoderSink] webrtc consumer requested but compiled without "
+        "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC");
+    return nullptr;
+#endif
+  }
   ihs::log::warn(
-      "[EncoderSink] unrecognized consumer spec '{}' (valid: file:<path>)",
+      "[EncoderSink] unrecognized consumer spec '{}' (valid: file:<path> | "
+      "webrtc:<host>:<port>)",
       std::string(spec));
   return nullptr;
 }

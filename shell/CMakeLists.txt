@@ -186,6 +186,25 @@ if (BUILD_BACKEND_SOFTWARE)
                 "${V4L2WC_DIR}/src/log.cc"
         )
         target_include_directories(${PROJECT_NAME} PRIVATE "${V4L2WC_DIR}")
+        if (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC)
+            # The WebRTC send consumer -- the only TU that links libwebrtc.
+            target_sources(${PROJECT_NAME} PRIVATE
+                    backend/software/webrtc_consumer.cc
+            )
+            target_include_directories(${PROJECT_NAME} PRIVATE
+                    "${LIBWEBRTC_DIR}/include")
+            target_link_libraries(${PROJECT_NAME} PRIVATE "${LIBWEBRTC_SO}")
+            # libwebrtc.so carries X11/desktop-capture deps (Xrandr/Xcomposite/
+            # Xdamage) as DT_NEEDED, but the software backend does not stage
+            # those extension -dev libs. They resolve at runtime on the target,
+            # so don't fail the link on the shared lib's own undefined symbols.
+            # --allow-shlib-undefined is a GNU/LLD flag; the encode path is
+            # Linux-only (V4L2 dma-buf), so guard it against a non-GNU linker.
+            if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+                target_link_options(${PROJECT_NAME} PRIVATE
+                        "LINKER:--allow-shlib-undefined")
+            endif ()
+        endif ()
     endif ()
     if (BUILD_SOFTWARE_INPUT_LIBINPUT)
         target_sources(${PROJECT_NAME} PRIVATE
