@@ -68,8 +68,12 @@ typedef enum IhsLocationSource {
   IHS_LOCATION_GPSD = 0,    /* gpsd JSON socket */
   IHS_LOCATION_GEOCLUE = 1, /* geoclue over D-Bus */
   IHS_LOCATION_AUTO = 2,    /* gpsd primary, geoclue fallback */
-  IHS_LOCATION_FILE = 3, /* replay a captured gpsd JSON file (@config=path) */
+  IHS_LOCATION_FILE = 3,    /* replay a captured gpsd file (@config below) */
 } IhsLocationSource;
+/* @config for IHS_LOCATION_FILE is a captured gpsd JSON path, optionally
+ * followed by "?" and one or more replay flags separated by ',' or '&':
+ * fast (ignore the recorded cadence), realtime (default), loop (restart at
+ * EOF). Unrecognized flags are ignored. E.g. "drive.jsonl?fast,loop". */
 
 /* Opaque handle to a running location service. */
 typedef struct IhsLocationService IhsLocationService;
@@ -78,9 +82,11 @@ typedef struct IhsLocationService IhsLocationService;
  * Start acquiring from @source. @config is an optional backend hint (may be
  * NULL): for gpsd, a numeric IPv4 "host:port" (default 127.0.0.1:2947 — host
  * names are not resolved); for geoclue, a D-Bus address, or the literal "user"
- * to use the session bus (default the system bus); for IHS_LOCATION_FILE, the
- * path to a captured gpsd JSON stream (as `gpspipe -w` writes) replayed at its
- * recorded cadence; ignored for IHS_LOCATION_AUTO. Returns NULL on failure — a
+ * to use the session bus (default the system bus); for IHS_LOCATION_FILE, a
+ * captured gpsd JSON path (as `gpspipe -w` writes), optionally followed by the
+ * "?"-prefixed replay flags (fast / realtime / loop, comma- or &-separated)
+ * described at the enum, replayed at the recorded cadence by default; ignored
+ * for IHS_LOCATION_AUTO. Returns NULL on failure — a
  * backend with no fix yet (or that is not present) still returns a handle and
  * simply reports no fix until one arrives.
  *
