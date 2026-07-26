@@ -29,10 +29,9 @@ namespace ihs::location {
 // It corrects from GNSS position (IHS_MEAS_POSITION_LLA), and — the reason the
 // model earns its keep — directly from a yaw-rate (IHS_MEAS_YAW_RATE) or ground
 // speed (IHS_MEAS_SPEED) measurement when a gyro/CAN source provides one, each
-// a scalar linear update on omega / v. estimate(t) predicts the state forward
-// to
-// @t, so a UI-rate poll gets a fresh position that curves correctly between
-// fixes.
+// a scalar linear update on omega / v. estimate() predicts the state forward to
+// the requested time, so a UI-rate poll gets a fresh position that curves
+// correctly between fixes.
 //
 // The same robustness as kalman.cv: a per-measurement chi-square gate rejects
 // outliers and a persistent run resets to the raw fix; CLOCK_MONOTONIC drives
