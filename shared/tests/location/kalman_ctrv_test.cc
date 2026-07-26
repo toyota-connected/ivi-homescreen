@@ -234,6 +234,30 @@ void TestYawRateCurvesPrediction() {
   ops.destroy(inst);
 }
 
+// A single gross position spike must be gated out by the 2-DOF NIS check.
+void TestOutlierRejection() {
+  const IhsLocationFilterOps& ops = KalmanCtrvFilterOps();
+  void* inst = ops.create(nullptr, nullptr);
+  // Settle on a stationary point.
+  for (int i = 0; i < 20; ++i) {
+    const IhsMeasurement m = PosMeas(kLat0, kLon0, 5.0, SecToNs(i));
+    ops.update(inst, &m);
+  }
+  IhsPosition before{};
+  ops.estimate(inst, SecToNs(20), &before);
+  // One gross outlier ~500 m north.
+  const double bad_lat = kLat0 + 500.0 / ihs::location::test::MetersPerDegLat();
+  const IhsMeasurement spike = PosMeas(bad_lat, kLon0, 5.0, SecToNs(21));
+  ops.update(inst, &spike);
+  IhsPosition after{};
+  ops.estimate(inst, SecToNs(21), &after);
+  const double moved = MetersBetween(after.latitude, after.longitude,
+                                     before.latitude, before.longitude, kLat0);
+  std::printf("outlier  : estimate moved %.2f m for a 500 m spike\n", moved);
+  Check(moved < 20.0, "a single gross outlier is gated out");
+  ops.destroy(inst);
+}
+
 void TestCoastingGrowsSigma() {
   const IhsLocationFilterOps& ops = KalmanCtrvFilterOps();
   void* inst = ops.create(nullptr, nullptr);
@@ -264,6 +288,7 @@ int main() {
   TestBeatsCvOnTurn();
   TestSpeedUpdate();
   TestYawRateCurvesPrediction();
+  TestOutlierRejection();
   TestCoastingGrowsSigma();
 
   if (g_failures == 0) {
