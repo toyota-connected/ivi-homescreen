@@ -139,8 +139,11 @@ class KalmanCv {
     const double s10 = p_[1][0];
     const double s11 = p_[1][1] + var_n;
     const double det = s00 * s11 - s01 * s10;
+    // The state's time advances even when the correction is skipped below (the
+    // Predict above coasted it to m.t), but last_mode_ describes the last
+    // ACCEPTED fix, so it is only updated on the accept path (and on a seed /
+    // reset), never for a rejected measurement.
     last_t_ns_ = m.t_monotonic_ns;
-    last_mode_ = mode;
     if (!(std::fabs(det) > 0.0)) {
       return;  // singular S (degenerate covariance): skip the correction
     }
@@ -161,6 +164,7 @@ class KalmanCv {
       return;  // keep the predicted (coasted) state; skip this correction
     }
     consecutive_rejects_ = 0;
+    last_mode_ = mode;  // this measurement is accepted; it defines the fix mode
 
     // Kalman gain K = P H^T S^-1 (P H^T is the first two columns of P).
     std::array<std::array<double, 2>, 4> k{};

@@ -302,6 +302,32 @@ void TestNonFiniteVariance() {
   ops.destroy(inst);
 }
 
+// The reported fix mode reflects the last ACCEPTED measurement: a rejected
+// outlier must not change it (mode is not updated on the gate-reject path).
+void TestModePreservedOnReject() {
+  const IhsLocationFilterOps& ops = KalmanCvFilterOps();
+  void* inst = ops.create(nullptr, nullptr);
+  // Settle a 3D fix (a third component = altitude marks mode 3).
+  for (int i = 0; i < 20; ++i) {
+    IhsMeasurement m = PosMeas(kLat0, kLon0, 5.0, SecToNs(i));
+    m.value_count = 3;
+    m.value[2] = 100.0;
+    m.variance[2] = 25.0;
+    ops.update(inst, &m);
+  }
+  IhsPosition before{};
+  ops.estimate(inst, SecToNs(20), &before);
+  Check(before.mode == 3, "seeded as a 3D fix");
+  // A single gross 2D outlier is gated out; it must not downgrade the mode.
+  const double bad_lat = kLat0 + 500.0 / MetersPerDegLat();
+  const IhsMeasurement spike = PosMeas(bad_lat, kLon0, 5.0, SecToNs(21));
+  ops.update(inst, &spike);
+  IhsPosition after{};
+  ops.estimate(inst, SecToNs(21), &after);
+  Check(after.mode == 3, "a rejected 2D outlier does not change the fix mode");
+  ops.destroy(inst);
+}
+
 }  // namespace
 
 int main() {
@@ -313,6 +339,7 @@ int main() {
   TestCoastingGrowsSigma();
   TestAnisotropicVariance();
   TestNonFiniteVariance();
+  TestModePreservedOnReject();
 
   if (g_failures == 0) {
     std::printf("kalman_cv_test: all %d checks passed\n", g_tests);
