@@ -68,7 +68,7 @@ typedef enum IhsLocationSource {
   IHS_LOCATION_GPSD = 0,    /* gpsd JSON socket */
   IHS_LOCATION_GEOCLUE = 1, /* geoclue over D-Bus */
   IHS_LOCATION_AUTO = 2,    /* gpsd primary, geoclue fallback */
-  IHS_LOCATION_FILE = 3, /* replay a captured gpsd JSON file (@config=path) */
+  IHS_LOCATION_FILE = 3,    /* replay a captured gpsd file (@config below) */
 } IhsLocationSource;
 /* @config for IHS_LOCATION_FILE is a captured gpsd JSON path, optionally
  * followed by "?" and one or more replay flags separated by ',' or '&':
