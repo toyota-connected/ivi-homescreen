@@ -39,8 +39,10 @@ namespace ihs::location {
 // ~10 km. A 5x5 fixed-size matrix implementation, no Eigen.
 //
 // config (optional, may be NULL/empty): "qa=<value>" sets the longitudinal
-// acceleration noise density and "qw=<value>" the yaw-acceleration noise
-// (space- or comma-separated), the two manoeuvring tuning knobs.
+// acceleration process noise as a 1-sigma in m/s^2 (default 2) and "qw=<value>"
+// the yaw-acceleration 1-sigma in rad/s^2 (default 0.15) — the two manoeuvring
+// tuning knobs, space- or comma-separated. So qa=2 is the default; the values
+// are squared to variances internally.
 
 // Register the filter under "kalman.ctrv" in the process-wide location
 // registry. Idempotent (re-registration replaces the entry). Returns true on
