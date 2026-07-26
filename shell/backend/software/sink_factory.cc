@@ -131,6 +131,14 @@ std::unique_ptr<ISurfaceSink> MakeSinkFromSpec(
     const std::string_view consumer_spec =
         spec == "encoder" ? std::string_view{}
                           : spec.substr(kEncoderPrefix.size());
+    if (consumer_spec.empty()) {
+      // "encoder" / "encoder:" with no consumer. Emit one explicit message
+      // rather than letting MakeNv12Consumer warn and then warning again.
+      ihs::log::warn(
+          "[SoftwareBackend] encoder sink needs a consumer (e.g. "
+          "encoder:file:<path>); falling back to NoneSink");
+      return std::make_unique<NoneSink>();
+    }
     auto consumer = MakeNv12Consumer(consumer_spec);
     if (consumer) {
       ihs::log::info("[SoftwareBackend] sink: encoder (consumer='{}')",
