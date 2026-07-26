@@ -164,20 +164,25 @@ void EncoderSink::ReleaseBuffer() {
 }
 
 bool EncoderSink::EnsureBuffer(uint32_t width, uint32_t height) {
-  if (ready_ && width == width_ && height == height_) {
+  // NV12 is subsampled 2x2, so both dimensions must be even. Round an odd
+  // source down -- the last column/row is dropped from the encode -- and match
+  // the fast path on the rounded values; comparing the raw input against the
+  // (already rounded) width_/height_ would miss for an odd source and force a
+  // ReleaseBuffer()+realloc on every frame.
+  const uint32_t even_w = width & ~1u;
+  const uint32_t even_h = height & ~1u;
+  if (ready_ && even_w == width_ && even_h == height_) {
     return true;
   }
   ReleaseBuffer();
-  // NV12 is subsampled 2x2, so both dimensions must be even. Round an odd
-  // source down and say so -- the last column/row is dropped from the encode.
   if ((width & 1u) != 0 || (height & 1u) != 0) {
     ihs::log::warn(
         "[EncoderSink] source {}x{} has an odd dimension; encoding {}x{} "
         "(last column/row dropped)",
-        width, height, width & ~1u, height & ~1u);
+        width, height, even_w, even_h);
   }
-  width_ = width & ~1u;
-  height_ = height & ~1u;
+  width_ = even_w;
+  height_ = even_h;
   stride_ = width_;
   if (width_ == 0 || height_ == 0) {
     return false;
