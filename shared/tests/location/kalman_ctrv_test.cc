@@ -104,6 +104,9 @@ double RmseThroughOps(const IhsLocationFilterOps& ops,
     }
   }
   ops.destroy(inst);
+  // Guard the empty case: with no successful estimate(), an RMSE of 0 would let
+  // a "< threshold" assertion pass even though the filter produced nothing.
+  Check(n > 0, "filter produced estimates");
   return n == 0 ? 0.0 : std::sqrt(sum / static_cast<double>(n));
 }
 
