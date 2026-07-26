@@ -70,6 +70,9 @@ typedef enum IhsLocationSource {
   IHS_LOCATION_AUTO = 2,    /* gpsd primary, geoclue fallback */
   IHS_LOCATION_FILE = 3, /* replay a captured gpsd JSON file (@config=path) */
 } IhsLocationSource;
+/* @config for IHS_LOCATION_FILE is "<path>[?<opt>[,<opt>]]": a captured gpsd
+ * JSON path, optionally followed by replay flags -- fast (ignore the recorded
+ * cadence), realtime (default), loop (restart at EOF). */
 
 /* Opaque handle to a running location service. */
 typedef struct IhsLocationService IhsLocationService;
