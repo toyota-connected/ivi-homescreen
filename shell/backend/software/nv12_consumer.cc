@@ -129,7 +129,9 @@ class FileEncoderConsumer final : public INv12Consumer {
                bool force_keyframe,
                void (* /*release*/)(void*),
                void* /*release_ctx*/) override {
-    if (!encoder_ || file_ == nullptr) {
+    // Once a write has failed the file is already truncated, so stop encoding:
+    // further EncodeDmabuf()/fwrite() work only burns CPU/IO on a corrupt file.
+    if (!encoder_ || file_ == nullptr || write_failed_) {
       return false;
     }
     int fds[2] = {dmabuf_fd, dmabuf_fd};
