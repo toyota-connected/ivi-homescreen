@@ -98,7 +98,12 @@ IHS_EXPORT IhsLocationService* ihs_location_start(IhsLocationSource source,
  * polled at UI rate, and coasts through a brief outage; NULL or "" means no
  * filter (identical to ihs_location_start). @filter_config is an optional
  * filter tuning string (may be NULL); for kalman.cv, "q=<value>" sets the
- * process-noise density. Returns NULL on failure.
+ * process-noise density.
+ *
+ * An unrecognized @filter_key (or a filter that fails to initialize) degrades
+ * to no filter rather than failing the service, so a non-NULL return does NOT
+ * guarantee the named filter is active — it only guarantees a running source.
+ * Returns NULL only when the source itself cannot start (e.g. a missing file).
  */
 IHS_EXPORT IhsLocationService* ihs_location_start_filtered(
     IhsLocationSource source,
