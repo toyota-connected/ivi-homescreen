@@ -82,14 +82,17 @@ class WebRtcSenderConsumer final : public INv12Consumer {
       ihs::log::error("[EncoderSink/webrtc] lw_initialize failed");
       return false;
     }
+    lw_initialized_ = true;
     factory_ = lw_factory_create();
     if (factory_ == nullptr || lw_factory_initialize(factory_) == 0) {
       ihs::log::error("[EncoderSink/webrtc] factory init failed");
+      Stop();
       return false;
     }
     pc_ = lw_pc_create(factory_);
     if (pc_ == nullptr) {
       ihs::log::error("[EncoderSink/webrtc] pc_create failed");
+      Stop();
       return false;
     }
 
@@ -106,6 +109,7 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     lw_pc_add_track(pc_, track_, streams, 1);
 
     if (!ConnectSignaling()) {
+      Stop();
       return false;
     }
     running_ = true;
@@ -223,11 +227,26 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     }
     return true;
   }
+  // write() may complete partially on a TCP socket; a short write here would
+  // desync the length-framed protocol, so loop until all bytes are sent.
+  static bool WriteAll(int fd, const char* buf, size_t n) {
+    size_t sent = 0;
+    while (sent < n) {
+      const ssize_t r = write(fd, buf + sent, n - sent);
+      if (r <= 0) {
+        return false;
+      }
+      sent += static_cast<size_t>(r);
+    }
+    return true;
+  }
   void SendFramed(const char* header, const char* payload, int len) {
     std::lock_guard<std::mutex> lock(send_mu_);
-    (void)!write(sock_, header, std::strlen(header));
+    if (!WriteAll(sock_, header, std::strlen(header))) {
+      return;
+    }
     if (len > 0) {
-      (void)!write(sock_, payload, static_cast<size_t>(len));
+      WriteAll(sock_, payload, static_cast<size_t>(len));
     }
   }
   static int ReadLine(int fd, char* out, int max) {
@@ -306,22 +325,32 @@ class WebRtcSenderConsumer final : public INv12Consumer {
     if (reader_.joinable()) {
       reader_.join();
     }
+    // Idempotent teardown: null each handle after releasing it so a Configure()
+    // failure path and the destructor can both call Stop() safely, and every
+    // created object is released even when Configure() bailed part-way through.
     if (track_ != nullptr) {
       lw_release(track_);
+      track_ = nullptr;
     }
     if (source_ != nullptr) {
       lw_release(source_);
+      source_ = nullptr;
     }
     if (pc_ != nullptr) {
       lw_pc_remove_observer(pc_);
       lw_pc_close(pc_);
       lw_release(pc_);
+      pc_ = nullptr;
     }
     if (factory_ != nullptr) {
       lw_release(factory_);
+      factory_ = nullptr;
     }
-    if (started_) {
+    // lw_terminate must pair with a successful lw_initialize(), tracked apart
+    // from started_ (which is only set once Configure() fully succeeds).
+    if (lw_initialized_) {
       lw_terminate();
+      lw_initialized_ = false;
     }
     if (sock_ >= 0) {
       close(sock_);
@@ -335,6 +364,8 @@ class WebRtcSenderConsumer final : public INv12Consumer {
   std::mutex send_mu_;
   std::thread reader_;
   std::atomic<bool> running_{false};
+  bool lw_initialized_{
+      false};  // lw_initialize() succeeded (pairs lw_terminate)
   bool started_{false};
   std::atomic<int> ice_state_{0};
 
