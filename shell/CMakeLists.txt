@@ -182,10 +182,10 @@ if (BUILD_BACKEND_SOFTWARE)
         target_sources(${PROJECT_NAME} PRIVATE
                 backend/software/encoder_sink.cc
                 backend/software/nv12_consumer.cc
-                ${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc
-                ${V4L2WC_DIR}/src/log.cc
+                "${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc"
+                "${V4L2WC_DIR}/src/log.cc"
         )
-        target_include_directories(${PROJECT_NAME} PRIVATE ${V4L2WC_DIR})
+        target_include_directories(${PROJECT_NAME} PRIVATE "${V4L2WC_DIR}")
     endif ()
     if (BUILD_SOFTWARE_INPUT_LIBINPUT)
         target_sources(${PROJECT_NAME} PRIVATE
