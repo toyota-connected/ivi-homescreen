@@ -30,6 +30,7 @@
 #if BUILD_COMPOSITOR
 
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -234,6 +235,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // dispose, or by the GL-fallback wait in GetGlTextureName. -1 when the
     // producer synced before submit.
     int acquire_fence_fd{-1};
+    // submit_seq when this frame was stashed. Compared against
+    // dmabuf_delivered_seq to tell a frame the DRM scene path took (its release
+    // rides OnScanoutRelease) from one superseded before it was ever scanned
+    // out (its release eventfd must be signalled at supersede instead).
+    uint64_t stash_seq{0};
   };
   mutable PendingEglFrame pending_egl;
   mutable std::map<uint32_t, EglDmabufImporter::ImportedTexture> buffers_egl;
@@ -255,6 +261,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // sampled this view. Polled at dispose so imports are not freed while a
   // compositor frame still binds them. -1 when none yet.
   int release_fence_fd{-1};
+
+  // DRM scene (KMS plane) release path: a per-frame eventfd keyed by the
+  // producer's buffer_id. HostSubmit creates one and hands the producer a dup
+  // as its release fence; the compositor signals it (OnScanoutRelease) when the
+  // plane stops scanning that frame out, so the producer reuses the slot only
+  // then. Guarded by `mutex`. Any left over are closed at dispose.
+  mutable std::map<uint32_t, int> release_efds;
 
   // ICompositorSurface — a Vulkan producer (no backing store, no GL texture).
   bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
@@ -373,28 +386,38 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (f.plane_count == 0 || f.plane_fd[0] < 0) {
       return false;
     }
-    // The Dmabuf descriptor carries a single fd shared across planes (the
-    // v4l2 / libcamera / Chromium single-handle layout). A genuine per-plane-fd
-    // frame can't be represented here, so bail — the caller falls back to the
-    // GL import path, which handles multiple fds. Clamp to the 4 planes the
-    // descriptor holds (a DRM fourcc has at most 4).
+    // Per-plane fds. A single-handle frame (v4l2/libcamera/Chromium) repeats
+    // one fd across planes with distinct offsets; a multi-handle frame (e.g.
+    // rpi-hevc-dec, which exports the Y and C planes as separate dma-bufs)
+    // carries a distinct fd per plane. Dup each so the caller owns its copies;
+    // AddFB2 resolves each to a GEM handle, so both layouts scan out. Clamp to
+    // the 4 planes the descriptor holds (a DRM fourcc has at most 4).
     const uint32_t np = f.plane_count < 4 ? f.plane_count : 4;
-    for (uint32_t i = 1; i < np; ++i) {
-      if (f.plane_fd[i] != f.plane_fd[0]) {
+    for (uint32_t i = 0; i < np; ++i) {
+      if (f.plane_fd[i] < 0) {
+        return false;  // a plane without a handle can't be scanned out
+      }
+    }
+    int duped[4] = {-1, -1, -1, -1};
+    for (uint32_t i = 0; i < np; ++i) {
+      duped[i] = ::dup(f.plane_fd[i]);
+      if (duped[i] < 0) {
+        for (uint32_t j = 0; j < i; ++j) {
+          ::close(duped[j]);
+        }
         return false;
       }
     }
-
-    const int dup_fd = ::dup(f.plane_fd[0]);
-    if (dup_fd < 0) {
-      return false;
+    for (uint32_t i = 0; i < np; ++i) {
+      out->fd[i] = duped[i];  // owned by the caller
     }
-    out->fd = dup_fd;  // owned by the caller
     out->fourcc = f.format.fourcc;
     out->modifier = f.format.modifier;
     out->width = f.width;
     out->height = f.height;
     out->plane_count = np;
+    out->buffer_id =
+        f.buffer_id;  // the compositor hands it to OnScanoutRelease
     for (uint32_t i = 0; i < np; ++i) {
       out->offset[i] = f.plane_offset[i];
       out->stride[i] = f.plane_stride[i];
@@ -447,6 +470,51 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     release_fence_fd = fd;
   }
 
+  // The DRM scene path retired this frame; wake the producer's release fence
+  // for its ring slot. Compositor thread.
+  void OnScanoutRelease(uint32_t buffer_id) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    SignalRelease(buffer_id);
+  }
+
+  // Signal and drop the release eventfd for `buffer_id` (a no-op if there is
+  // none). Writing wakes the producer's poll on its dup; closing our copy
+  // retires it. Caller holds `mutex`.
+  void SignalRelease(uint32_t buffer_id) {
+    const auto it = release_efds.find(buffer_id);
+    if (it == release_efds.end()) {
+      return;
+    }
+    (void)eventfd_write(it->second, 1);
+    close(it->second);
+    release_efds.erase(it);
+  }
+
+  // Create this frame's release eventfd, hand the producer a dup as its release
+  // fence (via *out_fd), and keep our copy keyed on buffer_id to signal later.
+  // A stale entry for the same slot is retired first. Caller holds `mutex`.
+  void HandBackReleaseEventfd(uint32_t buffer_id, int* out_fd) {
+    SignalRelease(buffer_id);  // retire any stale eventfd for this slot
+    const int ef = eventfd(0, EFD_CLOEXEC);
+    if (ef < 0) {
+      ihs::log::warn(
+          "[ihs_pv] eventfd() failed (errno={}); producer throttles "
+          "conservatively this frame",
+          errno);
+      return;  // *out_fd stays -1
+    }
+    release_efds[buffer_id] = ef;
+    if (out_fd != nullptr) {
+      const int dup_fd = ::dup(ef);
+      if (dup_fd < 0) {
+        ihs::log::warn("[ihs_pv] dup(release eventfd) failed (errno={})",
+                       errno);
+        return;
+      }
+      *out_fd = dup_fd;
+    }
+  }
+
  private:
   int32_t id_;
   bool disposed_{false};
@@ -481,6 +549,14 @@ IhsPluginView::~IhsPluginView() {
     close(pending_acquire_fd);
     pending_acquire_fd = -1;
   }
+  // The producer has been stopped (DisposePlugin above), so just retire any
+  // release eventfds it never got to wait on; it owns and closes its own dups.
+  for (const auto& [buffer_id, fd] : release_efds) {
+    if (fd >= 0) {
+      close(fd);
+    }
+  }
+  release_efds.clear();
 #if IVI_HAVE_VULKAN
   // With explicit-sync acquire the compositor's read of these imports is gated
   // on the producer's fence, so a re-create can dispose this view while a
@@ -937,6 +1013,14 @@ int HostSubmit(void* user_data,
     std::unique_lock<std::mutex> lock(v->mutex);
     ++v->submit_seq;
     if (v->pending_egl.valid) {
+      // A frame the DRM scene path never took (superseded before GetDmabuf
+      // delivered it) is never scanned out, so no OnScanoutRelease will fire
+      // for it -- signal its release here so the producer reclaims that slot. A
+      // frame that WAS delivered rides OnScanoutRelease and must not be
+      // double-signalled.
+      if (v->dmabuf_delivered_seq < v->pending_egl.stash_seq) {
+        v->SignalRelease(v->pending_egl.frame.buffer_id);
+      }
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import
       if (v->pending_egl.acquire_fence_fd >= 0) {
         close(v->pending_egl.acquire_fence_fd);
@@ -945,7 +1029,13 @@ int HostSubmit(void* user_data,
     v->pending_egl.frame = *frame;       // take ownership of the plane fds
     v->pending_egl.frame.hdr = nullptr;  // do not retain the plugin's hdr ptr
     v->pending_egl.acquire_fence_fd = acquire_fence_fd;  // ownership moves here
+    v->pending_egl.stash_seq = v->submit_seq;
     v->pending_egl.valid = true;
+    // Per-frame release eventfd: hand the producer a dup to wait on before it
+    // reuses this ring slot; the compositor signals our copy from
+    // OnScanoutRelease. A stale entry for this buffer_id (the producer reused
+    // the slot without our having signalled) is retired first.
+    v->HandBackReleaseEventfd(frame->buffer_id, out_release_fence_fd);
     lock.unlock();  // don't call into the engine holding the view lock
     ScheduleEngineFrame(user_data);
     return IHS_PV_OK;
