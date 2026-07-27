@@ -2368,10 +2368,21 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     ~PvFdCloser() {
       for (auto& fl : fls) {
         if (fl.pv_tag != nullptr) {
+          // Close each distinct fd once. GetDmabuf dups every plane, so these
+          // are normally all distinct, but the Dmabuf contract permits a
+          // single-handle layout to repeat one fd across planes -- closing it
+          // twice could reap an unrelated fd that reused the number. Clear
+          // every entry holding a value as it is closed.
           for (int& pfd : fl.pv_db.fd) {
-            if (pfd >= 0) {
-              ::close(pfd);
-              pfd = -1;
+            if (pfd < 0) {
+              continue;
+            }
+            const int fd = pfd;
+            ::close(fd);
+            for (int& other : fl.pv_db.fd) {
+              if (other == fd) {
+                other = -1;
+              }
             }
           }
         }

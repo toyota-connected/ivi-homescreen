@@ -297,12 +297,15 @@ class ICompositorSurface {
    * @brief The plane has stopped scanning out the frame the producer submitted
    * with @p buffer_id (Dmabuf::buffer_id); that ring slot is free to reuse.
    *
-   * The DRM scene path calls this once per submitted frame, from the compositor
-   * thread, when the frame is retired (a later frame replaced it on the plane).
-   * It is the per-buffer complement of the per-submit @c SetReleaseFenceFd: on
-   * the plane path a producer waits on the release fence handed back at submit,
-   * so a surface backing that path signals that fence here. The default ignores
-   * it (surfaces whose producer does not track per-buffer releases).
+   * The DRM scene path calls this once per submitted frame when the frame is
+   * retired (a later frame replaced it on the plane) -- normally on the
+   * compositor thread, but scene/pool teardown (e.g. ~DrmCompositor draining
+   * in-flight buffers) can call it from another thread, so an implementation
+   * must be thread-safe. It is the per-buffer complement of the per-submit
+   * @c SetReleaseFenceFd: on the plane path a producer waits on the release
+   * fence handed back at submit, so a surface backing that path signals that
+   * fence here. The default ignores it (surfaces whose producer does not track
+   * per-buffer releases).
    */
   virtual void OnScanoutRelease(uint32_t /*buffer_id*/) {}
 };
