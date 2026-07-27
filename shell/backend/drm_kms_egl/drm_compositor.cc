@@ -40,7 +40,6 @@
 
 #include <drm-cxx/core/format.hpp>
 #include <drm-cxx/scene/external_dma_buf_pool.hpp>
-#include <drm-cxx/scene/external_dma_buf_source.hpp>
 #include <drm-cxx/sync/fence.hpp>
 
 #include "backend/drm_kms_egl/driver_probe.h"
@@ -2469,7 +2468,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     return pruned;
   };
   const int bs_pruned = prune(scene_layer_batons_, frame_batons);
-  const int pv_pruned = prune(scene_pv_tags_, frame_pv_tags);
+  // Not const: the add loop below may remove another PV layer mid-frame (a
+  // geometry change under a fixed-generation pool), which is also a plane-
+  // topology change and must feed the blocking-modeset decision at commit time.
+  int pv_pruned = prune(scene_pv_tags_, frame_pv_tags);
   // A pruned PV's layer (removed above) carries its ExternalDmaBufPool into the
   // scene's source-retire ring; the scene release_with_fence()es the pool's
   // in-flight buffer as it retires, firing OnBufferRelease back to the
@@ -2599,7 +2601,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             // Source isn't our pool, or the producer's geometry changed under a
             // fixed-generation pool (an ABR rendition switch). Drop the layer
             // so the new loop re-adds it at the new geometry next present, and
-            // release this frame's buffer so its ring slot isn't leaked.
+            // release this frame's buffer so its ring slot isn't leaked. Count
+            // it as a prune: removing the plane is a topology change, so this
+            // frame must take the blocking ALLOW_MODESET commit below rather
+            // than a NONBLOCK one that could hit a transient EBUSY.
             scene_->remove_layer(layer->handle());
             scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
                                              scene_pv_tags_.end(), fl.pv_tag),
@@ -2607,7 +2612,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             if (fl.pv_surface) {
               fl.pv_surface->OnScanoutRelease(db.buffer_id);
             }
-            ++pv_reused;
+            ++pv_pruned;
             continue;
           }
         }
