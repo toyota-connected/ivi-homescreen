@@ -499,13 +499,17 @@ typedef struct IhsFrame {
  * Hand the registry a produced @frame for @view. Used by all kinds
  * (TEXTURE_DMABUF_IMPORT, SOFTWARE_SHM, and the registry-driven DRM_PLANE).
  * @acquire_fence_fd signals when the plugin's production completed (-1 for
- * implicit sync); the registry takes ownership of the fd. On an explicit-sync
- * grant *out_release_fence_fd is set to a fence that fires when the buffer is
- * free to reuse — the plugin owns and closes it, and waits on it before
- * overwriting that buffer; on implicit paths it is -1 and release rides
- * IhsPvCallbacks / the native protocol. The plugin keeps whatever buffer ring
- * it wants (double, triple, N); the registry never counts them. Returns
- * IHS_PV_OK or a negative IhsPvResult.
+ * implicit sync); the registry takes ownership of the fd. *out_release_fence_fd,
+ * when the registry sets it to a non-negative fd, is a release fence that fires
+ * when the buffer is free to reuse: the plugin owns that fd and must close it
+ * (waiting on it first before overwriting the buffer). The registry may return
+ * one under any sync mode — the DRM_PLANE path returns a per-buffer release
+ * eventfd even on an implicit-sync grant, since it has no other back-channel to
+ * the producer. -1 means no fence for this submit and release rides
+ * IhsPvCallbacks / the native protocol; a plugin must therefore always close a
+ * returned fd regardless of the negotiated sync mode. The plugin keeps whatever
+ * buffer ring it wants (double, triple, N); the registry never counts them.
+ * Returns IHS_PV_OK or a negative IhsPvResult.
  */
 IHS_EXPORT int ihs_pv_submit(IhsPlatformView* view,
                              const IhsFrame* frame,

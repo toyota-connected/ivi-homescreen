@@ -196,7 +196,9 @@ class ICompositorSurface {
    * with the planes separated by @c offset; a multi-handle layout (e.g. the
    * rpi-hevc-dec, which exports the Y and C planes as distinct dma-bufs) fills
    * each @c fd with its own handle. AddFB2 resolves each fd to a GEM handle, so
-   * both cases scan out. @c fourcc is a @c DRM_FORMAT_* code
+   * both cases scan out. GetDmabuf transfers ownership of every populated @c fd
+   * (all @c plane_count of them, not just @c fd[0]) to the caller, which must
+   * close each after importing the frame. @c fourcc is a @c DRM_FORMAT_* code
    * and @c modifier a @c DRM_FORMAT_MOD_* value — @c DRM_FORMAT_MOD_LINEAR (0)
    * for a plain linear buffer, @c DRM_FORMAT_MOD_INVALID only when the modifier
    * is unknown/unspecified (let the importer infer). @c width / @c height are
