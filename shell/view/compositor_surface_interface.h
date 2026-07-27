@@ -206,10 +206,11 @@ class ICompositorSurface {
    *
    * @c acquire_fence_fd, when >= 0, is a sync_file naming when the producer's
    * writes complete — intended for the atomic commit's @c IN_FENCE_FD so
-   * scanout is tear-free without a CPU stall. Not every present path consumes
-   * it yet: the DRM scene path is implicit-sync today and ignores it (leave it
-   * -1 for an implicit-sync producer). When a path does consume it, ownership
-   * stays with the surface and the compositor dups it.
+   * scanout is tear-free without a CPU stall. The DRM scene path imports it and
+   * hands it to the plane source (wired to @c IN_FENCE_FD, with a CPU wait as a
+   * fallback on drivers lacking that property); leave it -1 for a producer that
+   * has already synced. Ownership stays with the surface — the compositor dups
+   * what it needs.
    */
   struct Dmabuf {
     int fd[4]{-1, -1, -1, -1};  // one owned handle per plane (see above)
