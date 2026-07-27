@@ -2657,6 +2657,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             "[DrmCompositor] ExternalDmaBufPool::create (pv): {}; routing "
             "through GL fallback",
             pool.error().message());
+        // GetDmabuf already delivered this frame, so it won't be superseded and
+        // no pool exists to fire OnScanoutRelease -- release it here or the
+        // producer blocks forever waiting to reuse the slot.
+        if (fl.pv_surface) {
+          fl.pv_surface->OnScanoutRelease(db.buffer_id);
+        }
         return PresentViaGlFallback(layers, layer_count);
       }
       auto* pool_raw = pool.value().get();
@@ -2673,6 +2679,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       if (!handle) {
         ihs::log::warn("[DrmCompositor] LayerScene::add_layer (pv): {}",
                        handle.error().message());
+        // Delivered but never reached a pool that would release it (see above).
+        if (fl.pv_surface) {
+          fl.pv_surface->OnScanoutRelease(db.buffer_id);
+        }
         return PresentViaGlFallback(layers, layer_count);
       }
       scene_pv_tags_.push_back(fl.pv_tag);
