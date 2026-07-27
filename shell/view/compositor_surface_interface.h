@@ -190,9 +190,15 @@ class ICompositorSurface {
    * @brief A single dma-buf frame a surface can hand to a KMS overlay plane.
    *
    * Plain data so this header stays free of DRM/GBM includes. Multi-planar
-   * (YUV) frames fill @c plane_count entries of @c offset / @c stride, all
-   * sharing one @c fd (the common single-handle layout v4l2/libcamera and
-   * Chromium's accelerated paint produce). @c fourcc is a @c DRM_FORMAT_* code
+   * (YUV) frames fill @c plane_count entries of @c fd / @c offset / @c stride,
+   * one per plane. A single-handle layout (v4l2/libcamera contiguous,
+   * Chromium's accelerated paint) repeats the same handle in every @c fd entry
+   * with the planes separated by @c offset; a multi-handle layout (e.g. the
+   * rpi-hevc-dec, which exports the Y and C planes as distinct dma-bufs) fills
+   * each @c fd with its own handle. AddFB2 resolves each fd to a GEM handle, so
+   * both cases scan out. GetDmabuf transfers ownership of every populated @c fd
+   * (all @c plane_count of them, not just @c fd[0]) to the caller, which must
+   * close each after importing the frame. @c fourcc is a @c DRM_FORMAT_* code
    * and @c modifier a @c DRM_FORMAT_MOD_* value — @c DRM_FORMAT_MOD_LINEAR (0)
    * for a plain linear buffer, @c DRM_FORMAT_MOD_INVALID only when the modifier
    * is unknown/unspecified (let the importer infer). @c width / @c height are
@@ -200,13 +206,14 @@ class ICompositorSurface {
    *
    * @c acquire_fence_fd, when >= 0, is a sync_file naming when the producer's
    * writes complete — intended for the atomic commit's @c IN_FENCE_FD so
-   * scanout is tear-free without a CPU stall. Not every present path consumes
-   * it yet: the DRM scene path is implicit-sync today and ignores it (leave it
-   * -1 for an implicit-sync producer). When a path does consume it, ownership
-   * stays with the surface and the compositor dups it.
+   * scanout is tear-free without a CPU stall. The DRM scene path imports it and
+   * hands it to the plane source (wired to @c IN_FENCE_FD, with a CPU wait as a
+   * fallback on drivers lacking that property); leave it -1 for a producer that
+   * has already synced. Ownership stays with the surface — the compositor dups
+   * what it needs.
    */
   struct Dmabuf {
-    int fd{-1};
+    int fd[4]{-1, -1, -1, -1};  // one owned handle per plane (see above)
     uint32_t fourcc{0};
     uint64_t modifier{0};
     uint32_t width{0};
@@ -215,6 +222,10 @@ class ICompositorSurface {
     uint32_t offset[4]{};
     uint32_t stride[4]{};
     int acquire_fence_fd{-1};
+    // The producer's identity for this frame (IhsFrame.buffer_id, its ring
+    // slot). The compositor hands it back via OnScanoutRelease when the plane
+    // stops scanning the frame out, so the producer can reuse that slot.
+    uint32_t buffer_id{0};
   };
 
   /**
@@ -282,4 +293,20 @@ class ICompositorSurface {
       ::close(fd);
     }
   }
+
+  /**
+   * @brief The plane has stopped scanning out the frame the producer submitted
+   * with @p buffer_id (Dmabuf::buffer_id); that ring slot is free to reuse.
+   *
+   * The DRM scene path calls this once per submitted frame when the frame is
+   * retired (a later frame replaced it on the plane) -- normally on the
+   * compositor thread, but scene/pool teardown (e.g. ~DrmCompositor draining
+   * in-flight buffers) can call it from another thread, so an implementation
+   * must be thread-safe. It is the per-buffer complement of the per-submit
+   * @c SetReleaseFenceFd: on the plane path a producer waits on the release
+   * fence handed back at submit, so a surface backing that path signals that
+   * fence here. The default ignores it (surfaces whose producer does not track
+   * per-buffer releases).
+   */
+  virtual void OnScanoutRelease(uint32_t /*buffer_id*/) {}
 };
