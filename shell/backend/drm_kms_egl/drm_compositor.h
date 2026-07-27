@@ -461,6 +461,11 @@ class DrmCompositor : public IFlipSink {
   // that vanished from the frame must be pruned by tag.
   std::vector<void*> scene_pv_tags_;
 
+  // Per-platform-view buffer release is handled by each PV layer's
+  // ExternalDmaBufPool (its OnBufferRelease returns a buffer_id to the producer
+  // when it leaves scanout) plus the scene's source-retire ring on prune, so no
+  // per-buffer scanout history is tracked here.
+
   // DRM plane id of an externally-managed cursor to reserve from the
   // scene allocator's disable-unused pass. Set by ReserveCursorPlane()
   // (from DrmBackend, once the cursor exists); applied to scene_ each
@@ -543,6 +548,15 @@ class DrmCompositor : public IFlipSink {
   // Set once we hit an unrecoverable atomic-commit failure. All future
   // frames route through PresentViaGlFallback until restart.
   bool fallback_latched_{false};
+
+  // Consecutive scene-commit EBUSY count. EBUSY is transient -- a new plane
+  // (e.g. a platform view appearing) committed NONBLOCK against a still-pending
+  // flip during the GL->scene transition. Such a frame is skipped and retried
+  // next present rather than permanently latching GL fallback; the latch is
+  // taken only if EBUSY persists past kSceneEbusyRetryLimit frames. Reset on
+  // any successful scene commit.
+  static constexpr unsigned kSceneEbusyRetryLimit = 60;  // ~1s at 60fps
+  unsigned scene_ebusy_streak_{0};
 
   // Session-pause gate. Set by DrmBackend::OnSessionPaused (libseat
   // disable_seat) and cleared by OnResume on libseat enable_seat. Read
