@@ -39,6 +39,7 @@
 #include <xf86drmMode.h>
 
 #include <drm-cxx/core/format.hpp>
+#include <drm-cxx/scene/external_dma_buf_pool.hpp>
 #include <drm-cxx/scene/external_dma_buf_source.hpp>
 #include <drm-cxx/sync/fence.hpp>
 
@@ -2337,7 +2338,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // tag didn't appear this frame. Backing stores are keyed by their
   // StoreBaton; platform views by their ICompositorSurface pointer. A
   // platform view that exports a dma-buf goes onto a KMS overlay plane
-  // via ExternalDmaBufSource; one that can't (GL-only, or no frame yet)
+  // via an ExternalDmaBufPool; one that can't (GL-only, or no frame yet)
   // drops the whole frame to GL composition — the same all-or-nothing
   // rule the backing-store overflow uses below.
   struct FrameLayer {
@@ -2346,6 +2347,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     GbmBackingStore* store;            // non-null for backing-store layers
     void* pv_tag;                      // PV surface* identity tag (null for BS)
     ICompositorSurface::Dmabuf pv_db;  // PV frame (valid when pv_tag != null)
+    // Keeps the PV surface alive so the pool's OnBufferRelease (which calls
+    // back into it) is safe even if the view is disposed this frame.
+    std::shared_ptr<ICompositorSurface> pv_surface;
   };
   std::vector<FrameLayer> frame_layers;
   frame_layers.reserve(layer_count);
@@ -2357,16 +2361,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   frame_pv_tags.reserve(layer_count);
 
   // GetDmabuf hands back an owned (dup'd) fd per platform view; close them on
-  // every exit path (each GL-fallback return below, and the normal exit).
-  // ExternalDmaBufSource::create dups again for the KMS framebuffer, so closing
-  // after the scene layer is built is correct.
+  // every exit path (each GL-fallback return below, and the normal exit). The
+  // pool's first-sight import dups again for the KMS framebuffer, so closing
+  // after the frame is submitted is correct.
   struct PvFdCloser {
     std::vector<FrameLayer>& fls;
     ~PvFdCloser() {
       for (auto& fl : fls) {
-        if (fl.pv_tag != nullptr && fl.pv_db.fd >= 0) {
-          ::close(fl.pv_db.fd);
-          fl.pv_db.fd = -1;
+        if (fl.pv_tag != nullptr) {
+          for (int& pfd : fl.pv_db.fd) {
+            if (pfd >= 0) {
+              ::close(pfd);
+              pfd = -1;
+            }
+          }
         }
         // Close the producer's acquire fence. drm::sync::SyncFence::import_fd
         // (used by set_acquire_fence below) DUPS the fd rather than taking
@@ -2392,7 +2400,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       if (!baton || !baton->store) {
         continue;
       }
-      frame_layers.push_back({fl, baton, baton->store, nullptr, {}});
+      frame_layers.push_back({fl, baton, baton->store, nullptr, {}, nullptr});
       frame_batons.push_back(baton);
     } else if (fl->type == kFlutterLayerContentTypePlatformView &&
                fl->platform_view) {
@@ -2431,7 +2439,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         // samples the surface's GL texture / Vulkan image.
         return PresentViaGlFallback(layers, layer_count);
       }
-      frame_layers.push_back({fl, nullptr, nullptr, surface.get(), db});
+      frame_layers.push_back(
+          {fl, nullptr, nullptr, surface.get(), db, surface});
       frame_pv_tags.push_back(surface.get());
     }
   }
@@ -2461,6 +2470,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   };
   const int bs_pruned = prune(scene_layer_batons_, frame_batons);
   const int pv_pruned = prune(scene_pv_tags_, frame_pv_tags);
+  // A pruned PV's layer (removed above) carries its ExternalDmaBufPool into the
+  // scene's source-retire ring; the scene release_with_fence()es the pool's
+  // in-flight buffer as it retires, firing OnBufferRelease back to the
+  // producer. So there is no separate scanout history to drain here.
 
   // Add new layers; update geometry/zpos on existing ones. dst_rect is
   // in CRTC coordinates; the non-framed path has no letterbox so
@@ -2480,6 +2493,37 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // on the primary plane, whose zpos is immutable on some drivers.
   int bs_reused = 0, bs_new = 0, pv_reused = 0, pv_new = 0;
   int z_index = -1;
+  // Hand a freshly-delivered platform-view frame to its pool. The pool imports
+  // each decoder ring slot (keyed by buffer_id) once and reuses the cached
+  // fb_id on every recycle, so there is no per-frame AddFB2 and no
+  // deduped-GEM-handle double-close. The producer's acquire fence (if any)
+  // rides submit; the pool's OnBufferRelease returns each buffer_id to the
+  // producer when it leaves scanout. import_fd / the pool's dup keep our fds
+  // valid, so PvFdCloser still closes the originals at scope exit.
+  const auto submit_pv_pool = [](drm::scene::ExternalDmaBufPool* pool,
+                                 const ICompositorSurface::Dmabuf& db) {
+    const uint32_t np = db.plane_count < 4 ? db.plane_count : 4;
+    std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
+    for (uint32_t p = 0; p < np; ++p) {
+      planes[p] =
+          drm::scene::ExternalPlaneInfo{db.fd[p], db.offset[p], db.stride[p]};
+    }
+    std::optional<drm::sync::SyncFence> acquire;
+    if (db.acquire_fence_fd >= 0) {
+      if (auto f = drm::sync::SyncFence::import_fd(db.acquire_fence_fd); f) {
+        acquire = std::move(f.value());
+      } else {
+        ihs::log::warn(
+            "[DrmCompositor] pv acquire-fence import failed ({}); implicit "
+            "sync this frame",
+            f.error().message());
+      }
+    }
+    pool->submit(
+        db.buffer_id,
+        drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
+        std::move(acquire));
+  };
   for (auto& fl : frame_layers) {
     ++z_index;
     const bool is_ui = (z_index == 0);
@@ -2532,59 +2576,39 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     } else {
       // ── Platform view: wrap the dma-buf as a scene buffer source ──
       if (auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
-        // Reused layer: swap in this frame's dma-buf so a per-frame producer
-        // (a decoder, a camera) scans out fresh content instead of the first
-        // frame forever. replace_source retires the displaced source only once
-        // its in-flight buffers release (with their release fences), so nothing
-        // is freed while the kernel may still scan it. ExternalDmaBufSource
-        // dups the fds and does its own AddFB2WithModifiers; the pv_fd_closer
-        // closes our dup at scope exit.
+        // Reused layer: the pool created on first sight owns this PV's imports.
+        // Submit this frame's buffer_id; the pool reuses the cached fb_id when
+        // the decoder recycles a ring slot (no re-import, no double-close) and
+        // returns each buffer to the producer via OnBufferRelease when it
+        // leaves scanout -- so there is no RecordPvScanout / depth-history
+        // here.
         const auto& db = fl.pv_db;
         // GetDmabuf is deliver-once: a valid descriptor here means a fresh
         // frame this present. When it's empty (fd < 0 — the producer had no new
-        // frame), keep the source already on the plane rather than tearing the
-        // layer down, so the last frame holds until the next one arrives.
-        if (db.fd >= 0 && db.plane_count > 0) {
-          const uint32_t np = db.plane_count;
-          std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
-          for (uint32_t p = 0; p < np && p < 4; ++p) {
-            planes[p] = drm::scene::ExternalPlaneInfo{db.fd, db.offset[p],
-                                                      db.stride[p]};
-          }
-          auto src = drm::scene::ExternalDmaBufSource::create(
-              backend_->device(), db.width, db.height, db.fourcc, db.modifier,
-              drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(),
-                                                             np));
-          if (src) {
-            // Explicit sync: the producer's acquire fence rides the plane's
-            // IN_FENCE_FD (scene CPU-waits as a fallback). import_fd dups, so
-            // PvFdCloser still closes our original fd.
-            if (db.acquire_fence_fd >= 0) {
-              if (auto f = drm::sync::SyncFence::import_fd(db.acquire_fence_fd);
-                  f) {
-                src.value()->set_acquire_fence(std::move(f.value()));
-              } else {
-                // Fall back to implicit sync for this frame (the producer
-                // synced, or scanout may tear); log so it's diagnosable.
-                ihs::log::warn(
-                    "[DrmCompositor] pv acquire-fence import failed ({}); "
-                    "implicit sync this frame",
-                    f.error().message());
-              }
-            }
-            if (auto r = scene_->replace_source(layer->handle(),
-                                                std::move(src.value()));
-                !r) {
-              ihs::log::warn(
-                  "[DrmCompositor] LayerScene::replace_source (pv): {}",
-                  r.error().message());
-            }
+        // frame), don't submit; the pool holds the last buffer until the next
+        // arrives.
+        if (db.fd[0] >= 0 && db.plane_count > 0) {
+          auto* pool =
+              dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source());
+          if (pool != nullptr && pool->format().width == db.width &&
+              pool->format().height == db.height &&
+              pool->format().drm_fourcc == db.fourcc &&
+              pool->format().modifier == db.modifier) {
+            submit_pv_pool(pool, db);
           } else {
-            ihs::log::warn(
-                "[DrmCompositor] pv ExternalDmaBufSource::create failed "
-                "({}): {}x{} fourcc=0x{:08x} mod=0x{:016x} planes={}",
-                src.error().message(), db.width, db.height, db.fourcc,
-                db.modifier, np);
+            // Source isn't our pool, or the producer's geometry changed under a
+            // fixed-generation pool (an ABR rendition switch). Drop the layer
+            // so the new loop re-adds it at the new geometry next present, and
+            // release this frame's buffer so its ring slot isn't leaked.
+            scene_->remove_layer(layer->handle());
+            scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
+                                             scene_pv_tags_.end(), fl.pv_tag),
+                                 scene_pv_tags_.end());
+            if (fl.pv_surface) {
+              fl.pv_surface->OnScanoutRelease(db.buffer_id);
+            }
+            ++pv_reused;
+            continue;
           }
         }
         layer->set_dst_rect_if_changed(dst_rect);
@@ -2594,42 +2618,34 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       ++pv_new;
       const auto& db = fl.pv_db;
-      // GetDmabuf guarantees a valid single-handle plane set (1..4 planes); it
-      // returns false rather than a zero-plane frame.
-      const uint32_t np = db.plane_count;
-      std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
-      for (uint32_t p = 0; p < np && p < 4; ++p) {
-        planes[p] =
-            drm::scene::ExternalPlaneInfo{db.fd, db.offset[p], db.stride[p]};
-      }
-      // ExternalDmaBufSource dups the fds and does its own
-      // AddFB2WithModifiers; the producer keeps ownership of the originals.
-      auto src = drm::scene::ExternalDmaBufSource::create(
+      // First sight of this platform view: stand up a persistent pool for its
+      // decoder ring. Each ring slot (keyed by buffer_id) is imported once and
+      // its fb_id reused on every recycle -- the drm-cxx tool built for a
+      // rotating V4L2/MPP producer. OnBufferRelease returns each buffer to the
+      // producer when it leaves scanout, which drives the ihs_pv release path.
+      // The retained surface shared_ptr keeps the view alive across a release
+      // even if it is concurrently disposed.
+      drm::scene::ExternalDmaBufPool::Options opts{};
+      opts.on_release = [surface = fl.pv_surface](
+                            std::uintptr_t key,
+                            std::optional<drm::sync::SyncFence>) {
+        if (surface) {
+          surface->OnScanoutRelease(static_cast<uint32_t>(key));
+        }
+      };
+      auto pool = drm::scene::ExternalDmaBufPool::create(
           backend_->device(), db.width, db.height, db.fourcc, db.modifier,
-          drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np));
-      if (!src) {
+          std::move(opts));
+      if (!pool) {
         ihs::log::warn(
-            "[DrmCompositor] ExternalDmaBufSource::create (pv): {}; routing "
+            "[DrmCompositor] ExternalDmaBufPool::create (pv): {}; routing "
             "through GL fallback",
-            src.error().message());
+            pool.error().message());
         return PresentViaGlFallback(layers, layer_count);
       }
-      // Explicit sync: hand the producer's acquire fence to the source so the
-      // scene wires it to the plane's IN_FENCE_FD (CPU-wait fallback).
-      // import_fd dups, so PvFdCloser still closes our original fd.
-      if (db.acquire_fence_fd >= 0) {
-        if (auto f = drm::sync::SyncFence::import_fd(db.acquire_fence_fd); f) {
-          src.value()->set_acquire_fence(std::move(f.value()));
-        } else {
-          // Fall back to implicit sync for this frame; log so it's diagnosable.
-          ihs::log::warn(
-              "[DrmCompositor] pv acquire-fence import failed ({}); implicit "
-              "sync this frame",
-              f.error().message());
-        }
-      }
+      auto* pool_raw = pool.value().get();
       drm::scene::LayerDesc desc{};
-      desc.source = std::move(src.value());
+      desc.source = std::move(pool.value());
       desc.display.dst_rect = dst_rect;
       // Producer hands scanout-oriented (top-down) pixels — no REFLECT_Y,
       // unlike GL backing stores.
@@ -2644,6 +2660,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         return PresentViaGlFallback(layers, layer_count);
       }
       scene_pv_tags_.push_back(fl.pv_tag);
+      // Submit the first frame: imports this slot and caches its fb_id.
+      submit_pv_pool(pool_raw, db);
       if (backend_->cfg_.debug_backend) {
         ihs::log::debug(
             "[DrmCompositor] platform-view scene layer added: {}x{} "
@@ -2715,18 +2733,27 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // so the embedder doesn't manage plane_mode_set_ for this path.
   const bool was_first_commit_pre = !plane_mode_set_;
 
-  // Two-phase flags, mirroring the legacy direct-scanout path: the
-  // first commit is a blocking ALLOW_MODESET with NO PAGE_FLIP_EVENT.
-  // The kernel doesn't deliver a flip event across a modeset on most
-  // drivers (the commit returning is our signal), and combining the
-  // ALLOW_MODESET that LayerScene ORs in for first_commit_ with
-  // NONBLOCK makes rockchip's atomic path return EBUSY against the
-  // modeset's still-pending flip — wedging the CRTC. Steady state:
-  // NONBLOCK + PAGE_FLIP_EVENT for vsync-locked flips.
+  // A mid-session change in the plane set -- a platform-view overlay plane
+  // appearing (pv_new) or leaving (pv_pruned) -- must go through the same
+  // blocking ALLOW_MODESET commit as the very first commit. The steady-state
+  // NONBLOCK path returns EBUSY when it brings a plane up/down (observed on V3D
+  // as the GL->scene transition adds the video plane), and latching GL fallback
+  // on that transient error kills the plane path for the whole session. Only
+  // the PV plane's presence matters here; backing-store FB swaps on an
+  // already-live plane stay on the fast NONBLOCK path.
+  const bool plane_topology_changed = (pv_new != 0 || pv_pruned != 0);
+  const bool blocking_modeset = was_first_commit_pre || plane_topology_changed;
+
+  // Two-phase flags, mirroring the legacy direct-scanout path: a modeset commit
+  // is a blocking ALLOW_MODESET with NO PAGE_FLIP_EVENT. The kernel doesn't
+  // deliver a flip event across a modeset on most drivers (the commit returning
+  // is our signal), and combining the ALLOW_MODESET that LayerScene ORs in for
+  // first_commit_ with NONBLOCK makes the atomic path return EBUSY against the
+  // modeset's still-pending flip — wedging the CRTC. Steady state: NONBLOCK +
+  // PAGE_FLIP_EVENT for vsync-locked flips.
   const uint32_t commit_flags =
-      was_first_commit_pre
-          ? DRM_MODE_ATOMIC_ALLOW_MODESET
-          : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+      blocking_modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET
+                       : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   const uint64_t t2 = profile ? NsNow() : 0;
 
   auto report = scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
@@ -2739,6 +2766,23 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       return false;
     }
+    // EBUSY: a commit collided with a still-pending flip. The modeset path
+    // above handles the known plane-topology case; this is the safety net for
+    // any residual transient EBUSY. It clears once the pending flip retires, so
+    // skip this frame and retry next present rather than permanently latching
+    // GL fallback (which would kill the plane path for the whole session on a
+    // single transient error). Drive the next frame ourselves -- no commit
+    // landed, so no PAGE_FLIP_EVENT will arrive to return the vsync baton.
+    // Latch if it persists.
+    if (report.error() == std::errc::device_or_resource_busy) {
+      if (++scene_ebusy_streak_ <= kSceneEbusyRetryLimit) {
+        (void)backend_->vsync_.DeliverParkedBaton();  // keep the loop alive
+        return false;                                 // retry next present
+      }
+      ihs::log::warn(
+          "[DrmCompositor] LayerScene::commit EBUSY x{}; latching GL fallback",
+          scene_ebusy_streak_);
+    }
     ihs::log::warn(
         "[DrmCompositor] LayerScene::commit failed ({}); latching GL "
         "fallback for remaining session",
@@ -2746,14 +2790,19 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     fallback_latched_ = true;
     return PresentViaGlFallback(layers, layer_count);
   }
+  scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
 
-  if (was_first_commit_pre) {
-    // First commit landed; LayerScene's implicit ALLOW_MODESET cycle
-    // is blocking, so no PAGE_FLIP_EVENT is in flight. Latch + verify
-    // + kick the initial vsync baton, same as the legacy path.
-    plane_mode_set_ = true;
+  if (blocking_modeset) {
+    // A blocking ALLOW_MODESET commit landed (first commit, or a plane-topology
+    // change). It carries no PAGE_FLIP_EVENT, so no flip completion will arrive
+    // to return the vsync baton -- kick it ourselves, same as the legacy path
+    // and PresentDirectOverlay. The genuine first commit also latches
+    // plane_mode_set_ and verifies the pipe.
+    if (was_first_commit_pre) {
+      plane_mode_set_ = true;
+      VerifyPipeRunning();
+    }
     flip_pending_.store(false, std::memory_order_release);
-    VerifyPipeRunning();
     (void)backend_->vsync_.DeliverParkedBaton();
   } else {
     flip_pending_.store(true, std::memory_order_release);
