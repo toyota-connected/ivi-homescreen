@@ -503,16 +503,17 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
           errno);
       return;  // *out_fd stays -1
     }
-    release_efds[buffer_id] = ef;
     if (out_fd != nullptr) {
       const int dup_fd = ::dup(ef);
       if (dup_fd < 0) {
         ihs::log::warn("[ihs_pv] dup(release eventfd) failed (errno={})",
                        errno);
-        return;
+        close(ef);  // don't leak ef or leave a stale release_efds entry the
+        return;     // producer never got a fence to wait on
       }
       *out_fd = dup_fd;
     }
+    release_efds[buffer_id] = ef;
   }
 
  private:
