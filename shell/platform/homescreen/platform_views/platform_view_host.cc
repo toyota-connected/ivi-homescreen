@@ -485,7 +485,15 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (it == release_efds.end()) {
       return;
     }
-    (void)eventfd_write(it->second, 1);
+    // Should never fail for a live, blocking eventfd with a small counter, but
+    // if it did the producer would stall forever on its dup with no clue why --
+    // so log rather than swallow it.
+    if (eventfd_write(it->second, 1) != 0) {
+      ihs::log::warn(
+          "[ihs_pv] eventfd_write(release bid={}) failed (errno={}); producer "
+          "may stall on this ring slot",
+          buffer_id, errno);
+    }
     close(it->second);
     release_efds.erase(it);
   }
