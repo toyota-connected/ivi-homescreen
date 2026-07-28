@@ -19,3 +19,10 @@ build-systemd-watchdog-test/
 lcovHtml/
 
 coverage.info
+
+# emb cross resolve state. Records the host tools a resolve ran with (rustc,
+# Flutter and engine commits) and one entry per target the developer happens to
+# have built, so it differs per machine and dirties the tree on every
+# `emb cross`. Reproducibility for CI comes from pinning in the manifest and in
+# CI's own environment rather than from a file every developer rewrites.
+emb.lock
