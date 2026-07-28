@@ -75,6 +75,33 @@ const auto& d() {
   return vk::detail::defaultDispatchLoaderDynamic;
 }
 
+// Owns a file descriptor for the rest of its scope.
+//
+// The scanout barrier hands back an owned sync_file on every explicit-sync
+// frame, and each of the present path's exits owes it a close --- including the
+// two early returns taken while the presenting layer is still being created.
+// drm::sync::SyncFence cannot serve here: import_fd() dups, so handing the fd
+// to it leaves the original this side's problem.
+class ScopedFd {
+ public:
+  explicit ScopedFd(const int fd) noexcept : fd_(fd) {}
+  ~ScopedFd() {
+    if (fd_ >= 0) {
+      ::close(fd_);
+    }
+  }
+
+  ScopedFd(const ScopedFd&) = delete;
+  ScopedFd& operator=(const ScopedFd&) = delete;
+  ScopedFd(ScopedFd&&) = delete;
+  ScopedFd& operator=(ScopedFd&&) = delete;
+
+  [[nodiscard]] int get() const noexcept { return fd_; }
+
+ private:
+  int fd_{-1};
+};
+
 // Map a rotation in degrees (validated to 0|90|180|270 at config time) to the
 // KMS plane rotation bitflag. drm-cxx lowers DisplayParams::rotation to the
 // plane's `rotation` property (or software pre-rotation if the plane lacks it).
@@ -1323,9 +1350,11 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   // already retired; this barrier only makes the writes visible to KMS. On the
   // explicit-sync path it returns a sync_file the scene hands to IN_FENCE_FD so
   // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
-  const int scanout_fence_fd =
+  // Owned here so every exit below closes it exactly once --- the early returns
+  // during layer creation included.
+  const ScopedFd scanout_fence(
       SubmitScanoutBarrier(c, store->image(), store->view(), store->width(),
-                           store->height(), layers, count);
+                           store->height(), layers, count));
 
   // The engine's raster thread pipelines: it hands us frame N+1 while flip N is
   // still in flight, and a single plane can hold only one flip, so we wait for
@@ -1373,12 +1402,12 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
 
   // Mark the slot ready. On the explicit-sync path, hand its render-done
   // sync_file to the source as the acquire fence (the scene lowers it to the
-  // plane's IN_FENCE_FD); SyncFence takes ownership of the fd.
-  if (scanout_fence_fd >= 0) {
-    if (auto fence = drm::sync::SyncFence::import_fd(scanout_fence_fd)) {
+  // plane's IN_FENCE_FD). import_fd dups, so the fence the ring receives is its
+  // own; ours is closed by ScopedFd on the way out either way.
+  if (scanout_fence.get() >= 0) {
+    if (auto fence = drm::sync::SyncFence::import_fd(scanout_fence.get())) {
       c.ring->SetReady(slot, std::move(fence.value()));
     } else {
-      ::close(scanout_fence_fd);
       c.ring->SetReady(slot);
     }
   } else {
