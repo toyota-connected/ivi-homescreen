@@ -182,43 +182,61 @@ if (BUILD_BACKEND_SOFTWARE)
     option(BUILD_SOFTWARE_SINK_ENCODER
             "Build the V4L2 hardware-encoder sink for the software backend"
             OFF)
-    if (BUILD_SOFTWARE_SINK_ENCODER)
-        set(V4L2WC_DIR "${CMAKE_SOURCE_DIR}/../v4l2-webrtc-codec"
-                CACHE PATH "Path to the v4l2-webrtc-codec checkout")
-        # Verify every V4L2WC source the shell compiles (encoder + its logger),
-        # so a partial checkout / layout change fails here with a clear message
-        # rather than midway through the build.
-        foreach (_v4l2wc_src src/v4l2_m2m_encoder.cc src/log.cc)
-            if (NOT EXISTS "${V4L2WC_DIR}/${_v4l2wc_src}")
-                message(FATAL_ERROR
-                        "BUILD_SOFTWARE_SINK_ENCODER=ON but the v4l2-webrtc-codec "
-                        "source '${_v4l2wc_src}' was not found at "
-                        "V4L2WC_DIR='${V4L2WC_DIR}' (set -DV4L2WC_DIR=<path>)")
-            endif ()
-        endforeach ()
-        # Optional WebRTC send consumer: hand each NV12 dma-buf to libwebrtc,
-        # whose V4L2 encoder factory produces H.264 + RTP to a remote peer. This
-        # is the only software-backend TU that links libwebrtc, so it is gated
-        # separately. LIBWEBRTC_DIR supplies the flat C ABI headers (include/)
-        # and LIBWEBRTC_SO the prebuilt libwebrtc.so to link.
-        option(BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
-                "Build the WebRTC send consumer for the encoder sink (links libwebrtc)"
-                OFF)
-        if (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC)
-            set(LIBWEBRTC_DIR "${CMAKE_SOURCE_DIR}/../libwebrtc"
-                    CACHE PATH "Path to the libwebrtc checkout (flat C ABI headers)")
-            set(LIBWEBRTC_SO "" CACHE FILEPATH "Path to the prebuilt libwebrtc.so")
-            if (NOT EXISTS "${LIBWEBRTC_DIR}/include/c/lw_c_api.h")
-                message(FATAL_ERROR
-                        "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON but the libwebrtc C "
-                        "ABI header was not found at "
-                        "LIBWEBRTC_DIR='${LIBWEBRTC_DIR}' (set -DLIBWEBRTC_DIR=<path>)")
-            endif ()
-            if (NOT LIBWEBRTC_SO OR NOT EXISTS "${LIBWEBRTC_SO}")
-                message(FATAL_ERROR
-                        "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON requires "
-                        "-DLIBWEBRTC_SO=<path to libwebrtc.so>")
-            endif ()
+    # The V4L2WC_DIR / libwebrtc validation for this option lives in the shared
+    # encoder block below (it is common to the headless-EGL backend).
+endif ()
+
+#
+# Headless GPU-EGL encode backend: the Flutter engine renders on the GPU into an
+# offscreen FBO, packed RGBA->NV12 on the GPU into a dma-buf and handed to the
+# same encode consumer the software backend uses (a file encoder or a WebRTC
+# send). No display / Wayland. Needs EGL/GLES/gbm + the V4L2 encoder sources
+# (V4L2WC_DIR) + optionally libwebrtc (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC).
+#
+option(BUILD_BACKEND_HEADLESS_EGL
+        "Build the headless GPU-EGL encode backend (GPU render -> NV12 -> HW encode)"
+        OFF)
+
+# Shared encoder dependencies. Both the software encoder sink
+# (BUILD_SOFTWARE_SINK_ENCODER) and the headless-EGL backend
+# (BUILD_BACKEND_HEADLESS_EGL) compile the V4L2 encoder sources and can
+# optionally link libwebrtc for the WebRTC send consumer. Resolve and validate
+# them once here, gated on either feature, so the two paths cannot drift.
+if (BUILD_SOFTWARE_SINK_ENCODER OR BUILD_BACKEND_HEADLESS_EGL)
+    set(V4L2WC_DIR "${CMAKE_SOURCE_DIR}/../v4l2-webrtc-codec"
+            CACHE PATH "Path to the v4l2-webrtc-codec checkout")
+    # Verify every V4L2WC source the shell compiles (encoder + its logger), so a
+    # partial checkout / layout change fails here with a clear message rather
+    # than midway through the build.
+    foreach (_v4l2wc_src src/v4l2_m2m_encoder.cc src/log.cc)
+        if (NOT EXISTS "${V4L2WC_DIR}/${_v4l2wc_src}")
+            message(FATAL_ERROR
+                    "The encoder sink / headless-EGL backend needs the "
+                    "v4l2-webrtc-codec source '${_v4l2wc_src}' at "
+                    "V4L2WC_DIR='${V4L2WC_DIR}' (set -DV4L2WC_DIR=<path>)")
+        endif ()
+    endforeach ()
+    # Optional WebRTC send consumer: hand each NV12 dma-buf to libwebrtc, whose
+    # V4L2 encoder factory produces H.264 + RTP to a remote peer. The only TU
+    # that links libwebrtc, so it is gated separately. LIBWEBRTC_DIR supplies the
+    # flat C ABI headers (include/) and LIBWEBRTC_SO the prebuilt libwebrtc.so.
+    option(BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
+            "Build the WebRTC send consumer for the encoder sink (links libwebrtc)"
+            OFF)
+    if (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC)
+        set(LIBWEBRTC_DIR "${CMAKE_SOURCE_DIR}/../libwebrtc"
+                CACHE PATH "Path to the libwebrtc checkout (flat C ABI headers)")
+        set(LIBWEBRTC_SO "" CACHE FILEPATH "Path to the prebuilt libwebrtc.so")
+        if (NOT EXISTS "${LIBWEBRTC_DIR}/include/c/lw_c_api.h")
+            message(FATAL_ERROR
+                    "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON but the libwebrtc C "
+                    "ABI header was not found at "
+                    "LIBWEBRTC_DIR='${LIBWEBRTC_DIR}' (set -DLIBWEBRTC_DIR=<path>)")
+        endif ()
+        if (NOT LIBWEBRTC_SO OR NOT EXISTS "${LIBWEBRTC_SO}")
+            message(FATAL_ERROR
+                    "BUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON requires "
+                    "-DLIBWEBRTC_SO=<path to libwebrtc.so>")
         endif ()
     endif ()
 endif ()

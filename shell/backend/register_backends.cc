@@ -65,6 +65,11 @@
 #include "backend/software/input/software_seat.h"
 #endif
 #endif
+#if BUILD_BACKEND_HEADLESS_EGL
+#include "backend/headless_egl/headless_egl.h"
+#include "backend/software/nv12_consumer.h"  // MakeNv12Consumer
+#include "display/software_display.h"        // reused no-op IDisplay
+#endif
 #if BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/partial_repaint_gate.h"
 #include "backend/wayland_egl/wayland_egl.h"
@@ -630,6 +635,30 @@ std::shared_ptr<Backend> MakeSoftwareBackend(
 }
 #endif
 
+#if BUILD_BACKEND_HEADLESS_EGL
+// A no-op display: the encode backend has no screen or input, only a
+// refresh-rate denominator for App::Loop. Reuses SoftwareDisplay.
+std::shared_ptr<IDisplay> MakeHeadlessEglDisplay(
+    const std::vector<Configuration::Config>& configs) {
+  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
+  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  return std::make_shared<SoftwareDisplay>(static_cast<int32_t>(w),
+                                           static_cast<int32_t>(h), 60.0);
+}
+
+std::shared_ptr<Backend> MakeHeadlessEglBackend(
+    const Configuration::Config& config,
+    IDisplay* /*display*/) {
+  // Consumer picked at startup from IVI_ENC_SINK (the part after "encoder:"):
+  // file:<path> (default) or webrtc:<host>:<port>.
+  const char* spec = std::getenv("IVI_ENC_SINK");
+  auto consumer = MakeNv12Consumer(spec != nullptr ? spec : "file:out.h264");
+  return std::make_shared<HeadlessEglBackend>(
+      config.view.width.value_or(kDefaultViewWidth),
+      config.view.height.value_or(kDefaultViewHeight), std::move(consumer));
+}
+#endif
+
 #if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_SOFTWARE && \
     BUILD_SOFTWARE_SINK_DRM
 std::shared_ptr<Backend> MakeLeasedSoftwareBackend(
@@ -734,6 +763,10 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 #else
                      nullptr});
 #endif
+#endif
+#if BUILD_BACKEND_HEADLESS_EGL
+  registry.Register({"headless-egl", MakeHeadlessEglDisplay,
+                     MakeHeadlessEglBackend, nullptr});
 #endif
 }
 

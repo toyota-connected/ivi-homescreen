@@ -23,45 +23,10 @@
 #include <string>
 #include <string_view>
 
+// The NV12 consumer seam (INv12Consumer + MakeNv12Consumer) is backend-neutral,
+// so the CPU EncoderSink here and the GPU headless-EGL backend share it.
+#include "backend/software/nv12_consumer.h"
 #include "backend/software/surface_sink.h"
-
-// Destination for the NV12 frames EncoderSink packs. One implementation drives
-// the V4L2 hardware encoder to a file (validation); another will feed a WebRTC
-// send track. The seam keeps libwebrtc and the V4L2 codec out of the sink TU,
-// so the minimal software backend stays dependency-light and only the consumer
-// TU (compiled under BUILD_SOFTWARE_SINK_ENCODER) links them.
-class INv12Consumer {
- public:
-  virtual ~INv12Consumer() = default;
-
-  // Called once the frame geometry is known (EncoderSink::OnSize). The NV12 is
-  // one contiguous buffer: Y is width x height at `stride`, interleaved CbCr
-  // follows at offset stride*height. Returns false to disable the sink.
-  virtual bool Configure(uint32_t width, uint32_t height, uint32_t stride) = 0;
-
-  // Hand off one packed NV12 frame. `dmabuf_fd` is the single fd an encoder
-  // imports zero-copy; `nv12` maps the same bytes for a CPU-side consumer.
-  // Called on Flutter's rasterizer thread.
-  //
-  // The frame lives in one slot of the sink's ring. A consumer that FINISHES
-  // with it before returning (a synchronous encode) returns false, and the sink
-  // reclaims the slot immediately. A consumer that HOLDS it past the call (an
-  // asynchronous encode -- e.g. a WebRTC send whose encoder runs on its own
-  // thread) returns true, takes the release obligation, and MUST call
-  // `release(release_ctx)` exactly once when done -- from any thread. Until it
-  // does, that slot is not reused, so the buffer it points at stays valid.
-  virtual bool OnFrame(int dmabuf_fd,
-                       const uint8_t* nv12,
-                       uint64_t timestamp_us,
-                       bool force_keyframe,
-                       void (*release)(void*),
-                       void* release_ctx) = 0;
-};
-
-// Build a consumer from the part of the sink spec after "encoder:". Today:
-//   file:<path>   -> encode to an H.264 Annex-B file (validation)
-// Returns nullptr on an unrecognized / unbuildable spec.
-std::unique_ptr<INv12Consumer> MakeNv12Consumer(std::string_view spec);
 
 // Software-backend sink that converts each premultiplied-BGRA present to NV12
 // in a dma-buf and hands it to an INv12Consumer. No networking or encoder

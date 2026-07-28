@@ -29,7 +29,7 @@
 #include <string_view>
 #include <vector>
 
-#include "backend/software/encoder_sink.h"
+#include "backend/software/nv12_consumer.h"
 #include "config/common.h"  // BUILD_SOFTWARE_SINK_ENCODER_WEBRTC
 #include "logging/logging.h"
 
