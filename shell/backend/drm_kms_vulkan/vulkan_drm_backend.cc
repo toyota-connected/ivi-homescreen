@@ -367,13 +367,23 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
 VulkanDrmBackend::~VulkanDrmBackend() {
   // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRMVK_PROFILE ran).
   frame_profile_.LogSessionSummary("VulkanDrmBackend");
-#if BUILD_HUD
-  // Free the HUD while the Vulkan device is still alive (Teardown destroys it):
-  // ~VulkanHud runs ImGui_ImplVulkan_Shutdown, which frees device memory.
+  // Anything holding Vulkan objects has to be freed while the device is still
+  // alive, because Teardown() destroys it and members outlive this body. Wait
+  // for the GPU first: the last frame's command buffer may still reference the
+  // render pass and descriptors being freed just below.
   if (device_ != VK_NULL_HANDLE) {
     d().vkDeviceWaitIdle(device_);
   }
+#if BUILD_HUD
+  // ~VulkanHud runs ImGui_ImplVulkan_Shutdown, which frees device memory.
   hud_.reset();
+#endif
+#if BUILD_COMPOSITOR
+  // ~LayerCompositor destroys its render pass, pipelines, samplers, descriptor
+  // pools and cached framebuffers/views. As a member it would otherwise be
+  // destroyed after this body -- and so after Teardown() -- calling vkDestroy*
+  // on a dead device.
+  layer_compositor_.reset();
 #endif
   // Tear the cursor down first: it commits on compositor_'s DRM device, so it
   // must not outlive it.
