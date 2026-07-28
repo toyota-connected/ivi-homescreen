@@ -79,6 +79,28 @@
 namespace {
 
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+// Parse a yes/no/auto knob. File scope because both DRM backends read the same
+// spellings from the same config fields, and the Vulkan one cannot reach a
+// helper that lives inside the EGL backend's factory --- which is how
+// --drm-explicit-sync came to be parsed, plumbed, and then silently dropped on
+// the Vulkan path.
+drm_config::TriState ParseTriState(
+    const std::optional<std::string>& s,
+    const drm_config::TriState def = drm_config::TriState::kAuto) {
+  if (!s.has_value() || s->empty() || *s == "auto") {
+    return def;
+  }
+  if (*s == "yes" || *s == "true" || *s == "on") {
+    return drm_config::TriState::kYes;
+  }
+  if (*s == "no" || *s == "false" || *s == "off") {
+    return drm_config::TriState::kNo;
+  }
+  ihs::log::warn("[FlutterView] drm tri-state '{}' unrecognized; using auto",
+                 *s);
+  return drm_config::TriState::kAuto;
+}
+
 // DRM/KMS does not have a compositor-level display concept. The refresh
 // rate and mode are owned by the backend; the DrmDisplay stub answers
 // queries the shell issues (metrics, cursor activation, event loop) with
@@ -293,18 +315,7 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   std::shared_ptr<Backend> m_backend;
   auto parse_tri = [](const std::optional<std::string>& s,
                       drm_config::TriState def = drm_config::TriState::kAuto) {
-    if (!s.has_value() || s->empty() || *s == "auto") {
-      return def;
-    }
-    if (*s == "yes" || *s == "true" || *s == "on") {
-      return drm_config::TriState::kYes;
-    }
-    if (*s == "no" || *s == "false" || *s == "off") {
-      return drm_config::TriState::kNo;
-    }
-    ihs::log::warn("[FlutterView] drm tri-state '{}' unrecognized; using auto",
-                   *s);
-    return drm_config::TriState::kAuto;
+    return ParseTriState(s, def);
   };
   auto parse_compositor = [](const std::optional<std::string>& s) {
     if (!s.has_value() || s->empty() || *s == "auto") {
@@ -531,11 +542,13 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
                 drm_display->device_path(),
                 config.debug_backend.value_or(false), drm_mode,
                 config.view.drm_rotation.value_or(0),
-                drm_display->lease_connector_id(), drm_display->lease_revoked())
-          : VulkanDrmBackend::Create(drm_display->device_path(),
-                                     config.debug_backend.value_or(false),
-                                     drm_display->session(), drm_mode,
-                                     config.view.drm_rotation.value_or(0));
+                drm_display->lease_connector_id(), drm_display->lease_revoked(),
+                ParseTriState(config.view.drm_explicit_sync))
+          : VulkanDrmBackend::Create(
+                drm_display->device_path(),
+                config.debug_backend.value_or(false), drm_display->session(),
+                drm_mode, config.view.drm_rotation.value_or(0),
+                ParseTriState(config.view.drm_explicit_sync));
 
   // Create returns nullptr on any init failure (unsupported device, no
   // zero-copy scanout path). Continuing would dereference a null backend in
