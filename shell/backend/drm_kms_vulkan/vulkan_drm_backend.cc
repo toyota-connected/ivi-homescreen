@@ -214,13 +214,16 @@ VkImageMemoryBarrier ColorBarrier(VkImage image,
 // until the GPU has executed it. Used to walk a backing-store image between the
 // layout the Flutter Vulkan renderer leaves it in (COLOR_ATTACHMENT_OPTIMAL)
 // and a flushed layout whose writes are visible to the KMS scanout engine.
-void SubmitImageBarrier(VkDevice device,
-                        VkCommandPool pool,
-                        VkFence fence,
-                        VkQueue queue,
-                        const VkImageMemoryBarrier& barrier,
-                        VkPipelineStageFlags src_stage,
-                        VkPipelineStageFlags dst_stage) {
+// Record @p record into a one-shot command buffer, submit it, and block until
+// it retires. The CPU-fence scanout path needs more than a bare barrier in that
+// buffer (the platform-view blend goes there too), so the recording is the
+// caller's to supply.
+template <typename Record>
+void SubmitOneShot(VkDevice device,
+                   VkCommandPool pool,
+                   VkFence fence,
+                   VkQueue queue,
+                   Record&& record) {
   VkCommandBufferAllocateInfo cbai{};
   cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cbai.commandPool = pool;
@@ -234,8 +237,7 @@ void SubmitImageBarrier(VkDevice device,
   bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &bi);
-  d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
-                           1, &barrier);
+  record(cmd);
   d().vkEndCommandBuffer(cmd);
 
   VkSubmitInfo si{};
@@ -246,6 +248,19 @@ void SubmitImageBarrier(VkDevice device,
   d().vkQueueSubmit(queue, 1, &si, fence);
   d().vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
   d().vkFreeCommandBuffers(device, pool, 1, &cmd);
+}
+
+void SubmitImageBarrier(VkDevice device,
+                        VkCommandPool pool,
+                        VkFence fence,
+                        VkQueue queue,
+                        const VkImageMemoryBarrier& barrier,
+                        VkPipelineStageFlags src_stage,
+                        VkPipelineStageFlags dst_stage) {
+  SubmitOneShot(device, pool, fence, queue, [&](VkCommandBuffer cmd) {
+    d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0,
+                             nullptr, 1, &barrier);
+  });
 }
 
 // One layer, many buffers: a LayerBufferSource that owns a ring of
@@ -1170,17 +1185,36 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
                                            const FlutterLayer** layers,
                                            size_t count) {
   if (!c.explicit_sync) {
-    // CPU-fence fallback: submit + block until the barrier retires, then the
+    // CPU-fence fallback: submit + block until the work retires, then the
     // caller marks the slot ready with no in-fence. (The HUD is folded only
     // into the explicit-sync path, where the scanout fence covers its draw.)
-    const VkImageMemoryBarrier barrier = ColorBarrier(
-        image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        VK_ACCESS_MEMORY_READ_BIT);
-    SubmitImageBarrier(device_, c.barrier_pool, c.barrier_fence,
-                       graphics_queue_, barrier,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    //
+    // The platform-view blend belongs here as much as it does on the explicit
+    // path -- it is the same layer stack, and a compositor that drops it shows
+    // black views. This branch used to return before reaching it, so any target
+    // without IN_FENCE_FD composited the base backing store alone.
+    SubmitOneShot(
+        device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
+        [&](VkCommandBuffer cmd) {
+          bool composited = false;
+#if BUILD_COMPOSITOR
+          composited = CompositeOverlays(cmd, layers, count, image, view, width,
+                                         height, c.frame);
+#endif
+          // The blend's render pass ends in GENERAL, so when it runs it is
+          // itself the transition and the barrier would repeat it from a layout
+          // the image no longer has.
+          if (!composited) {
+            const VkImageMemoryBarrier barrier = ColorBarrier(
+                image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_ACCESS_MEMORY_READ_BIT);
+            d().vkCmdPipelineBarrier(
+                cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
+                1, &barrier);
+          }
+        });
     return -1;
   }
 
