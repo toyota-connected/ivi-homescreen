@@ -1174,17 +1174,30 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
 #else
   const bool hud_active = false;
 #endif
-  const VkImageMemoryBarrier barrier = ColorBarrier(
-      image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-      hud_active ? (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
-                 : VK_ACCESS_MEMORY_READ_BIT);
-  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           hud_active
-                               ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-                               : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                           0, 0, nullptr, 0, nullptr, 1, &barrier);
+#if BUILD_COMPOSITOR
+  // Blend the platform views and any Flutter overlay stores over the engine's
+  // render, which is already resident in this image. The blend's render pass
+  // consumes the image as a color attachment and declares GENERAL as its final
+  // layout, so when it runs it *is* the transition and the explicit barrier
+  // below would be a redundant second one from the wrong source layout.
+  const bool composited = CompositeOverlays(cmd, layers, count, image, view,
+                                            width, height, c.frame);
+#else
+  const bool composited = false;
+#endif
+  if (!composited) {
+    const VkImageMemoryBarrier barrier = ColorBarrier(
+        image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        hud_active ? (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+                   : VK_ACCESS_MEMORY_READ_BIT);
+    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             hud_active
+                                 ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                                 : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+  }
 
 #if BUILD_HUD
   // Draw the HUD into the same command buffer (image is now GENERAL), so the
@@ -1304,6 +1317,210 @@ bool VulkanDrmBackend::RecordHud(VkCommandBuffer cmd,
 }
 #endif  // BUILD_HUD
 
+#if BUILD_COMPOSITOR
+void VulkanDrmBackend::RegisterCompositorSurface(
+    const FlutterPlatformViewIdentifier id,
+    std::shared_ptr<ICompositorSurface> surface) {
+  const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+  compositor_surfaces_[id] = std::move(surface);
+}
+
+void VulkanDrmBackend::UnregisterCompositorSurface(
+    const FlutterPlatformViewIdentifier id) {
+  const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+  compositor_surfaces_.erase(id);
+}
+
+void VulkanDrmBackend::ResizeCompositorSurface(
+    const FlutterPlatformViewIdentifier id,
+    const int32_t width,
+    const int32_t height) {
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+    if (const auto it = compositor_surfaces_.find(id);
+        it != compositor_surfaces_.end()) {
+      surface = it->second;
+    }
+  }
+  // Called without the lock held: OnResize reaches into the plugin, which may
+  // call back into the registry.
+  if (surface) {
+    surface->OnResize(width, height);
+  }
+}
+
+bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
+                                         const FlutterLayer** layers,
+                                         const size_t count,
+                                         VkImage target_image,
+                                         VkImageView target_view,
+                                         const uint32_t width,
+                                         const uint32_t height,
+                                         const uint64_t frame) {
+  if (layers == nullptr || count < 2) {
+    return false;  // base backing store only — nothing to blend over it
+  }
+
+  struct Draw {
+    VkImage src;
+    VkFormat format;
+    int32_t dx, dy, dw, dh;
+    bool restore_color_attachment;  // a Flutter store the engine renders into
+    VkSamplerYcbcrModelConversion ycbcr_model;
+    VkSamplerYcbcrRange ycbcr_range;
+  };
+  std::vector<Draw> draws;
+  draws.reserve(count);
+
+  const auto barrier =
+      [&](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+          VkAccessFlags src_access, VkPipelineStageFlags src_stage,
+          VkAccessFlags dst_access, VkPipelineStageFlags dst_stage) {
+        VkImageMemoryBarrier b{};
+        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.oldLayout = old_layout;
+        b.newLayout = new_layout;
+        b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = image;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        b.srcAccessMask = src_access;
+        b.dstAccessMask = dst_access;
+        d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0,
+                                 nullptr, 1, &b);
+      };
+
+  CompositorState& c = *compositor_;
+  // Phase 1: move every source to SHADER_READ_ONLY. Layout transitions cannot
+  // happen inside a render pass, so they all precede phase 2.
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (layer == nullptr) {
+      continue;
+    }
+    const auto dx = static_cast<int32_t>(layer->offset.x);
+    const auto dy = static_cast<int32_t>(layer->offset.y);
+    const auto dw = static_cast<int32_t>(layer->size.width);
+    const auto dh = static_cast<int32_t>(layer->size.height);
+    if (dw <= 0 || dh <= 0) {
+      continue;
+    }
+
+    if (layer->type == kFlutterLayerContentTypeBackingStore &&
+        layer->backing_store != nullptr) {
+      const auto it = c.key_to_slot.find(layer->backing_store->user_data);
+      if (it == c.key_to_slot.end()) {
+        continue;
+      }
+      drm_kms_vulkan::VulkanBackingStore* store =
+          c.slots[it->second].store.get();
+      if (store == nullptr || store->image() == target_image) {
+        continue;  // the base store, already resident in the target
+      }
+      barrier(store->image(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+      draws.push_back({store->image(), store->vk_format(), dx, dy, dw, dh, true,
+                       VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+                       VK_SAMPLER_YCBCR_RANGE_ITU_NARROW});
+    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+               layer->platform_view != nullptr) {
+      std::shared_ptr<ICompositorSurface> surface;
+      {
+        const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+        if (const auto it =
+                compositor_surfaces_.find(layer->platform_view->identifier);
+            it != compositor_surfaces_.end()) {
+          surface = it->second;
+        }
+      }
+      if (!surface) {
+        continue;
+      }
+      int32_t pw = 0;
+      int32_t ph = 0;
+      void* vk_img = surface->GetVulkanImage(&pw, &ph);
+      if (vk_img == nullptr || pw <= 0 || ph <= 0) {
+        continue;  // no Vulkan image yet, or a GL-only producer
+      }
+      auto src = reinterpret_cast<VkImage>(vk_img);
+      // 0 keeps the historical B8G8R8A8_UNORM contract for RGB producers; a
+      // planar producer reports its own format plus the conversion parameters.
+      const uint32_t pv_fmt = surface->GetVulkanImageFormat();
+      const VkFormat src_format = pv_fmt != 0 ? static_cast<VkFormat>(pv_fmt)
+                                              : VK_FORMAT_B8G8R8A8_UNORM;
+      const auto cur =
+          static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
+      if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+        barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
+                from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                             : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      }
+      draws.push_back(
+          {src, src_format, dx, dy, dw, dh, false,
+           static_cast<VkSamplerYcbcrModelConversion>(
+               surface->GetVulkanYcbcrModel()),
+           static_cast<VkSamplerYcbcrRange>(surface->GetVulkanYcbcrRange())});
+    }
+  }
+
+  if (draws.empty()) {
+    return false;
+  }
+
+  // Built here rather than at init: the pipeline is keyed to the slot format,
+  // and a failure must not be retried every frame.
+  if (!layer_compositor_ && !layer_compositor_failed_) {
+    std::string err;
+    layer_compositor_ = wl_vulkan::LayerCompositor::Create(
+        device_, VK_FORMAT_B8G8R8A8_UNORM, err,
+        wl_vulkan::LayerCompositor::ContentMode::kPreserve);
+    if (!layer_compositor_) {
+      layer_compositor_failed_ = true;
+      ihs::log::error(
+          "[VulkanDrmBackend] platform-view blend unavailable ({}); views will "
+          "not composite",
+          err);
+    }
+  }
+  if (!layer_compositor_) {
+    return false;
+  }
+
+  // Phase 2: one render pass, layers blended in z-order over the base.
+  bool opened = false;
+  if (layer_compositor_->BeginFrame(cmd, target_view, width, height, frame)) {
+    opened = true;
+    for (const Draw& dr : draws) {
+      layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
+                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh);
+    }
+    wl_vulkan::LayerCompositor::EndFrame(cmd);
+  }
+
+  // Phase 3: hand the Flutter stores back as color attachments for the engine's
+  // next render. Runs even if the pass never opened, since phase 1 moved them.
+  for (const Draw& dr : draws) {
+    if (dr.restore_color_attachment) {
+      barrier(dr.src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    }
+  }
+  return opened;
+}
+#endif  // BUILD_COMPOSITOR
+
 bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
                                          size_t count) {
   if (!compositor_ || !compositor_->scene) {
@@ -1328,6 +1545,18 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     return true;
   }
   CompositorState& c = *compositor_;
+  {  // TEMP DIAGNOSTIC -- not for commit
+    std::string sig;
+    for (size_t i = 0; i < count; ++i) {
+      sig += (layers[i]->type == kFlutterLayerContentTypeBackingStore) ? "BS "
+                                                                       : "PV ";
+    }
+    static std::string last;
+    if (sig != last) {
+      last = sig;
+      ihs::log::info("[LAYERDIAG] count={} kinds=[{}]", count, sig);
+    }
+  }
   const FlutterLayer* bs_layer = nullptr;
   for (size_t i = 0; i < count; ++i) {
     if (layers[i]->type == kFlutterLayerContentTypeBackingStore) {
