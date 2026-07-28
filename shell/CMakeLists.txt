@@ -228,6 +228,44 @@ if (BUILD_BACKEND_SOFTWARE)
     endif ()
 endif ()
 
+if (BUILD_BACKEND_HEADLESS_EGL)
+    # GPU render (surfaceless GBM/EGL) + GPU RGBA->NV12 pack, feeding the same
+    # encode consumer the software backend uses. Reuses SoftwareDisplay (a no-op
+    # IDisplay) and the GL proc resolver.
+    find_package(PkgConfig REQUIRED)
+    if (NOT TARGET PkgConfig::GBM)
+        pkg_check_modules(GBM REQUIRED IMPORTED_TARGET gbm)
+    endif ()
+    target_sources(${PROJECT_NAME} PRIVATE
+            backend/headless_egl/headless_egl.cc
+            backend/software/nv12_gl_packer.cc
+            backend/software/nv12_consumer.cc
+            backend/gl_process_resolver.cc
+            display/software_display.cc
+            "${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc"
+            "${V4L2WC_DIR}/src/log.cc"
+    )
+    target_include_directories(${PROJECT_NAME} PRIVATE "${V4L2WC_DIR}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+            PkgConfig::GBM
+            # See the drm-kms-egl note: keep EGL/GLESv2 DT_NEEDED ahead of the
+            # platform lib that references gl* so --as-needed can't drop them.
+            -Wl,--no-as-needed
+            EGL
+            GLESv2
+            -Wl,--as-needed
+    )
+    if (BUILD_SOFTWARE_SINK_ENCODER_WEBRTC)
+        target_sources(${PROJECT_NAME} PRIVATE
+                backend/software/webrtc_consumer.cc)
+        target_include_directories(${PROJECT_NAME} PRIVATE
+                "${LIBWEBRTC_DIR}/include")
+        target_link_libraries(${PROJECT_NAME} PRIVATE "${LIBWEBRTC_SO}")
+        target_link_options(${PROJECT_NAME} PRIVATE
+                "LINKER:--allow-shlib-undefined")
+    endif ()
+endif ()
+
 # Shared libinput keyboard core (xkb translation + key-repeat) used by every
 # libinput-backed seat — SoftwareSeat and (DRM) DrmSeat — so keyboard behavior
 # is identical across backends. Depends only on libxkbcommon, which those seats
