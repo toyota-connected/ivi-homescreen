@@ -304,28 +304,46 @@ bool HeadlessEglBackend::TextureClearCurrent() {
 }
 
 void HeadlessEglBackend::Teardown() {
-  if (dpy_ == EGL_NO_DISPLAY) {
-    return;
+  // The GL/EGL objects only exist once we have a display, so tear those down
+  // under a dpy_ guard. The gbm device and render-node fd are opened before EGL
+  // comes up (see InitEgl), so they must be released even when EGL init failed
+  // part-way and dpy_ is still EGL_NO_DISPLAY -- otherwise a partial init leaks
+  // the fd. Handles are reset as they go so this is safe to call more than
+  // once.
+  if (dpy_ != EGL_NO_DISPLAY) {
+    // glDelete* needs a current context. If MakeCurrent fails (or was never
+    // established) skip the explicit deletes -- eglTerminate below frees them.
+    const bool ctx_current =
+        ctx_ != EGL_NO_CONTEXT &&
+        eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_) != 0;
+    if (ctx_current) {
+      if (render_fbo_ != 0) {
+        glDeleteFramebuffers(1, &render_fbo_);
+      }
+      if (render_tex_ != 0) {
+        glDeleteTextures(1, &render_tex_);
+      }
+    }
+    render_fbo_ = 0;
+    render_tex_ = 0;
+    eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (resource_ctx_ != EGL_NO_CONTEXT) {
+      eglDestroyContext(dpy_, resource_ctx_);
+      resource_ctx_ = EGL_NO_CONTEXT;
+    }
+    if (ctx_ != EGL_NO_CONTEXT) {
+      eglDestroyContext(dpy_, ctx_);
+      ctx_ = EGL_NO_CONTEXT;
+    }
+    eglTerminate(dpy_);
+    dpy_ = EGL_NO_DISPLAY;
   }
-  if (render_fbo_ != 0) {
-    glDeleteFramebuffers(1, &render_fbo_);
-  }
-  if (render_tex_ != 0) {
-    glDeleteTextures(1, &render_tex_);
-  }
-  eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  if (resource_ctx_ != EGL_NO_CONTEXT) {
-    eglDestroyContext(dpy_, resource_ctx_);
-  }
-  if (ctx_ != EGL_NO_CONTEXT) {
-    eglDestroyContext(dpy_, ctx_);
-  }
-  eglTerminate(dpy_);
-  dpy_ = EGL_NO_DISPLAY;
   if (gbm_ != nullptr) {
     gbm_device_destroy(gbm_);
+    gbm_ = nullptr;
   }
   if (render_fd_ >= 0) {
     ::close(render_fd_);
+    render_fd_ = -1;
   }
 }
