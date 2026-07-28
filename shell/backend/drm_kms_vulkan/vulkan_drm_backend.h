@@ -21,13 +21,22 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <vulkan/vulkan.h>
 
 #include "backend/backend.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
+#if BUILD_COMPOSITOR
+// Pure-Vulkan blend pipeline; despite living beside the Wayland backend it
+// pulls in no Wayland headers, so the DRM backend shares it rather than
+// carrying a second copy of the same render pass.
+#include "backend/wayland_vulkan/wl_layer_compositor.h"
+#include "view/compositor_surface_interface.h"
+#endif
 #include "profiling/frame_profile.h"
 #include "vsync/ivsync_provider.h"
 
@@ -123,6 +132,19 @@ class VulkanDrmBackend final : public Backend {
   // an exported dma-buf, and submit it for zero-copy import — the same seam
   // WaylandVulkanBackend provides.
   bool GetVulkanContext(BackendVulkanContext* out) const override;
+
+#if BUILD_COMPOSITOR
+  // Platform-view surfaces. Backend's default implementations are no-ops, so
+  // without these every surface the registry hands over is dropped and the
+  // views composite as nothing.
+  void RegisterCompositorSurface(
+      FlutterPlatformViewIdentifier id,
+      std::shared_ptr<ICompositorSurface> surface) override;
+  void UnregisterCompositorSurface(FlutterPlatformViewIdentifier id) override;
+  void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
+                               int32_t width,
+                               int32_t height) override;
+#endif
 
   // Vsync: drive Flutter's frame scheduling from the real page-flip event
   // instead of its wall-clock fallback, so frames align to the connector's
@@ -293,6 +315,40 @@ class VulkanDrmBackend final : public Backend {
                  uint32_t height,
                  const FlutterLayer** layers,
                  size_t count);
+#endif
+
+#if BUILD_COMPOSITOR
+  // Platform-view surfaces, keyed by the engine's view identifier. Registered
+  // from the platform thread and read on the raster thread during compositing,
+  // hence the mutex.
+  std::mutex compositor_surfaces_mu_;
+  std::unordered_map<FlutterPlatformViewIdentifier,
+                     std::shared_ptr<ICompositorSurface>>
+      compositor_surfaces_;
+
+  // src-over blend of the platform views (and any Flutter overlay stores) on
+  // top of the base backing store. Built lazily on first use because it is
+  // keyed to the slot format, which is not known until the scanout target has
+  // been negotiated. kPreserve: the base layer is already in the target.
+  std::unique_ptr<wl_vulkan::LayerCompositor> layer_compositor_;
+  bool layer_compositor_failed_{false};
+
+  // Blend every layer above the base backing store into @p target_view.
+  //
+  // Any backing store whose image is @p target_image is the base and is skipped
+  // --- it is already resident there, and sampling it would mean reading the
+  // image being rendered into. Records into @p cmd and reports whether it
+  // opened a render pass, which the caller needs because that pass leaves the
+  // target in GENERAL and so replaces the explicit scanout barrier. Raster
+  // thread.
+  bool CompositeOverlays(VkCommandBuffer cmd,
+                         const FlutterLayer** layers,
+                         size_t count,
+                         VkImage target_image,
+                         VkImageView target_view,
+                         uint32_t width,
+                         uint32_t height,
+                         uint64_t frame);
 #endif
 
   // Flutter's vsync_callback -> parks the baton in vsync_. Static C ABI; the
