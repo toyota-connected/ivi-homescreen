@@ -60,6 +60,13 @@ class Nv12GlPacker {
                      uint64_t timestamp_us,
                      bool force_keyframe);
 
+  // Release all GL/EGL/dma-buf resources. The owner must call this while the
+  // packer's GL context is still current, before destroying that context;
+  // otherwise the destructor's own teardown runs glDelete* with no current
+  // context (undefined). Idempotent -- the destructor calls it again as a
+  // no-op.
+  void Shutdown() { Teardown(); }
+
   uint32_t width() const { return width_; }
   uint32_t height() const { return height_; }
 

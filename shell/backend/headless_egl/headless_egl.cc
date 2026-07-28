@@ -62,10 +62,16 @@ HeadlessEglBackend::HeadlessEglBackend(uint32_t initial_width,
 HeadlessEglBackend::~HeadlessEglBackend() {
   // Quiesce the consumer before tearing down the GL resources its held frames
   // point into.
-  if (dpy_ != EGL_NO_DISPLAY) {
-    eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_);
-  }
+  const bool ctx_current =
+      dpy_ != EGL_NO_DISPLAY &&
+      eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_) != 0;
   consumer_.reset();
+  // Free the packer's GL/dma-buf resources now, while our context is current --
+  // Teardown() below destroys that context, and the packer's own destructor
+  // (member, runs after this body) would then glDelete* with none current.
+  if (ctx_current) {
+    packer_.Shutdown();
+  }
   Teardown();
 }
 
@@ -95,6 +101,18 @@ bool HeadlessEglBackend::InitEgl(const char* render_node) {
   if (exts == nullptr ||
       std::strstr(exts, "EGL_EXT_image_dma_buf_import") == nullptr) {
     ihs::log::error("[HeadlessEgl] no EGL_EXT_image_dma_buf_import");
+    return false;
+  }
+  // We render with no surface (eglMakeCurrent with EGL_NO_SURFACE), which needs
+  // EGL 1.5 or the EGL_KHR_surfaceless_context extension. Check up front rather
+  // than failing opaquely at the first MakeCurrent.
+  const bool surfaceless =
+      major > 1 || (major == 1 && minor >= 5) ||
+      std::strstr(exts, "EGL_KHR_surfaceless_context") != nullptr;
+  if (!surfaceless) {
+    ihs::log::error(
+        "[HeadlessEgl] no surfaceless-context support (need EGL 1.5 or "
+        "EGL_KHR_surfaceless_context)");
     return false;
   }
   eglBindAPI(EGL_OPENGL_ES_API);
@@ -218,10 +236,13 @@ FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
   config.open_gl.make_resource_current = [](void* user_data) -> bool {
     return BackendOf(user_data)->MakeResourceCurrent();
   };
-  // The frame-info present variants plus populate_existing_damage let us tell
-  // the engine the whole surface is stale each frame, forcing a full repaint
-  // into our single persistent FBO (a plain fbo_callback + present pair still
-  // let the engine clip to partial damage and leaves ghosting).
+  // The frame-info present variants let us report existing damage for our
+  // single persistent FBO. PopulateExistingDamage reports an EMPTY region: the
+  // buffer already holds the last presented frame (an age-1 swap chain), so the
+  // engine repaints only what actually changed into the intact buffer. A plain
+  // fbo_callback + present pair (no damage) instead lets the engine clip to
+  // partial damage against a buffer it assumes it cannot keep, which is what
+  // left ghosting.
   config.open_gl.fbo_with_frame_info_callback =
       [](void* user_data, const FlutterFrameInfo* /*info*/) -> uint32_t {
     return BackendOf(user_data)->Fbo();

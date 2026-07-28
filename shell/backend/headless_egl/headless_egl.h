@@ -37,8 +37,9 @@ class Engine;
 // GPU both rasterizes and colour-converts, so no CPU touches the pixels.
 //
 // Surfaceless GBM/EGL on the render node (like pi_gl_encode). Consumer selected
-// by IVI_ENC_SINK (default encoder:file:out.h264), same spec grammar as the
-// software backend's IVI_SW_SINK.
+// by IVI_ENC_SINK, which is the bare consumer spec -- "file:<path>" (default
+// "file:out.h264") or "webrtc:<host>:<port>" -- i.e. the part after "encoder:"
+// in the software backend's IVI_SW_SINK grammar.
 class HeadlessEglBackend final : public Backend {
  public:
   HeadlessEglBackend(uint32_t initial_width,
