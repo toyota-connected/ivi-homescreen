@@ -214,13 +214,16 @@ VkImageMemoryBarrier ColorBarrier(VkImage image,
 // until the GPU has executed it. Used to walk a backing-store image between the
 // layout the Flutter Vulkan renderer leaves it in (COLOR_ATTACHMENT_OPTIMAL)
 // and a flushed layout whose writes are visible to the KMS scanout engine.
-void SubmitImageBarrier(VkDevice device,
-                        VkCommandPool pool,
-                        VkFence fence,
-                        VkQueue queue,
-                        const VkImageMemoryBarrier& barrier,
-                        VkPipelineStageFlags src_stage,
-                        VkPipelineStageFlags dst_stage) {
+// Record @p record into a one-shot command buffer, submit it, and block until
+// it retires. The CPU-fence scanout path needs more than a bare barrier in that
+// buffer (the platform-view blend goes there too), so the recording is the
+// caller's to supply.
+template <typename Record>
+void SubmitOneShot(VkDevice device,
+                   VkCommandPool pool,
+                   VkFence fence,
+                   VkQueue queue,
+                   Record&& record) {
   VkCommandBufferAllocateInfo cbai{};
   cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cbai.commandPool = pool;
@@ -234,8 +237,7 @@ void SubmitImageBarrier(VkDevice device,
   bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   d().vkBeginCommandBuffer(cmd, &bi);
-  d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr,
-                           1, &barrier);
+  record(cmd);
   d().vkEndCommandBuffer(cmd);
 
   VkSubmitInfo si{};
@@ -246,6 +248,19 @@ void SubmitImageBarrier(VkDevice device,
   d().vkQueueSubmit(queue, 1, &si, fence);
   d().vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
   d().vkFreeCommandBuffers(device, pool, 1, &cmd);
+}
+
+void SubmitImageBarrier(VkDevice device,
+                        VkCommandPool pool,
+                        VkFence fence,
+                        VkQueue queue,
+                        const VkImageMemoryBarrier& barrier,
+                        VkPipelineStageFlags src_stage,
+                        VkPipelineStageFlags dst_stage) {
+  SubmitOneShot(device, pool, fence, queue, [&](VkCommandBuffer cmd) {
+    d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0,
+                             nullptr, 1, &barrier);
+  });
 }
 
 // One layer, many buffers: a LayerBufferSource that owns a ring of
@@ -367,13 +382,23 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
 VulkanDrmBackend::~VulkanDrmBackend() {
   // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRMVK_PROFILE ran).
   frame_profile_.LogSessionSummary("VulkanDrmBackend");
-#if BUILD_HUD
-  // Free the HUD while the Vulkan device is still alive (Teardown destroys it):
-  // ~VulkanHud runs ImGui_ImplVulkan_Shutdown, which frees device memory.
+  // Anything holding Vulkan objects has to be freed while the device is still
+  // alive, because Teardown() destroys it and members outlive this body. Wait
+  // for the GPU first: the last frame's command buffer may still reference the
+  // render pass and descriptors being freed just below.
   if (device_ != VK_NULL_HANDLE) {
     d().vkDeviceWaitIdle(device_);
   }
+#if BUILD_HUD
+  // ~VulkanHud runs ImGui_ImplVulkan_Shutdown, which frees device memory.
   hud_.reset();
+#endif
+#if BUILD_COMPOSITOR
+  // ~LayerCompositor destroys its render pass, pipelines, samplers, descriptor
+  // pools and cached framebuffers/views. As a member it would otherwise be
+  // destroyed after this body -- and so after Teardown() -- calling vkDestroy*
+  // on a dead device.
+  layer_compositor_.reset();
 #endif
   // Tear the cursor down first: it commits on compositor_'s DRM device, so it
   // must not outlive it.
@@ -389,10 +414,11 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const bool enable_validation,
     homescreen::DrmSession* session,
     const std::string& mode_spec,
-    const int rotation) {
+    const int rotation,
+    const drm_config::TriState explicit_sync) {
   auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
       drm_device, enable_validation, session, mode_spec, rotation));
-
+  backend->explicit_sync_pref_ = explicit_sync;
   return FinishCreate(std::move(backend));
 }
 
@@ -404,7 +430,8 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const std::string& mode_spec,
     const int rotation,
     const uint32_t connector_id,
-    std::function<bool()> revoked) {
+    std::function<bool()> revoked,
+    const drm_config::TriState explicit_sync) {
   if (drm_fd < 0) {
     ihs::log::critical("[VulkanDrmBackend] Create: invalid lease fd {}",
                        drm_fd);
@@ -421,6 +448,7 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
   // the connector.
   backend->lease_connector_id_ = connector_id;
   backend->lease_revoked_ = std::move(revoked);
+  backend->explicit_sync_pref_ = explicit_sync;
   return FinishCreate(std::move(backend));
 }
 
@@ -798,8 +826,15 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // than the raster thread CPU-blocking. If the device can't export a SYNC_FD
   // semaphore, explicit_sync stays false and the CPU-fence path (barrier_fence)
   // runs — same output, one raster-thread stall per frame.
-  if (d().vkGetSemaphoreFdKHR != nullptr &&
-      std::getenv("IVI_DRMVK_NO_EXPLICIT_SYNC") == nullptr) {
+  // --drm-explicit-sync / [view] drm_explicit_sync. kNo takes the CPU-fence
+  // path outright; kYes is a demand, and is answered below rather than here so
+  // a device that cannot export a SYNC_FD semaphore fails loudly instead of
+  // quietly running the fallback the operator just ruled out. The env var stays
+  // as the older spelling of kNo.
+  const bool sync_forced_off =
+      explicit_sync_pref_ == drm_config::TriState::kNo ||
+      std::getenv("IVI_DRMVK_NO_EXPLICIT_SYNC") != nullptr;
+  if (d().vkGetSemaphoreFdKHR != nullptr && !sync_forced_off) {
     VkCommandBufferAllocateInfo cbai{};
     cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cbai.commandPool = state->barrier_pool;
@@ -828,8 +863,21 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     }
     state->explicit_sync = ok;
   }
-  ihs::log::info("[VulkanDrmBackend] scanout sync: {}",
-                 state->explicit_sync ? "explicit (IN_FENCE_FD)" : "CPU fence");
+  // An explicit demand that the device cannot meet is an error, not a silent
+  // downgrade: the operator asked for KMS-side waits, and the CPU-fence path
+  // stalls the raster thread every frame instead. Saying so beats leaving them
+  // to infer it from a log line they did not know to read.
+  if (!state->explicit_sync &&
+      explicit_sync_pref_ == drm_config::TriState::kYes) {
+    err =
+        "--drm-explicit-sync=yes but the device cannot export a SYNC_FD "
+        "semaphore (VK_KHR_external_semaphore_fd); pass auto to fall back to "
+        "the CPU-fence path";
+    return false;
+  }
+  ihs::log::info("[VulkanDrmBackend] scanout sync: {}{}",
+                 state->explicit_sync ? "explicit (IN_FENCE_FD)" : "CPU fence",
+                 sync_forced_off ? " (forced off by configuration)" : "");
 
   // Page-flip event routing: the commit passes `this` as user_data (see
   // present), so the handler recovers the backend and returns the vsync baton
@@ -1137,17 +1185,36 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
                                            const FlutterLayer** layers,
                                            size_t count) {
   if (!c.explicit_sync) {
-    // CPU-fence fallback: submit + block until the barrier retires, then the
+    // CPU-fence fallback: submit + block until the work retires, then the
     // caller marks the slot ready with no in-fence. (The HUD is folded only
     // into the explicit-sync path, where the scanout fence covers its draw.)
-    const VkImageMemoryBarrier barrier = ColorBarrier(
-        image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        VK_ACCESS_MEMORY_READ_BIT);
-    SubmitImageBarrier(device_, c.barrier_pool, c.barrier_fence,
-                       graphics_queue_, barrier,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    //
+    // The platform-view blend belongs here as much as it does on the explicit
+    // path -- it is the same layer stack, and a compositor that drops it shows
+    // black views. This branch used to return before reaching it, so any target
+    // without IN_FENCE_FD composited the base backing store alone.
+    SubmitOneShot(
+        device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
+        [&](VkCommandBuffer cmd) {
+          bool composited = false;
+#if BUILD_COMPOSITOR
+          composited = CompositeOverlays(cmd, layers, count, image, view, width,
+                                         height, c.frame);
+#endif
+          // The blend's render pass ends in GENERAL, so when it runs it is
+          // itself the transition and the barrier would repeat it from a layout
+          // the image no longer has.
+          if (!composited) {
+            const VkImageMemoryBarrier barrier = ColorBarrier(
+                image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_ACCESS_MEMORY_READ_BIT);
+            d().vkCmdPipelineBarrier(
+                cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
+                1, &barrier);
+          }
+        });
     return -1;
   }
 

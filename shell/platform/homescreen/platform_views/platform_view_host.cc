@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>  // std::size over the advertised format table
 #include <map>
 #include <memory>
 #include <mutex>
@@ -849,6 +850,37 @@ void HostUnregisterFactory(void* user_data, const char* view_type) {
   }
 }
 
+// The packed-RGB fourccs every import path here accepts unconditionally: the
+// Vulkan importer maps all four to a VkFormat, and the EGL importer takes them
+// on a plain GL_TEXTURE_2D (its format switch only separates YUV, which needs
+// GL_TEXTURE_EXTERNAL_OES).
+//
+// This list exists so a plugin that passes no formats -- documented as "any the
+// backend offers" -- gets told which one it got. Without it caps.format_count
+// is 0, choose_format falls through to a zeroed IhsFormatModifier, and the
+// grant reports fourcc 0: a plugin then either guesses or allocates against
+// zero, which gbm accepts and eglCreateImageKHR later rejects with
+// EGL_BAD_MATCH, surfacing as a driver fault far from the cause.
+//
+// LINEAR per the IhsFormatModifier contract ("DRM_FORMAT_MOD_LINEAR when
+// unsure"): it is what every importer can read, and scanout modifier
+// negotiation is a separate step the grant already carries. YUV producers are
+// unaffected -- they name their format explicitly rather than asking for any.
+constexpr uint32_t HostFourcc(const char a,
+                              const char b,
+                              const char c,
+                              const char d) {
+  return static_cast<uint32_t>(a) | (static_cast<uint32_t>(b) << 8) |
+         (static_cast<uint32_t>(c) << 16) | (static_cast<uint32_t>(d) << 24);
+}
+
+constexpr IhsFormatModifier kDmabufImportFormats[] = {
+    {HostFourcc('X', 'R', '2', '4'), 0, 0},  // DRM_FORMAT_XRGB8888, LINEAR
+    {HostFourcc('A', 'R', '2', '4'), 0, 0},  // DRM_FORMAT_ARGB8888, LINEAR
+    {HostFourcc('X', 'B', '2', '4'), 0, 0},  // DRM_FORMAT_XBGR8888, LINEAR
+    {HostFourcc('A', 'B', '2', '4'), 0, 0},  // DRM_FORMAT_ABGR8888, LINEAR
+};
+
 int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
   out->backend_key = "";
   out->kinds =
@@ -889,6 +921,14 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
       }
     }
 #endif
+  }
+  // Name the formats behind the dma-buf kinds. Only when one was actually
+  // offered: advertising formats for a capability the backend does not have
+  // would hand a plugin a format it can never submit.
+  if ((out->kinds & IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) != 0U ||
+      (out->kinds & IHS_PV_KIND_DRM_PLANE) != 0U) {
+    out->formats = kDmabufImportFormats;
+    out->format_count = std::size(kDmabufImportFormats);
   }
   return IHS_PV_OK;
 }
