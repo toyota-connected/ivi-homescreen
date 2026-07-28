@@ -399,10 +399,11 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const bool enable_validation,
     homescreen::DrmSession* session,
     const std::string& mode_spec,
-    const int rotation) {
+    const int rotation,
+    const drm_config::TriState explicit_sync) {
   auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
       drm_device, enable_validation, session, mode_spec, rotation));
-
+  backend->explicit_sync_pref_ = explicit_sync;
   return FinishCreate(std::move(backend));
 }
 
@@ -414,7 +415,8 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const std::string& mode_spec,
     const int rotation,
     const uint32_t connector_id,
-    std::function<bool()> revoked) {
+    std::function<bool()> revoked,
+    const drm_config::TriState explicit_sync) {
   if (drm_fd < 0) {
     ihs::log::critical("[VulkanDrmBackend] Create: invalid lease fd {}",
                        drm_fd);
@@ -431,6 +433,7 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
   // the connector.
   backend->lease_connector_id_ = connector_id;
   backend->lease_revoked_ = std::move(revoked);
+  backend->explicit_sync_pref_ = explicit_sync;
   return FinishCreate(std::move(backend));
 }
 
@@ -808,8 +811,15 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // than the raster thread CPU-blocking. If the device can't export a SYNC_FD
   // semaphore, explicit_sync stays false and the CPU-fence path (barrier_fence)
   // runs — same output, one raster-thread stall per frame.
-  if (d().vkGetSemaphoreFdKHR != nullptr &&
-      std::getenv("IVI_DRMVK_NO_EXPLICIT_SYNC") == nullptr) {
+  // --drm-explicit-sync / [view] drm_explicit_sync. kNo takes the CPU-fence
+  // path outright; kYes is a demand, and is answered below rather than here so
+  // a device that cannot export a SYNC_FD semaphore fails loudly instead of
+  // quietly running the fallback the operator just ruled out. The env var stays
+  // as the older spelling of kNo.
+  const bool sync_forced_off =
+      explicit_sync_pref_ == drm_config::TriState::kNo ||
+      std::getenv("IVI_DRMVK_NO_EXPLICIT_SYNC") != nullptr;
+  if (d().vkGetSemaphoreFdKHR != nullptr && !sync_forced_off) {
     VkCommandBufferAllocateInfo cbai{};
     cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cbai.commandPool = state->barrier_pool;
@@ -838,8 +848,21 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     }
     state->explicit_sync = ok;
   }
-  ihs::log::info("[VulkanDrmBackend] scanout sync: {}",
-                 state->explicit_sync ? "explicit (IN_FENCE_FD)" : "CPU fence");
+  // An explicit demand that the device cannot meet is an error, not a silent
+  // downgrade: the operator asked for KMS-side waits, and the CPU-fence path
+  // stalls the raster thread every frame instead. Saying so beats leaving them
+  // to infer it from a log line they did not know to read.
+  if (!state->explicit_sync &&
+      explicit_sync_pref_ == drm_config::TriState::kYes) {
+    err =
+        "--drm-explicit-sync=yes but the device cannot export a SYNC_FD "
+        "semaphore (VK_KHR_external_semaphore_fd); pass auto to fall back to "
+        "the CPU-fence path";
+    return false;
+  }
+  ihs::log::info("[VulkanDrmBackend] scanout sync: {}{}",
+                 state->explicit_sync ? "explicit (IN_FENCE_FD)" : "CPU fence",
+                 sync_forced_off ? " (forced off by configuration)" : "");
 
   // Page-flip event routing: the commit passes `this` as user_data (see
   // present), so the handler recovers the backend and returns the vsync baton
