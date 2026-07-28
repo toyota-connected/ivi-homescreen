@@ -144,21 +144,30 @@ VkPipeline MakePipeline(VkDevice device,
 
 std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
                                                          VkFormat color_format,
-                                                         std::string& err) {
+                                                         std::string& err,
+                                                         ContentMode mode) {
   std::unique_ptr<LayerCompositor> c(new LayerCompositor(device));
   c->color_format_ = color_format;
 
-  // Render pass: one color attachment (the slot), cleared then blended into,
-  // left in GENERAL for the dma-buf present. initialLayout UNDEFINED because
-  // the clear discards any prior content.
+  // Render pass: one color attachment (the slot), blended into and left in
+  // GENERAL for the dma-buf present.
+  //
+  // kClear discards prior content, so initialLayout can be UNDEFINED. kPreserve
+  // keeps it, which means the layout has to be declared honestly: the content
+  // being preserved was just written as a color attachment, and UNDEFINED would
+  // permit the driver to throw it away -- the one thing this mode exists to
+  // prevent.
+  const bool preserve = mode == ContentMode::kPreserve;
   VkAttachmentDescription att{};
   att.format = color_format;
   att.samples = VK_SAMPLE_COUNT_1_BIT;
-  att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  att.loadOp =
+      preserve ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
   att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  att.initialLayout = preserve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                               : VK_IMAGE_LAYOUT_UNDEFINED;
   att.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
   VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
   VkSubpassDescription sub{};
@@ -175,6 +184,14 @@ std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
   deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   deps[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
   deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  if (preserve) {
+    // The content being loaded is the engine's render into this same image, so
+    // the load has to wait on those color writes. The clear path never reads
+    // prior content and so has nothing to wait for here.
+    deps[0].srcStageMask |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].srcAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[0].dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+  }
   deps[1].srcSubpass = 0;
   deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
   deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

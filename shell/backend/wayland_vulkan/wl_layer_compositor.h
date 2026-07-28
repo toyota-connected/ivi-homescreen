@@ -37,11 +37,24 @@ namespace wl_vulkan {
 // per frame: BeginFrame -> DrawLayer per layer (in z-order) -> EndFrame.
 class LayerCompositor {
  public:
+  // What the render pass does with the target's existing content.
+  //
+  // kClear suits a compositor that owns a scratch slot and draws the whole
+  // layer stack into it. kPreserve suits one whose base layer is already in the
+  // target --- the DRM/KMS Vulkan backend renders Flutter's backing store
+  // straight into the scanout image, so it can only blend the platform views
+  // and overlays on top; clearing would discard the frame it is compositing
+  // onto, and blending the base in instead would mean sampling the very image
+  // being rendered to.
+  enum class ContentMode { kClear, kPreserve };
+
   // Build the render pass / pipeline / sampler for @p color_format (the slot
   // format). Returns nullptr and sets @p err on failure.
-  static std::unique_ptr<LayerCompositor> Create(VkDevice device,
-                                                 VkFormat color_format,
-                                                 std::string& err);
+  static std::unique_ptr<LayerCompositor> Create(
+      VkDevice device,
+      VkFormat color_format,
+      std::string& err,
+      ContentMode mode = ContentMode::kClear);
   ~LayerCompositor();
   LayerCompositor(const LayerCompositor&) = delete;
   LayerCompositor& operator=(const LayerCompositor&) = delete;

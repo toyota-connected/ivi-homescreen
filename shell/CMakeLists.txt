@@ -331,6 +331,10 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_vulkan/modifier_format.cc
             backend/drm_kms_egl/scene_layer_source_vk.cc
             backend/drm_kms_egl/drm_session.cc
+            # Shared with the Wayland Vulkan backend, which is where it lives.
+            # It is pure Vulkan (no Wayland headers), and the two backends are
+            # mutually exclusive, so it is only ever compiled once.
+            $<$<BOOL:${BUILD_COMPOSITOR}>:backend/wayland_vulkan/wl_layer_compositor.cc>
             backend/drm_kms_egl/driver_probe.cc
             display/drm_display.cc
             display/drm_output_provider.cc
