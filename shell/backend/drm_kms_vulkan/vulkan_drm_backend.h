@@ -29,6 +29,9 @@
 #include <vulkan/vulkan.h>
 
 #include "backend/backend.h"
+// drm_config::TriState — the yes/no/auto knobs both DRM backends share. The
+// EGL backend's header is where they are declared; only the enum is used here.
+#include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
 #if BUILD_COMPOSITOR
 // Pure-Vulkan blend pipeline; despite living beside the Wayland backend it
@@ -67,12 +70,17 @@ class VulkanDrmBackend final : public Backend {
   // drm_kms_egl backend does on DrmBackend::Create returning null. @p session
   // may be null when no libseat session is available. @p mode_spec selects the
   // scanout mode ("<W>x<H>[@<R>]"); empty uses the connector's preferred mode.
+  //
+  // @p explicit_sync forces the scanout hand-off: kYes fails init when the
+  // device cannot export a SYNC_FD semaphore rather than degrading silently,
+  // kNo takes the CPU-fence path, kAuto uses explicit sync when available.
   static std::shared_ptr<VulkanDrmBackend> Create(
       const std::string& drm_device,
       bool enable_validation,
       homescreen::DrmSession* session,
       const std::string& mode_spec,
-      int rotation);
+      int rotation,
+      drm_config::TriState explicit_sync = drm_config::TriState::kAuto);
 
   // wayland-leased-drm: drive an externally-owned DRM fd (the master fd from
   // wp_drm_lease_v1.lease_fd) instead of opening a card by path.
@@ -103,7 +111,8 @@ class VulkanDrmBackend final : public Backend {
       const std::string& mode_spec,
       int rotation,
       uint32_t connector_id,
-      std::function<bool()> revoked);
+      std::function<bool()> revoked,
+      drm_config::TriState explicit_sync = drm_config::TriState::kAuto);
 
   ~VulkanDrmBackend() override;
 
@@ -252,6 +261,10 @@ class VulkanDrmBackend final : public Backend {
   // viewport extent against the CRTC mode; lowered to the plane rotation
   // property at present time.
   int rotation_ = 0;
+  // --drm-explicit-sync. Read once in SetupCompositor: kNo forces the CPU-fence
+  // scanout path, kYes refuses to start when the device cannot export a SYNC_FD
+  // semaphore, kAuto uses explicit sync when it is available.
+  drm_config::TriState explicit_sync_pref_ = drm_config::TriState::kAuto;
   // Unified cadence profiler (IVI_PROFILE / legacy IVI_DRMVK_PROFILE). Written
   // from the rasterizer thread (PresentLayersImpl) only.
   profiling::FrameProfile frame_profile_;
