@@ -414,6 +414,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     }
     out->fourcc = f.format.fourcc;
     out->modifier = f.format.modifier;
+    out->color_space = f.color_space;  // YUV colorimetry for the plane CSC
+    out->color_range = f.color_range;
     out->width = f.width;
     out->height = f.height;
     out->plane_count = np;
