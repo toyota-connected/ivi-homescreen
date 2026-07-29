@@ -83,35 +83,45 @@ cc_path, root = sys.argv[1], os.path.realpath(sys.argv[2])
 shard_index = int(sys.argv[3]) if sys.argv[3] else None
 shard_total = int(sys.argv[4]) if sys.argv[4] else None
 
+# Read compile_commands.json
 with open(cc_path) as fh:
     entries = json.load(fh)
 
+# Excluded files: build/, third-party/, and vendored Flutter embedder sources (client_wrapper, public).
 excludes = (
+    os.path.join(root, "build") + os.sep,
     os.path.join(root, "third_party") + os.sep,
     os.path.join(root, "shell", "platform", "homescreen", "client_wrapper")
     + os.sep,
     os.path.join(root, "shell", "platform", "homescreen", "public") + os.sep,
 )
 
+# Included files: 
 roots = (
     os.path.join(root, "shell") + os.sep,
     os.path.join(root, "shared") + os.sep,
 )
 
+# Filter the compile_commands.json entries
 seen = set()
 file_list = []
 for entry in entries:
+    # Resolve the absolute path of the source file
     path = os.path.realpath(
         entry["file"]
         if os.path.isabs(entry["file"])
         else os.path.join(entry.get("directory", ""), entry["file"])
     )
+    # "Roots" only
     if not any(path.startswith(r) for r in roots):
         continue
+    # Exclude excludes
     if any(path.startswith(ex) for ex in excludes):
         continue
+    # Only source extensions
     if not path.endswith((".cc", ".cpp")):
         continue
+    # Deduplicate
     if path in seen:
         continue
     seen.add(path)
