@@ -221,6 +221,11 @@ class ICompositorSurface {
     uint32_t plane_count{0};
     uint32_t offset[4]{};
     uint32_t stride[4]{};
+    // Container colorimetry of the pixels (IhsColorSpace / IhsColorRange). Only
+    // meaningful for YUV frames; the DRM scene path lowers these to the plane's
+    // COLOR_ENCODING / COLOR_RANGE CSC. DEFAULT (0) leaves the scene's default.
+    uint8_t color_space{0};
+    uint8_t color_range{0};
     int acquire_fence_fd{-1};
     // The producer's identity for this frame (IhsFrame.buffer_id, its ring
     // slot). The compositor hands it back via OnScanoutRelease when the plane

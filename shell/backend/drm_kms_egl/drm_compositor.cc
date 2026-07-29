@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -48,6 +49,7 @@
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
 #include "display/drm_display.h"
 #include "drm-cxx/src/modeset/atomic.hpp"
+#include "ihs/platform_view.h"
 #include "libflutter_engine.h"
 #include "logging.h"
 #include "profiling/frame_profile.h"
@@ -58,6 +60,52 @@ namespace {
 bool AllocDebug() {
   static const bool enabled = std::getenv("DRM_ALLOC_DEBUG") != nullptr;
   return enabled;
+}
+
+// Map the ABI's container colorimetry (IhsColorSpace/IhsColorRange, carried on
+// the platform view's Dmabuf) to the drm-cxx plane CSC. DEFAULT -> nullopt lets
+// LayerScene write its own default (BT.709 / limited). Only meaningful for YUV
+// frames; RGB layers leave color_encoding/range unset.
+std::optional<drm::planes::ColorEncoding> ToColorEncoding(uint8_t color_space) {
+  switch (color_space) {
+    case IHS_COLOR_SPACE_BT601:
+      return drm::planes::ColorEncoding::BT_601;
+    case IHS_COLOR_SPACE_BT709:
+      return drm::planes::ColorEncoding::BT_709;
+    case IHS_COLOR_SPACE_BT2020:
+      return drm::planes::ColorEncoding::BT_2020;
+    default:
+      return std::nullopt;
+  }
+}
+
+std::optional<drm::planes::ColorRange> ToColorRange(uint8_t color_range) {
+  switch (color_range) {
+    case IHS_COLOR_RANGE_FULL:
+      return drm::planes::ColorRange::Full;
+    case IHS_COLOR_RANGE_LIMITED:
+      return drm::planes::ColorRange::Limited;
+    default:
+      return std::nullopt;
+  }
+}
+
+// The planar/packed YUV fourccs a video producer submits — so the scene
+// allocator prefers an overlay plane with the best YUV coverage (ContentType::
+// Video) and applies the plane CSC. RGB frames stay Generic.
+bool IsYuvFourcc(uint32_t fourcc) {
+  switch (fourcc) {
+    case DRM_FORMAT_NV12:
+    case DRM_FORMAT_NV21:
+    case DRM_FORMAT_NV16:
+    case DRM_FORMAT_P010:
+    case DRM_FORMAT_P016:
+    case DRM_FORMAT_YUYV:
+    case DRM_FORMAT_UYVY:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // Per-frame composite profiling (IVI_DRM_PROFILE, or the IVI_PROFILE umbrella).
@@ -2673,7 +2721,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // unlike GL backing stores.
       desc.display.rotation = DRM_MODE_ROTATE_0;
       desc.display.zpos = overlay_zpos;
-      desc.content_type = drm::planes::ContentType::Generic;
+      // YUV video: hint the allocator toward a YUV-capable overlay and set the
+      // plane's YCbCr->RGB CSC from the frame's colorimetry. RGB stays Generic
+      // and leaves the CSC unset (the scene writes its default). A plane that
+      // cannot scan out the fourcc/modifier force-composites in the allocator.
+      const bool is_yuv = IsYuvFourcc(db.fourcc);
+      desc.content_type = is_yuv ? drm::planes::ContentType::Video
+                                 : drm::planes::ContentType::Generic;
+      desc.display.color_encoding = ToColorEncoding(db.color_space);
+      desc.display.color_range = ToColorRange(db.color_range);
       desc.identity_tag = fl.pv_tag;
       auto handle = scene_->add_layer(std::move(desc));
       if (!handle) {
