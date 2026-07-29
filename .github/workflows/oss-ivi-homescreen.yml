@@ -22,16 +22,24 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install runtime packages
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            ninja-build
+            libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+
+      - name: Show toolchain versions
         run: |
-          echo ${{ github.server_url }}
-          # Refresh the index first: the runner image's cached apt lists can
-          # reference superseded package versions (e.g. mesa security bumps),
-          # which 404 on the mirror and fail a bare `apt-get install`.
-          sudo apt-get update
-          sudo apt-get -y install ninja-build \
-          libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev \
-          mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
           cmake --version
           gcc --version
 
@@ -132,12 +140,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get -y install ninja-build \
-          libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev \
-          mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            ninja-build
+            libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
 
       - name: Configure (accessibility enabled)
         run: |
@@ -205,15 +222,23 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
       - name: Install build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git python3 \
-            curl ca-certificates xz-utils \
-            libxkbcommon-dev libwayland-dev wayland-protocols \
-            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
-            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential cmake ninja-build pkg-config git python3
+            curl ca-certificates xz-utils
+            libxkbcommon-dev libwayland-dev wayland-protocols
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
             libpugixml-dev libcurl4-openssl-dev
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
@@ -255,15 +280,23 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
       - name: Install build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git python3 \
-            curl ca-certificates xz-utils \
-            libxkbcommon-dev libwayland-dev wayland-protocols \
-            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
-            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential cmake ninja-build pkg-config git python3
+            curl ca-certificates xz-utils
+            libxkbcommon-dev libwayland-dev wayland-protocols
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
             libpugixml-dev libcurl4-openssl-dev
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
@@ -274,9 +307,13 @@ jobs:
           emb -v cross . --backend software \
             -D BUILD_WATCHDOG=ON \
             --build
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            libsystemd-dev
       - name: Build SystemD watchdog
         run: |
-          sudo apt install -y libsystemd-dev
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           emb --version
           emb -v cross . --backend software \
