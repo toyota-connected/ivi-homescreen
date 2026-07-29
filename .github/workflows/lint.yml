@@ -134,10 +134,10 @@ jobs:
         run: ninja -C ${{github.workspace}}/build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build
-          path: ${{github.workspace}}/build
+          path: ${{github.workspace}}
           retention-days: 1
 
   lint-format:
@@ -184,11 +184,6 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
       - name: Update apt package index
         run: sudo apt-get update
 
@@ -199,10 +194,19 @@ jobs:
           version: 1.0
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: build
-          path: ${{github.workspace}}/build
+          path: ${{github.workspace}}
 
       - name: clang-tidy (${{ matrix.shard }}/4)
-        run: scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
+        run: |
+          chmod +x scripts/clang_tidy.sh;
+          scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
+
+      # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
+      - name: Cleanup build artifacts
+        if: ${{ always() }} 
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: build
