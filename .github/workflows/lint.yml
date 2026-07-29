@@ -129,11 +129,11 @@ jobs:
       - name: Build (generate compile_commands.json)
         run: ninja -C ${{github.workspace}}/build
 
-      - name: clang-tidy
-        run: scripts/clang_tidy.sh ${{github.workspace}}/build
-
       - name: clang-format
         run: scripts/format.sh --check
+
+      - name: clang-tidy
+        run: scripts/clang_tidy.sh ${{github.workspace}}/build
 
       - name: config reference (parser table + --help in sync)
         run: python3 scripts/gen_config_reference.py --check
