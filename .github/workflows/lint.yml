@@ -7,6 +7,10 @@ on:
     branches: [v2.0]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     if: ${{ github.server_url == 'https://github.com' }}
@@ -77,10 +81,10 @@ jobs:
       - name: Build
         run: ninja -C ${{github.workspace}}/build
 
-  lint:
+  lint-build:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
-    name: lint
+    name: lint-build
     permissions:
       contents: read
 
@@ -129,11 +133,76 @@ jobs:
       - name: Build (generate compile_commands.json)
         run: ninja -C ${{github.workspace}}/build
 
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: ${{github.workspace}}/build
+          retention-days: 1
+
+  lint-format:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    name: lint-format
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Update apt package index
+        # Refresh the index before cache-apt-pkgs-action resolves versions, so
+        # it pins the revision currently on the mirror rather than a stale one
+        # the runner image still lists (a dropped .deb 404s and aborts install).
+        run: sudo apt-get update
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build clang-format-19
+          version: 1.0
+
       - name: clang-format
         run: scripts/format.sh --check
 
-      - name: clang-tidy
-        run: scripts/clang_tidy.sh ${{github.workspace}}/build
-
       - name: config reference (parser table + --help in sync)
         run: python3 scripts/gen_config_reference.py --check
+
+  lint-tidy:
+    if: ${{ github.server_url == 'https://github.com' }}
+    needs: lint-build
+    runs-on: ubuntu-24.04
+    name: lint-tidy-${{ matrix.shard }}/4
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Update apt package index
+        run: sudo apt-get update
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          version: 1.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: ${{github.workspace}}/build
+
+      - name: clang-tidy (${{ matrix.shard }}/4)
+        run: scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build

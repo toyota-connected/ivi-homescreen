@@ -6,16 +6,38 @@
 #
 # Usage:
 #   scripts/clang_tidy.sh [BUILD_DIR]
+#   scripts/clang_tidy.sh --shard <index>/<total> [BUILD_DIR]
 #
 # BUILD_DIR defaults to "build" and must contain a compile_commands.json
 # (configure with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON).
+#
+# --shard <index>/<total> — only lint files in shard <index> (0-based) out of
+#   <total> shards. Used in CI to split the work across multiple runners.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-BUILD_DIR="${1:-build}"
+# Parse arguments
+SHARD_INDEX=""
+SHARD_TOTAL=""
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --shard)
+            SHARD_INDEX="${2%%/*}"
+            SHARD_TOTAL="${2##*/}"
+            shift 2
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+BUILD_DIR="${POSITIONAL_ARGS[0]:-build}"
 if [[ "${BUILD_DIR}" != /* ]]; then
     BUILD_DIR="${ROOT_DIR}/${BUILD_DIR}"
 fi
@@ -46,13 +68,21 @@ echo "Using: $(command -v "${CLANG_TIDY}")"
 #
 # Further exclude vendored Flutter embedder sources (client_wrapper,
 # public) and third_party/.
+#
+# If --shard was provided, split the sorted list into <total> groups and
+# only emit the files belonging to shard <index>.
 mapfile -t FILES < <(
-    python3 - "${BUILD_DIR}/compile_commands.json" "${ROOT_DIR}" <<'PY'
+    python3 - "${BUILD_DIR}/compile_commands.json" "${ROOT_DIR}" \
+        "${SHARD_INDEX:-}" "${SHARD_TOTAL:-}" <<'PY'
 import json
 import os
 import sys
+from itertools import islice
 
 cc_path, root = sys.argv[1], os.path.realpath(sys.argv[2])
+shard_index = int(sys.argv[3]) if sys.argv[3] else None
+shard_total = int(sys.argv[4]) if sys.argv[4] else None
+
 with open(cc_path) as fh:
     entries = json.load(fh)
 
@@ -69,6 +99,7 @@ roots = (
 )
 
 seen = set()
+file_list = []
 for entry in entries:
     path = os.path.realpath(
         entry["file"]
@@ -84,11 +115,30 @@ for entry in entries:
     if path in seen:
         continue
     seen.add(path)
+    file_list.append(path)
+
+# Sort for deterministic shard assignment.
+file_list.sort()
+
+# Split into shards if requested.
+if shard_index is not None and shard_total is not None:
+    files = list(islice(
+        file_list, shard_index, len(file_list), shard_total
+    ))
+    if not files:
+        print(f"no files for shard {shard_index}/{shard_total}", file=sys.stderr)
+        sys.exit(0)
+
+for path in files if shard_index is not None else file_list:
     print(path)
 PY
 )
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
+    if [[ -n "${SHARD_INDEX}" ]]; then
+        echo "No files for shard ${SHARD_INDEX}/${SHARD_TOTAL}."
+        exit 0
+    fi
     echo "ERROR: no shell/ source files found in compile_commands.json." >&2
     exit 1
 fi
