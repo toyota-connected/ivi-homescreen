@@ -94,6 +94,6 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
 fi
 
 printf '%s\n' "${FILES[@]}" | sort | \
-    xargs "${CLANG_TIDY}" -p "${BUILD_DIR}" --warnings-as-errors='*' 2>&1
+    xargs -P "$(nproc 2>/dev/null || echo 4)" "${CLANG_TIDY}" -p "${BUILD_DIR}" --warnings-as-errors='*' 2>&1
 
 echo "clang-tidy passed."
