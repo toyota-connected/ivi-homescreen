@@ -284,40 +284,6 @@ jobs:
             -D BUILD_SYSTEMD_WATCHDOG=ON \
             --build
 
-# Reads .emb/base.emb.yaml and emits a GitHub Actions matrix whose entries
-  # map each backend name to its cmake flags, runner image, and any extra
-  # packages required (e.g. DRM backends need libdrm-dev etc. on ubuntu-24.04,
-  # mirroring the setup in drm-kms.yml).
-  collect-backends:
-    name: collect-backends
-    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.gen.outputs.matrix }}
-    steps:
-      - name: Checkout (shallow, no submodules)
-        uses: actions/checkout@v5
-        with:
-          submodules: false
-
-      - name: Generate backend matrix
-        id: gen
-        run: |
-          pip install --quiet pyyaml
-          python3 - <<'EOF'
-          import json, yaml, os
-
-          with open(".emb/base.emb.yaml") as f:
-              data = yaml.safe_load(f)
-
-          includes = [{"backend": name}
-                      for name in data["cross"]["backends"]]
-
-          matrix = json.dumps({"include": includes})
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"matrix={matrix}\n")
-          EOF
-
   # Unit-test + coverage-capture job.
   #
   # Runs once per backend from the collect-backends matrix. Reads
@@ -329,89 +295,84 @@ jobs:
   # All legs run on ubuntu-24.04, which satisfies both the DRM backend
   # requirements (libdrm-dev, libgbm-dev, etc.) and the wayland/software ones.
   unit-tests:
-    needs: collect-backends
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && always() }}
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.collect-backends.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Resolve backend cmake flags
-        id: backend
-        run: |
-          pip install --quiet pyyaml
-          python3 - <<'EOF'
-          import json, yaml, os
+      - name: Update apt package index
+        # Refresh the index before cache-apt-pkgs-action resolves versions, so
+        # it pins the revision currently on the mirror rather than a stale one
+        # the runner image still lists (a dropped .deb 404s and aborts install).
+        run: sudo apt-get update
 
-          with open(".emb/base.emb.yaml") as f:
-              data = yaml.safe_load(f)
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          version: 1.0
 
-          defines = data["cross"]["backends"]["${{ matrix.backend }}"]
-          flags = " ".join(f"-D {k}={v}" for k, v in defines.items())
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"BACKEND_CMAKE_FLAGS={flags}\n")
-          EOF
+      - name: Update apt package index
+        # Refresh the index before cache-apt-pkgs-action resolves versions, so
+        # it pins the revision currently on the mirror rather than a stale one
+        # the runner image still lists (a dropped .deb 404s and aborts install).
+        run: sudo apt-get update
 
-      - name: Install base packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            ninja-build lcov libglib2.0-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev \
-            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-            clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+      - name: Install extra dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            libdrm-dev libgbm-dev
+            libinput-dev libudev-dev libseat-dev libxcursor-dev
+            libsystemd-dev libpugixml-dev libcurl4-openssl-dev
+          version: 1.0-extra
 
-      - name: Install DRM backend packages
-        if: ${{ startsWith(matrix.backend, 'drm-') }}
-        run: |
-          sudo apt-get install -y \
-            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
-            libxcursor-dev
 
       - name: Setup libdisplay-info
-        if: ${{ startsWith(matrix.backend, 'drm-') }}
         uses: ./.github/actions/setup-libdisplay-info
 
       - name: Configure (coverage)
         run: |
           cmake -GNinja \
-            -B ${{github.workspace}}/build/unit-tests-${{ matrix.backend }} \
+            -B ${{github.workspace}}/build/unit-tests \
             -D CMAKE_BUILD_TYPE=Debug \
             -D BUILD_UNIT_TESTS=ON \
             -D COVERAGE=ON \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
-            ${BACKEND_CMAKE_FLAGS}
+            -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -D BUILD_BACKEND_WAYLAND_EGL=ON \
+            -D BUILD_BACKEND_WAYLAND_VULKAN=ON \
+            -D BUILD_BACKEND_DRM_KMS_EGL=ON \
+            -D BUILD_BACKEND_DRM_KMS_VULKAN=ON \
+            -D BUILD_BACKEND_SOFTWARE=ON \
+            -D BUILD_COMPOSITOR=ON \
+            -D BUILD_ACCESSIBILITY=ON \
+            -D BUILD_CRASH_HANDLER=OFF \
+            -D BUILD_WATCHDOG=ON \
+            -D BUILD_SYSTEMD_WATCHDOG=ON
 
       - name: Build
-        working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
+        working-directory: ${{github.workspace}}/build/unit-tests
         run: ninja -C .
 
       - name: Run unit tests (CTest)
-        working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
+        working-directory: ${{github.workspace}}/build/unit-tests
         run: ctest --output-on-failure --test-dir .
 
       - name: Capture coverage data
-        working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
+        working-directory: ${{github.workspace}}/build/unit-tests
         run: |
           lcov -d . -c --rc lcov_branch_coverage=1 --ignore-errors mismatch -o coverage.info
           lcov -r coverage.info \
             '*/test/*' '*/usr/*' '*/third_party/*' '*/wayland-protocols/*' \
             --rc lcov_branch_coverage=1 --ignore-errors mismatch -o coverage.info
 
-      - name: Upload per-backend coverage data
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ matrix.backend }}
-          path: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}/coverage.info
-        
       - name: Coverage summary
-        working-directory: ${{github.workspace}}/build/unit-tests-${{ matrix.backend }}
+        working-directory: ${{github.workspace}}/build/unit-tests
         run: |
           {
             echo "## Unit test coverage"
@@ -427,47 +388,14 @@ jobs:
               | awk -F'|' '{printf "| %s | %s |\n", $1, $2}'
           } >> "$GITHUB_STEP_SUMMARY"
           cat "${GITHUB_STEP_SUMMARY}"
-  
-  # Coverage merge + report job.
-  #
-  # Downloads all per-backend coverage.info files uploaded by the unit-tests
-  # matrix, merges them with lcov, generates a single HTML report, and
-  # uploads it as a downloadable artifact. All unit-test matrix legs must
-  # succeed before this job runs.
-  coverage:
-    name: coverage
-    needs: unit-tests
-    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Install lcov
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lcov
-
-      - name: Download per-backend coverage artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          path: coverage-artifacts
-          merge-multiple: false
-
-      - name: Merge coverage data
-        run: |
-          inputs=$(find coverage-artifacts -name 'coverage.info' \
-                     -printf '-a %p ')
-          lcov ${inputs} --rc lcov_branch_coverage=1 -o merged.info
-          lcov -r merged.info \
-            '*/test/*' '*/usr/*' '*/third_party/*' \
-            --rc lcov_branch_coverage=1 -o merged.info
 
       - name: Print coverage summary
         run: |
           echo "=== Coverage Summary (all backends merged) ==="
-          lcov --summary merged.info 2>&1 | grep -E 'lines\.|functions\.|branches\.'
+          lcov --summary coverage.info 2>&1 | grep -E 'lines\.|functions\.|branches\.'
 
       - name: Generate HTML report
-        run: genhtml -o lcovHtml -s --legend --branch-coverage merged.info
+        run: genhtml -o lcovHtml -s --legend --branch-coverage coverage.info
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@v4
