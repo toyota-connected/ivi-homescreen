@@ -133,12 +133,24 @@ jobs:
       - name: Build (generate compile_commands.json)
         run: ninja -C ${{github.workspace}}/build
 
+      # Pack into a tar before upload. actions/upload-artifact dereferences
+      # symlinks (turning them into real copies), which breaks the build tree:
+      # third_party/drm-cxx exposes its src/ headers under a drm-cxx/ prefix via
+      # a build/third_party/drm-cxx/include/drm-cxx -> ../../../../third_party/drm-cxx/src
+      # symlink. Both that symlink and src/ are on the include path, so #pragma
+      # once only dedupes them while they resolve to the same physical file. If
+      # the symlink is materialized into a copy, the two paths become distinct
+      # files and clang-tidy reports redefinition errors. tar preserves symlinks.
+      - name: Pack workspace (preserve symlinks)
+        run: tar -C ${{github.workspace}} -czf ${{runner.temp}}/build.tar.gz .
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: build
-          path: ${{github.workspace}}
+          path: ${{runner.temp}}/build.tar.gz
           retention-days: 1
+          archive: false
 
   lint-format:
     if: ${{ github.server_url == 'https://github.com' }}
@@ -175,7 +187,7 @@ jobs:
     if: ${{ github.server_url == 'https://github.com' }}
     needs: lint-build
     runs-on: ubuntu-24.04
-    name: lint-tidy-${{ matrix.shard }}/4
+    name: lint-tidy (${{ matrix.shard }}/4)
     strategy:
       fail-fast: false
       matrix:
@@ -197,12 +209,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: build
-          path: ${{github.workspace}}
+          path: ${{runner.temp}}
+
+      - name: Unpack workspace (restore symlinks)
+        run: tar -C ${{github.workspace}} -xzf ${{runner.temp}}/build.tar.gz
 
       - name: clang-tidy (${{ matrix.shard }}/4)
-        run: |
-          chmod +x scripts/clang_tidy.sh;
-          scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
+        run: scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
 
       # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
       - name: Cleanup build artifacts
