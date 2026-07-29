@@ -183,15 +183,19 @@ jobs:
       - name: config reference (parser table + --help in sync)
         run: python3 scripts/gen_config_reference.py --check
 
-  lint-tidy:
+  lint-tidy-shard:
     if: ${{ github.server_url == 'https://github.com' }}
     needs: lint-build
     runs-on: ubuntu-24.04
-    name: lint-tidy (${{ matrix.shard }}/4)
+    name: lint-tidy (${{ matrix.part }}/4)
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        include:
+          - { shard: 0, part: 1 }
+          - { shard: 1, part: 2 }
+          - { shard: 2, part: 3 }
+          - { shard: 3, part: 4 }
     permissions:
       contents: read
 
@@ -214,7 +218,7 @@ jobs:
       - name: Unpack workspace (restore symlinks)
         run: tar -C ${{github.workspace}} -xzf ${{runner.temp}}/build.tar.gz
 
-      - name: clang-tidy (${{ matrix.shard }}/4)
+      - name: clang-tidy
         run: scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
 
       # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
@@ -223,3 +227,19 @@ jobs:
         uses: geekyeggo/delete-artifact@v6
         with:
             name: build
+
+  lint-tidy:
+    name: lint-tidy (gate)
+    needs: [ lint-tidy-shard ]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that all shards passed
+        run: |
+          if [[ ${{ needs.lint-tidy-shard.result }} != 'success' ]]; then
+            echo "One or more lint-tidy shards failed; see the logs above."
+            exit 1
+          else
+            echo "All lint-tidy shards passed."
+          fi
+    
