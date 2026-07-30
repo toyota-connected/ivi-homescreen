@@ -282,6 +282,10 @@ class DrmCompositor : public IFlipSink {
 
   bool WaitForPendingFlip() const;
 
+  // Fire the platform-view scanout releases held since the last present, now
+  // that WaitForPendingFlip has confirmed their displacing flip completed.
+  void DrainDeferredScanoutReleases();
+
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via
   // drmModeObjectGetProperties, then samples vblank sequence across ~2
@@ -443,6 +447,25 @@ class DrmCompositor : public IFlipSink {
   // find_by_identity_tag / commit through this scene; CreateBackingStore
   // produces matching LayerBufferSource wrappers stashed in StoreBaton
   // until their first Present add_layer()s them in.
+  // Deferred platform-view scanout releases. drm-cxx fires a pool's on_release
+  // the moment a buffer is displaced (committed over), but the buffer is still
+  // scanned out until that commit's page flip completes -- so returning it to
+  // the producer immediately lets the producer (a decoder) overwrite a buffer
+  // the HVS is still reading, showing a later frame's pixels for one flip (a
+  // visible temporal jump on the direct-scanout path; the detile-copy path was
+  // insulated). Instead, hold each release here and fire it at the top of the
+  // next present, after WaitForPendingFlip has confirmed the displacing flip
+  // completed and the buffer is provably off the plane. The shared_ptr keeps
+  // the surface alive until then. Declared before scene_ so it outlives the
+  // pools whose callbacks append to it. Appended from the scene commit /
+  // teardown, drained on the present thread -- guarded by its mutex.
+  struct DeferredScanoutRelease {
+    std::shared_ptr<ICompositorSurface> surface;
+    std::uint32_t buffer_id;
+  };
+  std::mutex deferred_releases_mu_;
+  std::vector<DeferredScanoutRelease> deferred_releases_;
+
   std::unique_ptr<drm::scene::LayerScene> scene_;
 
   // Embedder-side mirror of the scene's live layer set, keyed by
