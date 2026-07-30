@@ -276,7 +276,7 @@ bool HeadlessEglBackend::Present(const FlutterPresentInfo* /*info*/) {
   // buffer is linear (forced at surface creation), so pass its modifier through
   // for an exact import.
   const int fd = gbm_bo_get_fd(bo);
-  const EGLint stride = static_cast<EGLint>(gbm_bo_get_stride(bo));
+  const auto stride = static_cast<EGLint>(gbm_bo_get_stride(bo));
   const uint64_t modifier = gbm_bo_get_modifier(bo);
   const bool has_modifier = modifier != DRM_FORMAT_MOD_INVALID;
   std::vector<EGLint> attrs = {EGL_WIDTH,
@@ -298,12 +298,14 @@ bool HeadlessEglBackend::Present(const FlutterPresentInfo* /*info*/) {
     attrs.push_back(static_cast<EGLint>(modifier >> 32));
   }
   attrs.push_back(EGL_NONE);
-  auto create_image = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
+  // Resolved once (raster thread) rather than per frame.
+  static const auto create_image = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
       eglGetProcAddress("eglCreateImageKHR"));
-  auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+  static const auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
       eglGetProcAddress("eglDestroyImageKHR"));
-  auto image_target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
-      eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+  static const auto image_target =
+      reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+          eglGetProcAddress("glEGLImageTargetTexture2DOES"));
   if (create_image != nullptr && destroy_image != nullptr &&
       image_target != nullptr) {
     EGLImageKHR image = create_image(
@@ -376,9 +378,12 @@ void HeadlessEglBackend::StartVsyncIfReady() {
       platform_task_runner_->GetIoContext() == nullptr) {
     return;
   }
-  vsync_.SetEngine(engine_handle_, platform_task_runner_);
-  vsync_.SetSourcePending(true);  // batons park; the timer returns them
+  // Mark the source pending + set the period before wiring the engine, so any
+  // baton that arrives once wired parks for the timer rather than draining
+  // inline unpaced.
+  vsync_.SetSourcePending(true);
   vsync_.SetPeriodNs(vsync_period_ns_);
+  vsync_.SetEngine(engine_handle_, platform_task_runner_);
   vsync_timer_ = std::make_unique<asio::steady_timer>(
       *platform_task_runner_->GetIoContext());
   vsync_running_.store(true, std::memory_order_release);
