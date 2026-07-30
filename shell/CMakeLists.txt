@@ -269,7 +269,7 @@ if (BUILD_BACKEND_HEADLESS_EGL)
 endif ()
 
 if (BUILD_BACKEND_HEADLESS_VULKAN)
-    # WS-1 stub: Vulkan render with no display / Wayland / scanout, paced at
+    # Vulkan render with no display / Wayland / scanout, paced at
     # IVI_HEADLESS_FPS. Reuses SoftwareDisplay (a no-op IDisplay). No EGL/GLES:
     # Vulkan is resolved at runtime via vulkan.hpp's dynamic loader; only the
     # vendored headers (vulkan_headers) are needed at build time — never a

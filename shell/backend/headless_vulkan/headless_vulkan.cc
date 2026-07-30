@@ -268,7 +268,7 @@ bool HeadlessVulkanBackend::SelectPhysicalDevice() {
 
 bool HeadlessVulkanBackend::CreateLogicalDevice() {
   // Enable the external-memory / external-semaphore device extensions when the
-  // device advertises them. Harmless in WS-1; a later export path needs them.
+  // device advertises them. Harmless now; a later export path needs them.
   uint32_t ext_count = 0;
   d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
                                            &ext_count, nullptr);
@@ -431,7 +431,7 @@ FlutterRendererConfig HeadlessVulkanBackend::GetRenderConfig() {
 }
 
 FlutterCompositor HeadlessVulkanBackend::GetCompositorConfig() {
-  // Single-surface rendering: no platform-view layer compositing in WS-1.
+  // Single-surface rendering: no platform-view layer compositing yet.
   FlutterCompositor compositor{};
   compositor.struct_size = sizeof(FlutterCompositor);
   return compositor;
@@ -477,7 +477,7 @@ FlutterVulkanImage HeadlessVulkanBackend::GetNextImageCallback(
 bool HeadlessVulkanBackend::PresentCallback(
     void* user_data,
     const FlutterVulkanImage* /* image */) {
-  // WS-1 does nothing with the composited frame — the pacer drives cadence.
+  // Nothing consumes the composited frame yet — the pacer drives cadence.
   // Advance the round-robin index so the next frame targets a different image.
   auto* backend = BackendOf(user_data);
   backend->current_image_ = (backend->current_image_ + 1) % kImageCount;
@@ -526,7 +526,7 @@ void HeadlessVulkanBackend::StartVsyncIfReady() {
     return;
   }
   vsync_running_.store(true, std::memory_order_release);
-  // Free-run (ceiling-only) pacing: WS-1 has no consumer to gate on, so the
+  // Free-run (ceiling-only) pacing: there is no consumer to gate on, so the
   // pacer delivers a baton on the vsync_period_ns_ ceiling alone. The pipeline
   // depth matches the render-target ring.
   pacer_ = std::make_unique<ivi::ConsumerPacedVsyncSource>(
@@ -556,7 +556,7 @@ void HeadlessVulkanBackend::Resize(size_t /*index*/,
   if (w == width_ && h == height_) {
     return;
   }
-  // Geometry changes are not supported in WS-1 (the render-target ring would
+  // Geometry changes are not supported yet (the render-target ring would
   // need re-allocation). Log and keep the initial size.
   ihs::log::warn("[HeadlessVulkan] resize to {}x{} ignored (fixed at {}x{})", w,
                  h, width_, height_);
