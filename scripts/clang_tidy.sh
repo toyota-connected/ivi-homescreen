@@ -153,7 +153,18 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# If clang-tidy-cache (ctcache) is available on PATH, wrap the real clang-tidy
+# binary with it so unchanged translation units are skipped on subsequent
+# runs. Falls back to running clang-tidy directly when ctcache isn't
+# installed (e.g. local developer machines), so behavior is unchanged there.
+if command -v clang-tidy-cache &>/dev/null; then
+    echo "Using clang-tidy-cache with: $(command -v "${CLANG_TIDY}")"
+    TIDY_CMD=(clang-tidy-cache "$(command -v "${CLANG_TIDY}")")
+else
+    TIDY_CMD=("${CLANG_TIDY}")
+fi
+
 printf '%s\n' "${FILES[@]}" | sort | \
-    xargs -P "$(nproc 2>/dev/null || echo 4)" "${CLANG_TIDY}" -p "${BUILD_DIR}" --warnings-as-errors='*' 2>&1
+    xargs -P "$(nproc 2>/dev/null || echo 4)" "${TIDY_CMD[@]}" -p "${BUILD_DIR}" --warnings-as-errors='*' 2>&1
 
 echo "clang-tidy passed."
