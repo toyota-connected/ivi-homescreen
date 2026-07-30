@@ -276,6 +276,16 @@ HeadlessVulkanBackend::HeadlessVulkanBackend(const uint32_t width,
     }
   }
 
+  // IVI_VK_EXPORT_LOOPBACK (opt-in): run an in-process stand-in consumer that
+  // signals consumer_done as soon as render_done fires, validating the
+  // per-frame semaphore round-trip without a real socket consumer. Without it
+  // the exported semaphore fds stay dormant (no one would signal consumer_done,
+  // so driving the per-frame wait would deadlock).
+  if (const char* lb = std::getenv("IVI_VK_EXPORT_LOOPBACK");
+      lb != nullptr && lb[0] != '\0' && std::strcmp(lb, "0") != 0) {
+    loopback_ = true;
+  }
+
   if (!InitVulkan()) {
     ihs::log::error("[HeadlessVulkan] Vulkan init failed; backend inert");
     Teardown();
@@ -545,6 +555,8 @@ bool HeadlessVulkanBackend::CreateRenderTargets() {
           "[HeadlessVulkan] export pool active: mode={} images={} {}x{}",
           active_export_mode_ == ExportMode::kDmaBuf ? "dmabuf" : "opaque",
           kImageCount, width_, height_);
+      // Best-effort per-frame sync semaphores on top of the exported images.
+      CreateExportSemaphores();
       return true;
     }
     // Exportable creation failed after a passing preflight (driver-specific);
@@ -788,7 +800,220 @@ bool HeadlessVulkanBackend::CreateExportableImage(
   return true;
 }
 
+void HeadlessVulkanBackend::CreateExportSemaphores() {
+  // Only meaningful when the image pool exported; require the
+  // external-semaphore device extensions the same way CreateRenderTargets gates
+  // the image export.
+  auto ext_enabled = [&](const char* name) {
+    for (const char* e : enabled_device_extensions_) {
+      if (std::strcmp(e, name) == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!ext_enabled(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME) ||
+      !ext_enabled(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME)) {
+    ihs::log::warn(
+        "[HeadlessVulkan] VK_KHR_external_semaphore[_fd] absent; per-frame "
+        "sync "
+        "semaphores disabled (image export still active)");
+    return;
+  }
+
+  // Preflight: the device must advertise OPAQUE_FD semaphore export.
+  VkPhysicalDeviceExternalSemaphoreInfo esi{};
+  esi.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO;
+  esi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+  VkExternalSemaphoreProperties esp{};
+  esp.sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES;
+  d().vkGetPhysicalDeviceExternalSemaphoreProperties(physical_device_, &esi,
+                                                     &esp);
+  if ((esp.externalSemaphoreFeatures &
+       VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) == 0) {
+    ihs::log::warn(
+        "[HeadlessVulkan] device does not advertise EXPORTABLE OPAQUE_FD "
+        "semaphores; per-frame sync semaphores disabled");
+    return;
+  }
+
+  // Command pool + reusable fence for the CPU-side consumer_done wait. The
+  // empty signal/self-consume submits carry no command buffers, so the pool is
+  // used only to satisfy the fence-backed wait submit; still, keep it around.
+  VkCommandPoolCreateInfo cpi{};
+  cpi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  cpi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  cpi.queueFamilyIndex = graphics_queue_family_;
+  if (d().vkCreateCommandPool(device_, &cpi, nullptr, &sync_command_pool_) !=
+      VK_SUCCESS) {
+    ihs::log::warn(
+        "[HeadlessVulkan] sync command pool creation failed; per-frame sync "
+        "semaphores disabled");
+    sync_command_pool_ = VK_NULL_HANDLE;
+    return;
+  }
+  VkFenceCreateInfo fci{};
+  fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;  // unsignaled
+  if (d().vkCreateFence(device_, &fci, nullptr, &consumer_wait_fence_) !=
+      VK_SUCCESS) {
+    ihs::log::warn(
+        "[HeadlessVulkan] sync fence creation failed; per-frame sync "
+        "semaphores disabled");
+    d().vkDestroyCommandPool(device_, sync_command_pool_, nullptr);
+    sync_command_pool_ = VK_NULL_HANDLE;
+    consumer_wait_fence_ = VK_NULL_HANDLE;
+    return;
+  }
+
+  // Per image: create the two OPAQUE_FD-exportable binary semaphores and export
+  // one persistent fd each. On any failure, roll back and skip the whole
+  // feature — the image export still stands.
+  auto rollback = [&]() {
+    DestroyExportSemaphores();
+    semaphores_active_ = false;
+  };
+  for (uint32_t i = 0; i < kImageCount; ++i) {
+    VkExportSemaphoreCreateInfo exp{};
+    exp.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+    exp.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+    VkSemaphoreCreateInfo sci{};
+    sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    sci.pNext = &exp;
+    if (d().vkCreateSemaphore(device_, &sci, nullptr, &render_done_[i]) !=
+            VK_SUCCESS ||
+        d().vkCreateSemaphore(device_, &sci, nullptr, &consumer_done_[i]) !=
+            VK_SUCCESS) {
+      ihs::log::warn(
+          "[HeadlessVulkan] vkCreateSemaphore {} failed; disabling "
+          "per-frame sync",
+          i);
+      rollback();
+      return;
+    }
+
+    const auto export_fd = [&](VkSemaphore sem, int* out) -> bool {
+      VkSemaphoreGetFdInfoKHR gfi{};
+      gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+      gfi.semaphore = sem;
+      gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+      return d().vkGetSemaphoreFdKHR(device_, &gfi, out) == VK_SUCCESS;
+    };
+    ExportedImage& e = exported_images_[i];
+    if (!export_fd(render_done_[i], &e.render_done_fd) ||
+        !export_fd(consumer_done_[i], &e.consumer_done_fd)) {
+      ihs::log::warn(
+          "[HeadlessVulkan] vkGetSemaphoreFdKHR {} failed; disabling per-frame "
+          "sync",
+          i);
+      rollback();
+      return;
+    }
+    ihs::log::info(
+        "[HeadlessVulkan] image {} sync semaphores: render_done_fd={} "
+        "consumer_done_fd={}",
+        i, e.render_done_fd, e.consumer_done_fd);
+  }
+
+  // Initialize each consumer_done to SIGNALED so the first GetNextImage wait
+  // passes (the image starts "free"). One empty signal-only submit per image.
+  for (uint32_t i = 0; i < kImageCount; ++i) {
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.signalSemaphoreCount = 1;
+    si.pSignalSemaphores = &consumer_done_[i];
+    if (d().vkQueueSubmit(graphics_queue_, 1, &si, VK_NULL_HANDLE) !=
+        VK_SUCCESS) {
+      ihs::log::warn(
+          "[HeadlessVulkan] initial consumer_done signal {} failed; disabling "
+          "per-frame sync",
+          i);
+      d().vkQueueWaitIdle(graphics_queue_);
+      rollback();
+      return;
+    }
+  }
+
+  semaphores_active_ = true;
+  ihs::log::info(
+      "[HeadlessVulkan] per-frame sync semaphores active (images={}, "
+      "loopback={})",
+      kImageCount, loopback_ ? "on" : "off");
+}
+
+void HeadlessVulkanBackend::DestroyExportSemaphores() {
+  for (uint32_t i = 0; i < kImageCount; ++i) {
+    if (render_done_[i] != VK_NULL_HANDLE) {
+      d().vkDestroySemaphore(device_, render_done_[i], nullptr);
+      render_done_[i] = VK_NULL_HANDLE;
+    }
+    if (consumer_done_[i] != VK_NULL_HANDLE) {
+      d().vkDestroySemaphore(device_, consumer_done_[i], nullptr);
+      consumer_done_[i] = VK_NULL_HANDLE;
+    }
+    if (exported_images_[i].render_done_fd >= 0) {
+      ::close(exported_images_[i].render_done_fd);
+      exported_images_[i].render_done_fd = -1;
+    }
+    if (exported_images_[i].consumer_done_fd >= 0) {
+      ::close(exported_images_[i].consumer_done_fd);
+      exported_images_[i].consumer_done_fd = -1;
+    }
+  }
+  if (consumer_wait_fence_ != VK_NULL_HANDLE) {
+    d().vkDestroyFence(device_, consumer_wait_fence_, nullptr);
+    consumer_wait_fence_ = VK_NULL_HANDLE;
+  }
+  if (sync_command_pool_ != VK_NULL_HANDLE) {
+    d().vkDestroyCommandPool(device_, sync_command_pool_, nullptr);
+    sync_command_pool_ = VK_NULL_HANDLE;
+  }
+  semaphores_active_ = false;
+}
+
+void HeadlessVulkanBackend::WaitConsumerDone(const uint32_t k) {
+  // CPU-wait consumer_done[k]: an empty wait-only submit (fence-backed) that
+  // unsignals the binary semaphore and confirms the consumer released image k.
+  VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  VkSubmitInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.waitSemaphoreCount = 1;
+  si.pWaitSemaphores = &consumer_done_[k];
+  si.pWaitDstStageMask = &stage;
+  if (d().vkQueueSubmit(graphics_queue_, 1, &si, consumer_wait_fence_) !=
+      VK_SUCCESS) {
+    return;
+  }
+  d().vkWaitForFences(device_, 1, &consumer_wait_fence_, VK_TRUE, UINT64_MAX);
+  d().vkResetFences(device_, 1, &consumer_wait_fence_);
+}
+
+void HeadlessVulkanBackend::SignalRenderDone(const uint32_t k) {
+  // Signal render_done[k]: empty signal-only submit. Same-queue ordering means
+  // it signals after the engine's render submits for image k complete.
+  VkSubmitInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.signalSemaphoreCount = 1;
+  si.pSignalSemaphores = &render_done_[k];
+  d().vkQueueSubmit(graphics_queue_, 1, &si, VK_NULL_HANDLE);
+}
+
+void HeadlessVulkanBackend::LoopbackSelfConsume(const uint32_t k) {
+  // Stand-in consumer: wait render_done[k] (unsignal) and signal
+  // consumer_done[k] in one empty submit, so the next GetNextImage for image k
+  // finds it free.
+  VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  VkSubmitInfo si{};
+  si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  si.waitSemaphoreCount = 1;
+  si.pWaitSemaphores = &render_done_[k];
+  si.pWaitDstStageMask = &stage;
+  si.signalSemaphoreCount = 1;
+  si.pSignalSemaphores = &consumer_done_[k];
+  d().vkQueueSubmit(graphics_queue_, 1, &si, VK_NULL_HANDLE);
+}
+
 void HeadlessVulkanBackend::DestroyRenderTargets() {
+  DestroyExportSemaphores();
   for (uint32_t i = 0; i < kImageCount; ++i) {
     if (images_[i] != VK_NULL_HANDLE) {
       d().vkDestroyImage(device_, images_[i], nullptr);
@@ -812,11 +1037,22 @@ void HeadlessVulkanBackend::Teardown() {
     d().vkDestroyDevice(device_, nullptr);
     device_ = VK_NULL_HANDLE;
   } else {
-    // Device already gone (or never created): still close any exported fds.
+    // Device already gone (or never created): still close any exported fds
+    // (image memory + the per-frame sync semaphores). The
+    // VkSemaphore/pool/fence handles die with the device; only the fds are ours
+    // to close.
     for (uint32_t i = 0; i < kImageCount; ++i) {
       if (exported_images_[i].fd >= 0) {
         ::close(exported_images_[i].fd);
         exported_images_[i].fd = -1;
+      }
+      if (exported_images_[i].render_done_fd >= 0) {
+        ::close(exported_images_[i].render_done_fd);
+        exported_images_[i].render_done_fd = -1;
+      }
+      if (exported_images_[i].consumer_done_fd >= 0) {
+        ::close(exported_images_[i].consumer_done_fd);
+        exported_images_[i].consumer_done_fd = -1;
       }
     }
   }
@@ -888,6 +1124,13 @@ FlutterVulkanImage HeadlessVulkanBackend::GetNextImageCallback(
     void* user_data,
     const FlutterFrameInfo* /* frame_info */) {
   auto* backend = BackendOf(user_data);
+  // Loopback only: block until the (stand-in) consumer released this image, so
+  // the engine never re-renders an image a consumer is still reading. Without
+  // loopback the binary consumer_done has no signaler and this would deadlock —
+  // so the per-frame ops stay dormant and the fds are merely exported.
+  if (backend->loopback_ && backend->semaphores_active_) {
+    backend->WaitConsumerDone(backend->current_image_);
+  }
   return {
       .struct_size = sizeof(FlutterVulkanImage),
       .image =
@@ -902,7 +1145,15 @@ bool HeadlessVulkanBackend::PresentCallback(
   // Nothing consumes the composited frame yet — the pacer drives cadence.
   // Advance the round-robin index so the next frame targets a different image.
   auto* backend = BackendOf(user_data);
-  backend->current_image_ = (backend->current_image_ + 1) % kImageCount;
+  const uint32_t k = backend->current_image_;  // index the engine just rendered
+  if (backend->loopback_ && backend->semaphores_active_) {
+    // Signal render_done[k] after the engine's render submits (same queue,
+    // ordered), then have the loopback consumer immediately drain it and signal
+    // consumer_done[k] so image k is free for its next GetNextImage.
+    backend->SignalRenderDone(k);
+    backend->LoopbackSelfConsume(k);
+  }
+  backend->current_image_ = (k + 1) % kImageCount;
   return true;
 }
 
