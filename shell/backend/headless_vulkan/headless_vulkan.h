@@ -31,18 +31,18 @@
 class Engine;
 class TaskRunner;
 
-// Headless Vulkan backend (WS-1 stub): boots the Flutter Vulkan renderer with
+// Headless Vulkan backend (initial): boots the Flutter Vulkan renderer with
 // no display, no Wayland, no scanout, and paces clear-color frames at a target
 // frame rate. It brings up a minimal Vulkan device (instance + physical-device
 // select + one graphics queue) and hands the engine a small ring of
 // render-target VkImages it composites into; the frames go nowhere yet.
 //
-// The device is set up so a LATER workstream can export those images as
+// The device is set up so a later change can export those images as
 // dma-bufs and hand them across an external-semaphore-synchronized socket to a
 // consumer: the external-memory / external-semaphore DEVICE extensions are
 // enabled here when the device advertises them (harmless now), and the selected
 // device's 16-byte deviceUUID is retained so a future HELLO handshake can name
-// the exact GPU. WS-1 itself does none of that — PresentCallback only advances
+// the exact GPU. None of that happens yet — PresentCallback only advances
 // the round-robin index, and the ConsumerPacedVsyncSource runs free (no
 // consumer) so the engine renders at the IVI_HEADLESS_FPS ceiling.
 class HeadlessVulkanBackend final : public Backend {
@@ -54,7 +54,7 @@ class HeadlessVulkanBackend final : public Backend {
   HeadlessVulkanBackend& operator=(const HeadlessVulkanBackend&) = delete;
 
   // ── Backend interface ──────────────────────────────────────────────────────
-  // No display surface and no platform-view compositing in WS-1, so the
+  // No display surface and no platform-view compositing here, so the
   // size/surface/texture entry points are trivial stubs that satisfy the vtable
   // and the FlutterView call sites; the engine drives the renderer callbacks
   // (GetRenderConfig) directly.
@@ -78,7 +78,7 @@ class HeadlessVulkanBackend final : public Backend {
 
   // Synthetic vsync: without a display there is no vblank, so pace the engine
   // to IVI_HEADLESS_FPS via a ConsumerPacedVsyncSource run in free-run mode (no
-  // consumer attached in WS-1). fps <= 0 leaves Flutter's wall-clock scheduler.
+  // consumer attached). fps <= 0 leaves Flutter's wall-clock scheduler.
   [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override;
   void SetPlatformTaskRunner(TaskRunner* runner) override;
@@ -144,7 +144,7 @@ class HeadlessVulkanBackend final : public Backend {
   uint32_t current_image_{0};
 
   // Synthetic-vsync pacing. vsync_ holds the baton machinery; the pacer drives
-  // it, run in free-run (ceiling-only) mode since WS-1 has no consumer.
+  // it, run in free-run (ceiling-only) mode since there is no consumer.
   ivi::IVsyncProvider vsync_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
   TaskRunner* platform_task_runner_{nullptr};
