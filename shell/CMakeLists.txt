@@ -43,6 +43,8 @@ add_executable(${PROJECT_NAME}
         # Backend-spanning vsync baton machinery (Wayland/DRM/software providers
         # inherit it). Source-agnostic, so always compiled.
         vsync/ivsync_provider.cc
+        # Consumer-paced vsync source (encode-ring backpressure -> baton timing).
+        vsync/consumer_paced_vsync.cc
         timer.cc
         view/flutter_view.cc
         watchdog.cc

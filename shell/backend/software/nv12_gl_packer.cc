@@ -237,8 +237,16 @@ void Nv12GlPacker::ReleaseSlotTrampoline(void* ctx) {
 }
 
 void Nv12GlPacker::ReleaseSlot(uint32_t index) {
-  std::lock_guard<std::mutex> lock(ring_mu_);
-  ring_[index].in_flight = false;
+  {
+    std::lock_guard<std::mutex> lock(ring_mu_);
+    ring_[index].in_flight = false;
+  }
+  // A slot is free again: hand a credit to a consumer-paced source. Fired
+  // outside the lock -- the callback hops to the vsync strand, and a
+  // synchronous consumer calls this from PackAndSubmit's own thread.
+  if (on_slot_free_) {
+    on_slot_free_();
+  }
 }
 
 void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
@@ -255,7 +263,7 @@ void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
   static const char* max_fps_env = std::getenv("IVI_ENC_MAX_FPS");
   static const int max_fps =
       max_fps_env != nullptr ? std::atoi(max_fps_env) : 30;
-  if (max_fps > 0) {
+  if (max_fps > 0 && !external_pacing_) {
     const uint64_t min_interval = 1000000ULL / static_cast<uint64_t>(max_fps);
     if (last_push_us_ != 0 && timestamp_us > last_push_us_ &&
         timestamp_us - last_push_us_ < min_interval) {
@@ -272,10 +280,20 @@ void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
         break;
       }
     }
-    if (idx == kRingSize) {
-      return;  // ring full: drop
+    if (idx != kRingSize) {
+      ring_[idx].in_flight = true;
     }
-    ring_[idx].in_flight = true;
+  }
+  if (idx == kRingSize) {
+    // Ring full: drop this frame. Under external pacing a delivered baton was
+    // already charged a credit for the slot this frame would have taken, so
+    // return that credit -- otherwise a drop would leak it and eventually stall
+    // the pacer. (In steady state the pacer keeps a slot free, so this is a
+    // self-correcting safety net, not the common path.)
+    if (external_pacing_ && on_slot_free_) {
+      on_slot_free_();
+    }
+    return;
   }
 
   Slot& slot = ring_[idx];
