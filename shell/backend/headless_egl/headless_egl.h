@@ -19,27 +19,40 @@
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
+
+#include "asio/steady_timer.hpp"
 
 #include "backend/backend.h"
 #include "backend/software/nv12_consumer.h"
 #include "backend/software/nv12_gl_packer.h"
+#include "vsync/ivsync_provider.h"
 
 struct gbm_device;
+struct gbm_surface;
+struct gbm_bo;
 class Engine;
 
 // GPU headless encode backend: the Flutter engine renders each frame on the GPU
-// (kOpenGL) into an FBO this backend owns -- no display, no Wayland, no scanout
-// -- and on present the frame is packed RGBA->NV12 on the GPU straight into a
-// dma-buf and handed to an INv12Consumer (a file encoder or a WebRTC send). It
-// is the zero-copy counterpart of the software backend's CPU EncoderSink: the
-// GPU both rasterizes and colour-converts, so no CPU touches the pixels.
+// (kOpenGL) into a real EGL window surface backed by a gbm_surface -- no
+// display, no Wayland, no scanout. On present the frame is eglSwapBuffers'd,
+// the just-presented gbm_bo is imported as a texture and packed RGBA->NV12 on
+// the GPU straight into a dma-buf handed to an INv12Consumer (a file encoder or
+// a WebRTC send). It is the zero-copy counterpart of the software backend's CPU
+// EncoderSink: the GPU both rasterizes and colour-converts, no CPU touches the
+// pixels.
 //
-// Surfaceless GBM/EGL on the render node (like pi_gl_encode). Consumer selected
-// by IVI_ENC_SINK, which is the bare consumer spec -- "file:<path>" (default
-// "file:out.h264") or "webrtc:<host>:<port>" -- i.e. the part after "encoder:"
-// in the software backend's IVI_SW_SINK grammar.
+// A real swap chain (gbm_surface + eglSwapBuffers) is used rather than a single
+// reused FBO: rendering into an FBO made the engine composite incrementally
+// against a buffer it wrongly assumed it could keep, leaving doubled widgets
+// and motion trails. A window surface composites a full frame each present
+// instead.
+//
+// Surfaceless GBM/EGL on the render node. Consumer selected by IVI_ENC_SINK,
+// which is the bare consumer spec -- "file:<path>" (default "file:out.h264") or
+// "webrtc:<host>:<port>".
 class HeadlessEglBackend final : public Backend {
  public:
   HeadlessEglBackend(uint32_t initial_width,
@@ -70,19 +83,32 @@ class HeadlessEglBackend final : public Backend {
   bool MakeCurrent();
   bool ClearCurrent();
   bool MakeResourceCurrent();
-  uint32_t Fbo() const { return render_fbo_; }
-  bool Present();  // engine finished the frame -> pack + submit
-  // Existing-damage query for the engine's partial-repaint path. The render
-  // target is one FBO reused every frame (a swap chain of age 1 that already
-  // holds the last frame), so this reports nothing stale and the engine does
-  // correct incremental repaints instead of leaving trails from prior frames.
-  void PopulateExistingDamage(FlutterDamage* out);
+  // Frame done: swap the window surface, import the presented buffer, pack it.
+  bool Present(const FlutterPresentInfo* info);
+
+  // Synthetic vsync: without a display there is no vblank, so the engine would
+  // render wall-clock (~60fps) and the packer would drop most frames. Instead
+  // pace the engine to the encode rate with a timer (IVI_ENC_MAX_FPS, default
+  // 30; IVI_HEADLESS_VSYNC=0 disables and falls back to wall-clock). The engine
+  // stays demand-driven -- an idle UI still schedules nothing.
+  [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override;
+  void SetPlatformTaskRunner(TaskRunner* runner) override;
+  void StopVsyncMonitor() override;
 
  private:
-  bool InitEgl(const char* render_node);
+  bool InitEgl(
+      const char* render_node);  // display, config, contexts, swapchain
   bool
-  InitRenderTarget();  // the RGBA FBO + the packer; GL context must be current
+  InitRenderTarget();  // packer + import texture; GL context must be current
   void Teardown();
+
+  // The engine's vsync_callback trampoline: parks the baton with vsync_.
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
+  // Start the timer once both the engine handle and the runner are wired.
+  void StartVsyncIfReady();
+  // Schedule the next tick; the handler runs on the runner's strand.
+  void ArmVsyncTimer();
 
   uint32_t width_{0};
   uint32_t height_{0};
@@ -90,15 +116,29 @@ class HeadlessEglBackend final : public Backend {
 
   int render_fd_{-1};
   gbm_device* gbm_{nullptr};
+  gbm_surface* gbm_surface_{nullptr};
+  uint32_t gbm_format_{0};  // DRM fourcc of the swap-chain buffers
+
   EGLDisplay dpy_{EGL_NO_DISPLAY};
+  EGLConfig config_{nullptr};
+  EGLSurface egl_surface_{EGL_NO_SURFACE};
   EGLContext ctx_{EGL_NO_CONTEXT};
   EGLContext resource_ctx_{EGL_NO_CONTEXT};
 
-  GLuint render_tex_{0};  // RGBA colour attachment the engine draws into
-  GLuint render_fbo_{0};
+  GLuint import_tex_{0};  // GL_TEXTURE_2D the presented bo is imported into
+  gbm_bo* locked_bo_{
+      nullptr};  // front buffer held until the next swap frees it
+
   bool target_ready_{false};
-  FlutterRect
-      existing_damage_{};  // stable storage for populate_existing_damage
+
+  // Synthetic-vsync pacing. vsync_ holds the baton machinery; a steady_timer on
+  // the platform runner's strand delivers it at the target rate.
+  ivi::IVsyncProvider vsync_;
+  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
+  TaskRunner* platform_task_runner_{nullptr};
+  std::unique_ptr<asio::steady_timer> vsync_timer_;
+  std::atomic<bool> vsync_running_{false};
+  uint32_t vsync_period_ns_{0};  // 0 = disabled (wall-clock scheduler)
 
   std::unique_ptr<INv12Consumer> consumer_;
   Nv12GlPacker packer_;
