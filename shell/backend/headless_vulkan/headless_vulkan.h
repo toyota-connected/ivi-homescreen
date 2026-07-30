@@ -65,6 +65,14 @@ class HeadlessVulkanBackend final : public Backend {
   // pool leaves fd == -1 / handle_type == 0. POD by design.
   struct ExportedImage {
     int fd = -1;  // owned by the backend; -1 if not exported
+    // Per-frame cross-process GPU sync (OPAQUE_FD exports of binary
+    // VkSemaphores; -1 unless the semaphore machinery came up). render_done:
+    // the backend signals it once image i is rendered, a consumer waits on it.
+    // consumer_done: a consumer signals it when done reading image i, the
+    // backend waits before re-rendering. Both are persistent OPAQUE_FD handles
+    // a consumer imports once and shares the binary state with the backend.
+    int render_done_fd = -1;
+    int consumer_done_fd = -1;
     uint64_t alloc_size = 0;
     uint32_t memory_type_index = 0;
     uint32_t drm_fourcc = 0;    // dmabuf only
@@ -147,6 +155,22 @@ class HeadlessVulkanBackend final : public Backend {
   bool CreateExportableImage(uint32_t index,
                              const std::vector<uint64_t>& allowed_modifiers);
   [[nodiscard]] uint32_t FindDeviceLocalMemoryType(uint32_t type_bits) const;
+  // Per-frame cross-process GPU sync. Called after the exportable image pool is
+  // built (export active only): creates a pair of OPAQUE_FD-exportable binary
+  // semaphores per image (render_done / consumer_done), exports their fds, and
+  // pre-signals each consumer_done so the first GetNextImage wait passes.
+  // Best-effort — logs and skips (leaving the fds -1) if the device cannot
+  // export an OPAQUE_FD semaphore; never fails bring-up.
+  void CreateExportSemaphores();
+  // Destroy the semaphores, close their fds, and destroy the sync command
+  // pool + fence. Called by DestroyRenderTargets.
+  void DestroyExportSemaphores();
+  // The per-frame loopback round-trip (active only when loopback_ &&
+  // semaphores_active_), all on graphics_queue_ from the raster thread.
+  void WaitConsumerDone(uint32_t k);  // GetNextImage: CPU-wait consumer_done[k]
+  void SignalRenderDone(uint32_t k);  // Present: signal render_done[k]
+  void LoopbackSelfConsume(
+      uint32_t k);  // Present: wait render / signal consumer
   // Destroy the images/memory and close any exported fds. Shared by the
   // export→plain fallback and Teardown.
   void DestroyRenderTargets();
@@ -203,6 +227,20 @@ class HeadlessVulkanBackend final : public Backend {
   ExportMode export_mode_{ExportMode::kNone};
   ExportMode active_export_mode_{ExportMode::kNone};
   std::array<ExportedImage, kImageCount> exported_images_{};
+
+  // Per-frame cross-process sync semaphores. render_done_[i] /
+  // consumer_done_[i] are binary VkSemaphores exported as OPAQUE_FD (fds stored
+  // in exported_images_[i]); semaphores_active_ gates every per-frame op. The
+  // sync command pool + reusable fence back the CPU-side consumer_done wait; no
+  // command buffers are recorded — the empty submits only carry wait/signal
+  // semaphores. IVI_VK_EXPORT_LOOPBACK=1 enables an in-process self-consumer
+  // that stands in for the future socket consumer to validate the round-trip.
+  bool loopback_{false};
+  bool semaphores_active_{false};
+  std::array<VkSemaphore, kImageCount> render_done_{};
+  std::array<VkSemaphore, kImageCount> consumer_done_{};
+  VkCommandPool sync_command_pool_{VK_NULL_HANDLE};
+  VkFence consumer_wait_fence_{VK_NULL_HANDLE};
 
   // Synthetic-vsync pacing. vsync_ holds the baton machinery; the pacer drives
   // it, run in free-run (ceiling-only) mode since there is no consumer.
