@@ -7,6 +7,10 @@ on:
     branches: [v2.0]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     if: ${{ github.server_url == 'https://github.com' }}
@@ -77,10 +81,10 @@ jobs:
       - name: Build
         run: ninja -C ${{github.workspace}}/build
 
-  lint:
+  lint-build:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
-    name: lint
+    name: lint-build
     permissions:
       contents: read
 
@@ -129,11 +133,163 @@ jobs:
       - name: Build (generate compile_commands.json)
         run: ninja -C ${{github.workspace}}/build
 
-      - name: clang-tidy
-        run: scripts/clang_tidy.sh ${{github.workspace}}/build
+      # Pack into a tar before upload. actions/upload-artifact dereferences
+      # symlinks (turning them into real copies), which breaks the build tree:
+      # third_party/drm-cxx exposes its src/ headers under a drm-cxx/ prefix via
+      # a build/third_party/drm-cxx/include/drm-cxx -> ../../../../third_party/drm-cxx/src
+      # symlink. Both that symlink and src/ are on the include path, so #pragma
+      # once only dedupes them while they resolve to the same physical file. If
+      # the symlink is materialized into a copy, the two paths become distinct
+      # files and clang-tidy reports redefinition errors. tar preserves symlinks.
+      - name: Pack workspace (preserve symlinks)
+        run: tar -C ${{github.workspace}} -czf ${{runner.temp}}/build.tar.gz .
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: lint_build-${{ github.run_id }}
+          path: ${{runner.temp}}/build.tar.gz
+          retention-days: 1
+
+  lint-format:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    name: lint-format
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Update apt package index
+        # Refresh the index before cache-apt-pkgs-action resolves versions, so
+        # it pins the revision currently on the mirror rather than a stale one
+        # the runner image still lists (a dropped .deb 404s and aborts install).
+        run: sudo apt-get update
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build clang-format-19
+          version: 1.0
 
       - name: clang-format
         run: scripts/format.sh --check
 
       - name: config reference (parser table + --help in sync)
         run: python3 scripts/gen_config_reference.py --check
+
+  lint-tidy-shard:
+    if: ${{ github.server_url == 'https://github.com' }}
+    needs: lint-build
+    runs-on: ubuntu-24.04
+    name: lint-tidy (${{ matrix.part }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: 0, part: 1 }
+          - { shard: 1, part: 2 }
+          - { shard: 2, part: 3 }
+          - { shard: 3, part: 4 }
+    permissions:
+      contents: read
+
+    steps:
+      - name: Update apt package index
+        run: sudo apt-get update
+
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          version: 1.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: lint_build-${{ github.run_id }}
+          path: ${{runner.temp}}
+
+      - name: Unpack workspace (restore symlinks)
+        run: tar -C ${{github.workspace}} -xzf ${{runner.temp}}/build.tar.gz
+
+      # ctcache isn't published on PyPI, so pipx install ctcache fails
+      # (404 - no matching distribution). Install straight from the repo.
+      - name: Install clang-tidy-cache (ctcache)
+        run: pipx install git+https://github.com/matus-chochlik/ctcache.git
+
+      # Every run uses a unique key (so "save" at the gate job never collides
+      # with an existing key), and falls back via restore-keys to the most
+      # recent merged cache uploaded by a previous run's gate job.
+      - name: Restore ctcache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{runner.temp}}/ctcache
+          key: lint_tidy-ctcache
+
+      - name: clang-tidy
+        env:
+          CTCACHE_DIR: ${{runner.temp}}/ctcache
+        run: scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
+
+      # Upload this shard's cache contents even if clang-tidy failed, so
+      # progress on the files that did pass is preserved for next time.
+      - name: Upload ctcache shard
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ctcache-shard-${{ matrix.shard }}
+          path: ${{runner.temp}}/ctcache
+          retention-days: 1
+
+  lint:
+    needs: [ lint-tidy-shard, lint-format, build ]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      # Merge the 4 shards' ctcache directories into one. ctcache entries are
+      # content-addressed by hash (<dir>/<hash[:2]>/<hash[2:]>), so merging is
+      # a safe union; only the small per-bucket stats counter files could be
+      # overwritten instead of summed, which only affects --show-stats output.
+      - name: Download ctcache shards
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ctcache-shard-*
+          path: ${{runner.temp}}/ctcache-merged
+          merge-multiple: true
+
+      - name: Save merged ctcache
+        uses: actions/cache/save@v6
+        with:
+          path: ${{runner.temp}}/ctcache-merged
+          key: lint_tidy-ctcache
+
+      # The merged result is now saved as a CI cache; the per-shard artifacts
+      # are no longer needed.
+      - name: Cleanup ctcache shard artifacts
+        if: ${{ always() }}
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: ctcache-shard-*
+
+      # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
+      - name: Cleanup build artifacts
+        if: ${{ always() }} 
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: lint_build-${{ github.run_id }}
+      - name: Check that all shards passed
+        run: |
+          lint_passed="${{ needs.lint-tidy-shard.result == 'success' && needs.lint-format.result == 'success' && needs.build.result == 'success' }}"
+          echo "lint_passed=$lint_passed" >> "$GITHUB_OUTPUT"
+          if [[ "$lint_passed" != "true" ]]; then
+            echo "One or more lint checks failed; see the logs above."
+            exit 1
+          else
+            echo "All lint checks passed."
+          fi
+    
