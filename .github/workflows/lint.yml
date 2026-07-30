@@ -1,4 +1,4 @@
-name: lint
+name: ci
 
 on:
   pull_request:
@@ -247,20 +247,10 @@ jobs:
           retention-days: 1
 
   lint:
-    needs: [ lint-tidy-shard, lint-format ]
+    needs: [ lint-tidy-shard, lint-format, build ]
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - name: Check that all shards passed
-        run: |
-          lint_passed="${{ needs.lint-tidy-shard.result == 'success' && needs.lint-format.result == 'success' }}"
-          echo "lint_passed=$lint_passed" >> "$GITHUB_OUTPUT"
-          if [[ "$lint_passed" != "true" ]]; then
-            echo "One or more lint checks failed; see the logs above."
-            exit 1
-          else
-            echo "All lint checks passed."
-          fi
       # Merge the 4 shards' ctcache directories into one. ctcache entries are
       # content-addressed by hash (<dir>/<hash[:2]>/<hash[2:]>), so merging is
       # a safe union; only the small per-bucket stats counter files could be
@@ -292,4 +282,14 @@ jobs:
         uses: geekyeggo/delete-artifact@v6
         with:
             name: lint_build-${{ github.run_id }}
+      - name: Check that all shards passed
+        run: |
+          lint_passed="${{ needs.lint-tidy-shard.result == 'success' && needs.lint-format.result == 'success' && needs.build.result == 'success' }}"
+          echo "lint_passed=$lint_passed" >> "$GITHUB_OUTPUT"
+          if [[ "$lint_passed" != "true" ]]; then
+            echo "One or more lint checks failed; see the logs above."
+            exit 1
+          else
+            echo "All lint checks passed."
+          fi
     
