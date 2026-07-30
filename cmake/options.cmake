@@ -197,6 +197,17 @@ option(BUILD_BACKEND_HEADLESS_EGL
         "Build the headless GPU-EGL encode backend (GPU render -> NV12 -> HW encode)"
         OFF)
 
+#
+# Headless Vulkan backend (WS-1): boots the Flutter Vulkan renderer with no
+# display / Wayland / scanout and paces clear-color frames at IVI_HEADLESS_FPS.
+# A stub for a later dma-buf-export + external-semaphore + socket workstream;
+# needs only the vendored Vulkan headers at build time (vulkan.hpp dlopens
+# libvulkan at runtime).
+#
+option(BUILD_BACKEND_HEADLESS_VULKAN
+        "Build the headless Vulkan backend (Vulkan render, no display; WS-1 stub)"
+        OFF)
+
 # Shared encoder dependencies. Both the software encoder sink
 # (BUILD_SOFTWARE_SINK_ENCODER) and the headless-EGL backend
 # (BUILD_BACKEND_HEADLESS_EGL) compile the V4L2 encoder sources and can
