@@ -155,7 +155,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
   // Negotiated grant, cached from the host's grant() for the accessors.
   uint32_t granted_kind{IHS_PV_KIND_NONE};
-  uint32_t drm_plane_id{0};
+  // The KMS plane this view was scanned out on at the last present, or 0 when
+  // it was GL-composited (no plane) that present. Written on the compositor
+  // thread via SetScanoutPlane, read on the platform thread via the DRM_PLANE
+  // accessor, so it is atomic. Feeds ihs_pv_grant_drm_plane_id.
+  std::atomic<uint32_t> drm_plane_id{0};
   int shm_fd{-1};
   size_t shm_stride{0};
 
@@ -283,6 +287,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     return id_;
   }
   void OnResize(int32_t, int32_t) override {}
+
+  // The compositor reports the KMS plane this view scanned out on this present
+  // (0 == GL-composited). Stored for the DRM_PLANE grant accessor. Compositor
+  // thread; the field is atomic.
+  void SetScanoutPlane(uint32_t plane_id) override {
+    drm_plane_id.store(plane_id, std::memory_order_relaxed);
+  }
 
 #if IVI_HAVE_VULKAN
   // The compositor samples the most recently submitted buffer. Null until the
@@ -989,7 +1000,15 @@ void HostRevoke(void* /*user_data*/, IhsPlatformView* view) {
 }
 
 uint32_t HostGrantDrmPlaneId(void* /*user_data*/, IhsPlatformView* view) {
-  return reinterpret_cast<IhsPluginView*>(view)->drm_plane_id;
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  // Per the ABI, the accessor is 0 unless the current grant is DRM_PLANE.
+  // Otherwise it is the plane the compositor scanned this view out on at the
+  // last present -- and 0 while the view is GL-composited (no plane), so a
+  // direct-scanout producer sees when its zero-GPU path is not being honored.
+  if (v->granted_kind != IHS_PV_KIND_DRM_PLANE) {
+    return 0;
+  }
+  return v->drm_plane_id.load(std::memory_order_relaxed);
 }
 
 int HostGrantShmFd(void* /*user_data*/,
