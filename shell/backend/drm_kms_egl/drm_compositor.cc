@@ -2492,9 +2492,26 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           scene_->find_by_identity_tag(surface.get()) == nullptr;
       const bool have_db = surface->GetDmabuf(&db);
       if (is_new && !have_db) {
-        // New platform view with no dma-buf (GL-only surface, or none ready
-        // this present): route the whole frame through GL composition, which
-        // samples the surface's GL texture / Vulkan image.
+        // New platform view with no dma-buf to place this present.
+        //
+        // On a plane-capable target (planes_available_) this is a dma-buf
+        // producer -- a decoder/camera -- that just hasn't delivered its first
+        // frame, or is momentarily between frames while its layer is not yet in
+        // the scene. Such a producer also exposes a GL-fallback texture, so a
+        // GetGlTextureName()!=0 test can't tell it apart from a genuine GL-only
+        // surface -- but routing the whole frame through GL here would flip the
+        // primary via GL on every such present until a buffer lands: the
+        // startup flicker. Skip the not-ready view and keep the frame on the
+        // plane/scene path; its plane lights up once GetDmabuf starts returning
+        // frames. Nothing is latched in the scene for an is_new view, so
+        // skipping it turns no plane off (the prune runs over this frame's tags
+        // only).
+        //
+        // With no overlay planes (e.g. software vkms) GL composition of the
+        // surface's texture is the only way to show it, so fall back.
+        if (planes_available_) {
+          continue;
+        }
         return PresentViaGlFallback(layers, layer_count);
       }
       frame_layers.push_back(
