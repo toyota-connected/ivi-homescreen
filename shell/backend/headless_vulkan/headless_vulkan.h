@@ -53,6 +53,31 @@ class HeadlessVulkanBackend final : public Backend {
   HeadlessVulkanBackend(const HeadlessVulkanBackend&) = delete;
   HeadlessVulkanBackend& operator=(const HeadlessVulkanBackend&) = delete;
 
+  // Requested external-memory export mode for the render-target pool, from
+  // IVI_VK_EXPORT_MODE (unset => kNone: current non-exportable behavior).
+  // Opaque fd is the portable, same-device floor (OPTIMAL tiling); dmabuf
+  // exports a DRM-format-modifier image a cross-process/cross-API consumer can
+  // import.
+  enum class ExportMode { kNone, kOpaqueFd, kDmaBuf };
+
+  // Everything a future handshake needs to re-import one pool image in another
+  // process/API. Populated only for the exported images; a plain (non-exported)
+  // pool leaves fd == -1 / handle_type == 0. POD by design.
+  struct ExportedImage {
+    int fd = -1;  // owned by the backend; -1 if not exported
+    uint64_t alloc_size = 0;
+    uint32_t memory_type_index = 0;
+    uint32_t drm_fourcc = 0;    // dmabuf only
+    uint64_t drm_modifier = 0;  // dmabuf only (DRM_FORMAT_MOD_*)
+    uint32_t plane_count = 1;
+    uint64_t plane_offset[4] = {0};
+    uint64_t plane_pitch[4] = {0};
+    uint32_t width = 0, height = 0;
+    uint32_t vk_format = 0;  // VkFormat
+    uint32_t handle_type =
+        0;  // VkExternalMemoryHandleTypeFlagBits used (0=none)
+  };
+
   // ── Backend interface ──────────────────────────────────────────────────────
   // No display surface and no platform-view compositing here, so the
   // size/surface/texture entry points are trivial stubs that satisfy the vtable
@@ -87,6 +112,22 @@ class HeadlessVulkanBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
 
+  // Export accessors for a future cross-process handshake. Nothing consumes
+  // these yet — they describe the pool the handshake would advertise. When
+  // export is disabled or fell back, export_enabled() is false and every
+  // ExportedImage has fd == -1.
+  [[nodiscard]] const std::array<ExportedImage, 3>& exported_images() const {
+    return exported_images_;
+  }
+  [[nodiscard]] bool export_enabled() const {
+    return active_export_mode_ != ExportMode::kNone;
+  }
+  // The selected device's 16-byte Vulkan deviceUUID; a HELLO handshake names
+  // the exact GPU an opaque-fd import must match.
+  [[nodiscard]] const std::array<uint8_t, VK_UUID_SIZE>& device_uuid() const {
+    return device_uuid_;
+  }
+
  private:
   // Bring-up. Each logs and returns false on failure; a failed InitVulkan
   // leaves the backend inert (GetRenderConfig hands the engine null handles,
@@ -96,6 +137,19 @@ class HeadlessVulkanBackend final : public Backend {
   bool SelectPhysicalDevice();
   bool CreateLogicalDevice();
   bool CreateRenderTargets();
+  // Pool creators used by CreateRenderTargets. CreateExportablePool honors
+  // active_export_mode_ (opaque-fd or dmabuf) and, on any failure, lets the
+  // caller fall back to CreatePlainPool (the original non-exportable path) so
+  // the backend always boots and paces.
+  bool CreatePlainPool();
+  bool CreateExportablePool(const std::vector<uint64_t>& allowed_modifiers);
+  bool CreatePlainImage(uint32_t index);
+  bool CreateExportableImage(uint32_t index,
+                             const std::vector<uint64_t>& allowed_modifiers);
+  [[nodiscard]] uint32_t FindDeviceLocalMemoryType(uint32_t type_bits) const;
+  // Destroy the images/memory and close any exported fds. Shared by the
+  // export→plain fallback and Teardown.
+  void DestroyRenderTargets();
   void Teardown();
 
   // Root-surface renderer callbacks (user_data == the FlutterDesktopEngineState
@@ -142,6 +196,13 @@ class HeadlessVulkanBackend final : public Backend {
   std::array<VkImage, kImageCount> images_{};
   std::array<VkDeviceMemory, kImageCount> image_memory_{};
   uint32_t current_image_{0};
+
+  // Export state. export_mode_ is the mode requested via IVI_VK_EXPORT_MODE;
+  // active_export_mode_ is what actually took (kNone after a fallback). The
+  // per-image handles/layout a future handshake reads live in exported_images_.
+  ExportMode export_mode_{ExportMode::kNone};
+  ExportMode active_export_mode_{ExportMode::kNone};
+  std::array<ExportedImage, kImageCount> exported_images_{};
 
   // Synthetic-vsync pacing. vsync_ holds the baton machinery; the pacer drives
   // it, run in free-run (ceiling-only) mode since there is no consumer.
