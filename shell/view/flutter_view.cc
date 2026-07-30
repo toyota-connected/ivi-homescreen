@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "flutter_view.h"
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include "logging/logging.h"
@@ -44,6 +45,9 @@
 #include "backend/software/sink_factory.h"
 #include "backend/software/software_backend.h"
 #include "display/software_display.h"
+#endif
+#if BUILD_BACKEND_HEADLESS_EGL
+#include "backend/headless_egl/headless_egl.h"
 #endif
 #if BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/wayland_egl.h"
@@ -365,11 +369,38 @@ Display* FlutterView::GetDisplay() const {
 void FlutterView::Initialize() {
   // Engine / Dart VM switches -> command_line_argv. argv[0] is the app id.
   std::vector<const char*> m_command_line_args_c;
-  m_command_line_args_c.reserve(m_config.view.engine_args.size() + 1);
+  m_command_line_args_c.reserve(m_config.view.engine_args.size() + 2);
   m_command_line_args_c.push_back(m_config.app_id.c_str());
   for (const auto& arg : m_config.view.engine_args) {
     m_command_line_args_c.push_back(arg.c_str());
   }
+
+#if BUILD_BACKEND_HEADLESS_EGL
+  // The headless-EGL encode backend requires Impeller. Under the Skia GL
+  // renderer a startup race in the raster cache intermittently drops static
+  // layers -- e.g. a whole-run black background on ~half of cold starts --
+  // because a cached layer image is captured empty. Impeller GLES has no such
+  // cache and paints the full layer tree every frame, which is also what an
+  // encoder wants. Default it on for this backend unless the deployment pinned
+  // the flag either way (e.g.
+  // --enable-impeller=false to opt back into Skia). The literal has static
+  // storage, so its pointer stays valid for the synchronous Engine
+  // construction.
+  static constexpr char kImpellerSwitch[] = "--enable-impeller";
+  if (dynamic_cast<HeadlessEglBackend*>(m_backend.get()) != nullptr) {
+    const auto& args = m_config.view.engine_args;
+    const bool pinned =
+        std::any_of(args.begin(), args.end(), [](const std::string& a) {
+          return a == kImpellerSwitch || a.rfind("--enable-impeller=", 0) == 0;
+        });
+    if (!pinned) {
+      m_command_line_args_c.push_back(kImpellerSwitch);
+      ihs::log::info(
+          "[FlutterView] headless-egl: enabling Impeller (Skia GL raster cache "
+          "intermittently drops static layers on this path)");
+    }
+  }
+#endif
 
   // Arguments to the Dart entrypoint main(List<String>) -> dart_entrypoint_argv
   // (no argv[0] convention).
