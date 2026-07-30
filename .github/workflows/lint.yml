@@ -244,13 +244,6 @@ jobs:
           path: ${{runner.temp}}/ctcache
           retention-days: 1
 
-      # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
-      - name: Cleanup build artifacts
-        if: ${{ always() }} 
-        uses: geekyeggo/delete-artifact@v6
-        with:
-            name: lint_build-${{ github.run_id }}
-
   lint-tidy:
     name: lint-tidy (gate)
     needs: [ lint-tidy-shard ]
@@ -259,6 +252,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Check that all shards passed
+        run: |
+          tidy_passed="${{ needs.lint-tidy-shard.result == 'success' }}"
+          echo "tidy_passed=$tidy_passed" >> "$GITHUB_OUTPUT"
+          if [[ "$tidy_passed" != "true" ]]; then
+            echo "One or more lint-tidy shards failed; see the logs above."
+            exit 1
+          else
+            echo "All lint-tidy shards passed."
+          fi
       # Merge the 4 shards' ctcache directories into one. ctcache entries are
       # content-addressed by hash (<dir>/<hash[:2]>/<hash[2:]>), so merging is
       # a safe union; only the small per-bucket stats counter files could be
@@ -284,12 +287,10 @@ jobs:
         with:
             name: ctcache-shard-*
 
-      - name: Check that all shards passed
-        run: |
-          if [[ ${{ needs.lint-tidy-shard.result }} != 'success' ]]; then
-            echo "One or more lint-tidy shards failed; see the logs above."
-            exit 1
-          else
-            echo "All lint-tidy shards passed."
-          fi
+      # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
+      - name: Cleanup build artifacts
+        if: ${{ always() }} 
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: lint_build-${{ github.run_id }}
     
