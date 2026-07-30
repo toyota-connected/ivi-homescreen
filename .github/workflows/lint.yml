@@ -217,8 +217,32 @@ jobs:
       - name: Unpack workspace (restore symlinks)
         run: tar -C ${{github.workspace}} -xzf ${{runner.temp}}/build.tar.gz
 
+      - name: Install clang-tidy-cache (ctcache)
+        run: pipx install ctcache
+
+      # Every run uses a unique key (so "save" at the gate job never collides
+      # with an existing key), and falls back via restore-keys to the most
+      # recent merged cache uploaded by a previous run's gate job.
+      - name: Restore ctcache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{runner.temp}}/ctcache
+          key: lint_tidy-ctcache
+
       - name: clang-tidy
+        env:
+          CTCACHE_DIR: ${{runner.temp}}/ctcache
         run: scripts/clang_tidy.sh --shard ${{ matrix.shard }}/4 ${{github.workspace}}/build
+
+      # Upload this shard's cache contents even if clang-tidy failed, so
+      # progress on the files that did pass is preserved for next time.
+      - name: Upload ctcache shard
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ctcache-shard-${{ matrix.shard }}
+          path: ${{runner.temp}}/ctcache
+          retention-days: 1
 
       # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
       - name: Cleanup build artifacts
@@ -232,7 +256,34 @@ jobs:
     needs: [ lint-tidy-shard ]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
+      # Merge the 4 shards' ctcache directories into one. ctcache entries are
+      # content-addressed by hash (<dir>/<hash[:2]>/<hash[2:]>), so merging is
+      # a safe union; only the small per-bucket stats counter files could be
+      # overwritten instead of summed, which only affects --show-stats output.
+      - name: Download ctcache shards
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ctcache-shard-*
+          path: ${{runner.temp}}/ctcache-merged
+          merge-multiple: true
+
+      - name: Save merged ctcache
+        uses: actions/cache/save@v6
+        with:
+          path: ${{runner.temp}}/ctcache-merged
+          key: lint_tidy-ctcache
+
+      # The merged result is now saved as a CI cache; the per-shard artifacts
+      # are no longer needed.
+      - name: Cleanup ctcache shard artifacts
+        if: ${{ always() }}
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: ctcache-shard-*
+
       - name: Check that all shards passed
         run: |
           if [[ ${{ needs.lint-tidy-shard.result }} != 'success' ]]; then
