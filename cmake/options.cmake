@@ -198,14 +198,14 @@ option(BUILD_BACKEND_HEADLESS_EGL
         OFF)
 
 #
-# Headless Vulkan backend (WS-1): boots the Flutter Vulkan renderer with no
+# Headless Vulkan backend: boots the Flutter Vulkan renderer with no
 # display / Wayland / scanout and paces clear-color frames at IVI_HEADLESS_FPS.
-# A stub for a later dma-buf-export + external-semaphore + socket workstream;
+# A foundation for a later dma-buf-export + external-semaphore + socket path;
 # needs only the vendored Vulkan headers at build time (vulkan.hpp dlopens
 # libvulkan at runtime).
 #
 option(BUILD_BACKEND_HEADLESS_VULKAN
-        "Build the headless Vulkan backend (Vulkan render, no display; WS-1 stub)"
+        "Build the headless Vulkan backend (Vulkan render, no display)"
         OFF)
 
 # Shared encoder dependencies. Both the software encoder sink
