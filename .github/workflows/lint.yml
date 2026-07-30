@@ -1,4 +1,4 @@
-name: ci
+name: lint
 
 on:
   pull_request:
@@ -246,23 +246,20 @@ jobs:
           path: ${{runner.temp}}/ctcache
           retention-days: 1
 
-  lint-tidy:
-    name: lint-tidy (gate)
-    needs: [ lint-tidy-shard ]
-    if: ${{ always() }}
+  lint:
+    needs: [ lint-tidy-shard, lint-format ]
+    if: always()
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     steps:
       - name: Check that all shards passed
         run: |
-          tidy_passed="${{ needs.lint-tidy-shard.result == 'success' }}"
-          echo "tidy_passed=$tidy_passed" >> "$GITHUB_OUTPUT"
-          if [[ "$tidy_passed" != "true" ]]; then
-            echo "One or more lint-tidy shards failed; see the logs above."
+          lint_passed="${{ needs.lint-tidy-shard.result == 'success' && needs.lint-format.result == 'success' }}"
+          echo "lint_passed=$lint_passed" >> "$GITHUB_OUTPUT"
+          if [[ "$lint_passed" != "true" ]]; then
+            echo "One or more lint checks failed; see the logs above."
             exit 1
           else
-            echo "All lint-tidy shards passed."
+            echo "All lint checks passed."
           fi
       # Merge the 4 shards' ctcache directories into one. ctcache entries are
       # content-addressed by hash (<dir>/<hash[:2]>/<hash[2:]>), so merging is
