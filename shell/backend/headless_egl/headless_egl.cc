@@ -23,15 +23,20 @@
 #include <gbm.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <vector>
 
+#include "asio/bind_executor.hpp"
+#include "asio/post.hpp"
+
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
 #include "logging/logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "task_runner.h"
 
 namespace {
 
@@ -56,6 +61,18 @@ HeadlessEglBackend::HeadlessEglBackend(uint32_t initial_width,
     : width_(initial_width & ~1u),
       height_(initial_height & ~1u),
       consumer_(std::move(consumer)) {
+  // Pace the engine to the encode rate (IVI_ENC_MAX_FPS, default 30 -- the same
+  // knob the packer caps at) via a synthetic vsync, so it does not render
+  // wall-clock and waste GPU on frames the packer would drop.
+  // IVI_HEADLESS_VSYNC=0 (or a non-positive fps) disables it and leaves
+  // Flutter's wall-clock scheduler.
+  const char* vsync_off = std::getenv("IVI_HEADLESS_VSYNC");
+  const char* fps_env = std::getenv("IVI_ENC_MAX_FPS");
+  const int fps = fps_env != nullptr ? std::atoi(fps_env) : 30;
+  if ((vsync_off == nullptr || vsync_off[0] != '0') && fps > 0) {
+    vsync_period_ns_ = static_cast<uint32_t>(1'000'000'000LL / fps);
+  }
+
   const char* node = std::getenv("IVI_ENC_RENDER_NODE");
   if (!InitEgl(node != nullptr ? node : "/dev/dri/renderD128")) {
     ihs::log::error("[HeadlessEgl] EGL init failed; backend inert");
@@ -316,6 +333,93 @@ bool HeadlessEglBackend::Present(const FlutterPresentInfo* /*info*/) {
   locked_bo_ = bo;
   ++frame_index_;
   return true;
+}
+
+VsyncCallback HeadlessEglBackend::GetVsyncCallback() const {
+  return vsync_period_ns_ != 0 ? &VsyncTrampoline : nullptr;
+}
+
+void HeadlessEglBackend::VsyncTrampoline(void* user_data,
+                                         const intptr_t baton) {
+  // user_data is the FlutterDesktopEngineState* handed to the engine. Recover
+  // the engine + backend; if either is gone (shutdown race) drop the baton (a
+  // leaked baton is the documented cost, but the only safe option here).
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->view_controller == nullptr ||
+      state->view_controller->engine == nullptr) {
+    return;
+  }
+  auto* engine_obj = state->view_controller->engine;
+  auto* backend = dynamic_cast<HeadlessEglBackend*>(engine_obj->GetBackend());
+  if (backend == nullptr) {
+    return;
+  }
+  // The timer is the source, so the baton parks (SetSourcePending(true)) and
+  // the next tick delivers it.
+  backend->vsync_.SubmitBaton(engine_obj->GetFlutterEngine(), baton);
+}
+
+void HeadlessEglBackend::SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine)
+                                             engine) {
+  engine_handle_ = engine;
+  StartVsyncIfReady();
+}
+
+void HeadlessEglBackend::SetPlatformTaskRunner(TaskRunner* runner) {
+  platform_task_runner_ = runner;
+  StartVsyncIfReady();
+}
+
+void HeadlessEglBackend::StartVsyncIfReady() {
+  if (vsync_period_ns_ == 0 || vsync_running_.load() ||
+      engine_handle_ == nullptr || platform_task_runner_ == nullptr ||
+      platform_task_runner_->GetIoContext() == nullptr) {
+    return;
+  }
+  vsync_.SetEngine(engine_handle_, platform_task_runner_);
+  vsync_.SetSourcePending(true);  // batons park; the timer returns them
+  vsync_.SetPeriodNs(vsync_period_ns_);
+  vsync_timer_ = std::make_unique<asio::steady_timer>(
+      *platform_task_runner_->GetIoContext());
+  vsync_running_.store(true, std::memory_order_release);
+  // Arm on the strand so every timer + OnVsync touch stays on the runner thread
+  // (Flutter rejects OnVsync from any other thread).
+  asio::post(*platform_task_runner_->GetStrandContext(),
+             [this]() { ArmVsyncTimer(); });
+  ihs::log::info("[HeadlessEgl] synthetic vsync at {} fps",
+                 1'000'000'000u / vsync_period_ns_);
+}
+
+void HeadlessEglBackend::ArmVsyncTimer() {
+  if (!vsync_running_.load(std::memory_order_acquire)) {
+    return;
+  }
+  vsync_timer_->expires_after(std::chrono::nanoseconds(vsync_period_ns_));
+  vsync_timer_->async_wait(asio::bind_executor(
+      *platform_task_runner_->GetStrandContext(),
+      [this](const asio::error_code& ec) {
+        if (ec || !vsync_running_.load(std::memory_order_acquire)) {
+          return;  // cancelled (teardown) or io_context stopped
+        }
+        vsync_.DeliverParkedBaton();  // no-op if the engine is idle
+        ArmVsyncTimer();
+      }));
+}
+
+void HeadlessEglBackend::StopVsyncMonitor() {
+  // Called from FlutterView::~FlutterView before the engine + runner are torn
+  // down. Stop re-arming and cancel the pending wait on the strand; the aborted
+  // handler sees vsync_running_ == false and does not re-arm.
+  if (vsync_running_.exchange(false, std::memory_order_acq_rel) &&
+      platform_task_runner_ != nullptr &&
+      platform_task_runner_->GetStrandContext() != nullptr) {
+    asio::post(*platform_task_runner_->GetStrandContext(), [this]() {
+      if (vsync_timer_ != nullptr) {
+        vsync_timer_->cancel();
+      }
+    });
+  }
+  vsync_.Stop();
 }
 
 FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
