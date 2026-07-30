@@ -217,8 +217,10 @@ jobs:
       - name: Unpack workspace (restore symlinks)
         run: tar -C ${{github.workspace}} -xzf ${{runner.temp}}/build.tar.gz
 
+      # ctcache isn't published on PyPI, so pipx install ctcache fails
+      # (404 - no matching distribution). Install straight from the repo.
       - name: Install clang-tidy-cache (ctcache)
-        run: pipx install ctcache
+        run: pipx install git+https://github.com/matus-chochlik/ctcache.git
 
       # Every run uses a unique key (so "save" at the gate job never collides
       # with an existing key), and falls back via restore-keys to the most
