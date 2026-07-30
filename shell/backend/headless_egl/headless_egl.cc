@@ -72,6 +72,12 @@ HeadlessEglBackend::HeadlessEglBackend(uint32_t initial_width,
   if ((vsync_off == nullptr || vsync_off[0] != '0') && fps > 0) {
     vsync_period_ns_ = static_cast<uint32_t>(1'000'000'000LL / fps);
   }
+  // IVI_HEADLESS_PACED=1 drives the vsync from encode-ring backpressure (a free
+  // slot releases the next baton) with the fps above as a ceiling, instead of a
+  // free-running timer -- so the engine renders at the consumer's real rate and
+  // stalls cleanly when it backs up. Opt-in for now.
+  const char* paced_env = std::getenv("IVI_HEADLESS_PACED");
+  paced_ = paced_env != nullptr && paced_env[0] == '1';
 
   const char* node = std::getenv("IVI_ENC_RENDER_NODE");
   if (!InitEgl(node != nullptr ? node : "/dev/dri/renderD128")) {
@@ -228,6 +234,18 @@ bool HeadlessEglBackend::InitRenderTarget() {
     ihs::log::error("[HeadlessEgl] packer init failed");
     return false;
   }
+  if (paced_) {
+    // Consumer-paced vsync: each freed ring slot is a credit for the pacer, and
+    // the pacer -- not the packer -- limits the rate. (StartVsyncIfReady may
+    // run before or after this; the lambda re-checks pacer_ at call time, and
+    // AddCredit no-ops until the pacer is running.)
+    packer_.SetExternalPacing(true);
+    packer_.SetOnSlotFree([this]() {
+      if (pacer_ != nullptr) {
+        pacer_->AddCredit();
+      }
+    });
+  }
   target_ready_ = true;
   ihs::log::info("[HeadlessEgl] render target ready {}x{}", width_, height_);
   return true;
@@ -356,9 +374,13 @@ void HeadlessEglBackend::VsyncTrampoline(void* user_data,
   if (backend == nullptr) {
     return;
   }
-  // The timer is the source, so the baton parks (SetSourcePending(true)) and
-  // the next tick delivers it.
-  backend->vsync_.SubmitBaton(engine_obj->GetFlutterEngine(), baton);
+  // The source (timer or consumer-paced) keeps the baton parked
+  // (SetSourcePending(true)) and delivers it under its own timing.
+  if (backend->paced_ && backend->pacer_ != nullptr) {
+    backend->pacer_->SubmitBaton(engine_obj->GetFlutterEngine(), baton);
+  } else {
+    backend->vsync_.SubmitBaton(engine_obj->GetFlutterEngine(), baton);
+  }
 }
 
 void HeadlessEglBackend::SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine)
@@ -378,6 +400,16 @@ void HeadlessEglBackend::StartVsyncIfReady() {
       platform_task_runner_->GetIoContext() == nullptr) {
     return;
   }
+  vsync_running_.store(true, std::memory_order_release);
+  if (paced_) {
+    // Consumer-paced: the ring depth is the credit budget, vsync_period_ns_ the
+    // rate ceiling. The pacer wires vsync_ (SetSourcePending/SetPeriodNs/
+    // SetEngine) itself.
+    pacer_ = std::make_unique<ivi::ConsumerPacedVsyncSource>(
+        vsync_, vsync_period_ns_, Nv12GlPacker::RingSize());
+    pacer_->Start(engine_handle_, platform_task_runner_);
+    return;
+  }
   // Mark the source pending + set the period before wiring the engine, so any
   // baton that arrives once wired parks for the timer rather than draining
   // inline unpaced.
@@ -386,7 +418,6 @@ void HeadlessEglBackend::StartVsyncIfReady() {
   vsync_.SetEngine(engine_handle_, platform_task_runner_);
   vsync_timer_ = std::make_unique<asio::steady_timer>(
       *platform_task_runner_->GetIoContext());
-  vsync_running_.store(true, std::memory_order_release);
   // Arm on the strand so every timer + OnVsync touch stays on the runner thread
   // (Flutter rejects OnVsync from any other thread).
   asio::post(*platform_task_runner_->GetStrandContext(),
@@ -418,6 +449,9 @@ void HeadlessEglBackend::StopVsyncMonitor() {
   if (vsync_running_.exchange(false, std::memory_order_acq_rel) &&
       platform_task_runner_ != nullptr &&
       platform_task_runner_->GetStrandContext() != nullptr) {
+    if (paced_ && pacer_ != nullptr) {
+      pacer_->Stop();
+    }
     asio::post(*platform_task_runner_->GetStrandContext(), [this]() {
       if (vsync_timer_ != nullptr) {
         vsync_timer_->cancel();

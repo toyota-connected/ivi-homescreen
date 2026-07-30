@@ -28,6 +28,7 @@
 #include "backend/backend.h"
 #include "backend/software/nv12_consumer.h"
 #include "backend/software/nv12_gl_packer.h"
+#include "vsync/consumer_paced_vsync.h"
 #include "vsync/ivsync_provider.h"
 
 struct gbm_device;
@@ -131,14 +132,20 @@ class HeadlessEglBackend final : public Backend {
 
   bool target_ready_{false};
 
-  // Synthetic-vsync pacing. vsync_ holds the baton machinery; a steady_timer on
-  // the platform runner's strand delivers it at the target rate.
+  // Synthetic-vsync pacing. vsync_ holds the baton machinery. Two drivers of
+  // it: the default free-running steady_timer (fixed target rate), or -- when
+  // paced_ (IVI_HEADLESS_PACED=1) -- a ConsumerPacedVsyncSource that only
+  // delivers a baton when the encode ring has a free slot (backpressure), with
+  // the same rate as a ceiling. The pacer is the backend-agnostic path a future
+  // Vulkan encoder reuses.
   ivi::IVsyncProvider vsync_;
   FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
   TaskRunner* platform_task_runner_{nullptr};
   std::unique_ptr<asio::steady_timer> vsync_timer_;
   std::atomic<bool> vsync_running_{false};
   uint32_t vsync_period_ns_{0};  // 0 = disabled (wall-clock scheduler)
+  bool paced_{false};            // consumer-paced vsync instead of the timer
+  std::unique_ptr<ivi::ConsumerPacedVsyncSource> pacer_;
 
   std::unique_ptr<INv12Consumer> consumer_;
   Nv12GlPacker packer_;
