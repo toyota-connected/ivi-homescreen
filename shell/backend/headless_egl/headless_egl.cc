@@ -17,6 +17,8 @@
 #include "backend/headless_egl/headless_egl.h"
 
 #include <EGL/eglext.h>
+#include <GLES2/gl2ext.h>
+#include <drm_fourcc.h>
 #include <fcntl.h>
 #include <gbm.h>
 #include <unistd.h>
@@ -24,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <vector>
 
 #include "backend/gl_process_resolver.h"
 #include "engine.h"
@@ -103,19 +106,13 @@ bool HeadlessEglBackend::InitEgl(const char* render_node) {
     ihs::log::error("[HeadlessEgl] no EGL_EXT_image_dma_buf_import");
     return false;
   }
-  // We render with no surface (eglMakeCurrent with EGL_NO_SURFACE), which needs
-  // EGL 1.5 or the EGL_KHR_surfaceless_context extension. Check up front rather
-  // than failing opaquely at the first MakeCurrent.
-  const bool surfaceless =
-      major > 1 || (major == 1 && minor >= 5) ||
-      std::strstr(exts, "EGL_KHR_surfaceless_context") != nullptr;
-  if (!surfaceless) {
-    ihs::log::error(
-        "[HeadlessEgl] no surfaceless-context support (need EGL 1.5 or "
-        "EGL_KHR_surfaceless_context)");
-    return false;
-  }
   eglBindAPI(EGL_OPENGL_ES_API);
+  // An OPAQUE window-surface config (no alpha), native visual XRGB8888.
+  // Opacity matters: an alpha surface lets a translucent app background (e.g. a
+  // withOpacity gradient over a transparent Scaffold) composite to
+  // premultiplied near-zero and vanish on the destroyed swap buffers; an opaque
+  // surface makes the engine composite a full opaque frame, so the background
+  // is present.
   const EGLint cfg_attrs[] = {EGL_SURFACE_TYPE,
                               EGL_WINDOW_BIT,
                               EGL_RENDERABLE_TYPE,
@@ -127,24 +124,75 @@ bool HeadlessEglBackend::InitEgl(const char* render_node) {
                               EGL_BLUE_SIZE,
                               8,
                               EGL_ALPHA_SIZE,
-                              8,
+                              0,
                               EGL_NONE};
-  EGLConfig cfg = nullptr;
-  EGLint ncfg = 0;
-  if (eglChooseConfig(dpy_, cfg_attrs, &cfg, 1, &ncfg) == 0 || ncfg == 0) {
-    ihs::log::error("[HeadlessEgl] eglChooseConfig failed");
+  EGLint total = 0;
+  if (eglChooseConfig(dpy_, cfg_attrs, nullptr, 0, &total) == 0 || total == 0) {
+    ihs::log::error("[HeadlessEgl] eglChooseConfig found no configs");
     return false;
   }
+  std::vector<EGLConfig> configs(static_cast<size_t>(total));
+  eglChooseConfig(dpy_, cfg_attrs, configs.data(), total, &total);
+  gbm_format_ = GBM_FORMAT_XRGB8888;
+  for (EGLConfig c : configs) {
+    EGLint vid = 0;
+    EGLint alpha = 0;
+    eglGetConfigAttrib(dpy_, c, EGL_NATIVE_VISUAL_ID, &vid);
+    eglGetConfigAttrib(dpy_, c, EGL_ALPHA_SIZE, &alpha);
+    if (alpha == 0 && static_cast<uint32_t>(vid) == GBM_FORMAT_XRGB8888) {
+      config_ = c;
+      gbm_format_ = GBM_FORMAT_XRGB8888;
+      break;
+    }
+  }
+  if (config_ == nullptr) {
+    config_ = configs.front();  // fall back; the surface create may still work
+  }
+
   const EGLint ctx_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
-  ctx_ = eglCreateContext(dpy_, cfg, EGL_NO_CONTEXT, ctx_attrs);
+  ctx_ = eglCreateContext(dpy_, config_, EGL_NO_CONTEXT, ctx_attrs);
   // The engine's resource thread needs its own context sharing objects with
   // the render context.
-  resource_ctx_ = eglCreateContext(dpy_, cfg, ctx_, ctx_attrs);
+  resource_ctx_ = eglCreateContext(dpy_, config_, ctx_, ctx_attrs);
   if (ctx_ == EGL_NO_CONTEXT || resource_ctx_ == EGL_NO_CONTEXT) {
     ihs::log::error("[HeadlessEgl] eglCreateContext failed");
     return false;
   }
-  ihs::log::info("[HeadlessEgl] EGL {}.{} ready on {}", major, minor,
+
+  // The swap chain: a gbm_surface the driver double-buffers, wrapped in an EGL
+  // window surface. Force a LINEAR modifier so the presented buffers are
+  // untiled and can be re-imported per frame as a plain GL_TEXTURE_2D for the
+  // NV12 pack (see Present); V3D otherwise hands back a tiled buffer that an
+  // implicit-modifier import mis-reads as dashed/blocky garbage. Fall back to a
+  // plain create if the driver rejects the forced modifier.
+  const uint64_t linear_mod = DRM_FORMAT_MOD_LINEAR;
+  gbm_surface_ = gbm_surface_create_with_modifiers(gbm_, width_, height_,
+                                                   gbm_format_, &linear_mod, 1);
+  if (gbm_surface_ == nullptr) {
+    gbm_surface_ = gbm_surface_create(gbm_, width_, height_, gbm_format_,
+                                      GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+  }
+  if (gbm_surface_ == nullptr) {
+    ihs::log::error("[HeadlessEgl] gbm_surface_create {}x{} failed", width_,
+                    height_);
+    return false;
+  }
+  auto create_platform_surface =
+      reinterpret_cast<PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC>(
+          eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT"));
+  egl_surface_ =
+      create_platform_surface != nullptr
+          ? create_platform_surface(dpy_, config_, gbm_surface_, nullptr)
+          : eglCreateWindowSurface(
+                dpy_, config_,
+                reinterpret_cast<EGLNativeWindowType>(gbm_surface_), nullptr);
+  if (egl_surface_ == EGL_NO_SURFACE) {
+    ihs::log::error("[HeadlessEgl] eglCreateWindowSurface failed: {:#x}",
+                    eglGetError());
+    return false;
+  }
+
+  ihs::log::info("[HeadlessEgl] EGL {}.{} ready on {} (XRGB8888)", major, minor,
                  render_node);
   return true;
 }
@@ -156,21 +204,9 @@ bool HeadlessEglBackend::InitRenderTarget() {
   if (width_ == 0 || height_ == 0 || consumer_ == nullptr) {
     return false;
   }
-  glGenTextures(1, &render_tex_);
-  glBindTexture(GL_TEXTURE_2D, render_tex_);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(width_),
-               static_cast<GLsizei>(height_), 0, GL_RGBA, GL_UNSIGNED_BYTE,
-               nullptr);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glGenFramebuffers(1, &render_fbo_);
-  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo_);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                         render_tex_, 0);
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    ihs::log::error("[HeadlessEgl] render FBO incomplete");
-    return false;
-  }
+  // A single reusable texture the presented (linear) gbm_bo is imported into
+  // each frame for the pack.
+  glGenTextures(1, &import_tex_);
   if (!packer_.Init(dpy_, width_, height_, consumer_.get())) {
     ihs::log::error("[HeadlessEgl] packer init failed");
     return false;
@@ -181,8 +217,8 @@ bool HeadlessEglBackend::InitRenderTarget() {
 }
 
 bool HeadlessEglBackend::MakeCurrent() {
-  if (dpy_ == EGL_NO_DISPLAY ||
-      eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_) == 0) {
+  if (dpy_ == EGL_NO_DISPLAY || egl_surface_ == EGL_NO_SURFACE ||
+      eglMakeCurrent(dpy_, egl_surface_, egl_surface_, ctx_) == 0) {
     return false;
   }
   return InitRenderTarget();
@@ -195,32 +231,91 @@ bool HeadlessEglBackend::ClearCurrent() {
 }
 
 bool HeadlessEglBackend::MakeResourceCurrent() {
+  // The resource context does no windowed rendering, so keep it surfaceless.
   return dpy_ != EGL_NO_DISPLAY &&
          eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, resource_ctx_) !=
              0;
 }
 
-bool HeadlessEglBackend::Present() {
+bool HeadlessEglBackend::Present(const FlutterPresentInfo* /*info*/) {
   if (!target_ready_) {
     return false;
   }
-  packer_.PackAndSubmit(render_tex_, MonotonicUs(),
-                        /*force_keyframe=*/frame_index_ == 0);
+  // Advance the swap chain: the driver publishes the frame the engine just
+  // composited as the new front buffer (the full frame lands here on swap, not
+  // in the pre-swap back buffer).
+  if (eglSwapBuffers(dpy_, egl_surface_) == 0) {
+    ihs::log::error("[HeadlessEgl] eglSwapBuffers failed: {:#x}",
+                    eglGetError());
+    return false;
+  }
+  gbm_bo* bo = gbm_surface_lock_front_buffer(gbm_surface_);
+  if (bo == nullptr) {
+    ihs::log::error("[HeadlessEgl] lock_front_buffer failed");
+    return false;
+  }
+
+  // Import the presented (linear) buffer as a plain 2D texture and pack it. The
+  // buffer is linear (forced at surface creation), so pass its modifier through
+  // for an exact import.
+  const int fd = gbm_bo_get_fd(bo);
+  const EGLint stride = static_cast<EGLint>(gbm_bo_get_stride(bo));
+  const uint64_t modifier = gbm_bo_get_modifier(bo);
+  const bool has_modifier = modifier != DRM_FORMAT_MOD_INVALID;
+  std::vector<EGLint> attrs = {EGL_WIDTH,
+                               static_cast<EGLint>(width_),
+                               EGL_HEIGHT,
+                               static_cast<EGLint>(height_),
+                               EGL_LINUX_DRM_FOURCC_EXT,
+                               static_cast<EGLint>(gbm_bo_get_format(bo)),
+                               EGL_DMA_BUF_PLANE0_FD_EXT,
+                               fd,
+                               EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+                               0,
+                               EGL_DMA_BUF_PLANE0_PITCH_EXT,
+                               stride};
+  if (has_modifier) {
+    attrs.push_back(EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT);
+    attrs.push_back(static_cast<EGLint>(modifier & 0xffffffff));
+    attrs.push_back(EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT);
+    attrs.push_back(static_cast<EGLint>(modifier >> 32));
+  }
+  attrs.push_back(EGL_NONE);
+  auto create_image = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
+      eglGetProcAddress("eglCreateImageKHR"));
+  auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+      eglGetProcAddress("eglDestroyImageKHR"));
+  auto image_target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+      eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+  if (create_image != nullptr && destroy_image != nullptr &&
+      image_target != nullptr) {
+    EGLImageKHR image = create_image(
+        dpy_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs.data());
+    if (image != EGL_NO_IMAGE_KHR) {
+      glBindTexture(GL_TEXTURE_2D, import_tex_);
+      image_target(GL_TEXTURE_2D, static_cast<GLeglImageOES>(image));
+      // The presented gbm_bo is top-left origin, so no vertical flip.
+      packer_.PackAndSubmit(import_tex_, MonotonicUs(),
+                            /*force_keyframe=*/frame_index_ == 0,
+                            /*flip_rows=*/false);
+      destroy_image(dpy_, image);
+    } else {
+      ihs::log::error("[HeadlessEgl] import eglCreateImageKHR failed: {:#x}",
+                      eglGetError());
+    }
+  }
+  if (fd >= 0) {
+    ::close(fd);
+  }
+
+  // Release the buffer we held last frame; keep this one locked until the next
+  // swap so the import's read is stable.
+  if (locked_bo_ != nullptr) {
+    gbm_surface_release_buffer(gbm_surface_, locked_bo_);
+  }
+  locked_bo_ = bo;
   ++frame_index_;
   return true;
-}
-
-void HeadlessEglBackend::PopulateExistingDamage(FlutterDamage* out) {
-  // The render target is one FBO we reuse every frame, so from the engine's
-  // point of view it is a swap chain of age 1: the buffer already holds the
-  // last presented frame and nothing in it is stale. Reporting an empty
-  // existing-damage region tells the engine exactly that, so it repaints only
-  // what actually changed (including the vacated region when a widget moves)
-  // onto the intact buffer -- no full-frame cost, and no stale trails.
-  existing_damage_ = FlutterRect{0.0, 0.0, 0.0, 0.0};
-  out->struct_size = sizeof(FlutterDamage);
-  out->num_rects = 1;
-  out->damage = &existing_damage_;
 }
 
 FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
@@ -236,26 +331,23 @@ FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
   config.open_gl.make_resource_current = [](void* user_data) -> bool {
     return BackendOf(user_data)->MakeResourceCurrent();
   };
-  // The frame-info present variants let us report existing damage for our
-  // single persistent FBO. PopulateExistingDamage reports an EMPTY region: the
-  // buffer already holds the last presented frame (an age-1 swap chain), so the
-  // engine repaints only what actually changed into the intact buffer. A plain
-  // fbo_callback + present pair (no damage) instead lets the engine clip to
-  // partial damage against a buffer it assumes it cannot keep, which is what
-  // left ghosting.
-  config.open_gl.fbo_with_frame_info_callback =
-      [](void* user_data, const FlutterFrameInfo* /*info*/) -> uint32_t {
-    return BackendOf(user_data)->Fbo();
+  // Render into the window surface's default framebuffer (FBO 0); the driver
+  // rotates the gbm buffers on eglSwapBuffers and Present() imports the
+  // published front buffer. populate_existing_damage reports the whole surface
+  // as stale so the engine composites a complete frame each time (an encoder
+  // wants a full frame per buffer, not a partial repaint).
+  config.open_gl.fbo_callback = [](void* /*user_data*/) -> uint32_t {
+    return 0;
   };
   config.open_gl.present_with_info =
-      [](void* user_data, const FlutterPresentInfo* /*info*/) -> bool {
-    return BackendOf(user_data)->Present();
+      [](void* user_data, const FlutterPresentInfo* info) -> bool {
+    return BackendOf(user_data)->Present(info);
   };
-  config.open_gl.populate_existing_damage =
-      [](void* user_data, intptr_t /*fbo_id*/,
-         FlutterDamage* existing_damage) -> void {
-    BackendOf(user_data)->PopulateExistingDamage(existing_damage);
-  };
+  // Deliberately NOT providing populate_existing_damage: partial repaint
+  // against the rotated (destroyed) swap buffers intermittently dropped the
+  // static background layer (a whole-run black background on ~1 in 4 starts).
+  // Without it the engine composites a complete frame into the buffer every
+  // time, which is what an encoder wants anyway.
   config.open_gl.fbo_reset_after_present = false;
   config.open_gl.gl_proc_resolver = [](void* /*user_data*/,
                                        const char* name) -> void* {
@@ -265,8 +357,8 @@ FlutterRendererConfig HeadlessEglBackend::GetRenderConfig() {
 }
 
 FlutterCompositor HeadlessEglBackend::GetCompositorConfig() {
-  // Single-FBO rendering: no platform-view layer compositing (the encode path
-  // wants one composited frame). A software/GL compositor could be added later.
+  // Single-surface rendering: no platform-view layer compositing (the encode
+  // path wants one composited frame). A GL compositor could be added later.
   FlutterCompositor compositor{};
   compositor.struct_size = sizeof(FlutterCompositor);
   return compositor;
@@ -281,8 +373,8 @@ void HeadlessEglBackend::Resize(size_t /*index*/,
   if (w == width_ && h == height_) {
     return;
   }
-  // Geometry changes are not yet supported mid-run (the packer/consumer would
-  // need re-init). Log and keep the initial size.
+  // Geometry changes are not yet supported mid-run (the swap chain / packer /
+  // consumer would need re-init). Log and keep the initial size.
   ihs::log::warn("[HeadlessEgl] resize to {}x{} ignored (fixed at {}x{})", w, h,
                  width_, height_);
 }
@@ -291,8 +383,8 @@ void HeadlessEglBackend::CreateSurface(size_t /*index*/,
                                        wl_surface* /*surface*/,
                                        int32_t /*width*/,
                                        int32_t /*height*/) {
-  // No display surface: rendering targets our own FBO, set up lazily on the
-  // first MakeCurrent from the raster thread.
+  // No display surface: rendering targets our own gbm-backed EGL window
+  // surface, set up in InitEgl and bound on the first MakeCurrent.
 }
 
 bool HeadlessEglBackend::TextureMakeCurrent() {
@@ -316,17 +408,15 @@ void HeadlessEglBackend::Teardown() {
     const bool ctx_current =
         ctx_ != EGL_NO_CONTEXT &&
         eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx_) != 0;
-    if (ctx_current) {
-      if (render_fbo_ != 0) {
-        glDeleteFramebuffers(1, &render_fbo_);
-      }
-      if (render_tex_ != 0) {
-        glDeleteTextures(1, &render_tex_);
-      }
+    if (ctx_current && import_tex_ != 0) {
+      glDeleteTextures(1, &import_tex_);
     }
-    render_fbo_ = 0;
-    render_tex_ = 0;
+    import_tex_ = 0;
     eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (egl_surface_ != EGL_NO_SURFACE) {
+      eglDestroySurface(dpy_, egl_surface_);
+      egl_surface_ = EGL_NO_SURFACE;
+    }
     if (resource_ctx_ != EGL_NO_CONTEXT) {
       eglDestroyContext(dpy_, resource_ctx_);
       resource_ctx_ = EGL_NO_CONTEXT;
@@ -337,6 +427,16 @@ void HeadlessEglBackend::Teardown() {
     }
     eglTerminate(dpy_);
     dpy_ = EGL_NO_DISPLAY;
+  }
+  // The front buffer must be released back to the surface before it is
+  // destroyed.
+  if (locked_bo_ != nullptr && gbm_surface_ != nullptr) {
+    gbm_surface_release_buffer(gbm_surface_, locked_bo_);
+  }
+  locked_bo_ = nullptr;
+  if (gbm_surface_ != nullptr) {
+    gbm_surface_destroy(gbm_surface_);
+    gbm_surface_ = nullptr;
   }
   if (gbm_ != nullptr) {
     gbm_device_destroy(gbm_);
