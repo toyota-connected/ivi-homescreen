@@ -70,6 +70,10 @@
 #include "backend/software/nv12_consumer.h"  // MakeNv12Consumer
 #include "display/software_display.h"        // reused no-op IDisplay
 #endif
+#if BUILD_BACKEND_HEADLESS_VULKAN
+#include "backend/headless_vulkan/headless_vulkan.h"
+#include "display/software_display.h"  // reused no-op IDisplay
+#endif
 #if BUILD_BACKEND_WAYLAND_EGL
 #include "backend/wayland_egl/partial_repaint_gate.h"
 #include "backend/wayland_egl/wayland_egl.h"
@@ -672,6 +676,26 @@ std::shared_ptr<Backend> MakeHeadlessEglBackend(
 }
 #endif
 
+#if BUILD_BACKEND_HEADLESS_VULKAN
+// A no-op display: the headless Vulkan backend has no screen or input, only a
+// refresh-rate denominator for App::Loop. Reuses SoftwareDisplay.
+std::shared_ptr<IDisplay> MakeHeadlessVulkanDisplay(
+    const std::vector<Configuration::Config>& configs) {
+  const auto w = configs[0].view.width.value_or(kDefaultViewWidth);
+  const auto h = configs[0].view.height.value_or(kDefaultViewHeight);
+  return std::make_shared<SoftwareDisplay>(static_cast<int32_t>(w),
+                                           static_cast<int32_t>(h), 60.0);
+}
+
+std::shared_ptr<Backend> MakeHeadlessVulkanBackend(
+    const Configuration::Config& config,
+    IDisplay* /*display*/) {
+  return std::make_shared<HeadlessVulkanBackend>(
+      config.view.width.value_or(kDefaultViewWidth),
+      config.view.height.value_or(kDefaultViewHeight));
+}
+#endif
+
 #if BUILD_BACKEND_WAYLAND_LEASED_DRM && BUILD_BACKEND_SOFTWARE && \
     BUILD_SOFTWARE_SINK_DRM
 std::shared_ptr<Backend> MakeLeasedSoftwareBackend(
@@ -780,6 +804,10 @@ void RegisterCompiledBackends(backend::BackendRegistry& registry) {
 #if BUILD_BACKEND_HEADLESS_EGL
   registry.Register({"headless-egl", MakeHeadlessEglDisplay,
                      MakeHeadlessEglBackend, nullptr});
+#endif
+#if BUILD_BACKEND_HEADLESS_VULKAN
+  registry.Register({"headless-vulkan", MakeHeadlessVulkanDisplay,
+                     MakeHeadlessVulkanBackend, nullptr});
 #endif
 }
 
