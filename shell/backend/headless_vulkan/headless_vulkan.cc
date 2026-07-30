@@ -37,10 +37,15 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
+#include "asio/post.hpp"
+
+#include "backend/headless_vulkan/vk_export_api.h"
 #include "engine.h"
+#include "libflutter_engine.h"
 #include "logging/logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "task_runner.h"
@@ -290,9 +295,18 @@ HeadlessVulkanBackend::HeadlessVulkanBackend(const uint32_t width,
     ihs::log::error("[HeadlessVulkan] Vulkan init failed; backend inert");
     Teardown();
   }
+
+  // Publish this backend to the exported `ihs_vk_export_get_api` seam so an
+  // in-process bridge plugin can resolve the pool. Done last so a fully
+  // constructed backend is what the ABI hands out (an inert backend still
+  // registers; export_active reports the truth).
+  ihs::RegisterVkExportBackend(this);
 }
 
 HeadlessVulkanBackend::~HeadlessVulkanBackend() {
+  // Withdraw from the exported ABI before tearing down so no bridge call lands
+  // on a half-destroyed backend.
+  ihs::UnregisterVkExportBackend(this);
   Teardown();
 }
 
@@ -1062,6 +1076,155 @@ void HeadlessVulkanBackend::Teardown() {
   }
 }
 
+// ── In-process C ABI (ihs/vk_export.h) ───────────────────────────────────────
+
+void HeadlessVulkanBackend::FillExportCaps(IhsVkExportCaps* out) const {
+  if (out == nullptr) {
+    return;
+  }
+  std::memset(out, 0, sizeof(*out));
+  out->api_version = IHS_VK_EXPORT_API_VERSION;
+  out->width = width_;
+  out->height = height_;
+  out->slot_count = kImageCount;
+  out->vk_format = static_cast<uint32_t>(image_format_);
+  out->export_active = export_enabled() ? 1u : 0u;
+  std::memcpy(out->device_uuid, device_uuid_.data(), device_uuid_.size());
+  out->handle_type = active_export_mode_ == ExportMode::kDmaBuf
+                         ? IHS_VK_HANDLE_DMA_BUF
+                         : (active_export_mode_ == ExportMode::kOpaqueFd
+                                ? IHS_VK_HANDLE_OPAQUE_FD
+                                : 0u);
+  // DRM fourcc is meaningful only for the dma-buf pool; opaque/none leave 0.
+  out->drm_fourcc = exported_images_[0].drm_fourcc;
+}
+
+int HeadlessVulkanBackend::FillImageTable(IhsVkExportImageTable* out) const {
+  if (out == nullptr) {
+    return -1;
+  }
+  if (!export_enabled()) {
+    return -1;
+  }
+  std::memset(out, 0, sizeof(*out));
+  out->generation = generation_;
+  out->slot_count = kImageCount;
+
+  // dup() the source fds so the caller owns/closes independent handles; -1 in
+  // means -1 out (no export for that fd).
+  auto dup_fd = [](int fd) -> int32_t { return fd >= 0 ? ::dup(fd) : -1; };
+
+  for (uint32_t i = 0; i < kImageCount; ++i) {
+    const ExportedImage& e = exported_images_[i];
+    IhsVkExportImage& o = out->images[i];
+    o.memory_fd = dup_fd(e.fd);
+    o.render_done_fd = dup_fd(e.render_done_fd);
+    o.consumer_done_fd = dup_fd(e.consumer_done_fd);
+    o.alloc_size = e.alloc_size;
+    o.drm_modifier = e.drm_modifier;
+    for (uint32_t p = 0; p < IHS_VK_EXPORT_MAX_PLANES; ++p) {
+      o.plane_offset[p] = e.plane_offset[p];
+      o.plane_pitch[p] = e.plane_pitch[p];
+    }
+    o.width = e.width;
+    o.height = e.height;
+    o.vk_format = e.vk_format;
+    o.drm_fourcc = e.drm_fourcc;
+    o.memory_type_index = e.memory_type_index;
+    // ExportedImage::handle_type holds a VkExternalMemoryHandleTypeFlagBits;
+    // translate it to the ABI's IHS_VK_HANDLE_* space.
+    o.handle_type =
+        e.handle_type == static_cast<uint32_t>(
+                             VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT)
+            ? IHS_VK_HANDLE_DMA_BUF
+            : (e.handle_type ==
+                       static_cast<uint32_t>(
+                           VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+                   ? IHS_VK_HANDLE_OPAQUE_FD
+                   : 0u);
+    o.plane_count = e.plane_count;
+  }
+  return 0;
+}
+
+void HeadlessVulkanBackend::SetExportFrameListener(IhsVkFrameListener cb,
+                                                   void* user) {
+  std::scoped_lock lock(frame_listener_mutex_);
+  frame_listener_ = cb;
+  frame_listener_user_ = user;
+}
+
+void HeadlessVulkanBackend::OnConsumerReleaseFrame(uint32_t /* slot */) {
+  // The pacing edge: crediting the pacer lets the next baton flow. The slot is
+  // unused today (the ring is strictly ordered) but kept for a future
+  // out-of-order release.
+  if (pacer_) {
+    pacer_->AddCredit();
+  }
+}
+
+void HeadlessVulkanBackend::SetExportPaceSource(uint32_t src) {
+  if (pacer_) {
+    pacer_->SetFreeRun(src == IHS_VK_PACE_FREE_RUN);
+  }
+}
+
+void HeadlessVulkanBackend::InjectPointer(const IhsPointerEvent& ev) {
+  if (engine_handle_ == nullptr || platform_task_runner_ == nullptr ||
+      platform_task_runner_->GetStrandContext() == nullptr) {
+    return;
+  }
+  // Map the ABI phase (0..4) to the embedder's pointer phase.
+  FlutterPointerPhase phase;
+  switch (ev.phase) {
+    case 0:
+      phase = kAdd;
+      break;
+    case 1:
+      phase = kDown;
+      break;
+    case 2:
+      phase = kMove;
+      break;
+    case 3:
+      phase = kUp;
+      break;
+    case 4:
+      phase = kRemove;
+      break;
+    default:
+      return;  // unknown phase; drop rather than fabricate one
+  }
+
+  // Marshal onto the platform strand so SendPointerEvent runs on the same
+  // thread the engine services input from (the bridge calls this from its IO
+  // thread). Capture the POD event by value.
+  auto engine = engine_handle_;
+  asio::post(*platform_task_runner_->GetStrandContext(), [engine, phase, ev]() {
+    FlutterPointerEvent e{};
+    e.struct_size = sizeof(FlutterPointerEvent);
+    e.phase = phase;
+    e.timestamp =
+        static_cast<size_t>(LibFlutterEngine->GetCurrentTime() / 1000);
+    e.x = ev.x;
+    e.y = ev.y;
+    e.device = static_cast<int32_t>(ev.device_id);
+    e.device_kind = kFlutterPointerDeviceKindMouse;
+    e.buttons = ev.buttons;
+    LibFlutterEngine->SendPointerEvent(engine, &e, 1);
+  });
+}
+
+int HeadlessVulkanBackend::RebuildExportPool(uint32_t width, uint32_t height) {
+  // Not supported yet: a real rebuild must tear down and recreate the image
+  // pool AND the per-frame semaphores under raster-thread quiescence, then bump
+  // generation_ so a consumer re-imports. Deferred to a later step.
+  ihs::log::warn(
+      "[HeadlessVulkan] RebuildExportPool({}x{}) not supported yet; ignoring",
+      width, height);
+  return -1;
+}
+
 // ── Renderer config ──────────────────────────────────────────────────────────
 
 FlutterRendererConfig HeadlessVulkanBackend::GetRenderConfig() {
@@ -1154,6 +1317,22 @@ bool HeadlessVulkanBackend::PresentCallback(
     backend->LoopbackSelfConsume(k);
   }
   backend->current_image_ = (k + 1) % kImageCount;
+
+  // Notify the export bridge that image k was just presented. Fired outside any
+  // GL/Vulkan critical section (after the semaphore loopback and index
+  // advance), on the raster thread. Read the listener under the mutex so a
+  // concurrent SetExportFrameListener from the bridge thread can't tear the
+  // {cb,user} pair.
+  IhsVkFrameListener cb = nullptr;
+  void* user = nullptr;
+  {
+    std::scoped_lock lock(backend->frame_listener_mutex_);
+    cb = backend->frame_listener_;
+    user = backend->frame_listener_user_;
+  }
+  if (cb != nullptr) {
+    cb(k, backend->frame_seq_++, user);
+  }
   return true;
 }
 

@@ -276,9 +276,19 @@ if (BUILD_BACKEND_HEADLESS_VULKAN)
     # Vulkan SDK in the system/sysroot.
     target_sources(${PROJECT_NAME} PRIVATE
             backend/headless_vulkan/headless_vulkan.cc
+            # In-process C ABI (ihs/vk_export.h): registry + the one exported
+            # `ihs_vk_export_get_api` symbol an in-process bridge dlsym's.
+            backend/headless_vulkan/vk_export_api.cc
             display/software_display.cc
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers)
+    # Put ONLY `ihs_vk_export_get_api` in the executable's dynamic symbol table
+    # (the bridge resolves it via dlsym(RTLD_DEFAULT)). Avoids blanket -rdynamic
+    # so no other internal symbol is exported; the shell sets no global
+    # -fvisibility=hidden, so the default-visibility attribute plus this keeps
+    # exactly one dynamic export.
+    target_link_options(${PROJECT_NAME} PRIVATE
+            -Wl,--export-dynamic-symbol=ihs_vk_export_get_api)
 endif ()
 
 # Shared libinput keyboard core (xkb translation + key-repeat) used by every
