@@ -98,8 +98,9 @@ void ConsumerPacedVsyncSource::TryDeliver() {
   if (!running_.load(std::memory_order_acquire)) {
     return;
   }
-  // Nothing to do unless a slot is free AND the engine has parked a baton.
-  if (credits_ <= 0 || !provider_.HasParkedBaton()) {
+  // Nothing to do unless the engine has parked a baton and -- when credit-gated
+  // -- a slot is free. Free-run ignores credits and paces on the ceiling alone.
+  if (!provider_.HasParkedBaton() || (!free_run_ && credits_ <= 0)) {
     return;
   }
   const uint64_t now = MonotonicNs();
@@ -111,9 +112,26 @@ void ConsumerPacedVsyncSource::TryDeliver() {
     }
   }
   if (provider_.DeliverParkedBaton()) {
-    --credits_;  // this frame commits one pipeline slot
+    if (!free_run_) {
+      --credits_;  // this frame commits one pipeline slot
+    }
     last_deliver_ns_ = now;
   }
+}
+
+void ConsumerPacedVsyncSource::SetFreeRun(bool free_run) {
+  if (!running_.load(std::memory_order_acquire)) {
+    return;
+  }
+  asio::post(*runner_->GetStrandContext(), [this, free_run]() {
+    free_run_ = free_run;
+    if (!free_run) {
+      // Re-attach: assume the consumer re-established the pool -> all slots
+      // free.
+      credits_ = static_cast<int>(pipeline_depth_);
+    }
+    TryDeliver();  // kick: a baton may be parked and newly deliverable
+  });
 }
 
 void ConsumerPacedVsyncSource::ArmCeiling(uint64_t ns) {

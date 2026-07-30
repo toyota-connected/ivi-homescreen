@@ -81,6 +81,14 @@ class ConsumerPacedVsyncSource {
   // any thread (a synchronous encoder's call site or an async release cb).
   void AddCredit();
 
+  // Free-run mode: pace on the ceiling ALONE, ignoring credits, for when no
+  // consumer is attached (a detached export pool, or a consumer that hitched --
+  // a watchdog flips this on until FRAME_RELEASE edges resume). Turning it back
+  // off resets the credit count to the full pipeline depth (the consumer is
+  // assumed to have re-established the pool). Credit-gated is the default; the
+  // encode path never calls this. Safe from any thread.
+  void SetFreeRun(bool free_run);
+
   // Stop pacing, cancel the ceiling timer, and drop any parked baton.
   void Stop();
 
@@ -100,6 +108,7 @@ class ConsumerPacedVsyncSource {
   int credits_{0};
   uint64_t last_deliver_ns_{0};
   bool ceiling_armed_{false};
+  bool free_run_{false};  // pace on the ceiling alone, ignoring credits
 };
 
 }  // namespace ivi

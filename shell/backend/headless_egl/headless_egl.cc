@@ -78,6 +78,11 @@ HeadlessEglBackend::HeadlessEglBackend(uint32_t initial_width,
   // stalls cleanly when it backs up. Opt-in for now.
   const char* paced_env = std::getenv("IVI_HEADLESS_PACED");
   paced_ = paced_env != nullptr && paced_env[0] == '1';
+  // IVI_HEADLESS_FREERUN=1 starts the paced source in ceiling-only (detached)
+  // mode -- the free-run fallback a headless_vulkan backend uses before a
+  // consumer attaches. Exercises the mode on this backend for validation.
+  const char* freerun_env = std::getenv("IVI_HEADLESS_FREERUN");
+  free_run_ = freerun_env != nullptr && freerun_env[0] == '1';
 
   const char* node = std::getenv("IVI_ENC_RENDER_NODE");
   if (!InitEgl(node != nullptr ? node : "/dev/dri/renderD128")) {
@@ -408,6 +413,9 @@ void HeadlessEglBackend::StartVsyncIfReady() {
     pacer_ = std::make_unique<ivi::ConsumerPacedVsyncSource>(
         vsync_, vsync_period_ns_, Nv12GlPacker::RingSize());
     pacer_->Start(engine_handle_, platform_task_runner_);
+    if (free_run_) {
+      pacer_->SetFreeRun(true);
+    }
     return;
   }
   // Mark the source pending + set the period before wiring the engine, so any

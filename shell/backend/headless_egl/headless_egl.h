@@ -145,6 +145,7 @@ class HeadlessEglBackend final : public Backend {
   std::atomic<bool> vsync_running_{false};
   uint32_t vsync_period_ns_{0};  // 0 = disabled (wall-clock scheduler)
   bool paced_{false};            // consumer-paced vsync instead of the timer
+  bool free_run_{false};         // paced source in ceiling-only (detached) mode
   std::unique_ptr<ivi::ConsumerPacedVsyncSource> pacer_;
 
   std::unique_ptr<INv12Consumer> consumer_;
