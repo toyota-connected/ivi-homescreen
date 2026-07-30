@@ -19,12 +19,16 @@
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
+
+#include "asio/steady_timer.hpp"
 
 #include "backend/backend.h"
 #include "backend/software/nv12_consumer.h"
 #include "backend/software/nv12_gl_packer.h"
+#include "vsync/ivsync_provider.h"
 
 struct gbm_device;
 struct gbm_surface;
@@ -82,12 +86,29 @@ class HeadlessEglBackend final : public Backend {
   // Frame done: swap the window surface, import the presented buffer, pack it.
   bool Present(const FlutterPresentInfo* info);
 
+  // Synthetic vsync: without a display there is no vblank, so the engine would
+  // render wall-clock (~60fps) and the packer would drop most frames. Instead
+  // pace the engine to the encode rate with a timer (IVI_ENC_MAX_FPS, default
+  // 30; IVI_HEADLESS_VSYNC=0 disables and falls back to wall-clock). The engine
+  // stays demand-driven -- an idle UI still schedules nothing.
+  VsyncCallback GetVsyncCallback() const override;
+  void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override;
+  void SetPlatformTaskRunner(TaskRunner* runner) override;
+  void StopVsyncMonitor() override;
+
  private:
   bool InitEgl(
       const char* render_node);  // display, config, contexts, swapchain
   bool
   InitRenderTarget();  // packer + import texture; GL context must be current
   void Teardown();
+
+  // The engine's vsync_callback trampoline: parks the baton with vsync_.
+  static void VsyncTrampoline(void* user_data, intptr_t baton);
+  // Start the timer once both the engine handle and the runner are wired.
+  void StartVsyncIfReady();
+  // Schedule the next tick; the handler runs on the runner's strand.
+  void ArmVsyncTimer();
 
   uint32_t width_{0};
   uint32_t height_{0};
@@ -109,6 +130,15 @@ class HeadlessEglBackend final : public Backend {
       nullptr};  // front buffer held until the next swap frees it
 
   bool target_ready_{false};
+
+  // Synthetic-vsync pacing. vsync_ holds the baton machinery; a steady_timer on
+  // the platform runner's strand delivers it at the target rate.
+  ivi::IVsyncProvider vsync_;
+  FLUTTER_API_SYMBOL(FlutterEngine) engine_handle_ { nullptr };
+  TaskRunner* platform_task_runner_{nullptr};
+  std::unique_ptr<asio::steady_timer> vsync_timer_;
+  std::atomic<bool> vsync_running_{false};
+  uint32_t vsync_period_ns_{0};  // 0 = disabled (wall-clock scheduler)
 
   std::unique_ptr<INv12Consumer> consumer_;
   Nv12GlPacker packer_;
