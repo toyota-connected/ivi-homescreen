@@ -54,11 +54,14 @@ class Nv12GlPacker {
 
   // Convert `rgba_tex` (a GL_TEXTURE_2D RGBA of the configured size) to NV12 in
   // a free ring slot and submit it to the consumer. `timestamp_us` and
-  // `force_keyframe` pass through. Drops the frame if no slot is free. Must run
-  // with the packer's GL context current.
+  // `force_keyframe` pass through. `flip_rows` flips the vertical sampling:
+  // true for a bottom-left-origin GL FBO, false for a top-left gbm_bo presented
+  // via a window surface. Drops the frame if no slot is free. Must run with the
+  // packer's GL context current.
   void PackAndSubmit(GLuint rgba_tex,
                      uint64_t timestamp_us,
-                     bool force_keyframe);
+                     bool force_keyframe,
+                     bool flip_rows = true);
 
   // Release all GL/EGL/dma-buf resources. The owner must call this while the
   // packer's GL context is still current, before destroying that context;
@@ -107,5 +110,6 @@ class Nv12GlPacker {
   GLint u_src_{-1};
   GLint u_w_{-1};
   GLint u_h_{-1};
+  GLint u_flip_{-1};
   bool ready_{false};
 };

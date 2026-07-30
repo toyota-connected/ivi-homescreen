@@ -75,29 +75,31 @@ const char* kVert =
     "void main(){ gl_Position = vec4(pos, 0.0, 1.0); }\n";
 
 // Pack RGBA -> NV12 into a stride x (H*3/2) R8 target. gl_FragCoord.xy is the
-// destination byte (column, row). Limited-range BT.601. The source is a GL FBO
-// texture, whose origin is bottom-left, so sample with the row flipped to keep
-// NV12 (top-down) upright.
+// destination byte (column, row). Limited-range BT.601. uFlip controls the
+// vertical sampling: a GL FBO texture has a bottom-left origin so it must be
+// flipped (uFlip=1) to keep NV12 (top-down) upright, whereas a gbm_bo presented
+// through a window surface is already top-left (uFlip=0).
 const char* kFrag =
     "#version 300 es\n"
     "precision highp float;\n"
     "uniform sampler2D src;\n"
-    "uniform float uW, uH;\n"
+    "uniform float uW, uH, uFlip;\n"
     "out vec4 frag;\n"
     "float luma(vec3 c){ return (0.257*c.r+0.504*c.g+0.098*c.b)+16.0/255.0; }\n"
     "float cb(vec3 c){ return (-0.148*c.r-0.291*c.g+0.439*c.b)+128.0/255.0; }\n"
     "float cr(vec3 c){ return (0.439*c.r-0.368*c.g-0.071*c.b)+128.0/255.0; }\n"
+    "float vcoord(float v){ return uFlip > 0.5 ? 1.0 - v : v; }\n"
     "void main(){\n"
     "  float x = floor(gl_FragCoord.x);\n"
     "  float y = floor(gl_FragCoord.y);\n"
     "  float outv;\n"
     "  if (y < uH) {\n"
-    "    vec2 s = vec2((x+0.5)/uW, 1.0-(y+0.5)/uH);\n"
+    "    vec2 s = vec2((x+0.5)/uW, vcoord((y+0.5)/uH));\n"
     "    outv = luma(texture(src, s).rgb);\n"
     "  } else {\n"
     "    float cyf = y - uH;\n"
     "    float cxf = floor(x*0.5);\n"
-    "    vec2 s = vec2((cxf*2.0+1.0)/uW, 1.0-(cyf*2.0+1.0)/uH);\n"
+    "    vec2 s = vec2((cxf*2.0+1.0)/uW, vcoord((cyf*2.0+1.0)/uH));\n"
     "    vec3 c = texture(src, s).rgb;\n"
     "    outv = (mod(x,2.0) < 1.0) ? cb(c) : cr(c);\n"
     "  }\n"
@@ -193,6 +195,7 @@ bool Nv12GlPacker::Init(EGLDisplay dpy,
   u_src_ = glGetUniformLocation(program_, "src");
   u_w_ = glGetUniformLocation(program_, "uW");
   u_h_ = glGetUniformLocation(program_, "uH");
+  u_flip_ = glGetUniformLocation(program_, "uFlip");
 
   // Own VAO so the pack draw is isolated from whatever vertex-array state the
   // Flutter engine leaves bound. Sharing the engine's VAO means its still-
@@ -240,7 +243,8 @@ void Nv12GlPacker::ReleaseSlot(uint32_t index) {
 
 void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
                                  uint64_t timestamp_us,
-                                 bool force_keyframe) {
+                                 bool force_keyframe,
+                                 bool flip_rows) {
   if (!ready_) {
     return;
   }
@@ -291,6 +295,7 @@ void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
   glUniform1i(u_src_, 0);
   glUniform1f(u_w_, static_cast<float>(width_));
   glUniform1f(u_h_, static_cast<float>(height_));
+  glUniform1f(u_flip_, flip_rows ? 1.0f : 0.0f);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, rgba_tex);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
