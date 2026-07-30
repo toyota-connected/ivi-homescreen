@@ -279,6 +279,9 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
 
 DrmCompositor::~DrmCompositor() {
   (void)WaitForPendingFlip();
+  // The final flip is done, so anything held for its post-flip release is now
+  // off the plane -- return it so producers aren't left blocked on a ring slot.
+  DrainDeferredScanoutReleases();
 
   if (texture_blit_fbo_ != 0) {
     glDeleteFramebuffers(1, &texture_blit_fbo_);
@@ -310,6 +313,21 @@ DrmCompositor::~DrmCompositor() {
   if (bg_store_valid_) {
     DestroyGbmStore(bg_store_);
     bg_store_valid_ = false;
+  }
+}
+
+void DrmCompositor::DrainDeferredScanoutReleases() {
+  // Take the batch under the lock, then fire the callbacks without it: they run
+  // producer code (an eventfd signal) and must not re-enter under our mutex.
+  std::vector<DeferredScanoutRelease> ready;
+  {
+    const std::scoped_lock lock(deferred_releases_mu_);
+    ready.swap(deferred_releases_);
+  }
+  for (const DeferredScanoutRelease& r : ready) {
+    if (r.surface) {
+      r.surface->OnScanoutRelease(r.buffer_id);
+    }
   }
 }
 
@@ -2379,6 +2397,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   }
   const uint64_t t1 = profile ? NsNow() : 0;
 
+  // The previous frame's flip has now completed, so every platform-view buffer
+  // displaced up to and including that frame is off the plane -- return them to
+  // their producers here, one present after drm-cxx signalled the release. See
+  // deferred_releases_.
+  DrainDeferredScanoutReleases();
+
   // Walk the FlutterLayer[] in z-order (Flutter's convention: layer 0
   // is bottom). Sync scene_'s layer set against the current frame: add
   // new, update geometry/zpos on existing, remove any scene layer whose
@@ -2707,12 +2731,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // The retained surface shared_ptr keeps the view alive across a release
       // even if it is concurrently disposed.
       drm::scene::ExternalDmaBufPool::Options opts{};
-      opts.on_release = [surface = fl.pv_surface](
+      // Defer the release by one present: the buffer is displaced now but stays
+      // on the plane until this commit's flip completes, so returning it to the
+      // producer here would let it be overwritten under scanout. Hold it and
+      // fire OnScanoutRelease at the next present's top
+      // (post-WaitForPendingFlip), when the flip is done. See
+      // deferred_releases_.
+      opts.on_release = [this, surface = fl.pv_surface](
                             std::uintptr_t key,
                             std::optional<drm::sync::SyncFence>) {
-        if (surface) {
-          surface->OnScanoutRelease(static_cast<uint32_t>(key));
+        if (!surface) {
+          return;
         }
+        const std::scoped_lock lock(deferred_releases_mu_);
+        deferred_releases_.push_back({surface, static_cast<uint32_t>(key)});
       };
       auto pool = drm::scene::ExternalDmaBufPool::create(
           backend_->device(), db.width, db.height, db.fourcc, db.modifier,
