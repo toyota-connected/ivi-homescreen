@@ -143,6 +143,15 @@ class IVsyncProvider {
     return last_frame_start_ns_.load(std::memory_order_acquire);
   }
 
+  /// True when a baton is parked awaiting delivery (i.e. the engine has asked
+  /// for a vsync that has not yet been handed back). Lets a scheduling owner
+  /// (e.g. a consumer-paced source) decide whether there is anything to deliver
+  /// before consuming a credit / arming a rate-ceiling timer, without taking
+  /// the baton.
+  [[nodiscard]] bool HasParkedBaton() const {
+    return vsync_baton_.load(std::memory_order_acquire) != 0;
+  }
+
  private:
   // Marshal one OnVsync onto the runner's strand. No-op when the runner is not
   // wired (the caller must leave the baton parked in that case).

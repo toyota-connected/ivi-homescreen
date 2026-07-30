@@ -21,6 +21,7 @@
 #include <GLES3/gl3.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -73,6 +74,22 @@ class Nv12GlPacker {
   uint32_t width() const { return width_; }
   uint32_t height() const { return height_; }
 
+  // The ring depth -- the pipeline's credit budget for a consumer-paced source.
+  static constexpr uint32_t RingSize() { return kRingSize; }
+
+  // Called (from any thread) each time a frame slot is released back to the
+  // ring
+  // -- a credit for a consumer-paced vsync source. Set once before streaming.
+  void SetOnSlotFree(std::function<void()> cb) {
+    on_slot_free_ = std::move(cb);
+  }
+
+  // When an external pacer governs the frame rate (a consumer-paced vsync
+  // source that only delivers a baton when a slot is free), disable the
+  // packer's own wall-clock push-rate cap so the two do not fight -- the pacer
+  // alone limits the rate and the ring never overflows.
+  void SetExternalPacing(bool on) { external_pacing_ = on; }
+
  private:
   static constexpr uint32_t kRingSize = 4;
 
@@ -107,6 +124,8 @@ class Nv12GlPacker {
   GLuint vbo_{0};
   GLuint vao_{0};
   uint64_t last_push_us_{0};  // last submitted frame, for the push-rate cap
+  std::function<void()> on_slot_free_;  // credit callback (consumer-paced)
+  bool external_pacing_{false};         // pacer governs the rate; skip the cap
   GLint u_src_{-1};
   GLint u_w_{-1};
   GLint u_h_{-1};
