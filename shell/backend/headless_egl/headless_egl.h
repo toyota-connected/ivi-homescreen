@@ -91,7 +91,7 @@ class HeadlessEglBackend final : public Backend {
   // pace the engine to the encode rate with a timer (IVI_ENC_MAX_FPS, default
   // 30; IVI_HEADLESS_VSYNC=0 disables and falls back to wall-clock). The engine
   // stays demand-driven -- an idle UI still schedules nothing.
-  VsyncCallback GetVsyncCallback() const override;
+  [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override;
   void SetPlatformTaskRunner(TaskRunner* runner) override;
   void StopVsyncMonitor() override;
