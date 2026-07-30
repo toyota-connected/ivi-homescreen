@@ -1129,6 +1129,10 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
         }
       }
       if (surface_sp) {
+        // GL-composited this present: no plane. Report 0 so the DRM_PLANE grant
+        // accessor reflects the fallback rather than a stale plane id (which
+        // would read as the zero-GPU path still being honored).
+        surface_sp->SetScanoutPlane(0);
         surface_sp->OnPresent(layer);
         if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
           const auto sw = surface_sp->GetGlTextureWidth();
@@ -2922,6 +2926,23 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, layer_count);
   }
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
+
+  // Report each platform view's scanout plane back through its surface (feeds
+  // the DRM_PLANE grant accessor, ihs_pv_grant_drm_plane_id). commit() ran
+  // record_placement above, so last_assigned_plane_id() is this frame's. Every
+  // layer is on a plane here -- the test() check above routes to GL fallback if
+  // any layer would be composited -- so PVs get their non-zero plane id; the
+  // fallback path reports 0 for them.
+  for (const auto& fl : frame_layers) {
+    if (fl.pv_tag == nullptr || !fl.pv_surface) {
+      continue;
+    }
+    uint32_t plane_id = 0;
+    if (const auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
+      plane_id = layer->last_assigned_plane_id().value_or(0);
+    }
+    fl.pv_surface->SetScanoutPlane(plane_id);
+  }
 
   if (blocking_modeset) {
     // A blocking ALLOW_MODESET commit landed (first commit, or a plane-topology

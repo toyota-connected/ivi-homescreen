@@ -314,4 +314,18 @@ class ICompositorSurface {
    * per-buffer releases).
    */
   virtual void OnScanoutRelease(uint32_t /*buffer_id*/) {}
+
+  /**
+   * @brief Report which KMS plane the surface's frame was scanned out on this
+   * present, or 0 when it was GL-composited (no plane) this present.
+   *
+   * The DRM scene path calls this once per present after the atomic commit,
+   * with the plane object id the allocator placed this surface on (or 0 on a
+   * GL-composite fallback). It feeds the @c DRM_PLANE grant accessor
+   * (@c ihs_pv_grant_drm_plane_id), so a direct-scanout producer can tell
+   * whether its zero-GPU path is actually being honored frame to frame. Called
+   * on the compositor thread; an implementation must be thread-safe. The
+   * default ignores it.
+   */
+  virtual void SetScanoutPlane(uint32_t /*plane_id*/) {}
 };
