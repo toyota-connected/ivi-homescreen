@@ -399,7 +399,7 @@ jobs:
         run: genhtml -o lcovHtml -s --legend --branch-coverage coverage.info
 
       - name: Upload coverage HTML report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-coverage-html
           path: ${{github.workspace}}/build/unit-tests/lcovHtml/
