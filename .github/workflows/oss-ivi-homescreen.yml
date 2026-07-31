@@ -330,7 +330,6 @@ jobs:
             libsystemd-dev libpugixml-dev libcurl4-openssl-dev
           version: 1.0-extra
 
-
       - name: Setup libdisplay-info
         uses: ./.github/actions/setup-libdisplay-info
 
@@ -358,6 +357,12 @@ jobs:
       - name: Build
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ninja -C .
+
+      - name: Install unit test deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: lcov
+          version: 1.0-unit_test
 
       - name: Run unit tests (CTest)
         working-directory: ${{github.workspace}}/build/unit-tests
