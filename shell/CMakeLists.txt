@@ -279,9 +279,12 @@ if (BUILD_BACKEND_HEADLESS_VULKAN)
             # In-process C ABI (ihs/vk_export.h): registry + the one exported
             # `ihs_vk_export_get_api` symbol an in-process bridge dlsym's.
             backend/headless_vulkan/vk_export_api.cc
+            # Env-gated loader (IVI_VK_BRIDGE_SO) that dlopen's an in-process
+            # bridge plugin and drives its create/start/stop/destroy lifecycle.
+            vk_export_bridge_loader.cc
             display/software_display.cc
     )
-    target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers)
+    target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers ${CMAKE_DL_LIBS})
     # Put ONLY `ihs_vk_export_get_api` in the executable's dynamic symbol table
     # (the bridge resolves it via dlsym(RTLD_DEFAULT)). Avoids blanket -rdynamic
     # so no other internal symbol is exported; the shell sets no global
@@ -457,6 +460,25 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN OR BUILD_DRM_KMS_VULKAN_PROBE)
             ${CMAKE_SOURCE_DIR}/third_party/Vulkan-Headers/include
     )
     target_link_libraries(drm_kms_vulkan_probe PRIVATE ${CMAKE_DL_LIBS} PkgConfig::DRM)
+endif ()
+
+# Standalone same-device consumer for the ihs-vk-export path: connects to the
+# bridge's SEQPACKET socket, imports the headless-vulkan backend's exported pool
+# (dma-buf + semaphore fds), and per presented frame waits render_done, copies
+# the image out and checksums it, signals consumer_done, and sends a
+# FrameRelease (driving the backend's consumer-paced vsync). Like the backend it
+# resolves Vulkan through vulkan.hpp's dynamic loader (dlopens libvulkan at
+# runtime), so only the vendored headers + libdl are needed at build time.
+if (BUILD_BACKEND_HEADLESS_VULKAN)
+    add_executable(ihs_vk_export_consumer
+            backend/headless_vulkan/export_consumer/export_consumer_main.cc
+            backend/headless_vulkan/export_consumer/vk_consumer.cc
+            backend/headless_vulkan/export_consumer/wire_client.cc
+    )
+    # Self-contained: wire_protocol.h (the shell copy of the wire contract) and
+    # the two local headers are all same-directory includes; no extra -I needed.
+    target_link_libraries(ihs_vk_export_consumer PRIVATE
+            vulkan_headers ${CMAKE_DL_LIBS})
 endif ()
 
 # Attach the IHS logging surface (logging.h shim + logger.hpp over ihs_shared).
