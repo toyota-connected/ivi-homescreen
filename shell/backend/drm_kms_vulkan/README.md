@@ -3,14 +3,75 @@
 Drives the Flutter **Vulkan** renderer and presents the result on hardware
 KMS planes via **zero-copy dma-buf import**, using the drm-cxx scene
 abstraction. The session / modeset / seat / input stack is shared with the
-`drm_kms_egl` backend (those translation units sit below the pixel layer and
-are GL-free); only the renderer and the present path differ.
+[drm_kms_egl](../drm_kms_egl/README.md) backend (those translation units sit
+below the pixel layer and are GL-free); only the renderer and the present path
+differ.
 
 Enable with `-DBUILD_BACKEND_DRM_KMS_VULKAN=ON`. **`-DBUILD_COMPOSITOR=ON` is
 required** — the engine only reaches the present path through the Flutter
 compositor's `CreateBackingStore` / `PresentLayers` callbacks.
 
-## How it works
+## Features
+
+| Capability | Status | Toggle / scope |
+|---|---|---|
+| Vulkan render + zero-copy dma-buf KMS scanout | ✓ | `-DBUILD_BACKEND_DRM_KMS_VULKAN=ON` + `-DBUILD_COMPOSITOR=ON` |
+| Zero-copy gate (Vulkan 1.1 + dma-buf extension set + openable DRM node) | ✓ | Refuses cleanly at init with a diagnostic if unmet |
+| Render-node-aware physical-device selection (vendor/name fallback) | ✓ | Picks the real GPU over a software ICD (llvmpipe) |
+| Explicit DRM-format-modifier backing stores, exported as dma-buf | ✓ | `NegotiateModifiers` intersects GPU export ↔ plane `IN_FORMATS` |
+| Triple-buffered, vsync-paced present (ring of scanout buffers) | ✓ | `avoid_backing_store_cache` + non-blocking page flips |
+| Page-flip-locked Flutter vsync | ✓ | `IVI_DRMVK_VSYNC=0` for wall-clock fallback |
+| Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`; 90/270 use a tiled non-DCC modifier |
+| Rotation-aware touch + HW cursor; per-device pointer transform | ✓ | `--input-transform` (shared DRM seat) |
+| KMS HW cursor (drm-cxx / xcursor) | ✓ | Requires libxcursor (`HAVE_DRM_CURSOR`); `--disable-cursor` |
+| libseat session, with direct-master fallback | ✓ | `LIBSEAT_BACKEND=seatd` forces the fallback |
+| wayland-leased-drm: drive an externally-owned DRM fd | ✓ | Second `Create()` overload, lease fd + connector + revocation gate |
+| Standalone zero-copy capability probe (`drm_kms_vulkan_probe`) | ✓ | `-DBUILD_DRM_KMS_VULKAN_PROBE=ON` (implied by the backend) |
+| Debug HUD (imgui Vulkan) | ✓ | `-DBUILD_HUD=ON`; `IVI_HUD` / `[hud].enable`; explicit-sync path |
+| DCC / tiled scanout consumption in the unrotated path | deferred | Advertised in the negotiated set, not yet driving allocation |
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    FE[FlutterEngine]
+
+    FE -->|Vulkan renderer config| RC["GetNextImage / PresentImage<br/>(stubs — never called on compositor path)"]
+    FE -->|compositor callbacks| VDB
+
+    subgraph VDB[VulkanDrmBackend]
+        DEV["VkInstance 1.1 + VkDevice<br/>DeviceCaps (zero-copy gate)"]
+        BS["VulkanBackingStore ×N<br/>exported modifier VkImage → dma-buf"]
+        SCENE["drm-cxx LayerScene<br/>single persistent layer"]
+        CUR["DrmCursor (HW cursor)"]
+        VS["IVsyncProvider + async flip reader"]
+        DEV --> BS
+        BS --> SCENE
+    end
+
+    subgraph SHARED["shared with drm_kms_egl (GL-free)"]
+        SESS["DrmSession (libseat)"]
+        SEAT["DrmSeat (libinput + xkb)"]
+        SESS --> SEAT
+    end
+
+    BS -->|drmModeAddFB2WithModifiers| CARD["/dev/dri/cardN<br/>primary plane scanout"]
+    SCENE --> CARD
+    SESS --> CARD
+    VS -->|page-flip event| SCENE
+```
+
+The backend brings up a Vulkan 1.1 instance and selects a physical device that
+can do zero-copy dma-buf scanout, then opens the DRM device, takes master,
+discovers the scanout target, and builds the `LayerScene` the present path
+commits onto. Each Flutter backing store is an exported modifier `VkImage`
+scanned out zero-copy on the primary plane. Session / modeset / seat / input
+are reused verbatim from the EGL backend; only the renderer and present path
+differ.
+
+**How it works, step by step:**
 
 1. **Device bring-up.** Creates a Vulkan 1.1 instance and selects a physical
    device that can do zero-copy dma-buf scanout: render-node-aware when the
@@ -55,6 +116,196 @@ compositor's `CreateBackingStore` / `PresentLayers` callbacks.
    callbacks. They are never invoked on the compositor path, but the embedder
    rejects a Vulkan renderer config that leaves them null, so they are stubs.
 
+### Module responsibilities
+
+- **`VulkanDrmBackend`** ([vulkan_drm_backend.cc](vulkan_drm_backend.cc),
+  [vulkan_drm_backend.h](vulkan_drm_backend.h)) — the `Backend` implementation.
+  `Create()` runs the Vulkan bring-up (instance → physical device → logical
+  device + queues), then `SetupCompositor()` opens the DRM device, takes master,
+  discovers the scanout target, and builds the `LayerScene`. Implements the
+  Flutter compositor callbacks (`CreateBackingStore` / `CollectBackingStore` /
+  `PresentLayers`) and the scanout hand-off barrier. Returns nullptr on failure;
+  the caller treats null as a hard init failure and aborts, exactly as
+  `drm_kms_egl` does. A second `Create()` overload drives an externally-owned
+  DRM fd for wayland-leased-drm (lease fd + connector id + revocation gate),
+  leaving the Vulkan side untouched.
+
+- **`drm_kms_vulkan::VulkanBackingStore`**
+  ([vulkan_backing_store.cc](vulkan_backing_store.cc),
+  [vulkan_backing_store.h](vulkan_backing_store.h)) — a device-local `VkImage`
+  allocated with an explicit DRM format modifier and exported as a dma-buf,
+  ready for zero-copy KMS scanout. Owns the image, memory, view, and dma-buf fd;
+  reads back the chosen modifier and per-plane layout for the framebuffer
+  import. Exposes an address-stable `FlutterVulkanImage`.
+
+- **`drm_kms_vulkan::ScanoutTarget`**
+  ([drm_scanout_target.cc](drm_scanout_target.cc),
+  [drm_scanout_target.h](drm_scanout_target.h)) — discovers the KMS scanout
+  target (connected connector + CRTC + mode + primary plane + that plane's
+  `IN_FORMATS` modifiers) read-only, without taking DRM master. A second
+  overload probes an already-open lease fd, pinned to the leased connector.
+
+- **`drm_kms_vulkan::NegotiateModifiers`**
+  ([modifier_format.cc](modifier_format.cc),
+  [modifier_format.h](modifier_format.h)) — intersects the modifiers the ICD can
+  export for the color format with the plane's `IN_FORMATS`, ordered tiled-first
+  with `LINEAR` last. `DescribeModifier` decodes a modifier to a readable label
+  (e.g. `AMD(GFX10_RBPLUS 64K_R_X dcc=1 retile)`).
+
+- **`drm_kms_vulkan::DeviceCaps` / `ProbeDeviceCaps`**
+  ([device_caps.cc](device_caps.cc), [device_caps.h](device_caps.h)) —
+  capability summary filled at bring-up and logged. `ProbeDeviceCaps` is the
+  lightweight read-only zero-copy gate used by the probe tool (throwaway
+  instance, no logical device). `DrmNodeNumber` resolves a DRM node path's
+  (major, minor) to match a physical device's DRM node against the scanout
+  device.
+
+- **`drm_kms_vulkan_probe`** ([probe_main.cc](probe_main.cc)) — standalone
+  exerciser for the zero-copy gate. Runs the same `ProbeDeviceCaps()` in
+  isolation (no libseat / DRM master) and dumps every plane's advertised
+  `IN_FORMATS` modifiers, decoded. Exit code mirrors the backend's contract:
+  0 = gate passed, 1 = refused.
+
+### File map
+
+- [vulkan_drm_backend.cc](vulkan_drm_backend.cc), [vulkan_drm_backend.h](vulkan_drm_backend.h) — the `VulkanDrmBackend` backend: bring-up, compositor callbacks, present, vsync, HW cursor.
+- [vulkan_backing_store.cc](vulkan_backing_store.cc), [vulkan_backing_store.h](vulkan_backing_store.h) — exported modifier `VkImage` → dma-buf backing store.
+- [drm_scanout_target.cc](drm_scanout_target.cc), [drm_scanout_target.h](drm_scanout_target.h) — read-only KMS scanout-target discovery (path + lease fd).
+- [modifier_format.cc](modifier_format.cc), [modifier_format.h](modifier_format.h) — modifier negotiation + human-readable modifier decode.
+- [device_caps.cc](device_caps.cc), [device_caps.h](device_caps.h) — capability struct + zero-copy probe + DRM-node number resolution.
+- [probe_main.cc](probe_main.cc) — `drm_kms_vulkan_probe` standalone gate/modifier dump tool.
+
+Shared verbatim from [drm_kms_egl](../drm_kms_egl/README.md) (GL-free, below the
+pixel layer): `scene_layer_source_vk.cc`, `drm_session.cc`, `driver_probe.cc`,
+`drm_cursor.cc`, plus [shell/display](../../display/README.md)'s
+`drm_display.cc` / `drm_output_provider.cc` / `drm_device_resolver.cc` /
+`drm_mode_list.cc` and [shell/input](../../input/README.md)'s `drm_seat.cc`.
+
+### Threading model
+
+- **Main thread**: argv parse, backend `Create()`, engine bring-up.
+- **Flutter rasterizer thread**: the compositor callbacks
+  (`CreateBackingStoreImpl` / `PresentLayersImpl`) and every KMS commit. Slot
+  state stays raster-thread-local.
+- **Async flip-reader thread**: arms `drmHandleEvent` for the next page-flip
+  event and, on completion (`OnFlipEvent`), returns the vsync baton with the
+  kernel scanout time; touches no slot state.
+- **DrmSession / DrmSeat dispatch threads**: reused from `drm_kms_egl` — libseat
+  session events + udev hotplug, and libinput + xkb input.
+
+The HW cursor is created against the compositor's DRM device and destroyed
+before it, so it never outlives that device.
+
+---
+
+## Build steps
+
+### Dependencies
+
+Same DRM / GBM / seat / input stack as `drm_kms_egl`; on Ubuntu 24.04 /
+Debian 13 / Fedora 41+:
+
+```bash
+sudo apt-get install -y \
+  ninja-build cmake pkg-config \
+  libdrm-dev libgbm-dev libinput-dev libudev-dev \
+  libxkbcommon-dev libxcursor-dev libseat-dev
+```
+
+There is **no build-time Vulkan SDK / `libvulkan` dependency**: only the
+vendored `third_party/Vulkan-Headers` are needed at build time. The Vulkan
+loader and an ICD are resolved at runtime via the dynamic loader (see Running).
+
+### Configure + build
+
+```bash
+cmake -GNinja -B cmake-build-debug-clang \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DBUILD_BACKEND_DRM_KMS_VULKAN=ON \
+  -DBUILD_COMPOSITOR=ON
+
+ninja -C cmake-build-debug-clang
+```
+
+`BUILD_BACKEND_DRM_KMS_VULKAN` is mutually exclusive with the EGL and Wayland
+backends. `BUILD_COMPOSITOR=ON` is **required** — the present path is only
+reachable through the Flutter compositor callbacks.
+
+### Build matrix
+
+| Config | CMake flags | Present path compiled in |
+|--------|-------------|--------------------------|
+| Backend | `-DBUILD_BACKEND_DRM_KMS_VULKAN=ON -DBUILD_COMPOSITOR=ON` | Full Vulkan zero-copy scanout backend (+ `drm_kms_vulkan_probe`) |
+| Probe only | `-DBUILD_DRM_KMS_VULKAN_PROBE=ON` | Just the standalone `drm_kms_vulkan_probe`, cross-buildable alongside any backend |
+
+- **`BUILD_BACKEND_DRM_KMS_VULKAN`** — build the backend; implies the probe tool.
+- **`BUILD_DRM_KMS_VULKAN_PROBE`** — build only the probe (device_caps + modifier_format have no shell/EGL/Wayland/DRM-master deps).
+- **`BUILD_VULKAN_VALIDATION`** — vendor the Khronos validation layer so `-d` guarantees validation even on images with no system layer registry (off by default).
+- **`BUILD_COMPOSITOR_DMABUF_EXPORT`** — export backing-store memory as a dma-buf fd for zero-copy plugins (requires `VK_KHR_external_memory_fd`; falls back silently).
+- **`BUILD_HUD`** — compile the imgui Vulkan debug HUD (requires `BUILD_COMPOSITOR`).
+
+### Optional features detected at configure time
+
+- **libxcursor** missing → `HAVE_DRM_CURSOR` undefined, `drm_cursor.cc` not
+  compiled, no HW cursor at runtime (logged at `message(STATUS …)`, build
+  continues).
+
+---
+
+## Running
+
+The backend needs **DRM master** on the scanout device.
+
+- `--drm-device <node>` — the KMS device with the connectors (the display
+  controller, e.g. `card1` for vc4 on a Pi, not the render-only `v3d` node).
+- `--drm-mode <W>x<H>[@<R>]` — select the scanout mode (`R` = integer refresh
+  Hz; omitted = any). Unset uses the connector's preferred mode.
+
+Session / DRM master:
+
+- With a libseat seat (logind) the backend uses it automatically
+  (`[DrmDisplay] libseat session active`).
+- Without a usable seat (e.g. a plain SSH login or a console login with no
+  logind seat), libseat's in-process builtin backend cannot grab the VT. Force
+  the legacy direct-master path by setting **`LIBSEAT_BACKEND=seatd`** with no
+  seatd daemon running: libseat fails to open the seat, `DrmSession::Open()`
+  returns null, and the backend falls back to a direct `/dev/dri` open +
+  `drmSetMaster`. Run from an active VT or as root.
+
+Example (Pi, forcing the fallback and a specific mode):
+
+```sh
+LIBSEAT_BACKEND=seatd LD_LIBRARY_PATH=<bundle>/lib \
+    homescreen --drm-device /dev/dri/card1 --drm-mode 1920x1080@60 -b <bundle>
+```
+
+The Vulkan loader and an ICD must be present at runtime (`libvulkan1` +
+`mesa-vulkan-drivers` for V3DV on the Pi; the headers are vendored, so the
+loader is dlopen'd, never linked).
+
+### CLI Flags
+
+| Flag | What it does |
+|------|-------------|
+| `--drm-device <node>` | KMS device with the connectors (display controller node) |
+| `--drm-mode <W>x<H>[@<R>]` | Select the scanout mode (`R` = integer refresh Hz); unset = connector preferred |
+| `--drm-rotation <0\|90\|180\|270>` | Rotate the scanout (see Rotation) |
+| `--drm-list-modes` | Report each connector's modes and which planes can rotate, then exit |
+| `--input-transform "<name-substring>=<0\|90\|180\|270>[,flip-x][,flip-y]"` | Per-device pointer transform, matched on the libinput device-name substring (repeatable; first match wins) |
+| `--disable-cursor` | Disable the KMS HW cursor |
+
+### Env vars
+
+| Env | Default | Effect |
+|------|---------|--------|
+| `IVI_DRMVK_VSYNC` | (on) | `0` disables page-flip-locked vsync (falls back to the engine's wall-clock scheduler) |
+| `IVI_DRMVK_PROFILE` | (off) | Enables per-frame cadence profiling (also enabled by the `IVI_PROFILE` umbrella) |
+| `IVI_DRMVK_NO_EXPLICIT_SYNC` | (off) | Set to force the CPU-fence fallback instead of the explicit-sync (`IN_FENCE_FD`) scanout hand-off |
+| `IVI_HUD` | (off) | Enable the debug HUD (also honored via `[hud].enable`); `BUILD_HUD` builds only |
+| `LIBSEAT_BACKEND` | — | `seatd` (with no seatd daemon running) forces the direct-master fallback path |
+
+---
+
 ## Hardware support
 
 Zero-copy scanout requires a buffer that **both** the render GPU and the
@@ -69,7 +320,7 @@ a live run. The negotiated set is logged decoded (e.g. `AMD(GFX10_RBPLUS
 64K_R_X dcc=1 retile)`) — but note this lists what the plane *can* scan out, not
 what is used: the backing stores are allocated **LINEAR** by default (a tiled,
 non-DCC modifier only for a 90/270 rotation, which amdgpu requires; see
-"Rotation" below). So DCC is advertised but not yet consumed — making it real is
+"Rotation" above). So DCC is advertised but not yet consumed — making it real is
 a follow-on once the negotiated modifier drives allocation in the unrotated path.
 
 | Platform | Render → display | Result |
@@ -197,37 +448,6 @@ into the keyboard/scroll path, not a second pointer), so it is not separately
 addressable through libinput; per-pad control would need the Steam Input /
 hidraw protocol instead.
 
-## Running
-
-The backend needs **DRM master** on the scanout device.
-
-- `--drm-device <node>` — the KMS device with the connectors (the display
-  controller, e.g. `card1` for vc4 on a Pi, not the render-only `v3d` node).
-- `--drm-mode <W>x<H>[@<R>]` — select the scanout mode (`R` = integer refresh
-  Hz; omitted = any). Unset uses the connector's preferred mode.
-
-Session / DRM master:
-
-- With a libseat seat (logind) the backend uses it automatically
-  (`[DrmDisplay] libseat session active`).
-- Without a usable seat (e.g. a plain SSH login or a console login with no
-  logind seat), libseat's in-process builtin backend cannot grab the VT. Force
-  the legacy direct-master path by setting **`LIBSEAT_BACKEND=seatd`** with no
-  seatd daemon running: libseat fails to open the seat, `DrmSession::Open()`
-  returns null, and the backend falls back to a direct `/dev/dri` open +
-  `drmSetMaster`. Run from an active VT or as root.
-
-Example (Pi, forcing the fallback and a specific mode):
-
-```sh
-LIBSEAT_BACKEND=seatd LD_LIBRARY_PATH=<bundle>/lib \
-    homescreen --drm-device /dev/dri/card1 --drm-mode 1920x1080@60 -b <bundle>
-```
-
-The Vulkan loader and an ICD must be present at runtime (`libvulkan1` +
-`mesa-vulkan-drivers` for V3DV on the Pi; the headers are vendored, so the
-loader is dlopen'd, never linked).
-
 ## Cross-compiling for the Raspberry Pi
 
 emb cross-compiles the backend for aarch64 from the project's `.emb/`
@@ -242,3 +462,54 @@ Vulkan entry points are dlopen'd, so no link-time `libvulkan`). A JIT (debug)
 bundle works for testing: `flutter build bundle --debug` produces an
 architecture-independent `kernel_blob.bin` that runs on the target's matching
 debug engine.
+
+---
+
+## Diagnostics/Debug
+
+- **Zero-copy gate.** The backend runs `ProbeDeviceCaps()` at `Create()`; on
+  refusal it logs the cause and returns nullptr (FlutterView then exits with
+  `EXIT_FAILURE`). To observe the gate without bringing up libseat / DRM master,
+  run the standalone probe:
+
+  ```sh
+  drm_kms_vulkan_probe [/dev/dri/cardN]     # default /dev/dri/card0
+  ```
+
+  Exit code 0 = gate passed, 1 = refused. The probe also dumps every plane's
+  advertised `IN_FORMATS` modifiers, decoded and labeled by plane type (PRIMARY
+  / OVERLAY / CURSOR), so you can see whether the display can scan out a
+  tiled/compressed layout (AMD DCC, ARM AFBC, Broadcom UIF) and on which plane.
+  It is read-only (no DRM master), so it is safe to run alongside a live
+  compositor. Force a refuse for testing with a software ICD:
+  `VK_ICD_FILENAMES=<lavapipe icd.json> drm_kms_vulkan_probe`, or point it at a
+  non-existent node.
+
+- **Negotiated modifiers.** The backend logs the negotiated modifier set decoded
+  by `DescribeModifier` (e.g. `AMD(GFX10_RBPLUS 64K_R_X dcc=1 retile)`).
+
+- **`--drm-list-modes`.** Reports every connector's modes and which planes can
+  rotate, then exits — no engine bring-up, no TTY required.
+
+- **Cadence profiling.** `IVI_DRMVK_PROFILE` (or the `IVI_PROFILE` umbrella)
+  enables per-frame cadence profiling, written from the rasterizer thread.
+
+- **Validation layers.** Build with `-DBUILD_VULKAN_VALIDATION=ON` and run with
+  `-d` to guarantee the Khronos validation layer even on images with no system
+  layer registry.
+
+- **Debug HUD.** With `-DBUILD_HUD=ON`, set `IVI_HUD` (or `[hud].enable`) to draw
+  the imgui Vulkan HUD; it is recorded into the scanout-barrier command buffer
+  (explicit-sync path only) so the scanout fence covers it.
+
+---
+
+## References
+
+- [drm_kms_egl backend](../drm_kms_egl/README.md) — the shared session / modeset / seat / input stack and the GL present path.
+- [shell/backend overview](../README.md) — the backend registry and `Backend` interface.
+- [shell/display](../../display/README.md) — `DrmDisplay` and DRM mode-list support.
+- [shell/input](../../input/README.md) — the shared `DrmSeat` (libinput + xkb, input transforms).
+- [shell/backend/hud](../hud/README.md) — the debug HUD.
+- [Vulkan `VK_EXT_image_drm_format_modifier`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_EXT_image_drm_format_modifier.html) — the explicit-modifier image extension the zero-copy gate requires.
+- [Linux DRM format modifiers](https://www.kernel.org/doc/html/latest/gpu/drm-kms.html) — KMS plane `IN_FORMATS` and framebuffer modifier import.
