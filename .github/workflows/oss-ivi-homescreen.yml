@@ -376,7 +376,7 @@ jobs:
             '*/test/*' '*/usr/*' '*/third_party/*' '*/wayland-protocols/*' \
             --rc lcov_branch_coverage=1 --ignore-errors mismatch -o coverage.info
 
-      - name: Coverage summary
+      - name: Print coverage summary
         working-directory: ${{github.workspace}}/build/unit-tests
         run: |
           {
@@ -394,16 +394,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           cat "${GITHUB_STEP_SUMMARY}"
 
-      - name: Print coverage summary
-        run: |
-          echo "=== Coverage Summary (all backends merged) ==="
-          lcov --summary coverage.info 2>&1 | grep -E 'lines\.|functions\.|branches\.'
-
       - name: Generate HTML report
+        working-directory: ${{github.workspace}}/build/unit-tests
         run: genhtml -o lcovHtml -s --legend --branch-coverage coverage.info
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-coverage-html
-          path: lcovHtml/
+          path: ${{github.workspace}}/build/unit-tests/lcovHtml/
