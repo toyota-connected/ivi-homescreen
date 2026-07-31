@@ -20,11 +20,13 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <vulkan/vulkan.h>
 
 #include "backend/backend.h"
+#include "ihs/vk_export.h"
 #include "vsync/consumer_paced_vsync.h"
 #include "vsync/ivsync_provider.h"
 
@@ -135,6 +137,31 @@ class HeadlessVulkanBackend final : public Backend {
   [[nodiscard]] const std::array<uint8_t, VK_UUID_SIZE>& device_uuid() const {
     return device_uuid_;
   }
+
+  // ── In-process C ABI (ihs/vk_export.h) ─────────────────────────────────────
+  // Backing for the exported `ihs_vk_export_get_api` seam (see
+  // vk_export_api.cc). Each is safe to call from the bridge IO thread unless
+  // noted; the frame listener fires on the raster thread.
+
+  // Fill @p out with pool-wide capabilities (extent, format, handle type,
+  // device UUID, slot count). Never fails; export_active reflects the pool.
+  void FillExportCaps(IhsVkExportCaps* out) const;
+  // Fill @p out with the current pool descriptors, DUP'ing the three fds per
+  // slot (the caller owns/closes the dups). Returns non-zero (leaving @p out
+  // zeroed) when there is no exportable pool.
+  int FillImageTable(IhsVkExportImageTable* out) const;
+  // Register the per-present frame listener (fires on the raster thread; cb ==
+  // nullptr clears it). Stored under a mutex.
+  void SetExportFrameListener(IhsVkFrameListener cb, void* user);
+  // The consumer released @p slot -- the pacing edge for consumer-driven vsync.
+  void OnConsumerReleaseFrame(uint32_t slot);
+  // Select consumer-driven vs free-run pacing (IHS_VK_PACE_*).
+  void SetExportPaceSource(uint32_t src);
+  // Inject a pointer event through the engine's normal input path; marshaled to
+  // the platform task runner.
+  void InjectPointer(const IhsPointerEvent& ev);
+  // Rebuild the pool at a new extent. NOT SUPPORTED yet: logs and returns -1.
+  int RebuildExportPool(uint32_t width, uint32_t height);
 
  private:
   // Bring-up. Each logs and returns false on failure; a failed InitVulkan
@@ -249,4 +276,15 @@ class HeadlessVulkanBackend final : public Backend {
   TaskRunner* platform_task_runner_{nullptr};
   std::atomic<bool> vsync_running_{false};
   std::unique_ptr<ivi::ConsumerPacedVsyncSource> pacer_;
+
+  // Exported-pool bookkeeping for the ihs/vk_export.h C ABI. generation_ bumps
+  // on every pool rebuild (0 until RebuildExportPool is implemented) and rides
+  // the image table so a consumer detects a stale pool. frame_seq_ counts
+  // presents delivered to the listener. The listener {cb,user} is set from the
+  // bridge thread and read on the raster thread, so it is mutex-guarded.
+  uint32_t generation_{0};
+  uint32_t frame_seq_{0};
+  mutable std::mutex frame_listener_mutex_;
+  IhsVkFrameListener frame_listener_{nullptr};
+  void* frame_listener_user_{nullptr};
 };
