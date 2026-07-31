@@ -430,6 +430,12 @@ class Display : public IDisplay,
   // repeat timerfd. Both fds are owned elsewhere (libwayland / the handler), so
   // these must release() — never close() — them on teardown.
   std::optional<asio::posix::stream_descriptor> wl_fd_;
+  // A wl_display_prepare_read is outstanding, waiting on wl_fd_. Tracked so
+  // teardown can undo it, because the handler that would is only reached while
+  // the reactor still runs. Not synchronized, and does not need to be: the
+  // reactor is a single io_context run on the thread that also tears the
+  // display down.
+  bool read_armed_{false};
   std::optional<asio::posix::stream_descriptor> repeat_fd_;
 
   std::shared_ptr<Engine> m_flutter_engine;
