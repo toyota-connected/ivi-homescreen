@@ -32,6 +32,10 @@ class IDisplay;
 
 class WaylandWindow;
 
+namespace ihs {
+class VkExportBridgeLoader;
+}  // namespace ihs
+
 class App final {
  public:
   explicit App(const std::vector<Configuration::Config>& configs);
@@ -96,4 +100,13 @@ class App final {
   asio::io_context primary_ioc_;
   asio::executor_work_guard<asio::io_context::executor_type> primary_work_{
       asio::make_work_guard(primary_ioc_)};
+
+#if BUILD_BACKEND_HEADLESS_VULKAN
+  // Optional in-process ihs-vk-export bridge (enabled by IVI_VK_BRIDGE_SO).
+  // Constructed at the end of the App ctor — after the headless-vulkan backend
+  // has registered its export API — and reset at the start of ~App so the
+  // module's raster-thread frame listener is cleared and its IO thread joined
+  // while the backend is still alive. Inert unless the env var is set.
+  std::unique_ptr<ihs::VkExportBridgeLoader> vk_export_bridge_;
+#endif
 };
