@@ -1031,14 +1031,22 @@ void Display::ArmWaylandRead() {
   while (wl_display_prepare_read(m_display) != 0) {
     wl_display_dispatch_pending(m_display);
   }
+  read_armed_ = true;
   wl_display_flush(m_display);
 
   wl_fd_->async_wait(asio::posix::stream_descriptor::wait_read,
                      [this](const std::error_code& ec) {
+                       const bool was_armed = read_armed_;
+                       read_armed_ = false;
                        if (ec) {
                          // Cancelled (teardown) — undo the pending
-                         // prepare_read.
-                         wl_display_cancel_read(m_display);
+                         // prepare_read, unless ReleaseWaylandFd already did.
+                         // Only one of the two may: libwayland counts readers,
+                         // and cancelling twice would drop the count below what
+                         // is outstanding.
+                         if (was_armed) {
+                           wl_display_cancel_read(m_display);
+                         }
                          return;
                        }
                        wl_display_read_events(m_display);
@@ -1096,6 +1104,19 @@ void Display::ReleaseWaylandFd() {
   wl_fd_->cancel(ec);
   wl_fd_->release();  // detach without closing libwayland's display fd
   wl_fd_.reset();
+  // cancel() only queues the handler with operation_aborted, and the reactor
+  // has already been stopped by the time this runs — so the cancel_read in
+  // ArmWaylandRead's handler never executes and the prepare_read it left
+  // outstanding would stay outstanding for the life of the process. libwayland
+  // then blocks any other thread that tries to read: wl_display_read_events
+  // waits for a reader that will never read. Mesa's Wayland WSI does exactly
+  // that inside vkDestroySwapchainKHR (wl_display_roundtrip_queue), which runs
+  // later in this same teardown, so leaving it armed hangs the process on exit
+  // instead of letting it quit.
+  if (read_armed_) {
+    read_armed_ = false;
+    wl_display_cancel_read(m_display);
+  }
 }
 
 void Display::StartEvents() {
