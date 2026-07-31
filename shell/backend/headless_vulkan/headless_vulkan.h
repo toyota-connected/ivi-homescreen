@@ -189,6 +189,18 @@ class HeadlessVulkanBackend final : public Backend {
   // Best-effort — logs and skips (leaving the fds -1) if the device cannot
   // export an OPAQUE_FD semaphore; never fails bring-up.
   void CreateExportSemaphores();
+  // Create the two exportable binary semaphores per image, export a persistent
+  // fd for each (into exported_images_, under export_fd_mutex_), and pre-signal
+  // every consumer_done. Returns false on any failure (the caller rolls back).
+  // Shared by CreateExportSemaphores (initial) and RebaselineSemaphores (per
+  // reconnect); assumes the sync command pool + fence already exist.
+  bool InstallExportSemaphores();
+  // Recreate the per-frame semaphores from scratch between consumer sessions.
+  // Binary semaphores cannot be reset in place, and a detaching consumer leaves
+  // render_done/consumer_done in an arbitrary signaled state; recreating gives
+  // each new consumer a clean baseline (render_done unsignaled, consumer_done
+  // signaled) and fresh export fds. Runs on the raster thread while dormant.
+  void RebaselineSemaphores();
   // Destroy the semaphores, close their fds, and destroy the sync command
   // pool + fence. Called by DestroyRenderTargets.
   void DestroyExportSemaphores();
@@ -264,10 +276,30 @@ class HeadlessVulkanBackend final : public Backend {
   // that stands in for the future socket consumer to validate the round-trip.
   bool loopback_{false};
   bool semaphores_active_{false};
+  // A real external consumer is attached and driving the pacing (set when the
+  // bridge selects consumer-driven pacing, cleared on free-run). Together with
+  // loopback_ it decides whether the per-frame render_done/consumer_done
+  // handshake runs: with neither, the binary consumer_done has no signaler, so
+  // the ops stay dormant and the fds are merely exported. Set from the bridge
+  // thread, read on the raster thread.
+  std::atomic<bool> export_consumer_active_{false};
+  // Latched once per frame in GetNextImage and reused in PresentCallback so a
+  // mid-frame attach/detach can never split a frame's wait from its signal
+  // (which would leave a binary semaphore double-signaled). Raster-thread only.
+  bool frame_sync_active_{false};
+  // Set when a consumer detaches; the raster thread recreates the semaphores at
+  // the next dormant frame so the following consumer starts from a clean
+  // baseline. Read on the raster thread and in FillImageTable (bridge thread).
+  std::atomic<bool> sync_rebaseline_pending_{false};
   std::array<VkSemaphore, kImageCount> render_done_{};
   std::array<VkSemaphore, kImageCount> consumer_done_{};
   VkCommandPool sync_command_pool_{VK_NULL_HANDLE};
   VkFence consumer_wait_fence_{VK_NULL_HANDLE};
+  // Guards the exported semaphore fds in exported_images_ between the raster
+  // thread (RebaselineSemaphores rewrites them) and the bridge thread
+  // (FillImageTable dups them). mutable so the const FillImageTable can lock
+  // it.
+  mutable std::mutex export_fd_mutex_;
 
   // Synthetic-vsync pacing. vsync_ holds the baton machinery; the pacer drives
   // it, run in free-run (ceiling-only) mode since there is no consumer.

@@ -879,13 +879,30 @@ void HeadlessVulkanBackend::CreateExportSemaphores() {
     return;
   }
 
-  // Per image: create the two OPAQUE_FD-exportable binary semaphores and export
-  // one persistent fd each. On any failure, roll back and skip the whole
-  // feature — the image export still stands.
-  auto rollback = [&]() {
+  // Create the exportable semaphores, export their fds, and pre-signal each
+  // consumer_done. On any failure roll back and skip the whole feature — the
+  // image export still stands.
+  if (!InstallExportSemaphores()) {
     DestroyExportSemaphores();
     semaphores_active_ = false;
-  };
+    return;
+  }
+
+  semaphores_active_ = true;
+  ihs::log::info(
+      "[HeadlessVulkan] per-frame sync semaphores active (images={}, "
+      "loopback={})",
+      kImageCount, loopback_ ? "on" : "off");
+}
+
+bool HeadlessVulkanBackend::InstallExportSemaphores() {
+  // Create the two OPAQUE_FD-exportable binary semaphores per image and export
+  // one persistent fd each (recorded in exported_images_ under export_fd_mutex_
+  // so a concurrent FillImageTable never dups a torn fd). Each consumer_done
+  // starts SIGNALED so the first GetNextImage wait passes (the image is
+  // "free"). Assumes render_done_/consumer_done_ are currently null — initial
+  // bring-up, or after RebaselineSemaphores destroyed them.
+  std::scoped_lock lock(export_fd_mutex_);
   for (uint32_t i = 0; i < kImageCount; ++i) {
     VkExportSemaphoreCreateInfo exp{};
     exp.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
@@ -901,8 +918,7 @@ void HeadlessVulkanBackend::CreateExportSemaphores() {
           "[HeadlessVulkan] vkCreateSemaphore {} failed; disabling "
           "per-frame sync",
           i);
-      rollback();
-      return;
+      return false;
     }
 
     const auto export_fd = [&](VkSemaphore sem, int* out) -> bool {
@@ -919,8 +935,7 @@ void HeadlessVulkanBackend::CreateExportSemaphores() {
           "[HeadlessVulkan] vkGetSemaphoreFdKHR {} failed; disabling per-frame "
           "sync",
           i);
-      rollback();
-      return;
+      return false;
     }
     ihs::log::info(
         "[HeadlessVulkan] image {} sync semaphores: render_done_fd={} "
@@ -942,16 +957,55 @@ void HeadlessVulkanBackend::CreateExportSemaphores() {
           "per-frame sync",
           i);
       d().vkQueueWaitIdle(graphics_queue_);
-      rollback();
-      return;
+      return false;
     }
   }
+  return true;
+}
 
-  semaphores_active_ = true;
-  ihs::log::info(
-      "[HeadlessVulkan] per-frame sync semaphores active (images={}, "
-      "loopback={})",
-      kImageCount, loopback_ ? "on" : "off");
+void HeadlessVulkanBackend::RebaselineSemaphores() {
+  // Between consumer sessions, recreate the binary semaphores so the next
+  // consumer starts from a clean baseline (render_done unsignaled,
+  // consumer_done signaled) with fresh export fds. Binary semaphores cannot be
+  // reset in place, and a detached consumer may have left either one signaled —
+  // reusing them would risk a double-signal. Runs on the raster thread while
+  // dormant (no in-flight per-frame sync submits), so a full queue idle is
+  // safe; the sync command pool + fence are kept, only the semaphores are
+  // cycled.
+  if (!semaphores_active_) {
+    return;
+  }
+  d().vkQueueWaitIdle(graphics_queue_);
+  {
+    std::scoped_lock lock(export_fd_mutex_);
+    for (uint32_t i = 0; i < kImageCount; ++i) {
+      if (render_done_[i] != VK_NULL_HANDLE) {
+        d().vkDestroySemaphore(device_, render_done_[i], nullptr);
+        render_done_[i] = VK_NULL_HANDLE;
+      }
+      if (consumer_done_[i] != VK_NULL_HANDLE) {
+        d().vkDestroySemaphore(device_, consumer_done_[i], nullptr);
+        consumer_done_[i] = VK_NULL_HANDLE;
+      }
+      if (exported_images_[i].render_done_fd >= 0) {
+        ::close(exported_images_[i].render_done_fd);
+        exported_images_[i].render_done_fd = -1;
+      }
+      if (exported_images_[i].consumer_done_fd >= 0) {
+        ::close(exported_images_[i].consumer_done_fd);
+        exported_images_[i].consumer_done_fd = -1;
+      }
+    }
+  }
+  if (!InstallExportSemaphores()) {
+    ihs::log::warn(
+        "[HeadlessVulkan] semaphore rebaseline failed; per-frame sync "
+        "disabled");
+    DestroyExportSemaphores();
+    semaphores_active_ = false;
+    return;
+  }
+  ihs::log::info("[HeadlessVulkan] semaphores rebaselined for next consumer");
 }
 
 void HeadlessVulkanBackend::DestroyExportSemaphores() {
@@ -1110,6 +1164,19 @@ int HeadlessVulkanBackend::FillImageTable(IhsVkExportImageTable* out) const {
   out->generation = generation_;
   out->slot_count = kImageCount;
 
+  // If a prior consumer just detached, wait briefly for the raster thread to
+  // reinstall fresh semaphores (RebaselineSemaphores) so the fds exported here
+  // carry a clean binary state rather than the previous session's leftovers.
+  // The raster thread ticks well within this bound at the pacing rate; the cap
+  // keeps a stalled raster from hanging a handshake.
+  for (int spin = 0;
+       spin < 200 && sync_rebaseline_pending_.load(std::memory_order_acquire);
+       ++spin) {
+    ::usleep(1000);  // 1 ms
+  }
+  // Serialize the fd reads against RebaselineSemaphores' rewrite.
+  std::scoped_lock lock(export_fd_mutex_);
+
   // dup() the source fds so the caller owns/closes independent handles; -1 in
   // means -1 out (no export for that fd).
   auto dup_fd = [](int fd) -> int32_t { return fd >= 0 ? ::dup(fd) : -1; };
@@ -1164,6 +1231,18 @@ void HeadlessVulkanBackend::OnConsumerReleaseFrame(uint32_t /* slot */) {
 }
 
 void HeadlessVulkanBackend::SetExportPaceSource(uint32_t src) {
+  // A consumer-driven pace source means a real external consumer is attached
+  // and will signal consumer_done / wait render_done, so the per-frame GPU
+  // handshake can run (see GetNextImageCallback / PresentCallback). Free-run
+  // means no consumer, so it must stay dormant.
+  const bool now_active = src == IHS_VK_PACE_CONSUMER_DRIVEN;
+  const bool was_active =
+      export_consumer_active_.exchange(now_active, std::memory_order_acq_rel);
+  if (was_active && !now_active) {
+    // The consumer detached: ask the raster thread to recreate the semaphores
+    // before the next consumer imports them (see GetNextImageCallback).
+    sync_rebaseline_pending_.store(true, std::memory_order_release);
+  }
   if (pacer_) {
     pacer_->SetFreeRun(src == IHS_VK_PACE_FREE_RUN);
   }
@@ -1287,10 +1366,32 @@ FlutterVulkanImage HeadlessVulkanBackend::GetNextImageCallback(
     void* user_data,
     const FlutterFrameInfo* /* frame_info */) {
   auto* backend = BackendOf(user_data);
-  // Loopback only: block until the (stand-in) consumer released this image, so
-  // the engine never re-renders an image a consumer is still reading. Without
-  // loopback the binary consumer_done has no signaler and this would deadlock —
-  // so the per-frame ops stay dormant and the fds are merely exported.
+  // A consumer detached since the last frame: recreate the semaphores now,
+  // while dormant, so the next consumer imports a clean baseline. Done here (a
+  // raster- thread frame boundary with no in-flight sync submits) rather than
+  // from the bridge thread, which must never touch the graphics queue.
+  if (backend->sync_rebaseline_pending_.load(std::memory_order_acquire) &&
+      backend->semaphores_active_ && !backend->loopback_ &&
+      !backend->export_consumer_active_.load(std::memory_order_acquire)) {
+    backend->RebaselineSemaphores();
+    backend->sync_rebaseline_pending_.store(false, std::memory_order_release);
+  }
+
+  // Latch this frame's sync state once and reuse it in PresentCallback, so a
+  // mid-frame attach/detach can never split a frame's render_done signal from
+  // the listener notification it must back. The handshake runs when the
+  // semaphores exist and either the loopback stand-in or a real consumer is
+  // attached; with neither, the ops stay dormant and the fds are merely
+  // exported.
+  backend->frame_sync_active_ =
+      backend->semaphores_active_ &&
+      (backend->loopback_ ||
+       backend->export_consumer_active_.load(std::memory_order_acquire));
+  // consumer_done is only CPU-waited for the loopback stand-in, which always
+  // signals it. A real consumer's backpressure is the credit/FrameRelease edge
+  // (sent after it finishes reading the slot), so the backend must not block on
+  // consumer_done here — a consumer that vanishes mid-frame would otherwise
+  // wedge the raster thread on a signal that never comes.
   if (backend->loopback_ && backend->semaphores_active_) {
     backend->WaitConsumerDone(backend->current_image_);
   }
@@ -1309,12 +1410,16 @@ bool HeadlessVulkanBackend::PresentCallback(
   // Advance the round-robin index so the next frame targets a different image.
   auto* backend = BackendOf(user_data);
   const uint32_t k = backend->current_image_;  // index the engine just rendered
-  if (backend->loopback_ && backend->semaphores_active_) {
+  // frame_sync_active_ was latched for this frame in GetNextImageCallback.
+  if (backend->frame_sync_active_) {
     // Signal render_done[k] after the engine's render submits (same queue,
-    // ordered), then have the loopback consumer immediately drain it and signal
-    // consumer_done[k] so image k is free for its next GetNextImage.
+    // ordered) so the consumer may sample image k. In loopback the stand-in
+    // consumer immediately drains it and signals consumer_done[k]; a real
+    // consumer waits render_done[k] and signals consumer_done[k] itself.
     backend->SignalRenderDone(k);
-    backend->LoopbackSelfConsume(k);
+    if (backend->loopback_) {
+      backend->LoopbackSelfConsume(k);
+    }
   }
   backend->current_image_ = (k + 1) % kImageCount;
 
@@ -1330,7 +1435,11 @@ bool HeadlessVulkanBackend::PresentCallback(
     cb = backend->frame_listener_;
     user = backend->frame_listener_user_;
   }
-  if (cb != nullptr) {
+  // Only advertise the frame when its render_done[k] was signaled this frame
+  // (frame_sync_active_): a consumer waits render_done[k] before sampling, so a
+  // FramePresent without the matching signal would hang it. Dormant frames (no
+  // consumer) simply are not advertised; the server drops them anyway.
+  if (cb != nullptr && backend->frame_sync_active_) {
     cb(k, backend->frame_seq_++, user);
   }
   return true;
