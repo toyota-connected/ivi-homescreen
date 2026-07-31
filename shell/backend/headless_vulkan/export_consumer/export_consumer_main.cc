@@ -80,6 +80,28 @@ uint32_t ResolveFrameBudget() {
   return 120;
 }
 
+// Optional resize request: IHS_VK_CONSUMER_RESIZE="WxH" makes the consumer send
+// one Resize after a few frames, exercising the backend's rebuild_pool. Returns
+// {0,0} when unset/invalid.
+ihs_vke::Resize ResolveResize() {
+  ihs_vke::Resize r{0, 0};
+  const char* env = std::getenv("IHS_VK_CONSUMER_RESIZE");
+  if (env == nullptr || env[0] == '\0') {
+    return r;
+  }
+  char* end = nullptr;
+  const long w = std::strtol(env, &end, 10);
+  long h = 0;
+  if (end != nullptr && (*end == 'x' || *end == 'X')) {
+    h = std::strtol(end + 1, nullptr, 10);
+  }
+  if (w > 0 && h > 0) {
+    r.width = static_cast<uint32_t>(w);
+    r.height = static_cast<uint32_t>(h);
+  }
+  return r;
+}
+
 void ToHex(const uint8_t* uuid, char out[33]) {
   static const char* kHex = "0123456789abcdef";
   for (int i = 0; i < 16; ++i) {
@@ -119,6 +141,8 @@ int main() {
 
   const std::string socket_path = ResolveSocketPath();
   const uint32_t frame_budget = ResolveFrameBudget();
+  const ihs_vke::Resize resize = ResolveResize();
+  bool resize_sent = false;
 
   ihs_vke_consumer::VkConsumer consumer;
   if (!consumer.InitVulkan()) {
@@ -320,6 +344,21 @@ int main() {
           break;
         }
         ++consumed;
+
+        // Optionally request a resize partway through; the bridge rebuilds the
+        // pool and sends a fresh ImageTable, which the kImageTable case
+        // re-imports at the new extent.
+        if (resize.width != 0 && !resize_sent && consumed >= 8) {
+          if (ihs_vke_consumer::SendPod(sock, ihs_vke::MsgType::kResize,
+                                        resize)) {
+            std::fprintf(stderr,
+                         "[ihs-vk-consumer] requested resize to %ux%u\n",
+                         resize.width, resize.height);
+            resize_sent = true;
+          } else {
+            LogErr("failed to send Resize");
+          }
+        }
         break;
       }
 

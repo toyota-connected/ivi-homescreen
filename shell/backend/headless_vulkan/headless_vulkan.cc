@@ -1164,13 +1164,15 @@ int HeadlessVulkanBackend::FillImageTable(IhsVkExportImageTable* out) const {
   out->generation = generation_;
   out->slot_count = kImageCount;
 
-  // If a prior consumer just detached, wait briefly for the raster thread to
-  // reinstall fresh semaphores (RebaselineSemaphores) so the fds exported here
-  // carry a clean binary state rather than the previous session's leftovers.
-  // The raster thread ticks well within this bound at the pacing rate; the cap
-  // keeps a stalled raster from hanging a handshake.
+  // Wait briefly for the raster thread to finish any pending semaphore
+  // rebaseline (a prior consumer detached) or pool resize, so the fds exported
+  // here are the current generation with a clean binary state rather than
+  // leftovers. The raster thread ticks well within this bound at the pacing
+  // rate; the cap keeps a stalled raster from hanging a handshake.
   for (int spin = 0;
-       spin < 200 && sync_rebaseline_pending_.load(std::memory_order_acquire);
+       spin < 400 &&
+       (sync_rebaseline_pending_.load(std::memory_order_acquire) ||
+        resize_pending_.load(std::memory_order_acquire));
        ++spin) {
     ::usleep(1000);  // 1 ms
   }
@@ -1294,14 +1296,111 @@ void HeadlessVulkanBackend::InjectPointer(const IhsPointerEvent& ev) {
   });
 }
 
+void HeadlessVulkanBackend::SendWindowMetrics(uint32_t width, uint32_t height) {
+  if (engine_handle_ == nullptr) {
+    return;
+  }
+  FlutterWindowMetricsEvent metrics{};
+  metrics.struct_size = sizeof(FlutterWindowMetricsEvent);
+  metrics.width = width;
+  metrics.height = height;
+  // Headless has no display scale: logical == physical pixels (pixel_ratio 1).
+  metrics.pixel_ratio = 1.0;
+  metrics.display_id = 0;
+  metrics.view_id = 0;
+  LibFlutterEngine->SendWindowMetricsEvent(engine_handle_, &metrics);
+}
+
+void HeadlessVulkanBackend::PerformResize() {
+  uint32_t w = 0;
+  uint32_t h = 0;
+  {
+    std::lock_guard<std::mutex> lk(resize_mutex_);
+    w = resize_width_;
+    h = resize_height_;
+  }
+
+  // No in-flight per-frame sync submits here (we are at a GetNextImage boundary
+  // before this frame's render), so a full device idle makes destroying and
+  // recreating the pool + semaphores safe. The consumer's imported dma-bufs
+  // keep their own fd references, so freeing our side does not pull the memory
+  // out from under a consumer that has not yet dropped the old generation.
+  d().vkDeviceWaitIdle(device_);
+  const uint32_t old_w = width_;
+  const uint32_t old_h = height_;
+  DestroyRenderTargets();
+  width_ = w;
+  height_ = h;
+  const bool ok = CreateRenderTargets();
+  if (ok) {
+    ++generation_;
+    current_image_ = 0;
+    // CreateRenderTargets reinstalled fresh semaphores, so any earlier
+    // rebaseline request is now satisfied.
+    sync_rebaseline_pending_.store(false, std::memory_order_release);
+    ihs::log::info(
+        "[HeadlessVulkan] pool rebuilt {}x{} -> {}x{} (generation {})", old_w,
+        old_h, w, h, generation_);
+  } else {
+    ihs::log::error("[HeadlessVulkan] pool rebuild to {}x{} failed", w, h);
+  }
+
+  // Restore pacing: a real consumer resumes consumer-driven (credits reset to
+  // the pipeline depth); otherwise stay free-run.
+  if (pacer_ != nullptr) {
+    pacer_->SetFreeRun(
+        !export_consumer_active_.load(std::memory_order_acquire));
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(resize_mutex_);
+    resize_result_ = ok ? 0 : -1;
+    resize_done_ = true;
+  }
+  resize_pending_.store(false, std::memory_order_release);
+  resize_cv_.notify_all();
+}
+
 int HeadlessVulkanBackend::RebuildExportPool(uint32_t width, uint32_t height) {
-  // Not supported yet: a real rebuild must tear down and recreate the image
-  // pool AND the per-frame semaphores under raster-thread quiescence, then bump
-  // generation_ so a consumer re-imports. Deferred to a later step.
-  ihs::log::warn(
-      "[HeadlessVulkan] RebuildExportPool({}x{}) not supported yet; ignoring",
-      width, height);
-  return -1;
+  if (!export_enabled() || width == 0 || height == 0) {
+    return -1;
+  }
+  if (width == width_ && height == height_) {
+    return 0;  // already at this extent
+  }
+  if (engine_handle_ == nullptr ||
+      !vsync_running_.load(std::memory_order_acquire)) {
+    return -1;  // no running engine to drive a frame through the rebuild
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(resize_mutex_);
+    resize_width_ = width;
+    resize_height_ = height;
+    resize_done_ = false;
+    resize_result_ = -1;
+  }
+  resize_pending_.store(true, std::memory_order_release);
+
+  // Force frames so the raster thread reaches GetNextImage and performs the
+  // rebuild even if consumer pacing is currently credit-starved; PerformResize
+  // restores the pacing mode. Then push the new metrics so the rebuilt frame
+  // lays out at the new size.
+  if (pacer_ != nullptr) {
+    pacer_->SetFreeRun(true);
+  }
+  SendWindowMetrics(width, height);
+
+  std::unique_lock<std::mutex> lk(resize_mutex_);
+  const bool done = resize_cv_.wait_for(lk, std::chrono::seconds(2),
+                                        [this] { return resize_done_; });
+  if (!done) {
+    resize_pending_.store(false, std::memory_order_release);
+    ihs::log::warn("[HeadlessVulkan] RebuildExportPool({}x{}) timed out", width,
+                   height);
+    return -1;
+  }
+  return resize_result_;
 }
 
 // ── Renderer config ──────────────────────────────────────────────────────────
@@ -1366,6 +1465,13 @@ FlutterVulkanImage HeadlessVulkanBackend::GetNextImageCallback(
     void* user_data,
     const FlutterFrameInfo* /* frame_info */) {
   auto* backend = BackendOf(user_data);
+  // A consumer requested a resize: rebuild the pool at the new extent now, at
+  // this frame boundary, so the image returned below (and the render into it)
+  // is the new size. Runs before the rebaseline check — a rebuild reinstalls
+  // the semaphores itself.
+  if (backend->resize_pending_.load(std::memory_order_acquire)) {
+    backend->PerformResize();
+  }
   // A consumer detached since the last frame: recreate the semaphores now,
   // while dormant, so the next consumer imports a clean baseline. Done here (a
   // raster- thread frame boundary with no in-flight sync submits) rather than
