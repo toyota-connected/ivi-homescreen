@@ -201,6 +201,23 @@ shell logging surface honors them transparently.
 
 ---
 
+## Known limitations
+
+- **Log lines are truncated at `IHS_LOG_TEXT_CAPACITY`.** Lines that exceed the
+  fixed stack buffer are silently cut at the C ABI boundary; there is no
+  partial-write recovery or warning.
+- **Ring overflow drops records silently.** When the per-thread SPSC ring is
+  full, `ihs_log` drops the record and increments a per-ring counter. No
+  backpressure is applied to the caller.
+- **Only one sink is active at a time.** `IHS_LOG_SINK` selects exactly one of
+  `console`, `file`, or `dlt`; simultaneous fan-out to multiple sinks is not
+  supported.
+- **Records emitted before `ihs_log_start` are dropped.** Log calls that race
+  the startup window (e.g. from static-init code) are issued against an invalid
+  context and discarded; they are not buffered for replay once the bridge is up.
+
+---
+
 ## References
 
 - [fmt library](https://fmt.dev) — header-only formatting used shell-side (`third_party/fmt`).

@@ -331,3 +331,30 @@ baselines under [`test/baselines/`](../../test/baselines/)).
 - Wayland protocols: `zwp_input_timestamps_v1` (kernel input time) and
   `wp_presentation` feedback (compositor scanout time) — the two endpoints joined
   by `MotionToPhoton`.
+
+---
+
+## Known limitations
+
+- **The `MotionToPhoton` input ring holds at most 256 entries.** Input events
+  that arrive during a stall or idle burst without an interleaving present
+  overflow the ring; the oldest entry is dropped and the drop is counted. High
+  input-event rates without corresponding presents will produce inaccurate
+  latency numbers.
+- **Frame-accurate latency requires a valid input cutoff.** When `cutoff_ns` is
+  `0` (e.g. a vsync provider that does not expose
+  `LastDeliveredFrameStartNs`), no inputs are matched frame-accurately on that
+  present and they roll forward to the next, understating latency.
+- **`pv_latency` fires at most once per platform-view id.** After the first
+  composite the id is added to the seen set and `FirstCompositeLatencyUs()`
+  returns `-1` for all subsequent composites of the same view. Ids are never
+  reused across the process lifetime.
+- **The latency histogram has 1 ms granularity and a 200 ms ceiling.** Latencies
+  above 200 ms accumulate in an overflow bucket; percentile readout is ±1 ms.
+- **The DRM/KMS path requires strand marshaling for `MotionToPhoton`.** If the
+  platform task runner is not yet wired when the first page-flip fires,
+  `MarshalRecordPresent` is a no-op and the scanout record is silently discarded.
+- **Profiling summaries are suppressed if `IHS_LOG_LEVEL` filters `info`.**
+  All three probes emit results via `ihs::log::info`; setting `IHS_LOG_LEVEL`
+  to `warn` or higher silently discards probe output even when a probe is
+  enabled.

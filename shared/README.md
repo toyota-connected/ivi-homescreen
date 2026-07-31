@@ -280,3 +280,18 @@ The logging sinks are selected from the environment at `ihs_log_start()`:
   out-of-tree plugins and where `ihs_shared` sits.
 - [shell/configuration/README.md](../shell/configuration/README.md) — the shell
   configuration that is flattened and published into the config read surface.
+
+---
+
+## Known limitations
+
+- **Static linking is not supported.** `ihs_shared` must be a single `.so`
+  shared by the shell and all plugins; statically linking it into both would
+  break the one-copy-of-state invariant.
+- **The platform-view surface (`ihs_pv_*`) is platform-thread only.** All
+  `negotiate`, factory, grant, and `IhsPvCallbacks` calls must originate on
+  the platform thread. Calling from any other thread is undefined behavior.
+- **The library cannot be unloaded.** `libihs_shared.so.1` is linked with
+  `-z nodelete` and remains mapped for the process lifetime. Even if every
+  plugin that opened it is closed, the drain-thread TLS and per-thread rings
+  must not be destroyed against unmapped code.
