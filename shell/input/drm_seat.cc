@@ -1171,12 +1171,14 @@ void DrmSeat::FlushTouchBatch() const {
   if (touch_batch_.empty() || touch_batch_region_ == nullptr) {
     touch_batch_.clear();
     touch_batch_region_ = nullptr;
+    touch_batch_ts_ = 0;
     return;
   }
   DispatchToRegion(*touch_batch_region_, touch_batch_.data(),
                    touch_batch_.size());
   touch_batch_.clear();
   touch_batch_region_ = nullptr;
+  touch_batch_ts_ = 0;
 }
 
 void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
@@ -1275,7 +1277,6 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
   FlutterPointerEvent pe{};
   pe.struct_size = sizeof(FlutterPointerEvent);
   pe.phase = phase;
-  pe.timestamp = FlutterTimestampMicros();
   pe.x = fx;
   pe.y = fy;
   pe.device = ev.slot;
@@ -1288,6 +1289,18 @@ void DrmSeat::HandleTouch(const drm::input::TouchEvent& ev) const {
     FlushTouchBatch();
   }
   touch_batch_region_ = region;
+  // One stamp for the whole frame. The contacts of a touch frame are one
+  // hardware scan and are logically simultaneous, so stamping each as it is
+  // walked hands the engine ten fingers whose times differ by however long
+  // that walk took -- and the engine's pointer resampler then interpolates
+  // that skew between fingers which in fact moved together. Latched from the
+  // first contact of the batch, the same way the Wayland path latches
+  // frame_time_us. Must come after the region flush above, so a batch that
+  // just went out does not leave its stamp behind for the next one.
+  if (touch_batch_.empty()) {
+    touch_batch_ts_ = FlutterTimestampMicros();
+  }
+  pe.timestamp = touch_batch_ts_;
   touch_batch_.push_back(pe);
 
   // Backstops: cancel ends the session with no guaranteed trailing frame

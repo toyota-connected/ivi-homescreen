@@ -276,6 +276,9 @@ class DrmSeat final : public ISeat {
   // 2500/s. Touched only from the seat dispatch thread.
   mutable std::vector<FlutterPointerEvent> touch_batch_;
   mutable const ViewRegion* touch_batch_region_ = nullptr;
+  // The stamp shared by every contact in the open batch, latched from the
+  // first one. See HandleTouch.
+  mutable size_t touch_batch_ts_ = 0;
   void FlushTouchBatch() const;
 
   // Caller-supplied hook for libinput's privileged device opens. Empty
