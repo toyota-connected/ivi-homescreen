@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -128,7 +128,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -202,7 +202,7 @@ jobs:
       # so this needs no setup-workspace / pinned checkout — it compiles exactly
       # the code under review.
       - name: Checkout ivi-homescreen (PR)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: Install build deps
@@ -252,7 +252,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout ivi-homescreen (PR)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: Install build deps
@@ -299,7 +299,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -399,7 +399,7 @@ jobs:
         run: genhtml -o lcovHtml -s --legend --branch-coverage coverage.info
 
       - name: Upload coverage HTML report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-coverage-html
           path: ${{github.workspace}}/build/unit-tests/lcovHtml/
