@@ -15,6 +15,9 @@
 
 #include "app.h"
 #include "logging/logging.h"
+#if BUILD_BACKEND_HEADLESS_VULKAN
+#include "vk_export_bridge_loader.h"
+#endif
 
 #include <algorithm>
 #include <csignal>
@@ -214,10 +217,24 @@ App::App(const std::vector<Configuration::Config>& configs) {
     display->StartEvents();
   }
 
+#if BUILD_BACKEND_HEADLESS_VULKAN
+  // Bring up the in-process ihs-vk-export bridge last: the headless-vulkan
+  // backend registered its export API during display/view construction above,
+  // so the module's dlsym(RTLD_DEFAULT) now resolves to a live backend. Inert
+  // unless IVI_VK_BRIDGE_SO is set.
+  vk_export_bridge_ = std::make_unique<ihs::VkExportBridgeLoader>();
+#endif
+
   IHS_DEBUG("-App::App");
 }
 
 App::~App() {
+#if BUILD_BACKEND_HEADLESS_VULKAN
+  // Stop and unload the bridge before anything else: this clears the backend's
+  // raster-thread frame listener and joins the module's IO thread while the
+  // backend (owned by the views/displays below) is still alive.
+  vk_export_bridge_.reset();
+#endif
   for (const auto& display : m_displays) {
     display->StopEvents();
   }
