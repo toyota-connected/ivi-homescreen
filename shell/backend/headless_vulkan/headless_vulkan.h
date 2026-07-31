@@ -18,6 +18,7 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -160,7 +161,11 @@ class HeadlessVulkanBackend final : public Backend {
   // Inject a pointer event through the engine's normal input path; marshaled to
   // the platform task runner.
   void InjectPointer(const IhsPointerEvent& ev);
-  // Rebuild the pool at a new extent. NOT SUPPORTED yet: logs and returns -1.
+  // Rebuild the exported pool at a new extent (consumer-driven resize). Blocks
+  // until the raster thread recreates the images + semaphores at the new size,
+  // bumps generation_, and the engine is told to relayout. Returns 0 on
+  // success, -1 if export is off, the size is unchanged/invalid, or it timed
+  // out. Called from the bridge IO thread.
   int RebuildExportPool(uint32_t width, uint32_t height);
 
  private:
@@ -214,6 +219,14 @@ class HeadlessVulkanBackend final : public Backend {
   // export→plain fallback and Teardown.
   void DestroyRenderTargets();
   void Teardown();
+
+  // Perform a pending pool resize on the raster thread at a GetNextImage frame
+  // boundary: wait the device idle, recreate the render targets + semaphores at
+  // resize_{width,height}_, bump generation_, and unblock RebuildExportPool.
+  void PerformResize();
+  // Push a new viewport size to the engine so it relayouts at the new extent.
+  // The engine metrics API is thread-safe; called from the bridge IO thread.
+  void SendWindowMetrics(uint32_t width, uint32_t height);
 
   // Root-surface renderer callbacks (user_data == the FlutterDesktopEngineState
   // handed to FlutterEngineRun; recovered via BackendOf).
@@ -300,6 +313,20 @@ class HeadlessVulkanBackend final : public Backend {
   // (FillImageTable dups them). mutable so the const FillImageTable can lock
   // it.
   mutable std::mutex export_fd_mutex_;
+
+  // Consumer-driven pool resize. RebuildExportPool (bridge IO thread) stashes
+  // the requested extent, sets resize_pending_, and blocks on resize_cv_ until
+  // the raster thread's next GetNextImage runs PerformResize and reports the
+  // outcome. FillImageTable also waits out a pending resize so it exports the
+  // rebuilt fds. Sizes/flags under resize_mutex_; resize_pending_ is the
+  // raster-thread trigger.
+  std::atomic<bool> resize_pending_{false};
+  std::mutex resize_mutex_;
+  std::condition_variable resize_cv_;
+  uint32_t resize_width_{0};   // guarded by resize_mutex_
+  uint32_t resize_height_{0};  // guarded by resize_mutex_
+  bool resize_done_{false};    // guarded by resize_mutex_
+  int resize_result_{-1};      // guarded by resize_mutex_
 
   // Synthetic-vsync pacing. vsync_ holds the baton machinery; the pacer drives
   // it, run in free-run (ceiling-only) mode since there is no consumer.
