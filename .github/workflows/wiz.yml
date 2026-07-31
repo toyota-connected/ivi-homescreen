@@ -17,7 +17,7 @@ jobs:
       composefiles: ${{ steps.set-matrix.outputs.composefiles }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: find-docker-files
         id: set-matrix
         run: |
@@ -72,7 +72,7 @@ jobs:
           password: ${{ secrets.STARGATE_ARTIFACTORY_TOKEN }}
           append: true
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: docker compose local build
         id: compose
         run: |
@@ -109,7 +109,7 @@ jobs:
         dockerfile: ${{ fromJson(needs.set-matrix.outputs.dockerfiles) }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Wiz IaC Scan
         uses: sg-innersource/wizcli-wrapper@v1
         with:
@@ -121,7 +121,7 @@ jobs:
     runs-on: [sg-jpe-x64-ubuntu-22.04-2core]
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Wiz IaC Scan
         uses: sg-innersource/wizcli-wrapper@v1
         with:

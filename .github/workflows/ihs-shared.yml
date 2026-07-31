@@ -38,7 +38,7 @@ jobs:
         enable_dlt: [ON, OFF]
     name: "consumer-smoke DLT=${{ matrix.enable_dlt }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -98,7 +98,7 @@ jobs:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch fmt submodule (raw-fmt reference)
         run: git submodule update --init --depth 1 third_party/fmt
@@ -127,7 +127,7 @@ jobs:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain + libabigail
         run: |
@@ -173,7 +173,7 @@ jobs:
 
       - name: Upload baseline artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ihs-shared-abi
           path: shared/abi/libihs_shared.so.abi
@@ -190,7 +190,7 @@ jobs:
               || github.event_name == 'push') }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain + dlt-daemon
         run: |
