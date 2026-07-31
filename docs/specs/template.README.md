@@ -101,6 +101,21 @@
 
 ---
 
+## Known limitations <!-- optional -->
+
+<!-- guidelines: 
+    - format: unordered list
+    - each limitation should be a single bullet point
+    - each bullet point should be up to 6 lines of text
+    - here's some good scenarios for an item:
+        - unimplemented (TODO) functionality
+        - known bugs
+        - unhandled edge cases
+        - quirks of the implementation
+-->
+
+---
+
 ## References
 
 <!-- list: references with links, include dependencies if any -->

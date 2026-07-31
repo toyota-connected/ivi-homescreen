@@ -505,3 +505,27 @@ Resolved in `parse_config()` from `config_common.h` when a value is unset/zero:
   — `LeaseConfig`, the semantics behind the `lease_*` keys.
 - [tomlplusplus](https://github.com/marzer/tomlplusplus) — TOML parser
   (exceptions disabled). [cxxopts](https://github.com/jarro2783/cxxopts) — CLI parser.
+
+---
+
+## Known limitations
+
+- **Feature-specific configuration is parsed in their respective subsystem classes**
+  (`[watchdog]` and `[sentry]`) The module copies the raw TOML
+  tables into the resolved `Config`; `Watchdog` and `CrashHandler` parse their
+  keys at construction time. This satisfies separation of concerns but means
+  validation errors in those tables are reported at runtime rather than at
+  configuration parse time.
+- **CLI flags are process-wide.** A single `-w` or `--height` clobbers every
+  view's width or height; there is no per-view CLI flag syntax — use a master
+  `--config` file with per-`[[view]]` overrides instead.
+- **A later layer's `[[view.output]]` replaces rather than appends earlier output bindings.**
+  When a master TOML or CLI layer overrides `[view.output]`,
+  `additional_outputs` is cleared before repopulating; partial per-output
+  overrides are not supported.
+- **TOML has no value references.** Defaults that depend on view geometry
+  (activation area, width/height when unset) are resolved in `parse_config()`
+  after all layers have been applied, not in the TOML files themselves.
+- **Fatal parse and validation errors call `exit()` directly.** Errors detected
+  by `ParseArgcArgv()` or `parse_config()` terminate the process before `App`
+  is constructed; there is no error-return path for callers to intercept.
