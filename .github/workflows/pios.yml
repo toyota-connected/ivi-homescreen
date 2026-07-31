@@ -57,7 +57,7 @@ jobs:
     name: publish-${{ matrix.pios }}
     steps:
       - name: Checkout ivi-homescreen
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           path: ivi-homescreen
           submodules: recursive
@@ -157,13 +157,13 @@ jobs:
     name: build-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
     steps:
       - name: Checkout ivi-homescreen
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           path: ivi-homescreen
           submodules: recursive
 
       - name: Checkout ivi-homescreen-plugins (sibling)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: toyota-connected/ivi-homescreen-plugins
           path: ivi-homescreen-plugins
