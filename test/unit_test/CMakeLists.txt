@@ -101,13 +101,43 @@ target_include_directories(homescreen_ut_shell
     # unit_test_utils.cc (in the archive) and test case .cc files both
     # include gtest/gtest.h; propagate it through the archive.
     $<TARGET_PROPERTY:gtest,INTERFACE_INCLUDE_DIRECTORIES>
+    # platform_homescreen is linked PRIVATE below (to keep its INTERFACE_SOURCES
+    # from being compiled into every driver), which also drops its PUBLIC
+    # include-dir usage requirements. Some shell headers reused as
+    # TYPICAL_TEST_SOURCES (flutter_view.h / engine.h) and test cases
+    # (test_case_text_input.cc) include platform_homescreen's public headers
+    # (flutter_desktop_view_controller_state.h, flutter_desktop_engine_state.h),
+    # so re-propagate just its include dirs here.
+    $<TARGET_PROPERTY:platform_homescreen,INTERFACE_INCLUDE_DIRECTORIES>
 )
+# platform_homescreen is a STATIC library that re-exports its platform-view
+# sources (platform_views_handler.cc / platform_view_registry.cc /
+# platform_view_touch.cc) as INTERFACE_SOURCES via target_sources(... PUBLIC ...)
+# — so every target that links it *compiles* those .cc into itself. That is fine
+# for the shell binary (a static archive only pulls .o on demand), but this
+# OBJECT library's object files are always linked, and linking platform_homescreen
+# PUBLIC would re-propagate its INTERFACE_SOURCES to every test driver as well.
+# The driver would then compile the same three TUs a second time, producing
+# "multiple definition of PlatformViewsHandler/PlatformViewRegistry/PlatformViewTouch"
+# at link time. So split platform_homescreen out of the PUBLIC link set and link
+# it PRIVATE: its interface sources are then compiled exactly once — here, into
+# homescreen_ut_shell — while its archive (and usage requirements) still
+# propagate to the drivers that link this object library. Keep everything else
+# PUBLIC so drivers inherit the transitive link deps (wayland, EGL, flutter,
+# toolchain isystem paths).
+#
+# Use a LOCAL copy for the split: the old-style test subdirectories added below
+# link ${TYPICAL_TEST_LINK_LIBS} directly and rely on platform_homescreen's
+# PUBLIC include dirs (flutter_desktop_*.h), so the shared variable must stay
+# intact.
+set(HOMESCREEN_UT_SHELL_PUBLIC_LIBS ${TYPICAL_TEST_LINK_LIBS})
+list(REMOVE_ITEM HOMESCREEN_UT_SHELL_PUBLIC_LIBS platform_homescreen)
 target_link_libraries(homescreen_ut_shell
-    # PUBLIC: test executables that link this archive must also see the
-    # transitive link deps (wayland, EGL, flutter, toolchain isystem paths).
     PUBLIC
-    ${TYPICAL_TEST_LINK_LIBS}
+    ${HOMESCREEN_UT_SHELL_PUBLIC_LIBS}
     toolchain::toolchain
+    PRIVATE
+    platform_homescreen
 )
 
 
