@@ -354,6 +354,12 @@ class VulkanDrmBackend final : public Backend {
   // opened a render pass, which the caller needs because that pass leaves the
   // target in GENERAL and so replaces the explicit scanout barrier. Raster
   // thread.
+  // Import a platform view's acquire fence (a sync_file from an explicit-sync
+  // producer) as a semaphore for this frame's submit to wait on. A no-op when
+  // the producer stalled instead of handing one over, which is what an
+  // implicit-sync producer does. Raster thread.
+  void CollectAcquireWait(CompositorState& c, ICompositorSurface* surface);
+
   bool CompositeOverlays(VkCommandBuffer cmd,
                          const FlutterLayer** layers,
                          size_t count,
