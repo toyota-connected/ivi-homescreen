@@ -219,11 +219,14 @@ VkImageMemoryBarrier ColorBarrier(VkImage image,
 // buffer (the platform-view blend goes there too), so the recording is the
 // caller's to supply.
 template <typename Record>
-void SubmitOneShot(VkDevice device,
-                   VkCommandPool pool,
-                   VkFence fence,
-                   VkQueue queue,
-                   Record&& record) {
+void SubmitOneShot(
+    VkDevice device,
+    VkCommandPool pool,
+    VkFence fence,
+    VkQueue queue,
+    Record&& record,
+    const std::vector<VkSemaphore>& waits = {},
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT) {
   VkCommandBufferAllocateInfo cbai{};
   cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cbai.commandPool = pool;
@@ -240,10 +243,14 @@ void SubmitOneShot(VkDevice device,
   record(cmd);
   d().vkEndCommandBuffer(cmd);
 
+  const std::vector<VkPipelineStageFlags> wait_stages(waits.size(), wait_stage);
   VkSubmitInfo si{};
   si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   si.commandBufferCount = 1;
   si.pCommandBuffers = &cmd;
+  si.waitSemaphoreCount = static_cast<uint32_t>(waits.size());
+  si.pWaitSemaphores = waits.empty() ? nullptr : waits.data();
+  si.pWaitDstStageMask = waits.empty() ? nullptr : wait_stages.data();
   d().vkResetFences(device, 1, &fence);
   d().vkQueueSubmit(queue, 1, &si, fence);
   d().vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
@@ -656,6 +663,12 @@ struct VulkanDrmBackend::CompositorState {
   std::array<VkCommandBuffer, kSyncRing> sync_cmd{};
   std::array<VkFence, kSyncRing> sync_fence{};
   std::array<VkSemaphore, kSyncRing> sync_sem{};
+  // Producer acquire fences imported for the frame recorded into each ring
+  // slot. Destroyed when that slot comes round again, which is after its fence
+  // has been waited -- so the submit that waited on them has retired.
+  std::array<std::vector<VkSemaphore>, kSyncRing> acquire_waits{};
+  // Collected while recording the current frame, moved into the slot at submit.
+  std::vector<VkSemaphore> pending_acquire_waits{};
   bool explicit_sync = false;
 
   uint64_t frame = 0;
@@ -1214,7 +1227,14 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
                 1, &barrier);
           }
-        });
+        },
+        c.pending_acquire_waits);
+    // This path blocks until the submit retires, so the imported semaphores
+    // cannot outlive it and are freed here rather than against a ring slot.
+    for (VkSemaphore sem : c.pending_acquire_waits) {
+      d().vkDestroySemaphore(device_, sem, nullptr);
+    }
+    c.pending_acquire_waits.clear();
     return -1;
   }
 
@@ -1224,6 +1244,15 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
   // command buffer safe to re-record.
   d().vkWaitForFences(device_, 1, &c.sync_fence[i], VK_TRUE, UINT64_MAX);
   d().vkResetFences(device_, 1, &c.sync_fence[i]);
+  // That fence covered the submit which waited on this slot's acquire
+  // semaphores, so they are now safe to destroy. A SYNC_FD import is
+  // single-use: the wait resets the semaphore to unsignaled, so none can be
+  // reused across frames.
+  for (VkSemaphore sem : c.acquire_waits[i]) {
+    d().vkDestroySemaphore(device_, sem, nullptr);
+  }
+  c.acquire_waits[i].clear();
+  c.pending_acquire_waits.clear();
   VkCommandBuffer cmd = c.sync_cmd[i];
   d().vkResetCommandBuffer(cmd, 0);
   VkCommandBufferBeginInfo bi{};
@@ -1279,10 +1308,23 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
 #endif
   d().vkEndCommandBuffer(cmd);
 
+  // Producer acquire fences collected while recording: the blend samples those
+  // images, so the wait belongs at the fragment stage. Ownership moves to the
+  // slot before the submit is built, so pWaitSemaphores points at storage that
+  // outlives the call rather than at a vector about to be moved from.
+  c.acquire_waits[i] = std::move(c.pending_acquire_waits);
+  c.pending_acquire_waits.clear();
+  const std::vector<VkSemaphore>& waits = c.acquire_waits[i];
+  const std::vector<VkPipelineStageFlags> wait_stages(
+      waits.size(), VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
   VkSubmitInfo si{};
   si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   si.commandBufferCount = 1;
   si.pCommandBuffers = &cmd;
+  si.waitSemaphoreCount = static_cast<uint32_t>(waits.size());
+  si.pWaitSemaphores = waits.empty() ? nullptr : waits.data();
+  si.pWaitDstStageMask = waits.empty() ? nullptr : wait_stages.data();
   si.signalSemaphoreCount = 1;
   si.pSignalSemaphores = &c.sync_sem[i];
   if (d().vkQueueSubmit(graphics_queue_, 1, &si, c.sync_fence[i]) !=
@@ -1417,6 +1459,39 @@ void VulkanDrmBackend::ResizeCompositorSurface(
   }
 }
 
+void VulkanDrmBackend::CollectAcquireWait(CompositorState& c,
+                                          ICompositorSurface* surface) {
+  const int fd = surface->TakeAcquireFenceFd();
+  if (fd < 0) {
+    return;  // implicit-sync producer: it stalled before submitting
+  }
+  // A SYNC_FD import is necessarily temporary, and the semaphore is reset to
+  // unsignaled once waited -- so it is single-use and retired with the slot.
+  if (d().vkImportSemaphoreFdKHR == nullptr) {
+    ::close(fd);
+    return;
+  }
+  VkSemaphore sem = VK_NULL_HANDLE;
+  VkSemaphoreCreateInfo sci{};
+  sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  if (d().vkCreateSemaphore(device_, &sci, nullptr, &sem) != VK_SUCCESS) {
+    ::close(fd);
+    return;
+  }
+  VkImportSemaphoreFdInfoKHR ii{};
+  ii.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR;
+  ii.semaphore = sem;
+  ii.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+  ii.flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT;
+  ii.fd = fd;  // consumed by a successful import; still ours on failure
+  if (d().vkImportSemaphoreFdKHR(device_, &ii) != VK_SUCCESS) {
+    ::close(fd);
+    d().vkDestroySemaphore(device_, sem, nullptr);
+    return;
+  }
+  c.pending_acquire_waits.push_back(sem);
+}
+
 bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                                          const FlutterLayer** layers,
                                          const size_t count,
@@ -1514,6 +1589,11 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
         continue;  // no Vulkan image yet, or a GL-only producer
       }
       auto src = reinterpret_cast<VkImage>(vk_img);
+      // Wait the producer's work before sampling. An implicit-sync producer
+      // stalls before submitting and hands back -1, which is why this path went
+      // unexercised; an explicit-sync one hands over a sync_file, and without
+      // this the blend samples a buffer the producer may still be writing.
+      CollectAcquireWait(c, surface.get());
       // 0 keeps the historical B8G8R8A8_UNORM contract for RGB producers; a
       // planar producer reports its own format plus the conversion parameters.
       const uint32_t pv_fmt = surface->GetVulkanImageFormat();
