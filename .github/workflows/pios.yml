@@ -78,7 +78,7 @@ jobs:
       # store/ only — not all of ~/.cache/emb — to skip the multi-GB image/CAS
       # downloads and stay under the repo cache limit.
       - name: Cache emb store (extracted sysroot + toolchain)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/emb/store
           key: emb-store-${{ matrix.pios }}-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml', 'emb_cli/boards/raspberry-pi.emb.yaml') }}
@@ -100,7 +100,7 @@ jobs:
       # cannot restore into root-owned /usr/local/bin. Install from the cached
       # dir into /usr/local/bin (where the publish step's oras is on PATH).
       - name: Cache oras binary
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/oras-bin
           key: oras-${{ env.ORAS_VERSION }}-linux-amd64
@@ -187,7 +187,7 @@ jobs:
       # OCI cache in the Build step (EMB_CACHE_REGISTRY), so the resolve is a
       # cache hit. Root in-container; the image ships curl.
       - name: Cache oras binary
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /usr/local/bin/oras
           key: oras-${{ env.ORAS_VERSION }}-linux-amd64
