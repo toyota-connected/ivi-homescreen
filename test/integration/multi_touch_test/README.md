@@ -29,9 +29,26 @@ arena — so the raw stream reaches the checks unmodified.
 | C4 | frame batch | contacts in one hardware scan arrive with one shared timestamp (the embedder stamps the batch once). Mean move-group size during the synchronized 10-finger drag must be ≥ `EXPECT_BATCH_MEAN` (6.0). An unbatched embedder stamps each contact separately → mean ≈ 1 |
 | C5 | cancel | after a compositor cancel, every down contact receives `PointerCancel` within 500 ms. Advisory until a cancel is observed (trigger one manually via a compositor system gesture) |
 
-`MTT-SUMMARY: {json}` is printed whenever all contacts lift.
+Whenever all contacts lift, two lines are printed:
+
+```
+MTT-CHECKS: c1=pass c2=pass c3=FAIL c4=pass c5=FAIL
+MTT-SUMMARY: {json}
+```
+
 `MULTI_TOUCH_TEST: PASS|FAIL` is printed by the Self-check button, or
 automatically with `--dart-define=SELFCHECK_AFTER_S=<seconds>`.
+
+Scrape `MTT-CHECKS`, not the JSON. The embedder caps a log record at
+`IHS_LOG_TEXT_CAPACITY` (240 bytes, less the `flutter: ` tag) and the encoded
+summary is longer than that, so it does not arrive as one line — the shell
+chunks it onto a continuation record. Nothing is lost, but a reader that
+matches a single line gets only the first piece.
+
+The summary puts the five verdict flags first, so that first piece carries
+them. `MTT-CHECKS` is better still: short enough to be safe by construction, it
+always lands whole on one line. Should a record ever be dropped rather than
+chunked, it ends in `...+<n>` giving the number of characters lost.
 
 ## Expected results
 
