@@ -44,11 +44,10 @@
 // "MULTI_TOUCH_TEST: PASS|FAIL" follows whenever the Self-check button is
 // tapped or SELFCHECK_AFTER_S (dart-define) elapses.
 //
-// CI should scrape "MTT-CHECKS:" or "MULTI_TOUCH_TEST:", not the JSON: the
-// embedder caps a log record and the encoded summary is longer than the cap,
-// so it is chunked onto a continuation record rather than arriving as one
-// line. The summary orders the verdict flags first so the first piece carries
-// them, but only the short lines are safe by construction.
+// The summary is longer than one log record, but the logging library splits
+// and rejoins it, so it arrives on one line and parses. CI can read the JSON,
+// or scrape "MTT-CHECKS:" / "MULTI_TOUCH_TEST:" and skip parsing entirely. The
+// verdict flags come first for readability, not to survive a cut.
 //
 // Drive it with tools/inject_ten_finger.py (uinput, no hardware needed) or a
 // real 10-point panel.

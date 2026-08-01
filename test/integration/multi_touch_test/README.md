@@ -39,16 +39,18 @@ MTT-SUMMARY: {json}
 `MULTI_TOUCH_TEST: PASS|FAIL` is printed by the Self-check button, or
 automatically with `--dart-define=SELFCHECK_AFTER_S=<seconds>`.
 
-Scrape `MTT-CHECKS`, not the JSON. The embedder caps a log record at
-`IHS_LOG_TEXT_CAPACITY` (240 bytes, less the `flutter: ` tag) and the encoded
-summary is longer than that, so it does not arrive as one line — the shell
-chunks it onto a continuation record. Nothing is lost, but a reader that
-matches a single line gets only the first piece.
+`MTT-SUMMARY` arrives whole, on one line, and parses. A log record is capped at
+`IHS_LOG_TEXT_CAPACITY` and the encoded summary is longer than that, but the
+logging library splits an over-length message across records and rejoins it
+before any sink sees it, so what lands in the log is a single line.
 
-The summary puts the five verdict flags first, so that first piece carries
-them. `MTT-CHECKS` is better still: short enough to be safe by construction, it
-always lands whole on one line. Should a record ever be dropped rather than
-chunked, it ends in `...+<n>` giving the number of characters lost.
+`MTT-CHECKS` remains the easier thing to scrape — the five verdicts, no JSON
+parser needed — and `MULTI_TOUCH_TEST: PASS|FAIL` easier still. The summary
+orders the verdict flags first, which no longer matters for surviving a cut and
+is simply a readable order.
+
+Verified on a Raspberry Pi 4 over `drm-kms-egl`: two summary lines from a touch
+session, both parsed by `json.load`, 14 keys each.
 
 ## Expected results
 
