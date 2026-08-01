@@ -308,21 +308,29 @@ int main(const int argc, char** argv) {
     return active.list_modes(list_modes_dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
   }
 
-  // Construct the App. It populates the runtime backend registry and resolves
-  // the active backend from its configs on first display creation, so it is
-  // self-contained (e.g. the app unit test constructs App without main()).
-  App app(configs);
+  // Scoped so ~App runs before logging is stopped below. Shutdown is where a
+  // backend reports what the session did -- the motion-to-photon and vsync
+  // summaries, the DRM CRTC restore, the VT keyboard mode being handed back --
+  // and all of it is emitted from destructors. Left to run at `return`, after
+  // ihs_log_stop(), every one of those lines is written to a logging system
+  // that has already gone away, and the operator sees a log that simply stops.
+  {
+    // Construct the App. It populates the runtime backend registry and resolves
+    // the active backend from its configs on first display creation, so it is
+    // self-contained (e.g. the app unit test constructs App without main()).
+    App app(configs);
 
-  // Construct the waker (publishing its eventfd) before installing the
-  // signal handlers, so HandleShutdownSignal's async-signal-safe wake always
-  // has a valid fd to write to.
-  (void)MainLoopWaker::instance();
-  InstallShutdownHandlers();
+    // Construct the waker (publishing its eventfd) before installing the
+    // signal handlers, so HandleShutdownSignal's async-signal-safe wake always
+    // has a valid fd to write to.
+    (void)MainLoopWaker::instance();
+    InstallShutdownHandlers();
 
-  // Run the application: the shared reactor drives every backend on this (main)
-  // thread and blocks until the shutdown signal stops the io_context.
-  const int ret = app.Run();
-  (void)ret;
+    // Run the application: the shared reactor drives every backend on this
+    // (main) thread and blocks until the shutdown signal stops the io_context.
+    const int ret = app.Run();
+    (void)ret;
+  }
 
   IHS_LOGGING_FLUSH();
   IHS_LOGGING_STOP();
