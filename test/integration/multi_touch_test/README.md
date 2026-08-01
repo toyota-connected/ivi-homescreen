@@ -25,7 +25,7 @@ arena — so the raw stream reaches the checks unmodified.
 | --- | --- | --- |
 | C1 | concurrency | ≥ `EXPECT_FINGERS` (10) simultaneous contacts with that many distinct device ids |
 | C2 | legality | per-device phase machine: no down-while-down, no move/up/cancel-while-up. Catches lost transitions and the historical cancel bug (only device 0 cancelled → 9 contacts stuck down → next session violates) |
-| C3 | churn | ≥ `EXPECT_CHURN_IDS` (24) distinct device ids across the run. Compositor/libinput touch ids are unbounded; the pre-fix embedder indexed a fixed `surface_x[10]` array by id — an out-of-bounds write for id ≥ 10 |
+| C3 | churn | ≥ `EXPECT_CHURN_IDS` (24) distinct device ids across the run. The pre-fix Wayland path indexed a fixed `surface_x[kMaxTouchFinger]` array by the `wl_touch` id — an out-of-bounds write for id ≥ 10. **Wayland backends only**; see [C3 only applies to the Wayland backends](#c3-only-applies-to-the-wayland-backends) |
 | C4 | frame batch | contacts in one hardware scan arrive with one shared timestamp (the embedder stamps the batch once). Mean move-group size during the synchronized 10-finger drag must be ≥ `EXPECT_BATCH_MEAN` (6.0). An unbatched embedder stamps each contact separately → mean ≈ 1 |
 | C5 | cancel | after a compositor cancel, every down contact receives `PointerCancel` within 500 ms. Advisory until a cancel is observed (trigger one manually via a compositor system gesture) |
 
@@ -35,13 +35,41 @@ automatically with `--dart-define=SELFCHECK_AFTER_S=<seconds>`.
 
 ## Expected results
 
-| Embedder | C1 | C2 | C3 | C4 (mean batch) |
+| Embedder | C1 | C2 | C3 † | C4 (mean batch) |
 | --- | --- | --- | --- | --- |
-| pre touch-frame-batching | pass | pass* | **undefined behaviour** (OOB write for id ≥ 10) | **fail** (≈ 1.0) |
-| with touch-frame-batching | pass | pass | pass | pass (≈ 10) |
+| pre touch-frame-batching | pass | pass* | Wayland: **undefined behaviour** (OOB write for id ≥ 10) — drm/software: n/a | **fail** (≈ 1.0) |
+| with touch-frame-batching | pass | pass | Wayland: pass — drm/software: n/a | pass (≈ 10) |
 
 \* C2 fails pre-fix if a compositor cancel occurs mid-session (only device 0
 was cancelled, at the mouse position).
+
+† C3 as written can only be reached on the Wayland backends. On drm/software it
+reports the panel's slot count and stops there, by design — see below.
+
+### C3 only applies to the Wayland backends
+
+The device id a contact arrives with is not the same quantity on every backend:
+
+| Backend | Flutter device id | Range |
+| --- | --- | --- |
+| `wayland-egl`, `wayland-vulkan` | the compositor's `wl_touch` point id (`display.cc`) | unbounded — a compositor may keep incrementing |
+| `drm-kms-egl`, `drm-kms-vulkan` | the libinput MT slot, `pe.device = ev.slot` (`drm_seat.cc`) | 0 .. slots-1, recycled |
+| `software` | the libinput seat slot, range-checked against `kMaxTouchSlots` = 16 (`software_seat.cc`) | 0 .. 15, recycled |
+
+C3 exists because an unbounded id was once used to index a fixed array, and
+that array was Wayland's: `wl_fixed_t surface_x[kMaxTouchFinger]` in the
+`touch_` struct in `display.h`, indexed by the `wl_touch` id. No other backend
+ever had it — before the fix, that was the only file in `shell/` containing it.
+Only the Wayland path carries an unbounded id, so only there can the distinct-id
+count pass 24, and only under a compositor that does not recycle ids. On drm/software the id *is* a slot: it cannot exceed the controller's slot
+count however much the fingers churn, so C3 tops out at that count and never
+reaches the threshold. Neither backend can suffer the bug C3 guards against,
+because neither has an unbounded id to overflow with.
+
+Treat C3 as not applicable there rather than as a failure. Measured on a
+Raspberry Pi 4 driving the 800x480 DSI panel (`ft5x06`, 10 slots) on
+`drm-kms-egl`, with the injector's churn phase advancing kernel tracking ids to
+40: `distinct_ids_total` = 10.
 
 ## Building
 
@@ -92,11 +120,18 @@ per-output mapping applies — none of these flags are needed there.
 
 ### Real hardware
 
-Any ≥ 10-point panel. C3 requires enough finger churn to advance the
-compositor's touch ids past 24 — tap repeatedly. Compositors that reuse the
-lowest free id (Weston, wlroots) will not grow ids by design; use the
-injector (which drives the libinput path with growing tracking ids) or lower
+Any ≥ 10-point panel. On a Wayland backend, C3 requires enough finger churn to
+advance the compositor's touch ids past 24 — tap repeatedly. Compositors that
+reuse the lowest free id (Weston, wlroots) will not grow ids by design; lower
 `EXPECT_CHURN_IDS` for those.
+
+What the injector can and cannot do for C3 differs by backend. On drm/software
+its growing kernel tracking ids never reach the app at all: libinput maps them
+onto seat slots first, and the slot is what becomes the Flutter device id, so
+driving tracking ids to 40 on a 10-slot panel still yields 10 distinct ids. On
+a Wayland backend it does automate the churn — phase D taps 30 times — but the
+ids the app sees are the compositor's to allocate, so whether they grow past 24
+remains the compositor's behavior and not something the injector can force.
 
 ## Why frame batching matters (the "engine interruption" question)
 
