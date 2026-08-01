@@ -37,6 +37,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -102,10 +104,27 @@ inline void emit_fmt(IhsLogLevel level,
   char buf[IHS_LOG_TEXT_CAPACITY];
   const auto result = fmt::format_to_n(buf, sizeof(buf) - 1, fmt_str,
                                        std::forward<Args>(args)...);
-  const std::size_t len = result.size < sizeof(buf)
-                              ? static_cast<std::size_t>(result.size)
-                              : sizeof(buf) - 1;
-  ihs_log(ctx.index(), static_cast<std::uint8_t>(level), buf, len);
+  if (result.size < sizeof(buf)) {
+    ihs_log(ctx.index(), static_cast<std::uint8_t>(level), buf,
+            static_cast<std::size_t>(result.size));
+    maybe_flush(level);
+    return;
+  }
+  // Too long for the stack buffer. Format it again into a growable one and
+  // hand the whole thing over: ihs_log splits an over-length message across
+  // records and the drain rejoins them, so the line survives -- but only if it
+  // arrives intact. Clipping it here would lose the tail before the library
+  // ever sees it, silently, unlike a record the library had to drop.
+  //
+  // The buffer is thread_local and kept, so a caller that logs long lines
+  // repeatedly allocates once rather than per call, and a caller that never
+  // does pays nothing.
+  static thread_local std::string overflow;
+  overflow.clear();
+  fmt::format_to(std::back_inserter(overflow), fmt_str,
+                 std::forward<Args>(args)...);
+  ihs_log(ctx.index(), static_cast<std::uint8_t>(level), overflow.data(),
+          overflow.size());
   maybe_flush(level);
 }
 
