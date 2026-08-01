@@ -803,6 +803,13 @@ void ListenerRejectGesture(int32_t /* id */, void* data) {
   }
 }
 
+void ListenerRenegotiate(int32_t /* id */, void* data) {
+  auto* view = static_cast<IhsPluginView*>(data);
+  if (view->callbacks.renegotiate != nullptr) {
+    view->callbacks.renegotiate(view->plugin_user_data);
+  }
+}
+
 void ListenerDispose(bool /*hybrid*/, void* data) {
   static_cast<IhsPluginView*>(data)->DisposePlugin();
 }
@@ -815,6 +822,7 @@ const platform_view_listener kListener = {
     /* dispose */ ListenerDispose,
     /* accept_gesture */ ListenerAcceptGesture,
     /* reject_gesture */ ListenerRejectGesture,
+    /* renegotiate */ ListenerRenegotiate,
 };
 
 // --- IhsPvHost implementation -----------------------------------------------
