@@ -115,6 +115,19 @@ class PlatformViewRegistry {
   void AcceptGesture(int32_t id);
   void RejectGesture(int32_t id);
 
+  // Tell one view its grant is stale. Returns false when no instance holds
+  // @p id, or when the view registered no renegotiate callback -- the caller
+  // uses that to tell "nothing to notify" from "notified".
+  bool Renegotiate(int32_t id);
+
+  // Tell every live view. The output layer calls this for the views bound to
+  // an output that changed; a caller with no per-view mapping (a single-output
+  // system) can use it directly.
+  void RenegotiateAll();
+
+  // Ids of the live instances, so a caller can decide which to notify.
+  [[nodiscard]] std::vector<int32_t> InstanceIds() const;
+
  private:
   struct Instance {
     const platform_view_listener* listener{nullptr};

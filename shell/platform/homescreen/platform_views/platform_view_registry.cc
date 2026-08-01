@@ -213,6 +213,37 @@ void PlatformViewRegistry::RejectGesture(int32_t id) {
   }
 }
 
+bool PlatformViewRegistry::Renegotiate(const int32_t id) {
+  const platform_view_listener* listener = nullptr;
+  void* context = nullptr;
+  if (!LookupListener(id, &listener, &context) ||
+      listener->renegotiate == nullptr) {
+    return false;
+  }
+  listener->renegotiate(id, context);
+  return true;
+}
+
+std::vector<int32_t> PlatformViewRegistry::InstanceIds() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<int32_t> ids;
+  ids.reserve(instances_.size());
+  for (const auto& [id, instance] : instances_) {
+    ids.push_back(id);
+  }
+  return ids;
+}
+
+void PlatformViewRegistry::RenegotiateAll() {
+  // Snapshot the ids, then dispatch outside the lock: a plugin's renegotiate
+  // re-runs ihs_pv_negotiate, which comes back through the registry, so
+  // holding the lock across the callback would deadlock -- the same reason
+  // LookupListener copies the table out rather than dispatching under it.
+  for (const int32_t id : InstanceIds()) {
+    (void)Renegotiate(id);
+  }
+}
+
 void PlatformViewRegistry::UnregisterCompositorSurface(int32_t id) const {
 #if BUILD_COMPOSITOR
   if (engine_state_ != nullptr && engine_state_->view_controller != nullptr &&

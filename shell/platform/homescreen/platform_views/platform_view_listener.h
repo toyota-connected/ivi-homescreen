@@ -46,6 +46,14 @@ struct platform_view_listener {
   /// two a host cannot implement.
   void (*accept_gesture)(int32_t id, void* data);
   void (*reject_gesture)(int32_t id, void* data);
+  /// The grant this view was given is no longer valid -- its output changed
+  /// mode, went away, or the plane backing it was taken -- so whatever the
+  /// view negotiated has to be negotiated again or dropped to the floor.
+  ///
+  /// Delivered per view rather than broadcast: only the views bound to the
+  /// output that changed are told, so a second display coming and going does
+  /// not disturb the first.
+  void (*renegotiate)(int32_t id, void* data);
 };
 
 typedef void (*PlatformViewAddListener)(void* context,

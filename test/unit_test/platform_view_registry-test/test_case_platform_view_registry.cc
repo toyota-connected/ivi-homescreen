@@ -21,6 +21,9 @@
 
 #include <memory>
 
+#include <algorithm>
+#include <vector>
+
 #include "gtest/gtest.h"
 #include "platform/homescreen/platform_views/platform_view.h"
 #include "platform/homescreen/platform_views/platform_view_listener.h"
@@ -36,6 +39,7 @@ struct Probe {
   double last_h = 0;
   int accept = 0;
   int reject = 0;
+  int renegotiate = 0;
   int32_t last_gesture_id = -1;
   void* last_gesture_data = nullptr;
 };
@@ -58,6 +62,13 @@ void ProbeAcceptGesture(int32_t id, void* data) {
   p->last_gesture_data = data;
 }
 
+void ProbeRenegotiate(int32_t id, void* data) {
+  auto* p = static_cast<Probe*>(data);
+  ++p->renegotiate;
+  p->last_gesture_id = id;
+  p->last_gesture_data = data;
+}
+
 void ProbeRejectGesture(int32_t id, void* data) {
   auto* p = static_cast<Probe*>(data);
   ++p->reject;
@@ -73,6 +84,7 @@ constexpr platform_view_listener kListener = {
     ProbeDispose,        // dispose
     ProbeAcceptGesture,  // accept_gesture
     ProbeRejectGesture,  // reject_gesture
+    ProbeRenegotiate,    // renegotiate
 };
 
 // A factory-created instance that flips a flag when destroyed, so the test can
@@ -155,6 +167,39 @@ TEST(PlatformViewRegistry, GestureArbitrationCarriesListenerContext) {
   EXPECT_TRUE(registry.Dispose(7, false));
   registry.AcceptGesture(7);
   EXPECT_EQ(probe.accept, 1);
+}
+
+// Renegotiation is per view: the output layer notifies only the views bound to
+// the output that changed, so the registry must be able to address one, and to
+// report whether anyone was listening.
+TEST(PlatformViewRegistry, RenegotiateAddressesOneView) {
+  PlatformViewRegistry registry(nullptr);
+  Probe a;
+  Probe b;
+  registry.RegisterListener(1, &kListener, &a);
+  registry.RegisterListener(2, &kListener, &b);
+
+  EXPECT_TRUE(registry.Renegotiate(1));
+  EXPECT_EQ(a.renegotiate, 1);
+  EXPECT_EQ(b.renegotiate, 0);  // the other output's view is undisturbed
+  EXPECT_EQ(a.last_gesture_data, &a);
+
+  // An id nobody holds reports that, rather than pretending it notified.
+  EXPECT_FALSE(registry.Renegotiate(42));
+
+  registry.RenegotiateAll();
+  EXPECT_EQ(a.renegotiate, 2);
+  EXPECT_EQ(b.renegotiate, 1);
+
+  auto ids = registry.InstanceIds();
+  std::sort(ids.begin(), ids.end());
+  EXPECT_EQ(ids, (std::vector<int32_t>{1, 2}));
+
+  // A disposed view is not notified again.
+  EXPECT_TRUE(registry.Dispose(1, false));
+  registry.RenegotiateAll();
+  EXPECT_EQ(a.renegotiate, 2);
+  EXPECT_EQ(b.renegotiate, 2);
 }
 
 TEST(PlatformViewRegistry, RepeatedRegistrationReplacesInPlace) {
