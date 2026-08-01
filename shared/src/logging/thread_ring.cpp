@@ -2,6 +2,7 @@
 #include "thread_ring.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 
@@ -44,6 +45,30 @@ bool ThreadRing::push(std::uint32_t ctx_index,
     std::memcpy(slot.text, text, copy_len);
   }
   slot.text[copy_len] = '\0';
+  // A clipped record has to say so. Records are capped at
+  // IHS_LOG_TEXT_CAPACITY, and a line cut at that boundary reads as a
+  // complete one -- while the tail is exactly where a structured payload (a
+  // JSON summary, the end of a stack frame) keeps what the reader came for.
+  // Stamping the overflow count over the last few characters costs one more
+  // character of message than a bare ellipsis and answers "how much did I
+  // lose". Only on the truncating branch, which is rare by construction.
+  if (len > copy_len) {
+    // Wide enough for the longest "...+%zu" a 64-bit size_t can produce (4 +
+    // 20 digits + NUL), so the marker itself is never the thing that gets
+    // truncated.
+    char mark[32];
+    const int n = std::snprintf(mark, sizeof(mark), "...+%zu", len - copy_len);
+    // snprintf returns the length it WOULD have written, so n >= sizeof(mark)
+    // means the marker was itself truncated -- copying n bytes would then run
+    // past what was written and drop mark's NUL into the middle of the text.
+    // Unreachable with the buffer above; checked because the alternative is a
+    // corrupt record if either size ever changes.
+    if (n > 0 && static_cast<std::size_t>(n) < sizeof(mark) &&
+        static_cast<std::size_t>(n) <= copy_len) {
+      std::memcpy(slot.text + copy_len - static_cast<std::size_t>(n), mark,
+                  static_cast<std::size_t>(n));
+    }
+  }
   slot.text_len = static_cast<std::uint16_t>(copy_len);
 
   head_.store(head + 1, std::memory_order_release);
