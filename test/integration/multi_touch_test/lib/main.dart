@@ -39,10 +39,16 @@
 //                    after a cancel arrives for any device. Advisory unless
 //                    a cancel is actually observed.
 //
-// A summary JSON line prefixed "MTT-SUMMARY:" is printed whenever all
-// contacts lift, and "MULTI_TOUCH_TEST: PASS|FAIL" whenever the Self-check
-// button is tapped or SELFCHECK_AFTER_S (dart-define) elapses — CI runs
-// scrape either.
+// Two lines are printed whenever all contacts lift: "MTT-CHECKS:" with the
+// five verdicts, and a summary JSON line prefixed "MTT-SUMMARY:".
+// "MULTI_TOUCH_TEST: PASS|FAIL" follows whenever the Self-check button is
+// tapped or SELFCHECK_AFTER_S (dart-define) elapses.
+//
+// CI should scrape "MTT-CHECKS:" or "MULTI_TOUCH_TEST:", not the JSON: the
+// embedder caps a log record and the encoded summary is longer than the cap,
+// so it is chunked onto a continuation record rather than arriving as one
+// line. The summary orders the verdict flags first so the first piece carries
+// them, but only the short lines are safe by construction.
 //
 // Drive it with tools/inject_ten_finger.py (uinput, no hardware needed) or a
 // real 10-point panel.
@@ -267,7 +273,17 @@ class _TouchProbePageState extends State<TouchProbePage> {
   bool get _c4 => _groupCount > 0 && _meanBatch >= kExpectBatchMean;
   bool get _c5 => _cancelViolations == 0; // advisory if no cancel observed
 
+  // Verdict flags first, counters after. The embedder caps a log record at
+  // IHS_LOG_TEXT_CAPACITY and the encoded summary is longer than that, so
+  // whatever sits at the end of this map is what gets clipped on the way out.
+  // The flags are the part a reader cannot reconstruct; a missing counter is
+  // merely inconvenient.
   Map<String, dynamic> _summary() => <String, dynamic>{
+        'c1_concurrency': _c1,
+        'c2_legality': _c2,
+        'c3_churn': _c3,
+        'c4_frame_batch': _c4,
+        'c5_cancel': _c5,
         'peak_simultaneous': _peakSimultaneous,
         'peak_distinct_ids': _peakDistinctAtPeak,
         'distinct_ids_total': _everSeenIds.length,
@@ -277,14 +293,19 @@ class _TouchProbePageState extends State<TouchProbePage> {
         'largest_batch': _largestGroup,
         'cancel_observed': _cancelObserved,
         'cancel_violations': _cancelViolations,
-        'c1_concurrency': _c1,
-        'c2_legality': _c2,
-        'c3_churn': _c3,
-        'c4_frame_batch': _c4,
-        'c5_cancel': _c5,
       };
 
+  // The five checks on one short line, well under any record cap, so a scrape
+  // never has to parse a JSON line that may have been clipped.
+  String _checksLine() => 'MTT-CHECKS: '
+      'c1=${_c1 ? 'pass' : 'FAIL'} '
+      'c2=${_c2 ? 'pass' : 'FAIL'} '
+      'c3=${_c3 ? 'pass' : 'FAIL'} '
+      'c4=${_c4 ? 'pass' : 'FAIL'} '
+      'c5=${_c5 ? 'pass' : 'FAIL'}';
+
   void _printSummary() {
+    debugPrint(_checksLine());
     debugPrint('MTT-SUMMARY: ${jsonEncode(_summary())}');
   }
 
