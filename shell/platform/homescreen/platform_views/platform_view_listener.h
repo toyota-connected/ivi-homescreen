@@ -32,16 +32,20 @@ struct platform_view_listener {
                    const double* pointer_data,
                    void* data);
   void (*dispose)(bool hybrid, void* data);
-  /// When a touch sequence is happening on the embedded UIView all touch events
-  /// are delayed. Calling this method releases the delayed events to the
-  /// embedded UIView and makes it consume any following touch events for the
-  /// pointers involved in the active gesture.
-  void (*accept_gesture)(int32_t id);
-  /// When a touch sequence is happening on the embedded UIView all touch events
-  /// are delayed. Calling this method drops the buffered touch events and
-  /// prevents any future touch events for the pointers that are part of the
-  /// active touch sequence from arriving to the embedded view.
-  void (*reject_gesture)(int32_t id);
+  /// Gesture-arena arbitration for a sequence already delivered to the view:
+  /// accept releases the delayed touches to it and lets it consume the rest of
+  /// the sequence, reject drops them and sends it nothing further for those
+  /// pointers.
+  ///
+  /// These are an iOS concept ("the embedded UIView" of the original docs) and
+  /// nothing on Linux drives them today: Flutter sends acceptGesture /
+  /// rejectGesture from DarwinPlatformViewController alone, while the
+  /// PlatformViewSurface path used here settles the arena inside the render
+  /// object without a platform message. They take @p data like every other
+  /// entry so a host can reach the view they concern, rather than being the
+  /// two a host cannot implement.
+  void (*accept_gesture)(int32_t id, void* data);
+  void (*reject_gesture)(int32_t id, void* data);
 };
 
 typedef void (*PlatformViewAddListener)(void* context,
