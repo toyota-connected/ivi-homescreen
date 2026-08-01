@@ -34,6 +34,10 @@ struct Probe {
   int dispose = 0;
   double last_w = 0;
   double last_h = 0;
+  int accept = 0;
+  int reject = 0;
+  int32_t last_gesture_id = -1;
+  void* last_gesture_data = nullptr;
 };
 
 void ProbeResize(double w, double h, void* data) {
@@ -47,18 +51,35 @@ void ProbeDispose(bool /* hybrid */, void* data) {
   ++static_cast<Probe*>(data)->dispose;
 }
 
+void ProbeAcceptGesture(int32_t id, void* data) {
+  auto* p = static_cast<Probe*>(data);
+  ++p->accept;
+  p->last_gesture_id = id;
+  p->last_gesture_data = data;
+}
+
+void ProbeRejectGesture(int32_t id, void* data) {
+  auto* p = static_cast<Probe*>(data);
+  ++p->reject;
+  p->last_gesture_id = id;
+  p->last_gesture_data = data;
+}
+
 constexpr platform_view_listener kListener = {
-    ProbeResize,   // resize
-    nullptr,       // set_direction
-    nullptr,       // set_offset
-    nullptr,       // on_touch
-    ProbeDispose,  // dispose
-    nullptr,       // accept_gesture
-    nullptr,       // reject_gesture
+    ProbeResize,         // resize
+    nullptr,             // set_direction
+    nullptr,             // set_offset
+    nullptr,             // on_touch
+    ProbeDispose,        // dispose
+    ProbeAcceptGesture,  // accept_gesture
+    ProbeRejectGesture,  // reject_gesture
 };
 
 // A factory-created instance that flips a flag when destroyed, so the test can
 // prove the registry owns and releases it on dispose.
+//
+// (kListener above now fills accept_gesture/reject_gesture; the arbitration
+// test below is what those are for.)
 class FakeView : public PlatformView {
  public:
   FakeView(const PlatformViewRegistry::CreateRequest& r, bool* destroyed)
@@ -105,6 +126,37 @@ TEST(PlatformViewRegistry, LegacyListenerLifecycle) {
 // replaced in place, so the id stays live and dispatch reaches the listener.
 // (The old toggle erased the entry, which CreateViaFactory then resurrected
 // with a null listener -> a later Resize dereferenced it and crashed.)
+// The gesture callbacks are handed the listener's context, so a host can reach
+// the view a decision concerns. Before they took a bare id, which is why the
+// ihs_pv host could not implement them at all.
+TEST(PlatformViewRegistry, GestureArbitrationCarriesListenerContext) {
+  PlatformViewRegistry registry(nullptr);
+  Probe probe;
+  registry.RegisterListener(7, &kListener, &probe);
+
+  registry.AcceptGesture(7);
+  EXPECT_EQ(probe.accept, 1);
+  EXPECT_EQ(probe.reject, 0);
+  EXPECT_EQ(probe.last_gesture_id, 7);
+  EXPECT_EQ(probe.last_gesture_data, &probe);
+
+  registry.RejectGesture(7);
+  EXPECT_EQ(probe.reject, 1);
+  EXPECT_EQ(probe.last_gesture_id, 7);
+  EXPECT_EQ(probe.last_gesture_data, &probe);
+
+  // An id with no listener is a no-op, not a crash.
+  registry.AcceptGesture(99);
+  registry.RejectGesture(99);
+  EXPECT_EQ(probe.accept, 1);
+  EXPECT_EQ(probe.reject, 1);
+
+  // After dispose the listener is gone and arbitration stops reaching it.
+  EXPECT_TRUE(registry.Dispose(7, false));
+  registry.AcceptGesture(7);
+  EXPECT_EQ(probe.accept, 1);
+}
+
 TEST(PlatformViewRegistry, RepeatedRegistrationReplacesInPlace) {
   PlatformViewRegistry registry(nullptr);
   Probe probe;

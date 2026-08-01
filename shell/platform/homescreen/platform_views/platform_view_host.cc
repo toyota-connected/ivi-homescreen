@@ -761,9 +761,15 @@ uint32_t IhsPluginView::GetGlTextureName() const {
 
 // platform_view_listener trampolines: the registry drives these with the
 // listener context (the IhsPluginView*), which we forward into the plugin's
-// IhsPvCallbacks. accept_gesture/reject_gesture take a bare id (no context), so
-// they cannot reach the view here and are left null — gesture-arena arbitration
-// for ihs_pv views is a follow-up.
+// IhsPvCallbacks.
+//
+// accept_gesture/reject_gesture are wired for completeness rather than because
+// anything calls them. Flutter emits acceptGesture/rejectGesture only from
+// DarwinPlatformViewController; the PlatformViewLink/PlatformViewSurface path
+// an ihs_pv view is built from settles the gesture arena inside the render
+// object, flushing or dropping the cached pointer events without a platform
+// message. So a plugin's callbacks stay unreached on Linux until something
+// drives that channel — the host side is simply no longer the reason why.
 void ListenerResize(double width, double height, void* data) {
   auto* view = static_cast<IhsPluginView*>(data);
   if (view->callbacks.resize != nullptr) {
@@ -783,6 +789,20 @@ void ListenerOnTouch(int32_t action,
   }
 }
 
+void ListenerAcceptGesture(int32_t /* id */, void* data) {
+  auto* view = static_cast<IhsPluginView*>(data);
+  if (view->callbacks.accept_gesture != nullptr) {
+    view->callbacks.accept_gesture(view->plugin_user_data);
+  }
+}
+
+void ListenerRejectGesture(int32_t /* id */, void* data) {
+  auto* view = static_cast<IhsPluginView*>(data);
+  if (view->callbacks.reject_gesture != nullptr) {
+    view->callbacks.reject_gesture(view->plugin_user_data);
+  }
+}
+
 void ListenerDispose(bool /*hybrid*/, void* data) {
   static_cast<IhsPluginView*>(data)->DisposePlugin();
 }
@@ -793,8 +813,8 @@ const platform_view_listener kListener = {
     /* set_offset */ nullptr,
     /* on_touch */ ListenerOnTouch,
     /* dispose */ ListenerDispose,
-    /* accept_gesture */ nullptr,
-    /* reject_gesture */ nullptr,
+    /* accept_gesture */ ListenerAcceptGesture,
+    /* reject_gesture */ ListenerRejectGesture,
 };
 
 // --- IhsPvHost implementation -----------------------------------------------
