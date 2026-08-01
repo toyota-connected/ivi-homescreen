@@ -103,8 +103,44 @@ bool DltBridge::log(const ContextHandle& ctx,
     return false;
   }
   ThreadRing& ring = RingRegistry::thread_local_ring();
-  return ring.push(ctx.index(), static_cast<std::uint8_t>(level),
-                   message.data(), message.size());
+  const auto lvl = static_cast<std::uint8_t>(level);
+
+  // A message that fits is one slot, which is the common case and stays a
+  // single push.
+  constexpr std::size_t kFit = kSlotTextCapacity - 1;
+  if (message.size() <= kFit) {
+    return ring.push(ctx.index(), lvl, message.data(), message.size());
+  }
+
+  // Longer than a slot: split it here rather than let the slot clip it, and
+  // mark every piece but the last so the drain can put it back together. Doing
+  // this below the C ABI means a caller never has to know the slot size --
+  // ihs_log() takes a message of any length and nothing is lost.
+  //
+  // All or nothing. A run whose last piece failed to enqueue would leave the
+  // drain holding a partial with no terminator, and the next unrelated record
+  // on this ring would be appended to it and printed as though it belonged --
+  // one corrupt line, plus a lost one, from a transient full ring. So take the
+  // room up front; the consumer only ever frees more, so a count read here
+  // cannot shrink under us.
+  const std::size_t pieces = (message.size() + kFit - 1) / kFit;
+  if (ring.space() < pieces) {
+    // Not enough room for the whole message. Enqueue what one slot holds and
+    // let push() mark it clipped, which is exactly the behavior this path had
+    // before it learned to split.
+    return ring.push(ctx.index(), lvl, message.data(), message.size());
+  }
+  bool ok = true;
+  std::string_view rest = message;
+  while (!rest.empty()) {
+    const std::size_t take = rest.size() < kFit ? rest.size() : kFit;
+    const bool last = take == rest.size();
+    ok = ring.push(ctx.index(), lvl, rest.data(), take,
+                   last ? 0 : kFlagContinues) &&
+         ok;
+    rest.remove_prefix(take);
+  }
+  return ok;
 }
 
 }  // namespace ihs::dlt

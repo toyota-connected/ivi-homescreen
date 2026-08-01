@@ -93,5 +93,5 @@ void LoggingHandler::OnLogMessage(int level,
         break;
     }
   };
-  ihs::log::emit_chunked(message, IHS_LOG_TEXT_CAPACITY - 1, emit);
+  ihs::log::emit_chunked(message, emit);
 }

@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 namespace ihs::dlt {
 
@@ -27,11 +29,67 @@ class ThreadRing {
   bool push(std::uint32_t ctx_index,
             std::uint8_t level,
             const char* text,
-            std::size_t len) noexcept;
+            std::size_t len,
+            std::uint8_t flags = 0) noexcept;
+
+  // Free slots, from the producer's side. Safe to act on: the consumer only
+  // ever frees more, so a count taken here cannot shrink before the producer
+  // uses it. Lets a caller splitting one message across slots check up front
+  // that the whole sequence fits, rather than discover halfway that it does
+  // not and leave an unterminated run behind.
+  [[nodiscard]] std::size_t space() const noexcept {
+    const std::uint32_t head = head_.load(std::memory_order_relaxed);
+    const std::uint32_t tail = tail_.load(std::memory_order_acquire);
+    const std::uint32_t used = head - tail;
+    return used >= kRingCapacity ? 0 : kRingCapacity - used;
+  }
 
   // Consumer side — called only from the worker thread.
   [[nodiscard]] const RingSlot* peek() const noexcept;
   void pop() noexcept;
+
+  // Reassembly buffer for a message split across slots. Consumer-side only:
+  // the worker owns it, so it needs no synchronization, and it lives here
+  // rather than in the worker because a drain can end mid-sequence and the
+  // partial has to survive until the next pass over this ring.
+  //
+  // Capped so a producer that never terminates a sequence cannot grow it
+  // without bound; past the cap the tail is dropped, which is the same outcome
+  // as the old per-slot clipping and strictly better than exhausting memory.
+  [[nodiscard]] const std::string& partial() const noexcept { return partial_; }
+
+  // The emit time of the piece that started the partial. A rejoined message
+  // belongs at the instant it was logged, not at the instant its last piece
+  // landed -- otherwise a long message sorts after short ones that were logged
+  // while it was still being written.
+  [[nodiscard]] std::uint64_t partial_ts_ns() const noexcept {
+    return partial_ts_ns_;
+  }
+  void begin_partial(std::uint64_t ts_ns) noexcept { partial_ts_ns_ = ts_ns; }
+  void append_partial(const char* text, std::size_t len) {
+    if (text == nullptr || dropped_partial_) {
+      return;
+    }
+    // Mark the clip where it happens rather than on a later call: the piece
+    // that overflows may be the last one, and then no later call comes. A
+    // reader cannot otherwise tell a complete message from one that hit the
+    // ceiling. push() marks its own clip the same way, for the message it is
+    // handed whole when a split would not fit the ring.
+    const std::size_t room =
+        kMaxText > partial_.size() ? kMaxText - partial_.size() : 0;
+    if (len <= room) {
+      partial_.append(text, len);
+      return;
+    }
+    partial_.append(text, room);
+    partial_.append(kCapMark);  // room was reserved for it; the cap holds
+    dropped_partial_ = true;
+  }
+  void clear_partial() noexcept {
+    partial_.clear();
+    dropped_partial_ = false;
+    partial_ts_ns_ = 0;
+  }
 
   [[nodiscard]] bool empty() const noexcept;
   [[nodiscard]] std::size_t pending() const noexcept;
@@ -58,6 +116,18 @@ class ThreadRing {
   // Registry linkage — touched only under RingRegistry's ownership.
   ThreadRing* next = nullptr;
 
+ private:
+  // kMaxPartial bounds the buffer; kMaxText is what a message may occupy in
+  // it, the difference reserved so the marker always fits without pushing the
+  // buffer past its own cap.
+  static constexpr std::string_view kCapMark = "...[log record capped]";
+  static constexpr std::size_t kMaxPartial = 64 * 1024;
+  static constexpr std::size_t kMaxText = kMaxPartial - kCapMark.size();
+  std::string partial_;
+  std::uint64_t partial_ts_ns_ = 0;  // emit time of the piece that started it
+  bool dropped_partial_ = false;     // cap hit; marker already appended
+
+ public:
  private:
   static constexpr std::uint32_t kMask = kRingCapacity - 1;
 

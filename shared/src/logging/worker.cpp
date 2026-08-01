@@ -16,8 +16,10 @@
 
 #include "worker.hpp"
 
+#include <string_view>
 #include "context_cache.hpp"
 #include "ring_registry.hpp"
+
 #include "ring_slot.hpp"
 #include "thread_ring.hpp"
 
@@ -122,17 +124,42 @@ std::size_t Worker::drain_all() {
        ring = ring->next) {
     while (const RingSlot* slot = ring->peek()) {
       if (ContextEntry* entry = cache_.at(slot->ctx_index)) {
+        // Rejoin a message that was split across slots. The pieces are
+        // consecutive in this ring -- one thread owns it, and the split loop
+        // pushes them back to back -- but a drain can land mid-sequence, so
+        // the partial lives on the ring across passes rather than in a local.
+        // A sink is only ever handed a whole message, so it keeps printing one
+        // prefix per line and needs to know nothing about any of this.
+        const bool continues = (slot->flags & kFlagContinues) != 0;
+        const bool joining = continues || !ring->partial().empty();
+        if (joining) {
+          if (ring->partial().empty()) {
+            ring->begin_partial(slot->ts_ns);
+          }
+          ring->append_partial(slot->text, slot->text_len);
+          if (continues) {
+            ring->pop();
+            ++drained;
+            continue;
+          }
+        }
+        const std::string_view whole =
+            joining ? std::string_view{ring->partial()}
+                    : std::string_view{slot->text, slot->text_len};
         const LogRecord record{
             entry->id.c_str(),
             &entry->dlt_ctx,
             static_cast<LogLevel>(slot->level),
-            slot->text,
-            slot->text_len,
-            slot->ts_ns,  // emit time, captured when the record was pushed
+            whole.data(),
+            whole.size(),
+            // A rejoined message is stamped when its first piece was pushed,
+            // so it sorts where it was logged rather than where it finished.
+            joining ? ring->partial_ts_ns() : slot->ts_ns,
         };
         for (const auto& sink : *sinks_) {
           sink->write(record);
         }
+        ring->clear_partial();
       }
       ring->pop();
       ++drained;
