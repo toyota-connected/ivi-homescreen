@@ -754,7 +754,7 @@ Run once
 ```
 git clone https://github.com/meta-flutter/workspace-automation
 cd workspace_automation
-sudo ./flutter_workspace.py
+./flutter_workspace.py
 ```
 
 Run for each development session, or new terminal window opened
