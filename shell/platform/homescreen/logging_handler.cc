@@ -18,6 +18,7 @@
 
 #include <flutter/standard_method_codec.h>
 
+#include "logging/log_chunk.h"
 #include "logging/logging.h"
 
 LoggingHandler::LoggingHandler(flutter::BinaryMessenger* messenger,
@@ -60,38 +61,6 @@ enum DartLogLevel {
   kLevelOff = 6,
 };
 
-// A single ihs log record is capped at IHS_LOG_TEXT_CAPACITY bytes, but Dart
-// messages — notably exception stack traces — routinely exceed that. Emit the
-// message in chunks so nothing is silently truncated: break on newlines first
-// (natural per stack frame), then hard-split any remaining over-length run.
-template <class Emit>
-void emit_chunked(const char* message, Emit emit) {
-  if (message == nullptr) {
-    return;
-  }
-  constexpr std::size_t kMax = IHS_LOG_TEXT_CAPACITY - 1;
-  std::string_view rest{message};
-  if (rest.empty()) {
-    emit(rest);
-    return;
-  }
-  while (!rest.empty()) {
-    std::size_t take = rest.size();
-    const std::size_t nl = rest.find('\n');
-    const bool at_newline = nl != std::string_view::npos && nl < take;
-    if (at_newline) {
-      take = nl;
-    }
-    if (take > kMax) {
-      take = kMax;
-      emit(rest.substr(0, take));
-      rest.remove_prefix(take);
-      continue;
-    }
-    emit(rest.substr(0, take));
-    rest.remove_prefix(at_newline ? take + 1 : take);  // consume the '\n' too
-  }
-}
 }  // namespace
 
 void LoggingHandler::OnLogMessage(int level,
@@ -124,5 +93,5 @@ void LoggingHandler::OnLogMessage(int level,
         break;
     }
   };
-  emit_chunked(message, emit);
+  ihs::log::emit_chunked(message, IHS_LOG_TEXT_CAPACITY - 1, emit);
 }
