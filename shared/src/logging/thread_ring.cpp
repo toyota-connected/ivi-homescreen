@@ -24,7 +24,8 @@ namespace ihs::dlt {
 bool ThreadRing::push(std::uint32_t ctx_index,
                       std::uint8_t level,
                       const char* text,
-                      std::size_t len) noexcept {
+                      std::size_t len,
+                      std::uint8_t flags) noexcept {
   const std::uint32_t head = head_.load(std::memory_order_relaxed);
   const std::uint32_t tail = tail_.load(std::memory_order_acquire);
 
@@ -36,6 +37,7 @@ bool ThreadRing::push(std::uint32_t ctx_index,
   RingSlot& slot = slots_[head & kMask];
   slot.ctx_index = ctx_index;
   slot.level = level;
+  slot.flags = flags;
   slot.sequence = head;
   slot.ts_ns = now_realtime_ns();
 

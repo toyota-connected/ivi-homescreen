@@ -23,28 +23,25 @@
 namespace ihs::log {
 
 /**
- * @brief Split a message so no piece exceeds @p max bytes, emitting each.
+ * @brief Emit a message one line at a time.
  *
- * A single ihs log record is capped at IHS_LOG_TEXT_CAPACITY bytes, but Dart
- * messages — exception stack traces, an encoded summary — routinely exceed
- * that, and the tail is where a structured payload keeps what the reader came
- * for. Breaking on newlines first keeps a stack frame per record; whatever is
- * still over length is hard-split rather than dropped.
+ * Dart messages — exception stack traces above all — arrive as several lines
+ * in one string, and a log record is a line. Splitting on newlines here keeps
+ * one stack frame per record instead of running them together.
  *
- * @p max is the budget for the text handed to @p emit, so a caller that
- * prefixes each record (with a tag, say) passes the record capacity minus that
- * prefix. It is clamped to at least 1 so a pathological budget cannot spin.
+ * Length is deliberately not this function's problem. A run with no newline to
+ * break on is emitted whole, however long: the logging library splits an
+ * over-length message across records itself and the drain rejoins them, so it
+ * reaches a sink intact. Cutting it here would hand the library several
+ * complete messages instead, and it would print as several stamped pieces.
  *
  * An empty message is emitted once, unchanged: a caller logging "" means to
  * produce a line.
  */
 template <class Emit>
-void emit_chunked(const char* message, std::size_t max, Emit emit) {
+void emit_chunked(const char* message, Emit emit) {
   if (message == nullptr) {
     return;
-  }
-  if (max == 0) {
-    max = 1;
   }
   std::string_view rest{message};
   if (rest.empty()) {
@@ -57,12 +54,6 @@ void emit_chunked(const char* message, std::size_t max, Emit emit) {
     const bool at_newline = nl != std::string_view::npos && nl < take;
     if (at_newline) {
       take = nl;
-    }
-    if (take > max) {
-      take = max;
-      emit(rest.substr(0, take));
-      rest.remove_prefix(take);
-      continue;
     }
     emit(rest.substr(0, take));
     rest.remove_prefix(at_newline ? take + 1 : take);  // consume the '\n' too

@@ -873,20 +873,12 @@ void Engine::OnFlutterPlatformMessage(
 void Engine::onLogMessageCallback(const char* tag,
                                   const char* message,
                                   void* /* user_data */) {
-  // Chunk rather than let the record cap cut the line. Dart print() and
-  // debugPrint() arrive here whole, and what they carry -- a stack trace, an
-  // encoded summary -- is routinely longer than one record, with the part
-  // worth reading at the end. LoggingHandler already treats the
-  // flutter/logging channel this way; this is the other path Dart output
-  // takes.
-  //
-  // Every chunk repeats the tag, so the budget is the record minus "<tag>: ".
+  // One record per line. Dart print() and debugPrint() arrive here whole, and
+  // a stack trace is several lines in one string; without this they run
+  // together into a single record. Over-length lines need no handling here --
+  // the logging library splits and the drain rejoins them.
   const std::string_view tag_text = tag != nullptr ? tag : "";
-  const std::size_t overhead = tag_text.size() + 2;  // ": "
-  const std::size_t budget = overhead + 1 < IHS_LOG_TEXT_CAPACITY
-                                 ? IHS_LOG_TEXT_CAPACITY - 1 - overhead
-                                 : 1;
-  ihs::log::emit_chunked(message, budget, [tag_text](std::string_view line) {
+  ihs::log::emit_chunked(message, [tag_text](std::string_view line) {
     ihs::log::info("{}: {}", tag_text, line);
   });
 
