@@ -200,7 +200,7 @@ void PlatformViewRegistry::AcceptGesture(int32_t id) {
   void* context = nullptr;
   if (LookupListener(id, &listener, &context) &&
       listener->accept_gesture != nullptr) {
-    listener->accept_gesture(id);
+    listener->accept_gesture(id, context);
   }
 }
 
@@ -209,7 +209,7 @@ void PlatformViewRegistry::RejectGesture(int32_t id) {
   void* context = nullptr;
   if (LookupListener(id, &listener, &context) &&
       listener->reject_gesture != nullptr) {
-    listener->reject_gesture(id);
+    listener->reject_gesture(id, context);
   }
 }
 
