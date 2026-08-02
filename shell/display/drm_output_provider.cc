@@ -16,6 +16,8 @@
 
 #include "display/drm_output_provider.h"
 
+#include "display/connector_edid.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -67,9 +69,37 @@ std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
     info.connected = connector.connected;
     info.handle = connector.connector_id;
 
+    // Monitor identity from the connector's EDID. Without it OutputInfo::serial
+    // is always empty, so the edid_serial tier of ResolveOutput can never fire
+    // and a [view.output] serial= silently falls through to the connector name
+    // -- a documented match that could not work. A port with nothing attached,
+    // or a panel whose EDID does not parse, simply leaves these empty.
+    //
+    // Note the serial is only as unique as the panel maker chose to make it:
+    // two LG DQHD heads measured here report the same serial, the same model
+    // string and the same make, so a serial= match against them is ambiguous
+    // and ResolveOutput says so before falling through to the connector name.
+    if (const auto edid =
+            ProbeConnectorInfo(dev->fd(), connector.connector_id)) {
+      info.make = edid->make;
+      info.model = edid->model;
+      info.serial = edid->serial;
+      info.mm_width = edid->width_mm;
+      info.mm_height = edid->height_mm;
+    } else if (connector.connected) {
+      // Routine, not a fault: a panel wired to a fixed port -- DSI on an
+      // embedded board is the usual case -- often carries no EDID at all, and
+      // plenty that do carry one omit the serial. Such an output can only be
+      // identified by its connector name, so say so rather than leave someone
+      // wondering why a serial= match never binds.
+      ihs::log::debug(
+          "[DrmOutputProvider] '{}' reports no usable EDID; identity is the "
+          "connector name alone",
+          info.name);
+    }
+
     // Current extent + refresh come from the connector's preferred mode (the
-    // EDID-preferred entry, else the first advertised). EDID make/model/serial
-    // are not read here yet; name is the join key ResolveOutput uses.
+    // EDID-preferred entry, else the first advertised).
     const drm::ModeInfo* mode = nullptr;
     for (const auto& candidate : connector.modes) {
       if (candidate.preferred()) {
