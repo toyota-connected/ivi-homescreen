@@ -38,7 +38,7 @@
 #endif
 
 #if BUILD_WATCHDOG
-#include "watchdog.h"
+#include "watchdog/watchdog.h"
 #endif
 
 #include "shutdown_flag.h"
