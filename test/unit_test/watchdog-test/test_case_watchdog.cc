@@ -3,7 +3,7 @@
 
 #include "gtest/gtest.h"
 
-#include "watchdog.h"
+#include "watchdog/watchdog.h"
 
 static constexpr char kSourceRoot[] = SOURCE_ROOT_DIR;
 

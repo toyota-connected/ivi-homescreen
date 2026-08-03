@@ -23,7 +23,7 @@
 #include "config/common.h"
 
 #if BUILD_WATCHDOG
-#include "shell/watchdog.h"
+#include "shell/watchdog/watchdog.h"
 #endif
 
 class WatchdogPlugin {
