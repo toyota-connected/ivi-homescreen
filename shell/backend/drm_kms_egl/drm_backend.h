@@ -311,6 +311,11 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] const drm::Device& device() const { return *drm_dev_; }
   [[nodiscard]] int drm_fd() const { return drm_dev_->fd(); }
   [[nodiscard]] uint32_t connector_id() const { return connector_id_; }
+  // The connector this backend modeset, by name. Empty until a connector is
+  // picked, which is why it is optional rather than a bare string.
+  [[nodiscard]] std::optional<std::string> BoundOutputName() const override {
+    return bound_connector_name_;
+  }
   [[nodiscard]] uint32_t crtc_id() const { return crtc_id_; }
   [[nodiscard]] uint32_t crtc_index() const { return crtc_index_; }
   // Framebuffer size — what the Flutter engine renders at. When the user
@@ -376,6 +381,7 @@ class DrmBackend : public Backend, public IFlipSink {
   // backend neither takes master nor closes the fd.
   drm::Device* drm_dev_ = nullptr;
   uint32_t connector_id_ = 0;
+  std::optional<std::string> bound_connector_name_{};
   uint32_t crtc_id_ = 0;
   uint32_t crtc_index_ = 0;
   drmModeModeInfo mode_{};

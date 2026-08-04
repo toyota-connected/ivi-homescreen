@@ -18,6 +18,8 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "config/common.h"
 #include "configuration/configuration.h"
@@ -217,6 +219,24 @@ class Backend {
    * @c kInternalInconsistency otherwise.
    */
   virtual VsyncCallback GetVsyncCallback() const { return nullptr; }
+
+  /**
+   * @brief The output this backend is presenting on, when it knows.
+   *
+   * The name a view is bound to and the name its config asked for are not the
+   * same thing: a backend may fall back to its own pick when no [view.output]
+   * constraint resolves, so re-running the resolver answers "what was
+   * requested", not "what are we on". Only the backend that programmed the
+   * output knows the latter, which is what a hotplug listener has to diff
+   * against to tell a rebind from a no-op.
+   *
+   * @return the output name, in the same form @c OutputInfo::name carries
+   *         (e.g. "DSI-1"); nullopt when the backend does not track one,
+   *         which is the default and not an error.
+   */
+  [[nodiscard]] virtual std::optional<std::string> BoundOutputName() const {
+    return std::nullopt;
+  }
 
   /**
    * @brief Hand the running FlutterEngine handle to the backend.
