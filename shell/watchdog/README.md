@@ -113,9 +113,142 @@ The watchdog logs the following to the shell log:
 
 ---
 
-# Diagnostics
+## Diagnostics/Debug
 
-TODO
+The purpose of these diagnostics is to verify the long-term stability
+of the homescreen system under extreme resource contention.
+These tests ensure that the watchdog mechanisms can correctly detect
+system hangs or unresponsive threads and that the integration with
+`systemd` properly manages service health.
+
+This testing procedure validates the following components under stress:
+- **Flutter Engine**: Responsiveness of the main thread and UI rendering.
+- **GPU Rendering**: Stability of the rendering backend and frame delivery.
+- **Watchdog Subsystem**: Correctness of timeout detection
+  and recovery triggers.
+- **`systemd` Integration**: Reliable delivery of keep-alive pings
+  (`sd_notify`).
+
+### Environment Setup
+
+This test is designed to run on a Ubuntu/Debian system with Wayland and SystemD installed.
+In the case of their absence the test will proceed using the `software` rendering backend
+and a mock SystemD-socket to simulate the `sd_notify` behavior, but a full installation
+is recommended for accurate results.
+
+**Package Dependencies**:
+Install the following packages to support the build and stress testing:
+```bash
+sudo apt update && sudo apt upgrade
+sudo apt install --no-install-recommends rpd-wayland-core
+
+# Required tools and libraries
+sudo apt-get install \
+     stress-ng btop \
+     build-essential cmake ninja-build pkg-config \
+     git curl wget unzip python3 python3-pip \
+     libwayland-dev wayland-protocols \
+     mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev \
+     libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+     libpugixml-dev libcurl4-openssl-dev \
+     libxkbcommon-dev libsystemd-dev libdbus-1-dev
+```
+
+Make sure `emb_cli` and Flutter SDK are installed and configured in your environment.
+
+### Test Configuration
+
+Ensure the project is built with watchdog support enabled:
+- `BUILD_WATCHDOG=ON`
+- `BUILD_SYSTEMD_WATCHDOG=ON`
+
+#### Stress Parameters
+To simulate a high-load scenario, the following `stress-ng` parameters are recommended:
+- **CPU**: Full load on all available cores.
+- **Memory**: 2 virtual memory workers with 256MB allocation each to
+  create memory pressure.
+- **I/O**: 2 I/O stress workers to create disk contention.
+- **Duration**: 8 hours (43,200 seconds) for stability validation.
+
+#### Watchdog Settings
+- **Timeout (`WATCHDOG_MS`)**: set this according to your preference -
+the default is 5000ms (5 seconds).
+
+For long-duration tests, a longer timeout (e.g., 100000ms) is recommended
+to avoid false positives due to temporary load spikes.
+
+#### Test Application
+The `stopwatch_stress_test` Flutter application is used to exercise the system:
+- **GPU Stimulation**: Continuous animation of UI elements
+  (e.g., `CircularProgressIndicator`) to exercise the GPU through Wayland EGL.
+- **Heartbeat**: The application writes per-minute uptime files to verify that
+  the main thread remains responsive.
+- **Visual Sanity**: The running stopwatch allows for intermittent
+  human observation to ensure the UI hasn't frozen.
+
+### Execution Guide
+Execute the integration script with the desired stress parameters:
+
+```bash
+# Set test duration to 8 hours
+export STRESS_SECS=28800 
+# Use all available CPU cores
+export STRESS_CPU=$(nproc) 
+# Set watchdog timeout to 100 seconds
+export WATCHDOG_MS=100000
+
+./scripts/stress_watchdog_integration.sh
+```
+
+#### Monitoring
+It is highly recommended to run `btop` in a separate terminal window
+during the test to monitor CPU, memory, and temperature in real-time.
+
+### Verification & Success Criteria
+
+A test run is considered **PASSED** only if all the following conditions are met:
+
+| Check | Requirement | Verification Method |
+|-------|-------------|-----------------------|
+| **Application Startup** | App must start successfully | Search for `STOPWATCH_STRESS_START` in logs |
+| **Watchdog Survival** | Watchdog must not trigger | Exit code must NOT be `134` (SIGABRT) or `6` |
+| **Uptime Integrity** | Main thread must remain responsive | $\ge 1$ valid `uptime_seconds=N` entry per minute in `uptime.txt` |
+| **`sd_notify` Delivery** | Keep-alives must be sustained | `WATCHDOG=1` messages received by the notify socket |
+
+#### Post-Run Analysis
+After the script completes, perform the following checks:
+
+**1. Check Exit Code**:
+```bash
+echo $?  # 0 = PASS, non-zero = FAIL
+```
+
+**2. Verify Uptime File Completeness**:
+Count the entries to ensure they match the expected duration (e.g., 480 entries for 8 hours):
+```bash
+wc -l /path/to/uptime.txt
+```
+
+**3. Detect Gaps in Responsiveness**:
+Use the following command to find any minutes where the heartbeat was missed:
+```bash
+cat /path/to/uptime.txt | awk -F= '{print $2}' | sort -n | uniq -c
+```
+
+### Test Reliability Considerations & Best Practices
+
+- **Thermal Management**: Extended stress tests can lead to significant heat buildup.
+  Monitor CPU/GPU temperatures via `btop`. If thermal throttling is detected, it may
+  affect timing and trigger false-positive watchdog timeouts.
+  Consider adding active cooling for long-duration tests.
+
+- **Memory Leak Detection**: While the watchdog detects hangs, it does not necessarily
+  detect slow memory leaks. It is recommended to monitor the resident set size (RSS)
+  of the homescreen process over the 12-hour window to ensure memory usage remains stable.
+
+- **Storage Health**: The test performs continuous writes to the storage medium
+  to verify the heartbeat. Frequent, sustained writes can accelerate storage
+  wear-out. For repeated long-term testing, use a resilient storage medium.
 
 ---
 
