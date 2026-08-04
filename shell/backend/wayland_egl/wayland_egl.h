@@ -182,6 +182,12 @@ class WaylandEglBackend : public Egl, public Backend {
    * listeners can't fire after the engine has destructed. Called from
    * @c FlutterView::~FlutterView before the engine destructs.
    */
+  void SetVsyncParked(const bool parked) override {
+    if (vsync_ != nullptr) {
+      vsync_->SetParked(parked);
+    }
+  }
+
   void StopVsyncMonitor() override;
 
   /**

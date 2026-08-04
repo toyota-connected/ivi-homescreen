@@ -119,6 +119,8 @@ class DrmDumbSink final : public ISurfaceSink {
   void SubmitBaton(void* engine, intptr_t baton) override;
   void SetEngineHandle(void* engine) override;
   void SetPlatformTaskRunner(TaskRunner* runner) override;
+  void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
+
   void StopVsyncMonitor() override;
   void SetMotionToPhoton(profiling::MotionToPhoton* m2p) override {
     m2p_ = m2p;
