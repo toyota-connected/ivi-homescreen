@@ -211,6 +211,43 @@ class FlutterView {
   void NoteOutputLost() { m_wayland_bound_output.reset(); }
 
   /**
+   * @brief Park the view: tell its platform views to stop producing.
+   *
+   * For a view whose output went away. The engine keeps running and the
+   * surface is kept, so returning is immediate -- what stops is the plugin
+   * side, which is where the cost of an unseen view actually is: a camera or
+   * video plugin holding a decoder busy for a display nobody can look at.
+   *
+   * Frame production stops too, by withholding the vsync baton rather than by
+   * tearing the source down: Flutter asked for a frame and gets no answer, so
+   * the UI thread, rasterizer, GPU and scanout all go quiet, and unparking
+   * hands back the baton it was holding. That is reversible, which
+   * StopVsyncMonitor is not.
+   *
+   * Idempotent: suspending a suspended view does nothing, so repeated output
+   * events do not re-notify plugins.
+   *
+   * @relation
+   * internal
+   */
+  void Suspend();
+
+  /**
+   * @brief Unpark the view; the inverse of Suspend().
+   * @relation
+   * internal
+   */
+  void Resume();
+
+ private:
+  // The one place the parked state changes: parks/unparks frame production and
+  // then tells the plugins. Public entry points are Suspend()/Resume().
+  void SetSuspended(bool suspended);
+
+ public:
+  [[nodiscard]] bool IsSuspended() const { return m_suspended; }
+
+  /**
    * @brief Get pointer to Display object
    * @return Display*
    * @relation
@@ -373,6 +410,10 @@ class FlutterView {
   // BoundOutput() asks it rather than keeping a second copy that could
   // disagree.
   std::optional<std::string> m_wayland_bound_output;
+
+  // Parked: the view's output went away and its platform views were told to
+  // stop producing. Not a teardown -- the engine and surface are untouched.
+  bool m_suspended = false;
 
   // Temporary owner of FlutterDesktopEngineState between FlutterView
   // construction (where engine_state is allocated and populated) and

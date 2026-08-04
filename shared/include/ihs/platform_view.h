@@ -366,11 +366,14 @@ typedef struct IhsPvGrant {
  *                                    already delivered to the view.
  *   set_suspended                    the view left (1) or re-entered (0) the
  *                                    composited scene — scrolled off, fully
- *                                    occluded. NOT teardown; the view stays
- *                                    alive. A producing plugin should pause its
- *                                    decode/render while suspended to save power
- *                                    (a camera, a video, a live tile), and
- *                                    resume on 0.
+ *                                    occluded, or on a display that has been
+ *                                    unplugged. NOT teardown; the view stays
+ *                                    alive and its grant stays held. A producing
+ *                                    plugin should pause its decode/render while
+ *                                    suspended to save power (a camera, a video,
+ *                                    a live tile), and resume on 0. Edge
+ *                                    triggered: a suspended view is not told
+ *                                    again, so 1 and 0 always alternate.
  *   renegotiate                      a grant was revoked (output/mode/plane
  *                                    change, or a lease withdrawn); re-call
  *                                    ihs_pv_negotiate or fall back to the floor.

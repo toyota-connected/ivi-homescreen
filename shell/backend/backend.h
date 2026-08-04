@@ -271,6 +271,19 @@ class Backend {
   virtual void StopVsyncMonitor() {}
 
   /**
+   * @brief Park (true) or unpark (false) frame production.
+   *
+   * Parking withholds the vsync baton: Flutter asked for a frame and gets no
+   * answer, so it builds none and the UI thread, rasterizer, GPU and scanout
+   * all go quiet. Unlike StopVsyncMonitor -- which tears the source down and
+   * cannot be undone -- this is reversible and keeps the engine warm, which is
+   * what a view whose display was unplugged needs.
+   *
+   * Default is a no-op, for backends that drive no vsync source of their own.
+   */
+  virtual void SetVsyncParked(bool /*parked*/) {}
+
+  /**
    * @brief Release the backend's GPU / windowing-system resources (render
    * surface, native window, GL contexts, display connection).
    *

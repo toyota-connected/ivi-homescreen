@@ -92,6 +92,12 @@ class SoftwareBackend final : public Backend {
       sink_->SetPlatformTaskRunner(runner);
     }
   }
+  void SetVsyncParked(const bool parked) override {
+    if (sink_) {
+      sink_->SetVsyncParked(parked);
+    }
+  }
+
   void StopVsyncMonitor() override {
     if (sink_) {
       sink_->StopVsyncMonitor();

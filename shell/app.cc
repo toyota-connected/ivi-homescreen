@@ -347,6 +347,20 @@ void App::RenegotiateView(const FlutterView* view) {
 #endif
 }
 
+void App::ApplyOnDisconnect(FlutterView* view) {
+  const auto policy = view->GetConfig().view.output.on_disconnect;
+  if (policy == homescreen::OutputMatch::OnDisconnect::kTeardown) {
+    // kTeardown means free the engine, which means destroying and later
+    // rebuilding the view. Nothing does that yet, and quietly suspending
+    // instead while reporting nothing would make the config look honored.
+    ihs::log::warn(
+        "[App] view {}: on_disconnect = teardown is not implemented; "
+        "suspending instead (the engine stays resident)",
+        view->GetIndex());
+  }
+  view->Suspend();
+}
+
 void App::OnDisplayOutputsChanged(IDisplay* display,
                                   const homescreen::OutputEvent event,
                                   const std::string_view output_name) {
@@ -377,15 +391,21 @@ void App::OnDisplayOutputsChanged(IDisplay* display,
     switch (transition) {
       case homescreen::OutputTransition::kMoved:
         what = "belongs on a different output";
+        view->Resume();
         break;
       case homescreen::OutputTransition::kAppeared:
         what = "has an output to bind to";
+        // Its output is back, so undo the park. The view is not moved onto it
+        // here -- that needs the rebind path -- but a parked view must not
+        // stay parked once the display it was waiting for is present.
+        view->Resume();
         break;
       case homescreen::OutputTransition::kLost:
         what = "lost its output";
         // Forget the placement now that it is gone, so the same output coming
         // back reads as an arrival rather than as "already there".
         view->NoteOutputLost();
+        ApplyOnDisconnect(view.get());
         break;
       case homescreen::OutputTransition::kReconfigured:
       case homescreen::OutputTransition::kNone:
@@ -398,10 +418,9 @@ void App::OnDisplayOutputsChanged(IDisplay* display,
                    output_name, EventName(event), view->GetIndex(), what,
                    current.value_or("-"), wanted.bound() ? wanted.name : "-");
 
-    // Tell the plugins their grant is stale. Actually moving the view to
-    // another output, or parking it when its output went away, needs the
-    // suspend/resume path that does not exist yet -- so a view whose output
-    // vanished keeps its surface for now and is only notified.
+    // Tell the plugins their grant is stale. Parking a view whose output went
+    // away is handled above, by ApplyOnDisconnect; what is still missing is
+    // moving a view onto a different output, which needs a rebind path.
     RenegotiateView(view.get());
   }
 }
