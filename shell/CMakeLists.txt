@@ -319,6 +319,7 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             backend/drm_kms_egl/gl_cursor.cc
             backend/gl_process_resolver.cc
             display/drm_display.cc
+            display/connector_edid.cc
             display/drm_output_provider.cc
             display/drm_device_resolver.cc
             display/drm_mode_list.cc
@@ -403,6 +404,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             $<$<BOOL:${BUILD_COMPOSITOR}>:backend/wayland_vulkan/wl_layer_compositor.cc>
             backend/drm_kms_egl/driver_probe.cc
             display/drm_display.cc
+            display/connector_edid.cc
             display/drm_output_provider.cc
             display/drm_device_resolver.cc
             display/drm_mode_list.cc
