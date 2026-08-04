@@ -43,6 +43,16 @@ class OutputManager {
   //     own default / auto-pick stands) or the requested output is absent (the
   //     caller falls back and the miss is logged).
   // The decision is logged either way.
+  // As ResolveForView, but distinguishing "no [view.output] constraint" from
+  // "a constraint was set and nothing satisfied it". The plain overload
+  // collapses both to nullopt, which is why a caller cannot currently park a
+  // view whose named output is absent -- it cannot tell that case from a view
+  // that never asked for one.
+  [[nodiscard]] static OutputResolution ResolveForViewDetailed(
+      const Configuration::Config& config,
+      IDisplay* display,
+      BackendFamily family);
+
   [[nodiscard]] static std::optional<std::string> ResolveForView(
       const Configuration::Config& config,
       IDisplay* display,
