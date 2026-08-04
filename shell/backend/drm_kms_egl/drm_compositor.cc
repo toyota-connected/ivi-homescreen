@@ -2676,6 +2676,28 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
         std::move(acquire));
   };
+  // Stand up a fresh ExternalDmaBufPool for a PV's decoder ring at the frame's
+  // geometry. Used both on first sight and when a live PV's buffer geometry
+  // changes (swapped in place via replace_source). The deferred on_release
+  // holds a displaced buffer until the next present's flip completes, then
+  // returns it to the producer (see deferred_releases_).
+  const auto make_pv_pool = [this](
+                                const ICompositorSurface::Dmabuf& db,
+                                std::shared_ptr<ICompositorSurface> surface) {
+    drm::scene::ExternalDmaBufPool::Options opts{};
+    opts.on_release = [this, surface = std::move(surface)](
+                          std::uintptr_t key,
+                          std::optional<drm::sync::SyncFence>) {
+      if (!surface) {
+        return;
+      }
+      const std::scoped_lock lock(deferred_releases_mu_);
+      deferred_releases_.push_back({surface, static_cast<uint32_t>(key)});
+    };
+    return drm::scene::ExternalDmaBufPool::create(backend_->device(), db.width,
+                                                  db.height, db.fourcc,
+                                                  db.modifier, std::move(opts));
+  };
   for (auto& fl : frame_layers) {
     ++z_index;
     const bool is_ui = (z_index == 0);
@@ -2748,22 +2770,39 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               pool->format().modifier == db.modifier) {
             submit_pv_pool(pool, db);
           } else {
-            // Source isn't our pool, or the producer's geometry changed under a
-            // fixed-generation pool (an ABR rendition switch). Drop the layer
-            // so the new loop re-adds it at the new geometry next present, and
-            // release this frame's buffer so its ring slot isn't leaked. Count
-            // it as a prune: removing the plane is a topology change, so this
-            // frame must take the blocking ALLOW_MODESET commit below rather
-            // than a NONBLOCK one that could hit a transient EBUSY.
-            scene_->remove_layer(layer->handle());
-            scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
-                                             scene_pv_tags_.end(), fl.pv_tag),
-                                 scene_pv_tags_.end());
-            if (fl.pv_surface) {
-              fl.pv_surface->OnScanoutRelease(db.buffer_id);
+            // The source isn't our pool, or the frame's buffer geometry changed
+            // -- a real ABR rendition switch, or subpixel resize jitter on the
+            // box demo. Swap the source in place with a fresh pool at the new
+            // geometry (replace_source) rather than pruning + re-adding next
+            // present: the layer keeps its plane assignment, geometry, and
+            // HDR/Colorspace signaling, so there is no gap frame (which blinks
+            // the view and toggles the connector's auto-derived HDR/Colorspace)
+            // and no per-jitter modeset. The displaced pool is retired by the
+            // scene as its in-flight buffers drain.
+            bool swapped = false;
+            if (auto new_pool = make_pv_pool(db, fl.pv_surface); new_pool) {
+              auto* np_raw = new_pool.value().get();
+              if (scene_->replace_source(layer->handle(),
+                                         std::move(new_pool.value()))) {
+                submit_pv_pool(np_raw, db);
+                swapped = true;
+              }
             }
-            ++pv_pruned;
-            continue;
+            if (!swapped) {
+              // Pool-create / replace failed: fall back to prune + re-add. This
+              // removes the plane (a topology change), so the frame takes the
+              // blocking ALLOW_MODESET commit below rather than a NONBLOCK one
+              // that could hit a transient EBUSY.
+              scene_->remove_layer(layer->handle());
+              scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
+                                               scene_pv_tags_.end(), fl.pv_tag),
+                                   scene_pv_tags_.end());
+              if (fl.pv_surface) {
+                fl.pv_surface->OnScanoutRelease(db.buffer_id);
+              }
+              ++pv_pruned;
+              continue;
+            }
           }
         }
         layer->set_dst_rect_if_changed(dst_rect);
@@ -2780,25 +2819,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // producer when it leaves scanout, which drives the ihs_pv release path.
       // The retained surface shared_ptr keeps the view alive across a release
       // even if it is concurrently disposed.
-      drm::scene::ExternalDmaBufPool::Options opts{};
-      // Defer the release by one present: the buffer is displaced now but stays
-      // on the plane until this commit's flip completes, so returning it to the
-      // producer here would let it be overwritten under scanout. Hold it and
-      // fire OnScanoutRelease at the next present's top
-      // (post-WaitForPendingFlip), when the flip is done. See
-      // deferred_releases_.
-      opts.on_release = [this, surface = fl.pv_surface](
-                            std::uintptr_t key,
-                            std::optional<drm::sync::SyncFence>) {
-        if (!surface) {
-          return;
-        }
-        const std::scoped_lock lock(deferred_releases_mu_);
-        deferred_releases_.push_back({surface, static_cast<uint32_t>(key)});
-      };
-      auto pool = drm::scene::ExternalDmaBufPool::create(
-          backend_->device(), db.width, db.height, db.fourcc, db.modifier,
-          std::move(opts));
+      // First sight: stand up the pool at this frame's geometry (deferred
+      // release holds a displaced buffer until the next present's flip; see
+      // deferred_releases_).
+      auto pool = make_pv_pool(db, fl.pv_surface);
       if (!pool) {
         ihs::log::warn(
             "[DrmCompositor] ExternalDmaBufPool::create (pv): {}; routing "
