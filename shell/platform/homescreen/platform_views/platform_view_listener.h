@@ -46,6 +46,12 @@ struct platform_view_listener {
   /// two a host cannot implement.
   void (*accept_gesture)(int32_t id, void* data);
   void (*reject_gesture)(int32_t id, void* data);
+  /// The view left (1) or re-entered (0) the composited scene, so a producing
+  /// plugin can pause its decode/render while nothing can see it. Not a
+  /// teardown: the instance stays alive and its grant stays held.
+  ///
+  /// Delivered per view, for the same reason as renegotiate below.
+  void (*set_suspended)(int32_t id, uint8_t suspended, void* data);
   /// The grant this view was given is no longer valid -- its output changed
   /// mode, went away, or the plane backing it was taken -- so whatever the
   /// view negotiated has to be negotiated again or dropped to the floor.
