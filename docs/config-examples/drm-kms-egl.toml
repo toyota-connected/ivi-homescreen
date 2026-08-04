@@ -16,7 +16,10 @@ pixel_ratio = 1.0
   type = 'drm-kms-egl'
 
     [view.backend.drm]
-    device = '/dev/dri/card0'
+    # Prefer the by-path name over cardN: the number is assigned in probe order
+    # and is not portable -- the same driver comes up as card0 on one board and
+    # card2 on another. `ls /dev/dri/by-path` to find yours.
+    device = '/dev/dri/by-path/platform-gpu-card'
     connector = 'eDP-1'          # unset = rank-pick
     mode = '1920x1080@60'        # unset = preferred mode from EDID
     rotation = 0                 # 0|90|180|270
