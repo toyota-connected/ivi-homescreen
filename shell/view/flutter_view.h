@@ -17,6 +17,8 @@
 #include "config/common.h"
 
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
@@ -58,6 +60,7 @@ class Engine;
 class Backend;
 class PlatformHandler;
 class PlatformChannel;
+class PlatformViewRegistry;
 namespace flutter {
 class KeyEventHandler;
 }
@@ -133,6 +136,37 @@ class FlutterView {
    * internal
    */
   [[nodiscard]] uint64_t GetIndex() const { return m_index; }
+
+  /**
+   * @brief The output this view is presenting on, by name.
+   *
+   * What the view is actually on, which is not always what its config asked
+   * for -- a backend falls back to its own pick when no [view.output]
+   * constraint resolves. A hotplug listener re-resolves the constraint and
+   * compares it with this to decide whether anything has to move.
+   *
+   * @return the output name in the form OutputInfo::name carries (e.g.
+   *         "DSI-1"); nullopt when the backend does not track one, which is
+   *         the case for the software backend and for a Wayland view with no
+   *         [view.output] constraint.
+   * @relation
+   * internal
+   */
+  [[nodiscard]] std::optional<std::string> BoundOutput() const;
+
+  /**
+   * @brief The engine's platform view registry, or nullptr before Initialize().
+   *
+   * The registry hangs off the engine state, which the view can reach and an
+   * outside caller cannot (m_flutter_engine is private). App needs it to
+   * dispatch per-view plugin callbacks such as renegotiate.
+   *
+   * Platform thread only, as PlatformViewRegistry requires.
+   *
+   * @relation
+   * internal
+   */
+  [[nodiscard]] PlatformViewRegistry* GetPlatformViewRegistry() const;
 
   /**
    * @brief Get pointer to Display object
@@ -289,6 +323,12 @@ class FlutterView {
   flutter::KeyEventHandler* m_key_event_handler{};
 
   uint64_t m_pointer_events{};
+
+  // The Wayland output this view was placed on, by name, when [view.output]
+  // resolved one. The DRM side is not mirrored here: DrmBackend knows which
+  // connector it programmed, so BoundOutput() asks it rather than keeping a
+  // second copy that could disagree.
+  std::optional<std::string> m_wayland_bound_output;
 
   // Temporary owner of FlutterDesktopEngineState between FlutterView
   // construction (where engine_state is allocated and populated) and
