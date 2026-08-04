@@ -106,6 +106,17 @@ The compositor, not this process, is the lessor:
   `wp_drm_lease_v1` object, which lets the compositor revoke and re-advertise.
 - **No libseat session.** The compositor already holds the session controller for
   the seat; taking it would fight. Input falls back to direct evdev.
+- **Input can be duplicated, and defaults to off under a host session.** A leased
+  client has no `wl_surface`, so the compositor delivers it no input — its only
+  source is libinput on `/dev/input/event*`, and those reads are *ungrabbed*. On
+  a host with a live Wayland session that means every keystroke and pointer event
+  reaches **both** this process and the session compositor (input is duplicated,
+  not stolen). `lease_input` controls it: `auto` (default) reads evdev on an
+  embedded target — no `WAYLAND_DISPLAY` — but disables it when a host session is
+  detected, warning why; `on` forces evdev even under a session (an embedded box
+  running its own compositor, with input devices partitioned between them); `off`
+  never reads evdev. `--drm-no-seat` does **not** affect this — it bypasses
+  libseat, not input.
 - **Outputs are enumerated through the lease fd**, whose resource view the kernel
   filters to the leased objects. Re-opening the card by path would both show
   connectors we do not hold *and* require permissions a leased client may not
@@ -183,6 +194,7 @@ homescreen --backend=wayland-leased-drm-egl --lease-connector=HDMI-A-1 -b <bundl
 | `--lease-connector` | `HOMESCREEN_LEASE_CONNECTOR` | `[view.backend.lease] connector` | Connector to request by name. Unset + one offer takes it; unset + several is fatal and lists them |
 | `--lease-device` | `HOMESCREEN_LEASE_DEVICE` | `[view.backend.lease] device` | Which `wp_drm_lease_device_v1` when several are advertised (one per DRM node): index or node path |
 | `--lease-timeout-ms` | `HOMESCREEN_LEASE_TIMEOUT_MS` | `[view.backend.lease] timeout_ms` | Bound on the whole negotiation (default 5000) |
+| `--lease-input` | `HOMESCREEN_LEASE_INPUT` | `[view.backend.lease] input` | Read input from raw evdev: `auto` (default; on for embedded, off under a host Wayland session), `on` (force), `off` (never). See the input-duplication note above |
 
 The timeout is load-bearing, not cosmetic: the spec lets a compositor defer the
 DRM fd until it regains DRM master, so without a bound a VT-switched-away

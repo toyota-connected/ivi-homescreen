@@ -98,6 +98,12 @@ bool SoftwareDisplay::ActivateSystemCursor(const int32_t /*device*/,
 }
 
 void SoftwareDisplay::StartEvents() {
+  if (!input_enabled_) {
+    // Seat left unstarted on purpose (SetInputEnabled(false)) — libinput never
+    // opens /dev/input/event*. The leased-software factory does this when a
+    // host Wayland session is present; the reason was logged there.
+    return;
+  }
   if (seat_) {
     seat_->Start();
   }

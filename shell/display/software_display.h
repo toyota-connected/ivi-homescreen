@@ -59,6 +59,14 @@ class SoftwareDisplay final : public IDisplay {
     return cursor_;
   }
 
+  // Gate the input seat. When false, StartEvents() leaves the seat unstarted,
+  // so libinput never opens /dev/input/event*. Default true. The leased-
+  // software factory sets it false when a host Wayland session is present --
+  // the leased path has no wl_surface, so its ungrabbed evdev reads would
+  // duplicate input into both this process and the session compositor. Must be
+  // called before StartEvents().
+  void SetInputEnabled(bool enabled) { input_enabled_ = enabled; }
+
   void StartEvents() override;
   void StopEvents() override;
   [[nodiscard]] int PollEvents() const override { return 0; }
@@ -114,6 +122,9 @@ class SoftwareDisplay final : public IDisplay {
   double refresh_rate_hz_;
   FlutterDesktopViewControllerState* view_controller_state_ = nullptr;
   std::unique_ptr<homescreen::ISeat> seat_;
+  // When false, StartEvents() leaves seat_ unstarted (see SetInputEnabled()).
+  // Default true.
+  bool input_enabled_ = true;
   std::shared_ptr<SoftwareCursor> cursor_;
   std::optional<LeasedScanout> leased_scanout_;
 };

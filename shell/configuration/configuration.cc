@@ -262,6 +262,10 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
     instance.view.lease_on_revoke =
         v->at_path("backend.lease.on_revoke").as_string()->value_or("");
   }
+  if (v->at_path("backend.lease.input").is_string()) {
+    instance.view.lease_input =
+        v->at_path("backend.lease.input").as_string()->value_or("");
+  }
   if (v->at_path("backend.lease.timeout_ms").is_integer()) {
     const int64_t ms = v->at_path("backend.lease.timeout_ms")
                            .as_integer()
@@ -797,6 +801,16 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "5000. The protocol lets a compositor defer the DRM fd until it "
         "regains DRM master, so this is what stops a VT-switched-away "
         "compositor hanging startup.",
+        cxxopts::value<std::string>())(
+        "lease-input",
+        "wayland-leased-drm: whether to read input from raw evdev. A leased "
+        "client has no wl_surface, so libinput on /dev/input/event* is its "
+        "only "
+        "input source, and it is ungrabbed -- on a host with a live Wayland "
+        "session that duplicates every keystroke into this process and the "
+        "session compositor. auto (default) = read evdev on an embedded target "
+        "but disable it when a Wayland session is detected; on = always read "
+        "evdev; off = never.",
         cxxopts::value<std::string>());
 
     // [view.backend.drm] (also settable via HOMESCREEN_DRM_* env)
@@ -1002,6 +1016,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
                 config.view.lease_connector);
     pick_string("lease-on-revoke", "HOMESCREEN_LEASE_ON_REVOKE",
                 config.view.lease_on_revoke);
+    pick_string("lease-input", "HOMESCREEN_LEASE_INPUT",
+                config.view.lease_input);
     // Same CLI-wins-then-env precedence as pick_string, but parsed as a bounded
     // uint32. Written as a lambda over both sources rather than an env-only
     // block: --lease-timeout-ms was registered as a flag and read from nowhere,
