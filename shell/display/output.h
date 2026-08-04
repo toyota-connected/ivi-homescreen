@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace homescreen {
@@ -125,6 +126,43 @@ struct OutputResolution {
 
   [[nodiscard]] bool bound() const { return status == Status::kBound; }
 };
+
+// What the output layer reported.
+enum class OutputEvent {
+  kAdded,
+  kRemoved,
+  kChanged,  // same output, new mode / EDID
+};
+
+// What an output event means for one view.
+enum class OutputTransition {
+  kNone,          // still where it belongs; nothing to do
+  kMoved,         // the constraint now resolves to a different output
+  kAppeared,      // the constraint resolves and the view is not on it yet
+  kLost,          // the view's output no longer satisfies the constraint
+  kReconfigured,  // same output, but its mode or EDID changed
+};
+
+/**
+ * @brief Decide what an output event means for a single view.
+ *
+ * Split out of the listener because this is the part that can be wrong: the
+ * caller supplies where the view is and what its config now resolves to, and
+ * the decision is a pure function of those. A view is only "lost" when a
+ * constraint was set and went unsatisfied -- an unconstrained view keeps
+ * whatever the backend chose, so its output vanishing is the backend's problem
+ * to report, not a resolution failure.
+ *
+ * @param[in] current the view's actual output, from FlutterView::BoundOutput()
+ * @param[in] wanted  the freshly re-resolved constraint
+ * @param[in] event   what happened
+ * @param[in] changed the output the event names; only meaningful for kChanged
+ */
+[[nodiscard]] OutputTransition ClassifyOutputTransition(
+    const std::optional<std::string>& current,
+    const OutputResolution& wanted,
+    OutputEvent event,
+    std::string_view changed);
 
 // As ResolveOutput, but distinguishing kUnconstrained from kUnresolved.
 [[nodiscard]] OutputResolution ResolveOutputDetailed(
