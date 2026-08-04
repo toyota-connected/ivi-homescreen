@@ -73,7 +73,8 @@ The Watchdog operates as a singleton service that manages a set of active timers
 
 ### Dependencies
 
-- **systemd** (optional) — Required for systemd watchdog integration (`libsystemd`).
+- **systemd** (runtime, optional) — Required for systemd watchdog integration (`libsystemd`).
+- **libsystemd-dev** (build, optional) — Required for building with systemd integration.
 
 ### Configure + build
 
