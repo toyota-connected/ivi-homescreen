@@ -141,6 +141,74 @@ OutputResolution ResolveOutputDetailed(const OutputMatch& match,
   return {OutputResolution::Status::kUnresolved, {}};
 }
 
+namespace {
+
+// The fields a view cares about. The name alone is the join key (see
+// FindByName), so a change in any of these on a still-connected connector is
+// what "reconfigured" means: a different mode, or a different panel behind the
+// same port -- a swap keeps the name and lands here rather than as a
+// remove/add pair.
+bool SameConfiguration(const OutputInfo& a, const OutputInfo& b) {
+  return a.width_px == b.width_px && a.height_px == b.height_px &&
+         a.refresh_hz == b.refresh_hz && a.mm_width == b.mm_width &&
+         a.mm_height == b.mm_height && a.make == b.make && a.model == b.model &&
+         a.serial == b.serial && a.output_id == b.output_id;
+}
+
+const OutputInfo* FindByName(const std::vector<OutputInfo>& v,
+                             const std::string& name) {
+  for (const auto& o : v) {
+    if (o.name == name) {
+      return &o;
+    }
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+std::vector<OutputChange> DiffOutputs(const std::vector<OutputInfo>& before,
+                                      const std::vector<OutputInfo>& after) {
+  std::vector<OutputChange> removed;
+  std::vector<OutputChange> added;
+  std::vector<OutputChange> changed;
+
+  for (const auto& was : before) {
+    if (!was.connected) {
+      continue;  // was not usable; its staying unusable is not an event
+    }
+    const OutputInfo* now = FindByName(after, was.name);
+    if (now == nullptr || !now->connected) {
+      // Either the connector object is gone, or it is still enumerated with
+      // nothing attached. Both mean the display a view could bind to is away.
+      removed.push_back({OutputEvent::kRemoved, was});
+    } else if (!SameConfiguration(was, *now)) {
+      changed.push_back({OutputEvent::kChanged, *now});
+    }
+  }
+
+  for (const auto& now : after) {
+    if (!now.connected) {
+      continue;
+    }
+    const OutputInfo* was = FindByName(before, now.name);
+    if (was == nullptr || !was->connected) {
+      added.push_back({OutputEvent::kAdded, now});
+    }
+  }
+
+  // Removals first. When one enumeration both loses and gains outputs -- a
+  // card whose DSI goes away as HDMI arrives -- a listener that saw the
+  // addition first would re-resolve while the departed output was still in its
+  // picture and conclude the view had not moved.
+  std::vector<OutputChange> out;
+  out.reserve(removed.size() + added.size() + changed.size());
+  out.insert(out.end(), removed.begin(), removed.end());
+  out.insert(out.end(), added.begin(), added.end());
+  out.insert(out.end(), changed.begin(), changed.end());
+  return out;
+}
+
 OutputTransition ClassifyOutputTransition(
     const std::optional<std::string>& current,
     const OutputResolution& wanted,

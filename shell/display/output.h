@@ -143,6 +143,39 @@ enum class OutputTransition {
   kReconfigured,  // same output, but its mode or EDID changed
 };
 
+// One change between two enumerations of a card's outputs.
+struct OutputChange {
+  OutputEvent event;
+  // For kAdded and kChanged this is the output as it is now. For kRemoved
+  // there is no "now" -- the port is disconnected or the connector is gone --
+  // so it is the last state the output was seen in. Read it for the name and
+  // nothing else on a removal.
+  OutputInfo output;
+};
+
+/**
+ * @brief Diff two enumerations of the same card's outputs.
+ *
+ * A DRM connector is not created and destroyed as displays come and go: it
+ * stays enumerated and its `connected` flag moves, so an unplug is a
+ * connected->disconnected transition rather than a disappearance. A connector
+ * object vanishing entirely is a different thing (MST teardown, or the card
+ * going away) and is reported as a removal too, since the output is equally
+ * gone from the view's point of view.
+ *
+ * Only connected outputs are reported: a port that was disconnected and still
+ * is has not changed, and nothing can bind to it either way.
+ *
+ * @param[in] before the previous enumeration
+ * @param[in] after  the current one
+ * @return the changes, in a stable order: removals first, then additions, then
+ *         modifications, so a caller applying them in order never sees two
+ *         outputs claiming the same name.
+ */
+[[nodiscard]] std::vector<OutputChange> DiffOutputs(
+    const std::vector<OutputInfo>& before,
+    const std::vector<OutputInfo>& after);
+
 /**
  * @brief Decide what an output event means for a single view.
  *
