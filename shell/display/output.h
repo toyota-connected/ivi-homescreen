@@ -35,6 +35,19 @@ enum class BackendFamily {
 // wl_output v4 name. The other fields are descriptive (EDID / current mode).
 struct OutputInfo {
   std::string name;
+  // Integrator-assigned role name, from the connector's IHS_OUTPUT_NAME udev
+  // property. Empty unless a rule sets one. This is the only key that survives
+  // a change of board: the connector name and the card number both move, and
+  // many panels publish no EDID to be matched on.
+  //
+  // DRM only for now: DrmOutputProvider fills it, the Wayland Display does not.
+  // A wl_output carries no connector identity a client can join on directly --
+  // the name a compositor advertises need not be the kernel's (Mutter reports
+  // HDMI-1 for HDMI-A-1, while Weston and wlroots pass it through) -- so that
+  // path needs a normalization step and its own verification. Until then an
+  // output_id match on Wayland finds nothing and parks, which ResolveOutput
+  // reports.
+  std::optional<std::string> output_id;
   std::string make;                   // EDID PNP id, e.g. "GSM"
   std::string model;                  // EDID model name
   std::optional<std::string> serial;  // EDID serial; DRM-only, often absent
@@ -50,6 +63,10 @@ struct OutputInfo {
 // Per-bundle output binding (Configuration::Config::view.output). The most
 // specific field that matches a live output wins; see ResolveOutput.
 struct OutputMatch {
+  // Role name assigned by a udev rule (IHS_OUTPUT_NAME). The most specific
+  // tier, and the only one portable across boards -- see ReadOutputIds.
+  // Populated on the DRM backends only; see OutputInfo::output_id.
+  std::optional<std::string> output_id;
   std::optional<std::string> wl_name;        // Wayland: wl_output name
   std::optional<std::string> drm_connector;  // DRM: kernel connector name
   std::optional<std::string> edid_serial;    // DRM-only refinement
@@ -86,13 +103,44 @@ struct OutputMatch {
   // immediately (preserves single-view behavior). Layout position is not a
   // match constraint, so it does not affect this.
   [[nodiscard]] bool empty() const {
-    return !wl_name && !drm_connector && !edid_serial && !index;
+    return !output_id && !wl_name && !drm_connector && !edid_serial && !index;
   }
 };
+
+// The outcome of resolving a view's [view.output] against the live set.
+//
+// "no constraint" and "constrained but not satisfied" are different situations
+// that a bare optional cannot tell apart, and they call for opposite handling:
+// the first means the backend's own default is correct, the second means the
+// display the config named is not there. Callers that cannot honor the second
+// at least must not mistake it for the first.
+struct OutputResolution {
+  enum class Status {
+    kUnconstrained,  // no [view.output]; the backend's default stands
+    kBound,          // a constraint matched a live output
+    kUnresolved,     // a constraint was set and nothing satisfied it
+  };
+  Status status = Status::kUnconstrained;
+  std::string name;  // set only when kBound
+
+  [[nodiscard]] bool bound() const { return status == Status::kBound; }
+};
+
+// As ResolveOutput, but distinguishing kUnconstrained from kUnresolved.
+[[nodiscard]] OutputResolution ResolveOutputDetailed(
+    const OutputMatch& match,
+    const std::vector<OutputInfo>& outputs,
+    BackendFamily family);
 
 // Resolve the OutputInfo::name a bundle should bind to, given the current live
 // set, or nullopt if none matches (the bundle is then parked). `family` selects
 // which OutputMatch name field is compared. Match order, most specific first:
+//   0. output_id   — the connector's IHS_OUTPUT_NAME udev property, when an
+//      integrator's rule sets one. Above the serial because it is assigned
+//      deliberately, works on panels with no EDID, and is the only key that
+//      holds across boards. An unmatched output_id parks rather than falling
+//      through: naming a role and silently binding to some other display is
+//      worse than not binding.
 //   1. edid_serial — DRM only; only if present AND it uniquely identifies one
 //      connected output. A duplicate/ambiguous serial warns and falls through.
 //   2. name        — drm_connector (DRM) or wl_name (Wayland); the primary
