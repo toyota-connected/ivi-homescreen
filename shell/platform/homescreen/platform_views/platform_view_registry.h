@@ -115,6 +115,12 @@ class PlatformViewRegistry {
   void AcceptGesture(int32_t id);
   void RejectGesture(int32_t id);
 
+  // Tell one view it left (true) or re-entered (false) the composited scene.
+  // Returns false when no instance holds @p id, or when the view registered no
+  // set_suspended callback -- the caller uses that to tell "nothing to notify"
+  // from "notified".
+  bool SetSuspended(int32_t id, bool suspended);
+
   // Tell one view its grant is stale. Returns false when no instance holds
   // @p id, or when the view registered no renegotiate callback -- the caller
   // uses that to tell "nothing to notify" from "notified".

@@ -40,6 +40,8 @@ struct Probe {
   int accept = 0;
   int reject = 0;
   int renegotiate = 0;
+  int suspend_calls = 0;
+  int last_suspended = -1;
   int32_t last_gesture_id = -1;
   void* last_gesture_data = nullptr;
 };
@@ -76,6 +78,12 @@ void ProbeRejectGesture(int32_t id, void* data) {
   p->last_gesture_data = data;
 }
 
+void ProbeSetSuspended(int32_t /* id */, uint8_t suspended, void* data) {
+  auto* p = static_cast<Probe*>(data);
+  ++p->suspend_calls;
+  p->last_suspended = suspended;
+}
+
 constexpr platform_view_listener kListener = {
     ProbeResize,         // resize
     nullptr,             // set_direction
@@ -84,6 +92,7 @@ constexpr platform_view_listener kListener = {
     ProbeDispose,        // dispose
     ProbeAcceptGesture,  // accept_gesture
     ProbeRejectGesture,  // reject_gesture
+    ProbeSetSuspended,   // set_suspended
     ProbeRenegotiate,    // renegotiate
 };
 
@@ -257,3 +266,27 @@ TEST(PlatformViewRegistry, FactoryOwnedInstanceDestroyedOnDispose) {
 }
 
 }  // namespace
+
+// set_suspended follows the same per-view addressing as renegotiate: parking
+// one view must not silence a second one that is still on screen.
+TEST(PlatformViewRegistry, SetSuspendedAddressesOneView) {
+  PlatformViewRegistry registry(nullptr);
+  Probe a;
+  Probe b;
+  registry.RegisterListener(1, &kListener, &a);
+  registry.RegisterListener(2, &kListener, &b);
+
+  EXPECT_TRUE(registry.SetSuspended(1, true));
+  EXPECT_EQ(a.suspend_calls, 1);
+  EXPECT_EQ(a.last_suspended, 1);
+  EXPECT_EQ(b.suspend_calls, 0) << "the other view is still visible";
+
+  // Resuming is the same call with the flag cleared, not a separate entry --
+  // a plugin that only ever saw 1 would never restart its producer.
+  EXPECT_TRUE(registry.SetSuspended(1, false));
+  EXPECT_EQ(a.suspend_calls, 2);
+  EXPECT_EQ(a.last_suspended, 0);
+
+  // Unknown id: nothing to notify, reported as such.
+  EXPECT_FALSE(registry.SetSuspended(42, true));
+}
