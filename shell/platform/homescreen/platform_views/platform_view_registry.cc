@@ -213,6 +213,18 @@ void PlatformViewRegistry::RejectGesture(int32_t id) {
   }
 }
 
+bool PlatformViewRegistry::SetSuspended(const int32_t id,
+                                        const bool suspended) {
+  const platform_view_listener* listener = nullptr;
+  void* context = nullptr;
+  if (!LookupListener(id, &listener, &context) ||
+      listener->set_suspended == nullptr) {
+    return false;
+  }
+  listener->set_suspended(id, suspended ? 1 : 0, context);
+  return true;
+}
+
 bool PlatformViewRegistry::Renegotiate(const int32_t id) {
   const platform_view_listener* listener = nullptr;
   void* context = nullptr;
