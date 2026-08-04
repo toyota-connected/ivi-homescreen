@@ -23,6 +23,8 @@
 #include <memory>
 #include <utility>
 
+#include "asio/post.hpp"
+
 #include "app.h"
 #include "backend/backend_registry.h"
 #include "backend/register_backends.h"
@@ -210,11 +212,6 @@ FlutterView::FlutterView(Configuration::Config config,
             m_config, display.get(), homescreen::BackendFamily::kWayland)) {
       if (const auto idx = wl->WlOutputIndexForName(*resolved)) {
         wl_output_index = *idx;
-        // Remember what we landed on. Only on the branch that took effect:
-        // when the name is not live the view stays on wl_output_index, which
-        // is a different output, and recording the requested name there would
-        // make BoundOutput() describe a placement that did not happen.
-        m_wayland_bound_output = *resolved;
       } else {
         ihs::log::warn(
             "[FlutterView] resolved wl_output '{}' is not live; using "
@@ -222,6 +219,13 @@ FlutterView::FlutterView(Configuration::Config config,
             *resolved, wl_output_index);
       }
     }
+    // Record the output the view actually landed on, by index rather than by
+    // what the config asked for. Those differ in two ordinary cases: no
+    // [view.output] at all, and a named output that is not live -- in both the
+    // view still sits on some real output, and a listener that cannot name it
+    // cannot tell that a mode change underneath it matters.
+    m_wayland_bound_output = wl->WlOutputNameForIndex(wl_output_index);
+
     m_wayland_window = std::make_shared<WaylandWindow>(
         m_index, std::dynamic_pointer_cast<Display>(display),
         m_config.view.window_type, wl->GetWlOutput(wl_output_index),
@@ -391,6 +395,18 @@ std::optional<std::string> FlutterView::BoundOutput() const {
     }
   }
   return m_wayland_bound_output;
+}
+
+bool FlutterView::PostToPlatformThread(std::function<void()> fn) const {
+  if (!m_flutter_engine) {
+    return false;
+  }
+  auto* runner = m_flutter_engine->GetPlatformTaskRunner();
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return false;
+  }
+  asio::post(*runner->GetStrandContext(), std::move(fn));
+  return true;
 }
 
 PlatformViewRegistry* FlutterView::GetPlatformViewRegistry() const {

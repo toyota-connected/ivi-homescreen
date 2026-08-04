@@ -19,9 +19,11 @@
 #include <EGL/egl.h>
 #include <chrono>
 #include <memory>
+#include <string_view>
 
 #include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 #include "configuration/configuration.h"
+#include "display/output.h"
 #include "logging/logger.hpp"
 #include "view/flutter_view.h"
 
@@ -79,10 +81,29 @@ class App final {
   std::vector<std::shared_ptr<IDisplay>> BuildDisplays(
       const std::vector<Configuration::Config>& configs);
 
+  // Watches one display's outputs on App's behalf. IOutputListener reports
+  // what changed but not which display reported it, and App can drive several
+  // -- so one listener per display, each carrying its own display pointer,
+  // rather than App implementing the interface once and having to guess.
+  class OutputWatch;
+
+  // Re-resolve every view on @p display and act on what changed. Runs on the
+  // App reactor thread (the one reading the Wayland fd), not the Flutter
+  // platform thread -- anything touching the engine hops via
+  // FlutterView::PostToPlatformThread.
+  void OnDisplayOutputsChanged(IDisplay* display,
+                               homescreen::OutputEvent event,
+                               std::string_view output_name);
+
+  // Tell one view's platform views their grant is stale.
+  static void RenegotiateView(const FlutterView* view);
+
   // The displays the App drives. One entry per distinct device-context; a
   // homogeneous config set yields a single shared display.
   std::vector<std::shared_ptr<IDisplay>> m_displays;
   std::vector<std::unique_ptr<FlutterView>> m_views;
+  // One per display that reports hotplug; cleared before the displays go.
+  std::vector<std::unique_ptr<OutputWatch>> m_output_watches;
 #if BUILD_WATCHDOG
   mutable std::chrono::steady_clock::time_point next_pet_;
 #endif
