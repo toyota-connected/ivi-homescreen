@@ -24,9 +24,12 @@
 #include "display/output.h"
 
 using homescreen::BackendFamily;
+using homescreen::ClassifyOutputTransition;
+using homescreen::OutputEvent;
 using homescreen::OutputInfo;
 using homescreen::OutputMatch;
 using homescreen::OutputResolution;
+using homescreen::OutputTransition;
 using homescreen::ResolveOutput;
 using homescreen::ResolveOutputDetailed;
 
@@ -309,4 +312,88 @@ TEST(OutputResolver, DetailedResultSeparatesUnconstrainedFromUnresolved) {
       ResolveOutputDetailed(present, TwoHeads(), BackendFamily::kDrm);
   EXPECT_TRUE(ok.bound());
   EXPECT_EQ(ok.name, "HDMI-A-1");
+}
+
+// ---------------------------------------------------------------------------
+// ClassifyOutputTransition: what an output event means for one view. Split out
+// of App's listener so the decision can be exercised without a display, an
+// engine or a compositor.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+OutputResolution Bound(std::string name) {
+  return {OutputResolution::Status::kBound, std::move(name)};
+}
+OutputResolution Unconstrained() {
+  return {OutputResolution::Status::kUnconstrained, {}};
+}
+OutputResolution Unresolved() {
+  return {OutputResolution::Status::kUnresolved, {}};
+}
+
+}  // namespace
+
+TEST(OutputTransitions, StayingPutIsNotAnEvent) {
+  // The common case by far: something changed elsewhere on the display.
+  EXPECT_EQ(
+      ClassifyOutputTransition(std::optional<std::string>{"DSI-1"},
+                               Bound("DSI-1"), OutputEvent::kAdded, "HDMI-A-1"),
+      OutputTransition::kNone);
+}
+
+TEST(OutputTransitions, ConstraintNowResolvesElsewhere) {
+  EXPECT_EQ(
+      ClassifyOutputTransition(std::optional<std::string>{"HDMI-A-1"},
+                               Bound("DSI-1"), OutputEvent::kAdded, "DSI-1"),
+      OutputTransition::kMoved);
+}
+
+TEST(OutputTransitions, AnUnboundViewGainsAnOutput) {
+  EXPECT_EQ(ClassifyOutputTransition(std::nullopt, Bound("DSI-1"),
+                                     OutputEvent::kAdded, "DSI-1"),
+            OutputTransition::kAppeared);
+}
+
+TEST(OutputTransitions, AConstraintThatStopsResolvingLosesTheOutput) {
+  EXPECT_EQ(
+      ClassifyOutputTransition(std::optional<std::string>{"HDMI-A-1"},
+                               Unresolved(), OutputEvent::kRemoved, "HDMI-A-1"),
+      OutputTransition::kLost);
+}
+
+TEST(OutputTransitions, AnUnconstrainedViewIsNeverLost) {
+  // No constraint means the backend's own pick stands, and re-resolving says
+  // nothing about it -- reporting "lost" here would park a view that is still
+  // perfectly placed.
+  EXPECT_EQ(ClassifyOutputTransition(std::optional<std::string>{"DSI-1"},
+                                     Unconstrained(), OutputEvent::kRemoved,
+                                     "HDMI-A-1"),
+            OutputTransition::kNone);
+}
+
+TEST(OutputTransitions, ReconfiguringTheViewsOwnOutputCounts) {
+  EXPECT_EQ(
+      ClassifyOutputTransition(std::optional<std::string>{"DSI-1"},
+                               Bound("DSI-1"), OutputEvent::kChanged, "DSI-1"),
+      OutputTransition::kReconfigured);
+  // ... and an unconstrained view on that output is equally affected: its mode
+  // may have changed underneath it.
+  EXPECT_EQ(
+      ClassifyOutputTransition(std::optional<std::string>{"DSI-1"},
+                               Unconstrained(), OutputEvent::kChanged, "DSI-1"),
+      OutputTransition::kReconfigured);
+}
+
+TEST(OutputTransitions, ReconfiguringSomeOtherOutputDoesNot) {
+  EXPECT_EQ(ClassifyOutputTransition(std::optional<std::string>{"DSI-1"},
+                                     Bound("DSI-1"), OutputEvent::kChanged,
+                                     "HDMI-A-1"),
+            OutputTransition::kNone);
+}
+
+TEST(OutputTransitions, AViewWithNoBindingAndNoConstraintHasNothingToDo) {
+  EXPECT_EQ(ClassifyOutputTransition(std::nullopt, Unconstrained(),
+                                     OutputEvent::kChanged, "DSI-1"),
+            OutputTransition::kNone);
 }

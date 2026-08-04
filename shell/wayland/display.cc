@@ -1266,6 +1266,24 @@ std::vector<homescreen::OutputInfo> Display::EnumerateOutputs() const {
 
 void Display::SetOutputListener(homescreen::IOutputListener* listener) {
   m_output_listener = listener;
+  if (listener == nullptr) {
+    return;
+  }
+  // Everything already bound counts as announced. A listener attaching after
+  // the registry roundtrip -- which is every listener, since the outputs are
+  // bound in the constructor -- reads the current set through
+  // EnumerateOutputs() instead. Without this the flag stays false, and two
+  // things go wrong: the next `done` on a long-standing output is reported as
+  // an arrival, and its removal is not reported at all, because
+  // HandleGlobalRemove only notifies for outputs it believes were announced.
+  for (const auto& oi : m_all_outputs) {
+    // Only the ones EnumerateOutputs() would expose, i.e. those whose first
+    // `done` has landed. A global bound but not yet described has genuinely
+    // not been announced, and its first `done` is an arrival.
+    if (oi && oi->done) {
+      oi->announced = true;
+    }
+  }
 }
 
 void Display::EmitOutputDone(output_info_t* oi) {
@@ -1287,10 +1305,16 @@ void Display::HandleGlobalRemove(const uint32_t global_name) {
     if (!oi || oi->global_id != global_name) {
       continue;
     }
-    if (m_output_listener != nullptr && oi->announced) {
-      m_output_listener->OnOutputRemoved(oi->name);
-    }
+    // Drop it first, then notify. A listener re-reads the live set through
+    // EnumerateOutputs() to decide what the removal means, and it must not
+    // still find the output that just went away -- doing so makes a departed
+    // output look present and the event look like a no-op.
+    const std::string name = oi->name;
+    const bool was_announced = oi->announced;
     m_all_outputs.erase(it);
+    if (m_output_listener != nullptr && was_announced) {
+      m_output_listener->OnOutputRemoved(name);
+    }
     return;
   }
 }

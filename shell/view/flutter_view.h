@@ -16,6 +16,7 @@
 
 #include "config/common.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -146,9 +147,9 @@ class FlutterView {
    * compares it with this to decide whether anything has to move.
    *
    * @return the output name in the form OutputInfo::name carries (e.g.
-   *         "DSI-1"); nullopt when the backend does not track one, which is
-   *         the case for the software backend and for a Wayland view with no
-   *         [view.output] constraint.
+   *         "DSI-1"); nullopt when neither the backend nor the view can name
+   *         one -- the software backend, or a Wayland output whose first
+   *         wl_output.done has not landed.
    * @relation
    * internal
    */
@@ -167,6 +168,47 @@ class FlutterView {
    * internal
    */
   [[nodiscard]] PlatformViewRegistry* GetPlatformViewRegistry() const;
+
+  /**
+   * @brief The config this view was built from.
+   *
+   * The [view.output] constraint lives here, and re-resolving it is how a
+   * hotplug listener decides whether the view still belongs where it is.
+   *
+   * @relation
+   * internal
+   */
+  [[nodiscard]] const Configuration::Config& GetConfig() const {
+    return m_config;
+  }
+
+  /**
+   * @brief Run @p fn on the Flutter platform thread.
+   *
+   * Output events reach App on its own reactor thread -- the one reading the
+   * Wayland fd -- and PlatformViewRegistry may only be touched on the platform
+   * thread, which TaskRunner owns separately. This is the hop between them.
+   *
+   * @return false if the engine is not running, in which case @p fn is not
+   *         called and never will be.
+   * @relation
+   * internal
+   */
+  bool PostToPlatformThread(std::function<void()> fn) const;
+
+  /**
+   * @brief Forget the output this view was placed on, because it is gone.
+   *
+   * Wayland only, and only where the view recorded its own placement: the DRM
+   * binding comes from the backend, which corrects itself when it re-modesets.
+   * Without this the record outlives the output, and a replug of the same name
+   * looks like "already there" -- so the view would never be told to
+   * renegotiate against the new one.
+   *
+   * @relation
+   * internal
+   */
+  void NoteOutputLost() { m_wayland_bound_output.reset(); }
 
   /**
    * @brief Get pointer to Display object
@@ -324,10 +366,12 @@ class FlutterView {
 
   uint64_t m_pointer_events{};
 
-  // The Wayland output this view was placed on, by name, when [view.output]
-  // resolved one. The DRM side is not mirrored here: DrmBackend knows which
-  // connector it programmed, so BoundOutput() asks it rather than keeping a
-  // second copy that could disagree.
+  // The Wayland output this view was placed on, by name -- taken from the
+  // index actually used, so it is set whether the placement came from
+  // [view.output], from wl_output_index, or from the default. The DRM side is
+  // not mirrored here: DrmBackend knows which connector it programmed, so
+  // BoundOutput() asks it rather than keeping a second copy that could
+  // disagree.
   std::optional<std::string> m_wayland_bound_output;
 
   // Temporary owner of FlutterDesktopEngineState between FlutterView

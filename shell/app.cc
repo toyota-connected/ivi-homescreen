@@ -32,6 +32,11 @@
 
 #include "config/common.h"
 
+#include "display/output_manager.h"
+#include "display/output_provider.h"
+#if BUILD_COMPOSITOR
+#include "platform/homescreen/platform_views/platform_view_registry.h"
+#endif
 #include "main_loop_waker.h"
 #include "timer.h"
 #include "view/flutter_view.h"
@@ -85,6 +90,45 @@ std::string ContextKey(const backend::BackendRegistry& reg,
 }
 
 }  // namespace
+
+namespace {
+
+const char* EventName(const homescreen::OutputEvent event) {
+  switch (event) {
+    case homescreen::OutputEvent::kAdded:
+      return "appeared";
+    case homescreen::OutputEvent::kRemoved:
+      return "disappeared";
+    case homescreen::OutputEvent::kChanged:
+      return "changed";
+  }
+  return "changed";
+}
+
+}  // namespace
+
+// One display's outputs, reported to App with the display it happened on.
+class App::OutputWatch final : public homescreen::IOutputListener {
+ public:
+  OutputWatch(App* app, IDisplay* display) : app_(app), display_(display) {}
+
+  void OnOutputAdded(const homescreen::OutputInfo& output) override {
+    app_->OnDisplayOutputsChanged(display_, homescreen::OutputEvent::kAdded,
+                                  output.name);
+  }
+  void OnOutputRemoved(const std::string_view name) override {
+    app_->OnDisplayOutputsChanged(display_, homescreen::OutputEvent::kRemoved,
+                                  name);
+  }
+  void OnOutputChanged(const homescreen::OutputInfo& output) override {
+    app_->OnDisplayOutputsChanged(display_, homescreen::OutputEvent::kChanged,
+                                  output.name);
+  }
+
+ private:
+  App* app_;
+  IDisplay* display_;
+};
 
 std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
     const std::vector<Configuration::Config>& configs) {
@@ -213,6 +257,22 @@ App::App(const std::vector<Configuration::Config>& configs) {
   }
 #endif
 
+  // Watch outputs before the event sources start, so nothing announced in the
+  // first burst is missed. Views already exist above, so the first re-resolve
+  // compares against a real binding and finds nothing to do -- which is the
+  // correct answer at startup, not a special case.
+  for (const auto& display : m_displays) {
+    auto* provider = display->GetOutputProvider();
+    if (provider == nullptr || !provider->SupportsHotplug()) {
+      continue;  // e.g. the software sink, and DRM until its monitor is wired
+    }
+    auto watch = std::make_unique<OutputWatch>(this, display.get());
+    provider->SetOutputListener(watch.get());
+    m_output_watches.push_back(std::move(watch));
+    ihs::log::debug("[App] watching outputs on a display ({} live now)",
+                    provider->EnumerateOutputs().size());
+  }
+
   for (const auto& display : m_displays) {
     display->StartEvents();
   }
@@ -235,6 +295,15 @@ App::~App() {
   // backend (owned by the views/displays below) is still alive.
   vk_export_bridge_.reset();
 #endif
+  // Unhook before the displays stop: a watch points at App, and a late event
+  // must not reach a half-destroyed one.
+  for (const auto& display : m_displays) {
+    if (auto* provider = display->GetOutputProvider()) {
+      provider->SetOutputListener(nullptr);
+    }
+  }
+  m_output_watches.clear();
+
   for (const auto& display : m_displays) {
     display->StopEvents();
   }
@@ -242,6 +311,99 @@ App::~App() {
   Watchdog::getInstance().stop(WATCHDOG_SOURCE_RENDER_THREAD);
   Watchdog::getInstance().stop(WATCHDOG_SOURCE_MAIN_THREAD);
 #endif
+}
+
+void App::RenegotiateView(const FlutterView* view) {
+#if !BUILD_COMPOSITOR
+  // Platform views are a BUILD_COMPOSITOR feature; with it off there is no
+  // registry and no plugin to notify. The transition is still detected and
+  // logged above -- that part is not compositor-specific.
+  ihs::log::debug(
+      "[App] view {}: platform views are not built; nothing to notify",
+      view->GetIndex());
+#else
+  // Hop to the platform thread: this is called from the reactor, and the
+  // registry is platform-thread-only. Capturing the view raw is safe because
+  // App owns every view and tears the watches down before the views go.
+  const bool posted = view->PostToPlatformThread([view] {
+    auto* registry = view->GetPlatformViewRegistry();
+    if (registry == nullptr) {
+      return;
+    }
+    // Per view, not RenegotiateAll(): a second view on another output of the
+    // same display has not moved and must not be told it has.
+    const auto ids = registry->InstanceIds();
+    size_t notified = 0;
+    for (const int32_t id : ids) {
+      notified += registry->Renegotiate(id) ? 1 : 0;
+    }
+    ihs::log::debug("[App] view {}: renegotiated {}/{} platform view(s)",
+                    view->GetIndex(), notified, ids.size());
+  });
+  if (!posted) {
+    ihs::log::debug("[App] view {} has no running engine; nothing to notify",
+                    view->GetIndex());
+  }
+#endif
+}
+
+void App::OnDisplayOutputsChanged(IDisplay* display,
+                                  const homescreen::OutputEvent event,
+                                  const std::string_view output_name) {
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  const auto family = dynamic_cast<Display*>(display) != nullptr
+                          ? homescreen::BackendFamily::kWayland
+                          : homescreen::BackendFamily::kDrm;
+#else
+  const auto family = homescreen::BackendFamily::kDrm;
+#endif
+
+  for (const auto& view : m_views) {
+    if (!view || view->GetIDisplay() != display) {
+      continue;
+    }
+    const std::optional<std::string> current = view->BoundOutput();
+    const homescreen::OutputResolution wanted =
+        homescreen::OutputManager::ResolveForViewDetailed(view->GetConfig(),
+                                                          display, family);
+    const homescreen::OutputTransition transition =
+        homescreen::ClassifyOutputTransition(current, wanted, event,
+                                             output_name);
+    if (transition == homescreen::OutputTransition::kNone) {
+      continue;
+    }
+
+    const char* what = "was reconfigured";
+    switch (transition) {
+      case homescreen::OutputTransition::kMoved:
+        what = "belongs on a different output";
+        break;
+      case homescreen::OutputTransition::kAppeared:
+        what = "has an output to bind to";
+        break;
+      case homescreen::OutputTransition::kLost:
+        what = "lost its output";
+        // Forget the placement now that it is gone, so the same output coming
+        // back reads as an arrival rather than as "already there".
+        view->NoteOutputLost();
+        break;
+      case homescreen::OutputTransition::kReconfigured:
+      case homescreen::OutputTransition::kNone:
+        break;
+    }
+    // States the transition only. What is done about it varies by build and
+    // by whether the view has any platform views, so RenegotiateView reports
+    // that itself rather than being announced for in advance.
+    ihs::log::info("[App] output '{}' {}: view {} {} (on '{}', wants '{}')",
+                   output_name, EventName(event), view->GetIndex(), what,
+                   current.value_or("-"), wanted.bound() ? wanted.name : "-");
+
+    // Tell the plugins their grant is stale. Actually moving the view to
+    // another output, or parking it when its output went away, needs the
+    // suspend/resume path that does not exist yet -- so a view whose output
+    // vanished keeps its surface for now and is only notified.
+    RenegotiateView(view.get());
+  }
 }
 
 bool App::AnyHasRepeatTimer() const {
