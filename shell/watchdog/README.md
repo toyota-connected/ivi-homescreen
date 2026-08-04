@@ -11,7 +11,7 @@ The Watchdog is a failure-detection subsystem that monitors the health of critic
 | Render thread monitoring | Built-in | |
 | Custom source monitoring | Built-in | `start()`/`pet()` |
 | Configurable timeout | Built-in | `[watchdog].timeout_ms` in `config.toml` |
-| Source name mapping | Built-in | `[watchdog.source_names]` in `config.toml` or `sourceSetName()` |
+| Source name mapping | Built-in | `[watchdog.source_names]` in `config.toml` or `setSourceName()` |
 | systemd integration | Optional | `BUILD_SYSTEMD_WATCHDOG=ON` |
 | Process health logging | Built-in | Logs threads/memory on every check |
 
@@ -169,7 +169,7 @@ To simulate a high-load scenario, the following `stress-ng` parameters are recom
 - **Memory**: 2 virtual memory workers with 256MB allocation each to
   create memory pressure.
 - **I/O**: 2 I/O stress workers to create disk contention.
-- **Duration**: 8 hours (43,200 seconds) for stability validation.
+- **Duration**: 8 hours (28,800 seconds) for stability validation.
 
 #### Watchdog Settings
 - **Timeout (`WATCHDOG_MS`)**: set this according to your preference -
