@@ -210,6 +210,11 @@ FlutterView::FlutterView(Configuration::Config config,
             m_config, display.get(), homescreen::BackendFamily::kWayland)) {
       if (const auto idx = wl->WlOutputIndexForName(*resolved)) {
         wl_output_index = *idx;
+        // Remember what we landed on. Only on the branch that took effect:
+        // when the name is not live the view stays on wl_output_index, which
+        // is a different output, and recording the requested name there would
+        // make BoundOutput() describe a placement that did not happen.
+        m_wayland_bound_output = *resolved;
       } else {
         ihs::log::warn(
             "[FlutterView] resolved wl_output '{}' is not live; using "
@@ -296,6 +301,15 @@ FlutterView::FlutterView(Configuration::Config config,
 #if ENABLE_PLUGINS
   PluginsApiRegisterPlugins(m_state->engine_state);
 #endif
+
+  // The backend has picked its output by now, so this is the placement the
+  // view will actually run on rather than the one it asked for.
+  if (const auto bound = BoundOutput()) {
+    ihs::log::debug("[FlutterView] view {} is on output '{}'", m_index, *bound);
+  } else {
+    ihs::log::debug("[FlutterView] view {} has no output binding to track",
+                    m_index);
+  }
 }
 
 FlutterView::~FlutterView() {
@@ -365,6 +379,27 @@ Display* FlutterView::GetDisplay() const {
   return dynamic_cast<Display*>(m_display.get());
 }
 #endif
+
+std::optional<std::string> FlutterView::BoundOutput() const {
+  // Ask the backend first: it is the only party that knows which output was
+  // actually programmed, including the connector it picked on its own when no
+  // [view.output] constraint applied. Only the Wayland backends have nothing
+  // to say here, and for those the view recorded its own placement.
+  if (m_backend) {
+    if (auto name = m_backend->BoundOutputName()) {
+      return name;
+    }
+  }
+  return m_wayland_bound_output;
+}
+
+PlatformViewRegistry* FlutterView::GetPlatformViewRegistry() const {
+  if (!m_flutter_engine) {
+    return nullptr;  // before Initialize(); no plugin can be registered yet
+  }
+  auto* state = m_flutter_engine->GetEngineState();
+  return state == nullptr ? nullptr : state->platform_view_registry.get();
+}
 
 void FlutterView::Initialize() {
   // Engine / Dart VM switches -> command_line_argv. argv[0] is the app id.
