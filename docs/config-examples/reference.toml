@@ -134,8 +134,8 @@
   # type=string default=(rank-pick) values=e.g. eDP-1, HDMI-A-1 applies=drm/sw
   connector =
 
-  # DRM device node.
-  # type=string default=(rank-pick) values=/dev/dri/cardN applies=drm/sw
+  # DRM device node. Prefer the by-path form: cardN is assigned in probe order, so the same driver is card0 on one board and card2 on another, while the by-path name is derived from the hardware topology and is stable.
+  # type=string default=(rank-pick) values=/dev/dri/by-path/<path>-card or /dev/dri/cardN applies=drm/sw
   device =
 
   # Use IN_FENCE_FD / OUT_FENCE_PTR.
@@ -179,8 +179,8 @@
   # type=string default=(sole offer) values=e.g. HDMI-A-1 applies=leased
   connector =
 
-  # Which wp_drm_lease_device_v1 when several are advertised (one per DRM node); ambiguous + unset is fatal.
-  # type=string default=(sole device) values=index or /dev/dri/cardN applies=leased
+  # Which wp_drm_lease_device_v1 when several are advertised (one per DRM node); ambiguous + unset is fatal. The by-path form is preferred for the same reason as backend.drm.device.
+  # type=string default=(sole device) values=index or /dev/dri/by-path/<path>-card or /dev/dri/cardN applies=leased
   device =
 
   # Whether to read input from raw evdev. A leased client has no wl_surface, so ungrabbed libinput is its only input source; under a host Wayland session that duplicates events into both this process and the compositor. auto disables it when a session is detected, on forces it (embedded-under-compositor), off never reads evdev.

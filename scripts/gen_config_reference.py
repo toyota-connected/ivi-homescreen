@@ -79,14 +79,14 @@ META = {
     "backend.type": ("(env-aware)", "wayland-egl|wayland-vulkan|drm-kms-egl|drm-kms-vulkan|software", "all", "Renderer backend; unset = auto (Wayland session -> wayland-egl, else drm-kms-egl)."),
     # [view.backend.lease] — wayland-leased-drm only. These say what to ask the
     # compositor to lease, not how to drive a card we already own (backend.drm.*).
-    "backend.lease.device": ("(sole device)", "index or /dev/dri/cardN", "leased", "Which wp_drm_lease_device_v1 when several are advertised (one per DRM node); ambiguous + unset is fatal."),
+    "backend.lease.device": ("(sole device)", "index or /dev/dri/by-path/<path>-card or /dev/dri/cardN", "leased", "Which wp_drm_lease_device_v1 when several are advertised (one per DRM node); ambiguous + unset is fatal. The by-path form is preferred for the same reason as backend.drm.device."),
     "backend.lease.connector": ("(sole offer)", "e.g. HDMI-A-1", "leased", "Connector to request by name; several offers with no choice is fatal."),
     "backend.lease.timeout_ms": ("5000", "> 0", "leased", "Bound on the whole lease negotiation; a compositor may defer the DRM fd until it regains DRM master."),
     "backend.lease.on_revoke": ("exit", "exit|gate", "leased", "On revocation (every VT switch away from the compositor is one): exit non-zero so a supervisor restarts and renegotiates, or gate and keep running with a frozen panel (debugging only)."),
     "backend.lease.input": ("auto", "auto|on|off", "leased", "Whether to read input from raw evdev. A leased client has no wl_surface, so ungrabbed libinput is its only input source; under a host Wayland session that duplicates events into both this process and the compositor. auto disables it when a session is detected, on forces it (embedded-under-compositor), off never reads evdev."),
 
     # [view.backend.drm] — DRM/software only
-    "backend.drm.device": ("(rank-pick)", "/dev/dri/cardN", "drm/sw", "DRM device node."),
+    "backend.drm.device": ("(rank-pick)", "/dev/dri/by-path/<path>-card or /dev/dri/cardN", "drm/sw", "DRM device node. Prefer the by-path form: cardN is assigned in probe order, so the same driver is card0 on one board and card2 on another, while the by-path name is derived from the hardware topology and is stable."),
     "backend.drm.connector": ("(rank-pick)", "e.g. eDP-1, HDMI-A-1", "drm/sw", "Connector to drive."),
     "backend.drm.mode": ("(preferred)", "<W>x<H>@<R>", "drm/sw", "Mode; unset = preferred from EDID."),
     "backend.drm.rotation": ("0", "0|90|180|270", "drm", "Scanout rotation in degrees."),
