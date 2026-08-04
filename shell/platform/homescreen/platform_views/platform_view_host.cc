@@ -803,6 +803,13 @@ void ListenerRejectGesture(int32_t /* id */, void* data) {
   }
 }
 
+void ListenerSetSuspended(int32_t /* id */, uint8_t suspended, void* data) {
+  auto* view = static_cast<IhsPluginView*>(data);
+  if (view->callbacks.set_suspended != nullptr) {
+    view->callbacks.set_suspended(view->plugin_user_data, suspended);
+  }
+}
+
 void ListenerRenegotiate(int32_t /* id */, void* data) {
   auto* view = static_cast<IhsPluginView*>(data);
   if (view->callbacks.renegotiate != nullptr) {
@@ -822,6 +829,7 @@ const platform_view_listener kListener = {
     /* dispose */ ListenerDispose,
     /* accept_gesture */ ListenerAcceptGesture,
     /* reject_gesture */ ListenerRejectGesture,
+    /* set_suspended */ ListenerSetSuspended,
     /* renegotiate */ ListenerRenegotiate,
 };
 
