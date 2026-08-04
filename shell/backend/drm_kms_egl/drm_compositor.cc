@@ -2467,9 +2467,13 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   frame_batons.reserve(layer_count);
   frame_pv_tags.reserve(layer_count);
 
-  // The connector's HDR_OUTPUT_METADATA this present: set from an HDR video
-  // PV's frame (the topmost such PV wins), or left empty for SDR — which clears
-  // any prior HDR signaling. Applied to the scene just before commit.
+  // The connector's HDR_OUTPUT_METADATA this present. Set below from the HDR
+  // PVs that actually survive into the committed scene (reused or newly added)
+  // -- NOT during the pre-scan, since a PV can still be pruned mid-frame (the
+  // replace_source fallback), which would otherwise leave HDR signaled over SDR
+  // content. The add/update loop walks bottom-to-top, so the topmost surviving
+  // HDR PV wins. Left empty for SDR, which clears any prior HDR signaling.
+  // Applied to the scene just before commit.
   std::optional<drm::display::HdrSourceMetadata> output_hdr;
 
   // GetDmabuf hands back an owned (dup'd) fd per platform view; close them on
@@ -2578,15 +2582,6 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           continue;
         }
         return PresentViaGlFallback(layers, layer_count);
-      }
-      // An HDR video PV drives the connector's HDR_OUTPUT_METADATA. Read the
-      // view's *persisted* HDR (not the deliver-once frame) so it holds steady
-      // across reuse presents — toggling it would re-sync the sink's HDR mode
-      // every few frames (flicker). Layers walk bottom-to-top, so the topmost
-      // HDR PV wins.
-      ICompositorSurface::Dmabuf::HdrMetadata hmeta{};
-      if (surface->GetHdrMetadata(&hmeta)) {
-        output_hdr = ToHdrSourceMetadata(hmeta);
       }
       frame_layers.push_back(
           {fl, nullptr, nullptr, surface.get(), db, surface});
@@ -2807,6 +2802,14 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         }
         layer->set_dst_rect_if_changed(dst_rect);
         layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
+        // This PV survives into the committed scene, so it drives the
+        // connector's HDR_OUTPUT_METADATA (persisted metadata, steady across
+        // reuse presents). A PV pruned above (replace_source fallback) never
+        // reaches here, so it can't signal HDR over content it isn't showing.
+        ICompositorSurface::Dmabuf::HdrMetadata reused_hdr{};
+        if (fl.pv_surface && fl.pv_surface->GetHdrMetadata(&reused_hdr)) {
+          output_hdr = ToHdrSourceMetadata(reused_hdr);
+        }
         ++pv_reused;
         continue;
       }
@@ -2859,7 +2862,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // colorimetry and stays in SDR. The frame's mastering metadata
       // (luminance / MaxCLL) rides set_output_metadata above.
       ICompositorSurface::Dmabuf::HdrMetadata hmeta{};
-      if (fl.pv_surface && fl.pv_surface->GetHdrMetadata(&hmeta)) {
+      const bool pv_is_hdr =
+          fl.pv_surface && fl.pv_surface->GetHdrMetadata(&hmeta);
+      if (pv_is_hdr) {
         desc.display.color_primaries = drm::scene::ColorPrimaries::Bt2020;
         desc.display.source_eotf =
             hmeta.transfer == 2 ? drm::display::TransferFunction::Bt2100Hlg
@@ -2877,6 +2882,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         return PresentViaGlFallback(layers, layer_count);
       }
       scene_pv_tags_.push_back(fl.pv_tag);
+      // Now committed into the scene, this PV drives the connector's
+      // HDR_OUTPUT_METADATA (topmost surviving HDR PV wins).
+      if (pv_is_hdr) {
+        output_hdr = ToHdrSourceMetadata(hmeta);
+      }
       // Submit the first frame: imports this slot and caches its fb_id.
       submit_pv_pool(pool_raw, db);
       if (backend_->cfg_.debug_backend) {

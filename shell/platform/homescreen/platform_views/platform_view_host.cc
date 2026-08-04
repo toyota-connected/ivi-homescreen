@@ -300,9 +300,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     drm_plane_id.store(plane_id, std::memory_order_relaxed);
   }
 
+#if IVI_HAVE_EGL
   // Persisted HDR metadata (from the last submit), so the compositor holds the
   // connector's HDR_OUTPUT_METADATA steady while this view is on screen even on
   // presents with no fresh frame. Compositor thread; guarded like the frame.
+  // EGL-only: the persisted HDR rides pending_egl, and the DRM scene path (the
+  // sole consumer) is EGL-backed. In Vulkan-only builds the base
+  // ICompositorSurface::GetHdrMetadata default (false) applies.
   [[nodiscard]] bool GetHdrMetadata(
       ICompositorSurface::Dmabuf::HdrMetadata* out) const override {
     const std::lock_guard<std::mutex> lock(mutex);
@@ -323,6 +327,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     out->max_frame_average_light_level = h.max_frame_average_light_level;
     return true;
   }
+#endif  // IVI_HAVE_EGL
 
 #if IVI_HAVE_VULKAN
   // The compositor samples the most recently submitted buffer. Null until the
