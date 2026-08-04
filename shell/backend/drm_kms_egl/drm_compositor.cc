@@ -48,6 +48,8 @@
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
 #include "display/drm_display.h"
+#include "drm-cxx/src/display/connector_info.hpp"  // ColorimetryInfo / Chromaticity
+#include "drm-cxx/src/display/hdr_metadata.hpp"  // HdrSourceMetadata / TransferFunction
 #include "drm-cxx/src/modeset/atomic.hpp"
 #include "ihs/platform_view.h"
 #include "libflutter_engine.h"
@@ -88,6 +90,36 @@ std::optional<drm::planes::ColorRange> ToColorRange(uint8_t color_range) {
     default:
       return std::nullopt;
   }
+}
+
+// Map the frame's HDR static metadata (mirrored IhsHdrMetadata, valid only when
+// Dmabuf::has_hdr) to drm-cxx's HdrSourceMetadata for the connector's
+// HDR_OUTPUT_METADATA. Primaries are 0.00002-unit uint16 -> CIE xy float;
+// luminances clamp to the CTA-861.3 uint16 fields.
+drm::display::HdrSourceMetadata ToHdrSourceMetadata(
+    const ICompositorSurface::Dmabuf::HdrMetadata& h) {
+  drm::display::HdrSourceMetadata out{};
+  // IhsTransfer: 2=HLG, otherwise PQ (has_hdr implies PQ or HLG).
+  out.eotf = h.transfer == 2 ? drm::display::TransferFunction::Bt2100Hlg
+                             : drm::display::TransferFunction::SmpteSt2084Pq;
+  const auto xy = [](uint16_t v) { return static_cast<float>(v) * 0.00002F; };
+  out.display_primaries.red = {xy(h.display_primaries_x[0]),
+                               xy(h.display_primaries_y[0])};
+  out.display_primaries.green = {xy(h.display_primaries_x[1]),
+                                 xy(h.display_primaries_y[1])};
+  out.display_primaries.blue = {xy(h.display_primaries_x[2]),
+                                xy(h.display_primaries_y[2])};
+  out.display_primaries.white = {xy(h.white_point_x), xy(h.white_point_y)};
+  const auto clamp16 = [](uint32_t v) {
+    return static_cast<uint16_t>(v > 0xFFFFU ? 0xFFFFU : v);
+  };
+  out.max_display_mastering_luminance =
+      clamp16(h.max_display_mastering_luminance);
+  out.min_display_mastering_luminance =
+      clamp16(h.min_display_mastering_luminance);
+  out.max_content_light_level = h.max_content_light_level;
+  out.max_frame_average_light_level = h.max_frame_average_light_level;
+  return out;
 }
 
 // The planar/packed YUV fourccs a video producer submits — so the scene
@@ -2435,6 +2467,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   frame_batons.reserve(layer_count);
   frame_pv_tags.reserve(layer_count);
 
+  // The connector's HDR_OUTPUT_METADATA this present. Set below from the HDR
+  // PVs that actually survive into the committed scene (reused or newly added)
+  // -- NOT during the pre-scan, since a PV can still be pruned mid-frame (the
+  // replace_source fallback), which would otherwise leave HDR signaled over SDR
+  // content. The add/update loop walks bottom-to-top, so the topmost surviving
+  // HDR PV wins. Left empty for SDR, which clears any prior HDR signaling.
+  // Applied to the scene just before commit.
+  std::optional<drm::display::HdrSourceMetadata> output_hdr;
+
   // GetDmabuf hands back an owned (dup'd) fd per platform view; close them on
   // every exit path (each GL-fallback return below, and the normal exit). The
   // pool's first-sight import dups again for the KMS framebuffer, so closing
@@ -2630,6 +2671,28 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
         std::move(acquire));
   };
+  // Stand up a fresh ExternalDmaBufPool for a PV's decoder ring at the frame's
+  // geometry. Used both on first sight and when a live PV's buffer geometry
+  // changes (swapped in place via replace_source). The deferred on_release
+  // holds a displaced buffer until the next present's flip completes, then
+  // returns it to the producer (see deferred_releases_).
+  const auto make_pv_pool = [this](
+                                const ICompositorSurface::Dmabuf& db,
+                                std::shared_ptr<ICompositorSurface> surface) {
+    drm::scene::ExternalDmaBufPool::Options opts{};
+    opts.on_release = [this, surface = std::move(surface)](
+                          std::uintptr_t key,
+                          std::optional<drm::sync::SyncFence>) {
+      if (!surface) {
+        return;
+      }
+      const std::scoped_lock lock(deferred_releases_mu_);
+      deferred_releases_.push_back({surface, static_cast<uint32_t>(key)});
+    };
+    return drm::scene::ExternalDmaBufPool::create(backend_->device(), db.width,
+                                                  db.height, db.fourcc,
+                                                  db.modifier, std::move(opts));
+  };
   for (auto& fl : frame_layers) {
     ++z_index;
     const bool is_ui = (z_index == 0);
@@ -2702,26 +2765,51 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               pool->format().modifier == db.modifier) {
             submit_pv_pool(pool, db);
           } else {
-            // Source isn't our pool, or the producer's geometry changed under a
-            // fixed-generation pool (an ABR rendition switch). Drop the layer
-            // so the new loop re-adds it at the new geometry next present, and
-            // release this frame's buffer so its ring slot isn't leaked. Count
-            // it as a prune: removing the plane is a topology change, so this
-            // frame must take the blocking ALLOW_MODESET commit below rather
-            // than a NONBLOCK one that could hit a transient EBUSY.
-            scene_->remove_layer(layer->handle());
-            scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
-                                             scene_pv_tags_.end(), fl.pv_tag),
-                                 scene_pv_tags_.end());
-            if (fl.pv_surface) {
-              fl.pv_surface->OnScanoutRelease(db.buffer_id);
+            // The source isn't our pool, or the frame's buffer geometry changed
+            // -- a real ABR rendition switch, or subpixel resize jitter on the
+            // box demo. Swap the source in place with a fresh pool at the new
+            // geometry (replace_source) rather than pruning + re-adding next
+            // present: the layer keeps its plane assignment, geometry, and
+            // HDR/Colorspace signaling, so there is no gap frame (which blinks
+            // the view and toggles the connector's auto-derived HDR/Colorspace)
+            // and no per-jitter modeset. The displaced pool is retired by the
+            // scene as its in-flight buffers drain.
+            bool swapped = false;
+            if (auto new_pool = make_pv_pool(db, fl.pv_surface); new_pool) {
+              auto* np_raw = new_pool.value().get();
+              if (scene_->replace_source(layer->handle(),
+                                         std::move(new_pool.value()))) {
+                submit_pv_pool(np_raw, db);
+                swapped = true;
+              }
             }
-            ++pv_pruned;
-            continue;
+            if (!swapped) {
+              // Pool-create / replace failed: fall back to prune + re-add. This
+              // removes the plane (a topology change), so the frame takes the
+              // blocking ALLOW_MODESET commit below rather than a NONBLOCK one
+              // that could hit a transient EBUSY.
+              scene_->remove_layer(layer->handle());
+              scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
+                                               scene_pv_tags_.end(), fl.pv_tag),
+                                   scene_pv_tags_.end());
+              if (fl.pv_surface) {
+                fl.pv_surface->OnScanoutRelease(db.buffer_id);
+              }
+              ++pv_pruned;
+              continue;
+            }
           }
         }
         layer->set_dst_rect_if_changed(dst_rect);
         layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
+        // This PV survives into the committed scene, so it drives the
+        // connector's HDR_OUTPUT_METADATA (persisted metadata, steady across
+        // reuse presents). A PV pruned above (replace_source fallback) never
+        // reaches here, so it can't signal HDR over content it isn't showing.
+        ICompositorSurface::Dmabuf::HdrMetadata reused_hdr{};
+        if (fl.pv_surface && fl.pv_surface->GetHdrMetadata(&reused_hdr)) {
+          output_hdr = ToHdrSourceMetadata(reused_hdr);
+        }
         ++pv_reused;
         continue;
       }
@@ -2734,25 +2822,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // producer when it leaves scanout, which drives the ihs_pv release path.
       // The retained surface shared_ptr keeps the view alive across a release
       // even if it is concurrently disposed.
-      drm::scene::ExternalDmaBufPool::Options opts{};
-      // Defer the release by one present: the buffer is displaced now but stays
-      // on the plane until this commit's flip completes, so returning it to the
-      // producer here would let it be overwritten under scanout. Hold it and
-      // fire OnScanoutRelease at the next present's top
-      // (post-WaitForPendingFlip), when the flip is done. See
-      // deferred_releases_.
-      opts.on_release = [this, surface = fl.pv_surface](
-                            std::uintptr_t key,
-                            std::optional<drm::sync::SyncFence>) {
-        if (!surface) {
-          return;
-        }
-        const std::scoped_lock lock(deferred_releases_mu_);
-        deferred_releases_.push_back({surface, static_cast<uint32_t>(key)});
-      };
-      auto pool = drm::scene::ExternalDmaBufPool::create(
-          backend_->device(), db.width, db.height, db.fourcc, db.modifier,
-          std::move(opts));
+      // First sight: stand up the pool at this frame's geometry (deferred
+      // release holds a displaced buffer until the next present's flip; see
+      // deferred_releases_).
+      auto pool = make_pv_pool(db, fl.pv_surface);
       if (!pool) {
         ihs::log::warn(
             "[DrmCompositor] ExternalDmaBufPool::create (pv): {}; routing "
@@ -2783,6 +2856,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                                  : drm::planes::ContentType::Generic;
       desc.display.color_encoding = ToColorEncoding(db.color_space);
       desc.display.color_range = ToColorRange(db.color_range);
+      // HDR video also carries its wide-gamut primaries + source EOTF, so the
+      // scene auto-derives the connector's Colorspace (BT.2020) and the HDR
+      // signaling from the layer — without which the sink never sees BT.2020
+      // colorimetry and stays in SDR. The frame's mastering metadata
+      // (luminance / MaxCLL) rides set_output_metadata above.
+      ICompositorSurface::Dmabuf::HdrMetadata hmeta{};
+      const bool pv_is_hdr =
+          fl.pv_surface && fl.pv_surface->GetHdrMetadata(&hmeta);
+      if (pv_is_hdr) {
+        desc.display.color_primaries = drm::scene::ColorPrimaries::Bt2020;
+        desc.display.source_eotf =
+            hmeta.transfer == 2 ? drm::display::TransferFunction::Bt2100Hlg
+                                : drm::display::TransferFunction::SmpteSt2084Pq;
+      }
       desc.identity_tag = fl.pv_tag;
       auto handle = scene_->add_layer(std::move(desc));
       if (!handle) {
@@ -2795,6 +2882,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         return PresentViaGlFallback(layers, layer_count);
       }
       scene_pv_tags_.push_back(fl.pv_tag);
+      // Now committed into the scene, this PV drives the connector's
+      // HDR_OUTPUT_METADATA (topmost surviving HDR PV wins).
+      if (pv_is_hdr) {
+        output_hdr = ToHdrSourceMetadata(hmeta);
+      }
       // Submit the first frame: imports this slot and caches its fb_id.
       submit_pv_pool(pool_raw, db);
       if (backend_->cfg_.debug_backend) {
@@ -2890,6 +2982,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       blocking_modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET
                        : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   const uint64_t t2 = profile ? NsNow() : 0;
+
+  // Signal this frame's HDR metadata on the connector (or clear to SDR when no
+  // HDR PV). The scene wires it into the commit below; a no-op on connectors
+  // without HDR_OUTPUT_METADATA, and content-hashed so an unchanged value is
+  // cheap on repeat.
+  scene_->set_output_metadata(output_hdr);
 
   auto report = scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
   if (!report) {
