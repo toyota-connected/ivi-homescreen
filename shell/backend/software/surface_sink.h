@@ -95,6 +95,11 @@ class ISurfaceSink {
   virtual void SetPlatformTaskRunner(TaskRunner* /*runner*/) {}
   virtual void StopVsyncMonitor() {}
 
+  /// Park (true) or unpark (false) frame production by withholding the vsync
+  /// baton. Reversible, unlike StopVsyncMonitor. Default is a no-op for sinks
+  /// that drive no vsync source.
+  virtual void SetVsyncParked(bool /*parked*/) {}
+
   // Hand the backend's motion-to-photon profiler (or nullptr) to a sink that
   // drives page flips, so it can record the scanout endpoint. Default no-op.
   virtual void SetMotionToPhoton(profiling::MotionToPhoton* /*m2p*/) {}

@@ -63,6 +63,9 @@
 #include "configuration/configuration.h"
 #include "display/output.h"          // homescreen::BackendFamily
 #include "display/output_manager.h"  // homescreen::OutputManager
+#if BUILD_COMPOSITOR
+#include "platform/homescreen/platform_views/platform_view_registry.h"
+#endif
 #include "engine.h"
 #include "logging.h"
 #include "main_loop_waker.h"
@@ -395,6 +398,72 @@ std::optional<std::string> FlutterView::BoundOutput() const {
     }
   }
   return m_wayland_bound_output;
+}
+
+namespace {
+
+// Tell every platform view on `view` it has left (or re-entered) the scene.
+// Runs on the platform thread; the registry requires it.
+void NotifySuspended(const FlutterView* view, const bool suspended) {
+#if BUILD_COMPOSITOR
+  auto* registry = view->GetPlatformViewRegistry();
+  if (registry == nullptr) {
+    return;
+  }
+  const auto ids = registry->InstanceIds();
+  size_t notified = 0;
+  for (const int32_t id : ids) {
+    notified += registry->SetSuspended(id, suspended) ? 1 : 0;
+  }
+  ihs::log::debug("[FlutterView] view {}: {} {}/{} platform view(s)",
+                  view->GetIndex(), suspended ? "suspended" : "resumed",
+                  notified, ids.size());
+#else
+  // Platform views are a BUILD_COMPOSITOR feature; with it off there is
+  // nothing to notify and the parked state is bookkeeping only.
+  ihs::log::debug("[FlutterView] view {}: {} (no platform views built)",
+                  view->GetIndex(), suspended ? "suspended" : "resumed");
+#endif
+}
+
+}  // namespace
+
+void FlutterView::SetSuspended(const bool suspended) {
+  if (m_suspended == suspended) {
+    return;  // repeated output events must not re-notify plugins
+  }
+  m_suspended = suspended;
+
+  // Frame production first, because it cannot fail and does not depend on the
+  // engine: withholding the vsync baton means Flutter asked for a frame and
+  // gets no answer, so nothing is built, rastered or scanned out. Unparking
+  // hands back the baton that was being held.
+  if (m_backend) {
+    m_backend->SetVsyncParked(suspended);
+  }
+
+  // Then the plugins, which is best-effort. m_suspended is deliberately NOT
+  // conditional on this posting: it is what SetVsyncParked was told, and
+  // leaving it unset on a failed post would strand the view parked -- a later
+  // Resume() would see !m_suspended, return early, and never unpark.
+  if (!PostToPlatformThread(
+          [this, suspended] { NotifySuspended(this, suspended); })) {
+    // No running engine means no plugin can have registered yet, so there is
+    // nobody to tell; in practice this is shutdown. Say so rather than
+    // leaving a silent gap between the view's state and the plugins'.
+    ihs::log::warn(
+        "[FlutterView] view {}: {} with no running engine; platform views were "
+        "not notified",
+        m_index, suspended ? "suspended" : "resumed");
+  }
+}
+
+void FlutterView::Suspend() {
+  SetSuspended(true);
+}
+
+void FlutterView::Resume() {
+  SetSuspended(false);
 }
 
 bool FlutterView::PostToPlatformThread(std::function<void()> fn) const {

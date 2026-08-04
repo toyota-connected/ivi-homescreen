@@ -112,6 +112,27 @@ class IVsyncProvider {
   /// records no profile discard: these are not dropped frames.
   bool DeliverParkedBaton();
 
+  /// Park (true) or unpark (false) frame production.
+  ///
+  /// While parked the baton is simply not handed back: Flutter asked for a
+  /// vsync and gets no answer, so it builds no frame and the whole pipeline
+  /// -- UI thread, rasterizer, GPU, scanout -- goes quiet. That is what a
+  /// view whose display was unplugged should do, and it needs no cooperation
+  /// from the source: the baton stays in vsync_baton_ exactly as it already
+  /// does during bring-up, and unparking delivers it.
+  ///
+  /// Deliberately not Stop(): Stop() clears engine and runner and is a
+  /// teardown with no way back, whereas this is reversible and keeps the
+  /// engine warm.
+  ///
+  /// Safe to call from any thread; idempotent.
+  void SetParked(bool parked);
+
+  /// True while frame production is parked by SetParked.
+  [[nodiscard]] bool IsParked() const {
+    return parked_.load(std::memory_order_acquire);
+  }
+
  protected:
   /// True when a present is already in flight, so SubmitBaton should wait for
   /// the source rather than draining inline. Default reads source_pending_;
@@ -153,6 +174,10 @@ class IVsyncProvider {
   }
 
  private:
+  // Frame production is parked: DeliverBaton leaves the baton in
+  // vsync_baton_ instead of posting it, and SetParked(false) delivers it.
+  std::atomic<bool> parked_{false};
+
   // Marshal one OnVsync onto the runner's strand. No-op when the runner is not
   // wired (the caller must leave the baton parked in that case).
   void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,

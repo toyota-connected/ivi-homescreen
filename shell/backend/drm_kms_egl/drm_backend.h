@@ -282,6 +282,8 @@ class DrmBackend : public Backend, public IFlipSink {
   // destructs — otherwise TaskRunner::~TaskRunner blocks forever joining
   // its io_context worker thread (the async_wait counts as outstanding
   // asio work, so run_one() never returns even after work_.reset()).
+  void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
+
   void StopVsyncMonitor() override;
 
   // Unified PAGE_FLIP_EVENT dispatcher (drmModeEventContext.page_flip_handler
