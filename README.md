@@ -361,7 +361,7 @@ annotated all-keys file see
 | `[view.backend.drm]` | `async_flip` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.drm]` | `compositor` | `string` | `auto` | `auto\|planes\|gl` | drm |
 | `[view.backend.drm]` | `connector` | `string` | `(rank-pick)` | `e.g. eDP-1, HDMI-A-1` | drm/sw |
-| `[view.backend.drm]` | `device` | `string` | `(rank-pick)` | `/dev/dri/cardN` | drm/sw |
+| `[view.backend.drm]` | `device` | `string` | `(rank-pick)` | `/dev/dri/by-path/<path>-card or /dev/dri/cardN` | drm/sw |
 | `[view.backend.drm]` | `explicit_sync` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.drm]` | `input_transforms` | `array<string>` | `[]` | `array<string>` | drm/sw |
 | `[view.backend.drm]` | `mode` | `string` | `(preferred)` | `<W>x<H>@<R>` | drm/sw |
@@ -372,7 +372,7 @@ annotated all-keys file see
 | `[view.backend.drm]` | `rotation` | `int` | `0` | `0\|90\|180\|270` | drm |
 | `[view.backend.drm]` | `stage_cursor` | `string` | `auto` | `auto\|yes\|no` | drm |
 | `[view.backend.lease]` | `connector` | `string` | `(sole offer)` | `e.g. HDMI-A-1` | leased |
-| `[view.backend.lease]` | `device` | `string` | `(sole device)` | `index or /dev/dri/cardN` | leased |
+| `[view.backend.lease]` | `device` | `string` | `(sole device)` | `index or /dev/dri/by-path/<path>-card or /dev/dri/cardN` | leased |
 | `[view.backend.lease]` | `input` | `string` | `auto` | `auto\|on\|off` | leased |
 | `[view.backend.lease]` | `on_revoke` | `string` | `exit` | `exit\|gate` | leased |
 | `[view.backend.lease]` | `timeout_ms` | `int` | `5000` | `> 0` | leased |
@@ -464,7 +464,8 @@ bundle = '/usr/share/gallery'
   [view.backend]
   type = 'drm-kms-egl'
     [view.backend.drm]
-    device = '/dev/dri/card1'
+    # by-path rather than cardN: see "Naming a card and an output" below.
+    device = '/dev/dri/by-path/platform-gpu-card'
   [view.output]
   drm_connector = 'HDMI-A-1'
   x = 0            # position in the combined pointer space
@@ -474,7 +475,7 @@ bundle = '/usr/share/cluster'
   [view.backend]
   type = 'drm-kms-egl'
     [view.backend.drm]
-    device = '/dev/dri/card1'
+    device = '/dev/dri/by-path/platform-gpu-card'
   [view.output]
   drm_connector = 'DP-1'
   x = 1920         # placed to the right of HDMI-A-1
@@ -484,6 +485,53 @@ The `x`/`y` values lay the displays out in a shared pointer space so the cursor
 crosses between them as arranged, and a single cursor is shown on whichever
 display the pointer is over. `touch_device` binds a touch panel (by libinput
 device-name substring) to the view on its display.
+
+### Naming a card and an output
+
+Three keys can identify hardware, and they are stable in different ways. Getting
+this wrong produces a config that works on the bench and binds nothing in the
+field, silently.
+
+**The card — use the by-path name.** `/dev/dri/cardN` numbers are assigned in
+probe order and are not portable. Measured on two boards running the same
+software:
+
+| driver | Raspberry Pi 4 | Raspberry Pi 5 |
+| --- | --- | --- |
+| `vc4-drm` | `card1` | `card0` |
+| `v3d` | `card0` | `card2` |
+| `drm-rp1-dsi` | — | `card1` |
+
+`/dev/dri/by-path/<path>-card` is derived from the hardware topology instead, so
+it does not move. `ls /dev/dri/by-path` to find yours. Any path is opened as
+given, so this needs no other change.
+
+**The output — use the connector name.** `drm_connector = 'HDMI-A-1'` (DRM) or
+`wl_name` (Wayland) is readable, matches what the kernel, `drm_info`, Weston and
+sway all print, and is unambiguous within a card. Prefer it over anything more
+exotic.
+
+Two caveats:
+
+- *Connector names are not portable across boards either.* The DSI panel is
+  `DSI-1` on a Pi 4 and `DSI-2` on a Pi 5 — same role, different name, and on a
+  different card.
+- *Compositors may rename.* Weston and wlroots pass the kernel name through
+  (`HDMI-A-1`); Mutter reports `HDMI-1`. A `wl_name` written against a desktop
+  session may not match on target.
+
+**Matching by `serial` is a last resort, and often unavailable.** It works only
+where EDID carries a unique serial, and frequently it does not: a panel wired to
+a fixed port often publishes no EDID at all (both Raspberry Pi DSI panels report
+zero bytes), and two identical monitors commonly share one. When a serial is
+ambiguous the resolver says so and falls back to the connector name.
+
+**There is currently no key that is portable across boards.** Every option above
+is stable per board and none survives a hardware change, so a config that must
+serve more than one board needs one file per board today — or a `name` that
+happens to agree, which is not something to rely on. A role-naming mechanism
+(an integrator-supplied udev property) is planned to close this; until it lands,
+prefer per-board configuration over a key that looks portable and is not.
 
 > Breaking change vs. earlier releases: the flat `[window_activation_area]`
 > table, `view.window_type`, `view.shell`/`view.backend` strings, `view.vm_args`,
