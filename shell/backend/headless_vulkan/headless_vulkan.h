@@ -118,6 +118,8 @@ class HeadlessVulkanBackend final : public Backend {
   [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
   void SetEngineHandle(FLUTTER_API_SYMBOL(FlutterEngine) engine) override;
   void SetPlatformTaskRunner(TaskRunner* runner) override;
+  void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
+
   void StopVsyncMonitor() override;
 
   [[nodiscard]] uint32_t width() const { return width_; }

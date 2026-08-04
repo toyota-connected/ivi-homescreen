@@ -95,6 +95,9 @@ class App final {
                                homescreen::OutputEvent event,
                                std::string_view output_name);
 
+  // Park a view whose output went away, per its [view.output] on_disconnect.
+  static void ApplyOnDisconnect(FlutterView* view);
+
   // Tell one view's platform views their grant is stale.
   static void RenegotiateView(const FlutterView* view);
 

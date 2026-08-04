@@ -170,6 +170,8 @@ class VulkanDrmBackend final : public Backend {
     platform_task_runner_.store(runner, std::memory_order_release);
     vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
   }
+  void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
+
   void StopVsyncMonitor() override;
 
   [[nodiscard]] uint32_t width() const { return width_; }

@@ -60,6 +60,9 @@ void IVsyncProvider::DeliverVsync(const uint64_t frame_start_ns) {
 }
 
 void IVsyncProvider::DeliverDiscard() {
+  if (parked_.load(std::memory_order_acquire)) {
+    return;  // parked: the baton stays held, and this is not a dropped frame
+  }
   if (profile_enabled_) {
     profile_.Record(profile_label_, /*ok=*/false);  // counts a discard
   }
@@ -68,6 +71,15 @@ void IVsyncProvider::DeliverDiscard() {
 }
 
 bool IVsyncProvider::DeliverParkedBaton() {
+  // Check the runner before taking the baton, as DrainParkedBaton does.
+  // PostOnVsync silently no-ops without one, so exchanging first would drop
+  // the baton on the floor and leave Flutter waiting for a vsync that can
+  // never arrive. Leaving it parked is recoverable: SetRunner's kick latch
+  // drains it once the runner is wired.
+  auto* runner = runner_.load(std::memory_order_acquire);
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return false;
+  }
   const intptr_t baton = vsync_baton_.exchange(0, std::memory_order_acq_rel);
   if (baton == 0) {
     return false;
@@ -79,7 +91,23 @@ bool IVsyncProvider::DeliverParkedBaton() {
   return true;
 }
 
+void IVsyncProvider::SetParked(const bool parked) {
+  if (parked_.exchange(parked, std::memory_order_acq_rel) == parked) {
+    return;
+  }
+  if (!parked) {
+    // Hand back whatever the engine was waiting on. If it was idle when we
+    // parked there is nothing held, and its next request proceeds normally.
+    DeliverParkedBaton();
+  }
+}
+
 void IVsyncProvider::DeliverBaton(const uint64_t now_ns) {
+  if (parked_.load(std::memory_order_acquire)) {
+    // Leave it parked. Not returning the baton is what stops frame
+    // production; SetParked(false) hands this one back.
+    return;
+  }
   const intptr_t baton = vsync_baton_.exchange(0, std::memory_order_acq_rel);
   if (baton == 0) {
     return;
@@ -91,6 +119,13 @@ void IVsyncProvider::DeliverBaton(const uint64_t now_ns) {
 }
 
 void IVsyncProvider::DrainParkedBaton() {
+  if (parked_.load(std::memory_order_acquire)) {
+    // Parked. This is the inline kick SubmitBaton takes when no present is in
+    // flight, so without this check a fresh request from the engine is served
+    // immediately and frame production carries on regardless of the gate --
+    // which is most of the traffic, not an edge case.
+    return;
+  }
   auto* runner = runner_.load(std::memory_order_acquire);
   if (runner == nullptr || runner->GetStrandContext() == nullptr) {
     return;  // leave parked; SetEngine's kick latch drains it once wired (#210)
