@@ -616,6 +616,11 @@ bool DrmBackend::InitDrm() {
   ihs::log::info("[DrmBackend] picked connector {} via {}",
                  connector_name(connector), pick_reason);
   connector_id_ = connector->connector_id;
+  // Record the name, not just the id: a hotplug listener diffs against output
+  // names, and this is the one place that knows which connector was actually
+  // programmed -- including when pick_reason was the rank heuristic rather
+  // than anything the config asked for.
+  bound_connector_name_ = connector_name(connector);
 
   // Default: drive the display at its preferred/native mode. Picking a
   // smaller mode to match a requested FB size is worse on almost every
