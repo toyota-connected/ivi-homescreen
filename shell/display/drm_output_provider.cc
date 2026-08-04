@@ -17,8 +17,15 @@
 #include "display/drm_output_provider.h"
 
 #include "display/connector_edid.h"
+#include "display/output_identity.h"
+
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <string>
+#include <system_error>
 #include <utility>
 
 #include <drm-cxx/core/device.hpp>
@@ -34,6 +41,37 @@ DrmOutputProvider::DrmOutputProvider(std::string device_path)
 void DrmOutputProvider::SetEnumerationFd(int fd) {
   enumeration_fd_ = fd;
 }
+
+namespace {
+
+// The sysfs name udev keys connectors by ("card1"), derived from the open fd
+// rather than from the path it came from.
+//
+// Not the path's basename: the device may legitimately be named through a
+// /dev/dri/by-path/ symlink -- which is what the documentation recommends,
+// precisely because cardN is assigned in probe order -- and "platform-gpu-card"
+// is not a sysfs name. Going through the device number resolves the symlink,
+// and works equally for a leased fd that has no path at all.
+//
+// Empty when the number cannot be resolved; ReadOutputIds then matches
+// connectors on any card, which is right for a single-card system.
+std::string CardSysnameFromFd(const int fd) {
+  struct stat st{};
+  if (fd < 0 || ::fstat(fd, &st) != 0 || !S_ISCHR(st.st_mode)) {
+    return {};
+  }
+  const std::string link = "/sys/dev/char/" +
+                           std::to_string(major(st.st_rdev)) + ":" +
+                           std::to_string(minor(st.st_rdev));
+  std::error_code ec;
+  const auto target = std::filesystem::read_symlink(link, ec);
+  if (ec) {
+    return {};
+  }
+  return target.filename().string();  // ".../drm/card1" -> "card1"
+}
+
+}  // namespace
 
 std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
   std::vector<OutputInfo> outputs;
@@ -62,12 +100,20 @@ std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
     return outputs;
   }
 
+  // Role names, if an integrator's udev rule assigns any. Read once per
+  // enumeration rather than per connector: one udev scan answers for the whole
+  // card. Empty without a rule, which is the default and costs nothing.
+  const OutputIdMap role_names = ReadOutputIds(CardSysnameFromFd(dev->fd()));
+
   outputs.reserve(connectors->size());
   for (const auto& connector : *connectors) {
     OutputInfo info;
     info.name = connector.name();
     info.connected = connector.connected;
     info.handle = connector.connector_id;
+    if (const auto it = role_names.find(info.name); it != role_names.end()) {
+      info.output_id = it->second;
+    }
 
     // Monitor identity from the connector's EDID. Without it OutputInfo::serial
     // is always empty, so the edid_serial tier of ResolveOutput can never fire

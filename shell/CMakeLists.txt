@@ -320,6 +320,7 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             backend/gl_process_resolver.cc
             display/drm_display.cc
             display/connector_edid.cc
+            display/output_identity.cc
             display/drm_output_provider.cc
             display/drm_device_resolver.cc
             display/drm_mode_list.cc
@@ -405,6 +406,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_egl/driver_probe.cc
             display/drm_display.cc
             display/connector_edid.cc
+            display/output_identity.cc
             display/drm_output_provider.cc
             display/drm_device_resolver.cc
             display/drm_mode_list.cc

@@ -26,7 +26,9 @@
 using homescreen::BackendFamily;
 using homescreen::OutputInfo;
 using homescreen::OutputMatch;
+using homescreen::OutputResolution;
 using homescreen::ResolveOutput;
+using homescreen::ResolveOutputDetailed;
 
 namespace {
 
@@ -46,6 +48,22 @@ std::vector<OutputInfo> TwoHeads() {
 }
 
 const std::optional<std::string> kParked = std::nullopt;
+
+// A connector carrying an integrator-assigned role name.
+OutputInfo WithRole(std::string name, std::string role, bool connected = true) {
+  OutputInfo o = MakeOutput(std::move(name), connected);
+  o.output_id = std::move(role);
+  return o;
+}
+
+// The two verification boards: the panel filling the same role is DSI-1 on a
+// Pi 4 and DSI-2 on a Pi 5, and neither publishes an EDID.
+std::vector<OutputInfo> Pi4Heads() {
+  return {WithRole("DSI-1", "cluster"), WithRole("HDMI-A-1", "center-stack")};
+}
+std::vector<OutputInfo> Pi5Heads() {
+  return {WithRole("DSI-2", "cluster")};
+}
 
 }  // namespace
 
@@ -168,4 +186,127 @@ TEST(OutputResolver, IndexOutOfRangeIsParked) {
   OutputMatch m;
   m.index = 5;
   EXPECT_EQ(ResolveOutput(m, TwoHeads(), BackendFamily::kDrm), kParked);
+}
+
+// The reason output_id exists: one config, two boards, different connector
+// names on different cards, and no EDID on either panel.
+TEST(OutputResolver, RoleNameBindsAcrossBoards) {
+  OutputMatch m;
+  m.output_id = "cluster";
+  EXPECT_EQ(ResolveOutput(m, Pi4Heads(), BackendFamily::kDrm), "DSI-1");
+  EXPECT_EQ(ResolveOutput(m, Pi5Heads(), BackendFamily::kDrm), "DSI-2");
+}
+
+// The resolver itself is family-agnostic: unlike edid_serial it does not check
+// the backend family, so it will work the day a Wayland provider populates
+// output_id. Note that none does today -- only DrmOutputProvider fills the
+// field -- so this covers the matching rule, not end-to-end Wayland support.
+TEST(OutputResolver, RoleMatchingDoesNotDependOnBackendFamily) {
+  OutputMatch m;
+  m.output_id = "cluster";
+  EXPECT_EQ(ResolveOutput(m, Pi4Heads(), BackendFamily::kWayland), "DSI-1");
+}
+
+// Above the serial: assigned deliberately, and it works where EDID does not.
+TEST(OutputResolver, RoleNameBeatsSerial) {
+  OutputMatch m;
+  m.output_id = "cluster";
+  m.edid_serial = "SN-HDMI";
+  std::vector<OutputInfo> heads = {
+      WithRole("DSI-1", "cluster"),
+      MakeOutput("HDMI-A-1", true, "SN-HDMI"),
+  };
+  EXPECT_EQ(ResolveOutput(m, heads, BackendFamily::kDrm), "DSI-1");
+}
+
+// A named role that is not present does not fall through to the lower tiers,
+// even when one of them would have matched. Binding an instrument cluster by
+// port because its role was absent is not a graceful degradation.
+//
+// Note the scope: this is the resolver refusing to substitute another tier.
+// Whether the *view* then goes dark is the caller's decision -- today
+// ResolveForView's callers fall back to the backend default, and real parking
+// arrives with the hotplug work.
+TEST(OutputResolver, MissingRoleDoesNotFallThroughToLowerTiers) {
+  OutputMatch m;
+  m.output_id = "passenger";
+  m.drm_connector = "DSI-1";  // would have matched, and must not rescue it
+  EXPECT_EQ(ResolveOutput(m, Pi4Heads(), BackendFamily::kDrm), kParked);
+}
+
+// A disconnected port carrying the role is not a place to put a view.
+TEST(OutputResolver, DisconnectedRoleIsNotEligible) {
+  OutputMatch m;
+  m.output_id = "passenger";
+  std::vector<OutputInfo> heads = {WithRole("HDMI-A-2", "passenger", false)};
+  EXPECT_EQ(ResolveOutput(m, heads, BackendFamily::kDrm), kParked);
+}
+
+// Without a udev rule nothing carries a role, and every existing config must
+// behave exactly as it did before this tier existed.
+TEST(OutputResolver, NoRuleInstalledLeavesOtherTiersUntouched) {
+  OutputMatch m;
+  m.drm_connector = "HDMI-A-1";
+  EXPECT_EQ(ResolveOutput(m, TwoHeads(), BackendFamily::kDrm), "HDMI-A-1");
+
+  OutputMatch by_serial;
+  by_serial.edid_serial = "SN-1";
+  std::vector<OutputInfo> heads = {MakeOutput("DP-1", true, "SN-1"),
+                                   MakeOutput("HDMI-A-1")};
+  EXPECT_EQ(ResolveOutput(by_serial, heads, BackendFamily::kDrm), "DP-1");
+}
+
+// An output_id constraint is a constraint: empty() must not report otherwise,
+// or a view naming only a role would be treated as unconstrained.
+TEST(OutputResolver, RoleNameCountsAsAConstraint) {
+  OutputMatch m;
+  m.output_id = "cluster";
+  EXPECT_FALSE(m.empty());
+}
+
+// A duplicated role is a mistake in the rule, and the enumeration order that
+// would otherwise decide it is not stable. Park rather than guess.
+TEST(OutputResolver, DuplicateRoleIsAmbiguousAndParks) {
+  OutputMatch m;
+  m.output_id = "cluster";
+  std::vector<OutputInfo> heads = {WithRole("DSI-1", "cluster"),
+                                   WithRole("HDMI-A-1", "cluster")};
+  EXPECT_EQ(ResolveOutput(m, heads, BackendFamily::kDrm), kParked);
+}
+
+// An empty output_id is not a constraint that matches nothing; the parser
+// leaves it unset, so a view carrying one is unconstrained rather than parked.
+TEST(OutputResolver, EmptyRoleIsNotAConstraint) {
+  OutputMatch m;
+  m.output_id = std::nullopt;
+  EXPECT_TRUE(m.empty());
+}
+
+// The distinction a bare optional cannot carry: asking for nothing and asking
+// for something absent both yield no name, but call for opposite handling.
+TEST(OutputResolver, DetailedResultSeparatesUnconstrainedFromUnresolved) {
+  const OutputMatch none;
+  EXPECT_EQ(ResolveOutputDetailed(none, TwoHeads(), BackendFamily::kDrm).status,
+            OutputResolution::Status::kUnconstrained);
+
+  OutputMatch missing_role;
+  missing_role.output_id = "passenger";
+  const auto r =
+      ResolveOutputDetailed(missing_role, Pi4Heads(), BackendFamily::kDrm);
+  EXPECT_EQ(r.status, OutputResolution::Status::kUnresolved);
+  EXPECT_FALSE(r.bound());
+
+  // The same distinction for the older tiers, not just for roles.
+  OutputMatch absent_name;
+  absent_name.drm_connector = "HDMI-A-9";
+  EXPECT_EQ(ResolveOutputDetailed(absent_name, TwoHeads(), BackendFamily::kDrm)
+                .status,
+            OutputResolution::Status::kUnresolved);
+
+  OutputMatch present;
+  present.drm_connector = "HDMI-A-1";
+  const auto ok =
+      ResolveOutputDetailed(present, TwoHeads(), BackendFamily::kDrm);
+  EXPECT_TRUE(ok.bound());
+  EXPECT_EQ(ok.name, "HDMI-A-1");
 }

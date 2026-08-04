@@ -24,6 +24,24 @@
 
 namespace homescreen {
 
+OutputResolution OutputManager::ResolveForViewDetailed(
+    const Configuration::Config& config,
+    IDisplay* display,
+    const BackendFamily family) {
+  const OutputMatch& match = config.view.output;
+  if (match.empty()) {
+    return {OutputResolution::Status::kUnconstrained, {}};
+  }
+  auto* provider = display != nullptr ? display->GetOutputProvider() : nullptr;
+  if (provider == nullptr) {
+    ihs::log::warn(
+        "[OutputManager] a view requests a specific output but its display "
+        "exposes no output provider; ignoring the request");
+    return {OutputResolution::Status::kUnresolved, {}};
+  }
+  return ResolveOutputDetailed(match, provider->EnumerateOutputs(), family);
+}
+
 std::optional<std::string> OutputManager::ResolveForView(
     const Configuration::Config& config,
     IDisplay* display,
@@ -47,13 +65,20 @@ std::optional<std::string> OutputManager::ResolveForView(
   const std::vector<OutputInfo> outputs = provider->EnumerateOutputs();
   std::optional<std::string> name = ResolveOutput(match, outputs, family);
   if (!name.has_value()) {
-    // The requested output is not among the connected ones. The caller keeps
-    // its default; full parking-until-present lands with the hotplug listener.
+    // Nothing connected satisfies the request -- the output is absent, or the
+    // key names more than one and is therefore ambiguous. The caller keeps its
+    // default; full parking-until-present lands with the hotplug listener.
+    //
+    // ResolveForViewDetailed reports this as kUnresolved rather than as "no
+    // constraint", so a caller that can park is able to tell the difference.
+    // This overload cannot express it, which is why the fallback is still what
+    // happens here.
     ihs::log::warn(
-        "[OutputManager] requested output is not connected (wl_name='{}' "
-        "drm_connector='{}' serial='{}'); falling back to the default output",
-        match.wl_name.value_or("-"), match.drm_connector.value_or("-"),
-        match.edid_serial.value_or("-"));
+        "[OutputManager] no connected output satisfies the requested match "
+        "(output_id='{}' wl_name='{}' drm_connector='{}' serial='{}'); falling "
+        "back to the default output",
+        match.output_id.value_or("-"), match.wl_name.value_or("-"),
+        match.drm_connector.value_or("-"), match.edid_serial.value_or("-"));
     return std::nullopt;
   }
 

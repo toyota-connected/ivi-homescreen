@@ -90,6 +90,15 @@ void ParseOutputMatch(const toml::table& t, homescreen::OutputMatch& out) {
   if (t["drm_connector"].is_string()) {
     out.drm_connector = t["drm_connector"].as_string()->value_or("");
   }
+  if (t["output_id"].is_string()) {
+    // Empty is unset, not a constraint that matches nothing. Unlike the other
+    // match fields this tier parks on a miss, so an output_id that expanded to
+    // "" would strand the view and blame a missing udev rule for it.
+    if (auto v = t["output_id"].as_string()->value_or(std::string{});
+        !v.empty()) {
+      out.output_id = std::move(v);
+    }
+  }
   if (t["serial"].is_string()) {
     out.edid_serial = t["serial"].as_string()->value_or("");
   }
